@@ -110,6 +110,10 @@ function goalStart(parsed: ParsedFlags, io: CliIo): number {
     return usageError("Missing required <goal.md> for goal start.", parsed, io);
   }
 
+  if (parsed.args.length > 3) {
+    return usageError(`Unexpected argument for goal start: ${parsed.args[3]}`, parsed, io);
+  }
+
   if (!parsed.foreground) {
     return usageError("Missing required --foreground for Milestone 1 goal start.", parsed, io);
   }

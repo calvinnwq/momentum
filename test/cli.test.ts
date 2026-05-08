@@ -234,6 +234,21 @@ describe("momentum CLI scaffold", () => {
     expect(result.stdout).toBe("");
   });
 
+  it("rejects extra positional arguments for goal start", async () => {
+    const result = await run([
+      "goal", "start", "goal.md", "--foreground", "--typo", "--json"
+    ]);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+
+    expect(result.code).toBe(2);
+    expect(payload).toMatchObject({
+      ok: false,
+      code: "usage_error",
+      message: "Unexpected argument for goal start: --typo"
+    });
+    expect(result.stdout).toBe("");
+  });
+
   it("reserves status and handoff command shells", async () => {
     const status = await run(["status", "goal-1", "--json"]);
     const handoff = await run(["handoff", "goal-1", "--json"]);

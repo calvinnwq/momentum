@@ -151,6 +151,19 @@ max_iterations: ${value}
     }
   });
 
+  it("parses numeric frontmatter values with inline comments", () => {
+    const result = parseGoalSpec(`---
+title: Commented Numbers
+max_iterations: 3 # retry budget
+verification_timeout_sec: 120 # seconds
+---
+`);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.spec.max_iterations).toBe(3);
+    expect(result.spec.verification_timeout_sec).toBe(120);
+  });
+
   it("returns error when verification_timeout_sec is not a positive integer", () => {
     for (const value of ["0", "-1", "1.5"]) {
       const result = parseGoalSpec(`---

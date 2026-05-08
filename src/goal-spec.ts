@@ -160,6 +160,7 @@ function parseSimpleYaml(yaml: string): YamlFields {
 }
 
 function parseYamlScalar(raw: string): YamlScalar {
+  raw = stripInlineComment(raw).trim();
   const n = Number(raw);
   if (!Number.isNaN(n) && raw !== "") return n;
   // Strip optional surrounding quotes
@@ -169,6 +170,23 @@ function parseYamlScalar(raw: string): YamlScalar {
   ) {
     return raw.slice(1, -1);
   }
+  return raw;
+}
+
+function stripInlineComment(raw: string): string {
+  let quote: string | undefined;
+
+  for (let index = 0; index < raw.length; index += 1) {
+    const char = raw[index];
+    if ((char === '"' || char === "'") && quote === undefined) {
+      quote = char;
+    } else if (char === quote) {
+      quote = undefined;
+    } else if (char === "#" && quote === undefined && (index === 0 || /\s/.test(raw[index - 1] ?? ""))) {
+      return raw.slice(0, index);
+    }
+  }
+
   return raw;
 }
 
