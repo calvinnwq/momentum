@@ -53,6 +53,11 @@ Common commands:
 - Avoid hard-coded paths tied to a single user.
 - Only use explicit local paths when existing documentation in-repo explicitly mandates them.
 
+## Local agent run artifacts
+- Use `.agent-runs/<tool>/<timestamp>-<label>/` for temporary local agent evidence.
+- `.agent-runs/` is ignored by git and may contain prompts, stdout, stderr, and result JSON.
+- Delete stale run directories after the work is merged or captured in durable docs/issues.
+
 ## Verification before completion
 - Run at least:
   - `pnpm test`
