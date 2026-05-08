@@ -19,6 +19,7 @@ type JsonPayload = Record<string, unknown>;
 type ParsedFlags = {
   args: string[];
   json: boolean;
+  foreground: boolean;
   repo?: string;
   runner?: string;
   dataDir?: string;
@@ -104,13 +105,12 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
 
 function goalStart(parsed: ParsedFlags, io: CliIo): number {
   const goalPath = parsed.args[2];
-  const foreground = parsed.args.includes("--foreground");
 
   if (!goalPath) {
     return usageError("Missing required <goal.md> for goal start.", parsed, io);
   }
 
-  if (!foreground) {
+  if (!parsed.foreground) {
     return usageError("Missing required --foreground for Milestone 1 goal start.", parsed, io);
   }
 
@@ -209,6 +209,7 @@ function usageError(message: string, parsed: ParsedFlags, io: CliIo): number {
 function parseFlags(argv: string[]): ParsedFlags {
   const args: string[] = [];
   let json = false;
+  let foreground = false;
   let repo: string | undefined;
   let runner: string | undefined;
   let dataDir: string | undefined;
@@ -222,6 +223,11 @@ function parseFlags(argv: string[]): ParsedFlags {
 
     if (arg === "--json") {
       json = true;
+      continue;
+    }
+
+    if (arg === "--foreground") {
+      foreground = true;
       continue;
     }
 
@@ -261,7 +267,7 @@ function parseFlags(argv: string[]): ParsedFlags {
     args.push(arg);
   }
 
-  const parsed: ParsedFlags = { args, json };
+  const parsed: ParsedFlags = { args, json, foreground };
   if (repo !== undefined) parsed.repo = repo;
   if (runner !== undefined) parsed.runner = runner;
   if (dataDir !== undefined) parsed.dataDir = dataDir;

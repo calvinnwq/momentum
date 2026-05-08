@@ -127,6 +127,42 @@ Body
     if (!result.ok) return;
     expect(result.spec.branch).toBe("momentum/hello-world-2025");
   });
+
+  it("returns error when title cannot derive a default branch", () => {
+    const result = parseGoalSpec(`---
+title: !!!
+---
+`);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatch(/branch/);
+  });
+
+  it("returns error when max_iterations is not a positive integer", () => {
+    for (const value of ["0", "-1", "1.5"]) {
+      const result = parseGoalSpec(`---
+title: Invalid Iterations
+max_iterations: ${value}
+---
+`);
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error).toMatch(/max_iterations/);
+    }
+  });
+
+  it("returns error when verification_timeout_sec is not a positive integer", () => {
+    for (const value of ["0", "-1", "1.5"]) {
+      const result = parseGoalSpec(`---
+title: Invalid Timeout
+verification_timeout_sec: ${value}
+---
+`);
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error).toMatch(/verification_timeout_sec/);
+    }
+  });
 });
 
 describe("parseGoalSpecFile", () => {

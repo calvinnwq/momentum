@@ -94,6 +94,32 @@ describe("momentum CLI scaffold", () => {
     fs.rmSync(dataDir, { recursive: true });
   });
 
+  it("goal start accepts --foreground before the goal file", async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "momentum-cli-"));
+    const goalFile = path.join(dataDir, "goal.md");
+    fs.writeFileSync(goalFile, GOAL_SPEC, "utf-8");
+
+    const result = await run([
+      "goal", "start",
+      "--foreground",
+      goalFile,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+
+    expect(result.code).toBe(0);
+    expect(payload).toMatchObject({
+      ok: true,
+      command: "goal start",
+      state: "initialized",
+      title: "CLI Test Goal"
+    });
+    expect(result.stderr).toBe("");
+
+    fs.rmSync(dataDir, { recursive: true });
+  });
+
   it("goal start applies --runner over frontmatter runner", async () => {
     const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "momentum-cli-"));
     const goalFile = path.join(dataDir, "goal.md");

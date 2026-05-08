@@ -64,13 +64,22 @@ export function parseGoalSpec(
     (typeof rawRunner === "string" && rawRunner ? rawRunner : "fake");
 
   const rawBranch = fields["branch"];
-  const branch =
-    typeof rawBranch === "string" && rawBranch
-      ? rawBranch
-      : `momentum/${slugify(title)}`;
+  let branch: string;
+  if (typeof rawBranch === "string" && rawBranch) {
+    branch = rawBranch;
+  } else {
+    const slug = slugify(title);
+    if (!slug) {
+      return { ok: false, error: "`title` must contain letters or numbers to derive a branch" };
+    }
+    branch = `momentum/${slug}`;
+  }
 
   const rawMaxIter = fields["max_iterations"];
   const max_iterations = typeof rawMaxIter === "number" ? rawMaxIter : 1;
+  if (!isPositiveInteger(max_iterations)) {
+    return { ok: false, error: "`max_iterations` must be a positive integer" };
+  }
 
   const rawVerification = fields["verification"];
   const verification = Array.isArray(rawVerification)
@@ -80,6 +89,9 @@ export function parseGoalSpec(
   const rawTimeout = fields["verification_timeout_sec"];
   const verification_timeout_sec =
     typeof rawTimeout === "number" ? rawTimeout : 900;
+  if (!isPositiveInteger(verification_timeout_sec)) {
+    return { ok: false, error: "`verification_timeout_sec` must be a positive integer" };
+  }
 
   return {
     ok: true,
@@ -185,6 +197,10 @@ function parseYamlInlineArray(raw: string): string[] {
 
   items.push(String(parseYamlScalar(current.trim())));
   return items;
+}
+
+function isPositiveInteger(value: number): boolean {
+  return Number.isInteger(value) && value > 0;
 }
 
 export function slugify(title: string): string {
