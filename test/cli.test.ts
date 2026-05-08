@@ -1,12 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
 import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
 import { VERSION, runCli } from "../src/cli.js";
+import { FAKE_RUNNER_FIXTURE_FILENAME } from "../src/fake-runner.js";
 
 const GOAL_SPEC = `---
 title: CLI Test Goal
-repo: /tmp/test-repo
 runner: fake
 verification:
   - pnpm test
@@ -20,6 +21,54 @@ type RunResult = {
   stdout: string;
   stderr: string;
 };
+
+const tempRoots: string[] = [];
+
+afterEach(() => {
+  while (tempRoots.length > 0) {
+    const dir = tempRoots.pop();
+    if (dir) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+function makeTempDir(prefix = "momentum-cli-"): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempRoots.push(dir);
+  return fs.realpathSync(dir);
+}
+
+function runGit(cwd: string, args: string[]): string {
+  return execFileSync("git", ["-C", cwd, ...args], {
+    encoding: "utf-8",
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+}
+
+function initRepo(): string {
+  const dir = makeTempDir("momentum-cli-repo-");
+  runGit(dir, ["init", "--initial-branch=main", "--quiet"]);
+  runGit(dir, ["config", "user.email", "test@example.com"]);
+  runGit(dir, ["config", "user.name", "Test User"]);
+  runGit(dir, ["config", "commit.gpgsign", "false"]);
+  fs.writeFileSync(path.join(dir, "README.md"), "init\n", "utf-8");
+  runGit(dir, ["add", "README.md"]);
+  runGit(dir, ["commit", "-m", "init", "--quiet"]);
+  return dir;
+}
+
+function setupGoalAndData(spec = GOAL_SPEC): {
+  dataDir: string;
+  goalFile: string;
+  repo: string;
+} {
+  const dataDir = makeTempDir("momentum-cli-data-");
+  const goalFile = path.join(dataDir, "goal.md");
+  fs.writeFileSync(goalFile, spec, "utf-8");
+  const repo = initRepo();
+  return { dataDir, goalFile, repo };
+}
 
 describe("momentum CLI scaffold", () => {
   it("prints help with the Milestone 1 public commands", async () => {
@@ -66,14 +115,13 @@ describe("momentum CLI scaffold", () => {
     expect(result.stderr).toBe("");
   });
 
-  it("goal start initializes a goal and returns ok with goalId", async () => {
-    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "momentum-cli-"));
-    const goalFile = path.join(dataDir, "goal.md");
-    fs.writeFileSync(goalFile, GOAL_SPEC, "utf-8");
+  it("goal start runs a foreground iteration and returns awaiting_verification", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
 
     const result = await run([
       "goal", "start", goalFile,
       "--foreground",
+      "--repo", repo,
       "--data-dir", dataDir,
       "--json"
     ]);
@@ -83,26 +131,41 @@ describe("momentum CLI scaffold", () => {
     expect(payload).toMatchObject({
       ok: true,
       command: "goal start",
-      state: "initialized",
+      state: "awaiting_verification",
       title: "CLI Test Goal",
       resumed: false
     });
     expect(typeof payload["goalId"]).toBe("string");
     expect(typeof payload["jobId"]).toBe("string");
-    expect(result.stderr).toBe("");
 
-    fs.rmSync(dataDir, { recursive: true });
+    const iter = payload["iteration"] as Record<string, unknown>;
+    expect(iter).toMatchObject({
+      ok: true,
+      iteration: 1,
+      branch: "momentum/cli-test-goal",
+      branchCreated: true,
+      runnerSuccess: true,
+      goalComplete: false
+    });
+    expect(iter["baseHead"]).toMatch(/^[0-9a-f]{40}$/);
+    expect(iter["postRunnerHead"]).toBe(iter["baseHead"]);
+    expect(iter["repoPath"]).toBe(repo);
+
+    expect(fs.existsSync(path.join(repo, FAKE_RUNNER_FIXTURE_FILENAME))).toBe(true);
+    expect(fs.existsSync(iter["promptPath"] as string)).toBe(true);
+    expect(fs.existsSync(iter["runnerLogPath"] as string)).toBe(true);
+    expect(fs.existsSync(iter["resultJsonPath"] as string)).toBe(true);
+    expect(result.stderr).toBe("");
   });
 
   it("goal start accepts --foreground before the goal file", async () => {
-    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "momentum-cli-"));
-    const goalFile = path.join(dataDir, "goal.md");
-    fs.writeFileSync(goalFile, GOAL_SPEC, "utf-8");
+    const { dataDir, goalFile, repo } = setupGoalAndData();
 
     const result = await run([
       "goal", "start",
       "--foreground",
       goalFile,
+      "--repo", repo,
       "--data-dir", dataDir,
       "--json"
     ]);
@@ -112,33 +175,39 @@ describe("momentum CLI scaffold", () => {
     expect(payload).toMatchObject({
       ok: true,
       command: "goal start",
-      state: "initialized",
+      state: "awaiting_verification",
       title: "CLI Test Goal"
     });
     expect(result.stderr).toBe("");
-
-    fs.rmSync(dataDir, { recursive: true });
   });
 
-  it("goal start applies --runner over frontmatter runner", async () => {
-    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "momentum-cli-"));
-    const goalFile = path.join(dataDir, "goal.md");
-    fs.writeFileSync(goalFile, GOAL_SPEC, "utf-8");
+  it("goal start surfaces unsupported_runner when --runner overrides to a non-fake profile", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
 
     const result = await run([
       "goal", "start", goalFile,
       "--foreground",
+      "--repo", repo,
       "--runner", "custom-runner",
       "--data-dir", dataDir,
       "--json"
     ]);
 
-    expect(result.code).toBe(0);
-    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
-    expect(payload["resumed"]).toBe(false);
-    expect(result.stderr).toBe("");
-
-    fs.rmSync(dataDir, { recursive: true });
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "goal start",
+      state: "failed",
+      code: "iteration_failed",
+      resumed: false
+    });
+    const iter = payload["iteration"] as Record<string, unknown>;
+    expect(iter).toMatchObject({
+      ok: false,
+      code: "unsupported_runner"
+    });
+    expect(result.stdout).toBe("");
   });
 
   it("goal start returns init_error when data dir cannot initialize", async () => {
@@ -184,23 +253,22 @@ describe("momentum CLI scaffold", () => {
     expect(result.stdout).toBe("");
   });
 
-  it("goal start text mode prints initialized goal info", async () => {
-    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "momentum-cli-"));
-    const goalFile = path.join(dataDir, "goal.md");
-    fs.writeFileSync(goalFile, GOAL_SPEC, "utf-8");
+  it("goal start text mode prints iteration summary", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
 
     const result = await run([
       "goal", "start", goalFile,
       "--foreground",
+      "--repo", repo,
       "--data-dir", dataDir
     ]);
 
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Goal initialized:");
     expect(result.stdout).toContain("CLI Test Goal");
+    expect(result.stdout).toContain("Branch: momentum/cli-test-goal (created)");
+    expect(result.stdout).toContain("Iteration: awaiting verification");
     expect(result.stderr).toBe("");
-
-    fs.rmSync(dataDir, { recursive: true });
   });
 
   it("requires --foreground for goal start", async () => {
@@ -265,6 +333,96 @@ describe("momentum CLI scaffold", () => {
       goalId: "goal-1",
       code: "not_implemented"
     });
+  });
+
+  it("goal start surfaces repo_guard_failed when the worktree is dirty", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+    fs.writeFileSync(path.join(repo, "dirty.txt"), "uncommitted\n", "utf-8");
+
+    const result = await run([
+      "goal", "start", goalFile,
+      "--foreground",
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "goal start",
+      state: "failed",
+      code: "iteration_failed"
+    });
+    const iter = payload["iteration"] as Record<string, unknown>;
+    expect(iter).toMatchObject({ ok: false, code: "repo_guard_failed" });
+    expect(fs.existsSync(path.join(repo, FAKE_RUNNER_FIXTURE_FILENAME))).toBe(false);
+    expect(result.stdout).toBe("");
+  });
+
+  it("goal start surfaces branch_manager_failed when the branch exists without metadata", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+    runGit(repo, ["checkout", "--quiet", "-b", "momentum/cli-test-goal"]);
+    runGit(repo, ["checkout", "--quiet", "main"]);
+
+    const result = await run([
+      "goal", "start", goalFile,
+      "--foreground",
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      state: "failed",
+      code: "iteration_failed"
+    });
+    const iter = payload["iteration"] as Record<string, unknown>;
+    expect(iter).toMatchObject({ ok: false, code: "branch_manager_failed" });
+    expect(result.stdout).toBe("");
+  });
+
+  it("goal start surfaces missing_repo when neither --repo nor frontmatter repo is set", async () => {
+    const dataDir = makeTempDir("momentum-cli-data-");
+    const goalFile = path.join(dataDir, "goal.md");
+    fs.writeFileSync(goalFile, GOAL_SPEC, "utf-8");
+
+    const result = await run([
+      "goal", "start", goalFile,
+      "--foreground",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      state: "failed",
+      code: "iteration_failed"
+    });
+    const iter = payload["iteration"] as Record<string, unknown>;
+    expect(iter).toMatchObject({ ok: false, code: "missing_repo" });
+  });
+
+  it("goal start text mode prints iteration_failed message on failure", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+    fs.writeFileSync(path.join(repo, "dirty.txt"), "uncommitted\n", "utf-8");
+
+    const result = await run([
+      "goal", "start", goalFile,
+      "--foreground",
+      "--repo", repo,
+      "--data-dir", dataDir
+    ]);
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("repo_guard_failed:");
+    expect(result.stdout).toBe("");
   });
 
   it("rejects unknown commands with usage", async () => {

@@ -1,6 +1,11 @@
 import process from "node:process";
-import { initGoal, type GoalInitOptions } from "./goal-init.js";
+import { openDb, type MomentumDb } from "./db.js";
+import { initGoal, type GoalInitOptions, type GoalInitSuccess } from "./goal-init.js";
 import type { DataDirOptions } from "./data-dir.js";
+import {
+  executeIterationJob,
+  type ExecuteIterationJobResult
+} from "./iteration-job.js";
 
 export const VERSION = "0.0.0";
 
@@ -144,30 +149,108 @@ function goalStart(parsed: ParsedFlags, io: CliIo): number {
     return 1;
   }
 
-  const payload = {
-    ok: true,
+  const iteration = runIteration(result);
+
+  return emitGoalStart(parsed, io, result, iteration);
+}
+
+function runIteration(init: GoalInitSuccess): ExecuteIterationJobResult {
+  let db: MomentumDb | undefined;
+  try {
+    db = openDb(init.dataDir);
+    return executeIterationJob({
+      db,
+      goalId: init.goalId,
+      jobId: init.jobId,
+      spec: init.spec,
+      artifactPaths: init.artifactPaths
+    });
+  } finally {
+    db?.close();
+  }
+}
+
+function emitGoalStart(
+  parsed: ParsedFlags,
+  io: CliIo,
+  init: GoalInitSuccess,
+  iteration: ExecuteIterationJobResult
+): number {
+  const base = {
     command: "goal start",
-    goalId: result.goalId,
-    jobId: result.jobId,
-    title: result.spec.title,
-    dataDir: result.dataDir,
-    artifactDir: result.artifactPaths.goalDir,
-    state: "initialized",
-    resumed: result.resumed
+    goalId: init.goalId,
+    jobId: init.jobId,
+    title: init.spec.title,
+    dataDir: init.dataDir,
+    artifactDir: init.artifactPaths.goalDir,
+    resumed: init.resumed
   };
 
-  if (parsed.json) {
-    writeJson(io.stdout, payload);
+  if (iteration.ok && iteration.iteration.ok) {
+    const iter = iteration.iteration;
+    const payload = {
+      ok: true,
+      ...base,
+      state: iteration.goalState,
+      iteration: {
+        ok: true,
+        iteration: iter.iteration,
+        repoPath: iter.repoPath,
+        branch: iter.branch,
+        branchCreated: iter.branchCreated,
+        baseHead: iter.baseHead,
+        postRunnerHead: iter.postRunnerHead,
+        runnerSuccess: iter.result.success,
+        goalComplete: iter.result.goal_complete,
+        promptPath: iter.promptPath,
+        runnerLogPath: iter.runnerLogPath,
+        resultJsonPath: iter.resultJsonPath
+      }
+    };
+
+    if (parsed.json) {
+      writeJson(io.stdout, payload);
+      return 0;
+    }
+
+    write(io.stdout, [
+      `${init.resumed ? "Goal resumed" : "Goal initialized"}: ${init.goalId}`,
+      `Title: ${init.spec.title}`,
+      `Artifact dir: ${init.artifactPaths.goalDir}`,
+      `Branch: ${iter.branch}${iter.branchCreated ? " (created)" : ""}`,
+      `Base HEAD: ${iter.baseHead}`,
+      `Iteration: awaiting verification`,
+      ""
+    ].join("\n"));
     return 0;
   }
 
-  write(io.stdout, [
-    `${result.resumed ? "Goal resumed" : "Goal initialized"}: ${result.goalId}`,
-    `Title: ${result.spec.title}`,
-    `Artifact dir: ${result.artifactPaths.goalDir}`,
-    ""
-  ].join("\n"));
-  return 0;
+  const iter = iteration.iteration;
+  if (iter.ok) {
+    throw new Error("invariant: iteration job failed but inner result reports ok");
+  }
+
+  const message = `${iter.code}: ${iter.error}`;
+  const payload = {
+    ok: false,
+    ...base,
+    state: iteration.goalState,
+    code: "iteration_failed",
+    message,
+    iteration: {
+      ok: false,
+      code: iter.code,
+      error: iter.error
+    }
+  };
+
+  if (parsed.json) {
+    writeJson(io.stderr, payload);
+    return 1;
+  }
+
+  write(io.stderr, `${message}\n`);
+  return 1;
 }
 
 function reservedCommand(
