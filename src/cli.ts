@@ -1,4 +1,6 @@
 import process from "node:process";
+import { initGoal, type GoalInitOptions } from "./goal-init.js";
+import type { DataDirOptions } from "./data-dir.js";
 
 export const VERSION = "0.0.0";
 
@@ -19,10 +21,11 @@ type ParsedFlags = {
   json: boolean;
   repo?: string;
   runner?: string;
+  dataDir?: string;
 };
 
 const COMMANDS = [
-  "momentum goal start <goal.md> --repo <path> --foreground [--runner <profile>] [--json]",
+  "momentum goal start <goal.md> [--repo <path>] --foreground [--runner <profile>] [--data-dir <path>] [--json]",
   "momentum status [goal-id] [--json]",
   "momentum handoff <goal-id> [--json]",
   "momentum doctor [--json]"
@@ -75,7 +78,7 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
     version: VERSION,
     node: process.version,
     platform: process.platform,
-    milestone: "NGX-235 scaffold"
+    milestone: "NGX-236 goal-init"
   };
 
   if (parsed.json) {
@@ -102,20 +105,59 @@ function goalStart(parsed: ParsedFlags, io: CliIo): number {
     return usageError("Missing required <goal.md> for goal start.", parsed, io);
   }
 
-  if (!parsed.repo) {
-    return usageError("Missing required --repo <path> for goal start.", parsed, io);
-  }
-
   if (!foreground) {
     return usageError("Missing required --foreground for Milestone 1 goal start.", parsed, io);
   }
 
-  return reservedCommand("goal start", parsed, io, {
-    goalPath,
-    repo: parsed.repo,
-    foreground,
-    runner: parsed.runner ?? "fake"
-  });
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  const initOptions: GoalInitOptions = { goalPath };
+  if (parsed.repo !== undefined) initOptions.repoOverride = parsed.repo;
+  initOptions.dataDirOptions = dataDirOptions;
+
+  const result = initGoal(initOptions);
+
+  if (!result.ok) {
+    const payload = {
+      ok: false,
+      command: "goal start",
+      code: "init_error",
+      message: result.error
+    };
+    if (parsed.json) {
+      writeJson(io.stderr, payload);
+      return 1;
+    }
+    write(io.stderr, `${result.error}\n`);
+    return 1;
+  }
+
+  const payload = {
+    ok: true,
+    command: "goal start",
+    goalId: result.goalId,
+    jobId: result.jobId,
+    title: result.spec.title,
+    dataDir: result.dataDir,
+    artifactDir: result.artifactPaths.goalDir,
+    state: "initialized",
+    resumed: result.resumed
+  };
+
+  if (parsed.json) {
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  write(io.stdout, [
+    `${result.resumed ? "Goal resumed" : "Goal initialized"}: ${result.goalId}`,
+    `Title: ${result.spec.title}`,
+    `Artifact dir: ${result.artifactPaths.goalDir}`,
+    ""
+  ].join("\n"));
+  return 0;
 }
 
 function reservedCommand(
@@ -163,6 +205,7 @@ function parseFlags(argv: string[]): ParsedFlags {
   let json = false;
   let repo: string | undefined;
   let runner: string | undefined;
+  let dataDir: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -187,16 +230,19 @@ function parseFlags(argv: string[]): ParsedFlags {
       continue;
     }
 
+    if (arg === "--data-dir") {
+      dataDir = readFlagValue(argv, index, "--data-dir");
+      index += 1;
+      continue;
+    }
+
     args.push(arg);
   }
 
   const parsed: ParsedFlags = { args, json };
-  if (repo !== undefined) {
-    parsed.repo = repo;
-  }
-  if (runner !== undefined) {
-    parsed.runner = runner;
-  }
+  if (repo !== undefined) parsed.repo = repo;
+  if (runner !== undefined) parsed.runner = runner;
+  if (dataDir !== undefined) parsed.dataDir = dataDir;
 
   return parsed;
 }
@@ -217,7 +263,7 @@ function renderHelp(): string {
     "Usage:",
     ...COMMANDS.map((command) => `  ${command}`),
     "",
-    "Milestone 1 scaffold reserves the public CLI shape. Goal parsing, runner execution, status, and handoff behavior land in later NGX-236..NGX-239 issues.",
+    "Milestone 1 supports Goal parsing and data/artifact initialization. Runner execution, status, and handoff behavior land in later NGX-237..NGX-239 issues.",
     ""
   ].join("\n");
 }
