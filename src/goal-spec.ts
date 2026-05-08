@@ -19,7 +19,8 @@ const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\n---\r?\n?([\s\S]*)$/;
 
 export function parseGoalSpecFile(
   filePath: string,
-  repoOverride?: string
+  repoOverride?: string,
+  runnerOverride?: string
 ): GoalSpecResult {
   let content: string;
   try {
@@ -27,12 +28,13 @@ export function parseGoalSpecFile(
   } catch {
     return { ok: false, error: `Cannot read goal file: ${filePath}` };
   }
-  return parseGoalSpec(content, repoOverride);
+  return parseGoalSpec(content, repoOverride, runnerOverride);
 }
 
 export function parseGoalSpec(
   content: string,
-  repoOverride?: string
+  repoOverride?: string,
+  runnerOverride?: string
 ): GoalSpecResult {
   const match = FRONTMATTER_RE.exec(content);
   if (!match) {
@@ -57,7 +59,9 @@ export function parseGoalSpec(
     (typeof rawRepo === "string" && rawRepo ? rawRepo : undefined);
 
   const rawRunner = fields["runner"];
-  const runner = typeof rawRunner === "string" && rawRunner ? rawRunner : "fake";
+  const runner =
+    runnerOverride ??
+    (typeof rawRunner === "string" && rawRunner ? rawRunner : "fake");
 
   const rawBranch = fields["branch"];
   const branch =

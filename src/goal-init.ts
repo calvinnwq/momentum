@@ -1,5 +1,7 @@
 import { readFileSync } from "node:fs";
 import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import { parseGoalSpec, type GoalSpec } from "./goal-spec.js";
 import { resolveDataDir, type DataDirOptions } from "./data-dir.js";
 import { openDb, type MomentumDb } from "./db.js";
@@ -12,6 +14,7 @@ import {
 export type GoalInitOptions = {
   goalPath: string;
   repoOverride?: string;
+  runnerOverride?: string;
   dataDirOptions?: DataDirOptions;
 };
 
@@ -35,18 +38,24 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
     return { ok: false, error: `Cannot read goal file: ${options.goalPath}` };
   }
 
-  const parseResult = parseGoalSpec(rawContent, options.repoOverride);
+  const parseResult = parseGoalSpec(
+    rawContent,
+    options.repoOverride,
+    options.runnerOverride
+  );
   if (!parseResult.ok) {
     return { ok: false, error: parseResult.error };
   }
   const { spec } = parseResult;
 
-  const dataDir = resolveDataDir(options.dataDirOptions);
-  const db = openDb(dataDir);
+  let db: MomentumDb | undefined;
 
   try {
+    const dataDir = resolveDataDir(options.dataDirOptions);
+    db = openDb(dataDir);
+
     const existingGoal = findInitializedGoal(db, spec);
-    if (existingGoal) {
+    if (existingGoal && goalArtifactMatches(existingGoal, rawContent)) {
       const artifactPaths = resolveGoalArtifactPaths(dataDir, existingGoal.id);
       const jobId = ensureInitialJob(db, existingGoal.id, artifactPaths.iteration1Dir);
       return {
@@ -95,8 +104,10 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
       artifactPaths,
       resumed: false
     };
+  } catch (error) {
+    return { ok: false, error: formatInitError(error) };
   } finally {
-    db.close();
+    db?.close();
   }
 }
 
@@ -133,13 +144,39 @@ function findInitializedGoal(db: MomentumDb, spec: GoalSpec): GoalRow | undefine
          AND repo IS ?
          AND branch = ?
          AND runner = ?
+         AND max_iterations = ?
+         AND verification = ?
+         AND verification_timeout_sec = ?
          AND state = 'initialized'
        ORDER BY created_at ASC
        LIMIT 1`
     )
-    .get(spec.title, spec.repo ?? null, spec.branch, spec.runner) as
+    .get(
+      spec.title,
+      spec.repo ?? null,
+      spec.branch,
+      spec.runner,
+      spec.max_iterations,
+      JSON.stringify(spec.verification),
+      spec.verification_timeout_sec
+    ) as
     | GoalRow
     | undefined;
+}
+
+function goalArtifactMatches(goal: GoalRow, rawContent: string): boolean {
+  try {
+    return fs.readFileSync(path.join(goal.artifact_dir, "goal.md"), "utf-8") === rawContent;
+  } catch {
+    return false;
+  }
+}
+
+function formatInitError(error: unknown): string {
+  if (error instanceof Error && error.message) {
+    return `Failed to initialize goal: ${error.message}`;
+  }
+  return "Failed to initialize goal.";
 }
 
 function ensureInitialJob(

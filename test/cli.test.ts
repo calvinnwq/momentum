@@ -94,6 +94,53 @@ describe("momentum CLI scaffold", () => {
     fs.rmSync(dataDir, { recursive: true });
   });
 
+  it("goal start applies --runner over frontmatter runner", async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "momentum-cli-"));
+    const goalFile = path.join(dataDir, "goal.md");
+    fs.writeFileSync(goalFile, GOAL_SPEC, "utf-8");
+
+    const result = await run([
+      "goal", "start", goalFile,
+      "--foreground",
+      "--runner", "custom-runner",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload["resumed"]).toBe(false);
+    expect(result.stderr).toBe("");
+
+    fs.rmSync(dataDir, { recursive: true });
+  });
+
+  it("goal start returns init_error when data dir cannot initialize", async () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "momentum-cli-"));
+    const goalFile = path.join(dataDir, "goal.md");
+    const blockedDataDir = path.join(dataDir, "blocked");
+    fs.writeFileSync(goalFile, GOAL_SPEC, "utf-8");
+    fs.writeFileSync(blockedDataDir, "not a directory", "utf-8");
+
+    const result = await run([
+      "goal", "start", goalFile,
+      "--foreground",
+      "--data-dir", blockedDataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "goal start",
+      code: "init_error"
+    });
+    expect(result.stdout).toBe("");
+
+    fs.rmSync(dataDir, { recursive: true });
+  });
+
   it("goal start returns init_error for a missing goal file", async () => {
     const result = await run([
       "goal", "start", "/no/such/goal.md",

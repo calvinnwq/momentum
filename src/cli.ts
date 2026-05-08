@@ -115,6 +115,7 @@ function goalStart(parsed: ParsedFlags, io: CliIo): number {
 
   const initOptions: GoalInitOptions = { goalPath };
   if (parsed.repo !== undefined) initOptions.repoOverride = parsed.repo;
+  if (parsed.runner !== undefined) initOptions.runnerOverride = parsed.runner;
   initOptions.dataDirOptions = dataDirOptions;
 
   const result = initGoal(initOptions);

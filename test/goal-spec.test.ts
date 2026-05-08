@@ -63,6 +63,13 @@ describe("parseGoalSpec", () => {
     expect(result.spec.repo).toBe("/override/path");
   });
 
+  it("runnerOverride takes precedence over frontmatter runner", () => {
+    const result = parseGoalSpec(FULL_SPEC, undefined, "custom-runner");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.spec.runner).toBe("custom-runner");
+  });
+
   it("repoOverride can supply repo when frontmatter has none", () => {
     const result = parseGoalSpec(MINIMAL_SPEC, "/from/flag");
     expect(result.ok).toBe(true);
@@ -124,10 +131,11 @@ describe("parseGoalSpecFile", () => {
     const filePath = path.join(tmp, "goal.md");
     fs.writeFileSync(filePath, MINIMAL_SPEC, "utf-8");
 
-    const result = parseGoalSpecFile(filePath, "/cli/repo");
+    const result = parseGoalSpecFile(filePath, "/cli/repo", "cli-runner");
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.spec.repo).toBe("/cli/repo");
+    expect(result.spec.runner).toBe("cli-runner");
 
     fs.rmSync(tmp, { recursive: true });
   });

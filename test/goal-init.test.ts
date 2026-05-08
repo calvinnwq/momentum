@@ -158,6 +158,29 @@ describe("initGoal integration", () => {
     fs.rmSync(dataDir, { recursive: true });
   });
 
+  it("runner override takes precedence over frontmatter runner", () => {
+    const dataDir = makeTempDir();
+    const goalFile = path.join(dataDir, "goal.md");
+    fs.writeFileSync(goalFile, VALID_SPEC, "utf-8");
+
+    const result = initGoal({
+      goalPath: goalFile,
+      runnerOverride: "custom-runner",
+      dataDirOptions: { dataDir }
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.spec.runner).toBe("custom-runner");
+
+    const db = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    const row = db.prepare("SELECT runner FROM goals WHERE id = ?").get(result.goalId) as Record<string, unknown>;
+    db.close();
+    expect(row["runner"]).toBe("custom-runner");
+
+    fs.rmSync(dataDir, { recursive: true });
+  });
+
   it("resolves data dir from MOMENTUM_HOME env var", () => {
     const dataDir = makeTempDir();
     const goalFile = path.join(dataDir, "goal.md");
@@ -208,6 +231,59 @@ describe("initGoal integration", () => {
 
     expect(goalCount.count).toBe(1);
     expect(jobCount.count).toBe(1);
+
+    fs.rmSync(dataDir, { recursive: true });
+  });
+
+  it("does not resume an initialized goal when spec content changes", () => {
+    const dataDir = makeTempDir();
+    const goalFile = path.join(dataDir, "goal.md");
+    fs.writeFileSync(goalFile, VALID_SPEC, "utf-8");
+
+    const first = initGoal({
+      goalPath: goalFile,
+      dataDirOptions: { dataDir }
+    });
+    fs.writeFileSync(
+      goalFile,
+      VALID_SPEC.replace("Goal body content.", "Changed body content."),
+      "utf-8"
+    );
+    const second = initGoal({
+      goalPath: goalFile,
+      dataDirOptions: { dataDir }
+    });
+
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+    if (!first.ok || !second.ok) return;
+
+    expect(second.resumed).toBe(false);
+    expect(second.goalId).not.toBe(first.goalId);
+
+    const db = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    const goalCount = db.prepare("SELECT count(*) AS count FROM goals").get() as { count: number };
+    db.close();
+    expect(goalCount.count).toBe(2);
+
+    fs.rmSync(dataDir, { recursive: true });
+  });
+
+  it("returns init error when data dir is not a directory", () => {
+    const dataDir = makeTempDir();
+    const goalFile = path.join(dataDir, "goal.md");
+    const blockedDataDir = path.join(dataDir, "blocked");
+    fs.writeFileSync(goalFile, VALID_SPEC, "utf-8");
+    fs.writeFileSync(blockedDataDir, "not a directory", "utf-8");
+
+    const result = initGoal({
+      goalPath: goalFile,
+      dataDirOptions: { dataDir: blockedDataDir }
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatch(/Failed to initialize goal/);
 
     fs.rmSync(dataDir, { recursive: true });
   });
