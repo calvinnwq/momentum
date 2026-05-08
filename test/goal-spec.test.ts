@@ -117,6 +117,21 @@ verification: # required checks
     expect(result.spec.verification).toEqual(["pnpm test"]);
   });
 
+  it("parses verification block lists after blank lines and comments", () => {
+    const result = parseGoalSpec(`---
+title: Spaced Verification Block
+verification:
+
+  # required checks
+  - pnpm test
+  - pnpm build
+---
+`);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.spec.verification).toEqual(["pnpm test", "pnpm build"]);
+  });
+
   it("repoOverride can supply repo when frontmatter has none", () => {
     const result = parseGoalSpec(MINIMAL_SPEC, "/from/flag");
     expect(result.ok).toBe(true);
