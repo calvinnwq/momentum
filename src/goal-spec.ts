@@ -135,6 +135,9 @@ function parseSimpleYaml(yaml: string): YamlFields {
         }
       }
       fields[key] = items;
+    } else if (rest.startsWith("[") && rest.endsWith("]")) {
+      fields[key] = parseYamlInlineArray(rest);
+      i++;
     } else {
       fields[key] = parseYamlScalar(rest);
       i++;
@@ -155,6 +158,33 @@ function parseYamlScalar(raw: string): YamlScalar {
     return raw.slice(1, -1);
   }
   return raw;
+}
+
+function parseYamlInlineArray(raw: string): string[] {
+  const inner = raw.slice(1, -1).trim();
+  if (!inner) return [];
+
+  const items: string[] = [];
+  let current = "";
+  let quote: string | undefined;
+
+  for (const char of inner) {
+    if ((char === '"' || char === "'") && quote === undefined) {
+      quote = char;
+    } else if (char === quote) {
+      quote = undefined;
+    }
+
+    if (char === "," && quote === undefined) {
+      items.push(String(parseYamlScalar(current.trim())));
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+
+  items.push(String(parseYamlScalar(current.trim())));
+  return items;
 }
 
 export function slugify(title: string): string {

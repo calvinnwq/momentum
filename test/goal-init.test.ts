@@ -269,6 +269,46 @@ describe("initGoal integration", () => {
     fs.rmSync(dataDir, { recursive: true });
   });
 
+  it("resumes a later initialized goal when an older artifact differs", () => {
+    const dataDir = makeTempDir();
+    const goalFile = path.join(dataDir, "goal.md");
+    fs.writeFileSync(goalFile, VALID_SPEC, "utf-8");
+
+    const first = initGoal({
+      goalPath: goalFile,
+      dataDirOptions: { dataDir }
+    });
+    fs.writeFileSync(
+      goalFile,
+      VALID_SPEC.replace("Goal body content.", "Changed body content."),
+      "utf-8"
+    );
+    const second = initGoal({
+      goalPath: goalFile,
+      dataDirOptions: { dataDir }
+    });
+    const third = initGoal({
+      goalPath: goalFile,
+      dataDirOptions: { dataDir }
+    });
+
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(true);
+    expect(third.ok).toBe(true);
+    if (!first.ok || !second.ok || !third.ok) return;
+
+    expect(third.resumed).toBe(true);
+    expect(third.goalId).toBe(second.goalId);
+    expect(third.jobId).toBe(second.jobId);
+
+    const db = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    const goalCount = db.prepare("SELECT count(*) AS count FROM goals").get() as { count: number };
+    db.close();
+    expect(goalCount.count).toBe(2);
+
+    fs.rmSync(dataDir, { recursive: true });
+  });
+
   it("returns init error when data dir is not a directory", () => {
     const dataDir = makeTempDir();
     const goalFile = path.join(dataDir, "goal.md");

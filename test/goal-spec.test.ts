@@ -83,6 +83,17 @@ verification:
     expect(result.spec.verification).toEqual(["pnpm test", "pnpm build"]);
   });
 
+  it("parses inline verification arrays as commands", () => {
+    const result = parseGoalSpec(`---
+title: Inline Verification
+verification: ["pnpm test", 'pnpm build']
+---
+`);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.spec.verification).toEqual(["pnpm test", "pnpm build"]);
+  });
+
   it("repoOverride can supply repo when frontmatter has none", () => {
     const result = parseGoalSpec(MINIMAL_SPEC, "/from/flag");
     expect(result.ok).toBe(true);

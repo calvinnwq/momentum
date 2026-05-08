@@ -54,8 +54,10 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
     const dataDir = resolveDataDir(options.dataDirOptions);
     db = openDb(dataDir);
 
-    const existingGoal = findInitializedGoal(db, spec);
-    if (existingGoal && goalArtifactMatches(existingGoal, rawContent)) {
+    const existingGoal = findInitializedGoals(db, spec).find((goal) =>
+      goalArtifactMatches(goal, rawContent)
+    );
+    if (existingGoal) {
       const artifactPaths = resolveGoalArtifactPaths(dataDir, existingGoal.id);
       const jobId = ensureInitialJob(db, existingGoal.id, artifactPaths.iteration1Dir);
       return {
@@ -136,7 +138,7 @@ type JobRow = {
   id: string;
 };
 
-function findInitializedGoal(db: MomentumDb, spec: GoalSpec): GoalRow | undefined {
+function findInitializedGoals(db: MomentumDb, spec: GoalSpec): GoalRow[] {
   return db
     .prepare(
       `SELECT * FROM goals
@@ -148,10 +150,9 @@ function findInitializedGoal(db: MomentumDb, spec: GoalSpec): GoalRow | undefine
          AND verification = ?
          AND verification_timeout_sec = ?
          AND state = 'initialized'
-       ORDER BY created_at ASC
-       LIMIT 1`
+       ORDER BY created_at ASC`
     )
-    .get(
+    .all(
       spec.title,
       spec.repo ?? null,
       spec.branch,
@@ -160,8 +161,7 @@ function findInitializedGoal(db: MomentumDb, spec: GoalSpec): GoalRow | undefine
       JSON.stringify(spec.verification),
       spec.verification_timeout_sec
     ) as
-    | GoalRow
-    | undefined;
+    | GoalRow[];
 }
 
 function goalArtifactMatches(goal: GoalRow, rawContent: string): boolean {
