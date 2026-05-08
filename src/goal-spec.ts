@@ -140,7 +140,7 @@ function parseSimpleYaml(yaml: string): YamlFields {
     const rest = line.slice(colonIdx + 1).trim();
     const commentStrippedRest = stripInlineComment(rest).trim();
 
-    if (rest === "") {
+    if (commentStrippedRest === "") {
       // Possibly a list
       const items: string[] = [];
       i++;
