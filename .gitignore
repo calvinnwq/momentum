@@ -8,3 +8,4 @@ coverage/
 .momentum/
 .claude/
 .agent-runs/
+.gnhf/postflight/

@@ -14,7 +14,8 @@ Typical loop:
 ## Current milestone
 - Milestone 1: Foreground proof loop is in progress.
 - NGX-235 (scaffold) is done.
-- Next issues: NGX-236, NGX-237, NGX-238, NGX-239.
+- NGX-236 (Goal spec parsing, data-dir resolution, SQLite init, artifact layout) is done.
+- Next issues: NGX-237, NGX-238, NGX-239.
 
 ## Stack and workflow commands
 - Runtime: Node.js
@@ -45,11 +46,10 @@ Common commands:
 - Preserve stable CLI behavior across both JSON and text outputs.
 - When changing user-facing output, update tests and verify callers that rely on stable formatting.
 
-## Data and artifact direction
-- Momentum state is moving toward:
-  - `MOMENTUM_HOME` / `~/.momentum`
-  - SQLite-backed state
-  - handoff + ledger artifacts
+## Data and artifact layout
+- State uses `MOMENTUM_HOME` env var → `~/.momentum` fallback; override with `--data-dir`.
+- SQLite database at `<data-dir>/momentum.db` with `goals`, `jobs`, `events` tables.
+- Goal artifacts at `<data-dir>/goals/<goal-id>/`: `goal.md`, `ledger.md`, `handoff.md`, `handoff.json`, `iterations/1/{prompt.md,runner.log,verification.log,result.json}`.
 - Avoid hard-coded paths tied to a single user.
 - Only use explicit local paths when existing documentation in-repo explicitly mandates them.
 

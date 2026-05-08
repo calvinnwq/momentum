@@ -1,0 +1,238 @@
+import { readFileSync } from "node:fs";
+
+export type GoalSpec = {
+  title: string;
+  repo: string | undefined;
+  runner: string;
+  branch: string;
+  max_iterations: number;
+  verification: string[];
+  verification_timeout_sec: number;
+  body: string;
+};
+
+export type GoalSpecError = { ok: false; error: string };
+export type GoalSpecSuccess = { ok: true; spec: GoalSpec };
+export type GoalSpecResult = GoalSpecError | GoalSpecSuccess;
+
+const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\n---\r?\n?([\s\S]*)$/;
+
+export function parseGoalSpecFile(
+  filePath: string,
+  repoOverride?: string,
+  runnerOverride?: string
+): GoalSpecResult {
+  let content: string;
+  try {
+    content = readFileSync(filePath, "utf-8");
+  } catch {
+    return { ok: false, error: `Cannot read goal file: ${filePath}` };
+  }
+  return parseGoalSpec(content, repoOverride, runnerOverride);
+}
+
+export function parseGoalSpec(
+  content: string,
+  repoOverride?: string,
+  runnerOverride?: string
+): GoalSpecResult {
+  const match = FRONTMATTER_RE.exec(content);
+  if (!match) {
+    return {
+      ok: false,
+      error: "Goal file must begin with YAML frontmatter (--- ... ---)"
+    };
+  }
+
+  const [, fm, body] = match;
+  const fields = parseSimpleYaml(fm ?? "");
+
+  const rawTitle = fields["title"];
+  if (typeof rawTitle !== "string" || !rawTitle.trim()) {
+    return { ok: false, error: "`title` is required in goal frontmatter" };
+  }
+  const title = rawTitle.trim();
+
+  const rawRepo = fields["repo"];
+  const repo =
+    repoOverride ??
+    (typeof rawRepo === "string" && rawRepo ? rawRepo : undefined);
+
+  const rawRunner = fields["runner"];
+  const runner =
+    runnerOverride ??
+    (typeof rawRunner === "string" && rawRunner ? rawRunner : "fake");
+
+  const rawBranch = fields["branch"];
+  let branch: string;
+  if (typeof rawBranch === "string" && rawBranch) {
+    branch = rawBranch;
+  } else {
+    const slug = slugify(title);
+    if (!slug) {
+      return { ok: false, error: "`title` must contain letters or numbers to derive a branch" };
+    }
+    branch = `momentum/${slug}`;
+  }
+
+  const rawMaxIter = fields["max_iterations"];
+  if (rawMaxIter !== undefined && typeof rawMaxIter !== "number") {
+    return { ok: false, error: "`max_iterations` must be a positive integer" };
+  }
+  const max_iterations = typeof rawMaxIter === "number" ? rawMaxIter : 1;
+  if (!isPositiveInteger(max_iterations)) {
+    return { ok: false, error: "`max_iterations` must be a positive integer" };
+  }
+
+  const rawVerification = fields["verification"];
+  const verification = Array.isArray(rawVerification)
+    ? (rawVerification as string[])
+    : [];
+
+  const rawTimeout = fields["verification_timeout_sec"];
+  if (rawTimeout !== undefined && typeof rawTimeout !== "number") {
+    return { ok: false, error: "`verification_timeout_sec` must be a positive integer" };
+  }
+  const verification_timeout_sec =
+    typeof rawTimeout === "number" ? rawTimeout : 900;
+  if (!isPositiveInteger(verification_timeout_sec)) {
+    return { ok: false, error: "`verification_timeout_sec` must be a positive integer" };
+  }
+
+  return {
+    ok: true,
+    spec: {
+      title,
+      repo,
+      runner,
+      branch,
+      max_iterations,
+      verification,
+      verification_timeout_sec,
+      body: (body ?? "").trimEnd()
+    }
+  };
+}
+
+type YamlScalar = string | number;
+type YamlValue = YamlScalar | string[];
+type YamlFields = Record<string, YamlValue>;
+
+function parseSimpleYaml(yaml: string): YamlFields {
+  const fields: YamlFields = {};
+  const lines = yaml.split("\n");
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i] ?? "";
+    if (!line.trim()) {
+      i++;
+      continue;
+    }
+
+    const colonIdx = line.indexOf(":");
+    if (colonIdx < 0) {
+      i++;
+      continue;
+    }
+
+    const key = line.slice(0, colonIdx).trim();
+    const rest = line.slice(colonIdx + 1).trim();
+    const commentStrippedRest = stripInlineComment(rest).trim();
+
+    if (commentStrippedRest === "") {
+      // Possibly a list
+      const items: string[] = [];
+      i++;
+      while (i < lines.length) {
+        const next = lines[i] ?? "";
+        if (/^\s*-\s/.test(next)) {
+          items.push(String(parseYamlScalar(next.replace(/^\s*-\s*/, "").trim())));
+          i++;
+        } else if (!next.trim() || next.trim().startsWith("#")) {
+          i++;
+        } else {
+          break;
+        }
+      }
+      fields[key] = items;
+    } else if (commentStrippedRest.startsWith("[") && commentStrippedRest.endsWith("]")) {
+      fields[key] = parseYamlInlineArray(commentStrippedRest);
+      i++;
+    } else {
+      fields[key] = parseYamlScalar(rest);
+      i++;
+    }
+  }
+
+  return fields;
+}
+
+function parseYamlScalar(raw: string): YamlScalar {
+  raw = stripInlineComment(raw).trim();
+  const n = Number(raw);
+  if (!Number.isNaN(n) && raw !== "") return n;
+  // Strip optional surrounding quotes
+  if (
+    (raw.startsWith('"') && raw.endsWith('"')) ||
+    (raw.startsWith("'") && raw.endsWith("'"))
+  ) {
+    return raw.slice(1, -1);
+  }
+  return raw;
+}
+
+function stripInlineComment(raw: string): string {
+  let quote: string | undefined;
+
+  for (let index = 0; index < raw.length; index += 1) {
+    const char = raw[index];
+    if ((char === '"' || char === "'") && quote === undefined) {
+      quote = char;
+    } else if (char === quote) {
+      quote = undefined;
+    } else if (char === "#" && quote === undefined && (index === 0 || /\s/.test(raw[index - 1] ?? ""))) {
+      return raw.slice(0, index);
+    }
+  }
+
+  return raw;
+}
+
+function parseYamlInlineArray(raw: string): string[] {
+  const inner = raw.slice(1, -1).trim();
+  if (!inner) return [];
+
+  const items: string[] = [];
+  let current = "";
+  let quote: string | undefined;
+
+  for (const char of inner) {
+    if ((char === '"' || char === "'") && quote === undefined) {
+      quote = char;
+    } else if (char === quote) {
+      quote = undefined;
+    }
+
+    if (char === "," && quote === undefined) {
+      items.push(String(parseYamlScalar(current.trim())));
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+
+  items.push(String(parseYamlScalar(current.trim())));
+  return items;
+}
+
+function isPositiveInteger(value: number): boolean {
+  return Number.isInteger(value) && value > 0;
+}
+
+export function slugify(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}

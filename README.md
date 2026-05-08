@@ -2,7 +2,7 @@
 
 Momentum is a TypeScript CLI targeting Node.js for autonomous repo-work orchestration. It turns a durable Goal into verified Iterations, with local artifacts and handoff state.
 
-This repo is currently implementing Linear issue `NGX-235`: the Milestone 1 scaffold and CLI test harness.
+Milestone 1 (Foreground Proof Loop) is in progress. NGX-235 (scaffold) and NGX-236 (Goal spec parsing, data-dir resolution, SQLite init, artifact layout) are complete.
 
 ## Milestone 1 Scope
 
@@ -12,18 +12,41 @@ Milestone 1 proves a foreground one-Iteration loop:
 Markdown Goal spec -> foreground runner -> Momentum-owned verification -> commit/reset -> ledger/artifacts/status
 ```
 
-The public CLI shape reserved by this scaffold is:
+The public CLI shape is:
 
 ```text
-momentum goal start <goal.md> --repo <path> --foreground [--runner <profile>] [--json]
+momentum goal start <goal.md> [--repo <path>] --foreground [--runner <profile>] [--data-dir <path>] [--json]
 momentum status [goal-id] [--json]
 momentum handoff <goal-id> [--json]
 momentum doctor [--json]
 ```
 
-`doctor`, `help`, and `version` work now. `goal start`, `status`, and `handoff` intentionally return stable `not_implemented` responses until `NGX-236..NGX-239` fill in parser, data, fake runner, transaction, and handoff behavior.
+`goal start` now parses the goal spec, resolves the data directory, initializes SQLite (`goals`, `jobs`, `events` tables), and creates the artifact layout. `status` and `handoff` return `not_implemented` until NGX-237..NGX-239 land.
+
+Goal files are Markdown that begin with YAML frontmatter. `title` is required; `repo`, `runner`, `branch`, `max_iterations`, `verification`, and `verification_timeout_sec` are optional. Defaults are `runner: fake`, `branch: momentum/<title-slug>`, `max_iterations: 1`, `verification: []`, and `verification_timeout_sec: 900`. `max_iterations` and `verification_timeout_sec` must be positive integers. If `branch` is omitted, `title` must contain letters or numbers so Momentum can derive `momentum/<title-slug>`. `--repo` and `--runner` override frontmatter values.
+
+```markdown
+---
+title: Example Goal
+repo: /path/to/repo
+runner: fake
+branch: momentum/example-goal
+max_iterations: 1
+verification:
+  - pnpm test
+verification_timeout_sec: 900
+---
+
+Describe the goal and constraints here.
+```
+
+State is stored under `--data-dir <path>`, then `MOMENTUM_HOME`, then `~/.momentum`. `goal start` creates `<data-dir>/momentum.db` and goal artifacts under `<data-dir>/goals/<goal-id>/`, including `goal.md`, `ledger.md`, `handoff.md`, `handoff.json`, and `iterations/1/{prompt.md,runner.log,verification.log,result.json}`.
+
+Running `goal start` again with the same initialized goal spec in the same data directory resumes the existing goal instead of creating duplicate state. Text output begins with `Goal resumed`; JSON output sets `resumed: true`.
 
 ## Local Development
+
+Requires Node.js 24 or newer.
 
 ```bash
 pnpm install
