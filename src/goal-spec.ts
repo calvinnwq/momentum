@@ -128,7 +128,7 @@ function parseSimpleYaml(yaml: string): YamlFields {
       while (i < lines.length) {
         const next = lines[i] ?? "";
         if (/^\s*-\s/.test(next)) {
-          items.push(next.replace(/^\s*-\s*/, "").trim());
+          items.push(String(parseYamlScalar(next.replace(/^\s*-\s*/, "").trim())));
           i++;
         } else {
           break;

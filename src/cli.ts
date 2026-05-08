@@ -22,6 +22,7 @@ type ParsedFlags = {
   repo?: string;
   runner?: string;
   dataDir?: string;
+  error?: string;
 };
 
 const COMMANDS = [
@@ -33,6 +34,10 @@ const COMMANDS = [
 
 export async function runCli(argv: string[], io: CliIo = defaultIo()): Promise<number> {
   const parsed = parseFlags(argv);
+  if (parsed.error) {
+    return usageError(parsed.error, parsed, io);
+  }
+
   const [command, subcommand] = parsed.args;
 
   if (!command || command === "help" || command === "--help" || command === "-h") {
@@ -207,6 +212,7 @@ function parseFlags(argv: string[]): ParsedFlags {
   let repo: string | undefined;
   let runner: string | undefined;
   let dataDir: string | undefined;
+  let error: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -220,20 +226,35 @@ function parseFlags(argv: string[]): ParsedFlags {
     }
 
     if (arg === "--repo") {
-      repo = readFlagValue(argv, index, "--repo");
-      index += 1;
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --repo.";
+      } else {
+        repo = value;
+        index += 1;
+      }
       continue;
     }
 
     if (arg === "--runner") {
-      runner = readFlagValue(argv, index, "--runner");
-      index += 1;
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --runner.";
+      } else {
+        runner = value;
+        index += 1;
+      }
       continue;
     }
 
     if (arg === "--data-dir") {
-      dataDir = readFlagValue(argv, index, "--data-dir");
-      index += 1;
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --data-dir.";
+      } else {
+        dataDir = value;
+        index += 1;
+      }
       continue;
     }
 
@@ -244,11 +265,12 @@ function parseFlags(argv: string[]): ParsedFlags {
   if (repo !== undefined) parsed.repo = repo;
   if (runner !== undefined) parsed.runner = runner;
   if (dataDir !== undefined) parsed.dataDir = dataDir;
+  if (error !== undefined) parsed.error = error;
 
   return parsed;
 }
 
-function readFlagValue(argv: string[], index: number, flag: string): string | undefined {
+function readFlagValue(argv: string[], index: number): string | undefined {
   const value = argv[index + 1];
   if (!value || value.startsWith("--")) {
     return undefined;
