@@ -2,7 +2,7 @@
 
 Momentum is a TypeScript CLI targeting Node.js for autonomous repo-work orchestration. It turns a durable Goal into verified Iterations, with local artifacts and handoff state.
 
-This repo is currently implementing Linear issue `NGX-235`: the Milestone 1 scaffold and CLI test harness.
+Milestone 1 (Foreground Proof Loop) is in progress. NGX-235 (scaffold) and NGX-236 (Goal spec parsing, data-dir resolution, SQLite init, artifact layout) are complete.
 
 ## Milestone 1 Scope
 
@@ -12,16 +12,16 @@ Milestone 1 proves a foreground one-Iteration loop:
 Markdown Goal spec -> foreground runner -> Momentum-owned verification -> commit/reset -> ledger/artifacts/status
 ```
 
-The public CLI shape reserved by this scaffold is:
+The public CLI shape is:
 
 ```text
-momentum goal start <goal.md> --repo <path> --foreground [--runner <profile>] [--json]
+momentum goal start <goal.md> [--repo <path>] --foreground [--runner <profile>] [--data-dir <path>] [--json]
 momentum status [goal-id] [--json]
 momentum handoff <goal-id> [--json]
 momentum doctor [--json]
 ```
 
-`doctor`, `help`, and `version` work now. `goal start`, `status`, and `handoff` intentionally return stable `not_implemented` responses until `NGX-236..NGX-239` fill in parser, data, fake runner, transaction, and handoff behavior.
+`goal start` now parses the goal spec, resolves the data directory, initializes SQLite (`goals`, `jobs`, `events` tables), and creates the artifact layout. `status` and `handoff` return `not_implemented` until NGX-237..NGX-239 land.
 
 ## Local Development
 
