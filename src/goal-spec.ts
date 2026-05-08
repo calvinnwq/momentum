@@ -76,6 +76,9 @@ export function parseGoalSpec(
   }
 
   const rawMaxIter = fields["max_iterations"];
+  if (rawMaxIter !== undefined && typeof rawMaxIter !== "number") {
+    return { ok: false, error: "`max_iterations` must be a positive integer" };
+  }
   const max_iterations = typeof rawMaxIter === "number" ? rawMaxIter : 1;
   if (!isPositiveInteger(max_iterations)) {
     return { ok: false, error: "`max_iterations` must be a positive integer" };
@@ -87,6 +90,9 @@ export function parseGoalSpec(
     : [];
 
   const rawTimeout = fields["verification_timeout_sec"];
+  if (rawTimeout !== undefined && typeof rawTimeout !== "number") {
+    return { ok: false, error: "`verification_timeout_sec` must be a positive integer" };
+  }
   const verification_timeout_sec =
     typeof rawTimeout === "number" ? rawTimeout : 900;
   if (!isPositiveInteger(verification_timeout_sec)) {
@@ -132,6 +138,7 @@ function parseSimpleYaml(yaml: string): YamlFields {
 
     const key = line.slice(0, colonIdx).trim();
     const rest = line.slice(colonIdx + 1).trim();
+    const commentStrippedRest = stripInlineComment(rest).trim();
 
     if (rest === "") {
       // Possibly a list
@@ -147,8 +154,8 @@ function parseSimpleYaml(yaml: string): YamlFields {
         }
       }
       fields[key] = items;
-    } else if (rest.startsWith("[") && rest.endsWith("]")) {
-      fields[key] = parseYamlInlineArray(rest);
+    } else if (commentStrippedRest.startsWith("[") && commentStrippedRest.endsWith("]")) {
+      fields[key] = parseYamlInlineArray(commentStrippedRest);
       i++;
     } else {
       fields[key] = parseYamlScalar(rest);

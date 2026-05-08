@@ -94,6 +94,17 @@ verification: ["pnpm test", 'pnpm build']
     expect(result.spec.verification).toEqual(["pnpm test", "pnpm build"]);
   });
 
+  it("parses inline verification arrays with comments", () => {
+    const result = parseGoalSpec(`---
+title: Commented Inline Verification
+verification: ["pnpm test"] # required check
+---
+`);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.spec.verification).toEqual(["pnpm test"]);
+  });
+
   it("repoOverride can supply repo when frontmatter has none", () => {
     const result = parseGoalSpec(MINIMAL_SPEC, "/from/flag");
     expect(result.ok).toBe(true);
@@ -139,7 +150,7 @@ title: !!!
   });
 
   it("returns error when max_iterations is not a positive integer", () => {
-    for (const value of ["0", "-1", "1.5"]) {
+    for (const value of ["0", "-1", "1.5", "three"]) {
       const result = parseGoalSpec(`---
 title: Invalid Iterations
 max_iterations: ${value}
@@ -165,7 +176,7 @@ verification_timeout_sec: 120 # seconds
   });
 
   it("returns error when verification_timeout_sec is not a positive integer", () => {
-    for (const value of ["0", "-1", "1.5"]) {
+    for (const value of ["0", "-1", "1.5", "soon"]) {
       const result = parseGoalSpec(`---
 title: Invalid Timeout
 verification_timeout_sec: ${value}
