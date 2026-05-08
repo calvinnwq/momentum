@@ -23,7 +23,28 @@ momentum doctor [--json]
 
 `goal start` now parses the goal spec, resolves the data directory, initializes SQLite (`goals`, `jobs`, `events` tables), and creates the artifact layout. `status` and `handoff` return `not_implemented` until NGX-237..NGX-239 land.
 
+Goal files are Markdown with YAML frontmatter. `title` is required; `repo`, `runner`, `branch`, `max_iterations`, `verification`, and `verification_timeout_sec` are optional. Defaults are `runner: fake`, `branch: momentum/<title-slug>`, `max_iterations: 1`, `verification: []`, and `verification_timeout_sec: 900`. `--repo` and `--runner` override frontmatter values.
+
+```markdown
+---
+title: Example Goal
+repo: /path/to/repo
+runner: fake
+branch: momentum/example-goal
+max_iterations: 1
+verification:
+  - pnpm test
+verification_timeout_sec: 900
+---
+
+Describe the goal and constraints here.
+```
+
+State is stored under `--data-dir <path>`, then `MOMENTUM_HOME`, then `~/.momentum`. `goal start` creates `<data-dir>/momentum.db` and goal artifacts under `<data-dir>/goals/<goal-id>/`, including `goal.md`, `ledger.md`, `handoff.md`, `handoff.json`, and `iterations/1/{prompt.md,runner.log,verification.log,result.json}`.
+
 ## Local Development
+
+Requires Node.js 24 or newer.
 
 ```bash
 pnpm install
