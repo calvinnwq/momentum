@@ -2,6 +2,7 @@ import type { GoalArtifactPaths } from "./artifacts.js";
 import type { MomentumDb } from "./db.js";
 import {
   runForegroundIteration,
+  type ForegroundIterationError,
   type ForegroundIterationResult
 } from "./foreground-iteration.js";
 import type { GoalSpec } from "./goal-spec.js";
@@ -58,12 +59,23 @@ export function executeIterationJob(
     runner: spec.runner
   });
 
-  const result = runForegroundIteration({
-    goalId,
-    spec,
-    iteration,
-    artifactPaths
-  });
+  let result: ForegroundIterationResult;
+  try {
+    result = runForegroundIteration({
+      goalId,
+      spec,
+      iteration,
+      artifactPaths
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "unknown error";
+    const synthetic: ForegroundIterationError = {
+      ok: false,
+      code: "unexpected_error",
+      error: `runForegroundIteration threw unexpectedly: ${detail}`
+    };
+    result = synthetic;
+  }
 
   const finishTs = now();
 

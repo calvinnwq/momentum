@@ -16,8 +16,10 @@ export type ForegroundIterationErrorCode =
   | "iteration_out_of_range"
   | "repo_guard_failed"
   | "branch_manager_failed"
+  | "artifact_write_failed"
   | "runner_failed"
-  | "git_failed";
+  | "git_failed"
+  | "unexpected_error";
 
 export type ForegroundIterationError = {
   ok: false;
@@ -124,7 +126,16 @@ export function runForegroundIteration(
     repoPath: guard.repoPath,
     baseHead
   });
-  fs.writeFileSync(artifactPaths.promptMd, promptText, "utf-8");
+  try {
+    fs.writeFileSync(artifactPaths.promptMd, promptText, "utf-8");
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "unknown error";
+    return {
+      ok: false,
+      code: "artifact_write_failed",
+      error: `failed to write prompt.md: ${detail}`
+    };
+  }
 
   let runnerOut;
   try {
