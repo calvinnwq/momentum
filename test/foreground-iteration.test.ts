@@ -201,6 +201,29 @@ describe("runForegroundIteration", () => {
     expect(fs.readFileSync(artifactPaths.promptMd, "utf-8")).toBe("");
   });
 
+  it("returns artifact_write_failed when prompt.md cannot be written", () => {
+    const repo = initRepo();
+    const spec = makeSpec(repo);
+    const artifactPaths = setupArtifacts();
+    fs.rmSync(artifactPaths.promptMd, { force: true });
+    fs.mkdirSync(artifactPaths.promptMd);
+
+    const out = runForegroundIteration({
+      goalId: GOAL_ID,
+      spec,
+      iteration: 1,
+      artifactPaths
+    });
+
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.code).toBe("artifact_write_failed");
+    expect(out.error).toContain("prompt.md");
+    expect(fs.existsSync(path.join(repo, FAKE_RUNNER_FIXTURE_FILENAME))).toBe(
+      false
+    );
+  });
+
   it("returns missing_repo when spec.repo is undefined", () => {
     const spec = makeSpec("/unused", { repo: undefined });
     const artifactPaths = setupArtifacts();
