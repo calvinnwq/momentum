@@ -89,7 +89,7 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
     version: VERSION,
     node: process.version,
     platform: process.platform,
-    milestone: "NGX-236 goal-init"
+    milestone: "NGX-237 foreground-iteration"
   };
 
   if (parsed.json) {
@@ -379,7 +379,7 @@ function renderHelp(): string {
     "Usage:",
     ...COMMANDS.map((command) => `  ${command}`),
     "",
-    "Milestone 1 supports Goal parsing and data/artifact initialization. Runner execution, status, and handoff behavior land in later NGX-237..NGX-239 issues.",
+    "Milestone 1 supports Goal parsing, data/artifact initialization, and a foreground iteration that invokes the fake runner. Status and handoff land in later Milestone 1 issues.",
     ""
   ].join("\n");
 }

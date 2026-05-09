@@ -97,7 +97,7 @@ describe("momentum CLI scaffold", () => {
 
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Momentum doctor: ok");
-    expect(result.stdout).toContain("scope: NGX-236 goal-init");
+    expect(result.stdout).toContain("scope: NGX-237 foreground-iteration");
     expect(result.stderr).toBe("");
   });
 
@@ -110,7 +110,7 @@ describe("momentum CLI scaffold", () => {
       ok: true,
       command: "doctor",
       version: VERSION,
-      milestone: "NGX-236 goal-init"
+      milestone: "NGX-237 foreground-iteration"
     });
     expect(result.stderr).toBe("");
   });

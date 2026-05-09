@@ -2,7 +2,7 @@
 
 Momentum is a TypeScript CLI targeting Node.js for autonomous repo-work orchestration. It turns a durable Goal into verified Iterations, with local artifacts and handoff state.
 
-Milestone 1 (Foreground Proof Loop) is in progress. NGX-235 (scaffold) and NGX-236 (Goal spec parsing, data-dir resolution, SQLite init, artifact layout) are complete.
+Milestone 1 (Foreground Proof Loop) is in progress. NGX-235 (scaffold), NGX-236 (Goal spec parsing, data-dir resolution, SQLite init, artifact layout), and NGX-237 (fake runner, foreground iteration transaction) are complete.
 
 ## Milestone 1 Scope
 
@@ -21,7 +21,7 @@ momentum handoff <goal-id> [--json]
 momentum doctor [--json]
 ```
 
-`goal start` now parses the goal spec, resolves the data directory, initializes SQLite (`goals`, `jobs`, `events` tables), and creates the artifact layout. `status` and `handoff` return `not_implemented` until NGX-237..NGX-239 land.
+`goal start --foreground` parses the goal spec, resolves the data directory, initializes SQLite (`goals`, `jobs`, `events` tables), creates the artifact layout, and runs one foreground iteration: it inspects the target repo, captures the pre-iteration HEAD, creates or reuses a Momentum branch, renders the iteration prompt, invokes the configured runner (currently `fake` only), and transitions the goal to `awaiting_verification` on success or `failed` on a typed pipeline error. The iteration writes `prompt.md`, `runner.log`, and `result.json` under `iterations/1/`, but does not commit, stage, or reset the worktree. `status` and `handoff` still return `not_implemented` until later Milestone 1 issues land.
 
 Goal files are Markdown that begin with YAML frontmatter. `title` is required; `repo`, `runner`, `branch`, `max_iterations`, `verification`, and `verification_timeout_sec` are optional. Defaults are `runner: fake`, `branch: momentum/<title-slug>`, `max_iterations: 1`, `verification: []`, and `verification_timeout_sec: 900`. `max_iterations` and `verification_timeout_sec` must be positive integers. If `branch` is omitted, `title` must contain letters or numbers so Momentum can derive `momentum/<title-slug>`. `--repo` and `--runner` override frontmatter values.
 

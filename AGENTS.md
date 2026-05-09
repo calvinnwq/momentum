@@ -15,7 +15,8 @@ Typical loop:
 - Milestone 1: Foreground proof loop is in progress.
 - NGX-235 (scaffold) is done.
 - NGX-236 (Goal spec parsing, data-dir resolution, SQLite init, artifact layout) is done.
-- Next issues: NGX-237, NGX-238, NGX-239.
+- NGX-237 (fake runner profile, repo guard, branch manager, iteration prompt renderer, foreground iteration orchestrator, iteration-job DB wrapper, CLI wiring) is done.
+- Next issues: NGX-238, NGX-239.
 
 ## Stack and workflow commands
 - Runtime: Node.js
