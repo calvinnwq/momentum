@@ -194,6 +194,22 @@ describe("ensureMomentumBranch", () => {
     if (!result.ok) expect(result.code).toBe("invalid_input");
   });
 
+  it("rejects a branch name starting with a hyphen with invalid_input", () => {
+    const dir = initRepo();
+    const head = commitInitial(dir);
+
+    for (const branch of ["-evil", "--config"]) {
+      const result = ensureMomentumBranch({
+        repoPath: dir,
+        branch,
+        goalId: "goal-1",
+        baseHead: head
+      });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.code).toBe("invalid_input");
+    }
+  });
+
   it("rejects a non-40-char baseHead with invalid_input", () => {
     const dir = initRepo();
     commitInitial(dir);

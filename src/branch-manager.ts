@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 
 const SHA40_RE = /^[0-9a-f]{40}$/;
-const BRANCH_NAME_RE = /^[A-Za-z0-9._/-]+$/;
+const BRANCH_NAME_RE = /^[A-Za-z0-9_][A-Za-z0-9._/-]*$/;
 const GOAL_ID_CONFIG_KEY_SUFFIX = "momentum-goal-id";
 
 export type BranchManagerErrorCode =
