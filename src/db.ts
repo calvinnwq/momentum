@@ -55,3 +55,21 @@ export function openDb(dataDir: string): MomentumDb {
   applyQueueMigrations(db);
   return db;
 }
+
+const SQLITE_CONSTRAINT_UNIQUE = 2067;
+
+type SqliteError = Error & { errcode?: number };
+
+/**
+ * True when `error` is a node:sqlite UNIQUE constraint violation. Prefers the
+ * extended SQLite error code (2067) and falls back to the message string for
+ * older runtimes that don't surface `errcode`.
+ */
+export function isUniqueViolation(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const errcode = (error as SqliteError).errcode;
+  if (typeof errcode === "number" && errcode === SQLITE_CONSTRAINT_UNIQUE) {
+    return true;
+  }
+  return /UNIQUE constraint failed/.test(error.message);
+}

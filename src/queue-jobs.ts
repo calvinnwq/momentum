@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 
-import type { MomentumDb } from "./db.js";
+import { isUniqueViolation, type MomentumDb } from "./db.js";
+import { QUEUE_EVENT_TYPES, appendQueueEvent } from "./events.js";
 
 export const GOAL_ITERATION_JOB_TYPE = "goal_iteration";
 
@@ -103,11 +104,20 @@ export function enqueueGoalIterationJob(
     throw error;
   }
 
-  return { jobId, created: true };
-}
+  appendQueueEvent(db, {
+    goalId: input.goalId,
+    jobId,
+    type: QUEUE_EVENT_TYPES.JOB_ENQUEUED,
+    payload: {
+      iteration: input.iteration,
+      idempotency_key: input.idempotencyKey,
+      artifact_path: input.artifactPath,
+      type: GOAL_ITERATION_JOB_TYPE
+    },
+    createdAt: now
+  });
 
-function isUniqueViolation(error: unknown): boolean {
-  return error instanceof Error && /UNIQUE constraint failed/.test(error.message);
+  return { jobId, created: true };
 }
 
 export function getQueueJob(

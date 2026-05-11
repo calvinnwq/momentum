@@ -47,11 +47,18 @@ CREATE INDEX IF NOT EXISTS idx_jobs_state_type
 `;
 
 export function applyQueueMigrations(db: MomentumDb): void {
-  for (const column of JOB_QUEUE_COLUMNS) {
-    ensureColumn(db, "jobs", column);
+  db.exec("BEGIN");
+  try {
+    for (const column of JOB_QUEUE_COLUMNS) {
+      ensureColumn(db, "jobs", column);
+    }
+    db.exec(JOB_IDEMPOTENCY_INDEX_DDL);
+    db.exec(REPO_LOCKS_DDL);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
   }
-  db.exec(JOB_IDEMPOTENCY_INDEX_DDL);
-  db.exec(REPO_LOCKS_DDL);
 }
 
 type PragmaColumnRow = { name: string };

@@ -68,6 +68,28 @@ describe("enqueueGoalIterationJob", () => {
       expect(row!.heartbeat_at).toBeNull();
       expect(row!.result_path).toBeNull();
       expect(row!.error_path).toBeNull();
+
+      const events = db
+        .prepare(
+          "SELECT goal_id, job_id, type, payload, created_at FROM events WHERE goal_id = 'g1' ORDER BY id ASC"
+        )
+        .all() as Array<{
+        goal_id: string;
+        job_id: string | null;
+        type: string;
+        payload: string;
+        created_at: number;
+      }>;
+      expect(events).toHaveLength(1);
+      expect(events[0]!.type).toBe("job.enqueued");
+      expect(events[0]!.job_id).toBe(out.jobId);
+      expect(events[0]!.created_at).toBe(1_700_000_000_000);
+      expect(JSON.parse(events[0]!.payload)).toEqual({
+        iteration: 1,
+        idempotency_key: "g1:1",
+        artifact_path: "/tmp/test/iterations/1",
+        type: GOAL_ITERATION_JOB_TYPE
+      });
     } finally {
       db.close();
     }
@@ -101,6 +123,14 @@ describe("enqueueGoalIterationJob", () => {
       // Original artifact path is preserved.
       const row = getQueueJob(db, first.jobId);
       expect(row!.artifact_path).toBe("/tmp/test/iterations/1");
+
+      // Idempotent re-enqueues do not double-emit job.enqueued.
+      const enqueueEvents = db
+        .prepare(
+          "SELECT count(*) AS c FROM events WHERE goal_id = 'g1' AND type = 'job.enqueued'"
+        )
+        .get() as { c: number };
+      expect(enqueueEvents.c).toBe(1);
     } finally {
       db.close();
     }

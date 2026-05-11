@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 
-import type { MomentumDb } from "./db.js";
+import { isUniqueViolation, type MomentumDb } from "./db.js";
 
 export type RepoLockState = "active" | "released" | "needs_manual_recovery";
 
@@ -182,9 +182,3 @@ function validateAcquireInput(input: AcquireRepoLockInput): void {
   }
 }
 
-function isUniqueViolation(error: unknown): boolean {
-  if (error instanceof Error) {
-    return /UNIQUE constraint failed/.test(error.message);
-  }
-  return false;
-}
