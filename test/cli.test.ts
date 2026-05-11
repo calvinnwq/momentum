@@ -322,22 +322,125 @@ describe("momentum CLI scaffold", () => {
     expect(result.stdout).toBe("");
   });
 
-  it("reserves status and handoff command shells", async () => {
-    const status = await run(["status", "goal-1", "--json"]);
+  it("reserves the handoff command shell", async () => {
     const handoff = await run(["handoff", "goal-1", "--json"]);
 
-    expect(status.code).toBe(1);
-    expect(JSON.parse(status.stdout)).toMatchObject({
-      command: "status",
-      goalId: "goal-1",
-      code: "not_implemented"
-    });
     expect(handoff.code).toBe(1);
     expect(JSON.parse(handoff.stdout)).toMatchObject({
       command: "handoff",
       goalId: "goal-1",
       code: "not_implemented"
     });
+  });
+
+  it("status returns goal_not_found in JSON mode when goalId is missing in the data dir", async () => {
+    const dataDir = makeTempDir("momentum-cli-data-");
+
+    const result = await run([
+      "status", "no-such-goal", "--data-dir", dataDir, "--json"
+    ]);
+
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "status",
+      code: "goal_not_found",
+      goalId: "no-such-goal"
+    });
+    expect(result.stdout).toBe("");
+  });
+
+  it("status returns no_goals when no goalId and the data dir is empty", async () => {
+    const dataDir = makeTempDir("momentum-cli-data-");
+
+    const result = await run(["status", "--data-dir", dataDir, "--json"]);
+
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "status",
+      code: "no_goals",
+      goalId: null
+    });
+  });
+
+  it("status returns the latest goal payload after goal start", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+
+    const startResult = await run([
+      "goal", "start", goalFile,
+      "--foreground",
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    const startPayload = JSON.parse(startResult.stdout) as Record<string, unknown>;
+    const goalId = startPayload["goalId"] as string;
+
+    const statusResult = await run([
+      "status", goalId, "--data-dir", dataDir, "--json"
+    ]);
+    expect(statusResult.code).toBe(0);
+    const statusPayload = JSON.parse(statusResult.stdout) as Record<string, unknown>;
+    expect(statusPayload).toMatchObject({
+      ok: true,
+      command: "status",
+      goalId,
+      title: "CLI Test Goal",
+      state: "iteration_complete",
+      repo,
+      branch: "momentum/cli-test-goal",
+      runner: "fake"
+    });
+    const iter = statusPayload["iteration"] as Record<string, unknown>;
+    expect(iter).toMatchObject({
+      iteration: 1,
+      runnerSuccess: true,
+      goalComplete: false,
+      branchCreated: true,
+      branch: "momentum/cli-test-goal"
+    });
+    expect(iter["commitSha"]).toMatch(/^[0-9a-f]{40}$/);
+    expect(statusResult.stderr).toBe("");
+  });
+
+  it("status text mode prints the goal summary", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+
+    const startResult = await run([
+      "goal", "start", goalFile,
+      "--foreground",
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    const startPayload = JSON.parse(startResult.stdout) as Record<string, unknown>;
+    const goalId = startPayload["goalId"] as string;
+
+    const result = await run(["status", goalId, "--data-dir", dataDir]);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(`Goal: ${goalId}`);
+    expect(result.stdout).toContain("Title: CLI Test Goal");
+    expect(result.stdout).toContain("State: iteration_complete");
+    expect(result.stdout).toContain("Branch: momentum/cli-test-goal");
+    expect(result.stdout).toMatch(/Commit: [0-9a-f]{40}/);
+    expect(result.stderr).toBe("");
+  });
+
+  it("status rejects extra positional arguments", async () => {
+    const result = await run(["status", "goal-1", "extra", "--json"]);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+
+    expect(result.code).toBe(2);
+    expect(payload).toMatchObject({
+      ok: false,
+      code: "usage_error",
+      message: "Unexpected argument for status: extra"
+    });
+    expect(result.stdout).toBe("");
   });
 
   it("goal start surfaces repo_guard_failed when the worktree is dirty", async () => {

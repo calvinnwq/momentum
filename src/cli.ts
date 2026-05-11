@@ -6,6 +6,10 @@ import {
   executeIterationJob,
   type ExecuteIterationJobResult
 } from "./iteration-job.js";
+import {
+  loadGoalStatus,
+  type GoalStatusSuccess
+} from "./goal-status.js";
 
 export const VERSION = "0.0.0";
 
@@ -65,9 +69,7 @@ export async function runCli(argv: string[], io: CliIo = defaultIo()): Promise<n
   }
 
   if (command === "status") {
-    return reservedCommand("status", parsed, io, {
-      goalId: parsed.args[1] ?? null
-    });
+    return status(parsed, io);
   }
 
   if (command === "handoff") {
@@ -257,6 +259,115 @@ function emitGoalStart(
   return 1;
 }
 
+function status(parsed: ParsedFlags, io: CliIo): number {
+  const goalIdArg = parsed.args[1];
+  if (parsed.args.length > 2) {
+    return usageError(`Unexpected argument for status: ${parsed.args[2]}`, parsed, io);
+  }
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  const input: { goalId?: string; dataDirOptions: DataDirOptions } = {
+    dataDirOptions
+  };
+  if (goalIdArg !== undefined) input.goalId = goalIdArg;
+
+  const result = loadGoalStatus(input);
+
+  if (!result.ok) {
+    const payload = {
+      ok: false,
+      command: "status",
+      code: result.code,
+      message: result.error,
+      goalId: goalIdArg ?? null
+    };
+    if (parsed.json) {
+      writeJson(io.stderr, payload);
+      return 1;
+    }
+    write(io.stderr, `${result.error}\n`);
+    return 1;
+  }
+
+  return emitStatus(parsed, io, result);
+}
+
+function emitStatus(
+  parsed: ParsedFlags,
+  io: CliIo,
+  data: GoalStatusSuccess
+): number {
+  const payload = {
+    ok: true,
+    command: "status",
+    goalId: data.goalId,
+    title: data.title,
+    state: data.state,
+    repo: data.repo,
+    branch: data.branch,
+    runner: data.runner,
+    maxIterations: data.maxIterations,
+    verification: data.verification,
+    verificationTimeoutSec: data.verificationTimeoutSec,
+    dataDir: data.dataDir,
+    artifactDir: data.artifactDir,
+    artifactPaths: {
+      goalMd: data.artifactPaths.goalMd,
+      ledgerMd: data.artifactPaths.ledgerMd,
+      handoffMd: data.artifactPaths.handoffMd,
+      handoffJson: data.artifactPaths.handoffJson,
+      promptMd: data.artifactPaths.promptMd,
+      runnerLog: data.artifactPaths.runnerLog,
+      verificationLog: data.artifactPaths.verificationLog,
+      resultJson: data.artifactPaths.resultJson
+    },
+    artifactFiles: data.artifactFiles,
+    createdAt: data.createdAt,
+    updatedAt: data.updatedAt,
+    latestJob: data.latestJob,
+    iteration: data.iteration
+  };
+
+  if (parsed.json) {
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  const lines: string[] = [
+    `Goal: ${data.goalId}`,
+    `Title: ${data.title}`,
+    `State: ${data.state}`,
+    `Repo: ${data.repo ?? "(unset)"}`,
+    `Branch: ${data.branch}`,
+    `Runner: ${data.runner}`,
+    `Artifact dir: ${data.artifactDir}`
+  ];
+
+  if (data.latestJob) {
+    lines.push(
+      `Job: ${data.latestJob.jobId} (${data.latestJob.state}, iteration ${data.latestJob.iteration})`
+    );
+  }
+
+  if (data.iteration) {
+    if (data.iteration.commitSha) {
+      lines.push(`Commit: ${data.iteration.commitSha}`);
+    }
+    if (data.iteration.failure) {
+      lines.push(
+        `Failure: ${data.iteration.failure.code} - ${data.iteration.failure.error}`
+      );
+    }
+  }
+
+  lines.push("");
+  write(io.stdout, lines.join("\n"));
+  return 0;
+}
+
 function reservedCommand(
   command: string,
   parsed: ParsedFlags,
@@ -383,7 +494,7 @@ function renderHelp(): string {
     "Usage:",
     ...COMMANDS.map((command) => `  ${command}`),
     "",
-    "Milestone 1 supports Goal parsing, data/artifact initialization, and a foreground iteration that invokes the fake runner. Status and handoff land in later Milestone 1 issues.",
+    "Milestone 1 supports Goal parsing, data/artifact initialization, a foreground iteration that invokes the fake runner, and read-only status. Handoff lands in a later Milestone 1 issue.",
     ""
   ].join("\n");
 }
