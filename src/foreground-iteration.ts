@@ -239,6 +239,14 @@ export function runForegroundIteration(
         finalize
       };
     case "commit_failed":
+      if (finalize.reset !== undefined && !finalize.reset.ok) {
+        return {
+          ok: false,
+          code: "reset_failed",
+          error: `reset after commit_failure failed: ${finalize.reset.error} (commit error: ${finalize.commit.error})`,
+          finalize
+        };
+      }
       return {
         ok: false,
         code: "commit_failed",

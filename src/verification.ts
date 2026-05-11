@@ -129,7 +129,7 @@ export function runVerification(input: VerificationInput): VerificationResult {
       ) {
         writeLine(
           logHandle,
-          `[verify]   output_overflow: combined stdout+stderr exceeded ${VERIFICATION_MAX_BUFFER_BYTES} bytes`
+          `[verify]   output_overflow: stdout or stderr exceeded ${VERIFICATION_MAX_BUFFER_BYTES} bytes`
         );
         writeLine(
           logHandle,
@@ -146,7 +146,7 @@ export function runVerification(input: VerificationInput): VerificationResult {
         return {
           ok: false,
           code: "output_overflow",
-          error: `verification command ${index + 1} produced more than ${VERIFICATION_MAX_BUFFER_BYTES} bytes of output (${command}); raise the cap or reduce the command's verbosity.`,
+          error: `verification command ${index + 1} produced more than ${VERIFICATION_MAX_BUFFER_BYTES} bytes on stdout or stderr (${command}); raise the cap or reduce the command's verbosity.`,
           results
         };
       }
