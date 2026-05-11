@@ -2,6 +2,8 @@ import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
 
+import { applyQueueMigrations } from "./migrations.js";
+
 export type MomentumDb = DatabaseSync;
 
 const SCHEMA = `
@@ -50,5 +52,24 @@ export function openDb(dataDir: string): MomentumDb {
   const dbPath = path.join(dataDir, "momentum.db");
   const db = new DatabaseSync(dbPath);
   db.exec(SCHEMA);
+  applyQueueMigrations(db);
   return db;
+}
+
+const SQLITE_CONSTRAINT_UNIQUE = 2067;
+
+type SqliteError = Error & { errcode?: number };
+
+/**
+ * True when `error` is a node:sqlite UNIQUE constraint violation. Prefers the
+ * extended SQLite error code (2067) and falls back to the message string for
+ * older runtimes that don't surface `errcode`.
+ */
+export function isUniqueViolation(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const errcode = (error as SqliteError).errcode;
+  if (typeof errcode === "number" && errcode === SQLITE_CONSTRAINT_UNIQUE) {
+    return true;
+  }
+  return /UNIQUE constraint failed/.test(error.message);
 }

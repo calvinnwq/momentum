@@ -2,7 +2,7 @@
 
 Momentum is a TypeScript CLI targeting Node.js for autonomous repo-work orchestration. It turns a durable Goal into verified Iterations, with local artifacts and handoff state.
 
-Milestone 1 (Foreground Proof Loop) is in progress. NGX-235 (scaffold), NGX-236 (Goal spec parsing, data-dir resolution, SQLite init, artifact layout), NGX-237 (fake runner, foreground iteration transaction), and NGX-238 (Momentum-owned verification, commit/reset transaction, `status` and `handoff` commands) are complete. NGX-239 (Milestone 1 end-to-end smoke and docs) is complete.
+Milestone 1 (Foreground Proof Loop) is complete. Milestone 2 (Queue and Worker Model) is in progress. NGX-235 (scaffold), NGX-236 (Goal spec parsing, data-dir resolution, SQLite init, artifact layout), NGX-237 (fake runner, foreground iteration transaction), NGX-238 (Momentum-owned verification, commit/reset transaction, `status` and `handoff` commands), and NGX-239 (Milestone 1 end-to-end smoke and docs) are complete. NGX-245 (M2-01 queue schema, event taxonomy, idempotent enqueue, repo locks, and migration system) is complete.
 
 ## Milestone 1 Scope
 
@@ -21,7 +21,7 @@ momentum handoff <goal-id> [--data-dir <path>] [--json]
 momentum doctor [--json]
 ```
 
-`goal start --foreground` parses the goal spec, resolves the data directory, initializes SQLite (`goals`, `jobs`, `events` tables), creates the artifact layout, and runs one foreground iteration: it inspects the target repo, captures the pre-iteration HEAD, creates or reuses a Momentum branch, renders the iteration prompt, invokes the configured runner (currently `fake` only), runs each verification command from the repo root, and either stages and commits the full repo diff as one Momentum commit on verified success or hard-resets the worktree back to the pre-iteration HEAD on runner failure or verification failure. The iteration writes `prompt.md`, `runner.log`, `verification.log`, and `result.json` under `iterations/1/`. On a verified commit the goal transitions to `iteration_complete` (or `completed` if the runner reports `goal_complete: true`); on runner failure, verification failure, or any pipeline error it transitions to `failed`. `status [goal-id] --json` reads the SQLite/artifact state and emits a stable JSON shape, and `handoff <goal-id> --json` writes `handoff.md` and `handoff.json` (schema v1) into the goal's artifact dir.
+`goal start --foreground` parses the goal spec, resolves the data directory, initializes SQLite (`goals`, `jobs`, `events`, `repo_locks` tables), creates the artifact layout, and runs one foreground iteration: it inspects the target repo, captures the pre-iteration HEAD, creates or reuses a Momentum branch, renders the iteration prompt, invokes the configured runner (currently `fake` only), runs each verification command from the repo root, and either stages and commits the full repo diff as one Momentum commit on verified success or hard-resets the worktree back to the pre-iteration HEAD on runner failure or verification failure. The iteration writes `prompt.md`, `runner.log`, `verification.log`, and `result.json` under `iterations/1/`. On a verified commit the goal transitions to `iteration_complete` (or `completed` if the runner reports `goal_complete: true`); on runner failure, verification failure, or any pipeline error it transitions to `failed`. `status [goal-id] --json` reads the SQLite/artifact state and emits a stable JSON shape, and `handoff <goal-id> --json` writes `handoff.md` and `handoff.json` (schema v1) into the goal's artifact dir.
 
 ## Local Development
 
@@ -120,7 +120,7 @@ State is stored under `--data-dir <path>`, then the `MOMENTUM_HOME` environment 
 
 ```text
 <data-dir>/
-  momentum.db                  # SQLite (goals, jobs, events tables)
+  momentum.db                  # SQLite (goals, jobs, events, repo_locks tables)
   goals/
     <goal-id>/
       goal.md                  # Canonical copy of the goal spec
@@ -190,7 +190,7 @@ Replacing the `verification: ["true"]` line with `verification: ["false"]` exerc
 
 Milestone 1 intentionally omits the following; they belong to later milestones or are out of scope for this scaffold:
 
-- Queue/worker execution, persistent job leases, and stale-lease recovery (Milestone 2).
+- Queue/worker execution, persistent job leases, and stale-lease recovery (Milestone 2; schema and state model in place, worker loop pending).
 - Daemon lifecycle management, stop/cancel commands, and background runner supervision (Milestone 2/3).
 - Real runner profiles beyond `fake`; only the fake runner is wired into the foreground iteration.
 - Multi-iteration loops; `max_iterations` is parsed but Milestone 1 executes exactly one iteration per `goal start`.

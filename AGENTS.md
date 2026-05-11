@@ -12,12 +12,14 @@ Typical loop:
 4. Emit handoff artifacts for continuity.
 
 ## Current milestone
-- Milestone 1: Foreground proof loop is in progress.
+- Milestone 1: Foreground proof loop is complete.
+- Milestone 2: Queue and worker model is in progress.
 - NGX-235 (scaffold) is done.
 - NGX-236 (Goal spec parsing, data-dir resolution, SQLite init, artifact layout) is done.
 - NGX-237 (fake runner profile, repo guard, branch manager, iteration prompt renderer, foreground iteration orchestrator, iteration-job DB wrapper, CLI wiring) is done.
 - NGX-238 (Momentum-owned verification runner, git transaction commit/reset, finalizeIteration orchestrator, `status` and `handoff` commands, stable CLI JSON shapes) is done.
 - NGX-239 (end-to-end Milestone 1 smoke test plus user-facing docs covering local setup, command usage, data directory, artifacts, failure reset semantics, and exclusions) is done.
+- NGX-245 (M2-01 queue schema, event taxonomy, idempotent enqueue, repo locks, migration system) is done.
 
 ## Stack and workflow commands
 - Runtime: Node.js
@@ -50,7 +52,7 @@ Common commands:
 
 ## Data and artifact layout
 - State uses `MOMENTUM_HOME` env var → `~/.momentum` fallback; override with `--data-dir`.
-- SQLite database at `<data-dir>/momentum.db` with `goals`, `jobs`, `events` tables.
+- SQLite database at `<data-dir>/momentum.db` with `goals`, `jobs`, `events`, `repo_locks` tables.
 - Goal artifacts at `<data-dir>/goals/<goal-id>/`: `goal.md`, `ledger.md`, `handoff.md`, `handoff.json`, `iterations/1/{prompt.md,runner.log,verification.log,result.json}`.
 - Avoid hard-coded paths tied to a single user.
 - Only use explicit local paths when existing documentation in-repo explicitly mandates them.
