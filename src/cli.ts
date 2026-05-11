@@ -10,6 +10,7 @@ import {
   loadGoalStatus,
   type GoalStatusSuccess
 } from "./goal-status.js";
+import { writeHandoff, type HandoffSuccess } from "./handoff.js";
 
 export const VERSION = "0.0.0";
 
@@ -73,12 +74,7 @@ export async function runCli(argv: string[], io: CliIo = defaultIo()): Promise<n
   }
 
   if (command === "handoff") {
-    const goalId = parsed.args[1];
-    if (!goalId) {
-      return usageError("Missing required <goal-id> for handoff.", parsed, io);
-    }
-
-    return reservedCommand("handoff", parsed, io, { goalId });
+    return handoff(parsed, io);
   }
 
   return usageError(`Unknown command: ${command}`, parsed, io);
@@ -368,27 +364,92 @@ function emitStatus(
   return 0;
 }
 
-function reservedCommand(
-  command: string,
+function handoff(parsed: ParsedFlags, io: CliIo): number {
+  const goalIdArg = parsed.args[1];
+  if (!goalIdArg) {
+    return usageError("Missing required <goal-id> for handoff.", parsed, io);
+  }
+  if (parsed.args.length > 2) {
+    return usageError(
+      `Unexpected argument for handoff: ${parsed.args[2]}`,
+      parsed,
+      io
+    );
+  }
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  const result = writeHandoff({ goalId: goalIdArg, dataDirOptions });
+
+  if (!result.ok) {
+    const payload = {
+      ok: false,
+      command: "handoff",
+      code: result.code,
+      message: result.error,
+      goalId: goalIdArg
+    };
+    if (parsed.json) {
+      writeJson(io.stderr, payload);
+      return 1;
+    }
+    write(io.stderr, `${result.error}\n`);
+    return 1;
+  }
+
+  return emitHandoff(parsed, io, result);
+}
+
+function emitHandoff(
   parsed: ParsedFlags,
   io: CliIo,
-  details: JsonPayload
+  result: HandoffSuccess
 ): number {
+  const { data } = result;
   const payload = {
-    ok: false,
-    command,
-    code: "not_implemented",
-    message: `${command} is reserved by NGX-235 and will be implemented in a later Milestone 1 issue.`,
-    ...details
+    ok: true,
+    command: "handoff",
+    goalId: data.goal.id,
+    title: data.goal.title,
+    state: data.goal.state,
+    schemaVersion: data.schemaVersion,
+    generatedAt: data.generatedAt,
+    handoffMdPath: result.handoffMdPath,
+    handoffJsonPath: result.handoffJsonPath,
+    dataDir: data.goal.dataDir,
+    artifactDir: data.goal.artifactDir,
+    iteration: data.iteration,
+    runnerResult: data.runnerResult,
+    latestJob: data.latestJob
   };
 
   if (parsed.json) {
     writeJson(io.stdout, payload);
-    return 1;
+    return 0;
   }
 
-  write(io.stderr, `${payload.message}\n`);
-  return 1;
+  const lines: string[] = [
+    `Handoff written for goal: ${data.goal.id}`,
+    `Title: ${data.goal.title}`,
+    `State: ${data.goal.state}`,
+    `handoff.md: ${result.handoffMdPath}`,
+    `handoff.json: ${result.handoffJsonPath}`
+  ];
+
+  if (data.iteration?.commitSha) {
+    lines.push(`Commit: ${data.iteration.commitSha}`);
+  }
+  if (data.iteration?.failure) {
+    lines.push(
+      `Failure: ${data.iteration.failure.code} - ${data.iteration.failure.error}`
+    );
+  }
+
+  lines.push("");
+  write(io.stdout, lines.join("\n"));
+  return 0;
 }
 
 function usageError(message: string, parsed: ParsedFlags, io: CliIo): number {
@@ -494,7 +555,7 @@ function renderHelp(): string {
     "Usage:",
     ...COMMANDS.map((command) => `  ${command}`),
     "",
-    "Milestone 1 supports Goal parsing, data/artifact initialization, a foreground iteration that invokes the fake runner, and read-only status. Handoff lands in a later Milestone 1 issue.",
+    "Milestone 1 supports Goal parsing, data/artifact initialization, a foreground iteration that invokes the fake runner, read-only status, and handoff artifact generation.",
     ""
   ].join("\n");
 }

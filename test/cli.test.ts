@@ -322,15 +322,125 @@ describe("momentum CLI scaffold", () => {
     expect(result.stdout).toBe("");
   });
 
-  it("reserves the handoff command shell", async () => {
-    const handoff = await run(["handoff", "goal-1", "--json"]);
+  it("handoff returns goal_not_found in JSON mode when the goalId is missing", async () => {
+    const dataDir = makeTempDir("momentum-cli-data-");
+    const result = await run([
+      "handoff", "no-such-goal", "--data-dir", dataDir, "--json"
+    ]);
 
-    expect(handoff.code).toBe(1);
-    expect(JSON.parse(handoff.stdout)).toMatchObject({
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
       command: "handoff",
-      goalId: "goal-1",
-      code: "not_implemented"
+      code: "goal_not_found",
+      goalId: "no-such-goal"
     });
+    expect(result.stdout).toBe("");
+  });
+
+  it("handoff usage error when goal-id is missing", async () => {
+    const result = await run(["handoff", "--json"]);
+
+    expect(result.code).toBe(2);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      code: "usage_error",
+      message: "Missing required <goal-id> for handoff."
+    });
+    expect(result.stdout).toBe("");
+  });
+
+  it("handoff rejects extra positional arguments", async () => {
+    const result = await run(["handoff", "goal-1", "extra", "--json"]);
+
+    expect(result.code).toBe(2);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      code: "usage_error",
+      message: "Unexpected argument for handoff: extra"
+    });
+    expect(result.stdout).toBe("");
+  });
+
+  it("handoff writes artifacts and emits the verified-commit payload after goal start", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+
+    const startResult = await run([
+      "goal", "start", goalFile,
+      "--foreground",
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    const startPayload = JSON.parse(startResult.stdout) as Record<string, unknown>;
+    const goalId = startPayload["goalId"] as string;
+
+    const result = await run([
+      "handoff", goalId, "--data-dir", dataDir, "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      command: "handoff",
+      goalId,
+      title: "CLI Test Goal",
+      state: "iteration_complete",
+      schemaVersion: 1
+    });
+    expect(typeof payload["generatedAt"]).toBe("number");
+
+    const handoffMdPath = payload["handoffMdPath"] as string;
+    const handoffJsonPath = payload["handoffJsonPath"] as string;
+    expect(fs.existsSync(handoffMdPath)).toBe(true);
+    expect(fs.existsSync(handoffJsonPath)).toBe(true);
+
+    const iteration = payload["iteration"] as Record<string, unknown>;
+    expect(iteration["commitSha"]).toMatch(/^[0-9a-f]{40}$/);
+    expect(iteration["runnerSuccess"]).toBe(true);
+
+    const runnerResult = payload["runnerResult"] as Record<string, unknown>;
+    expect(runnerResult["summary"]).toBe("Applied fake runner fixture.");
+
+    const fileJson = JSON.parse(fs.readFileSync(handoffJsonPath, "utf-8"));
+    expect(fileJson).toMatchObject({
+      schema_version: 1,
+      goal: { id: goalId, title: "CLI Test Goal", state: "iteration_complete" }
+    });
+
+    const md = fs.readFileSync(handoffMdPath, "utf-8");
+    expect(md).toContain("# Momentum handoff: CLI Test Goal");
+    expect(md).toMatch(/Commit SHA: [0-9a-f]{40}/);
+    expect(result.stderr).toBe("");
+  });
+
+  it("handoff text mode prints the artifact paths", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+
+    const startResult = await run([
+      "goal", "start", goalFile,
+      "--foreground",
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    const startPayload = JSON.parse(startResult.stdout) as Record<string, unknown>;
+    const goalId = startPayload["goalId"] as string;
+
+    const result = await run(["handoff", goalId, "--data-dir", dataDir]);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(`Handoff written for goal: ${goalId}`);
+    expect(result.stdout).toContain("Title: CLI Test Goal");
+    expect(result.stdout).toContain("State: iteration_complete");
+    expect(result.stdout).toMatch(/handoff\.md: .+handoff\.md/);
+    expect(result.stdout).toMatch(/handoff\.json: .+handoff\.json/);
+    expect(result.stdout).toMatch(/Commit: [0-9a-f]{40}/);
+    expect(result.stderr).toBe("");
   });
 
   it("status returns goal_not_found in JSON mode when goalId is missing in the data dir", async () => {
