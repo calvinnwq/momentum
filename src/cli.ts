@@ -87,7 +87,7 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
     version: VERSION,
     node: process.version,
     platform: process.platform,
-    milestone: "NGX-237 foreground-iteration"
+    milestone: "NGX-238 verification-commit-reset-handoff"
   };
 
   if (parsed.json) {
