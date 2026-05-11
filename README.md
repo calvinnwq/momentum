@@ -16,8 +16,8 @@ The public CLI shape is:
 
 ```text
 momentum goal start <goal.md> [--repo <path>] --foreground [--runner <profile>] [--data-dir <path>] [--json]
-momentum status [goal-id] [--json]
-momentum handoff <goal-id> [--json]
+momentum status [goal-id] [--data-dir <path>] [--json]
+momentum handoff <goal-id> [--data-dir <path>] [--json]
 momentum doctor [--json]
 ```
 

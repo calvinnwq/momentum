@@ -80,8 +80,8 @@ describe("momentum CLI scaffold", () => {
 
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("momentum goal start <goal.md> [--repo <path>] --foreground");
-    expect(result.stdout).toContain("momentum status [goal-id] [--json]");
-    expect(result.stdout).toContain("momentum handoff <goal-id> [--json]");
+    expect(result.stdout).toContain("momentum status [goal-id] [--data-dir <path>] [--json]");
+    expect(result.stdout).toContain("momentum handoff <goal-id> [--data-dir <path>] [--json]");
     expect(result.stdout).toContain("momentum doctor [--json]");
     expect(result.stderr).toBe("");
   });

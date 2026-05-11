@@ -145,10 +145,10 @@ describe("Milestone 1 end-to-end smoke", () => {
         "momentum goal start <goal.md> [--repo <path>] --foreground [--runner <profile>] [--data-dir <path>] [--json]"
       );
       expect(result.stdout).toContain(
-        "momentum status [goal-id] [--json]"
+        "momentum status [goal-id] [--data-dir <path>] [--json]"
       );
       expect(result.stdout).toContain(
-        "momentum handoff <goal-id> [--json]"
+        "momentum handoff <goal-id> [--data-dir <path>] [--json]"
       );
       expect(result.stdout).toContain("momentum doctor [--json]");
       expect(result.stdout).toContain(
@@ -231,8 +231,8 @@ describe("Milestone 1 end-to-end smoke", () => {
       expect(Array.isArray(commands)).toBe(true);
       expect(commands).toEqual([
         "momentum goal start <goal.md> [--repo <path>] --foreground [--runner <profile>] [--data-dir <path>] [--json]",
-        "momentum status [goal-id] [--json]",
-        "momentum handoff <goal-id> [--json]",
+        "momentum status [goal-id] [--data-dir <path>] [--json]",
+        "momentum handoff <goal-id> [--data-dir <path>] [--json]",
         "momentum doctor [--json]"
       ]);
     },
@@ -269,8 +269,8 @@ describe("Milestone 1 end-to-end smoke", () => {
       expect(Array.isArray(commands)).toBe(true);
       expect(commands).toEqual([
         "momentum goal start <goal.md> [--repo <path>] --foreground [--runner <profile>] [--data-dir <path>] [--json]",
-        "momentum status [goal-id] [--json]",
-        "momentum handoff <goal-id> [--json]",
+        "momentum status [goal-id] [--data-dir <path>] [--json]",
+        "momentum handoff <goal-id> [--data-dir <path>] [--json]",
         "momentum doctor [--json]"
       ]);
 
