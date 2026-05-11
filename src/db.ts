@@ -2,6 +2,8 @@ import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
 
+import { applyQueueMigrations } from "./migrations.js";
+
 export type MomentumDb = DatabaseSync;
 
 const SCHEMA = `
@@ -50,5 +52,6 @@ export function openDb(dataDir: string): MomentumDb {
   const dbPath = path.join(dataDir, "momentum.db");
   const db = new DatabaseSync(dbPath);
   db.exec(SCHEMA);
+  applyQueueMigrations(db);
   return db;
 }
