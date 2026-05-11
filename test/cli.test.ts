@@ -706,6 +706,72 @@ describe("momentum CLI scaffold", () => {
     );
   });
 
+  it("goal start surfaces verification_failed and resets to base HEAD when a verification command exits non-zero", async () => {
+    const failingSpec = `---
+title: CLI Test Goal
+runner: fake
+verification:
+  - false
+---
+
+Goal body.
+`;
+    const { dataDir, goalFile, repo } = setupGoalAndData(failingSpec);
+    const baseHead = runGit(repo, ["rev-parse", "HEAD"]).trim();
+
+    const result = await run([
+      "goal", "start", goalFile,
+      "--foreground",
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "goal start",
+      state: "failed",
+      code: "iteration_failed"
+    });
+    const iter = payload["iteration"] as Record<string, unknown>;
+    expect(iter).toMatchObject({ ok: false, code: "verification_failed" });
+
+    expect(runGit(repo, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
+    expect(runGit(repo, ["status", "--porcelain"]).trim()).toBe("");
+    expect(fs.existsSync(path.join(repo, FAKE_RUNNER_FIXTURE_FILENAME))).toBe(
+      false
+    );
+
+    const goalId = payload["goalId"] as string;
+    const runnerLog = path.join(
+      dataDir,
+      "goals",
+      goalId,
+      "iterations",
+      "1",
+      "runner.log"
+    );
+    const verificationLog = path.join(
+      dataDir,
+      "goals",
+      goalId,
+      "iterations",
+      "1",
+      "verification.log"
+    );
+    expect(fs.existsSync(runnerLog)).toBe(true);
+    const verificationLogText = fs.readFileSync(verificationLog, "utf-8");
+    expect(verificationLogText).toContain("[verify] running: false");
+    expect(verificationLogText).toContain("[verify]   exit_code: 1");
+    expect(verificationLogText).toContain(
+      "[verify] summary: verification failed on command 1: false"
+    );
+  });
+
   it("rejects unknown commands with usage", async () => {
     const result = await run(["wat"]);
 
