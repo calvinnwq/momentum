@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import {
+  FAKE_RUNNER_FAIL_ENV,
   FAKE_RUNNER_FIXTURE_FILENAME,
   runFakeRunner
 } from "../src/fake-runner.js";
@@ -238,5 +239,48 @@ describe("runFakeRunner", () => {
     expect(() =>
       runFakeRunner({ repoPath, iterationDir: file, iteration: 1 })
     ).toThrow(/iterationDir is not a directory/);
+  });
+
+  it("simulates runner failure when MOMENTUM_FAKE_RUNNER_FAIL is set", () => {
+    const repoPath = initRepo();
+    const iterationDir = makeIterationDir();
+
+    const out = runFakeRunner({
+      repoPath,
+      iterationDir,
+      iteration: 1,
+      env: { [FAKE_RUNNER_FAIL_ENV]: "1" }
+    });
+
+    expect(out.result.success).toBe(false);
+    expect(out.result.summary).toContain("Simulated runner failure");
+    expect(out.result.goal_complete).toBe(false);
+
+    expect(fs.existsSync(out.fixturePath)).toBe(true);
+    const log = fs.readFileSync(out.runnerLogPath, "utf-8");
+    expect(log).toContain(`simulated failure via ${FAKE_RUNNER_FAIL_ENV}`);
+    expect(log).toContain("[fake-runner] done");
+
+    const parsed = parseRunnerResult(
+      fs.readFileSync(out.resultJsonPath, "utf-8")
+    );
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.value.success).toBe(false);
+    }
+  });
+
+  it("treats empty/whitespace MOMENTUM_FAKE_RUNNER_FAIL as not set", () => {
+    const repoPath = initRepo();
+    const iterationDir = makeIterationDir();
+
+    const out = runFakeRunner({
+      repoPath,
+      iterationDir,
+      iteration: 1,
+      env: { [FAKE_RUNNER_FAIL_ENV]: "   " }
+    });
+
+    expect(out.result.success).toBe(true);
   });
 });

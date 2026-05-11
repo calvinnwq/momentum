@@ -6,7 +6,10 @@ import path from "node:path";
 
 import { resolveGoalArtifactPaths } from "../src/artifacts.js";
 import { openDb } from "../src/db.js";
-import { FAKE_RUNNER_FIXTURE_FILENAME } from "../src/fake-runner.js";
+import {
+  FAKE_RUNNER_FAIL_ENV,
+  FAKE_RUNNER_FIXTURE_FILENAME
+} from "../src/fake-runner.js";
 import { initGoal, type GoalInitSuccess } from "../src/goal-init.js";
 import { executeIterationJob } from "../src/iteration-job.js";
 
@@ -19,6 +22,7 @@ afterEach(() => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   }
+  delete process.env[FAKE_RUNNER_FAIL_ENV];
 });
 
 function makeTempDir(prefix = "momentum-iter-job-"): string {
@@ -236,6 +240,64 @@ describe("executeIterationJob", () => {
     ).toBe(false);
     const status = runGit(repo, ["status", "--porcelain"]).trim();
     expect(status).toBe("");
+
+    db.close();
+  });
+
+  it("marks goal/job failed and emits iteration_failed when runner reports failure after reset", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo);
+    const db = openDb(setup.dataDir);
+    const baseHead = runGit(repo, ["rev-parse", "HEAD"]).trim();
+
+    process.env[FAKE_RUNNER_FAIL_ENV] = "1";
+
+    const out = executeIterationJob({
+      db,
+      goalId: setup.goalId,
+      jobId: setup.jobId,
+      spec: setup.spec,
+      artifactPaths: setup.artifactPaths
+    });
+
+    expect(out.ok).toBe(false);
+    expect(out.goalState).toBe("failed");
+    expect(out.jobState).toBe("failed");
+
+    const jobRow = db
+      .prepare("SELECT state, error FROM jobs WHERE id = ?")
+      .get(setup.jobId) as Record<string, unknown>;
+    expect(jobRow["state"]).toBe("failed");
+    expect(jobRow["error"]).toContain("runner_reported_failure");
+
+    const events = db
+      .prepare("SELECT type, payload FROM events WHERE goal_id = ? ORDER BY id ASC")
+      .all(setup.goalId) as Array<{ type: string; payload: string }>;
+    expect(events.map((event) => event.type)).toEqual([
+      "iteration_started",
+      "iteration_failed"
+    ]);
+    const failed = JSON.parse(events[1]!.payload) as Record<string, unknown>;
+    expect(failed["code"]).toBe("runner_reported_failure");
+
+    const head = runGit(repo, ["rev-parse", "HEAD"]).trim();
+    expect(head).toBe(baseHead);
+
+    expect(
+      fs.existsSync(path.join(repo, FAKE_RUNNER_FIXTURE_FILENAME))
+    ).toBe(false);
+    const status = runGit(repo, ["status", "--porcelain"]).trim();
+    expect(status).toBe("");
+
+    const runnerLog = fs.readFileSync(setup.artifactPaths.runnerLog, "utf-8");
+    expect(runnerLog).toContain("[fake-runner] start");
+    expect(runnerLog).toContain(`simulated failure via ${FAKE_RUNNER_FAIL_ENV}`);
+
+    const verificationLog = fs.readFileSync(
+      setup.artifactPaths.verificationLog,
+      "utf-8"
+    );
+    expect(verificationLog).toContain("[verify] skipped: runner reported failure");
 
     db.close();
   });

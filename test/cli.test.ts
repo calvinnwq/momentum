@@ -4,7 +4,10 @@ import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
 import { VERSION, runCli } from "../src/cli.js";
-import { FAKE_RUNNER_FIXTURE_FILENAME } from "../src/fake-runner.js";
+import {
+  FAKE_RUNNER_FAIL_ENV,
+  FAKE_RUNNER_FIXTURE_FILENAME
+} from "../src/fake-runner.js";
 
 const GOAL_SPEC = `---
 title: CLI Test Goal
@@ -31,6 +34,7 @@ afterEach(() => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   }
+  delete process.env[FAKE_RUNNER_FAIL_ENV];
 });
 
 function makeTempDir(prefix = "momentum-cli-"): string {
@@ -641,6 +645,65 @@ describe("momentum CLI scaffold", () => {
     expect(result.code).toBe(1);
     expect(result.stderr).toContain("repo_guard_failed:");
     expect(result.stdout).toBe("");
+  });
+
+  it("goal start surfaces runner_reported_failure and resets to base HEAD when the runner fails", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+    const baseHead = runGit(repo, ["rev-parse", "HEAD"]).trim();
+    process.env[FAKE_RUNNER_FAIL_ENV] = "1";
+
+    const result = await run([
+      "goal", "start", goalFile,
+      "--foreground",
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "goal start",
+      state: "failed",
+      code: "iteration_failed"
+    });
+    const iter = payload["iteration"] as Record<string, unknown>;
+    expect(iter).toMatchObject({ ok: false, code: "runner_reported_failure" });
+    expect(typeof iter["error"]).toBe("string");
+    expect((iter["error"] as string).length).toBeGreaterThan(0);
+
+    expect(runGit(repo, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
+    expect(runGit(repo, ["status", "--porcelain"]).trim()).toBe("");
+    expect(fs.existsSync(path.join(repo, FAKE_RUNNER_FIXTURE_FILENAME))).toBe(
+      false
+    );
+
+    const goalId = payload["goalId"] as string;
+    const runnerLog = path.join(
+      dataDir,
+      "goals",
+      goalId,
+      "iterations",
+      "1",
+      "runner.log"
+    );
+    const verificationLog = path.join(
+      dataDir,
+      "goals",
+      goalId,
+      "iterations",
+      "1",
+      "verification.log"
+    );
+    expect(fs.readFileSync(runnerLog, "utf-8")).toContain(
+      `simulated failure via ${FAKE_RUNNER_FAIL_ENV}`
+    );
+    expect(fs.readFileSync(verificationLog, "utf-8")).toContain(
+      "[verify] skipped: runner reported failure"
+    );
   });
 
   it("rejects unknown commands with usage", async () => {

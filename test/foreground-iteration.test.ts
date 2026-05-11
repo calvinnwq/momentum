@@ -5,7 +5,11 @@ import os from "node:os";
 import path from "node:path";
 
 import { runForegroundIteration } from "../src/foreground-iteration.js";
-import { FAKE_RUNNER_FIXTURE_FILENAME } from "../src/fake-runner.js";
+import {
+  FAKE_RUNNER_FAIL_ENV,
+  FAKE_RUNNER_FIXTURE_FILENAME
+} from "../src/fake-runner.js";
+import { parseRunnerResult } from "../src/runner-result.js";
 import {
   initGoalArtifacts,
   resolveGoalArtifactPaths
@@ -21,6 +25,7 @@ afterEach(() => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   }
+  delete process.env[FAKE_RUNNER_FAIL_ENV];
 });
 
 function makeTempDir(prefix = "momentum-foreground-iter-"): string {
@@ -237,6 +242,56 @@ describe("runForegroundIteration", () => {
     expect(verificationText).toContain(
       "[verify] summary: verification failed on command 1"
     );
+  });
+
+  it("resets to base HEAD when the runner reports failure and preserves logs", () => {
+    const repo = initRepo();
+    const spec = makeSpec(repo);
+    const artifactPaths = setupArtifacts();
+    const baseHead = runGit(repo, ["rev-parse", "HEAD"]).trim();
+
+    process.env[FAKE_RUNNER_FAIL_ENV] = "1";
+
+    const out = runForegroundIteration({
+      goalId: GOAL_ID,
+      spec,
+      iteration: 1,
+      artifactPaths
+    });
+
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.code).toBe("runner_reported_failure");
+    expect(out.finalize?.outcome).toBe("reset_runner_failure");
+
+    const head = runGit(repo, ["rev-parse", "HEAD"]).trim();
+    expect(head).toBe(baseHead);
+
+    const status = runGit(repo, ["status", "--porcelain"]).trim();
+    expect(status).toBe("");
+
+    expect(fs.existsSync(path.join(repo, FAKE_RUNNER_FIXTURE_FILENAME))).toBe(
+      false
+    );
+
+    const runnerLog = fs.readFileSync(artifactPaths.runnerLog, "utf-8");
+    expect(runnerLog).toContain("[fake-runner] start");
+    expect(runnerLog).toContain(`simulated failure via ${FAKE_RUNNER_FAIL_ENV}`);
+
+    const verificationLog = fs.readFileSync(
+      artifactPaths.verificationLog,
+      "utf-8"
+    );
+    expect(verificationLog).toContain("[verify] skipped: runner reported failure");
+    expect(verificationLog).not.toContain("[verify] running:");
+
+    const parsed = parseRunnerResult(
+      fs.readFileSync(artifactPaths.resultJson, "utf-8")
+    );
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.value.success).toBe(false);
+    }
   });
 
   it("refuses a dirty worktree before invoking the runner", () => {
