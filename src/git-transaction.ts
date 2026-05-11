@@ -57,7 +57,13 @@ export function commitVerifiedChanges(input: CommitInput): CommitResult {
     return gitFailure("git add -A failed", error);
   }
 
-  if (!hasStagedChanges(repoPath)) {
+  let staged: boolean;
+  try {
+    staged = hasStagedChanges(repoPath);
+  } catch (error) {
+    return gitFailure("git diff --cached failed", error);
+  }
+  if (!staged) {
     return {
       ok: false,
       code: "nothing_to_commit",
@@ -243,8 +249,20 @@ function hasStagedChanges(repoPath: string): boolean {
   if (result.error !== undefined) {
     throw result.error;
   }
-  // exit 0 = no diff (clean), exit 1 = diff exists
-  return result.status === 1;
+  // exit 0 = no diff (clean), exit 1 = diff exists; anything else is a git error.
+  if (result.status === 0) return false;
+  if (result.status === 1) return true;
+  const stderrRaw: unknown = result.stderr;
+  const stderr =
+    typeof stderrRaw === "string"
+      ? stderrRaw.trim()
+      : Buffer.isBuffer(stderrRaw)
+        ? stderrRaw.toString("utf-8").trim()
+        : "";
+  const suffix = stderr.length > 0 ? `: ${stderr}` : "";
+  throw new Error(
+    `git diff --cached --quiet exited with status ${result.status ?? "null"}${suffix}`
+  );
 }
 
 function commitExists(repoPath: string, sha: string): boolean {
