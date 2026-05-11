@@ -2,7 +2,7 @@
 
 Momentum is a TypeScript CLI targeting Node.js for autonomous repo-work orchestration. It turns a durable Goal into verified Iterations, with local artifacts and handoff state.
 
-Milestone 1 (Foreground Proof Loop) is in progress. NGX-235 (scaffold), NGX-236 (Goal spec parsing, data-dir resolution, SQLite init, artifact layout), NGX-237 (fake runner, foreground iteration transaction), and NGX-238 (Momentum-owned verification, commit/reset transaction, `status` and `handoff` commands) are complete. NGX-239 (Milestone 1 end-to-end smoke and docs) is complete.
+Milestone 1 (Foreground Proof Loop) is complete. Milestone 2 (Queue and Worker Model) is in progress. NGX-235 (scaffold), NGX-236 (Goal spec parsing, data-dir resolution, SQLite init, artifact layout), NGX-237 (fake runner, foreground iteration transaction), NGX-238 (Momentum-owned verification, commit/reset transaction, `status` and `handoff` commands), and NGX-239 (Milestone 1 end-to-end smoke and docs) are complete. NGX-245 (M2-01 queue schema, event taxonomy, idempotent enqueue, repo locks, and migration system) is complete.
 
 ## Milestone 1 Scope
 
@@ -120,7 +120,7 @@ State is stored under `--data-dir <path>`, then the `MOMENTUM_HOME` environment 
 
 ```text
 <data-dir>/
-  momentum.db                  # SQLite (goals, jobs, events tables)
+  momentum.db                  # SQLite (goals, jobs, events, repo_locks tables)
   goals/
     <goal-id>/
       goal.md                  # Canonical copy of the goal spec
@@ -190,7 +190,7 @@ Replacing the `verification: ["true"]` line with `verification: ["false"]` exerc
 
 Milestone 1 intentionally omits the following; they belong to later milestones or are out of scope for this scaffold:
 
-- Queue/worker execution, persistent job leases, and stale-lease recovery (Milestone 2).
+- Queue/worker execution, persistent job leases, and stale-lease recovery (Milestone 2; schema and state model in place, worker loop pending).
 - Daemon lifecycle management, stop/cancel commands, and background runner supervision (Milestone 2/3).
 - Real runner profiles beyond `fake`; only the fake runner is wired into the foreground iteration.
 - Multi-iteration loops; `max_iterations` is parsed but Milestone 1 executes exactly one iteration per `goal start`.
