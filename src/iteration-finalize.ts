@@ -54,6 +54,7 @@ export type FinalizeIterationResult =
       outcome: "commit_failed";
       verification: VerificationSuccess;
       commit: CommitFailure;
+      reset?: ResetSuccess | ResetFailure;
     }
   | {
       outcome: "invalid_input";
@@ -117,10 +118,20 @@ export function finalizeIteration(
   });
 
   if (!commit.ok) {
+    if (shouldResetAfterCommitFailure(commit.code)) {
+      const reset = resetToBase({ repoPath, baseHead });
+      return { outcome: "commit_failed", verification, commit, reset };
+    }
     return { outcome: "commit_failed", verification, commit };
   }
 
   return { outcome: "committed", verification, commit };
+}
+
+function shouldResetAfterCommitFailure(code: CommitFailure["code"]): boolean {
+  return code !== "nothing_to_commit" &&
+    code !== "head_mismatch" &&
+    code !== "invalid_input";
 }
 
 function validateInput(

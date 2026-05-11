@@ -251,6 +251,25 @@ describe("runVerification", () => {
     expect(out.code).toBe("log_write_failed");
   });
 
+  it("captures large output well past the spawnSync 1 MiB default without truncating", () => {
+    const { repoPath, logPath } = setup();
+
+    const out = runVerification({
+      repoPath,
+      commands: ["node -e \"process.stdout.write('x'.repeat(4 * 1024 * 1024))\""],
+      timeoutSec: 60,
+      logPath
+    });
+
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.results).toHaveLength(1);
+    expect(out.results[0]?.succeeded).toBe(true);
+
+    const stats = fs.statSync(logPath);
+    expect(stats.size).toBeGreaterThan(4 * 1024 * 1024);
+  });
+
   it("returns spawn_failed when repoPath does not exist", () => {
     const ghost = path.join(makeTempDir(), "missing-repo");
     const logDir = makeTempDir("momentum-verification-log-");

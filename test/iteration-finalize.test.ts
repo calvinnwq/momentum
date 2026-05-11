@@ -200,9 +200,42 @@ describe("finalizeIteration", () => {
     if (result.outcome !== "commit_failed") return;
     expect(result.commit.code).toBe("nothing_to_commit");
     expect(result.verification.results).toHaveLength(1);
+    expect(result.reset).toBeUndefined();
 
     const head = runGit(repoPath, ["rev-parse", "HEAD"]).trim();
     expect(head).toBe(baseHead);
+  });
+
+  it("resets staged runner edits when git commit itself fails", () => {
+    const { repoPath, baseHead, logPath } = setupRepoWithRunnerEdits();
+    const hooksDir = path.join(repoPath, ".git", "hooks");
+    fs.mkdirSync(hooksDir, { recursive: true });
+    const preCommit = path.join(hooksDir, "pre-commit");
+    fs.writeFileSync(preCommit, "#!/bin/sh\nexit 1\n", "utf-8");
+    fs.chmodSync(preCommit, 0o755);
+
+    const result = finalizeIteration({
+      repoPath,
+      baseHead,
+      runnerSuccess: true,
+      commitIntent: baseIntent(),
+      verificationCommands: ["echo verify-ok"],
+      verificationTimeoutSec: 30,
+      verificationLogPath: logPath
+    });
+
+    expect(result.outcome).toBe("commit_failed");
+    if (result.outcome !== "commit_failed") return;
+    expect(result.commit.code).toBe("git_failed");
+    expect(result.reset).toBeDefined();
+    expect(result.reset?.ok).toBe(true);
+
+    const head = runGit(repoPath, ["rev-parse", "HEAD"]).trim();
+    expect(head).toBe(baseHead);
+    expect(fs.existsSync(path.join(repoPath, "runner-edit.txt"))).toBe(false);
+
+    const status = runGit(repoPath, ["status", "--porcelain"]).trim();
+    expect(status).toBe("");
   });
 
   it("returns reset_failed when baseHead does not exist and runner failed", () => {

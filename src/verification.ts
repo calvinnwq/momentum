@@ -15,7 +15,10 @@ export type VerificationErrorCode =
   | "log_write_failed"
   | "spawn_failed"
   | "command_failed"
-  | "command_timed_out";
+  | "command_timed_out"
+  | "output_overflow";
+
+const VERIFICATION_MAX_BUFFER_BYTES = 256 * 1024 * 1024;
 
 export type VerificationFailure = {
   ok: false;
@@ -80,6 +83,7 @@ export function runVerification(input: VerificationInput): VerificationResult {
           shell: true,
           timeout: timeoutMs,
           encoding: "utf-8",
+          maxBuffer: VERIFICATION_MAX_BUFFER_BYTES,
           stdio: ["ignore", "pipe", "pipe"]
         });
       } catch (error) {
@@ -118,6 +122,34 @@ export function runVerification(input: VerificationInput): VerificationResult {
       if (stdoutText.length > 0) writeChunk(logHandle, stdoutText);
       if (stderrText.length > 0) writeChunk(logHandle, stderrText);
       ensureTrailingNewline(logHandle, stdoutText, stderrText);
+
+      if (
+        spawn.error !== undefined &&
+        (spawn.error as NodeJS.ErrnoException).code === "ENOBUFS"
+      ) {
+        writeLine(
+          logHandle,
+          `[verify]   output_overflow: combined stdout+stderr exceeded ${VERIFICATION_MAX_BUFFER_BYTES} bytes`
+        );
+        writeLine(
+          logHandle,
+          `[verify] summary: verification output overflowed buffer on command ${index + 1}: ${command}`
+        );
+        results.push({
+          command,
+          exit_code: null,
+          signal: spawn.signal ?? null,
+          duration_ms: durationMs,
+          timed_out: false,
+          succeeded: false
+        });
+        return {
+          ok: false,
+          code: "output_overflow",
+          error: `verification command ${index + 1} produced more than ${VERIFICATION_MAX_BUFFER_BYTES} bytes of output (${command}); raise the cap or reduce the command's verbosity.`,
+          results
+        };
+      }
 
       const timedOut =
         spawn.signal === "SIGTERM" &&
