@@ -46,14 +46,17 @@ function initRepo(): string {
   return dir;
 }
 
-function makeSpecContent(repoPath: string): string {
+function makeSpecContent(
+  repoPath: string,
+  verificationCommand = "true"
+): string {
   return `---
 title: Prove foreground iteration
 repo: ${repoPath}
 runner: fake
 branch: momentum/prove-foreground-iteration
 verification:
-  - pnpm test
+  - ${verificationCommand}
 ---
 Apply the fixture file deterministically.
 `;
@@ -61,11 +64,14 @@ Apply the fixture file deterministically.
 
 type GoalSetup = GoalInitSuccess & { dataDir: string };
 
-function setupGoal(repo: string): GoalSetup {
+function setupGoal(
+  repo: string,
+  verificationCommand = "true"
+): GoalSetup {
   const dataDir = makeTempDir("momentum-iter-job-data-");
   const specDir = makeTempDir("momentum-iter-job-spec-");
   const goalFile = path.join(specDir, "goal.md");
-  fs.writeFileSync(goalFile, makeSpecContent(repo), "utf-8");
+  fs.writeFileSync(goalFile, makeSpecContent(repo, verificationCommand), "utf-8");
   const init = initGoal({
     goalPath: goalFile,
     dataDirOptions: { dataDir }
@@ -77,7 +83,7 @@ function setupGoal(repo: string): GoalSetup {
 }
 
 describe("executeIterationJob", () => {
-  it("transitions goal to awaiting_verification and job to succeeded on a clean repo", () => {
+  it("transitions goal to iteration_complete and job to succeeded after a verified commit", () => {
     const repo = initRepo();
     const setup = setupGoal(repo);
     const db = openDb(setup.dataDir);
@@ -91,7 +97,7 @@ describe("executeIterationJob", () => {
     });
 
     expect(out.ok).toBe(true);
-    expect(out.goalState).toBe("awaiting_verification");
+    expect(out.goalState).toBe("iteration_complete");
     expect(out.jobState).toBe("succeeded");
 
     const goalRow = db
@@ -101,7 +107,7 @@ describe("executeIterationJob", () => {
       .prepare("SELECT * FROM jobs WHERE id = ?")
       .get(setup.jobId) as Record<string, unknown>;
 
-    expect(goalRow["state"]).toBe("awaiting_verification");
+    expect(goalRow["state"]).toBe("iteration_complete");
     expect(jobRow["state"]).toBe("succeeded");
     expect(jobRow["error"]).toBeNull();
     expect(jobRow["started_at"]).not.toBeNull();
@@ -138,11 +144,13 @@ describe("executeIterationJob", () => {
     const layout = resolveGoalArtifactPaths(setup.dataDir, setup.goalId);
     expect(out.iteration.runnerLogPath).toBe(layout.runnerLog);
     expect(out.iteration.resultJsonPath).toBe(layout.resultJson);
+    expect(out.iteration.verificationLogPath).toBe(layout.verificationLog);
+    expect(out.iteration.commitSha).toMatch(/^[0-9a-f]{40}$/);
 
     db.close();
   });
 
-  it("writes iteration_started then iteration_completed events on success", () => {
+  it("writes iteration_started then iteration_completed events with commit metadata on success", () => {
     const repo = initRepo();
     const setup = setupGoal(repo);
     const db = openDb(setup.dataDir);
@@ -182,8 +190,52 @@ describe("executeIterationJob", () => {
     expect(completed["branch_created"]).toBe(true);
     expect(typeof completed["base_head"]).toBe("string");
     expect(typeof completed["post_runner_head"]).toBe("string");
+    expect(typeof completed["commit_sha"]).toBe("string");
+    expect(typeof completed["commit_message"]).toBe("string");
     expect(completed["runner_success"]).toBe(true);
     expect(completed["goal_complete"]).toBe(false);
+
+    db.close();
+  });
+
+  it("marks goal/job failed and emits iteration_failed when verification fails after reset", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "false");
+    const db = openDb(setup.dataDir);
+
+    const out = executeIterationJob({
+      db,
+      goalId: setup.goalId,
+      jobId: setup.jobId,
+      spec: setup.spec,
+      artifactPaths: setup.artifactPaths
+    });
+
+    expect(out.ok).toBe(false);
+    expect(out.goalState).toBe("failed");
+    expect(out.jobState).toBe("failed");
+
+    const jobRow = db
+      .prepare("SELECT state, error FROM jobs WHERE id = ?")
+      .get(setup.jobId) as Record<string, unknown>;
+    expect(jobRow["state"]).toBe("failed");
+    expect(jobRow["error"]).toContain("verification_failed");
+
+    const events = db
+      .prepare("SELECT type, payload FROM events WHERE goal_id = ? ORDER BY id ASC")
+      .all(setup.goalId) as Array<{ type: string; payload: string }>;
+    expect(events.map((event) => event.type)).toEqual([
+      "iteration_started",
+      "iteration_failed"
+    ]);
+    const failed = JSON.parse(events[1]!.payload) as Record<string, unknown>;
+    expect(failed["code"]).toBe("verification_failed");
+
+    expect(
+      fs.existsSync(path.join(repo, FAKE_RUNNER_FIXTURE_FILENAME))
+    ).toBe(false);
+    const status = runGit(repo, ["status", "--porcelain"]).trim();
+    expect(status).toBe("");
 
     db.close();
   });
@@ -305,7 +357,7 @@ describe("executeIterationJob", () => {
     };
 
     const db = openDb(setup.dataDir);
-    executeIterationJob({
+    const first = executeIterationJob({
       db,
       goalId: setup.goalId,
       jobId: setup.jobId,
@@ -313,12 +365,12 @@ describe("executeIterationJob", () => {
       artifactPaths: setup.artifactPaths,
       now
     });
+    expect(first.ok).toBe(true);
 
-    // The fake runner leaves the fixture file untracked; clean the worktree
-    // so the repo guard accepts the next iteration. This mimics an operator
-    // committing or resetting between runs.
-    fs.rmSync(path.join(repo, FAKE_RUNNER_FIXTURE_FILENAME));
-
+    // The fake runner regenerates the same fixture content on the second pass,
+    // so verification still passes but the commit step finds no diff. Asserting
+    // that bookkeeping (attempt_count, finished_at) still updates is the point
+    // of this test.
     const second = executeIterationJob({
       db,
       goalId: setup.goalId,
@@ -328,13 +380,19 @@ describe("executeIterationJob", () => {
       now
     });
 
-    expect(second.ok).toBe(true);
+    expect(second.ok).toBe(false);
+    if (second.iteration.ok) return;
+    expect(second.iteration.code).toBe("commit_failed");
+
     const jobRow = db
-      .prepare("SELECT attempt_count, started_at, finished_at FROM jobs WHERE id = ?")
+      .prepare(
+        "SELECT attempt_count, started_at, finished_at, state FROM jobs WHERE id = ?"
+      )
       .get(setup.jobId) as Record<string, unknown>;
     expect(jobRow["attempt_count"]).toBe(2);
     expect(jobRow["started_at"]).toBe(1_700_000_000_002);
     expect(jobRow["finished_at"]).toBe(1_700_000_000_003);
+    expect(jobRow["state"]).toBe("failed");
 
     const eventTypes = db
       .prepare("SELECT type FROM events WHERE goal_id = ? ORDER BY id ASC")
@@ -343,7 +401,7 @@ describe("executeIterationJob", () => {
       "iteration_started",
       "iteration_completed",
       "iteration_started",
-      "iteration_completed"
+      "iteration_failed"
     ]);
 
     db.close();
@@ -377,7 +435,7 @@ describe("executeIterationJob", () => {
     db.close();
   });
 
-  it("does not commit or stage anything in the underlying repo on success", () => {
+  it("commits exactly one verified momentum commit on the underlying branch", () => {
     const repo = initRepo();
     const setup = setupGoal(repo);
     const db = openDb(setup.dataDir);
@@ -394,13 +452,13 @@ describe("executeIterationJob", () => {
 
     expect(out.ok).toBe(true);
     const after = runGit(repo, ["log", "--oneline"]).trim().split("\n").length;
-    expect(after).toBe(before);
+    expect(after).toBe(before + 1);
 
     const status = runGit(repo, ["status", "--porcelain"]).trim();
-    expect(status).toContain(FAKE_RUNNER_FIXTURE_FILENAME);
-    expect(status.split("\n").every((line) => line.startsWith("??"))).toBe(
-      true
-    );
+    expect(status).toBe("");
+
+    const subject = runGit(repo, ["log", "-1", "--pretty=%s"]).trim();
+    expect(subject).toContain("milestone-1");
   });
 
   it("records updated_at on the goal row reflecting the finish timestamp", () => {

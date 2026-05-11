@@ -10,7 +10,7 @@ const GOAL_SPEC = `---
 title: CLI Test Goal
 runner: fake
 verification:
-  - pnpm test
+  - true
 ---
 
 Goal body.
@@ -115,7 +115,7 @@ describe("momentum CLI scaffold", () => {
     expect(result.stderr).toBe("");
   });
 
-  it("goal start runs a foreground iteration and returns awaiting_verification", async () => {
+  it("goal start runs a foreground iteration that commits and returns iteration_complete", async () => {
     const { dataDir, goalFile, repo } = setupGoalAndData();
 
     const result = await run([
@@ -131,7 +131,7 @@ describe("momentum CLI scaffold", () => {
     expect(payload).toMatchObject({
       ok: true,
       command: "goal start",
-      state: "awaiting_verification",
+      state: "iteration_complete",
       title: "CLI Test Goal",
       resumed: false
     });
@@ -150,11 +150,15 @@ describe("momentum CLI scaffold", () => {
     expect(iter["baseHead"]).toMatch(/^[0-9a-f]{40}$/);
     expect(iter["postRunnerHead"]).toBe(iter["baseHead"]);
     expect(iter["repoPath"]).toBe(repo);
+    expect(iter["commitSha"]).toMatch(/^[0-9a-f]{40}$/);
+    expect(iter["commitSha"]).not.toBe(iter["baseHead"]);
+    expect(typeof iter["commitMessage"]).toBe("string");
 
     expect(fs.existsSync(path.join(repo, FAKE_RUNNER_FIXTURE_FILENAME))).toBe(true);
     expect(fs.existsSync(iter["promptPath"] as string)).toBe(true);
     expect(fs.existsSync(iter["runnerLogPath"] as string)).toBe(true);
     expect(fs.existsSync(iter["resultJsonPath"] as string)).toBe(true);
+    expect(fs.existsSync(iter["verificationLogPath"] as string)).toBe(true);
     expect(result.stderr).toBe("");
   });
 
@@ -175,7 +179,7 @@ describe("momentum CLI scaffold", () => {
     expect(payload).toMatchObject({
       ok: true,
       command: "goal start",
-      state: "awaiting_verification",
+      state: "iteration_complete",
       title: "CLI Test Goal"
     });
     expect(result.stderr).toBe("");
@@ -267,7 +271,8 @@ describe("momentum CLI scaffold", () => {
     expect(result.stdout).toContain("Goal initialized:");
     expect(result.stdout).toContain("CLI Test Goal");
     expect(result.stdout).toContain("Branch: momentum/cli-test-goal (created)");
-    expect(result.stdout).toContain("Iteration: awaiting verification");
+    expect(result.stdout).toContain("State: iteration_complete");
+    expect(result.stdout).toMatch(/Commit: [0-9a-f]{40}/);
     expect(result.stderr).toBe("");
   });
 

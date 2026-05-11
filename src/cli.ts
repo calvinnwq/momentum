@@ -200,11 +200,14 @@ function emitGoalStart(
         branchCreated: iter.branchCreated,
         baseHead: iter.baseHead,
         postRunnerHead: iter.postRunnerHead,
+        commitSha: iter.commitSha,
+        commitMessage: iter.commitMessage,
         runnerSuccess: iter.result.success,
         goalComplete: iter.result.goal_complete,
         promptPath: iter.promptPath,
         runnerLogPath: iter.runnerLogPath,
-        resultJsonPath: iter.resultJsonPath
+        resultJsonPath: iter.resultJsonPath,
+        verificationLogPath: iter.verificationLogPath
       }
     };
 
@@ -219,7 +222,8 @@ function emitGoalStart(
       `Artifact dir: ${init.artifactPaths.goalDir}`,
       `Branch: ${iter.branch}${iter.branchCreated ? " (created)" : ""}`,
       `Base HEAD: ${iter.baseHead}`,
-      `Iteration: awaiting verification`,
+      `Commit: ${iter.commitSha}`,
+      `State: ${iteration.goalState}`,
       ""
     ].join("\n"));
     return 0;

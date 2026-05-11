@@ -5,6 +5,10 @@ import type { GoalArtifactPaths } from "./artifacts.js";
 import { ensureMomentumBranch } from "./branch-manager.js";
 import { runFakeRunner } from "./fake-runner.js";
 import type { GoalSpec } from "./goal-spec.js";
+import {
+  finalizeIteration,
+  type FinalizeIterationResult
+} from "./iteration-finalize.js";
 import { renderIterationPrompt } from "./iteration-prompt.js";
 import { inspectRepo } from "./repo-guard.js";
 import type { RunnerResult } from "./runner-result.js";
@@ -18,6 +22,11 @@ export type ForegroundIterationErrorCode =
   | "branch_manager_failed"
   | "artifact_write_failed"
   | "runner_failed"
+  | "runner_reported_failure"
+  | "verification_failed"
+  | "commit_failed"
+  | "reset_failed"
+  | "finalize_invalid_input"
   | "git_failed"
   | "unexpected_error";
 
@@ -25,6 +34,7 @@ export type ForegroundIterationError = {
   ok: false;
   code: ForegroundIterationErrorCode;
   error: string;
+  finalize?: FinalizeIterationResult;
 };
 
 export type ForegroundIterationSuccess = {
@@ -40,6 +50,10 @@ export type ForegroundIterationSuccess = {
   promptPath: string;
   runnerLogPath: string;
   resultJsonPath: string;
+  verificationLogPath: string;
+  commitSha: string;
+  commitMessage: string;
+  finalize: FinalizeIterationResult;
 };
 
 export type ForegroundIterationResult =
@@ -169,8 +183,17 @@ export function runForegroundIteration(
     };
   }
 
-  return {
-    ok: true,
+  const finalize = finalizeIteration({
+    repoPath: guard.repoPath,
+    baseHead,
+    runnerSuccess: runnerOut.result.success,
+    commitIntent: runnerOut.result.commit,
+    verificationCommands: spec.verification,
+    verificationTimeoutSec: spec.verification_timeout_sec,
+    verificationLogPath: artifactPaths.verificationLog
+  });
+
+  const baseSuccess = {
     goalId,
     iteration,
     repoPath: guard.repoPath,
@@ -181,6 +204,53 @@ export function runForegroundIteration(
     result: runnerOut.result,
     promptPath: artifactPaths.promptMd,
     runnerLogPath: runnerOut.runnerLogPath,
-    resultJsonPath: runnerOut.resultJsonPath
+    resultJsonPath: runnerOut.resultJsonPath,
+    verificationLogPath: artifactPaths.verificationLog
   };
+
+  switch (finalize.outcome) {
+    case "committed":
+      return {
+        ok: true,
+        ...baseSuccess,
+        commitSha: finalize.commit.commitSha,
+        commitMessage: finalize.commit.message,
+        finalize
+      };
+    case "reset_runner_failure":
+      return {
+        ok: false,
+        code: "runner_reported_failure",
+        error: "Runner reported success=false; uncommitted changes reset to base HEAD.",
+        finalize
+      };
+    case "reset_verification_failure":
+      return {
+        ok: false,
+        code: "verification_failed",
+        error: `${finalize.verification.code}: ${finalize.verification.error}`,
+        finalize
+      };
+    case "reset_failed":
+      return {
+        ok: false,
+        code: "reset_failed",
+        error: `reset after ${finalize.trigger} failed: ${finalize.reset.error}`,
+        finalize
+      };
+    case "commit_failed":
+      return {
+        ok: false,
+        code: "commit_failed",
+        error: `commit after verified runner failed: ${finalize.commit.error}`,
+        finalize
+      };
+    case "invalid_input":
+      return {
+        ok: false,
+        code: "finalize_invalid_input",
+        error: finalize.error,
+        finalize
+      };
+  }
 }

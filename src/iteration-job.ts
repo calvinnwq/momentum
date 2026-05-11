@@ -26,7 +26,8 @@ export type ExecuteIterationJobResult = {
 
 export type GoalIterationState =
   | "running"
-  | "awaiting_verification"
+  | "completed"
+  | "iteration_complete"
   | "failed";
 export type JobIterationState = "running" | "succeeded" | "failed";
 
@@ -80,8 +81,11 @@ export function executeIterationJob(
   const finishTs = now();
 
   if (result.ok) {
+    const goalState: GoalIterationState = result.result.goal_complete
+      ? "completed"
+      : "iteration_complete";
     db.prepare(`UPDATE goals SET state = ?, updated_at = ? WHERE id = ?`).run(
-      "awaiting_verification",
+      goalState,
       finishTs,
       goalId
     );
@@ -99,13 +103,15 @@ export function executeIterationJob(
       branch_created: result.branchCreated,
       base_head: result.baseHead,
       post_runner_head: result.postRunnerHead,
+      commit_sha: result.commitSha,
+      commit_message: result.commitMessage,
       runner_success: result.result.success,
       goal_complete: result.result.goal_complete
     });
     return {
       ok: true,
       iteration: result,
-      goalState: "awaiting_verification",
+      goalState,
       jobState: "succeeded"
     };
   }

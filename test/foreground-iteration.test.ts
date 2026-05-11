@@ -55,7 +55,7 @@ function makeSpec(repoPath: string, overrides: Partial<GoalSpec> = {}): GoalSpec
     runner: "fake",
     branch: "momentum/prove-foreground-iteration",
     max_iterations: 1,
-    verification: ["pnpm test"],
+    verification: ["true"],
     verification_timeout_sec: 900,
     body: "Apply the fixture and write a runner result.",
     ...overrides
@@ -70,7 +70,7 @@ function setupArtifacts(goalId = GOAL_ID, specContent = "# fixture spec\n") {
 }
 
 describe("runForegroundIteration", () => {
-  it("runs the full pipeline and returns success on a clean repo", () => {
+  it("runs the full pipeline, verifies, and commits the runner diff", () => {
     const repo = initRepo();
     const spec = makeSpec(repo);
     const artifactPaths = setupArtifacts();
@@ -95,9 +95,13 @@ describe("runForegroundIteration", () => {
     expect(out.result.success).toBe(true);
     expect(out.result.commit.type).toBe("test");
     expect(out.result.commit.scope).toBe("milestone-1");
+    expect(out.commitSha).toMatch(/^[0-9a-f]{40}$/);
+    expect(out.commitSha).not.toBe(out.baseHead);
+    expect(out.commitMessage).toContain("test(milestone-1):");
+    expect(out.finalize.outcome).toBe("committed");
   });
 
-  it("writes prompt.md, runner.log, result.json, and the fixture file on success", () => {
+  it("writes prompt.md, runner.log, verification.log, result.json, and the fixture file on success", () => {
     const repo = initRepo();
     const spec = makeSpec(repo);
     const artifactPaths = setupArtifacts();
@@ -122,6 +126,13 @@ describe("runForegroundIteration", () => {
       "[fake-runner] start"
     );
 
+    const verificationText = fs.readFileSync(out.verificationLogPath, "utf-8");
+    expect(verificationText).toContain("[verify] running: true");
+    expect(verificationText).toContain("[verify]   result: ok");
+    expect(verificationText).toContain(
+      "[verify] summary: all 1 verification command(s) passed"
+    );
+
     const resultRaw = fs.readFileSync(out.resultJsonPath, "utf-8");
     const parsedResult = JSON.parse(resultRaw);
     expect(parsedResult.success).toBe(true);
@@ -132,6 +143,41 @@ describe("runForegroundIteration", () => {
     const fixturePath = path.join(repo, FAKE_RUNNER_FIXTURE_FILENAME);
     expect(fs.existsSync(fixturePath)).toBe(true);
     expect(fs.readFileSync(fixturePath, "utf-8")).toContain("iteration: 1");
+  });
+
+  it("leaves a single verified commit on the momentum branch", () => {
+    const repo = initRepo();
+    const spec = makeSpec(repo);
+    const artifactPaths = setupArtifacts();
+
+    const initialLog = runGit(repo, ["log", "--oneline"]).trim().split("\n");
+    expect(initialLog).toHaveLength(1);
+
+    const out = runForegroundIteration({
+      goalId: GOAL_ID,
+      spec,
+      iteration: 1,
+      artifactPaths
+    });
+
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+
+    const status = runGit(repo, ["status", "--porcelain"]).trim();
+    expect(status).toBe("");
+
+    const log = runGit(repo, ["log", "--oneline"]).trim().split("\n");
+    expect(log).toHaveLength(2);
+
+    const head = runGit(repo, ["rev-parse", "HEAD"]).trim();
+    expect(head).toBe(out.commitSha);
+
+    const subject = runGit(repo, [
+      "log",
+      "-1",
+      "--pretty=%s"
+    ]).trim();
+    expect(subject).toBe("test(milestone-1): prove foreground momentum iteration");
   });
 
   it("checks out the new momentum branch in the repo", () => {
@@ -149,6 +195,48 @@ describe("runForegroundIteration", () => {
     expect(out.ok).toBe(true);
     const current = runGit(repo, ["rev-parse", "--abbrev-ref", "HEAD"]).trim();
     expect(current).toBe(spec.branch);
+  });
+
+  it("resets to base HEAD when a verification command fails and preserves logs", () => {
+    const repo = initRepo();
+    const spec = makeSpec(repo, { verification: ["false"] });
+    const artifactPaths = setupArtifacts();
+
+    const baseHead = runGit(repo, ["rev-parse", "HEAD"]).trim();
+
+    const out = runForegroundIteration({
+      goalId: GOAL_ID,
+      spec,
+      iteration: 1,
+      artifactPaths
+    });
+
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.code).toBe("verification_failed");
+    expect(out.finalize?.outcome).toBe("reset_verification_failure");
+
+    const head = runGit(repo, ["rev-parse", "HEAD"]).trim();
+    expect(head).toBe(baseHead);
+
+    const status = runGit(repo, ["status", "--porcelain"]).trim();
+    expect(status).toBe("");
+
+    expect(fs.existsSync(path.join(repo, FAKE_RUNNER_FIXTURE_FILENAME))).toBe(
+      false
+    );
+
+    expect(fs.readFileSync(artifactPaths.runnerLog, "utf-8")).toContain(
+      "[fake-runner] start"
+    );
+    const verificationText = fs.readFileSync(
+      artifactPaths.verificationLog,
+      "utf-8"
+    );
+    expect(verificationText).toContain("[verify] running: false");
+    expect(verificationText).toContain(
+      "[verify] summary: verification failed on command 1"
+    );
   });
 
   it("refuses a dirty worktree before invoking the runner", () => {
@@ -315,29 +403,6 @@ describe("runForegroundIteration", () => {
     if (!zeroIter.ok) expect(zeroIter.code).toBe("invalid_input");
   });
 
-  it("does not commit or stage anything in the repo", () => {
-    const repo = initRepo();
-    const spec = makeSpec(repo);
-    const artifactPaths = setupArtifacts();
-
-    const out = runForegroundIteration({
-      goalId: GOAL_ID,
-      spec,
-      iteration: 1,
-      artifactPaths
-    });
-
-    expect(out.ok).toBe(true);
-    if (!out.ok) return;
-
-    const status = runGit(repo, ["status", "--porcelain"]).trim();
-    expect(status).toContain(FAKE_RUNNER_FIXTURE_FILENAME);
-    expect(status).toMatch(/^\?\?/);
-
-    const log = runGit(repo, ["log", "--oneline"]).trim().split("\n");
-    expect(log).toHaveLength(1);
-  });
-
   it("uses resolveGoalArtifactPaths layout for prompt and result outputs", () => {
     const repo = initRepo();
     const spec = makeSpec(repo);
@@ -358,5 +423,6 @@ describe("runForegroundIteration", () => {
     expect(out.promptPath).toBe(expected.promptMd);
     expect(out.runnerLogPath).toBe(expected.runnerLog);
     expect(out.resultJsonPath).toBe(expected.resultJson);
+    expect(out.verificationLogPath).toBe(expected.verificationLog);
   });
 });
