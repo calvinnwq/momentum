@@ -212,7 +212,7 @@ State is stored under `--data-dir <path>`, then the `MOMENTUM_HOME` environment 
           result.json          # Runner result envelope
 ```
 
-`goal.md`, `ledger.md`, `handoff.md`, `handoff.json`, and the iteration artifact files are created up-front during goal initialization; `handoff.md`, `prompt.md`, `runner.log`, and `verification.log` start empty, while `handoff.json` and `result.json` start as `{}`. `goal start --foreground` populates the iteration artifacts during inline execution; the queued path leaves them as placeholders until `momentum worker run` claims and executes the job.
+`goal.md`, `ledger.md`, `handoff.md`, `handoff.json`, and the first iteration artifact files are created up-front during goal initialization; `handoff.md`, `prompt.md`, `runner.log`, and `verification.log` start empty, while `handoff.json` and `result.json` start as `{}`. `goal start --foreground` populates the iteration artifacts during inline execution. In the queued path, iteration 1 starts with placeholders; later iteration directories and jobs are created by the reducer, and their artifact files are materialized when `momentum worker run` claims and executes that iteration.
 
 ## Failure and Reset Semantics
 

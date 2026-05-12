@@ -3,7 +3,7 @@
 Use this file as the primary agent operating guide for the Momentum repository.
 
 ## Project purpose
-Momentum is a TypeScript CLI (Node.js) for one-iteration goal execution with local verification artifacts.
+Momentum is a TypeScript CLI (Node.js) for queued goal execution across verified iterations with local artifacts.
 
 Typical loop:
 1. Run a goal iteration.
