@@ -82,11 +82,11 @@ export function runForegroundIteration(
       error: "iteration must be a positive integer."
     };
   }
-  if (iteration !== 1) {
+  if (iteration !== artifactPaths.iteration) {
     return {
       ok: false,
       code: "invalid_input",
-      error: "Milestone 1 supports iteration 1 only."
+      error: `iteration ${iteration} does not match artifactPaths iteration ${artifactPaths.iteration}.`
     };
   }
   if (iteration > spec.max_iterations) {
@@ -155,7 +155,7 @@ export function runForegroundIteration(
   try {
     runnerOut = runFakeRunner({
       repoPath: guard.repoPath,
-      iterationDir: artifactPaths.iteration1Dir,
+      iterationDir: artifactPaths.iterationDir,
       iteration
     });
   } catch (error) {

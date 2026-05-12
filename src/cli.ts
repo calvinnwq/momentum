@@ -174,7 +174,7 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
     version: VERSION,
     node: process.version,
     platform: process.platform,
-    milestone: "NGX-246 goal-start-queued-enqueue"
+    milestone: "NGX-249 completion-reducer-chaining"
   };
 
   if (parsed.json) {
@@ -263,7 +263,7 @@ function emitGoalStartQueued(
     runner: init.spec.runner,
     dataDir: init.dataDir,
     artifactDir: init.artifactPaths.goalDir,
-    iterationArtifactDir: init.artifactPaths.iteration1Dir,
+    iterationArtifactDir: init.artifactPaths.iterationDir,
     resumed: init.resumed,
     enqueueCreated: init.enqueueCreated,
     nextAction: QUEUED_NEXT_ACTION
@@ -448,6 +448,8 @@ function emitStatus(
     branch: data.branch,
     runner: data.runner,
     maxIterations: data.maxIterations,
+    currentIteration: data.currentIteration,
+    completionReason: data.completionReason,
     verification: data.verification,
     verificationTimeoutSec: data.verificationTimeoutSec,
     dataDir: data.dataDir,
@@ -466,7 +468,10 @@ function emitStatus(
     createdAt: data.createdAt,
     updatedAt: data.updatedAt,
     latestJob: data.latestJob,
-    iteration: data.iteration
+    iteration: data.iteration,
+    reducer: data.reducer,
+    nextJob: data.nextJob,
+    nextAction: data.nextAction
   };
 
   if (parsed.json) {
@@ -499,6 +504,19 @@ function emitStatus(
         `Failure: ${data.iteration.failure.code} - ${data.iteration.failure.error}`
       );
     }
+  }
+
+  if (data.reducer) {
+    lines.push(
+      `Reducer: ${data.reducer.decision} (iteration ${data.reducer.iteration})`
+    );
+    if (data.reducer.completionReason) {
+      lines.push(`Completion reason: ${data.reducer.completionReason}`);
+    }
+  }
+
+  if (data.nextAction) {
+    lines.push(`Next: ${data.nextAction}`);
   }
 
   lines.push("");
@@ -556,6 +574,8 @@ function emitHandoff(
     goalId: data.goal.id,
     title: data.goal.title,
     state: data.goal.state,
+    currentIteration: data.goal.currentIteration,
+    completionReason: data.goal.completionReason,
     schemaVersion: data.schemaVersion,
     generatedAt: data.generatedAt,
     handoffMdPath: result.handoffMdPath,
@@ -564,7 +584,10 @@ function emitHandoff(
     artifactDir: data.goal.artifactDir,
     iteration: data.iteration,
     runnerResult: data.runnerResult,
-    latestJob: data.latestJob
+    latestJob: data.latestJob,
+    reducer: data.reducer,
+    nextJob: data.nextJob,
+    nextAction: data.nextAction
   };
 
   if (parsed.json) {

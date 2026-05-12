@@ -79,7 +79,7 @@ describe("initGoal integration", () => {
     expect(job["type"]).toBe("foreground_iteration");
     expect(job["iteration"]).toBe(1);
     expect(job["state"]).toBe("pending");
-    expect(job["artifact_path"]).toBe(artifactPaths.iteration1Dir);
+    expect(job["artifact_path"]).toBe(artifactPaths.iterationDir);
 
     fs.rmSync(dataDir, { recursive: true });
   });

@@ -13,7 +13,10 @@ import {
   releaseRepoLock
 } from "./repo-locks.js";
 import { getGoal } from "./goal-init.js";
-import { resolveGoalArtifactPaths } from "./artifacts.js";
+import {
+  ensureIterationArtifactDir,
+  resolveGoalArtifactPaths
+} from "./artifacts.js";
 import { parseGoalSpecFile } from "./goal-spec.js";
 import {
   executeIterationJob,
@@ -21,6 +24,10 @@ import {
   type JobIterationState,
   type ExecuteIterationJobResult
 } from "./iteration-job.js";
+import {
+  reduceGoalIteration,
+  type ReducerResult
+} from "./goal-reducer.js";
 
 export type WorkerRunNow = () => number;
 
@@ -68,6 +75,7 @@ export type WorkerRunSuccessResult = {
   leaseExpiresAt: number;
   heartbeatAt: number;
   jobIterationResult: ExecuteIterationJobResult;
+  reducer: ReducerResult;
   message: string;
 };
 
@@ -141,8 +149,8 @@ export function runWorkerOnce(input: WorkerRunInput): WorkerRunResult {
     });
   }
 
-  const artifactPaths = resolveGoalArtifactPaths(input.dataDir, goal.id);
-  const specResult = parseGoalSpecFile(artifactPaths.goalMd);
+  const goalArtifactPaths = resolveGoalArtifactPaths(input.dataDir, goal.id);
+  const specResult = parseGoalSpecFile(goalArtifactPaths.goalMd);
   if (!specResult.ok) {
     const released = releaseClaimedGoalIterationJob(input.db, {
       jobId: claimedJob.id,
@@ -253,12 +261,17 @@ export function runWorkerOnce(input: WorkerRunInput): WorkerRunResult {
   }
 
   const runningJob = heartbeat.job;
+  const iterationArtifactPaths = ensureIterationArtifactDir(
+    input.dataDir,
+    goal.id,
+    runningJob.iteration
+  );
   const iterationResult = executeIterationJob({
     db: input.db,
     goalId: goal.id,
     jobId: runningJob.id,
     spec,
-    artifactPaths,
+    artifactPaths: iterationArtifactPaths,
     iteration: runningJob.iteration,
     now
   });
@@ -292,7 +305,7 @@ export function runWorkerOnce(input: WorkerRunInput): WorkerRunResult {
         goal_complete: iter.result.goal_complete,
         result_path: iter.resultJsonPath,
         artifacts: {
-          iteration_dir: artifactPaths.iteration1Dir,
+          iteration_dir: iterationArtifactPaths.iterationDir,
           prompt: iter.promptPath,
           runner_log: iter.runnerLogPath,
           verification_log: iter.verificationLogPath,
@@ -313,14 +326,21 @@ export function runWorkerOnce(input: WorkerRunInput): WorkerRunResult {
         lock_id: lock.id,
         error: summarizeIterationFailure(iterationResult.iteration),
         artifacts: {
-          iteration_dir: artifactPaths.iteration1Dir,
-          runner_log: artifactPaths.runnerLog,
-          verification_log: artifactPaths.verificationLog
+          iteration_dir: iterationArtifactPaths.iterationDir,
+          runner_log: iterationArtifactPaths.runnerLog,
+          verification_log: iterationArtifactPaths.verificationLog
         }
       },
       createdAt: now()
     });
   }
+
+  const reducer = reduceGoalIteration({
+    db: input.db,
+    goalId: goal.id,
+    jobId: runningJob.id,
+    now
+  });
 
   return {
     code: "ran_job",
@@ -336,6 +356,7 @@ export function runWorkerOnce(input: WorkerRunInput): WorkerRunResult {
     leaseExpiresAt: heartbeatNow + leaseDurationMs,
     heartbeatAt: heartbeatNow,
     jobIterationResult: iterationResult,
+    reducer,
     message: iterationResult.ok
       ? `Ran goal ${goal.id} iteration ${runningJob.iteration} as claimed job ${runningJob.id}.`
       : `Ran goal ${goal.id} iteration ${runningJob.iteration} with runner outcome ${summarizeIterationFailure(

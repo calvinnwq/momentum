@@ -7,11 +7,14 @@ import { execFileSync } from "node:child_process";
 import { acquireRepoLock } from "../src/repo-locks.js";
 import {
   FAKE_RUNNER_FAIL_ENV,
-  FAKE_RUNNER_FIXTURE_FILENAME
+  FAKE_RUNNER_FIXTURE_FILENAME,
+  FAKE_RUNNER_GOAL_COMPLETE_ENV,
+  FAKE_RUNNER_TRAJECTORY_ENV
 } from "../src/fake-runner.js";
-import { initGoal } from "../src/goal-init.js";
+import { buildIterationIdempotencyKey, initGoal } from "../src/goal-init.js";
 import { openDb } from "../src/db.js";
 import {
+  getJobByIdempotencyKey,
   getQueueJob,
   claimPendingGoalIterationJob,
 } from "../src/queue-jobs.js";
@@ -19,11 +22,18 @@ import { runWorkerOnce } from "../src/worker-run.js";
 
 const GOAL_SPEC = makeGoalSpec("true");
 
-function makeGoalSpec(verificationCommand: string): string {
+function makeGoalSpec(
+  verificationCommand: string,
+  options: { maxIterations?: number } = {}
+): string {
+  const maxIterationsLine =
+    options.maxIterations !== undefined
+      ? `max_iterations: ${options.maxIterations}\n`
+      : "";
   return `---
 title: Worker Run Test
 runner: fake
-verification:
+${maxIterationsLine}verification:
   - "${verificationCommand}"
 ---
 
@@ -48,6 +58,8 @@ afterEach(() => {
     }
   }
   delete process.env[FAKE_RUNNER_FAIL_ENV];
+  delete process.env[FAKE_RUNNER_GOAL_COMPLETE_ENV];
+  delete process.env[FAKE_RUNNER_TRAJECTORY_ENV];
 });
 
 function makeTempDir(prefix = "momentum-worker-run-"): string {
@@ -129,7 +141,7 @@ describe("runWorkerOnce", () => {
       const goalRow = db
         .prepare("SELECT state FROM goals WHERE id = ?")
         .get(seed.goalId) as { state: string };
-      expect(goalRow.state).toBe("iteration_complete");
+      expect(goalRow.state).toBe("max_iterations_reached");
 
       const job = getQueueJob(db, seed.jobId);
       expect(job?.state).toBe("succeeded");
@@ -181,7 +193,9 @@ describe("runWorkerOnce", () => {
         "job.heartbeat",
         "iteration_started",
         "iteration_completed",
-        "job.succeeded"
+        "job.succeeded",
+        "goal.reduced",
+        "goal.failed"
       ]);
     } finally {
       db.close();
@@ -328,12 +342,16 @@ describe("runWorkerOnce", () => {
         "job.heartbeat",
         "iteration_started",
         "iteration_failed",
-        "job.failed"
+        "job.failed",
+        "goal.reduced",
+        "goal.failed"
       ]);
 
-      const jobFailed = JSON.parse(
-        eventRows[eventRows.length - 1]!.payload
-      ) as Record<string, unknown>;
+      const jobFailedRow = eventRows.find((row) => row.type === "job.failed");
+      const jobFailed = JSON.parse(jobFailedRow!.payload) as Record<
+        string,
+        unknown
+      >;
       expect(jobFailed["worker_id"]).toBe("worker-runner-fail");
       expect(jobFailed["repo_root"]).toBe(repo);
       expect(jobFailed["error"]).toBe("runner_reported_failure");
@@ -405,12 +423,16 @@ describe("runWorkerOnce", () => {
         "job.heartbeat",
         "iteration_started",
         "iteration_failed",
-        "job.failed"
+        "job.failed",
+        "goal.reduced",
+        "goal.failed"
       ]);
 
-      const jobFailed = JSON.parse(
-        eventRows[eventRows.length - 1]!.payload
-      ) as Record<string, unknown>;
+      const jobFailedRow = eventRows.find((row) => row.type === "job.failed");
+      const jobFailed = JSON.parse(jobFailedRow!.payload) as Record<
+        string,
+        unknown
+      >;
       expect(jobFailed["error"]).toBe("verification_failed");
 
       const verificationLog = fs.readFileSync(
@@ -569,6 +591,400 @@ describe("runWorkerOnce", () => {
         "job.enqueued",
         "job.claimed"
       ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("enqueues the next iteration with a stable idempotency key when the reducer decides CONTINUE", () => {
+    const dataDir = makeTempDir("momentum-worker-run-continue-");
+    const repo = initRepo();
+    const seed = seedQueuedGoal(dataDir, repo, makeGoalSpec("true", { maxIterations: 3 }));
+
+    const db = openDb(seed.dataDir);
+    try {
+      const out = runWorkerOnce({
+        db,
+        dataDir: seed.dataDir,
+        workerId: "worker-continue"
+      });
+      expect(out.code).toBe("ran_job");
+      if (out.code !== "ran_job") return;
+
+      expect(out.jobIterationResult.ok).toBe(true);
+      expect(out.reducer.decision).toBe("continue");
+      expect(out.reducer.goalState).toBe("queued");
+      expect(out.reducer.completionReason).toBeNull();
+      expect(out.reducer.reusedExistingDecision).toBe(false);
+      expect(out.reducer.nextJob).not.toBeNull();
+      const nextJobInfo = out.reducer.nextJob!;
+      expect(nextJobInfo.iteration).toBe(2);
+      expect(nextJobInfo.idempotencyKey).toBe(
+        buildIterationIdempotencyKey(seed.goalId, 2)
+      );
+      expect(nextJobInfo.created).toBe(true);
+
+      const goalRow = db
+        .prepare("SELECT state, current_iteration, completion_reason FROM goals WHERE id = ?")
+        .get(seed.goalId) as {
+        state: string;
+        current_iteration: number;
+        completion_reason: string | null;
+      };
+      expect(goalRow.state).toBe("queued");
+      expect(goalRow.current_iteration).toBe(1);
+      expect(goalRow.completion_reason).toBeNull();
+
+      const enqueued = getJobByIdempotencyKey(
+        db,
+        buildIterationIdempotencyKey(seed.goalId, 2)
+      );
+      expect(enqueued?.id).toBe(nextJobInfo.jobId);
+      expect(enqueued?.state).toBe("pending");
+      expect(enqueued?.iteration).toBe(2);
+
+      const eventTypes = (
+        db
+          .prepare(
+            "SELECT type FROM events WHERE goal_id = ? ORDER BY id ASC"
+          )
+          .all(seed.goalId) as Array<{ type: string }>
+      ).map((row) => row.type);
+      expect(eventTypes).toEqual([
+        "job.enqueued",
+        "job.claimed",
+        "job.heartbeat",
+        "iteration_started",
+        "iteration_completed",
+        "job.succeeded",
+        "job.enqueued",
+        "goal.reduced"
+      ]);
+
+      const reducedRow = db
+        .prepare(
+          "SELECT payload FROM events WHERE goal_id = ? AND type = 'goal.reduced'"
+        )
+        .get(seed.goalId) as { payload: string };
+      const reducedPayload = JSON.parse(reducedRow.payload) as Record<
+        string,
+        unknown
+      >;
+      expect(reducedPayload).toMatchObject({
+        decision: "continue",
+        iteration: 1,
+        goal_state: "queued",
+        completion_reason: null,
+        max_iterations: 3
+      });
+      const nextJobPayload = reducedPayload["next_job"] as Record<
+        string,
+        unknown
+      >;
+      expect(nextJobPayload).toMatchObject({
+        job_id: nextJobInfo.jobId,
+        iteration: 2,
+        idempotency_key: buildIterationIdempotencyKey(seed.goalId, 2),
+        created: true
+      });
+
+      const goalCompletedCount = (
+        db
+          .prepare(
+            "SELECT count(*) AS c FROM events WHERE goal_id = ? AND type IN ('goal.completed', 'goal.failed')"
+          )
+          .get(seed.goalId) as { c: number }
+      ).c;
+      expect(goalCompletedCount).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("marks the goal completed and stops chaining when the runner reports goal_complete=true", () => {
+    const dataDir = makeTempDir("momentum-worker-run-goal-complete-");
+    const repo = initRepo();
+    const seed = seedQueuedGoal(dataDir, repo, makeGoalSpec("true", { maxIterations: 3 }));
+
+    process.env[FAKE_RUNNER_GOAL_COMPLETE_ENV] = "1";
+
+    const db = openDb(seed.dataDir);
+    try {
+      const out = runWorkerOnce({
+        db,
+        dataDir: seed.dataDir,
+        workerId: "worker-goal-complete"
+      });
+      expect(out.code).toBe("ran_job");
+      if (out.code !== "ran_job") return;
+
+      expect(out.jobIterationResult.ok).toBe(true);
+      if (!out.jobIterationResult.ok) return;
+      expect(out.jobIterationResult.iteration.result.goal_complete).toBe(true);
+
+      expect(out.reducer.decision).toBe("goal_complete");
+      expect(out.reducer.goalState).toBe("completed");
+      expect(out.reducer.completionReason).toBe("goal_complete");
+      expect(out.reducer.goalComplete).toBe(true);
+      expect(out.reducer.nextJob).toBeNull();
+
+      const goalRow = db
+        .prepare("SELECT state, current_iteration, completion_reason FROM goals WHERE id = ?")
+        .get(seed.goalId) as {
+        state: string;
+        current_iteration: number;
+        completion_reason: string | null;
+      };
+      expect(goalRow.state).toBe("completed");
+      expect(goalRow.current_iteration).toBe(1);
+      expect(goalRow.completion_reason).toBe("goal_complete");
+
+      const eventTypes = (
+        db
+          .prepare(
+            "SELECT type FROM events WHERE goal_id = ? ORDER BY id ASC"
+          )
+          .all(seed.goalId) as Array<{ type: string }>
+      ).map((row) => row.type);
+      expect(eventTypes).toEqual([
+        "job.enqueued",
+        "job.claimed",
+        "job.heartbeat",
+        "iteration_started",
+        "iteration_completed",
+        "job.succeeded",
+        "goal.reduced",
+        "goal.completed"
+      ]);
+
+      const nextJob = getJobByIdempotencyKey(
+        db,
+        buildIterationIdempotencyKey(seed.goalId, 2)
+      );
+      expect(nextJob).toBeUndefined();
+
+      const completedRow = db
+        .prepare(
+          "SELECT payload FROM events WHERE goal_id = ? AND type = 'goal.completed'"
+        )
+        .get(seed.goalId) as { payload: string };
+      const completedPayload = JSON.parse(completedRow.payload) as Record<
+        string,
+        unknown
+      >;
+      expect(completedPayload).toMatchObject({
+        iteration: 1,
+        completion_reason: "goal_complete"
+      });
+      expect(typeof completedPayload["commit_sha"]).toBe("string");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("re-invoking the reducer after a queued CONTINUE worker run does not double-enqueue or duplicate events", async () => {
+    const { reduceGoalIteration } = await import("../src/goal-reducer.js");
+    const dataDir = makeTempDir("momentum-worker-run-reducer-replay-");
+    const repo = initRepo();
+    const seed = seedQueuedGoal(dataDir, repo, makeGoalSpec("true", { maxIterations: 3 }));
+
+    const db = openDb(seed.dataDir);
+    try {
+      const out = runWorkerOnce({
+        db,
+        dataDir: seed.dataDir,
+        workerId: "worker-replay"
+      });
+      expect(out.code).toBe("ran_job");
+      if (out.code !== "ran_job") return;
+      expect(out.reducer.decision).toBe("continue");
+      const firstNext = out.reducer.nextJob!;
+
+      const replay = reduceGoalIteration({
+        db,
+        goalId: seed.goalId,
+        jobId: seed.jobId
+      });
+      expect(replay.decision).toBe("already_reduced");
+      expect(replay.reusedExistingDecision).toBe(true);
+      expect(replay.nextJob?.jobId).toBe(firstNext.jobId);
+      expect(replay.nextJob?.created).toBe(false);
+
+      const iterationTwoJobs = (
+        db
+          .prepare(
+            "SELECT count(*) AS c FROM jobs WHERE goal_id = ? AND iteration = 2"
+          )
+          .get(seed.goalId) as { c: number }
+      ).c;
+      expect(iterationTwoJobs).toBe(1);
+
+      const reducedEventCount = (
+        db
+          .prepare(
+            "SELECT count(*) AS c FROM events WHERE goal_id = ? AND job_id = ? AND type = 'goal.reduced'"
+          )
+          .get(seed.goalId, seed.jobId) as { c: number }
+      ).c;
+      expect(reducedEventCount).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("drains a 2-iteration fake-runner goal end-to-end through queued worker execution", () => {
+    const dataDir = makeTempDir("momentum-worker-run-2iter-drain-");
+    const repo = initRepo();
+    const seed = seedQueuedGoal(
+      dataDir,
+      repo,
+      makeGoalSpec("true", { maxIterations: 2 })
+    );
+    const baseHead = runGit(repo, ["rev-parse", "HEAD"]).trim();
+
+    const db = openDb(seed.dataDir);
+    try {
+      const firstRun = runWorkerOnce({
+        db,
+        dataDir: seed.dataDir,
+        workerId: "worker-drain-1"
+      });
+      expect(firstRun.code).toBe("ran_job");
+      if (firstRun.code !== "ran_job") return;
+      expect(firstRun.jobIterationResult.ok).toBe(true);
+      if (!firstRun.jobIterationResult.ok) return;
+      expect(firstRun.reducer.decision).toBe("continue");
+      expect(firstRun.reducer.goalState).toBe("queued");
+      const iterOneCommitSha = firstRun.jobIterationResult.iteration.commitSha;
+      expect(iterOneCommitSha).toMatch(/^[0-9a-f]{40}$/);
+      const branch = firstRun.jobIterationResult.iteration.branch;
+      expect(branch).toMatch(/^momentum\//);
+
+      const nextJobInfo = firstRun.reducer.nextJob!;
+      expect(nextJobInfo.iteration).toBe(2);
+      expect(nextJobInfo.idempotencyKey).toBe(
+        buildIterationIdempotencyKey(seed.goalId, 2)
+      );
+      expect(nextJobInfo.created).toBe(true);
+
+      const secondRun = runWorkerOnce({
+        db,
+        dataDir: seed.dataDir,
+        workerId: "worker-drain-2"
+      });
+      expect(secondRun.code).toBe("ran_job");
+      if (secondRun.code !== "ran_job") return;
+      expect(secondRun.jobId).toBe(nextJobInfo.jobId);
+      expect(secondRun.iteration).toBe(2);
+      expect(secondRun.jobIterationResult.ok).toBe(true);
+      if (!secondRun.jobIterationResult.ok) return;
+      expect(secondRun.reducer.decision).toBe("max_iterations_reached");
+      expect(secondRun.reducer.goalState).toBe("max_iterations_reached");
+      expect(secondRun.reducer.completionReason).toBe(
+        "max_iterations_reached:2"
+      );
+      expect(secondRun.reducer.nextJob).toBeNull();
+
+      const iterTwoCommitSha = secondRun.jobIterationResult.iteration.commitSha;
+      expect(iterTwoCommitSha).toMatch(/^[0-9a-f]{40}$/);
+      expect(iterTwoCommitSha).not.toBe(iterOneCommitSha);
+      expect(secondRun.jobIterationResult.iteration.baseHead).toBe(
+        iterOneCommitSha
+      );
+      expect(secondRun.jobIterationResult.iteration.branch).toBe(branch);
+      expect(secondRun.jobIterationResult.iteration.branchCreated).toBe(false);
+
+      // main is untouched; momentum branch holds both commits stacked on baseHead.
+      expect(runGit(repo, ["rev-parse", "main"]).trim()).toBe(baseHead);
+      expect(runGit(repo, ["rev-parse", branch]).trim()).toBe(iterTwoCommitSha);
+      const stackedCount = Number(
+        runGit(repo, ["rev-list", "--count", `${baseHead}..${branch}`]).trim()
+      );
+      expect(stackedCount).toBe(2);
+      const parent = runGit(repo, ["rev-parse", `${branch}^`]).trim();
+      expect(parent).toBe(iterOneCommitSha);
+      expect(runGit(repo, ["status", "--porcelain"]).trim()).toBe("");
+
+      // Per-iteration artifact directories exist with the expected files.
+      for (const iteration of [1, 2]) {
+        const iterDir = path.join(
+          seed.dataDir,
+          "goals",
+          seed.goalId,
+          "iterations",
+          String(iteration)
+        );
+        for (const file of ["prompt.md", "runner.log", "verification.log", "result.json"]) {
+          expect(
+            fs.existsSync(path.join(iterDir, file)),
+            `missing artifact for iteration ${iteration}: ${file}`
+          ).toBe(true);
+        }
+      }
+
+      // Goal row reflects the terminal max-iterations state.
+      const goalRow = db
+        .prepare(
+          "SELECT state, current_iteration, completion_reason FROM goals WHERE id = ?"
+        )
+        .get(seed.goalId) as {
+        state: string;
+        current_iteration: number;
+        completion_reason: string | null;
+      };
+      expect(goalRow).toMatchObject({
+        state: "max_iterations_reached",
+        current_iteration: 2,
+        completion_reason: "max_iterations_reached:2"
+      });
+
+      // Both job rows are succeeded; iteration 2 carries the second jobId.
+      const jobRows = db
+        .prepare(
+          "SELECT id, iteration, state FROM jobs WHERE goal_id = ? ORDER BY iteration ASC"
+        )
+        .all(seed.goalId) as Array<{
+        id: string;
+        iteration: number;
+        state: string;
+      }>;
+      expect(jobRows).toEqual([
+        { id: seed.jobId, iteration: 1, state: "succeeded" },
+        { id: nextJobInfo.jobId, iteration: 2, state: "succeeded" }
+      ]);
+
+      // Event tail covers both iterations with the chaining-ON, then terminal-failed reducer outputs.
+      const eventTypes = (
+        db
+          .prepare(
+            "SELECT type FROM events WHERE goal_id = ? ORDER BY id ASC"
+          )
+          .all(seed.goalId) as Array<{ type: string }>
+      ).map((row) => row.type);
+      expect(eventTypes).toEqual([
+        "job.enqueued",
+        "job.claimed",
+        "job.heartbeat",
+        "iteration_started",
+        "iteration_completed",
+        "job.succeeded",
+        "job.enqueued",
+        "goal.reduced",
+        "job.claimed",
+        "job.heartbeat",
+        "iteration_started",
+        "iteration_completed",
+        "job.succeeded",
+        "goal.reduced",
+        "goal.failed"
+      ]);
+
+      // No iteration 3 ever enqueued.
+      const nonexistent = getJobByIdempotencyKey(
+        db,
+        buildIterationIdempotencyKey(seed.goalId, 3)
+      );
+      expect(nonexistent).toBeUndefined();
     } finally {
       db.close();
     }
