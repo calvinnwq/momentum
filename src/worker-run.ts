@@ -270,6 +270,7 @@ export function runWorkerOnce(input: WorkerRunInput): WorkerRunResult {
   });
 
   if (iterationResult.ok) {
+    const iter = iterationResult.iteration;
     appendQueueEvent(input.db, {
       goalId: goal.id,
       jobId: runningJob.id,
@@ -282,7 +283,21 @@ export function runWorkerOnce(input: WorkerRunInput): WorkerRunResult {
         goal_state: iterationResult.goalState,
         job_state: iterationResult.jobState,
         heartbeat_at: runningJob.heartbeat_at,
-        lease_expires_at: runningJob.lease_expires_at
+        lease_expires_at: runningJob.lease_expires_at,
+        branch: iter.branch,
+        branch_created: iter.branchCreated,
+        base_head: iter.baseHead,
+        commit_sha: iter.commitSha,
+        commit_message: iter.commitMessage,
+        goal_complete: iter.result.goal_complete,
+        result_path: iter.resultJsonPath,
+        artifacts: {
+          iteration_dir: artifactPaths.iteration1Dir,
+          prompt: iter.promptPath,
+          runner_log: iter.runnerLogPath,
+          verification_log: iter.verificationLogPath,
+          result_json: iter.resultJsonPath
+        }
       },
       createdAt: now()
     });
@@ -296,7 +311,12 @@ export function runWorkerOnce(input: WorkerRunInput): WorkerRunResult {
         worker_id: workerId,
         repo_root: goal.repo,
         lock_id: lock.id,
-        error: summarizeIterationFailure(iterationResult.iteration)
+        error: summarizeIterationFailure(iterationResult.iteration),
+        artifacts: {
+          iteration_dir: artifactPaths.iteration1Dir,
+          runner_log: artifactPaths.runnerLog,
+          verification_log: artifactPaths.verificationLog
+        }
       },
       createdAt: now()
     });

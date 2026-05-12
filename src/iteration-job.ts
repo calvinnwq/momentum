@@ -3,7 +3,7 @@ import type { MomentumDb } from "./db.js";
 import {
   runForegroundIteration,
   type ForegroundIterationError,
-  type ForegroundIterationResult
+  type ForegroundIterationSuccess
 } from "./foreground-iteration.js";
 import type { GoalSpec } from "./goal-spec.js";
 
@@ -17,12 +17,23 @@ export type ExecuteIterationJobInput = {
   now?: () => number;
 };
 
-export type ExecuteIterationJobResult = {
-  ok: boolean;
-  iteration: ForegroundIterationResult;
-  goalState: GoalIterationState;
-  jobState: JobIterationState;
+export type ExecuteIterationJobSuccess = {
+  ok: true;
+  iteration: ForegroundIterationSuccess;
+  goalState: Exclude<GoalIterationState, "failed" | "running">;
+  jobState: "succeeded";
 };
+
+export type ExecuteIterationJobFailure = {
+  ok: false;
+  iteration: ForegroundIterationError;
+  goalState: "failed";
+  jobState: "failed";
+};
+
+export type ExecuteIterationJobResult =
+  | ExecuteIterationJobSuccess
+  | ExecuteIterationJobFailure;
 
 export type GoalIterationState =
   | "running"
@@ -60,7 +71,7 @@ export function executeIterationJob(
     runner: spec.runner
   });
 
-  let result: ForegroundIterationResult;
+  let result: ForegroundIterationSuccess | ForegroundIterationError;
   try {
     result = runForegroundIteration({
       goalId,
@@ -94,9 +105,11 @@ export function executeIterationJob(
          SET state = ?,
              finished_at = ?,
              updated_at = ?,
+             result_path = ?,
+             error_path = NULL,
              error = NULL
          WHERE id = ?`
-    ).run("succeeded", finishTs, finishTs, jobId);
+    ).run("succeeded", finishTs, finishTs, result.resultJsonPath, jobId);
     insertEvent(db, goalId, jobId, "iteration_completed", finishTs, {
       iteration,
       branch: result.branch,
@@ -117,6 +130,7 @@ export function executeIterationJob(
   }
 
   const errorText = `${result.code}: ${result.error}`;
+  const errorPath = pickErrorArtifactPath(result, artifactPaths);
   db.prepare(`UPDATE goals SET state = ?, updated_at = ? WHERE id = ?`).run(
     "failed",
     finishTs,
@@ -127,9 +141,11 @@ export function executeIterationJob(
        SET state = ?,
            finished_at = ?,
            updated_at = ?,
+           result_path = NULL,
+           error_path = ?,
            error = ?
        WHERE id = ?`
-  ).run("failed", finishTs, finishTs, errorText, jobId);
+  ).run("failed", finishTs, finishTs, errorPath, errorText, jobId);
   insertEvent(db, goalId, jobId, "iteration_failed", finishTs, {
     iteration,
     code: result.code,
@@ -141,6 +157,16 @@ export function executeIterationJob(
     goalState: "failed",
     jobState: "failed"
   };
+}
+
+function pickErrorArtifactPath(
+  result: ForegroundIterationError,
+  artifactPaths: GoalArtifactPaths
+): string {
+  if (result.code === "verification_failed" || result.code === "runner_reported_failure") {
+    return artifactPaths.verificationLog;
+  }
+  return artifactPaths.runnerLog;
 }
 
 function insertEvent(

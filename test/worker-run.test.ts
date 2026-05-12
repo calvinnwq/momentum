@@ -423,6 +423,113 @@ describe("runWorkerOnce", () => {
     }
   });
 
+  it("includes commit and artifact pointers in the job.succeeded event and on the job row", () => {
+    const dataDir = makeTempDir("momentum-worker-run-success-pointers-");
+    const repo = initRepo();
+    const seed = seedQueuedGoal(dataDir, repo);
+    const baseHead = runGit(repo, ["rev-parse", "HEAD"]).trim();
+
+    const db = openDb(seed.dataDir);
+    try {
+      const out = runWorkerOnce({
+        db,
+        dataDir: seed.dataDir,
+        workerId: "worker-success-pointers"
+      });
+      expect(out.code).toBe("ran_job");
+      if (out.code !== "ran_job") return;
+      expect(out.jobIterationResult.ok).toBe(true);
+
+      const headAfter = runGit(repo, ["rev-parse", "HEAD"]).trim();
+      expect(headAfter).not.toBe(baseHead);
+
+      const layoutDir = path.join(
+        seed.dataDir,
+        "goals",
+        seed.goalId,
+        "iterations",
+        "1"
+      );
+
+      const event = db
+        .prepare(
+          "SELECT payload FROM events WHERE goal_id = ? AND type = 'job.succeeded' ORDER BY id DESC LIMIT 1"
+        )
+        .get(seed.goalId) as { payload: string };
+      const payload = JSON.parse(event.payload) as Record<string, unknown>;
+      expect(payload["iteration"]).toBe(1);
+      expect(payload["worker_id"]).toBe("worker-success-pointers");
+      expect(payload["repo_root"]).toBe(repo);
+      expect(payload["goal_state"]).toBe("iteration_complete");
+      expect(payload["job_state"]).toBe("succeeded");
+      expect(payload["branch"]).toMatch(/^momentum\//);
+      expect(payload["branch_created"]).toBe(true);
+      expect(payload["base_head"]).toBe(baseHead);
+      expect(payload["commit_sha"]).toBe(headAfter);
+      expect(typeof payload["commit_message"]).toBe("string");
+      expect(payload["goal_complete"]).toBe(false);
+      expect(payload["result_path"]).toBe(path.join(layoutDir, "result.json"));
+      expect(payload["artifacts"]).toEqual({
+        iteration_dir: layoutDir,
+        prompt: path.join(layoutDir, "prompt.md"),
+        runner_log: path.join(layoutDir, "runner.log"),
+        verification_log: path.join(layoutDir, "verification.log"),
+        result_json: path.join(layoutDir, "result.json")
+      });
+
+      const job = getQueueJob(db, seed.jobId);
+      expect(job?.result_path).toBe(path.join(layoutDir, "result.json"));
+      expect(job?.error_path).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("emits artifact pointers in the job.failed event and on the job row when verification fails", () => {
+    const dataDir = makeTempDir("momentum-worker-run-fail-pointers-");
+    const repo = initRepo();
+    const seed = seedQueuedGoal(dataDir, repo, makeGoalSpec("false"));
+
+    const db = openDb(seed.dataDir);
+    try {
+      const out = runWorkerOnce({
+        db,
+        dataDir: seed.dataDir,
+        workerId: "worker-fail-pointers"
+      });
+      expect(out.code).toBe("ran_job");
+      if (out.code !== "ran_job") return;
+      expect(out.jobIterationResult.ok).toBe(false);
+
+      const layoutDir = path.join(
+        seed.dataDir,
+        "goals",
+        seed.goalId,
+        "iterations",
+        "1"
+      );
+
+      const event = db
+        .prepare(
+          "SELECT payload FROM events WHERE goal_id = ? AND type = 'job.failed' ORDER BY id DESC LIMIT 1"
+        )
+        .get(seed.goalId) as { payload: string };
+      const payload = JSON.parse(event.payload) as Record<string, unknown>;
+      expect(payload["error"]).toBe("verification_failed");
+      expect(payload["artifacts"]).toEqual({
+        iteration_dir: layoutDir,
+        runner_log: path.join(layoutDir, "runner.log"),
+        verification_log: path.join(layoutDir, "verification.log")
+      });
+
+      const job = getQueueJob(db, seed.jobId);
+      expect(job?.result_path).toBeNull();
+      expect(job?.error_path).toBe(path.join(layoutDir, "verification.log"));
+    } finally {
+      db.close();
+    }
+  });
+
   it("returns no_work when another worker already claimed the pending job", () => {
     const dataDir = makeTempDir("momentum-worker-run-contention2-");
     const repo = initRepo();

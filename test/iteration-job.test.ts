@@ -121,6 +121,116 @@ describe("executeIterationJob", () => {
     db.close();
   });
 
+  it("writes jobs.result_path to the iteration result.json on success and clears error_path", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo);
+    const db = openDb(setup.dataDir);
+
+    const out = executeIterationJob({
+      db,
+      goalId: setup.goalId,
+      jobId: setup.jobId,
+      spec: setup.spec,
+      artifactPaths: setup.artifactPaths
+    });
+
+    expect(out.ok).toBe(true);
+
+    const jobRow = db
+      .prepare("SELECT result_path, error_path FROM jobs WHERE id = ?")
+      .get(setup.jobId) as { result_path: string | null; error_path: string | null };
+    expect(jobRow.result_path).toBe(setup.artifactPaths.resultJson);
+    expect(jobRow.error_path).toBeNull();
+    expect(fs.existsSync(jobRow.result_path!)).toBe(true);
+
+    db.close();
+  });
+
+  it("writes jobs.error_path to the verification log on verification failure and clears result_path", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "false");
+    const db = openDb(setup.dataDir);
+
+    const out = executeIterationJob({
+      db,
+      goalId: setup.goalId,
+      jobId: setup.jobId,
+      spec: setup.spec,
+      artifactPaths: setup.artifactPaths
+    });
+
+    expect(out.ok).toBe(false);
+
+    const jobRow = db
+      .prepare("SELECT result_path, error_path FROM jobs WHERE id = ?")
+      .get(setup.jobId) as { result_path: string | null; error_path: string | null };
+    expect(jobRow.result_path).toBeNull();
+    expect(jobRow.error_path).toBe(setup.artifactPaths.verificationLog);
+    expect(fs.existsSync(jobRow.error_path!)).toBe(true);
+
+    db.close();
+  });
+
+  it("writes jobs.error_path to the verification log on runner failure (reset path)", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo);
+    process.env[FAKE_RUNNER_FAIL_ENV] = "1";
+    const db = openDb(setup.dataDir);
+
+    const out = executeIterationJob({
+      db,
+      goalId: setup.goalId,
+      jobId: setup.jobId,
+      spec: setup.spec,
+      artifactPaths: setup.artifactPaths
+    });
+
+    expect(out.ok).toBe(false);
+
+    const jobRow = db
+      .prepare("SELECT result_path, error_path, error FROM jobs WHERE id = ?")
+      .get(setup.jobId) as {
+      result_path: string | null;
+      error_path: string | null;
+      error: string | null;
+    };
+    expect(jobRow.error).toContain("runner_reported_failure");
+    expect(jobRow.result_path).toBeNull();
+    expect(jobRow.error_path).toBe(setup.artifactPaths.verificationLog);
+
+    db.close();
+  });
+
+  it("writes jobs.error_path to the runner log when failure happens before the runner produces output", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo);
+    fs.writeFileSync(path.join(repo, "dirty.txt"), "uncommitted\n", "utf-8");
+    const db = openDb(setup.dataDir);
+
+    const out = executeIterationJob({
+      db,
+      goalId: setup.goalId,
+      jobId: setup.jobId,
+      spec: setup.spec,
+      artifactPaths: setup.artifactPaths
+    });
+
+    expect(out.ok).toBe(false);
+
+    const jobRow = db
+      .prepare("SELECT result_path, error_path, error FROM jobs WHERE id = ?")
+      .get(setup.jobId) as {
+      result_path: string | null;
+      error_path: string | null;
+      error: string | null;
+    };
+    expect(jobRow.error).toContain("repo_guard_failed");
+    expect(jobRow.result_path).toBeNull();
+    expect(jobRow.error_path).toBe(setup.artifactPaths.runnerLog);
+
+    db.close();
+  });
+
   it("invokes the orchestrator and produces the canonical iteration artifacts", () => {
     const repo = initRepo();
     const setup = setupGoal(repo);
