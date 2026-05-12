@@ -27,6 +27,8 @@ export type GoalStatusJobSummary = {
   state: string;
   attemptCount: number;
   artifactPath: string;
+  resultPath: string | null;
+  errorPath: string | null;
   createdAt: number;
   updatedAt: number;
   startedAt: number | null;
@@ -101,6 +103,8 @@ type JobRow = {
   state: string;
   attempt_count: number;
   artifact_path: string;
+  result_path: string | null;
+  error_path: string | null;
   created_at: number;
   updated_at: number;
   started_at: number | null;
@@ -233,6 +237,8 @@ function toJobSummary(row: JobRow): GoalStatusJobSummary {
     state: row.state,
     attemptCount: row.attempt_count,
     artifactPath: row.artifact_path,
+    resultPath: row.result_path,
+    errorPath: row.error_path,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     startedAt: row.started_at,

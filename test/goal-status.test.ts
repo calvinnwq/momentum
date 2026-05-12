@@ -214,6 +214,9 @@ describe("loadGoalStatus", () => {
     expect(status.artifactFiles.runnerLog).toBe(true);
     expect(status.artifactFiles.verificationLog).toBe(true);
     expect(status.artifactFiles.resultJson).toBe(true);
+
+    expect(status.latestJob?.resultPath).toBe(setup.artifactPaths.resultJson);
+    expect(status.latestJob?.errorPath).toBeNull();
   });
 
   it("reports failure metadata when the iteration fails verification", () => {
@@ -251,6 +254,25 @@ describe("loadGoalStatus", () => {
     expect(status.iteration?.failure?.error).toContain("command_failed");
     expect(status.iteration?.commitSha).toBeNull();
     expect(status.iteration?.runnerSuccess).toBeNull();
+
+    expect(status.latestJob?.resultPath).toBeNull();
+    expect(status.latestJob?.errorPath).toBe(setup.artifactPaths.verificationLog);
+  });
+
+  it("reports null result/error paths for a pending job that has not yet executed", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Status pending paths");
+
+    const result = loadGoalStatus({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.latestJob?.state).toBe("pending");
+    expect(result.latestJob?.resultPath).toBeNull();
+    expect(result.latestJob?.errorPath).toBeNull();
   });
 
   it("returns the most recently created goal when goalId is omitted", () => {

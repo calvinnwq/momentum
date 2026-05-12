@@ -224,7 +224,9 @@ describe("writeHandoff", () => {
     expect(latestJob).toMatchObject({
       state: "succeeded",
       iteration: 1,
-      type: "foreground_iteration"
+      type: "foreground_iteration",
+      result_path: setup.artifactPaths.resultJson,
+      error_path: null
     });
 
     const artifacts = json["artifacts"] as Record<string, unknown>;
@@ -273,6 +275,8 @@ describe("writeHandoff", () => {
     expect(markdown).toContain(
       `verification.log (present): ${setup.artifactPaths.verificationLog}`
     );
+    expect(markdown).toContain(`Result path: ${setup.artifactPaths.resultJson}`);
+    expect(markdown).not.toContain("Error path:");
   });
 
   it("captures failure metadata when the iteration fails verification", () => {
@@ -299,13 +303,20 @@ describe("writeHandoff", () => {
     expect(typeof failure["error"]).toBe("string");
 
     expect((json["goal"] as Record<string, unknown>)["state"]).toBe("failed");
-    expect((json["latest_job"] as Record<string, unknown>)["state"]).toBe(
-      "failed"
+    const failedLatestJob = json["latest_job"] as Record<string, unknown>;
+    expect(failedLatestJob["state"]).toBe("failed");
+    expect(failedLatestJob["result_path"]).toBeNull();
+    expect(failedLatestJob["error_path"]).toBe(
+      setup.artifactPaths.verificationLog
     );
 
     const markdown = fs.readFileSync(setup.artifactPaths.handoffMd, "utf-8");
     expect(markdown).toContain("State: failed");
     expect(markdown).toContain("Failure: verification_failed");
+    expect(markdown).toContain(
+      `Error path: ${setup.artifactPaths.verificationLog}`
+    );
+    expect(markdown).not.toContain("Result path:");
   });
 
   it("returns null runner_result when result.json is the empty initializer", () => {

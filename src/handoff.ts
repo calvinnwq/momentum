@@ -174,6 +174,8 @@ function toJsonShape(data: HandoffData): Record<string, unknown> {
           state: data.latestJob.state,
           attempt_count: data.latestJob.attemptCount,
           artifact_path: data.latestJob.artifactPath,
+          result_path: data.latestJob.resultPath,
+          error_path: data.latestJob.errorPath,
           created_at: data.latestJob.createdAt,
           updated_at: data.latestJob.updatedAt,
           started_at: data.latestJob.startedAt,
@@ -294,6 +296,12 @@ function renderHandoffMarkdown(data: HandoffData): string {
     lines.push(`- Type: ${data.latestJob.type}`);
     lines.push(`- State: ${data.latestJob.state}`);
     lines.push(`- Attempts: ${data.latestJob.attemptCount}`);
+    if (data.latestJob.resultPath) {
+      lines.push(`- Result path: ${data.latestJob.resultPath}`);
+    }
+    if (data.latestJob.errorPath) {
+      lines.push(`- Error path: ${data.latestJob.errorPath}`);
+    }
     if (data.latestJob.error) {
       lines.push(`- Error: ${data.latestJob.error}`);
     }
