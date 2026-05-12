@@ -75,7 +75,8 @@ export type WorkerRunSuccessResult = {
   leaseExpiresAt: number;
   heartbeatAt: number;
   jobIterationResult: ExecuteIterationJobResult;
-  reducer: ReducerResult;
+  reducer: ReducerResult | null;
+  reducerError: string | null;
   message: string;
 };
 
@@ -335,12 +336,35 @@ export function runWorkerOnce(input: WorkerRunInput): WorkerRunResult {
     });
   }
 
-  const reducer = reduceGoalIteration({
-    db: input.db,
-    goalId: goal.id,
-    jobId: runningJob.id,
-    now
-  });
+  let reducer: ReducerResult | null = null;
+  let reducerError: string | null = null;
+  try {
+    reducer = reduceGoalIteration({
+      db: input.db,
+      goalId: goal.id,
+      jobId: runningJob.id,
+      now
+    });
+  } catch (error) {
+    reducerError =
+      error instanceof Error ? error.message : String(error);
+    try {
+      appendQueueEvent(input.db, {
+        goalId: goal.id,
+        jobId: runningJob.id,
+        type: QUEUE_EVENT_TYPES.GOAL_REDUCE_FAILED,
+        payload: {
+          iteration: runningJob.iteration,
+          worker_id: workerId,
+          job_state: iterationResult.jobState,
+          error: reducerError
+        },
+        createdAt: now()
+      });
+    } catch {
+      reducerError = `${reducerError}; goal.reduce_failed event write also failed`;
+    }
+  }
 
   return {
     code: "ran_job",
@@ -357,6 +381,7 @@ export function runWorkerOnce(input: WorkerRunInput): WorkerRunResult {
     heartbeatAt: heartbeatNow,
     jobIterationResult: iterationResult,
     reducer,
+    reducerError,
     message: iterationResult.ok
       ? `Ran goal ${goal.id} iteration ${runningJob.iteration} as claimed job ${runningJob.id}.`
       : `Ran goal ${goal.id} iteration ${runningJob.iteration} with runner outcome ${summarizeIterationFailure(

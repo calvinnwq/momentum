@@ -112,10 +112,12 @@ export function reduceGoalIteration(
       );
     }
 
-    const goalComplete =
-      job.state === "succeeded" ? readGoalComplete(db, goalId, jobId) : null;
-    const commitSha =
-      job.state === "succeeded" ? readCommitSha(db, goalId, jobId) : null;
+    const completion =
+      job.state === "succeeded"
+        ? readIterationCompletedSummary(db, goalId, jobId)
+        : { goalComplete: null, commitSha: null };
+    const goalComplete = completion.goalComplete;
+    const commitSha = completion.commitSha;
     const plan = decidePlan(job, goal, goalComplete);
     const at = nowFn();
 
@@ -333,11 +335,11 @@ function findReducedDecision(
   };
 }
 
-function readGoalComplete(
+function readIterationCompletedSummary(
   db: MomentumDb,
   goalId: string,
   jobId: string
-): boolean | null {
+): { goalComplete: boolean | null; commitSha: string | null } {
   const row = db
     .prepare(
       `SELECT payload FROM events
@@ -346,38 +348,20 @@ function readGoalComplete(
          LIMIT 1`
     )
     .get(goalId, jobId) as { payload: string } | undefined;
-  if (!row) return null;
+  if (!row) return { goalComplete: null, commitSha: null };
   try {
     const payload = JSON.parse(row.payload) as Record<string, unknown>;
-    return typeof payload["goal_complete"] === "boolean"
-      ? (payload["goal_complete"] as boolean)
-      : null;
+    const goalComplete =
+      typeof payload["goal_complete"] === "boolean"
+        ? (payload["goal_complete"] as boolean)
+        : null;
+    const commitSha =
+      typeof payload["commit_sha"] === "string"
+        ? (payload["commit_sha"] as string)
+        : null;
+    return { goalComplete, commitSha };
   } catch {
-    return null;
-  }
-}
-
-function readCommitSha(
-  db: MomentumDb,
-  goalId: string,
-  jobId: string
-): string | null {
-  const row = db
-    .prepare(
-      `SELECT payload FROM events
-         WHERE goal_id = ? AND job_id = ? AND type = 'iteration_completed'
-         ORDER BY created_at DESC, id DESC
-         LIMIT 1`
-    )
-    .get(goalId, jobId) as { payload: string } | undefined;
-  if (!row) return null;
-  try {
-    const payload = JSON.parse(row.payload) as Record<string, unknown>;
-    return typeof payload["commit_sha"] === "string"
-      ? (payload["commit_sha"] as string)
-      : null;
-  } catch {
-    return null;
+    return { goalComplete: null, commitSha: null };
   }
 }
 

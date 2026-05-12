@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -19,6 +19,7 @@ import {
   claimPendingGoalIterationJob,
 } from "../src/queue-jobs.js";
 import { runWorkerOnce } from "../src/worker-run.js";
+import * as goalReducerModule from "../src/goal-reducer.js";
 
 const GOAL_SPEC = makeGoalSpec("true");
 
@@ -612,12 +613,15 @@ describe("runWorkerOnce", () => {
       if (out.code !== "ran_job") return;
 
       expect(out.jobIterationResult.ok).toBe(true);
-      expect(out.reducer.decision).toBe("continue");
-      expect(out.reducer.goalState).toBe("queued");
-      expect(out.reducer.completionReason).toBeNull();
-      expect(out.reducer.reusedExistingDecision).toBe(false);
-      expect(out.reducer.nextJob).not.toBeNull();
-      const nextJobInfo = out.reducer.nextJob!;
+      expect(out.reducerError).toBeNull();
+      expect(out.reducer).not.toBeNull();
+      const reducer = out.reducer!;
+      expect(reducer.decision).toBe("continue");
+      expect(reducer.goalState).toBe("queued");
+      expect(reducer.completionReason).toBeNull();
+      expect(reducer.reusedExistingDecision).toBe(false);
+      expect(reducer.nextJob).not.toBeNull();
+      const nextJobInfo = reducer.nextJob!;
       expect(nextJobInfo.iteration).toBe(2);
       expect(nextJobInfo.idempotencyKey).toBe(
         buildIterationIdempotencyKey(seed.goalId, 2)
@@ -722,11 +726,14 @@ describe("runWorkerOnce", () => {
       if (!out.jobIterationResult.ok) return;
       expect(out.jobIterationResult.iteration.result.goal_complete).toBe(true);
 
-      expect(out.reducer.decision).toBe("goal_complete");
-      expect(out.reducer.goalState).toBe("completed");
-      expect(out.reducer.completionReason).toBe("goal_complete");
-      expect(out.reducer.goalComplete).toBe(true);
-      expect(out.reducer.nextJob).toBeNull();
+      expect(out.reducerError).toBeNull();
+      expect(out.reducer).not.toBeNull();
+      const reducer = out.reducer!;
+      expect(reducer.decision).toBe("goal_complete");
+      expect(reducer.goalState).toBe("completed");
+      expect(reducer.completionReason).toBe("goal_complete");
+      expect(reducer.goalComplete).toBe(true);
+      expect(reducer.nextJob).toBeNull();
 
       const goalRow = db
         .prepare("SELECT state, current_iteration, completion_reason FROM goals WHERE id = ?")
@@ -797,8 +804,11 @@ describe("runWorkerOnce", () => {
       });
       expect(out.code).toBe("ran_job");
       if (out.code !== "ran_job") return;
-      expect(out.reducer.decision).toBe("continue");
-      const firstNext = out.reducer.nextJob!;
+      expect(out.reducerError).toBeNull();
+      expect(out.reducer).not.toBeNull();
+      const reducer = out.reducer!;
+      expect(reducer.decision).toBe("continue");
+      const firstNext = reducer.nextJob!;
 
       const replay = reduceGoalIteration({
         db,
@@ -853,14 +863,17 @@ describe("runWorkerOnce", () => {
       if (firstRun.code !== "ran_job") return;
       expect(firstRun.jobIterationResult.ok).toBe(true);
       if (!firstRun.jobIterationResult.ok) return;
-      expect(firstRun.reducer.decision).toBe("continue");
-      expect(firstRun.reducer.goalState).toBe("queued");
+      expect(firstRun.reducerError).toBeNull();
+      expect(firstRun.reducer).not.toBeNull();
+      const firstReducer = firstRun.reducer!;
+      expect(firstReducer.decision).toBe("continue");
+      expect(firstReducer.goalState).toBe("queued");
       const iterOneCommitSha = firstRun.jobIterationResult.iteration.commitSha;
       expect(iterOneCommitSha).toMatch(/^[0-9a-f]{40}$/);
       const branch = firstRun.jobIterationResult.iteration.branch;
       expect(branch).toMatch(/^momentum\//);
 
-      const nextJobInfo = firstRun.reducer.nextJob!;
+      const nextJobInfo = firstReducer.nextJob!;
       expect(nextJobInfo.iteration).toBe(2);
       expect(nextJobInfo.idempotencyKey).toBe(
         buildIterationIdempotencyKey(seed.goalId, 2)
@@ -878,12 +891,13 @@ describe("runWorkerOnce", () => {
       expect(secondRun.iteration).toBe(2);
       expect(secondRun.jobIterationResult.ok).toBe(true);
       if (!secondRun.jobIterationResult.ok) return;
-      expect(secondRun.reducer.decision).toBe("max_iterations_reached");
-      expect(secondRun.reducer.goalState).toBe("max_iterations_reached");
-      expect(secondRun.reducer.completionReason).toBe(
-        "max_iterations_reached:2"
-      );
-      expect(secondRun.reducer.nextJob).toBeNull();
+      expect(secondRun.reducerError).toBeNull();
+      expect(secondRun.reducer).not.toBeNull();
+      const secondReducer = secondRun.reducer!;
+      expect(secondReducer.decision).toBe("max_iterations_reached");
+      expect(secondReducer.goalState).toBe("max_iterations_reached");
+      expect(secondReducer.completionReason).toBe("max_iterations_reached:2");
+      expect(secondReducer.nextJob).toBeNull();
 
       const iterTwoCommitSha = secondRun.jobIterationResult.iteration.commitSha;
       expect(iterTwoCommitSha).toMatch(/^[0-9a-f]{40}$/);
@@ -987,6 +1001,65 @@ describe("runWorkerOnce", () => {
       expect(nonexistent).toBeUndefined();
     } finally {
       db.close();
+    }
+  });
+
+  it("captures reducer exceptions as goal.reduce_failed without stranding the worker", () => {
+    const dataDir = makeTempDir("momentum-worker-run-reducer-throw-");
+    const repo = initRepo();
+    const seed = seedQueuedGoal(dataDir, repo);
+
+    const spy = vi
+      .spyOn(goalReducerModule, "reduceGoalIteration")
+      .mockImplementation(() => {
+        throw new Error("synthetic reducer failure");
+      });
+
+    const db = openDb(seed.dataDir);
+    try {
+      const out = runWorkerOnce({
+        db,
+        dataDir: seed.dataDir,
+        workerId: "worker-reducer-throw"
+      });
+
+      expect(out.code).toBe("ran_job");
+      if (out.code !== "ran_job") return;
+      expect(out.jobIterationResult.ok).toBe(true);
+      expect(out.reducer).toBeNull();
+      expect(out.reducerError).toBe("synthetic reducer failure");
+
+      const eventTypes = (
+        db
+          .prepare("SELECT type FROM events WHERE goal_id = ? ORDER BY id ASC")
+          .all(seed.goalId) as Array<{ type: string }>
+      ).map((row) => row.type);
+      expect(eventTypes).toContain("goal.reduce_failed");
+      expect(eventTypes).not.toContain("goal.reduced");
+
+      const reduceFailedRow = db
+        .prepare(
+          "SELECT payload FROM events WHERE goal_id = ? AND type = 'goal.reduce_failed' ORDER BY id DESC LIMIT 1"
+        )
+        .get(seed.goalId) as { payload: string };
+      const reduceFailedPayload = JSON.parse(reduceFailedRow.payload) as Record<
+        string,
+        unknown
+      >;
+      expect(reduceFailedPayload["worker_id"]).toBe("worker-reducer-throw");
+      expect(reduceFailedPayload["error"]).toBe("synthetic reducer failure");
+      expect(reduceFailedPayload["iteration"]).toBe(1);
+
+      const job = getQueueJob(db, seed.jobId);
+      expect(job?.state).toBe("succeeded");
+
+      const goalRow = db
+        .prepare("SELECT state FROM goals WHERE id = ?")
+        .get(seed.goalId) as { state: string };
+      expect(goalRow.state).toBe("iteration_complete");
+    } finally {
+      db.close();
+      spy.mockRestore();
     }
   });
 });

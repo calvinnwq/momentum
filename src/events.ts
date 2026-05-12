@@ -8,6 +8,7 @@ export const QUEUE_EVENT_TYPES = {
   JOB_SUCCEEDED: "job.succeeded",
   JOB_FAILED: "job.failed",
   GOAL_REDUCED: "goal.reduced",
+  GOAL_REDUCE_FAILED: "goal.reduce_failed",
   GOAL_COMPLETED: "goal.completed",
   GOAL_FAILED: "goal.failed"
 } as const;
