@@ -88,6 +88,9 @@ Parses the goal spec and initializes (or resumes) goal state under the resolved 
     "branch": "momentum/example-goal",
     "baseHead": null,
     "runner": "fake",
+    "dataDir": "/path/to/data-dir",
+    "artifactDir": "/path/to/data-dir/goals/<uuid>",
+    "iterationArtifactDir": "/path/to/data-dir/goals/<uuid>/iterations/1",
     "resumed": false,
     "enqueueCreated": true,
     "nextAction": "Goal queued. A goal_iteration worker is required to execute this job; the worker loop is not yet implemented (Milestone 2 in progress)."
@@ -169,7 +172,7 @@ State is stored under `--data-dir <path>`, then the `MOMENTUM_HOME` environment 
           result.json          # Runner result envelope
 ```
 
-`goal.md`, `ledger.md`, `handoff.md`, and `handoff.json` are created up-front during goal initialization; `handoff.md` starts empty and `handoff.json` starts as `{}` until the `handoff` command writes the schema-v1 envelope. Iteration artifacts are written by `goal start --foreground`.
+`goal.md`, `ledger.md`, `handoff.md`, `handoff.json`, and the iteration artifact files are created up-front during goal initialization; `handoff.md`, `prompt.md`, `runner.log`, and `verification.log` start empty, while `handoff.json` and `result.json` start as `{}`. `goal start --foreground` populates the iteration artifacts during inline execution; the queued path leaves them as placeholders until a future worker executes the job.
 
 ## Failure and Reset Semantics
 
