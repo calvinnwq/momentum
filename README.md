@@ -38,7 +38,7 @@ node dist/index.js --help
 node dist/index.js doctor
 ```
 
-The `pnpm test` suite includes a built-binary end-to-end smoke (`test/smoke.test.ts`) that builds `dist/` via `pnpm build`, initializes a disposable git repo under the OS temp dir, drives `goal start`, `status`, and `handoff` through the spawned CLI, and asserts both the success path (exactly one Momentum commit on the Momentum branch with the verification log, handoff artifacts, and SQLite database in place) and the verification-failure reset path (worktree clean and HEAD back at base after `false` verification).
+The `pnpm test` suite includes a built-binary end-to-end smoke (`test/smoke.test.ts`) that builds `dist/` via `pnpm build`, initializes a disposable git repo under the OS temp dir, drives `goal start`, `status`, and `handoff` through the spawned CLI, and asserts the default queued enqueue path (no runner execution, idempotent re-enqueue, and queued job/event SQLite state), the foreground success path (exactly one Momentum commit on the Momentum branch with the verification log, handoff artifacts, and SQLite database in place), and the verification-failure reset path (worktree clean and HEAD back at base after `false` verification).
 
 ## Goal Spec
 
@@ -239,7 +239,7 @@ Milestone 1 intentionally omits the following; they belong to later milestones o
 - Queue/worker execution, persistent job leases, and stale-lease recovery (Milestone 2; schema, idempotent first-iteration enqueue, and default queued `goal start` path are in place; the worker loop that drains `goal_iteration` jobs is pending).
 - Daemon lifecycle management, stop/cancel commands, and background runner supervision (Milestone 2/3).
 - Real runner profiles beyond `fake`; only the fake runner is wired into the foreground iteration.
-- Multi-iteration loops; `max_iterations` is parsed but Milestone 1 executes exactly one iteration per `goal start`.
+- Multi-iteration loops; `max_iterations` is parsed, the default path only enqueues iteration 1, and `--foreground` executes exactly one inline iteration.
 - Worktree management and remote git operations (`fetch`, `pull`, `push`, `rebase`).
 - GitHub, Linear, and other external integrations driven from inside Momentum.
 - A dashboard or other UI surfaces beyond the CLI JSON/text outputs.
