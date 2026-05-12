@@ -170,11 +170,6 @@ function resolveOutcome(
   const trajectoryRaw = readEnv(env, FAKE_RUNNER_TRAJECTORY_ENV);
   if (trajectoryRaw !== undefined) {
     const entries = trajectoryRaw.split("|").map((entry) => entry.trim());
-    if (entries.length === 0) {
-      throw new Error(
-        `fake runner: ${FAKE_RUNNER_TRAJECTORY_ENV} must contain at least one entry`
-      );
-    }
     const rawEntry = entries[Math.min(iteration - 1, entries.length - 1)] ?? "";
     const normalized = rawEntry.toLowerCase();
     if (normalized === "" || normalized === "ok") return "ok";
