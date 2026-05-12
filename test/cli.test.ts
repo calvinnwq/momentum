@@ -79,7 +79,9 @@ describe("momentum CLI scaffold", () => {
     const result = await run(["--help"]);
 
     expect(result.code).toBe(0);
-    expect(result.stdout).toContain("momentum goal start <goal.md> [--repo <path>] --foreground");
+    expect(result.stdout).toContain(
+      "momentum goal start <goal.md> [--repo <path>] [--foreground] [--runner <profile>] [--data-dir <path>] [--json]"
+    );
     expect(result.stdout).toContain("momentum status [goal-id] [--data-dir <path>] [--json]");
     expect(result.stdout).toContain("momentum handoff <goal-id> [--data-dir <path>] [--json]");
     expect(result.stdout).toContain("momentum doctor [--json]");
@@ -101,7 +103,7 @@ describe("momentum CLI scaffold", () => {
 
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Momentum doctor: ok");
-    expect(result.stdout).toContain("scope: NGX-238 verification-commit-reset-handoff");
+    expect(result.stdout).toContain("scope: NGX-246 goal-start-queued-enqueue");
     expect(result.stderr).toBe("");
   });
 
@@ -114,7 +116,7 @@ describe("momentum CLI scaffold", () => {
       ok: true,
       command: "doctor",
       version: VERSION,
-      milestone: "NGX-238 verification-commit-reset-handoff"
+      milestone: "NGX-246 goal-start-queued-enqueue"
     });
     expect(result.stderr).toBe("");
   });
@@ -280,17 +282,139 @@ describe("momentum CLI scaffold", () => {
     expect(result.stderr).toBe("");
   });
 
-  it("requires --foreground for goal start", async () => {
-    const result = await run(["goal", "start", "goal.md", "--json"]);
-    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+  it("goal start (default queued path) creates a queued goal and a pending goal_iteration job without running the runner", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
 
-    expect(result.code).toBe(2);
+    const result = await run([
+      "goal", "start", goalFile,
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--runner", "fake",
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
     expect(payload).toMatchObject({
-      ok: false,
-      code: "usage_error",
-      message: "Missing required --foreground for Milestone 1 goal start."
+      ok: true,
+      command: "goal start",
+      mode: "queued",
+      goalState: "queued",
+      jobType: "goal_iteration",
+      jobState: "pending",
+      title: "CLI Test Goal",
+      repo,
+      branch: "momentum/cli-test-goal",
+      baseHead: null,
+      runner: "fake",
+      iteration: 1,
+      resumed: false,
+      enqueueCreated: true
     });
-    expect(result.stdout).toBe("");
+    expect(typeof payload["goalId"]).toBe("string");
+    expect(typeof payload["jobId"]).toBe("string");
+    expect(payload["idempotencyKey"]).toBe(
+      `goal:${payload["goalId"]}:iteration:1`
+    );
+    expect(typeof payload["nextAction"]).toBe("string");
+    expect(payload["nextAction"] as string).toContain("worker");
+    expect(payload["iterationArtifactDir"]).toBe(
+      path.join(dataDir, "goals", payload["goalId"] as string, "iterations", "1")
+    );
+
+    expect(fs.existsSync(path.join(repo, FAKE_RUNNER_FIXTURE_FILENAME))).toBe(
+      false
+    );
+
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      const goalRow = db
+        .prepare("SELECT state FROM goals WHERE id = ?")
+        .get(payload["goalId"] as string) as { state: string };
+      expect(goalRow.state).toBe("queued");
+
+      const jobs = db
+        .prepare("SELECT * FROM jobs WHERE goal_id = ? ORDER BY created_at ASC")
+        .all(payload["goalId"] as string) as Array<Record<string, unknown>>;
+      expect(jobs).toHaveLength(1);
+      expect(jobs[0]).toMatchObject({
+        id: payload["jobId"],
+        type: "goal_iteration",
+        state: "pending",
+        iteration: 1,
+        idempotency_key: payload["idempotencyKey"]
+      });
+
+      const events = db
+        .prepare("SELECT type FROM events WHERE goal_id = ? ORDER BY id ASC")
+        .all(payload["goalId"] as string) as Array<{ type: string }>;
+      expect(events.map((row) => row.type)).toEqual(["job.enqueued"]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("goal start (default queued path) is idempotent for the same goal spec", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+
+    const first = await run([
+      "goal", "start", goalFile,
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    const firstPayload = JSON.parse(first.stdout) as Record<string, unknown>;
+
+    const second = await run([
+      "goal", "start", goalFile,
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    const secondPayload = JSON.parse(second.stdout) as Record<string, unknown>;
+
+    expect(second.code).toBe(0);
+    expect(secondPayload["goalId"]).toBe(firstPayload["goalId"]);
+    expect(secondPayload["jobId"]).toBe(firstPayload["jobId"]);
+    expect(secondPayload["resumed"]).toBe(true);
+    expect(secondPayload["enqueueCreated"]).toBe(false);
+
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      const jobCount = db
+        .prepare("SELECT count(*) AS c FROM jobs WHERE goal_id = ?")
+        .get(firstPayload["goalId"] as string) as { c: number };
+      expect(jobCount.c).toBe(1);
+
+      const enqueueEvents = db
+        .prepare(
+          "SELECT count(*) AS c FROM events WHERE goal_id = ? AND type = 'job.enqueued'"
+        )
+        .get(firstPayload["goalId"] as string) as { c: number };
+      expect(enqueueEvents.c).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("goal start (default queued path) text mode prints queued summary and next action", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+
+    const result = await run([
+      "goal", "start", goalFile,
+      "--repo", repo,
+      "--data-dir", dataDir
+    ]);
+
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("Goal initialized:");
+    expect(result.stdout).toContain("Goal state: queued");
+    expect(result.stdout).toContain("goal_iteration, pending, iteration 1");
+    expect(result.stdout).toMatch(/Next: Goal queued\. A goal_iteration worker/);
   });
 
   it("rejects --data-dir without a value", async () => {

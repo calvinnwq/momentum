@@ -142,7 +142,7 @@ describe("Milestone 1 end-to-end smoke", () => {
       expect(result.stdout.startsWith("Momentum\n")).toBe(true);
       expect(result.stdout).toContain("Usage:");
       expect(result.stdout).toContain(
-        "momentum goal start <goal.md> [--repo <path>] --foreground [--runner <profile>] [--data-dir <path>] [--json]"
+        "momentum goal start <goal.md> [--repo <path>] [--foreground] [--runner <profile>] [--data-dir <path>] [--json]"
       );
       expect(result.stdout).toContain(
         "momentum status [goal-id] [--data-dir <path>] [--json]"
@@ -152,7 +152,7 @@ describe("Milestone 1 end-to-end smoke", () => {
       );
       expect(result.stdout).toContain("momentum doctor [--json]");
       expect(result.stdout).toContain(
-        "Milestone 1 supports Goal parsing"
+        "Default goal start enqueues a goal_iteration job"
       );
     },
     60_000
@@ -230,7 +230,7 @@ describe("Milestone 1 end-to-end smoke", () => {
       const commands = payload["commands"];
       expect(Array.isArray(commands)).toBe(true);
       expect(commands).toEqual([
-        "momentum goal start <goal.md> [--repo <path>] --foreground [--runner <profile>] [--data-dir <path>] [--json]",
+        "momentum goal start <goal.md> [--repo <path>] [--foreground] [--runner <profile>] [--data-dir <path>] [--json]",
         "momentum status [goal-id] [--data-dir <path>] [--json]",
         "momentum handoff <goal-id> [--data-dir <path>] [--json]",
         "momentum doctor [--json]"
@@ -240,44 +240,130 @@ describe("Milestone 1 end-to-end smoke", () => {
   );
 
   it(
-    "goal start --json surfaces usage_error when --foreground is omitted and does not touch the data dir",
+    "goal start --json defaults to the queued enqueue path, creates a pending goal_iteration job, and does not run the runner",
     () => {
+      const repo = initDisposableRepo();
       const dataDir = makeTempDir("momentum-smoke-data-");
       const goalFile = path.join(dataDir, "goal.md");
       fs.writeFileSync(goalFile, SMOKE_GOAL_SPEC, "utf-8");
-      const beforeEntries = fs.readdirSync(dataDir).sort();
+
+      const baseHead = runGit(repo, ["rev-parse", "HEAD"]).trim();
 
       const result = runCliBinary([
         "goal",
         "start",
         goalFile,
+        "--repo",
+        repo,
         "--data-dir",
         dataDir,
+        "--runner",
+        "fake",
         "--json"
       ]);
 
-      expect(result.code).toBe(2);
-      expect(result.stdout).toBe("");
-      const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+      expect(result.code, `goal start stderr: ${result.stderr}`).toBe(0);
+      expect(result.stderr).toBe("");
+      const payload = JSON.parse(result.stdout) as Record<string, unknown>;
       expect(payload).toMatchObject({
-        ok: false,
-        code: "usage_error",
-        message: "Missing required --foreground for Milestone 1 goal start."
+        ok: true,
+        command: "goal start",
+        mode: "queued",
+        goalState: "queued",
+        jobType: "goal_iteration",
+        jobState: "pending",
+        title: "Smoke Goal",
+        runner: "fake",
+        repo,
+        baseHead: null,
+        iteration: 1,
+        resumed: false,
+        enqueueCreated: true
       });
-      expect(payload).not.toHaveProperty("command");
-      const commands = payload["commands"];
-      expect(Array.isArray(commands)).toBe(true);
-      expect(commands).toEqual([
-        "momentum goal start <goal.md> [--repo <path>] --foreground [--runner <profile>] [--data-dir <path>] [--json]",
-        "momentum status [goal-id] [--data-dir <path>] [--json]",
-        "momentum handoff <goal-id> [--data-dir <path>] [--json]",
-        "momentum doctor [--json]"
-      ]);
+      const goalId = payload["goalId"] as string;
+      const jobId = payload["jobId"] as string;
+      expect(typeof goalId).toBe("string");
+      expect(goalId.length).toBeGreaterThan(0);
+      expect(typeof jobId).toBe("string");
+      expect(payload["idempotencyKey"]).toBe(`goal:${goalId}:iteration:1`);
+      expect(typeof payload["nextAction"]).toBe("string");
 
-      const afterEntries = fs.readdirSync(dataDir).sort();
-      expect(afterEntries).toEqual(beforeEntries);
-      expect(fs.existsSync(path.join(dataDir, "momentum.db"))).toBe(false);
-      expect(fs.existsSync(path.join(dataDir, "goals"))).toBe(false);
+      // Runner did NOT execute in the default path: no fake fixture, no branch, no commits.
+      expect(
+        fs.existsSync(path.join(repo, FAKE_RUNNER_FIXTURE_FILENAME))
+      ).toBe(false);
+      expect(runGit(repo, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
+      const branchListing = runGit(repo, ["branch", "--list", "momentum/*"]);
+      expect(branchListing).toBe("");
+
+      const db = new DatabaseSync(path.join(dataDir, "momentum.db"));
+      try {
+        const goalRow = db
+          .prepare("SELECT state FROM goals WHERE id = ?")
+          .get(goalId) as { state: string };
+        expect(goalRow.state).toBe("queued");
+
+        const jobRows = db
+          .prepare(
+            "SELECT id, type, state, iteration, idempotency_key FROM jobs WHERE goal_id = ?"
+          )
+          .all(goalId) as Array<Record<string, unknown>>;
+        expect(jobRows).toHaveLength(1);
+        expect(jobRows[0]).toMatchObject({
+          id: jobId,
+          type: "goal_iteration",
+          state: "pending",
+          iteration: 1,
+          idempotency_key: `goal:${goalId}:iteration:1`
+        });
+
+        const events = (
+          db
+            .prepare(
+              "SELECT type FROM events WHERE goal_id = ? ORDER BY id ASC"
+            )
+            .all(goalId) as Array<{ type: string }>
+        ).map((row) => row.type);
+        expect(events).toEqual(["job.enqueued"]);
+      } finally {
+        db.close();
+      }
+
+      // Idempotent re-enqueue: rerunning the same spec returns the same goal/job and emits no new event.
+      const second = runCliBinary([
+        "goal",
+        "start",
+        goalFile,
+        "--repo",
+        repo,
+        "--data-dir",
+        dataDir,
+        "--runner",
+        "fake",
+        "--json"
+      ]);
+      expect(second.code, `second goal start stderr: ${second.stderr}`).toBe(0);
+      const secondPayload = JSON.parse(second.stdout) as Record<string, unknown>;
+      expect(secondPayload["goalId"]).toBe(goalId);
+      expect(secondPayload["jobId"]).toBe(jobId);
+      expect(secondPayload["resumed"]).toBe(true);
+      expect(secondPayload["enqueueCreated"]).toBe(false);
+
+      const db2 = new DatabaseSync(path.join(dataDir, "momentum.db"));
+      try {
+        const enqueueCount = db2
+          .prepare(
+            "SELECT count(*) AS c FROM events WHERE goal_id = ? AND type = 'job.enqueued'"
+          )
+          .get(goalId) as { c: number };
+        expect(enqueueCount.c).toBe(1);
+        const jobCount = db2
+          .prepare("SELECT count(*) AS c FROM jobs WHERE goal_id = ?")
+          .get(goalId) as { c: number };
+        expect(jobCount.c).toBe(1);
+      } finally {
+        db2.close();
+      }
     },
     60_000
   );

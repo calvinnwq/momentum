@@ -10,12 +10,19 @@ import {
   resolveGoalArtifactPaths,
   type GoalArtifactPaths
 } from "./artifacts.js";
+import {
+  GOAL_ITERATION_JOB_TYPE,
+  enqueueGoalIterationJob
+} from "./queue-jobs.js";
+
+export type GoalInitMode = "foreground" | "queued";
 
 export type GoalInitOptions = {
   goalPath: string;
   repoOverride?: string;
   runnerOverride?: string;
   dataDirOptions?: DataDirOptions;
+  mode?: GoalInitMode;
 };
 
 export type GoalInitError = { ok: false; error: string };
@@ -23,14 +30,29 @@ export type GoalInitSuccess = {
   ok: true;
   goalId: string;
   jobId: string;
+  jobType: "foreground_iteration" | typeof GOAL_ITERATION_JOB_TYPE;
+  jobState: "pending";
+  goalState: "initialized" | "queued";
+  iteration: number;
+  idempotencyKey: string | null;
   spec: GoalSpec;
   dataDir: string;
   artifactPaths: GoalArtifactPaths;
   resumed: boolean;
+  enqueueCreated: boolean;
 };
 export type GoalInitResult = GoalInitError | GoalInitSuccess;
 
+export function buildIterationIdempotencyKey(
+  goalId: string,
+  iteration: number
+): string {
+  return `goal:${goalId}:iteration:${iteration}`;
+}
+
 export function initGoal(options: GoalInitOptions): GoalInitResult {
+  const mode: GoalInitMode = options.mode ?? "foreground";
+
   let rawContent: string;
   try {
     rawContent = readFileSync(options.goalPath, "utf-8");
@@ -54,20 +76,55 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
     const dataDir = resolveDataDir(options.dataDirOptions);
     db = openDb(dataDir);
 
-    const existingGoal = findInitializedGoals(db, spec).find((goal) =>
+    const resumeState = mode === "foreground" ? "initialized" : "queued";
+    const existingGoal = findResumableGoals(db, spec, resumeState).find((goal) =>
       goalArtifactMatches(goal, rawContent)
     );
     if (existingGoal) {
       const artifactPaths = resolveGoalArtifactPaths(dataDir, existingGoal.id);
-      const jobId = ensureInitialJob(db, existingGoal.id, artifactPaths.iteration1Dir);
+      if (mode === "foreground") {
+        const jobId = ensureInitialForegroundJob(
+          db,
+          existingGoal.id,
+          artifactPaths.iteration1Dir
+        );
+        return {
+          ok: true,
+          goalId: existingGoal.id,
+          jobId,
+          jobType: "foreground_iteration",
+          jobState: "pending",
+          goalState: "initialized",
+          iteration: 1,
+          idempotencyKey: null,
+          spec,
+          dataDir,
+          artifactPaths,
+          resumed: true,
+          enqueueCreated: false
+        };
+      }
+      const idempotencyKey = buildIterationIdempotencyKey(existingGoal.id, 1);
+      const enqueue = enqueueGoalIterationJob(db, {
+        goalId: existingGoal.id,
+        iteration: 1,
+        idempotencyKey,
+        artifactPath: artifactPaths.iteration1Dir
+      });
       return {
         ok: true,
         goalId: existingGoal.id,
-        jobId,
+        jobId: enqueue.jobId,
+        jobType: GOAL_ITERATION_JOB_TYPE,
+        jobState: "pending",
+        goalState: "queued",
+        iteration: 1,
+        idempotencyKey,
         spec,
         dataDir,
         artifactPaths,
-        resumed: true
+        resumed: true,
+        enqueueCreated: enqueue.created
       };
     }
 
@@ -75,6 +132,7 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
     const now = Date.now();
     const artifactPaths = initGoalArtifacts(dataDir, goalId, rawContent);
 
+    const goalState = mode === "foreground" ? "initialized" : "queued";
     db.prepare(
       `INSERT INTO goals
          (id, title, repo, runner, branch, max_iterations, verification,
@@ -89,22 +147,58 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
       spec.max_iterations,
       JSON.stringify(spec.verification),
       spec.verification_timeout_sec,
-      "initialized",
+      goalState,
       artifactPaths.goalDir,
       now,
       now
     );
 
-    const jobId = createInitialJob(db, goalId, artifactPaths.iteration1Dir, now);
+    if (mode === "foreground") {
+      const jobId = createForegroundJob(
+        db,
+        goalId,
+        artifactPaths.iteration1Dir,
+        now
+      );
+      return {
+        ok: true,
+        goalId,
+        jobId,
+        jobType: "foreground_iteration",
+        jobState: "pending",
+        goalState: "initialized",
+        iteration: 1,
+        idempotencyKey: null,
+        spec,
+        dataDir,
+        artifactPaths,
+        resumed: false,
+        enqueueCreated: false
+      };
+    }
 
+    const idempotencyKey = buildIterationIdempotencyKey(goalId, 1);
+    const enqueue = enqueueGoalIterationJob(db, {
+      goalId,
+      iteration: 1,
+      idempotencyKey,
+      artifactPath: artifactPaths.iteration1Dir,
+      now
+    });
     return {
       ok: true,
       goalId,
-      jobId,
+      jobId: enqueue.jobId,
+      jobType: GOAL_ITERATION_JOB_TYPE,
+      jobState: "pending",
+      goalState: "queued",
+      iteration: 1,
+      idempotencyKey,
       spec,
       dataDir,
       artifactPaths,
-      resumed: false
+      resumed: false,
+      enqueueCreated: enqueue.created
     };
   } catch (error) {
     return { ok: false, error: formatInitError(error) };
@@ -138,7 +232,11 @@ type JobRow = {
   id: string;
 };
 
-function findInitializedGoals(db: MomentumDb, spec: GoalSpec): GoalRow[] {
+function findResumableGoals(
+  db: MomentumDb,
+  spec: GoalSpec,
+  state: "initialized" | "queued"
+): GoalRow[] {
   return db
     .prepare(
       `SELECT * FROM goals
@@ -149,7 +247,7 @@ function findInitializedGoals(db: MomentumDb, spec: GoalSpec): GoalRow[] {
          AND max_iterations = ?
          AND verification = ?
          AND verification_timeout_sec = ?
-         AND state = 'initialized'
+         AND state = ?
        ORDER BY created_at ASC`
     )
     .all(
@@ -159,7 +257,8 @@ function findInitializedGoals(db: MomentumDb, spec: GoalSpec): GoalRow[] {
       spec.runner,
       spec.max_iterations,
       JSON.stringify(spec.verification),
-      spec.verification_timeout_sec
+      spec.verification_timeout_sec,
+      state
     ) as
     | GoalRow[];
 }
@@ -179,7 +278,7 @@ function formatInitError(error: unknown): string {
   return "Failed to initialize goal.";
 }
 
-function ensureInitialJob(
+function ensureInitialForegroundJob(
   db: MomentumDb,
   goalId: string,
   artifactPath: string
@@ -197,10 +296,10 @@ function ensureInitialJob(
     return existing.id;
   }
 
-  return createInitialJob(db, goalId, artifactPath, Date.now());
+  return createForegroundJob(db, goalId, artifactPath, Date.now());
 }
 
-function createInitialJob(
+function createForegroundJob(
   db: MomentumDb,
   goalId: string,
   artifactPath: string,
