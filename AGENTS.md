@@ -22,6 +22,7 @@ Typical loop:
 - NGX-245 (M2-01 queue schema, event taxonomy, idempotent enqueue, repo locks, migration system) is done.
 - NGX-246 (M2-02 default enqueue path for `goal start`; `--foreground` retained as the Milestone 1 inline debug path) is done.
 - NGX-247 (M2-03 worker execution slice: `momentum worker run` claims one queued `goal_iteration`, acquires the repo lock, refreshes lease/heartbeat metadata, executes the iteration, and releases the lock) is done.
+- NGX-248 (M2-04 queued `goal_iteration` handler: queued execution reuses `finalizeIteration` for commit/reset, populates `jobs.result_path` / `jobs.error_path`, emits `job.succeeded` / `job.failed` with commit + artifact pointers, surfaces those pointers through `status --json` and `handoff`, and extends the fake runner with `goal_complete` and per-iteration trajectory envs for NGX-249 chaining) is done.
 
 ## Stack and workflow commands
 - Runtime: Node.js

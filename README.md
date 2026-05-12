@@ -2,7 +2,7 @@
 
 Momentum is a TypeScript CLI targeting Node.js for autonomous repo-work orchestration. It turns a durable Goal into verified Iterations, with local artifacts and handoff state.
 
-Milestone 1 (Foreground Proof Loop) is complete. Milestone 2 (Queue and Worker Model) is in progress. NGX-235 (scaffold), NGX-236 (Goal spec parsing, data-dir resolution, SQLite init, artifact layout), NGX-237 (fake runner, foreground iteration transaction), NGX-238 (Momentum-owned verification, commit/reset transaction, `status` and `handoff` commands), and NGX-239 (Milestone 1 end-to-end smoke and docs) are complete. NGX-245 (M2-01 queue schema, event taxonomy, idempotent enqueue, repo locks, and migration system) is complete. NGX-246 (M2-02 default enqueue path for `goal start`) is complete. NGX-247 (M2-03 worker execution slice: `momentum worker run` claims one queued `goal_iteration` job, acquires the repo lock, refreshes lease/heartbeat metadata, runs the iteration, and releases the lock) is complete.
+Milestone 1 (Foreground Proof Loop) is complete. Milestone 2 (Queue and Worker Model) is in progress. NGX-235 (scaffold), NGX-236 (Goal spec parsing, data-dir resolution, SQLite init, artifact layout), NGX-237 (fake runner, foreground iteration transaction), NGX-238 (Momentum-owned verification, commit/reset transaction, `status` and `handoff` commands), and NGX-239 (Milestone 1 end-to-end smoke and docs) are complete. NGX-245 (M2-01 queue schema, event taxonomy, idempotent enqueue, repo locks, and migration system) is complete. NGX-246 (M2-02 default enqueue path for `goal start`) is complete. NGX-247 (M2-03 worker execution slice: `momentum worker run` claims one queued `goal_iteration` job, acquires the repo lock, refreshes lease/heartbeat metadata, runs the iteration, and releases the lock) is complete. NGX-248 (M2-04 queued `goal_iteration` handler: queued execution reuses `finalizeIteration` for commit/reset, populates `jobs.result_path` and `jobs.error_path`, emits `job.succeeded` / `job.failed` with commit and per-iteration artifact pointers, surfaces those pointers through `status --json` and `handoff`, and extends the fake runner with `goal_complete` plus per-iteration trajectory envs) is complete.
 
 ## Milestone 1 Scope
 
@@ -39,7 +39,7 @@ node dist/index.js --help
 node dist/index.js doctor
 ```
 
-The `pnpm test` suite includes a built-binary end-to-end smoke (`test/smoke.test.ts`) that builds `dist/` via `pnpm build`, initializes a disposable git repo under the OS temp dir, drives `goal start`, `status`, and `handoff` through the spawned CLI, and asserts the default queued enqueue path (no runner execution, idempotent re-enqueue, and queued job/event SQLite state), the foreground success path (exactly one Momentum commit on the Momentum branch with the verification log, handoff artifacts, and SQLite database in place), and the verification-failure reset path (worktree clean and HEAD back at base after `false` verification).
+The `pnpm test` suite includes a built-binary end-to-end smoke (`test/smoke.test.ts`) that builds `dist/` via `pnpm build`, initializes a disposable git repo under the OS temp dir, drives `goal start`, `worker run`, `status`, and `handoff` through the spawned CLI, and asserts: the default queued enqueue path (no runner execution, idempotent re-enqueue, and queued job/event SQLite state); the foreground success path (exactly one Momentum commit on the Momentum branch with the verification log, handoff artifacts, and SQLite database in place); the foreground verification-failure reset path (worktree clean and HEAD back at base after `false` verification); and the queued `worker run` success / verification-failure / runner-failure paths, which assert the full `job.enqueued` → `job.claimed` → `job.heartbeat` → `iteration_started` → (`iteration_completed` | `iteration_failed`) → (`job.succeeded` | `job.failed`) event chain, the commit + artifact pointers on `job.succeeded`, the `artifacts` block on `job.failed`, and the `result_path` / `error_path` surface through `status --json` and `handoff`.
 
 ## Goal Spec
 
@@ -166,8 +166,10 @@ Consumes queued `goal_iteration` work in single-job batches:
 - Claims the oldest pending `goal_iteration` job and stamps `worker` / `lease` metadata.
 - Acquires a repo lock for the goal repo before launching the iteration.
 - Refreshes lease metadata with a heartbeat before execution.
-- Releases the repo lock and persists iteration completion/failure state and job transition.
-- Emits a deterministic JSON result (`code: no_work | not_executed | ran_job`) for automation.
+- Executes the claimed `goal_iteration` through the same `finalizeIteration` transaction as the foreground path: runner → Momentum-owned verification → commit on verified success or hard reset to `baseHead` on runner/verification/commit failure.
+- Persists `jobs.result_path` to `iterations/<n>/result.json` on success and `jobs.error_path` to `iterations/<n>/verification.log` (or `runner.log` for pre-runner failures) on failure.
+- Emits `job.succeeded` with commit + artifact pointers (`commit_sha`, `commit_message`, `branch`, `branch_created`, `base_head`, `goal_complete`, `result_path`, and an `artifacts` block with `iteration_dir` / `prompt` / `runner_log` / `verification_log` / `result_json`) or `job.failed` with the matching `artifacts` block on the failure path.
+- Releases the repo lock with the appropriate `recovery_status` and emits a deterministic CLI JSON result (`code: no_work | not_executed | ran_job`) for automation.
 
 `--worker-id` is optional; default is `worker-<pid>`. For queued work, use:
 
@@ -176,6 +178,8 @@ momentum worker run --data-dir <path>
 ```
 
 Local interrupt policy: `worker run` is a foreground one-shot command. If the process is interrupted mid-run, there is no automatic stale-lease recovery in this milestone; jobs/locks may remain claimed or active until manual intervention or lock expiry. Re-running the command is the supported local recovery path in Milestone 2.
+
+`status --json` and `handoff` surface the same `result_path` / `error_path` pointers under `latestJob` (and in `handoff.md` under the latest-job section) so downstream tooling can locate the per-iteration artifacts without re-reading the event log.
 
 ### `doctor`
 
