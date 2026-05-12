@@ -37,11 +37,14 @@ type ParsedFlags = {
 };
 
 const COMMANDS = [
-  "momentum goal start <goal.md> [--repo <path>] --foreground [--runner <profile>] [--data-dir <path>] [--json]",
+  "momentum goal start <goal.md> [--repo <path>] [--foreground] [--runner <profile>] [--data-dir <path>] [--json]",
   "momentum status [goal-id] [--data-dir <path>] [--json]",
   "momentum handoff <goal-id> [--data-dir <path>] [--json]",
   "momentum doctor [--json]"
 ];
+
+const QUEUED_NEXT_ACTION =
+  "Goal queued. A goal_iteration worker is required to execute this job; the worker loop is not yet implemented (Milestone 2 in progress).";
 
 export async function runCli(argv: string[], io: CliIo = defaultIo()): Promise<number> {
   const parsed = parseFlags(argv);
@@ -87,7 +90,7 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
     version: VERSION,
     node: process.version,
     platform: process.platform,
-    milestone: "NGX-238 verification-commit-reset-handoff"
+    milestone: "NGX-246 goal-start-queued-enqueue"
   };
 
   if (parsed.json) {
@@ -117,10 +120,6 @@ function goalStart(parsed: ParsedFlags, io: CliIo): number {
     return usageError(`Unexpected argument for goal start: ${parsed.args[3]}`, parsed, io);
   }
 
-  if (!parsed.foreground) {
-    return usageError("Missing required --foreground for Milestone 1 goal start.", parsed, io);
-  }
-
   const dataDirOptions: DataDirOptions = {};
   if (io.env !== undefined) dataDirOptions.env = io.env;
   if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
@@ -129,6 +128,7 @@ function goalStart(parsed: ParsedFlags, io: CliIo): number {
   if (parsed.repo !== undefined) initOptions.repoOverride = parsed.repo;
   if (parsed.runner !== undefined) initOptions.runnerOverride = parsed.runner;
   initOptions.dataDirOptions = dataDirOptions;
+  initOptions.mode = parsed.foreground ? "foreground" : "queued";
 
   const result = initGoal(initOptions);
 
@@ -147,9 +147,61 @@ function goalStart(parsed: ParsedFlags, io: CliIo): number {
     return 1;
   }
 
+  if (!parsed.foreground) {
+    return emitGoalStartQueued(parsed, io, result);
+  }
+
   const iteration = runIteration(result);
 
   return emitGoalStart(parsed, io, result, iteration);
+}
+
+function emitGoalStartQueued(
+  parsed: ParsedFlags,
+  io: CliIo,
+  init: GoalInitSuccess
+): number {
+  const payload = {
+    ok: true,
+    command: "goal start",
+    mode: "queued" as const,
+    goalId: init.goalId,
+    goalState: init.goalState,
+    jobId: init.jobId,
+    jobType: init.jobType,
+    jobState: init.jobState,
+    iteration: init.iteration,
+    idempotencyKey: init.idempotencyKey,
+    title: init.spec.title,
+    repo: init.spec.repo ?? null,
+    branch: init.spec.branch,
+    baseHead: null,
+    runner: init.spec.runner,
+    dataDir: init.dataDir,
+    artifactDir: init.artifactPaths.goalDir,
+    iterationArtifactDir: init.artifactPaths.iteration1Dir,
+    resumed: init.resumed,
+    enqueueCreated: init.enqueueCreated,
+    nextAction: QUEUED_NEXT_ACTION
+  };
+
+  if (parsed.json) {
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  write(io.stdout, [
+    `${init.resumed ? "Goal resumed" : "Goal initialized"}: ${init.goalId}`,
+    `Title: ${init.spec.title}`,
+    `Artifact dir: ${init.artifactPaths.goalDir}`,
+    `Repo: ${init.spec.repo ?? "(unset)"}`,
+    `Branch (planned): ${init.spec.branch}`,
+    `Goal state: ${init.goalState}`,
+    `Job: ${init.jobId} (${init.jobType}, ${init.jobState}, iteration ${init.iteration})`,
+    `Next: ${QUEUED_NEXT_ACTION}`,
+    ""
+  ].join("\n"));
+  return 0;
 }
 
 function runIteration(init: GoalInitSuccess): ExecuteIterationJobResult {
@@ -176,8 +228,10 @@ function emitGoalStart(
 ): number {
   const base = {
     command: "goal start",
+    mode: "foreground" as const,
     goalId: init.goalId,
     jobId: init.jobId,
+    jobType: init.jobType,
     title: init.spec.title,
     dataDir: init.dataDir,
     artifactDir: init.artifactPaths.goalDir,
@@ -190,6 +244,8 @@ function emitGoalStart(
       ok: true,
       ...base,
       state: iteration.goalState,
+      goalState: iteration.goalState,
+      jobState: iteration.jobState,
       iteration: {
         ok: true,
         iteration: iter.iteration,
@@ -237,6 +293,8 @@ function emitGoalStart(
     ok: false,
     ...base,
     state: iteration.goalState,
+    goalState: iteration.goalState,
+    jobState: iteration.jobState,
     code: "iteration_failed",
     message,
     iteration: {
@@ -555,7 +613,7 @@ function renderHelp(): string {
     "Usage:",
     ...COMMANDS.map((command) => `  ${command}`),
     "",
-    "Milestone 1 supports Goal parsing, data/artifact initialization, a foreground iteration that invokes the fake runner, read-only status, and handoff artifact generation.",
+    "Default goal start enqueues a goal_iteration job for a future worker; pass --foreground to keep the Milestone 1 inline iteration.",
     ""
   ].join("\n");
 }
