@@ -62,6 +62,7 @@ export type WorkerRunNoClaimResult = {
 
 export type WorkerRunSuccessResult = {
   code: "ran_job";
+  ok: boolean;
   workerId: string;
   dataDir: string;
   outcome: "ran_job";
@@ -368,6 +369,7 @@ export function runWorkerOnce(input: WorkerRunInput): WorkerRunResult {
 
   return {
     code: "ran_job",
+    ok: iterationResult.ok && reducerError === null,
     ...baseData,
     outcome: "ran_job",
     goalId: goal.id,
@@ -382,7 +384,9 @@ export function runWorkerOnce(input: WorkerRunInput): WorkerRunResult {
     jobIterationResult: iterationResult,
     reducer,
     reducerError,
-    message: iterationResult.ok
+    message: reducerError !== null
+      ? `Ran goal ${goal.id} iteration ${runningJob.iteration}, but reducer failed: ${reducerError}`
+      : iterationResult.ok
       ? `Ran goal ${goal.id} iteration ${runningJob.iteration} as claimed job ${runningJob.id}.`
       : `Ran goal ${goal.id} iteration ${runningJob.iteration} with runner outcome ${summarizeIterationFailure(
         iterationResult.iteration

@@ -1004,7 +1004,7 @@ describe("runWorkerOnce", () => {
     }
   });
 
-  it("captures reducer exceptions as goal.reduce_failed without stranding the worker", () => {
+  it("reports reducer exceptions as failed worker runs", () => {
     const dataDir = makeTempDir("momentum-worker-run-reducer-throw-");
     const repo = initRepo();
     const seed = seedQueuedGoal(dataDir, repo);
@@ -1025,6 +1025,7 @@ describe("runWorkerOnce", () => {
 
       expect(out.code).toBe("ran_job");
       if (out.code !== "ran_job") return;
+      expect(out.ok).toBe(false);
       expect(out.jobIterationResult.ok).toBe(true);
       expect(out.reducer).toBeNull();
       expect(out.reducerError).toBe("synthetic reducer failure");

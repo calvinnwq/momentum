@@ -127,17 +127,14 @@ function emitWorkerRunResult(
       ...result
     };
     const payload = {
-      ok:
-        result.code === "ran_job"
-          ? result.jobIterationResult.ok
-          : true,
+      ok: result.code === "ran_job" ? result.ok : true,
       ...base
     } as Record<string, unknown>;
 
     writeJson(io.stdout, payload);
     return result.code === "no_work" || result.code === "not_executed"
       ? 0
-      : result.jobIterationResult.ok
+      : result.ok
         ? 0
         : 1;
   }
@@ -153,7 +150,7 @@ function emitWorkerRunResult(
   }
 
   const iterResult = result.jobIterationResult;
-  const status = iterResult.ok ? "succeeded" : "failed";
+  const status = result.ok ? "succeeded" : "failed";
   write(io.stdout, [
     `Worker ${result.workerId} ${status} goal ${result.goalId} iteration ${result.iteration}`,
     `Job: ${result.jobId}`,
@@ -164,7 +161,7 @@ function emitWorkerRunResult(
     ""
   ].join("\n"));
 
-  return iterResult.ok ? 0 : 1;
+  return result.ok ? 0 : 1;
 }
 
 function doctor(parsed: ParsedFlags, io: CliIo): number {
