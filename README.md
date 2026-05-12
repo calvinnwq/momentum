@@ -2,7 +2,7 @@
 
 Momentum is a TypeScript CLI targeting Node.js for autonomous repo-work orchestration. It turns a durable Goal into verified Iterations, with local artifacts and handoff state.
 
-Milestone 1 (Foreground Proof Loop) is complete. Milestone 2 (Queue and Worker Model) is in progress. NGX-235 (scaffold), NGX-236 (Goal spec parsing, data-dir resolution, SQLite init, artifact layout), NGX-237 (fake runner, foreground iteration transaction), NGX-238 (Momentum-owned verification, commit/reset transaction, `status` and `handoff` commands), and NGX-239 (Milestone 1 end-to-end smoke and docs) are complete. NGX-245 (M2-01 queue schema, event taxonomy, idempotent enqueue, repo locks, and migration system) is complete. NGX-246 (M2-02 default enqueue path for `goal start`) is complete: the worker loop that drains `goal_iteration` jobs is the next M2 increment.
+Milestone 1 (Foreground Proof Loop) is complete. Milestone 2 (Queue and Worker Model) is in progress. NGX-235 (scaffold), NGX-236 (Goal spec parsing, data-dir resolution, SQLite init, artifact layout), NGX-237 (fake runner, foreground iteration transaction), NGX-238 (Momentum-owned verification, commit/reset transaction, `status` and `handoff` commands), and NGX-239 (Milestone 1 end-to-end smoke and docs) are complete. NGX-245 (M2-01 queue schema, event taxonomy, idempotent enqueue, repo locks, and migration system) is complete. NGX-246 (M2-02 default enqueue path for `goal start`) is complete. NGX-247 (M2-03 worker execution slice: `momentum worker run` claims one queued `goal_iteration` job, acquires the repo lock, refreshes lease/heartbeat metadata, runs the iteration, and releases the lock) is complete.
 
 ## Milestone 1 Scope
 
@@ -206,7 +206,7 @@ State is stored under `--data-dir <path>`, then the `MOMENTUM_HOME` environment 
           result.json          # Runner result envelope
 ```
 
-`goal.md`, `ledger.md`, `handoff.md`, `handoff.json`, and the iteration artifact files are created up-front during goal initialization; `handoff.md`, `prompt.md`, `runner.log`, and `verification.log` start empty, while `handoff.json` and `result.json` start as `{}`. `goal start --foreground` populates the iteration artifacts during inline execution; the queued path leaves them as placeholders until a future worker executes the job.
+`goal.md`, `ledger.md`, `handoff.md`, `handoff.json`, and the iteration artifact files are created up-front during goal initialization; `handoff.md`, `prompt.md`, `runner.log`, and `verification.log` start empty, while `handoff.json` and `result.json` start as `{}`. `goal start --foreground` populates the iteration artifacts during inline execution; the queued path leaves them as placeholders until `momentum worker run` claims and executes the job.
 
 ## Failure and Reset Semantics
 
@@ -264,7 +264,7 @@ Milestone 1 intentionally omits the following; they belong to later milestones o
 - Automatic stale-lease recovery in background loops (Milestone 2 queue execution is wired to local worker claims; stale-repo-lock handling is manual for now).
 - Daemon lifecycle management, stop/cancel commands, and background runner supervision (Milestone 2/3).
 - Real runner profiles beyond `fake`; only the fake runner is wired into the foreground iteration.
-- Multi-iteration loops; `max_iterations` is parsed, the default path only enqueues iteration 1, and `--foreground` executes exactly one inline iteration.
+- Multi-iteration loops; `max_iterations` is parsed, the default path only enqueues iteration 1, `--foreground` executes exactly one inline iteration, and `worker run` is a single-shot consumer (one job per invocation, no draining loop).
 - Worktree management and remote git operations (`fetch`, `pull`, `push`, `rebase`).
 - GitHub, Linear, and other external integrations driven from inside Momentum.
 - A dashboard or other UI surfaces beyond the CLI JSON/text outputs.

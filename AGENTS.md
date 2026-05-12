@@ -20,7 +20,8 @@ Typical loop:
 - NGX-238 (Momentum-owned verification runner, git transaction commit/reset, finalizeIteration orchestrator, `status` and `handoff` commands, stable CLI JSON shapes) is done.
 - NGX-239 (end-to-end Milestone 1 smoke test plus user-facing docs covering local setup, command usage, data directory, artifacts, failure reset semantics, and exclusions) is done.
 - NGX-245 (M2-01 queue schema, event taxonomy, idempotent enqueue, repo locks, migration system) is done.
-- NGX-246 (M2-02 default enqueue path for `goal start`; `--foreground` retained as the Milestone 1 inline debug path) is done; the `goal_iteration` worker loop is the next M2 increment.
+- NGX-246 (M2-02 default enqueue path for `goal start`; `--foreground` retained as the Milestone 1 inline debug path) is done.
+- NGX-247 (M2-03 worker execution slice: `momentum worker run` claims one queued `goal_iteration`, acquires the repo lock, refreshes lease/heartbeat metadata, executes the iteration, and releases the lock) is done.
 
 ## Stack and workflow commands
 - Runtime: Node.js
@@ -47,6 +48,7 @@ Common commands:
   - `goal start`
   - `status`
   - `handoff`
+  - `worker run`
   - `doctor`
 - Preserve stable CLI behavior across both JSON and text outputs.
 - When changing user-facing output, update tests and verify callers that rely on stable formatting.
