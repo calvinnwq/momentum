@@ -19,6 +19,16 @@ verification:
 Goal body.
 `;
 
+const FAILING_GOAL_SPEC = `---
+title: Failing CLI Goal
+runner: fake
+verification:
+  - false
+---
+
+This goal fails verification.
+`;
+
 type RunResult = {
   code: number;
   stdout: string;
@@ -461,6 +471,178 @@ describe("momentum CLI scaffold", () => {
     expect(result.stdout).toContain("Goal state: queued");
     expect(result.stdout).toContain("goal_iteration, pending, iteration 1");
     expect(result.stdout).toMatch(/Next: Goal queued\. Run `momentum worker run/);
+  });
+
+  it("worker run returns no_work in JSON when nothing is queued", async () => {
+    const dataDir = makeTempDir("momentum-cli-worker-noop-");
+
+    const result = await run([
+      "worker", "run",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      command: "worker run",
+      code: "no_work",
+      outcome: "idle",
+      workerId: `worker-${process.pid}`,
+      dataDir
+    });
+    expect(payload["message"]).toBe(
+      "No pending goal_iteration jobs were available."
+    );
+  });
+
+  it("worker run executes one queued goal_iteration job and records queue/lock artifacts", async () => {
+    const dataDir = makeTempDir("momentum-cli-worker-exec-");
+    const repo = initRepo();
+    const goalFile = path.join(dataDir, "goal.md");
+    fs.writeFileSync(goalFile, GOAL_SPEC, "utf-8");
+
+    const queued = await run([
+      "goal", "start", goalFile,
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    const queuedPayload = JSON.parse(queued.stdout) as Record<string, unknown>;
+    const goalId = queuedPayload["goalId"] as string;
+    const jobId = queuedPayload["jobId"] as string;
+
+    const workerRun = await run([
+      "worker", "run",
+      "--worker-id", "cli-worker",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(workerRun.code).toBe(0);
+    expect(workerRun.stderr).toBe("");
+    const payload = JSON.parse(workerRun.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      command: "worker run",
+      code: "ran_job",
+      outcome: "ran_job",
+      workerId: "cli-worker",
+      goalId,
+      jobId,
+      iteration: 1,
+      goalState: "iteration_complete",
+      jobState: "succeeded",
+      repoRoot: repo
+    });
+
+    const resultPayload = payload["jobIterationResult"] as Record<string, unknown>;
+    expect(resultPayload).toMatchObject({
+      ok: true,
+      goalState: "iteration_complete",
+      jobState: "succeeded"
+    });
+
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      const job = db
+        .prepare("SELECT state, worker_id FROM jobs WHERE id = ?")
+        .get(jobId) as { state: string; worker_id: string };
+      expect(job.state).toBe("succeeded");
+      expect(job.worker_id).toBe("cli-worker");
+
+      const lock = db
+        .prepare(
+          "SELECT state, holder, recovery_status FROM repo_locks WHERE job_id = ? ORDER BY acquired_at DESC LIMIT 1"
+        )
+        .get(jobId) as { state: string; holder: string; recovery_status: string };
+      expect(lock).toMatchObject({
+        state: "released",
+        holder: "cli-worker",
+        recovery_status: "iteration_success"
+      });
+
+      const events = db
+        .prepare(
+          "SELECT type FROM events WHERE goal_id = ? ORDER BY id ASC"
+        )
+        .all(goalId) as Array<{ type: string }>;
+      expect(events.map((row) => row.type)).toEqual([
+        "job.enqueued",
+        "job.claimed",
+        "job.heartbeat",
+        "iteration_started",
+        "iteration_completed",
+        "job.succeeded"
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("worker run returns not_executed payload as ok=false and keeps error output deterministic", async () => {
+    const dataDir = makeTempDir("momentum-cli-worker-fail-");
+    const repo = initRepo();
+    const goalFile = path.join(dataDir, "goal.md");
+    fs.writeFileSync(goalFile, FAILING_GOAL_SPEC, "utf-8");
+
+    const queued = await run([
+      "goal", "start", goalFile,
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    const queuedPayload = JSON.parse(queued.stdout) as Record<string, unknown>;
+    const goalId = queuedPayload["goalId"] as string;
+    const jobId = queuedPayload["jobId"] as string;
+
+    const workerRun = await run([
+      "worker", "run",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(workerRun.code).toBe(1);
+    expect(workerRun.stderr).toBe("");
+    const payload = JSON.parse(workerRun.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "worker run",
+      code: "ran_job",
+      outcome: "ran_job",
+      workerId: `worker-${process.pid}`,
+      goalId,
+      jobId,
+      goalState: "failed",
+      jobState: "failed",
+      repoRoot: repo
+    });
+    const resultPayload = payload["jobIterationResult"] as Record<string, unknown>;
+    expect(resultPayload).toMatchObject({
+      ok: false,
+      goalState: "failed",
+      jobState: "failed"
+    });
+    const iteration = resultPayload["iteration"] as Record<string, unknown>;
+    expect(iteration).toMatchObject({
+      ok: false,
+      code: "verification_failed"
+    });
+
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      const job = db
+        .prepare("SELECT state, worker_id FROM jobs WHERE id = ?")
+        .get(jobId) as { state: string; worker_id: string };
+      expect(job.state).toBe("failed");
+      expect(job.worker_id).toBe(`worker-${process.pid}`);
+    } finally {
+      db.close();
+    }
   });
 
   it("rejects --data-dir without a value", async () => {

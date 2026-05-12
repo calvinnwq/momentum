@@ -18,12 +18,13 @@ The public CLI shape is:
 momentum goal start <goal.md> [--repo <path>] [--foreground] [--runner <profile>] [--data-dir <path>] [--json]
 momentum status [goal-id] [--data-dir <path>] [--json]
 momentum handoff <goal-id> [--data-dir <path>] [--json]
+momentum worker run [--worker-id <id>] [--data-dir <path>] [--json]
 momentum doctor [--json]
 ```
 
 `goal start --foreground` parses the goal spec, resolves the data directory, initializes SQLite (`goals`, `jobs`, `events`, `repo_locks` tables), creates the artifact layout, and runs one foreground iteration: it inspects the target repo, captures the pre-iteration HEAD, creates or reuses a Momentum branch, renders the iteration prompt, invokes the configured runner (currently `fake` only), runs each verification command from the repo root, and either stages and commits the full repo diff as one Momentum commit on verified success or hard-resets the worktree back to the pre-iteration HEAD on runner failure or verification failure. The iteration writes `prompt.md`, `runner.log`, `verification.log`, and `result.json` under `iterations/1/`. On a verified commit the goal transitions to `iteration_complete` (or `completed` if the runner reports `goal_complete: true`); on runner failure, verification failure, or any pipeline error it transitions to `failed`. `status [goal-id] --json` reads the SQLite/artifact state and emits a stable JSON shape, and `handoff <goal-id> --json` writes `handoff.md` and `handoff.json` (schema v1) into the goal's artifact dir.
 
-Without `--foreground`, `goal start` takes the Milestone 2 default path: it parses the goal spec, initializes (or resumes) durable Goal state in SQLite, prepares the artifact layout, and enqueues a single `goal_iteration` job (state `pending`, iteration `1`) with idempotency key `goal:<goal-id>:iteration:1`. The Goal row is written with state `queued`; the worker loop that actually executes the job is the next Milestone 2 increment and is not wired up yet. `--foreground` is retained as the Milestone 1 inline debugging path.
+Without `--foreground`, `goal start` takes the Milestone 2 default path: it parses the goal spec, initializes (or resumes) durable Goal state in SQLite, prepares the artifact layout, and enqueues a single `goal_iteration` job (state `pending`, iteration `1`) with idempotency key `goal:<goal-id>:iteration:1`. The Goal row is written with state `queued`; `momentum worker run` consumes that queue and executes one job at a time. `--foreground` is retained as the Milestone 1 inline debugging path.
 
 ## Local Development
 
@@ -153,6 +154,28 @@ momentum handoff <goal-id> [--data-dir <path>] [--json]
 ```
 
 Renders `handoff.md` and `handoff.json` (schema v1) into the goal's artifact directory from the same state `status` reads. The JSON envelope echoes `goalId`, `title`, `state`, and `schemaVersion: 1`.
+
+### `worker run`
+
+```text
+momentum worker run [--worker-id <id>] [--data-dir <path>] [--json]
+```
+
+Consumes queued `goal_iteration` work in single-job batches:
+
+- Claims the oldest pending `goal_iteration` job and stamps `worker` / `lease` metadata.
+- Acquires a repo lock for the goal repo before launching the iteration.
+- Refreshes lease metadata with a heartbeat before execution.
+- Releases the repo lock and persists iteration completion/failure state and job transition.
+- Emits a deterministic JSON result (`code: no_work | not_executed | ran_job`) for automation.
+
+`--worker-id` is optional; default is `worker-<pid>`. For queued work, use:
+
+```text
+momentum worker run --data-dir <path>
+```
+
+Local interrupt policy: `worker run` is a foreground one-shot command. If the process is interrupted mid-run, there is no automatic stale-lease recovery in this milestone; jobs/locks may remain claimed or active until manual intervention or lock expiry. Re-running the command is the supported local recovery path in Milestone 2.
 
 ### `doctor`
 
