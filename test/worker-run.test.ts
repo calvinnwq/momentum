@@ -122,10 +122,16 @@ describe("runWorkerOnce", () => {
       expect(job?.state).toBe("succeeded");
       expect(job?.worker_id).toBe("worker-test");
       expect(job?.goal_id).toBe(seed.goalId);
+      expect(job?.lease_acquired_at).toBe(1_700_000_000_000);
+      expect(job?.lease_expires_at).toBe(1_700_000_050_000);
+      expect(job?.heartbeat_at).toBe(1_700_000_020_000);
+      expect(job?.started_at).toBe(1_700_000_030_000);
+      expect(job?.finished_at).toBe(1_700_000_040_000);
+      expect(job?.attempt_count).toBe(2);
 
       const lock = db
         .prepare(
-          "SELECT goal_id, job_id, holder, state, recovery_status FROM repo_locks WHERE job_id = ? ORDER BY acquired_at DESC LIMIT 1"
+          "SELECT goal_id, job_id, holder, state, recovery_status, heartbeat_at, lease_expires_at, acquired_at, updated_at FROM repo_locks WHERE job_id = ? ORDER BY acquired_at DESC LIMIT 1"
         )
         .get(seed.jobId) as {
         goal_id: string;
@@ -133,6 +139,10 @@ describe("runWorkerOnce", () => {
         holder: string;
         state: string;
         recovery_status: string | null;
+        heartbeat_at: number;
+        lease_expires_at: number;
+        acquired_at: number;
+        updated_at: number;
       };
       expect(lock).toMatchObject({
         goal_id: seed.goalId,
@@ -141,6 +151,10 @@ describe("runWorkerOnce", () => {
         state: "released",
         recovery_status: "iteration_success"
       });
+      expect(lock.heartbeat_at).toBe(1_700_000_020_000);
+      expect(lock.lease_expires_at).toBe(1_700_000_050_000);
+      expect(lock.acquired_at).toBe(1_700_000_010_000);
+      expect(lock.updated_at).toBe(1_700_000_050_000);
 
       const events = db
         .prepare(
@@ -173,6 +187,10 @@ describe("runWorkerOnce", () => {
       expect(out.code).toBe("no_work");
       expect(out.code).toBe("no_work");
       expect(out.message).toContain("No pending goal_iteration jobs were available.");
+      const events = db.prepare("SELECT COUNT(*) AS c FROM events").get() as {
+        c: number;
+      };
+      expect(events.c).toBe(0);
     } finally {
       db.close();
     }
