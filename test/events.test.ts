@@ -38,6 +38,7 @@ describe("queue event taxonomy", () => {
         "job.enqueued",
         "job.failed",
         "job.heartbeat",
+        "job.released",
         "job.succeeded"
       ]
     );

@@ -294,6 +294,73 @@ export function heartbeatGoalIterationJob(
   return { ok: true, job: updatedJob, lock };
 }
 
+export type ReleaseClaimedGoalIterationInput = {
+  jobId: string;
+  workerId: string;
+  reason: string;
+  now?: number;
+};
+
+export type ReleaseClaimedGoalIterationFailureReason = "job_not_claimed";
+
+export type ReleaseClaimedGoalIterationResult =
+  | { ok: true; job: QueueJobRow }
+  | { ok: false; reason: ReleaseClaimedGoalIterationFailureReason };
+
+/**
+ * Revert a claimed `goal_iteration` job to `pending`, clearing worker/lease
+ * metadata, and emit `job.released`. The worker loop uses this to surrender a
+ * claim it cannot honor (e.g. the repo lock is already held by another
+ * holder). The UPDATE is guarded by worker_id, type, and `state = 'claimed'`
+ * so a worker can only release its own pre-execution claim. `attempt_count`
+ * is preserved to keep contention visible to future backoff/recovery logic.
+ */
+export function releaseClaimedGoalIterationJob(
+  db: MomentumDb,
+  input: ReleaseClaimedGoalIterationInput
+): ReleaseClaimedGoalIterationResult {
+  validateReleaseInput(input);
+  const now = input.now ?? Date.now();
+
+  const released = db
+    .prepare(
+      `UPDATE jobs
+         SET state = 'pending',
+             worker_id = NULL,
+             lease_acquired_at = NULL,
+             lease_expires_at = NULL,
+             heartbeat_at = NULL,
+             updated_at = ?
+       WHERE id = ?
+         AND type = ?
+         AND worker_id = ?
+         AND state = 'claimed'
+       RETURNING *`
+    )
+    .get(now, input.jobId, GOAL_ITERATION_JOB_TYPE, input.workerId) as
+    | QueueJobRow
+    | undefined;
+
+  if (!released) {
+    return { ok: false, reason: "job_not_claimed" };
+  }
+
+  appendQueueEvent(db, {
+    goalId: released.goal_id,
+    jobId: released.id,
+    type: QUEUE_EVENT_TYPES.JOB_RELEASED,
+    payload: {
+      iteration: released.iteration,
+      worker_id: input.workerId,
+      reason: input.reason,
+      attempt_count: released.attempt_count
+    },
+    createdAt: now
+  });
+
+  return { ok: true, job: released };
+}
+
 export function getQueueJob(
   db: MomentumDb,
   jobId: string
@@ -323,6 +390,18 @@ function validateClaimInput(input: ClaimGoalIterationInput): void {
     throw new Error(
       "claimPendingGoalIterationJob: leaseDurationMs must be a positive number"
     );
+  }
+}
+
+function validateReleaseInput(input: ReleaseClaimedGoalIterationInput): void {
+  if (typeof input.jobId !== "string" || input.jobId.length === 0) {
+    throw new Error("releaseClaimedGoalIterationJob: jobId is required");
+  }
+  if (typeof input.workerId !== "string" || input.workerId.length === 0) {
+    throw new Error("releaseClaimedGoalIterationJob: workerId is required");
+  }
+  if (typeof input.reason !== "string" || input.reason.length === 0) {
+    throw new Error("releaseClaimedGoalIterationJob: reason is required");
   }
 }
 

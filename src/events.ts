@@ -4,6 +4,7 @@ export const QUEUE_EVENT_TYPES = {
   JOB_ENQUEUED: "job.enqueued",
   JOB_CLAIMED: "job.claimed",
   JOB_HEARTBEAT: "job.heartbeat",
+  JOB_RELEASED: "job.released",
   JOB_SUCCEEDED: "job.succeeded",
   JOB_FAILED: "job.failed",
   GOAL_REDUCED: "goal.reduced",

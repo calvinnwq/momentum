@@ -10,7 +10,8 @@ import {
   enqueueGoalIterationJob,
   getJobByIdempotencyKey,
   getQueueJob,
-  heartbeatGoalIterationJob
+  heartbeatGoalIterationJob,
+  releaseClaimedGoalIterationJob
 } from "../src/queue-jobs.js";
 import {
   acquireRepoLock,
@@ -699,6 +700,239 @@ describe("heartbeatGoalIterationJob", () => {
       expect(() =>
         heartbeatGoalIterationJob(db, { ...base, leaseDurationMs: -1 })
       ).toThrow(/leaseDurationMs/);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("releaseClaimedGoalIterationJob", () => {
+  function seedClaimed(
+    db: ReturnType<typeof openDb>,
+    options: {
+      goalId?: string;
+      workerId?: string;
+      enqueueNow?: number;
+      claimNow?: number;
+      leaseDurationMs?: number;
+    } = {}
+  ): { jobId: string; workerId: string; goalId: string } {
+    const goalId = options.goalId ?? "g1";
+    const workerId = options.workerId ?? "worker-a";
+    const enqueueNow = options.enqueueNow ?? 1_700_000_000_000;
+    const claimNow = options.claimNow ?? 1_700_000_001_000;
+    const leaseDurationMs = options.leaseDurationMs ?? 5_000;
+
+    seedGoal(db, goalId);
+    const enq = enqueueGoalIterationJob(db, {
+      goalId,
+      iteration: 1,
+      idempotencyKey: `${goalId}:1`,
+      artifactPath: `/tmp/${goalId}/it/1`,
+      now: enqueueNow
+    });
+    const claim = claimPendingGoalIterationJob(db, {
+      workerId,
+      leaseDurationMs,
+      now: claimNow
+    });
+    if (!claim.ok) throw new Error("seedClaimed: claim failed");
+    return { jobId: enq.jobId, workerId, goalId };
+  }
+
+  it("reverts the claimed job to pending, clears lease metadata, and emits job.released", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { jobId, workerId, goalId } = seedClaimed(db);
+
+      const release = releaseClaimedGoalIterationJob(db, {
+        jobId,
+        workerId,
+        reason: "repo_locked",
+        now: 1_700_000_002_000
+      });
+      expect(release.ok).toBe(true);
+      if (!release.ok) return;
+      expect(release.job.id).toBe(jobId);
+      expect(release.job.state).toBe("pending");
+      expect(release.job.worker_id).toBeNull();
+      expect(release.job.lease_acquired_at).toBeNull();
+      expect(release.job.lease_expires_at).toBeNull();
+      expect(release.job.heartbeat_at).toBeNull();
+      expect(release.job.attempt_count).toBe(1);
+      expect(release.job.updated_at).toBe(1_700_000_002_000);
+      expect(release.job.started_at).toBeNull();
+      expect(release.job.finished_at).toBeNull();
+
+      const persisted = getQueueJob(db, jobId);
+      expect(persisted?.state).toBe("pending");
+      expect(persisted?.worker_id).toBeNull();
+      expect(persisted?.lease_acquired_at).toBeNull();
+      expect(persisted?.lease_expires_at).toBeNull();
+      expect(persisted?.heartbeat_at).toBeNull();
+
+      const events = db
+        .prepare(
+          `SELECT job_id, type, payload, created_at FROM events
+             WHERE goal_id = ? AND type = 'job.released'
+             ORDER BY id ASC`
+        )
+        .all(goalId) as Array<{
+        job_id: string | null;
+        type: string;
+        payload: string;
+        created_at: number;
+      }>;
+      expect(events).toHaveLength(1);
+      expect(events[0]!.job_id).toBe(jobId);
+      expect(events[0]!.created_at).toBe(1_700_000_002_000);
+      expect(JSON.parse(events[0]!.payload)).toEqual({
+        iteration: 1,
+        worker_id: workerId,
+        reason: "repo_locked",
+        attempt_count: 1
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("allows a subsequent worker to claim the released job in pending state", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { jobId, workerId } = seedClaimed(db);
+      const release = releaseClaimedGoalIterationJob(db, {
+        jobId,
+        workerId,
+        reason: "repo_locked",
+        now: 1_700_000_002_000
+      });
+      expect(release.ok).toBe(true);
+
+      const reclaim = claimPendingGoalIterationJob(db, {
+        workerId: "worker-b",
+        leaseDurationMs: 5_000,
+        now: 1_700_000_003_000
+      });
+      expect(reclaim.ok).toBe(true);
+      if (!reclaim.ok) return;
+      expect(reclaim.job.id).toBe(jobId);
+      expect(reclaim.job.worker_id).toBe("worker-b");
+      expect(reclaim.job.state).toBe("claimed");
+      // attempt_count keeps climbing across release/reclaim cycles.
+      expect(reclaim.job.attempt_count).toBe(2);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("returns job_not_claimed when the worker_id does not match and emits no event", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { jobId } = seedClaimed(db);
+
+      const release = releaseClaimedGoalIterationJob(db, {
+        jobId,
+        workerId: "intruder",
+        reason: "repo_locked",
+        now: 1_700_000_002_000
+      });
+      expect(release).toEqual({ ok: false, reason: "job_not_claimed" });
+
+      const persisted = getQueueJob(db, jobId);
+      expect(persisted?.state).toBe("claimed");
+      expect(persisted?.worker_id).toBe("worker-a");
+
+      const events = db
+        .prepare(
+          "SELECT count(*) AS c FROM events WHERE type = 'job.released'"
+        )
+        .get() as { c: number };
+      expect(events.c).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses to release a job that has moved past claimed", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { jobId, workerId } = seedClaimed(db);
+      db.prepare("UPDATE jobs SET state = 'running' WHERE id = ?").run(jobId);
+
+      const release = releaseClaimedGoalIterationJob(db, {
+        jobId,
+        workerId,
+        reason: "voluntary",
+        now: 1_700_000_002_000
+      });
+      expect(release).toEqual({ ok: false, reason: "job_not_claimed" });
+
+      const persisted = getQueueJob(db, jobId);
+      expect(persisted?.state).toBe("running");
+      expect(persisted?.worker_id).toBe("worker-a");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("ignores non-goal_iteration jobs even when worker_id matches", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedGoal(db);
+      db.prepare(
+        `INSERT INTO jobs (id, goal_id, type, iteration, state, attempt_count,
+            artifact_path, worker_id, lease_acquired_at, lease_expires_at,
+            heartbeat_at, created_at, updated_at)
+         VALUES ('foreground-1', 'g1', 'foreground_iteration', 1, 'claimed', 1,
+                 '/tmp/g1/it/1', 'worker-a', ?, ?, ?, ?, ?)`
+      ).run(
+        1_700_000_000_000,
+        1_700_000_005_000,
+        1_700_000_000_000,
+        1_700_000_000_000,
+        1_700_000_000_000
+      );
+
+      const release = releaseClaimedGoalIterationJob(db, {
+        jobId: "foreground-1",
+        workerId: "worker-a",
+        reason: "repo_locked",
+        now: 1_700_000_002_000
+      });
+      expect(release).toEqual({ ok: false, reason: "job_not_claimed" });
+
+      const row = getQueueJob(db, "foreground-1");
+      expect(row?.state).toBe("claimed");
+      expect(row?.worker_id).toBe("worker-a");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("validates required release inputs", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const base = {
+        jobId: "j",
+        workerId: "w",
+        reason: "r"
+      };
+      expect(() =>
+        releaseClaimedGoalIterationJob(db, { ...base, jobId: "" })
+      ).toThrow(/jobId/);
+      expect(() =>
+        releaseClaimedGoalIterationJob(db, { ...base, workerId: "" })
+      ).toThrow(/workerId/);
+      expect(() =>
+        releaseClaimedGoalIterationJob(db, { ...base, reason: "" })
+      ).toThrow(/reason/);
     } finally {
       db.close();
     }
