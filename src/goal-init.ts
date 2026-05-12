@@ -69,7 +69,8 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
   if (!parseResult.ok) {
     return { ok: false, error: parseResult.error };
   }
-  const { spec } = parseResult;
+  const spec =
+    mode === "queued" ? normalizeGoalSpecRepo(parseResult.spec) : parseResult.spec;
 
   let db: MomentumDb | undefined;
 
@@ -277,6 +278,13 @@ function formatInitError(error: unknown): string {
     return `Failed to initialize goal: ${error.message}`;
   }
   return "Failed to initialize goal.";
+}
+
+function normalizeGoalSpecRepo(spec: GoalSpec): GoalSpec {
+  if (typeof spec.repo !== "string" || spec.repo.length === 0) {
+    return spec;
+  }
+  return { ...spec, repo: path.resolve(spec.repo) };
 }
 
 function ensureInitialForegroundJob(

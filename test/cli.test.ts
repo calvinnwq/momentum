@@ -356,6 +356,39 @@ describe("momentum CLI scaffold", () => {
     }
   });
 
+  it("goal start (default queued path) persists relative repo paths as absolute", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+    const originalCwd = process.cwd();
+
+    try {
+      process.chdir(repo);
+
+      const result = await run([
+        "goal", "start", goalFile,
+        "--repo", ".",
+        "--data-dir", dataDir,
+        "--json"
+      ]);
+
+      expect(result.code).toBe(0);
+      const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+      expect(payload["repo"]).toBe(repo);
+
+      const { DatabaseSync } = await import("node:sqlite");
+      const db = new DatabaseSync(path.join(dataDir, "momentum.db"));
+      try {
+        const goalRow = db
+          .prepare("SELECT repo FROM goals WHERE id = ?")
+          .get(payload["goalId"] as string) as { repo: string };
+        expect(goalRow.repo).toBe(repo);
+      } finally {
+        db.close();
+      }
+    } finally {
+      process.chdir(originalCwd);
+    }
+  });
+
   it("goal start (default queued path) is idempotent for the same goal spec", async () => {
     const { dataDir, goalFile, repo } = setupGoalAndData();
 
