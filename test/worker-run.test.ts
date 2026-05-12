@@ -9,6 +9,7 @@ import { initGoal } from "../src/goal-init.js";
 import { openDb } from "../src/db.js";
 import {
   getQueueJob,
+  claimPendingGoalIterationJob,
 } from "../src/queue-jobs.js";
 import { runWorkerOnce } from "../src/worker-run.js";
 
@@ -229,6 +230,50 @@ describe("runWorkerOnce", () => {
         "job.enqueued",
         "job.claimed",
         "job.released"
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("returns no_work when another worker already claimed the pending job", () => {
+    const dataDir = makeTempDir("momentum-worker-run-contention2-");
+    const repo = initRepo();
+    const seed = seedQueuedGoal(dataDir, repo);
+
+    const db = openDb(seed.dataDir);
+    try {
+      const claimNow = 1_700_000_040_000;
+      const claim = claimPendingGoalIterationJob(db, {
+        workerId: "other-worker",
+        leaseDurationMs: 30_000,
+        now: claimNow
+      });
+      expect(claim.ok).toBe(true);
+      if (!claim.ok) return;
+      expect(claim.job.id).toBe(seed.jobId);
+      expect(claim.job.state).toBe("claimed");
+
+      const out = runWorkerOnce({
+        db,
+        dataDir: seed.dataDir,
+        workerId: "worker-blocked"
+      });
+      expect(out.code).toBe("no_work");
+
+      const job = getQueueJob(db, seed.jobId);
+      expect(job?.state).toBe("claimed");
+      expect(job?.worker_id).toBe("other-worker");
+      expect(job?.lease_expires_at).toBe(claimNow + 30_000);
+
+      const events = db
+        .prepare(
+          "SELECT type FROM events WHERE goal_id = ? ORDER BY id ASC"
+        )
+        .all(seed.goalId) as Array<{ type: string }>;
+      expect(events.map((row) => row.type)).toEqual([
+        "job.enqueued",
+        "job.claimed"
       ]);
     } finally {
       db.close();
