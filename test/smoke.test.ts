@@ -1565,6 +1565,221 @@ describe("Milestone 2 queued goal_iteration end-to-end smoke (NGX-248)", () => {
   );
 
   it(
+    "fails the queued job, resets the repo, and surfaces error_path through status/handoff when the runner reports failure",
+    () => {
+      const repo = initDisposableRepo();
+      const dataDir = makeTempDir("momentum-smoke-m2-runner-fail-data-");
+      const goalFile = path.join(dataDir, "goal.md");
+      fs.writeFileSync(goalFile, SMOKE_GOAL_SPEC, "utf-8");
+
+      const baseHead = runGit(repo, ["rev-parse", "HEAD"]).trim();
+
+      const start = runCliBinary([
+        "goal",
+        "start",
+        goalFile,
+        "--repo",
+        repo,
+        "--data-dir",
+        dataDir,
+        "--runner",
+        "fake",
+        "--json"
+      ]);
+      expect(start.code, `goal start stderr: ${start.stderr}`).toBe(0);
+      const startPayload = JSON.parse(start.stdout) as Record<string, unknown>;
+      const goalId = startPayload["goalId"] as string;
+      const jobId = startPayload["jobId"] as string;
+
+      const worker = runCliBinary(
+        [
+          "worker",
+          "run",
+          "--data-dir",
+          dataDir,
+          "--worker-id",
+          "smoke-worker-runner-fail",
+          "--json"
+        ],
+        { env: { [FAKE_RUNNER_FAIL_ENV]: "1" } }
+      );
+      expect(worker.code, `worker run stderr: ${worker.stderr}`).toBe(1);
+      expect(worker.stderr).toBe("");
+      const workerPayload = JSON.parse(worker.stdout) as Record<string, unknown>;
+      expect(workerPayload).toMatchObject({
+        ok: false,
+        command: "worker run",
+        code: "ran_job",
+        outcome: "ran_job",
+        goalId,
+        jobId,
+        goalState: "failed",
+        jobState: "failed"
+      });
+      const iterationResult = workerPayload["jobIterationResult"] as Record<
+        string,
+        unknown
+      >;
+      expect(iterationResult).toMatchObject({
+        ok: false,
+        goalState: "failed",
+        jobState: "failed"
+      });
+      const iter = iterationResult["iteration"] as Record<string, unknown>;
+      expect(iter).toMatchObject({
+        ok: false,
+        code: "runner_reported_failure"
+      });
+
+      // Repo cleanliness invariant: HEAD reset to base, worktree clean, no fixture.
+      expect(runGit(repo, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
+      expect(runGit(repo, ["status", "--porcelain"]).trim()).toBe("");
+      expect(runGit(repo, ["rev-parse", "main"]).trim()).toBe(baseHead);
+      expect(
+        fs.existsSync(path.join(repo, FAKE_RUNNER_FIXTURE_FILENAME))
+      ).toBe(false);
+
+      const goalDir = path.join(dataDir, "goals", goalId);
+      const iterationDir = path.join(goalDir, "iterations", "1");
+      const verificationLog = path.join(iterationDir, "verification.log");
+      const runnerLog = path.join(iterationDir, "runner.log");
+      expect(fs.existsSync(runnerLog)).toBe(true);
+      expect(fs.readFileSync(runnerLog, "utf-8")).toContain(
+        `simulated failure via ${FAKE_RUNNER_FAIL_ENV}`
+      );
+      expect(fs.existsSync(verificationLog)).toBe(true);
+      expect(fs.readFileSync(verificationLog, "utf-8")).toContain(
+        "[verify] skipped: runner reported failure"
+      );
+
+      const db = new DatabaseSync(path.join(dataDir, "momentum.db"));
+      try {
+        const jobRow = db
+          .prepare(
+            "SELECT state, type, iteration, error, result_path, error_path, worker_id FROM jobs WHERE id = ?"
+          )
+          .get(jobId) as {
+          state: string;
+          type: string;
+          iteration: number;
+          error: string | null;
+          result_path: string | null;
+          error_path: string | null;
+          worker_id: string | null;
+        };
+        expect(jobRow).toMatchObject({
+          state: "failed",
+          type: "goal_iteration",
+          iteration: 1,
+          result_path: null,
+          error_path: verificationLog,
+          worker_id: "smoke-worker-runner-fail"
+        });
+        expect(jobRow.error).toContain("runner_reported_failure");
+
+        const goalRow = db
+          .prepare("SELECT state FROM goals WHERE id = ?")
+          .get(goalId) as { state: string };
+        expect(goalRow.state).toBe("failed");
+
+        const eventTypes = (
+          db
+            .prepare(
+              "SELECT type FROM events WHERE goal_id = ? ORDER BY id ASC"
+            )
+            .all(goalId) as Array<{ type: string }>
+        ).map((row) => row.type);
+        expect(eventTypes).toEqual([
+          "job.enqueued",
+          "job.claimed",
+          "job.heartbeat",
+          "iteration_started",
+          "iteration_failed",
+          "job.failed"
+        ]);
+
+        const failedRow = db
+          .prepare(
+            "SELECT payload FROM events WHERE goal_id = ? AND type = 'job.failed'"
+          )
+          .get(goalId) as { payload: string };
+        const failedPayload = JSON.parse(failedRow.payload) as Record<
+          string,
+          unknown
+        >;
+        expect(failedPayload).toMatchObject({
+          iteration: 1,
+          worker_id: "smoke-worker-runner-fail",
+          repo_root: repo
+        });
+        expect(failedPayload["error"]).toBe("runner_reported_failure");
+        const failedArtifacts = failedPayload["artifacts"] as Record<
+          string,
+          unknown
+        >;
+        expect(failedArtifacts).toMatchObject({
+          iteration_dir: iterationDir,
+          runner_log: runnerLog,
+          verification_log: verificationLog
+        });
+      } finally {
+        db.close();
+      }
+
+      // status --json surfaces error_path from the queued failed job.
+      const status = runCliBinary([
+        "status",
+        goalId,
+        "--data-dir",
+        dataDir,
+        "--json"
+      ]);
+      expect(status.code, `status stderr: ${status.stderr}`).toBe(0);
+      const statusPayload = JSON.parse(status.stdout) as Record<string, unknown>;
+      const latestJob = statusPayload["latestJob"] as Record<string, unknown>;
+      expect(latestJob).toMatchObject({
+        type: "goal_iteration",
+        state: "failed",
+        iteration: 1,
+        resultPath: null,
+        errorPath: verificationLog
+      });
+      expect(latestJob["error"]).toContain("runner_reported_failure");
+
+      // handoff JSON + markdown surface error_path = verification.log.
+      const handoff = runCliBinary([
+        "handoff",
+        goalId,
+        "--data-dir",
+        dataDir,
+        "--json"
+      ]);
+      expect(handoff.code, `handoff stderr: ${handoff.stderr}`).toBe(0);
+      const handoffJson = path.join(goalDir, "handoff.json");
+      const handoffMd = path.join(goalDir, "handoff.md");
+      const writtenHandoffJson = JSON.parse(
+        fs.readFileSync(handoffJson, "utf-8")
+      ) as Record<string, unknown>;
+      const handoffLatestJob = writtenHandoffJson["latest_job"] as Record<
+        string,
+        unknown
+      >;
+      expect(handoffLatestJob).toMatchObject({
+        type: "goal_iteration",
+        state: "failed",
+        iteration: 1,
+        result_path: null,
+        error_path: verificationLog
+      });
+      const handoffMdContent = fs.readFileSync(handoffMd, "utf-8");
+      expect(handoffMdContent).toContain("- State: failed");
+      expect(handoffMdContent).toContain(`- Error path: ${verificationLog}`);
+      expect(handoffMdContent).not.toContain("- Result path:");
+    },
+    90_000
+  );
+
+  it(
     "fails the queued job, resets the repo, and surfaces error_path through status/handoff when verification fails",
     () => {
       const failingSpec = `---
