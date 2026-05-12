@@ -121,6 +121,86 @@ export function enqueueGoalIterationJob(
   return { jobId, jobState: "pending", created: true };
 }
 
+export type ClaimGoalIterationInput = {
+  workerId: string;
+  leaseDurationMs: number;
+  now?: number;
+};
+
+export type ClaimGoalIterationResult =
+  | { ok: true; job: QueueJobRow }
+  | { ok: false; reason: "no_pending_jobs" };
+
+/**
+ * Atomically transition the oldest pending `goal_iteration` job to `claimed`,
+ * stamp lease/worker metadata, and emit `job.claimed`. The `state = 'pending'`
+ * guard on the UPDATE makes the claim safe under concurrent workers; the loser
+ * sees `no_pending_jobs` and can retry on the next tick.
+ */
+export function claimPendingGoalIterationJob(
+  db: MomentumDb,
+  input: ClaimGoalIterationInput
+): ClaimGoalIterationResult {
+  validateClaimInput(input);
+  const now = input.now ?? Date.now();
+  const leaseExpiresAt = now + input.leaseDurationMs;
+
+  const candidate = db
+    .prepare(
+      `SELECT id FROM jobs
+       WHERE state = 'pending' AND type = ?
+       ORDER BY created_at ASC, id ASC
+       LIMIT 1`
+    )
+    .get(GOAL_ITERATION_JOB_TYPE) as { id: string } | undefined;
+
+  if (!candidate) {
+    return { ok: false, reason: "no_pending_jobs" };
+  }
+
+  const claimed = db
+    .prepare(
+      `UPDATE jobs
+         SET state = 'claimed',
+             worker_id = ?,
+             lease_acquired_at = ?,
+             lease_expires_at = ?,
+             heartbeat_at = ?,
+             updated_at = ?,
+             attempt_count = attempt_count + 1
+       WHERE id = ? AND state = 'pending'
+       RETURNING *`
+    )
+    .get(
+      input.workerId,
+      now,
+      leaseExpiresAt,
+      now,
+      now,
+      candidate.id
+    ) as QueueJobRow | undefined;
+
+  if (!claimed) {
+    return { ok: false, reason: "no_pending_jobs" };
+  }
+
+  appendQueueEvent(db, {
+    goalId: claimed.goal_id,
+    jobId: claimed.id,
+    type: QUEUE_EVENT_TYPES.JOB_CLAIMED,
+    payload: {
+      iteration: claimed.iteration,
+      worker_id: input.workerId,
+      lease_acquired_at: now,
+      lease_expires_at: leaseExpiresAt,
+      attempt_count: claimed.attempt_count
+    },
+    createdAt: now
+  });
+
+  return { ok: true, job: claimed };
+}
+
 export function getQueueJob(
   db: MomentumDb,
   jobId: string
@@ -137,6 +217,20 @@ export function getJobByIdempotencyKey(
   return db
     .prepare("SELECT * FROM jobs WHERE idempotency_key = ?")
     .get(idempotencyKey) as QueueJobRow | undefined;
+}
+
+function validateClaimInput(input: ClaimGoalIterationInput): void {
+  if (typeof input.workerId !== "string" || input.workerId.length === 0) {
+    throw new Error("claimPendingGoalIterationJob: workerId is required");
+  }
+  if (
+    !Number.isFinite(input.leaseDurationMs) ||
+    input.leaseDurationMs <= 0
+  ) {
+    throw new Error(
+      "claimPendingGoalIterationJob: leaseDurationMs must be a positive number"
+    );
+  }
 }
 
 function validateEnqueueInput(input: EnqueueGoalIterationInput): void {
