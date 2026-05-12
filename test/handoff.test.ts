@@ -7,6 +7,7 @@ import path from "node:path";
 import { openDb } from "../src/db.js";
 import { initGoal, type GoalInitSuccess } from "../src/goal-init.js";
 import { executeIterationJob } from "../src/iteration-job.js";
+import { reduceGoalIteration } from "../src/goal-reducer.js";
 import {
   HANDOFF_SCHEMA_VERSION,
   writeHandoff,
@@ -70,7 +71,8 @@ type GoalSetup = GoalInitSuccess & { dataDir: string };
 function setupGoal(
   repo: string,
   title = "Prove handoff command",
-  verificationCommand = "true"
+  verificationCommand = "true",
+  mode: "foreground" | "queued" = "foreground"
 ): GoalSetup {
   const dataDir = makeTempDir("momentum-handoff-data-");
   const specDir = makeTempDir("momentum-handoff-spec-");
@@ -82,7 +84,8 @@ function setupGoal(
   );
   const init = initGoal({
     goalPath: goalFile,
-    dataDirOptions: { dataDir }
+    dataDirOptions: { dataDir },
+    mode
   });
   if (!init.ok) {
     throw new Error(`initGoal failed: ${init.error}`);
@@ -343,6 +346,130 @@ describe("writeHandoff", () => {
     expect(markdown).toContain("No iteration has run yet.");
     expect(markdown).toContain("No runner result captured.");
     expect(markdown).not.toContain("Commit SHA:");
+  });
+
+  it("captures reducer decision, next job, and next-action hint when a reducer has run", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Handoff reducer continue", "true", "queued");
+    // Force max_iterations = 2 so the reducer chooses CONTINUE on iteration 1.
+    const db = openDb(setup.dataDir);
+    db.prepare("UPDATE goals SET max_iterations = 2 WHERE id = ?").run(
+      setup.goalId
+    );
+    let nextJobId: string;
+    try {
+      const job = executeIterationJob({
+        db,
+        goalId: setup.goalId,
+        jobId: setup.jobId,
+        spec: { ...setup.spec, max_iterations: 2 },
+        artifactPaths: setup.artifactPaths
+      });
+      if (!job.ok || !job.iteration.ok) {
+        throw new Error("iteration unexpectedly failed");
+      }
+      const reducer = reduceGoalIteration({
+        db,
+        goalId: setup.goalId,
+        jobId: setup.jobId
+      });
+      expect(reducer.decision).toBe("continue");
+      nextJobId = reducer.nextJob!.jobId;
+    } finally {
+      db.close();
+    }
+
+    const result = writeHandoff({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+    const handoff = expectSuccess(result);
+
+    expect(handoff.data.reducer?.decision).toBe("continue");
+    expect(handoff.data.reducer?.nextJob?.jobId).toBe(nextJobId);
+    expect(handoff.data.nextJob?.jobId).toBe(nextJobId);
+    expect(handoff.data.nextAction).toContain("worker run");
+
+    const json = JSON.parse(
+      fs.readFileSync(setup.artifactPaths.handoffJson, "utf-8")
+    ) as Record<string, unknown>;
+    const reducerJson = json["reducer"] as Record<string, unknown>;
+    expect(reducerJson["decision"]).toBe("continue");
+    expect(reducerJson["job_id"]).toBe(setup.jobId);
+    expect(reducerJson["iteration"]).toBe(1);
+    expect(reducerJson["goal_state"]).toBe("queued");
+    const nextJobJson = reducerJson["next_job"] as Record<string, unknown>;
+    expect(nextJobJson["job_id"]).toBe(nextJobId);
+    expect(nextJobJson["iteration"]).toBe(2);
+    expect(nextJobJson["idempotency_key"]).toBe(
+      `goal:${setup.goalId}:iteration:2`
+    );
+    expect((json["next_job"] as Record<string, unknown>)["state"]).toBe(
+      "pending"
+    );
+    expect(json["next_action"]).toEqual(handoff.data.nextAction);
+    expect((json["goal"] as Record<string, unknown>)["current_iteration"]).toBe(
+      1
+    );
+    expect(
+      (json["goal"] as Record<string, unknown>)["completion_reason"]
+    ).toBeNull();
+
+    const markdown = fs.readFileSync(setup.artifactPaths.handoffMd, "utf-8");
+    expect(markdown).toContain("## Reducer");
+    expect(markdown).toContain("Decision: continue");
+    expect(markdown).toContain(`Next job: ${nextJobId}`);
+    expect(markdown).toContain("Next action: ");
+  });
+
+  it("records max_iterations_reached reducer state with null next job", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Handoff reducer max iter", "true", "queued");
+    const db = openDb(setup.dataDir);
+    try {
+      const job = executeIterationJob({
+        db,
+        goalId: setup.goalId,
+        jobId: setup.jobId,
+        spec: setup.spec,
+        artifactPaths: setup.artifactPaths
+      });
+      if (!job.ok || !job.iteration.ok) {
+        throw new Error("iteration unexpectedly failed");
+      }
+      const reducer = reduceGoalIteration({
+        db,
+        goalId: setup.goalId,
+        jobId: setup.jobId
+      });
+      expect(reducer.decision).toBe("max_iterations_reached");
+    } finally {
+      db.close();
+    }
+
+    const handoff = expectSuccess(
+      writeHandoff({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      })
+    );
+
+    expect(handoff.data.reducer?.decision).toBe("max_iterations_reached");
+    expect(handoff.data.reducer?.nextJob).toBeNull();
+    expect(handoff.data.nextJob).toBeNull();
+    expect(handoff.data.nextAction).toContain("max_iterations");
+
+    const json = JSON.parse(
+      fs.readFileSync(setup.artifactPaths.handoffJson, "utf-8")
+    ) as Record<string, unknown>;
+    expect((json["goal"] as Record<string, unknown>)["state"]).toBe(
+      "max_iterations_reached"
+    );
+    expect((json["goal"] as Record<string, unknown>)["completion_reason"]).toBe(
+      "max_iterations_reached:1"
+    );
+    expect((json["reducer"] as Record<string, unknown>)["next_job"]).toBeNull();
+    expect(json["next_job"]).toBeNull();
   });
 
   it("operates on the most recently created goal when goalId is omitted", () => {

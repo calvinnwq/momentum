@@ -7,6 +7,7 @@ import {
 import { resolveDataDir, type DataDirOptions } from "./data-dir.js";
 import { openDb, type MomentumDb } from "./db.js";
 import { getGoal, type GoalRow } from "./goal-init.js";
+import { GOAL_ITERATION_JOB_TYPE } from "./queue-jobs.js";
 
 export type GoalStatusErrorCode =
   | "invalid_input"
@@ -67,6 +68,27 @@ export type GoalStatusArtifactFiles = {
   resultJson: boolean;
 };
 
+export type GoalStatusReducerNextJob = {
+  jobId: string;
+  iteration: number;
+  idempotencyKey: string;
+  artifactPath: string;
+};
+
+export type GoalStatusReducerSummary = {
+  decision: string;
+  jobId: string;
+  iteration: number;
+  jobState: string | null;
+  goalState: string | null;
+  completionReason: string | null;
+  goalComplete: boolean | null;
+  commitSha: string | null;
+  maxIterations: number | null;
+  recordedAt: number;
+  nextJob: GoalStatusReducerNextJob | null;
+};
+
 export type GoalStatusSuccess = {
   ok: true;
   dataDir: string;
@@ -77,6 +99,8 @@ export type GoalStatusSuccess = {
   branch: string;
   runner: string;
   maxIterations: number;
+  currentIteration: number;
+  completionReason: string | null;
   verification: string[];
   verificationTimeoutSec: number;
   artifactDir: string;
@@ -86,6 +110,9 @@ export type GoalStatusSuccess = {
   updatedAt: number;
   latestJob: GoalStatusJobSummary | null;
   iteration: GoalStatusIterationSummary | null;
+  reducer: GoalStatusReducerSummary | null;
+  nextJob: GoalStatusJobSummary | null;
+  nextAction: string | null;
 };
 
 export type GoalStatusResult = GoalStatusError | GoalStatusSuccess;
@@ -171,6 +198,19 @@ export function loadGoalStatus(input: LoadGoalStatusInput = {}): GoalStatusResul
     const artifactPaths = resolveGoalArtifactPaths(dataDir, goal.id);
     const artifactFiles = computeArtifactFiles(artifactPaths);
 
+    const reducer = findLatestReducerSummary(db, goal.id);
+    const nextJob = reducer?.nextJob
+      ? findJobById(db, reducer.nextJob.jobId)
+      : null;
+    const latestJobSummary = latestJob ? toJobSummary(latestJob) : null;
+    const nextJobSummary = nextJob ? toJobSummary(nextJob) : null;
+    const nextAction = computeNextAction(
+      goal,
+      latestJobSummary,
+      reducer,
+      nextJobSummary
+    );
+
     return {
       ok: true,
       dataDir,
@@ -181,6 +221,8 @@ export function loadGoalStatus(input: LoadGoalStatusInput = {}): GoalStatusResul
       branch: goal.branch,
       runner: goal.runner,
       maxIterations: goal.max_iterations,
+      currentIteration: goal.current_iteration,
+      completionReason: goal.completion_reason,
       verification: parseVerification(goal.verification),
       verificationTimeoutSec: goal.verification_timeout_sec,
       artifactDir: goal.artifact_dir,
@@ -188,8 +230,11 @@ export function loadGoalStatus(input: LoadGoalStatusInput = {}): GoalStatusResul
       artifactFiles,
       createdAt: goal.created_at,
       updatedAt: goal.updated_at,
-      latestJob: latestJob ? toJobSummary(latestJob) : null,
-      iteration
+      latestJob: latestJobSummary,
+      iteration,
+      reducer,
+      nextJob: nextJobSummary,
+      nextAction
     };
   } finally {
     db?.close();
@@ -211,6 +256,117 @@ function findLatestJob(db: MomentumDb, goalId: string): JobRow | undefined {
        LIMIT 1`
     )
     .get(goalId) as JobRow | undefined;
+}
+
+function findJobById(db: MomentumDb, jobId: string): JobRow | undefined {
+  return db
+    .prepare("SELECT * FROM jobs WHERE id = ?")
+    .get(jobId) as JobRow | undefined;
+}
+
+function findLatestReducerSummary(
+  db: MomentumDb,
+  goalId: string
+): GoalStatusReducerSummary | null {
+  const row = db
+    .prepare(
+      `SELECT * FROM events
+         WHERE goal_id = ? AND type = 'goal.reduced'
+         ORDER BY created_at DESC, id DESC
+         LIMIT 1`
+    )
+    .get(goalId) as EventRow | undefined;
+  if (!row || !row.job_id) return null;
+
+  const payload = parsePayload(row.payload);
+  if (!payload) return null;
+
+  const iteration =
+    typeof payload["iteration"] === "number"
+      ? (payload["iteration"] as number)
+      : 0;
+  const decision = pickString(payload, "decision") ?? "unknown";
+  const maxIterRaw = payload["max_iterations"];
+  const maxIterations =
+    typeof maxIterRaw === "number" ? (maxIterRaw as number) : null;
+
+  return {
+    decision,
+    jobId: row.job_id,
+    iteration,
+    jobState: pickString(payload, "job_state"),
+    goalState: pickString(payload, "goal_state"),
+    completionReason: pickString(payload, "completion_reason"),
+    goalComplete: pickBool(payload, "goal_complete"),
+    commitSha: pickString(payload, "commit_sha"),
+    maxIterations,
+    recordedAt: row.created_at,
+    nextJob: readReducerNextJob(payload)
+  };
+}
+
+function readReducerNextJob(
+  payload: Record<string, unknown>
+): GoalStatusReducerNextJob | null {
+  const raw = payload["next_job"];
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const entry = raw as Record<string, unknown>;
+  const jobId = pickString(entry, "job_id");
+  const idempotencyKey = pickString(entry, "idempotency_key");
+  const artifactPath = pickString(entry, "artifact_path");
+  const iteration =
+    typeof entry["iteration"] === "number"
+      ? (entry["iteration"] as number)
+      : null;
+  if (!jobId || !idempotencyKey || !artifactPath || iteration === null) {
+    return null;
+  }
+  return { jobId, iteration, idempotencyKey, artifactPath };
+}
+
+function computeNextAction(
+  goal: GoalRow,
+  latestJob: GoalStatusJobSummary | null,
+  reducer: GoalStatusReducerSummary | null,
+  nextJob: GoalStatusJobSummary | null
+): string | null {
+  if (reducer) {
+    if (reducer.decision === "continue" && nextJob) {
+      return (
+        `Run \`momentum worker run\` to claim queued ${GOAL_ITERATION_JOB_TYPE} ` +
+        `job ${nextJob.jobId} (iteration ${nextJob.iteration}).`
+      );
+    }
+    if (reducer.decision === "goal_complete") {
+      return "Goal completed; no further iterations will be enqueued.";
+    }
+    if (reducer.decision === "max_iterations_reached") {
+      return (
+        `Goal reached max_iterations (${goal.max_iterations}); ` +
+        "no further iterations will be enqueued."
+      );
+    }
+    if (reducer.decision === "iteration_failed") {
+      return "Goal failed; inspect the latest job error_path before retrying.";
+    }
+  }
+
+  if (latestJob && latestJob.state === "pending") {
+    if (latestJob.type === GOAL_ITERATION_JOB_TYPE) {
+      return (
+        `Run \`momentum worker run\` to claim queued ${GOAL_ITERATION_JOB_TYPE} ` +
+        `job ${latestJob.jobId} (iteration ${latestJob.iteration}).`
+      );
+    }
+    if (latestJob.type === "foreground_iteration") {
+      return (
+        `Run \`momentum goal start --foreground\` (resume) to execute ` +
+        `iteration ${latestJob.iteration} (job ${latestJob.jobId}).`
+      );
+    }
+  }
+
+  return null;
 }
 
 function findLatestEventByType(

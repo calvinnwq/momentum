@@ -8,6 +8,7 @@ import {
   type GoalStatusError,
   type GoalStatusIterationSummary,
   type GoalStatusJobSummary,
+  type GoalStatusReducerSummary,
   type GoalStatusSuccess
 } from "./goal-status.js";
 
@@ -46,6 +47,8 @@ export type HandoffGoalSummary = {
   branch: string;
   runner: string;
   maxIterations: number;
+  currentIteration: number;
+  completionReason: string | null;
   verification: string[];
   verificationTimeoutSec: number;
   artifactDir: string;
@@ -61,6 +64,9 @@ export type HandoffData = {
   latestJob: GoalStatusJobSummary | null;
   iteration: GoalStatusIterationSummary | null;
   runnerResult: HandoffRunnerResultSummary | null;
+  reducer: GoalStatusReducerSummary | null;
+  nextJob: GoalStatusJobSummary | null;
+  nextAction: string | null;
   artifactPaths: GoalArtifactPaths;
   artifactFiles: GoalStatusArtifactFiles;
 };
@@ -132,6 +138,8 @@ function buildHandoffData(
       branch: status.branch,
       runner: status.runner,
       maxIterations: status.maxIterations,
+      currentIteration: status.currentIteration,
+      completionReason: status.completionReason,
       verification: status.verification,
       verificationTimeoutSec: status.verificationTimeoutSec,
       artifactDir: status.artifactDir,
@@ -142,6 +150,9 @@ function buildHandoffData(
     latestJob: status.latestJob,
     iteration: status.iteration,
     runnerResult,
+    reducer: status.reducer,
+    nextJob: status.nextJob,
+    nextAction: status.nextAction,
     artifactPaths: status.artifactPaths,
     artifactFiles: status.artifactFiles
   };
@@ -159,6 +170,8 @@ function toJsonShape(data: HandoffData): Record<string, unknown> {
       branch: data.goal.branch,
       runner: data.goal.runner,
       max_iterations: data.goal.maxIterations,
+      current_iteration: data.goal.currentIteration,
+      completion_reason: data.goal.completionReason,
       verification: data.goal.verification,
       verification_timeout_sec: data.goal.verificationTimeoutSec,
       artifact_dir: data.goal.artifactDir,
@@ -214,6 +227,46 @@ function toJsonShape(data: HandoffData): Record<string, unknown> {
           goal_complete: data.runnerResult.goalComplete
         }
       : null,
+    reducer: data.reducer
+      ? {
+          decision: data.reducer.decision,
+          job_id: data.reducer.jobId,
+          iteration: data.reducer.iteration,
+          job_state: data.reducer.jobState,
+          goal_state: data.reducer.goalState,
+          completion_reason: data.reducer.completionReason,
+          goal_complete: data.reducer.goalComplete,
+          commit_sha: data.reducer.commitSha,
+          max_iterations: data.reducer.maxIterations,
+          recorded_at: data.reducer.recordedAt,
+          next_job: data.reducer.nextJob
+            ? {
+                job_id: data.reducer.nextJob.jobId,
+                iteration: data.reducer.nextJob.iteration,
+                idempotency_key: data.reducer.nextJob.idempotencyKey,
+                artifact_path: data.reducer.nextJob.artifactPath
+              }
+            : null
+        }
+      : null,
+    next_job: data.nextJob
+      ? {
+          job_id: data.nextJob.jobId,
+          type: data.nextJob.type,
+          iteration: data.nextJob.iteration,
+          state: data.nextJob.state,
+          attempt_count: data.nextJob.attemptCount,
+          artifact_path: data.nextJob.artifactPath,
+          result_path: data.nextJob.resultPath,
+          error_path: data.nextJob.errorPath,
+          created_at: data.nextJob.createdAt,
+          updated_at: data.nextJob.updatedAt,
+          started_at: data.nextJob.startedAt,
+          finished_at: data.nextJob.finishedAt,
+          error: data.nextJob.error
+        }
+      : null,
+    next_action: data.nextAction,
     artifacts: {
       goal_md: data.artifactPaths.goalMd,
       ledger_md: data.artifactPaths.ledgerMd,
@@ -307,6 +360,30 @@ function renderHandoffMarkdown(data: HandoffData): string {
     }
     lines.push("");
   }
+
+  lines.push("## Reducer");
+  if (!data.reducer) {
+    lines.push("- No reducer decision recorded yet.");
+  } else {
+    lines.push(`- Decision: ${data.reducer.decision}`);
+    lines.push(`- Iteration: ${data.reducer.iteration}`);
+    lines.push(`- Goal state: ${data.reducer.goalState ?? "(unknown)"}`);
+    lines.push(
+      `- Completion reason: ${data.reducer.completionReason ?? "(none)"}`
+    );
+    if (data.reducer.commitSha) {
+      lines.push(`- Commit SHA: ${data.reducer.commitSha}`);
+    }
+    if (data.reducer.nextJob) {
+      lines.push(
+        `- Next job: ${data.reducer.nextJob.jobId} ` +
+          `(iteration ${data.reducer.nextJob.iteration}, ` +
+          `key ${data.reducer.nextJob.idempotencyKey})`
+      );
+    }
+  }
+  lines.push(`- Next action: ${data.nextAction ?? "(none)"}`);
+  lines.push("");
 
   lines.push("## Runner result");
   if (!data.runnerResult) {
