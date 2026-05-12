@@ -8,6 +8,7 @@ import { openDb } from "../src/db.js";
 import { initGoal, type GoalInitSuccess } from "../src/goal-init.js";
 import { executeIterationJob } from "../src/iteration-job.js";
 import { reduceGoalIteration } from "../src/goal-reducer.js";
+import { ensureIterationArtifactDir } from "../src/artifacts.js";
 import {
   HANDOFF_SCHEMA_VERSION,
   writeHandoff,
@@ -470,6 +471,82 @@ describe("writeHandoff", () => {
     );
     expect((json["reducer"] as Record<string, unknown>)["next_job"]).toBeNull();
     expect(json["next_job"]).toBeNull();
+  });
+
+  it("writes handoff artifacts from the latest executed iteration", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Handoff iteration two artifacts", "true", "queued");
+    const db = openDb(setup.dataDir);
+    db.prepare("UPDATE goals SET max_iterations = 2 WHERE id = ?").run(
+      setup.goalId
+    );
+    let iterationTwoResultPath = "";
+    try {
+      const spec = { ...setup.spec, max_iterations: 2 };
+      const firstJob = executeIterationJob({
+        db,
+        goalId: setup.goalId,
+        jobId: setup.jobId,
+        spec,
+        artifactPaths: setup.artifactPaths
+      });
+      if (!firstJob.ok || !firstJob.iteration.ok) {
+        throw new Error("iteration unexpectedly failed");
+      }
+      const firstReducer = reduceGoalIteration({
+        db,
+        goalId: setup.goalId,
+        jobId: setup.jobId
+      });
+      if (firstReducer.decision !== "continue" || !firstReducer.nextJob) {
+        throw new Error("expected next iteration job");
+      }
+
+      const iterationTwoPaths = ensureIterationArtifactDir(
+        setup.dataDir,
+        setup.goalId,
+        2
+      );
+      iterationTwoResultPath = iterationTwoPaths.resultJson;
+      const secondJob = executeIterationJob({
+        db,
+        goalId: setup.goalId,
+        jobId: firstReducer.nextJob.jobId,
+        spec,
+        artifactPaths: iterationTwoPaths,
+        iteration: 2
+      });
+      if (!secondJob.ok || !secondJob.iteration.ok) {
+        throw new Error("iteration unexpectedly failed");
+      }
+      const secondReducer = reduceGoalIteration({
+        db,
+        goalId: setup.goalId,
+        jobId: firstReducer.nextJob.jobId
+      });
+      expect(secondReducer.decision).toBe("max_iterations_reached");
+    } finally {
+      db.close();
+    }
+
+    const handoff = expectSuccess(
+      writeHandoff({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      })
+    );
+
+    expect(handoff.data.artifactPaths.iteration).toBe(2);
+    expect(handoff.data.artifactPaths.resultJson).toBe(iterationTwoResultPath);
+    expect(handoff.data.runnerResult?.success).toBe(true);
+
+    const json = JSON.parse(
+      fs.readFileSync(setup.artifactPaths.handoffJson, "utf-8")
+    ) as Record<string, unknown>;
+    expect((json["artifacts"] as Record<string, unknown>)["result_json"]).toBe(
+      iterationTwoResultPath
+    );
+    expect(json["runner_result"]).not.toBeNull();
   });
 
   it("operates on the most recently created goal when goalId is omitted", () => {

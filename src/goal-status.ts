@@ -195,7 +195,11 @@ export function loadGoalStatus(input: LoadGoalStatusInput = {}): GoalStatusResul
     const latestJob = findLatestJob(db, goal.id);
     const iteration = latestJob ? buildIterationSummary(db, goal.id, latestJob) : null;
 
-    const artifactPaths = resolveGoalArtifactPaths(dataDir, goal.id);
+    const artifactPaths = resolveGoalArtifactPaths(
+      dataDir,
+      goal.id,
+      selectArtifactIteration(goal, latestJob)
+    );
     const artifactFiles = computeArtifactFiles(artifactPaths);
 
     const reducer = findLatestReducerSummary(db, goal.id);
@@ -262,6 +266,16 @@ function findJobById(db: MomentumDb, jobId: string): JobRow | undefined {
   return db
     .prepare("SELECT * FROM jobs WHERE id = ?")
     .get(jobId) as JobRow | undefined;
+}
+
+function selectArtifactIteration(goal: GoalRow, latestJob: JobRow | undefined): number {
+  if (latestJob && latestJob.state !== "pending") {
+    return latestJob.iteration;
+  }
+  if (goal.current_iteration > 0) {
+    return goal.current_iteration;
+  }
+  return latestJob?.iteration ?? 1;
 }
 
 function findLatestReducerSummary(

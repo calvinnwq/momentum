@@ -9,6 +9,7 @@ import { initGoal, type GoalInitSuccess } from "../src/goal-init.js";
 import { executeIterationJob } from "../src/iteration-job.js";
 import { loadGoalStatus } from "../src/goal-status.js";
 import { reduceGoalIteration } from "../src/goal-reducer.js";
+import { ensureIterationArtifactDir } from "../src/artifacts.js";
 
 const tempRoots: string[] = [];
 
@@ -411,6 +412,69 @@ describe("loadGoalStatus", () => {
     expect(status.nextJob?.iteration).toBe(2);
     expect(status.nextAction).toContain("worker run");
     expect(status.nextAction).toContain(nextJobId);
+  });
+
+  it("resolves artifact paths for the latest executed iteration", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Status iteration two artifacts", {
+      maxIterations: 2,
+      mode: "queued"
+    });
+
+    const db = openDb(setup.dataDir);
+    try {
+      const firstJob = executeIterationJob({
+        db,
+        goalId: setup.goalId,
+        jobId: setup.jobId,
+        spec: setup.spec,
+        artifactPaths: setup.artifactPaths
+      });
+      if (!firstJob.ok || !firstJob.iteration.ok) throw new Error("iteration failed");
+      const firstReducer = reduceGoalIteration({
+        db,
+        goalId: setup.goalId,
+        jobId: setup.jobId
+      });
+      if (firstReducer.decision !== "continue" || !firstReducer.nextJob) {
+        throw new Error("expected next iteration job");
+      }
+
+      const iterationTwoPaths = ensureIterationArtifactDir(
+        setup.dataDir,
+        setup.goalId,
+        2
+      );
+      const secondJob = executeIterationJob({
+        db,
+        goalId: setup.goalId,
+        jobId: firstReducer.nextJob.jobId,
+        spec: setup.spec,
+        artifactPaths: iterationTwoPaths,
+        iteration: 2
+      });
+      if (!secondJob.ok || !secondJob.iteration.ok) throw new Error("iteration failed");
+      const secondReducer = reduceGoalIteration({
+        db,
+        goalId: setup.goalId,
+        jobId: firstReducer.nextJob.jobId
+      });
+      expect(secondReducer.decision).toBe("max_iterations_reached");
+    } finally {
+      db.close();
+    }
+
+    const status = loadGoalStatus({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+
+    expect(status.ok).toBe(true);
+    if (!status.ok) return;
+    expect(status.currentIteration).toBe(2);
+    expect(status.artifactPaths.iteration).toBe(2);
+    expect(status.artifactPaths.resultJson).toContain(path.join("iterations", "2"));
+    expect(status.artifactFiles.resultJson).toBe(true);
   });
 
   it("returns the most recently created goal when goalId is omitted", () => {
