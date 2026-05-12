@@ -10,6 +10,22 @@ export const FAKE_RUNNER_FIXTURE_FILENAME = "momentum-fixture.txt";
 // success=false, exercising the runner-failure reset path end-to-end.
 export const FAKE_RUNNER_FAIL_ENV = "MOMENTUM_FAKE_RUNNER_FAIL";
 
+// Test-only goal_complete injection: when MOMENTUM_FAKE_RUNNER_GOAL_COMPLETE is
+// set to a non-empty value, a successful fake-runner result reports
+// goal_complete=true so chaining/completion paths can be exercised without a
+// trajectory. Ignored when the runner reports success=false.
+export const FAKE_RUNNER_GOAL_COMPLETE_ENV =
+  "MOMENTUM_FAKE_RUNNER_GOAL_COMPLETE";
+
+// Test-only per-iteration trajectory: when MOMENTUM_FAKE_RUNNER_TRAJECTORY is
+// set, each pipe-separated entry maps iteration N to one of `ok` (success),
+// `complete` (success+goal_complete), or `fail` (runner failure). Iterations
+// past the last entry reuse the last entry. Trajectory takes precedence over
+// the legacy FAIL/GOAL_COMPLETE toggles when set.
+export const FAKE_RUNNER_TRAJECTORY_ENV = "MOMENTUM_FAKE_RUNNER_TRAJECTORY";
+
+export type FakeRunnerOutcome = "ok" | "complete" | "fail";
+
 export type FakeRunnerInput = {
   repoPath: string;
   iterationDir: string;
@@ -23,6 +39,7 @@ export type FakeRunnerOutput = {
   runnerLogPath: string;
   resultJsonPath: string;
   fixtureExisted: boolean;
+  outcome: FakeRunnerOutcome;
 };
 
 export function runFakeRunner(input: FakeRunnerInput): FakeRunnerOutput {
@@ -55,7 +72,7 @@ export function runFakeRunner(input: FakeRunnerInput): FakeRunnerOutput {
   const fixtureContent = `momentum fake runner fixture\niteration: ${iteration}\n`;
   fs.writeFileSync(fixturePath, fixtureContent, "utf-8");
 
-  const simulateFailure = isFailureRequested(env);
+  const outcome = resolveOutcome(env, iteration);
   const runnerLogPath = path.join(iterationDir, "runner.log");
   const action = fixtureExisted ? "modified" : "created";
   const logLines = [
@@ -63,45 +80,14 @@ export function runFakeRunner(input: FakeRunnerInput): FakeRunnerOutput {
     `[fake-runner] repo: ${repoPath}`,
     `[fake-runner] iteration: ${iteration}`,
     `[fake-runner] action: ${action} ${FAKE_RUNNER_FIXTURE_FILENAME}`,
-    ...(simulateFailure
-      ? [`[fake-runner] simulated failure via ${FAKE_RUNNER_FAIL_ENV}`]
-      : []),
+    `[fake-runner] outcome: ${outcome}`,
+    ...outcomeLogLines(outcome, env),
     "[fake-runner] result.json written",
     "[fake-runner] done"
   ];
   fs.writeFileSync(runnerLogPath, `${logLines.join("\n")}\n`, "utf-8");
 
-  const result: RunnerResult = simulateFailure
-    ? {
-        success: false,
-        summary: `Simulated runner failure via ${FAKE_RUNNER_FAIL_ENV}.`,
-        key_changes_made: [],
-        key_learnings: [],
-        remaining_work: ["Runner reported failure; iteration must reset."],
-        goal_complete: false,
-        commit: {
-          type: "test",
-          scope: "milestone-1",
-          subject: "prove foreground momentum iteration",
-          body: "",
-          breaking: false
-        }
-      }
-    : {
-        success: true,
-        summary: "Applied fake runner fixture.",
-        key_changes_made: ["Created or modified fixture target file."],
-        key_learnings: [],
-        remaining_work: [],
-        goal_complete: false,
-        commit: {
-          type: "test",
-          scope: "milestone-1",
-          subject: "prove foreground momentum iteration",
-          body: "",
-          breaking: false
-        }
-      };
+  const result = buildRunnerResult(outcome);
 
   const resultJsonPath = path.join(iterationDir, "result.json");
   fs.writeFileSync(
@@ -115,8 +101,58 @@ export function runFakeRunner(input: FakeRunnerInput): FakeRunnerOutput {
     fixturePath,
     runnerLogPath,
     resultJsonPath,
-    fixtureExisted
+    fixtureExisted,
+    outcome
   };
+}
+
+function buildRunnerResult(outcome: FakeRunnerOutcome): RunnerResult {
+  const baseCommit = {
+    type: "test" as const,
+    scope: "milestone-1",
+    subject: "prove foreground momentum iteration",
+    body: "",
+    breaking: false
+  };
+  if (outcome === "fail") {
+    return {
+      success: false,
+      summary: `Simulated runner failure via ${FAKE_RUNNER_FAIL_ENV}.`,
+      key_changes_made: [],
+      key_learnings: [],
+      remaining_work: ["Runner reported failure; iteration must reset."],
+      goal_complete: false,
+      commit: baseCommit
+    };
+  }
+  return {
+    success: true,
+    summary: "Applied fake runner fixture.",
+    key_changes_made: ["Created or modified fixture target file."],
+    key_learnings: [],
+    remaining_work: [],
+    goal_complete: outcome === "complete",
+    commit: baseCommit
+  };
+}
+
+function outcomeLogLines(
+  outcome: FakeRunnerOutcome,
+  env: NodeJS.ProcessEnv
+): string[] {
+  if (outcome === "fail") {
+    const source = readEnv(env, FAKE_RUNNER_TRAJECTORY_ENV)
+      ? FAKE_RUNNER_TRAJECTORY_ENV
+      : FAKE_RUNNER_FAIL_ENV;
+    return [`[fake-runner] simulated failure via ${source}`];
+  }
+  if (outcome === "complete") {
+    const source = readEnv(env, FAKE_RUNNER_TRAJECTORY_ENV)
+      ? FAKE_RUNNER_TRAJECTORY_ENV
+      : FAKE_RUNNER_GOAL_COMPLETE_ENV;
+    return [`[fake-runner] goal_complete via ${source}`];
+  }
+  return [];
 }
 
 function statOrThrow(p: string, label: string): fs.Stats {
@@ -127,7 +163,40 @@ function statOrThrow(p: string, label: string): fs.Stats {
   }
 }
 
-function isFailureRequested(env: NodeJS.ProcessEnv): boolean {
-  const raw = env[FAKE_RUNNER_FAIL_ENV];
-  return typeof raw === "string" && raw.trim().length > 0;
+function resolveOutcome(
+  env: NodeJS.ProcessEnv,
+  iteration: number
+): FakeRunnerOutcome {
+  const trajectoryRaw = readEnv(env, FAKE_RUNNER_TRAJECTORY_ENV);
+  if (trajectoryRaw !== undefined) {
+    const entries = trajectoryRaw.split("|").map((entry) => entry.trim());
+    if (entries.length === 0) {
+      throw new Error(
+        `fake runner: ${FAKE_RUNNER_TRAJECTORY_ENV} must contain at least one entry`
+      );
+    }
+    const rawEntry = entries[Math.min(iteration - 1, entries.length - 1)] ?? "";
+    const normalized = rawEntry.toLowerCase();
+    if (normalized === "" || normalized === "ok") return "ok";
+    if (normalized === "complete") return "complete";
+    if (normalized === "fail") return "fail";
+    throw new Error(
+      `fake runner: ${FAKE_RUNNER_TRAJECTORY_ENV} entry ${JSON.stringify(rawEntry)} is not one of ok|complete|fail`
+    );
+  }
+
+  if (readEnv(env, FAKE_RUNNER_FAIL_ENV) !== undefined) {
+    return "fail";
+  }
+  if (readEnv(env, FAKE_RUNNER_GOAL_COMPLETE_ENV) !== undefined) {
+    return "complete";
+  }
+  return "ok";
+}
+
+function readEnv(env: NodeJS.ProcessEnv, key: string): string | undefined {
+  const raw = env[key];
+  if (typeof raw !== "string") return undefined;
+  const trimmed = raw.trim();
+  return trimmed.length === 0 ? undefined : trimmed;
 }

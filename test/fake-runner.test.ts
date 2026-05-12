@@ -7,6 +7,8 @@ import path from "node:path";
 import {
   FAKE_RUNNER_FAIL_ENV,
   FAKE_RUNNER_FIXTURE_FILENAME,
+  FAKE_RUNNER_GOAL_COMPLETE_ENV,
+  FAKE_RUNNER_TRAJECTORY_ENV,
   runFakeRunner
 } from "../src/fake-runner.js";
 import { parseRunnerResult } from "../src/runner-result.js";
@@ -282,5 +284,137 @@ describe("runFakeRunner", () => {
     });
 
     expect(out.result.success).toBe(true);
+  });
+
+  it("drives goal_complete=true when MOMENTUM_FAKE_RUNNER_GOAL_COMPLETE is set", () => {
+    const repoPath = initRepo();
+    const iterationDir = makeIterationDir();
+
+    const out = runFakeRunner({
+      repoPath,
+      iterationDir,
+      iteration: 1,
+      env: { [FAKE_RUNNER_GOAL_COMPLETE_ENV]: "1" }
+    });
+
+    expect(out.outcome).toBe("complete");
+    expect(out.result.success).toBe(true);
+    expect(out.result.goal_complete).toBe(true);
+
+    const log = fs.readFileSync(out.runnerLogPath, "utf-8");
+    expect(log).toContain("[fake-runner] outcome: complete");
+    expect(log).toContain(
+      `[fake-runner] goal_complete via ${FAKE_RUNNER_GOAL_COMPLETE_ENV}`
+    );
+
+    const parsed = parseRunnerResult(
+      fs.readFileSync(out.resultJsonPath, "utf-8")
+    );
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(parsed.value.goal_complete).toBe(true);
+    }
+  });
+
+  it("MOMENTUM_FAKE_RUNNER_FAIL wins over goal_complete env (no concurrent success+complete)", () => {
+    const repoPath = initRepo();
+    const iterationDir = makeIterationDir();
+
+    const out = runFakeRunner({
+      repoPath,
+      iterationDir,
+      iteration: 1,
+      env: {
+        [FAKE_RUNNER_FAIL_ENV]: "1",
+        [FAKE_RUNNER_GOAL_COMPLETE_ENV]: "1"
+      }
+    });
+
+    expect(out.outcome).toBe("fail");
+    expect(out.result.success).toBe(false);
+    expect(out.result.goal_complete).toBe(false);
+  });
+
+  it("resolves per-iteration outcome from MOMENTUM_FAKE_RUNNER_TRAJECTORY", () => {
+    const repoPath = initRepo();
+    const env = { [FAKE_RUNNER_TRAJECTORY_ENV]: "ok|complete|fail" };
+
+    const iter1 = runFakeRunner({
+      repoPath,
+      iterationDir: makeIterationDir(),
+      iteration: 1,
+      env
+    });
+    expect(iter1.outcome).toBe("ok");
+    expect(iter1.result.success).toBe(true);
+    expect(iter1.result.goal_complete).toBe(false);
+
+    const iter2 = runFakeRunner({
+      repoPath,
+      iterationDir: makeIterationDir(),
+      iteration: 2,
+      env
+    });
+    expect(iter2.outcome).toBe("complete");
+    expect(iter2.result.success).toBe(true);
+    expect(iter2.result.goal_complete).toBe(true);
+
+    const iter3 = runFakeRunner({
+      repoPath,
+      iterationDir: makeIterationDir(),
+      iteration: 3,
+      env
+    });
+    expect(iter3.outcome).toBe("fail");
+    expect(iter3.result.success).toBe(false);
+  });
+
+  it("reuses the last trajectory entry when iteration exceeds the list length", () => {
+    const repoPath = initRepo();
+    const env = { [FAKE_RUNNER_TRAJECTORY_ENV]: "ok|complete" };
+
+    const iter5 = runFakeRunner({
+      repoPath,
+      iterationDir: makeIterationDir(),
+      iteration: 5,
+      env
+    });
+
+    expect(iter5.outcome).toBe("complete");
+    expect(iter5.result.goal_complete).toBe(true);
+  });
+
+  it("trajectory overrides legacy FAIL/GOAL_COMPLETE envs", () => {
+    const repoPath = initRepo();
+    const out = runFakeRunner({
+      repoPath,
+      iterationDir: makeIterationDir(),
+      iteration: 1,
+      env: {
+        [FAKE_RUNNER_TRAJECTORY_ENV]: "complete",
+        [FAKE_RUNNER_FAIL_ENV]: "1",
+        [FAKE_RUNNER_GOAL_COMPLETE_ENV]: ""
+      }
+    });
+
+    expect(out.outcome).toBe("complete");
+    expect(out.result.success).toBe(true);
+    expect(out.result.goal_complete).toBe(true);
+    const log = fs.readFileSync(out.runnerLogPath, "utf-8");
+    expect(log).toContain(
+      `[fake-runner] goal_complete via ${FAKE_RUNNER_TRAJECTORY_ENV}`
+    );
+  });
+
+  it("throws when MOMENTUM_FAKE_RUNNER_TRAJECTORY has an unknown entry", () => {
+    const repoPath = initRepo();
+    expect(() =>
+      runFakeRunner({
+        repoPath,
+        iterationDir: makeIterationDir(),
+        iteration: 1,
+        env: { [FAKE_RUNNER_TRAJECTORY_ENV]: "bogus" }
+      })
+    ).toThrow(/not one of ok\|complete\|fail/);
   });
 });

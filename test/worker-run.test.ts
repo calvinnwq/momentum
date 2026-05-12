@@ -5,6 +5,10 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 
 import { acquireRepoLock } from "../src/repo-locks.js";
+import {
+  FAKE_RUNNER_FAIL_ENV,
+  FAKE_RUNNER_FIXTURE_FILENAME
+} from "../src/fake-runner.js";
 import { initGoal } from "../src/goal-init.js";
 import { openDb } from "../src/db.js";
 import {
@@ -13,15 +17,19 @@ import {
 } from "../src/queue-jobs.js";
 import { runWorkerOnce } from "../src/worker-run.js";
 
-const GOAL_SPEC = `---
+const GOAL_SPEC = makeGoalSpec("true");
+
+function makeGoalSpec(verificationCommand: string): string {
+  return `---
 title: Worker Run Test
 runner: fake
 verification:
-  - "true"
+  - "${verificationCommand}"
 ---
 
 Test goal for worker run loop coverage.
 `;
+}
 
 type WorkerGoalSeed = {
   dataDir: string;
@@ -39,6 +47,7 @@ afterEach(() => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   }
+  delete process.env[FAKE_RUNNER_FAIL_ENV];
 });
 
 function makeTempDir(prefix = "momentum-worker-run-"): string {
@@ -66,9 +75,13 @@ function initRepo(): string {
   return dir;
 }
 
-function seedQueuedGoal(dataDir: string, repo: string): WorkerGoalSeed {
+function seedQueuedGoal(
+  dataDir: string,
+  repo: string,
+  spec: string = GOAL_SPEC
+): WorkerGoalSeed {
   const goalFile = path.join(dataDir, "goal.md");
-  fs.writeFileSync(goalFile, GOAL_SPEC, "utf-8");
+  fs.writeFileSync(goalFile, spec, "utf-8");
 
   const result = initGoal({
     goalPath: goalFile,
@@ -249,6 +262,162 @@ describe("runWorkerOnce", () => {
         "job.claimed",
         "job.released"
       ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("records job.failed, resets the repo, and writes artifacts when the runner reports failure", () => {
+    const dataDir = makeTempDir("momentum-worker-run-runner-fail-");
+    const repo = initRepo();
+    const seed = seedQueuedGoal(dataDir, repo);
+    const baseHead = runGit(repo, ["rev-parse", "HEAD"]).trim();
+
+    process.env[FAKE_RUNNER_FAIL_ENV] = "1";
+
+    const db = openDb(seed.dataDir);
+    try {
+      const out = runWorkerOnce({
+        db,
+        dataDir: seed.dataDir,
+        workerId: "worker-runner-fail"
+      });
+
+      expect(out.code).toBe("ran_job");
+      if (out.code !== "ran_job") return;
+      expect(out.jobIterationResult.ok).toBe(false);
+      expect(out.jobIterationResult.jobState).toBe("failed");
+      expect(out.jobIterationResult.goalState).toBe("failed");
+
+      const job = getQueueJob(db, seed.jobId);
+      expect(job?.state).toBe("failed");
+      expect(job?.error).toContain("runner_reported_failure");
+      expect(job?.attempt_count).toBe(1);
+
+      const goalRow = db
+        .prepare("SELECT state FROM goals WHERE id = ?")
+        .get(seed.goalId) as { state: string };
+      expect(goalRow.state).toBe("failed");
+
+      const head = runGit(repo, ["rev-parse", "HEAD"]).trim();
+      expect(head).toBe(baseHead);
+      expect(
+        fs.existsSync(path.join(repo, FAKE_RUNNER_FIXTURE_FILENAME))
+      ).toBe(false);
+      expect(runGit(repo, ["status", "--porcelain"]).trim()).toBe("");
+
+      const lock = db
+        .prepare(
+          "SELECT state, recovery_status FROM repo_locks WHERE job_id = ? ORDER BY acquired_at DESC LIMIT 1"
+        )
+        .get(seed.jobId) as { state: string; recovery_status: string };
+      expect(lock).toMatchObject({
+        state: "released",
+        recovery_status: "iteration_failure"
+      });
+
+      const eventRows = db
+        .prepare(
+          "SELECT type, payload FROM events WHERE goal_id = ? ORDER BY id ASC"
+        )
+        .all(seed.goalId) as Array<{ type: string; payload: string }>;
+      const eventTypes = eventRows.map((row) => row.type);
+      expect(eventTypes).toEqual([
+        "job.enqueued",
+        "job.claimed",
+        "job.heartbeat",
+        "iteration_started",
+        "iteration_failed",
+        "job.failed"
+      ]);
+
+      const jobFailed = JSON.parse(
+        eventRows[eventRows.length - 1]!.payload
+      ) as Record<string, unknown>;
+      expect(jobFailed["worker_id"]).toBe("worker-runner-fail");
+      expect(jobFailed["repo_root"]).toBe(repo);
+      expect(jobFailed["error"]).toBe("runner_reported_failure");
+
+      const layoutDir = path.join(seed.dataDir, "goals", seed.goalId, "iterations", "1");
+      const runnerLog = fs.readFileSync(path.join(layoutDir, "runner.log"), "utf-8");
+      expect(runnerLog).toContain(`simulated failure via ${FAKE_RUNNER_FAIL_ENV}`);
+      const verificationLog = fs.readFileSync(
+        path.join(layoutDir, "verification.log"),
+        "utf-8"
+      );
+      expect(verificationLog).toContain(
+        "[verify] skipped: runner reported failure"
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("records job.failed, resets the repo, and writes artifacts when verification fails", () => {
+    const dataDir = makeTempDir("momentum-worker-run-verify-fail-");
+    const repo = initRepo();
+    const seed = seedQueuedGoal(dataDir, repo, makeGoalSpec("false"));
+    const baseHead = runGit(repo, ["rev-parse", "HEAD"]).trim();
+
+    const db = openDb(seed.dataDir);
+    try {
+      const out = runWorkerOnce({
+        db,
+        dataDir: seed.dataDir,
+        workerId: "worker-verify-fail"
+      });
+
+      expect(out.code).toBe("ran_job");
+      if (out.code !== "ran_job") return;
+      expect(out.jobIterationResult.ok).toBe(false);
+      expect(out.jobIterationResult.jobState).toBe("failed");
+
+      const job = getQueueJob(db, seed.jobId);
+      expect(job?.state).toBe("failed");
+      expect(job?.error).toContain("verification_failed");
+
+      const head = runGit(repo, ["rev-parse", "HEAD"]).trim();
+      expect(head).toBe(baseHead);
+      expect(
+        fs.existsSync(path.join(repo, FAKE_RUNNER_FIXTURE_FILENAME))
+      ).toBe(false);
+      expect(runGit(repo, ["status", "--porcelain"]).trim()).toBe("");
+
+      const lock = db
+        .prepare(
+          "SELECT state, recovery_status FROM repo_locks WHERE job_id = ? ORDER BY acquired_at DESC LIMIT 1"
+        )
+        .get(seed.jobId) as { state: string; recovery_status: string };
+      expect(lock).toMatchObject({
+        state: "released",
+        recovery_status: "iteration_failure"
+      });
+
+      const eventRows = db
+        .prepare(
+          "SELECT type, payload FROM events WHERE goal_id = ? ORDER BY id ASC"
+        )
+        .all(seed.goalId) as Array<{ type: string; payload: string }>;
+      const eventTypes = eventRows.map((row) => row.type);
+      expect(eventTypes).toEqual([
+        "job.enqueued",
+        "job.claimed",
+        "job.heartbeat",
+        "iteration_started",
+        "iteration_failed",
+        "job.failed"
+      ]);
+
+      const jobFailed = JSON.parse(
+        eventRows[eventRows.length - 1]!.payload
+      ) as Record<string, unknown>;
+      expect(jobFailed["error"]).toBe("verification_failed");
+
+      const verificationLog = fs.readFileSync(
+        path.join(seed.dataDir, "goals", seed.goalId, "iterations", "1", "verification.log"),
+        "utf-8"
+      );
+      expect(verificationLog.length).toBeGreaterThan(0);
     } finally {
       db.close();
     }
