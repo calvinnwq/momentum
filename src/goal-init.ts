@@ -12,7 +12,8 @@ import {
 } from "./artifacts.js";
 import {
   GOAL_ITERATION_JOB_TYPE,
-  enqueueGoalIterationJob
+  enqueueGoalIterationJob,
+  type QueueJobState
 } from "./queue-jobs.js";
 
 export type GoalInitMode = "foreground" | "queued";
@@ -31,7 +32,7 @@ export type GoalInitSuccess = {
   goalId: string;
   jobId: string;
   jobType: "foreground_iteration" | typeof GOAL_ITERATION_JOB_TYPE;
-  jobState: "pending";
+  jobState: QueueJobState;
   goalState: "initialized" | "queued";
   iteration: number;
   idempotencyKey: string | null;
@@ -116,7 +117,7 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
         goalId: existingGoal.id,
         jobId: enqueue.jobId,
         jobType: GOAL_ITERATION_JOB_TYPE,
-        jobState: "pending",
+        jobState: enqueue.jobState,
         goalState: "queued",
         iteration: 1,
         idempotencyKey,
@@ -190,7 +191,7 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
       goalId,
       jobId: enqueue.jobId,
       jobType: GOAL_ITERATION_JOB_TYPE,
-      jobState: "pending",
+      jobState: enqueue.jobState,
       goalState: "queued",
       iteration: 1,
       idempotencyKey,

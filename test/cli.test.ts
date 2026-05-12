@@ -367,6 +367,16 @@ describe("momentum CLI scaffold", () => {
     ]);
     const firstPayload = JSON.parse(first.stdout) as Record<string, unknown>;
 
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      db.prepare(
+        "UPDATE jobs SET state = 'running' WHERE id = ?"
+      ).run(firstPayload["jobId"] as string);
+    } finally {
+      db.close();
+    }
+
     const second = await run([
       "goal", "start", goalFile,
       "--repo", repo,
@@ -378,25 +388,25 @@ describe("momentum CLI scaffold", () => {
     expect(second.code).toBe(0);
     expect(secondPayload["goalId"]).toBe(firstPayload["goalId"]);
     expect(secondPayload["jobId"]).toBe(firstPayload["jobId"]);
+    expect(secondPayload["jobState"]).toBe("running");
     expect(secondPayload["resumed"]).toBe(true);
     expect(secondPayload["enqueueCreated"]).toBe(false);
 
-    const { DatabaseSync } = await import("node:sqlite");
-    const db = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    const verifyDb = new DatabaseSync(path.join(dataDir, "momentum.db"));
     try {
-      const jobCount = db
+      const jobCount = verifyDb
         .prepare("SELECT count(*) AS c FROM jobs WHERE goal_id = ?")
         .get(firstPayload["goalId"] as string) as { c: number };
       expect(jobCount.c).toBe(1);
 
-      const enqueueEvents = db
+      const enqueueEvents = verifyDb
         .prepare(
           "SELECT count(*) AS c FROM events WHERE goal_id = ? AND type = 'job.enqueued'"
         )
         .get(firstPayload["goalId"] as string) as { c: number };
       expect(enqueueEvents.c).toBe(1);
     } finally {
-      db.close();
+      verifyDb.close();
     }
   });
 

@@ -22,6 +22,7 @@ export type EnqueueGoalIterationInput = {
 
 export type EnqueueGoalIterationResult = {
   jobId: string;
+  jobState: QueueJobState;
   created: boolean;
 };
 
@@ -67,7 +68,7 @@ export function enqueueGoalIterationJob(
           `already bound to goal ${existing.goal_id}`
       );
     }
-    return { jobId: existing.id, created: false };
+    return { jobId: existing.id, jobState: existing.state, created: false };
   }
 
   const jobId = crypto.randomUUID();
@@ -98,7 +99,7 @@ export function enqueueGoalIterationJob(
               `already bound to goal ${racing.goal_id}`
           );
         }
-        return { jobId: racing.id, created: false };
+        return { jobId: racing.id, jobState: racing.state, created: false };
       }
     }
     throw error;
@@ -117,7 +118,7 @@ export function enqueueGoalIterationJob(
     createdAt: now
   });
 
-  return { jobId, created: true };
+  return { jobId, jobState: "pending", created: true };
 }
 
 export function getQueueJob(
