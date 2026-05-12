@@ -13,7 +13,7 @@ Typical loop:
 
 ## Current milestone
 - Milestone 1: Foreground proof loop is complete.
-- Milestone 2: Queue and worker model is in progress.
+- Milestone 2: Queue and worker model is in progress; NGX-249 (M2-05 completion reducer + idempotent chaining) is implemented in this branch.
 - NGX-235 (scaffold) is done.
 - NGX-236 (Goal spec parsing, data-dir resolution, SQLite init, artifact layout) is done.
 - NGX-237 (fake runner profile, repo guard, branch manager, iteration prompt renderer, foreground iteration orchestrator, iteration-job DB wrapper, CLI wiring) is done.
