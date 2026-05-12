@@ -9,8 +9,14 @@ import {
   claimPendingGoalIterationJob,
   enqueueGoalIterationJob,
   getJobByIdempotencyKey,
-  getQueueJob
+  getQueueJob,
+  heartbeatGoalIterationJob
 } from "../src/queue-jobs.js";
+import {
+  acquireRepoLock,
+  getRepoLock,
+  releaseRepoLock
+} from "../src/repo-locks.js";
 
 const tempRoots: string[] = [];
 
@@ -413,6 +419,285 @@ describe("claimPendingGoalIterationJob", () => {
           workerId: "worker-a",
           leaseDurationMs: -1
         })
+      ).toThrow(/leaseDurationMs/);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("heartbeatGoalIterationJob", () => {
+  function seedClaimedJob(
+    db: ReturnType<typeof openDb>,
+    options: {
+      goalId?: string;
+      workerId?: string;
+      claimNow?: number;
+      leaseDurationMs?: number;
+      repoRoot?: string;
+    } = {}
+  ): {
+    jobId: string;
+    lockId: string;
+    workerId: string;
+    repoRoot: string;
+  } {
+    const goalId = options.goalId ?? "g1";
+    const workerId = options.workerId ?? "worker-a";
+    const claimNow = options.claimNow ?? 1_700_000_001_000;
+    const leaseDurationMs = options.leaseDurationMs ?? 5_000;
+    const repoRoot = options.repoRoot ?? "/tmp/momentum-test-repo";
+
+    seedGoal(db, goalId);
+    const enq = enqueueGoalIterationJob(db, {
+      goalId,
+      iteration: 1,
+      idempotencyKey: `${goalId}:1`,
+      artifactPath: `/tmp/${goalId}/it/1`,
+      now: claimNow - 1_000
+    });
+    const claim = claimPendingGoalIterationJob(db, {
+      workerId,
+      leaseDurationMs,
+      now: claimNow
+    });
+    if (!claim.ok) throw new Error("seedClaimedJob: claim failed");
+    const lock = acquireRepoLock(db, {
+      repoRoot,
+      holder: workerId,
+      goalId,
+      iteration: 1,
+      jobId: claim.job.id,
+      leaseExpiresAt: claim.job.lease_expires_at!,
+      now: claimNow
+    });
+    if (!lock.ok) throw new Error("seedClaimedJob: lock acquire failed");
+    return { jobId: enq.jobId, lockId: lock.lockId, workerId, repoRoot };
+  }
+
+  it("refreshes job and lock heartbeat columns and emits job.heartbeat", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { jobId, lockId, workerId } = seedClaimedJob(db);
+
+      const beat = heartbeatGoalIterationJob(db, {
+        jobId,
+        lockId,
+        workerId,
+        leaseDurationMs: 5_000,
+        now: 1_700_000_003_000
+      });
+      expect(beat.ok).toBe(true);
+      if (!beat.ok) return;
+      expect(beat.job.heartbeat_at).toBe(1_700_000_003_000);
+      expect(beat.job.lease_expires_at).toBe(1_700_000_008_000);
+      expect(beat.job.updated_at).toBe(1_700_000_003_000);
+      expect(beat.job.state).toBe("claimed");
+      expect(beat.lock.heartbeat_at).toBe(1_700_000_003_000);
+      expect(beat.lock.lease_expires_at).toBe(1_700_000_008_000);
+
+      const persistedJob = getQueueJob(db, jobId);
+      expect(persistedJob?.heartbeat_at).toBe(1_700_000_003_000);
+      expect(persistedJob?.lease_expires_at).toBe(1_700_000_008_000);
+      const persistedLock = getRepoLock(db, lockId);
+      expect(persistedLock?.heartbeat_at).toBe(1_700_000_003_000);
+      expect(persistedLock?.lease_expires_at).toBe(1_700_000_008_000);
+
+      const beats = db
+        .prepare(
+          `SELECT job_id, type, payload, created_at FROM events
+             WHERE goal_id = 'g1' AND type = 'job.heartbeat'
+             ORDER BY id ASC`
+        )
+        .all() as Array<{
+        job_id: string | null;
+        type: string;
+        payload: string;
+        created_at: number;
+      }>;
+      expect(beats).toHaveLength(1);
+      expect(beats[0]!.job_id).toBe(jobId);
+      expect(beats[0]!.created_at).toBe(1_700_000_003_000);
+      expect(JSON.parse(beats[0]!.payload)).toEqual({
+        iteration: 1,
+        worker_id: workerId,
+        lock_id: lockId,
+        heartbeat_at: 1_700_000_003_000,
+        lease_expires_at: 1_700_000_008_000
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("also refreshes while the job is in the running state", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { jobId, lockId, workerId } = seedClaimedJob(db);
+      db.prepare("UPDATE jobs SET state = 'running' WHERE id = ?").run(jobId);
+
+      const beat = heartbeatGoalIterationJob(db, {
+        jobId,
+        lockId,
+        workerId,
+        leaseDurationMs: 5_000,
+        now: 1_700_000_004_000
+      });
+      expect(beat.ok).toBe(true);
+      if (!beat.ok) return;
+      expect(beat.job.state).toBe("running");
+      expect(beat.job.heartbeat_at).toBe(1_700_000_004_000);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("returns job_not_active when the worker_id does not match and emits no event", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { jobId, lockId } = seedClaimedJob(db);
+
+      const beat = heartbeatGoalIterationJob(db, {
+        jobId,
+        lockId,
+        workerId: "intruder",
+        leaseDurationMs: 5_000,
+        now: 1_700_000_003_000
+      });
+      expect(beat).toEqual({ ok: false, reason: "job_not_active" });
+
+      const persistedJob = getQueueJob(db, jobId);
+      expect(persistedJob?.worker_id).toBe("worker-a");
+      expect(persistedJob?.heartbeat_at).toBe(1_700_000_001_000);
+
+      const events = db
+        .prepare(
+          "SELECT count(*) AS c FROM events WHERE type = 'job.heartbeat'"
+        )
+        .get() as { c: number };
+      expect(events.c).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("returns job_not_active when the job has been finalized", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { jobId, lockId, workerId } = seedClaimedJob(db);
+      db.prepare("UPDATE jobs SET state = 'succeeded' WHERE id = ?").run(jobId);
+
+      const beat = heartbeatGoalIterationJob(db, {
+        jobId,
+        lockId,
+        workerId,
+        leaseDurationMs: 5_000,
+        now: 1_700_000_003_000
+      });
+      expect(beat).toEqual({ ok: false, reason: "job_not_active" });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("returns lock_not_active when the repo lock has been released", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { jobId, lockId, workerId } = seedClaimedJob(db);
+      releaseRepoLock(db, { lockId, now: 1_700_000_002_000 });
+
+      const beat = heartbeatGoalIterationJob(db, {
+        jobId,
+        lockId,
+        workerId,
+        leaseDurationMs: 5_000,
+        now: 1_700_000_003_000
+      });
+      expect(beat).toEqual({ ok: false, reason: "lock_not_active" });
+
+      // Job lease columns were refreshed but no job.heartbeat event was emitted.
+      const events = db
+        .prepare(
+          "SELECT count(*) AS c FROM events WHERE type = 'job.heartbeat'"
+        )
+        .get() as { c: number };
+      expect(events.c).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("ignores non-goal_iteration jobs even if worker_id matches", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedGoal(db);
+      db.prepare(
+        `INSERT INTO jobs (id, goal_id, type, iteration, state, attempt_count,
+            artifact_path, worker_id, lease_acquired_at, lease_expires_at,
+            heartbeat_at, created_at, updated_at)
+         VALUES ('foreground-1', 'g1', 'foreground_iteration', 1, 'running', 1,
+                 '/tmp/g1/it/1', 'worker-a', ?, ?, ?, ?, ?)`
+      ).run(
+        1_700_000_000_000,
+        1_700_000_005_000,
+        1_700_000_000_000,
+        1_700_000_000_000,
+        1_700_000_000_000
+      );
+      const lock = acquireRepoLock(db, {
+        repoRoot: "/tmp/momentum-test-repo",
+        holder: "worker-a",
+        goalId: "g1",
+        iteration: 1,
+        jobId: "foreground-1",
+        leaseExpiresAt: 1_700_000_005_000,
+        now: 1_700_000_000_000
+      });
+      if (!lock.ok) throw new Error("expected lock");
+
+      const beat = heartbeatGoalIterationJob(db, {
+        jobId: "foreground-1",
+        lockId: lock.lockId,
+        workerId: "worker-a",
+        leaseDurationMs: 5_000,
+        now: 1_700_000_003_000
+      });
+      expect(beat).toEqual({ ok: false, reason: "job_not_active" });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("validates required heartbeat inputs", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const base = {
+        jobId: "j",
+        lockId: "l",
+        workerId: "w",
+        leaseDurationMs: 5_000
+      };
+      expect(() =>
+        heartbeatGoalIterationJob(db, { ...base, jobId: "" })
+      ).toThrow(/jobId/);
+      expect(() =>
+        heartbeatGoalIterationJob(db, { ...base, lockId: "" })
+      ).toThrow(/lockId/);
+      expect(() =>
+        heartbeatGoalIterationJob(db, { ...base, workerId: "" })
+      ).toThrow(/workerId/);
+      expect(() =>
+        heartbeatGoalIterationJob(db, { ...base, leaseDurationMs: 0 })
+      ).toThrow(/leaseDurationMs/);
+      expect(() =>
+        heartbeatGoalIterationJob(db, { ...base, leaseDurationMs: -1 })
       ).toThrow(/leaseDurationMs/);
     } finally {
       db.close();

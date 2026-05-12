@@ -2,6 +2,11 @@ import crypto from "node:crypto";
 
 import { isUniqueViolation, type MomentumDb } from "./db.js";
 import { QUEUE_EVENT_TYPES, appendQueueEvent } from "./events.js";
+import {
+  getRepoLock,
+  updateRepoLockHeartbeat,
+  type RepoLockRow
+} from "./repo-locks.js";
 
 export const GOAL_ITERATION_JOB_TYPE = "goal_iteration";
 
@@ -201,6 +206,94 @@ export function claimPendingGoalIterationJob(
   return { ok: true, job: claimed };
 }
 
+export type HeartbeatGoalIterationInput = {
+  jobId: string;
+  lockId: string;
+  workerId: string;
+  leaseDurationMs: number;
+  now?: number;
+};
+
+export type HeartbeatGoalIterationFailureReason =
+  | "job_not_active"
+  | "lock_not_active";
+
+export type HeartbeatGoalIterationResult =
+  | { ok: true; job: QueueJobRow; lock: RepoLockRow }
+  | { ok: false; reason: HeartbeatGoalIterationFailureReason };
+
+/**
+ * Refresh the lease/heartbeat columns on a claimed `goal_iteration` job and
+ * its repo lock, then emit `job.heartbeat`. Both updates are guarded so a
+ * worker can't heartbeat a job it no longer owns. The job update is scoped by
+ * worker_id and state ∈ (claimed, running) to keep stale workers out; the
+ * lock refresh is scoped by `state = 'active'` inside `updateRepoLockHeartbeat`.
+ * When either guard fails, no event is emitted and the caller can release.
+ */
+export function heartbeatGoalIterationJob(
+  db: MomentumDb,
+  input: HeartbeatGoalIterationInput
+): HeartbeatGoalIterationResult {
+  validateHeartbeatInput(input);
+  const now = input.now ?? Date.now();
+  const leaseExpiresAt = now + input.leaseDurationMs;
+
+  const updatedJob = db
+    .prepare(
+      `UPDATE jobs
+         SET heartbeat_at = ?,
+             lease_expires_at = ?,
+             updated_at = ?
+       WHERE id = ?
+         AND type = ?
+         AND worker_id = ?
+         AND state IN ('claimed', 'running')
+       RETURNING *`
+    )
+    .get(
+      now,
+      leaseExpiresAt,
+      now,
+      input.jobId,
+      GOAL_ITERATION_JOB_TYPE,
+      input.workerId
+    ) as QueueJobRow | undefined;
+
+  if (!updatedJob) {
+    return { ok: false, reason: "job_not_active" };
+  }
+
+  const lockUpdate = updateRepoLockHeartbeat(db, {
+    lockId: input.lockId,
+    heartbeatAt: now,
+    leaseExpiresAt
+  });
+  if (!lockUpdate.ok) {
+    return { ok: false, reason: "lock_not_active" };
+  }
+
+  const lock = getRepoLock(db, input.lockId);
+  if (!lock) {
+    return { ok: false, reason: "lock_not_active" };
+  }
+
+  appendQueueEvent(db, {
+    goalId: updatedJob.goal_id,
+    jobId: updatedJob.id,
+    type: QUEUE_EVENT_TYPES.JOB_HEARTBEAT,
+    payload: {
+      iteration: updatedJob.iteration,
+      worker_id: input.workerId,
+      lock_id: input.lockId,
+      heartbeat_at: now,
+      lease_expires_at: leaseExpiresAt
+    },
+    createdAt: now
+  });
+
+  return { ok: true, job: updatedJob, lock };
+}
+
 export function getQueueJob(
   db: MomentumDb,
   jobId: string
@@ -229,6 +322,26 @@ function validateClaimInput(input: ClaimGoalIterationInput): void {
   ) {
     throw new Error(
       "claimPendingGoalIterationJob: leaseDurationMs must be a positive number"
+    );
+  }
+}
+
+function validateHeartbeatInput(input: HeartbeatGoalIterationInput): void {
+  if (typeof input.jobId !== "string" || input.jobId.length === 0) {
+    throw new Error("heartbeatGoalIterationJob: jobId is required");
+  }
+  if (typeof input.lockId !== "string" || input.lockId.length === 0) {
+    throw new Error("heartbeatGoalIterationJob: lockId is required");
+  }
+  if (typeof input.workerId !== "string" || input.workerId.length === 0) {
+    throw new Error("heartbeatGoalIterationJob: workerId is required");
+  }
+  if (
+    !Number.isFinite(input.leaseDurationMs) ||
+    input.leaseDurationMs <= 0
+  ) {
+    throw new Error(
+      "heartbeatGoalIterationJob: leaseDurationMs must be a positive number"
     );
   }
 }
