@@ -1,7 +1,7 @@
 import process from "node:process";
 import { openDb, type MomentumDb } from "./db.js";
 import { initGoal, type GoalInitOptions, type GoalInitSuccess } from "./goal-init.js";
-import type { DataDirOptions } from "./data-dir.js";
+import { resolveDataDir, type DataDirOptions } from "./data-dir.js";
 import {
   executeIterationJob,
   type ExecuteIterationJobResult
@@ -11,6 +11,7 @@ import {
   type GoalStatusSuccess
 } from "./goal-status.js";
 import { writeHandoff, type HandoffSuccess } from "./handoff.js";
+import { runWorkerOnce, type WorkerRunResult } from "./worker-run.js";
 
 export const VERSION = "0.0.0";
 
@@ -32,6 +33,7 @@ type ParsedFlags = {
   foreground: boolean;
   repo?: string;
   runner?: string;
+  workerId?: string;
   dataDir?: string;
   error?: string;
 };
@@ -40,11 +42,12 @@ const COMMANDS = [
   "momentum goal start <goal.md> [--repo <path>] [--foreground] [--runner <profile>] [--data-dir <path>] [--json]",
   "momentum status [goal-id] [--data-dir <path>] [--json]",
   "momentum handoff <goal-id> [--data-dir <path>] [--json]",
+  "momentum worker run [--worker-id <id>] [--data-dir <path>] [--json]",
   "momentum doctor [--json]"
 ];
 
 const QUEUED_NEXT_ACTION =
-  "Goal queued. A goal_iteration worker is required to execute this job; the worker loop is not yet implemented (Milestone 2 in progress).";
+  "Goal queued. Run `momentum worker run --data-dir <path>` to claim and execute one goal_iteration job.";
 
 export async function runCli(argv: string[], io: CliIo = defaultIo()): Promise<number> {
   const parsed = parseFlags(argv);
@@ -80,7 +83,85 @@ export async function runCli(argv: string[], io: CliIo = defaultIo()): Promise<n
     return handoff(parsed, io);
   }
 
+  if (command === "worker" && subcommand === "run") {
+    return workerRun(parsed, io);
+  }
+
   return usageError(`Unknown command: ${command}`, parsed, io);
+}
+
+function workerRun(parsed: ParsedFlags, io: CliIo): number {
+  if (parsed.args.length > 2) {
+    return usageError(`Unexpected argument for worker run: ${parsed.args[2]}`, parsed, io);
+  }
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+  const dataDir = resolveDataDir(dataDirOptions);
+
+  const workerId = parsed.workerId ?? `worker-${process.pid}`;
+
+  const db = openDb(dataDir);
+  try {
+    const result = runWorkerOnce({
+      db,
+      dataDir,
+      workerId,
+      leaseDurationMs: 30_000
+    });
+    return emitWorkerRunResult(parsed, io, result);
+  } finally {
+    db.close();
+  }
+}
+
+function emitWorkerRunResult(
+  parsed: ParsedFlags,
+  io: CliIo,
+  result: WorkerRunResult
+): number {
+  if (parsed.json) {
+    const base = {
+      command: "worker run",
+      ...result
+    };
+    const payload = {
+      ok: result.code !== "not_executed" && result.code !== "ran_job" ? true : result.code === "ran_job",
+      ...base
+    } as Record<string, unknown>;
+
+    writeJson(io.stdout, payload);
+    return result.code === "no_work" || result.code === "not_executed"
+      ? 0
+      : result.jobIterationResult.ok
+        ? 0
+        : 1;
+  }
+
+  if (result.code === "no_work") {
+    write(io.stdout, `${result.message}\n`);
+    return 0;
+  }
+
+  if (result.code === "not_executed") {
+    write(io.stdout, `${result.message}\n`);
+    return 0;
+  }
+
+  const iterResult = result.jobIterationResult;
+  const status = iterResult.ok ? "succeeded" : "failed";
+  write(io.stdout, [
+    `Worker ${result.workerId} ${status} goal ${result.goalId} iteration ${result.iteration}`,
+    `Job: ${result.jobId}`,
+    `Lock: ${result.lockId}`,
+    `Repo: ${result.repoRoot}`,
+    `Goal state: ${result.goalState}`,
+    `Job state: ${result.jobState}`,
+    ""
+  ].join("\n"));
+
+  return iterResult.ok ? 0 : 1;
 }
 
 function doctor(parsed: ParsedFlags, io: CliIo): number {
@@ -533,6 +614,7 @@ function parseFlags(argv: string[]): ParsedFlags {
   let foreground = false;
   let repo: string | undefined;
   let runner: string | undefined;
+  let workerId: string | undefined;
   let dataDir: string | undefined;
   let error: string | undefined;
 
@@ -574,6 +656,17 @@ function parseFlags(argv: string[]): ParsedFlags {
       continue;
     }
 
+    if (arg === "--worker-id") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --worker-id.";
+      } else {
+        workerId = value;
+        index += 1;
+      }
+      continue;
+    }
+
     if (arg === "--data-dir") {
       const value = readFlagValue(argv, index);
       if (value === undefined) {
@@ -592,6 +685,7 @@ function parseFlags(argv: string[]): ParsedFlags {
   if (repo !== undefined) parsed.repo = repo;
   if (runner !== undefined) parsed.runner = runner;
   if (dataDir !== undefined) parsed.dataDir = dataDir;
+  if (workerId !== undefined) parsed.workerId = workerId;
   if (error !== undefined) parsed.error = error;
 
   return parsed;

@@ -84,6 +84,9 @@ describe("momentum CLI scaffold", () => {
     );
     expect(result.stdout).toContain("momentum status [goal-id] [--data-dir <path>] [--json]");
     expect(result.stdout).toContain("momentum handoff <goal-id> [--data-dir <path>] [--json]");
+    expect(result.stdout).toContain(
+      "momentum worker run [--worker-id <id>] [--data-dir <path>] [--json]"
+    );
     expect(result.stdout).toContain("momentum doctor [--json]");
     expect(result.stderr).toBe("");
   });
@@ -457,7 +460,7 @@ describe("momentum CLI scaffold", () => {
     expect(result.stdout).toContain("Goal initialized:");
     expect(result.stdout).toContain("Goal state: queued");
     expect(result.stdout).toContain("goal_iteration, pending, iteration 1");
-    expect(result.stdout).toMatch(/Next: Goal queued\. A goal_iteration worker/);
+    expect(result.stdout).toMatch(/Next: Goal queued\. Run `momentum worker run/);
   });
 
   it("rejects --data-dir without a value", async () => {

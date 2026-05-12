@@ -1,0 +1,410 @@
+import type { MomentumDb } from "./db.js";
+import {
+  appendQueueEvent,
+  QUEUE_EVENT_TYPES
+} from "./events.js";
+import {
+  claimPendingGoalIterationJob,
+  heartbeatGoalIterationJob,
+  releaseClaimedGoalIterationJob
+} from "./queue-jobs.js";
+import {
+  acquireRepoLock,
+  releaseRepoLock
+} from "./repo-locks.js";
+import { getGoal } from "./goal-init.js";
+import { resolveGoalArtifactPaths } from "./artifacts.js";
+import { parseGoalSpecFile } from "./goal-spec.js";
+import {
+  executeIterationJob,
+  type GoalIterationState,
+  type JobIterationState,
+  type ExecuteIterationJobResult
+} from "./iteration-job.js";
+
+export type WorkerRunNow = () => number;
+
+export type WorkerRunInput = {
+  db: MomentumDb;
+  dataDir: string;
+  workerId: string;
+  leaseDurationMs?: number;
+  now?: WorkerRunNow;
+};
+
+export type WorkerRunNoWorkResult = {
+  code: "no_work";
+  workerId: string;
+  dataDir: string;
+  outcome: "idle";
+  message: string;
+};
+
+export type WorkerRunNoClaimResult = {
+  code: "not_executed";
+  workerId: string;
+  dataDir: string;
+  outcome: "not_executed";
+  reason: string;
+  goalId: string;
+  jobId: string;
+  lockId?: string;
+  message: string;
+  error?: string;
+};
+
+export type WorkerRunSuccessResult = {
+  code: "ran_job";
+  workerId: string;
+  dataDir: string;
+  outcome: "ran_job";
+  goalId: string;
+  jobId: string;
+  lockId: string;
+  goalState: GoalIterationState;
+  jobState: JobIterationState;
+  iteration: number;
+  repoRoot: string;
+  leaseExpiresAt: number;
+  heartbeatAt: number;
+  jobIterationResult: ExecuteIterationJobResult;
+  message: string;
+};
+
+export type WorkerRunResult =
+  | WorkerRunNoWorkResult
+  | WorkerRunNoClaimResult
+  | WorkerRunSuccessResult;
+
+type GoalRow = {
+  id: string;
+  repo: string | null;
+};
+
+export function runWorkerOnce(input: WorkerRunInput): WorkerRunResult {
+  const now = input.now ?? (() => Date.now());
+  const leaseDurationMs = input.leaseDurationMs ?? 30_000;
+  const workerId = input.workerId;
+  const baseData = { workerId, dataDir: input.dataDir };
+
+  const claimNow = now();
+  const claim = claimPendingGoalIterationJob(input.db, {
+    workerId,
+    leaseDurationMs,
+    now: claimNow
+  });
+
+  if (!claim.ok) {
+    return {
+      code: "no_work",
+      ...baseData,
+      outcome: "idle",
+      message: "No pending goal_iteration jobs were available."
+    };
+  }
+
+  const claimedJob = claim.job;
+  const goal = getGoalRow(input.db, claimedJob.goal_id);
+  if (!goal) {
+    const released = releaseClaimedGoalIterationJob(input.db, {
+      jobId: claimedJob.id,
+      workerId,
+      reason: "goal_not_found"
+    });
+    const message = released.ok
+      ? `Released claim on job ${claimedJob.id} after missing goal metadata.`
+      : `Could not release claim on job ${claimedJob.id}; it was reclaimed.`;
+    return notExecutedFailure({
+      ...baseData,
+      goalId: claimedJob.goal_id,
+      jobId: claimedJob.id,
+      reason: "goal_not_found",
+      message
+    });
+  }
+
+  if (!goal.repo) {
+    const released = releaseClaimedGoalIterationJob(input.db, {
+      jobId: claimedJob.id,
+      workerId,
+      reason: "goal_missing_repo"
+    });
+    const message = released.ok
+      ? `Released claim on job ${claimedJob.id}; goal ${claimedJob.goal_id} has no repo path.`
+      : `Could not release claim on job ${claimedJob.id}; it was reclaimed.`;
+    return notExecutedFailure({
+      ...baseData,
+      goalId: claimedJob.goal_id,
+      jobId: claimedJob.id,
+      reason: "goal_missing_repo",
+      message
+    });
+  }
+
+  const artifactPaths = resolveGoalArtifactPaths(input.dataDir, goal.id);
+  const specResult = parseGoalSpecFile(artifactPaths.goalMd);
+  if (!specResult.ok) {
+    const released = releaseClaimedGoalIterationJob(input.db, {
+      jobId: claimedJob.id,
+      workerId,
+      reason: "invalid_goal_spec"
+    });
+    const message = released.ok
+      ? `Released claim on job ${claimedJob.id}; failed to parse queued goal artifact.`
+      : `Could not release claim on job ${claimedJob.id}; it was reclaimed.`;
+    return notExecutedFailure({
+      ...baseData,
+      goalId: claimedJob.goal_id,
+      jobId: claimedJob.id,
+      reason: "invalid_goal_spec",
+      message,
+      error: specResult.error
+    });
+  }
+
+  const spec = {
+    ...specResult.spec,
+    repo: goal.repo ?? specResult.spec.repo
+  };
+  if (typeof spec.repo !== "string" || spec.repo.trim().length === 0) {
+    const released = releaseClaimedGoalIterationJob(input.db, {
+      jobId: claimedJob.id,
+      workerId,
+      reason: "missing_repo_in_goal"
+    });
+    const message = released.ok
+      ? `Released claim on job ${claimedJob.id}; no repo path available for execution.`
+      : `Could not release claim on job ${claimedJob.id}; it was reclaimed.`;
+    return notExecutedFailure({
+      ...baseData,
+      goalId: claimedJob.goal_id,
+      jobId: claimedJob.id,
+      reason: "missing_repo_in_goal",
+      message,
+      error: "Goal repo path unavailable."
+    });
+  }
+
+  const lockNow = now();
+  const lockLeaseExpiresAt = claimedJob.lease_expires_at ?? claimNow + leaseDurationMs;
+  const lockResult = acquireRepoLock(input.db, {
+    repoRoot: goal.repo,
+    holder: workerId,
+    goalId: goal.id,
+    iteration: claimedJob.iteration,
+    jobId: claimedJob.id,
+    leaseExpiresAt: lockLeaseExpiresAt,
+    now: lockNow
+  });
+
+  if (!lockResult.ok) {
+    const released = releaseClaimedGoalIterationJob(input.db, {
+      jobId: claimedJob.id,
+      workerId,
+      reason: `repo_lock_${lockResult.reason}`
+    });
+    if (released.ok) {
+      return notExecutedFailure({
+        ...baseData,
+        goalId: goal.id,
+        jobId: claimedJob.id,
+        reason: `repo_lock_${lockResult.reason}`,
+        lockId: lockResult.existing.id,
+        message: `Could not acquire repo lock for ${goal.repo}; lock already held by ${lockResult.existing.holder}.`
+      });
+    }
+
+    appendQueueEvent(input.db, {
+      goalId: goal.id,
+      jobId: claimedJob.id,
+      type: QUEUE_EVENT_TYPES.JOB_RELEASED,
+      payload: {
+        iteration: claimedJob.iteration,
+        worker_id: workerId,
+        reason: "repo_lock_contention",
+        holder: lockResult.existing.holder
+      },
+      createdAt: lockNow
+    });
+    return notExecutedFailure({
+      ...baseData,
+      goalId: goal.id,
+      jobId: claimedJob.id,
+      reason: "repo_lock_released",
+      lockId: lockResult.existing.id,
+      message: `Could not acquire repo lock for ${goal.repo}; lock already held by ${lockResult.existing.holder}.`
+    });
+  }
+
+  const lock = lockResult.lock;
+  const heartbeatNow = now();
+  const heartbeat = heartbeatGoalIterationJob(input.db, {
+    jobId: claimedJob.id,
+    lockId: lock.id,
+    workerId,
+    leaseDurationMs,
+    now: heartbeatNow
+  });
+
+  if (!heartbeat.ok) {
+    releaseRepoLock(input.db, {
+      lockId: lock.id,
+      now: now(),
+      recoveryStatus: "heartbeat_rejected_before_run"
+    });
+
+    const released = releaseClaimedGoalIterationJob(input.db, {
+      jobId: claimedJob.id,
+      workerId,
+      reason: "heartbeat_rejected"
+    });
+    if (!released.ok) {
+      appendQueueEvent(input.db, {
+        goalId: goal.id,
+        jobId: claimedJob.id,
+        type: QUEUE_EVENT_TYPES.JOB_RELEASED,
+        payload: {
+          iteration: claimedJob.iteration,
+          worker_id: workerId,
+          reason: "heartbeat_rejected"
+        },
+        createdAt: now()
+      });
+    }
+
+    return notExecutedFailure({
+      ...baseData,
+      goalId: goal.id,
+      jobId: claimedJob.id,
+      reason: "heartbeat_rejected",
+      lockId: lock.id,
+      message: "Job heartbeat could not be refreshed before execution; claim was released."
+    });
+  }
+
+  const runningJob = heartbeat.job;
+  const iterationResult = executeIterationJob({
+    db: input.db,
+    goalId: goal.id,
+    jobId: runningJob.id,
+    spec,
+    artifactPaths,
+    iteration: runningJob.iteration,
+    now
+  });
+
+  const lockReleased = releaseRepoLock(input.db, {
+    lockId: lock.id,
+    now: now(),
+    recoveryStatus: iterationResult.ok ? "iteration_success" : "iteration_failure"
+  });
+  if (!lockReleased.ok) {
+    appendQueueEvent(input.db, {
+      goalId: goal.id,
+      jobId: runningJob.id,
+      type: QUEUE_EVENT_TYPES.JOB_RELEASED,
+      payload: {
+        iteration: runningJob.iteration,
+        worker_id: workerId,
+        reason: "lock_release_failed"
+      },
+      createdAt: now()
+    });
+  }
+
+  if (iterationResult.ok) {
+    appendQueueEvent(input.db, {
+      goalId: goal.id,
+      jobId: runningJob.id,
+      type: QUEUE_EVENT_TYPES.JOB_SUCCEEDED,
+      payload: {
+        iteration: runningJob.iteration,
+        worker_id: workerId,
+        repo_root: goal.repo,
+        lock_id: lock.id,
+        goal_state: iterationResult.goalState,
+        job_state: iterationResult.jobState,
+        heartbeat_at: runningJob.heartbeat_at,
+        lease_expires_at: runningJob.lease_expires_at
+      },
+      createdAt: now()
+    });
+  } else {
+    appendQueueEvent(input.db, {
+      goalId: goal.id,
+      jobId: runningJob.id,
+      type: QUEUE_EVENT_TYPES.JOB_FAILED,
+      payload: {
+        iteration: runningJob.iteration,
+        worker_id: workerId,
+        repo_root: goal.repo,
+        lock_id: lock.id,
+        error: summarizeIterationFailure(iterationResult.iteration)
+      },
+      createdAt: now()
+    });
+  }
+
+  return {
+    code: "ran_job",
+    ...baseData,
+    outcome: "ran_job",
+    goalId: goal.id,
+    jobId: runningJob.id,
+    lockId: lock.id,
+    goalState: iterationResult.goalState,
+    jobState: iterationResult.jobState,
+    iteration: runningJob.iteration,
+    repoRoot: goal.repo,
+    leaseExpiresAt: runningJob.lease_expires_at ?? lockLeaseExpiresAt,
+    heartbeatAt: runningJob.heartbeat_at ?? heartbeat.lock.heartbeat_at,
+    jobIterationResult: iterationResult,
+    message: iterationResult.ok
+      ? `Ran goal ${goal.id} iteration ${runningJob.iteration} as claimed job ${runningJob.id}.`
+      : `Ran goal ${goal.id} iteration ${runningJob.iteration} with runner outcome ${summarizeIterationFailure(
+        iterationResult.iteration
+      )}.`
+  };
+}
+
+function getGoalRow(db: MomentumDb, goalId: string): GoalRow | undefined {
+  const goal = getGoal(db, goalId);
+  if (!goal) return undefined;
+  return { id: goal.id, repo: goal.repo };
+}
+
+function summarizeIterationFailure(result: ExecuteIterationJobResult["iteration"]): string {
+  if (result.ok) {
+    return "ok";
+  }
+  return result.code;
+}
+
+function notExecutedFailure(input: {
+  workerId: string;
+  dataDir: string;
+  goalId: string;
+  jobId: string;
+  reason: string;
+  message: string;
+  lockId?: string;
+  error?: string;
+}): WorkerRunNoClaimResult {
+  const payload: WorkerRunNoClaimResult = {
+    code: "not_executed",
+    workerId: input.workerId,
+    dataDir: input.dataDir,
+    outcome: "not_executed",
+    goalId: input.goalId,
+    jobId: input.jobId,
+    reason: input.reason,
+    message: input.message
+  };
+  if (input.lockId !== undefined) {
+    payload.lockId = input.lockId;
+  }
+  if (input.error !== undefined) {
+    payload.error = input.error;
+  }
+  return payload;
+}

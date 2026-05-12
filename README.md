@@ -69,7 +69,9 @@ momentum goal start <goal.md> [--repo <path>] [--foreground] [--runner <profile>
 
 Parses the goal spec and initializes (or resumes) goal state under the resolved data directory. Behavior then branches on `--foreground`:
 
-- **Default (queued enqueue path, Milestone 2):** writes the Goal row with state `queued` and enqueues a single `goal_iteration` job (state `pending`, iteration `1`) with idempotency key `goal:<goal-id>:iteration:1`. Repo, branch, and base HEAD are not inspected at enqueue time — that is the worker's job. Re-running with the same spec returns the same `goalId` and `jobId`, sets `resumed: true` / `enqueueCreated: false`, and emits exactly one `job.enqueued` event per idempotent first-iteration enqueue. The worker loop that executes `goal_iteration` jobs is the next Milestone 2 increment and is not yet wired up; `nextAction` in the JSON envelope spells this out. JSON envelope shape:
+- **Default (queued enqueue path, Milestone 2):** writes the Goal row with state `queued` and enqueues a single `goal_iteration` job (state `pending`, iteration `1`) with idempotency key `goal:<goal-id>:iteration:1`. Repo, branch, and base HEAD are not inspected at enqueue time — that is the worker's job. Re-running with the same spec returns the same `goalId` and `jobId`, sets `resumed: true` / `enqueueCreated: false`, and emits exactly one `job.enqueued` event per idempotent first-iteration enqueue. `momentum worker run` consumes that queue and executes a claimed job once.
+
+  JSON envelope shape:
 
   ```json
   {
@@ -93,7 +95,7 @@ Parses the goal spec and initializes (or resumes) goal state under the resolved 
     "iterationArtifactDir": "/path/to/data-dir/goals/<uuid>/iterations/1",
     "resumed": false,
     "enqueueCreated": true,
-    "nextAction": "Goal queued. A goal_iteration worker is required to execute this job; the worker loop is not yet implemented (Milestone 2 in progress)."
+    "nextAction": "Goal queued. Run `momentum worker run --data-dir <path>` to claim and execute one goal_iteration job."
   }
   ```
 
@@ -236,7 +238,7 @@ Replacing the `verification: ["true"]` line with `verification: ["false"]` exerc
 
 Milestone 1 intentionally omits the following; they belong to later milestones or are out of scope for this scaffold:
 
-- Queue/worker execution, persistent job leases, and stale-lease recovery (Milestone 2; schema, idempotent first-iteration enqueue, and default queued `goal start` path are in place; the worker loop that drains `goal_iteration` jobs is pending).
+- Automatic stale-lease recovery in background loops (Milestone 2 queue execution is wired to local worker claims; stale-repo-lock handling is manual for now).
 - Daemon lifecycle management, stop/cancel commands, and background runner supervision (Milestone 2/3).
 - Real runner profiles beyond `fake`; only the fake runner is wired into the foreground iteration.
 - Multi-iteration loops; `max_iterations` is parsed, the default path only enqueues iteration 1, and `--foreground` executes exactly one inline iteration.

@@ -150,6 +150,9 @@ describe("Milestone 1 end-to-end smoke", () => {
       expect(result.stdout).toContain(
         "momentum handoff <goal-id> [--data-dir <path>] [--json]"
       );
+      expect(result.stdout).toContain(
+        "momentum worker run [--worker-id <id>] [--data-dir <path>] [--json]"
+      );
       expect(result.stdout).toContain("momentum doctor [--json]");
       expect(result.stdout).toContain(
         "Default goal start enqueues a goal_iteration job"
@@ -233,6 +236,7 @@ describe("Milestone 1 end-to-end smoke", () => {
         "momentum goal start <goal.md> [--repo <path>] [--foreground] [--runner <profile>] [--data-dir <path>] [--json]",
         "momentum status [goal-id] [--data-dir <path>] [--json]",
         "momentum handoff <goal-id> [--data-dir <path>] [--json]",
+        "momentum worker run [--worker-id <id>] [--data-dir <path>] [--json]",
         "momentum doctor [--json]"
       ]);
     },
