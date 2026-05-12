@@ -88,7 +88,7 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
         const jobId = ensureInitialForegroundJob(
           db,
           existingGoal.id,
-          artifactPaths.iteration1Dir
+          artifactPaths.iterationDir
         );
         return {
           ok: true,
@@ -111,7 +111,7 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
         goalId: existingGoal.id,
         iteration: 1,
         idempotencyKey,
-        artifactPath: artifactPaths.iteration1Dir
+        artifactPath: artifactPaths.iterationDir
       });
       return {
         ok: true,
@@ -159,7 +159,7 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
       const jobId = createForegroundJob(
         db,
         goalId,
-        artifactPaths.iteration1Dir,
+        artifactPaths.iterationDir,
         now
       );
       return {
@@ -184,7 +184,7 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
       goalId,
       iteration: 1,
       idempotencyKey,
-      artifactPath: artifactPaths.iteration1Dir,
+      artifactPath: artifactPaths.iterationDir,
       now
     });
     return {
@@ -220,6 +220,8 @@ export type GoalRow = {
   verification_timeout_sec: number;
   state: string;
   artifact_dir: string;
+  current_iteration: number;
+  completion_reason: string | null;
   created_at: number;
   updated_at: number;
 };

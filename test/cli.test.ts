@@ -116,7 +116,7 @@ describe("momentum CLI scaffold", () => {
 
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Momentum doctor: ok");
-    expect(result.stdout).toContain("scope: NGX-246 goal-start-queued-enqueue");
+    expect(result.stdout).toContain("scope: NGX-249 completion-reducer-chaining");
     expect(result.stderr).toBe("");
   });
 
@@ -129,7 +129,7 @@ describe("momentum CLI scaffold", () => {
       ok: true,
       command: "doctor",
       version: VERSION,
-      milestone: "NGX-246 goal-start-queued-enqueue"
+      milestone: "NGX-249 completion-reducer-chaining"
     });
     expect(result.stderr).toBe("");
   });
@@ -576,7 +576,9 @@ describe("momentum CLI scaffold", () => {
         "job.heartbeat",
         "iteration_started",
         "iteration_completed",
-        "job.succeeded"
+        "job.succeeded",
+        "goal.reduced",
+        "goal.failed"
       ]);
     } finally {
       db.close();

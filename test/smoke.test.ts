@@ -1442,7 +1442,7 @@ describe("Milestone 2 queued goal_iteration end-to-end smoke (NGX-248)", () => {
         const goalRow = db
           .prepare("SELECT state FROM goals WHERE id = ?")
           .get(goalId) as { state: string };
-        expect(goalRow.state).toBe("iteration_complete");
+        expect(goalRow.state).toBe("max_iterations_reached");
 
         const eventTypes = (
           db
@@ -1457,7 +1457,9 @@ describe("Milestone 2 queued goal_iteration end-to-end smoke (NGX-248)", () => {
           "job.heartbeat",
           "iteration_started",
           "iteration_completed",
-          "job.succeeded"
+          "job.succeeded",
+          "goal.reduced",
+          "goal.failed"
         ]);
 
         const succeededRow = db
@@ -1508,7 +1510,7 @@ describe("Milestone 2 queued goal_iteration end-to-end smoke (NGX-248)", () => {
         ok: true,
         command: "status",
         goalId,
-        state: "iteration_complete"
+        state: "max_iterations_reached"
       });
       const latestJob = statusPayload["latestJob"] as Record<string, unknown>;
       expect(latestJob).toMatchObject({
@@ -1538,7 +1540,7 @@ describe("Milestone 2 queued goal_iteration end-to-end smoke (NGX-248)", () => {
         ok: true,
         command: "handoff",
         goalId,
-        state: "iteration_complete"
+        state: "max_iterations_reached"
       });
       const handoffJson = path.join(goalDir, "handoff.json");
       const handoffMd = path.join(goalDir, "handoff.md");
@@ -1695,7 +1697,9 @@ describe("Milestone 2 queued goal_iteration end-to-end smoke (NGX-248)", () => {
           "job.heartbeat",
           "iteration_started",
           "iteration_failed",
-          "job.failed"
+          "job.failed",
+          "goal.reduced",
+          "goal.failed"
         ]);
 
         const failedRow = db
@@ -1913,7 +1917,9 @@ Queued smoke goal that fails verification.
           "job.heartbeat",
           "iteration_started",
           "iteration_failed",
-          "job.failed"
+          "job.failed",
+          "goal.reduced",
+          "goal.failed"
         ]);
 
         const failedRow = db

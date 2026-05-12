@@ -400,9 +400,10 @@ describe("runForegroundIteration", () => {
     expect(out.code).toBe("unsupported_runner");
   });
 
-  it("returns invalid_input for iteration values other than 1", () => {
+  it("returns invalid_input when iteration does not match the artifact paths iteration", () => {
     const repo = initRepo();
     const spec = makeSpec(repo, { max_iterations: 5 });
+    // artifactPaths default to iteration 1; passing iteration 2 should mismatch.
     const artifactPaths = setupArtifacts();
 
     const out = runForegroundIteration({
@@ -415,6 +416,7 @@ describe("runForegroundIteration", () => {
     expect(out.ok).toBe(false);
     if (out.ok) return;
     expect(out.code).toBe("invalid_input");
+    expect(out.error).toContain("artifactPaths iteration");
   });
 
   it("returns iteration_out_of_range when iteration exceeds max_iterations", () => {

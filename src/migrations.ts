@@ -14,6 +14,11 @@ const JOB_QUEUE_COLUMNS: ColumnSpec[] = [
   { name: "error_path", type: "TEXT" }
 ];
 
+const GOAL_REDUCER_COLUMNS: ColumnSpec[] = [
+  { name: "current_iteration", type: "INTEGER NOT NULL DEFAULT 0" },
+  { name: "completion_reason", type: "TEXT" }
+];
+
 const REPO_LOCKS_DDL = `
 CREATE TABLE IF NOT EXISTS repo_locks (
   id TEXT PRIMARY KEY,
@@ -49,8 +54,15 @@ CREATE INDEX IF NOT EXISTS idx_jobs_state_type
 export function applyQueueMigrations(db: MomentumDb): void {
   db.exec("BEGIN");
   try {
-    for (const column of JOB_QUEUE_COLUMNS) {
-      ensureColumn(db, "jobs", column);
+    if (tableExists(db, "jobs")) {
+      for (const column of JOB_QUEUE_COLUMNS) {
+        ensureColumn(db, "jobs", column);
+      }
+    }
+    if (tableExists(db, "goals")) {
+      for (const column of GOAL_REDUCER_COLUMNS) {
+        ensureColumn(db, "goals", column);
+      }
     }
     db.exec(JOB_IDEMPOTENCY_INDEX_DDL);
     db.exec(REPO_LOCKS_DDL);
@@ -69,4 +81,11 @@ function ensureColumn(db: MomentumDb, table: string, column: ColumnSpec): void {
     .all() as PragmaColumnRow[];
   if (rows.some((row) => row.name === column.name)) return;
   db.exec(`ALTER TABLE ${table} ADD COLUMN ${column.name} ${column.type}`);
+}
+
+function tableExists(db: MomentumDb, name: string): boolean {
+  const row = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+    .get(name) as { name: string } | undefined;
+  return row !== undefined;
 }
