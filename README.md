@@ -42,7 +42,7 @@ The `pnpm test` suite includes a built-binary end-to-end smoke (`test/smoke.test
 
 ## Goal Spec
 
-Goal files are Markdown that begin with YAML frontmatter. `title` is required; `repo`, `runner`, `branch`, `max_iterations`, `verification`, and `verification_timeout_sec` are optional. Defaults are `runner: fake`, `branch: momentum/<title-slug>`, `max_iterations: 1`, `verification: []`, and `verification_timeout_sec: 900`. `max_iterations` and `verification_timeout_sec` must be positive integers. If `branch` is omitted, `title` must contain letters or numbers so Momentum can derive `momentum/<title-slug>`. `--repo` and `--runner` override frontmatter values.
+Goal files are Markdown that begin with YAML frontmatter. `title` is required; `repo`, `runner`, `branch`, `max_iterations`, `verification`, and `verification_timeout_sec` are optional. Defaults are `runner: fake`, `branch: momentum/<title-slug>`, `max_iterations: 1`, `verification: []`, and `verification_timeout_sec: 900`. `max_iterations` and `verification_timeout_sec` must be positive integers. If `branch` is omitted, `title` must contain letters or numbers so Momentum can derive `momentum/<title-slug>`. `--repo` and `--runner` override frontmatter values. In the default queued path, relative `repo` values are resolved to absolute paths before being persisted or emitted.
 
 ```markdown
 ---
@@ -108,19 +108,28 @@ Parses the goal spec and initializes (or resumes) goal state under the resolved 
     "jobId": "<uuid>",
     "jobType": "foreground_iteration",
     "title": "Example Goal",
+    "dataDir": "/path/to/data-dir",
+    "artifactDir": "/path/to/data-dir/goals/<uuid>",
+    "resumed": false,
     "state": "iteration_complete",
     "goalState": "iteration_complete",
     "jobState": "succeeded",
-    "resumed": false,
     "iteration": {
       "ok": true,
       "iteration": 1,
+      "repoPath": "/path/to/repo",
       "branch": "momentum/example-goal",
       "branchCreated": true,
       "baseHead": "<sha>",
+      "postRunnerHead": "<sha>",
       "commitSha": "<sha>",
+      "commitMessage": "Momentum iteration 1: Example Goal",
       "runnerSuccess": true,
-      "goalComplete": false
+      "goalComplete": false,
+      "promptPath": "/path/to/data-dir/goals/<uuid>/iterations/1/prompt.md",
+      "runnerLogPath": "/path/to/data-dir/goals/<uuid>/iterations/1/runner.log",
+      "resultJsonPath": "/path/to/data-dir/goals/<uuid>/iterations/1/result.json",
+      "verificationLogPath": "/path/to/data-dir/goals/<uuid>/iterations/1/verification.log"
     }
   }
   ```
