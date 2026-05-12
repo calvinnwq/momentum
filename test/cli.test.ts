@@ -583,7 +583,7 @@ describe("momentum CLI scaffold", () => {
     }
   });
 
-  it("worker run returns not_executed payload as ok=false and keeps error output deterministic", async () => {
+  it("worker run returns ran_job failure as ok=false and exit 1 when verification fails", async () => {
     const dataDir = makeTempDir("momentum-cli-worker-fail-");
     const repo = initRepo();
     const goalFile = path.join(dataDir, "goal.md");
@@ -643,6 +643,112 @@ describe("momentum CLI scaffold", () => {
     } finally {
       db.close();
     }
+  });
+
+  it("worker run returns not_executed with ok=true and exit 0 when repo lock contention blocks claim", async () => {
+    const dataDir = makeTempDir("momentum-cli-worker-contended-");
+    const repo = initRepo();
+    const goalFile = path.join(dataDir, "goal.md");
+    fs.writeFileSync(goalFile, GOAL_SPEC, "utf-8");
+
+    const queued = await run([
+      "goal", "start", goalFile,
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    const queuedPayload = JSON.parse(queued.stdout) as Record<string, unknown>;
+    const goalId = queuedPayload["goalId"] as string;
+    const jobId = queuedPayload["jobId"] as string;
+
+    const { acquireRepoLock } = await import("../src/repo-locks.js");
+    const { openDb } = await import("../src/db.js");
+    const setupDb = openDb(dataDir);
+    let blockingLockId: string;
+    try {
+      const acquired = acquireRepoLock(setupDb, {
+        repoRoot: repo,
+        holder: "other-worker",
+        goalId,
+        iteration: 1,
+        jobId,
+        leaseExpiresAt: Date.now() + 60_000
+      });
+      if (!acquired.ok) throw new Error("seed lock did not acquire");
+      blockingLockId = acquired.lockId;
+    } finally {
+      setupDb.close();
+    }
+
+    const workerRun = await run([
+      "worker", "run",
+      "--worker-id", "contended-worker",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(workerRun.code).toBe(0);
+    expect(workerRun.stderr).toBe("");
+    const payload = JSON.parse(workerRun.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      command: "worker run",
+      code: "not_executed",
+      outcome: "not_executed",
+      workerId: "contended-worker",
+      goalId,
+      jobId,
+      reason: "repo_lock_already_locked",
+      lockId: blockingLockId
+    });
+
+    const { DatabaseSync } = await import("node:sqlite");
+    const db = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      const job = db
+        .prepare("SELECT state, worker_id FROM jobs WHERE id = ?")
+        .get(jobId) as { state: string; worker_id: string | null };
+      expect(job.state).toBe("pending");
+      expect(job.worker_id).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rejects --worker-id without a value", async () => {
+    const result = await run([
+      "worker", "run",
+      "--worker-id",
+      "--data-dir", "/tmp",
+      "--json"
+    ]);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+
+    expect(result.code).toBe(2);
+    expect(payload).toMatchObject({
+      ok: false,
+      code: "usage_error",
+      message: "Missing required value for --worker-id."
+    });
+    expect(result.stdout).toBe("");
+  });
+
+  it("rejects --worker-id with an empty value", async () => {
+    const result = await run([
+      "worker", "run",
+      "--worker-id", "",
+      "--data-dir", "/tmp",
+      "--json"
+    ]);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+
+    expect(result.code).toBe(2);
+    expect(payload).toMatchObject({
+      ok: false,
+      code: "usage_error",
+      message: "Missing required value for --worker-id."
+    });
+    expect(result.stdout).toBe("");
   });
 
   it("rejects --data-dir without a value", async () => {

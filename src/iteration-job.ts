@@ -49,7 +49,7 @@ export function executeIterationJob(
        SET state = ?,
            started_at = ?,
            updated_at = ?,
-           attempt_count = attempt_count + 1,
+           attempt_count = attempt_count + CASE WHEN state = 'claimed' THEN 0 ELSE 1 END,
            error = NULL,
            finished_at = NULL
        WHERE id = ?`

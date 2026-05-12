@@ -164,9 +164,9 @@ export function runWorkerOnce(input: WorkerRunInput): WorkerRunResult {
 
   const spec = {
     ...specResult.spec,
-    repo: goal.repo ?? specResult.spec.repo
+    repo: goal.repo
   };
-  if (typeof spec.repo !== "string" || spec.repo.trim().length === 0) {
+  if (spec.repo.trim().length === 0) {
     const released = releaseClaimedGoalIterationJob(input.db, {
       jobId: claimedJob.id,
       workerId,
@@ -186,7 +186,7 @@ export function runWorkerOnce(input: WorkerRunInput): WorkerRunResult {
   }
 
   const lockNow = now();
-  const lockLeaseExpiresAt = claimedJob.lease_expires_at ?? claimNow + leaseDurationMs;
+  const lockLeaseExpiresAt = claimNow + leaseDurationMs;
   const lockResult = acquireRepoLock(input.db, {
     repoRoot: goal.repo,
     holder: workerId,
@@ -203,36 +203,17 @@ export function runWorkerOnce(input: WorkerRunInput): WorkerRunResult {
       workerId,
       reason: `repo_lock_${lockResult.reason}`
     });
-    if (released.ok) {
-      return notExecutedFailure({
-        ...baseData,
-        goalId: goal.id,
-        jobId: claimedJob.id,
-        reason: `repo_lock_${lockResult.reason}`,
-        lockId: lockResult.existing.id,
-        message: `Could not acquire repo lock for ${goal.repo}; lock already held by ${lockResult.existing.holder}.`
-      });
-    }
-
-    appendQueueEvent(input.db, {
-      goalId: goal.id,
-      jobId: claimedJob.id,
-      type: QUEUE_EVENT_TYPES.JOB_RELEASED,
-      payload: {
-        iteration: claimedJob.iteration,
-        worker_id: workerId,
-        reason: "repo_lock_contention",
-        holder: lockResult.existing.holder
-      },
-      createdAt: lockNow
-    });
     return notExecutedFailure({
       ...baseData,
       goalId: goal.id,
       jobId: claimedJob.id,
-      reason: "repo_lock_released",
+      reason: released.ok
+        ? `repo_lock_${lockResult.reason}`
+        : "repo_lock_release_failed",
       lockId: lockResult.existing.id,
-      message: `Could not acquire repo lock for ${goal.repo}; lock already held by ${lockResult.existing.holder}.`
+      message: released.ok
+        ? `Could not acquire repo lock for ${goal.repo}; lock already held by ${lockResult.existing.holder}.`
+        : `Could not acquire repo lock for ${goal.repo}; lock already held by ${lockResult.existing.holder}. Claim release also failed.`
     });
   }
 
@@ -258,27 +239,16 @@ export function runWorkerOnce(input: WorkerRunInput): WorkerRunResult {
       workerId,
       reason: "heartbeat_rejected"
     });
-    if (!released.ok) {
-      appendQueueEvent(input.db, {
-        goalId: goal.id,
-        jobId: claimedJob.id,
-        type: QUEUE_EVENT_TYPES.JOB_RELEASED,
-        payload: {
-          iteration: claimedJob.iteration,
-          worker_id: workerId,
-          reason: "heartbeat_rejected"
-        },
-        createdAt: now()
-      });
-    }
 
     return notExecutedFailure({
       ...baseData,
       goalId: goal.id,
       jobId: claimedJob.id,
-      reason: "heartbeat_rejected",
+      reason: released.ok ? "heartbeat_rejected" : "heartbeat_rejected_release_failed",
       lockId: lock.id,
-      message: "Job heartbeat could not be refreshed before execution; claim was released."
+      message: released.ok
+        ? "Job heartbeat could not be refreshed before execution; claim was released."
+        : "Job heartbeat could not be refreshed before execution; claim release also failed."
     });
   }
 
@@ -293,24 +263,11 @@ export function runWorkerOnce(input: WorkerRunInput): WorkerRunResult {
     now
   });
 
-  const lockReleased = releaseRepoLock(input.db, {
+  releaseRepoLock(input.db, {
     lockId: lock.id,
     now: now(),
     recoveryStatus: iterationResult.ok ? "iteration_success" : "iteration_failure"
   });
-  if (!lockReleased.ok) {
-    appendQueueEvent(input.db, {
-      goalId: goal.id,
-      jobId: runningJob.id,
-      type: QUEUE_EVENT_TYPES.JOB_RELEASED,
-      payload: {
-        iteration: runningJob.iteration,
-        worker_id: workerId,
-        reason: "lock_release_failed"
-      },
-      createdAt: now()
-    });
-  }
 
   if (iterationResult.ok) {
     appendQueueEvent(input.db, {
@@ -356,8 +313,8 @@ export function runWorkerOnce(input: WorkerRunInput): WorkerRunResult {
     jobState: iterationResult.jobState,
     iteration: runningJob.iteration,
     repoRoot: goal.repo,
-    leaseExpiresAt: runningJob.lease_expires_at ?? lockLeaseExpiresAt,
-    heartbeatAt: runningJob.heartbeat_at ?? heartbeat.lock.heartbeat_at,
+    leaseExpiresAt: heartbeatNow + leaseDurationMs,
+    heartbeatAt: heartbeatNow,
     jobIterationResult: iterationResult,
     message: iterationResult.ok
       ? `Ran goal ${goal.id} iteration ${runningJob.iteration} as claimed job ${runningJob.id}.`

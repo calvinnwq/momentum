@@ -130,7 +130,7 @@ function emitWorkerRunResult(
       ok:
         result.code === "ran_job"
           ? result.jobIterationResult.ok
-          : result.code === "no_work",
+          : true,
       ...base
     } as Record<string, unknown>;
 

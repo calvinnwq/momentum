@@ -127,7 +127,7 @@ describe("runWorkerOnce", () => {
       expect(job?.heartbeat_at).toBe(1_700_000_020_000);
       expect(job?.started_at).toBe(1_700_000_030_000);
       expect(job?.finished_at).toBe(1_700_000_040_000);
-      expect(job?.attempt_count).toBe(2);
+      expect(job?.attempt_count).toBe(1);
 
       const lock = db
         .prepare(
