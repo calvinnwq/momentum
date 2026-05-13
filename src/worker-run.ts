@@ -31,12 +31,31 @@ import {
 
 export type WorkerRunNow = () => number;
 
+export type WorkerJobClaimedInfo = {
+  goalId: string;
+  jobId: string;
+  lockId: string;
+  iteration: number;
+  workerId: string;
+  now: number;
+};
+
+export type WorkerJobReleasedInfo = WorkerJobClaimedInfo & {
+  outcome: "success" | "failure";
+};
+
+export type WorkerRunHooks = {
+  onJobClaimed?: (info: WorkerJobClaimedInfo) => void;
+  onJobReleased?: (info: WorkerJobReleasedInfo) => void;
+};
+
 export type WorkerRunInput = {
   db: MomentumDb;
   dataDir: string;
   workerId: string;
   leaseDurationMs?: number;
   now?: WorkerRunNow;
+  hooks?: WorkerRunHooks;
 };
 
 export type WorkerRunNoWorkResult = {
@@ -268,6 +287,16 @@ export function runWorkerOnce(input: WorkerRunInput): WorkerRunResult {
     goal.id,
     runningJob.iteration
   );
+
+  input.hooks?.onJobClaimed?.({
+    goalId: goal.id,
+    jobId: runningJob.id,
+    lockId: lock.id,
+    iteration: runningJob.iteration,
+    workerId,
+    now: heartbeatNow
+  });
+
   const iterationResult = executeIterationJob({
     db: input.db,
     goalId: goal.id,
@@ -278,10 +307,21 @@ export function runWorkerOnce(input: WorkerRunInput): WorkerRunResult {
     now
   });
 
+  const releaseNow = now();
   releaseRepoLock(input.db, {
     lockId: lock.id,
-    now: now(),
+    now: releaseNow,
     recoveryStatus: iterationResult.ok ? "iteration_success" : "iteration_failure"
+  });
+
+  input.hooks?.onJobReleased?.({
+    goalId: goal.id,
+    jobId: runningJob.id,
+    lockId: lock.id,
+    iteration: runningJob.iteration,
+    workerId,
+    now: releaseNow,
+    outcome: iterationResult.ok ? "success" : "failure"
   });
 
   if (iterationResult.ok) {
