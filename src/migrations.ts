@@ -72,6 +72,10 @@ CREATE INDEX IF NOT EXISTS idx_daemon_runs_started_at
 
 CREATE INDEX IF NOT EXISTS idx_daemon_runs_heartbeat_at
   ON daemon_runs(heartbeat_at);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_daemon_runs_one_active
+  ON daemon_runs((state IN ('starting', 'running', 'stop_requested')))
+  WHERE state IN ('starting', 'running', 'stop_requested');
 `;
 
 const JOB_IDEMPOTENCY_INDEX_DDL = `

@@ -129,6 +129,7 @@ describe("applyQueueMigrations", () => {
       expect(indexes).toContain("idx_repo_locks_active_root");
       expect(indexes).toContain("idx_daemon_runs_state");
       expect(indexes).toContain("idx_daemon_runs_heartbeat_at");
+      expect(indexes).toContain("idx_daemon_runs_one_active");
     } finally {
       db.close();
     }

@@ -66,6 +66,9 @@ Common commands:
   - `logs`
   - `handoff`
   - `worker run`
+  - `daemon start`
+  - `daemon stop`
+  - `daemon status`
   - `doctor`
 - Preserve stable CLI behavior across both JSON and text outputs.
 - When changing user-facing output, update tests and verify callers that rely on stable formatting.

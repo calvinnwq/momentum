@@ -306,7 +306,7 @@ JSON envelope shape (active run with no stop request or error):
 momentum doctor [--json]
 ```
 
-Reports CLI version, Node.js version, platform, the current milestone scope label, and a compact daemon-readiness block read from `daemon_runs` (`{ok, dataDir, hasRun, state, isActive, stale, staleRunCount, runId}` on success, `{ok: false, code, message}` on failure). Useful as a first sanity check after install and as a quick orchestrator-health probe.
+Reports CLI version, Node.js version, platform, the current milestone scope label (`Milestone 3: daemon state model and CLI contract (NGX-272)`), and a compact daemon-readiness block read from `daemon_runs` (`{ok, dataDir, hasRun, state, isActive, stale, staleRunCount, runId}` on success, `{ok: false, code, message}` on failure). Useful as a first sanity check after install and as a quick orchestrator-health probe.
 
 ## Data Directory
 

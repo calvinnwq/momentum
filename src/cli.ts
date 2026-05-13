@@ -1,6 +1,6 @@
 import os from "node:os";
 import process from "node:process";
-import { openDb, type MomentumDb } from "./db.js";
+import { isUniqueViolation, openDb, type MomentumDb } from "./db.js";
 import { initGoal, type GoalInitOptions, type GoalInitSuccess } from "./goal-init.js";
 import { resolveDataDir, type DataDirOptions } from "./data-dir.js";
 import {
@@ -222,7 +222,24 @@ function daemonStart(parsed: ParsedFlags, io: CliIo): number {
       });
     }
 
-    const { runId, run } = startDaemonRun(db, { pid, host, now });
+    let runId: string;
+    let run: ReturnType<typeof startDaemonRun>["run"];
+    try {
+      ({ runId, run } = startDaemonRun(db, { pid, host, now }));
+    } catch (err) {
+      if (!isUniqueViolation(err)) throw err;
+      const existing = getActiveDaemonRun(db);
+      const existingSummary = existing
+        ? summarizeExistingDaemonRun(existing, now)
+        : undefined;
+      return emitDaemonStartFailure(parsed, io, {
+        code: "daemon_already_active",
+        message: existing
+          ? `An active daemon run already exists (${existing.id}, state ${existing.state}). Stop it before starting another.`
+          : "An active daemon run already exists. Stop it before starting another.",
+        ...(existingSummary ? { existing: existingSummary } : {})
+      });
+    }
     return emitDaemonStartSuccess(parsed, io, {
       dataDir,
       runId,
@@ -683,7 +700,7 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
     version: VERSION,
     node: process.version,
     platform: process.platform,
-    milestone: "Milestone 2: queue/worker and chaining (NGX-250)",
+    milestone: "Milestone 3: daemon state model and CLI contract (NGX-272)",
     daemon: daemonPayload
   };
 
@@ -718,6 +735,23 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
   lines.push("");
   write(io.stdout, lines.join("\n"));
   return 0;
+}
+
+function summarizeExistingDaemonRun(
+  run: ReturnType<typeof getActiveDaemonRun> extends infer T ? NonNullable<T> : never,
+  now: number
+): NonNullable<DaemonStartFailurePayload["existing"]> {
+  const heartbeatAgeMs = Math.max(0, now - run.heartbeat_at);
+  return {
+    runId: run.id,
+    state: run.state,
+    pid: run.pid,
+    host: run.host,
+    startedAt: run.started_at,
+    heartbeatAt: run.heartbeat_at,
+    heartbeatAgeMs,
+    stale: heartbeatAgeMs >= DEFAULT_DAEMON_STALE_AFTER_MS
+  };
 }
 
 function goalStart(parsed: ParsedFlags, io: CliIo): number {

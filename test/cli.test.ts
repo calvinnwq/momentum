@@ -129,7 +129,9 @@ describe("momentum CLI scaffold", () => {
 
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Momentum doctor: ok");
-    expect(result.stdout).toContain("scope: Milestone 2: queue/worker and chaining (NGX-250)");
+    expect(result.stdout).toContain(
+      "scope: Milestone 3: daemon state model and CLI contract (NGX-272)"
+    );
     expect(result.stdout).toContain("daemon: never started");
     expect(result.stderr).toBe("");
   });
@@ -144,7 +146,7 @@ describe("momentum CLI scaffold", () => {
       ok: true,
       command: "doctor",
       version: VERSION,
-      milestone: "Milestone 2: queue/worker and chaining (NGX-250)"
+      milestone: "Milestone 3: daemon state model and CLI contract (NGX-272)"
     });
     expect(payload["daemon"]).toEqual({
       ok: true,

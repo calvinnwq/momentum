@@ -86,6 +86,19 @@ describe("startDaemonRun", () => {
     }
   });
 
+  it("enforces one active daemon run at the database layer", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      startDaemonRun(db, { now: 100 });
+      expect(() => startDaemonRun(db, { now: 200 })).toThrow(
+        /UNIQUE/
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   it("allows initial state 'starting' and rejects other initial states", () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);
@@ -479,6 +492,11 @@ describe("getActiveDaemonRun and getLatestDaemonRun", () => {
         now: 150
       });
       const middle = startDaemonRun(db, { now: 200, pid: 2 });
+      finishDaemonRun(db, {
+        runId: middle.runId,
+        terminalState: "stopped",
+        now: 250
+      });
       const newest = startDaemonRun(db, { now: 300, pid: 3 });
 
       const active = getActiveDaemonRun(db);
@@ -488,7 +506,7 @@ describe("getActiveDaemonRun and getLatestDaemonRun", () => {
       expect(getLatestDaemonRun(db)?.id).toBe(newest.runId);
 
       // unused but ensures the middle row is preserved
-      expect(getDaemonRun(db, middle.runId)?.state).toBe("running");
+      expect(getDaemonRun(db, middle.runId)?.state).toBe("stopped");
     } finally {
       db.close();
     }
@@ -499,6 +517,11 @@ describe("getActiveDaemonRun and getLatestDaemonRun", () => {
     const db = openDb(dataDir);
     try {
       const first = startDaemonRun(db, { now: 100 });
+      finishDaemonRun(db, {
+        runId: first.runId,
+        terminalState: "stopped",
+        now: 150
+      });
       const second = startDaemonRun(db, { now: 200 });
       finishDaemonRun(db, {
         runId: second.runId,
@@ -508,7 +531,7 @@ describe("getActiveDaemonRun and getLatestDaemonRun", () => {
       const latest = getLatestDaemonRun(db);
       expect(latest?.id).toBe(second.runId);
       expect(latest?.state).toBe("stopped");
-      expect(getActiveDaemonRun(db)?.id).toBe(first.runId);
+      expect(getActiveDaemonRun(db)).toBeUndefined();
     } finally {
       db.close();
     }
@@ -521,6 +544,21 @@ describe("listStaleDaemonRuns", () => {
     const db = openDb(dataDir);
     try {
       const stale = startDaemonRun(db, { now: 1_000 });
+
+      const out = listStaleDaemonRuns(db, {
+        now: 10_000,
+        staleAfterMs: 5_000
+      });
+      expect(out.map((row) => row.id)).toEqual([stale.runId]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("excludes active runs whose heartbeat is still fresh", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
       const fresh = startDaemonRun(db, { now: 1_000 });
       heartbeatDaemonRun(db, { runId: fresh.runId, now: 9_000 });
 
@@ -528,7 +566,7 @@ describe("listStaleDaemonRuns", () => {
         now: 10_000,
         staleAfterMs: 5_000
       });
-      expect(out.map((row) => row.id)).toEqual([stale.runId]);
+      expect(out).toEqual([]);
     } finally {
       db.close();
     }
