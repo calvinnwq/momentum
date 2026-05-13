@@ -4,7 +4,7 @@ Momentum is a TypeScript CLI targeting Node.js for autonomous repo-work orchestr
 
 Milestone 1 (Foreground Proof Loop) is complete. Milestone 2 (Queue and Worker Model) is complete, with NGX-235, NGX-236, NGX-237, NGX-238, NGX-239, NGX-245, NGX-246, NGX-247, NGX-248, NGX-249, and NGX-250 implemented and verified. NGX-249 is M2-05 completion reducer and idempotent chaining (`reduceGoalIteration` classifies terminal `goal_iteration` jobs as `continue` / `goal_complete` / `max_iterations_reached` / `iteration_failed`; updates `goals.state` / `current_iteration` / `completion_reason`; enqueues next iterations with stable idempotency keys; emits `goal.reduced` + `goal.completed` / `goal.failed`; surfaces reducer state, next job, and next-action via `status`/`handoff`; and runs after each completed queued job). NGX-250 pins the Milestone 2 CLI contract around queued status/handoff fields, local log inspection, queued smoke coverage, and user-facing docs. Milestone 2 also includes queued-path execution without a long-lived daemon, stable single-shot worker behavior, and explicit artifact pointers on job success/failure.
 
-Milestone 3 is Operational Safety. It should add daemon/orchestrator state, stop behavior, stale lease recovery, manual recovery artifacts, and closeout smoke/docs without changing Momentum's core product model. NGX-272 has landed as the first M3 slice (M3-01 orchestrator state model and daemon CLI contract): durable `daemon_runs` schema, `daemon start` / `daemon stop` / `daemon status` subcommands, and a daemon-readiness block on `doctor --json`. The remaining M3 slices (continuous draining, cooperative stop, automatic stale-lease recovery, manual `recovery.md` artifacts, and closeout smoke/docs) are still planning targets. Momentum's core primitive is a durable `Goal`; external issues/projects are source items that seed context and reconciliation, not the source of truth for completion. Goal completion is determined by the Goal's Markdown acceptance criteria plus runner, verification, and handoff evidence. Tracker writes are adapter-mediated and policy-gated: core records durable facts and external-update intents, while Linear/GitHub/Jira/etc. adapters or approved workflow steps perform external writes. Source adapters are pull/reconcile first in M3; inbound webhooks are deferred. A Goal uses one shared repo/workspace lease for now; per-source-item worktrees/workspaces are deferred until daemon, stop, and recovery behavior are solid. `MOMENTUM.md` is the canonical future repo policy file, documented in M3 as a contract but not loaded at runtime unless a later daemon slice explicitly proves it is required.
+Milestone 3 is Operational Safety. It should add daemon/orchestrator state, stop behavior, stale lease recovery, manual recovery artifacts, and closeout smoke/docs without changing Momentum's core product model. NGX-272 has landed as the first M3 slice (M3-01 orchestrator state model and daemon CLI contract): durable `daemon_runs` schema, `daemon start` / `daemon stop` / `daemon status` subcommands, and a daemon-readiness block on `doctor --json`. NGX-273 has landed as the second M3 slice (M3-02 managed daemon loop for queued jobs): a `runDaemonLoop` primitive that composes `runWorkerOnce` with deterministic idle backoff, heartbeat / active-job / reconciliation updates per cycle, and `stop_requested` shutdown handling; opt-in bounded-loop flags (`--max-loop-iterations`, `--max-idle-cycles`, `--poll-interval-ms`) wire that loop into `momentum daemon start` so a queued goal can be drained without manually invoking `worker run` repeatedly. The remaining M3 slices (cooperative stop semantics beyond loop shutdown, automatic stale-lease recovery, manual `recovery.md` artifacts, and closeout smoke/docs) are still planning targets. Momentum's core primitive is a durable `Goal`; external issues/projects are source items that seed context and reconciliation, not the source of truth for completion. Goal completion is determined by the Goal's Markdown acceptance criteria plus runner, verification, and handoff evidence. Tracker writes are adapter-mediated and policy-gated: core records durable facts and external-update intents, while Linear/GitHub/Jira/etc. adapters or approved workflow steps perform external writes. Source adapters are pull/reconcile first in M3; inbound webhooks are deferred. A Goal uses one shared repo/workspace lease for now; per-source-item worktrees/workspaces are deferred until daemon, stop, and recovery behavior are solid. `MOMENTUM.md` is the canonical future repo policy file, documented in M3 as a contract but not loaded at runtime unless a later daemon slice explicitly proves it is required.
 
 ## CLI Surface
 
@@ -22,13 +22,13 @@ momentum status [goal-id] [--data-dir <path>] [--json]
 momentum logs <goal-id> [--iteration <n>] [--data-dir <path>] [--json]
 momentum handoff <goal-id> [--data-dir <path>] [--json]
 momentum worker run [--worker-id <id>] [--data-dir <path>] [--json]
-momentum daemon start [--data-dir <path>] [--json]
+momentum daemon start [--data-dir <path>] [--max-loop-iterations <n>] [--max-idle-cycles <n>] [--poll-interval-ms <n>] [--json]
 momentum daemon stop [--reason <text>] [--data-dir <path>] [--json]
 momentum daemon status [--data-dir <path>] [--json]
 momentum doctor [--json]
 ```
 
-The `daemon` subcommands record orchestrator-run state in SQLite (`daemon_runs`) and expose an inspection contract. They are deliberately scoped to the Milestone 3 operational-safety slice (NGX-272): `daemon start` does not begin a continuous queue-draining loop, `daemon stop` records a stop request without killing active runners, and stale records are surfaced without auto-recovery.
+The `daemon` subcommands record orchestrator-run state in SQLite (`daemon_runs`) and expose an inspection contract. They are scoped to the Milestone 3 operational-safety slices (NGX-272, NGX-273): without any loop-bound flags, `daemon start` registers a new orchestrator run and returns immediately (preserving the NGX-272 register-only contract); passing any of `--max-loop-iterations`, `--max-idle-cycles`, or `--poll-interval-ms` opts into the NGX-273 managed loop and drains queued goal iterations in-process until a bound, `stop_requested`, or terminal error is reached. `daemon stop` records a stop request that the managed loop observes between cycles, but does not kill any external runner, worker, or process. Stale `daemon_runs` records are surfaced without auto-recovery.
 
 `goal start --foreground` parses the goal spec, resolves the data directory, initializes SQLite (`goals`, `jobs`, `events`, `repo_locks` tables), creates the artifact layout, and runs one foreground iteration: it inspects the target repo, captures the pre-iteration HEAD, creates or reuses a Momentum branch, renders the iteration prompt, invokes the configured runner (currently `fake` only), runs each verification command from the repo root, and either stages and commits the full repo diff as one Momentum commit on verified success or hard-resets the worktree back to the pre-iteration HEAD on runner failure or verification failure. The iteration writes `prompt.md`, `runner.log`, `verification.log`, and `result.json` under `iterations/<n>/`. On a verified commit the goal transitions to `iteration_complete` (or `completed` if the runner reports `goal_complete: true`); on runner failure, verification failure, or any pipeline error it transitions to `failed`. `status [goal-id] --json` reads the SQLite/artifact state and emits a stable JSON shape including reducer state, next job, and next-action hints, and `handoff <goal-id> --json` writes `handoff.md` and `handoff.json` (schema v1) into the goal's artifact dir.
 
@@ -202,14 +202,14 @@ Local interrupt policy: `worker run` is a foreground one-shot command. If the pr
 ### `daemon start`
 
 ```text
-momentum daemon start [--data-dir <path>] [--json]
+momentum daemon start [--data-dir <path>] [--max-loop-iterations <n>] [--max-idle-cycles <n>] [--poll-interval-ms <n>] [--json]
 ```
 
 Records a new orchestrator run in `daemon_runs` (state `running`) with `pid`, `host`, `started_at`, and `heartbeat_at` populated from the invoking process. Refuses to record a second concurrent run while one is still active (states `starting`, `running`, `stop_requested`) and exits with `code: "daemon_already_active"` (exit 1); the failure payload surfaces the existing `runId`, `state`, `pid`, `host`, `startedAt`, `heartbeatAt`, `heartbeatAgeMs`, and a `stale` flag (default 90s cutoff) so operators can decide whether to wait or clear the prior record manually. After a terminal record (`stopped` / `error`), a fresh start is allowed.
 
-This command does **not** begin a long-running queue-draining loop. Continuous draining, runner supervision, and automatic stale-lease recovery are explicitly out of scope for NGX-272.
+Without any loop-bound flag, `daemon start` returns immediately after registering the run (the NGX-272 register-only contract). Passing any of `--max-loop-iterations`, `--max-idle-cycles`, or `--poll-interval-ms` opts into the NGX-273 managed loop: the process keeps running and drains queued `goal_iteration` jobs in-process by composing `runWorkerOnce`, refreshes `daemon_runs.heartbeat_at` / `active_job_id` / `reconcile_count` per cycle, applies deterministic idle backoff between empty polls, and exits cleanly when one of the bounds is reached, `daemon stop` records a stop request, or a terminal daemon-run state is observed. The opt-in surfaces a `loop` summary on the response with `exitReason` (`stop_requested` / `run_terminated` / `run_missing` / `max_loop_iterations` / `max_idle_cycles` / `internal_error`), `terminalState`, `iterations`, `jobsRun`, `jobsFailed`, `jobsNotExecuted`, `idleCycles`, `lastObservedState`, `lastWorkerCode`, and `error`. All loop bounds must be non-negative integers; a `--max-idle-cycles 0` or `--max-loop-iterations 0` invocation exits before claiming any work, which is useful as a one-shot readiness probe.
 
-JSON envelope shape:
+JSON envelope shape (register-only):
 
 ```json
 {
@@ -222,6 +222,34 @@ JSON envelope shape:
   "state": "running",
   "startedAt": 1731500000000,
   "heartbeatAt": 1731500000000
+}
+```
+
+JSON envelope shape (managed loop):
+
+```json
+{
+  "ok": true,
+  "command": "daemon start",
+  "dataDir": "/path/to/data-dir",
+  "runId": "<uuid>",
+  "pid": 12345,
+  "host": "hostname",
+  "state": "running",
+  "startedAt": 1731500000000,
+  "heartbeatAt": 1731500000000,
+  "loop": {
+    "exitReason": "max_idle_cycles",
+    "terminalState": "running",
+    "iterations": 1,
+    "jobsRun": 0,
+    "jobsFailed": 0,
+    "jobsNotExecuted": 1,
+    "idleCycles": 1,
+    "lastObservedState": "running",
+    "lastWorkerCode": "no_queued_job",
+    "error": null
+  }
 }
 ```
 
@@ -306,7 +334,7 @@ JSON envelope shape (active run with no stop request or error):
 momentum doctor [--json]
 ```
 
-Reports CLI version, Node.js version, platform, the current milestone scope label (`Milestone 3: daemon state model and CLI contract (NGX-272)`), and a compact daemon-readiness block read from `daemon_runs` (`{ok, dataDir, hasRun, state, isActive, stale, staleRunCount, runId}` on success, `{ok: false, code, message}` on failure). Useful as a first sanity check after install and as a quick orchestrator-health probe.
+Reports CLI version, Node.js version, platform, the current milestone scope label (`Milestone 3: managed daemon loop for queued jobs (NGX-272, NGX-273)`), and a compact daemon-readiness block read from `daemon_runs` (`{ok, dataDir, hasRun, state, isActive, stale, staleRunCount, runId}` on success, `{ok: false, code, message}` on failure). Useful as a first sanity check after install and as a quick orchestrator-health probe.
 
 ## Data Directory
 
@@ -462,10 +490,10 @@ Momentum's product model is centered on these durable concepts; M3 must not brea
 
 Milestone 2 intentionally deferred the following to **Milestone 3** so the queued path stayed scoped to single-shot worker claims and explicit local recovery:
 
-- **Background runner supervision and continuous queue draining.** NGX-272 lands `daemon start` / `daemon stop` / `daemon status` as orchestrator-state contracts, but no continuous draining loop is wired up; that remains a later M3 slice.
-- **Graceful stop beyond recording intent.** `daemon stop` records a stop request in `daemon_runs` (idempotent, with a default `operator-requested` reason) but does not signal, kill, or otherwise terminate any running runner, worker, or external process. A `stop --now` command and an actual cooperative-shutdown handshake are deferred.
+- **Background runner supervision.** NGX-272 lands `daemon start` / `daemon stop` / `daemon status` as orchestrator-state contracts; NGX-273 wires an opt-in managed loop on `daemon start` that drains queued goal iterations in-process by composing `runWorkerOnce`. Background detachment / supervision (forking, daemonization, restart-on-crash) is still out of scope.
+- **Graceful stop beyond recording intent and loop shutdown.** `daemon stop` records a stop request in `daemon_runs` (idempotent, with a default `operator-requested` reason); the NGX-273 managed loop observes that state between cycles and exits cleanly. The command still does not signal, kill, or otherwise terminate any running runner, worker, or external process. A `stop --now` command, mid-job cancellation, and a full cooperative-shutdown handshake are deferred.
 - Automatic stale-lease recovery, a `needs_manual_recovery` goal state, and a `recovery.md` artifact. Stale repo-lock handling in Milestone 2 is manual; re-running `worker run` is the supported local recovery path. `daemon status` flags stale `daemon_runs` records (default 90s heartbeat cutoff) but does not auto-transition them.
-- Multi-iteration draining loops inside a single invocation. `worker run` is a single-shot consumer that processes one claimed job per invocation and then exits. The completion reducer enqueues the next iteration when the decision is `continue`, so separate `worker run` invocations drain a multi-iteration goal step by step. A long-running daemon loop that polls and drains continuously is a Milestone 3 concern.
+- `worker run` remains a single-shot consumer that processes one claimed job per invocation and then exits; the NGX-273 managed loop is the bounded continuous-draining path on `daemon start`.
 - Worktree management, remote git operations (`fetch`, `pull`, `push`, `rebase`), and parallel same-repo Goals.
 - PR/GitHub/Linear automation and any external integrations driven from inside Momentum.
 - A dashboard or other UI surface beyond the CLI JSON/text outputs.
