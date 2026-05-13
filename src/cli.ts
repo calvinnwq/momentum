@@ -26,6 +26,11 @@ import {
   requestDaemonRunStop,
   startDaemonRun
 } from "./daemon-runs.js";
+import {
+  runDaemonLoop,
+  DEFAULT_DAEMON_POLL_INTERVAL_MS,
+  type DaemonLoopResult
+} from "./daemon-loop.js";
 
 export const VERSION = "0.0.0";
 
@@ -51,6 +56,9 @@ type ParsedFlags = {
   dataDir?: string;
   iteration?: number;
   reason?: string;
+  maxLoopIterations?: number;
+  maxIdleCycles?: number;
+  pollIntervalMs?: number;
   error?: string;
 };
 
@@ -60,7 +68,7 @@ const COMMANDS = [
   "momentum logs <goal-id> [--iteration <n>] [--data-dir <path>] [--json]",
   "momentum handoff <goal-id> [--data-dir <path>] [--json]",
   "momentum worker run [--worker-id <id>] [--data-dir <path>] [--json]",
-  "momentum daemon start [--data-dir <path>] [--json]",
+  "momentum daemon start [--max-loop-iterations <n>] [--max-idle-cycles <n>] [--poll-interval-ms <ms>] [--data-dir <path>] [--json]",
   "momentum daemon stop [--reason <text>] [--data-dir <path>] [--json]",
   "momentum daemon status [--data-dir <path>] [--json]",
   "momentum doctor [--json]"
@@ -118,7 +126,7 @@ export async function runCli(argv: string[], io: CliIo = defaultIo()): Promise<n
   return usageError(`Unknown command: ${command}`, parsed, io);
 }
 
-function daemon(parsed: ParsedFlags, io: CliIo): number {
+function daemon(parsed: ParsedFlags, io: CliIo): number | Promise<number> {
   const subcommand = parsed.args[1];
   if (!subcommand) {
     return usageError(
@@ -171,7 +179,10 @@ function daemonStatus(parsed: ParsedFlags, io: CliIo): number {
   return emitDaemonStatus(parsed, io, result);
 }
 
-function daemonStart(parsed: ParsedFlags, io: CliIo): number {
+async function daemonStart(
+  parsed: ParsedFlags,
+  io: CliIo
+): Promise<number> {
   if (parsed.args.length > 2) {
     return usageError(
       `Unexpected argument for daemon start: ${parsed.args[2]}`,
@@ -193,6 +204,11 @@ function daemonStart(parsed: ParsedFlags, io: CliIo): number {
       message: err instanceof Error ? err.message : String(err)
     });
   }
+
+  const loopRequested =
+    parsed.maxLoopIterations !== undefined ||
+    parsed.maxIdleCycles !== undefined ||
+    parsed.pollIntervalMs !== undefined;
 
   const now = Date.now();
   const pid = process.pid;
@@ -240,14 +256,41 @@ function daemonStart(parsed: ParsedFlags, io: CliIo): number {
         ...(existingSummary ? { existing: existingSummary } : {})
       });
     }
-    return emitDaemonStartSuccess(parsed, io, {
+
+    if (!loopRequested) {
+      return emitDaemonStartSuccess(parsed, io, {
+        dataDir,
+        runId,
+        pid: run.pid,
+        host: run.host,
+        state: run.state,
+        startedAt: run.started_at,
+        heartbeatAt: run.heartbeat_at
+      });
+    }
+
+    const loopResult = await runDaemonLoop({
+      db,
+      dataDir,
+      runId,
+      workerId: `daemon-${pid}`,
+      ...(parsed.maxLoopIterations !== undefined
+        ? { maxLoopIterations: parsed.maxLoopIterations }
+        : {}),
+      ...(parsed.maxIdleCycles !== undefined
+        ? { maxIdleCycles: parsed.maxIdleCycles }
+        : {}),
+      pollIntervalMs:
+        parsed.pollIntervalMs ?? DEFAULT_DAEMON_POLL_INTERVAL_MS
+    });
+
+    return emitDaemonStartLoopResult(parsed, io, {
       dataDir,
       runId,
       pid: run.pid,
       host: run.host,
-      state: run.state,
       startedAt: run.started_at,
-      heartbeatAt: run.heartbeat_at
+      loop: loopResult
     });
   } finally {
     db.close();
@@ -513,6 +556,74 @@ function emitDaemonStartSuccess(
     ""
   ].join("\n"));
   return 0;
+}
+
+type DaemonStartLoopPayload = {
+  dataDir: string;
+  runId: string;
+  pid: number | null;
+  host: string | null;
+  startedAt: number;
+  loop: DaemonLoopResult;
+};
+
+function emitDaemonStartLoopResult(
+  parsed: ParsedFlags,
+  io: CliIo,
+  data: DaemonStartLoopPayload
+): number {
+  const loop = data.loop;
+  const loopSummary = {
+    exitReason: loop.exitReason,
+    terminalState: loop.terminalState,
+    iterations: loop.iterations,
+    jobsRun: loop.jobsRun,
+    jobsFailed: loop.jobsFailed,
+    jobsNotExecuted: loop.jobsNotExecuted,
+    idleCycles: loop.idleCycles,
+    lastObservedState: loop.lastObservedState,
+    lastWorkerCode: loop.lastWorkerCode,
+    ...(loop.error !== undefined ? { error: loop.error } : {})
+  };
+
+  const payload: Record<string, unknown> = {
+    ok: loop.ok,
+    command: "daemon start",
+    dataDir: data.dataDir,
+    runId: data.runId,
+    pid: data.pid,
+    host: data.host,
+    startedAt: data.startedAt,
+    state: loop.terminalState,
+    workerId: loop.workerId,
+    loop: loopSummary
+  };
+
+  if (parsed.json) {
+    writeJson(loop.ok ? io.stdout : io.stderr, payload);
+    return loop.ok ? 0 : 1;
+  }
+
+  const lines: string[] = [
+    `Daemon run started: ${data.runId}`,
+    `State: ${loop.terminalState}`,
+    `Exit reason: ${loop.exitReason}`,
+    `Iterations: ${loop.iterations}`,
+    `Jobs run: ${loop.jobsRun}`,
+    `Jobs failed: ${loop.jobsFailed}`,
+    `Jobs not executed: ${loop.jobsNotExecuted}`,
+    `Idle cycles: ${loop.idleCycles}`,
+    `Pid: ${data.pid ?? "(unset)"}`,
+    `Host: ${data.host ?? "(unset)"}`,
+    `Started at: ${data.startedAt}`,
+    `Data dir: ${data.dataDir}`
+  ];
+  if (loop.error !== undefined) {
+    lines.push(`Error: ${loop.error}`);
+  }
+  lines.push("");
+  write(loop.ok ? io.stdout : io.stderr, lines.join("\n"));
+  return loop.ok ? 0 : 1;
 }
 
 function emitDaemonStartFailure(
@@ -1331,6 +1442,9 @@ function parseFlags(argv: string[]): ParsedFlags {
   let dataDir: string | undefined;
   let iteration: number | undefined;
   let reason: string | undefined;
+  let maxLoopIterations: number | undefined;
+  let maxIdleCycles: number | undefined;
+  let pollIntervalMs: number | undefined;
   let error: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -1422,6 +1536,60 @@ function parseFlags(argv: string[]): ParsedFlags {
       continue;
     }
 
+    if (arg === "--max-loop-iterations") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --max-loop-iterations.";
+      } else {
+        const parsedValue = /^\d+$/.test(value)
+          ? Number.parseInt(value, 10)
+          : NaN;
+        if (!Number.isInteger(parsedValue) || parsedValue < 0) {
+          error ??= `Invalid value for --max-loop-iterations: ${value}`;
+        } else {
+          maxLoopIterations = parsedValue;
+        }
+        index += 1;
+      }
+      continue;
+    }
+
+    if (arg === "--max-idle-cycles") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --max-idle-cycles.";
+      } else {
+        const parsedValue = /^\d+$/.test(value)
+          ? Number.parseInt(value, 10)
+          : NaN;
+        if (!Number.isInteger(parsedValue) || parsedValue < 0) {
+          error ??= `Invalid value for --max-idle-cycles: ${value}`;
+        } else {
+          maxIdleCycles = parsedValue;
+        }
+        index += 1;
+      }
+      continue;
+    }
+
+    if (arg === "--poll-interval-ms") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --poll-interval-ms.";
+      } else {
+        const parsedValue = /^\d+$/.test(value)
+          ? Number.parseInt(value, 10)
+          : NaN;
+        if (!Number.isInteger(parsedValue) || parsedValue < 0) {
+          error ??= `Invalid value for --poll-interval-ms: ${value}`;
+        } else {
+          pollIntervalMs = parsedValue;
+        }
+        index += 1;
+      }
+      continue;
+    }
+
     args.push(arg);
   }
 
@@ -1432,6 +1600,9 @@ function parseFlags(argv: string[]): ParsedFlags {
   if (workerId !== undefined) parsed.workerId = workerId;
   if (iteration !== undefined) parsed.iteration = iteration;
   if (reason !== undefined) parsed.reason = reason;
+  if (maxLoopIterations !== undefined) parsed.maxLoopIterations = maxLoopIterations;
+  if (maxIdleCycles !== undefined) parsed.maxIdleCycles = maxIdleCycles;
+  if (pollIntervalMs !== undefined) parsed.pollIntervalMs = pollIntervalMs;
   if (error !== undefined) parsed.error = error;
 
   return parsed;

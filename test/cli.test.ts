@@ -6,7 +6,8 @@ import path from "node:path";
 import { VERSION, runCli } from "../src/cli.js";
 import {
   FAKE_RUNNER_FAIL_ENV,
-  FAKE_RUNNER_FIXTURE_FILENAME
+  FAKE_RUNNER_FIXTURE_FILENAME,
+  FAKE_RUNNER_GOAL_COMPLETE_ENV
 } from "../src/fake-runner.js";
 
 const GOAL_SPEC = `---
@@ -45,6 +46,7 @@ afterEach(() => {
     }
   }
   delete process.env[FAKE_RUNNER_FAIL_ENV];
+  delete process.env[FAKE_RUNNER_GOAL_COMPLETE_ENV];
 });
 
 function makeTempDir(prefix = "momentum-cli-"): string {
@@ -101,7 +103,7 @@ describe("momentum CLI scaffold", () => {
       "momentum worker run [--worker-id <id>] [--data-dir <path>] [--json]"
     );
     expect(result.stdout).toContain(
-      "momentum daemon start [--data-dir <path>] [--json]"
+      "momentum daemon start [--max-loop-iterations <n>] [--max-idle-cycles <n>] [--poll-interval-ms <ms>] [--data-dir <path>] [--json]"
     );
     expect(result.stdout).toContain(
       "momentum daemon stop [--reason <text>] [--data-dir <path>] [--json]"
@@ -2105,6 +2107,173 @@ Goal body.
     const result = await run(["daemon", "stop", "--reason"]);
     expect(result.code).toBe(2);
     expect(result.stderr).toContain("Missing required value for --reason");
+    expect(result.stdout).toBe("");
+  });
+
+  it("daemon start with --max-idle-cycles 0 registers a run and exits with terminalState=stopped", async () => {
+    const dataDir = makeTempDir("momentum-cli-daemon-loop-");
+    const result = await run([
+      "daemon", "start",
+      "--max-idle-cycles", "0",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      command: "daemon start",
+      dataDir,
+      state: "stopped"
+    });
+    expect(typeof payload["runId"]).toBe("string");
+    const loop = payload["loop"] as Record<string, unknown>;
+    expect(loop).toMatchObject({
+      exitReason: "max_idle_cycles",
+      terminalState: "stopped",
+      iterations: 0,
+      jobsRun: 0,
+      jobsFailed: 0,
+      jobsNotExecuted: 0,
+      idleCycles: 0
+    });
+
+    // The recorded run should be terminal in status afterwards.
+    const statusResult = await run([
+      "daemon", "status",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    const statusPayload = JSON.parse(statusResult.stdout) as Record<string, unknown>;
+    const run0 = statusPayload["daemonRun"] as Record<string, unknown>;
+    expect(run0["state"]).toBe("stopped");
+    expect(run0["isActive"]).toBe(false);
+  });
+
+  it("daemon start with --max-idle-cycles drains a queued goal end-to-end", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+    process.env[FAKE_RUNNER_GOAL_COMPLETE_ENV] = "1";
+
+    const enqueueResult = await run([
+      "goal", "start", goalFile,
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(enqueueResult.code).toBe(0);
+    const enqueuePayload = JSON.parse(enqueueResult.stdout) as Record<
+      string,
+      unknown
+    >;
+    const goalId = enqueuePayload["goalId"] as string;
+    expect(goalId.length).toBeGreaterThan(0);
+
+    const result = await run([
+      "daemon", "start",
+      "--max-idle-cycles", "2",
+      "--poll-interval-ms", "0",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      command: "daemon start",
+      dataDir,
+      state: "stopped"
+    });
+    const loop = payload["loop"] as Record<string, unknown>;
+    expect(loop["jobsRun"]).toBe(1);
+    expect(loop["jobsFailed"]).toBe(0);
+    expect(loop["exitReason"]).toBe("max_idle_cycles");
+
+    const statusResult = await run([
+      "status", goalId,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(statusResult.code).toBe(0);
+    const statusPayload = JSON.parse(statusResult.stdout) as Record<
+      string,
+      unknown
+    >;
+    expect(statusPayload["state"]).toBe("completed");
+  });
+
+  it("daemon start refuses to run the loop while another daemon is active", async () => {
+    const dataDir = makeTempDir("momentum-cli-daemon-loop-");
+    const { openDb } = await import("../src/db.js");
+    const { startDaemonRun } = await import("../src/daemon-runs.js");
+    let existingRunId: string;
+    const db = openDb(dataDir);
+    try {
+      ({ runId: existingRunId } = startDaemonRun(db, {
+        pid: 4242,
+        host: "node-existing-loop",
+        now: Date.now()
+      }));
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "daemon", "start",
+      "--max-idle-cycles", "1",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "daemon start",
+      code: "daemon_already_active"
+    });
+    expect(payload["message"]).toContain(existingRunId);
+  });
+
+  it("daemon start text mode prints a loop summary when bounded", async () => {
+    const dataDir = makeTempDir("momentum-cli-daemon-loop-");
+    const result = await run([
+      "daemon", "start",
+      "--max-idle-cycles", "0",
+      "--data-dir", dataDir
+    ]);
+
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("Daemon run started:");
+    expect(result.stdout).toContain("State: stopped");
+    expect(result.stdout).toContain("Exit reason: max_idle_cycles");
+    expect(result.stdout).toContain("Jobs run: 0");
+  });
+
+  it("daemon start rejects --max-loop-iterations with a non-integer value", async () => {
+    const result = await run([
+      "daemon", "start",
+      "--max-loop-iterations", "abc"
+    ]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain(
+      "Invalid value for --max-loop-iterations: abc"
+    );
+    expect(result.stdout).toBe("");
+  });
+
+  it("daemon start rejects --max-idle-cycles without a value", async () => {
+    const result = await run([
+      "daemon", "start",
+      "--max-idle-cycles"
+    ]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("Missing required value for --max-idle-cycles");
     expect(result.stdout).toBe("");
   });
 });
