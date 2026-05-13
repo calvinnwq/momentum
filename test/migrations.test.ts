@@ -90,6 +90,34 @@ describe("applyQueueMigrations", () => {
         expect(lockColumns, `missing repo_locks column: ${col}`).toContain(col);
       }
 
+      expect(tableNames(db)).toContain("daemon_runs");
+      const daemonColumns = getColumns(db, "daemon_runs").map(
+        (row) => row.name
+      );
+      for (const col of [
+        "id",
+        "pid",
+        "host",
+        "state",
+        "started_at",
+        "heartbeat_at",
+        "last_state_change_at",
+        "finished_at",
+        "active_job_id",
+        "active_lock_id",
+        "stop_requested_at",
+        "stop_reason",
+        "reconcile_count",
+        "last_reconciled_at",
+        "error",
+        "error_at",
+        "updated_at"
+      ]) {
+        expect(daemonColumns, `missing daemon_runs column: ${col}`).toContain(
+          col
+        );
+      }
+
       const indexes = (
         db
           .prepare(
@@ -99,6 +127,8 @@ describe("applyQueueMigrations", () => {
       ).map((row) => row.name);
       expect(indexes).toContain("idx_jobs_idempotency_key");
       expect(indexes).toContain("idx_repo_locks_active_root");
+      expect(indexes).toContain("idx_daemon_runs_state");
+      expect(indexes).toContain("idx_daemon_runs_heartbeat_at");
     } finally {
       db.close();
     }
@@ -109,12 +139,14 @@ describe("applyQueueMigrations", () => {
     const a = openDb(dataDir);
     const beforeJobsCols = getColumns(a, "jobs").length;
     const beforeLockCols = getColumns(a, "repo_locks").length;
+    const beforeDaemonCols = getColumns(a, "daemon_runs").length;
     a.close();
 
     const b = openDb(dataDir);
     try {
       expect(getColumns(b, "jobs")).toHaveLength(beforeJobsCols);
       expect(getColumns(b, "repo_locks")).toHaveLength(beforeLockCols);
+      expect(getColumns(b, "daemon_runs")).toHaveLength(beforeDaemonCols);
     } finally {
       b.close();
     }
@@ -199,6 +231,7 @@ describe("applyQueueMigrations", () => {
       expect(job["worker_id"]).toBeNull();
 
       expect(tableNames(upgraded)).toContain("repo_locks");
+      expect(tableNames(upgraded)).toContain("daemon_runs");
 
       const events = upgraded
         .prepare("SELECT count(*) AS c FROM events")
@@ -287,6 +320,7 @@ describe("applyQueueMigrations", () => {
         "idempotency_key"
       );
       expect(tableNames(db)).toContain("repo_locks");
+      expect(tableNames(db)).toContain("daemon_runs");
     } finally {
       db.close();
     }
