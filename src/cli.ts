@@ -1,3 +1,4 @@
+import os from "node:os";
 import process from "node:process";
 import { openDb, type MomentumDb } from "./db.js";
 import { initGoal, type GoalInitOptions, type GoalInitSuccess } from "./goal-init.js";
@@ -15,8 +16,13 @@ import { writeHandoff, type HandoffSuccess } from "./handoff.js";
 import { runWorkerOnce, type WorkerRunResult } from "./worker-run.js";
 import {
   loadDaemonStatus,
+  DEFAULT_DAEMON_STALE_AFTER_MS,
   type DaemonStatusSuccess
 } from "./daemon-status.js";
+import {
+  getActiveDaemonRun,
+  startDaemonRun
+} from "./daemon-runs.js";
 
 export const VERSION = "0.0.0";
 
@@ -50,6 +56,7 @@ const COMMANDS = [
   "momentum logs <goal-id> [--iteration <n>] [--data-dir <path>] [--json]",
   "momentum handoff <goal-id> [--data-dir <path>] [--json]",
   "momentum worker run [--worker-id <id>] [--data-dir <path>] [--json]",
+  "momentum daemon start [--data-dir <path>] [--json]",
   "momentum daemon status [--data-dir <path>] [--json]",
   "momentum doctor [--json]"
 ];
@@ -110,14 +117,21 @@ function daemon(parsed: ParsedFlags, io: CliIo): number {
   const subcommand = parsed.args[1];
   if (!subcommand) {
     return usageError(
-      "Missing required subcommand for daemon. Expected: status.",
+      "Missing required subcommand for daemon. Expected: start, status.",
       parsed,
       io
     );
   }
-  if (subcommand !== "status") {
-    return usageError(`Unknown daemon subcommand: ${subcommand}`, parsed, io);
+  if (subcommand === "status") {
+    return daemonStatus(parsed, io);
   }
+  if (subcommand === "start") {
+    return daemonStart(parsed, io);
+  }
+  return usageError(`Unknown daemon subcommand: ${subcommand}`, parsed, io);
+}
+
+function daemonStatus(parsed: ParsedFlags, io: CliIo): number {
   if (parsed.args.length > 2) {
     return usageError(
       `Unexpected argument for daemon status: ${parsed.args[2]}`,
@@ -147,6 +161,152 @@ function daemon(parsed: ParsedFlags, io: CliIo): number {
   }
 
   return emitDaemonStatus(parsed, io, result);
+}
+
+function daemonStart(parsed: ParsedFlags, io: CliIo): number {
+  if (parsed.args.length > 2) {
+    return usageError(
+      `Unexpected argument for daemon start: ${parsed.args[2]}`,
+      parsed,
+      io
+    );
+  }
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return emitDaemonStartFailure(parsed, io, {
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err)
+    });
+  }
+
+  const now = Date.now();
+  const pid = process.pid;
+  const host = os.hostname() || null;
+
+  const db = openDb(dataDir);
+  try {
+    const existing = getActiveDaemonRun(db);
+    if (existing) {
+      const heartbeatAgeMs = Math.max(0, now - existing.heartbeat_at);
+      const stale = heartbeatAgeMs >= DEFAULT_DAEMON_STALE_AFTER_MS;
+      return emitDaemonStartFailure(parsed, io, {
+        code: "daemon_already_active",
+        message: stale
+          ? `An active daemon run already exists (${existing.id}, state ${existing.state}, stale heartbeat). Resolve it before starting another.`
+          : `An active daemon run already exists (${existing.id}, state ${existing.state}). Stop it before starting another.`,
+        existing: {
+          runId: existing.id,
+          state: existing.state,
+          pid: existing.pid,
+          host: existing.host,
+          startedAt: existing.started_at,
+          heartbeatAt: existing.heartbeat_at,
+          heartbeatAgeMs,
+          stale
+        }
+      });
+    }
+
+    const { runId, run } = startDaemonRun(db, { pid, host, now });
+    return emitDaemonStartSuccess(parsed, io, {
+      dataDir,
+      runId,
+      pid: run.pid,
+      host: run.host,
+      state: run.state,
+      startedAt: run.started_at,
+      heartbeatAt: run.heartbeat_at
+    });
+  } finally {
+    db.close();
+  }
+}
+
+type DaemonStartSuccessPayload = {
+  dataDir: string;
+  runId: string;
+  pid: number | null;
+  host: string | null;
+  state: string;
+  startedAt: number;
+  heartbeatAt: number;
+};
+
+type DaemonStartFailurePayload = {
+  code: "daemon_already_active" | "data_dir_failed";
+  message: string;
+  existing?: {
+    runId: string;
+    state: string;
+    pid: number | null;
+    host: string | null;
+    startedAt: number;
+    heartbeatAt: number;
+    heartbeatAgeMs: number;
+    stale: boolean;
+  };
+};
+
+function emitDaemonStartSuccess(
+  parsed: ParsedFlags,
+  io: CliIo,
+  data: DaemonStartSuccessPayload
+): number {
+  const payload = {
+    ok: true,
+    command: "daemon start",
+    dataDir: data.dataDir,
+    runId: data.runId,
+    pid: data.pid,
+    host: data.host,
+    state: data.state,
+    startedAt: data.startedAt,
+    heartbeatAt: data.heartbeatAt
+  };
+
+  if (parsed.json) {
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  write(io.stdout, [
+    `Daemon run started: ${data.runId}`,
+    `State: ${data.state}`,
+    `Pid: ${data.pid ?? "(unset)"}`,
+    `Host: ${data.host ?? "(unset)"}`,
+    `Started at: ${data.startedAt}`,
+    `Data dir: ${data.dataDir}`,
+    ""
+  ].join("\n"));
+  return 0;
+}
+
+function emitDaemonStartFailure(
+  parsed: ParsedFlags,
+  io: CliIo,
+  failure: DaemonStartFailurePayload
+): number {
+  const payload: Record<string, unknown> = {
+    ok: false,
+    command: "daemon start",
+    code: failure.code,
+    message: failure.message
+  };
+  if (failure.existing) payload["existing"] = failure.existing;
+
+  if (parsed.json) {
+    writeJson(io.stderr, payload);
+    return 1;
+  }
+  write(io.stderr, `${failure.message}\n`);
+  return 1;
 }
 
 function emitDaemonStatus(

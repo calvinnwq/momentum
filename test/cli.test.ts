@@ -101,6 +101,9 @@ describe("momentum CLI scaffold", () => {
       "momentum worker run [--worker-id <id>] [--data-dir <path>] [--json]"
     );
     expect(result.stdout).toContain(
+      "momentum daemon start [--data-dir <path>] [--json]"
+    );
+    expect(result.stdout).toContain(
       "momentum daemon status [--data-dir <path>] [--json]"
     );
     expect(result.stdout).toContain("momentum doctor [--json]");
@@ -1687,6 +1690,174 @@ Goal body.
     const result = await run(["daemon", "status", "extra"]);
     expect(result.code).toBe(2);
     expect(result.stderr).toContain("Unexpected argument for daemon status");
+    expect(result.stdout).toBe("");
+  });
+
+  it("daemon start records a new orchestrator run and exits 0 (json)", async () => {
+    const dataDir = makeTempDir("momentum-cli-daemon-start-");
+    const before = Date.now();
+    const result = await run([
+      "daemon", "start",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    const after = Date.now();
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      command: "daemon start",
+      dataDir,
+      state: "running"
+    });
+    expect(typeof payload["runId"]).toBe("string");
+    expect((payload["runId"] as string).length).toBeGreaterThan(0);
+    expect(payload["pid"]).toBe(process.pid);
+    expect(typeof payload["host"]).toBe("string");
+    expect((payload["host"] as string).length).toBeGreaterThan(0);
+    expect(payload["startedAt"]).toBeGreaterThanOrEqual(before);
+    expect(payload["startedAt"]).toBeLessThanOrEqual(after);
+    expect(payload["heartbeatAt"]).toBe(payload["startedAt"]);
+    expect(result.stderr).toBe("");
+
+    // The new record should also be visible via `daemon status`.
+    const statusResult = await run([
+      "daemon", "status",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(statusResult.code).toBe(0);
+    const statusPayload = JSON.parse(statusResult.stdout) as Record<string, unknown>;
+    const daemonRun = statusPayload["daemonRun"] as Record<string, unknown>;
+    expect(daemonRun["runId"]).toBe(payload["runId"]);
+    expect(daemonRun["state"]).toBe("running");
+    expect(daemonRun["isActive"]).toBe(true);
+  });
+
+  it("daemon start text mode prints the recorded run summary", async () => {
+    const dataDir = makeTempDir("momentum-cli-daemon-start-");
+    const result = await run([
+      "daemon", "start",
+      "--data-dir", dataDir
+    ]);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("Daemon run started:");
+    expect(result.stdout).toContain("State: running");
+    expect(result.stdout).toContain(`Pid: ${process.pid}`);
+    expect(result.stdout).toContain(`Data dir: ${dataDir}`);
+    expect(result.stderr).toBe("");
+  });
+
+  it("daemon start refuses to record a second run while one is active", async () => {
+    const dataDir = makeTempDir("momentum-cli-daemon-start-");
+    const { openDb } = await import("../src/db.js");
+    const { startDaemonRun } = await import("../src/daemon-runs.js");
+    let existingRunId: string;
+    const db = openDb(dataDir);
+    try {
+      ({ runId: existingRunId } = startDaemonRun(db, {
+        pid: 77,
+        host: "node-existing",
+        now: Date.now()
+      }));
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "daemon", "start",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "daemon start",
+      code: "daemon_already_active"
+    });
+    expect(payload["message"]).toContain(existingRunId);
+    const existing = payload["existing"] as Record<string, unknown>;
+    expect(existing).toMatchObject({
+      runId: existingRunId,
+      state: "running",
+      pid: 77,
+      host: "node-existing",
+      stale: false
+    });
+  });
+
+  it("daemon start refuses and flags stale heartbeats on the existing active run", async () => {
+    const dataDir = makeTempDir("momentum-cli-daemon-start-");
+    const { openDb } = await import("../src/db.js");
+    const { startDaemonRun } = await import("../src/daemon-runs.js");
+    let existingRunId: string;
+    const db = openDb(dataDir);
+    try {
+      // Heartbeat far in the past so the default 90s stale cutoff triggers.
+      ({ runId: existingRunId } = startDaemonRun(db, { pid: 99, now: 100 }));
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "daemon", "start",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      code: "daemon_already_active"
+    });
+    expect(payload["message"]).toContain("stale heartbeat");
+    const existing = payload["existing"] as Record<string, unknown>;
+    expect(existing).toMatchObject({
+      runId: existingRunId,
+      stale: true
+    });
+    expect(existing["heartbeatAgeMs"]).toBeGreaterThanOrEqual(90_000);
+  });
+
+  it("daemon start allows a new run once the previous one terminates", async () => {
+    const dataDir = makeTempDir("momentum-cli-daemon-start-");
+    const { openDb } = await import("../src/db.js");
+    const { startDaemonRun, finishDaemonRun } = await import(
+      "../src/daemon-runs.js"
+    );
+    const db = openDb(dataDir);
+    try {
+      const { runId } = startDaemonRun(db, { now: Date.now() });
+      finishDaemonRun(db, { runId, terminalState: "stopped", now: Date.now() });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "daemon", "start",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      command: "daemon start",
+      state: "running"
+    });
+  });
+
+  it("daemon start rejects extra positional arguments", async () => {
+    const result = await run(["daemon", "start", "extra"]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("Unexpected argument for daemon start");
     expect(result.stdout).toBe("");
   });
 });
