@@ -43,6 +43,41 @@ CREATE INDEX IF NOT EXISTS idx_repo_locks_job_id
   ON repo_locks(job_id);
 `;
 
+const DAEMON_RUNS_DDL = `
+CREATE TABLE IF NOT EXISTS daemon_runs (
+  id TEXT PRIMARY KEY,
+  pid INTEGER,
+  host TEXT,
+  state TEXT NOT NULL DEFAULT 'starting',
+  started_at INTEGER NOT NULL,
+  heartbeat_at INTEGER NOT NULL,
+  last_state_change_at INTEGER NOT NULL,
+  finished_at INTEGER,
+  active_job_id TEXT,
+  active_lock_id TEXT,
+  stop_requested_at INTEGER,
+  stop_reason TEXT,
+  reconcile_count INTEGER NOT NULL DEFAULT 0,
+  last_reconciled_at INTEGER,
+  error TEXT,
+  error_at INTEGER,
+  updated_at INTEGER NOT NULL
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS idx_daemon_runs_state
+  ON daemon_runs(state);
+
+CREATE INDEX IF NOT EXISTS idx_daemon_runs_started_at
+  ON daemon_runs(started_at);
+
+CREATE INDEX IF NOT EXISTS idx_daemon_runs_heartbeat_at
+  ON daemon_runs(heartbeat_at);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_daemon_runs_one_active
+  ON daemon_runs((state IN ('starting', 'running', 'stop_requested')))
+  WHERE state IN ('starting', 'running', 'stop_requested');
+`;
+
 const JOB_IDEMPOTENCY_INDEX_DDL = `
 CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_idempotency_key
   ON jobs(idempotency_key) WHERE idempotency_key IS NOT NULL;
@@ -66,6 +101,7 @@ export function applyQueueMigrations(db: MomentumDb): void {
     }
     db.exec(JOB_IDEMPOTENCY_INDEX_DDL);
     db.exec(REPO_LOCKS_DDL);
+    db.exec(DAEMON_RUNS_DDL);
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
