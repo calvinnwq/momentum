@@ -328,15 +328,18 @@ export function runWorkerOnce(input: WorkerRunInput): WorkerRunResult {
     recoveryStatus: iterationResult.ok ? "iteration_success" : "iteration_failure"
   });
 
-  input.hooks?.onJobReleased?.({
-    goalId: goal.id,
-    jobId: runningJob.id,
-    lockId: lock.id,
-    iteration: runningJob.iteration,
-    workerId,
-    now: releaseNow,
-    outcome: iterationResult.ok ? "success" : "failure"
-  });
+  try {
+    input.hooks?.onJobReleased?.({
+      goalId: goal.id,
+      jobId: runningJob.id,
+      lockId: lock.id,
+      iteration: runningJob.iteration,
+      workerId,
+      now: releaseNow,
+      outcome: iterationResult.ok ? "success" : "failure"
+    });
+  } catch {
+  }
 
   if (iterationResult.ok) {
     const iter = iterationResult.iteration;

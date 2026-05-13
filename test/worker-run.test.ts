@@ -650,6 +650,65 @@ describe("runWorkerOnce", () => {
     }
   });
 
+  it("continues durable finalization when the released hook throws", () => {
+    const dataDir = makeTempDir("momentum-worker-run-release-hook-fail-");
+    const repo = initRepo();
+    const seed = seedQueuedGoal(dataDir, repo);
+
+    const db = openDb(seed.dataDir);
+    try {
+      const out = runWorkerOnce({
+        db,
+        dataDir: seed.dataDir,
+        workerId: "worker-release-hook-fail",
+        hooks: {
+          onJobReleased: () => {
+            throw new Error("release hook failed");
+          }
+        }
+      });
+
+      expect(out.code).toBe("ran_job");
+      if (out.code !== "ran_job") return;
+      expect(out.ok).toBe(true);
+      expect(out.reducerError).toBeNull();
+      expect(out.reducer).not.toBeNull();
+
+      const job = getQueueJob(db, seed.jobId);
+      expect(job?.state).toBe("succeeded");
+
+      const lock = db
+        .prepare(
+          "SELECT state, recovery_status FROM repo_locks WHERE job_id = ? ORDER BY acquired_at DESC LIMIT 1"
+        )
+        .get(seed.jobId) as { state: string; recovery_status: string };
+      expect(lock).toMatchObject({
+        state: "released",
+        recovery_status: "iteration_success"
+      });
+
+      const eventTypes = (
+        db
+          .prepare(
+            "SELECT type FROM events WHERE goal_id = ? ORDER BY id ASC"
+          )
+          .all(seed.goalId) as Array<{ type: string }>
+      ).map((row) => row.type);
+      expect(eventTypes).toEqual([
+        "job.enqueued",
+        "job.claimed",
+        "job.heartbeat",
+        "iteration_started",
+        "iteration_completed",
+        "job.succeeded",
+        "goal.reduced",
+        "goal.failed"
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("enqueues the next iteration with a stable idempotency key when the reducer decides CONTINUE", () => {
     const dataDir = makeTempDir("momentum-worker-run-continue-");
     const repo = initRepo();
