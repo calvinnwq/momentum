@@ -209,6 +209,16 @@ async function daemonStart(
     parsed.maxLoopIterations !== undefined ||
     parsed.maxIdleCycles !== undefined ||
     parsed.pollIntervalMs !== undefined;
+  const loopBoundRequested =
+    parsed.maxLoopIterations !== undefined ||
+    parsed.maxIdleCycles !== undefined;
+  if (parsed.pollIntervalMs !== undefined && !loopBoundRequested) {
+    return usageError(
+      "--poll-interval-ms requires --max-loop-iterations or --max-idle-cycles.",
+      parsed,
+      io
+    );
+  }
 
   const now = Date.now();
   const pid = process.pid;
@@ -601,9 +611,12 @@ function emitDaemonStartLoopResult(
     loop: loopSummary
   };
 
+  const exitCode = loop.ok && loop.workSucceeded ? 0 : 1;
+  const output = loop.ok ? io.stdout : io.stderr;
+
   if (parsed.json) {
-    writeJson(loop.ok ? io.stdout : io.stderr, payload);
-    return loop.ok ? 0 : 1;
+    writeJson(output, payload);
+    return exitCode;
   }
 
   const lines: string[] = [
@@ -625,8 +638,8 @@ function emitDaemonStartLoopResult(
     lines.push(`Error: ${loop.error}`);
   }
   lines.push("");
-  write(loop.ok ? io.stdout : io.stderr, lines.join("\n"));
-  return loop.ok ? 0 : 1;
+  write(output, lines.join("\n"));
+  return exitCode;
 }
 
 function emitDaemonStartFailure(

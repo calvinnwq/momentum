@@ -2210,6 +2210,60 @@ Goal body.
     expect(statusPayload["state"]).toBe("completed");
   });
 
+  it("daemon start rejects --poll-interval-ms without a loop bound", async () => {
+    const dataDir = makeTempDir("momentum-cli-daemon-loop-");
+    const result = await run([
+      "daemon", "start",
+      "--poll-interval-ms", "0",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(2);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain(
+      "--poll-interval-ms requires --max-loop-iterations or --max-idle-cycles."
+    );
+  });
+
+  it("daemon start exits non-zero when bounded loop work fails", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData(FAILING_GOAL_SPEC);
+    const enqueueResult = await run([
+      "goal", "start", goalFile,
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(enqueueResult.code).toBe(0);
+
+    const result = await run([
+      "daemon", "start",
+      "--max-loop-iterations", "1",
+      "--poll-interval-ms", "0",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toBe("");
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      workSucceeded: false,
+      command: "daemon start",
+      dataDir,
+      state: "stopped"
+    });
+    const loop = payload["loop"] as Record<string, unknown>;
+    expect(loop).toMatchObject({
+      exitReason: "max_loop_iterations",
+      terminalState: "stopped",
+      workSucceeded: false,
+      jobsRun: 0,
+      jobsFailed: 1
+    });
+  });
+
   it("daemon start refuses to run the loop while another daemon is active", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-loop-");
     const { openDb } = await import("../src/db.js");
