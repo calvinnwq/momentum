@@ -22,8 +22,13 @@ momentum status [goal-id] [--data-dir <path>] [--json]
 momentum logs <goal-id> [--iteration <n>] [--data-dir <path>] [--json]
 momentum handoff <goal-id> [--data-dir <path>] [--json]
 momentum worker run [--worker-id <id>] [--data-dir <path>] [--json]
+momentum daemon start [--data-dir <path>] [--json]
+momentum daemon stop [--reason <text>] [--data-dir <path>] [--json]
+momentum daemon status [--data-dir <path>] [--json]
 momentum doctor [--json]
 ```
+
+The `daemon` subcommands record orchestrator-run state in SQLite (`daemon_runs`) and expose an inspection contract. They are deliberately scoped to the Milestone 3 operational-safety slice (NGX-272): `daemon start` does not begin a continuous queue-draining loop, `daemon stop` records a stop request without killing active runners, and stale records are surfaced without auto-recovery.
 
 `goal start --foreground` parses the goal spec, resolves the data directory, initializes SQLite (`goals`, `jobs`, `events`, `repo_locks` tables), creates the artifact layout, and runs one foreground iteration: it inspects the target repo, captures the pre-iteration HEAD, creates or reuses a Momentum branch, renders the iteration prompt, invokes the configured runner (currently `fake` only), runs each verification command from the repo root, and either stages and commits the full repo diff as one Momentum commit on verified success or hard-resets the worktree back to the pre-iteration HEAD on runner failure or verification failure. The iteration writes `prompt.md`, `runner.log`, `verification.log`, and `result.json` under `iterations/<n>/`. On a verified commit the goal transitions to `iteration_complete` (or `completed` if the runner reports `goal_complete: true`); on runner failure, verification failure, or any pipeline error it transitions to `failed`. `status [goal-id] --json` reads the SQLite/artifact state and emits a stable JSON shape including reducer state, next job, and next-action hints, and `handoff <goal-id> --json` writes `handoff.md` and `handoff.json` (schema v1) into the goal's artifact dir.
 
@@ -194,13 +199,114 @@ Local interrupt policy: `worker run` is a foreground one-shot command. If the pr
 
 `status --json` and `handoff --json` surface the same `latestJob.resultPath` / `latestJob.errorPath` pointers, plus `reducer` (decision, iteration, goal state, completion reason, commit SHA, next job), `nextJob` (the queued next-iteration job, if any), and `nextAction` (a human-readable hint) so downstream tooling can locate the per-iteration artifacts and decide what to do next without re-reading the event log. The written `handoff.json` artifact keeps snake_case `result_path` / `error_path` fields.
 
+### `daemon start`
+
+```text
+momentum daemon start [--data-dir <path>] [--json]
+```
+
+Records a new orchestrator run in `daemon_runs` (state `running`) with `pid`, `host`, `started_at`, and `heartbeat_at` populated from the invoking process. Refuses to record a second concurrent run while one is still active (states `starting`, `running`, `stop_requested`) and exits with `code: "daemon_already_active"` (exit 1); the failure payload surfaces the existing `runId`, `state`, `pid`, `host`, `startedAt`, `heartbeatAt`, `heartbeatAgeMs`, and a `stale` flag (default 90s cutoff) so operators can decide whether to wait or clear the prior record manually. After a terminal record (`stopped` / `error`), a fresh start is allowed.
+
+This command does **not** begin a long-running queue-draining loop. Continuous draining, runner supervision, and automatic stale-lease recovery are explicitly out of scope for NGX-272.
+
+JSON envelope shape:
+
+```json
+{
+  "ok": true,
+  "command": "daemon start",
+  "dataDir": "/path/to/data-dir",
+  "runId": "<uuid>",
+  "pid": 12345,
+  "host": "hostname",
+  "state": "running",
+  "startedAt": 1731500000000,
+  "heartbeatAt": 1731500000000
+}
+```
+
+### `daemon stop`
+
+```text
+momentum daemon stop [--reason <text>] [--data-dir <path>] [--json]
+```
+
+Records a stop request against the active daemon run (`stop_requested_at` and `stop_reason`); the underlying state transitions to `stop_requested` if it was not already. Default reason is `operator-requested`. Idempotent: re-running on a record that is already `stop_requested` keeps the original `stopRequestedAt`, refreshes `stopReason`, and sets `alreadyStopRequested: true`. Exits with `code: "no_active_daemon"` (exit 1) when no active record exists; if the latest record is terminal, the failure payload includes a `latest` summary so operators can see what was already stopped or failed.
+
+This command only records intent; it does not signal, kill, or otherwise terminate any running runner, worker, or external process. Graceful shutdown of an actual long-running daemon process is deferred to a later M3 slice.
+
+JSON envelope shape:
+
+```json
+{
+  "ok": true,
+  "command": "daemon stop",
+  "dataDir": "/path/to/data-dir",
+  "runId": "<uuid>",
+  "previousState": "running",
+  "state": "stop_requested",
+  "pid": 12345,
+  "host": "hostname",
+  "startedAt": 1731500000000,
+  "stopRequestedAt": 1731500010000,
+  "stopReason": "operator-requested",
+  "alreadyStopRequested": false,
+  "heartbeatAt": 1731500000000,
+  "heartbeatAgeMs": 10000,
+  "stale": false
+}
+```
+
+### `daemon status`
+
+```text
+momentum daemon status [--data-dir <path>] [--json]
+```
+
+Read-only inspector for `daemon_runs`. Selects the active record if one exists; otherwise falls back to the most recently started run so operators can see terminal/error state. When no daemon has ever started, exits 0 with `hasRun: false` (text mode: `Daemon: never started`). The summary surfaces `runId`, `pid`, `host`, `state`, `isActive`, `isTerminal`, `startedAt`, `heartbeatAt`, `lastStateChangeAt`, `finishedAt`, `ageMs`, `heartbeatAgeMs`, `stale` (90s default cutoff), `activeJob` (`{jobId, lockId}`), `stopRequest` (`{requestedAt, reason}` or `null`), `reconciliation` (`{count, lastReconciledAt}`), `error` (`{message, at}` or `null`), and `updatedAt`. Stale records are flagged but not auto-recovered.
+
+JSON envelope shape (active run with no stop request or error):
+
+```json
+{
+  "ok": true,
+  "command": "daemon status",
+  "dataDir": "/path/to/data-dir",
+  "hasRun": true,
+  "daemonRun": {
+    "runId": "<uuid>",
+    "pid": 12345,
+    "host": "hostname",
+    "state": "running",
+    "isActive": true,
+    "isTerminal": false,
+    "startedAt": 1731500000000,
+    "heartbeatAt": 1731500000000,
+    "lastStateChangeAt": 1731500000000,
+    "finishedAt": null,
+    "ageMs": 0,
+    "heartbeatAgeMs": 0,
+    "stale": false,
+    "staleAfterMs": 90000,
+    "activeJob": { "jobId": null, "lockId": null },
+    "stopRequest": null,
+    "reconciliation": { "count": 0, "lastReconciledAt": null },
+    "error": null,
+    "updatedAt": 1731500000000
+  },
+  "staleAfterMs": 90000,
+  "staleRuns": [],
+  "observedAt": 1731500000000
+}
+```
+
 ### `doctor`
 
 ```text
 momentum doctor [--json]
 ```
 
-Reports CLI version, Node.js version, platform, and the current milestone scope label. Useful as a first sanity check after install.
+Reports CLI version, Node.js version, platform, the current milestone scope label, and a compact daemon-readiness block read from `daemon_runs` (`{ok, dataDir, hasRun, state, isActive, stale, staleRunCount, runId}` on success, `{ok: false, code, message}` on failure). Useful as a first sanity check after install and as a quick orchestrator-health probe.
 
 ## Data Directory
 
@@ -208,7 +314,7 @@ State is stored under `--data-dir <path>`, then the `MOMENTUM_HOME` environment 
 
 ```text
 <data-dir>/
-  momentum.db                  # SQLite (goals, jobs, events, repo_locks tables)
+  momentum.db                  # SQLite (goals, jobs, events, repo_locks, daemon_runs tables)
   goals/
     <goal-id>/
       goal.md                  # Canonical copy of the goal spec
@@ -356,9 +462,9 @@ Momentum's product model is centered on these durable concepts; M3 must not brea
 
 Milestone 2 intentionally deferred the following to **Milestone 3** so the queued path stayed scoped to single-shot worker claims and explicit local recovery:
 
-- Managed `daemon start` / `daemon status` lifecycle and background runner supervision.
-- Graceful stop and `stop --now` commands.
-- Automatic stale-lease recovery, a `needs_manual_recovery` goal state, and a `recovery.md` artifact. Stale repo-lock handling in Milestone 2 is manual; re-running `worker run` is the supported local recovery path.
+- **Background runner supervision and continuous queue draining.** NGX-272 lands `daemon start` / `daemon stop` / `daemon status` as orchestrator-state contracts, but no continuous draining loop is wired up; that remains a later M3 slice.
+- **Graceful stop beyond recording intent.** `daemon stop` records a stop request in `daemon_runs` (idempotent, with a default `operator-requested` reason) but does not signal, kill, or otherwise terminate any running runner, worker, or external process. A `stop --now` command and an actual cooperative-shutdown handshake are deferred.
+- Automatic stale-lease recovery, a `needs_manual_recovery` goal state, and a `recovery.md` artifact. Stale repo-lock handling in Milestone 2 is manual; re-running `worker run` is the supported local recovery path. `daemon status` flags stale `daemon_runs` records (default 90s heartbeat cutoff) but does not auto-transition them.
 - Multi-iteration draining loops inside a single invocation. `worker run` is a single-shot consumer that processes one claimed job per invocation and then exits. The completion reducer enqueues the next iteration when the decision is `continue`, so separate `worker run` invocations drain a multi-iteration goal step by step. A long-running daemon loop that polls and drains continuously is a Milestone 3 concern.
 - Worktree management, remote git operations (`fetch`, `pull`, `push`, `rebase`), and parallel same-repo Goals.
 - PR/GitHub/Linear automation and any external integrations driven from inside Momentum.
