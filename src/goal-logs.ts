@@ -25,8 +25,10 @@ export type GoalLogsError = {
 export type GoalLogFile = {
   path: string;
   exists: boolean;
+  readable: boolean;
   bytes: number;
   content: string;
+  error?: string;
 };
 
 export type GoalLogsSuccess = {
@@ -181,16 +183,24 @@ function readLogFile(filePath: string): GoalLogFile {
   try {
     stat = fs.statSync(filePath);
   } catch {
-    return { path: filePath, exists: false, bytes: 0, content: "" };
+    return { path: filePath, exists: false, readable: false, bytes: 0, content: "" };
   }
   if (!stat.isFile()) {
-    return { path: filePath, exists: false, bytes: 0, content: "" };
+    return { path: filePath, exists: false, readable: false, bytes: 0, content: "" };
   }
   let content = "";
   try {
     content = fs.readFileSync(filePath, "utf-8");
-  } catch {
-    content = "";
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "unknown error";
+    return {
+      path: filePath,
+      exists: true,
+      readable: false,
+      bytes: stat.size,
+      content: "",
+      error: `failed to read log file: ${detail}`
+    };
   }
-  return { path: filePath, exists: true, bytes: stat.size, content };
+  return { path: filePath, exists: true, readable: true, bytes: stat.size, content };
 }

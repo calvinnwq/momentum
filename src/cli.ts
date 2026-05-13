@@ -596,14 +596,18 @@ function emitLogs(
       runnerLog: {
         path: data.runnerLog.path,
         exists: data.runnerLog.exists,
+        readable: data.runnerLog.readable,
         bytes: data.runnerLog.bytes,
-        content: data.runnerLog.content
+        content: data.runnerLog.content,
+        error: data.runnerLog.error
       },
       verificationLog: {
         path: data.verificationLog.path,
         exists: data.verificationLog.exists,
+        readable: data.verificationLog.readable,
         bytes: data.verificationLog.bytes,
-        content: data.verificationLog.content
+        content: data.verificationLog.content,
+        error: data.verificationLog.error
       }
     };
     writeJson(io.stdout, payload);
@@ -618,7 +622,9 @@ function emitLogs(
     "",
     `## runner.log (${data.runnerLog.exists ? `${data.runnerLog.bytes} bytes` : "missing"}): ${data.runnerLog.path}`
   ];
-  if (data.runnerLog.exists && data.runnerLog.content.length > 0) {
+  if (data.runnerLog.error !== undefined) {
+    lines.push(`(unreadable: ${data.runnerLog.error})`);
+  } else if (data.runnerLog.exists && data.runnerLog.content.length > 0) {
     lines.push(data.runnerLog.content.endsWith("\n")
       ? data.runnerLog.content.slice(0, -1)
       : data.runnerLog.content);
@@ -629,7 +635,9 @@ function emitLogs(
   lines.push(
     `## verification.log (${data.verificationLog.exists ? `${data.verificationLog.bytes} bytes` : "missing"}): ${data.verificationLog.path}`
   );
-  if (data.verificationLog.exists && data.verificationLog.content.length > 0) {
+  if (data.verificationLog.error !== undefined) {
+    lines.push(`(unreadable: ${data.verificationLog.error})`);
+  } else if (data.verificationLog.exists && data.verificationLog.content.length > 0) {
     lines.push(data.verificationLog.content.endsWith("\n")
       ? data.verificationLog.content.slice(0, -1)
       : data.verificationLog.content);

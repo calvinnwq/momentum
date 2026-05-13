@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -13,6 +13,7 @@ import { loadGoalLogs } from "../src/goal-logs.js";
 const tempRoots: string[] = [];
 
 afterEach(() => {
+  vi.restoreAllMocks();
   while (tempRoots.length > 0) {
     const dir = tempRoots.pop();
     if (dir) {
@@ -179,6 +180,33 @@ describe("loadGoalLogs", () => {
     expect(result.verificationLog.exists).toBe(true);
     expect(result.verificationLog.bytes).toBeGreaterThan(0);
     expect(result.verificationLog.content.length).toBeGreaterThan(0);
+  });
+
+  it("marks existing log files unreadable when content cannot be read", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Unreadable logs");
+    fs.writeFileSync(setup.artifactPaths.runnerLog, "runner output\n", "utf-8");
+    const originalReadFileSync = fs.readFileSync;
+    vi.spyOn(fs, "readFileSync").mockImplementation(((filePath, options) => {
+      if (filePath === setup.artifactPaths.runnerLog) {
+        throw new Error("permission denied");
+      }
+      return originalReadFileSync(filePath, options);
+    }) as typeof fs.readFileSync);
+
+    const result = loadGoalLogs({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.runnerLog.exists).toBe(true);
+    expect(result.runnerLog.readable).toBe(false);
+    expect(result.runnerLog.bytes).toBeGreaterThan(0);
+    expect(result.runnerLog.content).toBe("");
+    expect(result.runnerLog.error).toContain("permission denied");
+    expect(result.verificationLog.readable).toBe(true);
   });
 
   it("defaults to the highest available iteration when multiple exist", () => {
