@@ -13,7 +13,7 @@ Typical loop:
 
 ## Current milestone
 - Milestone 1: Foreground proof loop is complete.
-- Milestone 2: Queue and worker model is in progress; NGX-249 (M2-05 completion reducer + idempotent chaining) is implemented in this branch.
+- Milestone 2: Queue and worker model is in progress; NGX-250 (CLI contract and local log inspection) is implemented in this branch.
 - NGX-235 (scaffold) is done.
 - NGX-236 (Goal spec parsing, data-dir resolution, SQLite init, artifact layout) is done.
 - NGX-237 (fake runner profile, repo guard, branch manager, iteration prompt renderer, foreground iteration orchestrator, iteration-job DB wrapper, CLI wiring) is done.
@@ -24,6 +24,7 @@ Typical loop:
 - NGX-247 (M2-03 worker execution slice: `momentum worker run` claims one queued `goal_iteration`, acquires the repo lock, refreshes lease/heartbeat metadata, executes the iteration, and releases the lock) is done.
 - NGX-248 (M2-04 queued `goal_iteration` handler: queued execution reuses `finalizeIteration` for commit/reset, populates `jobs.result_path` / `jobs.error_path`, emits `job.succeeded` / `job.failed` with commit + artifact pointers, surfaces those pointers through `status --json` and `handoff`, and extends the fake runner with `goal_complete` and per-iteration trajectory envs for NGX-249 chaining) is done.
 - NGX-249 (M2-05 completion reducer and idempotent chaining: `reduceGoalIteration` classifies terminal `goal_iteration` jobs as `continue` / `goal_complete` / `max_iterations_reached` / `iteration_failed`, updates `goals.state` / `current_iteration` / `completion_reason`, enqueues next iterations with stable idempotency keys, emits `goal.reduced` + `goal.completed` / `goal.failed`, is idempotent via `goal.reduced` event check, and surfaces reducer state / next-job / next-action through `status --json` and `handoff`; the worker calls the reducer after each completed job, enabling multi-iteration chaining without drifting or double-enqueueing; per-iteration artifact directories are generalized beyond iteration 1) is done.
+- NGX-250 (M2 CLI contract and local log inspection: `status --json` / `handoff.json` expose artifact, current-iteration, next-action, latest-commit, idempotency, and lease metadata; `logs` reads local runner and verification logs; queued smoke coverage and user-facing docs are updated) is done.
 
 ## Stack and workflow commands
 - Runtime: Node.js

@@ -146,7 +146,7 @@ Re-running `goal start` with the same goal spec against the same data directory 
 momentum status [goal-id] [--data-dir <path>] [--json]
 ```
 
-Reads SQLite plus artifact state and reports the goal's current state, configured repo and runner, latest job, latest iteration summary (including the verified commit SHA when present), reducer decision (`continue` / `goal_complete` / `max_iterations_reached` / `iteration_failed`), the next queued job (if any), and a next-action hint. Omitting `goal-id` selects the most recently updated goal in the data directory; when no goals exist the command exits non-zero with `code: "no_goals"`.
+Reads SQLite plus artifact state and reports the goal's current state, configured repo and runner, latest job, latest iteration summary (including the verified commit SHA when present), reducer decision (`continue` / `goal_complete` / `max_iterations_reached` / `iteration_failed`), the next queued job (if any), and a next-action hint. JSON output includes `goalState`, `artifacts`, `currentIterationDetail`, `nextActionDetail`, and `latestCommitSha`; `latestJob` / `nextJob` include `idempotencyKey`, result/error paths, and lease timestamps. Omitting `goal-id` selects the most recently updated goal in the data directory; when no goals exist the command exits non-zero with `code: "no_goals"`.
 
 ### `logs`
 
@@ -154,7 +154,7 @@ Reads SQLite plus artifact state and reports the goal's current state, configure
 momentum logs <goal-id> [--iteration <n>] [--data-dir <path>] [--json]
 ```
 
-Reads local iteration artifacts for a goal and emits `runner.log` and `verification.log` content. Without `--iteration`, selects the highest-numbered iteration directory under `goals/<goal-id>/iterations/` (or `goals.current_iteration` when present), so a freshly-initialized goal returns iteration `1` with empty logs. With `--iteration <n>`, reads that iteration's artifact dir and exits non-zero with `code: "iteration_not_found"` if it doesn't exist. `--iteration` must be a positive integer; non-positive values fail with `code: "usage_error"`. The command only reads on-disk artifacts; it does not consult live worker state. JSON output exposes per-log `{path, exists, bytes, content}` plus `availableIterations` so downstream tooling can navigate prior iterations.
+Reads local iteration artifacts for a goal and emits `runner.log` and `verification.log` content. Without `--iteration`, selects the highest-numbered iteration directory under `goals/<goal-id>/iterations/` (or `goals.current_iteration` when present), so a freshly-initialized goal returns iteration `1` with empty logs. With `--iteration <n>`, reads that iteration's artifact dir and exits non-zero with `code: "iteration_not_found"` if it doesn't exist. `--iteration` must be a positive integer; non-positive values fail with `code: "usage_error"`. The command only reads on-disk artifacts; it does not consult live worker state. JSON output exposes `availableIterations` plus per-log `{path, exists, readable, bytes, content, error}` so downstream tooling can navigate prior iterations and distinguish missing logs from unreadable ones.
 
 ### `handoff`
 
@@ -162,7 +162,7 @@ Reads local iteration artifacts for a goal and emits `runner.log` and `verificat
 momentum handoff <goal-id> [--data-dir <path>] [--json]
 ```
 
-Renders `handoff.md` and `handoff.json` (schema v1) into the goal's artifact directory from the same state `status` reads. The handoff includes reducer decision and next-job details, plus a next-action hint describing what to do next.
+Renders `handoff.md` and `handoff.json` (schema v1) into the goal's artifact directory from the same state `status` reads. The handoff includes reducer decision and next-job details, plus a next-action hint describing what to do next. The JSON artifact includes `goal_state`, `current_iteration_detail`, `next_action_detail`, `latest_commit_sha`, and `latest_job` / `next_job` fields with idempotency keys, result/error paths, and lease timestamps.
 
 ### `worker run`
 
