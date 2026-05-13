@@ -26,6 +26,7 @@ Typical loop:
 - NGX-248 (M2-04 queued `goal_iteration` handler: queued execution reuses `finalizeIteration` for commit/reset, populates `jobs.result_path` / `jobs.error_path`, emits `job.succeeded` / `job.failed` with commit + artifact pointers, surfaces those pointers through `status --json` and `handoff`, and extends the fake runner with `goal_complete` and per-iteration trajectory envs for NGX-249 chaining) is done.
 - NGX-249 (M2-05 completion reducer and idempotent chaining: `reduceGoalIteration` classifies terminal `goal_iteration` jobs as `continue` / `goal_complete` / `max_iterations_reached` / `iteration_failed`, updates `goals.state` / `current_iteration` / `completion_reason`, enqueues next iterations with stable idempotency keys, emits `goal.reduced` + `goal.completed` / `goal.failed`, is idempotent via `goal.reduced` event check, and surfaces reducer state / next-job / next-action through `status --json` and `handoff`; the worker calls the reducer after each completed job, enabling multi-iteration chaining without drifting or double-enqueueing; per-iteration artifact directories are generalized beyond iteration 1) is done.
 - NGX-250 (M2 CLI contract and local log inspection: `status --json` / `handoff.json` expose artifact, current-iteration, next-action, latest-commit, idempotency, and lease metadata; `logs` reads local runner and verification logs; queued smoke coverage and user-facing docs are updated) is done.
+- NGX-272 (M3-01 orchestrator state model and daemon CLI contract: durable `daemon_runs` schema and storage primitives with idempotency and stale-heartbeat detection; `daemon start` records a new orchestrator run and refuses while an active one exists; `daemon stop` records an idempotent stop request without killing runners; `daemon status` and `doctor --json` surface no-daemon, active, stop-requested, error-terminal, stale, and malformed-CLI states; the active-run contract is hardened so concurrent `daemon start` invocations cannot race) is done.
 
 ## Milestone 3 alignment
 Milestone 3 is orchestrator lifecycle / operational safety, not just daemon process plumbing. The canonical alignment note lives in `README.md` under "Milestone 3 Alignment"; read it before starting any M3 implementation slice. The headline rules:
@@ -76,7 +77,7 @@ Common commands:
 
 ## Data and artifact layout
 - State uses `MOMENTUM_HOME` env var → `~/.momentum` fallback; override with `--data-dir`.
-- SQLite database at `<data-dir>/momentum.db` with `goals`, `jobs`, `events`, `repo_locks` tables.
+- SQLite database at `<data-dir>/momentum.db` with `goals`, `jobs`, `events`, `repo_locks`, `daemon_runs` tables.
 - Goal artifacts at `<data-dir>/goals/<goal-id>/`: `goal.md`, `ledger.md`, `handoff.md`, `handoff.json`, `iterations/<n>/{prompt.md,runner.log,verification.log,result.json}`.
 - Avoid hard-coded paths tied to a single user.
 - Only use explicit local paths when existing documentation in-repo explicitly mandates them.
