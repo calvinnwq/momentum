@@ -13,6 +13,10 @@ import {
 import { loadGoalLogs, type GoalLogsSuccess } from "./goal-logs.js";
 import { writeHandoff, type HandoffSuccess } from "./handoff.js";
 import { runWorkerOnce, type WorkerRunResult } from "./worker-run.js";
+import {
+  loadDaemonStatus,
+  type DaemonStatusSuccess
+} from "./daemon-status.js";
 
 export const VERSION = "0.0.0";
 
@@ -46,6 +50,7 @@ const COMMANDS = [
   "momentum logs <goal-id> [--iteration <n>] [--data-dir <path>] [--json]",
   "momentum handoff <goal-id> [--data-dir <path>] [--json]",
   "momentum worker run [--worker-id <id>] [--data-dir <path>] [--json]",
+  "momentum daemon status [--data-dir <path>] [--json]",
   "momentum doctor [--json]"
 ];
 
@@ -94,7 +99,115 @@ export async function runCli(argv: string[], io: CliIo = defaultIo()): Promise<n
     return workerRun(parsed, io);
   }
 
+  if (command === "daemon") {
+    return daemon(parsed, io);
+  }
+
   return usageError(`Unknown command: ${command}`, parsed, io);
+}
+
+function daemon(parsed: ParsedFlags, io: CliIo): number {
+  const subcommand = parsed.args[1];
+  if (!subcommand) {
+    return usageError(
+      "Missing required subcommand for daemon. Expected: status.",
+      parsed,
+      io
+    );
+  }
+  if (subcommand !== "status") {
+    return usageError(`Unknown daemon subcommand: ${subcommand}`, parsed, io);
+  }
+  if (parsed.args.length > 2) {
+    return usageError(
+      `Unexpected argument for daemon status: ${parsed.args[2]}`,
+      parsed,
+      io
+    );
+  }
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  const result = loadDaemonStatus({ dataDirOptions });
+  if (!result.ok) {
+    const payload = {
+      ok: false,
+      command: "daemon status",
+      code: result.code,
+      message: result.error
+    };
+    if (parsed.json) {
+      writeJson(io.stderr, payload);
+      return 1;
+    }
+    write(io.stderr, `${result.error}\n`);
+    return 1;
+  }
+
+  return emitDaemonStatus(parsed, io, result);
+}
+
+function emitDaemonStatus(
+  parsed: ParsedFlags,
+  io: CliIo,
+  data: DaemonStatusSuccess
+): number {
+  const payload = {
+    ok: true,
+    command: "daemon status",
+    dataDir: data.dataDir,
+    hasRun: data.hasRun,
+    daemonRun: data.daemonRun,
+    staleAfterMs: data.staleAfterMs,
+    staleRuns: data.staleRuns,
+    observedAt: data.observedAt
+  };
+
+  if (parsed.json) {
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  if (!data.daemonRun) {
+    write(io.stdout, [
+      "Daemon: never started",
+      `Data dir: ${data.dataDir}`,
+      ""
+    ].join("\n"));
+    return 0;
+  }
+
+  const run = data.daemonRun;
+  const lines: string[] = [
+    `Daemon run: ${run.runId}`,
+    `State: ${run.state}${run.isActive ? " (active)" : " (terminal)"}${run.stale ? " [stale]" : ""}`,
+    `Pid: ${run.pid ?? "(unset)"}`,
+    `Host: ${run.host ?? "(unset)"}`,
+    `Started at: ${run.startedAt}`,
+    `Heartbeat at: ${run.heartbeatAt} (age ${run.heartbeatAgeMs}ms)`,
+    `Active job: ${run.activeJob.jobId ?? "(none)"}`,
+    `Active lock: ${run.activeJob.lockId ?? "(none)"}`,
+    `Reconcile count: ${run.reconciliation.count}`
+  ];
+  if (run.stopRequest) {
+    lines.push(
+      `Stop requested at: ${run.stopRequest.requestedAt} (reason: ${run.stopRequest.reason})`
+    );
+  }
+  if (run.finishedAt !== null) {
+    lines.push(`Finished at: ${run.finishedAt}`);
+  }
+  if (run.error) {
+    lines.push(`Error: ${run.error.message}`);
+  }
+  if (data.staleRuns.length > 0) {
+    lines.push(`Stale runs: ${data.staleRuns.length}`);
+  }
+  lines.push("");
+  write(io.stdout, lines.join("\n"));
+  return 0;
 }
 
 function workerRun(parsed: ParsedFlags, io: CliIo): number {
@@ -172,13 +285,36 @@ function emitWorkerRunResult(
 }
 
 function doctor(parsed: ParsedFlags, io: CliIo): number {
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  const daemonStatus = loadDaemonStatus({ dataDirOptions });
+  const daemonPayload = daemonStatus.ok
+    ? {
+        ok: true as const,
+        dataDir: daemonStatus.dataDir,
+        hasRun: daemonStatus.hasRun,
+        state: daemonStatus.daemonRun?.state ?? null,
+        isActive: daemonStatus.daemonRun?.isActive ?? false,
+        stale: daemonStatus.daemonRun?.stale ?? false,
+        staleRunCount: daemonStatus.staleRuns.length,
+        runId: daemonStatus.daemonRun?.runId ?? null
+      }
+    : {
+        ok: false as const,
+        code: daemonStatus.code,
+        message: daemonStatus.error
+      };
+
   const payload = {
     ok: true,
     command: "doctor",
     version: VERSION,
     node: process.version,
     platform: process.platform,
-    milestone: "Milestone 2: queue/worker and chaining (NGX-250)"
+    milestone: "Milestone 2: queue/worker and chaining (NGX-250)",
+    daemon: daemonPayload
   };
 
   if (parsed.json) {
@@ -186,14 +322,31 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
     return 0;
   }
 
-  write(io.stdout, [
+  const lines: string[] = [
     "Momentum doctor: ok",
     `version: ${payload.version}`,
     `node: ${payload.node}`,
     `platform: ${payload.platform}`,
-    `scope: ${payload.milestone}`,
-    ""
-  ].join("\n"));
+    `scope: ${payload.milestone}`
+  ];
+  if (daemonPayload.ok) {
+    if (!daemonPayload.hasRun) {
+      lines.push("daemon: never started");
+    } else {
+      const flags: string[] = [];
+      if (daemonPayload.isActive) flags.push("active");
+      if (daemonPayload.stale) flags.push("stale");
+      const flagStr = flags.length > 0 ? ` (${flags.join(", ")})` : "";
+      lines.push(`daemon: ${daemonPayload.state}${flagStr}`);
+    }
+    if (daemonPayload.staleRunCount > 0) {
+      lines.push(`daemon stale runs: ${daemonPayload.staleRunCount}`);
+    }
+  } else {
+    lines.push(`daemon: error (${daemonPayload.code})`);
+  }
+  lines.push("");
+  write(io.stdout, lines.join("\n"));
   return 0;
 }
 
