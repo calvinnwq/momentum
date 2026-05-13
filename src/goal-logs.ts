@@ -171,9 +171,6 @@ function listAvailableIterations(goalDir: string): number[] {
 
 function selectDefaultIteration(goal: GoalRow, available: number[]): number {
   if (available.length > 0) {
-    if (goal.current_iteration > 0 && available.includes(goal.current_iteration)) {
-      return goal.current_iteration;
-    }
     return available[available.length - 1] as number;
   }
   return goal.current_iteration > 0 ? goal.current_iteration : 1;
