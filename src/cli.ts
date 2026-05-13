@@ -21,6 +21,9 @@ import {
 } from "./daemon-status.js";
 import {
   getActiveDaemonRun,
+  getDaemonRun,
+  getLatestDaemonRun,
+  requestDaemonRunStop,
   startDaemonRun
 } from "./daemon-runs.js";
 
@@ -47,6 +50,7 @@ type ParsedFlags = {
   workerId?: string;
   dataDir?: string;
   iteration?: number;
+  reason?: string;
   error?: string;
 };
 
@@ -57,6 +61,7 @@ const COMMANDS = [
   "momentum handoff <goal-id> [--data-dir <path>] [--json]",
   "momentum worker run [--worker-id <id>] [--data-dir <path>] [--json]",
   "momentum daemon start [--data-dir <path>] [--json]",
+  "momentum daemon stop [--reason <text>] [--data-dir <path>] [--json]",
   "momentum daemon status [--data-dir <path>] [--json]",
   "momentum doctor [--json]"
 ];
@@ -117,7 +122,7 @@ function daemon(parsed: ParsedFlags, io: CliIo): number {
   const subcommand = parsed.args[1];
   if (!subcommand) {
     return usageError(
-      "Missing required subcommand for daemon. Expected: start, status.",
+      "Missing required subcommand for daemon. Expected: start, stop, status.",
       parsed,
       io
     );
@@ -127,6 +132,9 @@ function daemon(parsed: ParsedFlags, io: CliIo): number {
   }
   if (subcommand === "start") {
     return daemonStart(parsed, io);
+  }
+  if (subcommand === "stop") {
+    return daemonStop(parsed, io);
   }
   return usageError(`Unknown daemon subcommand: ${subcommand}`, parsed, io);
 }
@@ -227,6 +235,208 @@ function daemonStart(parsed: ParsedFlags, io: CliIo): number {
   } finally {
     db.close();
   }
+}
+
+const DEFAULT_DAEMON_STOP_REASON = "operator-requested";
+
+function daemonStop(parsed: ParsedFlags, io: CliIo): number {
+  if (parsed.args.length > 2) {
+    return usageError(
+      `Unexpected argument for daemon stop: ${parsed.args[2]}`,
+      parsed,
+      io
+    );
+  }
+
+  const reason =
+    parsed.reason !== undefined && parsed.reason.length > 0
+      ? parsed.reason
+      : DEFAULT_DAEMON_STOP_REASON;
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return emitDaemonStopFailure(parsed, io, {
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err)
+    });
+  }
+
+  const now = Date.now();
+  const db = openDb(dataDir);
+  try {
+    const active = getActiveDaemonRun(db);
+    if (!active) {
+      const latest = getLatestDaemonRun(db);
+      return emitDaemonStopFailure(parsed, io, {
+        code: "no_active_daemon",
+        message: latest
+          ? `No active daemon run to stop (latest ${latest.id} is ${latest.state}).`
+          : "No active daemon run to stop. Run `momentum daemon start` first.",
+        latest: latest
+          ? {
+              runId: latest.id,
+              state: latest.state,
+              pid: latest.pid,
+              host: latest.host,
+              startedAt: latest.started_at,
+              finishedAt: latest.finished_at
+            }
+          : null
+      });
+    }
+
+    const previousState = active.state;
+    const alreadyStopRequested = previousState === "stop_requested";
+    const result = requestDaemonRunStop(db, {
+      runId: active.id,
+      reason,
+      now
+    });
+    if (!result.ok) {
+      // The active record disappeared (or transitioned terminal) between
+      // selection and update. Treat as no active daemon and surface clearly.
+      return emitDaemonStopFailure(parsed, io, {
+        code: "no_active_daemon",
+        message: `Active daemon run ${active.id} could not be transitioned to stop_requested (state may have just changed).`,
+        latest: {
+          runId: active.id,
+          state: active.state,
+          pid: active.pid,
+          host: active.host,
+          startedAt: active.started_at,
+          finishedAt: active.finished_at
+        }
+      });
+    }
+
+    const updated = getDaemonRun(db, active.id);
+    if (!updated) {
+      throw new Error(
+        `daemon stop: run ${active.id} disappeared after stop request`
+      );
+    }
+
+    const heartbeatAgeMs = Math.max(0, now - updated.heartbeat_at);
+    const stale = heartbeatAgeMs >= DEFAULT_DAEMON_STALE_AFTER_MS;
+    return emitDaemonStopSuccess(parsed, io, {
+      dataDir,
+      runId: updated.id,
+      previousState,
+      state: updated.state,
+      pid: updated.pid,
+      host: updated.host,
+      startedAt: updated.started_at,
+      stopRequestedAt: updated.stop_requested_at ?? now,
+      stopReason: updated.stop_reason ?? reason,
+      alreadyStopRequested,
+      heartbeatAt: updated.heartbeat_at,
+      heartbeatAgeMs,
+      stale
+    });
+  } finally {
+    db.close();
+  }
+}
+
+type DaemonStopSuccessPayload = {
+  dataDir: string;
+  runId: string;
+  previousState: string;
+  state: string;
+  pid: number | null;
+  host: string | null;
+  startedAt: number;
+  stopRequestedAt: number;
+  stopReason: string;
+  alreadyStopRequested: boolean;
+  heartbeatAt: number;
+  heartbeatAgeMs: number;
+  stale: boolean;
+};
+
+type DaemonStopFailurePayload = {
+  code: "no_active_daemon" | "data_dir_failed";
+  message: string;
+  latest?: {
+    runId: string;
+    state: string;
+    pid: number | null;
+    host: string | null;
+    startedAt: number;
+    finishedAt: number | null;
+  } | null;
+};
+
+function emitDaemonStopSuccess(
+  parsed: ParsedFlags,
+  io: CliIo,
+  data: DaemonStopSuccessPayload
+): number {
+  const payload = {
+    ok: true,
+    command: "daemon stop",
+    dataDir: data.dataDir,
+    runId: data.runId,
+    previousState: data.previousState,
+    state: data.state,
+    pid: data.pid,
+    host: data.host,
+    startedAt: data.startedAt,
+    stopRequestedAt: data.stopRequestedAt,
+    stopReason: data.stopReason,
+    alreadyStopRequested: data.alreadyStopRequested,
+    heartbeatAt: data.heartbeatAt,
+    heartbeatAgeMs: data.heartbeatAgeMs,
+    stale: data.stale
+  };
+
+  if (parsed.json) {
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  const lines: string[] = [
+    data.alreadyStopRequested
+      ? `Daemon stop request refreshed: ${data.runId}`
+      : `Daemon stop requested: ${data.runId}`,
+    `State: ${data.state}${data.stale ? " [stale]" : ""}`,
+    `Previous state: ${data.previousState}`,
+    `Reason: ${data.stopReason}`,
+    `Requested at: ${data.stopRequestedAt}`,
+    `Pid: ${data.pid ?? "(unset)"}`,
+    `Host: ${data.host ?? "(unset)"}`,
+    `Data dir: ${data.dataDir}`,
+    ""
+  ];
+  write(io.stdout, lines.join("\n"));
+  return 0;
+}
+
+function emitDaemonStopFailure(
+  parsed: ParsedFlags,
+  io: CliIo,
+  failure: DaemonStopFailurePayload
+): number {
+  const payload: Record<string, unknown> = {
+    ok: false,
+    command: "daemon stop",
+    code: failure.code,
+    message: failure.message
+  };
+  if (failure.latest !== undefined) payload["latest"] = failure.latest;
+
+  if (parsed.json) {
+    writeJson(io.stderr, payload);
+    return 1;
+  }
+  write(io.stderr, `${failure.message}\n`);
+  return 1;
 }
 
 type DaemonStartSuccessPayload = {
@@ -1086,6 +1296,7 @@ function parseFlags(argv: string[]): ParsedFlags {
   let workerId: string | undefined;
   let dataDir: string | undefined;
   let iteration: number | undefined;
+  let reason: string | undefined;
   let error: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -1148,6 +1359,17 @@ function parseFlags(argv: string[]): ParsedFlags {
       continue;
     }
 
+    if (arg === "--reason") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --reason.";
+      } else {
+        reason = value;
+        index += 1;
+      }
+      continue;
+    }
+
     if (arg === "--iteration") {
       const value = readFlagValue(argv, index);
       if (value === undefined) {
@@ -1175,6 +1397,7 @@ function parseFlags(argv: string[]): ParsedFlags {
   if (dataDir !== undefined) parsed.dataDir = dataDir;
   if (workerId !== undefined) parsed.workerId = workerId;
   if (iteration !== undefined) parsed.iteration = iteration;
+  if (reason !== undefined) parsed.reason = reason;
   if (error !== undefined) parsed.error = error;
 
   return parsed;

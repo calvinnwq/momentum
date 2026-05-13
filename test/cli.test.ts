@@ -104,6 +104,9 @@ describe("momentum CLI scaffold", () => {
       "momentum daemon start [--data-dir <path>] [--json]"
     );
     expect(result.stdout).toContain(
+      "momentum daemon stop [--reason <text>] [--data-dir <path>] [--json]"
+    );
+    expect(result.stdout).toContain(
       "momentum daemon status [--data-dir <path>] [--json]"
     );
     expect(result.stdout).toContain("momentum doctor [--json]");
@@ -1858,6 +1861,248 @@ Goal body.
     const result = await run(["daemon", "start", "extra"]);
     expect(result.code).toBe(2);
     expect(result.stderr).toContain("Unexpected argument for daemon start");
+    expect(result.stdout).toBe("");
+  });
+
+  it("daemon stop records a stop request on the active run (json)", async () => {
+    const dataDir = makeTempDir("momentum-cli-daemon-stop-");
+    const { openDb } = await import("../src/db.js");
+    const { startDaemonRun } = await import("../src/daemon-runs.js");
+    let activeRunId: string;
+    const db = openDb(dataDir);
+    try {
+      ({ runId: activeRunId } = startDaemonRun(db, {
+        pid: 4242,
+        host: "node-stop",
+        now: Date.now()
+      }));
+    } finally {
+      db.close();
+    }
+
+    const before = Date.now();
+    const result = await run([
+      "daemon", "stop",
+      "--reason", "operator-shutdown",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    const after = Date.now();
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      command: "daemon stop",
+      dataDir,
+      runId: activeRunId,
+      previousState: "running",
+      state: "stop_requested",
+      stopReason: "operator-shutdown",
+      alreadyStopRequested: false,
+      pid: 4242,
+      host: "node-stop",
+      stale: false
+    });
+    expect(payload["stopRequestedAt"]).toBeGreaterThanOrEqual(before);
+    expect(payload["stopRequestedAt"]).toBeLessThanOrEqual(after);
+    expect(typeof payload["heartbeatAgeMs"]).toBe("number");
+    expect(result.stderr).toBe("");
+
+    // Status round-trip should reflect the recorded stop request.
+    const statusResult = await run([
+      "daemon", "status",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(statusResult.code).toBe(0);
+    const statusPayload = JSON.parse(statusResult.stdout) as Record<string, unknown>;
+    const daemonRun = statusPayload["daemonRun"] as Record<string, unknown>;
+    expect(daemonRun["runId"]).toBe(activeRunId);
+    expect(daemonRun["state"]).toBe("stop_requested");
+    expect(daemonRun["stopRequest"]).toEqual({
+      requestedAt: payload["stopRequestedAt"],
+      reason: "operator-shutdown"
+    });
+  });
+
+  it("daemon stop defaults --reason to 'operator-requested' and prints a text summary", async () => {
+    const dataDir = makeTempDir("momentum-cli-daemon-stop-");
+    const { openDb } = await import("../src/db.js");
+    const { startDaemonRun } = await import("../src/daemon-runs.js");
+    const db = openDb(dataDir);
+    try {
+      startDaemonRun(db, { pid: 11, host: "node-default", now: Date.now() });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "daemon", "stop",
+      "--data-dir", dataDir
+    ]);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("Daemon stop requested:");
+    expect(result.stdout).toContain("State: stop_requested");
+    expect(result.stdout).toContain("Previous state: running");
+    expect(result.stdout).toContain("Reason: operator-requested");
+    expect(result.stdout).toContain(`Data dir: ${dataDir}`);
+    expect(result.stderr).toBe("");
+  });
+
+  it("daemon stop is idempotent and refreshes the reason on a stop_requested run", async () => {
+    const dataDir = makeTempDir("momentum-cli-daemon-stop-");
+    const { openDb } = await import("../src/db.js");
+    const { startDaemonRun, requestDaemonRunStop } = await import(
+      "../src/daemon-runs.js"
+    );
+    let runId: string;
+    const firstRequestedAt = Date.now() - 5_000;
+    const db = openDb(dataDir);
+    try {
+      ({ runId } = startDaemonRun(db, { pid: 22, now: firstRequestedAt }));
+      requestDaemonRunStop(db, {
+        runId,
+        reason: "initial",
+        now: firstRequestedAt
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "daemon", "stop",
+      "--reason", "second-call",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      command: "daemon stop",
+      runId,
+      previousState: "stop_requested",
+      state: "stop_requested",
+      alreadyStopRequested: true,
+      stopReason: "second-call"
+    });
+    // The original stop_requested_at is preserved (COALESCE in the primitive).
+    expect(payload["stopRequestedAt"]).toBe(firstRequestedAt);
+    expect(result.stdout).not.toContain("Daemon stop requested:");
+  });
+
+  it("daemon stop refuses when no daemon has ever started", async () => {
+    const dataDir = makeTempDir("momentum-cli-daemon-stop-");
+    const result = await run([
+      "daemon", "stop",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "daemon stop",
+      code: "no_active_daemon",
+      latest: null
+    });
+    expect((payload["message"] as string).toLowerCase()).toContain(
+      "no active daemon"
+    );
+  });
+
+  it("daemon stop refuses when the latest run is already terminal and surfaces it", async () => {
+    const dataDir = makeTempDir("momentum-cli-daemon-stop-");
+    const { openDb } = await import("../src/db.js");
+    const { startDaemonRun, finishDaemonRun } = await import(
+      "../src/daemon-runs.js"
+    );
+    let runId: string;
+    const db = openDb(dataDir);
+    try {
+      ({ runId } = startDaemonRun(db, {
+        pid: 33,
+        host: "node-old",
+        now: Date.now() - 1_000
+      }));
+      finishDaemonRun(db, {
+        runId,
+        terminalState: "stopped",
+        now: Date.now()
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "daemon", "stop",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "daemon stop",
+      code: "no_active_daemon"
+    });
+    const latest = payload["latest"] as Record<string, unknown>;
+    expect(latest).toMatchObject({
+      runId,
+      state: "stopped",
+      pid: 33,
+      host: "node-old"
+    });
+    expect((payload["message"] as string).toLowerCase()).toContain("stopped");
+  });
+
+  it("daemon stop flags stale heartbeats on the active run but still records the request", async () => {
+    const dataDir = makeTempDir("momentum-cli-daemon-stop-");
+    const { openDb } = await import("../src/db.js");
+    const { startDaemonRun } = await import("../src/daemon-runs.js");
+    let runId: string;
+    const db = openDb(dataDir);
+    try {
+      // Started long ago so heartbeat_at is well past the default 90s cutoff.
+      ({ runId } = startDaemonRun(db, { pid: 44, now: 100 }));
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "daemon", "stop",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      runId,
+      state: "stop_requested",
+      stale: true
+    });
+    expect(payload["heartbeatAgeMs"]).toBeGreaterThanOrEqual(90_000);
+  });
+
+  it("daemon stop rejects extra positional arguments", async () => {
+    const result = await run(["daemon", "stop", "extra"]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("Unexpected argument for daemon stop");
+    expect(result.stdout).toBe("");
+  });
+
+  it("daemon stop rejects --reason without a value", async () => {
+    const result = await run(["daemon", "stop", "--reason"]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("Missing required value for --reason");
     expect(result.stdout).toBe("");
   });
 });
