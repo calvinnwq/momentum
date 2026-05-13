@@ -13,7 +13,8 @@ Typical loop:
 
 ## Current milestone
 - Milestone 1: Foreground proof loop is complete.
-- Milestone 2: Queue and worker model is in progress; NGX-250 (CLI contract and local log inspection) is implemented in this branch.
+- Milestone 2: Queue and worker model is complete.
+- Milestone 3: Operational Safety is the active planning target. It should add daemon/orchestrator state, stop behavior, stale lease recovery, manual recovery artifacts, and smoke/docs closeout while preserving the durable Goal/Iteration/Job/Handoff model.
 - NGX-235 (scaffold) is done.
 - NGX-236 (Goal spec parsing, data-dir resolution, SQLite init, artifact layout) is done.
 - NGX-237 (fake runner profile, repo guard, branch manager, iteration prompt renderer, foreground iteration orchestrator, iteration-job DB wrapper, CLI wiring) is done.
@@ -25,6 +26,18 @@ Typical loop:
 - NGX-248 (M2-04 queued `goal_iteration` handler: queued execution reuses `finalizeIteration` for commit/reset, populates `jobs.result_path` / `jobs.error_path`, emits `job.succeeded` / `job.failed` with commit + artifact pointers, surfaces those pointers through `status --json` and `handoff`, and extends the fake runner with `goal_complete` and per-iteration trajectory envs for NGX-249 chaining) is done.
 - NGX-249 (M2-05 completion reducer and idempotent chaining: `reduceGoalIteration` classifies terminal `goal_iteration` jobs as `continue` / `goal_complete` / `max_iterations_reached` / `iteration_failed`, updates `goals.state` / `current_iteration` / `completion_reason`, enqueues next iterations with stable idempotency keys, emits `goal.reduced` + `goal.completed` / `goal.failed`, is idempotent via `goal.reduced` event check, and surfaces reducer state / next-job / next-action through `status --json` and `handoff`; the worker calls the reducer after each completed job, enabling multi-iteration chaining without drifting or double-enqueueing; per-iteration artifact directories are generalized beyond iteration 1) is done.
 - NGX-250 (M2 CLI contract and local log inspection: `status --json` / `handoff.json` expose artifact, current-iteration, next-action, latest-commit, idempotency, and lease metadata; `logs` reads local runner and verification logs; queued smoke coverage and user-facing docs are updated) is done.
+
+## Milestone 3 alignment
+Milestone 3 is orchestrator lifecycle / operational safety, not just daemon process plumbing. The canonical alignment note lives in `README.md` under "Milestone 3 Alignment"; read it before starting any M3 implementation slice. The headline rules:
+
+- Momentum's durable primitives are `Goal`, `Source`, `Source Item`, `Iteration`, `Job`, `RunnerAdapter`, `Workflow/Policy`, `Workspace/Repo Lease`, `Event`, and `Handoff`. M3 must not break or rename them.
+- `Goal` is the core product primitive; external issues/projects are source items that seed context and reconciliation, not completion authority.
+- Goal completion is determined by the Goal Markdown acceptance criteria plus runner, verification, and handoff evidence.
+- Tracker writes are adapter-mediated and policy-gated. Core records durable facts and external-update intents; Linear/GitHub/Jira/etc. adapters or approved workflow steps perform external writes.
+- Source adapters are pull/reconcile first in M3. Do not add inbound webhook infrastructure in the operational-safety milestone.
+- A Goal uses one shared repo/workspace lease for now. Do not add per-source-item worktrees/workspaces until daemon, stop, and recovery behavior are solid.
+- `MOMENTUM.md` is the canonical future repo policy file, but M3 documents the contract only. Do not implement parsing/validation/precedence unless a daemon slice explicitly proves it is required.
+- Symphony is an orchestration reference, not a blueprint to clone. Adopt: single-authority scheduling, reconciliation, retry/backoff taxonomy, workspace safety invariants, runner event taxonomy, token/rate-limit observability, explicit trust/sandbox posture. Avoid: in-memory-only scheduler state, Codex-only runner assumptions, issue-tracker-only completion semantics, high-trust auto-approval defaults, inbound webhooks in M3, per-issue workspace cleanup that loses audit artifacts, core-owned tracker writes, and a runtime `MOMENTUM.md` loader before a daemon slice proves it.
 
 ## Stack and workflow commands
 - Runtime: Node.js
