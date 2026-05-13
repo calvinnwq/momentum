@@ -235,6 +235,7 @@ describe("Milestone 1 end-to-end smoke", () => {
       expect(commands).toEqual([
         "momentum goal start <goal.md> [--repo <path>] [--foreground] [--runner <profile>] [--data-dir <path>] [--json]",
         "momentum status [goal-id] [--data-dir <path>] [--json]",
+        "momentum logs <goal-id> [--iteration <n>] [--data-dir <path>] [--json]",
         "momentum handoff <goal-id> [--data-dir <path>] [--json]",
         "momentum worker run [--worker-id <id>] [--data-dir <path>] [--json]",
         "momentum doctor [--json]"
@@ -2000,6 +2001,147 @@ Queued smoke goal that fails verification.
       expect(handoffMdContent).toContain("- State: failed");
       expect(handoffMdContent).toContain(`- Error path: ${verificationLog}`);
       expect(handoffMdContent).not.toContain("- Result path:");
+    },
+    90_000
+  );
+
+  it(
+    "logs <goal-id> reads the queued iteration's runner.log and verification.log via the built CLI in both text and --json modes",
+    () => {
+      const repo = initDisposableRepo();
+      const dataDir = makeTempDir("momentum-smoke-m2-logs-data-");
+      const goalFile = path.join(dataDir, "goal.md");
+      fs.writeFileSync(goalFile, SMOKE_GOAL_SPEC, "utf-8");
+
+      const start = runCliBinary([
+        "goal",
+        "start",
+        goalFile,
+        "--repo",
+        repo,
+        "--data-dir",
+        dataDir,
+        "--runner",
+        "fake",
+        "--json"
+      ]);
+      expect(start.code, `goal start stderr: ${start.stderr}`).toBe(0);
+      const startPayload = JSON.parse(start.stdout) as Record<string, unknown>;
+      const goalId = startPayload["goalId"] as string;
+
+      const worker = runCliBinary([
+        "worker",
+        "run",
+        "--data-dir",
+        dataDir,
+        "--worker-id",
+        "smoke-worker-logs",
+        "--json"
+      ]);
+      expect(worker.code, `worker run stderr: ${worker.stderr}`).toBe(0);
+      const workerPayload = JSON.parse(worker.stdout) as Record<string, unknown>;
+      expect(workerPayload).toMatchObject({
+        ok: true,
+        code: "ran_job",
+        outcome: "ran_job",
+        goalId,
+        jobState: "succeeded",
+        iteration: 1
+      });
+
+      const goalDir = path.join(dataDir, "goals", goalId);
+      const iterationDir = path.join(goalDir, "iterations", "1");
+      const runnerLogPath = path.join(iterationDir, "runner.log");
+      const verificationLogPath = path.join(iterationDir, "verification.log");
+
+      const logsText = runCliBinary([
+        "logs",
+        goalId,
+        "--data-dir",
+        dataDir
+      ]);
+      expect(logsText.code, `logs stderr: ${logsText.stderr}`).toBe(0);
+      expect(logsText.stderr).toBe("");
+      expect(logsText.stdout).toContain(`Goal: ${goalId}`);
+      expect(logsText.stdout).toContain("Iteration: 1");
+      expect(logsText.stdout).toContain("Available iterations: 1");
+      expect(logsText.stdout).toContain(`Iteration dir: ${iterationDir}`);
+      expect(logsText.stdout).toContain(
+        `## runner.log (${fs.statSync(runnerLogPath).size} bytes): ${runnerLogPath}`
+      );
+      expect(logsText.stdout).toContain(
+        `## verification.log (${fs.statSync(verificationLogPath).size} bytes): ${verificationLogPath}`
+      );
+      expect(logsText.stdout).toContain("[verify]");
+
+      const logsJson = runCliBinary([
+        "logs",
+        goalId,
+        "--iteration",
+        "1",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ]);
+      expect(logsJson.code, `logs --json stderr: ${logsJson.stderr}`).toBe(0);
+      expect(logsJson.stderr).toBe("");
+      const logsPayload = JSON.parse(logsJson.stdout) as Record<string, unknown>;
+      expect(logsPayload).toMatchObject({
+        ok: true,
+        command: "logs",
+        goalId,
+        iteration: 1,
+        availableIterations: [1],
+        dataDir,
+        artifactDir: goalDir,
+        iterationDir
+      });
+      const runnerLog = logsPayload["runnerLog"] as Record<string, unknown>;
+      expect(runnerLog).toMatchObject({
+        path: runnerLogPath,
+        exists: true
+      });
+      expect(typeof runnerLog["bytes"]).toBe("number");
+      expect(runnerLog["bytes"]).toBe(fs.statSync(runnerLogPath).size);
+      expect(runnerLog["content"]).toBe(
+        fs.readFileSync(runnerLogPath, "utf-8")
+      );
+      const verificationLog = logsPayload["verificationLog"] as Record<
+        string,
+        unknown
+      >;
+      expect(verificationLog).toMatchObject({
+        path: verificationLogPath,
+        exists: true
+      });
+      expect(verificationLog["bytes"]).toBe(
+        fs.statSync(verificationLogPath).size
+      );
+      expect(verificationLog["content"]).toBe(
+        fs.readFileSync(verificationLogPath, "utf-8")
+      );
+      expect(verificationLog["content"]).toContain("[verify]");
+
+      const missing = runCliBinary([
+        "logs",
+        goalId,
+        "--iteration",
+        "99",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ]);
+      expect(missing.code).toBe(1);
+      expect(missing.stdout).toBe("");
+      const missingPayload = JSON.parse(missing.stderr) as Record<string, unknown>;
+      expect(missingPayload).toMatchObject({
+        ok: false,
+        command: "logs",
+        code: "iteration_not_found",
+        goalId
+      });
+      expect(typeof missingPayload["message"]).toBe("string");
+      expect((missingPayload["message"] as string)).toContain(goalId);
     },
     90_000
   );

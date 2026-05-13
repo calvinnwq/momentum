@@ -35,6 +35,11 @@ export type GoalStatusJobSummary = {
   startedAt: number | null;
   finishedAt: number | null;
   error: string | null;
+  idempotencyKey: string | null;
+  leaseHolder: string | null;
+  leaseAcquiredAt: number | null;
+  leaseHeartbeatAt: number | null;
+  leaseExpiresAt: number | null;
 };
 
 export type GoalStatusIterationFailure = {
@@ -68,6 +73,25 @@ export type GoalStatusArtifactFiles = {
   resultJson: boolean;
 };
 
+export type GoalStatusArtifactEntry = {
+  path: string;
+  exists: boolean;
+};
+
+export type GoalStatusArtifactsView = {
+  iteration: number;
+  goalDir: string;
+  iterationDir: string;
+  goalMd: GoalStatusArtifactEntry;
+  ledgerMd: GoalStatusArtifactEntry;
+  handoffMd: GoalStatusArtifactEntry;
+  handoffJson: GoalStatusArtifactEntry;
+  promptMd: GoalStatusArtifactEntry;
+  runnerLog: GoalStatusArtifactEntry;
+  verificationLog: GoalStatusArtifactEntry;
+  resultJson: GoalStatusArtifactEntry;
+};
+
 export type GoalStatusReducerNextJob = {
   jobId: string;
   iteration: number;
@@ -89,12 +113,36 @@ export type GoalStatusReducerSummary = {
   nextJob: GoalStatusReducerNextJob | null;
 };
 
+export type GoalStatusNextActionKind =
+  | "run_worker"
+  | "resume_foreground"
+  | "goal_complete"
+  | "max_iterations_reached"
+  | "iteration_failed";
+
+export type GoalStatusNextActionDetail = {
+  kind: GoalStatusNextActionKind;
+  message: string;
+  jobId: string | null;
+  iteration: number | null;
+};
+
+export type GoalStatusCurrentIterationDetail = {
+  number: number;
+  jobId: string;
+  state: string;
+  queuedAt: number;
+  startedAt: number | null;
+  completedAt: number | null;
+};
+
 export type GoalStatusSuccess = {
   ok: true;
   dataDir: string;
   goalId: string;
   title: string;
   state: string;
+  goalState: string;
   repo: string | null;
   branch: string;
   runner: string;
@@ -106,13 +154,17 @@ export type GoalStatusSuccess = {
   artifactDir: string;
   artifactPaths: GoalArtifactPaths;
   artifactFiles: GoalStatusArtifactFiles;
+  artifacts: GoalStatusArtifactsView;
   createdAt: number;
   updatedAt: number;
   latestJob: GoalStatusJobSummary | null;
   iteration: GoalStatusIterationSummary | null;
+  currentIterationDetail: GoalStatusCurrentIterationDetail | null;
   reducer: GoalStatusReducerSummary | null;
   nextJob: GoalStatusJobSummary | null;
   nextAction: string | null;
+  nextActionDetail: GoalStatusNextActionDetail | null;
+  latestCommitSha: string | null;
 };
 
 export type GoalStatusResult = GoalStatusError | GoalStatusSuccess;
@@ -137,6 +189,11 @@ type JobRow = {
   started_at: number | null;
   finished_at: number | null;
   error: string | null;
+  idempotency_key: string | null;
+  worker_id: string | null;
+  lease_acquired_at: number | null;
+  lease_expires_at: number | null;
+  heartbeat_at: number | null;
 };
 
 type EventRow = {
@@ -201,6 +258,7 @@ export function loadGoalStatus(input: LoadGoalStatusInput = {}): GoalStatusResul
       selectArtifactIteration(goal, latestJob)
     );
     const artifactFiles = computeArtifactFiles(artifactPaths);
+    const artifacts = buildArtifactsView(artifactPaths, artifactFiles);
 
     const reducer = findLatestReducerSummary(db, goal.id);
     const nextJob = reducer?.nextJob
@@ -208,12 +266,19 @@ export function loadGoalStatus(input: LoadGoalStatusInput = {}): GoalStatusResul
       : null;
     const latestJobSummary = latestJob ? toJobSummary(latestJob) : null;
     const nextJobSummary = nextJob ? toJobSummary(nextJob) : null;
-    const nextAction = computeNextAction(
+    const currentIterationDetail = latestJob
+      ? toCurrentIterationDetail(latestJob)
+      : null;
+    const nextActionDetail = computeNextActionDetail(
       goal,
       latestJobSummary,
       reducer,
       nextJobSummary
     );
+    const nextAction = nextActionDetail?.message ?? null;
+
+    const latestCommitSha =
+      iteration?.commitSha ?? reducer?.commitSha ?? null;
 
     return {
       ok: true,
@@ -221,6 +286,7 @@ export function loadGoalStatus(input: LoadGoalStatusInput = {}): GoalStatusResul
       goalId: goal.id,
       title: goal.title,
       state: goal.state,
+      goalState: goal.state,
       repo: goal.repo,
       branch: goal.branch,
       runner: goal.runner,
@@ -232,13 +298,17 @@ export function loadGoalStatus(input: LoadGoalStatusInput = {}): GoalStatusResul
       artifactDir: goal.artifact_dir,
       artifactPaths,
       artifactFiles,
+      artifacts,
       createdAt: goal.created_at,
       updatedAt: goal.updated_at,
       latestJob: latestJobSummary,
       iteration,
+      currentIterationDetail,
       reducer,
       nextJob: nextJobSummary,
-      nextAction
+      nextAction,
+      nextActionDetail,
+      latestCommitSha
     };
   } finally {
     db?.close();
@@ -338,45 +408,72 @@ function readReducerNextJob(
   return { jobId, iteration, idempotencyKey, artifactPath };
 }
 
-function computeNextAction(
+function computeNextActionDetail(
   goal: GoalRow,
   latestJob: GoalStatusJobSummary | null,
   reducer: GoalStatusReducerSummary | null,
   nextJob: GoalStatusJobSummary | null
-): string | null {
+): GoalStatusNextActionDetail | null {
   if (reducer) {
     if (reducer.decision === "continue" && nextJob) {
-      return (
-        `Run \`momentum worker run\` to claim queued ${GOAL_ITERATION_JOB_TYPE} ` +
-        `job ${nextJob.jobId} (iteration ${nextJob.iteration}).`
-      );
+      return {
+        kind: "run_worker",
+        message:
+          `Run \`momentum worker run\` to claim queued ${GOAL_ITERATION_JOB_TYPE} ` +
+          `job ${nextJob.jobId} (iteration ${nextJob.iteration}).`,
+        jobId: nextJob.jobId,
+        iteration: nextJob.iteration
+      };
     }
     if (reducer.decision === "goal_complete") {
-      return "Goal completed; no further iterations will be enqueued.";
+      return {
+        kind: "goal_complete",
+        message: "Goal completed; no further iterations will be enqueued.",
+        jobId: reducer.jobId,
+        iteration: reducer.iteration
+      };
     }
     if (reducer.decision === "max_iterations_reached") {
-      return (
-        `Goal reached max_iterations (${goal.max_iterations}); ` +
-        "no further iterations will be enqueued."
-      );
+      return {
+        kind: "max_iterations_reached",
+        message:
+          `Goal reached max_iterations (${goal.max_iterations}); ` +
+          "no further iterations will be enqueued.",
+        jobId: reducer.jobId,
+        iteration: reducer.iteration
+      };
     }
     if (reducer.decision === "iteration_failed") {
-      return "Goal failed; inspect the latest job error_path before retrying.";
+      return {
+        kind: "iteration_failed",
+        message:
+          "Goal failed; inspect the latest job error_path before retrying.",
+        jobId: reducer.jobId,
+        iteration: reducer.iteration
+      };
     }
   }
 
   if (latestJob && latestJob.state === "pending") {
     if (latestJob.type === GOAL_ITERATION_JOB_TYPE) {
-      return (
-        `Run \`momentum worker run\` to claim queued ${GOAL_ITERATION_JOB_TYPE} ` +
-        `job ${latestJob.jobId} (iteration ${latestJob.iteration}).`
-      );
+      return {
+        kind: "run_worker",
+        message:
+          `Run \`momentum worker run\` to claim queued ${GOAL_ITERATION_JOB_TYPE} ` +
+          `job ${latestJob.jobId} (iteration ${latestJob.iteration}).`,
+        jobId: latestJob.jobId,
+        iteration: latestJob.iteration
+      };
     }
     if (latestJob.type === "foreground_iteration") {
-      return (
-        `Run \`momentum goal start --foreground\` (resume) to execute ` +
-        `iteration ${latestJob.iteration} (job ${latestJob.jobId}).`
-      );
+      return {
+        kind: "resume_foreground",
+        message:
+          `Run \`momentum goal start --foreground\` (resume) to execute ` +
+          `iteration ${latestJob.iteration} (job ${latestJob.jobId}).`,
+        jobId: latestJob.jobId,
+        iteration: latestJob.iteration
+      };
     }
   }
 
@@ -399,6 +496,19 @@ function findLatestEventByType(
     .get(goalId, jobId, type) as EventRow | undefined;
 }
 
+function toCurrentIterationDetail(
+  row: JobRow
+): GoalStatusCurrentIterationDetail {
+  return {
+    number: row.iteration,
+    jobId: row.id,
+    state: row.state,
+    queuedAt: row.created_at,
+    startedAt: row.started_at,
+    completedAt: row.finished_at
+  };
+}
+
 function toJobSummary(row: JobRow): GoalStatusJobSummary {
   return {
     jobId: row.id,
@@ -413,7 +523,12 @@ function toJobSummary(row: JobRow): GoalStatusJobSummary {
     updatedAt: row.updated_at,
     startedAt: row.started_at,
     finishedAt: row.finished_at,
-    error: row.error
+    error: row.error,
+    idempotencyKey: row.idempotency_key,
+    leaseHolder: row.worker_id,
+    leaseAcquiredAt: row.lease_acquired_at,
+    leaseHeartbeatAt: row.heartbeat_at,
+    leaseExpiresAt: row.lease_expires_at
   };
 }
 
@@ -508,5 +623,27 @@ function computeArtifactFiles(paths: GoalArtifactPaths): GoalStatusArtifactFiles
     runnerLog: fs.existsSync(paths.runnerLog),
     verificationLog: fs.existsSync(paths.verificationLog),
     resultJson: fs.existsSync(paths.resultJson)
+  };
+}
+
+function buildArtifactsView(
+  paths: GoalArtifactPaths,
+  files: GoalStatusArtifactFiles
+): GoalStatusArtifactsView {
+  return {
+    iteration: paths.iteration,
+    goalDir: paths.goalDir,
+    iterationDir: paths.iterationDir,
+    goalMd: { path: paths.goalMd, exists: files.goalMd },
+    ledgerMd: { path: paths.ledgerMd, exists: files.ledgerMd },
+    handoffMd: { path: paths.handoffMd, exists: files.handoffMd },
+    handoffJson: { path: paths.handoffJson, exists: files.handoffJson },
+    promptMd: { path: paths.promptMd, exists: files.promptMd },
+    runnerLog: { path: paths.runnerLog, exists: files.runnerLog },
+    verificationLog: {
+      path: paths.verificationLog,
+      exists: files.verificationLog
+    },
+    resultJson: { path: paths.resultJson, exists: files.resultJson }
   };
 }

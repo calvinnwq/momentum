@@ -49,11 +49,13 @@ Common commands:
 - Public surface currently includes:
   - `goal start`
   - `status`
+  - `logs`
   - `handoff`
   - `worker run`
   - `doctor`
 - Preserve stable CLI behavior across both JSON and text outputs.
 - When changing user-facing output, update tests and verify callers that rely on stable formatting.
+- `logs <goal-id> [--iteration N]` reads on-disk `runner.log` and `verification.log` only; it must not consult live worker state.
 
 ## Data and artifact layout
 - State uses `MOMENTUM_HOME` env var → `~/.momentum` fallback; override with `--data-dir`.

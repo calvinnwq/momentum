@@ -93,6 +93,9 @@ describe("momentum CLI scaffold", () => {
       "momentum goal start <goal.md> [--repo <path>] [--foreground] [--runner <profile>] [--data-dir <path>] [--json]"
     );
     expect(result.stdout).toContain("momentum status [goal-id] [--data-dir <path>] [--json]");
+    expect(result.stdout).toContain(
+      "momentum logs <goal-id> [--iteration <n>] [--data-dir <path>] [--json]"
+    );
     expect(result.stdout).toContain("momentum handoff <goal-id> [--data-dir <path>] [--json]");
     expect(result.stdout).toContain(
       "momentum worker run [--worker-id <id>] [--data-dir <path>] [--json]"
@@ -116,7 +119,7 @@ describe("momentum CLI scaffold", () => {
 
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Momentum doctor: ok");
-    expect(result.stdout).toContain("scope: NGX-249 completion-reducer-chaining");
+    expect(result.stdout).toContain("scope: Milestone 2: queue/worker and chaining (NGX-250)");
     expect(result.stderr).toBe("");
   });
 
@@ -129,7 +132,7 @@ describe("momentum CLI scaffold", () => {
       ok: true,
       command: "doctor",
       version: VERSION,
-      milestone: "NGX-249 completion-reducer-chaining"
+      milestone: "Milestone 2: queue/worker and chaining (NGX-250)"
     });
     expect(result.stderr).toBe("");
   });
@@ -841,6 +844,7 @@ describe("momentum CLI scaffold", () => {
     ]);
     const startPayload = JSON.parse(startResult.stdout) as Record<string, unknown>;
     const goalId = startPayload["goalId"] as string;
+    const jobId = startPayload["jobId"] as string;
 
     const result = await run([
       "handoff", goalId, "--data-dir", dataDir, "--json"
@@ -854,9 +858,20 @@ describe("momentum CLI scaffold", () => {
       goalId,
       title: "CLI Test Goal",
       state: "iteration_complete",
+      goalState: "iteration_complete",
       schemaVersion: 1
     });
     expect(typeof payload["generatedAt"]).toBe("number");
+    expect(payload["latestCommitSha"]).toMatch(/^[0-9a-f]{40}$/);
+    const currentIterationDetail = payload[
+      "currentIterationDetail"
+    ] as Record<string, unknown>;
+    expect(currentIterationDetail).toMatchObject({
+      number: 1,
+      jobId,
+      state: "succeeded"
+    });
+    expect(payload["nextActionDetail"]).toBeNull();
 
     const handoffMdPath = payload["handoffMdPath"] as string;
     const handoffJsonPath = payload["handoffJsonPath"] as string;
@@ -1013,6 +1028,174 @@ describe("momentum CLI scaffold", () => {
       ok: false,
       code: "usage_error",
       message: "Unexpected argument for status: extra"
+    });
+    expect(result.stdout).toBe("");
+  });
+
+  it("logs usage error when goal-id is missing", async () => {
+    const result = await run(["logs", "--json"]);
+
+    expect(result.code).toBe(2);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      code: "usage_error",
+      message: "Missing required <goal-id> for logs."
+    });
+  });
+
+  it("logs returns goal_not_found in JSON mode for an unknown goalId", async () => {
+    const dataDir = makeTempDir("momentum-cli-data-");
+
+    const result = await run([
+      "logs",
+      "no-such-goal",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "logs",
+      code: "goal_not_found",
+      goalId: "no-such-goal"
+    });
+  });
+
+  it("logs --json returns runner.log/verification.log content after a successful goal start", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+
+    const startResult = await run([
+      "goal", "start", goalFile,
+      "--foreground",
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    const startPayload = JSON.parse(startResult.stdout) as Record<string, unknown>;
+    const goalId = startPayload["goalId"] as string;
+
+    const logsResult = await run([
+      "logs", goalId, "--data-dir", dataDir, "--json"
+    ]);
+
+    expect(logsResult.code).toBe(0);
+    const payload = JSON.parse(logsResult.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      command: "logs",
+      goalId,
+      iteration: 1,
+      availableIterations: [1]
+    });
+    const runnerLog = payload["runnerLog"] as Record<string, unknown>;
+    expect(runnerLog["exists"]).toBe(true);
+    expect(runnerLog["bytes"]).toBeGreaterThan(0);
+    expect(typeof runnerLog["content"]).toBe("string");
+    expect((runnerLog["content"] as string).length).toBeGreaterThan(0);
+    const verificationLog = payload["verificationLog"] as Record<string, unknown>;
+    expect(verificationLog["exists"]).toBe(true);
+    expect(verificationLog["bytes"]).toBeGreaterThan(0);
+    expect(typeof verificationLog["content"]).toBe("string");
+    expect(logsResult.stderr).toBe("");
+  });
+
+  it("logs --iteration returns iteration_not_found for an unknown iteration", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+
+    const startResult = await run([
+      "goal", "start", goalFile,
+      "--foreground",
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    const goalId = (JSON.parse(startResult.stdout) as Record<string, unknown>)[
+      "goalId"
+    ] as string;
+
+    const result = await run([
+      "logs",
+      goalId,
+      "--iteration",
+      "9",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "logs",
+      code: "iteration_not_found",
+      goalId
+    });
+    expect(payload["message"]).toContain("Iteration 9");
+  });
+
+  it("logs text mode prints headed sections for runner.log and verification.log", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+
+    const startResult = await run([
+      "goal", "start", goalFile,
+      "--foreground",
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    const goalId = (JSON.parse(startResult.stdout) as Record<string, unknown>)[
+      "goalId"
+    ] as string;
+
+    const result = await run(["logs", goalId, "--data-dir", dataDir]);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(`Goal: ${goalId}`);
+    expect(result.stdout).toContain("Iteration: 1");
+    expect(result.stdout).toContain("Available iterations: 1");
+    expect(result.stdout).toContain("## runner.log");
+    expect(result.stdout).toContain("## verification.log");
+    expect(result.stderr).toBe("");
+  });
+
+  it("logs rejects invalid --iteration values", async () => {
+    const result = await run([
+      "logs",
+      "goal-1",
+      "--iteration",
+      "0",
+      "--json"
+    ]);
+
+    expect(result.code).toBe(2);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      code: "usage_error",
+      message: "Invalid value for --iteration: 0"
+    });
+  });
+
+  it("logs rejects partially numeric --iteration values", async () => {
+    const result = await run([
+      "logs",
+      "goal-1",
+      "--iteration",
+      "1abc",
+      "--json"
+    ]);
+
+    expect(result.code).toBe(2);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      code: "usage_error",
+      message: "Invalid value for --iteration: 1abc"
     });
     expect(result.stdout).toBe("");
   });
