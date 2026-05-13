@@ -2,7 +2,9 @@
 
 Momentum is a TypeScript CLI targeting Node.js for autonomous repo-work orchestration. It turns a durable Goal into verified Iterations, with local artifacts and handoff state.
 
-Milestone 1 (Foreground Proof Loop) is complete. Milestone 2 (Queue and Worker Model) is in progress, with NGX-235, NGX-236, NGX-237, NGX-238, NGX-239, NGX-245, NGX-246, NGX-247, NGX-248, NGX-249, and NGX-250 implemented and verified in this branch. NGX-249 is M2-05 completion reducer and idempotent chaining (`reduceGoalIteration` classifies terminal `goal_iteration` jobs as `continue` / `goal_complete` / `max_iterations_reached` / `iteration_failed`; updates `goals.state` / `current_iteration` / `completion_reason`; enqueues next iterations with stable idempotency keys; emits `goal.reduced` + `goal.completed` / `goal.failed`; surfaces reducer state, next job, and next-action via `status`/`handoff`; and runs after each completed queued job). NGX-250 pins the Milestone 2 CLI contract around queued status/handoff fields, local log inspection, queued smoke coverage, and user-facing docs. Milestone 2 also includes queued-path execution without a long-lived daemon, stable single-shot worker behavior, and explicit artifact pointers on job success/failure.
+Milestone 1 (Foreground Proof Loop) is complete. Milestone 2 (Queue and Worker Model) is complete, with NGX-235, NGX-236, NGX-237, NGX-238, NGX-239, NGX-245, NGX-246, NGX-247, NGX-248, NGX-249, and NGX-250 implemented and verified. NGX-249 is M2-05 completion reducer and idempotent chaining (`reduceGoalIteration` classifies terminal `goal_iteration` jobs as `continue` / `goal_complete` / `max_iterations_reached` / `iteration_failed`; updates `goals.state` / `current_iteration` / `completion_reason`; enqueues next iterations with stable idempotency keys; emits `goal.reduced` + `goal.completed` / `goal.failed`; surfaces reducer state, next job, and next-action via `status`/`handoff`; and runs after each completed queued job). NGX-250 pins the Milestone 2 CLI contract around queued status/handoff fields, local log inspection, queued smoke coverage, and user-facing docs. Milestone 2 also includes queued-path execution without a long-lived daemon, stable single-shot worker behavior, and explicit artifact pointers on job success/failure.
+
+Milestone 3 is Operational Safety. It should add daemon/orchestrator state, stop behavior, stale lease recovery, manual recovery artifacts, and closeout smoke/docs without changing Momentum's core product model. Momentum's core primitive is a durable `Goal`; external issues/projects are source items that seed context and reconciliation, not the source of truth for completion. Goal completion is determined by the Goal's Markdown acceptance criteria plus runner, verification, and handoff evidence. Tracker writes are adapter-mediated and policy-gated: core records durable facts and external-update intents, while Linear/GitHub/Jira/etc. adapters or approved workflow steps perform external writes. Source adapters are pull/reconcile first in M3; inbound webhooks are deferred. A Goal uses one shared repo/workspace lease for now; per-source-item worktrees/workspaces are deferred until daemon, stop, and recovery behavior are solid. `MOMENTUM.md` is the canonical future repo policy file, documented in M3 as a contract but not loaded at runtime unless a later daemon slice explicitly proves it is required.
 
 ## Milestone 1 Scope
 
@@ -291,9 +293,68 @@ node dist/index.js goal start "$DATA/goal.md" \
 
 Day-to-day execution should use the default queued path so the reducer can chain iterations and the queue can be inspected with `status` / `logs` / `handoff`.
 
+## Milestone 3 Alignment
+
+Milestone 3 is **orchestrator lifecycle / operational safety**, not merely daemon process plumbing. It should add daemon/orchestrator state, stop behavior, stale-lease recovery, manual recovery artifacts, and closeout smoke/docs while preserving Momentum's durable Goal/Iteration/Job/Handoff model and SQLite-backed queue. The work is informed by OpenAI Symphony's orchestration model ([SPEC.md](https://github.com/openai/symphony/blob/main/SPEC.md)) but Momentum is a durable local-first engine, not an issue-tracker poller / Codex app-server clone.
+
+### Durable primitives
+
+Momentum's product model is centered on these durable concepts; M3 must not break or rename them:
+
+- **Goal**: the core product primitive. A Markdown spec plus acceptance criteria, durably tracked in SQLite with its own state machine.
+- **Source**: an external system that can seed Goals or reconcile context (Linear, GitHub, Jira, etc.).
+- **Source Item**: a durable intake record under a Goal, drawn from a Source. Not the completion authority.
+- **Iteration**: one verified attempt at the Goal, with prompt, runner log, verification log, and result artifacts.
+- **Job**: a queued unit of work (today: `goal_iteration`) with idempotency key, lease, and result/error pointers.
+- **RunnerAdapter**: the boundary for invoking an agent runner (currently `fake`; later Codex, Claude, OpenCode, ACP/app-server backends).
+- **Workflow / Policy**: repo-owned configuration and prompt contract, the future `MOMENTUM.md`.
+- **Workspace / Repo Lease**: the shared per-Goal repo lock that protects the working tree during an iteration.
+- **Event**: append-only record on the durable event log (`job.enqueued`, `job.claimed`, `job.heartbeat`, `iteration_*`, `job.succeeded`/`job.failed`, `goal.reduced`, `goal.completed`/`goal.failed`, `goal.reduce_failed`).
+- **Handoff**: the `handoff.md` + `handoff.json` artifacts that snapshot state for continuity.
+
+### Locked decisions
+
+- Momentum's core product primitive is `Goal`, not `Issue`. A Goal may be seeded from one or more source items; Linear projects/issues are one source shape, not the source of truth.
+- Goal completion is decided by the Goal Markdown acceptance criteria plus runner, verification, and handoff evidence, not by source-item count or external tracker state alone.
+- Tracker writes are **adapter-mediated and policy-gated**. Momentum core records durable facts and emits external-update intents; Linear/GitHub/Jira/etc. adapters or approved workflow steps perform the external writes.
+- Source adapters are **pull / reconcile first** in M3. No inbound webhook infrastructure in the operational-safety milestone.
+- A Goal uses **one shared repo / workspace lease** for now. Per-source-item worktrees or workspaces are deferred until daemon, stop, and recovery behavior are solid.
+- `MOMENTUM.md` is the canonical future repo policy file. M3 documents it as a contract but does **not** add a runtime loader, parser, or precedence rules unless a later daemon slice explicitly proves it is required.
+
+### Symphony to Momentum domain mapping
+
+| Symphony concept | Momentum equivalent |
+|---|---|
+| `WORKFLOW.md` | Future `MOMENTUM.md` repo policy contract (doc-only in M3). |
+| Issue | Source item / intake record under a Momentum Goal. |
+| Orchestrator state (in-memory) | Momentum daemon/orchestrator state plus durable queue/job records in SQLite. |
+| Per-issue workspace | Current Goal repo-lease boundary; future worktree support deferred. |
+| Agent runner | Momentum `RunnerAdapter` boundary (Codex, Claude, OpenCode, ACP/app-server backends). |
+| Status / log snapshots | Momentum events, `status --json`, `logs`, and `handoff` artifacts. |
+
+### Adopt from Symphony
+
+- Repo-owned workflow config and prompt contract (future `MOMENTUM.md`), with typed config loading and dynamic reload semantics added later only when justified.
+- Single-authority scheduling and explicit reconciliation passes.
+- Retry / backoff taxonomy on jobs and runner calls.
+- Workspace safety invariants (clean tree, captured base HEAD, deterministic reset).
+- A runner event taxonomy that makes runner progress observable without coupling to one vendor.
+- Token / rate-limit observability and an explicit trust / sandbox posture for runners.
+
+### Avoid from Symphony
+
+- In-memory-only scheduler state; Momentum's queue stays durable in SQLite.
+- A Codex-only runner protocol; keep the `RunnerAdapter` boundary multi-backend.
+- An issue-tracker-only product model; Goal remains the durable primitive.
+- High-trust auto-approval as an implicit default; every external/destructive action must be policy-gated.
+- Inbound webhooks in M3; adapters stay pull / reconcile first.
+- Per-issue workspace cleanup that risks losing audit artifacts.
+- Core-owned tracker writes; adapters or approved workflow steps own external writes.
+- A runtime `MOMENTUM.md` loader before any daemon slice proves it is needed.
+
 ## Current Exclusions
 
-Milestone 2 intentionally defers the following to **Milestone 3** so the queued path stays scoped to single-shot worker claims and explicit local recovery:
+Milestone 2 intentionally deferred the following to **Milestone 3** so the queued path stayed scoped to single-shot worker claims and explicit local recovery:
 
 - Managed `daemon start` / `daemon status` lifecycle and background runner supervision.
 - Graceful stop and `stop --now` commands.
