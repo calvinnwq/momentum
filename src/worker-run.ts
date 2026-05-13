@@ -288,14 +288,28 @@ export function runWorkerOnce(input: WorkerRunInput): WorkerRunResult {
     runningJob.iteration
   );
 
-  input.hooks?.onJobClaimed?.({
-    goalId: goal.id,
-    jobId: runningJob.id,
-    lockId: lock.id,
-    iteration: runningJob.iteration,
-    workerId,
-    now: heartbeatNow
-  });
+  try {
+    input.hooks?.onJobClaimed?.({
+      goalId: goal.id,
+      jobId: runningJob.id,
+      lockId: lock.id,
+      iteration: runningJob.iteration,
+      workerId,
+      now: heartbeatNow
+    });
+  } catch (error) {
+    releaseRepoLock(input.db, {
+      lockId: lock.id,
+      now: now(),
+      recoveryStatus: "job_claim_hook_failed"
+    });
+    releaseClaimedGoalIterationJob(input.db, {
+      jobId: runningJob.id,
+      workerId,
+      reason: "job_claim_hook_failed"
+    });
+    throw error;
+  }
 
   const iterationResult = executeIterationJob({
     db: input.db,

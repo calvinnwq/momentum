@@ -217,6 +217,8 @@ export async function runDaemonLoop(
       now: finishNow,
       error: internalError?.message ?? "unknown internal error"
     });
+  } else if (exitReason === "run_terminated" && lastObservedState === "error") {
+    terminalState = "error";
   } else {
     terminalState = "stopped";
     finishDaemonRun(input.db, {

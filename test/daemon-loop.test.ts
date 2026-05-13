@@ -354,6 +354,43 @@ describe("runDaemonLoop", () => {
     }
   });
 
+  it("preserves an observed terminal error state for run_terminated", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const runId = seedDaemonRun(db);
+      finishDaemonRun(db, {
+        runId,
+        terminalState: "error",
+        now: 100_500,
+        error: "previous daemon failure"
+      });
+
+      const result = await runDaemonLoop({
+        db,
+        dataDir,
+        runId,
+        workerId: "daemon-loop-terminal-error",
+        pollIntervalMs: 0,
+        sleep: async () => undefined,
+        now: makeMonotonicNow(),
+        runWorker: () => {
+          throw new Error("runWorker should not be called when run is terminal");
+        }
+      });
+
+      expect(result.exitReason).toBe("run_terminated");
+      expect(result.terminalState).toBe("error");
+      expect(result.lastObservedState).toBe("error");
+
+      const row = getDaemonRun(db, runId);
+      expect(row?.state).toBe("error");
+      expect(row?.error).toBe("previous daemon failure");
+    } finally {
+      db.close();
+    }
+  });
+
   it("updates active job/lock during work and clears them between jobs", async () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);
