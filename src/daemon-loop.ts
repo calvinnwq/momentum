@@ -53,6 +53,7 @@ export type DaemonLoopCycle = {
 
 export type DaemonLoopResult = {
   ok: boolean;
+  workSucceeded: boolean;
   runId: string;
   workerId: string;
   exitReason: DaemonLoopExitReason;
@@ -187,6 +188,7 @@ export async function runDaemonLoop(
 
     if (workerResult.code === "not_executed") {
       jobsNotExecuted += 1;
+      idleCycles += 1;
       input.onCycleComplete?.({
         cycleIndex: iterations - 1,
         observedState: run.state,
@@ -221,15 +223,18 @@ export async function runDaemonLoop(
     terminalState = "error";
   } else {
     terminalState = "stopped";
-    finishDaemonRun(input.db, {
-      runId: input.runId,
-      terminalState,
-      now: finishNow
-    });
+    if (exitReason !== "run_terminated") {
+      finishDaemonRun(input.db, {
+        runId: input.runId,
+        terminalState,
+        now: finishNow
+      });
+    }
   }
 
   const result: DaemonLoopResult = {
     ok: exitReason !== "internal_error",
+    workSucceeded: jobsFailed === 0,
     runId: input.runId,
     workerId: input.workerId,
     exitReason: exitReason ?? "stop_requested",

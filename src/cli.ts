@@ -576,6 +576,7 @@ function emitDaemonStartLoopResult(
   const loopSummary = {
     exitReason: loop.exitReason,
     terminalState: loop.terminalState,
+    workSucceeded: loop.workSucceeded,
     iterations: loop.iterations,
     jobsRun: loop.jobsRun,
     jobsFailed: loop.jobsFailed,
@@ -588,6 +589,7 @@ function emitDaemonStartLoopResult(
 
   const payload: Record<string, unknown> = {
     ok: loop.ok,
+    workSucceeded: loop.workSucceeded,
     command: "daemon start",
     dataDir: data.dataDir,
     runId: data.runId,
@@ -608,6 +610,7 @@ function emitDaemonStartLoopResult(
     `Daemon run started: ${data.runId}`,
     `State: ${loop.terminalState}`,
     `Exit reason: ${loop.exitReason}`,
+    `Work succeeded: ${loop.workSucceeded ? "yes" : "no"}`,
     `Iterations: ${loop.iterations}`,
     `Jobs run: ${loop.jobsRun}`,
     `Jobs failed: ${loop.jobsFailed}`,

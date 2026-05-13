@@ -2125,6 +2125,7 @@ Goal body.
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: true,
+      workSucceeded: true,
       command: "daemon start",
       dataDir,
       state: "stopped"
@@ -2134,6 +2135,7 @@ Goal body.
     expect(loop).toMatchObject({
       exitReason: "max_idle_cycles",
       terminalState: "stopped",
+      workSucceeded: true,
       iterations: 0,
       jobsRun: 0,
       jobsFailed: 0,
@@ -2184,6 +2186,7 @@ Goal body.
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
     expect(payload).toMatchObject({
       ok: true,
+      workSucceeded: true,
       command: "daemon start",
       dataDir,
       state: "stopped"
@@ -2191,6 +2194,7 @@ Goal body.
     const loop = payload["loop"] as Record<string, unknown>;
     expect(loop["jobsRun"]).toBe(1);
     expect(loop["jobsFailed"]).toBe(0);
+    expect(loop["workSucceeded"]).toBe(true);
     expect(loop["exitReason"]).toBe("max_idle_cycles");
 
     const statusResult = await run([
@@ -2253,6 +2257,7 @@ Goal body.
     expect(result.stdout).toContain("Daemon run started:");
     expect(result.stdout).toContain("State: stopped");
     expect(result.stdout).toContain("Exit reason: max_idle_cycles");
+    expect(result.stdout).toContain("Work succeeded: yes");
     expect(result.stdout).toContain("Jobs run: 0");
   });
 

@@ -207,7 +207,7 @@ momentum daemon start [--data-dir <path>] [--max-loop-iterations <n>] [--max-idl
 
 Records a new orchestrator run in `daemon_runs` (state `running`) with `pid`, `host`, `started_at`, and `heartbeat_at` populated from the invoking process. Refuses to record a second concurrent run while one is still active (states `starting`, `running`, `stop_requested`) and exits with `code: "daemon_already_active"` (exit 1); the failure payload surfaces the existing `runId`, `state`, `pid`, `host`, `startedAt`, `heartbeatAt`, `heartbeatAgeMs`, and a `stale` flag (default 90s cutoff) so operators can decide whether to wait or clear the prior record manually. After a terminal record (`stopped` / `error`), a fresh start is allowed.
 
-Without any loop-bound flag, `daemon start` returns immediately after registering the run (the NGX-272 register-only contract). Passing any of `--max-loop-iterations`, `--max-idle-cycles`, or `--poll-interval-ms` opts into the NGX-273 managed loop: the process keeps running and drains queued `goal_iteration` jobs in-process by composing `runWorkerOnce`, refreshes `daemon_runs.heartbeat_at` / `active_job_id` / `reconcile_count` per cycle, applies deterministic idle backoff between empty polls, and exits cleanly when one of the bounds is reached, `daemon stop` records a stop request, or a terminal daemon-run state is observed. The opt-in surfaces a `loop` summary on the response with `exitReason` (`stop_requested` / `run_terminated` / `run_missing` / `max_loop_iterations` / `max_idle_cycles` / `internal_error`), `terminalState`, `iterations`, `jobsRun`, `jobsFailed`, `jobsNotExecuted`, `idleCycles`, `lastObservedState`, `lastWorkerCode`, and `error`. All loop bounds must be non-negative integers; a `--max-idle-cycles 0` or `--max-loop-iterations 0` invocation exits before claiming any work, which is useful as a one-shot readiness probe.
+Without any loop-bound flag, `daemon start` returns immediately after registering the run (the NGX-272 register-only contract). Passing any of `--max-loop-iterations`, `--max-idle-cycles`, or `--poll-interval-ms` opts into the NGX-273 managed loop: the process keeps running and drains queued `goal_iteration` jobs in-process by composing `runWorkerOnce`, refreshes `daemon_runs.heartbeat_at` / `active_job_id` / `reconcile_count` per cycle, applies deterministic idle backoff between empty polls or unexecutable jobs, and exits cleanly when one of the bounds is reached, `daemon stop` records a stop request, or a terminal daemon-run state is observed. The top-level `ok` field reports loop/process health; `workSucceeded` reports whether claimed queued jobs succeeded. The opt-in surfaces a `loop` summary on the response with `exitReason` (`stop_requested` / `run_terminated` / `run_missing` / `max_loop_iterations` / `max_idle_cycles` / `internal_error`), `terminalState`, `workSucceeded`, `iterations`, `jobsRun`, `jobsFailed`, `jobsNotExecuted`, `idleCycles`, `lastObservedState`, `lastWorkerCode`, and `error`. All loop bounds must be non-negative integers; a `--max-idle-cycles 0` or `--max-loop-iterations 0` invocation exits before claiming any work, which is useful as a one-shot readiness probe.
 
 JSON envelope shape (register-only):
 
@@ -230,6 +230,7 @@ JSON envelope shape (managed loop):
 ```json
 {
   "ok": true,
+  "workSucceeded": true,
   "command": "daemon start",
   "dataDir": "/path/to/data-dir",
   "runId": "<uuid>",
@@ -241,6 +242,7 @@ JSON envelope shape (managed loop):
   "loop": {
     "exitReason": "max_idle_cycles",
     "terminalState": "stopped",
+    "workSucceeded": true,
     "iterations": 1,
     "jobsRun": 0,
     "jobsFailed": 0,

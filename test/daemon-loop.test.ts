@@ -157,6 +157,7 @@ describe("runDaemonLoop", () => {
 
       expect(result.exitReason).toBe("max_idle_cycles");
       expect(result.terminalState).toBe("stopped");
+      expect(result.workSucceeded).toBe(true);
       expect(result.idleCycles).toBe(3);
       expect(result.iterations).toBe(3);
       expect(result.jobsRun).toBe(0);
@@ -279,6 +280,7 @@ describe("runDaemonLoop", () => {
       expect(result.exitReason).toBe("internal_error");
       expect(result.terminalState).toBe("error");
       expect(result.ok).toBe(false);
+      expect(result.workSucceeded).toBe(true);
       expect(result.error).toBe("worker boom");
 
       const row = getDaemonRun(db, runId);
@@ -627,8 +629,101 @@ describe("runDaemonLoop", () => {
 
       expect(result.jobsNotExecuted).toBe(1);
       expect(result.idleCycles).toBe(1);
+      expect(result.iterations).toBe(1);
+      expect(sleeps).toEqual([7]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("bounds repeated not_executed cycles with maxIdleCycles", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const runId = seedDaemonRun(db);
+      const sleeps: number[] = [];
+
+      const result = await runDaemonLoop({
+        db,
+        dataDir,
+        runId,
+        workerId: "daemon-loop-not-executed-bound",
+        pollIntervalMs: 9,
+        maxIdleCycles: 2,
+        now: makeMonotonicNow(),
+        sleep: async (ms) => {
+          sleeps.push(ms);
+        },
+        runWorker: () => ({
+          code: "not_executed",
+          workerId: "daemon-loop-not-executed-bound",
+          dataDir,
+          outcome: "not_executed",
+          reason: "repo_lock_already_locked",
+          goalId: "goal-x",
+          jobId: "job-x",
+          message: "contention"
+        })
+      });
+
+      expect(result.exitReason).toBe("max_idle_cycles");
+      expect(result.jobsNotExecuted).toBe(2);
+      expect(result.idleCycles).toBe(2);
       expect(result.iterations).toBe(2);
-      expect(sleeps).toEqual([7, 7]);
+      expect(sleeps).toEqual([9, 9]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("reports loop health separately from queued work success", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const runId = seedDaemonRun(db);
+
+      const result = await runDaemonLoop({
+        db,
+        dataDir,
+        runId,
+        workerId: "daemon-loop-failed-work",
+        pollIntervalMs: 0,
+        maxLoopIterations: 1,
+        now: makeMonotonicNow(),
+        sleep: async () => undefined,
+        runWorker: () => ({
+          code: "ran_job",
+          ok: false,
+          workerId: "daemon-loop-failed-work",
+          dataDir,
+          outcome: "ran_job",
+          goalId: "goal-a",
+          jobId: "job-a",
+          lockId: "lock-a",
+          goalState: "failed",
+          jobState: "failed",
+          iteration: 1,
+          repoRoot: "/tmp/fake",
+          leaseExpiresAt: 1,
+          heartbeatAt: 1,
+          jobIterationResult: {
+            ok: false,
+            goalState: "failed",
+            jobState: "failed",
+            iteration: {
+              ok: false
+            } as never
+          } as never,
+          reducer: null,
+          reducerError: null,
+          message: "mocked failed job"
+        } as WorkerRunResult)
+      });
+
+      expect(result.ok).toBe(true);
+      expect(result.workSucceeded).toBe(false);
+      expect(result.jobsFailed).toBe(1);
+      expect(result.exitReason).toBe("max_loop_iterations");
     } finally {
       db.close();
     }
