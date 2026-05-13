@@ -230,7 +230,12 @@ describe("writeHandoff", () => {
       iteration: 1,
       type: "foreground_iteration",
       result_path: setup.artifactPaths.resultJson,
-      error_path: null
+      error_path: null,
+      idempotency_key: null,
+      lease_holder: null,
+      lease_acquired_at: null,
+      lease_heartbeat_at: null,
+      lease_expires_at: null
     });
 
     const artifacts = json["artifacts"] as Record<string, unknown>;
@@ -405,9 +410,15 @@ describe("writeHandoff", () => {
     expect(nextJobJson["idempotency_key"]).toBe(
       `goal:${setup.goalId}:iteration:2`
     );
-    expect((json["next_job"] as Record<string, unknown>)["state"]).toBe(
-      "pending"
+    const topNextJob = json["next_job"] as Record<string, unknown>;
+    expect(topNextJob["state"]).toBe("pending");
+    expect(topNextJob["idempotency_key"]).toBe(
+      `goal:${setup.goalId}:iteration:2`
     );
+    expect(topNextJob["lease_holder"]).toBeNull();
+    expect(topNextJob["lease_acquired_at"]).toBeNull();
+    expect(topNextJob["lease_heartbeat_at"]).toBeNull();
+    expect(topNextJob["lease_expires_at"]).toBeNull();
     expect(json["next_action"]).toEqual(handoff.data.nextAction);
     expect((json["goal"] as Record<string, unknown>)["current_iteration"]).toBe(
       1
@@ -549,6 +560,152 @@ describe("writeHandoff", () => {
     expect(json["runner_result"]).not.toBeNull();
   });
 
+  it("pins goal_state and latest_commit_sha on the handoff JSON after a successful iteration", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Handoff goal state pinning");
+    runVerifiedIteration(setup);
+
+    const handoff = expectSuccess(
+      writeHandoff({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      })
+    );
+
+    expect(handoff.data.goalState).toBe("iteration_complete");
+    expect(handoff.data.latestCommitSha).toMatch(/^[0-9a-f]{40}$/);
+    expect(handoff.data.latestCommitSha).toBe(handoff.data.iteration?.commitSha);
+
+    const json = JSON.parse(
+      fs.readFileSync(setup.artifactPaths.handoffJson, "utf-8")
+    ) as Record<string, unknown>;
+    expect(json["goal_state"]).toBe("iteration_complete");
+    expect(json["latest_commit_sha"]).toBe(handoff.data.latestCommitSha);
+    // The nested goal block keeps its existing `state` field for back-compat.
+    expect((json["goal"] as Record<string, unknown>)["state"]).toBe(
+      "iteration_complete"
+    );
+  });
+
+  it("pins next_action_detail.kind=run_worker after a reducer continue", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Handoff next action continue", "true", "queued");
+    const db = openDb(setup.dataDir);
+    db.prepare("UPDATE goals SET max_iterations = 2 WHERE id = ?").run(
+      setup.goalId
+    );
+    let nextJobId: string;
+    try {
+      const job = executeIterationJob({
+        db,
+        goalId: setup.goalId,
+        jobId: setup.jobId,
+        spec: { ...setup.spec, max_iterations: 2 },
+        artifactPaths: setup.artifactPaths
+      });
+      if (!job.ok || !job.iteration.ok) {
+        throw new Error("iteration unexpectedly failed");
+      }
+      const reducer = reduceGoalIteration({
+        db,
+        goalId: setup.goalId,
+        jobId: setup.jobId
+      });
+      expect(reducer.decision).toBe("continue");
+      nextJobId = reducer.nextJob!.jobId;
+    } finally {
+      db.close();
+    }
+
+    const handoff = expectSuccess(
+      writeHandoff({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      })
+    );
+
+    expect(handoff.data.nextActionDetail?.kind).toBe("run_worker");
+    expect(handoff.data.nextActionDetail?.jobId).toBe(nextJobId);
+    expect(handoff.data.nextActionDetail?.iteration).toBe(2);
+    expect(handoff.data.nextActionDetail?.message).toBe(handoff.data.nextAction);
+
+    const json = JSON.parse(
+      fs.readFileSync(setup.artifactPaths.handoffJson, "utf-8")
+    ) as Record<string, unknown>;
+    const detail = json["next_action_detail"] as Record<string, unknown>;
+    expect(detail).toMatchObject({
+      kind: "run_worker",
+      job_id: nextJobId,
+      iteration: 2,
+      message: handoff.data.nextAction
+    });
+  });
+
+  it("emits a null next_action_detail when no action is required", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Handoff next action terminal", "true", "queued");
+    const db = openDb(setup.dataDir);
+    try {
+      const job = executeIterationJob({
+        db,
+        goalId: setup.goalId,
+        jobId: setup.jobId,
+        spec: setup.spec,
+        artifactPaths: setup.artifactPaths
+      });
+      if (!job.ok || !job.iteration.ok) {
+        throw new Error("iteration unexpectedly failed");
+      }
+      const reducer = reduceGoalIteration({
+        db,
+        goalId: setup.goalId,
+        jobId: setup.jobId
+      });
+      expect(reducer.decision).toBe("max_iterations_reached");
+    } finally {
+      db.close();
+    }
+
+    const handoff = expectSuccess(
+      writeHandoff({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      })
+    );
+
+    expect(handoff.data.nextActionDetail?.kind).toBe("max_iterations_reached");
+    expect(handoff.data.nextActionDetail?.message).toBe(handoff.data.nextAction);
+
+    const json = JSON.parse(
+      fs.readFileSync(setup.artifactPaths.handoffJson, "utf-8")
+    ) as Record<string, unknown>;
+    const detail = json["next_action_detail"] as Record<string, unknown>;
+    expect(detail["kind"]).toBe("max_iterations_reached");
+    expect(detail["job_id"]).toBe(setup.jobId);
+    expect(detail["iteration"]).toBe(1);
+  });
+
+  it("emits null latest_commit_sha and the initialized goal_state before any iteration runs", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Handoff init no commit");
+
+    const handoff = expectSuccess(
+      writeHandoff({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      })
+    );
+
+    expect(handoff.data.goalState).toBe("initialized");
+    expect(handoff.data.latestCommitSha).toBeNull();
+
+    const json = JSON.parse(
+      fs.readFileSync(setup.artifactPaths.handoffJson, "utf-8")
+    ) as Record<string, unknown>;
+    expect(json["goal_state"]).toBe("initialized");
+    expect(json["latest_commit_sha"]).toBeNull();
+  });
+
   it("operates on the most recently created goal when goalId is omitted", () => {
     const repo = initRepo();
     const dataDir = makeTempDir("momentum-handoff-data-");
@@ -582,6 +739,71 @@ describe("writeHandoff", () => {
     const handoff = expectSuccess(writeHandoff({ dataDirOptions: { dataDir } }));
     expect(handoff.data.goal.id).toBe(second.goalId);
     expect(handoff.data.goal.title).toBe("Second handoff goal");
+  });
+
+  it("pins current_iteration_detail to the queued iteration before execution", () => {
+    const repo = initRepo();
+    const setup = setupGoal(
+      repo,
+      "Handoff current iteration queued",
+      "true",
+      "queued"
+    );
+
+    const result = writeHandoff({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+    const handoff = expectSuccess(result);
+    expect(handoff.data.currentIterationDetail).not.toBeNull();
+    expect(handoff.data.currentIterationDetail?.number).toBe(1);
+    expect(handoff.data.currentIterationDetail?.jobId).toBe(setup.jobId);
+    expect(handoff.data.currentIterationDetail?.state).toBe("pending");
+
+    const json = JSON.parse(
+      fs.readFileSync(setup.artifactPaths.handoffJson, "utf-8")
+    ) as Record<string, unknown>;
+    const detail = json["current_iteration_detail"] as Record<string, unknown>;
+    expect(detail).toMatchObject({
+      number: 1,
+      job_id: setup.jobId,
+      state: "pending",
+      started_at: null,
+      completed_at: null
+    });
+    expect(typeof detail["queued_at"]).toBe("number");
+  });
+
+  it("pins current_iteration_detail timestamps after a successful iteration", () => {
+    const repo = initRepo();
+    const setup = setupGoal(
+      repo,
+      "Handoff current iteration succeeded",
+      "true",
+      "queued"
+    );
+    runVerifiedIteration(setup);
+
+    const handoff = expectSuccess(
+      writeHandoff({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      })
+    );
+    expect(handoff.data.currentIterationDetail?.state).toBe("succeeded");
+    expect(handoff.data.currentIterationDetail?.startedAt).not.toBeNull();
+    expect(handoff.data.currentIterationDetail?.completedAt).not.toBeNull();
+
+    const json = JSON.parse(
+      fs.readFileSync(setup.artifactPaths.handoffJson, "utf-8")
+    ) as Record<string, unknown>;
+    const detail = json["current_iteration_detail"] as Record<string, unknown>;
+    expect(detail["number"]).toBe(1);
+    expect(detail["job_id"]).toBe(setup.jobId);
+    expect(detail["state"]).toBe("succeeded");
+    expect(typeof detail["queued_at"]).toBe("number");
+    expect(typeof detail["started_at"]).toBe("number");
+    expect(typeof detail["completed_at"]).toBe("number");
   });
 
   it("surfaces handoff_write_failed when the artifact dir is unwritable", () => {

@@ -10,6 +10,7 @@ import {
   loadGoalStatus,
   type GoalStatusSuccess
 } from "./goal-status.js";
+import { loadGoalLogs, type GoalLogsSuccess } from "./goal-logs.js";
 import { writeHandoff, type HandoffSuccess } from "./handoff.js";
 import { runWorkerOnce, type WorkerRunResult } from "./worker-run.js";
 
@@ -35,12 +36,14 @@ type ParsedFlags = {
   runner?: string;
   workerId?: string;
   dataDir?: string;
+  iteration?: number;
   error?: string;
 };
 
 const COMMANDS = [
   "momentum goal start <goal.md> [--repo <path>] [--foreground] [--runner <profile>] [--data-dir <path>] [--json]",
   "momentum status [goal-id] [--data-dir <path>] [--json]",
+  "momentum logs <goal-id> [--iteration <n>] [--data-dir <path>] [--json]",
   "momentum handoff <goal-id> [--data-dir <path>] [--json]",
   "momentum worker run [--worker-id <id>] [--data-dir <path>] [--json]",
   "momentum doctor [--json]"
@@ -77,6 +80,10 @@ export async function runCli(argv: string[], io: CliIo = defaultIo()): Promise<n
 
   if (command === "status") {
     return status(parsed, io);
+  }
+
+  if (command === "logs") {
+    return logs(parsed, io);
   }
 
   if (command === "handoff") {
@@ -171,7 +178,7 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
     version: VERSION,
     node: process.version,
     platform: process.platform,
-    milestone: "NGX-249 completion-reducer-chaining"
+    milestone: "Milestone 2: queue/worker and chaining (NGX-250)"
   };
 
   if (parsed.json) {
@@ -441,6 +448,7 @@ function emitStatus(
     goalId: data.goalId,
     title: data.title,
     state: data.state,
+    goalState: data.goalState,
     repo: data.repo,
     branch: data.branch,
     runner: data.runner,
@@ -462,13 +470,17 @@ function emitStatus(
       resultJson: data.artifactPaths.resultJson
     },
     artifactFiles: data.artifactFiles,
+    artifacts: data.artifacts,
     createdAt: data.createdAt,
     updatedAt: data.updatedAt,
     latestJob: data.latestJob,
     iteration: data.iteration,
+    currentIterationDetail: data.currentIterationDetail,
     reducer: data.reducer,
     nextJob: data.nextJob,
-    nextAction: data.nextAction
+    nextAction: data.nextAction,
+    nextActionDetail: data.nextActionDetail,
+    latestCommitSha: data.latestCommitSha
   };
 
   if (parsed.json) {
@@ -517,6 +529,123 @@ function emitStatus(
   }
 
   lines.push("");
+  write(io.stdout, lines.join("\n"));
+  return 0;
+}
+
+function logs(parsed: ParsedFlags, io: CliIo): number {
+  const goalIdArg = parsed.args[1];
+  if (!goalIdArg) {
+    return usageError("Missing required <goal-id> for logs.", parsed, io);
+  }
+  if (parsed.args.length > 2) {
+    return usageError(
+      `Unexpected argument for logs: ${parsed.args[2]}`,
+      parsed,
+      io
+    );
+  }
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  const input: {
+    goalId: string;
+    iteration?: number;
+    dataDirOptions: DataDirOptions;
+  } = { goalId: goalIdArg, dataDirOptions };
+  if (parsed.iteration !== undefined) input.iteration = parsed.iteration;
+
+  const result = loadGoalLogs(input);
+
+  if (!result.ok) {
+    const payload = {
+      ok: false,
+      command: "logs",
+      code: result.code,
+      message: result.error,
+      goalId: goalIdArg
+    };
+    if (parsed.json) {
+      writeJson(io.stderr, payload);
+      return 1;
+    }
+    write(io.stderr, `${result.error}\n`);
+    return 1;
+  }
+
+  return emitLogs(parsed, io, result);
+}
+
+function emitLogs(
+  parsed: ParsedFlags,
+  io: CliIo,
+  data: GoalLogsSuccess
+): number {
+  if (parsed.json) {
+    const payload = {
+      ok: true,
+      command: "logs",
+      goalId: data.goalId,
+      iteration: data.iteration,
+      availableIterations: data.availableIterations,
+      dataDir: data.dataDir,
+      artifactDir: data.artifactDir,
+      iterationDir: data.iterationDir,
+      runnerLog: {
+        path: data.runnerLog.path,
+        exists: data.runnerLog.exists,
+        readable: data.runnerLog.readable,
+        bytes: data.runnerLog.bytes,
+        content: data.runnerLog.content,
+        error: data.runnerLog.error
+      },
+      verificationLog: {
+        path: data.verificationLog.path,
+        exists: data.verificationLog.exists,
+        readable: data.verificationLog.readable,
+        bytes: data.verificationLog.bytes,
+        content: data.verificationLog.content,
+        error: data.verificationLog.error
+      }
+    };
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  const lines: string[] = [
+    `Goal: ${data.goalId}`,
+    `Iteration: ${data.iteration}`,
+    `Available iterations: ${data.availableIterations.length === 0 ? "(none)" : data.availableIterations.join(", ")}`,
+    `Iteration dir: ${data.iterationDir}`,
+    "",
+    `## runner.log (${data.runnerLog.exists ? `${data.runnerLog.bytes} bytes` : "missing"}): ${data.runnerLog.path}`
+  ];
+  if (data.runnerLog.error !== undefined) {
+    lines.push(`(unreadable: ${data.runnerLog.error})`);
+  } else if (data.runnerLog.exists && data.runnerLog.content.length > 0) {
+    lines.push(data.runnerLog.content.endsWith("\n")
+      ? data.runnerLog.content.slice(0, -1)
+      : data.runnerLog.content);
+  } else if (data.runnerLog.exists) {
+    lines.push("(empty)");
+  }
+  lines.push("");
+  lines.push(
+    `## verification.log (${data.verificationLog.exists ? `${data.verificationLog.bytes} bytes` : "missing"}): ${data.verificationLog.path}`
+  );
+  if (data.verificationLog.error !== undefined) {
+    lines.push(`(unreadable: ${data.verificationLog.error})`);
+  } else if (data.verificationLog.exists && data.verificationLog.content.length > 0) {
+    lines.push(data.verificationLog.content.endsWith("\n")
+      ? data.verificationLog.content.slice(0, -1)
+      : data.verificationLog.content);
+  } else if (data.verificationLog.exists) {
+    lines.push("(empty)");
+  }
+  lines.push("");
+
   write(io.stdout, lines.join("\n"));
   return 0;
 }
@@ -584,7 +713,11 @@ function emitHandoff(
     latestJob: data.latestJob,
     reducer: data.reducer,
     nextJob: data.nextJob,
-    nextAction: data.nextAction
+    nextAction: data.nextAction,
+    goalState: data.goalState,
+    currentIterationDetail: data.currentIterationDetail,
+    nextActionDetail: data.nextActionDetail,
+    latestCommitSha: data.latestCommitSha
   };
 
   if (parsed.json) {
@@ -639,6 +772,7 @@ function parseFlags(argv: string[]): ParsedFlags {
   let runner: string | undefined;
   let workerId: string | undefined;
   let dataDir: string | undefined;
+  let iteration: number | undefined;
   let error: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -701,6 +835,24 @@ function parseFlags(argv: string[]): ParsedFlags {
       continue;
     }
 
+    if (arg === "--iteration") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --iteration.";
+      } else {
+        const parsedIteration = /^\d+$/.test(value)
+          ? Number.parseInt(value, 10)
+          : NaN;
+        if (!Number.isInteger(parsedIteration) || parsedIteration < 1) {
+          error ??= `Invalid value for --iteration: ${value}`;
+        } else {
+          iteration = parsedIteration;
+        }
+        index += 1;
+      }
+      continue;
+    }
+
     args.push(arg);
   }
 
@@ -709,6 +861,7 @@ function parseFlags(argv: string[]): ParsedFlags {
   if (runner !== undefined) parsed.runner = runner;
   if (dataDir !== undefined) parsed.dataDir = dataDir;
   if (workerId !== undefined) parsed.workerId = workerId;
+  if (iteration !== undefined) parsed.iteration = iteration;
   if (error !== undefined) parsed.error = error;
 
   return parsed;

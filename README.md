@@ -2,7 +2,7 @@
 
 Momentum is a TypeScript CLI targeting Node.js for autonomous repo-work orchestration. It turns a durable Goal into verified Iterations, with local artifacts and handoff state.
 
-Milestone 1 (Foreground Proof Loop) is complete. Milestone 2 (Queue and Worker Model) is in progress, with NGX-235, NGX-236, NGX-237, NGX-238, NGX-239, NGX-245, NGX-246, NGX-247, NGX-248, and NGX-249 implemented and verified in this branch. NGX-249 is M2-05 completion reducer and idempotent chaining (`reduceGoalIteration` classifies terminal `goal_iteration` jobs as `continue` / `goal_complete` / `max_iterations_reached` / `iteration_failed`; updates `goals.state` / `current_iteration` / `completion_reason`; enqueues next iterations with stable idempotency keys; emits `goal.reduced` + `goal.completed` / `goal.failed`; surfaces reducer state, next job, and next-action via `status`/`handoff`; and runs after each completed queued job). Milestone 2 also includes queued-path execution without a long-lived daemon, stable single-shot worker behavior, and explicit artifact pointers on job success/failure.
+Milestone 1 (Foreground Proof Loop) is complete. Milestone 2 (Queue and Worker Model) is in progress, with NGX-235, NGX-236, NGX-237, NGX-238, NGX-239, NGX-245, NGX-246, NGX-247, NGX-248, NGX-249, and NGX-250 implemented and verified in this branch. NGX-249 is M2-05 completion reducer and idempotent chaining (`reduceGoalIteration` classifies terminal `goal_iteration` jobs as `continue` / `goal_complete` / `max_iterations_reached` / `iteration_failed`; updates `goals.state` / `current_iteration` / `completion_reason`; enqueues next iterations with stable idempotency keys; emits `goal.reduced` + `goal.completed` / `goal.failed`; surfaces reducer state, next job, and next-action via `status`/`handoff`; and runs after each completed queued job). NGX-250 pins the Milestone 2 CLI contract around queued status/handoff fields, local log inspection, queued smoke coverage, and user-facing docs. Milestone 2 also includes queued-path execution without a long-lived daemon, stable single-shot worker behavior, and explicit artifact pointers on job success/failure.
 
 ## Milestone 1 Scope
 
@@ -17,6 +17,7 @@ The public CLI shape is:
 ```text
 momentum goal start <goal.md> [--repo <path>] [--foreground] [--runner <profile>] [--data-dir <path>] [--json]
 momentum status [goal-id] [--data-dir <path>] [--json]
+momentum logs <goal-id> [--iteration <n>] [--data-dir <path>] [--json]
 momentum handoff <goal-id> [--data-dir <path>] [--json]
 momentum worker run [--worker-id <id>] [--data-dir <path>] [--json]
 momentum doctor [--json]
@@ -39,7 +40,7 @@ node dist/index.js --help
 node dist/index.js doctor
 ```
 
-The `pnpm test` suite includes a built-binary end-to-end smoke (`test/smoke.test.ts`) that builds `dist/` via `pnpm build`, initializes a disposable git repo under the OS temp dir, drives `goal start`, `worker run`, `status`, and `handoff` through the spawned CLI, and asserts: the default queued enqueue path (no runner execution, idempotent re-enqueue, and queued job/event SQLite state); the foreground success path (exactly one Momentum commit on the Momentum branch with the verification log, handoff artifacts, and SQLite database in place); the foreground verification-failure reset path (worktree clean and HEAD back at base after `false` verification); and the queued `worker run` success / verification-failure / runner-failure paths, which assert the full event chain through the reducer (`job.enqueued` → `job.claimed` → `job.heartbeat` → `iteration_started` → (`iteration_completed` | `iteration_failed`) → (`job.succeeded` | `job.failed`) → `goal.reduced` → (`goal.completed` | `goal.failed`)), the commit + artifact pointers on `job.succeeded`, the `artifacts` block on `job.failed`, the `latestJob.resultPath` / `latestJob.errorPath` surface through `status --json` and `handoff`, and the reducer decision / next-job / next-action fields.
+The `pnpm test` suite includes a built-binary end-to-end smoke (`test/smoke.test.ts`) that builds `dist/` via `pnpm build`, initializes a disposable git repo under the OS temp dir, drives `goal start`, `worker run`, `status`, `logs`, and `handoff` through the spawned CLI, and asserts: the default queued enqueue path (no runner execution, idempotent re-enqueue, and queued job/event SQLite state); the foreground success path (exactly one Momentum commit on the Momentum branch with the verification log, handoff artifacts, and SQLite database in place); the foreground verification-failure reset path (worktree clean and HEAD back at base after `false` verification); the queued logs inspection path; and the queued `worker run` success / verification-failure / runner-failure paths, which assert the full event chain through the reducer (`job.enqueued` → `job.claimed` → `job.heartbeat` → `iteration_started` → (`iteration_completed` | `iteration_failed`) → (`job.succeeded` | `job.failed`) → `goal.reduced` → (`goal.completed` | `goal.failed`)), the commit + artifact pointers on `job.succeeded`, the `artifacts` block on `job.failed`, the `latestJob.resultPath` / `latestJob.errorPath` surface through `status --json` and `handoff`, and the reducer decision / next-job / next-action fields.
 
 ## Goal Spec
 
@@ -145,7 +146,15 @@ Re-running `goal start` with the same goal spec against the same data directory 
 momentum status [goal-id] [--data-dir <path>] [--json]
 ```
 
-Reads SQLite plus artifact state and reports the goal's current state, configured repo and runner, latest job, latest iteration summary (including the verified commit SHA when present), reducer decision (`continue` / `goal_complete` / `max_iterations_reached` / `iteration_failed`), the next queued job (if any), and a next-action hint. Omitting `goal-id` selects the most recently updated goal in the data directory; when no goals exist the command exits non-zero with `code: "no_goals"`.
+Reads SQLite plus artifact state and reports the goal's current state, configured repo and runner, latest job, latest iteration summary (including the verified commit SHA when present), reducer decision (`continue` / `goal_complete` / `max_iterations_reached` / `iteration_failed`), the next queued job (if any), and a next-action hint. JSON output includes `goalState`, `artifacts`, `currentIterationDetail`, `nextActionDetail`, and `latestCommitSha`; `latestJob` / `nextJob` include `idempotencyKey`, result/error paths, and lease timestamps. Omitting `goal-id` selects the most recently updated goal in the data directory; when no goals exist the command exits non-zero with `code: "no_goals"`.
+
+### `logs`
+
+```text
+momentum logs <goal-id> [--iteration <n>] [--data-dir <path>] [--json]
+```
+
+Reads local iteration artifacts for a goal and emits `runner.log` and `verification.log` content. Without `--iteration`, selects the highest-numbered iteration directory under `goals/<goal-id>/iterations/` (or `goals.current_iteration` when present), so a freshly-initialized goal returns iteration `1` with empty logs. With `--iteration <n>`, reads that iteration's artifact dir and exits non-zero with `code: "iteration_not_found"` if it doesn't exist. `--iteration` must be a positive integer; non-positive values fail with `code: "usage_error"`. The command only reads on-disk artifacts; it does not consult live worker state. JSON output exposes `availableIterations` plus per-log `{path, exists, readable, bytes, content, error}` so downstream tooling can navigate prior iterations and distinguish missing logs from unreadable ones.
 
 ### `handoff`
 
@@ -153,7 +162,7 @@ Reads SQLite plus artifact state and reports the goal's current state, configure
 momentum handoff <goal-id> [--data-dir <path>] [--json]
 ```
 
-Renders `handoff.md` and `handoff.json` (schema v1) into the goal's artifact directory from the same state `status` reads. The handoff includes reducer decision and next-job details, plus a next-action hint describing what to do next.
+Renders `handoff.md` and `handoff.json` (schema v1) into the goal's artifact directory from the same state `status` reads. The handoff includes reducer decision and next-job details, plus a next-action hint describing what to do next. The JSON artifact includes `goal_state`, `current_iteration_detail`, `next_action_detail`, `latest_commit_sha`, and `latest_job` / `next_job` fields with idempotency keys, result/error paths, and lease timestamps.
 
 ### `worker run`
 
@@ -230,7 +239,7 @@ Other early-pipeline errors surface as their own codes (`invalid_input`, `missin
 
 ## End-to-end Walkthrough
 
-Drive a fresh disposable run from anywhere in this repo:
+Drive a fresh disposable run from anywhere in this repo. The default path is **queued**: `goal start` enqueues a `goal_iteration` job, and `worker run` drains the queue one iteration at a time.
 
 ```bash
 pnpm build
@@ -246,6 +255,7 @@ git -C "$REPO" commit -m init --quiet
 cat > "$DATA/goal.md" <<'EOF'
 ---
 title: Smoke Goal
+repo: REPO_PLACEHOLDER
 runner: fake
 verification:
   - "true"
@@ -253,24 +263,44 @@ verification:
 
 End-to-end smoke goal.
 EOF
+sed -i.bak "s|REPO_PLACEHOLDER|$REPO|" "$DATA/goal.md" && rm "$DATA/goal.md.bak"
 
-node dist/index.js goal start "$DATA/goal.md" \
-  --foreground --repo "$REPO" --data-dir "$DATA" --runner fake --json
-node dist/index.js status --data-dir "$DATA" --json
+# 1. Enqueue the first iteration (queued default path).
+node dist/index.js goal start "$DATA/goal.md" --data-dir "$DATA" --json
 GOAL_ID=$(ls "$DATA/goals" | head -n 1)
+
+# 2. Drain one queued goal_iteration job.
+node dist/index.js worker run --data-dir "$DATA" --json
+
+# 3. Inspect queued lifecycle through status / logs / handoff.
+node dist/index.js status "$GOAL_ID" --data-dir "$DATA" --json
+node dist/index.js logs "$GOAL_ID" --data-dir "$DATA" --json
 node dist/index.js handoff "$GOAL_ID" --data-dir "$DATA" --json
 ```
 
-Replacing the `verification: ["true"]` line with `verification: ["false"]` exercises the failure-reset path: `goal start` exits non-zero, the worktree is reset to its pre-iteration HEAD, and `verification.log` records the failed command.
+Replacing the `verification: ["true"]` line with `verification: ["false"]` exercises the failure-reset path: the queued `goal_iteration` job fails, the worktree is reset to its pre-iteration HEAD, `verification.log` records the failed command, and `status --json` exposes `latestJob.errorPath` plus the `artifacts` block for inspection.
+
+### Foreground debug path
+
+`--foreground` is retained as a Milestone 1 inline debugging path. It bypasses the queue and runs one iteration synchronously, useful when iterating on runner profiles or reproducing a single iteration locally without the worker:
+
+```bash
+node dist/index.js goal start "$DATA/goal.md" \
+  --foreground --repo "$REPO" --data-dir "$DATA" --runner fake --json
+```
+
+Day-to-day execution should use the default queued path so the reducer can chain iterations and the queue can be inspected with `status` / `logs` / `handoff`.
 
 ## Current Exclusions
 
-Milestone 1 intentionally omits the following; they belong to later milestones or are out of scope for this scaffold:
+Milestone 2 intentionally defers the following to **Milestone 3** so the queued path stays scoped to single-shot worker claims and explicit local recovery:
 
-- Automatic stale-lease recovery in background loops (Milestone 2 queue execution is wired to local worker claims; stale-repo-lock handling is manual for now).
-- Daemon lifecycle management, stop/cancel commands, and background runner supervision (Milestone 2/3).
-- Real runner profiles beyond `fake`; only the fake runner is wired into the foreground iteration.
-- Multi-iteration draining loops; `worker run` is a single-shot consumer that processes one claimed job per invocation and then exits. The completion reducer enqueues the next iteration when the decision is `continue`, so separate `worker run` invocations can drain a multi-iteration goal step by step. A long-running daemon loop that polls and drains continuously is not yet implemented.
-- Worktree management and remote git operations (`fetch`, `pull`, `push`, `rebase`).
-- GitHub, Linear, and other external integrations driven from inside Momentum.
-- A dashboard or other UI surfaces beyond the CLI JSON/text outputs.
+- Managed `daemon start` / `daemon status` lifecycle and background runner supervision.
+- Graceful stop and `stop --now` commands.
+- Automatic stale-lease recovery, a `needs_manual_recovery` goal state, and a `recovery.md` artifact. Stale repo-lock handling in Milestone 2 is manual; re-running `worker run` is the supported local recovery path.
+- Multi-iteration draining loops inside a single invocation. `worker run` is a single-shot consumer that processes one claimed job per invocation and then exits. The completion reducer enqueues the next iteration when the decision is `continue`, so separate `worker run` invocations drain a multi-iteration goal step by step. A long-running daemon loop that polls and drains continuously is a Milestone 3 concern.
+- Worktree management, remote git operations (`fetch`, `pull`, `push`, `rebase`), and parallel same-repo Goals.
+- PR/GitHub/Linear automation and any external integrations driven from inside Momentum.
+- A dashboard or other UI surface beyond the CLI JSON/text outputs.
+
+Additionally, Milestone 2 only wires the `fake` runner profile; real runner profiles are tracked separately and are not required to close Milestone 2.

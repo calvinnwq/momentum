@@ -5,9 +5,11 @@ import type { DataDirOptions } from "./data-dir.js";
 import {
   loadGoalStatus,
   type GoalStatusArtifactFiles,
+  type GoalStatusCurrentIterationDetail,
   type GoalStatusError,
   type GoalStatusIterationSummary,
   type GoalStatusJobSummary,
+  type GoalStatusNextActionDetail,
   type GoalStatusReducerSummary,
   type GoalStatusSuccess
 } from "./goal-status.js";
@@ -61,12 +63,16 @@ export type HandoffData = {
   schemaVersion: number;
   generatedAt: number;
   goal: HandoffGoalSummary;
+  goalState: string;
   latestJob: GoalStatusJobSummary | null;
   iteration: GoalStatusIterationSummary | null;
+  currentIterationDetail: GoalStatusCurrentIterationDetail | null;
   runnerResult: HandoffRunnerResultSummary | null;
   reducer: GoalStatusReducerSummary | null;
   nextJob: GoalStatusJobSummary | null;
   nextAction: string | null;
+  nextActionDetail: GoalStatusNextActionDetail | null;
+  latestCommitSha: string | null;
   artifactPaths: GoalArtifactPaths;
   artifactFiles: GoalStatusArtifactFiles;
 };
@@ -147,12 +153,16 @@ function buildHandoffData(
       createdAt: status.createdAt,
       updatedAt: status.updatedAt
     },
+    goalState: status.goalState,
     latestJob: status.latestJob,
     iteration: status.iteration,
+    currentIterationDetail: status.currentIterationDetail,
     runnerResult,
     reducer: status.reducer,
     nextJob: status.nextJob,
     nextAction: status.nextAction,
+    nextActionDetail: status.nextActionDetail,
+    latestCommitSha: status.latestCommitSha,
     artifactPaths: status.artifactPaths,
     artifactFiles: status.artifactFiles
   };
@@ -179,23 +189,7 @@ function toJsonShape(data: HandoffData): Record<string, unknown> {
       created_at: data.goal.createdAt,
       updated_at: data.goal.updatedAt
     },
-    latest_job: data.latestJob
-      ? {
-          job_id: data.latestJob.jobId,
-          type: data.latestJob.type,
-          iteration: data.latestJob.iteration,
-          state: data.latestJob.state,
-          attempt_count: data.latestJob.attemptCount,
-          artifact_path: data.latestJob.artifactPath,
-          result_path: data.latestJob.resultPath,
-          error_path: data.latestJob.errorPath,
-          created_at: data.latestJob.createdAt,
-          updated_at: data.latestJob.updatedAt,
-          started_at: data.latestJob.startedAt,
-          finished_at: data.latestJob.finishedAt,
-          error: data.latestJob.error
-        }
-      : null,
+    latest_job: data.latestJob ? jobToJsonShape(data.latestJob) : null,
     iteration: data.iteration
       ? {
           iteration: data.iteration.iteration,
@@ -249,24 +243,28 @@ function toJsonShape(data: HandoffData): Record<string, unknown> {
             : null
         }
       : null,
-    next_job: data.nextJob
+    next_job: data.nextJob ? jobToJsonShape(data.nextJob) : null,
+    current_iteration_detail: data.currentIterationDetail
       ? {
-          job_id: data.nextJob.jobId,
-          type: data.nextJob.type,
-          iteration: data.nextJob.iteration,
-          state: data.nextJob.state,
-          attempt_count: data.nextJob.attemptCount,
-          artifact_path: data.nextJob.artifactPath,
-          result_path: data.nextJob.resultPath,
-          error_path: data.nextJob.errorPath,
-          created_at: data.nextJob.createdAt,
-          updated_at: data.nextJob.updatedAt,
-          started_at: data.nextJob.startedAt,
-          finished_at: data.nextJob.finishedAt,
-          error: data.nextJob.error
+          number: data.currentIterationDetail.number,
+          job_id: data.currentIterationDetail.jobId,
+          state: data.currentIterationDetail.state,
+          queued_at: data.currentIterationDetail.queuedAt,
+          started_at: data.currentIterationDetail.startedAt,
+          completed_at: data.currentIterationDetail.completedAt
         }
       : null,
     next_action: data.nextAction,
+    next_action_detail: data.nextActionDetail
+      ? {
+          kind: data.nextActionDetail.kind,
+          message: data.nextActionDetail.message,
+          job_id: data.nextActionDetail.jobId,
+          iteration: data.nextActionDetail.iteration
+        }
+      : null,
+    goal_state: data.goalState,
+    latest_commit_sha: data.latestCommitSha,
     artifacts: {
       goal_md: data.artifactPaths.goalMd,
       ledger_md: data.artifactPaths.ledgerMd,
@@ -287,6 +285,29 @@ function toJsonShape(data: HandoffData): Record<string, unknown> {
       verification_log: data.artifactFiles.verificationLog,
       result_json: data.artifactFiles.resultJson
     }
+  };
+}
+
+function jobToJsonShape(job: GoalStatusJobSummary): Record<string, unknown> {
+  return {
+    job_id: job.jobId,
+    type: job.type,
+    iteration: job.iteration,
+    state: job.state,
+    attempt_count: job.attemptCount,
+    artifact_path: job.artifactPath,
+    result_path: job.resultPath,
+    error_path: job.errorPath,
+    created_at: job.createdAt,
+    updated_at: job.updatedAt,
+    started_at: job.startedAt,
+    finished_at: job.finishedAt,
+    error: job.error,
+    idempotency_key: job.idempotencyKey,
+    lease_holder: job.leaseHolder,
+    lease_acquired_at: job.leaseAcquiredAt,
+    lease_heartbeat_at: job.leaseHeartbeatAt,
+    lease_expires_at: job.leaseExpiresAt
   };
 }
 

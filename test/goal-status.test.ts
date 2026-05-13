@@ -5,11 +5,13 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDb } from "../src/db.js";
+import { FAKE_RUNNER_GOAL_COMPLETE_ENV } from "../src/fake-runner.js";
 import { initGoal, type GoalInitSuccess } from "../src/goal-init.js";
 import { executeIterationJob } from "../src/iteration-job.js";
 import { loadGoalStatus } from "../src/goal-status.js";
 import { reduceGoalIteration } from "../src/goal-reducer.js";
 import { ensureIterationArtifactDir } from "../src/artifacts.js";
+import { claimPendingGoalIterationJob } from "../src/queue-jobs.js";
 
 const tempRoots: string[] = [];
 
@@ -177,6 +179,10 @@ describe("loadGoalStatus", () => {
     expect(result.latestJob?.startedAt).toBeNull();
     expect(result.latestJob?.finishedAt).toBeNull();
     expect(result.latestJob?.error).toBeNull();
+    expect(result.latestJob?.leaseHolder).toBeNull();
+    expect(result.latestJob?.leaseAcquiredAt).toBeNull();
+    expect(result.latestJob?.leaseHeartbeatAt).toBeNull();
+    expect(result.latestJob?.leaseExpiresAt).toBeNull();
     expect(result.artifactFiles.goalMd).toBe(true);
     expect(result.artifactFiles.handoffMd).toBe(true);
     expect(result.artifactFiles.handoffJson).toBe(true);
@@ -477,6 +483,153 @@ describe("loadGoalStatus", () => {
     expect(status.artifactFiles.resultJson).toBe(true);
   });
 
+  it("surfaces the queued idempotency key on a pending goal_iteration job", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Status queued idempotency", { mode: "queued" });
+
+    const result = loadGoalStatus({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.latestJob?.state).toBe("pending");
+    expect(result.latestJob?.idempotencyKey).toBe(`goal:${setup.goalId}:iteration:1`);
+    expect(result.latestJob?.leaseHolder).toBeNull();
+    expect(result.latestJob?.leaseAcquiredAt).toBeNull();
+    expect(result.latestJob?.leaseHeartbeatAt).toBeNull();
+    expect(result.latestJob?.leaseExpiresAt).toBeNull();
+  });
+
+  it("surfaces leaseHolder and lease timestamps after a worker claims the job", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Status claimed lease", { mode: "queued" });
+
+    const db = openDb(setup.dataDir);
+    const claimNow = 1_700_000_001_000;
+    const leaseDurationMs = 30_000;
+    try {
+      const claim = claimPendingGoalIterationJob(db, {
+        workerId: "worker-status-test",
+        leaseDurationMs,
+        now: claimNow
+      });
+      expect(claim.ok).toBe(true);
+      if (!claim.ok) throw new Error("claim failed");
+      expect(claim.job.id).toBe(setup.jobId);
+    } finally {
+      db.close();
+    }
+
+    const result = loadGoalStatus({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.latestJob?.state).toBe("claimed");
+    expect(result.latestJob?.idempotencyKey).toBe(`goal:${setup.goalId}:iteration:1`);
+    expect(result.latestJob?.leaseHolder).toBe("worker-status-test");
+    expect(result.latestJob?.leaseAcquiredAt).toBe(claimNow);
+    expect(result.latestJob?.leaseHeartbeatAt).toBe(claimNow);
+    expect(result.latestJob?.leaseExpiresAt).toBe(claimNow + leaseDurationMs);
+    expect(result.latestJob?.attemptCount).toBe(1);
+  });
+
+  it("aliases goalState to state and reports null latestCommitSha on a freshly initialized goal", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Status pinning fresh init");
+
+    const result = loadGoalStatus({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.goalState).toBe("initialized");
+    expect(result.goalState).toBe(result.state);
+    expect(result.latestCommitSha).toBeNull();
+  });
+
+  it("surfaces the iteration commit as latestCommitSha after a successful run", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Status pinning commit");
+    const db = openDb(setup.dataDir);
+    try {
+      const job = executeIterationJob({
+        db,
+        goalId: setup.goalId,
+        jobId: setup.jobId,
+        spec: setup.spec,
+        artifactPaths: setup.artifactPaths
+      });
+      if (!job.ok || !job.iteration.ok) throw new Error("iteration failed");
+    } finally {
+      db.close();
+    }
+
+    const status = loadGoalStatus({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+
+    expect(status.ok).toBe(true);
+    if (!status.ok) return;
+    expect(status.goalState).toBe("iteration_complete");
+    expect(status.goalState).toBe(status.state);
+    expect(status.latestCommitSha).toMatch(/^[0-9a-f]{40}$/);
+    expect(status.latestCommitSha).toBe(status.iteration?.commitSha);
+  });
+
+  it("falls back to the reducer commit for latestCommitSha when the latest job is the queued next iteration", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Status pinning reducer fallback", {
+      maxIterations: 2,
+      mode: "queued"
+    });
+
+    const db = openDb(setup.dataDir);
+    let reducerCommit: string | null = null;
+    try {
+      const job = executeIterationJob({
+        db,
+        goalId: setup.goalId,
+        jobId: setup.jobId,
+        spec: setup.spec,
+        artifactPaths: setup.artifactPaths
+      });
+      if (!job.ok || !job.iteration.ok) throw new Error("iteration failed");
+      const reducer = reduceGoalIteration({
+        db,
+        goalId: setup.goalId,
+        jobId: setup.jobId
+      });
+      expect(reducer.decision).toBe("continue");
+      reducerCommit = reducer.commitSha;
+    } finally {
+      db.close();
+    }
+
+    const status = loadGoalStatus({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+
+    expect(status.ok).toBe(true);
+    if (!status.ok) return;
+    // The latest job is now the pending next iteration, so the iteration
+    // summary tied to that pending job is null.
+    expect(status.latestJob?.state).toBe("pending");
+    expect(status.iteration).toBeNull();
+    expect(reducerCommit).toMatch(/^[0-9a-f]{40}$/);
+    expect(status.latestCommitSha).toBe(reducerCommit);
+    expect(status.latestCommitSha).toBe(status.reducer?.commitSha);
+    expect(status.goalState).toBe("queued");
+  });
+
   it("returns the most recently created goal when goalId is omitted", () => {
     const repo = initRepo();
     const dataDir = makeTempDir("momentum-status-data-");
@@ -489,5 +642,524 @@ describe("loadGoalStatus", () => {
     if (!result.ok) return;
     expect(result.goalId).toBe(second.goalId);
     expect(result.title).toBe("Second status goal");
+  });
+
+  describe("nextActionDetail", () => {
+    it("emits kind=resume_foreground for a fresh foreground goal", () => {
+      const repo = initRepo();
+      const setup = setupGoal(repo, "Next action foreground");
+
+      const result = loadGoalStatus({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.nextActionDetail).not.toBeNull();
+      expect(result.nextActionDetail?.kind).toBe("resume_foreground");
+      expect(result.nextActionDetail?.jobId).toBe(setup.jobId);
+      expect(result.nextActionDetail?.iteration).toBe(1);
+      expect(result.nextActionDetail?.message).toBe(result.nextAction);
+    });
+
+    it("emits kind=run_worker for a fresh queued goal with no reducer yet", () => {
+      const repo = initRepo();
+      const setup = setupGoal(repo, "Next action queued pending", {
+        mode: "queued"
+      });
+
+      const result = loadGoalStatus({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.reducer).toBeNull();
+      expect(result.nextActionDetail).not.toBeNull();
+      expect(result.nextActionDetail?.kind).toBe("run_worker");
+      expect(result.nextActionDetail?.jobId).toBe(setup.jobId);
+      expect(result.nextActionDetail?.iteration).toBe(1);
+      expect(result.nextActionDetail?.message).toContain("worker run");
+      expect(result.nextActionDetail?.message).toBe(result.nextAction);
+    });
+
+    it("emits kind=run_worker pointing at the reducer next job after continue", () => {
+      const repo = initRepo();
+      const setup = setupGoal(repo, "Next action continue", {
+        maxIterations: 2,
+        mode: "queued"
+      });
+      const db = openDb(setup.dataDir);
+      let nextJobId: string;
+      try {
+        const job = executeIterationJob({
+          db,
+          goalId: setup.goalId,
+          jobId: setup.jobId,
+          spec: setup.spec,
+          artifactPaths: setup.artifactPaths
+        });
+        if (!job.ok || !job.iteration.ok) throw new Error("iteration failed");
+        const reducer = reduceGoalIteration({
+          db,
+          goalId: setup.goalId,
+          jobId: setup.jobId
+        });
+        expect(reducer.decision).toBe("continue");
+        nextJobId = reducer.nextJob!.jobId;
+      } finally {
+        db.close();
+      }
+
+      const result = loadGoalStatus({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.nextActionDetail?.kind).toBe("run_worker");
+      expect(result.nextActionDetail?.jobId).toBe(nextJobId);
+      expect(result.nextActionDetail?.iteration).toBe(2);
+      expect(result.nextActionDetail?.message).toBe(result.nextAction);
+    });
+
+    it("emits kind=max_iterations_reached on a single-iteration goal terminal reducer", () => {
+      const repo = initRepo();
+      const setup = setupGoal(repo, "Next action max iter", {
+        mode: "queued"
+      });
+      const db = openDb(setup.dataDir);
+      try {
+        const job = executeIterationJob({
+          db,
+          goalId: setup.goalId,
+          jobId: setup.jobId,
+          spec: setup.spec,
+          artifactPaths: setup.artifactPaths
+        });
+        if (!job.ok || !job.iteration.ok) throw new Error("iteration failed");
+        const reducer = reduceGoalIteration({
+          db,
+          goalId: setup.goalId,
+          jobId: setup.jobId
+        });
+        expect(reducer.decision).toBe("max_iterations_reached");
+      } finally {
+        db.close();
+      }
+
+      const result = loadGoalStatus({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.nextActionDetail?.kind).toBe("max_iterations_reached");
+      expect(result.nextActionDetail?.jobId).toBe(setup.jobId);
+      expect(result.nextActionDetail?.iteration).toBe(1);
+      expect(result.nextActionDetail?.message).toContain("max_iterations");
+      expect(result.nextActionDetail?.message).toBe(result.nextAction);
+    });
+
+    it("emits kind=goal_complete when the reducer marks the goal completed", () => {
+      const repo = initRepo();
+      const setup = setupGoal(repo, "Next action goal complete", {
+        maxIterations: 3,
+        mode: "queued"
+      });
+      const db = openDb(setup.dataDir);
+      const prev = process.env[FAKE_RUNNER_GOAL_COMPLETE_ENV];
+      process.env[FAKE_RUNNER_GOAL_COMPLETE_ENV] = "1";
+      try {
+        const job = executeIterationJob({
+          db,
+          goalId: setup.goalId,
+          jobId: setup.jobId,
+          spec: setup.spec,
+          artifactPaths: setup.artifactPaths
+        });
+        if (!job.ok || !job.iteration.ok) throw new Error("iteration failed");
+        const reducer = reduceGoalIteration({
+          db,
+          goalId: setup.goalId,
+          jobId: setup.jobId
+        });
+        expect(reducer.decision).toBe("goal_complete");
+      } finally {
+        db.close();
+        if (prev === undefined) {
+          delete process.env[FAKE_RUNNER_GOAL_COMPLETE_ENV];
+        } else {
+          process.env[FAKE_RUNNER_GOAL_COMPLETE_ENV] = prev;
+        }
+      }
+
+      const result = loadGoalStatus({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.nextActionDetail?.kind).toBe("goal_complete");
+      expect(result.nextActionDetail?.jobId).toBe(setup.jobId);
+      expect(result.nextActionDetail?.iteration).toBe(1);
+      expect(result.nextActionDetail?.message).toBe(result.nextAction);
+    });
+
+    it("emits kind=iteration_failed when verification fails terminally", () => {
+      const repo = initRepo();
+      const setup = setupGoal(repo, "Next action iteration failed", {
+        verificationCommand: "false",
+        mode: "queued"
+      });
+      const db = openDb(setup.dataDir);
+      try {
+        const job = executeIterationJob({
+          db,
+          goalId: setup.goalId,
+          jobId: setup.jobId,
+          spec: setup.spec,
+          artifactPaths: setup.artifactPaths
+        });
+        expect(job.ok).toBe(false);
+        const reducer = reduceGoalIteration({
+          db,
+          goalId: setup.goalId,
+          jobId: setup.jobId
+        });
+        expect(reducer.decision).toBe("iteration_failed");
+      } finally {
+        db.close();
+      }
+
+      const result = loadGoalStatus({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.nextActionDetail?.kind).toBe("iteration_failed");
+      expect(result.nextActionDetail?.jobId).toBe(setup.jobId);
+      expect(result.nextActionDetail?.iteration).toBe(1);
+      expect(result.nextActionDetail?.message).toContain("inspect");
+      expect(result.nextActionDetail?.message).toBe(result.nextAction);
+    });
+  });
+
+  describe("currentIterationDetail", () => {
+    it("returns null when no goal job exists", () => {
+      const dataDir = makeTempDir("momentum-status-data-");
+      const result = loadGoalStatus({ dataDirOptions: { dataDir } });
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.code).toBe("no_goals");
+    });
+
+    it("surfaces queuedAt with null startedAt/completedAt for a fresh queued goal", () => {
+      const repo = initRepo();
+      const setup = setupGoal(repo, "Current iteration queued", {
+        mode: "queued"
+      });
+
+      const result = loadGoalStatus({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.latestJob?.state).toBe("pending");
+      expect(result.currentIterationDetail).not.toBeNull();
+      expect(result.currentIterationDetail?.number).toBe(1);
+      expect(result.currentIterationDetail?.jobId).toBe(setup.jobId);
+      expect(result.currentIterationDetail?.state).toBe("pending");
+      expect(result.currentIterationDetail?.queuedAt).toBe(
+        result.latestJob?.createdAt
+      );
+      expect(result.currentIterationDetail?.startedAt).toBeNull();
+      expect(result.currentIterationDetail?.completedAt).toBeNull();
+    });
+
+    it("surfaces startedAt and completedAt after a successful queued iteration", () => {
+      const repo = initRepo();
+      const setup = setupGoal(repo, "Current iteration succeeded", {
+        mode: "queued"
+      });
+      const db = openDb(setup.dataDir);
+      try {
+        const job = executeIterationJob({
+          db,
+          goalId: setup.goalId,
+          jobId: setup.jobId,
+          spec: setup.spec,
+          artifactPaths: setup.artifactPaths
+        });
+        if (!job.ok || !job.iteration.ok) throw new Error("iteration failed");
+      } finally {
+        db.close();
+      }
+
+      const status = loadGoalStatus({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      });
+
+      expect(status.ok).toBe(true);
+      if (!status.ok) return;
+      expect(status.currentIterationDetail).not.toBeNull();
+      expect(status.currentIterationDetail?.number).toBe(1);
+      expect(status.currentIterationDetail?.jobId).toBe(setup.jobId);
+      expect(status.currentIterationDetail?.state).toBe("succeeded");
+      expect(status.currentIterationDetail?.queuedAt).toBe(
+        status.latestJob?.createdAt
+      );
+      expect(status.currentIterationDetail?.startedAt).toBe(
+        status.latestJob?.startedAt
+      );
+      expect(status.currentIterationDetail?.completedAt).toBe(
+        status.latestJob?.finishedAt
+      );
+      expect(status.currentIterationDetail?.startedAt).not.toBeNull();
+      expect(status.currentIterationDetail?.completedAt).not.toBeNull();
+    });
+
+    it("tracks the queued next iteration after the reducer enqueues it", () => {
+      const repo = initRepo();
+      const setup = setupGoal(repo, "Current iteration after continue", {
+        maxIterations: 2,
+        mode: "queued"
+      });
+      const db = openDb(setup.dataDir);
+      let nextJobId: string;
+      try {
+        const job = executeIterationJob({
+          db,
+          goalId: setup.goalId,
+          jobId: setup.jobId,
+          spec: setup.spec,
+          artifactPaths: setup.artifactPaths
+        });
+        if (!job.ok || !job.iteration.ok) throw new Error("iteration failed");
+        const reducer = reduceGoalIteration({
+          db,
+          goalId: setup.goalId,
+          jobId: setup.jobId
+        });
+        expect(reducer.decision).toBe("continue");
+        nextJobId = reducer.nextJob!.jobId;
+      } finally {
+        db.close();
+      }
+
+      const status = loadGoalStatus({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      });
+
+      expect(status.ok).toBe(true);
+      if (!status.ok) return;
+      expect(status.currentIterationDetail?.number).toBe(2);
+      expect(status.currentIterationDetail?.jobId).toBe(nextJobId);
+      expect(status.currentIterationDetail?.state).toBe("pending");
+      expect(status.currentIterationDetail?.startedAt).toBeNull();
+      expect(status.currentIterationDetail?.completedAt).toBeNull();
+      expect(typeof status.currentIterationDetail?.queuedAt).toBe("number");
+    });
+
+    it("surfaces completedAt with state=failed for a verification failure", () => {
+      const repo = initRepo();
+      const setup = setupGoal(repo, "Current iteration failed", {
+        verificationCommand: "false",
+        mode: "queued"
+      });
+      const db = openDb(setup.dataDir);
+      try {
+        const job = executeIterationJob({
+          db,
+          goalId: setup.goalId,
+          jobId: setup.jobId,
+          spec: setup.spec,
+          artifactPaths: setup.artifactPaths
+        });
+        expect(job.ok).toBe(false);
+      } finally {
+        db.close();
+      }
+
+      const status = loadGoalStatus({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      });
+
+      expect(status.ok).toBe(true);
+      if (!status.ok) return;
+      expect(status.currentIterationDetail?.number).toBe(1);
+      expect(status.currentIterationDetail?.jobId).toBe(setup.jobId);
+      expect(status.currentIterationDetail?.state).toBe("failed");
+      expect(status.currentIterationDetail?.startedAt).not.toBeNull();
+      expect(status.currentIterationDetail?.completedAt).not.toBeNull();
+    });
+
+    it("surfaces startedAt with null completedAt after a worker claim and before execution", () => {
+      const repo = initRepo();
+      const setup = setupGoal(repo, "Current iteration claimed", {
+        mode: "queued"
+      });
+
+      const db = openDb(setup.dataDir);
+      const claimNow = 1_700_000_002_000;
+      try {
+        const claim = claimPendingGoalIterationJob(db, {
+          workerId: "worker-current-iter",
+          leaseDurationMs: 30_000,
+          now: claimNow
+        });
+        expect(claim.ok).toBe(true);
+        if (!claim.ok) throw new Error("claim failed");
+      } finally {
+        db.close();
+      }
+
+      const status = loadGoalStatus({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      });
+
+      expect(status.ok).toBe(true);
+      if (!status.ok) return;
+      expect(status.currentIterationDetail?.state).toBe("claimed");
+      expect(status.currentIterationDetail?.startedAt).toBeNull();
+      expect(status.currentIterationDetail?.completedAt).toBeNull();
+    });
+  });
+
+  describe("artifacts", () => {
+    it("exposes path+exists entries for goal- and iteration-scoped files on a fresh init", () => {
+      const repo = initRepo();
+      const setup = setupGoal(repo, "Status artifacts fresh init");
+
+      const result = loadGoalStatus({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+
+      expect(result.artifacts.iteration).toBe(1);
+      expect(result.artifacts.goalDir).toBe(setup.artifactPaths.goalDir);
+      expect(result.artifacts.iterationDir).toBe(
+        setup.artifactPaths.iterationDir
+      );
+
+      expect(result.artifacts.goalMd).toEqual({
+        path: setup.artifactPaths.goalMd,
+        exists: true
+      });
+      expect(result.artifacts.ledgerMd).toEqual({
+        path: setup.artifactPaths.ledgerMd,
+        exists: true
+      });
+      expect(result.artifacts.handoffMd).toEqual({
+        path: setup.artifactPaths.handoffMd,
+        exists: true
+      });
+      expect(result.artifacts.handoffJson).toEqual({
+        path: setup.artifactPaths.handoffJson,
+        exists: true
+      });
+      expect(result.artifacts.promptMd).toEqual({
+        path: setup.artifactPaths.promptMd,
+        exists: true
+      });
+      expect(result.artifacts.runnerLog).toEqual({
+        path: setup.artifactPaths.runnerLog,
+        exists: true
+      });
+      expect(result.artifacts.verificationLog).toEqual({
+        path: setup.artifactPaths.verificationLog,
+        exists: true
+      });
+      expect(result.artifacts.resultJson).toEqual({
+        path: setup.artifactPaths.resultJson,
+        exists: true
+      });
+    });
+
+    it("walks artifacts forward to iteration N after the next iteration executes", () => {
+      const repo = initRepo();
+      const setup = setupGoal(repo, "Status artifacts iteration two", {
+        maxIterations: 2,
+        mode: "queued"
+      });
+
+      const db = openDb(setup.dataDir);
+      try {
+        const firstJob = executeIterationJob({
+          db,
+          goalId: setup.goalId,
+          jobId: setup.jobId,
+          spec: setup.spec,
+          artifactPaths: setup.artifactPaths
+        });
+        if (!firstJob.ok || !firstJob.iteration.ok) {
+          throw new Error("iteration failed");
+        }
+        const reducer = reduceGoalIteration({
+          db,
+          goalId: setup.goalId,
+          jobId: setup.jobId
+        });
+        if (reducer.decision !== "continue" || !reducer.nextJob) {
+          throw new Error("expected continue with next job");
+        }
+
+        const iterationTwoPaths = ensureIterationArtifactDir(
+          setup.dataDir,
+          setup.goalId,
+          2
+        );
+        const secondJob = executeIterationJob({
+          db,
+          goalId: setup.goalId,
+          jobId: reducer.nextJob.jobId,
+          spec: setup.spec,
+          artifactPaths: iterationTwoPaths,
+          iteration: 2
+        });
+        if (!secondJob.ok || !secondJob.iteration.ok) {
+          throw new Error("iteration failed");
+        }
+      } finally {
+        db.close();
+      }
+
+      const status = loadGoalStatus({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      });
+
+      expect(status.ok).toBe(true);
+      if (!status.ok) return;
+      expect(status.artifacts.iteration).toBe(2);
+      expect(status.artifacts.iterationDir).toContain(
+        path.join("iterations", "2")
+      );
+      expect(status.artifacts.runnerLog.path).toBe(
+        status.artifactPaths.runnerLog
+      );
+      expect(status.artifacts.resultJson.path).toContain(
+        path.join("iterations", "2")
+      );
+      expect(status.artifacts.resultJson.exists).toBe(true);
+      expect(status.artifacts.goalMd.exists).toBe(true);
+      expect(status.artifacts.handoffJson.exists).toBe(true);
+    });
   });
 });
