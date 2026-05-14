@@ -2133,6 +2133,46 @@ Goal body.
     expect(payload["heartbeatAgeMs"]).toBeGreaterThanOrEqual(90_000);
   });
 
+  it("daemon stop uses active-job freshness when reporting staleness", async () => {
+    const dataDir = makeTempDir("momentum-cli-daemon-stop-");
+    const { openDb } = await import("../src/db.js");
+    const { startDaemonRun, setDaemonRunActiveJob } = await import(
+      "../src/daemon-runs.js"
+    );
+    let runId: string;
+    const db = openDb(dataDir);
+    try {
+      ({ runId } = startDaemonRun(db, {
+        pid: 45,
+        now: Date.now() - 100_000
+      }));
+      setDaemonRunActiveJob(db, {
+        runId,
+        jobId: "job-1",
+        lockId: "lock-1",
+        now: Date.now() - 100_000
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "daemon", "stop",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      runId,
+      state: "stop_requested",
+      stale: false
+    });
+    expect(payload["heartbeatAgeMs"]).toBeGreaterThanOrEqual(90_000);
+  });
+
   it("daemon stop rejects extra positional arguments", async () => {
     const result = await run(["daemon", "stop", "extra"]);
     expect(result.code).toBe(2);

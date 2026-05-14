@@ -394,7 +394,7 @@ function daemonStop(parsed: ParsedFlags, io: CliIo): number {
     }
 
     const heartbeatAgeMs = Math.max(0, now - updated.heartbeat_at);
-    const stale = heartbeatAgeMs >= DEFAULT_DAEMON_STALE_AFTER_MS;
+    const stale = isExistingDaemonRunStale(updated, now);
     return emitDaemonStopSuccess(parsed, io, {
       dataDir,
       runId: updated.id,
