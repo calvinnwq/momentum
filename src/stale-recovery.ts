@@ -406,9 +406,26 @@ export function recoverStaleDaemonRuns(
   return { recovered, skipped };
 }
 
+/**
+ * Default heartbeat-age cutoffs used by `runStartupRecovery` when the caller
+ * does not override them. Mirrors `DEFAULT_DAEMON_STALE_AFTER_MS` /
+ * `DEFAULT_DAEMON_ACTIVE_JOB_STALE_AFTER_MS` in `daemon-status` so the startup
+ * pass classifies the same rows as stale that the read-only inspector flags;
+ * defined locally to avoid module coupling between recovery and inspection.
+ */
+export const DEFAULT_STARTUP_RECOVERY_DAEMON_STALE_AFTER_MS = 90_000;
+export const DEFAULT_STARTUP_RECOVERY_DAEMON_ACTIVE_JOB_STALE_AFTER_MS = 930_000;
+
+export type StartupRecoveryDaemonInput = {
+  staleAfterMs?: number;
+  activeJobStaleAfterMs?: number;
+  excludeRunId?: string;
+};
+
 export type StartupRecoveryInput = {
   now?: number;
   graceMs?: number;
+  daemonRuns?: StartupRecoveryDaemonInput;
 };
 
 export type StartupRecoveryResult = {
@@ -416,21 +433,28 @@ export type StartupRecoveryResult = {
   graceMs: number;
   repoLocks: RecoverStaleRepoLocksResult;
   claimedJobs: RecoverStaleClaimedGoalIterationJobsResult;
+  daemonRuns: RecoverStaleDaemonRunsResult;
 };
 
 /**
  * Composer that runs the safe stale-lease auto-recovery primitives in the order
  * the daemon startup path should: first release orphaned repo locks whose
  * owning job is terminal (so a re-pended job can be re-claimed without lock
- * contention), then re-pend stale claimed goal_iteration jobs that no live
- * owner asserts. Both inner primitives are independently idempotent and skip
- * dirty/unknown states with stable reasons; this composer simply returns both
- * results unmodified so callers can surface combined counts and routing
- * information for manual recovery.
+ * contention), next re-pend stale claimed goal_iteration jobs that no live
+ * owner asserts, and finally finalize orphaned idle daemon records so the
+ * single-active partial index does not block a freshly registered daemon. All
+ * three inner primitives are independently idempotent and skip dirty/unknown
+ * states with stable reasons; this composer simply returns each result
+ * unmodified so callers can surface combined counts and routing information
+ * for manual recovery.
  *
  * Exposes one observed `now` and `graceMs` so a single startup pass produces a
  * coherent snapshot. Callers that need a different cadence can pass their own
- * `now`/`graceMs`, or invoke the underlying primitives directly.
+ * `now`/`graceMs`, or invoke the underlying primitives directly. Daemon
+ * recovery uses defaults that match the read-only `daemon status` inspector;
+ * callers should pass `daemonRuns.excludeRunId` to skip the caller's own run
+ * so a startup pass run from inside a freshly registered daemon does not
+ * finalize itself before the loop starts.
  */
 export function runStartupRecovery(
   db: MomentumDb,
@@ -443,11 +467,25 @@ export function runStartupRecovery(
     now,
     graceMs
   });
+  const daemonInput = input.daemonRuns ?? {};
+  const daemonRuns = recoverStaleDaemonRuns(db, {
+    now,
+    staleAfterMs:
+      daemonInput.staleAfterMs ??
+      DEFAULT_STARTUP_RECOVERY_DAEMON_STALE_AFTER_MS,
+    activeJobStaleAfterMs:
+      daemonInput.activeJobStaleAfterMs ??
+      DEFAULT_STARTUP_RECOVERY_DAEMON_ACTIVE_JOB_STALE_AFTER_MS,
+    ...(daemonInput.excludeRunId !== undefined
+      ? { excludeRunId: daemonInput.excludeRunId }
+      : {})
+  });
   return {
     observedAt: now,
     graceMs,
     repoLocks,
-    claimedJobs
+    claimedJobs,
+    daemonRuns
   };
 }
 

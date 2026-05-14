@@ -133,7 +133,8 @@ export async function runDaemonLoop(
         input.startupRecoveryGraceMs ?? DEFAULT_DAEMON_STARTUP_RECOVERY_GRACE_MS;
       startupRecovery = runStartupRecovery(input.db, {
         now: now(),
-        graceMs: recoveryGraceMs
+        graceMs: recoveryGraceMs,
+        daemonRuns: { excludeRunId: input.runId }
       });
     } catch (error) {
       markInternalError(error);

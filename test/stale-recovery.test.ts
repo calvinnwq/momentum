@@ -911,6 +911,77 @@ describe("runStartupRecovery", () => {
   });
 });
 
+describe("runStartupRecovery daemon recovery wiring", () => {
+  it("finalizes an idle stale daemon record alongside repo/claim recovery", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      // Orphan daemon: started long ago, heartbeat never refreshed, no
+      // active job/lock pointer.
+      const { runId } = startDaemonRun(db, { now: 1_000 });
+
+      const out = runStartupRecovery(db, {
+        now: 1_000_000,
+        daemonRuns: { staleAfterMs: 30_000 }
+      });
+      expect(out.daemonRuns.recovered).toHaveLength(1);
+      expect(out.daemonRuns.recovered[0]!.runAfter.id).toBe(runId);
+      expect(out.daemonRuns.recovered[0]!.runAfter.state).toBe("error");
+      expect(out.daemonRuns.recovered[0]!.recoveryStatus).toBe(
+        DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS
+      );
+      expect(out.daemonRuns.skipped).toEqual([]);
+
+      const stored = getDaemonRun(db, runId);
+      expect(stored?.state).toBe("error");
+      expect(stored?.recovery_status).toBe(
+        DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("skips the caller's own run when daemonRuns.excludeRunId is provided", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { runId } = startDaemonRun(db, { now: 1_000 });
+
+      const out = runStartupRecovery(db, {
+        now: 1_000_000,
+        daemonRuns: {
+          staleAfterMs: 30_000,
+          excludeRunId: runId
+        }
+      });
+      expect(out.daemonRuns.recovered).toEqual([]);
+      expect(out.daemonRuns.skipped).toHaveLength(1);
+      expect(out.daemonRuns.skipped[0]!.run.id).toBe(runId);
+      expect(out.daemonRuns.skipped[0]!.reason).toBe("self");
+
+      const stored = getDaemonRun(db, runId);
+      expect(stored?.state).toBe("running");
+      expect(stored?.recovery_status).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("returns an empty daemonRuns result when no daemon records exist", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedGoal(db);
+      const out = runStartupRecovery(db, { now: 5_000 });
+      expect(out.daemonRuns.recovered).toEqual([]);
+      expect(out.daemonRuns.skipped).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+});
+
 describe("recoverStaleDaemonRuns", () => {
   it("auto-finalizes an idle stale daemon run to error and stamps recovery_status", () => {
     const dataDir = makeTempDir();

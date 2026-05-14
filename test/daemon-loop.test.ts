@@ -1290,6 +1290,14 @@ describe("runDaemonLoop", () => {
       expect(recovery.claimedJobs.recovered[0]!.recoveryStatus).toBe(
         JOB_RECOVERED_AUTO_REPENDED_STATUS
       );
+      // The loop's own daemon run is skipped via excludeRunId so the startup
+      // pass does not finalize the row that just registered itself.
+      expect(recovery.daemonRuns.recovered).toEqual([]);
+      expect(
+        recovery.daemonRuns.skipped.some(
+          (entry) => entry.run.id === runId && entry.reason === "self"
+        )
+      ).toBe(true);
 
       // Side effects landed: lock released, claimed job re-pended.
       expect(getRepoLock(db, lock.lockId)?.state).toBe("released");
@@ -1368,8 +1376,54 @@ describe("runDaemonLoop", () => {
       expect(result.startupRecovery!.repoLocks.skipped).toEqual([]);
       expect(result.startupRecovery!.claimedJobs.recovered).toEqual([]);
       expect(result.startupRecovery!.claimedJobs.skipped).toEqual([]);
+      // The loop's own daemon run is excluded from recovery via excludeRunId.
+      expect(result.startupRecovery!.daemonRuns.recovered).toEqual([]);
     } finally {
       db.close();
     }
   });
+
+  it("skips the caller's own daemon run during startup recovery", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      // seedDaemonRun stamps the daemon at now: 100_000, but the loop's first
+      // observed `now` (via makeMonotonicNow's default start) is 1.7e12. The
+      // heartbeat age therefore far exceeds any default stale cutoff, so the
+      // run would be classified stale and auto-finalized without excludeRunId.
+      const runId = seedDaemonRun(db);
+      const result = await runDaemonLoop({
+        db,
+        dataDir,
+        runId,
+        workerId: "daemon-loop-self-exclude",
+        pollIntervalMs: 1,
+        maxIdleCycles: 1,
+        now: makeMonotonicNow(),
+        sleep: async () => undefined,
+        runWorker: () => ({
+          code: "no_work",
+          workerId: "daemon-loop-self-exclude",
+          dataDir,
+          outcome: "idle",
+          message: "no work"
+        })
+      });
+
+      expect(result.startupRecovery).not.toBeNull();
+      const recovery = result.startupRecovery!;
+      expect(recovery.daemonRuns.recovered).toEqual([]);
+      expect(recovery.daemonRuns.skipped).toHaveLength(1);
+      expect(recovery.daemonRuns.skipped[0]!.run.id).toBe(runId);
+      expect(recovery.daemonRuns.skipped[0]!.reason).toBe("self");
+
+      // Loop exited cleanly via maxIdleCycles, not via run_terminated — i.e.
+      // the daemon was not auto-finalized out from under itself.
+      expect(result.exitReason).toBe("max_idle_cycles");
+      expect(result.terminalState).toBe("stopped");
+    } finally {
+      db.close();
+    }
+  });
+
 });

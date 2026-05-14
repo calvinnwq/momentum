@@ -35,6 +35,7 @@ import {
 } from "./daemon-loop.js";
 import type {
   StaleClaimedJobRecoverySkipped,
+  StaleDaemonRunRecoverySkipped,
   StaleRepoLockRecoverySkipped,
   StartupRecoveryResult
 } from "./stale-recovery.js";
@@ -695,8 +696,10 @@ type StartupRecoverySummary = {
   graceMs: number;
   recoveredRepoLockCount: number;
   recoveredClaimedJobCount: number;
+  recoveredDaemonRunCount: number;
   skippedRepoLocks: StaleRepoLockRecoverySkipped[];
   skippedClaimedJobs: StaleClaimedJobRecoverySkipped[];
+  skippedDaemonRuns: StaleDaemonRunRecoverySkipped[];
 };
 
 function summarizeStartupRecovery(
@@ -708,8 +711,10 @@ function summarizeStartupRecovery(
     graceMs: recovery.graceMs,
     recoveredRepoLockCount: recovery.repoLocks.recovered.length,
     recoveredClaimedJobCount: recovery.claimedJobs.recovered.length,
+    recoveredDaemonRunCount: recovery.daemonRuns.recovered.length,
     skippedRepoLocks: recovery.repoLocks.skipped,
-    skippedClaimedJobs: recovery.claimedJobs.skipped
+    skippedClaimedJobs: recovery.claimedJobs.skipped,
+    skippedDaemonRuns: recovery.daemonRuns.skipped
   };
 }
 
@@ -719,18 +724,22 @@ function formatStartupRecoveryLines(
   if (recovery === null) return [];
   const recoveredLocks = recovery.repoLocks.recovered.length;
   const recoveredJobs = recovery.claimedJobs.recovered.length;
+  const recoveredDaemons = recovery.daemonRuns.recovered.length;
   const skippedLocks = recovery.repoLocks.skipped.length;
   const skippedJobs = recovery.claimedJobs.skipped.length;
+  const skippedDaemons = recovery.daemonRuns.skipped.length;
   if (
     recoveredLocks === 0 &&
     recoveredJobs === 0 &&
+    recoveredDaemons === 0 &&
     skippedLocks === 0 &&
-    skippedJobs === 0
+    skippedJobs === 0 &&
+    skippedDaemons === 0
   ) {
     return [];
   }
   return [
-    `Startup recovery: locks recovered=${recoveredLocks} skipped=${skippedLocks}; claims recovered=${recoveredJobs} skipped=${skippedJobs}`
+    `Startup recovery: locks recovered=${recoveredLocks} skipped=${skippedLocks}; claims recovered=${recoveredJobs} skipped=${skippedJobs}; daemons recovered=${recoveredDaemons} skipped=${skippedDaemons}`
   ];
 }
 
