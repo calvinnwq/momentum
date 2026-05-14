@@ -953,6 +953,295 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
     }
   });
 
+  describe("recovery.md artifact writes", () => {
+    it("writes a recovery.md artifact for a repo_dirty skip when dataDir is provided", () => {
+      const dataDir = makeTempDir();
+      const db = openDb(dataDir);
+      try {
+        seedGoalWithRepo(db, "g1", "/tmp/repo-a");
+        const { jobId } = seedClaimedIteration(db, {
+          leaseDurationMs: 900,
+          claimAt: 100
+        });
+        const inspectRepoState = () => ({
+          ok: false as const,
+          code: "dirty_worktree" as const,
+          error: "Repo has uncommitted changes: /tmp/repo-a"
+        });
+
+        const out = recoverStaleClaimedGoalIterationJobs(db, {
+          now: 5_000,
+          inspectRepoState,
+          dataDir
+        });
+        expect(out.recovered).toEqual([]);
+        expect(out.skipped).toHaveLength(1);
+        const skipped = out.skipped[0]!;
+        expect(skipped.reason).toBe("repo_dirty");
+        expect(skipped.job.id).toBe(jobId);
+
+        const expectedPath = path.join(
+          dataDir,
+          "goals",
+          "g1",
+          "recovery.md"
+        );
+        expect(skipped.recoveryArtifactPath).toBe(expectedPath);
+        expect(fs.existsSync(expectedPath)).toBe(true);
+        const md = fs.readFileSync(expectedPath, "utf-8");
+        expect(md).toContain("# Manual recovery required: test goal");
+        expect(md).toContain("- Goal ID: g1");
+        expect(md).toContain(`- Job ID: ${jobId}`);
+        expect(md).toContain("- Iteration: 1");
+        expect(md).toContain("- Repo path: /tmp/repo-a");
+        expect(md).toContain("- Code: repo_dirty");
+        expect(md).toContain(
+          "- Message: Repo has uncommitted changes: /tmp/repo-a"
+        );
+        expect(md).toContain("- Classified at (epoch ms): 5000");
+        expect(md).toContain("## Safe next steps");
+        expect(md).toContain("git -C /tmp/repo-a status");
+      } finally {
+        db.close();
+      }
+    });
+
+    it("writes recovery.md for repo_unknown_commit and repo_unavailable skips", () => {
+      const dataDir = makeTempDir();
+      const db = openDb(dataDir);
+      try {
+        seedGoalWithRepo(db, "g1", "/tmp/repo-a");
+        seedGoalWithRepo(db, "g2", "/tmp/repo-missing");
+        const claimA = seedClaimedIteration(db, {
+          goalId: "g1",
+          idempotencyKey: "g1:1",
+          leaseDurationMs: 900,
+          claimAt: 100,
+          workerId: "worker-a"
+        });
+        const claimB = seedClaimedIteration(db, {
+          goalId: "g2",
+          idempotencyKey: "g2:1",
+          leaseDurationMs: 900,
+          claimAt: 101,
+          workerId: "worker-b"
+        });
+
+        const inspectRepoState = (repoRoot: string) => {
+          if (repoRoot === "/tmp/repo-a") {
+            return {
+              ok: false as const,
+              code: "no_head" as const,
+              error: "Repo has no HEAD commit: /tmp/repo-a"
+            };
+          }
+          return {
+            ok: false as const,
+            code: "missing" as const,
+            error: "Repo path does not exist: /tmp/repo-missing"
+          };
+        };
+
+        const out = recoverStaleClaimedGoalIterationJobs(db, {
+          now: 5_000,
+          inspectRepoState,
+          dataDir
+        });
+        expect(out.skipped).toHaveLength(2);
+        const byJob = new Map(out.skipped.map((row) => [row.job.id, row]));
+        const skippedA = byJob.get(claimA.jobId)!;
+        const skippedB = byJob.get(claimB.jobId)!;
+
+        expect(skippedA.reason).toBe("repo_unknown_commit");
+        expect(skippedA.recoveryArtifactPath).toBe(
+          path.join(dataDir, "goals", "g1", "recovery.md")
+        );
+        const mdA = fs.readFileSync(skippedA.recoveryArtifactPath!, "utf-8");
+        expect(mdA).toContain("- Code: repo_unknown_commit");
+        expect(mdA).toContain("- Repo path: /tmp/repo-a");
+        expect(mdA).toContain("- Message: Repo has no HEAD commit: /tmp/repo-a");
+
+        expect(skippedB.reason).toBe("repo_unavailable");
+        expect(skippedB.recoveryArtifactPath).toBe(
+          path.join(dataDir, "goals", "g2", "recovery.md")
+        );
+        const mdB = fs.readFileSync(skippedB.recoveryArtifactPath!, "utf-8");
+        expect(mdB).toContain("- Code: repo_unavailable");
+        expect(mdB).toContain("- Repo path: /tmp/repo-missing");
+        expect(mdB).toContain(
+          "- Message: Repo path does not exist: /tmp/repo-missing"
+        );
+      } finally {
+        db.close();
+      }
+    });
+
+    it("writes recovery.md for a job_running skip when dataDir is provided", () => {
+      const dataDir = makeTempDir();
+      const db = openDb(dataDir);
+      try {
+        seedGoalWithRepo(db, "g1", "/tmp/repo-a");
+        const { jobId } = seedClaimedIteration(db, {
+          leaseDurationMs: 900,
+          claimAt: 100
+        });
+        setJobState(db, jobId, "running");
+
+        const out = recoverStaleClaimedGoalIterationJobs(db, {
+          now: 5_000,
+          dataDir
+        });
+        expect(out.skipped).toHaveLength(1);
+        const skipped = out.skipped[0]!;
+        expect(skipped.reason).toBe("job_running");
+        const expectedPath = path.join(
+          dataDir,
+          "goals",
+          "g1",
+          "recovery.md"
+        );
+        expect(skipped.recoveryArtifactPath).toBe(expectedPath);
+        const md = fs.readFileSync(expectedPath, "utf-8");
+        expect(md).toContain("- Code: job_running");
+        expect(md).toContain(
+          "- Message: Stale claimed job is still in `running` state"
+        );
+        expect(md).toContain("## Safe next steps");
+        expect(md).toContain("git -C /tmp/repo-a status");
+      } finally {
+        db.close();
+      }
+    });
+
+    it("does not write recovery.md when dataDir is omitted (backwards compatible)", () => {
+      const tempDir = makeTempDir();
+      const db = openDb(tempDir);
+      try {
+        seedGoalWithRepo(db, "g1", "/tmp/repo-a");
+        const { jobId } = seedClaimedIteration(db, {
+          leaseDurationMs: 900,
+          claimAt: 100
+        });
+        const inspectRepoState = () => ({
+          ok: false as const,
+          code: "dirty_worktree" as const,
+          error: "dirty"
+        });
+
+        const out = recoverStaleClaimedGoalIterationJobs(db, {
+          now: 5_000,
+          inspectRepoState
+        });
+        expect(out.skipped).toHaveLength(1);
+        const skipped = out.skipped[0]!;
+        expect(skipped.job.id).toBe(jobId);
+        expect(skipped.reason).toBe("repo_dirty");
+        expect(skipped.recoveryArtifactPath).toBeUndefined();
+        expect(
+          fs.existsSync(path.join(tempDir, "goals", "g1", "recovery.md"))
+        ).toBe(false);
+      } finally {
+        db.close();
+      }
+    });
+
+    it("does not write recovery.md for live-owner skips (daemon_active / lock_active)", () => {
+      const dataDir = makeTempDir();
+      const db = openDb(dataDir);
+      try {
+        seedGoal(db, "g1");
+        seedGoal(db, "g2");
+        const a = seedClaimedIteration(db, {
+          goalId: "g1",
+          idempotencyKey: "g1:1",
+          leaseDurationMs: 900,
+          claimAt: 100,
+          workerId: "worker-a"
+        });
+        const { runId } = startDaemonRun(db, { now: 100 });
+        setDaemonRunActiveJob(db, {
+          runId,
+          jobId: a.jobId,
+          lockId: null,
+          now: 100
+        });
+
+        const b = seedClaimedIteration(db, {
+          goalId: "g2",
+          idempotencyKey: "g2:1",
+          leaseDurationMs: 900,
+          claimAt: 101,
+          workerId: "worker-b"
+        });
+        const acquired = acquireRepoLock(db, {
+          repoRoot: "/tmp/repo-b",
+          holder: "worker-b",
+          goalId: "g2",
+          iteration: 1,
+          jobId: b.jobId,
+          leaseExpiresAt: 2_000,
+          now: 100
+        });
+        if (!acquired.ok) throw new Error("acquire failed");
+
+        const out = recoverStaleClaimedGoalIterationJobs(db, {
+          now: 5_000,
+          dataDir
+        });
+        expect(out.skipped).toHaveLength(2);
+        for (const entry of out.skipped) {
+          expect(["daemon_active", "lock_active"]).toContain(entry.reason);
+          expect(entry.recoveryArtifactPath).toBeUndefined();
+        }
+        expect(
+          fs.existsSync(path.join(dataDir, "goals", "g1", "recovery.md"))
+        ).toBe(false);
+        expect(
+          fs.existsSync(path.join(dataDir, "goals", "g2", "recovery.md"))
+        ).toBe(false);
+      } finally {
+        db.close();
+      }
+    });
+
+    it("runStartupRecovery forwards dataDir to the claimed-job recovery pass", () => {
+      const dataDir = makeTempDir();
+      const db = openDb(dataDir);
+      try {
+        seedGoalWithRepo(db, "g1", "/tmp/repo-a");
+        const { jobId } = seedClaimedIteration(db, {
+          leaseDurationMs: 900,
+          claimAt: 100
+        });
+        const inspectRepoState = () => ({
+          ok: false as const,
+          code: "dirty_worktree" as const,
+          error: "Repo has uncommitted changes: /tmp/repo-a"
+        });
+
+        const out = runStartupRecovery(db, {
+          now: 5_000,
+          inspectRepoState,
+          dataDir
+        });
+        expect(out.claimedJobs.skipped).toHaveLength(1);
+        const skipped = out.claimedJobs.skipped[0]!;
+        expect(skipped.job.id).toBe(jobId);
+        expect(skipped.reason).toBe("repo_dirty");
+        const expectedPath = path.join(
+          dataDir,
+          "goals",
+          "g1",
+          "recovery.md"
+        );
+        expect(skipped.recoveryArtifactPath).toBe(expectedPath);
+        expect(fs.existsSync(expectedPath)).toBe(true);
+      } finally {
+        db.close();
+      }
+    });
+  });
+
   it("orders recovered jobs deterministically by lease_expires_at", () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);

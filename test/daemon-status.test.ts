@@ -18,6 +18,7 @@ import {
   getQueueJob,
   releaseClaimedGoalIterationJob
 } from "../src/queue-jobs.js";
+import { writeRecoveryArtifact } from "../src/recovery-artifact.js";
 
 const tempRoots: string[] = [];
 
@@ -276,6 +277,121 @@ describe("loadDaemonStatus stale lease detection", () => {
       expect(result.code).toBe("invalid_input");
       expect(result.error).toMatch(/staleLeaseGraceMs/);
     }
+  });
+});
+
+describe("loadDaemonStatus goals needing manual recovery", () => {
+  it("returns an empty list when no goals exist", () => {
+    const dataDir = makeTempDir();
+    const result = loadDaemonStatus({
+      dataDirOptions: { dataDir },
+      now: 1_000
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.goalsNeedingRecovery).toEqual([]);
+  });
+
+  it("surfaces goals whose recovery.md exists on disk and ignores goals without one", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedGoal(db, "g-with-recovery");
+      seedGoal(db, "g-without-recovery");
+      writeRecoveryArtifact({
+        dataDir,
+        input: {
+          goalId: "g-with-recovery",
+          goalTitle: "test goal",
+          iteration: 1,
+          jobId: "job-x",
+          daemonRunId: null,
+          repoPath: "/tmp/repo",
+          expectedCommit: "abc",
+          currentCommit: "def",
+          reason: { code: "repo_dirty", message: "uncommitted changes" },
+          artifactPaths: {
+            iterationDir: "/tmp/test/iterations/1",
+            runnerLog: null,
+            verificationLog: null,
+            resultJson: null
+          },
+          safeNextSteps: ["Inspect the repo working tree"],
+          classifiedAt: 1_700_000_000_000
+        }
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = loadDaemonStatus({
+      dataDirOptions: { dataDir },
+      now: 1_000
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.goalsNeedingRecovery).toHaveLength(1);
+    const [entry] = result.goalsNeedingRecovery;
+    expect(entry).toMatchObject({
+      goalId: "g-with-recovery",
+      title: "test goal",
+      goalState: "initialized"
+    });
+    expect(entry?.recoveryMdPath).toMatch(/g-with-recovery\/recovery\.md$/);
+    expect(fs.existsSync(entry?.recoveryMdPath ?? "")).toBe(true);
+  });
+
+  it("lists multiple goals deterministically by created_at then id", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      db.prepare(
+        `INSERT INTO goals (id, title, branch, artifact_dir, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).run("g-second", "second goal", "momentum/test", "/tmp/test", 200, 200);
+      db.prepare(
+        `INSERT INTO goals (id, title, branch, artifact_dir, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).run("g-first", "first goal", "momentum/test", "/tmp/test", 100, 100);
+
+      for (const goalId of ["g-first", "g-second"]) {
+        writeRecoveryArtifact({
+          dataDir,
+          input: {
+            goalId,
+            goalTitle: `${goalId} title`,
+            iteration: 1,
+            jobId: null,
+            daemonRunId: null,
+            repoPath: null,
+            expectedCommit: null,
+            currentCommit: null,
+            reason: { code: "repo_dirty", message: "dirty" },
+            artifactPaths: {
+              iterationDir: `/tmp/test/${goalId}/iterations/1`,
+              runnerLog: null,
+              verificationLog: null,
+              resultJson: null
+            },
+            safeNextSteps: [],
+            classifiedAt: 1
+          }
+        });
+      }
+    } finally {
+      db.close();
+    }
+
+    const result = loadDaemonStatus({
+      dataDirOptions: { dataDir },
+      now: 1_000
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.goalsNeedingRecovery.map((g) => g.goalId)).toEqual([
+      "g-first",
+      "g-second"
+    ]);
   });
 });
 

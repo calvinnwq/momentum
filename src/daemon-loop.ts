@@ -134,6 +134,7 @@ export async function runDaemonLoop(
       startupRecovery = runStartupRecovery(input.db, {
         now: now(),
         graceMs: recoveryGraceMs,
+        dataDir: input.dataDir,
         daemonRuns: { excludeRunId: input.runId }
       });
     } catch (error) {

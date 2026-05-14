@@ -1,3 +1,6 @@
+import fs from "node:fs";
+
+import { resolveGoalArtifactPaths } from "./artifacts.js";
 import type { MomentumDb } from "./db.js";
 import {
   DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS,
@@ -7,7 +10,8 @@ import {
   type DaemonRunRow
 } from "./daemon-runs.js";
 import { QUEUE_EVENT_TYPES, appendQueueEvent } from "./events.js";
-import { getGoal } from "./goal-init.js";
+import { getGoal, type GoalRow } from "./goal-init.js";
+import { markGoalNeedsManualRecovery } from "./goal-recovery.js";
 import {
   getQueueJob,
   listStaleClaimedGoalIterationJobs,
@@ -15,6 +19,11 @@ import {
   type QueueJobRow,
   type QueueJobState
 } from "./queue-jobs.js";
+import {
+  writeRecoveryArtifact,
+  type RecoveryArtifactPathBundle,
+  type RecoveryArtifactReason
+} from "./recovery-artifact.js";
 import { inspectRepo, type RepoGuardResult } from "./repo-guard.js";
 import {
   getActiveRepoLockForJob,
@@ -185,6 +194,14 @@ export type StaleClaimedJobRecoverySkipped = {
    * classification without re-running `git status`.
    */
   repoInspectionError?: string;
+  /**
+   * Goal-scoped path to the `recovery.md` artifact written when this skip is
+   * routed to manual recovery (only `repo_dirty` / `repo_unknown_commit` /
+   * `repo_unavailable` / `job_running` and only when `dataDir` is provided).
+   * Other skip reasons (`daemon_active` / `lock_active` / `job_state_changed`)
+   * are live-owner / race classifications that do not need a manual artifact.
+   */
+  recoveryArtifactPath?: string;
 };
 
 export type RecoverStaleClaimedGoalIterationJobsInput = {
@@ -196,6 +213,14 @@ export type RecoverStaleClaimedGoalIterationJobsInput = {
    * unknown-commit / missing-repo states without a real filesystem.
    */
   inspectRepoState?: RepoStateInspector;
+  /**
+   * Momentum data dir. When provided, skips that route to manual recovery
+   * (`repo_dirty` / `repo_unknown_commit` / `repo_unavailable` / `job_running`)
+   * cause a goal-scoped `recovery.md` artifact to be written before the skip
+   * is returned, so operators see why the daemon refused to auto-recover.
+   * When omitted (e.g. read-only test paths) no artifact is written.
+   */
+  dataDir?: string;
 };
 
 export type RecoverStaleClaimedGoalIterationJobsResult = {
@@ -231,6 +256,7 @@ export function recoverStaleClaimedGoalIterationJobs(
   const now = input.now ?? Date.now();
   const graceMs = input.graceMs ?? 0;
   const inspectRepoState = input.inspectRepoState ?? inspectRepo;
+  const dataDir = input.dataDir;
   const staleJobs = listStaleClaimedGoalIterationJobs(db, { now, graceMs });
 
   const recovered: StaleClaimedJobRecoveryRecovered[] = [];
@@ -238,7 +264,16 @@ export function recoverStaleClaimedGoalIterationJobs(
 
   for (const job of staleJobs) {
     if (job.state === "running") {
-      skipped.push({ job, reason: "job_running" });
+      const entry: StaleClaimedJobRecoverySkipped = {
+        job,
+        reason: "job_running"
+      };
+      maybeWriteRecoveryArtifact(db, dataDir, job, entry, {
+        code: "job_running",
+        message:
+          "Stale claimed job is still in `running` state; the runner may have left mid-write artifacts in the repo."
+      }, now);
+      skipped.push(entry);
       continue;
     }
 
@@ -267,6 +302,12 @@ export function recoverStaleClaimedGoalIterationJobs(
 
     const repoSkip = classifyRepoStateSkip(db, job, inspectRepoState);
     if (repoSkip) {
+      maybeWriteRecoveryArtifact(db, dataDir, job, repoSkip, {
+        code: repoSkip.reason,
+        message:
+          repoSkip.repoInspectionError ??
+          `Repo state inspection failed with reason ${repoSkip.reason}.`
+      }, now);
       skipped.push(repoSkip);
       continue;
     }
@@ -471,6 +512,13 @@ export type StartupRecoveryInput = {
    * daemon's startup pass. Defaults to the production `inspectRepo`.
    */
   inspectRepoState?: RepoStateInspector;
+  /**
+   * Momentum data dir. Forwarded to `recoverStaleClaimedGoalIterationJobs` so
+   * manual-recovery skip paths can write a goal-scoped `recovery.md` artifact
+   * during the daemon's startup pass. Omit in tests that only assert in-memory
+   * shape and do not need the on-disk artifact.
+   */
+  dataDir?: string;
 };
 
 export type StartupRecoveryResult = {
@@ -513,7 +561,8 @@ export function runStartupRecovery(
     graceMs,
     ...(input.inspectRepoState !== undefined
       ? { inspectRepoState: input.inspectRepoState }
-      : {})
+      : {}),
+    ...(input.dataDir !== undefined ? { dataDir: input.dataDir } : {})
   });
   const daemonInput = input.daemonRuns ?? {};
   const daemonRuns = recoverStaleDaemonRuns(db, {
@@ -590,5 +639,120 @@ function skipReasonForJobState(state: QueueJobState): StaleRepoLockSkipReason {
       throw new Error(
         `skipReasonForJobState: terminal state ${state} reached non-terminal branch`
       );
+  }
+}
+
+/**
+ * Per-reason operator hints for the `recovery.md` artifact written when a
+ * stale claim is routed to manual recovery. Stable lists so operators get a
+ * predictable next-action surface across runs.
+ */
+function safeNextStepsForSkip(
+  reason: StaleClaimedJobSkipReason,
+  repoRoot: string | null
+): string[] {
+  const repoHint = repoRoot ?? "<repo>";
+  switch (reason) {
+    case "repo_dirty":
+      return [
+        `Inspect the working tree with \`git -C ${repoHint} status\`.`,
+        "Resolve the dirty state (commit, stash, or discard intended changes).",
+        "Once the worktree is clean, re-run `momentum daemon start` to retry."
+      ];
+    case "repo_unknown_commit":
+      return [
+        `Inspect the repo with \`git -C ${repoHint} status\` and \`git -C ${repoHint} log -1\`.`,
+        "Ensure HEAD resolves to a commit (the repo may be empty or detached).",
+        "Once HEAD is resolvable, re-run `momentum daemon start` to retry."
+      ];
+    case "repo_unavailable":
+      return [
+        `Verify the repo path exists and is a git repository: \`${repoHint}\`.`,
+        "Fix the path / permissions, or update the goal spec to point at a valid repo.",
+        "Once the repo is reachable, re-run `momentum daemon start` to retry."
+      ];
+    case "job_running":
+      return [
+        "Inspect the iteration artifacts to determine whether the runner finished or was killed mid-write.",
+        `Inspect repo state with \`git -C ${repoHint} status\` before retrying.`,
+        "Resolve any partial writes manually before re-enqueueing the iteration."
+      ];
+    default:
+      return [];
+  }
+}
+
+const MANUAL_RECOVERY_SKIP_REASONS: ReadonlySet<StaleClaimedJobSkipReason> =
+  new Set(["repo_dirty", "repo_unknown_commit", "repo_unavailable", "job_running"]);
+
+/**
+ * When `dataDir` is provided and the skip reason maps to manual recovery,
+ * render and write `recovery.md` for the goal so the operator-facing artifact
+ * exists on disk for status/handoff/daemon-status surfaces to point at. The
+ * write is best-effort relative to the recovery primitive's contract — if the
+ * artifact cannot be written we still surface the skip without the path, so a
+ * filesystem failure does not strand the in-memory recovery report.
+ */
+function maybeWriteRecoveryArtifact(
+  db: MomentumDb,
+  dataDir: string | undefined,
+  job: QueueJobRow,
+  skip: StaleClaimedJobRecoverySkipped,
+  reason: RecoveryArtifactReason,
+  now: number
+): void {
+  if (dataDir === undefined) return;
+  if (!MANUAL_RECOVERY_SKIP_REASONS.has(skip.reason)) return;
+
+  const goal: GoalRow | undefined = getGoal(db, job.goal_id);
+  const goalTitle = goal?.title ?? job.goal_id;
+  const repoPath = goal?.repo ?? skip.repoRoot ?? null;
+
+  const paths = resolveGoalArtifactPaths(dataDir, job.goal_id, job.iteration);
+  const artifactPaths: RecoveryArtifactPathBundle = {
+    iterationDir: paths.iterationDir,
+    runnerLog: fs.existsSync(paths.runnerLog) ? paths.runnerLog : null,
+    verificationLog: fs.existsSync(paths.verificationLog)
+      ? paths.verificationLog
+      : null,
+    resultJson: fs.existsSync(paths.resultJson) ? paths.resultJson : null
+  };
+
+  try {
+    const result = writeRecoveryArtifact({
+      dataDir,
+      input: {
+        goalId: job.goal_id,
+        goalTitle,
+        iteration: job.iteration,
+        jobId: job.id,
+        daemonRunId: null,
+        repoPath,
+        expectedCommit: null,
+        currentCommit: null,
+        reason,
+        artifactPaths,
+        safeNextSteps: safeNextStepsForSkip(skip.reason, repoPath),
+        classifiedAt: now
+      }
+    });
+    skip.recoveryArtifactPath = result.path;
+  } catch {
+    // Filesystem failure should not strand the skip. Leave recoveryArtifactPath
+    // unset so callers can detect the missing artifact.
+  }
+
+  // Set the durable manual-recovery flag regardless of artifact-write outcome.
+  // The flag is what blocks further claims; recovery.md is operator evidence.
+  // A filesystem failure must not silently re-open the goal for claims.
+  try {
+    markGoalNeedsManualRecovery(db, {
+      goalId: job.goal_id,
+      reason: reason.code,
+      now
+    });
+  } catch {
+    // Best-effort: if we cannot mark the goal (e.g. row vanished mid-pass) the
+    // recovery still surfaces via the in-memory skip result.
   }
 }

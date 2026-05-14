@@ -16,7 +16,10 @@ const JOB_QUEUE_COLUMNS: ColumnSpec[] = [
 
 const GOAL_REDUCER_COLUMNS: ColumnSpec[] = [
   { name: "current_iteration", type: "INTEGER NOT NULL DEFAULT 0" },
-  { name: "completion_reason", type: "TEXT" }
+  { name: "completion_reason", type: "TEXT" },
+  { name: "needs_manual_recovery", type: "INTEGER NOT NULL DEFAULT 0" },
+  { name: "manual_recovery_reason", type: "TEXT" },
+  { name: "manual_recovery_at", type: "INTEGER" }
 ];
 
 const DAEMON_RUN_COLUMNS: ColumnSpec[] = [

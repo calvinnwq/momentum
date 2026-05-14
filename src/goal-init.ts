@@ -222,6 +222,9 @@ export type GoalRow = {
   artifact_dir: string;
   current_iteration: number;
   completion_reason: string | null;
+  needs_manual_recovery: number;
+  manual_recovery_reason: string | null;
+  manual_recovery_at: number | null;
   created_at: number;
   updated_at: number;
 };

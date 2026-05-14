@@ -152,10 +152,14 @@ export function claimPendingGoalIterationJob(
 
   const candidate = db
     .prepare(
-      `SELECT id FROM jobs
-       WHERE state = 'pending' AND type = ?
-       ORDER BY created_at ASC, id ASC
-       LIMIT 1`
+      `SELECT jobs.id
+         FROM jobs
+         JOIN goals ON goals.id = jobs.goal_id
+        WHERE jobs.state = 'pending'
+          AND jobs.type = ?
+          AND goals.needs_manual_recovery = 0
+        ORDER BY jobs.created_at ASC, jobs.id ASC
+        LIMIT 1`
     )
     .get(GOAL_ITERATION_JOB_TYPE) as { id: string } | undefined;
 

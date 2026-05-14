@@ -1,3 +1,5 @@
+import fs from "node:fs";
+
 import { resolveDataDir, type DataDirOptions } from "./data-dir.js";
 import { openDb, type MomentumDb } from "./db.js";
 import {
@@ -15,6 +17,7 @@ import {
   type QueueJobRow,
   type QueueJobState
 } from "./queue-jobs.js";
+import { resolveRecoveryArtifactPath } from "./recovery-artifact.js";
 import {
   listStaleRepoLocks,
   type RepoLockRow,
@@ -127,6 +130,18 @@ export type DaemonStatusStaleClaimedJob = {
   leaseExpiredAgeMs: number;
 };
 
+/**
+ * One entry per goal whose `recovery.md` artifact exists on disk. Surfacing it
+ * in daemon status lets operators see at a glance which goals are blocked on
+ * manual inspection without scanning the filesystem themselves.
+ */
+export type DaemonStatusGoalRecoveryArtifact = {
+  goalId: string;
+  title: string;
+  goalState: string;
+  recoveryMdPath: string;
+};
+
 export type DaemonStatusSuccess = {
   ok: true;
   dataDir: string;
@@ -138,6 +153,7 @@ export type DaemonStatusSuccess = {
   staleRuns: DaemonStatusRunSummary[];
   staleRepoLocks: DaemonStatusStaleRepoLock[];
   staleClaimedJobs: DaemonStatusStaleClaimedJob[];
+  goalsNeedingRecovery: DaemonStatusGoalRecoveryArtifact[];
   observedAt: number;
 };
 
@@ -289,6 +305,8 @@ export function loadDaemonStatus(
       staleLeaseGraceMs
     });
 
+    const goalsNeedingRecovery = listGoalsWithRecoveryArtifact(db, dataDir);
+
     return {
       ok: true,
       dataDir,
@@ -300,6 +318,7 @@ export function loadDaemonStatus(
       staleRuns,
       staleRepoLocks: preCheck.staleRepoLocks,
       staleClaimedJobs: preCheck.staleClaimedJobs,
+      goalsNeedingRecovery,
       observedAt: now
     };
   } catch (err) {
@@ -311,6 +330,39 @@ export function loadDaemonStatus(
   } finally {
     db?.close();
   }
+}
+
+type GoalRecoveryRow = {
+  id: string;
+  title: string;
+  state: string;
+};
+
+/**
+ * Scan the goals table and surface goals whose `recovery.md` artifact exists
+ * on disk. We intentionally probe the filesystem rather than tracking a
+ * separate db column so the surface stays consistent with goal-scoped status /
+ * handoff reads, which also derive recovery presence from existsSync.
+ */
+function listGoalsWithRecoveryArtifact(
+  db: MomentumDb,
+  dataDir: string
+): DaemonStatusGoalRecoveryArtifact[] {
+  const rows = db
+    .prepare("SELECT id, title, state FROM goals ORDER BY created_at ASC, id ASC")
+    .all() as GoalRecoveryRow[];
+  const out: DaemonStatusGoalRecoveryArtifact[] = [];
+  for (const row of rows) {
+    const recoveryMdPath = resolveRecoveryArtifactPath(dataDir, row.id);
+    if (!fs.existsSync(recoveryMdPath)) continue;
+    out.push({
+      goalId: row.id,
+      title: row.title,
+      goalState: row.state,
+      recoveryMdPath
+    });
+  }
+  return out;
 }
 
 function summarizeStaleRepoLock(

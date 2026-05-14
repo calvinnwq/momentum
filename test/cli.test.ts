@@ -132,7 +132,7 @@ describe("momentum CLI scaffold", () => {
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Momentum doctor: ok");
     expect(result.stdout).toContain(
-      "scope: Milestone 3: operational safety (NGX-272, NGX-273, NGX-274, NGX-275, NGX-276)"
+      "scope: Milestone 3: operational safety (NGX-272, NGX-273, NGX-274, NGX-275, NGX-276, NGX-277)"
     );
     expect(result.stdout).toContain("daemon: never started");
     expect(result.stderr).toBe("");
@@ -149,7 +149,7 @@ describe("momentum CLI scaffold", () => {
       command: "doctor",
       version: VERSION,
       milestone:
-        "Milestone 3: operational safety (NGX-272, NGX-273, NGX-274, NGX-275, NGX-276)"
+        "Milestone 3: operational safety (NGX-272, NGX-273, NGX-274, NGX-275, NGX-276, NGX-277)"
     });
     expect(payload["daemon"]).toEqual({
       ok: true,
@@ -161,6 +161,7 @@ describe("momentum CLI scaffold", () => {
       staleRunCount: 0,
       staleRepoLockCount: 0,
       staleClaimedJobCount: 0,
+      goalsNeedingRecoveryCount: 0,
       runId: null
     });
     expect(result.stderr).toBe("");
@@ -1926,6 +1927,72 @@ Goal body.
     expect(textResult.stdout).toContain("Stale claimed jobs: 1");
   });
 
+  it("daemon status surfaces goals needing manual recovery in JSON and text", async () => {
+    const dataDir = makeTempDir("momentum-cli-daemon-recovery-");
+    const { openDb } = await import("../src/db.js");
+    const { writeRecoveryArtifact } = await import("../src/recovery-artifact.js");
+    const db = openDb(dataDir);
+    try {
+      db.prepare(
+        `INSERT INTO goals
+           (id, title, branch, artifact_dir, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).run("g-needs", "Stuck goal", "momentum/test", "/tmp/test", 1, 1);
+      writeRecoveryArtifact({
+        dataDir,
+        input: {
+          goalId: "g-needs",
+          goalTitle: "Stuck goal",
+          iteration: 1,
+          jobId: null,
+          daemonRunId: null,
+          repoPath: "/tmp/repo",
+          expectedCommit: null,
+          currentCommit: null,
+          reason: { code: "repo_dirty", message: "uncommitted changes" },
+          artifactPaths: {
+            iterationDir: "/tmp/test/iterations/1",
+            runnerLog: null,
+            verificationLog: null,
+            resultJson: null
+          },
+          safeNextSteps: ["Inspect the repo working tree"],
+          classifiedAt: 1_700_000_000_000
+        }
+      });
+    } finally {
+      db.close();
+    }
+
+    const jsonResult = await run([
+      "daemon", "status",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(jsonResult.code).toBe(0);
+    const payload = JSON.parse(jsonResult.stdout) as Record<string, unknown>;
+    const entries = payload["goalsNeedingRecovery"] as Array<
+      Record<string, unknown>
+    >;
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      goalId: "g-needs",
+      title: "Stuck goal",
+      goalState: "initialized"
+    });
+    expect(entries[0]?.["recoveryMdPath"]).toMatch(
+      /g-needs\/recovery\.md$/
+    );
+
+    const textResult = await run([
+      "daemon", "status",
+      "--data-dir", dataDir
+    ]);
+    expect(textResult.code).toBe(0);
+    expect(textResult.stdout).toContain("Goals needing manual recovery: 1");
+    expect(textResult.stdout).toContain("g-needs");
+  });
+
   it("doctor --json surfaces stale repo-lock and claimed-job counts", async () => {
     const dataDir = makeTempDir("momentum-cli-doctor-stale-");
     const { openDb } = await import("../src/db.js");
@@ -3180,6 +3247,251 @@ Goal body.
     );
     expect(result.stdout).toContain(
       "Daemon cancel outcome: active_job_completed"
+    );
+  });
+});
+
+describe("momentum recovery clear", () => {
+  it("requires a goal-id argument", async () => {
+    const dataDir = makeTempDir("momentum-cli-recovery-");
+    const result = await run([
+      "recovery", "clear",
+      "--data-dir", dataDir
+    ]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain(
+      "Missing required <goal-id> for recovery clear."
+    );
+  });
+
+  it("rejects unexpected positional arguments", async () => {
+    const dataDir = makeTempDir("momentum-cli-recovery-");
+    const result = await run([
+      "recovery", "clear", "g1", "extra",
+      "--data-dir", dataDir
+    ]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain(
+      "Unexpected argument for recovery clear: extra"
+    );
+  });
+
+  it("rejects unknown recovery subcommand", async () => {
+    const dataDir = makeTempDir("momentum-cli-recovery-");
+    const result = await run([
+      "recovery", "nope",
+      "--data-dir", dataDir
+    ]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("Unknown recovery subcommand: nope");
+  });
+
+  it("rejects missing recovery subcommand", async () => {
+    const dataDir = makeTempDir("momentum-cli-recovery-");
+    const result = await run([
+      "recovery",
+      "--data-dir", dataDir
+    ]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain(
+      "Missing required subcommand for recovery. Expected: clear."
+    );
+  });
+
+  it("returns goal_not_found JSON code when goal does not exist", async () => {
+    const dataDir = makeTempDir("momentum-cli-recovery-");
+    const { openDb } = await import("../src/db.js");
+    // Touch db so the file exists with migrations applied.
+    openDb(dataDir).close();
+
+    const result = await run([
+      "recovery", "clear", "missing-goal",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "recovery clear",
+      code: "goal_not_found",
+      goalId: "missing-goal"
+    });
+  });
+
+  it("returns not_flagged when the goal exists but is not currently flagged", async () => {
+    const dataDir = makeTempDir("momentum-cli-recovery-");
+    const { openDb } = await import("../src/db.js");
+    const db = openDb(dataDir);
+    try {
+      db.prepare(
+        `INSERT INTO goals
+           (id, title, branch, artifact_dir, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).run("g-clean", "clean goal", "momentum/test", "/tmp/test", 1, 1);
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "recovery", "clear", "g-clean",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "recovery clear",
+      code: "not_flagged",
+      goalId: "g-clean"
+    });
+  });
+
+  it("returns job_active with activeJobIds when a claimed iteration job still holds the goal", async () => {
+    const dataDir = makeTempDir("momentum-cli-recovery-");
+    const { openDb } = await import("../src/db.js");
+    const { enqueueGoalIterationJob } = await import("../src/queue-jobs.js");
+    const { markGoalNeedsManualRecovery } = await import(
+      "../src/goal-recovery.js"
+    );
+
+    const db = openDb(dataDir);
+    let jobId: string;
+    try {
+      db.prepare(
+        `INSERT INTO goals
+           (id, title, branch, artifact_dir, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).run("g-stuck", "stuck goal", "momentum/test", "/tmp/test", 1, 1);
+      const enq = enqueueGoalIterationJob(db, {
+        goalId: "g-stuck",
+        iteration: 1,
+        idempotencyKey: "g-stuck:1",
+        artifactPath: "/tmp/test/g-stuck/iterations/1",
+        now: 1
+      });
+      jobId = enq.jobId;
+      db.prepare(
+        `UPDATE jobs SET state = 'claimed', worker_id = 'worker-x' WHERE id = ?`
+      ).run(jobId);
+      markGoalNeedsManualRecovery(db, {
+        goalId: "g-stuck",
+        reason: "repo_dirty",
+        now: 2
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "recovery", "clear", "g-stuck",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "recovery clear",
+      code: "job_active",
+      goalId: "g-stuck"
+    });
+    expect(payload["activeJobIds"]).toEqual([jobId]);
+  });
+
+  it("clears a flagged goal and surfaces the event id in JSON+text output", async () => {
+    const dataDir = makeTempDir("momentum-cli-recovery-");
+    const { openDb } = await import("../src/db.js");
+    const { markGoalNeedsManualRecovery } = await import(
+      "../src/goal-recovery.js"
+    );
+
+    const db = openDb(dataDir);
+    try {
+      db.prepare(
+        `INSERT INTO goals
+           (id, title, branch, artifact_dir, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).run(
+        "g-flagged",
+        "flagged goal",
+        "momentum/test",
+        "/tmp/test",
+        1,
+        1
+      );
+      markGoalNeedsManualRecovery(db, {
+        goalId: "g-flagged",
+        reason: "repo_dirty",
+        now: 1_700_000_000_000
+      });
+    } finally {
+      db.close();
+    }
+
+    const jsonResult = await run([
+      "recovery", "clear", "g-flagged",
+      "--reason", "operator inspected",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(jsonResult.code).toBe(0);
+    const payload = JSON.parse(jsonResult.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      command: "recovery clear",
+      goalId: "g-flagged",
+      previousReason: "repo_dirty",
+      previousMarkedAt: 1_700_000_000_000
+    });
+    expect(typeof payload["clearedAt"]).toBe("number");
+    expect(typeof payload["eventId"]).toBe("number");
+
+    // Reflagging is required to repeat the clear; second clear should now
+    // refuse with not_flagged.
+    const secondResult = await run([
+      "recovery", "clear", "g-flagged",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(secondResult.code).toBe(1);
+    const secondPayload = JSON.parse(secondResult.stderr) as Record<
+      string,
+      unknown
+    >;
+    expect(secondPayload).toMatchObject({
+      code: "not_flagged"
+    });
+
+    // Now re-flag and check the text path surfaces the audit-friendly fields.
+    const reflagDb = openDb(dataDir);
+    try {
+      markGoalNeedsManualRecovery(reflagDb, {
+        goalId: "g-flagged",
+        reason: "job_running",
+        now: 1_700_000_500_000
+      });
+    } finally {
+      reflagDb.close();
+    }
+
+    const textResult = await run([
+      "recovery", "clear", "g-flagged",
+      "--data-dir", dataDir
+    ]);
+    expect(textResult.code).toBe(0);
+    expect(textResult.stdout).toContain(
+      "Manual recovery cleared for goal: g-flagged"
+    );
+    expect(textResult.stdout).toContain("Previous reason: job_running");
+  });
+
+  it("help lists the new recovery clear command", async () => {
+    const result = await run(["--help"]);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(
+      "momentum recovery clear <goal-id> [--reason <text>] [--data-dir <path>] [--json]"
     );
   });
 });

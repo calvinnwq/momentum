@@ -43,6 +43,10 @@ import {
   type StaleRepoLockRecoverySkipped,
   type StartupRecoveryResult
 } from "./stale-recovery.js";
+import {
+  clearGoalManualRecoveryGuarded,
+  type ClearGoalManualRecoveryGuardedResult
+} from "./goal-recovery.js";
 
 export const VERSION = "0.0.0";
 
@@ -84,6 +88,7 @@ const COMMANDS = [
   "momentum daemon start [--max-loop-iterations <n>] [--max-idle-cycles <n>] [--poll-interval-ms <ms>] [--data-dir <path>] [--json]",
   "momentum daemon stop [--now] [--reason <text>] [--data-dir <path>] [--json]",
   "momentum daemon status [--data-dir <path>] [--json]",
+  "momentum recovery clear <goal-id> [--reason <text>] [--data-dir <path>] [--json]",
   "momentum doctor [--json]"
 ];
 
@@ -140,7 +145,139 @@ export async function runCli(argv: string[], io: CliIo = defaultIo()): Promise<n
     return daemon(parsed, io);
   }
 
+  if (command === "recovery") {
+    return recovery(parsed, io);
+  }
+
   return usageError(`Unknown command: ${command}`, parsed, io);
+}
+
+function recovery(parsed: ParsedFlags, io: CliIo): number {
+  const subcommand = parsed.args[1];
+  if (!subcommand) {
+    return usageError(
+      "Missing required subcommand for recovery. Expected: clear.",
+      parsed,
+      io
+    );
+  }
+  if (subcommand === "clear") {
+    return recoveryClear(parsed, io);
+  }
+  return usageError(`Unknown recovery subcommand: ${subcommand}`, parsed, io);
+}
+
+function recoveryClear(parsed: ParsedFlags, io: CliIo): number {
+  const goalId = parsed.args[2];
+  if (!goalId) {
+    return usageError(
+      "Missing required <goal-id> for recovery clear.",
+      parsed,
+      io
+    );
+  }
+  if (parsed.args.length > 3) {
+    return usageError(
+      `Unexpected argument for recovery clear: ${parsed.args[3]}`,
+      parsed,
+      io
+    );
+  }
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    const payload = {
+      ok: false,
+      command: "recovery clear",
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err),
+      goalId
+    };
+    if (parsed.json) {
+      writeJson(io.stderr, payload);
+      return 1;
+    }
+    write(io.stderr, `${payload.message}\n`);
+    return 1;
+  }
+
+  const db = openDb(dataDir);
+  let result: ClearGoalManualRecoveryGuardedResult;
+  try {
+    const input: Parameters<typeof clearGoalManualRecoveryGuarded>[1] = {
+      goalId
+    };
+    if (parsed.reason !== undefined && parsed.reason.length > 0) {
+      input.operatorReason = parsed.reason;
+    }
+    result = clearGoalManualRecoveryGuarded(db, input);
+  } finally {
+    db.close();
+  }
+
+  return emitRecoveryClear(parsed, io, dataDir, goalId, result);
+}
+
+function emitRecoveryClear(
+  parsed: ParsedFlags,
+  io: CliIo,
+  dataDir: string,
+  goalId: string,
+  result: ClearGoalManualRecoveryGuardedResult
+): number {
+  if (!result.ok) {
+    const payload: Record<string, unknown> = {
+      ok: false,
+      command: "recovery clear",
+      code: result.reason,
+      message: result.message,
+      goalId,
+      dataDir
+    };
+    if (result.reason === "job_active" && result.activeJobIds) {
+      payload["activeJobIds"] = result.activeJobIds;
+    }
+    if (parsed.json) {
+      writeJson(io.stderr, payload);
+      return 1;
+    }
+    write(io.stderr, `${result.message}\n`);
+    return 1;
+  }
+
+  const payload = {
+    ok: true,
+    command: "recovery clear",
+    goalId: result.goalId,
+    dataDir,
+    previousReason: result.previousReason,
+    previousMarkedAt: result.previousMarkedAt,
+    clearedAt: result.clearedAt,
+    eventId: result.eventId
+  };
+
+  if (parsed.json) {
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  const lines: string[] = [
+    `Manual recovery cleared for goal: ${result.goalId}`,
+    `Previous reason: ${result.previousReason ?? "(unset)"}`,
+    `Previous marked at: ${result.previousMarkedAt ?? "(unset)"}`,
+    `Cleared at: ${result.clearedAt}`,
+    `Event id: ${result.eventId}`,
+    `Data dir: ${dataDir}`,
+    ""
+  ];
+  write(io.stdout, lines.join("\n"));
+  return 0;
 }
 
 function daemon(parsed: ParsedFlags, io: CliIo): number | Promise<number> {
@@ -247,7 +384,8 @@ async function daemonStart(
     if (existing && loopRequested && isExistingDaemonRunStale(existing, now)) {
       runStartupRecovery(db, {
         now,
-        graceMs: DEFAULT_DAEMON_STARTUP_RECOVERY_GRACE_MS
+        graceMs: DEFAULT_DAEMON_STARTUP_RECOVERY_GRACE_MS,
+        dataDir
       });
       existing = getActiveDaemonRun(db);
     }
@@ -782,6 +920,7 @@ function emitDaemonStatus(
     staleRuns: data.staleRuns,
     staleRepoLocks: data.staleRepoLocks,
     staleClaimedJobs: data.staleClaimedJobs,
+    goalsNeedingRecovery: data.goalsNeedingRecovery,
     observedAt: data.observedAt
   };
 
@@ -800,6 +939,16 @@ function emitDaemonStatus(
     }
     if (data.staleClaimedJobs.length > 0) {
       noDaemonLines.push(`Stale claimed jobs: ${data.staleClaimedJobs.length}`);
+    }
+    if (data.goalsNeedingRecovery.length > 0) {
+      noDaemonLines.push(
+        `Goals needing manual recovery: ${data.goalsNeedingRecovery.length}`
+      );
+      for (const entry of data.goalsNeedingRecovery) {
+        noDaemonLines.push(
+          `  - ${entry.goalId} [${entry.goalState}] ${entry.recoveryMdPath}`
+        );
+      }
     }
     noDaemonLines.push("");
     write(io.stdout, noDaemonLines.join("\n"));
@@ -845,6 +994,16 @@ function emitDaemonStatus(
   }
   if (data.staleClaimedJobs.length > 0) {
     lines.push(`Stale claimed jobs: ${data.staleClaimedJobs.length}`);
+  }
+  if (data.goalsNeedingRecovery.length > 0) {
+    lines.push(
+      `Goals needing manual recovery: ${data.goalsNeedingRecovery.length}`
+    );
+    for (const entry of data.goalsNeedingRecovery) {
+      lines.push(
+        `  - ${entry.goalId} [${entry.goalState}] ${entry.recoveryMdPath}`
+      );
+    }
   }
   lines.push("");
   write(io.stdout, lines.join("\n"));
@@ -974,6 +1133,7 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
         staleRunCount: daemonStatus.staleRuns.length,
         staleRepoLockCount: daemonStatus.staleRepoLocks.length,
         staleClaimedJobCount: daemonStatus.staleClaimedJobs.length,
+        goalsNeedingRecoveryCount: daemonStatus.goalsNeedingRecovery.length,
         runId: daemonStatus.daemonRun?.runId ?? null
       }
     : {
@@ -989,7 +1149,7 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
     node: process.version,
     platform: process.platform,
     milestone:
-      "Milestone 3: operational safety (NGX-272, NGX-273, NGX-274, NGX-275, NGX-276)",
+      "Milestone 3: operational safety (NGX-272, NGX-273, NGX-274, NGX-275, NGX-276, NGX-277)",
     daemon: daemonPayload
   };
 
@@ -1026,6 +1186,11 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
     if (daemonPayload.staleClaimedJobCount > 0) {
       lines.push(
         `daemon stale claimed jobs: ${daemonPayload.staleClaimedJobCount}`
+      );
+    }
+    if (daemonPayload.goalsNeedingRecoveryCount > 0) {
+      lines.push(
+        `goals needing manual recovery: ${daemonPayload.goalsNeedingRecoveryCount}`
       );
     }
   } else {
@@ -1332,6 +1497,7 @@ function emitStatus(
       ledgerMd: data.artifactPaths.ledgerMd,
       handoffMd: data.artifactPaths.handoffMd,
       handoffJson: data.artifactPaths.handoffJson,
+      recoveryMd: data.artifactPaths.recoveryMd,
       promptMd: data.artifactPaths.promptMd,
       runnerLog: data.artifactPaths.runnerLog,
       verificationLog: data.artifactPaths.verificationLog,
