@@ -350,7 +350,34 @@ describe("requestDaemonRunImmediateStop", () => {
       const after = getDaemonRun(db, runId);
       expect(after?.stop_now_requested_at).toBe(200);
       expect(after?.stop_requested_at).toBe(200);
-      expect(after?.stop_reason).toBe("second");
+      expect(after?.stop_reason).toBe("first");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("preserves stop-now reason when a later graceful stop is requested", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { runId } = startDaemonRun(db, { now: 100 });
+      requestDaemonRunImmediateStop(db, {
+        runId,
+        reason: "now-reason",
+        now: 200
+      });
+      const out = requestDaemonRunStop(db, {
+        runId,
+        reason: "later-graceful",
+        now: 350
+      });
+      expect(out.ok).toBe(true);
+
+      const after = getDaemonRun(db, runId);
+      expect(after?.stop_now_requested_at).toBe(200);
+      expect(after?.stop_requested_at).toBe(200);
+      expect(after?.stop_reason).toBe("now-reason");
+      expect(after?.updated_at).toBe(350);
     } finally {
       db.close();
     }

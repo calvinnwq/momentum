@@ -151,8 +151,10 @@ export type RequestDaemonRunStopInput = {
 /**
  * Record an operator/automation stop request. The transition is one-way for
  * active states; terminal records are left alone so we never overwrite a
- * recorded shutdown outcome. Idempotent for runs already in `stop_requested`:
- * the reason and timestamp are refreshed without changing state.
+ * recorded shutdown outcome. Idempotent for graceful runs already in
+ * `stop_requested`: the reason is refreshed without changing state. Once an
+ * immediate stop is recorded, the reason is no longer mutable because it is the
+ * audited stop-now reason surfaced by status and handoff.
  */
 export function requestDaemonRunStop(
   db: MomentumDb,
@@ -168,7 +170,8 @@ export function requestDaemonRunStop(
       `UPDATE daemon_runs
          SET state = 'stop_requested',
              stop_requested_at = COALESCE(stop_requested_at, ?),
-             stop_reason = ?,
+             stop_reason = CASE WHEN stop_now_requested_at IS NULL
+               THEN ? ELSE stop_reason END,
              last_state_change_at = CASE WHEN state = 'stop_requested'
                THEN last_state_change_at ELSE ? END,
              updated_at = ?
@@ -191,8 +194,9 @@ export type RequestDaemonRunImmediateStopInput = {
  * the dedicated `stop_now_requested_at` marker so the daemon loop can detect
  * the upgrade between cycles, and so consumers can render either form without
  * a separate query. Idempotent for runs already requested-stop or
- * already-stop-now: subsequent calls refresh the reason but keep the earliest
- * timestamps. Terminal records are left alone.
+ * already-stop-now: subsequent calls keep the earliest timestamps. Once a
+ * stop-now request has been recorded, its reason is immutable because status
+ * and handoff expose the shared stop reason as stop-now audit context.
  */
 export function requestDaemonRunImmediateStop(
   db: MomentumDb,
@@ -209,7 +213,8 @@ export function requestDaemonRunImmediateStop(
          SET state = 'stop_requested',
              stop_requested_at = COALESCE(stop_requested_at, ?),
              stop_now_requested_at = COALESCE(stop_now_requested_at, ?),
-             stop_reason = ?,
+             stop_reason = CASE WHEN stop_now_requested_at IS NULL
+               THEN ? ELSE stop_reason END,
              last_state_change_at = CASE WHEN state = 'stop_requested'
                THEN last_state_change_at ELSE ? END,
              updated_at = ?

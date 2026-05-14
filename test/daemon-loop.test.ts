@@ -300,6 +300,47 @@ describe("runDaemonLoop", () => {
     }
   });
 
+  it("treats an already canceled stop-now run as terminal instead of a new stop-now request", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const runId = seedDaemonRun(db);
+      requestDaemonRunImmediateStop(db, {
+        runId,
+        reason: "operator-now",
+        now: 100_500
+      });
+      finishDaemonRun(db, {
+        runId,
+        terminalState: "canceled",
+        cancelOutcome: "idle",
+        now: 100_750
+      });
+
+      const result = await runDaemonLoop({
+        db,
+        dataDir,
+        runId,
+        workerId: "daemon-loop-terminal-canceled",
+        sleep: makeRecordingSleep().sleep,
+        now: makeMonotonicNow(),
+        runWorker: () => {
+          throw new Error("runWorker should not be called for terminal runs");
+        }
+      });
+
+      expect(result.exitReason).toBe("run_terminated");
+      expect(result.terminalState).toBe("canceled");
+      expect(result.cancelOutcome).toBe("idle");
+
+      const row = getDaemonRun(db, runId);
+      expect(row?.state).toBe("canceled");
+      expect(row?.finished_at).toBe(100_750);
+    } finally {
+      db.close();
+    }
+  });
+
   it("upgrades to canceled mid-loop with active_job_completed when a job ran first", async () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);

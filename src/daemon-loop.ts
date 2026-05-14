@@ -141,16 +141,16 @@ export async function runDaemonLoop(
         break;
       }
       lastObservedState = run.state;
+      if (isTerminalDaemonRunState(run.state)) {
+        exitReason = "run_terminated";
+        break;
+      }
       if (run.stop_now_requested_at !== null) {
         exitReason = "stop_now_requested";
         break;
       }
       if (run.state === "stop_requested") {
         exitReason = "stop_requested";
-        break;
-      }
-      if (isTerminalDaemonRunState(run.state)) {
-        exitReason = "run_terminated";
         break;
       }
 
@@ -256,6 +256,7 @@ export async function runDaemonLoop(
     terminalState = "error";
   } else if (exitReason === "run_terminated" && lastObservedState === "canceled") {
     terminalState = "canceled";
+    cancelOutcome = getDaemonRun(input.db, input.runId)?.cancel_outcome ?? null;
   } else if (exitReason === "run_terminated" && lastObservedState === "error") {
     terminalState = "error";
   } else if (exitReason === "stop_now_requested") {

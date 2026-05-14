@@ -2246,7 +2246,7 @@ Goal body.
     });
   });
 
-  it("daemon stop --now is idempotent and preserves the earliest stop_now_requested_at", async () => {
+  it("daemon stop --now is idempotent and preserves the first stop-now reason", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-stop-");
     const { openDb } = await import("../src/db.js");
     const { startDaemonRun, requestDaemonRunImmediateStop } = await import(
@@ -2286,12 +2286,12 @@ Goal body.
       immediate: true,
       alreadyStopNow: true,
       alreadyStopRequested: true,
-      stopReason: "second-now"
+      stopReason: "first-now"
     });
     expect(payload["stopNowRequestedAt"]).toBe(firstNowAt);
   });
 
-  it("daemon stop --now text output uses the refreshed headline on a repeat call", async () => {
+  it("daemon stop --now text output reports the preserved reason on a repeat call", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-stop-");
     const { openDb } = await import("../src/db.js");
     const { startDaemonRun, requestDaemonRunImmediateStop } = await import(
