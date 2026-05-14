@@ -159,6 +159,8 @@ describe("momentum CLI scaffold", () => {
       isActive: false,
       stale: false,
       staleRunCount: 0,
+      staleRepoLockCount: 0,
+      staleClaimedJobCount: 0,
       runId: null
     });
     expect(result.stderr).toBe("");
@@ -1754,6 +1756,154 @@ Goal body.
     expect(result.code).toBe(2);
     expect(result.stderr).toContain("Unexpected argument for daemon status");
     expect(result.stdout).toBe("");
+  });
+
+  it("daemon status surfaces stale repo locks and stale claimed jobs in JSON and text", async () => {
+    const dataDir = makeTempDir("momentum-cli-daemon-");
+    const { openDb } = await import("../src/db.js");
+    const { acquireRepoLock } = await import("../src/repo-locks.js");
+    const {
+      claimPendingGoalIterationJob,
+      enqueueGoalIterationJob
+    } = await import("../src/queue-jobs.js");
+    const db = openDb(dataDir);
+    let lockId: string;
+    let jobId: string;
+    try {
+      db.prepare(
+        `INSERT INTO goals
+           (id, title, branch, artifact_dir, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).run("g1", "test goal", "momentum/test", "/tmp/test", 1, 1);
+      const acquired = acquireRepoLock(db, {
+        repoRoot: "/tmp/repo",
+        holder: "worker-a",
+        goalId: "g1",
+        iteration: 1,
+        jobId: "preexisting-job",
+        leaseExpiresAt: 1_000,
+        now: 500
+      });
+      if (!acquired.ok) throw new Error("seed lock did not acquire");
+      lockId = acquired.lockId;
+
+      enqueueGoalIterationJob(db, {
+        goalId: "g1",
+        iteration: 1,
+        idempotencyKey: "g1:1",
+        artifactPath: "/tmp/test/iterations/1",
+        now: 100
+      });
+      const claimed = claimPendingGoalIterationJob(db, {
+        workerId: "worker-b",
+        leaseDurationMs: 1_000,
+        now: 200
+      });
+      if (!claimed.ok) throw new Error("seed claim failed");
+      jobId = claimed.job.id;
+    } finally {
+      db.close();
+    }
+
+    const jsonResult = await run([
+      "daemon", "status",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(jsonResult.code).toBe(0);
+    const payload = JSON.parse(jsonResult.stdout) as Record<string, unknown>;
+    expect(typeof payload["staleLeaseGraceMs"]).toBe("number");
+    const staleLocks = payload["staleRepoLocks"] as Array<Record<string, unknown>>;
+    expect(staleLocks).toHaveLength(1);
+    expect(staleLocks[0]).toMatchObject({
+      lockId,
+      repoRoot: "/tmp/repo",
+      holder: "worker-a",
+      goalId: "g1",
+      iteration: 1,
+      jobId: "preexisting-job",
+      state: "active",
+      leaseExpiresAt: 1_000
+    });
+    const staleJobs = payload["staleClaimedJobs"] as Array<Record<string, unknown>>;
+    expect(staleJobs).toHaveLength(1);
+    expect(staleJobs[0]).toMatchObject({
+      jobId,
+      goalId: "g1",
+      iteration: 1,
+      state: "claimed",
+      attemptCount: 1,
+      workerId: "worker-b",
+      leaseAcquiredAt: 200,
+      leaseExpiresAt: 1_200
+    });
+
+    const textResult = await run([
+      "daemon", "status",
+      "--data-dir", dataDir
+    ]);
+    expect(textResult.code).toBe(0);
+    expect(textResult.stdout).toContain("Stale repo locks: 1");
+    expect(textResult.stdout).toContain("Stale claimed jobs: 1");
+  });
+
+  it("doctor --json surfaces stale repo-lock and claimed-job counts", async () => {
+    const dataDir = makeTempDir("momentum-cli-doctor-stale-");
+    const { openDb } = await import("../src/db.js");
+    const { acquireRepoLock } = await import("../src/repo-locks.js");
+    const {
+      claimPendingGoalIterationJob,
+      enqueueGoalIterationJob
+    } = await import("../src/queue-jobs.js");
+    const db = openDb(dataDir);
+    try {
+      db.prepare(
+        `INSERT INTO goals
+           (id, title, branch, artifact_dir, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).run("g1", "test goal", "momentum/test", "/tmp/test", 1, 1);
+      const acquired = acquireRepoLock(db, {
+        repoRoot: "/tmp/repo",
+        holder: "worker-a",
+        goalId: "g1",
+        iteration: 1,
+        jobId: "preexisting-job",
+        leaseExpiresAt: 1_000,
+        now: 500
+      });
+      if (!acquired.ok) throw new Error("seed lock did not acquire");
+      enqueueGoalIterationJob(db, {
+        goalId: "g1",
+        iteration: 1,
+        idempotencyKey: "g1:1",
+        artifactPath: "/tmp/test/iterations/1",
+        now: 100
+      });
+      const claimed = claimPendingGoalIterationJob(db, {
+        workerId: "worker-b",
+        leaseDurationMs: 1_000,
+        now: 200
+      });
+      if (!claimed.ok) throw new Error("seed claim failed");
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "doctor",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    const daemon = payload["daemon"] as Record<string, unknown>;
+    expect(daemon).toMatchObject({
+      ok: true,
+      hasRun: false,
+      staleRunCount: 0,
+      staleRepoLockCount: 1,
+      staleClaimedJobCount: 1
+    });
   });
 
   it("daemon start records a new orchestrator run and exits 0 (json)", async () => {

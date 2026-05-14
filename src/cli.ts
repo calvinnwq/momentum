@@ -717,7 +717,10 @@ function emitDaemonStatus(
     daemonRun: data.daemonRun,
     staleAfterMs: data.staleAfterMs,
     activeJobStaleAfterMs: data.activeJobStaleAfterMs,
+    staleLeaseGraceMs: data.staleLeaseGraceMs,
     staleRuns: data.staleRuns,
+    staleRepoLocks: data.staleRepoLocks,
+    staleClaimedJobs: data.staleClaimedJobs,
     observedAt: data.observedAt
   };
 
@@ -727,11 +730,18 @@ function emitDaemonStatus(
   }
 
   if (!data.daemonRun) {
-    write(io.stdout, [
+    const noDaemonLines: string[] = [
       "Daemon: never started",
-      `Data dir: ${data.dataDir}`,
-      ""
-    ].join("\n"));
+      `Data dir: ${data.dataDir}`
+    ];
+    if (data.staleRepoLocks.length > 0) {
+      noDaemonLines.push(`Stale repo locks: ${data.staleRepoLocks.length}`);
+    }
+    if (data.staleClaimedJobs.length > 0) {
+      noDaemonLines.push(`Stale claimed jobs: ${data.staleClaimedJobs.length}`);
+    }
+    noDaemonLines.push("");
+    write(io.stdout, noDaemonLines.join("\n"));
     return 0;
   }
 
@@ -768,6 +778,12 @@ function emitDaemonStatus(
   }
   if (data.staleRuns.length > 0) {
     lines.push(`Stale runs: ${data.staleRuns.length}`);
+  }
+  if (data.staleRepoLocks.length > 0) {
+    lines.push(`Stale repo locks: ${data.staleRepoLocks.length}`);
+  }
+  if (data.staleClaimedJobs.length > 0) {
+    lines.push(`Stale claimed jobs: ${data.staleClaimedJobs.length}`);
   }
   lines.push("");
   write(io.stdout, lines.join("\n"));
@@ -863,6 +879,8 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
         isActive: daemonStatus.daemonRun?.isActive ?? false,
         stale: daemonStatus.daemonRun?.stale ?? false,
         staleRunCount: daemonStatus.staleRuns.length,
+        staleRepoLockCount: daemonStatus.staleRepoLocks.length,
+        staleClaimedJobCount: daemonStatus.staleClaimedJobs.length,
         runId: daemonStatus.daemonRun?.runId ?? null
       }
     : {
@@ -906,6 +924,16 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
     }
     if (daemonPayload.staleRunCount > 0) {
       lines.push(`daemon stale runs: ${daemonPayload.staleRunCount}`);
+    }
+    if (daemonPayload.staleRepoLockCount > 0) {
+      lines.push(
+        `daemon stale repo locks: ${daemonPayload.staleRepoLockCount}`
+      );
+    }
+    if (daemonPayload.staleClaimedJobCount > 0) {
+      lines.push(
+        `daemon stale claimed jobs: ${daemonPayload.staleClaimedJobCount}`
+      );
     }
   } else {
     lines.push(`daemon: error (${daemonPayload.code})`);

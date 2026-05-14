@@ -296,7 +296,7 @@ JSON envelope shape:
 momentum daemon status [--data-dir <path>] [--json]
 ```
 
-Read-only inspector for `daemon_runs`. Selects the active record if one exists; otherwise falls back to the most recently started run so operators can see terminal/error state. When no daemon has ever started, exits 0 with `hasRun: false` (text mode: `Daemon: never started`). The summary surfaces `runId`, `pid`, `host`, `state`, `isActive`, `isTerminal`, `startedAt`, `heartbeatAt`, `lastStateChangeAt`, `finishedAt`, `ageMs`, `heartbeatAgeMs`, `stale`, `staleAfterMs` (90s default heartbeat cutoff, or `activeJobStaleAfterMs` while an active job is recorded), `activeJobStaleAfterMs` (930s default), `activeJob` (`{jobId, lockId}`), `stopRequest` (`{requestedAt, reason}` or `null`), `stopNowRequest` (`{requestedAt, reason}` or `null`), `cancelOutcome` (`{outcome}` or `null`), `reconciliation` (`{count, lastReconciledAt}`), `error` (`{message, at}` or `null`), and `updatedAt`. Stale records are flagged but not auto-recovered.
+Read-only inspector for `daemon_runs`. Selects the active record if one exists; otherwise falls back to the most recently started run so operators can see terminal/error state. When no daemon has ever started, exits 0 with `hasRun: false` (text mode: `Daemon: never started`). The summary surfaces `runId`, `pid`, `host`, `state`, `isActive`, `isTerminal`, `startedAt`, `heartbeatAt`, `lastStateChangeAt`, `finishedAt`, `ageMs`, `heartbeatAgeMs`, `stale`, `staleAfterMs` (90s default heartbeat cutoff, or `activeJobStaleAfterMs` while an active job is recorded), `activeJobStaleAfterMs` (930s default), `activeJob` (`{jobId, lockId}`), `stopRequest` (`{requestedAt, reason}` or `null`), `stopNowRequest` (`{requestedAt, reason}` or `null`), `cancelOutcome` (`{outcome}` or `null`), `reconciliation` (`{count, lastReconciledAt}`), `error` (`{message, at}` or `null`), and `updatedAt`. Stale records are flagged but not auto-recovered. The envelope also lists `staleRepoLocks` (active repo locks whose `lease_expires_at` is in the past) and `staleClaimedJobs` (claimed/running `goal_iteration` jobs whose lease has lapsed), tolerating up to `staleLeaseGraceMs` (5s default) of clock skew. These lists are read-only signals for the auto-recovery slice that follows; no lock release or job requeue is triggered by reading them.
 
 JSON envelope shape (active run with no stop request or error):
 
@@ -332,7 +332,10 @@ JSON envelope shape (active run with no stop request or error):
   },
   "staleAfterMs": 90000,
   "activeJobStaleAfterMs": 930000,
+  "staleLeaseGraceMs": 5000,
   "staleRuns": [],
+  "staleRepoLocks": [],
+  "staleClaimedJobs": [],
   "observedAt": 1731500000000
 }
 ```
@@ -343,7 +346,7 @@ JSON envelope shape (active run with no stop request or error):
 momentum doctor [--json]
 ```
 
-Reports CLI version, Node.js version, platform, the current milestone scope label (`Milestone 3: managed daemon loop for queued jobs (NGX-272, NGX-273)`), and a compact daemon-readiness block read from `daemon_runs` (`{ok, dataDir, hasRun, state, isActive, stale, staleRunCount, runId}` on success, `{ok: false, code, message}` on failure). Useful as a first sanity check after install and as a quick orchestrator-health probe.
+Reports CLI version, Node.js version, platform, the current milestone scope label (`Milestone 3: managed daemon loop for queued jobs (NGX-272, NGX-273)`), and a compact daemon-readiness block read from `daemon_runs` (`{ok, dataDir, hasRun, state, isActive, stale, staleRunCount, staleRepoLockCount, staleClaimedJobCount, runId}` on success, `{ok: false, code, message}` on failure). The two stale-lease counts surface orphaned repo locks and claimed jobs whose lease expired more than `staleLeaseGraceMs` ago, so a single command reveals whether the orchestrator has work that needs manual recovery. Useful as a first sanity check after install and as a quick orchestrator-health probe.
 
 ## Data Directory
 

@@ -10,6 +10,16 @@ import {
   type DaemonRunRow,
   type DaemonRunState
 } from "./daemon-runs.js";
+import {
+  listStaleClaimedGoalIterationJobs,
+  type QueueJobRow,
+  type QueueJobState
+} from "./queue-jobs.js";
+import {
+  listStaleRepoLocks,
+  type RepoLockRow,
+  type RepoLockState
+} from "./repo-locks.js";
 
 /**
  * Default cutoff between "active" and "stale" for daemon heartbeat surfaces.
@@ -18,6 +28,15 @@ import {
  */
 export const DEFAULT_DAEMON_STALE_AFTER_MS = 90_000;
 export const DEFAULT_DAEMON_ACTIVE_JOB_STALE_AFTER_MS = 930_000;
+
+/**
+ * Grace window applied when listing stale repo locks / queue claims. The lease
+ * deadline is the contract, so once `lease_expires_at` has passed the holder
+ * has lost authority; the grace tolerates small clock skew between the worker
+ * that wrote the lease and the inspector reading it back. Surfaces only — no
+ * recovery action is taken when a row crosses this threshold.
+ */
+export const DEFAULT_STALE_LEASE_GRACE_MS = 5_000;
 
 export type DaemonStatusErrorCode = "invalid_input" | "data_dir_failed";
 
@@ -81,6 +100,33 @@ export type DaemonStatusRunSummary = {
   updatedAt: number;
 };
 
+export type DaemonStatusStaleRepoLock = {
+  lockId: string;
+  repoRoot: string;
+  holder: string;
+  goalId: string;
+  iteration: number;
+  jobId: string;
+  state: RepoLockState;
+  acquiredAt: number;
+  heartbeatAt: number;
+  leaseExpiresAt: number;
+  leaseExpiredAgeMs: number;
+};
+
+export type DaemonStatusStaleClaimedJob = {
+  jobId: string;
+  goalId: string;
+  iteration: number;
+  state: QueueJobState;
+  attemptCount: number;
+  workerId: string | null;
+  leaseAcquiredAt: number | null;
+  leaseExpiresAt: number;
+  heartbeatAt: number | null;
+  leaseExpiredAgeMs: number;
+};
+
 export type DaemonStatusSuccess = {
   ok: true;
   dataDir: string;
@@ -88,7 +134,10 @@ export type DaemonStatusSuccess = {
   daemonRun: DaemonStatusRunSummary | null;
   staleAfterMs: number;
   activeJobStaleAfterMs: number;
+  staleLeaseGraceMs: number;
   staleRuns: DaemonStatusRunSummary[];
+  staleRepoLocks: DaemonStatusStaleRepoLock[];
+  staleClaimedJobs: DaemonStatusStaleClaimedJob[];
   observedAt: number;
 };
 
@@ -98,6 +147,7 @@ export type LoadDaemonStatusInput = {
   dataDirOptions: DataDirOptions;
   staleAfterMs?: number;
   activeJobStaleAfterMs?: number;
+  staleLeaseGraceMs?: number;
   now?: number;
 };
 
@@ -113,6 +163,8 @@ export function loadDaemonStatus(
   const staleAfterMs = input.staleAfterMs ?? DEFAULT_DAEMON_STALE_AFTER_MS;
   const activeJobStaleAfterMs =
     input.activeJobStaleAfterMs ?? DEFAULT_DAEMON_ACTIVE_JOB_STALE_AFTER_MS;
+  const staleLeaseGraceMs =
+    input.staleLeaseGraceMs ?? DEFAULT_STALE_LEASE_GRACE_MS;
   if (!Number.isFinite(staleAfterMs) || staleAfterMs <= 0) {
     return {
       ok: false,
@@ -128,6 +180,13 @@ export function loadDaemonStatus(
       ok: false,
       code: "invalid_input",
       error: `activeJobStaleAfterMs must be a positive number, got ${activeJobStaleAfterMs}`
+    };
+  }
+  if (!Number.isFinite(staleLeaseGraceMs) || staleLeaseGraceMs < 0) {
+    return {
+      ok: false,
+      code: "invalid_input",
+      error: `staleLeaseGraceMs must be a non-negative number, got ${staleLeaseGraceMs}`
     };
   }
 
@@ -172,6 +231,15 @@ export function loadDaemonStatus(
       })
     );
 
+    const staleRepoLocks = listStaleRepoLocks(db, {
+      now,
+      graceMs: staleLeaseGraceMs
+    }).map((row) => summarizeStaleRepoLock(row, now));
+    const staleClaimedJobs = listStaleClaimedGoalIterationJobs(db, {
+      now,
+      graceMs: staleLeaseGraceMs
+    }).map((row) => summarizeStaleClaimedJob(row, now));
+
     return {
       ok: true,
       dataDir,
@@ -179,7 +247,10 @@ export function loadDaemonStatus(
       daemonRun,
       staleAfterMs,
       activeJobStaleAfterMs,
+      staleLeaseGraceMs,
       staleRuns,
+      staleRepoLocks,
+      staleClaimedJobs,
       observedAt: now
     };
   } catch (err) {
@@ -191,6 +262,44 @@ export function loadDaemonStatus(
   } finally {
     db?.close();
   }
+}
+
+function summarizeStaleRepoLock(
+  row: RepoLockRow,
+  now: number
+): DaemonStatusStaleRepoLock {
+  return {
+    lockId: row.id,
+    repoRoot: row.repo_root,
+    holder: row.holder,
+    goalId: row.goal_id,
+    iteration: row.iteration,
+    jobId: row.job_id,
+    state: row.state,
+    acquiredAt: row.acquired_at,
+    heartbeatAt: row.heartbeat_at,
+    leaseExpiresAt: row.lease_expires_at,
+    leaseExpiredAgeMs: Math.max(0, now - row.lease_expires_at)
+  };
+}
+
+function summarizeStaleClaimedJob(
+  row: QueueJobRow,
+  now: number
+): DaemonStatusStaleClaimedJob {
+  const leaseExpiresAt = row.lease_expires_at ?? 0;
+  return {
+    jobId: row.id,
+    goalId: row.goal_id,
+    iteration: row.iteration,
+    state: row.state,
+    attemptCount: row.attempt_count,
+    workerId: row.worker_id,
+    leaseAcquiredAt: row.lease_acquired_at,
+    leaseExpiresAt,
+    heartbeatAt: row.heartbeat_at,
+    leaseExpiredAgeMs: Math.max(0, now - leaseExpiresAt)
+  };
 }
 
 function summarizeRow(
