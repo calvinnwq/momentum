@@ -135,6 +135,44 @@ export function releaseRepoLock(
   return { ok: Number(result.changes) > 0 };
 }
 
+export type ListStaleRepoLocksInput = {
+  now: number;
+  graceMs?: number;
+};
+
+/**
+ * Return active repo locks whose `lease_expires_at` is older than `now` (minus
+ * an optional `graceMs` tolerance for small clock skew). The lease deadline is
+ * the contract between worker and lock; once it has passed, the holder no
+ * longer owns the lock and the row is a candidate for stale-lease recovery.
+ * This helper is read-only — M3-05 surfaces stale locks deterministically but
+ * leaves recovery decisions to higher-level orchestrator slices that can
+ * verify repo state, holder liveness, and metadata invariants first.
+ */
+export function listStaleRepoLocks(
+  db: MomentumDb,
+  input: ListStaleRepoLocksInput
+): RepoLockRow[] {
+  if (!Number.isFinite(input.now)) {
+    throw new Error("listStaleRepoLocks: now must be a finite number");
+  }
+  const graceMs = input.graceMs ?? 0;
+  if (!Number.isFinite(graceMs) || graceMs < 0) {
+    throw new Error(
+      "listStaleRepoLocks: graceMs must be a non-negative finite number"
+    );
+  }
+  const cutoff = input.now - graceMs;
+  return db
+    .prepare(
+      `SELECT * FROM repo_locks
+       WHERE state = 'active'
+         AND lease_expires_at < ?
+       ORDER BY lease_expires_at ASC, id ASC`
+    )
+    .all(cutoff) as RepoLockRow[];
+}
+
 export function getActiveRepoLock(
   db: MomentumDb,
   repoRoot: string

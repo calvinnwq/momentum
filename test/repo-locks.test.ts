@@ -8,6 +8,7 @@ import {
   acquireRepoLock,
   getActiveRepoLock,
   getRepoLock,
+  listStaleRepoLocks,
   releaseRepoLock,
   updateRepoLockHeartbeat
 } from "../src/repo-locks.js";
@@ -271,6 +272,150 @@ describe("acquireRepoLock", () => {
       expect(() =>
         acquireRepoLock(db, { ...base, leaseExpiresAt: 0 })
       ).toThrow(/leaseExpiresAt/);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("listStaleRepoLocks", () => {
+  it("returns active locks whose lease has expired", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const acquired = acquireRepoLock(db, {
+        repoRoot: REPO_ROOT,
+        holder: "worker-a",
+        goalId: "g1",
+        iteration: 1,
+        jobId: "j1",
+        leaseExpiresAt: 1_000,
+        now: 100
+      });
+      expect(acquired.ok).toBe(true);
+
+      const stale = listStaleRepoLocks(db, { now: 2_000 });
+      expect(stale.map((row) => row.repo_root)).toEqual([REPO_ROOT]);
+      expect(stale[0]?.state).toBe("active");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("excludes active locks whose lease is still in the future", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      acquireRepoLock(db, {
+        repoRoot: REPO_ROOT,
+        holder: "worker-a",
+        goalId: "g1",
+        iteration: 1,
+        jobId: "j1",
+        leaseExpiresAt: 10_000,
+        now: 100
+      });
+      expect(listStaleRepoLocks(db, { now: 5_000 })).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("excludes released locks even if the lease window is in the past", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const acquired = acquireRepoLock(db, {
+        repoRoot: REPO_ROOT,
+        holder: "worker-a",
+        goalId: "g1",
+        iteration: 1,
+        jobId: "j1",
+        leaseExpiresAt: 1_000,
+        now: 100
+      });
+      expect(acquired.ok).toBe(true);
+      if (!acquired.ok) return;
+      releaseRepoLock(db, { lockId: acquired.lockId, now: 500 });
+
+      expect(listStaleRepoLocks(db, { now: 9_000 })).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("orders multiple stale locks by lease_expires_at ascending", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      acquireRepoLock(db, {
+        repoRoot: "/tmp/repo-a",
+        holder: "worker-a",
+        goalId: "g1",
+        iteration: 1,
+        jobId: "j1",
+        leaseExpiresAt: 2_000,
+        now: 100
+      });
+      acquireRepoLock(db, {
+        repoRoot: "/tmp/repo-b",
+        holder: "worker-b",
+        goalId: "g2",
+        iteration: 1,
+        jobId: "j2",
+        leaseExpiresAt: 1_000,
+        now: 100
+      });
+
+      const stale = listStaleRepoLocks(db, { now: 5_000 });
+      expect(stale.map((row) => row.repo_root)).toEqual([
+        "/tmp/repo-b",
+        "/tmp/repo-a"
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("supports an optional graceMs to tolerate small clock skew", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      acquireRepoLock(db, {
+        repoRoot: REPO_ROOT,
+        holder: "worker-a",
+        goalId: "g1",
+        iteration: 1,
+        jobId: "j1",
+        leaseExpiresAt: 1_000,
+        now: 100
+      });
+      expect(
+        listStaleRepoLocks(db, { now: 1_500, graceMs: 1_000 })
+      ).toEqual([]);
+      const stale = listStaleRepoLocks(db, {
+        now: 3_000,
+        graceMs: 1_000
+      });
+      expect(stale.map((row) => row.repo_root)).toEqual([REPO_ROOT]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("validates now and graceMs inputs", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      expect(() =>
+        listStaleRepoLocks(db, { now: Number.NaN })
+      ).toThrow(/now/);
+      expect(() =>
+        listStaleRepoLocks(db, { now: 100, graceMs: -1 })
+      ).toThrow(/graceMs/);
+      expect(() =>
+        listStaleRepoLocks(db, { now: 100, graceMs: Number.NaN })
+      ).toThrow(/graceMs/);
     } finally {
       db.close();
     }

@@ -361,6 +361,46 @@ export function releaseClaimedGoalIterationJob(
   return { ok: true, job: released };
 }
 
+export type ListStaleClaimedGoalIterationJobsInput = {
+  now: number;
+  graceMs?: number;
+};
+
+/**
+ * Return `goal_iteration` jobs in `claimed` or `running` state whose
+ * `lease_expires_at` is older than `now` (minus an optional `graceMs`
+ * tolerance for clock skew). The lease is the worker's contract; once it
+ * lapses, the claim is a candidate for stale-lease recovery. M3-05 keeps
+ * detection read-only here so higher-level orchestrator slices can decide
+ * whether a stale claim is safe to requeue (e.g. repo is clean, no other
+ * worker is heartbeating, metadata invariants hold).
+ */
+export function listStaleClaimedGoalIterationJobs(
+  db: MomentumDb,
+  input: ListStaleClaimedGoalIterationJobsInput
+): QueueJobRow[] {
+  if (!Number.isFinite(input.now)) {
+    throw new Error("listStaleClaimedGoalIterationJobs: now must be a finite number");
+  }
+  const graceMs = input.graceMs ?? 0;
+  if (!Number.isFinite(graceMs) || graceMs < 0) {
+    throw new Error(
+      "listStaleClaimedGoalIterationJobs: graceMs must be a non-negative finite number"
+    );
+  }
+  const cutoff = input.now - graceMs;
+  return db
+    .prepare(
+      `SELECT * FROM jobs
+       WHERE type = ?
+         AND state IN ('claimed', 'running')
+         AND lease_expires_at IS NOT NULL
+         AND lease_expires_at < ?
+       ORDER BY lease_expires_at ASC, id ASC`
+    )
+    .all(GOAL_ITERATION_JOB_TYPE, cutoff) as QueueJobRow[];
+}
+
 export function getQueueJob(
   db: MomentumDb,
   jobId: string

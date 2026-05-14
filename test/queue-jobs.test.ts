@@ -11,6 +11,7 @@ import {
   getJobByIdempotencyKey,
   getQueueJob,
   heartbeatGoalIterationJob,
+  listStaleClaimedGoalIterationJobs,
   releaseClaimedGoalIterationJob
 } from "../src/queue-jobs.js";
 import {
@@ -933,6 +934,219 @@ describe("releaseClaimedGoalIterationJob", () => {
       expect(() =>
         releaseClaimedGoalIterationJob(db, { ...base, reason: "" })
       ).toThrow(/reason/);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("listStaleClaimedGoalIterationJobs", () => {
+  it("returns claimed/running jobs whose lease has expired", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedGoal(db);
+      const enq = enqueueGoalIterationJob(db, {
+        goalId: "g1",
+        iteration: 1,
+        idempotencyKey: "g1:1",
+        artifactPath: "/tmp/test/iterations/1",
+        now: 100
+      });
+      const claim = claimPendingGoalIterationJob(db, {
+        workerId: "worker-a",
+        leaseDurationMs: 1_000,
+        now: 200
+      });
+      expect(claim.ok).toBe(true);
+      if (!claim.ok) return;
+
+      const stale = listStaleClaimedGoalIterationJobs(db, { now: 5_000 });
+      expect(stale.map((row) => row.id)).toEqual([enq.jobId]);
+      expect(stale[0]?.state).toBe("claimed");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("excludes claimed jobs whose lease is still in the future", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedGoal(db);
+      enqueueGoalIterationJob(db, {
+        goalId: "g1",
+        iteration: 1,
+        idempotencyKey: "g1:1",
+        artifactPath: "/tmp/test/iterations/1",
+        now: 100
+      });
+      claimPendingGoalIterationJob(db, {
+        workerId: "worker-a",
+        leaseDurationMs: 10_000,
+        now: 200
+      });
+
+      expect(
+        listStaleClaimedGoalIterationJobs(db, { now: 5_000 })
+      ).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("excludes pending, succeeded, and failed jobs even with ancient lease metadata", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedGoal(db);
+      // Pending job — never claimed, no lease metadata.
+      enqueueGoalIterationJob(db, {
+        goalId: "g1",
+        iteration: 1,
+        idempotencyKey: "g1:1",
+        artifactPath: "/tmp/test/iterations/1",
+        now: 100
+      });
+      // Insert a synthetic succeeded job with a long-expired lease to confirm
+      // the helper only considers in-flight claims, not terminal records.
+      db.prepare(
+        `INSERT INTO jobs
+           (id, goal_id, type, iteration, state, attempt_count,
+            artifact_path, idempotency_key,
+            worker_id, lease_acquired_at, lease_expires_at, heartbeat_at,
+            created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'succeeded', 1, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        "succeeded-job",
+        "g1",
+        GOAL_ITERATION_JOB_TYPE,
+        2,
+        "/tmp/test/iterations/2",
+        "g1:2",
+        "worker-a",
+        50,
+        100,
+        80,
+        50,
+        100
+      );
+
+      expect(
+        listStaleClaimedGoalIterationJobs(db, { now: 1_000_000 })
+      ).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("orders multiple stale claims by lease_expires_at ascending", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedGoal(db);
+      // Two synthetic claimed jobs with different lease windows.
+      db.prepare(
+        `INSERT INTO jobs
+           (id, goal_id, type, iteration, state, attempt_count,
+            artifact_path, idempotency_key,
+            worker_id, lease_acquired_at, lease_expires_at, heartbeat_at,
+            created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'claimed', 1, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        "job-a",
+        "g1",
+        GOAL_ITERATION_JOB_TYPE,
+        1,
+        "/tmp/test/iterations/1",
+        "g1:1",
+        "worker-a",
+        100,
+        2_000,
+        150,
+        100,
+        150
+      );
+      db.prepare(
+        `INSERT INTO jobs
+           (id, goal_id, type, iteration, state, attempt_count,
+            artifact_path, idempotency_key,
+            worker_id, lease_acquired_at, lease_expires_at, heartbeat_at,
+            created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'claimed', 1, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        "job-b",
+        "g1",
+        GOAL_ITERATION_JOB_TYPE,
+        2,
+        "/tmp/test/iterations/2",
+        "g1:2",
+        "worker-b",
+        100,
+        1_000,
+        150,
+        100,
+        150
+      );
+
+      const stale = listStaleClaimedGoalIterationJobs(db, { now: 5_000 });
+      expect(stale.map((row) => row.id)).toEqual(["job-b", "job-a"]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("supports an optional graceMs to tolerate small clock skew", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedGoal(db);
+      enqueueGoalIterationJob(db, {
+        goalId: "g1",
+        iteration: 1,
+        idempotencyKey: "g1:1",
+        artifactPath: "/tmp/test/iterations/1",
+        now: 100
+      });
+      claimPendingGoalIterationJob(db, {
+        workerId: "worker-a",
+        leaseDurationMs: 1_000,
+        now: 200
+      });
+
+      // lease_expires_at == 1_200. With graceMs 5_000 and now 2_000, still not stale.
+      expect(
+        listStaleClaimedGoalIterationJobs(db, {
+          now: 2_000,
+          graceMs: 5_000
+        })
+      ).toEqual([]);
+      const stale = listStaleClaimedGoalIterationJobs(db, {
+        now: 10_000,
+        graceMs: 5_000
+      });
+      expect(stale).toHaveLength(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("validates now and graceMs inputs", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      expect(() =>
+        listStaleClaimedGoalIterationJobs(db, { now: Number.NaN })
+      ).toThrow(/now/);
+      expect(() =>
+        listStaleClaimedGoalIterationJobs(db, { now: 100, graceMs: -1 })
+      ).toThrow(/graceMs/);
+      expect(() =>
+        listStaleClaimedGoalIterationJobs(db, {
+          now: 100,
+          graceMs: Number.NaN
+        })
+      ).toThrow(/graceMs/);
     } finally {
       db.close();
     }
