@@ -55,6 +55,18 @@ function seedGoal(db: MomentumDb, id = "g1"): void {
   ).run(id, "test goal", "momentum/test", "/tmp/test", 1, 1);
 }
 
+function seedGoalWithRepo(
+  db: MomentumDb,
+  id: string,
+  repo: string
+): void {
+  db.prepare(
+    `INSERT INTO goals
+       (id, title, repo, branch, artifact_dir, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run(id, "test goal", repo, "momentum/test", "/tmp/test", 1, 1);
+}
+
 function setJobState(db: MomentumDb, jobId: string, state: QueueJobState): void {
   db.prepare(`UPDATE jobs SET state = ?, updated_at = updated_at WHERE id = ?`).run(
     state,
@@ -738,6 +750,209 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
     }
   });
 
+  it("refuses to recover when the goal's repo has a dirty worktree", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedGoalWithRepo(db, "g1", "/tmp/repo-a");
+      const { jobId } = seedClaimedIteration(db, {
+        leaseDurationMs: 900,
+        claimAt: 100
+      });
+      const inspectRepoState = (repoRoot: string) => {
+        expect(repoRoot).toBe("/tmp/repo-a");
+        return {
+          ok: false as const,
+          code: "dirty_worktree" as const,
+          error: "Repo has uncommitted changes: /tmp/repo-a"
+        };
+      };
+
+      const out = recoverStaleClaimedGoalIterationJobs(db, {
+        now: 5_000,
+        inspectRepoState
+      });
+      expect(out.recovered).toEqual([]);
+      expect(out.skipped).toHaveLength(1);
+      const skipped = out.skipped[0]!;
+      expect(skipped.job.id).toBe(jobId);
+      expect(skipped.reason).toBe("repo_dirty");
+      expect(skipped.repoRoot).toBe("/tmp/repo-a");
+      expect(skipped.repoInspectionError).toBe(
+        "Repo has uncommitted changes: /tmp/repo-a"
+      );
+
+      // Job stays claimed; no recovery event emitted.
+      const stored = getQueueJob(db, jobId);
+      expect(stored?.state).toBe("claimed");
+      const events = db
+        .prepare("SELECT count(*) AS c FROM events WHERE type = 'job.recovered'")
+        .get() as { c: number };
+      expect(events.c).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses to recover when the goal's repo HEAD cannot be resolved", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedGoalWithRepo(db, "g1", "/tmp/repo-a");
+      const { jobId } = seedClaimedIteration(db, {
+        leaseDurationMs: 900,
+        claimAt: 100
+      });
+      const inspectRepoState = () => ({
+        ok: false as const,
+        code: "no_head" as const,
+        error: "Repo has no HEAD commit: /tmp/repo-a"
+      });
+
+      const out = recoverStaleClaimedGoalIterationJobs(db, {
+        now: 5_000,
+        inspectRepoState
+      });
+      expect(out.recovered).toEqual([]);
+      expect(out.skipped).toHaveLength(1);
+      expect(out.skipped[0]!.reason).toBe("repo_unknown_commit");
+      expect(out.skipped[0]!.repoRoot).toBe("/tmp/repo-a");
+      expect(getQueueJob(db, jobId)?.state).toBe("claimed");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses to recover when the goal's repo path is missing or not a git repo", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedGoalWithRepo(db, "g1", "/tmp/repo-missing");
+      const { jobId } = seedClaimedIteration(db, {
+        leaseDurationMs: 900,
+        claimAt: 100
+      });
+      const inspectRepoState = () => ({
+        ok: false as const,
+        code: "missing" as const,
+        error: "Repo path does not exist: /tmp/repo-missing"
+      });
+
+      const out = recoverStaleClaimedGoalIterationJobs(db, {
+        now: 5_000,
+        inspectRepoState
+      });
+      expect(out.recovered).toEqual([]);
+      expect(out.skipped).toHaveLength(1);
+      expect(out.skipped[0]!.reason).toBe("repo_unavailable");
+      expect(out.skipped[0]!.repoRoot).toBe("/tmp/repo-missing");
+      expect(out.skipped[0]!.repoInspectionError).toBe(
+        "Repo path does not exist: /tmp/repo-missing"
+      );
+      expect(getQueueJob(db, jobId)?.state).toBe("claimed");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("recovers when the goal has no configured repo (worker handles fail-fast)", () => {
+    // goal.repo is null. The worker fail-fast path handles missing-repo cleanly
+    // by releasing the claim, so refusing to re-pend would strand the job.
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedGoal(db); // repo defaults to null
+      const { jobId } = seedClaimedIteration(db, {
+        leaseDurationMs: 900,
+        claimAt: 100
+      });
+      let inspectorCalled = false;
+      const inspectRepoState = () => {
+        inspectorCalled = true;
+        return {
+          ok: false as const,
+          code: "missing" as const,
+          error: "should not be called"
+        };
+      };
+
+      const out = recoverStaleClaimedGoalIterationJobs(db, {
+        now: 5_000,
+        inspectRepoState
+      });
+      expect(inspectorCalled).toBe(false);
+      expect(out.recovered).toHaveLength(1);
+      expect(out.recovered[0]!.jobBefore.id).toBe(jobId);
+      expect(out.skipped).toEqual([]);
+      expect(getQueueJob(db, jobId)?.state).toBe("pending");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("recovers when the goal's repo inspects clean", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedGoalWithRepo(db, "g1", "/tmp/repo-a");
+      const { jobId } = seedClaimedIteration(db, {
+        leaseDurationMs: 900,
+        claimAt: 100
+      });
+      const inspectRepoState = (repoRoot: string) => ({
+        ok: true as const,
+        repoPath: repoRoot,
+        head: "a".repeat(40)
+      });
+
+      const out = recoverStaleClaimedGoalIterationJobs(db, {
+        now: 5_000,
+        inspectRepoState
+      });
+      expect(out.recovered).toHaveLength(1);
+      expect(out.recovered[0]!.jobBefore.id).toBe(jobId);
+      expect(out.skipped).toEqual([]);
+      expect(getQueueJob(db, jobId)?.state).toBe("pending");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("repo state check runs after state/daemon/lock checks (precedence)", () => {
+    // A running job with a dirty repo is reported as job_running, not
+    // repo_dirty. Earlier checks are strictly cheaper and take precedence so
+    // the inspector is never called for jobs we'd skip anyway.
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedGoalWithRepo(db, "g1", "/tmp/repo-a");
+      const { jobId } = seedClaimedIteration(db, {
+        leaseDurationMs: 900,
+        claimAt: 100
+      });
+      setJobState(db, jobId, "running");
+      let inspectorCalled = false;
+      const inspectRepoState = () => {
+        inspectorCalled = true;
+        return {
+          ok: false as const,
+          code: "dirty_worktree" as const,
+          error: "dirty"
+        };
+      };
+
+      const out = recoverStaleClaimedGoalIterationJobs(db, {
+        now: 5_000,
+        inspectRepoState
+      });
+      expect(out.skipped).toHaveLength(1);
+      expect(out.skipped[0]!.reason).toBe("job_running");
+      expect(inspectorCalled).toBe(false);
+    } finally {
+      db.close();
+    }
+  });
+
   it("orders recovered jobs deterministically by lease_expires_at", () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);
@@ -905,6 +1120,37 @@ describe("runStartupRecovery", () => {
       expect(out.claimedJobs.skipped).toHaveLength(1);
       expect(out.claimedJobs.skipped[0]!.job.id).toBe(dirtyClaim.jobId);
       expect(out.claimedJobs.skipped[0]!.reason).toBe("job_running");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("forwards inspectRepoState through to the claimed-job recovery pass", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedGoalWithRepo(db, "g1", "/tmp/repo-a");
+      const { jobId } = seedClaimedIteration(db, {
+        leaseDurationMs: 900,
+        claimAt: 100
+      });
+      const observed: string[] = [];
+      const inspectRepoState = (repoRoot: string) => {
+        observed.push(repoRoot);
+        return {
+          ok: false as const,
+          code: "dirty_worktree" as const,
+          error: "dirty"
+        };
+      };
+
+      const out = runStartupRecovery(db, { now: 5_000, inspectRepoState });
+      expect(observed).toEqual(["/tmp/repo-a"]);
+      expect(out.claimedJobs.recovered).toEqual([]);
+      expect(out.claimedJobs.skipped).toHaveLength(1);
+      expect(out.claimedJobs.skipped[0]!.job.id).toBe(jobId);
+      expect(out.claimedJobs.skipped[0]!.reason).toBe("repo_dirty");
+      expect(getQueueJob(db, jobId)?.state).toBe("claimed");
     } finally {
       db.close();
     }

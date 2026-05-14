@@ -7,6 +7,7 @@ import {
   type DaemonRunRow
 } from "./daemon-runs.js";
 import { QUEUE_EVENT_TYPES, appendQueueEvent } from "./events.js";
+import { getGoal } from "./goal-init.js";
 import {
   getQueueJob,
   listStaleClaimedGoalIterationJobs,
@@ -14,12 +15,22 @@ import {
   type QueueJobRow,
   type QueueJobState
 } from "./queue-jobs.js";
+import { inspectRepo, type RepoGuardResult } from "./repo-guard.js";
 import {
   getActiveRepoLockForJob,
   listStaleRepoLocks,
   releaseRepoLock,
   type RepoLockRow
 } from "./repo-locks.js";
+
+/**
+ * Inspects the working tree at `repoRoot` so the auto-recovery primitive can
+ * refuse to re-pend a stale claim when the repo is dirty, has no resolvable
+ * HEAD, or otherwise cannot be verified safe. Default implementation is
+ * `inspectRepo` from repo-guard; tests inject a stub to avoid touching the
+ * filesystem.
+ */
+export type RepoStateInspector = (repoRoot: string) => RepoGuardResult;
 
 /**
  * `recovery_status` written onto repo_locks when this slice auto-releases an
@@ -144,6 +155,9 @@ export type StaleClaimedJobSkipReason =
   | "job_running"
   | "daemon_active"
   | "lock_active"
+  | "repo_dirty"
+  | "repo_unknown_commit"
+  | "repo_unavailable"
   | "job_state_changed";
 
 export type StaleClaimedJobRecoveryRecovered = {
@@ -159,11 +173,29 @@ export type StaleClaimedJobRecoverySkipped = {
   reason: StaleClaimedJobSkipReason;
   blockingDaemonRunId?: string;
   blockingLockId?: string;
+  /**
+   * For `repo_dirty` / `repo_unknown_commit` / `repo_unavailable`: the
+   * configured repo root that failed inspection. Surfaced so manual-recovery
+   * operators see where to look without re-querying the goal.
+   */
+  repoRoot?: string;
+  /**
+   * For `repo_dirty` / `repo_unknown_commit` / `repo_unavailable`: the
+   * inspector's error string verbatim so operators can reproduce the
+   * classification without re-running `git status`.
+   */
+  repoInspectionError?: string;
 };
 
 export type RecoverStaleClaimedGoalIterationJobsInput = {
   now?: number;
   graceMs?: number;
+  /**
+   * Inspector used to verify the goal's repo is safe to re-pend onto. Defaults
+   * to `inspectRepo` from repo-guard. Injectable so tests can simulate dirty /
+   * unknown-commit / missing-repo states without a real filesystem.
+   */
+  inspectRepoState?: RepoStateInspector;
 };
 
 export type RecoverStaleClaimedGoalIterationJobsResult = {
@@ -198,6 +230,7 @@ export function recoverStaleClaimedGoalIterationJobs(
 ): RecoverStaleClaimedGoalIterationJobsResult {
   const now = input.now ?? Date.now();
   const graceMs = input.graceMs ?? 0;
+  const inspectRepoState = input.inspectRepoState ?? inspectRepo;
   const staleJobs = listStaleClaimedGoalIterationJobs(db, { now, graceMs });
 
   const recovered: StaleClaimedJobRecoveryRecovered[] = [];
@@ -229,6 +262,12 @@ export function recoverStaleClaimedGoalIterationJobs(
         reason: "lock_active",
         blockingLockId: owningLock.id
       });
+      continue;
+    }
+
+    const repoSkip = classifyRepoStateSkip(db, job, inspectRepoState);
+    if (repoSkip) {
+      skipped.push(repoSkip);
       continue;
     }
 
@@ -426,6 +465,12 @@ export type StartupRecoveryInput = {
   now?: number;
   graceMs?: number;
   daemonRuns?: StartupRecoveryDaemonInput;
+  /**
+   * Repo-state inspector forwarded to `recoverStaleClaimedGoalIterationJobs`
+   * so dirty / unknown-commit / unavailable repos are refused even from the
+   * daemon's startup pass. Defaults to the production `inspectRepo`.
+   */
+  inspectRepoState?: RepoStateInspector;
 };
 
 export type StartupRecoveryResult = {
@@ -465,7 +510,10 @@ export function runStartupRecovery(
   const repoLocks = recoverStaleRepoLocksForTerminalJobs(db, { now, graceMs });
   const claimedJobs = recoverStaleClaimedGoalIterationJobs(db, {
     now,
-    graceMs
+    graceMs,
+    ...(input.inspectRepoState !== undefined
+      ? { inspectRepoState: input.inspectRepoState }
+      : {})
   });
   const daemonInput = input.daemonRuns ?? {};
   const daemonRuns = recoverStaleDaemonRuns(db, {
@@ -486,6 +534,45 @@ export function runStartupRecovery(
     repoLocks,
     claimedJobs,
     daemonRuns
+  };
+}
+
+/**
+ * Map an `inspectRepo` failure code onto the auto-recovery skip taxonomy.
+ * Returns `null` when the inspector reports `ok: true` OR when the goal has no
+ * configured repo (the worker handles the no-repo case via fail-fast release,
+ * so leaving the claim re-pendable is strictly safer than stranding it).
+ *
+ * - `dirty_worktree` → `repo_dirty`: previous worker may have left in-progress
+ *   writes; re-pending would either lose those writes or have the next worker
+ *   bail via repo-guard. Route to manual recovery.
+ * - `no_head` → `repo_unknown_commit`: HEAD is unresolvable so we cannot
+ *   reason about the baseline state. Route to manual recovery.
+ * - `missing` / `not_a_directory` / `not_a_git_repo` / `git_failed` →
+ *   `repo_unavailable`: the configured repo cannot be inspected. Route to
+ *   manual recovery rather than re-pend onto a path we cannot verify.
+ */
+function classifyRepoStateSkip(
+  db: MomentumDb,
+  job: QueueJobRow,
+  inspectRepoState: RepoStateInspector
+): StaleClaimedJobRecoverySkipped | null {
+  const goal = getGoal(db, job.goal_id);
+  const repoRoot = goal?.repo;
+  if (!repoRoot) return null;
+  const inspection = inspectRepoState(repoRoot);
+  if (inspection.ok) return null;
+  const reason: StaleClaimedJobSkipReason =
+    inspection.code === "dirty_worktree"
+      ? "repo_dirty"
+      : inspection.code === "no_head"
+        ? "repo_unknown_commit"
+        : "repo_unavailable";
+  return {
+    job,
+    reason,
+    repoRoot,
+    repoInspectionError: inspection.error
   };
 }
 
