@@ -163,74 +163,89 @@ export function clearGoalManualRecoveryGuarded(
     throw new Error("clearGoalManualRecoveryGuarded: now must be finite");
   }
 
-  const state = getGoalManualRecoveryState(db, input.goalId);
-  if (!state) {
-    return {
-      ok: false,
-      reason: "goal_not_found",
-      message: `Goal ${input.goalId} does not exist.`
-    };
-  }
-  if (!state.needsManualRecovery) {
-    return {
-      ok: false,
-      reason: "not_flagged",
-      message: `Goal ${input.goalId} is not flagged for manual recovery; nothing to clear.`
-    };
-  }
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const state = getGoalManualRecoveryState(db, input.goalId);
+    if (!state) {
+      db.exec("ROLLBACK");
+      return {
+        ok: false,
+        reason: "goal_not_found",
+        message: `Goal ${input.goalId} does not exist.`
+      };
+    }
+    if (!state.needsManualRecovery) {
+      db.exec("ROLLBACK");
+      return {
+        ok: false,
+        reason: "not_flagged",
+        message: `Goal ${input.goalId} is not flagged for manual recovery; nothing to clear.`
+      };
+    }
 
-  const activeJobs = db
-    .prepare(
-      `SELECT id FROM jobs
-        WHERE goal_id = ?
-          AND type = 'goal_iteration'
-          AND state IN ('claimed', 'running')
-        ORDER BY created_at ASC, id ASC`
-    )
-    .all(input.goalId) as Array<{ id: string }>;
-  if (activeJobs.length > 0) {
-    return {
-      ok: false,
-      reason: "job_active",
-      message:
-        `Goal ${input.goalId} has ${activeJobs.length} active goal_iteration ` +
-        `job(s); release or finalize them before clearing manual recovery.`,
-      activeJobIds: activeJobs.map((row) => row.id)
+    const activeJobs = db
+      .prepare(
+        `SELECT id FROM jobs
+          WHERE goal_id = ?
+            AND type = 'goal_iteration'
+            AND state IN ('claimed', 'running')
+          ORDER BY created_at ASC, id ASC`
+      )
+      .all(input.goalId) as Array<{ id: string }>;
+    if (activeJobs.length > 0) {
+      db.exec("ROLLBACK");
+      return {
+        ok: false,
+        reason: "job_active",
+        message:
+          `Goal ${input.goalId} has ${activeJobs.length} active goal_iteration ` +
+          `job(s); release or finalize them before clearing manual recovery.`,
+        activeJobIds: activeJobs.map((row) => row.id)
+      };
+    }
+
+    const cleared = clearGoalManualRecovery(db, { goalId: input.goalId, now });
+    if (!cleared.ok) {
+      db.exec("ROLLBACK");
+      return {
+        ok: false,
+        reason: "goal_not_found",
+        message: `Goal ${input.goalId} disappeared during clear.`
+      };
+    }
+
+    const payload: Record<string, unknown> = {
+      previousReason: state.reason,
+      previousMarkedAt: state.markedAt,
+      clearedAt: now
     };
-  }
+    if (input.operatorReason !== undefined) {
+      payload["operatorReason"] = input.operatorReason;
+    }
+    const event = appendQueueEvent(db, {
+      goalId: input.goalId,
+      type: QUEUE_EVENT_TYPES.GOAL_RECOVERY_CLEARED,
+      payload,
+      createdAt: now
+    });
+    db.exec("COMMIT");
 
-  const cleared = clearGoalManualRecovery(db, { goalId: input.goalId, now });
-  if (!cleared.ok) {
     return {
-      ok: false,
-      reason: "goal_not_found",
-      message: `Goal ${input.goalId} disappeared during clear.`
+      ok: true,
+      goalId: input.goalId,
+      previousReason: state.reason,
+      previousMarkedAt: state.markedAt,
+      clearedAt: now,
+      eventId: event.id
     };
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      // Ignore rollback errors so callers see the original write failure.
+    }
+    throw error;
   }
-
-  const payload: Record<string, unknown> = {
-    previousReason: state.reason,
-    previousMarkedAt: state.markedAt,
-    clearedAt: now
-  };
-  if (input.operatorReason !== undefined) {
-    payload["operatorReason"] = input.operatorReason;
-  }
-  const event = appendQueueEvent(db, {
-    goalId: input.goalId,
-    type: QUEUE_EVENT_TYPES.GOAL_RECOVERY_CLEARED,
-    payload,
-    createdAt: now
-  });
-
-  return {
-    ok: true,
-    goalId: input.goalId,
-    previousReason: state.reason,
-    previousMarkedAt: state.markedAt,
-    clearedAt: now,
-    eventId: event.id
-  };
 }
 
 export function getGoalManualRecoveryState(

@@ -652,7 +652,7 @@ function safeNextStepsForSkip(
   reason: StaleClaimedJobSkipReason,
   repoRoot: string | null
 ): string[] {
-  const repoHint = repoRoot ?? "<repo>";
+  const repoHint = repoRoot ? shellQuote(repoRoot) : "<repo>";
   switch (reason) {
     case "repo_dirty":
       return [
@@ -681,6 +681,10 @@ function safeNextStepsForSkip(
     default:
       return [];
   }
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 const MANUAL_RECOVERY_SKIP_REASONS: ReadonlySet<StaleClaimedJobSkipReason> =

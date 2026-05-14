@@ -366,6 +366,47 @@ describe("clearGoalManualRecoveryGuarded", () => {
     }
   });
 
+  it("rolls back the flag clear if the audit event append fails", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedGoal(db, "g-audit-fails");
+      markGoalNeedsManualRecovery(db, {
+        goalId: "g-audit-fails",
+        reason: "repo_dirty",
+        now: 1_700_000_000_000
+      });
+      db.exec(
+        `CREATE TRIGGER fail_recovery_cleared_event
+           BEFORE INSERT ON events
+           WHEN NEW.type = 'goal.recovery_cleared'
+           BEGIN
+             SELECT RAISE(ABORT, 'recovery clear audit append failed');
+           END`
+      );
+
+      expect(() =>
+        clearGoalManualRecoveryGuarded(db, {
+          goalId: "g-audit-fails",
+          now: 1_700_000_999_000
+        })
+      ).toThrow(/recovery clear audit append failed/);
+
+      const state = getGoalManualRecoveryState(db, "g-audit-fails");
+      expect(state?.needsManualRecovery).toBe(true);
+      expect(state?.reason).toBe("repo_dirty");
+      expect(state?.markedAt).toBe(1_700_000_000_000);
+      const event = readLatestEventOfType(
+        db,
+        "g-audit-fails",
+        QUEUE_EVENT_TYPES.GOAL_RECOVERY_CLEARED
+      );
+      expect(event).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
   it("returns goal_not_found when the goal does not exist", () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);

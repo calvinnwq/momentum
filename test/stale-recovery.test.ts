@@ -1020,7 +1020,7 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
         );
         expect(md).toContain("- Classified at (epoch ms): 5000");
         expect(md).toContain("## Safe next steps");
-        expect(md).toContain("git -C /tmp/repo-a status");
+        expect(md).toContain("git -C '/tmp/repo-a' status");
       } finally {
         db.close();
       }
@@ -1214,7 +1214,43 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
           "- Message: Stale claimed job is still in `running` state"
         );
         expect(md).toContain("## Safe next steps");
-        expect(md).toContain("git -C /tmp/repo-a status");
+        expect(md).toContain("git -C '/tmp/repo-a' status");
+      } finally {
+        db.close();
+      }
+    });
+
+    it("shell-quotes repo paths in recovery.md next-step commands", () => {
+      const dataDir = makeTempDir();
+      const db = openDb(dataDir);
+      try {
+        const unsafeRepo = "/tmp/repo with spaces/$(touch pwned)'";
+        seedGoalWithRepo(db, "g1", unsafeRepo);
+        seedClaimedIteration(db, {
+          leaseDurationMs: 900,
+          claimAt: 100
+        });
+        const inspectRepoState = () => ({
+          ok: false as const,
+          code: "dirty_worktree" as const,
+          error: `Repo has uncommitted changes: ${unsafeRepo}`
+        });
+
+        const out = recoverStaleClaimedGoalIterationJobs(db, {
+          now: 5_000,
+          inspectRepoState,
+          dataDir
+        });
+
+        expect(out.skipped).toHaveLength(1);
+        const md = fs.readFileSync(
+          out.skipped[0]!.recoveryArtifactPath!,
+          "utf-8"
+        );
+        expect(md).toContain(
+          "git -C '/tmp/repo with spaces/$(touch pwned)'\\''' status"
+        );
+        expect(md).not.toContain("git -C /tmp/repo with spaces");
       } finally {
         db.close();
       }
