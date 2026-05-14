@@ -597,6 +597,15 @@ describe("listStaleDaemonRuns", () => {
         activeJobStaleAfterMs: 120_000
       });
       expect(stale.map((row) => row.id)).toEqual([activeWork.runId]);
+
+      const shorterActiveJobCutoff = listStaleDaemonRuns(db, {
+        now: 11_000,
+        staleAfterMs: 120_000,
+        activeJobStaleAfterMs: 5_000
+      });
+      expect(shorterActiveJobCutoff.map((row) => row.id)).toEqual([
+        activeWork.runId
+      ]);
     } finally {
       db.close();
     }

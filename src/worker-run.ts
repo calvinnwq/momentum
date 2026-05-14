@@ -328,6 +328,7 @@ export function runWorkerOnce(input: WorkerRunInput): WorkerRunResult {
     recoveryStatus: iterationResult.ok ? "iteration_success" : "iteration_failure"
   });
 
+  let releaseHookError: Error | null = null;
   try {
     input.hooks?.onJobReleased?.({
       goalId: goal.id,
@@ -338,7 +339,8 @@ export function runWorkerOnce(input: WorkerRunInput): WorkerRunResult {
       now: releaseNow,
       outcome: iterationResult.ok ? "success" : "failure"
     });
-  } catch {
+  } catch (error) {
+    releaseHookError = error instanceof Error ? error : new Error(String(error));
   }
 
   if (iterationResult.ok) {
@@ -422,6 +424,10 @@ export function runWorkerOnce(input: WorkerRunInput): WorkerRunResult {
     } catch {
       reducerError = `${reducerError}; goal.reduce_failed event write also failed`;
     }
+  }
+
+  if (releaseHookError !== null) {
+    throw releaseHookError;
   }
 
   return {

@@ -367,10 +367,9 @@ export function listStaleDaemonRuns(
     .prepare(
       `SELECT * FROM daemon_runs
        WHERE state IN ('starting', 'running', 'stop_requested')
-         AND heartbeat_at < ?
          AND (
-           active_job_id IS NULL
-           OR heartbeat_at < ?
+           (active_job_id IS NULL AND heartbeat_at < ?)
+           OR (active_job_id IS NOT NULL AND heartbeat_at < ?)
          )
        ORDER BY heartbeat_at ASC, id ASC`
     )
