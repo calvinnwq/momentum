@@ -60,8 +60,18 @@ export type DaemonRunRow = {
   last_reconciled_at: number | null;
   error: string | null;
   error_at: number | null;
+  recovery_status: string | null;
   updated_at: number;
 };
+
+/**
+ * `recovery_status` stamped on a daemon_runs row when an idle stale record is
+ * auto-finalized to `error` by the stale-recovery path. Stable string so
+ * downstream surfaces (daemon status / handoff / log inspection) can recognize
+ * the cause without matching free-form `error` text.
+ */
+export const DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS =
+  "auto_recovered_idle_stale";
 
 export type StartDaemonRunInput = {
   pid?: number | null;
@@ -486,6 +496,83 @@ export function listStaleDaemonRuns(
        ORDER BY heartbeat_at ASC, id ASC`
     )
     .all(cutoff, activeJobCutoff) as DaemonRunRow[];
+}
+
+export type RecoverStaleDaemonRunInput = {
+  runId: string;
+  now?: number;
+  recoveryStatus?: string;
+  errorMessage?: string;
+};
+
+export type RecoverStaleDaemonRunResult =
+  | { ok: true; run: DaemonRunRow }
+  | { ok: false };
+
+/**
+ * Auto-finalize an idle stale daemon record to the `error` terminal state and
+ * stamp `recovery_status` so downstream surfaces can distinguish an
+ * orchestrator-driven recovery from a run-internal failure. Guarded so it
+ * never disturbs live work:
+ *
+ *   - Only active records (`starting` / `running` / `stop_requested`) flip.
+ *   - `active_job_id` AND `active_lock_id` must both be NULL — a record with
+ *     either set may still own a job/lock, and stale-claim / stale-lock
+ *     recovery primitives are the right tools for those cases.
+ *
+ * The caller (orchestrator) is responsible for deciding which rows are
+ * eligible based on the listStaleDaemonRuns enumeration; this helper only
+ * applies the row-level guards so two concurrent recoveries are safe.
+ *
+ * Returns `{ ok: false }` when the row was not updated (state changed, an
+ * active_job_id/active_lock_id appeared, or the row is gone), so callers can
+ * skip event emission for a state they no longer observe.
+ */
+export function recoverStaleDaemonRun(
+  db: MomentumDb,
+  input: RecoverStaleDaemonRunInput
+): RecoverStaleDaemonRunResult {
+  validateRunId(input.runId, "recoverStaleDaemonRun");
+  const now = input.now ?? Date.now();
+  const recoveryStatus =
+    input.recoveryStatus ?? DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS;
+  const errorMessage =
+    input.errorMessage ?? DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS;
+
+  const result = db
+    .prepare(
+      `UPDATE daemon_runs
+         SET state = 'error',
+             finished_at = ?,
+             last_state_change_at = ?,
+             active_job_id = NULL,
+             active_lock_id = NULL,
+             error = COALESCE(error, ?),
+             error_at = COALESCE(error_at, ?),
+             recovery_status = ?,
+             updated_at = ?
+       WHERE id = ?
+         AND state IN ('starting', 'running', 'stop_requested')
+         AND active_job_id IS NULL
+         AND active_lock_id IS NULL`
+    )
+    .run(
+      now,
+      now,
+      errorMessage,
+      now,
+      recoveryStatus,
+      now,
+      input.runId
+    );
+  if (Number(result.changes) === 0) {
+    return { ok: false };
+  }
+  const run = getDaemonRun(db, input.runId);
+  if (!run) {
+    return { ok: false };
+  }
+  return { ok: true, run };
 }
 
 function validateRunId(runId: unknown, label: string): void {

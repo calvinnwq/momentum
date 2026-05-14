@@ -6,6 +6,7 @@ import path from "node:path";
 import { openDb } from "../src/db.js";
 import {
   DAEMON_CANCEL_OUTCOMES,
+  DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS,
   DAEMON_RUN_STATES,
   finishDaemonRun,
   getActiveDaemonRun,
@@ -16,6 +17,7 @@ import {
   isTerminalDaemonRunState,
   listStaleDaemonRuns,
   recordDaemonRunReconciliation,
+  recoverStaleDaemonRun,
   requestDaemonRunImmediateStop,
   requestDaemonRunStop,
   setDaemonRunActiveJob,
@@ -863,6 +865,141 @@ describe("listStaleDaemonRuns", () => {
       expect(() =>
         listStaleDaemonRuns(db, { now: Number.NaN, staleAfterMs: 1 })
       ).toThrow(/now/);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("recoverStaleDaemonRun", () => {
+  it("flips an idle active run to error, stamps recovery_status and timestamps", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { runId } = startDaemonRun(db, { now: 1_000 });
+
+      const result = recoverStaleDaemonRun(db, { runId, now: 10_000 });
+      if (!result.ok) throw new Error("expected recovery to succeed");
+      expect(result.run.state).toBe("error");
+      expect(result.run.finished_at).toBe(10_000);
+      expect(result.run.last_state_change_at).toBe(10_000);
+      expect(result.run.active_job_id).toBeNull();
+      expect(result.run.active_lock_id).toBeNull();
+      expect(result.run.error).toBe(DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS);
+      expect(result.run.error_at).toBe(10_000);
+      expect(result.run.recovery_status).toBe(
+        DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS
+      );
+      expect(result.run.updated_at).toBe(10_000);
+
+      const stored = getDaemonRun(db, runId);
+      expect(stored?.state).toBe("error");
+      expect(stored?.recovery_status).toBe(
+        DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses to recover a run that holds an active job", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { runId } = startDaemonRun(db, { now: 1_000 });
+      setDaemonRunActiveJob(db, {
+        runId,
+        jobId: "job-1",
+        lockId: null,
+        now: 1_000
+      });
+
+      const result = recoverStaleDaemonRun(db, { runId, now: 10_000 });
+      expect(result.ok).toBe(false);
+      const stored = getDaemonRun(db, runId);
+      expect(stored?.state).toBe("running");
+      expect(stored?.active_job_id).toBe("job-1");
+      expect(stored?.recovery_status).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses to recover a run that holds an active lock", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { runId } = startDaemonRun(db, { now: 1_000 });
+      setDaemonRunActiveJob(db, {
+        runId,
+        jobId: null,
+        lockId: "lock-1",
+        now: 1_000
+      });
+
+      const result = recoverStaleDaemonRun(db, { runId, now: 10_000 });
+      expect(result.ok).toBe(false);
+      const stored = getDaemonRun(db, runId);
+      expect(stored?.state).toBe("running");
+      expect(stored?.active_lock_id).toBe("lock-1");
+      expect(stored?.recovery_status).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses to recover a terminal run and leaves it intact", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { runId } = startDaemonRun(db, { now: 1_000 });
+      finishDaemonRun(db, {
+        runId,
+        terminalState: "stopped",
+        now: 2_000
+      });
+
+      const result = recoverStaleDaemonRun(db, { runId, now: 10_000 });
+      expect(result.ok).toBe(false);
+      const stored = getDaemonRun(db, runId);
+      expect(stored?.state).toBe("stopped");
+      expect(stored?.finished_at).toBe(2_000);
+      expect(stored?.recovery_status).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("preserves a pre-existing error message and error_at via COALESCE", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { runId } = startDaemonRun(db, { now: 1_000 });
+      // Simulate an in-flight error message that the orchestrator wrote before
+      // the daemon process exited. The recovery path should not overwrite it.
+      db.prepare(
+        `UPDATE daemon_runs SET error = ?, error_at = ?, updated_at = ? WHERE id = ?`
+      ).run("worker crashed", 5_000, 5_000, runId);
+
+      const result = recoverStaleDaemonRun(db, { runId, now: 10_000 });
+      if (!result.ok) throw new Error("expected recovery to succeed");
+      expect(result.run.error).toBe("worker crashed");
+      expect(result.run.error_at).toBe(5_000);
+      expect(result.run.recovery_status).toBe(
+        DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("validates runId", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      expect(() =>
+        recoverStaleDaemonRun(db, { runId: "", now: 100 })
+      ).toThrow(/runId/);
     } finally {
       db.close();
     }

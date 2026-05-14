@@ -4,7 +4,10 @@ import os from "node:os";
 import path from "node:path";
 
 import {
+  DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS,
   finishDaemonRun,
+  getDaemonRun,
+  heartbeatDaemonRun,
   setDaemonRunActiveJob,
   startDaemonRun
 } from "../src/daemon-runs.js";
@@ -18,9 +21,11 @@ import {
 } from "../src/queue-jobs.js";
 import { acquireRepoLock, getRepoLock } from "../src/repo-locks.js";
 import {
+  DAEMON_RUN_AUTO_RECOVERED_STATUS,
   JOB_RECOVERED_AUTO_REPENDED_STATUS,
   REPO_LOCK_AUTO_RELEASED_TERMINAL_JOB_STATUS,
   recoverStaleClaimedGoalIterationJobs,
+  recoverStaleDaemonRuns,
   recoverStaleRepoLocksForTerminalJobs,
   runStartupRecovery
 } from "../src/stale-recovery.js";
@@ -900,6 +905,245 @@ describe("runStartupRecovery", () => {
       expect(out.claimedJobs.skipped).toHaveLength(1);
       expect(out.claimedJobs.skipped[0]!.job.id).toBe(dirtyClaim.jobId);
       expect(out.claimedJobs.skipped[0]!.reason).toBe("job_running");
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("recoverStaleDaemonRuns", () => {
+  it("auto-finalizes an idle stale daemon run to error and stamps recovery_status", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      // Started long ago, heartbeat never refreshed.
+      const { runId } = startDaemonRun(db, { now: 1_000 });
+
+      const out = recoverStaleDaemonRuns(db, {
+        now: 100_000,
+        staleAfterMs: 30_000
+      });
+      expect(out.recovered).toHaveLength(1);
+      expect(out.skipped).toEqual([]);
+      const entry = out.recovered[0]!;
+      expect(entry.runBefore.id).toBe(runId);
+      expect(entry.runBefore.state).toBe("running");
+      expect(entry.runAfter.id).toBe(runId);
+      expect(entry.runAfter.state).toBe("error");
+      expect(entry.runAfter.recovery_status).toBe(
+        DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS
+      );
+      expect(entry.runAfter.finished_at).toBe(100_000);
+      expect(entry.recoveryStatus).toBe(DAEMON_RUN_AUTO_RECOVERED_STATUS);
+
+      const stored = getDaemonRun(db, runId);
+      expect(stored?.state).toBe("error");
+      expect(stored?.recovery_status).toBe(
+        DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("returns empty when nothing is stale", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { runId } = startDaemonRun(db, { now: 1_000 });
+      heartbeatDaemonRun(db, { runId, now: 9_000 });
+
+      const out = recoverStaleDaemonRuns(db, {
+        now: 10_000,
+        staleAfterMs: 5_000
+      });
+      expect(out.recovered).toEqual([]);
+      expect(out.skipped).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("skips a stale daemon with an active_job_id and surfaces blockingJobId", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { runId } = startDaemonRun(db, { now: 1_000 });
+      setDaemonRunActiveJob(db, {
+        runId,
+        jobId: "job-1",
+        lockId: null,
+        now: 1_000
+      });
+
+      const out = recoverStaleDaemonRuns(db, {
+        now: 100_000,
+        staleAfterMs: 5_000,
+        activeJobStaleAfterMs: 5_000
+      });
+      expect(out.recovered).toEqual([]);
+      expect(out.skipped).toHaveLength(1);
+      expect(out.skipped[0]!.run.id).toBe(runId);
+      expect(out.skipped[0]!.reason).toBe("active_job_present");
+      expect(out.skipped[0]!.blockingJobId).toBe("job-1");
+
+      const stored = getDaemonRun(db, runId);
+      expect(stored?.state).toBe("running");
+      expect(stored?.active_job_id).toBe("job-1");
+      expect(stored?.recovery_status).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("skips a stale daemon with an active_lock_id and surfaces blockingLockId", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { runId } = startDaemonRun(db, { now: 1_000 });
+      setDaemonRunActiveJob(db, {
+        runId,
+        jobId: null,
+        lockId: "lock-1",
+        now: 1_000
+      });
+
+      const out = recoverStaleDaemonRuns(db, {
+        now: 100_000,
+        staleAfterMs: 5_000,
+        activeJobStaleAfterMs: 5_000
+      });
+      expect(out.recovered).toEqual([]);
+      expect(out.skipped).toHaveLength(1);
+      expect(out.skipped[0]!.run.id).toBe(runId);
+      expect(out.skipped[0]!.reason).toBe("active_lock_present");
+      expect(out.skipped[0]!.blockingLockId).toBe("lock-1");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("skips the caller's own run via excludeRunId", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { runId } = startDaemonRun(db, { now: 1_000 });
+
+      const out = recoverStaleDaemonRuns(db, {
+        now: 100_000,
+        staleAfterMs: 5_000,
+        excludeRunId: runId
+      });
+      expect(out.recovered).toEqual([]);
+      expect(out.skipped).toHaveLength(1);
+      expect(out.skipped[0]!.run.id).toBe(runId);
+      expect(out.skipped[0]!.reason).toBe("self");
+
+      const stored = getDaemonRun(db, runId);
+      expect(stored?.state).toBe("running");
+      expect(stored?.recovery_status).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("excludes terminal daemons even when heartbeat is ancient", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { runId } = startDaemonRun(db, { now: 1_000 });
+      finishDaemonRun(db, {
+        runId,
+        terminalState: "stopped",
+        now: 2_000
+      });
+
+      const out = recoverStaleDaemonRuns(db, {
+        now: 100_000,
+        staleAfterMs: 1_000
+      });
+      // listStaleDaemonRuns filters terminal records, so they never appear.
+      expect(out.recovered).toEqual([]);
+      expect(out.skipped).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("is idempotent across repeated invocations", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { runId } = startDaemonRun(db, { now: 1_000 });
+      const first = recoverStaleDaemonRuns(db, {
+        now: 100_000,
+        staleAfterMs: 5_000
+      });
+      expect(first.recovered).toHaveLength(1);
+
+      const second = recoverStaleDaemonRuns(db, {
+        now: 200_000,
+        staleAfterMs: 5_000
+      });
+      expect(second.recovered).toEqual([]);
+      expect(second.skipped).toEqual([]);
+
+      const stored = getDaemonRun(db, runId);
+      expect(stored?.state).toBe("error");
+      expect(stored?.recovery_status).toBe(
+        DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS
+      );
+      // recovery_status / finished_at were set on the first pass and not
+      // overwritten by the second invocation (no row matches state guard).
+      expect(stored?.finished_at).toBe(100_000);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("orders the result deterministically by heartbeat_at then id", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const oldest = startDaemonRun(db, { now: 1_000 });
+      finishDaemonRun(db, {
+        runId: oldest.runId,
+        terminalState: "stopped",
+        now: 1_500
+      });
+      // Two concurrently-started stale runs with distinct heartbeats. The DB
+      // partial unique index forbids two ACTIVE records at once, so we finish
+      // one before starting the next to simulate sequential overlap.
+      const middle = startDaemonRun(db, { now: 2_000 });
+      finishDaemonRun(db, {
+        runId: middle.runId,
+        terminalState: "stopped",
+        now: 2_500
+      });
+      const newest = startDaemonRun(db, { now: 3_000 });
+
+      // Only the newest is still active and stale (terminal rows are excluded).
+      const out = recoverStaleDaemonRuns(db, {
+        now: 100_000,
+        staleAfterMs: 5_000
+      });
+      expect(out.recovered).toHaveLength(1);
+      expect(out.recovered[0]!.runBefore.id).toBe(newest.runId);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("validates staleAfterMs", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      expect(() =>
+        recoverStaleDaemonRuns(db, { now: 100, staleAfterMs: 0 })
+      ).toThrow(/staleAfterMs/);
+      expect(() =>
+        recoverStaleDaemonRuns(db, { now: 100, staleAfterMs: -1 })
+      ).toThrow(/staleAfterMs/);
     } finally {
       db.close();
     }

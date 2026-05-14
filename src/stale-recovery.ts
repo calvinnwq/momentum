@@ -1,6 +1,9 @@
 import type { MomentumDb } from "./db.js";
 import {
+  DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS,
   getActiveDaemonRunForJob,
+  listStaleDaemonRuns,
+  recoverStaleDaemonRun,
   type DaemonRunRow
 } from "./daemon-runs.js";
 import { QUEUE_EVENT_TYPES, appendQueueEvent } from "./events.js";
@@ -263,6 +266,140 @@ export function recoverStaleClaimedGoalIterationJobs(
       previousWorkerId: repended.previousWorkerId,
       previousLeaseExpiresAt: repended.previousLeaseExpiresAt,
       recoveryStatus: JOB_RECOVERED_AUTO_REPENDED_STATUS
+    });
+  }
+
+  return { recovered, skipped };
+}
+
+/**
+ * `recovery_status` stamped on daemon_runs when this slice auto-finalizes an
+ * idle stale daemon record. Re-exported from daemon-runs.ts so callers that
+ * already import from stale-recovery have a single recognized status taxonomy.
+ */
+export const DAEMON_RUN_AUTO_RECOVERED_STATUS =
+  DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS;
+
+export type StaleDaemonRunSkipReason =
+  | "self"
+  | "active_job_present"
+  | "active_lock_present"
+  | "run_state_changed";
+
+export type StaleDaemonRunRecoveryRecovered = {
+  runBefore: DaemonRunRow;
+  runAfter: DaemonRunRow;
+  recoveryStatus: typeof DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS;
+};
+
+export type StaleDaemonRunRecoverySkipped = {
+  run: DaemonRunRow;
+  reason: StaleDaemonRunSkipReason;
+  blockingJobId?: string;
+  blockingLockId?: string;
+};
+
+export type RecoverStaleDaemonRunsInput = {
+  now?: number;
+  staleAfterMs: number;
+  activeJobStaleAfterMs?: number;
+  excludeRunId?: string;
+};
+
+export type RecoverStaleDaemonRunsResult = {
+  recovered: StaleDaemonRunRecoveryRecovered[];
+  skipped: StaleDaemonRunRecoverySkipped[];
+};
+
+/**
+ * Auto-finalize idle stale daemon records to the `error` terminal state when
+ * their heartbeat has crossed the stale cutoff AND they hold no live owner
+ * pointer (`active_job_id` / `active_lock_id` both NULL). These records are
+ * definitionally orphaned: a daemon process that exited without finalizing
+ * leaves the row in `running` / `stop_requested` forever, which blocks fresh
+ * `daemon start` invocations via the single-active partial index. Rows with
+ * an `active_job_id` or `active_lock_id` are NOT touched here — those are
+ * routed through the stale-claim and stale-lock primitives instead, or to
+ * manual recovery via the `skipped` taxonomy.
+ *
+ * Safety guards:
+ *   - `excludeRunId` filters out the caller's own active daemon so a startup
+ *     pass run from inside a freshly registered daemon does not finalize
+ *     itself before the loop starts.
+ *   - `active_job_id` and `active_lock_id` must both be NULL on the daemon row
+ *     at update time — concurrent writes from `setDaemonRunActiveJob` race-
+ *     guard the helper at the SQL level.
+ *   - Idempotent: a recovered run transitions to a terminal state and is no
+ *     longer returned by `listStaleDaemonRuns`, so a second invocation finds
+ *     nothing to recover.
+ *
+ * No queue event is emitted because the `events` schema requires a non-empty
+ * `goal_id` and a daemon row with no active job has no goal pointer. The
+ * recovery is recorded directly on the daemon_runs row via the
+ * `recovery_status` column and the daemon's terminal state transition.
+ */
+export function recoverStaleDaemonRuns(
+  db: MomentumDb,
+  input: RecoverStaleDaemonRunsInput
+): RecoverStaleDaemonRunsResult {
+  if (
+    !Number.isFinite(input.staleAfterMs) ||
+    input.staleAfterMs <= 0
+  ) {
+    throw new Error(
+      "recoverStaleDaemonRuns: staleAfterMs must be a positive number"
+    );
+  }
+  const now = input.now ?? Date.now();
+  const activeJobStaleAfterMs =
+    input.activeJobStaleAfterMs ?? input.staleAfterMs;
+  const stale = listStaleDaemonRuns(db, {
+    now,
+    staleAfterMs: input.staleAfterMs,
+    activeJobStaleAfterMs
+  });
+
+  const recovered: StaleDaemonRunRecoveryRecovered[] = [];
+  const skipped: StaleDaemonRunRecoverySkipped[] = [];
+
+  for (const run of stale) {
+    if (input.excludeRunId !== undefined && run.id === input.excludeRunId) {
+      skipped.push({ run, reason: "self" });
+      continue;
+    }
+    if (run.active_job_id !== null) {
+      skipped.push({
+        run,
+        reason: "active_job_present",
+        blockingJobId: run.active_job_id
+      });
+      continue;
+    }
+    if (run.active_lock_id !== null) {
+      skipped.push({
+        run,
+        reason: "active_lock_present",
+        blockingLockId: run.active_lock_id
+      });
+      continue;
+    }
+
+    const result = recoverStaleDaemonRun(db, {
+      runId: run.id,
+      now,
+      recoveryStatus: DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS
+    });
+    if (!result.ok) {
+      // Race: another caller transitioned the row, or an active_job_id/
+      // active_lock_id appeared between listing and update. Surface for
+      // manual recovery rather than emitting a fact we no longer observe.
+      skipped.push({ run, reason: "run_state_changed" });
+      continue;
+    }
+    recovered.push({
+      runBefore: run,
+      runAfter: result.run,
+      recoveryStatus: DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS
     });
   }
 

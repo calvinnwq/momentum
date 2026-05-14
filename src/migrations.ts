@@ -21,7 +21,8 @@ const GOAL_REDUCER_COLUMNS: ColumnSpec[] = [
 
 const DAEMON_RUN_COLUMNS: ColumnSpec[] = [
   { name: "stop_now_requested_at", type: "INTEGER" },
-  { name: "cancel_outcome", type: "TEXT" }
+  { name: "cancel_outcome", type: "TEXT" },
+  { name: "recovery_status", type: "TEXT" }
 ];
 
 const REPO_LOCKS_DDL = `
@@ -68,6 +69,7 @@ CREATE TABLE IF NOT EXISTS daemon_runs (
   last_reconciled_at INTEGER,
   error TEXT,
   error_at INTEGER,
+  recovery_status TEXT,
   updated_at INTEGER NOT NULL
 ) STRICT;
 
