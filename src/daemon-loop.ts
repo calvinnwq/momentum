@@ -219,6 +219,8 @@ export async function runDaemonLoop(
       now: finishNow,
       error: internalError?.message ?? "unknown internal error"
     });
+  } else if (exitReason === "run_missing") {
+    terminalState = "error";
   } else if (exitReason === "run_terminated" && lastObservedState === "error") {
     terminalState = "error";
   } else {
@@ -233,7 +235,7 @@ export async function runDaemonLoop(
   }
 
   const result: DaemonLoopResult = {
-    ok: exitReason !== "internal_error",
+    ok: exitReason !== "internal_error" && exitReason !== "run_missing",
     workSucceeded: jobsFailed === 0,
     runId: input.runId,
     workerId: input.workerId,

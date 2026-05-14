@@ -238,7 +238,6 @@ JSON envelope shape (managed loop):
   "host": "hostname",
   "state": "stopped",
   "startedAt": 1731500000000,
-  "heartbeatAt": 1731500000000,
   "loop": {
     "exitReason": "max_idle_cycles",
     "terminalState": "stopped",
@@ -249,8 +248,7 @@ JSON envelope shape (managed loop):
     "jobsNotExecuted": 1,
     "idleCycles": 1,
     "lastObservedState": "running",
-    "lastWorkerCode": "no_queued_job",
-    "error": null
+    "lastWorkerCode": "not_executed"
   }
 }
 ```

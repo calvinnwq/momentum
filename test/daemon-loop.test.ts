@@ -313,7 +313,8 @@ describe("runDaemonLoop", () => {
       });
 
       expect(result.exitReason).toBe("run_missing");
-      expect(result.terminalState).toBe("stopped");
+      expect(result.ok).toBe(false);
+      expect(result.terminalState).toBe("error");
       expect(result.iterations).toBe(0);
       expect(result.lastObservedState).toBeNull();
     } finally {
