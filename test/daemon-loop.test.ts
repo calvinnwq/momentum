@@ -741,6 +741,7 @@ describe("runDaemonLoop", () => {
 
       expect(result.ok).toBe(true);
       expect(result.workSucceeded).toBe(false);
+      expect(result.jobsRun).toBe(1);
       expect(result.jobsFailed).toBe(1);
       expect(result.exitReason).toBe("max_loop_iterations");
     } finally {

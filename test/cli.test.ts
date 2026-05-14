@@ -2335,7 +2335,7 @@ Goal body.
       exitReason: "max_loop_iterations",
       terminalState: "stopped",
       workSucceeded: false,
-      jobsRun: 0,
+      jobsRun: 1,
       jobsFailed: 1
     });
   });

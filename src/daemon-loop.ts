@@ -193,9 +193,8 @@ export async function runDaemonLoop(
     lastWorkerCode = workerResult.code;
 
     if (workerResult.code === "ran_job") {
-      if (workerResult.ok) {
-        jobsRun += 1;
-      } else {
+      jobsRun += 1;
+      if (!workerResult.ok) {
         jobsFailed += 1;
       }
       if (!completeCycle(iterations - 1, run.state, workerResult, cycleStart)) {
