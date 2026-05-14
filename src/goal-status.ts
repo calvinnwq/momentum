@@ -184,10 +184,11 @@ export type GoalStatusDaemonSummary = {
  * Goal-scoped view of NGX-276 stale-lease recovery. Surfaces (a) the count and
  * latest timestamp of `repo_lock.recovered` / `job.recovered` events recorded
  * for this goal so prior auto-recovery actions are visible to operators, and
- * (b) the count of repo locks / claimed goal_iteration jobs still asserting
- * ownership for this goal whose lease has already expired — those are records
- * the auto-recovery primitives left untouched for manual intervention (e.g. a
- * lock_active stale claim or a stale lock whose owning job is not terminal).
+ * (b) the count of repo locks / claimed or running goal_iteration jobs still
+ * asserting ownership for this goal whose lease has already expired — those
+ * are records the auto-recovery primitives left untouched for manual
+ * intervention (e.g. a lock_active stale claim or a stale lock whose owning job
+ * is not terminal).
  *
  * The grace tolerance mirrors `daemon status` so the same rows are classified
  * stale by the read-only inspector and by this surface. Daemon-level recovery
