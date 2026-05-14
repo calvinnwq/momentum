@@ -990,7 +990,7 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
     node: process.version,
     platform: process.platform,
     milestone:
-      "Milestone 3: managed daemon loop for queued jobs (NGX-272, NGX-273)",
+      "Milestone 3: operational safety (NGX-272, NGX-273, NGX-274, NGX-275, NGX-276)",
     daemon: daemonPayload
   };
 
