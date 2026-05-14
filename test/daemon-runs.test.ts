@@ -572,6 +572,45 @@ describe("listStaleDaemonRuns", () => {
     }
   });
 
+  it("uses the longer stale cutoff for runs with an active job", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const activeWork = startDaemonRun(db, { now: 1_000 });
+      setDaemonRunActiveJob(db, {
+        runId: activeWork.runId,
+        jobId: "job-1",
+        lockId: "lock-1",
+        now: 1_000
+      });
+
+      const notYetStale = listStaleDaemonRuns(db, {
+        now: 100_000,
+        staleAfterMs: 5_000,
+        activeJobStaleAfterMs: 120_000
+      });
+      expect(notYetStale).toEqual([]);
+
+      const stale = listStaleDaemonRuns(db, {
+        now: 130_000,
+        staleAfterMs: 5_000,
+        activeJobStaleAfterMs: 120_000
+      });
+      expect(stale.map((row) => row.id)).toEqual([activeWork.runId]);
+
+      const shorterActiveJobCutoff = listStaleDaemonRuns(db, {
+        now: 11_000,
+        staleAfterMs: 120_000,
+        activeJobStaleAfterMs: 5_000
+      });
+      expect(shorterActiveJobCutoff.map((row) => row.id)).toEqual([
+        activeWork.runId
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("excludes terminal runs even when their heartbeat is ancient", () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);
