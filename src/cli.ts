@@ -33,6 +33,11 @@ import {
   DEFAULT_DAEMON_POLL_INTERVAL_MS,
   type DaemonLoopResult
 } from "./daemon-loop.js";
+import type {
+  StaleClaimedJobRecoverySkipped,
+  StaleRepoLockRecoverySkipped,
+  StartupRecoveryResult
+} from "./stale-recovery.js";
 
 export const VERSION = "0.0.0";
 
@@ -632,6 +637,7 @@ function emitDaemonStartLoopResult(
     idleCycles: loop.idleCycles,
     lastObservedState: loop.lastObservedState,
     lastWorkerCode: loop.lastWorkerCode,
+    startupRecovery: summarizeStartupRecovery(loop.startupRecovery),
     ...(loop.error !== undefined ? { error: loop.error } : {})
   };
 
@@ -670,6 +676,7 @@ function emitDaemonStartLoopResult(
     `Jobs failed: ${loop.jobsFailed}`,
     `Jobs not executed: ${loop.jobsNotExecuted}`,
     `Idle cycles: ${loop.idleCycles}`,
+    ...formatStartupRecoveryLines(loop.startupRecovery),
     `Pid: ${data.pid ?? "(unset)"}`,
     `Host: ${data.host ?? "(unset)"}`,
     `Started at: ${data.startedAt}`,
@@ -681,6 +688,50 @@ function emitDaemonStartLoopResult(
   lines.push("");
   write(output, lines.join("\n"));
   return exitCode;
+}
+
+type StartupRecoverySummary = {
+  observedAt: number;
+  graceMs: number;
+  recoveredRepoLockCount: number;
+  recoveredClaimedJobCount: number;
+  skippedRepoLocks: StaleRepoLockRecoverySkipped[];
+  skippedClaimedJobs: StaleClaimedJobRecoverySkipped[];
+};
+
+function summarizeStartupRecovery(
+  recovery: StartupRecoveryResult | null
+): StartupRecoverySummary | null {
+  if (recovery === null) return null;
+  return {
+    observedAt: recovery.observedAt,
+    graceMs: recovery.graceMs,
+    recoveredRepoLockCount: recovery.repoLocks.recovered.length,
+    recoveredClaimedJobCount: recovery.claimedJobs.recovered.length,
+    skippedRepoLocks: recovery.repoLocks.skipped,
+    skippedClaimedJobs: recovery.claimedJobs.skipped
+  };
+}
+
+function formatStartupRecoveryLines(
+  recovery: StartupRecoveryResult | null
+): string[] {
+  if (recovery === null) return [];
+  const recoveredLocks = recovery.repoLocks.recovered.length;
+  const recoveredJobs = recovery.claimedJobs.recovered.length;
+  const skippedLocks = recovery.repoLocks.skipped.length;
+  const skippedJobs = recovery.claimedJobs.skipped.length;
+  if (
+    recoveredLocks === 0 &&
+    recoveredJobs === 0 &&
+    skippedLocks === 0 &&
+    skippedJobs === 0
+  ) {
+    return [];
+  }
+  return [
+    `Startup recovery: locks recovered=${recoveredLocks} skipped=${skippedLocks}; claims recovered=${recoveredJobs} skipped=${skippedJobs}`
+  ];
 }
 
 function emitDaemonStartFailure(

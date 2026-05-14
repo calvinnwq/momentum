@@ -269,6 +269,51 @@ export function recoverStaleClaimedGoalIterationJobs(
   return { recovered, skipped };
 }
 
+export type StartupRecoveryInput = {
+  now?: number;
+  graceMs?: number;
+};
+
+export type StartupRecoveryResult = {
+  observedAt: number;
+  graceMs: number;
+  repoLocks: RecoverStaleRepoLocksResult;
+  claimedJobs: RecoverStaleClaimedGoalIterationJobsResult;
+};
+
+/**
+ * Composer that runs the safe stale-lease auto-recovery primitives in the order
+ * the daemon startup path should: first release orphaned repo locks whose
+ * owning job is terminal (so a re-pended job can be re-claimed without lock
+ * contention), then re-pend stale claimed goal_iteration jobs that no live
+ * owner asserts. Both inner primitives are independently idempotent and skip
+ * dirty/unknown states with stable reasons; this composer simply returns both
+ * results unmodified so callers can surface combined counts and routing
+ * information for manual recovery.
+ *
+ * Exposes one observed `now` and `graceMs` so a single startup pass produces a
+ * coherent snapshot. Callers that need a different cadence can pass their own
+ * `now`/`graceMs`, or invoke the underlying primitives directly.
+ */
+export function runStartupRecovery(
+  db: MomentumDb,
+  input: StartupRecoveryInput = {}
+): StartupRecoveryResult {
+  const now = input.now ?? Date.now();
+  const graceMs = input.graceMs ?? 0;
+  const repoLocks = recoverStaleRepoLocksForTerminalJobs(db, { now, graceMs });
+  const claimedJobs = recoverStaleClaimedGoalIterationJobs(db, {
+    now,
+    graceMs
+  });
+  return {
+    observedAt: now,
+    graceMs,
+    repoLocks,
+    claimedJobs
+  };
+}
+
 function skipReasonForJobState(state: QueueJobState): StaleRepoLockSkipReason {
   switch (state) {
     case "pending":

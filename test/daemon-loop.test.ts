@@ -18,6 +18,16 @@ import {
   type DaemonLoopResult
 } from "../src/daemon-loop.js";
 import {
+  acquireRepoLock,
+  getRepoLock
+} from "../src/repo-locks.js";
+import {
+  claimPendingGoalIterationJob,
+  enqueueGoalIterationJob,
+  getQueueJob
+} from "../src/queue-jobs.js";
+import { JOB_RECOVERED_AUTO_REPENDED_STATUS, REPO_LOCK_AUTO_RELEASED_TERMINAL_JOB_STATUS } from "../src/stale-recovery.js";
+import {
   FAKE_RUNNER_FAIL_ENV,
   FAKE_RUNNER_GOAL_COMPLETE_ENV,
   FAKE_RUNNER_TRAJECTORY_ENV
@@ -759,6 +769,7 @@ describe("runDaemonLoop", () => {
         workerId: "daemon-loop-active",
         pollIntervalMs: 5,
         maxLoopIterations: 1,
+        skipStartupRecovery: true,
         now: makeMonotonicNow(),
         sleep: async () => undefined,
         runWorker
@@ -1193,6 +1204,170 @@ describe("runDaemonLoop", () => {
       await expect(runDaemonLoop(input)).rejects.toThrow(
         /pollIntervalMs/
       );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("runs startup recovery before the first cycle and surfaces the result", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      // Stale repo lock whose owning job is terminal: previous-daemon residue.
+      db.prepare(
+        `INSERT INTO goals
+           (id, title, branch, artifact_dir, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).run("goal-recover", "recover", "momentum/recover", "/tmp/recover", 1, 1);
+      const enqueued = enqueueGoalIterationJob(db, {
+        goalId: "goal-recover",
+        iteration: 1,
+        idempotencyKey: "goal-recover:1",
+        artifactPath: "/tmp/recover/iterations/1",
+        now: 100
+      });
+      const lock = acquireRepoLock(db, {
+        repoRoot: "/tmp/recover",
+        holder: "previous-worker",
+        goalId: "goal-recover",
+        iteration: 1,
+        jobId: enqueued.jobId,
+        leaseExpiresAt: 1_000,
+        now: 100
+      });
+      if (!lock.ok) throw new Error("acquire failed in test setup");
+      db.prepare(
+        "UPDATE jobs SET state = 'succeeded', updated_at = updated_at WHERE id = ?"
+      ).run(enqueued.jobId);
+
+      // Stale claimed job with no live owner: also re-pendable.
+      const enqueued2 = enqueueGoalIterationJob(db, {
+        goalId: "goal-recover",
+        iteration: 2,
+        idempotencyKey: "goal-recover:2",
+        artifactPath: "/tmp/recover/iterations/2",
+        now: 200
+      });
+      const claimed = claimPendingGoalIterationJob(db, {
+        workerId: "previous-worker",
+        leaseDurationMs: 900,
+        now: 200
+      });
+      if (!claimed.ok) throw new Error("claim failed in test setup");
+
+      const runId = seedDaemonRun(db);
+      const result = await runDaemonLoop({
+        db,
+        dataDir,
+        runId,
+        workerId: "daemon-loop-recovery",
+        pollIntervalMs: 1,
+        maxLoopIterations: 1,
+        startupRecoveryGraceMs: 0,
+        now: makeMonotonicNow(1_000_000, 1),
+        sleep: async () => undefined,
+        runWorker: () => ({
+          code: "no_work",
+          workerId: "daemon-loop-recovery",
+          dataDir,
+          outcome: "idle",
+          message: "no work"
+        })
+      });
+
+      expect(result.startupRecovery).not.toBeNull();
+      const recovery = result.startupRecovery!;
+      expect(recovery.graceMs).toBe(0);
+      expect(recovery.repoLocks.recovered).toHaveLength(1);
+      expect(recovery.repoLocks.recovered[0]!.lock.id).toBe(lock.lockId);
+      expect(recovery.repoLocks.recovered[0]!.recoveryStatus).toBe(
+        REPO_LOCK_AUTO_RELEASED_TERMINAL_JOB_STATUS
+      );
+      expect(recovery.claimedJobs.recovered).toHaveLength(1);
+      expect(recovery.claimedJobs.recovered[0]!.jobBefore.id).toBe(
+        enqueued2.jobId
+      );
+      expect(recovery.claimedJobs.recovered[0]!.recoveryStatus).toBe(
+        JOB_RECOVERED_AUTO_REPENDED_STATUS
+      );
+
+      // Side effects landed: lock released, claimed job re-pended.
+      expect(getRepoLock(db, lock.lockId)?.state).toBe("released");
+      expect(getQueueJob(db, enqueued2.jobId)?.state).toBe("pending");
+
+      // Recovery events were emitted.
+      const events = db
+        .prepare(
+          "SELECT type FROM events WHERE type IN ('repo_lock.recovered', 'job.recovered') ORDER BY id"
+        )
+        .all() as Array<{ type: string }>;
+      expect(events.map((e) => e.type)).toEqual([
+        "repo_lock.recovered",
+        "job.recovered"
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("returns startupRecovery: null when the pre-loop recovery pass is skipped", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const runId = seedDaemonRun(db);
+      const result = await runDaemonLoop({
+        db,
+        dataDir,
+        runId,
+        workerId: "daemon-loop-skip-recovery",
+        pollIntervalMs: 1,
+        maxIdleCycles: 1,
+        skipStartupRecovery: true,
+        now: makeMonotonicNow(),
+        sleep: async () => undefined,
+        runWorker: () => ({
+          code: "no_work",
+          workerId: "daemon-loop-skip-recovery",
+          dataDir,
+          outcome: "idle",
+          message: "no work"
+        })
+      });
+
+      expect(result.startupRecovery).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("reports an empty startupRecovery payload when nothing is stale", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const runId = seedDaemonRun(db);
+      const result = await runDaemonLoop({
+        db,
+        dataDir,
+        runId,
+        workerId: "daemon-loop-empty-recovery",
+        pollIntervalMs: 1,
+        maxIdleCycles: 1,
+        now: makeMonotonicNow(),
+        sleep: async () => undefined,
+        runWorker: () => ({
+          code: "no_work",
+          workerId: "daemon-loop-empty-recovery",
+          dataDir,
+          outcome: "idle",
+          message: "no work"
+        })
+      });
+
+      expect(result.startupRecovery).not.toBeNull();
+      expect(result.startupRecovery!.repoLocks.recovered).toEqual([]);
+      expect(result.startupRecovery!.repoLocks.skipped).toEqual([]);
+      expect(result.startupRecovery!.claimedJobs.recovered).toEqual([]);
+      expect(result.startupRecovery!.claimedJobs.skipped).toEqual([]);
     } finally {
       db.close();
     }

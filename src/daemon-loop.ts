@@ -10,6 +10,10 @@ import {
   type DaemonRunState
 } from "./daemon-runs.js";
 import {
+  runStartupRecovery,
+  type StartupRecoveryResult
+} from "./stale-recovery.js";
+import {
   runWorkerOnce,
   type WorkerRunInput,
   type WorkerRunResult
@@ -17,6 +21,13 @@ import {
 
 export const DEFAULT_DAEMON_POLL_INTERVAL_MS = 500;
 export const DEFAULT_DAEMON_WORKER_LEASE_MS = 30_000;
+/**
+ * Grace tolerance applied when the daemon's startup recovery pass scans for
+ * stale leases. Mirrors `DEFAULT_STALE_LEASE_GRACE_MS` from `daemon-status` so
+ * a cycle that crosses the lease deadline by a few milliseconds isn't reaped
+ * out from under a worker that is still mid-write.
+ */
+export const DEFAULT_DAEMON_STARTUP_RECOVERY_GRACE_MS = 5_000;
 
 export type DaemonLoopNow = () => number;
 export type DaemonLoopSleep = (ms: number) => Promise<void>;
@@ -35,6 +46,17 @@ export type DaemonLoopInput = {
   sleep?: DaemonLoopSleep;
   runWorker?: DaemonLoopRunWorker;
   onCycleComplete?: (cycle: DaemonLoopCycle) => void;
+  /**
+   * Disable the one-shot stale-lease auto-recovery pass run before the loop
+   * enters its first cycle. Defaults to `false` (recovery on). Tests that want
+   * to assert raw loop semantics without the recovery side-effect can opt out.
+   */
+  skipStartupRecovery?: boolean;
+  /**
+   * Grace tolerance forwarded to `runStartupRecovery`. Defaults to
+   * `DEFAULT_DAEMON_STARTUP_RECOVERY_GRACE_MS`.
+   */
+  startupRecoveryGraceMs?: number;
 };
 
 export type DaemonLoopExitReason =
@@ -68,6 +90,7 @@ export type DaemonLoopResult = {
   lastObservedState: DaemonRunState | null;
   lastWorkerCode: WorkerRunResult["code"] | null;
   cancelOutcome: DaemonCancelOutcome | null;
+  startupRecovery: StartupRecoveryResult | null;
   error?: string;
 };
 
@@ -97,11 +120,25 @@ export async function runDaemonLoop(
   let lastWorkerCode: WorkerRunResult["code"] | null = null;
   let exitReason: DaemonLoopExitReason | null = null;
   let internalErrorMessage: string | null = null;
+  let startupRecovery: StartupRecoveryResult | null = null;
 
   const markInternalError = (error: unknown): void => {
     internalErrorMessage = error instanceof Error ? error.message : String(error);
     exitReason = "internal_error";
   };
+
+  if (input.skipStartupRecovery !== true) {
+    try {
+      const recoveryGraceMs =
+        input.startupRecoveryGraceMs ?? DEFAULT_DAEMON_STARTUP_RECOVERY_GRACE_MS;
+      startupRecovery = runStartupRecovery(input.db, {
+        now: now(),
+        graceMs: recoveryGraceMs
+      });
+    } catch (error) {
+      markInternalError(error);
+    }
+  }
 
   const completeCycle = (
     cycleIndex: number,
@@ -304,7 +341,8 @@ export async function runDaemonLoop(
     idleCycles,
     lastObservedState,
     lastWorkerCode,
-    cancelOutcome
+    cancelOutcome,
+    startupRecovery
   };
   if (internalErrorMessage !== null) {
     result.error = internalErrorMessage;

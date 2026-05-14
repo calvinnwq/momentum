@@ -21,7 +21,8 @@ import {
   JOB_RECOVERED_AUTO_REPENDED_STATUS,
   REPO_LOCK_AUTO_RELEASED_TERMINAL_JOB_STATUS,
   recoverStaleClaimedGoalIterationJobs,
-  recoverStaleRepoLocksForTerminalJobs
+  recoverStaleRepoLocksForTerminalJobs,
+  runStartupRecovery
 } from "../src/stale-recovery.js";
 
 const tempRoots: string[] = [];
@@ -772,6 +773,133 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
         claimedB.job.id,
         claimedA.job.id
       ]);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("runStartupRecovery", () => {
+  it("returns empty result when nothing is stale", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedGoal(db);
+      const out = runStartupRecovery(db, { now: 5_000, graceMs: 100 });
+      expect(out.observedAt).toBe(5_000);
+      expect(out.graceMs).toBe(100);
+      expect(out.repoLocks.recovered).toEqual([]);
+      expect(out.repoLocks.skipped).toEqual([]);
+      expect(out.claimedJobs.recovered).toEqual([]);
+      expect(out.claimedJobs.skipped).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("composes both primitives in one pass and surfaces both results", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedGoal(db, "g1");
+      seedGoal(db, "g2");
+      // Stale repo lock whose owning job is terminal → recoverable.
+      const seededLock = seedQueuedIterationWithLock(db, {
+        repoRoot: "/tmp/repo-a",
+        goalId: "g1",
+        idempotencyKey: "g1:1",
+        leaseExpiresAt: 1_000
+      });
+      setJobState(db, seededLock.jobId, "succeeded");
+      // Stale claimed job with no live owner → recoverable.
+      const claimed = seedClaimedIteration(db, {
+        goalId: "g2",
+        leaseDurationMs: 900,
+        claimAt: 100
+      });
+
+      const out = runStartupRecovery(db, { now: 5_000, graceMs: 0 });
+      expect(out.observedAt).toBe(5_000);
+      expect(out.graceMs).toBe(0);
+      expect(out.repoLocks.recovered).toHaveLength(1);
+      expect(out.repoLocks.recovered[0]!.lock.id).toBe(seededLock.lockId);
+      expect(out.repoLocks.recovered[0]!.recoveryStatus).toBe(
+        REPO_LOCK_AUTO_RELEASED_TERMINAL_JOB_STATUS
+      );
+      expect(out.claimedJobs.recovered).toHaveLength(1);
+      expect(out.claimedJobs.recovered[0]!.jobBefore.id).toBe(claimed.jobId);
+      expect(out.claimedJobs.recovered[0]!.recoveryStatus).toBe(
+        JOB_RECOVERED_AUTO_REPENDED_STATUS
+      );
+
+      const releasedLock = getRepoLock(db, seededLock.lockId);
+      expect(releasedLock?.state).toBe("released");
+      const rependedJob = getQueueJob(db, claimed.jobId);
+      expect(rependedJob?.state).toBe("pending");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("is idempotent across repeated invocations", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedGoal(db);
+      const claimed = seedClaimedIteration(db, {
+        leaseDurationMs: 900,
+        claimAt: 100
+      });
+      const first = runStartupRecovery(db, { now: 5_000 });
+      expect(first.claimedJobs.recovered).toHaveLength(1);
+
+      const second = runStartupRecovery(db, { now: 6_000 });
+      expect(second.claimedJobs.recovered).toEqual([]);
+      expect(second.claimedJobs.skipped).toEqual([]);
+      expect(second.repoLocks.recovered).toEqual([]);
+      expect(second.repoLocks.skipped).toEqual([]);
+
+      expect(getQueueJob(db, claimed.jobId)?.state).toBe("pending");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("surfaces dirty/unknown stale records via skipped reasons for manual recovery", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedGoal(db, "g1");
+      seedGoal(db, "g2");
+      // Enqueue the lock-owning job for g1 with a LATER created_at than the
+      // claim seed so the subsequent claim picks the g2 row deterministically.
+      const seededLock = seedQueuedIterationWithLock(db, {
+        repoRoot: "/tmp/repo-a",
+        goalId: "g1",
+        idempotencyKey: "g1:1",
+        leaseExpiresAt: 1_000,
+        enqueueAt: 200
+      });
+      // Stale claimed job (different goal) promoted to running (dirty: repo
+      // writes may have happened, refuse auto-recovery).
+      const dirtyClaim = seedClaimedIteration(db, {
+        goalId: "g2",
+        leaseDurationMs: 900,
+        enqueueAt: 100,
+        claimAt: 100,
+        workerId: "worker-b"
+      });
+      setJobState(db, dirtyClaim.jobId, "running");
+
+      const out = runStartupRecovery(db, { now: 5_000 });
+      expect(out.repoLocks.recovered).toEqual([]);
+      expect(out.repoLocks.skipped).toHaveLength(1);
+      expect(out.repoLocks.skipped[0]!.lock.id).toBe(seededLock.lockId);
+      expect(out.repoLocks.skipped[0]!.reason).toBe("job_pending");
+      expect(out.claimedJobs.recovered).toEqual([]);
+      expect(out.claimedJobs.skipped).toHaveLength(1);
+      expect(out.claimedJobs.skipped[0]!.job.id).toBe(dirtyClaim.jobId);
+      expect(out.claimedJobs.skipped[0]!.reason).toBe("job_running");
     } finally {
       db.close();
     }
