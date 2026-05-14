@@ -22,7 +22,7 @@ momentum status [goal-id] [--data-dir <path>] [--json]
 momentum logs <goal-id> [--iteration <n>] [--data-dir <path>] [--json]
 momentum handoff <goal-id> [--data-dir <path>] [--json]
 momentum worker run [--worker-id <id>] [--data-dir <path>] [--json]
-momentum daemon start [--data-dir <path>] [--max-loop-iterations <n>] [--max-idle-cycles <n>] [--poll-interval-ms <n>] [--json]
+momentum daemon start [--max-loop-iterations <n>] [--max-idle-cycles <n>] [--poll-interval-ms <ms>] [--data-dir <path>] [--json]
 momentum daemon stop [--reason <text>] [--data-dir <path>] [--json]
 momentum daemon status [--data-dir <path>] [--json]
 momentum doctor [--json]
@@ -202,7 +202,7 @@ Local interrupt policy: `worker run` is a foreground one-shot command. If the pr
 ### `daemon start`
 
 ```text
-momentum daemon start [--data-dir <path>] [--max-loop-iterations <n>] [--max-idle-cycles <n>] [--poll-interval-ms <n>] [--json]
+momentum daemon start [--max-loop-iterations <n>] [--max-idle-cycles <n>] [--poll-interval-ms <ms>] [--data-dir <path>] [--json]
 ```
 
 Records a new orchestrator run in `daemon_runs` (state `running`) with `pid`, `host`, `started_at`, and `heartbeat_at` populated from the invoking process. Refuses to record a second concurrent run while one is still active (states `starting`, `running`, `stop_requested`) and exits with `code: "daemon_already_active"` (exit 1); the failure payload surfaces the existing `runId`, `state`, `pid`, `host`, `startedAt`, `heartbeatAt`, `heartbeatAgeMs`, and a `stale` flag (90s default heartbeat cutoff, or 930s default while an active job is recorded) so operators can decide whether to wait or clear the prior record manually. After a terminal record (`stopped` / `error`), a fresh start is allowed.
