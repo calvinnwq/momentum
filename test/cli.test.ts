@@ -111,7 +111,9 @@ describe("momentum CLI scaffold", () => {
     expect(result.stdout).toContain(
       "momentum daemon status [--data-dir <path>] [--json]"
     );
-    expect(result.stdout).toContain("momentum doctor [--json]");
+    expect(result.stdout).toContain(
+      "momentum doctor [--data-dir <path>] [--json]"
+    );
     expect(result.stderr).toBe("");
   });
 
