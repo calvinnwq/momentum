@@ -28,7 +28,7 @@ function makeTempDir(prefix = "momentum-events-"): string {
 }
 
 describe("queue event taxonomy", () => {
-  it("exposes the full Milestone 2 event vocabulary", () => {
+  it("exposes the full Milestone 2 + M3 recovery event vocabulary", () => {
     expect(Object.values(QUEUE_EVENT_TYPES).sort()).toEqual(
       [
         "goal.completed",
@@ -40,7 +40,8 @@ describe("queue event taxonomy", () => {
         "job.failed",
         "job.heartbeat",
         "job.released",
-        "job.succeeded"
+        "job.succeeded",
+        "repo_lock.recovered"
       ]
     );
   });
