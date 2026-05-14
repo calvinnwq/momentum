@@ -25,10 +25,11 @@ momentum worker run [--worker-id <id>] [--data-dir <path>] [--json]
 momentum daemon start [--max-loop-iterations <n>] [--max-idle-cycles <n>] [--poll-interval-ms <ms>] [--data-dir <path>] [--json]
 momentum daemon stop [--now] [--reason <text>] [--data-dir <path>] [--json]
 momentum daemon status [--data-dir <path>] [--json]
+momentum recovery clear <goal-id> [--reason <text>] [--data-dir <path>] [--json]
 momentum doctor [--json]
 ```
 
-The `daemon` subcommands record orchestrator-run state in SQLite (`daemon_runs`) and expose an inspection contract. They are scoped to the Milestone 3 operational-safety slices (NGX-272, NGX-273, NGX-274, NGX-275, NGX-276): without any loop-bound flags, `daemon start` registers a new orchestrator run and returns immediately (preserving the NGX-272 register-only contract); passing `--max-loop-iterations` or `--max-idle-cycles` opts into the NGX-273 managed loop and drains queued goal iterations in-process until a bound, `stop_requested`, `stop_now_requested`, or a terminal daemon-run state is reached. `--poll-interval-ms` tunes that bounded loop and must be paired with a loop bound. `daemon stop` records a graceful stop request that the managed loop observes between cycles; `daemon stop --now` records an immediate-stop request that causes the loop to finalize the run as `canceled` rather than `stopped`. Neither command kills any external runner, worker, or process. The managed loop runs a one-shot NGX-276 startup-recovery pass before its first cycle, auto-releases stale repo locks whose owning job is terminal, re-pends orphaned stale claims whose repo state is clean, and auto-finalizes idle stale `daemon_runs` rows; dirty / active / ambiguous cases are reported on the response under a stable skip taxonomy so operators can drive manual recovery deliberately.
+The `daemon` subcommands record orchestrator-run state in SQLite (`daemon_runs`) and expose an inspection contract. They are scoped to the Milestone 3 operational-safety slices (NGX-272, NGX-273, NGX-274, NGX-275, NGX-276, NGX-277): without any loop-bound flags, `daemon start` registers a new orchestrator run and returns immediately (preserving the NGX-272 register-only contract); passing `--max-loop-iterations` or `--max-idle-cycles` opts into the NGX-273 managed loop and drains queued goal iterations in-process until a bound, `stop_requested`, `stop_now_requested`, or a terminal daemon-run state is reached. `--poll-interval-ms` tunes that bounded loop and must be paired with a loop bound. `daemon stop` records a graceful stop request that the managed loop observes between cycles; `daemon stop --now` records an immediate-stop request that causes the loop to finalize the run as `canceled` rather than `stopped`. Neither command kills any external runner, worker, or process. The managed loop runs a one-shot NGX-276 startup-recovery pass before its first cycle, auto-releases stale repo locks whose owning job is terminal, re-pends orphaned stale claims whose repo state is clean, and auto-finalizes idle stale `daemon_runs` rows; dirty / active / ambiguous cases are reported on the response under a stable skip taxonomy so operators can drive manual recovery deliberately. Manual-recovery skip reasons (`repo_dirty`, `repo_unknown_commit`, `repo_unavailable`, `job_running`) also write a `recovery.md` artifact for the goal and set a `needs_manual_recovery` flag that blocks future queue claims until an operator explicitly clears it via `momentum recovery clear`.
 
 `goal start --foreground` parses the goal spec, resolves the data directory, initializes SQLite (`goals`, `jobs`, `events`, `repo_locks` tables), creates the artifact layout, and runs one foreground iteration: it inspects the target repo, captures the pre-iteration HEAD, creates or reuses a Momentum branch, renders the iteration prompt, invokes the configured runner (currently `fake` only), runs each verification command from the repo root, and either stages and commits the full repo diff as one Momentum commit on verified success or hard-resets the worktree back to the pre-iteration HEAD on runner failure or verification failure. The iteration writes `prompt.md`, `runner.log`, `verification.log`, and `result.json` under `iterations/<n>/`. On a verified commit the goal transitions to `iteration_complete` (or `completed` if the runner reports `goal_complete: true`); on runner failure, verification failure, or any pipeline error it transitions to `failed`. `status [goal-id] --json` reads the SQLite/artifact state and emits a stable JSON shape including reducer state, next job, and next-action hints, and `handoff <goal-id> --json` writes `handoff.md` and `handoff.json` (schema v1) into the goal's artifact dir.
 
@@ -153,7 +154,7 @@ Re-running `goal start` with the same goal spec against the same data directory 
 momentum status [goal-id] [--data-dir <path>] [--json]
 ```
 
-Reads SQLite plus artifact state and reports the goal's current state, configured repo and runner, latest job, latest iteration summary (including the verified commit SHA when present), reducer decision (`continue` / `goal_complete` / `max_iterations_reached` / `iteration_failed`), the next queued job (if any), a next-action hint, and the daemon run summary. JSON output includes `goalState`, `artifacts`, `currentIterationDetail`, `nextActionDetail`, `latestCommitSha`, `daemon`, and `staleRecovery`; `latestJob` / `nextJob` include `idempotencyKey`, result/error paths, and lease timestamps. The `daemon` field is `null` when no daemon run has ever been recorded for the data directory; otherwise it contains `runId`, `state`, `isActive`, `isTerminal`, `startedAt`, `heartbeatAt`, `finishedAt`, `activeJob` (`{jobId, lockId}`), `stopRequest` (`{requestedAt, reason}` or `null`), `stopNowRequest` (`{requestedAt, reason}` or `null`), and `cancelOutcome` (`{outcome}` or `null`). The `staleRecovery` field is goal-scoped and exposes `recoveredRepoLockCount`, `recoveredJobCount`, `latestRecoveredRepoLockAt`, `latestRecoveredJobAt` (counts and most-recent timestamps for `repo_lock.recovered` and `job.recovered` events recorded for this goal), `staleRepoLockCount`, `staleClaimedJobCount` (current goal-scoped records whose lease has expired and may need recovery), and `staleLeaseGraceMs` (5s default skew tolerance). Text output includes a `Daemon:` line with state, active/terminal flags, and run ID; if present, `Daemon stop requested:`, `Daemon stop-now requested:`, and `Daemon cancel outcome:` lines show stop/cancel details, and a `Stale recovery:` line appears when any recovered or pending stale counts are non-zero. Omitting `goal-id` selects the most recently updated goal in the data directory; when no goals exist the command exits non-zero with `code: "no_goals"`.
+Reads SQLite plus artifact state and reports the goal's current state, configured repo and runner, latest job, latest iteration summary (including the verified commit SHA when present), reducer decision (`continue` / `goal_complete` / `max_iterations_reached` / `iteration_failed`), the next queued job (if any), a next-action hint, and the daemon run summary. JSON output includes `goalState`, `artifacts`, `currentIterationDetail`, `nextActionDetail`, `latestCommitSha`, `daemon`, and `staleRecovery`; `latestJob` / `nextJob` include `idempotencyKey`, result/error paths, and lease timestamps. The `artifacts` block includes `recoveryMd` (path and exists status) showing whether a `recovery.md` artifact is present for the goal. The `daemon` field is `null` when no daemon run has ever been recorded for the data directory; otherwise it contains `runId`, `state`, `isActive`, `isTerminal`, `startedAt`, `heartbeatAt`, `finishedAt`, `activeJob` (`{jobId, lockId}`), `stopRequest` (`{requestedAt, reason}` or `null`), `stopNowRequest` (`{requestedAt, reason}` or `null`), and `cancelOutcome` (`{outcome}` or `null`). The `staleRecovery` field is goal-scoped and exposes `recoveredRepoLockCount`, `recoveredJobCount`, `latestRecoveredRepoLockAt`, `latestRecoveredJobAt` (counts and most-recent timestamps for `repo_lock.recovered` and `job.recovered` events recorded for this goal), `staleRepoLockCount`, `staleClaimedJobCount` (current goal-scoped records whose lease has expired and may need recovery), and `staleLeaseGraceMs` (5s default skew tolerance). Text output includes a `Daemon:` line with state, active/terminal flags, and run ID; if present, `Daemon stop requested:`, `Daemon stop-now requested:`, and `Daemon cancel outcome:` lines show stop/cancel details, and a `Stale recovery:` line appears when any recovered or pending stale counts are non-zero. Omitting `goal-id` selects the most recently updated goal in the data directory; when no goals exist the command exits non-zero with `code: "no_goals"`.
 
 ### `logs`
 
@@ -169,7 +170,7 @@ Reads local iteration artifacts for a goal and emits `runner.log` and `verificat
 momentum handoff <goal-id> [--data-dir <path>] [--json]
 ```
 
-Renders `handoff.md` and `handoff.json` (schema v1) into the goal's artifact directory from the same state `status` reads. The handoff includes reducer decision and next-job details, a next-action hint describing what to do next, and a daemon run summary. The JSON artifact includes `goal_state`, `current_iteration_detail`, `next_action_detail`, `latest_commit_sha`, `daemon`, `stale_recovery`, and `latest_job` / `next_job` fields with idempotency keys, result/error paths, and lease timestamps. The `daemon` field is `null` when no daemon has ever run; otherwise it contains `run_id`, `state`, `is_active`, `is_terminal`, `started_at`, `heartbeat_at`, `finished_at`, `active_job` (`{job_id, lock_id}`), `stop_request` (`{requested_at, reason}` or `null`), `stop_now_request` (`{requested_at, reason}` or `null`), and `cancel_outcome` (`{outcome}` or `null`). The `stale_recovery` field is goal-scoped (`recovered_repo_lock_count`, `recovered_job_count`, `latest_recovered_repo_lock_at`, `latest_recovered_job_at`, `stale_repo_lock_count`, `stale_claimed_job_count`, `stale_lease_grace_ms`) so prior auto-recovery actions and currently stale goal-scoped records are visible alongside the handoff. The markdown includes a `## Daemon` section showing the run ID, state, stop request, stop-now request, cancel outcome, active job, and finished time, plus a `## Stale recovery` section that renders the recovery counts and latest timestamps (or a no-activity sentinel when none).
+Renders `handoff.md` and `handoff.json` (schema v1) into the goal's artifact directory from the same state `status` reads. The handoff includes reducer decision and next-job details, a next-action hint describing what to do next, and a daemon run summary. The JSON artifact includes `goal_state`, `current_iteration_detail`, `next_action_detail`, `latest_commit_sha`, `daemon`, `stale_recovery`, and `latest_job` / `next_job` fields with idempotency keys, result/error paths, and lease timestamps. The `artifacts` block includes `recovery_md` showing the path to the goal-scoped `recovery.md` file, and `artifact_files` includes `recovery_md` as a boolean indicating whether the file exists on disk. The markdown includes `recovery.md` in the artifact list; when present it shows `(present)`, when absent it shows `(missing)`. The `daemon` field is `null` when no daemon has ever run; otherwise it contains `run_id`, `state`, `is_active`, `is_terminal`, `started_at`, `heartbeat_at`, `finished_at`, `active_job` (`{job_id, lock_id}`), `stop_request` (`{requested_at, reason}` or `null`), `stop_now_request` (`{requested_at, reason}` or `null`), and `cancel_outcome` (`{outcome}` or `null`). The `stale_recovery` field is goal-scoped (`recovered_repo_lock_count`, `recovered_job_count`, `latest_recovered_repo_lock_at`, `latest_recovered_job_at`, `stale_repo_lock_count`, `stale_claimed_job_count`, `stale_lease_grace_ms`) so prior auto-recovery actions and currently stale goal-scoped records are visible alongside the handoff. The markdown includes a `## Daemon` section showing the run ID, state, stop request, stop-now request, cancel outcome, active job, and finished time, plus a `## Stale recovery` section that renders the recovery counts and latest timestamps (or a no-activity sentinel when none).
 
 ### `worker run`
 
@@ -306,7 +307,7 @@ JSON envelope shape:
 momentum daemon status [--data-dir <path>] [--json]
 ```
 
-Read-only inspector for `daemon_runs`. Selects the active record if one exists; otherwise falls back to the most recently started run so operators can see terminal/error state. When no daemon has ever started, exits 0 with `hasRun: false` (text mode: `Daemon: never started`). The summary surfaces `runId`, `pid`, `host`, `state`, `isActive`, `isTerminal`, `startedAt`, `heartbeatAt`, `lastStateChangeAt`, `finishedAt`, `ageMs`, `heartbeatAgeMs`, `stale`, `staleAfterMs` (90s default heartbeat cutoff, or `activeJobStaleAfterMs` while an active job is recorded), `activeJobStaleAfterMs` (930s default), `activeJob` (`{jobId, lockId}`), `stopRequest` (`{requestedAt, reason}` or `null`), `stopNowRequest` (`{requestedAt, reason}` or `null`), `cancelOutcome` (`{outcome}` or `null`), `reconciliation` (`{count, lastReconciledAt}`), `error` (`{message, at}` or `null`), and `updatedAt`. The envelope also lists `staleRepoLocks` (active repo locks whose `lease_expires_at` is in the past) and `staleClaimedJobs` (claimed/running `goal_iteration` jobs whose lease has lapsed), tolerating up to `staleLeaseGraceMs` (5s default) of clock skew. `daemon status` itself is read-only — running it triggers no recovery action. Automatic recovery for known-safe stale leases is performed by the NGX-276 startup-recovery pass when a managed `daemon start` boots; rows surfaced by `daemon status` are the current stale snapshot and may still need manual recovery if a startup-recovery pass skips them.
+Read-only inspector for `daemon_runs`. Selects the active record if one exists; otherwise falls back to the most recently started run so operators can see terminal/error state. When no daemon has ever started, exits 0 with `hasRun: false` (text mode: `Daemon: never started`). The summary surfaces `runId`, `pid`, `host`, `state`, `isActive`, `isTerminal`, `startedAt`, `heartbeatAt`, `lastStateChangeAt`, `finishedAt`, `ageMs`, `heartbeatAgeMs`, `stale`, `staleAfterMs` (90s default heartbeat cutoff, or `activeJobStaleAfterMs` while an active job is recorded), `activeJobStaleAfterMs` (930s default), `activeJob` (`{jobId, lockId}`), `stopRequest` (`{requestedAt, reason}` or `null`), `stopNowRequest` (`{requestedAt, reason}` or `null`), `cancelOutcome` (`{outcome}` or `null`), `reconciliation` (`{count, lastReconciledAt}`), `error` (`{message, at}` or `null`), and `updatedAt`. The envelope also lists `staleRepoLocks` (active repo locks whose `lease_expires_at` is in the past) and `staleClaimedJobs` (claimed/running `goal_iteration` jobs whose lease has lapsed), tolerating up to `staleLeaseGraceMs` (5s default) of clock skew, plus `goalsNeedingRecovery` listing goals whose `recovery.md` artifact exists on disk (each entry includes `goalId`, `title`, `goalState`, and `recoveryMdPath`). `daemon status` itself is read-only — running it triggers no recovery action. Automatic recovery for known-safe stale leases is performed by the NGX-276 startup-recovery pass when a managed `daemon start` boots; rows surfaced by `daemon status` are the current stale snapshot and may still need manual recovery if a startup-recovery pass skips them.
 
 JSON envelope shape (active run with no stop request or error):
 
@@ -346,9 +347,48 @@ JSON envelope shape (active run with no stop request or error):
   "staleRuns": [],
   "staleRepoLocks": [],
   "staleClaimedJobs": [],
+  "goalsNeedingRecovery": [],
   "observedAt": 1731500000000
 }
 ```
+
+### `recovery clear`
+
+```text
+momentum recovery clear <goal-id> [--reason <text>] [--data-dir <path>] [--json]
+```
+
+Clears the `needs_manual_recovery` flag on a goal so it becomes eligible for queue claims again. Refuses safely when the goal does not exist (`code: goal_not_found`), is not currently flagged (`code: not_flagged`), or still has an active `claimed`/`running` job (`code: job_active` with `activeJobIds`). On success, appends a `goal.recovery_cleared` audit event with the previous reason, previous marked-at timestamp, cleared-at timestamp, and optional `operatorReason`. The `recovery.md` artifact is intentionally left on disk as durable evidence — operators should remove it manually after capturing the context elsewhere. Idempotent in the sense that a second clear on the same goal fails with `code: not_flagged`.
+
+JSON envelope shape (success):
+
+```json
+{
+  "ok": true,
+  "command": "recovery clear",
+  "goalId": "<uuid>",
+  "dataDir": "/path/to/data-dir",
+  "previousReason": "repo_dirty",
+  "previousMarkedAt": 1731500000000,
+  "clearedAt": 1731500060000,
+  "eventId": 42
+}
+```
+
+JSON envelope shape (failure — goal has active jobs):
+
+```json
+{
+  "ok": false,
+  "command": "recovery clear",
+  "code": "job_active",
+  "message": "Goal <uuid> has 1 active goal_iteration job(s); release or finalize them before clearing manual recovery.",
+  "goalId": "<uuid>",
+  "activeJobIds": ["<job-uuid>"]
+}
+```
+
+Text output includes the goal ID, previous reason, previous marked-at timestamp, cleared-at timestamp, and event ID.
 
 ### `doctor`
 
@@ -356,7 +396,7 @@ JSON envelope shape (active run with no stop request or error):
 momentum doctor [--json]
 ```
 
-Reports CLI version, Node.js version, platform, the current milestone scope label (`Milestone 3: operational safety (NGX-272, NGX-273, NGX-274, NGX-275, NGX-276)`), and a compact daemon-readiness block read from `daemon_runs` (`{ok, dataDir, hasRun, state, isActive, stale, staleRunCount, staleRepoLockCount, staleClaimedJobCount, runId}` on success, `{ok: false, code, message}` on failure). The two stale-lease counts surface orphaned repo locks and claimed/running jobs whose lease expired more than `staleLeaseGraceMs` ago, so a single command reveals whether the orchestrator has work that needs manual recovery. Useful as a first sanity check after install and as a quick orchestrator-health probe.
+Reports CLI version, Node.js version, platform, the current milestone scope label (`Milestone 3: operational safety (NGX-272, NGX-273, NGX-274, NGX-275, NGX-276, NGX-277)`), and a compact daemon-readiness block read from `daemon_runs` (`{ok, dataDir, hasRun, state, isActive, stale, staleRunCount, staleRepoLockCount, staleClaimedJobCount, goalsNeedingRecoveryCount, runId}` on success, `{ok: false, code, message}` on failure). The stale-lease counts surface orphaned repo locks and claimed/running jobs whose lease expired more than `staleLeaseGraceMs` ago. The `goalsNeedingRecoveryCount` surface shows how many goals currently have a `recovery.md` artifact on disk, indicating they are flagged for manual inspection. Useful as a first sanity check after install and as a quick orchestrator-health probe.
 
 ### Stale-lease detection and auto-recovery (NGX-276)
 
@@ -376,7 +416,36 @@ The managed `daemon start` loop runs a one-shot `runStartupRecovery` pass before
 - `status --json` / text and `handoff` — goal-scoped `staleRecovery` block with `recoveredRepoLockCount`, `recoveredJobCount`, `latestRecoveredRepoLockAt`, `latestRecoveredJobAt`, current `staleRepoLockCount`, current `staleClaimedJobCount`, and `staleLeaseGraceMs`; markdown handoff includes a `## Stale recovery` section.
 - `worker run --json` / text — pre-claim `stalePreCheck` snapshot listing stale repo locks and claimed/running jobs observed before the worker attempts to claim a job.
 
-Manual recovery is the operator-driven path for everything that lands in a skip taxonomy. A dedicated `recovery.md` artifact and a `needs_manual_recovery` goal state are deferred to a later M3 slice; today the skip reasons (and the `repoRoot` / `repoInspectionError` fields on repo-state refusals) are the routing surface.
+Manual recovery is the operator-driven path for everything that lands in a skip taxonomy. Stale-claim skip reasons (`repo_dirty`, `repo_unknown_commit`, `repo_unavailable`, `job_running`) now write a goal-scoped `recovery.md` artifact and set a durable `needs_manual_recovery` flag on the goal row; the flag blocks future queue claims until an operator explicitly clears it via `momentum recovery clear`. Skip reasons that indicate live ownership (`daemon_active`, `lock_active`, `job_state_changed`) do not produce an artifact since they resolve on their own.
+
+### Manual recovery artifacts and flag (NGX-277)
+
+When the daemon's startup-recovery pass or manual inspection identifies a stale claim that cannot be auto-recovered (because the repo is dirty, HEAD is unresolvable, the repo path is missing, or the job is still in a `running` state), Momentum writes a `recovery.md` artifact to the goal's artifact directory and sets a durable `needs_manual_recovery` flag on the goal row. The flag blocks `claimPendingGoalIterationJob` from claiming any pending iteration for that goal until the operator explicitly clears it.
+
+The `recovery.md` artifact contains:
+
+- Schema version, goal ID, job ID, iteration, daemon run ID, repo path
+- The reason code and human-readable message (`repo_dirty`, `repo_unknown_commit`, `repo_unavailable`, or `job_running`)
+- Commit pointers (expected pre-iteration commit vs current commit)
+- Paths to relevant iteration artifacts (runner log, verification log, result JSON)
+- Safe next steps with actionable guidance
+
+The flag is surfaced in the queue claim filter so flagged goals are invisible to `worker run` and `daemon start` loop claims. Operators can detect flagged goals via:
+
+- `daemon status --json` — `goalsNeedingRecovery` array with `goalId`, `title`, `goalState`, `recoveryMdPath`
+- `doctor --json` — `goalsNeedingRecoveryCount` compact count
+- `status --json` — `artifacts.recoveryMd` path and `artifactFiles.recoveryMd` exists flag
+- `handoff.json` — `artifacts.recovery_md` and `artifact_files.recovery_md`
+
+The operator acknowledgement flow is `momentum recovery clear <goal-id> [--reason <text>] [--data-dir <path>] [--json]`, which:
+
+1. Checks that the goal exists and is currently flagged (`not_flagged` otherwise).
+2. Checks that no claimed/running jobs hold the goal (`job_active` with `activeJobIds` otherwise).
+3. Clears `needs_manual_recovery`, `manual_recovery_reason`, and `manual_recovery_at` on the goal row.
+4. Appends a `goal.recovery_cleared` audit event with the previous reason, previous marked-at timestamp, cleared-at timestamp, and optional `operatorReason`.
+5. Leaves `recovery.md` on disk as durable evidence (operators remove it manually after capturing context).
+
+On successful clear, the goal immediately becomes eligible for queue claims again.
 
 ## Data Directory
 
@@ -391,6 +460,7 @@ State is stored under `--data-dir <path>`, then the `MOMENTUM_HOME` environment 
       ledger.md                # Append-only iteration ledger
       handoff.md               # Populated by `handoff` (empty placeholder until then)
       handoff.json             # Populated by `handoff` (schema v1)
+      recovery.md               # Populated by stale-recovery when a goal is flagged for manual recovery
       iterations/
         <n>/
           prompt.md            # Rendered iteration prompt

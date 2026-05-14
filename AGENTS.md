@@ -14,7 +14,7 @@ Typical loop:
 ## Current milestone
 - Milestone 1: Foreground proof loop is complete.
 - Milestone 2: Queue and worker model is complete.
-- Milestone 3: Operational Safety is in active implementation. NGX-272 (M3-01 orchestrator state model and daemon CLI contract), NGX-273 (M3-02 managed daemon loop for queued jobs), NGX-274 (M3-03 graceful daemon stop visibility), NGX-275 (M3-04 immediate daemon stop-now cancellation), and NGX-276 (M3-05 stale-lease detection and safe auto-recovery) have shipped; the remaining slices (cooperative mid-job shutdown semantics, manual recovery artifacts, and smoke/docs closeout) are still planning targets and must preserve the durable Goal/Iteration/Job/Handoff model.
+- Milestone 3: Operational Safety is in active implementation. NGX-272 (M3-01 orchestrator state model and daemon CLI contract), NGX-273 (M3-02 managed daemon loop for queued jobs), NGX-274 (M3-03 graceful daemon stop visibility), NGX-275 (M3-04 immediate daemon stop-now cancellation), NGX-276 (M3-05 stale-lease detection and safe auto-recovery), and NGX-277 (M3-06 manual recovery artifacts, durable goal-level `needs_manual_recovery` flag, blocked-claim guard, `recovery clear` CLI, and cross-CLI visibility) have shipped; the remaining slices (cooperative mid-job shutdown semantics and smoke/docs closeout) are still planning targets and must preserve the durable Goal/Iteration/Job/Handoff model.
 - NGX-235 (scaffold) is done.
 - NGX-236 (Goal spec parsing, data-dir resolution, SQLite init, artifact layout) is done.
 - NGX-237 (fake runner profile, repo guard, branch manager, iteration prompt renderer, foreground iteration orchestrator, iteration-job DB wrapper, CLI wiring) is done.
@@ -31,6 +31,7 @@ Typical loop:
 - NGX-274 (M3-03 graceful daemon stop visibility: `status --json` / text and `handoff` JSON / markdown surface daemon stop-request state via a `daemon` summary field — `runId`, `state`, `isActive`, `isTerminal`, `startedAt`, `heartbeatAt`, `finishedAt`, `activeJob`, and `stopRequest` — so operators can see why work is not draining without running `daemon status` separately; the daemon loop includes a focused stop-between-jobs test asserting that a stop requested after a reducer-enqueued follow-up iteration does not claim it, the daemon run transitions to `stopped`, and the goal stays `queued` with one pending iteration-2 job; `GoalStatusDaemonSummary` and `buildDaemonSummary` reuse `getActiveDaemonRun`/`getLatestDaemonRun` from the existing `daemon-runs` module) is done.
 - NGX-275 (M3-04 immediate daemon stop-now cancellation: `momentum daemon stop --now` records an idempotent immediate-stop request via `requestDaemonRunImmediateStop` and a new `stop_now_requested_at` column on `daemon_runs`; the managed daemon loop observes `stop_now_requested_at` between cycles and finalizes the run to a new `canceled` terminal state with a `cancel_outcome` of `idle` or `active_job_completed` depending on whether a job had already run in the loop session; iteration atomicity ensures repo state is left clean on cancellation because `finalizeIteration` commits or resets before each cycle returns; `status --json` / text, `handoff` JSON / markdown, and `daemon status` surface `stopNowRequest`, `cancelOutcome`, and the new `canceled` terminal so operators see what was cancelled and whether manual recovery is needed; focused tests cover the idle cancel path, mid-loop active_job_completed path, graceful-to-stop-now upgrade, stop-now idempotency for repeat calls, refusal when no daemon is active, and the new state/outcome surfaces in status and handoff) is done.
 - NGX-276 (M3-05 stale-lease detection and safe auto-recovery: `listStaleRepoLocks` / `listStaleClaimedGoalIterationJobs` and the existing `listStaleDaemonRuns` give deterministic stale-state visibility; `recoverStaleRepoLocksForTerminalJobs`, `recoverStaleClaimedGoalIterationJobs`, and `recoverStaleDaemonRuns` auto-release / re-pend / finalize known-safe cases while refusing dirty / active / ambiguous states with a stable skip taxonomy (`job_pending` / `job_claimed` / `job_running` / `job_missing` for locks; `job_running` / `daemon_active` / `lock_active` / `job_state_changed` / `repo_dirty` / `repo_unknown_commit` / `repo_unavailable` for claims; `active_job_present` / `active_lock_present` / `self` / `run_state_changed` for daemons); `runStartupRecovery` composes the three primitives behind `runDaemonLoop`'s pre-loop pass with `excludeRunId` self-exclusion and a configurable grace window; `repo_lock.recovered` and `job.recovered` queue events plus `recovery_status` columns on `repo_locks` and `daemon_runs` carry the audit trail; `doctor` surfaces compact stale counts, `daemon status` surfaces stale rows, `worker run` surfaces a stale pre-check snapshot, and `status` / `handoff` surface goal-scoped recovery summaries) is done.
+- NGX-277 (M3-06 manual recovery artifacts, durable goal-level `needs_manual_recovery` flag, blocked-claim guard, `recovery clear` CLI, and cross-CLI visibility: `recovery-artifact.ts` renders and writes a goal-scoped `recovery.md` with schema version, reason code/message, commit pointers, iteration artifact paths, and safe next steps; `maybeWriteRecoveryArtifact` in `stale-recovery.ts` writes the artifact and marks the durable flag for `repo_dirty` / `repo_unknown_commit` / `repo_unavailable` / `job_running` skip reasons when `dataDir` is provided; `markGoalNeedsManualRecovery` / `clearGoalManualRecovery` / `getGoalManualRecoveryState` in `goal-recovery.ts` manage the `needs_manual_recovery` / `manual_recovery_reason` / `manual_recovery_at` columns on `goals`; `claimPendingGoalIterationJob` JOINs goals and filters out flagged rows so blocked goals are invisible to the queue; `clearGoalManualRecoveryGuarded` refuses when the goal is missing, not flagged, or still has active claimed/running jobs, then clears the flag and appends a `goal.recovery_cleared` audit event; `momentum recovery clear <goal-id>` wires the guarded clear into the CLI; `status --json` / text and `handoff` JSON / markdown surface `recovery.md` path and presence; `daemon status --json` / text and `doctor --json` surface `goalsNeedingRecovery`; the `goals` table migration adds `needs_manual_recovery` / `manual_recovery_reason` / `manual_recovery_at`) is done.
 
 ## Milestone 3 alignment
 Milestone 3 is orchestrator lifecycle / operational safety, not just daemon process plumbing. The canonical alignment note lives in `README.md` under "Milestone 3 Alignment"; read it before starting any M3 implementation slice. The headline rules:
@@ -66,15 +67,16 @@ Common commands:
 
 ## CLI expectations
 - Public surface currently includes:
-  - `goal start`
-  - `status`
-  - `logs`
-  - `handoff`
-  - `worker run`
-  - `daemon start`
-  - `daemon stop`
-  - `daemon status`
-  - `doctor`
+- `goal start`
+- `status`
+- `logs`
+- `handoff`
+- `worker run`
+- `daemon start`
+- `daemon stop`
+- `daemon status`
+- `recovery clear`
+- `doctor`
 - Preserve stable CLI behavior across both JSON and text outputs.
 - When changing user-facing output, update tests and verify callers that rely on stable formatting.
 - `logs <goal-id> [--iteration N]` reads on-disk `runner.log` and `verification.log` only; it must not consult live worker state.
