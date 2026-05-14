@@ -1675,6 +1675,42 @@ Goal body.
     });
   });
 
+  it("daemon status keeps in-flight active work fresh until the active-job cutoff", async () => {
+    const dataDir = makeTempDir("momentum-cli-daemon-");
+    const { openDb } = await import("../src/db.js");
+    const { startDaemonRun, setDaemonRunActiveJob } = await import(
+      "../src/daemon-runs.js"
+    );
+    const db = openDb(dataDir);
+    try {
+      const { runId } = startDaemonRun(db, {
+        pid: 1,
+        now: Date.now() - 100_000
+      });
+      setDaemonRunActiveJob(db, {
+        runId,
+        jobId: "job-1",
+        lockId: "lock-1",
+        now: Date.now() - 100_000
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "daemon", "status",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    const run0 = payload["daemonRun"] as Record<string, unknown>;
+    expect(run0["stale"]).toBe(false);
+    expect(run0["activeJob"]).toEqual({ jobId: "job-1", lockId: "lock-1" });
+    expect(payload["staleRuns"]).toEqual([]);
+  });
+
   it("daemon with no subcommand prints a usage error", async () => {
     const result = await run(["daemon", "--json"]);
     expect(result.code).toBe(2);

@@ -316,6 +316,7 @@ JSON envelope shape (active run with no stop request or error):
     "heartbeatAgeMs": 0,
     "stale": false,
     "staleAfterMs": 90000,
+    "activeJobStaleAfterMs": 930000,
     "activeJob": { "jobId": null, "lockId": null },
     "stopRequest": null,
     "reconciliation": { "count": 0, "lastReconciledAt": null },
@@ -323,6 +324,7 @@ JSON envelope shape (active run with no stop request or error):
     "updatedAt": 1731500000000
   },
   "staleAfterMs": 90000,
+  "activeJobStaleAfterMs": 930000,
   "staleRuns": [],
   "observedAt": 1731500000000
 }

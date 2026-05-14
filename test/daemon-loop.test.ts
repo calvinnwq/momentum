@@ -395,7 +395,7 @@ describe("runDaemonLoop", () => {
     }
   });
 
-  it("updates active job/lock during work and clears them between jobs", async () => {
+  it("updates active job/lock and heartbeat during work and clears them between jobs", async () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);
     try {
@@ -404,6 +404,7 @@ describe("runDaemonLoop", () => {
         phase: string;
         activeJobId: string | null;
         activeLockId: string | null;
+        heartbeatAt: number | null;
       }> = [];
 
       const sampleState = (phase: string): void => {
@@ -411,7 +412,8 @@ describe("runDaemonLoop", () => {
         states.push({
           phase,
           activeJobId: row?.active_job_id ?? null,
-          activeLockId: row?.active_lock_id ?? null
+          activeLockId: row?.active_lock_id ?? null,
+          heartbeatAt: row?.heartbeat_at ?? null
         });
       };
 
@@ -487,9 +489,24 @@ describe("runDaemonLoop", () => {
       expect(result.iterations).toBe(1);
       expect(result.jobsRun).toBe(1);
       expect(states).toEqual([
-        { phase: "before", activeJobId: null, activeLockId: null },
-        { phase: "during", activeJobId: "job-a", activeLockId: "lock-a" },
-        { phase: "after", activeJobId: null, activeLockId: null }
+        {
+          phase: "before",
+          activeJobId: null,
+          activeLockId: null,
+          heartbeatAt: 100_000
+        },
+        {
+          phase: "during",
+          activeJobId: "job-a",
+          activeLockId: "lock-a",
+          heartbeatAt: 1_700_000_001_000
+        },
+        {
+          phase: "after",
+          activeJobId: null,
+          activeLockId: null,
+          heartbeatAt: 1_700_000_002_000
+        }
       ]);
     } finally {
       db.close();

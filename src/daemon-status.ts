@@ -16,6 +16,7 @@ import {
  * what the read-only inspector flags; it does not transition state.
  */
 export const DEFAULT_DAEMON_STALE_AFTER_MS = 90_000;
+export const DEFAULT_DAEMON_ACTIVE_JOB_STALE_AFTER_MS = 930_000;
 
 export type DaemonStatusErrorCode = "invalid_input" | "data_dir_failed";
 
@@ -60,6 +61,7 @@ export type DaemonStatusRunSummary = {
   heartbeatAgeMs: number;
   stale: boolean;
   staleAfterMs: number;
+  activeJobStaleAfterMs: number;
   activeJob: DaemonStatusActiveJob;
   stopRequest: DaemonStatusStopRequest | null;
   reconciliation: DaemonStatusReconciliation;
@@ -73,6 +75,7 @@ export type DaemonStatusSuccess = {
   hasRun: boolean;
   daemonRun: DaemonStatusRunSummary | null;
   staleAfterMs: number;
+  activeJobStaleAfterMs: number;
   staleRuns: DaemonStatusRunSummary[];
   observedAt: number;
 };
@@ -82,6 +85,7 @@ export type DaemonStatusResult = DaemonStatusSuccess | DaemonStatusError;
 export type LoadDaemonStatusInput = {
   dataDirOptions: DataDirOptions;
   staleAfterMs?: number;
+  activeJobStaleAfterMs?: number;
   now?: number;
 };
 
@@ -95,11 +99,23 @@ export function loadDaemonStatus(
   input: LoadDaemonStatusInput
 ): DaemonStatusResult {
   const staleAfterMs = input.staleAfterMs ?? DEFAULT_DAEMON_STALE_AFTER_MS;
+  const activeJobStaleAfterMs =
+    input.activeJobStaleAfterMs ?? DEFAULT_DAEMON_ACTIVE_JOB_STALE_AFTER_MS;
   if (!Number.isFinite(staleAfterMs) || staleAfterMs <= 0) {
     return {
       ok: false,
       code: "invalid_input",
       error: `staleAfterMs must be a positive number, got ${staleAfterMs}`
+    };
+  }
+  if (
+    !Number.isFinite(activeJobStaleAfterMs) ||
+    activeJobStaleAfterMs <= 0
+  ) {
+    return {
+      ok: false,
+      code: "invalid_input",
+      error: `activeJobStaleAfterMs must be a positive number, got ${activeJobStaleAfterMs}`
     };
   }
 
@@ -120,14 +136,28 @@ export function loadDaemonStatus(
     db = openDb(dataDir);
     const active = getActiveDaemonRun(db);
     const latest = active ?? getLatestDaemonRun(db);
-    const stale = listStaleDaemonRuns(db, { now, staleAfterMs });
+    const stale = listStaleDaemonRuns(db, {
+      now,
+      staleAfterMs,
+      activeJobStaleAfterMs
+    });
     const staleIds = new Set(stale.map((row) => row.id));
 
     const daemonRun = latest
-      ? summarizeRow(latest, { now, staleAfterMs, staleIds })
+      ? summarizeRow(latest, {
+        now,
+        staleAfterMs,
+        activeJobStaleAfterMs,
+        staleIds
+      })
       : null;
     const staleRuns = stale.map((row) =>
-      summarizeRow(row, { now, staleAfterMs, staleIds })
+      summarizeRow(row, {
+        now,
+        staleAfterMs,
+        activeJobStaleAfterMs,
+        staleIds
+      })
     );
 
     return {
@@ -136,6 +166,7 @@ export function loadDaemonStatus(
       hasRun: latest !== undefined,
       daemonRun,
       staleAfterMs,
+      activeJobStaleAfterMs,
       staleRuns,
       observedAt: now
     };
@@ -152,8 +183,15 @@ export function loadDaemonStatus(
 
 function summarizeRow(
   row: DaemonRunRow,
-  ctx: { now: number; staleAfterMs: number; staleIds: Set<string> }
+  ctx: {
+    now: number;
+    staleAfterMs: number;
+    activeJobStaleAfterMs: number;
+    staleIds: Set<string>;
+  }
 ): DaemonStatusRunSummary {
+  const rowStaleAfterMs =
+    row.active_job_id !== null ? ctx.activeJobStaleAfterMs : ctx.staleAfterMs;
   const summary: DaemonStatusRunSummary = {
     runId: row.id,
     pid: row.pid,
@@ -168,7 +206,8 @@ function summarizeRow(
     ageMs: Math.max(0, ctx.now - row.started_at),
     heartbeatAgeMs: Math.max(0, ctx.now - row.heartbeat_at),
     stale: ctx.staleIds.has(row.id),
-    staleAfterMs: ctx.staleAfterMs,
+    staleAfterMs: rowStaleAfterMs,
+    activeJobStaleAfterMs: ctx.activeJobStaleAfterMs,
     activeJob: { jobId: row.active_job_id, lockId: row.active_lock_id },
     stopRequest:
       row.stop_requested_at !== null

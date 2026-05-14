@@ -16,6 +16,7 @@ import { writeHandoff, type HandoffSuccess } from "./handoff.js";
 import { runWorkerOnce, type WorkerRunResult } from "./worker-run.js";
 import {
   loadDaemonStatus,
+  DEFAULT_DAEMON_ACTIVE_JOB_STALE_AFTER_MS,
   DEFAULT_DAEMON_STALE_AFTER_MS,
   type DaemonStatusSuccess
 } from "./daemon-status.js";
@@ -229,7 +230,7 @@ async function daemonStart(
     const existing = getActiveDaemonRun(db);
     if (existing) {
       const heartbeatAgeMs = Math.max(0, now - existing.heartbeat_at);
-      const stale = heartbeatAgeMs >= DEFAULT_DAEMON_STALE_AFTER_MS;
+      const stale = isExistingDaemonRunStale(existing, now);
       return emitDaemonStartFailure(parsed, io, {
         code: "daemon_already_active",
         message: stale
@@ -675,6 +676,7 @@ function emitDaemonStatus(
     hasRun: data.hasRun,
     daemonRun: data.daemonRun,
     staleAfterMs: data.staleAfterMs,
+    activeJobStaleAfterMs: data.activeJobStaleAfterMs,
     staleRuns: data.staleRuns,
     observedAt: data.observedAt
   };
@@ -878,8 +880,20 @@ function summarizeExistingDaemonRun(
     startedAt: run.started_at,
     heartbeatAt: run.heartbeat_at,
     heartbeatAgeMs,
-    stale: heartbeatAgeMs >= DEFAULT_DAEMON_STALE_AFTER_MS
+    stale: isExistingDaemonRunStale(run, now)
   };
+}
+
+function isExistingDaemonRunStale(
+  run: ReturnType<typeof getActiveDaemonRun> extends infer T ? NonNullable<T> : never,
+  now: number
+): boolean {
+  const heartbeatAgeMs = Math.max(0, now - run.heartbeat_at);
+  const staleAfterMs =
+    run.active_job_id !== null
+      ? DEFAULT_DAEMON_ACTIVE_JOB_STALE_AFTER_MS
+      : DEFAULT_DAEMON_STALE_AFTER_MS;
+  return heartbeatAgeMs >= staleAfterMs;
 }
 
 function goalStart(parsed: ParsedFlags, io: CliIo): number {

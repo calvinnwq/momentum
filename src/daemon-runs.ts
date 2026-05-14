@@ -329,12 +329,15 @@ export function getLatestDaemonRun(
 export type ListStaleDaemonRunsInput = {
   now: number;
   staleAfterMs: number;
+  activeJobStaleAfterMs?: number;
 };
 
 /**
- * Return active daemon records whose `heartbeat_at` is older than
- * `now - staleAfterMs`. The list is read-only; M3 surfaces stale records via
- * status/doctor surfaces but does not auto-recover them.
+ * Return active daemon records whose `heartbeat_at` is older than the relevant
+ * stale cutoff. Runs with an active job can use a longer cutoff so legitimate
+ * long-running work does not look stale while the worker is blocked inside a
+ * runner or verification command. The list is read-only; M3 surfaces stale
+ * records via status/doctor surfaces but does not auto-recover them.
  */
 export function listStaleDaemonRuns(
   db: MomentumDb,
@@ -348,15 +351,30 @@ export function listStaleDaemonRuns(
       "listStaleDaemonRuns: staleAfterMs must be a positive number"
     );
   }
+  const activeJobStaleAfterMs =
+    input.activeJobStaleAfterMs ?? input.staleAfterMs;
+  if (
+    !Number.isFinite(activeJobStaleAfterMs) ||
+    activeJobStaleAfterMs <= 0
+  ) {
+    throw new Error(
+      "listStaleDaemonRuns: activeJobStaleAfterMs must be a positive number"
+    );
+  }
   const cutoff = input.now - input.staleAfterMs;
+  const activeJobCutoff = input.now - activeJobStaleAfterMs;
   return db
     .prepare(
       `SELECT * FROM daemon_runs
        WHERE state IN ('starting', 'running', 'stop_requested')
          AND heartbeat_at < ?
+         AND (
+           active_job_id IS NULL
+           OR heartbeat_at < ?
+         )
        ORDER BY heartbeat_at ASC, id ASC`
     )
-    .all(cutoff) as DaemonRunRow[];
+    .all(cutoff, activeJobCutoff) as DaemonRunRow[];
 }
 
 function validateRunId(runId: unknown, label: string): void {
