@@ -95,6 +95,27 @@ export async function runDaemonLoop(
   let exitReason: DaemonLoopExitReason | null = null;
   let internalError: Error | null = null;
 
+  const completeCycle = (
+    cycleIndex: number,
+    observedState: DaemonRunState,
+    workerResult: WorkerRunResult,
+    startedAt: number
+  ): boolean => {
+    try {
+      input.onCycleComplete?.({
+        cycleIndex,
+        observedState,
+        workerResult,
+        startedAt
+      });
+      return true;
+    } catch (error) {
+      internalError = error instanceof Error ? error : new Error(String(error));
+      exitReason = "internal_error";
+      return false;
+    }
+  };
+
   while (exitReason === null) {
     if (iterations >= maxLoopIterations) {
       exitReason = "max_loop_iterations";
@@ -177,35 +198,26 @@ export async function runDaemonLoop(
       } else {
         jobsFailed += 1;
       }
-      input.onCycleComplete?.({
-        cycleIndex: iterations - 1,
-        observedState: run.state,
-        workerResult,
-        startedAt: cycleStart
-      });
+      if (!completeCycle(iterations - 1, run.state, workerResult, cycleStart)) {
+        break;
+      }
       continue;
     }
 
     if (workerResult.code === "not_executed") {
       jobsNotExecuted += 1;
       idleCycles += 1;
-      input.onCycleComplete?.({
-        cycleIndex: iterations - 1,
-        observedState: run.state,
-        workerResult,
-        startedAt: cycleStart
-      });
+      if (!completeCycle(iterations - 1, run.state, workerResult, cycleStart)) {
+        break;
+      }
       await sleep(pollIntervalMs);
       continue;
     }
 
     idleCycles += 1;
-    input.onCycleComplete?.({
-      cycleIndex: iterations - 1,
-      observedState: run.state,
-      workerResult,
-      startedAt: cycleStart
-    });
+    if (!completeCycle(iterations - 1, run.state, workerResult, cycleStart)) {
+      break;
+    }
     await sleep(pollIntervalMs);
   }
 
@@ -235,7 +247,7 @@ export async function runDaemonLoop(
   }
 
   const result: DaemonLoopResult = {
-    ok: exitReason !== "internal_error" && exitReason !== "run_missing",
+    ok: terminalState !== "error",
     workSucceeded: jobsFailed === 0,
     runId: input.runId,
     workerId: input.workerId,

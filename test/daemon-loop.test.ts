@@ -383,6 +383,7 @@ describe("runDaemonLoop", () => {
       });
 
       expect(result.exitReason).toBe("run_terminated");
+      expect(result.ok).toBe(false);
       expect(result.terminalState).toBe("error");
       expect(result.lastObservedState).toBe("error");
 
@@ -766,6 +767,46 @@ describe("runDaemonLoop", () => {
         { index: 0, code: "no_work" },
         { index: 1, code: "no_work" }
       ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("marks the daemon run as error when onCycleComplete throws", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const runId = seedDaemonRun(db);
+
+      const result = await runDaemonLoop({
+        db,
+        dataDir,
+        runId,
+        workerId: "daemon-loop-observer-error",
+        pollIntervalMs: 0,
+        maxIdleCycles: 2,
+        sleep: async () => undefined,
+        now: makeMonotonicNow(),
+        onCycleComplete: () => {
+          throw new Error("observer failed");
+        },
+        runWorker: () => ({
+          code: "no_work",
+          workerId: "daemon-loop-observer-error",
+          dataDir,
+          outcome: "idle",
+          message: "no work"
+        })
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.exitReason).toBe("internal_error");
+      expect(result.terminalState).toBe("error");
+      expect(result.error).toBe("observer failed");
+
+      const row = getDaemonRun(db, runId);
+      expect(row?.state).toBe("error");
+      expect(row?.error).toBe("observer failed");
     } finally {
       db.close();
     }
