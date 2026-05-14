@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 
 import { resolveGoalArtifactPaths } from "./artifacts.js";
@@ -707,6 +708,8 @@ function maybeWriteRecoveryArtifact(
   const goal: GoalRow | undefined = getGoal(db, job.goal_id);
   const goalTitle = goal?.title ?? job.goal_id;
   const repoPath = goal?.repo ?? skip.repoRoot ?? null;
+  const expectedCommit = readExpectedCommitForJob(db, job);
+  const currentCommit = readCurrentCommit(repoPath);
 
   const paths = resolveGoalArtifactPaths(dataDir, job.goal_id, job.iteration);
   const artifactPaths: RecoveryArtifactPathBundle = {
@@ -728,8 +731,8 @@ function maybeWriteRecoveryArtifact(
         jobId: job.id,
         daemonRunId: null,
         repoPath,
-        expectedCommit: null,
-        currentCommit: null,
+        expectedCommit,
+        currentCommit,
         reason,
         artifactPaths,
         safeNextSteps: safeNextStepsForSkip(skip.reason, repoPath),
@@ -744,15 +747,74 @@ function maybeWriteRecoveryArtifact(
 
   // Set the durable manual-recovery flag regardless of artifact-write outcome.
   // The flag is what blocks further claims; recovery.md is operator evidence.
-  // A filesystem failure must not silently re-open the goal for claims.
-  try {
-    markGoalNeedsManualRecovery(db, {
-      goalId: job.goal_id,
-      reason: reason.code,
-      now
-    });
-  } catch {
-    // Best-effort: if we cannot mark the goal (e.g. row vanished mid-pass) the
-    // recovery still surfaces via the in-memory skip result.
+  // If this durable write fails, fail the recovery pass rather than returning
+  // a skip that looks protected while the goal remains claimable.
+  const marked = markGoalNeedsManualRecovery(db, {
+    goalId: job.goal_id,
+    reason: reason.code,
+    now
+  });
+  if (!marked.ok) {
+    throw new Error(
+      `manual recovery flag write failed for goal ${job.goal_id}: ${marked.reason}`
+    );
   }
+}
+
+function readExpectedCommitForJob(
+  db: MomentumDb,
+  job: QueueJobRow
+): string | null {
+  const rows = db
+    .prepare(
+      `SELECT payload
+         FROM events
+        WHERE goal_id = ?
+          AND type IN ('job.succeeded', 'iteration_completed', 'goal.reduced')
+        ORDER BY created_at DESC, id DESC`
+    )
+    .all(job.goal_id) as Array<{ payload: string }>;
+
+  for (const row of rows) {
+    const payload = parseEventPayload(row.payload);
+    if (!payload) continue;
+    const iteration = payload["iteration"];
+    if (typeof iteration === "number" && iteration >= job.iteration) continue;
+    const commitSha = readPayloadString(payload, "commit_sha");
+    if (commitSha) return commitSha;
+  }
+  return null;
+}
+
+function readCurrentCommit(repoPath: string | null): string | null {
+  if (!repoPath) return null;
+  try {
+    const head = execFileSync("git", ["-C", repoPath, "rev-parse", "HEAD"], {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"]
+    }).trim();
+    return /^[0-9a-f]{40}$/.test(head) ? head : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseEventPayload(payload: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(payload) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return null;
+    }
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function readPayloadString(
+  payload: Record<string, unknown>,
+  key: string
+): string | null {
+  const value = payload[key];
+  return typeof value === "string" && value.length > 0 ? value : null;
 }

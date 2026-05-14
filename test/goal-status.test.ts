@@ -7,6 +7,7 @@ import path from "node:path";
 import { openDb } from "../src/db.js";
 import { FAKE_RUNNER_GOAL_COMPLETE_ENV } from "../src/fake-runner.js";
 import { initGoal, type GoalInitSuccess } from "../src/goal-init.js";
+import { markGoalNeedsManualRecovery } from "../src/goal-recovery.js";
 import { executeIterationJob } from "../src/iteration-job.js";
 import { loadGoalStatus } from "../src/goal-status.js";
 import { reduceGoalIteration } from "../src/goal-reducer.js";
@@ -318,6 +319,39 @@ describe("loadGoalStatus", () => {
     expect(result.nextJob).toBeNull();
     expect(result.nextAction).toContain("foreground");
     expect(result.nextAction).toContain(setup.jobId);
+  });
+
+  it("routes pending work to manual recovery when the goal is flagged", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Status manual recovery", {
+      mode: "queued"
+    });
+    const db = openDb(setup.dataDir);
+    try {
+      markGoalNeedsManualRecovery(db, {
+        goalId: setup.goalId,
+        reason: "repo_dirty",
+        now: 1_700_000_000_000
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = loadGoalStatus({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.nextActionDetail).toMatchObject({
+      kind: "manual_recovery_required",
+      jobId: setup.jobId,
+      iteration: 1
+    });
+    expect(result.nextAction).toContain("Manual recovery required");
+    expect(result.nextAction).toContain("momentum recovery clear");
+    expect(result.nextAction).not.toContain("worker run");
   });
 
   it("surfaces the reducer max_iterations_reached decision plus null nextJob on a 1-iteration goal", () => {

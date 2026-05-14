@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -45,6 +46,25 @@ function makeTempDir(prefix = "momentum-stale-recovery-"): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   tempRoots.push(dir);
   return fs.realpathSync(dir);
+}
+
+function runGit(cwd: string, args: string[]): string {
+  return execFileSync("git", ["-C", cwd, ...args], {
+    encoding: "utf-8",
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+}
+
+function initRepo(): { repo: string; head: string } {
+  const repo = makeTempDir("momentum-stale-recovery-repo-");
+  runGit(repo, ["init", "--initial-branch=main", "--quiet"]);
+  runGit(repo, ["config", "user.email", "test@example.com"]);
+  runGit(repo, ["config", "user.name", "Test User"]);
+  runGit(repo, ["config", "commit.gpgsign", "false"]);
+  fs.writeFileSync(path.join(repo, "README.md"), "init\n", "utf-8");
+  runGit(repo, ["add", "README.md"]);
+  runGit(repo, ["commit", "-m", "init", "--quiet"]);
+  return { repo, head: runGit(repo, ["rev-parse", "HEAD"]).trim() };
 }
 
 function seedGoal(db: MomentumDb, id = "g1"): void {
@@ -1001,6 +1021,93 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
         expect(md).toContain("- Classified at (epoch ms): 5000");
         expect(md).toContain("## Safe next steps");
         expect(md).toContain("git -C /tmp/repo-a status");
+      } finally {
+        db.close();
+      }
+    });
+
+    it("populates available commit pointers in recovery.md", () => {
+      const dataDir = makeTempDir();
+      const { repo, head } = initRepo();
+      const db = openDb(dataDir);
+      try {
+        seedGoalWithRepo(db, "g1", repo);
+        const previous = seedClaimedIteration(db, {
+          goalId: "g1",
+          idempotencyKey: "g1:1",
+          leaseDurationMs: 900,
+          claimAt: 100,
+          workerId: "worker-prev"
+        });
+        setJobState(db, previous.jobId, "succeeded");
+        db.prepare(
+          `INSERT INTO events (goal_id, job_id, type, payload, created_at)
+           VALUES (?, ?, ?, ?, ?)`
+        ).run(
+          "g1",
+          previous.jobId,
+          "job.succeeded",
+          JSON.stringify({ iteration: 1, commit_sha: head }),
+          200
+        );
+        const current = seedClaimedIteration(db, {
+          goalId: "g1",
+          idempotencyKey: "g1:2",
+          leaseDurationMs: 900,
+          claimAt: 300,
+          workerId: "worker-current",
+          iteration: 2
+        });
+        fs.writeFileSync(path.join(repo, "dirty.txt"), "dirty\n", "utf-8");
+        const inspectRepoState = () => ({
+          ok: false as const,
+          code: "dirty_worktree" as const,
+          error: `Repo has uncommitted changes: ${repo}`
+        });
+
+        const out = recoverStaleClaimedGoalIterationJobs(db, {
+          now: 5_000,
+          inspectRepoState,
+          dataDir
+        });
+
+        expect(out.skipped).toHaveLength(1);
+        expect(out.skipped[0]!.job.id).toBe(current.jobId);
+        const md = fs.readFileSync(
+          out.skipped[0]!.recoveryArtifactPath!,
+          "utf-8"
+        );
+        expect(md).toContain(`- Expected (pre-iteration) commit: ${head}`);
+        expect(md).toContain(`- Current commit: ${head}`);
+      } finally {
+        db.close();
+      }
+    });
+
+    it("fails the recovery pass when the durable manual-recovery flag cannot be written", () => {
+      const dataDir = makeTempDir();
+      const db = openDb(dataDir);
+      try {
+        seedGoalWithRepo(db, "g1", "/tmp/repo-a");
+        const { jobId } = seedClaimedIteration(db, {
+          leaseDurationMs: 900,
+          claimAt: 100
+        });
+        setJobState(db, jobId, "running");
+        db.prepare(
+          `CREATE TRIGGER fail_manual_recovery_flag
+             BEFORE UPDATE OF needs_manual_recovery ON goals
+             BEGIN
+               SELECT RAISE(ABORT, 'manual recovery flag write failed');
+             END`
+        ).run();
+
+        expect(() =>
+          recoverStaleClaimedGoalIterationJobs(db, {
+            now: 5_000,
+            dataDir
+          })
+        ).toThrow(/manual recovery flag write failed/);
       } finally {
         db.close();
       }

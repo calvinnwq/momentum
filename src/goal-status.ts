@@ -127,6 +127,7 @@ export type GoalStatusReducerSummary = {
 };
 
 export type GoalStatusNextActionKind =
+  | "manual_recovery_required"
   | "run_worker"
   | "resume_foreground"
   | "goal_complete"
@@ -603,6 +604,18 @@ function computeNextActionDetail(
   reducer: GoalStatusReducerSummary | null,
   nextJob: GoalStatusJobSummary | null
 ): GoalStatusNextActionDetail | null {
+  if (goal.needs_manual_recovery === 1) {
+    return {
+      kind: "manual_recovery_required",
+      message:
+        "Manual recovery required; inspect recovery.md, resolve the blocked state, " +
+        "then run `momentum recovery clear <goal-id>`.",
+      jobId: latestJob?.jobId ?? nextJob?.jobId ?? reducer?.jobId ?? null,
+      iteration:
+        latestJob?.iteration ?? nextJob?.iteration ?? reducer?.iteration ?? null
+    };
+  }
+
   if (reducer) {
     if (reducer.decision === "continue" && nextJob) {
       return {
