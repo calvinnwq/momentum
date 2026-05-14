@@ -2781,6 +2781,52 @@ Goal body.
     });
   });
 
+  it("managed daemon start recovers a stale idle active run before registering", async () => {
+    const dataDir = makeTempDir("momentum-cli-daemon-loop-");
+    const { openDb } = await import("../src/db.js");
+    const { getDaemonRun, startDaemonRun } = await import(
+      "../src/daemon-runs.js"
+    );
+    let staleRunId: string;
+    const db = openDb(dataDir);
+    try {
+      ({ runId: staleRunId } = startDaemonRun(db, {
+        pid: 5151,
+        host: "stale-existing-loop",
+        now: 100
+      }));
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "daemon", "start",
+      "--max-idle-cycles", "0",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      command: "daemon start",
+      state: "stopped"
+    });
+    expect(payload["runId"]).not.toBe(staleRunId);
+
+    const verifyDb = openDb(dataDir);
+    try {
+      const staleRun = getDaemonRun(verifyDb, staleRunId);
+      expect(staleRun).not.toBeNull();
+      expect(staleRun?.state).toBe("error");
+      expect(staleRun?.recovery_status).toBe("auto_recovered_idle_stale");
+    } finally {
+      verifyDb.close();
+    }
+  });
+
   it("daemon start refuses to run the loop while another daemon is active", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-loop-");
     const { openDb } = await import("../src/db.js");

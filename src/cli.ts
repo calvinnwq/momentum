@@ -33,13 +33,15 @@ import {
 import {
   runDaemonLoop,
   DEFAULT_DAEMON_POLL_INTERVAL_MS,
+  DEFAULT_DAEMON_STARTUP_RECOVERY_GRACE_MS,
   type DaemonLoopResult
 } from "./daemon-loop.js";
-import type {
-  StaleClaimedJobRecoverySkipped,
-  StaleDaemonRunRecoverySkipped,
-  StaleRepoLockRecoverySkipped,
-  StartupRecoveryResult
+import {
+  runStartupRecovery,
+  type StaleClaimedJobRecoverySkipped,
+  type StaleDaemonRunRecoverySkipped,
+  type StaleRepoLockRecoverySkipped,
+  type StartupRecoveryResult
 } from "./stale-recovery.js";
 
 export const VERSION = "0.0.0";
@@ -241,25 +243,22 @@ async function daemonStart(
 
   const db = openDb(dataDir);
   try {
-    const existing = getActiveDaemonRun(db);
+    let existing = getActiveDaemonRun(db);
+    if (existing && loopRequested && isExistingDaemonRunStale(existing, now)) {
+      runStartupRecovery(db, {
+        now,
+        graceMs: DEFAULT_DAEMON_STARTUP_RECOVERY_GRACE_MS
+      });
+      existing = getActiveDaemonRun(db);
+    }
     if (existing) {
-      const heartbeatAgeMs = Math.max(0, now - existing.heartbeat_at);
-      const stale = isExistingDaemonRunStale(existing, now);
+      const existingSummary = summarizeExistingDaemonRun(existing, now);
       return emitDaemonStartFailure(parsed, io, {
         code: "daemon_already_active",
-        message: stale
+        message: existingSummary.stale
           ? `An active daemon run already exists (${existing.id}, state ${existing.state}, stale heartbeat). Resolve it before starting another.`
           : `An active daemon run already exists (${existing.id}, state ${existing.state}). Stop it before starting another.`,
-        existing: {
-          runId: existing.id,
-          state: existing.state,
-          pid: existing.pid,
-          host: existing.host,
-          startedAt: existing.started_at,
-          heartbeatAt: existing.heartbeat_at,
-          heartbeatAgeMs,
-          stale
-        }
+        existing: existingSummary
       });
     }
 
