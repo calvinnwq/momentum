@@ -402,6 +402,32 @@ export function getActiveDaemonRun(
     .get() as DaemonRunRow | undefined;
 }
 
+/**
+ * Return the active daemon run (`starting`, `running`, or `stop_requested`)
+ * whose `active_job_id` matches the given job. Used by stale-claim recovery to
+ * refuse re-pending a claim that an active daemon is still asserting ownership
+ * of, even if the claim's lease has lapsed. Terminal-state daemons
+ * (`stopped` / `canceled` / `error`) are excluded because they no longer hold
+ * authority over the claim.
+ */
+export function getActiveDaemonRunForJob(
+  db: MomentumDb,
+  jobId: string
+): DaemonRunRow | undefined {
+  if (typeof jobId !== "string" || jobId.length === 0) {
+    throw new Error("getActiveDaemonRunForJob: jobId is required");
+  }
+  return db
+    .prepare(
+      `SELECT * FROM daemon_runs
+       WHERE active_job_id = ?
+         AND state IN ('starting', 'running', 'stop_requested')
+       ORDER BY started_at DESC, id ASC
+       LIMIT 1`
+    )
+    .get(jobId) as DaemonRunRow | undefined;
+}
+
 export function getLatestDaemonRun(
   db: MomentumDb
 ): DaemonRunRow | undefined {

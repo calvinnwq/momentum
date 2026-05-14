@@ -39,6 +39,7 @@ describe("queue event taxonomy", () => {
         "job.enqueued",
         "job.failed",
         "job.heartbeat",
+        "job.recovered",
         "job.released",
         "job.succeeded",
         "repo_lock.recovered"

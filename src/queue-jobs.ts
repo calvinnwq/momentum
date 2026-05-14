@@ -401,6 +401,75 @@ export function listStaleClaimedGoalIterationJobs(
     .all(GOAL_ITERATION_JOB_TYPE, cutoff) as QueueJobRow[];
 }
 
+export type RependStaleClaimedGoalIterationInput = {
+  jobId: string;
+  now?: number;
+};
+
+export type RependStaleClaimedGoalIterationResult =
+  | { ok: true; job: QueueJobRow; previousWorkerId: string | null; previousLeaseExpiresAt: number | null }
+  | { ok: false; reason: "job_not_stale_claimed" };
+
+/**
+ * Re-pend a stale `claimed` goal_iteration job back to `pending` without an
+ * owner check. Unlike `releaseClaimedGoalIterationJob`, this does NOT require a
+ * `worker_id` match because the orchestrator is recovering an orphaned claim
+ * whose worker is presumed dead. The UPDATE is guarded by
+ * `state = 'claimed' AND lease_expires_at < now` so an in-flight claim with a
+ * fresh lease is never demoted. Does not emit an event; the caller composes
+ * with `appendQueueEvent` so the recovery action is observed atomically with
+ * any other recovery bookkeeping (lock release, status surfaces).
+ *
+ * `attempt_count` is preserved: the failed attempt is durable history and the
+ * next worker that claims the row will see the incremented count from the
+ * dead worker's claim.
+ */
+export function recoverStaleClaimedGoalIterationJob(
+  db: MomentumDb,
+  input: RependStaleClaimedGoalIterationInput
+): RependStaleClaimedGoalIterationResult {
+  if (typeof input.jobId !== "string" || input.jobId.length === 0) {
+    throw new Error("recoverStaleClaimedGoalIterationJob: jobId is required");
+  }
+  const now = input.now ?? Date.now();
+  if (!Number.isFinite(now)) {
+    throw new Error("recoverStaleClaimedGoalIterationJob: now must be finite");
+  }
+
+  const before = getQueueJob(db, input.jobId);
+  if (!before || before.state !== "claimed") {
+    return { ok: false, reason: "job_not_stale_claimed" };
+  }
+  const previousWorkerId = before.worker_id;
+  const previousLeaseExpiresAt = before.lease_expires_at;
+
+  const updated = db
+    .prepare(
+      `UPDATE jobs
+         SET state = 'pending',
+             worker_id = NULL,
+             lease_acquired_at = NULL,
+             lease_expires_at = NULL,
+             heartbeat_at = NULL,
+             updated_at = ?
+       WHERE id = ?
+         AND type = ?
+         AND state = 'claimed'
+         AND lease_expires_at IS NOT NULL
+         AND lease_expires_at < ?
+       RETURNING *`
+    )
+    .get(now, input.jobId, GOAL_ITERATION_JOB_TYPE, now) as
+    | QueueJobRow
+    | undefined;
+
+  if (!updated) {
+    return { ok: false, reason: "job_not_stale_claimed" };
+  }
+
+  return { ok: true, job: updated, previousWorkerId, previousLeaseExpiresAt };
+}
+
 export function getQueueJob(
   db: MomentumDb,
   jobId: string

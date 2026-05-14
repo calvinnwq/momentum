@@ -3,16 +3,24 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import {
+  finishDaemonRun,
+  setDaemonRunActiveJob,
+  startDaemonRun
+} from "../src/daemon-runs.js";
 import { openDb, type MomentumDb } from "../src/db.js";
 import {
   GOAL_ITERATION_JOB_TYPE,
   claimPendingGoalIterationJob,
   enqueueGoalIterationJob,
+  getQueueJob,
   type QueueJobState
 } from "../src/queue-jobs.js";
 import { acquireRepoLock, getRepoLock } from "../src/repo-locks.js";
 import {
+  JOB_RECOVERED_AUTO_REPENDED_STATUS,
   REPO_LOCK_AUTO_RELEASED_TERMINAL_JOB_STATUS,
+  recoverStaleClaimedGoalIterationJobs,
   recoverStaleRepoLocksForTerminalJobs
 } from "../src/stale-recovery.js";
 
@@ -411,6 +419,358 @@ describe("recoverStaleRepoLocksForTerminalJobs", () => {
       expect(out.recovered.map((row) => row.lock.id)).toEqual([
         b.lockId,
         a.lockId
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+function seedClaimedIteration(
+  db: MomentumDb,
+  opts: {
+    goalId?: string;
+    iteration?: number;
+    idempotencyKey?: string;
+    workerId?: string;
+    leaseDurationMs: number;
+    enqueueAt?: number;
+    claimAt?: number;
+  }
+): { jobId: string } {
+  const goalId = opts.goalId ?? "g1";
+  const iteration = opts.iteration ?? 1;
+  const idempotencyKey = opts.idempotencyKey ?? `${goalId}:${iteration}`;
+  enqueueGoalIterationJob(db, {
+    goalId,
+    iteration,
+    idempotencyKey,
+    artifactPath: `/tmp/test/${goalId}/iterations/${iteration}`,
+    now: opts.enqueueAt ?? 100
+  });
+  const claimed = claimPendingGoalIterationJob(db, {
+    workerId: opts.workerId ?? "worker-a",
+    leaseDurationMs: opts.leaseDurationMs,
+    now: opts.claimAt ?? 100
+  });
+  if (!claimed.ok) throw new Error(`claim failed: ${claimed.reason}`);
+  // Ensure the right job was claimed in tests that enqueue multiple goals.
+  if (claimed.job.goal_id !== goalId) {
+    throw new Error(
+      `seedClaimedIteration: unexpected claim ordering (claimed ${claimed.job.goal_id}, wanted ${goalId})`
+    );
+  }
+  return { jobId: claimed.job.id };
+}
+
+describe("recoverStaleClaimedGoalIterationJobs", () => {
+  it("re-pends a stale claimed job with no daemon and no active lock", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedGoal(db);
+      const { jobId } = seedClaimedIteration(db, {
+        leaseDurationMs: 900,
+        claimAt: 100
+      });
+      // Lease expires at 1_000; now=5_000 → stale.
+      const out = recoverStaleClaimedGoalIterationJobs(db, { now: 5_000 });
+      expect(out.recovered).toHaveLength(1);
+      expect(out.skipped).toEqual([]);
+
+      const entry = out.recovered[0]!;
+      expect(entry.jobBefore.id).toBe(jobId);
+      expect(entry.jobBefore.state).toBe("claimed");
+      expect(entry.jobAfter.state).toBe("pending");
+      expect(entry.jobAfter.worker_id).toBeNull();
+      expect(entry.jobAfter.lease_acquired_at).toBeNull();
+      expect(entry.jobAfter.lease_expires_at).toBeNull();
+      expect(entry.jobAfter.heartbeat_at).toBeNull();
+      // attempt_count is preserved from the failed claim.
+      expect(entry.jobAfter.attempt_count).toBe(1);
+      expect(entry.previousWorkerId).toBe("worker-a");
+      expect(entry.previousLeaseExpiresAt).toBe(1_000);
+      expect(entry.recoveryStatus).toBe(JOB_RECOVERED_AUTO_REPENDED_STATUS);
+
+      const stored = getQueueJob(db, jobId);
+      expect(stored?.state).toBe("pending");
+      expect(stored?.worker_id).toBeNull();
+
+      const events = db
+        .prepare(
+          "SELECT goal_id, job_id, type, payload, created_at FROM events WHERE type = 'job.recovered'"
+        )
+        .all() as Array<{
+        goal_id: string;
+        job_id: string | null;
+        type: string;
+        payload: string;
+        created_at: number;
+      }>;
+      expect(events).toHaveLength(1);
+      const event = events[0]!;
+      expect(event.goal_id).toBe("g1");
+      expect(event.job_id).toBe(jobId);
+      expect(event.created_at).toBe(5_000);
+      expect(JSON.parse(event.payload)).toEqual({
+        iteration: 1,
+        previous_state: "claimed",
+        previous_worker_id: "worker-a",
+        previous_lease_expires_at: 1_000,
+        attempt_count: 1,
+        recovered_at: 5_000,
+        recovery_status: JOB_RECOVERED_AUTO_REPENDED_STATUS
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses to recover a stale running job and reports job_running", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedGoal(db);
+      const { jobId } = seedClaimedIteration(db, {
+        leaseDurationMs: 900,
+        claimAt: 100
+      });
+      // Promote to running. The repo may have been written to before the
+      // worker died, so auto-recovery must refuse.
+      setJobState(db, jobId, "running");
+
+      const out = recoverStaleClaimedGoalIterationJobs(db, { now: 5_000 });
+      expect(out.recovered).toEqual([]);
+      expect(out.skipped).toHaveLength(1);
+      expect(out.skipped[0]!.job.id).toBe(jobId);
+      expect(out.skipped[0]!.reason).toBe("job_running");
+
+      const stored = getQueueJob(db, jobId);
+      expect(stored?.state).toBe("running");
+      expect(stored?.worker_id).toBe("worker-a");
+
+      const events = db
+        .prepare("SELECT count(*) AS c FROM events WHERE type = 'job.recovered'")
+        .get() as { c: number };
+      expect(events.c).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses to recover when an active daemon asserts ownership", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedGoal(db);
+      const { jobId } = seedClaimedIteration(db, {
+        leaseDurationMs: 900,
+        claimAt: 100
+      });
+      const { runId } = startDaemonRun(db, { now: 100 });
+      setDaemonRunActiveJob(db, {
+        runId,
+        jobId,
+        lockId: null,
+        now: 100
+      });
+
+      const out = recoverStaleClaimedGoalIterationJobs(db, { now: 5_000 });
+      expect(out.recovered).toEqual([]);
+      expect(out.skipped).toHaveLength(1);
+      expect(out.skipped[0]!.job.id).toBe(jobId);
+      expect(out.skipped[0]!.reason).toBe("daemon_active");
+      expect(out.skipped[0]!.blockingDaemonRunId).toBe(runId);
+
+      const stored = getQueueJob(db, jobId);
+      expect(stored?.state).toBe("claimed");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("recovers when the daemon owning the job is terminal", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedGoal(db);
+      const { jobId } = seedClaimedIteration(db, {
+        leaseDurationMs: 900,
+        claimAt: 100
+      });
+      const { runId } = startDaemonRun(db, { now: 100 });
+      setDaemonRunActiveJob(db, { runId, jobId, lockId: null, now: 100 });
+      finishDaemonRun(db, {
+        runId,
+        terminalState: "error",
+        now: 200,
+        error: "worker crashed"
+      });
+
+      const out = recoverStaleClaimedGoalIterationJobs(db, { now: 5_000 });
+      expect(out.recovered).toHaveLength(1);
+      expect(out.recovered[0]!.jobBefore.id).toBe(jobId);
+      expect(out.skipped).toEqual([]);
+
+      const stored = getQueueJob(db, jobId);
+      expect(stored?.state).toBe("pending");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses to recover when an active repo lock still references the job", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedGoal(db);
+      const { jobId } = seedClaimedIteration(db, {
+        leaseDurationMs: 900,
+        claimAt: 100
+      });
+      const lock = acquireRepoLock(db, {
+        repoRoot: "/tmp/repo-a",
+        holder: "worker-a",
+        goalId: "g1",
+        iteration: 1,
+        jobId,
+        leaseExpiresAt: 1_000,
+        now: 100
+      });
+      if (!lock.ok) throw new Error("acquire failed");
+
+      const out = recoverStaleClaimedGoalIterationJobs(db, { now: 5_000 });
+      expect(out.recovered).toEqual([]);
+      expect(out.skipped).toHaveLength(1);
+      expect(out.skipped[0]!.job.id).toBe(jobId);
+      expect(out.skipped[0]!.reason).toBe("lock_active");
+      expect(out.skipped[0]!.blockingLockId).toBe(lock.lockId);
+
+      // Job is still claimed; lock is still active.
+      const storedJob = getQueueJob(db, jobId);
+      expect(storedJob?.state).toBe("claimed");
+      const storedLock = getRepoLock(db, lock.lockId);
+      expect(storedLock?.state).toBe("active");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("returns empty result when no claimed jobs are stale", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedGoal(db);
+      seedClaimedIteration(db, {
+        leaseDurationMs: 60_000,
+        claimAt: 100
+      });
+      // Lease expires at 60_100; now=5_000 → still fresh.
+      const out = recoverStaleClaimedGoalIterationJobs(db, { now: 5_000 });
+      expect(out.recovered).toEqual([]);
+      expect(out.skipped).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("is idempotent across repeated invocations", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedGoal(db);
+      const { jobId } = seedClaimedIteration(db, {
+        leaseDurationMs: 900,
+        claimAt: 100
+      });
+      const first = recoverStaleClaimedGoalIterationJobs(db, { now: 5_000 });
+      expect(first.recovered).toHaveLength(1);
+
+      const second = recoverStaleClaimedGoalIterationJobs(db, { now: 6_000 });
+      expect(second.recovered).toEqual([]);
+      expect(second.skipped).toEqual([]);
+
+      const stored = getQueueJob(db, jobId);
+      expect(stored?.state).toBe("pending");
+
+      const events = db
+        .prepare("SELECT count(*) AS c FROM events WHERE type = 'job.recovered'")
+        .get() as { c: number };
+      expect(events.c).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("honors graceMs when classifying a job as stale-claimed", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedGoal(db);
+      const { jobId } = seedClaimedIteration(db, {
+        leaseDurationMs: 900,
+        claimAt: 100
+      });
+      // Lease expires at 1_000. Within grace window (now=1_500, grace=1_000)
+      // → not yet considered stale.
+      const inGrace = recoverStaleClaimedGoalIterationJobs(db, {
+        now: 1_500,
+        graceMs: 1_000
+      });
+      expect(inGrace.recovered).toEqual([]);
+      expect(inGrace.skipped).toEqual([]);
+      expect(getQueueJob(db, jobId)?.state).toBe("claimed");
+
+      const past = recoverStaleClaimedGoalIterationJobs(db, {
+        now: 5_000,
+        graceMs: 1_000
+      });
+      expect(past.recovered).toHaveLength(1);
+      expect(getQueueJob(db, jobId)?.state).toBe("pending");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("orders recovered jobs deterministically by lease_expires_at", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedGoal(db, "g1");
+      seedGoal(db, "g2");
+      // Enqueue both up front so the older-first claim ordering is stable.
+      enqueueGoalIterationJob(db, {
+        goalId: "g1",
+        iteration: 1,
+        idempotencyKey: "g1:1",
+        artifactPath: "/tmp/test/g1/iterations/1",
+        now: 100
+      });
+      enqueueGoalIterationJob(db, {
+        goalId: "g2",
+        iteration: 1,
+        idempotencyKey: "g2:1",
+        artifactPath: "/tmp/test/g2/iterations/1",
+        now: 101
+      });
+      const claimedA = claimPendingGoalIterationJob(db, {
+        workerId: "worker-a",
+        leaseDurationMs: 1_900,
+        now: 100
+      });
+      if (!claimedA.ok) throw new Error("claim a failed");
+      const claimedB = claimPendingGoalIterationJob(db, {
+        workerId: "worker-b",
+        leaseDurationMs: 900,
+        now: 100
+      });
+      if (!claimedB.ok) throw new Error("claim b failed");
+      // claimedA.lease_expires_at = 2_000, claimedB.lease_expires_at = 1_000.
+
+      const out = recoverStaleClaimedGoalIterationJobs(db, { now: 9_000 });
+      expect(out.recovered.map((row) => row.jobBefore.id)).toEqual([
+        claimedB.job.id,
+        claimedA.job.id
       ]);
     } finally {
       db.close();

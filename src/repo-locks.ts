@@ -173,6 +173,28 @@ export function listStaleRepoLocks(
     .all(cutoff) as RepoLockRow[];
 }
 
+/**
+ * Return an active repo lock whose `job_id` matches. Used by stale-claim
+ * recovery to refuse re-pending a claim that still has an associated active
+ * repo lock — releasing that lock is a separate (more dangerous) recovery
+ * action that must be handled by the lock-side primitives or manual recovery.
+ */
+export function getActiveRepoLockForJob(
+  db: MomentumDb,
+  jobId: string
+): RepoLockRow | undefined {
+  if (typeof jobId !== "string" || jobId.length === 0) {
+    throw new Error("getActiveRepoLockForJob: jobId is required");
+  }
+  return db
+    .prepare(
+      `SELECT * FROM repo_locks
+       WHERE job_id = ? AND state = 'active'
+       ORDER BY acquired_at DESC LIMIT 1`
+    )
+    .get(jobId) as RepoLockRow | undefined;
+}
+
 export function getActiveRepoLock(
   db: MomentumDb,
   repoRoot: string
