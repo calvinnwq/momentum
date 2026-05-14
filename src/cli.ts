@@ -98,6 +98,10 @@ export async function runCli(argv: string[], io: CliIo = defaultIo()): Promise<n
     return 0;
   }
 
+  if (parsed.now && !(command === "daemon" && subcommand === "stop")) {
+    return usageError("--now is only supported by `momentum daemon stop`.", parsed, io);
+  }
+
   if (command === "doctor") {
     return doctor(parsed, io);
   }
@@ -619,6 +623,7 @@ function emitDaemonStartLoopResult(
   const loopSummary = {
     exitReason: loop.exitReason,
     terminalState: loop.terminalState,
+    cancelOutcome: loop.cancelOutcome,
     workSucceeded: loop.workSucceeded,
     iterations: loop.iterations,
     jobsRun: loop.jobsRun,
@@ -656,6 +661,9 @@ function emitDaemonStartLoopResult(
     `Daemon run started: ${data.runId}`,
     `State: ${loop.terminalState}`,
     `Exit reason: ${loop.exitReason}`,
+    ...(loop.cancelOutcome !== null
+      ? [`Cancel outcome: ${loop.cancelOutcome}`]
+      : []),
     `Work succeeded: ${loop.workSucceeded ? "yes" : "no"}`,
     `Iterations: ${loop.iterations}`,
     `Jobs run: ${loop.jobsRun}`,

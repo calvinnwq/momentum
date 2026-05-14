@@ -1730,6 +1730,25 @@ Goal body.
     expect(result.stdout).toBe("");
   });
 
+  it("rejects --now outside daemon stop", async () => {
+    const startResult = await run(["daemon", "start", "--now", "--json"]);
+    expect(startResult.code).toBe(2);
+    expect(startResult.stdout).toBe("");
+    const startPayload = JSON.parse(startResult.stderr) as Record<string, unknown>;
+    expect(startPayload).toMatchObject({
+      ok: false,
+      code: "usage_error",
+      message: "--now is only supported by `momentum daemon stop`."
+    });
+
+    const statusResult = await run(["status", "--now"]);
+    expect(statusResult.code).toBe(2);
+    expect(statusResult.stdout).toBe("");
+    expect(statusResult.stderr).toContain(
+      "--now is only supported by `momentum daemon stop`."
+    );
+  });
+
   it("daemon status rejects extra positional arguments", async () => {
     const result = await run(["daemon", "status", "extra"]);
     expect(result.code).toBe(2);
@@ -2403,6 +2422,7 @@ Goal body.
     expect(loop).toMatchObject({
       exitReason: "max_idle_cycles",
       terminalState: "stopped",
+      cancelOutcome: null,
       workSucceeded: true,
       iterations: 0,
       jobsRun: 0,
