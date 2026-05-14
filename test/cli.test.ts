@@ -1152,6 +1152,8 @@ describe("momentum CLI scaffold", () => {
     expect(result.stdout).toContain("Title: CLI Test Goal");
     expect(result.stdout).toContain("State: iteration_complete");
     expect(result.stdout).toContain("Branch: momentum/cli-test-goal");
+    expect(result.stdout).toContain("Recovery: missing");
+    expect(result.stdout).toContain(`${goalId}/recovery.md`);
     expect(result.stdout).toMatch(/Commit: [0-9a-f]{40}/);
     expect(result.stderr).toBe("");
   });
@@ -1931,6 +1933,9 @@ Goal body.
     const dataDir = makeTempDir("momentum-cli-daemon-recovery-");
     const { openDb } = await import("../src/db.js");
     const { writeRecoveryArtifact } = await import("../src/recovery-artifact.js");
+    const { markGoalNeedsManualRecovery } = await import(
+      "../src/goal-recovery.js"
+    );
     const db = openDb(dataDir);
     try {
       db.prepare(
@@ -1938,6 +1943,11 @@ Goal body.
            (id, title, branch, artifact_dir, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?)`
       ).run("g-needs", "Stuck goal", "momentum/test", "/tmp/test", 1, 1);
+      markGoalNeedsManualRecovery(db, {
+        goalId: "g-needs",
+        reason: "repo_dirty",
+        now: 1
+      });
       writeRecoveryArtifact({
         dataDir,
         input: {
@@ -1978,7 +1988,8 @@ Goal body.
     expect(entries[0]).toMatchObject({
       goalId: "g-needs",
       title: "Stuck goal",
-      goalState: "initialized"
+      goalState: "initialized",
+      recoveryMdExists: true
     });
     expect(entries[0]?.["recoveryMdPath"]).toMatch(
       /g-needs\/recovery\.md$/

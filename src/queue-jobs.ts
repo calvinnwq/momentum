@@ -137,10 +137,11 @@ export type ClaimGoalIterationResult =
   | { ok: false; reason: "no_pending_jobs" };
 
 /**
- * Atomically transition the oldest pending `goal_iteration` job to `claimed`,
- * stamp lease/worker metadata, and emit `job.claimed`. The `state = 'pending'`
- * guard on the UPDATE makes the claim safe under concurrent workers; the loser
- * sees `no_pending_jobs` and can retry on the next tick.
+ * Atomically transition the oldest pending, unblocked `goal_iteration` job to
+ * `claimed`, stamp lease/worker metadata, and emit `job.claimed`. The UPDATE
+ * re-checks both `state = 'pending'` and the goal's manual-recovery flag so a
+ * concurrent recovery mark cannot be bypassed between candidate selection and
+ * claim.
  */
 export function claimPendingGoalIterationJob(
   db: MomentumDb,
@@ -177,7 +178,14 @@ export function claimPendingGoalIterationJob(
              heartbeat_at = ?,
              updated_at = ?,
              attempt_count = attempt_count + 1
-       WHERE id = ? AND state = 'pending'
+       WHERE id = ?
+         AND state = 'pending'
+         AND EXISTS (
+           SELECT 1
+             FROM goals
+            WHERE goals.id = jobs.goal_id
+              AND goals.needs_manual_recovery = 0
+         )
        RETURNING *`
     )
     .get(

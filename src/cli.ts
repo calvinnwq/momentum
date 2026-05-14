@@ -1531,7 +1531,8 @@ function emitStatus(
     `Repo: ${data.repo ?? "(unset)"}`,
     `Branch: ${data.branch}`,
     `Runner: ${data.runner}`,
-    `Artifact dir: ${data.artifactDir}`
+    `Artifact dir: ${data.artifactDir}`,
+    `Recovery: ${data.artifactFiles.recoveryMd ? "present" : "missing"} (${data.artifactPaths.recoveryMd})`
   ];
 
   if (data.latestJob) {

@@ -19,6 +19,10 @@ import {
   releaseClaimedGoalIterationJob
 } from "../src/queue-jobs.js";
 import { writeRecoveryArtifact } from "../src/recovery-artifact.js";
+import {
+  clearGoalManualRecovery,
+  markGoalNeedsManualRecovery
+} from "../src/goal-recovery.js";
 
 const tempRoots: string[] = [];
 
@@ -292,12 +296,28 @@ describe("loadDaemonStatus goals needing manual recovery", () => {
     expect(result.goalsNeedingRecovery).toEqual([]);
   });
 
-  it("surfaces goals whose recovery.md exists on disk and ignores goals without one", () => {
+  it("surfaces durable manual-recovery flags with recovery.md presence", () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);
     try {
       seedGoal(db, "g-with-recovery");
-      seedGoal(db, "g-without-recovery");
+      seedGoal(db, "g-without-artifact");
+      seedGoal(db, "g-cleared-with-artifact");
+      markGoalNeedsManualRecovery(db, {
+        goalId: "g-with-recovery",
+        reason: "repo_dirty",
+        now: 10
+      });
+      markGoalNeedsManualRecovery(db, {
+        goalId: "g-without-artifact",
+        reason: "repo_unavailable",
+        now: 11
+      });
+      markGoalNeedsManualRecovery(db, {
+        goalId: "g-cleared-with-artifact",
+        reason: "repo_dirty",
+        now: 12
+      });
       writeRecoveryArtifact({
         dataDir,
         input: {
@@ -320,6 +340,32 @@ describe("loadDaemonStatus goals needing manual recovery", () => {
           classifiedAt: 1_700_000_000_000
         }
       });
+      writeRecoveryArtifact({
+        dataDir,
+        input: {
+          goalId: "g-cleared-with-artifact",
+          goalTitle: "cleared goal",
+          iteration: 1,
+          jobId: "job-y",
+          daemonRunId: null,
+          repoPath: "/tmp/repo",
+          expectedCommit: "abc",
+          currentCommit: "def",
+          reason: { code: "repo_dirty", message: "uncommitted changes" },
+          artifactPaths: {
+            iterationDir: "/tmp/test/iterations/1",
+            runnerLog: null,
+            verificationLog: null,
+            resultJson: null
+          },
+          safeNextSteps: ["Inspect the repo working tree"],
+          classifiedAt: 1_700_000_000_000
+        }
+      });
+      clearGoalManualRecovery(db, {
+        goalId: "g-cleared-with-artifact",
+        now: 13
+      });
     } finally {
       db.close();
     }
@@ -330,15 +376,27 @@ describe("loadDaemonStatus goals needing manual recovery", () => {
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.goalsNeedingRecovery).toHaveLength(1);
-    const [entry] = result.goalsNeedingRecovery;
-    expect(entry).toMatchObject({
+    expect(result.goalsNeedingRecovery).toHaveLength(2);
+    expect(result.goalsNeedingRecovery.map((entry) => entry.goalId)).toEqual([
+      "g-with-recovery",
+      "g-without-artifact"
+    ]);
+    const [withArtifact, withoutArtifact] = result.goalsNeedingRecovery;
+    expect(withArtifact).toMatchObject({
       goalId: "g-with-recovery",
       title: "test goal",
-      goalState: "initialized"
+      goalState: "initialized",
+      recoveryMdExists: true
     });
-    expect(entry?.recoveryMdPath).toMatch(/g-with-recovery\/recovery\.md$/);
-    expect(fs.existsSync(entry?.recoveryMdPath ?? "")).toBe(true);
+    expect(withArtifact?.recoveryMdPath).toMatch(/g-with-recovery\/recovery\.md$/);
+    expect(fs.existsSync(withArtifact?.recoveryMdPath ?? "")).toBe(true);
+    expect(withoutArtifact).toMatchObject({
+      goalId: "g-without-artifact",
+      recoveryMdExists: false
+    });
+    expect(withoutArtifact?.recoveryMdPath).toMatch(
+      /g-without-artifact\/recovery\.md$/
+    );
   });
 
   it("lists multiple goals deterministically by created_at then id", () => {
@@ -355,6 +413,11 @@ describe("loadDaemonStatus goals needing manual recovery", () => {
       ).run("g-first", "first goal", "momentum/test", "/tmp/test", 100, 100);
 
       for (const goalId of ["g-first", "g-second"]) {
+        markGoalNeedsManualRecovery(db, {
+          goalId,
+          reason: "repo_dirty",
+          now: 1
+        });
         writeRecoveryArtifact({
           dataDir,
           input: {

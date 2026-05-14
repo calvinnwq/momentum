@@ -131,15 +131,16 @@ export type DaemonStatusStaleClaimedJob = {
 };
 
 /**
- * One entry per goal whose `recovery.md` artifact exists on disk. Surfacing it
- * in daemon status lets operators see at a glance which goals are blocked on
- * manual inspection without scanning the filesystem themselves.
+ * One entry per goal whose durable `needs_manual_recovery` flag is set.
+ * `recovery.md` presence is surfaced separately because `recovery clear`
+ * intentionally leaves the artifact on disk after clearing the durable block.
  */
 export type DaemonStatusGoalRecoveryArtifact = {
   goalId: string;
   title: string;
   goalState: string;
   recoveryMdPath: string;
+  recoveryMdExists: boolean;
 };
 
 export type DaemonStatusSuccess = {
@@ -336,30 +337,35 @@ type GoalRecoveryRow = {
   id: string;
   title: string;
   state: string;
+  needs_manual_recovery: number;
 };
 
 /**
- * Scan the goals table and surface goals whose `recovery.md` artifact exists
- * on disk. We intentionally probe the filesystem rather than tracking a
- * separate db column so the surface stays consistent with goal-scoped status /
- * handoff reads, which also derive recovery presence from existsSync.
+ * Scan the durable recovery flag first, then attach the artifact path/presence
+ * so a missing artifact does not hide a blocked goal and a cleared goal with a
+ * retained recovery.md does not stay listed as blocked.
  */
 function listGoalsWithRecoveryArtifact(
   db: MomentumDb,
   dataDir: string
 ): DaemonStatusGoalRecoveryArtifact[] {
   const rows = db
-    .prepare("SELECT id, title, state FROM goals ORDER BY created_at ASC, id ASC")
+    .prepare(
+      `SELECT id, title, state, needs_manual_recovery
+         FROM goals
+        ORDER BY created_at ASC, id ASC`
+    )
     .all() as GoalRecoveryRow[];
   const out: DaemonStatusGoalRecoveryArtifact[] = [];
   for (const row of rows) {
+    if (row.needs_manual_recovery !== 1) continue;
     const recoveryMdPath = resolveRecoveryArtifactPath(dataDir, row.id);
-    if (!fs.existsSync(recoveryMdPath)) continue;
     out.push({
       goalId: row.id,
       title: row.title,
       goalState: row.state,
-      recoveryMdPath
+      recoveryMdPath,
+      recoveryMdExists: fs.existsSync(recoveryMdPath)
     });
   }
   return out;

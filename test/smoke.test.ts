@@ -1284,10 +1284,13 @@ End-to-end smoke goal that fails verification.
       expect(lines[4]).toBe(`Branch: ${branch}`);
       expect(lines[5]).toBe("Runner: fake");
       expect(lines[6]).toBe(`Artifact dir: ${artifactDir}`);
-      expect(lines[7]).toBe(
+      expect(lines[7]).toMatch(
+        new RegExp(`^Recovery: missing \\(.*/${goalId}/recovery\\.md\\)$`)
+      );
+      expect(lines[8]).toBe(
         `Job: ${jobId} (succeeded, iteration 1)`
       );
-      expect(lines[8]).toBe(`Commit: ${commitSha}`);
+      expect(lines[9]).toBe(`Commit: ${commitSha}`);
       expect(status.stdout.endsWith("\n")).toBe(true);
       expect(status.stdout).not.toContain("{");
       expect(status.stdout).not.toContain("Failure:");
