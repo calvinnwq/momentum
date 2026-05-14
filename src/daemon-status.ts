@@ -151,6 +151,57 @@ export type LoadDaemonStatusInput = {
   now?: number;
 };
 
+export type StaleLeasePreCheckSnapshot = {
+  observedAt: number;
+  staleLeaseGraceMs: number;
+  staleRepoLocks: DaemonStatusStaleRepoLock[];
+  staleClaimedJobs: DaemonStatusStaleClaimedJob[];
+};
+
+export type LoadStaleLeasePreCheckInput = {
+  db: MomentumDb;
+  now?: number;
+  staleLeaseGraceMs?: number;
+};
+
+/**
+ * Read-only stale-lease snapshot over an already-open db. Composes
+ * `listStaleRepoLocks` and `listStaleClaimedGoalIterationJobs` against a single
+ * observed `now` so callers (worker run pre-check, daemon status, doctor) see a
+ * coherent view of orphaned repo locks and stale claimed `goal_iteration` jobs.
+ *
+ * The grace window tolerates small clock skew between the writer that stamped
+ * `lease_expires_at` and the reader observing it; it is non-recovering and does
+ * not mutate any state. Callers that want recovery must invoke the dedicated
+ * primitives in `stale-recovery.ts`.
+ */
+export function loadStaleLeasePreCheck(
+  input: LoadStaleLeasePreCheckInput
+): StaleLeasePreCheckSnapshot {
+  const staleLeaseGraceMs =
+    input.staleLeaseGraceMs ?? DEFAULT_STALE_LEASE_GRACE_MS;
+  if (!Number.isFinite(staleLeaseGraceMs) || staleLeaseGraceMs < 0) {
+    throw new Error(
+      `staleLeaseGraceMs must be a non-negative number, got ${staleLeaseGraceMs}`
+    );
+  }
+  const now = input.now ?? Date.now();
+  const staleRepoLocks = listStaleRepoLocks(input.db, {
+    now,
+    graceMs: staleLeaseGraceMs
+  }).map((row) => summarizeStaleRepoLock(row, now));
+  const staleClaimedJobs = listStaleClaimedGoalIterationJobs(input.db, {
+    now,
+    graceMs: staleLeaseGraceMs
+  }).map((row) => summarizeStaleClaimedJob(row, now));
+  return {
+    observedAt: now,
+    staleLeaseGraceMs,
+    staleRepoLocks,
+    staleClaimedJobs
+  };
+}
+
 /**
  * Read-only inspector for the daemon_runs table. Selects the active record if
  * one exists; otherwise falls back to the most recently started run so
@@ -231,14 +282,11 @@ export function loadDaemonStatus(
       })
     );
 
-    const staleRepoLocks = listStaleRepoLocks(db, {
+    const preCheck = loadStaleLeasePreCheck({
+      db,
       now,
-      graceMs: staleLeaseGraceMs
-    }).map((row) => summarizeStaleRepoLock(row, now));
-    const staleClaimedJobs = listStaleClaimedGoalIterationJobs(db, {
-      now,
-      graceMs: staleLeaseGraceMs
-    }).map((row) => summarizeStaleClaimedJob(row, now));
+      staleLeaseGraceMs
+    });
 
     return {
       ok: true,
@@ -249,8 +297,8 @@ export function loadDaemonStatus(
       activeJobStaleAfterMs,
       staleLeaseGraceMs,
       staleRuns,
-      staleRepoLocks,
-      staleClaimedJobs,
+      staleRepoLocks: preCheck.staleRepoLocks,
+      staleClaimedJobs: preCheck.staleClaimedJobs,
       observedAt: now
     };
   } catch (err) {

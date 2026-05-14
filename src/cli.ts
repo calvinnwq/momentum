@@ -16,9 +16,11 @@ import { writeHandoff, type HandoffSuccess } from "./handoff.js";
 import { runWorkerOnce, type WorkerRunResult } from "./worker-run.js";
 import {
   loadDaemonStatus,
+  loadStaleLeasePreCheck,
   DEFAULT_DAEMON_ACTIVE_JOB_STALE_AFTER_MS,
   DEFAULT_DAEMON_STALE_AFTER_MS,
-  type DaemonStatusSuccess
+  type DaemonStatusSuccess,
+  type StaleLeasePreCheckSnapshot
 } from "./daemon-status.js";
 import {
   getActiveDaemonRun,
@@ -864,13 +866,14 @@ function workerRun(parsed: ParsedFlags, io: CliIo): number {
 
   const db = openDb(dataDir);
   try {
+    const stalePreCheck = loadStaleLeasePreCheck({ db });
     const result = runWorkerOnce({
       db,
       dataDir,
       workerId,
       leaseDurationMs: 30_000
     });
-    return emitWorkerRunResult(parsed, io, result);
+    return emitWorkerRunResult(parsed, io, result, stalePreCheck);
   } finally {
     db.close();
   }
@@ -879,12 +882,15 @@ function workerRun(parsed: ParsedFlags, io: CliIo): number {
 function emitWorkerRunResult(
   parsed: ParsedFlags,
   io: CliIo,
-  result: WorkerRunResult
+  result: WorkerRunResult,
+  stalePreCheck: StaleLeasePreCheckSnapshot
 ): number {
+  const preCheckJson = summarizeStalePreCheckForJson(stalePreCheck);
   if (parsed.json) {
     const base = {
       command: "worker run",
-      ...result
+      ...result,
+      stalePreCheck: preCheckJson
     };
     const payload = {
       ok: result.code === "ran_job" ? result.ok : true,
@@ -898,6 +904,8 @@ function emitWorkerRunResult(
         ? 0
         : 1;
   }
+
+  emitStalePreCheckText(io, stalePreCheck);
 
   if (result.code === "no_work") {
     write(io.stdout, `${result.message}\n`);
@@ -922,6 +930,32 @@ function emitWorkerRunResult(
   ].join("\n"));
 
   return result.ok ? 0 : 1;
+}
+
+function summarizeStalePreCheckForJson(
+  snapshot: StaleLeasePreCheckSnapshot
+): Record<string, unknown> {
+  return {
+    observedAt: snapshot.observedAt,
+    staleLeaseGraceMs: snapshot.staleLeaseGraceMs,
+    staleRepoLockCount: snapshot.staleRepoLocks.length,
+    staleClaimedJobCount: snapshot.staleClaimedJobs.length,
+    staleRepoLocks: snapshot.staleRepoLocks,
+    staleClaimedJobs: snapshot.staleClaimedJobs
+  };
+}
+
+function emitStalePreCheckText(
+  io: CliIo,
+  snapshot: StaleLeasePreCheckSnapshot
+): void {
+  const lockCount = snapshot.staleRepoLocks.length;
+  const claimCount = snapshot.staleClaimedJobs.length;
+  if (lockCount === 0 && claimCount === 0) return;
+  write(
+    io.stdout,
+    `Stale leases observed before claim: ${lockCount} repo lock(s), ${claimCount} claimed job(s) — see \`momentum daemon status\` for details.\n`
+  );
 }
 
 function doctor(parsed: ParsedFlags, io: CliIo): number {

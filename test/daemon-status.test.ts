@@ -3,7 +3,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { loadDaemonStatus } from "../src/daemon-status.js";
+import {
+  loadDaemonStatus,
+  loadStaleLeasePreCheck
+} from "../src/daemon-status.js";
 import { openDb } from "../src/db.js";
 import {
   acquireRepoLock,
@@ -272,6 +275,125 @@ describe("loadDaemonStatus stale lease detection", () => {
     if (!result.ok) {
       expect(result.code).toBe("invalid_input");
       expect(result.error).toMatch(/staleLeaseGraceMs/);
+    }
+  });
+});
+
+describe("loadStaleLeasePreCheck", () => {
+  it("returns an empty snapshot when no leases exist", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const snapshot = loadStaleLeasePreCheck({ db, now: 5_000 });
+      expect(snapshot.observedAt).toBe(5_000);
+      expect(snapshot.staleLeaseGraceMs).toBeGreaterThan(0);
+      expect(snapshot.staleRepoLocks).toEqual([]);
+      expect(snapshot.staleClaimedJobs).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("flags an expired repo lock and a stale claimed job in one snapshot", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    let lockId: string;
+    let jobId: string;
+    try {
+      seedGoal(db);
+      const acquired = acquireRepoLock(db, {
+        repoRoot: "/tmp/repo",
+        holder: "worker-a",
+        goalId: "g1",
+        iteration: 1,
+        jobId: "job-1",
+        leaseExpiresAt: 1_000,
+        now: 500
+      });
+      if (!acquired.ok) throw new Error("seed lock did not acquire");
+      lockId = acquired.lockId;
+      const enqueued = enqueueGoalIterationJob(db, {
+        goalId: "g1",
+        iteration: 2,
+        idempotencyKey: "g1:2",
+        artifactPath: "/tmp/test/iterations/2",
+        now: 100
+      });
+      jobId = enqueued.jobId;
+      const claimed = claimPendingGoalIterationJob(db, {
+        workerId: "worker-b",
+        leaseDurationMs: 1_000,
+        now: 200
+      });
+      expect(claimed.ok).toBe(true);
+
+      const snapshot = loadStaleLeasePreCheck({
+        db,
+        now: 50_000,
+        staleLeaseGraceMs: 0
+      });
+      expect(snapshot.staleRepoLocks).toHaveLength(1);
+      expect(snapshot.staleRepoLocks[0]).toMatchObject({
+        lockId,
+        leaseExpiresAt: 1_000,
+        leaseExpiredAgeMs: 49_000
+      });
+      expect(snapshot.staleClaimedJobs).toHaveLength(1);
+      expect(snapshot.staleClaimedJobs[0]).toMatchObject({
+        jobId,
+        state: "claimed",
+        leaseExpiresAt: 1_200
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("respects the configured grace window", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      acquireRepoLock(db, {
+        repoRoot: "/tmp/repo",
+        holder: "worker-a",
+        goalId: "g1",
+        iteration: 1,
+        jobId: "job-1",
+        leaseExpiresAt: 1_000,
+        now: 500
+      });
+
+      const fresh = loadStaleLeasePreCheck({
+        db,
+        now: 2_000,
+        staleLeaseGraceMs: 5_000
+      });
+      expect(fresh.staleRepoLocks).toEqual([]);
+
+      const expired = loadStaleLeasePreCheck({
+        db,
+        now: 10_000,
+        staleLeaseGraceMs: 5_000
+      });
+      expect(expired.staleRepoLocks).toHaveLength(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("throws when staleLeaseGraceMs is negative", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      expect(() =>
+        loadStaleLeasePreCheck({
+          db,
+          now: 1_000,
+          staleLeaseGraceMs: -1
+        })
+      ).toThrow(/staleLeaseGraceMs/);
+    } finally {
+      db.close();
     }
   });
 });

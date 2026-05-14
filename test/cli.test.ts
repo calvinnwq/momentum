@@ -777,6 +777,85 @@ describe("momentum CLI scaffold", () => {
     }
   });
 
+  it("worker run JSON surfaces an empty stalePreCheck snapshot when no leases exist", async () => {
+    const dataDir = makeTempDir("momentum-cli-worker-precheck-empty-");
+
+    const result = await run([
+      "worker", "run",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    const preCheck = payload["stalePreCheck"] as Record<string, unknown>;
+    expect(preCheck).toMatchObject({
+      staleRepoLockCount: 0,
+      staleClaimedJobCount: 0,
+      staleRepoLocks: [],
+      staleClaimedJobs: []
+    });
+    expect(typeof preCheck["observedAt"]).toBe("number");
+    expect(typeof preCheck["staleLeaseGraceMs"]).toBe("number");
+    expect(preCheck["staleLeaseGraceMs"]).toBeGreaterThan(0);
+  });
+
+  it("worker run surfaces stale repo locks observed before claim in JSON and text", async () => {
+    const dataDir = makeTempDir("momentum-cli-worker-precheck-stale-");
+
+    const { acquireRepoLock } = await import("../src/repo-locks.js");
+    const { openDb } = await import("../src/db.js");
+    const setupDb = openDb(dataDir);
+    let staleLockId: string;
+    try {
+      const acquired = acquireRepoLock(setupDb, {
+        repoRoot: "/tmp/stale-repo",
+        holder: "ghost-worker",
+        goalId: "orphan-goal",
+        iteration: 1,
+        jobId: "orphan-job",
+        leaseExpiresAt: 1_000,
+        now: 500
+      });
+      if (!acquired.ok) throw new Error("seed lock did not acquire");
+      staleLockId = acquired.lockId;
+    } finally {
+      setupDb.close();
+    }
+
+    const jsonResult = await run([
+      "worker", "run",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(jsonResult.code).toBe(0);
+    const jsonPayload = JSON.parse(jsonResult.stdout) as Record<string, unknown>;
+    const preCheck = jsonPayload["stalePreCheck"] as Record<string, unknown>;
+    expect(preCheck["staleRepoLockCount"]).toBe(1);
+    expect(preCheck["staleClaimedJobCount"]).toBe(0);
+    const staleRepoLocks = preCheck["staleRepoLocks"] as Array<Record<string, unknown>>;
+    expect(staleRepoLocks).toHaveLength(1);
+    expect(staleRepoLocks[0]).toMatchObject({
+      lockId: staleLockId,
+      repoRoot: "/tmp/stale-repo",
+      holder: "ghost-worker",
+      goalId: "orphan-goal",
+      jobId: "orphan-job"
+    });
+
+    const textResult = await run([
+      "worker", "run",
+      "--data-dir", dataDir
+    ]);
+    expect(textResult.code).toBe(0);
+    expect(textResult.stdout).toMatch(
+      /Stale leases observed before claim: 1 repo lock\(s\), 0 claimed job\(s\)/
+    );
+    expect(textResult.stdout).toMatch(
+      /No pending goal_iteration jobs were available\./
+    );
+  });
+
   it("rejects --worker-id without a value", async () => {
     const result = await run([
       "worker", "run",
