@@ -4,6 +4,14 @@ import {
   resolveGoalArtifactPaths,
   type GoalArtifactPaths
 } from "./artifacts.js";
+import {
+  getActiveDaemonRun,
+  getLatestDaemonRun,
+  isActiveDaemonRunState,
+  isTerminalDaemonRunState,
+  type DaemonRunRow,
+  type DaemonRunState
+} from "./daemon-runs.js";
 import { resolveDataDir, type DataDirOptions } from "./data-dir.js";
 import { openDb, type MomentumDb } from "./db.js";
 import { getGoal, type GoalRow } from "./goal-init.js";
@@ -136,6 +144,28 @@ export type GoalStatusCurrentIterationDetail = {
   completedAt: number | null;
 };
 
+export type GoalStatusDaemonStopRequest = {
+  requestedAt: number;
+  reason: string;
+};
+
+export type GoalStatusDaemonActiveJob = {
+  jobId: string | null;
+  lockId: string | null;
+};
+
+export type GoalStatusDaemonSummary = {
+  runId: string;
+  state: DaemonRunState;
+  isActive: boolean;
+  isTerminal: boolean;
+  startedAt: number;
+  heartbeatAt: number;
+  finishedAt: number | null;
+  activeJob: GoalStatusDaemonActiveJob;
+  stopRequest: GoalStatusDaemonStopRequest | null;
+};
+
 export type GoalStatusSuccess = {
   ok: true;
   dataDir: string;
@@ -165,6 +195,7 @@ export type GoalStatusSuccess = {
   nextAction: string | null;
   nextActionDetail: GoalStatusNextActionDetail | null;
   latestCommitSha: string | null;
+  daemon: GoalStatusDaemonSummary | null;
 };
 
 export type GoalStatusResult = GoalStatusError | GoalStatusSuccess;
@@ -280,6 +311,8 @@ export function loadGoalStatus(input: LoadGoalStatusInput = {}): GoalStatusResul
     const latestCommitSha =
       iteration?.commitSha ?? reducer?.commitSha ?? null;
 
+    const daemon = buildDaemonSummary(db);
+
     return {
       ok: true,
       dataDir,
@@ -308,11 +341,40 @@ export function loadGoalStatus(input: LoadGoalStatusInput = {}): GoalStatusResul
       nextJob: nextJobSummary,
       nextAction,
       nextActionDetail,
-      latestCommitSha
+      latestCommitSha,
+      daemon
     };
   } finally {
     db?.close();
   }
+}
+
+function buildDaemonSummary(
+  db: MomentumDb
+): GoalStatusDaemonSummary | null {
+  const row = getActiveDaemonRun(db) ?? getLatestDaemonRun(db);
+  if (!row) return null;
+  return toDaemonSummary(row);
+}
+
+function toDaemonSummary(row: DaemonRunRow): GoalStatusDaemonSummary {
+  return {
+    runId: row.id,
+    state: row.state,
+    isActive: isActiveDaemonRunState(row.state),
+    isTerminal: isTerminalDaemonRunState(row.state),
+    startedAt: row.started_at,
+    heartbeatAt: row.heartbeat_at,
+    finishedAt: row.finished_at,
+    activeJob: { jobId: row.active_job_id, lockId: row.active_lock_id },
+    stopRequest:
+      row.stop_requested_at !== null
+        ? {
+            requestedAt: row.stop_requested_at,
+            reason: row.stop_reason ?? ""
+          }
+        : null
+  };
 }
 
 function findLatestGoal(db: MomentumDb): GoalRow | undefined {

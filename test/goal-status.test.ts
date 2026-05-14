@@ -1162,4 +1162,107 @@ describe("loadGoalStatus", () => {
       expect(status.artifacts.handoffJson.exists).toBe(true);
     });
   });
+
+  describe("daemon surface", () => {
+    it("returns daemon=null when no daemon has ever run", () => {
+      const repo = initRepo();
+      const setup = setupGoal(repo, "Status no daemon");
+
+      const status = loadGoalStatus({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      });
+
+      expect(status.ok).toBe(true);
+      if (!status.ok) return;
+      expect(status.daemon).toBeNull();
+    });
+
+    it("surfaces the active daemon run with its stop-request state", async () => {
+      const repo = initRepo();
+      const setup = setupGoal(repo, "Status daemon stop request", {
+        mode: "queued"
+      });
+      const { startDaemonRun, requestDaemonRunStop } = await import(
+        "../src/daemon-runs.js"
+      );
+      const db = openDb(setup.dataDir);
+      let runId: string;
+      try {
+        ({ runId } = startDaemonRun(db, {
+          pid: 9876,
+          host: "status-daemon-host",
+          now: 1_700_000_000_000
+        }));
+        requestDaemonRunStop(db, {
+          runId,
+          reason: "operator-requested",
+          now: 1_700_000_010_000
+        });
+      } finally {
+        db.close();
+      }
+
+      const status = loadGoalStatus({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      });
+
+      expect(status.ok).toBe(true);
+      if (!status.ok) return;
+      expect(status.daemon).not.toBeNull();
+      expect(status.daemon).toMatchObject({
+        runId,
+        state: "stop_requested",
+        isActive: true,
+        isTerminal: false,
+        startedAt: 1_700_000_000_000,
+        finishedAt: null,
+        stopRequest: {
+          requestedAt: 1_700_000_010_000,
+          reason: "operator-requested"
+        },
+        activeJob: { jobId: null, lockId: null }
+      });
+    });
+
+    it("falls back to the latest terminal daemon run when none are active", async () => {
+      const repo = initRepo();
+      const setup = setupGoal(repo, "Status daemon terminal");
+      const { startDaemonRun, finishDaemonRun } = await import(
+        "../src/daemon-runs.js"
+      );
+      const db = openDb(setup.dataDir);
+      let runId: string;
+      try {
+        ({ runId } = startDaemonRun(db, {
+          pid: 5555,
+          now: 1_700_000_000_000
+        }));
+        finishDaemonRun(db, {
+          runId,
+          terminalState: "stopped",
+          now: 1_700_000_005_000
+        });
+      } finally {
+        db.close();
+      }
+
+      const status = loadGoalStatus({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      });
+
+      expect(status.ok).toBe(true);
+      if (!status.ok) return;
+      expect(status.daemon).not.toBeNull();
+      expect(status.daemon).toMatchObject({
+        runId,
+        state: "stopped",
+        isActive: false,
+        isTerminal: true,
+        finishedAt: 1_700_000_005_000
+      });
+    });
+  });
 });

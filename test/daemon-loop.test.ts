@@ -671,6 +671,71 @@ describe("runDaemonLoop", () => {
     }
   });
 
+  it("stops between jobs without claiming the reducer-enqueued next iteration", async () => {
+    const dataDir = makeTempDir();
+    const repo = initRepo();
+    const seed = seedQueuedGoal(dataDir, repo, { maxIterations: 3 });
+    process.env[FAKE_RUNNER_TRAJECTORY_ENV] = "ok|ok|complete";
+    const db = openDb(dataDir);
+    try {
+      const runId = seedDaemonRun(db);
+      const { sleep } = makeRecordingSleep();
+
+      const result = await runDaemonLoop({
+        db,
+        dataDir,
+        runId,
+        workerId: "daemon-loop-stop-between",
+        pollIntervalMs: 5,
+        maxIdleCycles: 5,
+        sleep,
+        now: makeMonotonicNow(),
+        onCycleComplete: (cycle) => {
+          if (cycle.workerResult.code === "ran_job") {
+            requestDaemonRunStop(db, {
+              runId,
+              reason: "stop after first job",
+              now: 200_000
+            });
+          }
+        }
+      });
+
+      expect(result.exitReason).toBe("stop_requested");
+      expect(result.jobsRun).toBe(1);
+      expect(result.jobsFailed).toBe(0);
+      expect(result.terminalState).toBe("stopped");
+
+      const goalRow = db
+        .prepare(
+          "SELECT state, current_iteration, completion_reason FROM goals WHERE id = ?"
+        )
+        .get(seed.goalId) as {
+        state: string;
+        current_iteration: number;
+        completion_reason: string | null;
+      };
+      expect(goalRow.state).toBe("queued");
+      expect(goalRow.completion_reason).toBeNull();
+      expect(goalRow.current_iteration).toBe(1);
+
+      const pendingJobs = db
+        .prepare(
+          "SELECT iteration, state FROM jobs WHERE goal_id = ? AND state = 'pending' ORDER BY iteration ASC"
+        )
+        .all(seed.goalId) as { iteration: number; state: string }[];
+      expect(pendingJobs.length).toBe(1);
+      expect(pendingJobs[0]?.iteration).toBe(2);
+
+      const row = getDaemonRun(db, runId);
+      expect(row?.state).toBe("stopped");
+      expect(row?.stop_reason).toBe("stop after first job");
+      expect(row?.active_job_id).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
   it("backs off after a not_executed cycle and continues idling", async () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);
