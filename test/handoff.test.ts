@@ -888,6 +888,101 @@ describe("writeHandoff", () => {
     expect(markdown).toContain("reason: operator-requested");
   });
 
+  it("captures goal-scoped stale-recovery activity in JSON and markdown", async () => {
+    const repo = initRepo();
+    const setup = setupGoal(
+      repo,
+      "Handoff stale recovery",
+      "true",
+      "queued"
+    );
+    const { appendQueueEvent, QUEUE_EVENT_TYPES } = await import(
+      "../src/events.js"
+    );
+
+    const db = openDb(setup.dataDir);
+    try {
+      appendQueueEvent(db, {
+        goalId: setup.goalId,
+        jobId: setup.jobId,
+        type: QUEUE_EVENT_TYPES.REPO_LOCK_RECOVERED,
+        payload: { recovered_at: 1_700_000_001_000 },
+        createdAt: 1_700_000_001_000
+      });
+      appendQueueEvent(db, {
+        goalId: setup.goalId,
+        jobId: setup.jobId,
+        type: QUEUE_EVENT_TYPES.JOB_RECOVERED,
+        payload: { recovered_at: 1_700_000_002_000 },
+        createdAt: 1_700_000_002_000
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = writeHandoff({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+    const handoff = expectSuccess(result);
+
+    expect(handoff.data.staleRecovery).toMatchObject({
+      recoveredRepoLockCount: 1,
+      recoveredJobCount: 1,
+      latestRecoveredRepoLockAt: 1_700_000_001_000,
+      latestRecoveredJobAt: 1_700_000_002_000,
+      staleRepoLockCount: 0,
+      staleClaimedJobCount: 0,
+      staleLeaseGraceMs: 5_000
+    });
+
+    const json = JSON.parse(
+      fs.readFileSync(setup.artifactPaths.handoffJson, "utf-8")
+    ) as Record<string, unknown>;
+    expect(json["stale_recovery"]).toEqual({
+      recovered_repo_lock_count: 1,
+      recovered_job_count: 1,
+      latest_recovered_repo_lock_at: 1_700_000_001_000,
+      latest_recovered_job_at: 1_700_000_002_000,
+      stale_repo_lock_count: 0,
+      stale_claimed_job_count: 0,
+      stale_lease_grace_ms: 5_000
+    });
+
+    const markdown = fs.readFileSync(setup.artifactPaths.handoffMd, "utf-8");
+    expect(markdown).toContain("## Stale recovery");
+    expect(markdown).toContain(
+      "Recovered repo locks: 1 (latest at 1700000001000)"
+    );
+    expect(markdown).toContain("Recovered jobs: 1 (latest at 1700000002000)");
+  });
+
+  it("renders the no-activity stale recovery section when nothing has been recovered", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Handoff stale recovery empty");
+
+    const result = writeHandoff({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+    const handoff = expectSuccess(result);
+    expect(handoff.data.staleRecovery).toEqual({
+      recoveredRepoLockCount: 0,
+      recoveredJobCount: 0,
+      latestRecoveredRepoLockAt: null,
+      latestRecoveredJobAt: null,
+      staleRepoLockCount: 0,
+      staleClaimedJobCount: 0,
+      staleLeaseGraceMs: 5_000
+    });
+
+    const markdown = fs.readFileSync(setup.artifactPaths.handoffMd, "utf-8");
+    expect(markdown).toContain("## Stale recovery");
+    expect(markdown).toContain(
+      "No stale-lease recovery activity recorded for this goal."
+    );
+  });
+
   it("writes daemon=null when no daemon has ever run for the data dir", () => {
     const repo = initRepo();
     const setup = setupGoal(repo, "Handoff no daemon");

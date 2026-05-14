@@ -12,6 +12,7 @@ import {
   type GoalStatusJobSummary,
   type GoalStatusNextActionDetail,
   type GoalStatusReducerSummary,
+  type GoalStatusStaleRecoverySummary,
   type GoalStatusSuccess
 } from "./goal-status.js";
 
@@ -75,6 +76,7 @@ export type HandoffData = {
   nextActionDetail: GoalStatusNextActionDetail | null;
   latestCommitSha: string | null;
   daemon: GoalStatusDaemonSummary | null;
+  staleRecovery: GoalStatusStaleRecoverySummary;
   artifactPaths: GoalArtifactPaths;
   artifactFiles: GoalStatusArtifactFiles;
 };
@@ -166,6 +168,7 @@ function buildHandoffData(
     nextActionDetail: status.nextActionDetail,
     latestCommitSha: status.latestCommitSha,
     daemon: status.daemon,
+    staleRecovery: status.staleRecovery,
     artifactPaths: status.artifactPaths,
     artifactFiles: status.artifactFiles
   };
@@ -298,6 +301,15 @@ function toJsonShape(data: HandoffData): Record<string, unknown> {
             : null
         }
       : null,
+    stale_recovery: {
+      recovered_repo_lock_count: data.staleRecovery.recoveredRepoLockCount,
+      recovered_job_count: data.staleRecovery.recoveredJobCount,
+      latest_recovered_repo_lock_at: data.staleRecovery.latestRecoveredRepoLockAt,
+      latest_recovered_job_at: data.staleRecovery.latestRecoveredJobAt,
+      stale_repo_lock_count: data.staleRecovery.staleRepoLockCount,
+      stale_claimed_job_count: data.staleRecovery.staleClaimedJobCount,
+      stale_lease_grace_ms: data.staleRecovery.staleLeaseGraceMs
+    },
     artifacts: {
       goal_md: data.artifactPaths.goalMd,
       ledger_md: data.artifactPaths.ledgerMd,
@@ -491,6 +503,38 @@ function renderHandoffMarkdown(data: HandoffData): string {
     if (data.daemon.finishedAt !== null) {
       lines.push(`- Finished at: ${data.daemon.finishedAt}`);
     }
+  }
+  lines.push("");
+
+  lines.push("## Stale recovery");
+  const sr = data.staleRecovery;
+  if (
+    sr.recoveredRepoLockCount === 0 &&
+    sr.recoveredJobCount === 0 &&
+    sr.staleRepoLockCount === 0 &&
+    sr.staleClaimedJobCount === 0
+  ) {
+    lines.push("- No stale-lease recovery activity recorded for this goal.");
+  } else {
+    lines.push(
+      `- Recovered repo locks: ${sr.recoveredRepoLockCount}` +
+        (sr.latestRecoveredRepoLockAt !== null
+          ? ` (latest at ${sr.latestRecoveredRepoLockAt})`
+          : "")
+    );
+    lines.push(
+      `- Recovered jobs: ${sr.recoveredJobCount}` +
+        (sr.latestRecoveredJobAt !== null
+          ? ` (latest at ${sr.latestRecoveredJobAt})`
+          : "")
+    );
+    lines.push(
+      `- Stale repo locks pending manual recovery: ${sr.staleRepoLockCount}`
+    );
+    lines.push(
+      `- Stale claimed jobs pending manual recovery: ${sr.staleClaimedJobCount}`
+    );
+    lines.push(`- Stale lease grace (ms): ${sr.staleLeaseGraceMs}`);
   }
   lines.push("");
 

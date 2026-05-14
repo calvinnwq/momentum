@@ -1265,4 +1265,167 @@ describe("loadGoalStatus", () => {
       });
     });
   });
+
+  describe("stale recovery surface", () => {
+    it("returns zeroed counts when no recovery activity has been recorded", () => {
+      const repo = initRepo();
+      const setup = setupGoal(repo, "Status no stale recovery");
+
+      const status = loadGoalStatus({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      });
+
+      expect(status.ok).toBe(true);
+      if (!status.ok) return;
+      expect(status.staleRecovery).toEqual({
+        recoveredRepoLockCount: 0,
+        recoveredJobCount: 0,
+        latestRecoveredRepoLockAt: null,
+        latestRecoveredJobAt: null,
+        staleRepoLockCount: 0,
+        staleClaimedJobCount: 0,
+        staleLeaseGraceMs: 5_000
+      });
+    });
+
+    it("aggregates repo_lock.recovered and job.recovered events for this goal", async () => {
+      const repo = initRepo();
+      const setup = setupGoal(repo, "Status recovered events", {
+        mode: "queued"
+      });
+      const { appendQueueEvent, QUEUE_EVENT_TYPES } = await import(
+        "../src/events.js"
+      );
+
+      const db = openDb(setup.dataDir);
+      try {
+        appendQueueEvent(db, {
+          goalId: setup.goalId,
+          jobId: setup.jobId,
+          type: QUEUE_EVENT_TYPES.REPO_LOCK_RECOVERED,
+          payload: { recovered_at: 1_700_000_001_000 },
+          createdAt: 1_700_000_001_000
+        });
+        appendQueueEvent(db, {
+          goalId: setup.goalId,
+          jobId: setup.jobId,
+          type: QUEUE_EVENT_TYPES.REPO_LOCK_RECOVERED,
+          payload: { recovered_at: 1_700_000_002_000 },
+          createdAt: 1_700_000_002_000
+        });
+        appendQueueEvent(db, {
+          goalId: setup.goalId,
+          jobId: setup.jobId,
+          type: QUEUE_EVENT_TYPES.JOB_RECOVERED,
+          payload: { recovered_at: 1_700_000_003_000 },
+          createdAt: 1_700_000_003_000
+        });
+      } finally {
+        db.close();
+      }
+
+      const status = loadGoalStatus({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      });
+      expect(status.ok).toBe(true);
+      if (!status.ok) return;
+      expect(status.staleRecovery).toMatchObject({
+        recoveredRepoLockCount: 2,
+        recoveredJobCount: 1,
+        latestRecoveredRepoLockAt: 1_700_000_002_000,
+        latestRecoveredJobAt: 1_700_000_003_000
+      });
+    });
+
+    it("ignores recovery events that belong to a different goal", async () => {
+      const repo = initRepo();
+      const setupA = setupGoal(repo, "Status stale recovery A", {
+        mode: "queued"
+      });
+      const repoB = initRepo();
+      const setupB = setupGoalInDataDir(
+        repoB,
+        setupA.dataDir,
+        "Status stale recovery B",
+        { mode: "queued" }
+      );
+      const { appendQueueEvent, QUEUE_EVENT_TYPES } = await import(
+        "../src/events.js"
+      );
+
+      const db = openDb(setupA.dataDir);
+      try {
+        appendQueueEvent(db, {
+          goalId: setupB.goalId,
+          jobId: setupB.jobId,
+          type: QUEUE_EVENT_TYPES.REPO_LOCK_RECOVERED,
+          payload: { recovered_at: 1_700_000_010_000 },
+          createdAt: 1_700_000_010_000
+        });
+        appendQueueEvent(db, {
+          goalId: setupB.goalId,
+          jobId: setupB.jobId,
+          type: QUEUE_EVENT_TYPES.JOB_RECOVERED,
+          payload: { recovered_at: 1_700_000_011_000 },
+          createdAt: 1_700_000_011_000
+        });
+      } finally {
+        db.close();
+      }
+
+      const status = loadGoalStatus({
+        goalId: setupA.goalId,
+        dataDirOptions: { dataDir: setupA.dataDir }
+      });
+      expect(status.ok).toBe(true);
+      if (!status.ok) return;
+      expect(status.staleRecovery.recoveredRepoLockCount).toBe(0);
+      expect(status.staleRecovery.recoveredJobCount).toBe(0);
+      expect(status.staleRecovery.latestRecoveredRepoLockAt).toBeNull();
+      expect(status.staleRecovery.latestRecoveredJobAt).toBeNull();
+    });
+
+    it("counts active+expired repo locks and claimed jobs pending manual recovery", async () => {
+      const repo = initRepo();
+      const setup = setupGoal(repo, "Status pending stale", {
+        mode: "queued"
+      });
+      const { acquireRepoLock } = await import("../src/repo-locks.js");
+
+      const db = openDb(setup.dataDir);
+      try {
+        const lock = acquireRepoLock(db, {
+          repoRoot: "/tmp/momentum-status-pending-repo",
+          holder: "worker-pending",
+          goalId: setup.goalId,
+          iteration: 1,
+          jobId: setup.jobId,
+          leaseExpiresAt: 1_000,
+          now: 100
+        });
+        expect(lock.ok).toBe(true);
+
+        const claim = claimPendingGoalIterationJob(db, {
+          workerId: "worker-pending",
+          leaseDurationMs: 1_800,
+          now: 200
+        });
+        expect(claim.ok).toBe(true);
+      } finally {
+        db.close();
+      }
+
+      const status = loadGoalStatus({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      });
+      expect(status.ok).toBe(true);
+      if (!status.ok) return;
+      expect(status.staleRecovery.staleRepoLockCount).toBe(1);
+      expect(status.staleRecovery.staleClaimedJobCount).toBe(1);
+      expect(status.staleRecovery.staleLeaseGraceMs).toBe(5_000);
+    });
+  });
 });

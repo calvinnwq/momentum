@@ -13,8 +13,10 @@ import {
   type DaemonRunRow,
   type DaemonRunState
 } from "./daemon-runs.js";
+import { DEFAULT_STALE_LEASE_GRACE_MS } from "./daemon-status.js";
 import { resolveDataDir, type DataDirOptions } from "./data-dir.js";
 import { openDb, type MomentumDb } from "./db.js";
+import { QUEUE_EVENT_TYPES } from "./events.js";
 import { getGoal, type GoalRow } from "./goal-init.js";
 import { GOAL_ITERATION_JOB_TYPE } from "./queue-jobs.js";
 
@@ -178,6 +180,30 @@ export type GoalStatusDaemonSummary = {
   cancelOutcome: GoalStatusDaemonCancelOutcome | null;
 };
 
+/**
+ * Goal-scoped view of NGX-276 stale-lease recovery. Surfaces (a) the count and
+ * latest timestamp of `repo_lock.recovered` / `job.recovered` events recorded
+ * for this goal so prior auto-recovery actions are visible to operators, and
+ * (b) the count of repo locks / claimed goal_iteration jobs still asserting
+ * ownership for this goal whose lease has already expired — those are records
+ * the auto-recovery primitives left untouched for manual intervention (e.g. a
+ * lock_active stale claim or a stale lock whose owning job is not terminal).
+ *
+ * The grace tolerance mirrors `daemon status` so the same rows are classified
+ * stale by the read-only inspector and by this surface. Daemon-level recovery
+ * is NOT surfaced here because it is not goal-scoped — operators consult
+ * `daemon status` / `doctor` for the system-wide daemon picture.
+ */
+export type GoalStatusStaleRecoverySummary = {
+  recoveredRepoLockCount: number;
+  recoveredJobCount: number;
+  latestRecoveredRepoLockAt: number | null;
+  latestRecoveredJobAt: number | null;
+  staleRepoLockCount: number;
+  staleClaimedJobCount: number;
+  staleLeaseGraceMs: number;
+};
+
 export type GoalStatusSuccess = {
   ok: true;
   dataDir: string;
@@ -208,6 +234,7 @@ export type GoalStatusSuccess = {
   nextActionDetail: GoalStatusNextActionDetail | null;
   latestCommitSha: string | null;
   daemon: GoalStatusDaemonSummary | null;
+  staleRecovery: GoalStatusStaleRecoverySummary;
 };
 
 export type GoalStatusResult = GoalStatusError | GoalStatusSuccess;
@@ -324,6 +351,7 @@ export function loadGoalStatus(input: LoadGoalStatusInput = {}): GoalStatusResul
       iteration?.commitSha ?? reducer?.commitSha ?? null;
 
     const daemon = buildDaemonSummary(db);
+    const staleRecovery = buildStaleRecoverySummary(db, goal.id);
 
     return {
       ok: true,
@@ -354,11 +382,86 @@ export function loadGoalStatus(input: LoadGoalStatusInput = {}): GoalStatusResul
       nextAction,
       nextActionDetail,
       latestCommitSha,
-      daemon
+      daemon,
+      staleRecovery
     };
   } finally {
     db?.close();
   }
+}
+
+type RecoveryEventAggregateRow = {
+  type: string;
+  count: number;
+  max_created_at: number | null;
+};
+
+type StaleRecoveryCountRow = {
+  count: number;
+};
+
+function buildStaleRecoverySummary(
+  db: MomentumDb,
+  goalId: string,
+  now: number = Date.now(),
+  graceMs: number = DEFAULT_STALE_LEASE_GRACE_MS
+): GoalStatusStaleRecoverySummary {
+  const cutoff = now - graceMs;
+
+  const recoveryAggregates = db
+    .prepare(
+      `SELECT type, COUNT(*) AS count, MAX(created_at) AS max_created_at
+         FROM events
+        WHERE goal_id = ? AND type IN (?, ?)
+        GROUP BY type`
+    )
+    .all(
+      goalId,
+      QUEUE_EVENT_TYPES.REPO_LOCK_RECOVERED,
+      QUEUE_EVENT_TYPES.JOB_RECOVERED
+    ) as RecoveryEventAggregateRow[];
+
+  let recoveredRepoLockCount = 0;
+  let recoveredJobCount = 0;
+  let latestRecoveredRepoLockAt: number | null = null;
+  let latestRecoveredJobAt: number | null = null;
+  for (const row of recoveryAggregates) {
+    if (row.type === QUEUE_EVENT_TYPES.REPO_LOCK_RECOVERED) {
+      recoveredRepoLockCount = row.count;
+      latestRecoveredRepoLockAt = row.max_created_at;
+    } else if (row.type === QUEUE_EVENT_TYPES.JOB_RECOVERED) {
+      recoveredJobCount = row.count;
+      latestRecoveredJobAt = row.max_created_at;
+    }
+  }
+
+  const staleRepoLockRow = db
+    .prepare(
+      `SELECT COUNT(*) AS count FROM repo_locks
+        WHERE goal_id = ? AND state = 'active' AND lease_expires_at < ?`
+    )
+    .get(goalId, cutoff) as StaleRecoveryCountRow;
+
+  const staleClaimedJobRow = db
+    .prepare(
+      `SELECT COUNT(*) AS count FROM jobs
+        WHERE goal_id = ?
+          AND type = ?
+          AND state IN ('claimed', 'running')
+          AND lease_expires_at IS NOT NULL
+          AND lease_expires_at < ?`
+    )
+    .get(goalId, GOAL_ITERATION_JOB_TYPE, cutoff) as StaleRecoveryCountRow;
+
+  return {
+    recoveredRepoLockCount,
+    recoveredJobCount,
+    latestRecoveredRepoLockAt,
+    latestRecoveredJobAt,
+    staleRepoLockCount: staleRepoLockRow.count,
+    staleClaimedJobCount: staleClaimedJobRow.count,
+    staleLeaseGraceMs: graceMs
+  };
 }
 
 function buildDaemonSummary(

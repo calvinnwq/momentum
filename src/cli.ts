@@ -1316,7 +1316,8 @@ function emitStatus(
     nextAction: data.nextAction,
     nextActionDetail: data.nextActionDetail,
     latestCommitSha: data.latestCommitSha,
-    daemon: data.daemon
+    daemon: data.daemon,
+    staleRecovery: data.staleRecovery
   };
 
   if (parsed.json) {
@@ -1385,6 +1386,21 @@ function emitStatus(
     if (data.daemon.cancelOutcome) {
       lines.push(`Daemon cancel outcome: ${data.daemon.cancelOutcome.outcome}`);
     }
+  }
+
+  const sr = data.staleRecovery;
+  if (
+    sr.recoveredRepoLockCount > 0 ||
+    sr.recoveredJobCount > 0 ||
+    sr.staleRepoLockCount > 0 ||
+    sr.staleClaimedJobCount > 0
+  ) {
+    lines.push(
+      `Stale recovery: locks recovered=${sr.recoveredRepoLockCount} ` +
+        `jobs recovered=${sr.recoveredJobCount} ` +
+        `pending locks=${sr.staleRepoLockCount} ` +
+        `pending jobs=${sr.staleClaimedJobCount}`
+    );
   }
 
   lines.push("");
@@ -1577,7 +1593,8 @@ function emitHandoff(
     currentIterationDetail: data.currentIterationDetail,
     nextActionDetail: data.nextActionDetail,
     latestCommitSha: data.latestCommitSha,
-    daemon: data.daemon
+    daemon: data.daemon,
+    staleRecovery: data.staleRecovery
   };
 
   if (parsed.json) {
