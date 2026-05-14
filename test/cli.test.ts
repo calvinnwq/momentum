@@ -2412,6 +2412,164 @@ Goal body.
     expect(result.stderr).toContain("Missing required value for --max-idle-cycles");
     expect(result.stdout).toBe("");
   });
+
+  it("status --json surfaces an active daemon stop request alongside the queued goal", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+    const enqueueResult = await run([
+      "goal", "start", goalFile,
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(enqueueResult.code).toBe(0);
+    const enqueuePayload = JSON.parse(enqueueResult.stdout) as Record<
+      string,
+      unknown
+    >;
+    const goalId = enqueuePayload["goalId"] as string;
+
+    const { openDb } = await import("../src/db.js");
+    const { startDaemonRun, requestDaemonRunStop } = await import(
+      "../src/daemon-runs.js"
+    );
+    const db = openDb(dataDir);
+    let runId: string;
+    try {
+      ({ runId } = startDaemonRun(db, {
+        pid: 8888,
+        host: "cli-status-daemon",
+        now: 1_700_000_000_000
+      }));
+      requestDaemonRunStop(db, {
+        runId,
+        reason: "ops shutdown",
+        now: 1_700_000_005_000
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "status", goalId,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    const daemon = payload["daemon"] as Record<string, unknown>;
+    expect(daemon).toMatchObject({
+      runId,
+      state: "stop_requested",
+      isActive: true,
+      isTerminal: false,
+      stopRequest: {
+        requestedAt: 1_700_000_005_000,
+        reason: "ops shutdown"
+      }
+    });
+  });
+
+  it("status text surfaces the daemon stop-request when work is queued", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+    const enqueueResult = await run([
+      "goal", "start", goalFile,
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(enqueueResult.code).toBe(0);
+    const enqueuePayload = JSON.parse(enqueueResult.stdout) as Record<
+      string,
+      unknown
+    >;
+    const goalId = enqueuePayload["goalId"] as string;
+
+    const { openDb } = await import("../src/db.js");
+    const { startDaemonRun, requestDaemonRunStop } = await import(
+      "../src/daemon-runs.js"
+    );
+    const db = openDb(dataDir);
+    let runId: string;
+    try {
+      ({ runId } = startDaemonRun(db, {
+        pid: 8889,
+        now: 1_700_000_000_000
+      }));
+      requestDaemonRunStop(db, {
+        runId,
+        reason: "ops",
+        now: 1_700_000_005_000
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "status", goalId,
+      "--data-dir", dataDir
+    ]);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(`Daemon: stop_requested (active) [${runId}]`);
+    expect(result.stdout).toContain("Daemon stop requested: 1700000005000 (ops)");
+  });
+
+  it("handoff --json captures the daemon stop request so operators see why work is not draining", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+    const enqueueResult = await run([
+      "goal", "start", goalFile,
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(enqueueResult.code).toBe(0);
+    const enqueuePayload = JSON.parse(enqueueResult.stdout) as Record<
+      string,
+      unknown
+    >;
+    const goalId = enqueuePayload["goalId"] as string;
+
+    const { openDb } = await import("../src/db.js");
+    const { startDaemonRun, requestDaemonRunStop } = await import(
+      "../src/daemon-runs.js"
+    );
+    const db = openDb(dataDir);
+    let runId: string;
+    try {
+      ({ runId } = startDaemonRun(db, {
+        pid: 9999,
+        host: "cli-handoff-daemon",
+        now: 1_700_000_000_000
+      }));
+      requestDaemonRunStop(db, {
+        runId,
+        reason: "drain before deploy",
+        now: 1_700_000_004_000
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "handoff", goalId,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    const daemon = payload["daemon"] as Record<string, unknown>;
+    expect(daemon).toMatchObject({
+      runId,
+      state: "stop_requested",
+      isActive: true,
+      stopRequest: {
+        requestedAt: 1_700_000_004_000,
+        reason: "drain before deploy"
+      }
+    });
+  });
 });
 
 async function run(argv: string[]): Promise<RunResult> {

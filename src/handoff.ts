@@ -6,6 +6,7 @@ import {
   loadGoalStatus,
   type GoalStatusArtifactFiles,
   type GoalStatusCurrentIterationDetail,
+  type GoalStatusDaemonSummary,
   type GoalStatusError,
   type GoalStatusIterationSummary,
   type GoalStatusJobSummary,
@@ -73,6 +74,7 @@ export type HandoffData = {
   nextAction: string | null;
   nextActionDetail: GoalStatusNextActionDetail | null;
   latestCommitSha: string | null;
+  daemon: GoalStatusDaemonSummary | null;
   artifactPaths: GoalArtifactPaths;
   artifactFiles: GoalStatusArtifactFiles;
 };
@@ -163,6 +165,7 @@ function buildHandoffData(
     nextAction: status.nextAction,
     nextActionDetail: status.nextActionDetail,
     latestCommitSha: status.latestCommitSha,
+    daemon: status.daemon,
     artifactPaths: status.artifactPaths,
     artifactFiles: status.artifactFiles
   };
@@ -265,6 +268,27 @@ function toJsonShape(data: HandoffData): Record<string, unknown> {
       : null,
     goal_state: data.goalState,
     latest_commit_sha: data.latestCommitSha,
+    daemon: data.daemon
+      ? {
+          run_id: data.daemon.runId,
+          state: data.daemon.state,
+          is_active: data.daemon.isActive,
+          is_terminal: data.daemon.isTerminal,
+          started_at: data.daemon.startedAt,
+          heartbeat_at: data.daemon.heartbeatAt,
+          finished_at: data.daemon.finishedAt,
+          active_job: {
+            job_id: data.daemon.activeJob.jobId,
+            lock_id: data.daemon.activeJob.lockId
+          },
+          stop_request: data.daemon.stopRequest
+            ? {
+                requested_at: data.daemon.stopRequest.requestedAt,
+                reason: data.daemon.stopRequest.reason
+              }
+            : null
+        }
+      : null,
     artifacts: {
       goal_md: data.artifactPaths.goalMd,
       ledger_md: data.artifactPaths.ledgerMd,
@@ -422,6 +446,31 @@ function renderHandoffMarkdown(data: HandoffData): string {
     appendList(lines, "Key changes made", data.runnerResult.keyChangesMade);
     appendList(lines, "Key learnings", data.runnerResult.keyLearnings);
     appendList(lines, "Remaining work", data.runnerResult.remainingWork);
+  }
+  lines.push("");
+
+  lines.push("## Daemon");
+  if (!data.daemon) {
+    lines.push("- No daemon run recorded for this data directory.");
+  } else {
+    lines.push(`- Run ID: ${data.daemon.runId}`);
+    const flags: string[] = [];
+    if (data.daemon.isActive) flags.push("active");
+    if (data.daemon.isTerminal) flags.push("terminal");
+    const flagStr = flags.length > 0 ? ` (${flags.join(", ")})` : "";
+    lines.push(`- State: ${data.daemon.state}${flagStr}`);
+    if (data.daemon.stopRequest) {
+      lines.push(
+        `- Stop requested at: ${data.daemon.stopRequest.requestedAt} ` +
+          `(reason: ${data.daemon.stopRequest.reason})`
+      );
+    }
+    if (data.daemon.activeJob.jobId) {
+      lines.push(`- Active job: ${data.daemon.activeJob.jobId}`);
+    }
+    if (data.daemon.finishedAt !== null) {
+      lines.push(`- Finished at: ${data.daemon.finishedAt}`);
+    }
   }
   lines.push("");
 

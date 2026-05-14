@@ -1179,7 +1179,8 @@ function emitStatus(
     nextJob: data.nextJob,
     nextAction: data.nextAction,
     nextActionDetail: data.nextActionDetail,
-    latestCommitSha: data.latestCommitSha
+    latestCommitSha: data.latestCommitSha,
+    daemon: data.daemon
   };
 
   if (parsed.json) {
@@ -1225,6 +1226,20 @@ function emitStatus(
 
   if (data.nextAction) {
     lines.push(`Next: ${data.nextAction}`);
+  }
+
+  if (data.daemon) {
+    const flags: string[] = [];
+    if (data.daemon.isActive) flags.push("active");
+    if (data.daemon.isTerminal) flags.push("terminal");
+    const flagStr = flags.length > 0 ? ` (${flags.join(", ")})` : "";
+    lines.push(`Daemon: ${data.daemon.state}${flagStr} [${data.daemon.runId}]`);
+    if (data.daemon.stopRequest) {
+      lines.push(
+        `Daemon stop requested: ${data.daemon.stopRequest.requestedAt} ` +
+          `(${data.daemon.stopRequest.reason})`
+      );
+    }
   }
 
   lines.push("");
@@ -1416,7 +1431,8 @@ function emitHandoff(
     goalState: data.goalState,
     currentIterationDetail: data.currentIterationDetail,
     nextActionDetail: data.nextActionDetail,
-    latestCommitSha: data.latestCommitSha
+    latestCommitSha: data.latestCommitSha,
+    daemon: data.daemon
   };
 
   if (parsed.json) {

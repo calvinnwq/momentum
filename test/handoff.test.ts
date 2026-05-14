@@ -823,4 +823,89 @@ describe("writeHandoff", () => {
     expect(result.code).toBe("handoff_write_failed");
     expect(result.error).toContain("failed to write handoff artifacts");
   });
+
+  it("captures the active daemon stop-request state in JSON and markdown", async () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Handoff daemon stop");
+    const { startDaemonRun, requestDaemonRunStop } = await import(
+      "../src/daemon-runs.js"
+    );
+    const db = openDb(setup.dataDir);
+    let runId: string;
+    try {
+      ({ runId } = startDaemonRun(db, {
+        pid: 7777,
+        host: "handoff-daemon-host",
+        now: 1_700_000_000_000
+      }));
+      requestDaemonRunStop(db, {
+        runId,
+        reason: "operator-requested",
+        now: 1_700_000_002_000
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = writeHandoff({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+    const handoff = expectSuccess(result);
+
+    expect(handoff.data.daemon).toMatchObject({
+      runId,
+      state: "stop_requested",
+      isActive: true,
+      isTerminal: false,
+      stopRequest: {
+        requestedAt: 1_700_000_002_000,
+        reason: "operator-requested"
+      }
+    });
+
+    const json = JSON.parse(
+      fs.readFileSync(setup.artifactPaths.handoffJson, "utf-8")
+    ) as Record<string, unknown>;
+    const daemon = json["daemon"] as Record<string, unknown>;
+    expect(daemon).toMatchObject({
+      run_id: runId,
+      state: "stop_requested",
+      is_active: true,
+      is_terminal: false
+    });
+    const stopRequest = daemon["stop_request"] as Record<string, unknown>;
+    expect(stopRequest).toEqual({
+      requested_at: 1_700_000_002_000,
+      reason: "operator-requested"
+    });
+
+    const markdown = fs.readFileSync(setup.artifactPaths.handoffMd, "utf-8");
+    expect(markdown).toContain("## Daemon");
+    expect(markdown).toContain(`Run ID: ${runId}`);
+    expect(markdown).toContain("State: stop_requested (active)");
+    expect(markdown).toContain("Stop requested at: 1700000002000");
+    expect(markdown).toContain("reason: operator-requested");
+  });
+
+  it("writes daemon=null when no daemon has ever run for the data dir", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Handoff no daemon");
+
+    const result = writeHandoff({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+    const handoff = expectSuccess(result);
+    expect(handoff.data.daemon).toBeNull();
+
+    const json = JSON.parse(
+      fs.readFileSync(setup.artifactPaths.handoffJson, "utf-8")
+    ) as Record<string, unknown>;
+    expect(json["daemon"]).toBeNull();
+
+    const markdown = fs.readFileSync(setup.artifactPaths.handoffMd, "utf-8");
+    expect(markdown).toContain("## Daemon");
+    expect(markdown).toContain("No daemon run recorded for this data directory.");
+  });
 });
