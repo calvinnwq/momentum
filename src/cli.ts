@@ -89,7 +89,7 @@ const COMMANDS = [
   "momentum daemon stop [--now] [--reason <text>] [--data-dir <path>] [--json]",
   "momentum daemon status [--data-dir <path>] [--json]",
   "momentum recovery clear <goal-id> [--reason <text>] [--data-dir <path>] [--json]",
-  "momentum doctor [--json]"
+  "momentum doctor [--data-dir <path>] [--json]"
 ];
 
 const QUEUED_NEXT_ACTION =
