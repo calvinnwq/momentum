@@ -51,7 +51,7 @@ function makeFullInput(overrides: Partial<RecoveryArtifactInput> = {}): Recovery
     },
     safeNextSteps: [
       "Inspect repo with `git status`.",
-      "Resolve dirty state and run `momentum recovery ack <goal-id>`."
+      "Resolve dirty state and run `momentum recovery clear <goal-id>`."
     ],
     classifiedAt: 1717000000000,
     schemaVersion: 1,
@@ -94,7 +94,7 @@ describe("recovery-artifact", () => {
     expect(md).toContain("## Safe next steps");
     expect(md).toContain("1. Inspect repo with `git status`.");
     expect(md).toContain(
-      "2. Resolve dirty state and run `momentum recovery ack <goal-id>`."
+      "2. Resolve dirty state and run `momentum recovery clear <goal-id>`."
     );
     expect(md.endsWith("\n")).toBe(true);
   });

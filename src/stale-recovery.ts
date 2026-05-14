@@ -658,25 +658,30 @@ function safeNextStepsForSkip(
       return [
         `Inspect the working tree with \`git -C ${repoHint} status\`.`,
         "Resolve the dirty state (commit, stash, or discard intended changes).",
-        "Once the worktree is clean, re-run `momentum daemon start` to retry."
+        "Run `momentum recovery clear <goal-id>` after the underlying repo issue is resolved.",
+        "Once the manual-recovery flag is cleared, re-run `momentum daemon start` to retry."
       ];
     case "repo_unknown_commit":
       return [
         `Inspect the repo with \`git -C ${repoHint} status\` and \`git -C ${repoHint} log -1\`.`,
         "Ensure HEAD resolves to a commit (the repo may be empty or detached).",
-        "Once HEAD is resolvable, re-run `momentum daemon start` to retry."
+        "Run `momentum recovery clear <goal-id>` after HEAD is resolvable.",
+        "Once the manual-recovery flag is cleared, re-run `momentum daemon start` to retry."
       ];
     case "repo_unavailable":
       return [
         `Verify the repo path exists and is a git repository: \`${repoHint}\`.`,
         "Fix the path / permissions, or update the goal spec to point at a valid repo.",
-        "Once the repo is reachable, re-run `momentum daemon start` to retry."
+        "Run `momentum recovery clear <goal-id>` after the repo is reachable.",
+        "Once the manual-recovery flag is cleared, re-run `momentum daemon start` to retry."
       ];
     case "job_running":
       return [
         "Inspect the iteration artifacts to determine whether the runner finished or was killed mid-write.",
         `Inspect repo state with \`git -C ${repoHint} status\` before retrying.`,
-        "Resolve any partial writes manually before re-enqueueing the iteration."
+        "Resolve any partial writes manually before clearing manual recovery.",
+        "Release or finalize any still-active claimed/running jobs; `recovery clear` refuses active jobs.",
+        "Run `momentum recovery clear <goal-id>` once the active job and repo state are resolved."
       ];
     default:
       return [];

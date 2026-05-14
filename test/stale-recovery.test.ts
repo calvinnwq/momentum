@@ -1021,6 +1021,8 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
         expect(md).toContain("- Classified at (epoch ms): 5000");
         expect(md).toContain("## Safe next steps");
         expect(md).toContain("git -C '/tmp/repo-a' status");
+        expect(md).toContain("momentum recovery clear <goal-id>");
+        expect(md).toContain("Once the manual-recovery flag is cleared");
       } finally {
         db.close();
       }
@@ -1215,6 +1217,8 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
         );
         expect(md).toContain("## Safe next steps");
         expect(md).toContain("git -C '/tmp/repo-a' status");
+        expect(md).toContain("recovery clear` refuses active jobs");
+        expect(md).toContain("momentum recovery clear <goal-id>");
       } finally {
         db.close();
       }
