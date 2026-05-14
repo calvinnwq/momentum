@@ -6,6 +6,7 @@ import {
   isActiveDaemonRunState,
   isTerminalDaemonRunState,
   listStaleDaemonRuns,
+  type DaemonCancelOutcome,
   type DaemonRunRow,
   type DaemonRunState
 } from "./daemon-runs.js";
@@ -36,6 +37,15 @@ export type DaemonStatusStopRequest = {
   reason: string;
 };
 
+export type DaemonStatusStopNowRequest = {
+  requestedAt: number;
+  reason: string;
+};
+
+export type DaemonStatusCancelOutcome = {
+  outcome: DaemonCancelOutcome;
+};
+
 export type DaemonStatusErrorDetail = {
   message: string;
   at: number;
@@ -64,6 +74,8 @@ export type DaemonStatusRunSummary = {
   activeJobStaleAfterMs: number;
   activeJob: DaemonStatusActiveJob;
   stopRequest: DaemonStatusStopRequest | null;
+  stopNowRequest: DaemonStatusStopNowRequest | null;
+  cancelOutcome: DaemonStatusCancelOutcome | null;
   reconciliation: DaemonStatusReconciliation;
   error: DaemonStatusErrorDetail | null;
   updatedAt: number;
@@ -213,6 +225,15 @@ function summarizeRow(
       row.stop_requested_at !== null
         ? { requestedAt: row.stop_requested_at, reason: row.stop_reason ?? "" }
         : null,
+    stopNowRequest:
+      row.stop_now_requested_at !== null
+        ? {
+            requestedAt: row.stop_now_requested_at,
+            reason: row.stop_reason ?? ""
+          }
+        : null,
+    cancelOutcome:
+      row.cancel_outcome !== null ? { outcome: row.cancel_outcome } : null,
     reconciliation: {
       count: row.reconcile_count,
       lastReconciledAt: row.last_reconciled_at

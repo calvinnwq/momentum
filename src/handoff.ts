@@ -286,6 +286,15 @@ function toJsonShape(data: HandoffData): Record<string, unknown> {
                 requested_at: data.daemon.stopRequest.requestedAt,
                 reason: data.daemon.stopRequest.reason
               }
+            : null,
+          stop_now_request: data.daemon.stopNowRequest
+            ? {
+                requested_at: data.daemon.stopNowRequest.requestedAt,
+                reason: data.daemon.stopNowRequest.reason
+              }
+            : null,
+          cancel_outcome: data.daemon.cancelOutcome
+            ? { outcome: data.daemon.cancelOutcome.outcome }
             : null
         }
       : null,
@@ -463,6 +472,17 @@ function renderHandoffMarkdown(data: HandoffData): string {
       lines.push(
         `- Stop requested at: ${data.daemon.stopRequest.requestedAt} ` +
           `(reason: ${data.daemon.stopRequest.reason})`
+      );
+    }
+    if (data.daemon.stopNowRequest) {
+      lines.push(
+        `- Stop-now requested at: ${data.daemon.stopNowRequest.requestedAt} ` +
+          `(reason: ${data.daemon.stopNowRequest.reason})`
+      );
+    }
+    if (data.daemon.cancelOutcome) {
+      lines.push(
+        `- Cancel outcome: ${data.daemon.cancelOutcome.outcome}`
       );
     }
     if (data.daemon.activeJob.jobId) {

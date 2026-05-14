@@ -24,6 +24,7 @@ import {
   getActiveDaemonRun,
   getDaemonRun,
   getLatestDaemonRun,
+  requestDaemonRunImmediateStop,
   requestDaemonRunStop,
   startDaemonRun
 } from "./daemon-runs.js";
@@ -51,6 +52,7 @@ type ParsedFlags = {
   args: string[];
   json: boolean;
   foreground: boolean;
+  now: boolean;
   repo?: string;
   runner?: string;
   workerId?: string;
@@ -70,7 +72,7 @@ const COMMANDS = [
   "momentum handoff <goal-id> [--data-dir <path>] [--json]",
   "momentum worker run [--worker-id <id>] [--data-dir <path>] [--json]",
   "momentum daemon start [--max-loop-iterations <n>] [--max-idle-cycles <n>] [--poll-interval-ms <ms>] [--data-dir <path>] [--json]",
-  "momentum daemon stop [--reason <text>] [--data-dir <path>] [--json]",
+  "momentum daemon stop [--now] [--reason <text>] [--data-dir <path>] [--json]",
   "momentum daemon status [--data-dir <path>] [--json]",
   "momentum doctor [--json]"
 ];
@@ -94,6 +96,10 @@ export async function runCli(argv: string[], io: CliIo = defaultIo()): Promise<n
   if (command === "--version" || command === "-v" || command === "version") {
     write(io.stdout, `${VERSION}\n`);
     return 0;
+  }
+
+  if (parsed.now && !(command === "daemon" && subcommand === "stop")) {
+    return usageError("--now is only supported by `momentum daemon stop`.", parsed, io);
   }
 
   if (command === "doctor") {
@@ -309,6 +315,7 @@ async function daemonStart(
 }
 
 const DEFAULT_DAEMON_STOP_REASON = "operator-requested";
+const DEFAULT_DAEMON_STOP_NOW_REASON = "operator-requested-immediate";
 
 function daemonStop(parsed: ParsedFlags, io: CliIo): number {
   if (parsed.args.length > 2) {
@@ -319,10 +326,13 @@ function daemonStop(parsed: ParsedFlags, io: CliIo): number {
     );
   }
 
+  const immediate = parsed.now;
   const reason =
     parsed.reason !== undefined && parsed.reason.length > 0
       ? parsed.reason
-      : DEFAULT_DAEMON_STOP_REASON;
+      : immediate
+        ? DEFAULT_DAEMON_STOP_NOW_REASON
+        : DEFAULT_DAEMON_STOP_REASON;
 
   const dataDirOptions: DataDirOptions = {};
   if (io.env !== undefined) dataDirOptions.env = io.env;
@@ -364,11 +374,18 @@ function daemonStop(parsed: ParsedFlags, io: CliIo): number {
 
     const previousState = active.state;
     const alreadyStopRequested = previousState === "stop_requested";
-    const result = requestDaemonRunStop(db, {
-      runId: active.id,
-      reason,
-      now
-    });
+    const alreadyStopNow = active.stop_now_requested_at !== null;
+    const result = immediate
+      ? requestDaemonRunImmediateStop(db, {
+          runId: active.id,
+          reason,
+          now
+        })
+      : requestDaemonRunStop(db, {
+          runId: active.id,
+          reason,
+          now
+        });
     if (!result.ok) {
       // The active record disappeared (or transitioned terminal) between
       // selection and update. Treat as no active daemon and surface clearly.
@@ -406,6 +423,9 @@ function daemonStop(parsed: ParsedFlags, io: CliIo): number {
       stopRequestedAt: updated.stop_requested_at ?? now,
       stopReason: updated.stop_reason ?? reason,
       alreadyStopRequested,
+      immediate,
+      alreadyStopNow,
+      stopNowRequestedAt: updated.stop_now_requested_at,
       heartbeatAt: updated.heartbeat_at,
       heartbeatAgeMs,
       stale
@@ -426,6 +446,9 @@ type DaemonStopSuccessPayload = {
   stopRequestedAt: number;
   stopReason: string;
   alreadyStopRequested: boolean;
+  immediate: boolean;
+  alreadyStopNow: boolean;
+  stopNowRequestedAt: number | null;
   heartbeatAt: number;
   heartbeatAgeMs: number;
   stale: boolean;
@@ -462,6 +485,9 @@ function emitDaemonStopSuccess(
     stopRequestedAt: data.stopRequestedAt,
     stopReason: data.stopReason,
     alreadyStopRequested: data.alreadyStopRequested,
+    immediate: data.immediate,
+    alreadyStopNow: data.alreadyStopNow,
+    stopNowRequestedAt: data.stopNowRequestedAt,
     heartbeatAt: data.heartbeatAt,
     heartbeatAgeMs: data.heartbeatAgeMs,
     stale: data.stale
@@ -472,14 +498,24 @@ function emitDaemonStopSuccess(
     return 0;
   }
 
-  const lines: string[] = [
-    data.alreadyStopRequested
+  const headline = data.immediate
+    ? data.alreadyStopNow
+      ? `Daemon stop-now request refreshed: ${data.runId}`
+      : `Daemon stop-now requested: ${data.runId}`
+    : data.alreadyStopRequested
       ? `Daemon stop request refreshed: ${data.runId}`
-      : `Daemon stop requested: ${data.runId}`,
+      : `Daemon stop requested: ${data.runId}`;
+  const lines: string[] = [
+    headline,
     `State: ${data.state}${data.stale ? " [stale]" : ""}`,
     `Previous state: ${data.previousState}`,
     `Reason: ${data.stopReason}`,
     `Requested at: ${data.stopRequestedAt}`,
+    ...(data.immediate
+      ? [
+          `Stop-now requested at: ${data.stopNowRequestedAt ?? data.stopRequestedAt}`
+        ]
+      : []),
     `Pid: ${data.pid ?? "(unset)"}`,
     `Host: ${data.host ?? "(unset)"}`,
     `Data dir: ${data.dataDir}`,
@@ -587,6 +623,7 @@ function emitDaemonStartLoopResult(
   const loopSummary = {
     exitReason: loop.exitReason,
     terminalState: loop.terminalState,
+    cancelOutcome: loop.cancelOutcome,
     workSucceeded: loop.workSucceeded,
     iterations: loop.iterations,
     jobsRun: loop.jobsRun,
@@ -624,6 +661,9 @@ function emitDaemonStartLoopResult(
     `Daemon run started: ${data.runId}`,
     `State: ${loop.terminalState}`,
     `Exit reason: ${loop.exitReason}`,
+    ...(loop.cancelOutcome !== null
+      ? [`Cancel outcome: ${loop.cancelOutcome}`]
+      : []),
     `Work succeeded: ${loop.workSucceeded ? "yes" : "no"}`,
     `Iterations: ${loop.iterations}`,
     `Jobs run: ${loop.jobsRun}`,
@@ -711,6 +751,14 @@ function emitDaemonStatus(
     lines.push(
       `Stop requested at: ${run.stopRequest.requestedAt} (reason: ${run.stopRequest.reason})`
     );
+  }
+  if (run.stopNowRequest) {
+    lines.push(
+      `Stop-now requested at: ${run.stopNowRequest.requestedAt} (reason: ${run.stopNowRequest.reason})`
+    );
+  }
+  if (run.cancelOutcome) {
+    lines.push(`Cancel outcome: ${run.cancelOutcome.outcome}`);
   }
   if (run.finishedAt !== null) {
     lines.push(`Finished at: ${run.finishedAt}`);
@@ -1240,6 +1288,15 @@ function emitStatus(
           `(${data.daemon.stopRequest.reason})`
       );
     }
+    if (data.daemon.stopNowRequest) {
+      lines.push(
+        `Daemon stop-now requested: ${data.daemon.stopNowRequest.requestedAt} ` +
+          `(${data.daemon.stopNowRequest.reason})`
+      );
+    }
+    if (data.daemon.cancelOutcome) {
+      lines.push(`Daemon cancel outcome: ${data.daemon.cancelOutcome.outcome}`);
+    }
   }
 
   lines.push("");
@@ -1483,6 +1540,7 @@ function parseFlags(argv: string[]): ParsedFlags {
   const args: string[] = [];
   let json = false;
   let foreground = false;
+  let now = false;
   let repo: string | undefined;
   let runner: string | undefined;
   let workerId: string | undefined;
@@ -1507,6 +1565,11 @@ function parseFlags(argv: string[]): ParsedFlags {
 
     if (arg === "--foreground") {
       foreground = true;
+      continue;
+    }
+
+    if (arg === "--now") {
+      now = true;
       continue;
     }
 
@@ -1640,7 +1703,7 @@ function parseFlags(argv: string[]): ParsedFlags {
     args.push(arg);
   }
 
-  const parsed: ParsedFlags = { args, json, foreground };
+  const parsed: ParsedFlags = { args, json, foreground, now };
   if (repo !== undefined) parsed.repo = repo;
   if (runner !== undefined) parsed.runner = runner;
   if (dataDir !== undefined) parsed.dataDir = dataDir;

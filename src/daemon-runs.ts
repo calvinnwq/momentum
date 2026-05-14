@@ -7,10 +7,19 @@ export const DAEMON_RUN_STATES = [
   "running",
   "stop_requested",
   "stopped",
+  "canceled",
   "error"
 ] as const;
 
 export type DaemonRunState = (typeof DAEMON_RUN_STATES)[number];
+
+export const DAEMON_CANCEL_OUTCOMES = [
+  "idle",
+  "active_job_completed",
+  "active_job_abandoned"
+] as const;
+
+export type DaemonCancelOutcome = (typeof DAEMON_CANCEL_OUTCOMES)[number];
 
 const ACTIVE_DAEMON_STATES = new Set<DaemonRunState>([
   "starting",
@@ -18,7 +27,11 @@ const ACTIVE_DAEMON_STATES = new Set<DaemonRunState>([
   "stop_requested"
 ]);
 
-const TERMINAL_DAEMON_STATES = new Set<DaemonRunState>(["stopped", "error"]);
+const TERMINAL_DAEMON_STATES = new Set<DaemonRunState>([
+  "stopped",
+  "canceled",
+  "error"
+]);
 
 export function isActiveDaemonRunState(state: DaemonRunState): boolean {
   return ACTIVE_DAEMON_STATES.has(state);
@@ -41,6 +54,8 @@ export type DaemonRunRow = {
   active_lock_id: string | null;
   stop_requested_at: number | null;
   stop_reason: string | null;
+  stop_now_requested_at: number | null;
+  cancel_outcome: DaemonCancelOutcome | null;
   reconcile_count: number;
   last_reconciled_at: number | null;
   error: string | null;
@@ -106,8 +121,8 @@ export type HeartbeatDaemonRunInput = {
 
 /**
  * Refresh `heartbeat_at` (and `updated_at`) for a non-terminal daemon run. The
- * `state NOT IN ('stopped','error')` guard keeps stale workers from heart-
- * beating a record that has already terminated. Returns `ok: false` for
+ * `state NOT IN ('stopped','canceled','error')` guard keeps stale workers
+ * from heartbeating a record that has already terminated. Returns `ok: false` for
  * unknown ids or terminal records.
  */
 export function heartbeatDaemonRun(
@@ -121,7 +136,7 @@ export function heartbeatDaemonRun(
       `UPDATE daemon_runs
          SET heartbeat_at = ?, updated_at = ?
        WHERE id = ?
-         AND state NOT IN ('stopped', 'error')`
+         AND state NOT IN ('stopped', 'canceled', 'error')`
     )
     .run(now, now, input.runId);
   return { ok: Number(result.changes) > 0 };
@@ -136,8 +151,10 @@ export type RequestDaemonRunStopInput = {
 /**
  * Record an operator/automation stop request. The transition is one-way for
  * active states; terminal records are left alone so we never overwrite a
- * recorded shutdown outcome. Idempotent for runs already in `stop_requested`:
- * the reason and timestamp are refreshed without changing state.
+ * recorded shutdown outcome. Idempotent for graceful runs already in
+ * `stop_requested`: the reason is refreshed without changing state. Once an
+ * immediate stop is recorded, the reason is no longer mutable because it is the
+ * audited stop-now reason surfaced by status and handoff.
  */
 export function requestDaemonRunStop(
   db: MomentumDb,
@@ -153,7 +170,8 @@ export function requestDaemonRunStop(
       `UPDATE daemon_runs
          SET state = 'stop_requested',
              stop_requested_at = COALESCE(stop_requested_at, ?),
-             stop_reason = ?,
+             stop_reason = CASE WHEN stop_now_requested_at IS NULL
+               THEN ? ELSE stop_reason END,
              last_state_change_at = CASE WHEN state = 'stop_requested'
                THEN last_state_change_at ELSE ? END,
              updated_at = ?
@@ -164,27 +182,78 @@ export function requestDaemonRunStop(
   return { ok: Number(result.changes) > 0 };
 }
 
-export type FinishDaemonRunInput = {
+export type RequestDaemonRunImmediateStopInput = {
   runId: string;
-  terminalState: Extract<DaemonRunState, "stopped" | "error">;
+  reason: string;
   now?: number;
-  error?: string;
 };
 
 /**
- * Mark a daemon run terminal. `stopped` is a clean shutdown; `error` records
- * an unrecoverable failure. The update is guarded so we don't transition out
- * of an existing terminal record. When `error` is set, `error_at` is stamped
- * as well so operators can correlate the failure with the event log.
+ * Record an operator/automation immediate-stop ("stop --now") request. The
+ * graceful `stop_requested_at` and `stop_reason` columns are stamped alongside
+ * the dedicated `stop_now_requested_at` marker so the daemon loop can detect
+ * the upgrade between cycles, and so consumers can render either form without
+ * a separate query. Idempotent for runs already requested-stop or
+ * already-stop-now: subsequent calls keep the earliest timestamps. Once a
+ * stop-now request has been recorded, its reason is immutable because status
+ * and handoff expose the shared stop reason as stop-now audit context.
+ */
+export function requestDaemonRunImmediateStop(
+  db: MomentumDb,
+  input: RequestDaemonRunImmediateStopInput
+): { ok: boolean } {
+  validateRunId(input.runId, "requestDaemonRunImmediateStop");
+  if (typeof input.reason !== "string" || input.reason.length === 0) {
+    throw new Error("requestDaemonRunImmediateStop: reason is required");
+  }
+  const now = input.now ?? Date.now();
+  const result = db
+    .prepare(
+      `UPDATE daemon_runs
+         SET state = 'stop_requested',
+             stop_requested_at = COALESCE(stop_requested_at, ?),
+             stop_now_requested_at = COALESCE(stop_now_requested_at, ?),
+             stop_reason = CASE WHEN stop_now_requested_at IS NULL
+               THEN ? ELSE stop_reason END,
+             last_state_change_at = CASE WHEN state = 'stop_requested'
+               THEN last_state_change_at ELSE ? END,
+             updated_at = ?
+       WHERE id = ?
+         AND state IN ('starting', 'running', 'stop_requested')`
+    )
+    .run(now, now, input.reason, now, now, input.runId);
+  return { ok: Number(result.changes) > 0 };
+}
+
+export type FinishDaemonRunInput = {
+  runId: string;
+  terminalState: Extract<DaemonRunState, "stopped" | "canceled" | "error">;
+  now?: number;
+  error?: string;
+  cancelOutcome?: DaemonCancelOutcome;
+};
+
+/**
+ * Mark a daemon run terminal. `stopped` is a clean shutdown, `canceled` is an
+ * operator stop-now request observed by the loop, and `error` records an
+ * unrecoverable failure. The update is guarded so we don't transition out of
+ * an existing terminal record. When `error` is set, `error_at` is stamped as
+ * well so operators can correlate the failure with the event log. When
+ * `canceled` is set, `cancel_outcome` records whether the cancellation
+ * occurred while idle or while an iteration was in flight.
  */
 export function finishDaemonRun(
   db: MomentumDb,
   input: FinishDaemonRunInput
 ): { ok: boolean } {
   validateRunId(input.runId, "finishDaemonRun");
-  if (input.terminalState !== "stopped" && input.terminalState !== "error") {
+  if (
+    input.terminalState !== "stopped" &&
+    input.terminalState !== "canceled" &&
+    input.terminalState !== "error"
+  ) {
     throw new Error(
-      `finishDaemonRun: terminalState must be 'stopped' or 'error', got ${input.terminalState}`
+      `finishDaemonRun: terminalState must be 'stopped', 'canceled', or 'error', got ${input.terminalState}`
     );
   }
   if (input.terminalState === "error") {
@@ -194,9 +263,23 @@ export function finishDaemonRun(
       );
     }
   }
+  if (input.terminalState === "canceled") {
+    if (input.cancelOutcome === undefined) {
+      throw new Error(
+        "finishDaemonRun: cancelOutcome is required when terminalState is 'canceled'"
+      );
+    }
+    if (!DAEMON_CANCEL_OUTCOMES.includes(input.cancelOutcome)) {
+      throw new Error(
+        `finishDaemonRun: cancelOutcome must be one of ${DAEMON_CANCEL_OUTCOMES.join(", ")}, got ${input.cancelOutcome}`
+      );
+    }
+  }
   const now = input.now ?? Date.now();
   const errorMessage = input.error ?? null;
   const errorAt = input.terminalState === "error" ? now : null;
+  const cancelOutcome =
+    input.terminalState === "canceled" ? (input.cancelOutcome ?? null) : null;
 
   const result = db
     .prepare(
@@ -208,9 +291,10 @@ export function finishDaemonRun(
              active_lock_id = NULL,
              error = CASE WHEN ? IS NOT NULL THEN ? ELSE error END,
              error_at = CASE WHEN ? IS NOT NULL THEN ? ELSE error_at END,
+             cancel_outcome = CASE WHEN ? IS NOT NULL THEN ? ELSE cancel_outcome END,
              updated_at = ?
        WHERE id = ?
-         AND state NOT IN ('stopped', 'error')`
+         AND state NOT IN ('stopped', 'canceled', 'error')`
     )
     .run(
       input.terminalState,
@@ -220,6 +304,8 @@ export function finishDaemonRun(
       errorMessage,
       errorAt,
       errorAt,
+      cancelOutcome,
+      cancelOutcome,
       now,
       input.runId
     );

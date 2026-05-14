@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { openDb } from "../src/db.js";
 import {
+  DAEMON_CANCEL_OUTCOMES,
   DAEMON_RUN_STATES,
   finishDaemonRun,
   getActiveDaemonRun,
@@ -15,6 +16,7 @@ import {
   isTerminalDaemonRunState,
   listStaleDaemonRuns,
   recordDaemonRunReconciliation,
+  requestDaemonRunImmediateStop,
   requestDaemonRunStop,
   setDaemonRunActiveJob,
   startDaemonRun
@@ -40,13 +42,20 @@ function makeTempDir(prefix = "momentum-daemon-runs-"): string {
 describe("DAEMON_RUN_STATES classification", () => {
   it("classifies active vs terminal states deterministically", () => {
     expect(new Set(DAEMON_RUN_STATES)).toEqual(
-      new Set(["starting", "running", "stop_requested", "stopped", "error"])
+      new Set([
+        "starting",
+        "running",
+        "stop_requested",
+        "stopped",
+        "canceled",
+        "error"
+      ])
     );
     for (const state of ["starting", "running", "stop_requested"] as const) {
       expect(isActiveDaemonRunState(state)).toBe(true);
       expect(isTerminalDaemonRunState(state)).toBe(false);
     }
-    for (const state of ["stopped", "error"] as const) {
+    for (const state of ["stopped", "canceled", "error"] as const) {
       expect(isActiveDaemonRunState(state)).toBe(false);
       expect(isTerminalDaemonRunState(state)).toBe(true);
     }
@@ -273,6 +282,144 @@ describe("requestDaemonRunStop", () => {
   });
 });
 
+describe("requestDaemonRunImmediateStop", () => {
+  it("stamps stop_now_requested_at alongside graceful stop columns on an active run", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { runId } = startDaemonRun(db, { now: 100 });
+      const out = requestDaemonRunImmediateStop(db, {
+        runId,
+        reason: "operator-now",
+        now: 250
+      });
+      expect(out.ok).toBe(true);
+
+      const after = getDaemonRun(db, runId);
+      expect(after?.state).toBe("stop_requested");
+      expect(after?.stop_requested_at).toBe(250);
+      expect(after?.stop_now_requested_at).toBe(250);
+      expect(after?.stop_reason).toBe("operator-now");
+      expect(after?.last_state_change_at).toBe(250);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("preserves earliest stop_requested_at when upgrading from graceful to stop_now", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { runId } = startDaemonRun(db, { now: 100 });
+      requestDaemonRunStop(db, { runId, reason: "graceful", now: 200 });
+      const out = requestDaemonRunImmediateStop(db, {
+        runId,
+        reason: "now-please",
+        now: 400
+      });
+      expect(out.ok).toBe(true);
+
+      const after = getDaemonRun(db, runId);
+      expect(after?.stop_requested_at).toBe(200);
+      expect(after?.stop_now_requested_at).toBe(400);
+      expect(after?.stop_reason).toBe("now-please");
+      // last_state_change_at stays at 200 because we were already stop_requested.
+      expect(after?.last_state_change_at).toBe(200);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("is idempotent for repeat stop-now calls without resetting stop_now_requested_at", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { runId } = startDaemonRun(db, { now: 100 });
+      requestDaemonRunImmediateStop(db, {
+        runId,
+        reason: "first",
+        now: 200
+      });
+      const out = requestDaemonRunImmediateStop(db, {
+        runId,
+        reason: "second",
+        now: 350
+      });
+      expect(out.ok).toBe(true);
+
+      const after = getDaemonRun(db, runId);
+      expect(after?.stop_now_requested_at).toBe(200);
+      expect(after?.stop_requested_at).toBe(200);
+      expect(after?.stop_reason).toBe("first");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("preserves stop-now reason when a later graceful stop is requested", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { runId } = startDaemonRun(db, { now: 100 });
+      requestDaemonRunImmediateStop(db, {
+        runId,
+        reason: "now-reason",
+        now: 200
+      });
+      const out = requestDaemonRunStop(db, {
+        runId,
+        reason: "later-graceful",
+        now: 350
+      });
+      expect(out.ok).toBe(true);
+
+      const after = getDaemonRun(db, runId);
+      expect(after?.stop_now_requested_at).toBe(200);
+      expect(after?.stop_requested_at).toBe(200);
+      expect(after?.stop_reason).toBe("now-reason");
+      expect(after?.updated_at).toBe(350);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses to mutate terminal runs", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { runId } = startDaemonRun(db, { now: 100 });
+      finishDaemonRun(db, { runId, terminalState: "stopped", now: 150 });
+      const out = requestDaemonRunImmediateStop(db, {
+        runId,
+        reason: "nope",
+        now: 200
+      });
+      expect(out.ok).toBe(false);
+
+      const after = getDaemonRun(db, runId);
+      expect(after?.state).toBe("stopped");
+      expect(after?.stop_now_requested_at).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("validates inputs", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      expect(() =>
+        requestDaemonRunImmediateStop(db, { runId: "", reason: "r" })
+      ).toThrow(/runId/);
+      expect(() =>
+        requestDaemonRunImmediateStop(db, { runId: "a", reason: "" })
+      ).toThrow(/reason/);
+    } finally {
+      db.close();
+    }
+  });
+});
+
 describe("finishDaemonRun", () => {
   it("stops a running daemon and clears active job/lock linkage", () => {
     const dataDir = makeTempDir();
@@ -360,6 +507,78 @@ describe("finishDaemonRun", () => {
     } finally {
       db.close();
     }
+  });
+
+  it("records cancel_outcome and finalizes when terminalState is 'canceled'", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { runId } = startDaemonRun(db, { now: 100 });
+      requestDaemonRunImmediateStop(db, {
+        runId,
+        reason: "operator-now",
+        now: 150
+      });
+      const out = finishDaemonRun(db, {
+        runId,
+        terminalState: "canceled",
+        cancelOutcome: "idle",
+        now: 250
+      });
+      expect(out.ok).toBe(true);
+
+      const after = getDaemonRun(db, runId);
+      expect(after?.state).toBe("canceled");
+      expect(after?.cancel_outcome).toBe("idle");
+      expect(after?.finished_at).toBe(250);
+      expect(after?.error).toBeNull();
+      expect(after?.error_at).toBeNull();
+      expect(after?.active_job_id).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("requires cancel_outcome when terminalState is 'canceled'", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { runId } = startDaemonRun(db, { now: 100 });
+      expect(() =>
+        finishDaemonRun(db, {
+          runId,
+          terminalState: "canceled",
+          now: 200
+        })
+      ).toThrow(/cancelOutcome/);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rejects unknown cancel outcomes", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { runId } = startDaemonRun(db, { now: 100 });
+      expect(() =>
+        finishDaemonRun(db, {
+          runId,
+          terminalState: "canceled",
+          // @ts-expect-error invalid outcome for runtime test
+          cancelOutcome: "not-a-real-outcome",
+          now: 200
+        })
+      ).toThrow(/cancelOutcome/);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("exposes DAEMON_CANCEL_OUTCOMES as a stable list", () => {
+    expect(new Set(DAEMON_CANCEL_OUTCOMES)).toEqual(
+      new Set(["idle", "active_job_completed", "active_job_abandoned"])
+    );
   });
 
   it("rejects invalid terminal states", () => {
