@@ -121,8 +121,8 @@ export type HeartbeatDaemonRunInput = {
 
 /**
  * Refresh `heartbeat_at` (and `updated_at`) for a non-terminal daemon run. The
- * `state NOT IN ('stopped','error')` guard keeps stale workers from heart-
- * beating a record that has already terminated. Returns `ok: false` for
+ * `state NOT IN ('stopped','canceled','error')` guard keeps stale workers
+ * from heartbeating a record that has already terminated. Returns `ok: false` for
  * unknown ids or terminal records.
  */
 export function heartbeatDaemonRun(
