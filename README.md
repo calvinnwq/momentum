@@ -205,7 +205,7 @@ Local interrupt policy: `worker run` is a foreground one-shot command. If the pr
 momentum daemon start [--data-dir <path>] [--max-loop-iterations <n>] [--max-idle-cycles <n>] [--poll-interval-ms <n>] [--json]
 ```
 
-Records a new orchestrator run in `daemon_runs` (state `running`) with `pid`, `host`, `started_at`, and `heartbeat_at` populated from the invoking process. Refuses to record a second concurrent run while one is still active (states `starting`, `running`, `stop_requested`) and exits with `code: "daemon_already_active"` (exit 1); the failure payload surfaces the existing `runId`, `state`, `pid`, `host`, `startedAt`, `heartbeatAt`, `heartbeatAgeMs`, and a `stale` flag (default 90s cutoff) so operators can decide whether to wait or clear the prior record manually. After a terminal record (`stopped` / `error`), a fresh start is allowed.
+Records a new orchestrator run in `daemon_runs` (state `running`) with `pid`, `host`, `started_at`, and `heartbeat_at` populated from the invoking process. Refuses to record a second concurrent run while one is still active (states `starting`, `running`, `stop_requested`) and exits with `code: "daemon_already_active"` (exit 1); the failure payload surfaces the existing `runId`, `state`, `pid`, `host`, `startedAt`, `heartbeatAt`, `heartbeatAgeMs`, and a `stale` flag (90s default heartbeat cutoff, or 930s default while an active job is recorded) so operators can decide whether to wait or clear the prior record manually. After a terminal record (`stopped` / `error`), a fresh start is allowed.
 
 Without any loop-bound flag, `daemon start` returns immediately after registering the run (the NGX-272 register-only contract). Passing `--max-loop-iterations` or `--max-idle-cycles` opts into the NGX-273 managed loop: the process keeps running and drains queued `goal_iteration` jobs in-process by composing `runWorkerOnce`, refreshes `daemon_runs.heartbeat_at` / `active_job_id` / `reconcile_count` per cycle, applies deterministic idle backoff between empty polls or unexecutable jobs, and exits cleanly when one of the bounds is reached, `daemon stop` records a stop request, or a terminal daemon-run state is observed. `--poll-interval-ms` only tunes the bounded loop and is rejected unless `--max-loop-iterations` or `--max-idle-cycles` is also present. The top-level `ok` field reports loop/process health; `workSucceeded` reports whether claimed queued jobs succeeded, and managed-loop mode exits non-zero when `workSucceeded` is false. The opt-in surfaces a `loop` summary on the response with `exitReason` (`stop_requested` / `run_terminated` / `run_missing` / `max_loop_iterations` / `max_idle_cycles` / `internal_error`), `terminalState`, `workSucceeded`, `iterations`, `jobsRun`, `jobsFailed`, `jobsNotExecuted`, `idleCycles`, `lastObservedState`, `lastWorkerCode`, and `error`. All loop bounds must be non-negative integers; a `--max-idle-cycles 0` or `--max-loop-iterations 0` invocation exits before claiming any work, which is useful as a one-shot readiness probe.
 
@@ -238,6 +238,7 @@ JSON envelope shape (managed loop):
   "host": "hostname",
   "state": "stopped",
   "startedAt": 1731500000000,
+  "workerId": "daemon-12345",
   "loop": {
     "exitReason": "max_idle_cycles",
     "terminalState": "stopped",
@@ -261,7 +262,7 @@ momentum daemon stop [--reason <text>] [--data-dir <path>] [--json]
 
 Records a stop request against the active daemon run (`stop_requested_at` and `stop_reason`); the underlying state transitions to `stop_requested` if it was not already. Default reason is `operator-requested`. Idempotent: re-running on a record that is already `stop_requested` keeps the original `stopRequestedAt`, refreshes `stopReason`, and sets `alreadyStopRequested: true`. Exits with `code: "no_active_daemon"` (exit 1) when no active record exists; if the latest record is terminal, the failure payload includes a `latest` summary so operators can see what was already stopped or failed.
 
-This command only records intent; it does not signal, kill, or otherwise terminate any running runner, worker, or external process. Graceful shutdown of an actual long-running daemon process is deferred to a later M3 slice.
+This command records stop intent and the NGX-273 managed loop observes it between cycles, exits cleanly, and marks the daemon run stopped. It does not signal, kill, or otherwise terminate any running runner, worker, or external process; process signaling, forced termination, and mid-job cancellation are deferred to later M3 slices.
 
 JSON envelope shape:
 
@@ -291,7 +292,7 @@ JSON envelope shape:
 momentum daemon status [--data-dir <path>] [--json]
 ```
 
-Read-only inspector for `daemon_runs`. Selects the active record if one exists; otherwise falls back to the most recently started run so operators can see terminal/error state. When no daemon has ever started, exits 0 with `hasRun: false` (text mode: `Daemon: never started`). The summary surfaces `runId`, `pid`, `host`, `state`, `isActive`, `isTerminal`, `startedAt`, `heartbeatAt`, `lastStateChangeAt`, `finishedAt`, `ageMs`, `heartbeatAgeMs`, `stale` (90s default cutoff), `activeJob` (`{jobId, lockId}`), `stopRequest` (`{requestedAt, reason}` or `null`), `reconciliation` (`{count, lastReconciledAt}`), `error` (`{message, at}` or `null`), and `updatedAt`. Stale records are flagged but not auto-recovered.
+Read-only inspector for `daemon_runs`. Selects the active record if one exists; otherwise falls back to the most recently started run so operators can see terminal/error state. When no daemon has ever started, exits 0 with `hasRun: false` (text mode: `Daemon: never started`). The summary surfaces `runId`, `pid`, `host`, `state`, `isActive`, `isTerminal`, `startedAt`, `heartbeatAt`, `lastStateChangeAt`, `finishedAt`, `ageMs`, `heartbeatAgeMs`, `stale`, `staleAfterMs` (90s default heartbeat cutoff, or `activeJobStaleAfterMs` while an active job is recorded), `activeJobStaleAfterMs` (930s default), `activeJob` (`{jobId, lockId}`), `stopRequest` (`{requestedAt, reason}` or `null`), `reconciliation` (`{count, lastReconciledAt}`), `error` (`{message, at}` or `null`), and `updatedAt`. Stale records are flagged but not auto-recovered.
 
 JSON envelope shape (active run with no stop request or error):
 
@@ -494,7 +495,7 @@ Milestone 2 intentionally deferred the following to **Milestone 3** so the queue
 
 - **Background runner supervision.** NGX-272 lands `daemon start` / `daemon stop` / `daemon status` as orchestrator-state contracts; NGX-273 wires an opt-in managed loop on `daemon start` that drains queued goal iterations in-process by composing `runWorkerOnce`. Background detachment / supervision (forking, daemonization, restart-on-crash) is still out of scope.
 - **Graceful stop beyond recording intent and loop shutdown.** `daemon stop` records a stop request in `daemon_runs` (idempotent, with a default `operator-requested` reason); the NGX-273 managed loop observes that state between cycles and exits cleanly. The command still does not signal, kill, or otherwise terminate any running runner, worker, or external process. A `stop --now` command, mid-job cancellation, and a full cooperative-shutdown handshake are deferred.
-- Automatic stale-lease recovery, a `needs_manual_recovery` goal state, and a `recovery.md` artifact. Stale repo-lock handling in Milestone 2 is manual; re-running `worker run` is the supported local recovery path. `daemon status` flags stale `daemon_runs` records (default 90s heartbeat cutoff) but does not auto-transition them.
+- Automatic stale-lease recovery, a `needs_manual_recovery` goal state, and a `recovery.md` artifact. Stale repo-lock handling in Milestone 2 is manual; re-running `worker run` is the supported local recovery path. `daemon status` flags stale `daemon_runs` records using the default heartbeat cutoff (90s, or 930s while an active job is recorded) but does not auto-transition them.
 - `worker run` remains a single-shot consumer that processes one claimed job per invocation and then exits; the NGX-273 managed loop is the bounded continuous-draining path on `daemon start`.
 - Worktree management, remote git operations (`fetch`, `pull`, `push`, `rebase`), and parallel same-repo Goals.
 - PR/GitHub/Linear automation and any external integrations driven from inside Momentum.
