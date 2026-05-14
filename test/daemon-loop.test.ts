@@ -292,6 +292,74 @@ describe("runDaemonLoop", () => {
     }
   });
 
+  it("records error terminal state when loop backoff fails", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const runId = seedDaemonRun(db);
+
+      const result = await runDaemonLoop({
+        db,
+        dataDir,
+        runId,
+        workerId: "daemon-loop-sleep-error",
+        pollIntervalMs: 5,
+        now: makeMonotonicNow(),
+        sleep: async () => {
+          throw new Error("sleep boom");
+        },
+        runWorker: () => ({
+          code: "no_work",
+          workerId: "daemon-loop-sleep-error",
+          dataDir,
+          outcome: "idle",
+          message: "no work"
+        })
+      });
+
+      expect(result.exitReason).toBe("internal_error");
+      expect(result.terminalState).toBe("error");
+      expect(result.ok).toBe(false);
+      expect(result.error).toBe("sleep boom");
+      expect(result.iterations).toBe(1);
+      expect(result.idleCycles).toBe(1);
+
+      const row = getDaemonRun(db, runId);
+      expect(row?.state).toBe("error");
+      expect(row?.error).toBe("sleep boom");
+      expect(row?.active_job_id).toBeNull();
+      expect(row?.finished_at).not.toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("returns internal_error when cycle bookkeeping cannot be persisted", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    const runId = seedDaemonRun(db);
+    db.close();
+
+    const result = await runDaemonLoop({
+      db,
+      dataDir,
+      runId,
+      workerId: "daemon-loop-db-error",
+      pollIntervalMs: 0,
+      now: makeMonotonicNow(),
+      sleep: async () => undefined,
+      runWorker: () => {
+        throw new Error("runWorker should not be called");
+      }
+    });
+
+    expect(result.exitReason).toBe("internal_error");
+    expect(result.terminalState).toBe("error");
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/database is not open|closed/i);
+    expect(result.iterations).toBe(0);
+  });
+
   it("returns run_missing when the daemon run row is deleted before the loop runs", async () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);

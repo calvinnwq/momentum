@@ -93,7 +93,12 @@ export async function runDaemonLoop(
   let lastObservedState: DaemonRunState | null = null;
   let lastWorkerCode: WorkerRunResult["code"] | null = null;
   let exitReason: DaemonLoopExitReason | null = null;
-  let internalError: Error | null = null;
+  let internalErrorMessage: string | null = null;
+
+  const markInternalError = (error: unknown): void => {
+    internalErrorMessage = error instanceof Error ? error.message : String(error);
+    exitReason = "internal_error";
+  };
 
   const completeCycle = (
     cycleIndex: number,
@@ -110,8 +115,7 @@ export async function runDaemonLoop(
       });
       return true;
     } catch (error) {
-      internalError = error instanceof Error ? error : new Error(String(error));
-      exitReason = "internal_error";
+      markInternalError(error);
       return false;
     }
   };
@@ -126,31 +130,30 @@ export async function runDaemonLoop(
       break;
     }
 
-    const cycleStart = now();
-    const run = getDaemonRun(input.db, input.runId);
-    if (!run) {
-      exitReason = "run_missing";
-      break;
-    }
-    lastObservedState = run.state;
-    if (run.state === "stop_requested") {
-      exitReason = "stop_requested";
-      break;
-    }
-    if (isTerminalDaemonRunState(run.state)) {
-      exitReason = "run_terminated";
-      break;
-    }
-
-    heartbeatDaemonRun(input.db, { runId: input.runId, now: cycleStart });
-    recordDaemonRunReconciliation(input.db, {
-      runId: input.runId,
-      now: cycleStart
-    });
-
-    let workerResult: WorkerRunResult;
     try {
-      workerResult = runWorker({
+      const cycleStart = now();
+      const run = getDaemonRun(input.db, input.runId);
+      if (!run) {
+        exitReason = "run_missing";
+        break;
+      }
+      lastObservedState = run.state;
+      if (run.state === "stop_requested") {
+        exitReason = "stop_requested";
+        break;
+      }
+      if (isTerminalDaemonRunState(run.state)) {
+        exitReason = "run_terminated";
+        break;
+      }
+
+      heartbeatDaemonRun(input.db, { runId: input.runId, now: cycleStart });
+      recordDaemonRunReconciliation(input.db, {
+        runId: input.runId,
+        now: cycleStart
+      });
+
+      const workerResult = runWorker({
         db: input.db,
         dataDir: input.dataDir,
         workerId: input.workerId,
@@ -183,53 +186,64 @@ export async function runDaemonLoop(
           }
         }
       });
-    } catch (error) {
-      internalError = error instanceof Error ? error : new Error(String(error));
-      exitReason = "internal_error";
-      break;
-    }
 
-    iterations += 1;
-    lastWorkerCode = workerResult.code;
+      iterations += 1;
+      lastWorkerCode = workerResult.code;
 
-    if (workerResult.code === "ran_job") {
-      jobsRun += 1;
-      if (!workerResult.ok) {
-        jobsFailed += 1;
+      if (workerResult.code === "ran_job") {
+        jobsRun += 1;
+        if (!workerResult.ok) {
+          jobsFailed += 1;
+        }
+        if (!completeCycle(iterations - 1, run.state, workerResult, cycleStart)) {
+          break;
+        }
+        continue;
       }
-      if (!completeCycle(iterations - 1, run.state, workerResult, cycleStart)) {
-        break;
-      }
-      continue;
-    }
 
-    if (workerResult.code === "not_executed") {
-      jobsNotExecuted += 1;
+      if (workerResult.code === "not_executed") {
+        jobsNotExecuted += 1;
+        idleCycles += 1;
+        if (!completeCycle(iterations - 1, run.state, workerResult, cycleStart)) {
+          break;
+        }
+        await sleep(pollIntervalMs);
+        continue;
+      }
+
       idleCycles += 1;
       if (!completeCycle(iterations - 1, run.state, workerResult, cycleStart)) {
         break;
       }
       await sleep(pollIntervalMs);
-      continue;
+    } catch (error) {
+      markInternalError(error);
     }
-
-    idleCycles += 1;
-    if (!completeCycle(iterations - 1, run.state, workerResult, cycleStart)) {
-      break;
-    }
-    await sleep(pollIntervalMs);
   }
 
-  const finishNow = now();
+  let finishNow: number;
+  try {
+    finishNow = now();
+  } catch (error) {
+    if (internalErrorMessage === null) {
+      markInternalError(error);
+    }
+    finishNow = Date.now();
+  }
   let terminalState: Extract<DaemonRunState, "stopped" | "error">;
-  if (exitReason === "internal_error") {
+  if (internalErrorMessage !== null) {
     terminalState = "error";
-    finishDaemonRun(input.db, {
-      runId: input.runId,
-      terminalState,
-      now: finishNow,
-      error: internalError?.message ?? "unknown internal error"
-    });
+    try {
+      finishDaemonRun(input.db, {
+        runId: input.runId,
+        terminalState,
+        now: finishNow,
+        error: internalErrorMessage
+      });
+    } catch {
+      // Best effort: callers still receive an error result even if persistence
+      // failed after the loop had already entered the internal-error path.
+    }
   } else if (exitReason === "run_missing") {
     terminalState = "error";
   } else if (exitReason === "run_terminated" && lastObservedState === "error") {
@@ -237,11 +251,16 @@ export async function runDaemonLoop(
   } else {
     terminalState = "stopped";
     if (exitReason !== "run_terminated") {
-      finishDaemonRun(input.db, {
-        runId: input.runId,
-        terminalState,
-        now: finishNow
-      });
+      try {
+        finishDaemonRun(input.db, {
+          runId: input.runId,
+          terminalState,
+          now: finishNow
+        });
+      } catch (error) {
+        markInternalError(error);
+        terminalState = "error";
+      }
     }
   }
 
@@ -260,8 +279,8 @@ export async function runDaemonLoop(
     lastObservedState,
     lastWorkerCode
   };
-  if (internalError !== null) {
-    result.error = internalError.message;
+  if (internalErrorMessage !== null) {
+    result.error = internalErrorMessage;
   }
   return result;
 }
