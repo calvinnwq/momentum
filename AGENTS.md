@@ -14,7 +14,7 @@ Typical loop:
 ## Current milestone
 - Milestone 1: Foreground proof loop is complete.
 - Milestone 2: Queue and worker model is complete.
-- Milestone 3: Operational Safety is in active implementation. NGX-272 (M3-01 orchestrator state model and daemon CLI contract) and NGX-273 (M3-02 managed daemon loop for queued jobs) have shipped; the remaining slices (cooperative stop semantics beyond loop shutdown, automatic stale-lease recovery, manual recovery artifacts, and smoke/docs closeout) are still planning targets and must preserve the durable Goal/Iteration/Job/Handoff model.
+- Milestone 3: Operational Safety is in active implementation. NGX-272 (M3-01 orchestrator state model and daemon CLI contract), NGX-273 (M3-02 managed daemon loop for queued jobs), and NGX-274 (M3-03 graceful daemon stop visibility) have shipped; the remaining slices (cooperative stop semantics beyond loop shutdown, automatic stale-lease recovery, manual recovery artifacts, and smoke/docs closeout) are still planning targets and must preserve the durable Goal/Iteration/Job/Handoff model.
 - NGX-235 (scaffold) is done.
 - NGX-236 (Goal spec parsing, data-dir resolution, SQLite init, artifact layout) is done.
 - NGX-237 (fake runner profile, repo guard, branch manager, iteration prompt renderer, foreground iteration orchestrator, iteration-job DB wrapper, CLI wiring) is done.
