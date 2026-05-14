@@ -106,7 +106,7 @@ describe("momentum CLI scaffold", () => {
       "momentum daemon start [--max-loop-iterations <n>] [--max-idle-cycles <n>] [--poll-interval-ms <ms>] [--data-dir <path>] [--json]"
     );
     expect(result.stdout).toContain(
-      "momentum daemon stop [--reason <text>] [--data-dir <path>] [--json]"
+      "momentum daemon stop [--now] [--reason <text>] [--data-dir <path>] [--json]"
     );
     expect(result.stdout).toContain(
       "momentum daemon status [--data-dir <path>] [--json]"
@@ -2187,6 +2187,198 @@ Goal body.
     expect(result.stdout).toBe("");
   });
 
+  it("daemon stop --now records an immediate stop request and surfaces stopNowRequestedAt", async () => {
+    const dataDir = makeTempDir("momentum-cli-daemon-stop-");
+    const { openDb } = await import("../src/db.js");
+    const { startDaemonRun } = await import("../src/daemon-runs.js");
+    let activeRunId: string;
+    const db = openDb(dataDir);
+    try {
+      ({ runId: activeRunId } = startDaemonRun(db, {
+        pid: 7171,
+        host: "node-stop-now",
+        now: Date.now()
+      }));
+    } finally {
+      db.close();
+    }
+
+    const before = Date.now();
+    const result = await run([
+      "daemon", "stop",
+      "--now",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    const after = Date.now();
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      command: "daemon stop",
+      runId: activeRunId,
+      previousState: "running",
+      state: "stop_requested",
+      immediate: true,
+      alreadyStopNow: false,
+      alreadyStopRequested: false,
+      stopReason: "operator-requested-immediate"
+    });
+    expect(payload["stopNowRequestedAt"]).toBeGreaterThanOrEqual(before);
+    expect(payload["stopNowRequestedAt"]).toBeLessThanOrEqual(after);
+
+    const statusResult = await run([
+      "daemon", "status",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(statusResult.code).toBe(0);
+    const statusPayload = JSON.parse(statusResult.stdout) as Record<string, unknown>;
+    const daemonRun = statusPayload["daemonRun"] as Record<string, unknown>;
+    expect(daemonRun["stopNowRequest"]).toEqual({
+      requestedAt: payload["stopNowRequestedAt"],
+      reason: "operator-requested-immediate"
+    });
+    expect(daemonRun["stopRequest"]).toEqual({
+      requestedAt: payload["stopNowRequestedAt"],
+      reason: "operator-requested-immediate"
+    });
+  });
+
+  it("daemon stop --now is idempotent and preserves the earliest stop_now_requested_at", async () => {
+    const dataDir = makeTempDir("momentum-cli-daemon-stop-");
+    const { openDb } = await import("../src/db.js");
+    const { startDaemonRun, requestDaemonRunImmediateStop } = await import(
+      "../src/daemon-runs.js"
+    );
+    let runId: string;
+    const firstNowAt = Date.now() - 5_000;
+    const db = openDb(dataDir);
+    try {
+      ({ runId } = startDaemonRun(db, {
+        pid: 8181,
+        now: firstNowAt - 100
+      }));
+      requestDaemonRunImmediateStop(db, {
+        runId,
+        reason: "first-now",
+        now: firstNowAt
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "daemon", "stop",
+      "--now",
+      "--reason", "second-now",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      runId,
+      previousState: "stop_requested",
+      state: "stop_requested",
+      immediate: true,
+      alreadyStopNow: true,
+      alreadyStopRequested: true,
+      stopReason: "second-now"
+    });
+    expect(payload["stopNowRequestedAt"]).toBe(firstNowAt);
+  });
+
+  it("daemon stop --now text output uses the refreshed headline on a repeat call", async () => {
+    const dataDir = makeTempDir("momentum-cli-daemon-stop-");
+    const { openDb } = await import("../src/db.js");
+    const { startDaemonRun, requestDaemonRunImmediateStop } = await import(
+      "../src/daemon-runs.js"
+    );
+    let runId: string;
+    const db = openDb(dataDir);
+    try {
+      ({ runId } = startDaemonRun(db, { pid: 4242, now: Date.now() - 1_000 }));
+      requestDaemonRunImmediateStop(db, {
+        runId,
+        reason: "first",
+        now: Date.now() - 500
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "daemon", "stop",
+      "--now",
+      "--data-dir", dataDir
+    ]);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(`Daemon stop-now request refreshed: ${runId}`);
+    expect(result.stdout).toContain("Stop-now requested at:");
+  });
+
+  it("daemon stop --now upgrades a graceful stop_requested run to stop_now", async () => {
+    const dataDir = makeTempDir("momentum-cli-daemon-stop-");
+    const { openDb } = await import("../src/db.js");
+    const { startDaemonRun, requestDaemonRunStop } = await import(
+      "../src/daemon-runs.js"
+    );
+    let runId: string;
+    const gracefulAt = Date.now() - 3_000;
+    const db = openDb(dataDir);
+    try {
+      ({ runId } = startDaemonRun(db, { pid: 9191, now: gracefulAt - 100 }));
+      requestDaemonRunStop(db, { runId, reason: "graceful", now: gracefulAt });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "daemon", "stop",
+      "--now",
+      "--reason", "upgrade",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      runId,
+      previousState: "stop_requested",
+      state: "stop_requested",
+      immediate: true,
+      alreadyStopRequested: true,
+      alreadyStopNow: false,
+      stopReason: "upgrade"
+    });
+    expect(payload["stopRequestedAt"]).toBe(gracefulAt);
+    expect(typeof payload["stopNowRequestedAt"]).toBe("number");
+    expect(payload["stopNowRequestedAt"]).toBeGreaterThan(gracefulAt);
+  });
+
+  it("daemon stop --now refuses when there is no active daemon", async () => {
+    const dataDir = makeTempDir("momentum-cli-daemon-stop-");
+    const result = await run([
+      "daemon", "stop",
+      "--now",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "daemon stop",
+      code: "no_active_daemon"
+    });
+  });
+
   it("daemon start with --max-idle-cycles 0 registers a run and exits with terminalState=stopped", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-loop-");
     const result = await run([
@@ -2569,6 +2761,131 @@ Goal body.
         reason: "drain before deploy"
       }
     });
+  });
+
+  it("handoff --json surfaces canceled daemon state with stop_now_request and cancel_outcome", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+    const enqueueResult = await run([
+      "goal", "start", goalFile,
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(enqueueResult.code).toBe(0);
+    const enqueuePayload = JSON.parse(enqueueResult.stdout) as Record<
+      string,
+      unknown
+    >;
+    const goalId = enqueuePayload["goalId"] as string;
+
+    const { openDb } = await import("../src/db.js");
+    const {
+      startDaemonRun,
+      requestDaemonRunImmediateStop,
+      finishDaemonRun
+    } = await import("../src/daemon-runs.js");
+    const db = openDb(dataDir);
+    let runId: string;
+    try {
+      ({ runId } = startDaemonRun(db, {
+        pid: 1234,
+        host: "cli-handoff-canceled",
+        now: 1_700_000_000_000
+      }));
+      requestDaemonRunImmediateStop(db, {
+        runId,
+        reason: "operator-now",
+        now: 1_700_000_002_000
+      });
+      finishDaemonRun(db, {
+        runId,
+        terminalState: "canceled",
+        cancelOutcome: "idle",
+        now: 1_700_000_003_000
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "handoff", goalId,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    const daemon = payload["daemon"] as Record<string, unknown>;
+    expect(daemon).toMatchObject({
+      runId,
+      state: "canceled",
+      isActive: false,
+      isTerminal: true,
+      stopNowRequest: {
+        requestedAt: 1_700_000_002_000,
+        reason: "operator-now"
+      },
+      cancelOutcome: { outcome: "idle" }
+    });
+  });
+
+  it("status text surfaces canceled daemon state with cancel outcome", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+    const enqueueResult = await run([
+      "goal", "start", goalFile,
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(enqueueResult.code).toBe(0);
+    const enqueuePayload = JSON.parse(enqueueResult.stdout) as Record<
+      string,
+      unknown
+    >;
+    const goalId = enqueuePayload["goalId"] as string;
+
+    const { openDb } = await import("../src/db.js");
+    const {
+      startDaemonRun,
+      requestDaemonRunImmediateStop,
+      finishDaemonRun
+    } = await import("../src/daemon-runs.js");
+    const db = openDb(dataDir);
+    let runId: string;
+    try {
+      ({ runId } = startDaemonRun(db, {
+        pid: 2345,
+        host: "cli-status-canceled",
+        now: 1_700_000_000_000
+      }));
+      requestDaemonRunImmediateStop(db, {
+        runId,
+        reason: "operator-now",
+        now: 1_700_000_002_000
+      });
+      finishDaemonRun(db, {
+        runId,
+        terminalState: "canceled",
+        cancelOutcome: "active_job_completed",
+        now: 1_700_000_003_000
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "status", goalId,
+      "--data-dir", dataDir
+    ]);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(`Daemon: canceled (terminal) [${runId}]`);
+    expect(result.stdout).toContain(
+      "Daemon stop-now requested: 1700000002000 (operator-now)"
+    );
+    expect(result.stdout).toContain(
+      "Daemon cancel outcome: active_job_completed"
+    );
   });
 });
 

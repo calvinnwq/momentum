@@ -8,6 +8,7 @@ import { openDb, type MomentumDb } from "../src/db.js";
 import {
   finishDaemonRun,
   getDaemonRun,
+  requestDaemonRunImmediateStop,
   requestDaemonRunStop,
   startDaemonRun
 } from "../src/daemon-runs.js";
@@ -253,6 +254,177 @@ describe("runDaemonLoop", () => {
 
       const row = getDaemonRun(db, runId);
       expect(row?.state).toBe("stopped");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("exits as canceled when stop_now is requested before any work", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const runId = seedDaemonRun(db);
+      requestDaemonRunImmediateStop(db, {
+        runId,
+        reason: "operator-now",
+        now: 100_500
+      });
+
+      const result = await runDaemonLoop({
+        db,
+        dataDir,
+        runId,
+        workerId: "daemon-loop-stop-now-idle",
+        sleep: makeRecordingSleep().sleep,
+        now: makeMonotonicNow(),
+        runWorker: () => {
+          throw new Error(
+            "runWorker should not be called when stop_now_requested before any cycle"
+          );
+        }
+      });
+
+      expect(result.exitReason).toBe("stop_now_requested");
+      expect(result.terminalState).toBe("canceled");
+      expect(result.cancelOutcome).toBe("idle");
+      expect(result.iterations).toBe(0);
+      expect(result.jobsRun).toBe(0);
+
+      const row = getDaemonRun(db, runId);
+      expect(row?.state).toBe("canceled");
+      expect(row?.cancel_outcome).toBe("idle");
+      expect(row?.stop_now_requested_at).toBe(100_500);
+      expect(row?.finished_at).not.toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("upgrades to canceled mid-loop with active_job_completed when a job ran first", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const runId = seedDaemonRun(db);
+      let cycleCount = 0;
+      const { sleep } = makeRecordingSleep();
+
+      const runWorker = (input: WorkerRunInput): WorkerRunResult => {
+        cycleCount += 1;
+        if (cycleCount > 1) {
+          throw new Error(
+            "runWorker should not run after stop_now is observed"
+          );
+        }
+        const claimedAt = input.now ? input.now() : Date.now();
+        input.hooks?.onJobClaimed?.({
+          goalId: "goal-a",
+          jobId: "job-a",
+          lockId: "lock-a",
+          iteration: 1,
+          workerId: input.workerId,
+          now: claimedAt
+        });
+        const releasedAt = input.now ? input.now() : Date.now();
+        input.hooks?.onJobReleased?.({
+          goalId: "goal-a",
+          jobId: "job-a",
+          lockId: "lock-a",
+          iteration: 1,
+          workerId: input.workerId,
+          now: releasedAt,
+          outcome: "success"
+        });
+        requestDaemonRunImmediateStop(db, {
+          runId,
+          reason: "operator-now",
+          now: 200_000
+        });
+        return {
+          code: "ran_job",
+          ok: true,
+          workerId: input.workerId,
+          dataDir,
+          outcome: "ran_job",
+          goalId: "goal-a",
+          jobId: "job-a",
+          lockId: "lock-a",
+          goalState: "completed",
+          jobState: "succeeded",
+          iteration: 1,
+          repoRoot: "/tmp/fake",
+          leaseExpiresAt: claimedAt + 1_000,
+          heartbeatAt: claimedAt,
+          jobIterationResult: { ok: true } as never,
+          reducer: null,
+          reducerError: null,
+          message: "mocked ran_job"
+        } as WorkerRunResult;
+      };
+
+      const result = await runDaemonLoop({
+        db,
+        dataDir,
+        runId,
+        workerId: "daemon-loop-stop-now-mid",
+        pollIntervalMs: 5,
+        now: makeMonotonicNow(),
+        sleep,
+        maxIdleCycles: 10,
+        runWorker
+      });
+
+      expect(result.exitReason).toBe("stop_now_requested");
+      expect(result.terminalState).toBe("canceled");
+      expect(result.cancelOutcome).toBe("active_job_completed");
+      expect(result.iterations).toBe(1);
+      expect(result.jobsRun).toBe(1);
+
+      const row = getDaemonRun(db, runId);
+      expect(row?.state).toBe("canceled");
+      expect(row?.cancel_outcome).toBe("active_job_completed");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("treats stop_now as canceled even when a graceful stop was previously requested", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const runId = seedDaemonRun(db);
+      requestDaemonRunStop(db, {
+        runId,
+        reason: "graceful",
+        now: 100_100
+      });
+      requestDaemonRunImmediateStop(db, {
+        runId,
+        reason: "now-upgrade",
+        now: 100_500
+      });
+
+      const result = await runDaemonLoop({
+        db,
+        dataDir,
+        runId,
+        workerId: "daemon-loop-stop-now-upgrade",
+        sleep: makeRecordingSleep().sleep,
+        now: makeMonotonicNow(),
+        runWorker: () => {
+          throw new Error(
+            "runWorker should not be called once stop_now is observed"
+          );
+        }
+      });
+
+      expect(result.exitReason).toBe("stop_now_requested");
+      expect(result.terminalState).toBe("canceled");
+      expect(result.cancelOutcome).toBe("idle");
+
+      const row = getDaemonRun(db, runId);
+      expect(row?.state).toBe("canceled");
+      expect(row?.stop_requested_at).toBe(100_100);
+      expect(row?.stop_now_requested_at).toBe(100_500);
     } finally {
       db.close();
     }

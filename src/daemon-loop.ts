@@ -6,6 +6,7 @@ import {
   isTerminalDaemonRunState,
   recordDaemonRunReconciliation,
   setDaemonRunActiveJob,
+  type DaemonCancelOutcome,
   type DaemonRunState
 } from "./daemon-runs.js";
 import {
@@ -38,6 +39,7 @@ export type DaemonLoopInput = {
 
 export type DaemonLoopExitReason =
   | "stop_requested"
+  | "stop_now_requested"
   | "run_terminated"
   | "run_missing"
   | "max_loop_iterations"
@@ -57,7 +59,7 @@ export type DaemonLoopResult = {
   runId: string;
   workerId: string;
   exitReason: DaemonLoopExitReason;
-  terminalState: Extract<DaemonRunState, "stopped" | "error">;
+  terminalState: Extract<DaemonRunState, "stopped" | "canceled" | "error">;
   iterations: number;
   jobsRun: number;
   jobsFailed: number;
@@ -65,6 +67,7 @@ export type DaemonLoopResult = {
   idleCycles: number;
   lastObservedState: DaemonRunState | null;
   lastWorkerCode: WorkerRunResult["code"] | null;
+  cancelOutcome: DaemonCancelOutcome | null;
   error?: string;
 };
 
@@ -138,6 +141,10 @@ export async function runDaemonLoop(
         break;
       }
       lastObservedState = run.state;
+      if (run.stop_now_requested_at !== null) {
+        exitReason = "stop_now_requested";
+        break;
+      }
       if (run.state === "stop_requested") {
         exitReason = "stop_requested";
         break;
@@ -230,7 +237,8 @@ export async function runDaemonLoop(
     }
     finishNow = Date.now();
   }
-  let terminalState: Extract<DaemonRunState, "stopped" | "error">;
+  let terminalState: Extract<DaemonRunState, "stopped" | "canceled" | "error">;
+  let cancelOutcome: DaemonCancelOutcome | null = null;
   if (internalErrorMessage !== null) {
     terminalState = "error";
     try {
@@ -246,8 +254,25 @@ export async function runDaemonLoop(
     }
   } else if (exitReason === "run_missing") {
     terminalState = "error";
+  } else if (exitReason === "run_terminated" && lastObservedState === "canceled") {
+    terminalState = "canceled";
   } else if (exitReason === "run_terminated" && lastObservedState === "error") {
     terminalState = "error";
+  } else if (exitReason === "stop_now_requested") {
+    terminalState = "canceled";
+    cancelOutcome = jobsRun > 0 ? "active_job_completed" : "idle";
+    try {
+      finishDaemonRun(input.db, {
+        runId: input.runId,
+        terminalState,
+        cancelOutcome,
+        now: finishNow
+      });
+    } catch (error) {
+      markInternalError(error);
+      terminalState = "error";
+      cancelOutcome = null;
+    }
   } else {
     terminalState = "stopped";
     if (exitReason !== "run_terminated") {
@@ -277,7 +302,8 @@ export async function runDaemonLoop(
     jobsNotExecuted,
     idleCycles,
     lastObservedState,
-    lastWorkerCode
+    lastWorkerCode,
+    cancelOutcome
   };
   if (internalErrorMessage !== null) {
     result.error = internalErrorMessage;

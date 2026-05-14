@@ -19,6 +19,11 @@ const GOAL_REDUCER_COLUMNS: ColumnSpec[] = [
   { name: "completion_reason", type: "TEXT" }
 ];
 
+const DAEMON_RUN_COLUMNS: ColumnSpec[] = [
+  { name: "stop_now_requested_at", type: "INTEGER" },
+  { name: "cancel_outcome", type: "TEXT" }
+];
+
 const REPO_LOCKS_DDL = `
 CREATE TABLE IF NOT EXISTS repo_locks (
   id TEXT PRIMARY KEY,
@@ -57,6 +62,8 @@ CREATE TABLE IF NOT EXISTS daemon_runs (
   active_lock_id TEXT,
   stop_requested_at INTEGER,
   stop_reason TEXT,
+  stop_now_requested_at INTEGER,
+  cancel_outcome TEXT,
   reconcile_count INTEGER NOT NULL DEFAULT 0,
   last_reconciled_at INTEGER,
   error TEXT,
@@ -102,6 +109,11 @@ export function applyQueueMigrations(db: MomentumDb): void {
     db.exec(JOB_IDEMPOTENCY_INDEX_DDL);
     db.exec(REPO_LOCKS_DDL);
     db.exec(DAEMON_RUNS_DDL);
+    if (tableExists(db, "daemon_runs")) {
+      for (const column of DAEMON_RUN_COLUMNS) {
+        ensureColumn(db, "daemon_runs", column);
+      }
+    }
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");

@@ -9,6 +9,7 @@ import {
   getLatestDaemonRun,
   isActiveDaemonRunState,
   isTerminalDaemonRunState,
+  type DaemonCancelOutcome,
   type DaemonRunRow,
   type DaemonRunState
 } from "./daemon-runs.js";
@@ -149,6 +150,15 @@ export type GoalStatusDaemonStopRequest = {
   reason: string;
 };
 
+export type GoalStatusDaemonStopNowRequest = {
+  requestedAt: number;
+  reason: string;
+};
+
+export type GoalStatusDaemonCancelOutcome = {
+  outcome: DaemonCancelOutcome;
+};
+
 export type GoalStatusDaemonActiveJob = {
   jobId: string | null;
   lockId: string | null;
@@ -164,6 +174,8 @@ export type GoalStatusDaemonSummary = {
   finishedAt: number | null;
   activeJob: GoalStatusDaemonActiveJob;
   stopRequest: GoalStatusDaemonStopRequest | null;
+  stopNowRequest: GoalStatusDaemonStopNowRequest | null;
+  cancelOutcome: GoalStatusDaemonCancelOutcome | null;
 };
 
 export type GoalStatusSuccess = {
@@ -373,7 +385,16 @@ function toDaemonSummary(row: DaemonRunRow): GoalStatusDaemonSummary {
             requestedAt: row.stop_requested_at,
             reason: row.stop_reason ?? ""
           }
-        : null
+        : null,
+    stopNowRequest:
+      row.stop_now_requested_at !== null
+        ? {
+            requestedAt: row.stop_now_requested_at,
+            reason: row.stop_reason ?? ""
+          }
+        : null,
+    cancelOutcome:
+      row.cancel_outcome !== null ? { outcome: row.cancel_outcome } : null
   };
 }
 
