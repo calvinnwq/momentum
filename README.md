@@ -435,8 +435,10 @@ The flag is surfaced in the queue claim filter so flagged goals are invisible to
 
 - `daemon status --json` — `goalsNeedingRecovery` array with `goalId`, `title`, `goalState`, `recoveryMdPath`, and `recoveryMdExists`
 - `doctor --json` — `goalsNeedingRecoveryCount` compact count
-- `status --json` — `artifacts.recoveryMd` path and `artifactFiles.recoveryMd` exists flag
-- `handoff.json` — `artifacts.recovery_md` and `artifact_files.recovery_md`
+- `status --json` — `nextActionDetail.kind` = `manual_recovery_required`; `artifacts.recoveryMd` and `artifactFiles.recoveryMd` show the evidence file path/presence separately
+- `handoff.json` — `next_action_detail.kind` = `manual_recovery_required`; `artifacts.recovery_md` and `artifact_files.recovery_md` show the evidence file path/presence separately
+
+`recovery.md` presence is not equivalent to the durable flag: `recovery clear` leaves the artifact on disk as evidence after the goal is unblocked.
 
 The operator acknowledgement flow is `momentum recovery clear <goal-id> [--reason <text>] [--data-dir <path>] [--json]`, which:
 
