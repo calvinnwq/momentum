@@ -885,6 +885,43 @@ describe("loadGoalStatus", () => {
       expect(result.nextActionDetail?.message).toContain("inspect");
       expect(result.nextActionDetail?.message).toBe(result.nextAction);
     });
+
+    it("guides active-job manual recovery before recovery clear", () => {
+      const repo = initRepo();
+      const setup = setupGoal(repo, "Next action manual recovery active job", {
+        mode: "queued"
+      });
+
+      const db = openDb(setup.dataDir);
+      try {
+        const claim = claimPendingGoalIterationJob(db, {
+          workerId: "worker-status-manual-recovery",
+          leaseDurationMs: 30_000,
+          now: 1_700_000_002_000
+        });
+        expect(claim.ok).toBe(true);
+        markGoalNeedsManualRecovery(db, {
+          goalId: setup.goalId,
+          reason: "job_running",
+          now: 1_700_000_002_500
+        });
+      } finally {
+        db.close();
+      }
+
+      const result = loadGoalStatus({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.nextActionDetail?.kind).toBe("manual_recovery_required");
+      expect(result.nextActionDetail?.jobId).toBe(setup.jobId);
+      expect(result.nextActionDetail?.message).toContain("startup recovery");
+      expect(result.nextActionDetail?.message).toContain("refuses active jobs");
+      expect(result.nextActionDetail?.message).toBe(result.nextAction);
+    });
   });
 
   describe("currentIterationDetail", () => {

@@ -605,11 +605,19 @@ function computeNextActionDetail(
   nextJob: GoalStatusJobSummary | null
 ): GoalStatusNextActionDetail | null {
   if (goal.needs_manual_recovery === 1) {
+    const activeJob = [latestJob, nextJob].find(
+      (job) => job?.state === "claimed" || job?.state === "running"
+    );
+    const activeJobMessage = activeJob
+      ? " If a stale active job is still listed, first re-run daemon startup recovery " +
+        "or otherwise release/finalize that job; `recovery clear` refuses active jobs."
+      : "";
     return {
       kind: "manual_recovery_required",
       message:
         "Manual recovery required; inspect recovery.md, resolve the blocked state, " +
-        "then run `momentum recovery clear <goal-id>`.",
+        "then run `momentum recovery clear <goal-id>`." +
+        activeJobMessage,
       jobId: latestJob?.jobId ?? nextJob?.jobId ?? reducer?.jobId ?? null,
       iteration:
         latestJob?.iteration ?? nextJob?.iteration ?? reducer?.iteration ?? null
