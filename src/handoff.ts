@@ -315,6 +315,7 @@ function toJsonShape(data: HandoffData): Record<string, unknown> {
       ledger_md: data.artifactPaths.ledgerMd,
       handoff_md: data.artifactPaths.handoffMd,
       handoff_json: data.artifactPaths.handoffJson,
+      recovery_md: data.artifactPaths.recoveryMd,
       prompt_md: data.artifactPaths.promptMd,
       runner_log: data.artifactPaths.runnerLog,
       verification_log: data.artifactPaths.verificationLog,
@@ -325,6 +326,7 @@ function toJsonShape(data: HandoffData): Record<string, unknown> {
       ledger_md: data.artifactFiles.ledgerMd,
       handoff_md: data.artifactFiles.handoffMd,
       handoff_json: data.artifactFiles.handoffJson,
+      recovery_md: data.artifactFiles.recoveryMd,
       prompt_md: data.artifactFiles.promptMd,
       runner_log: data.artifactFiles.runnerLog,
       verification_log: data.artifactFiles.verificationLog,
@@ -541,6 +543,9 @@ function renderHandoffMarkdown(data: HandoffData): string {
   lines.push("## Artifacts");
   lines.push(`- Data dir: ${data.goal.dataDir}`);
   lines.push(`- Artifact dir: ${data.goal.artifactDir}`);
+  lines.push(
+    `- recovery.md (${existsMark(data.artifactFiles.recoveryMd)}): ${data.artifactPaths.recoveryMd}`
+  );
   lines.push(
     `- prompt.md (${existsMark(data.artifactFiles.promptMd)}): ${data.artifactPaths.promptMd}`
   );

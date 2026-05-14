@@ -12,6 +12,7 @@ import { loadGoalStatus } from "../src/goal-status.js";
 import { reduceGoalIteration } from "../src/goal-reducer.js";
 import { ensureIterationArtifactDir } from "../src/artifacts.js";
 import { claimPendingGoalIterationJob } from "../src/queue-jobs.js";
+import { writeRecoveryArtifact } from "../src/recovery-artifact.js";
 
 const tempRoots: string[] = [];
 
@@ -1088,6 +1089,59 @@ describe("loadGoalStatus", () => {
       });
       expect(result.artifacts.resultJson).toEqual({
         path: setup.artifactPaths.resultJson,
+        exists: true
+      });
+
+      expect(result.artifactPaths.recoveryMd).toBe(
+        path.join(setup.artifactPaths.goalDir, "recovery.md")
+      );
+      expect(result.artifactFiles.recoveryMd).toBe(false);
+      expect(result.artifacts.recoveryMd).toEqual({
+        path: setup.artifactPaths.recoveryMd,
+        exists: false
+      });
+    });
+
+    it("flips recoveryMd.exists to true after writeRecoveryArtifact lays the file down", () => {
+      const repo = initRepo();
+      const setup = setupGoal(repo, "Status surfaces recovery.md when present");
+
+      writeRecoveryArtifact({
+        dataDir: setup.dataDir,
+        input: {
+          goalId: setup.goalId,
+          goalTitle: "Status surfaces recovery.md when present",
+          iteration: 1,
+          jobId: setup.jobId,
+          daemonRunId: null,
+          repoPath: repo,
+          expectedCommit: null,
+          currentCommit: null,
+          reason: {
+            code: "repo_dirty",
+            message: "Worktree had uncommitted changes during stale recovery."
+          },
+          artifactPaths: {
+            iterationDir: setup.artifactPaths.iterationDir,
+            runnerLog: setup.artifactPaths.runnerLog,
+            verificationLog: setup.artifactPaths.verificationLog,
+            resultJson: setup.artifactPaths.resultJson
+          },
+          safeNextSteps: ["Inspect repo with `git status`."],
+          classifiedAt: 1717000000000
+        }
+      });
+
+      const result = loadGoalStatus({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.artifactFiles.recoveryMd).toBe(true);
+      expect(result.artifacts.recoveryMd).toEqual({
+        path: setup.artifactPaths.recoveryMd,
         exists: true
       });
     });

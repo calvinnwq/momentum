@@ -12,7 +12,8 @@ export const QUEUE_EVENT_TYPES = {
   GOAL_COMPLETED: "goal.completed",
   GOAL_FAILED: "goal.failed",
   REPO_LOCK_RECOVERED: "repo_lock.recovered",
-  JOB_RECOVERED: "job.recovered"
+  JOB_RECOVERED: "job.recovered",
+  GOAL_RECOVERY_CLEARED: "goal.recovery_cleared"
 } as const;
 
 export type QueueEventType =

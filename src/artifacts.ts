@@ -1,12 +1,15 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { RECOVERY_ARTIFACT_FILENAME } from "./recovery-artifact.js";
+
 export type GoalArtifactPaths = {
   goalDir: string;
   goalMd: string;
   ledgerMd: string;
   handoffMd: string;
   handoffJson: string;
+  recoveryMd: string;
   iteration: number;
   iterationDir: string;
   promptMd: string;
@@ -55,6 +58,10 @@ export function resolveGoalArtifactPaths(
     ledgerMd: path.join(goalDir, "ledger.md"),
     handoffMd: path.join(goalDir, "handoff.md"),
     handoffJson: path.join(goalDir, "handoff.json"),
+    // recovery.md is goal-scoped and lazy-created by writeRecoveryArtifact only
+    // when a manual-recovery classification fires, so the path is exposed for
+    // discovery/inspection but no empty file is laid down on goal init.
+    recoveryMd: path.join(goalDir, RECOVERY_ARTIFACT_FILENAME),
     iteration,
     iterationDir,
     promptMd: path.join(iterationDir, "prompt.md"),

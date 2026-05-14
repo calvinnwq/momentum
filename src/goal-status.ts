@@ -78,6 +78,7 @@ export type GoalStatusArtifactFiles = {
   ledgerMd: boolean;
   handoffMd: boolean;
   handoffJson: boolean;
+  recoveryMd: boolean;
   promptMd: boolean;
   runnerLog: boolean;
   verificationLog: boolean;
@@ -97,6 +98,7 @@ export type GoalStatusArtifactsView = {
   ledgerMd: GoalStatusArtifactEntry;
   handoffMd: GoalStatusArtifactEntry;
   handoffJson: GoalStatusArtifactEntry;
+  recoveryMd: GoalStatusArtifactEntry;
   promptMd: GoalStatusArtifactEntry;
   runnerLog: GoalStatusArtifactEntry;
   verificationLog: GoalStatusArtifactEntry;
@@ -806,6 +808,7 @@ function computeArtifactFiles(paths: GoalArtifactPaths): GoalStatusArtifactFiles
     ledgerMd: fs.existsSync(paths.ledgerMd),
     handoffMd: fs.existsSync(paths.handoffMd),
     handoffJson: fs.existsSync(paths.handoffJson),
+    recoveryMd: fs.existsSync(paths.recoveryMd),
     promptMd: fs.existsSync(paths.promptMd),
     runnerLog: fs.existsSync(paths.runnerLog),
     verificationLog: fs.existsSync(paths.verificationLog),
@@ -825,6 +828,7 @@ function buildArtifactsView(
     ledgerMd: { path: paths.ledgerMd, exists: files.ledgerMd },
     handoffMd: { path: paths.handoffMd, exists: files.handoffMd },
     handoffJson: { path: paths.handoffJson, exists: files.handoffJson },
+    recoveryMd: { path: paths.recoveryMd, exists: files.recoveryMd },
     promptMd: { path: paths.promptMd, exists: files.promptMd },
     runnerLog: { path: paths.runnerLog, exists: files.runnerLog },
     verificationLog: {

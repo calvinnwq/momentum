@@ -14,6 +14,7 @@ import {
   writeHandoff,
   type HandoffSuccess
 } from "../src/handoff.js";
+import { writeRecoveryArtifact } from "../src/recovery-artifact.js";
 
 const tempRoots: string[] = [];
 
@@ -241,17 +242,92 @@ describe("writeHandoff", () => {
     const artifacts = json["artifacts"] as Record<string, unknown>;
     expect(artifacts["handoff_md"]).toBe(setup.artifactPaths.handoffMd);
     expect(artifacts["handoff_json"]).toBe(setup.artifactPaths.handoffJson);
+    expect(artifacts["recovery_md"]).toBe(setup.artifactPaths.recoveryMd);
 
     const artifactFiles = json["artifact_files"] as Record<string, unknown>;
     expect(artifactFiles).toMatchObject({
       goal_md: true,
       handoff_md: true,
       handoff_json: true,
+      recovery_md: false,
       prompt_md: true,
       runner_log: true,
       verification_log: true,
       result_json: true
     });
+  });
+
+  it("surfaces recovery.md path + presence after writeRecoveryArtifact fires", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Handoff recovery surface");
+    runVerifiedIteration(setup);
+
+    writeRecoveryArtifact({
+      dataDir: setup.dataDir,
+      input: {
+        goalId: setup.goalId,
+        goalTitle: "Handoff recovery surface",
+        iteration: 1,
+        jobId: setup.jobId,
+        daemonRunId: null,
+        repoPath: repo,
+        expectedCommit: null,
+        currentCommit: null,
+        reason: {
+          code: "repo_dirty",
+          message: "Repo was dirty when the stale claim recovered."
+        },
+        artifactPaths: {
+          iterationDir: setup.artifactPaths.iterationDir,
+          runnerLog: setup.artifactPaths.runnerLog,
+          verificationLog: setup.artifactPaths.verificationLog,
+          resultJson: setup.artifactPaths.resultJson
+        },
+        safeNextSteps: ["Run `git status` in the repo and reset manually."],
+        classifiedAt: 1717000000000
+      }
+    });
+
+    expectSuccess(
+      writeHandoff({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir },
+        now: () => 1700000000001
+      })
+    );
+
+    const json = JSON.parse(
+      fs.readFileSync(setup.artifactPaths.handoffJson, "utf-8")
+    ) as Record<string, unknown>;
+
+    const artifacts = json["artifacts"] as Record<string, unknown>;
+    expect(artifacts["recovery_md"]).toBe(setup.artifactPaths.recoveryMd);
+    const artifactFiles = json["artifact_files"] as Record<string, unknown>;
+    expect(artifactFiles["recovery_md"]).toBe(true);
+
+    const markdown = fs.readFileSync(setup.artifactPaths.handoffMd, "utf-8");
+    expect(markdown).toContain(
+      `recovery.md (present): ${setup.artifactPaths.recoveryMd}`
+    );
+  });
+
+  it("renders recovery.md as (missing) in handoff markdown when never written", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Handoff recovery missing");
+    runVerifiedIteration(setup);
+
+    expectSuccess(
+      writeHandoff({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir },
+        now: () => 1700000000001
+      })
+    );
+
+    const markdown = fs.readFileSync(setup.artifactPaths.handoffMd, "utf-8");
+    expect(markdown).toContain(
+      `recovery.md (missing): ${setup.artifactPaths.recoveryMd}`
+    );
   });
 
   it("writes a human-readable handoff.md with the iteration summary", () => {

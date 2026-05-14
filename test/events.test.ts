@@ -33,6 +33,7 @@ describe("queue event taxonomy", () => {
       [
         "goal.completed",
         "goal.failed",
+        "goal.recovery_cleared",
         "goal.reduce_failed",
         "goal.reduced",
         "job.claimed",
