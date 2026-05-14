@@ -66,9 +66,9 @@ export type DaemonRunRow = {
 
 /**
  * `recovery_status` stamped on a daemon_runs row when an idle stale record is
- * auto-finalized to `error` by the stale-recovery path. Stable string so
- * downstream surfaces (daemon status / handoff / log inspection) can recognize
- * the cause without matching free-form `error` text.
+ * auto-finalized to `error` by the stale-recovery path. Stable string for the
+ * database audit trail so callers can recognize the cause without matching
+ * free-form `error` text.
  */
 export const DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS =
   "auto_recovered_idle_stale";
@@ -458,8 +458,9 @@ export type ListStaleDaemonRunsInput = {
  * Return active daemon records whose `heartbeat_at` is older than the relevant
  * stale cutoff. Runs with an active job can use a longer cutoff so legitimate
  * long-running work does not look stale while the worker is blocked inside a
- * runner or verification command. The list is read-only; M3 surfaces stale
- * records via status/doctor surfaces but does not auto-recover them.
+ * runner or verification command. This helper is read-only; dedicated
+ * stale-recovery primitives decide which stale daemon records are safe to
+ * auto-finalize.
  */
 export function listStaleDaemonRuns(
   db: MomentumDb,

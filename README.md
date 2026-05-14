@@ -374,7 +374,7 @@ The managed `daemon start` loop runs a one-shot `runStartupRecovery` pass before
 - `daemon status --json` / text — `staleRepoLocks`, `staleClaimedJobs`, and `staleRuns` rows the recovery pass left untouched, with `staleLeaseGraceMs` (5s default skew tolerance).
 - `doctor --json` / text — compact counts: `staleRunCount`, `staleRepoLockCount`, `staleClaimedJobCount`.
 - `status --json` / text and `handoff` — goal-scoped `staleRecovery` block with `recoveredRepoLockCount`, `recoveredJobCount`, `latestRecoveredRepoLockAt`, `latestRecoveredJobAt`, `staleRepoLockCount`, `staleClaimedJobCount`, and `staleLeaseGraceMs`; markdown handoff includes a `## Stale recovery` section.
-- `worker run --json` / text — pre-claim `stalePreCheck` snapshot listing stale repo locks and claimed jobs observed before the worker attempts to claim a job.
+- `worker run --json` / text — pre-claim `stalePreCheck` snapshot listing stale repo locks and claimed/running jobs observed before the worker attempts to claim a job.
 
 Manual recovery is the operator-driven path for everything that lands in a skip taxonomy. A dedicated `recovery.md` artifact and a `needs_manual_recovery` goal state are deferred to a later M3 slice; today the skip reasons (and the `repoRoot` / `repoInspectionError` fields on repo-state refusals) are the routing surface.
 
