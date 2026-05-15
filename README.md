@@ -657,7 +657,7 @@ The Linear milestone "Milestone 4: Real Runner Profiles" sequences the work as:
 7. **NGX-285 — M4-06 Real-runner status, logs, and recovery hardening**
 8. **NGX-286 — M4-07 M4 smoke, docs, and milestone closeout**
 
-The closeout marker for M4 will be pinned by NGX-286 when the smoke and docs alignment lands. Until then, `doctor`'s milestone string intentionally still reads "Milestone 3: operational safety … complete" — NGX-279 opens the contract and NGX-280 adds the profile model and resolver, but neither flips the readiness marker.
+The closeout marker for M4 will be pinned by NGX-286 when the smoke and docs alignment lands. Until then, `doctor`'s milestone string intentionally still reads "Milestone 3: operational safety … complete" — the landed M4 setup, profile-model, and RunnerAdapter slices do not flip the readiness marker.
 
 ### M4 non-goals (explicit)
 
