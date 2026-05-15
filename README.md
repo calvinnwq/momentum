@@ -124,6 +124,9 @@ Parses the goal spec and initializes (or resumes) goal state under the resolved 
     "jobId": "<uuid>",
     "jobType": "foreground_iteration",
     "title": "Example Goal",
+    "runner": "fake",
+    "runnerProfile": { "kind": "fake", "name": "fake", "description": "Built-in in-process fake runner; writes a fixture file and no external command runs.", "executes": false },
+    "runnerProfileSource": "builtin_default",
     "dataDir": "/path/to/data-dir",
     "artifactDir": "/path/to/data-dir/goals/<uuid>",
     "resumed": false,
@@ -193,6 +196,8 @@ Consumes queued `goal_iteration` work in single-job batches:
 - After the job completes, runs the completion reducer (`reduceGoalIteration`), which classifies the terminal job as `continue` (enqueue next iteration), `goal_complete` (mark goal completed), `max_iterations_reached` (mark goal terminal), or `iteration_failed` (mark goal failed). The reducer is idempotent: re-invoking it on the same job short-circuits to `already_reduced` without duplicating events or enqueueing duplicate work. If the reducer throws, the worker emits a defensive `goal.reduce_failed` event with the error message and surfaces `reducerError` on the `worker run` result so the job's commit/reset is preserved for inspection and manual recovery.
 - On `continue`, enqueues one next `goal_iteration` job with idempotency key `goal:<id>:iteration:<n>`, bumps the goal to state `queued`, and emits `goal.reduced`. On `goal_complete`, sets the goal to `completed` and emits `goal.reduced` + `goal.completed`. On `max_iterations_reached` or `iteration_failed`, sets the goal to the corresponding terminal state and emits `goal.reduced` + `goal.failed`.
 - Releases the repo lock with the appropriate `recovery_status` and emits a deterministic CLI JSON result (`code: no_work | not_executed | ran_job`) for automation.
+
+Queued jobs execute the runner profile stored on the Goal row. In M4-01, `trusted-shell` is accepted at init time so the profile can be persisted and surfaced, but execution still supports only `fake`; a queued job with a non-`fake` built-in runner fails with `unsupported_runner` until the NGX-281 `RunnerAdapter` boundary lands.
 
 `--worker-id` is optional; default is `worker-<pid>`. For queued work, use:
 
@@ -644,7 +649,7 @@ External writes remain adapter-mediated and policy-gated (Linear/GitHub/Jira ada
 The Linear milestone "Milestone 4: Real Runner Profiles" sequences the work as:
 
 1. **NGX-279 — M4-00 M4 contract, roadmap, and docs setup** *(done)*
-2. **NGX-280 — M4-01 Runner profile model and resolver** *(done)*: added `src/runner-profile.ts` with the built-in registry (`BUILTIN_RUNNER_KINDS = ["fake", "trusted-shell"]`, `DEFAULT_RUNNER_KIND = "fake"`), `parseRunnerProfile` (validates and normalizes runner names, returning `unsupported_runner` or `malformed_profile` on bad input), `resolveRunnerProfile` (applies precedence: `cli_override > goal_frontmatter > builtin_default`), and `safeRunnerProfileSummary`; wired the resolver into `goal-init.ts` so `goal start` validates the runner profile at init time and persists the resolved name to `goals.runner`; surfaced `runnerProfile` and `runnerProfileSource` on `goal start` JSON and text output, `runnerProfile` on `status` JSON/text and `handoff` JSON/markdown, and a `runners` block on `doctor` JSON/text with `supported`, `default`, and `profiles` arrays; both profiles ship as non-executing in M4-01 (`executes: false`); replaced the generic `init_error` code with specific stable codes (`parse_error`, `unsupported_runner`, `malformed_profile`, `init_failed`); `foreground-iteration.ts` still rejects non-`fake` runners at execution time, which is intentional until NGX-281 migrates the execution layer behind the `RunnerAdapter` boundary.
+2. **NGX-280 — M4-01 Runner profile model and resolver** *(done)*: added `src/runner-profile.ts` with the built-in registry (`BUILTIN_RUNNER_KINDS = ["fake", "trusted-shell"]`, `DEFAULT_RUNNER_KIND = "fake"`), `parseRunnerProfile` (validates and normalizes runner names, returning `unsupported_runner` or `malformed_profile` on bad input), `resolveRunnerProfile` (applies precedence: `cli_override > goal_frontmatter > builtin_default`), and `safeRunnerProfileSummary`; wired the resolver into `goal-init.ts` so `goal start` validates the runner profile at init time and persists the resolved name to `goals.runner`; surfaced `runnerProfile` and `runnerProfileSource` on `goal start` JSON, `runnerProfile` on `status` JSON/text and `handoff` JSON/markdown, and a `runners` block on `doctor` JSON/text with `supported`, `default`, and `profiles` arrays; both profiles ship as non-executing in M4-01 (`executes: false`); replaced the generic `init_error` code with specific stable codes (`parse_error`, `unsupported_runner`, `malformed_profile`, `init_failed`); `foreground-iteration.ts` still rejects non-`fake` runners at execution time, which is intentional until NGX-281 migrates the execution layer behind the `RunnerAdapter` boundary.
 3. **NGX-281 — M4-02 RunnerAdapter boundary and fake-runner migration**
 4. **NGX-282 — M4-03 Trusted-shell runner profile**
 5. **NGX-283 — M4-04 ACP/acpx runtime smoke runner**
