@@ -47,6 +47,12 @@ import {
   clearGoalManualRecoveryGuarded,
   type ClearGoalManualRecoveryGuardedResult
 } from "./goal-recovery.js";
+import {
+  BUILTIN_RUNNER_KINDS,
+  DEFAULT_RUNNER_KIND,
+  buildRunnerProfile,
+  safeRunnerProfileSummary
+} from "./runner-profile.js";
 
 export const VERSION = "0.0.0";
 
@@ -1150,7 +1156,14 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
     platform: process.platform,
     milestone:
       "Milestone 3: operational safety (NGX-272, NGX-273, NGX-274, NGX-275, NGX-276, NGX-277, NGX-278) complete",
-    daemon: daemonPayload
+    daemon: daemonPayload,
+    runners: {
+      supported: [...BUILTIN_RUNNER_KINDS],
+      default: DEFAULT_RUNNER_KIND,
+      profiles: BUILTIN_RUNNER_KINDS.map((kind) =>
+        safeRunnerProfileSummary(buildRunnerProfile(kind))
+      )
+    }
   };
 
   if (parsed.json) {
@@ -1196,6 +1209,9 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
   } else {
     lines.push(`daemon: error (${daemonPayload.code})`);
   }
+  lines.push(
+    `runners: ${BUILTIN_RUNNER_KINDS.join(", ")} (default ${DEFAULT_RUNNER_KIND})`
+  );
   lines.push("");
   write(io.stdout, lines.join("\n"));
   return 0;
@@ -1257,7 +1273,7 @@ function goalStart(parsed: ParsedFlags, io: CliIo): number {
     const payload = {
       ok: false,
       command: "goal start",
-      code: "init_error",
+      code: result.code,
       message: result.error
     };
     if (parsed.json) {
@@ -1298,6 +1314,8 @@ function emitGoalStartQueued(
     branch: init.spec.branch,
     baseHead: null,
     runner: init.spec.runner,
+    runnerProfile: init.runnerProfile,
+    runnerProfileSource: init.runnerProfileSource,
     dataDir: init.dataDir,
     artifactDir: init.artifactPaths.goalDir,
     iterationArtifactDir: init.artifactPaths.iterationDir,
@@ -1354,6 +1372,9 @@ function emitGoalStart(
     jobId: init.jobId,
     jobType: init.jobType,
     title: init.spec.title,
+    runner: init.spec.runner,
+    runnerProfile: init.runnerProfile,
+    runnerProfileSource: init.runnerProfileSource,
     dataDir: init.dataDir,
     artifactDir: init.artifactPaths.goalDir,
     resumed: init.resumed
@@ -1485,6 +1506,7 @@ function emitStatus(
     repo: data.repo,
     branch: data.branch,
     runner: data.runner,
+    runnerProfile: data.runnerProfile,
     maxIterations: data.maxIterations,
     currentIteration: data.currentIteration,
     completionReason: data.completionReason,
@@ -1531,6 +1553,11 @@ function emitStatus(
     `Repo: ${data.repo ?? "(unset)"}`,
     `Branch: ${data.branch}`,
     `Runner: ${data.runner}`,
+    ...(data.runnerProfile
+      ? [
+          `Runner profile: ${data.runnerProfile.name} (executes=${data.runnerProfile.executes ? "true" : "false"})`
+        ]
+      : []),
     `Artifact dir: ${data.artifactDir}`,
     `Recovery: ${data.artifactFiles.recoveryMd ? "present" : "missing"} (${data.artifactPaths.recoveryMd})`
   ];

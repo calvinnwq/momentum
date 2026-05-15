@@ -19,6 +19,11 @@ import { openDb, type MomentumDb } from "./db.js";
 import { QUEUE_EVENT_TYPES } from "./events.js";
 import { getGoal, type GoalRow } from "./goal-init.js";
 import { GOAL_ITERATION_JOB_TYPE } from "./queue-jobs.js";
+import {
+  buildRunnerProfile,
+  isBuiltinRunnerKind,
+  type RunnerProfile
+} from "./runner-profile.js";
 
 export type GoalStatusErrorCode =
   | "invalid_input"
@@ -218,6 +223,7 @@ export type GoalStatusSuccess = {
   repo: string | null;
   branch: string;
   runner: string;
+  runnerProfile: RunnerProfile | null;
   maxIterations: number;
   currentIteration: number;
   completionReason: string | null;
@@ -367,6 +373,9 @@ export function loadGoalStatus(input: LoadGoalStatusInput = {}): GoalStatusResul
       repo: goal.repo,
       branch: goal.branch,
       runner: goal.runner,
+      runnerProfile: isBuiltinRunnerKind(goal.runner)
+        ? buildRunnerProfile(goal.runner)
+        : null,
       maxIterations: goal.max_iterations,
       currentIteration: goal.current_iteration,
       completionReason: goal.completion_reason,

@@ -381,7 +381,7 @@ describe("Milestone 1 end-to-end smoke", () => {
   );
 
   it(
-    "goal start --json surfaces init_error when the goal file does not exist and does not touch the data dir",
+    "goal start --json surfaces parse_error when the goal file does not exist and does not touch the data dir",
     () => {
       const dataDir = makeTempDir("momentum-smoke-data-");
       const missingGoalFile = path.join(dataDir, "does-not-exist.md");
@@ -403,7 +403,7 @@ describe("Milestone 1 end-to-end smoke", () => {
       expect(payload).toMatchObject({
         ok: false,
         command: "goal start",
-        code: "init_error"
+        code: "parse_error"
       });
       expect(typeof payload["message"]).toBe("string");
       expect(payload["message"]).toBe(
@@ -959,7 +959,7 @@ End-to-end smoke goal that fails verification.
   );
 
   it(
-    "goal start surfaces unsupported_runner without touching the repo when --runner overrides to a non-fake profile",
+    "goal start surfaces unsupported_runner at init time without touching the repo or creating a goal row",
     () => {
       const repo = initDisposableRepo();
       const dataDir = makeTempDir("momentum-smoke-data-");
@@ -987,17 +987,9 @@ End-to-end smoke goal that fails verification.
       expect(payload).toMatchObject({
         ok: false,
         command: "goal start",
-        state: "failed",
-        code: "iteration_failed",
-        resumed: false
-      });
-      const iter = payload["iteration"] as Record<string, unknown>;
-      expect(iter).toMatchObject({
-        ok: false,
         code: "unsupported_runner"
       });
-      expect(typeof iter["error"]).toBe("string");
-      expect(iter["error"] as string).toContain("custom-runner");
+      expect(payload["message"] as string).toContain("custom-runner");
 
       expect(runGit(repo, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
       expect(runGit(repo, ["status", "--porcelain"]).trim()).toBe("");
@@ -1007,25 +999,9 @@ End-to-end smoke goal that fails verification.
         fs.existsSync(path.join(repo, FAKE_RUNNER_FIXTURE_FILENAME))
       ).toBe(false);
 
-      const goalId = payload["goalId"] as string;
-      expect(typeof goalId).toBe("string");
-      expect(goalId.length).toBeGreaterThan(0);
-
-      const db = new DatabaseSync(path.join(dataDir, "momentum.db"));
-      try {
-        const goalRow = db
-          .prepare("SELECT state, runner FROM goals WHERE id = ?")
-          .get(goalId) as { state: string; runner: string };
-        expect(goalRow.state).toBe("failed");
-        expect(goalRow.runner).toBe("custom-runner");
-        const jobRow = db
-          .prepare("SELECT state, error FROM jobs WHERE goal_id = ?")
-          .get(goalId) as { state: string; error: string | null };
-        expect(jobRow.state).toBe("failed");
-        expect(jobRow.error).toContain("unsupported_runner");
-      } finally {
-        db.close();
-      }
+      // Unsupported runner fails before the data dir / database are touched.
+      expect(fs.existsSync(path.join(dataDir, "momentum.db"))).toBe(false);
+      expect(fs.existsSync(path.join(dataDir, "goals"))).toBe(false);
     },
     60_000
   );
@@ -1286,14 +1262,15 @@ End-to-end smoke goal that fails verification.
       expect(lines[3]).toBe(`Repo: ${repo}`);
       expect(lines[4]).toBe(`Branch: ${branch}`);
       expect(lines[5]).toBe("Runner: fake");
-      expect(lines[6]).toBe(`Artifact dir: ${artifactDir}`);
-      expect(lines[7]).toMatch(
+      expect(lines[6]).toBe("Runner profile: fake (executes=false)");
+      expect(lines[7]).toBe(`Artifact dir: ${artifactDir}`);
+      expect(lines[8]).toMatch(
         new RegExp(`^Recovery: missing \\(.*/${goalId}/recovery\\.md\\)$`)
       );
-      expect(lines[8]).toBe(
+      expect(lines[9]).toBe(
         `Job: ${jobId} (succeeded, iteration 1)`
       );
-      expect(lines[9]).toBe(`Commit: ${commitSha}`);
+      expect(lines[10]).toBe(`Commit: ${commitSha}`);
       expect(status.stdout.endsWith("\n")).toBe(true);
       expect(status.stdout).not.toContain("{");
       expect(status.stdout).not.toContain("Failure:");
