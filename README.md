@@ -100,7 +100,7 @@ Parses the goal spec and initializes (or resumes) goal state under the resolved 
     "branch": "momentum/example-goal",
     "baseHead": null,
     "runner": "fake",
-    "runnerProfile": { "kind": "fake", "name": "fake", "description": "Built-in in-process fake runner; writes a fixture file and no external command runs.", "executes": false },
+    "runnerProfile": { "kind": "fake", "name": "fake", "description": "Built-in in-process fake runner; writes a fixture file and reports a normalized result. Dispatches through the RunnerAdapter boundary.", "executes": true },
     "runnerProfileSource": "builtin_default",
     "dataDir": "/path/to/data-dir",
     "artifactDir": "/path/to/data-dir/goals/<uuid>",
@@ -125,7 +125,7 @@ Parses the goal spec and initializes (or resumes) goal state under the resolved 
     "jobType": "foreground_iteration",
     "title": "Example Goal",
     "runner": "fake",
-    "runnerProfile": { "kind": "fake", "name": "fake", "description": "Built-in in-process fake runner; writes a fixture file and no external command runs.", "executes": false },
+    "runnerProfile": { "kind": "fake", "name": "fake", "description": "Built-in in-process fake runner; writes a fixture file and reports a normalized result. Dispatches through the RunnerAdapter boundary.", "executes": true },
     "runnerProfileSource": "builtin_default",
     "dataDir": "/path/to/data-dir",
     "artifactDir": "/path/to/data-dir/goals/<uuid>",
@@ -406,7 +406,7 @@ Text output includes the goal ID, previous reason, previous marked-at timestamp,
 momentum doctor [--data-dir <path>] [--json]
 ```
 
-Reports CLI version, Node.js version, platform, the current milestone scope label, and a compact daemon-readiness block read from `daemon_runs` (`{ok, dataDir, hasRun, state, isActive, stale, staleRunCount, staleRepoLockCount, staleClaimedJobCount, goalsNeedingRecoveryCount, runId}` on success, `{ok: false, code, message}` on failure). The stale-lease counts surface orphaned repo locks and claimed/running jobs whose lease expired more than `staleLeaseGraceMs` ago. The `goalsNeedingRecoveryCount` surface shows how many goals currently have the durable `needs_manual_recovery` flag set in the selected data directory; pass `--data-dir <path>` to inspect a non-default Momentum home. The `runners` block in JSON output lists `supported` (the current set of built-in runner profile names, `["fake", "trusted-shell"]`), `default` (the built-in default runner kind, `"fake"`), and `profiles` (an array of `{kind, name, description, executes}` objects for each built-in runner). Both profiles currently have `executes: false`; the `trusted-shell` profile recognizes the identity but does not execute a shell command. Text output includes a `runners:` line showing the supported kinds and default. Useful as a first sanity check after install and as a quick orchestrator-health probe.
+Reports CLI version, Node.js version, platform, the current milestone scope label, and a compact daemon-readiness block read from `daemon_runs` (`{ok, dataDir, hasRun, state, isActive, stale, staleRunCount, staleRepoLockCount, staleClaimedJobCount, goalsNeedingRecoveryCount, runId}` on success, `{ok: false, code, message}` on failure). The stale-lease counts surface orphaned repo locks and claimed/running jobs whose lease expired more than `staleLeaseGraceMs` ago. The `goalsNeedingRecoveryCount` surface shows how many goals currently have the durable `needs_manual_recovery` flag set in the selected data directory; pass `--data-dir <path>` to inspect a non-default Momentum home. The `runners` block in JSON output lists `supported` (the current set of built-in runner profile names, `["fake", "trusted-shell"]`), `default` (the built-in default runner kind, `"fake"`), and `profiles` (an array of `{kind, name, description, executes}` objects for each built-in runner). The `fake` profile currently has `executes: true`; the `trusted-shell` profile has `executes: false`, recognizing the identity but not executing a shell command yet. Text output includes a `runners:` line showing the supported kinds and default. Useful as a first sanity check after install and as a quick orchestrator-health probe.
 
 ### Stale-lease detection and auto-recovery (NGX-276)
 
