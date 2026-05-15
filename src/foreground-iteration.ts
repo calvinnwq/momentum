@@ -108,7 +108,7 @@ export function runForegroundIteration(
     return {
       ok: false,
       code: "unsupported_runner",
-      error: `Runner ${spec.runner} is not supported in Milestone 1; only 'fake' is implemented.`
+      error: `Runner "${spec.runner}" is not supported for execution; only the "fake" runner is implemented.`
     };
   }
 

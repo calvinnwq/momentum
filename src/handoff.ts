@@ -2,6 +2,7 @@ import fs from "node:fs";
 
 import type { GoalArtifactPaths } from "./artifacts.js";
 import type { DataDirOptions } from "./data-dir.js";
+import type { RunnerProfile } from "./runner-profile.js";
 import {
   loadGoalStatus,
   type GoalStatusArtifactFiles,
@@ -50,6 +51,7 @@ export type HandoffGoalSummary = {
   repo: string | null;
   branch: string;
   runner: string;
+  runnerProfile: RunnerProfile | null;
   maxIterations: number;
   currentIteration: number;
   completionReason: string | null;
@@ -147,6 +149,7 @@ function buildHandoffData(
       repo: status.repo,
       branch: status.branch,
       runner: status.runner,
+      runnerProfile: status.runnerProfile,
       maxIterations: status.maxIterations,
       currentIteration: status.currentIteration,
       completionReason: status.completionReason,
@@ -185,6 +188,14 @@ function toJsonShape(data: HandoffData): Record<string, unknown> {
       repo: data.goal.repo,
       branch: data.goal.branch,
       runner: data.goal.runner,
+      runner_profile: data.goal.runnerProfile
+        ? {
+            kind: data.goal.runnerProfile.kind,
+            name: data.goal.runnerProfile.name,
+            description: data.goal.runnerProfile.description,
+            executes: data.goal.runnerProfile.executes
+          }
+        : null,
       max_iterations: data.goal.maxIterations,
       current_iteration: data.goal.currentIteration,
       completion_reason: data.goal.completionReason,
@@ -368,6 +379,12 @@ function renderHandoffMarkdown(data: HandoffData): string {
   lines.push(`- Repo: ${data.goal.repo ?? "(unset)"}`);
   lines.push(`- Branch: ${data.goal.branch}`);
   lines.push(`- Runner: ${data.goal.runner}`);
+  if (data.goal.runnerProfile) {
+    lines.push(
+      `- Runner profile: ${data.goal.runnerProfile.name} ` +
+        `(executes=${data.goal.runnerProfile.executes ? "true" : "false"})`
+    );
+  }
   lines.push(`- Max iterations: ${data.goal.maxIterations}`);
   lines.push(`- Schema version: ${data.schemaVersion}`);
   lines.push(`- Generated at (epoch ms): ${data.generatedAt}`);

@@ -166,6 +166,26 @@ describe("momentum CLI scaffold", () => {
       goalsNeedingRecoveryCount: 0,
       runId: null
     });
+    expect(payload["runners"]).toEqual({
+      supported: ["fake", "trusted-shell"],
+      default: "fake",
+      profiles: [
+        {
+          kind: "fake",
+          name: "fake",
+          description:
+            "Built-in in-process fake runner; writes a fixture file and no external command runs.",
+          executes: false
+        },
+        {
+          kind: "trusted-shell",
+          name: "trusted-shell",
+          description:
+            "Operator-trusted shell runner; identity recognized but no shell command executes in M4-01.",
+          executes: false
+        }
+      ]
+    });
     expect(result.stderr).toBe("");
   });
 
@@ -267,14 +287,14 @@ describe("momentum CLI scaffold", () => {
     expect(result.stderr).toBe("");
   });
 
-  it("goal start surfaces unsupported_runner when --runner overrides to a non-fake profile", async () => {
+  it("goal start surfaces unsupported_runner at init time when --runner is not a built-in profile", async () => {
     const { dataDir, goalFile, repo } = setupGoalAndData();
 
     const result = await run([
       "goal", "start", goalFile,
       "--foreground",
       "--repo", repo,
-      "--runner", "custom-runner",
+      "--runner", "claude-code",
       "--data-dir", dataDir,
       "--json"
     ]);
@@ -284,19 +304,46 @@ describe("momentum CLI scaffold", () => {
     expect(payload).toMatchObject({
       ok: false,
       command: "goal start",
-      state: "failed",
-      code: "iteration_failed",
-      resumed: false
-    });
-    const iter = payload["iteration"] as Record<string, unknown>;
-    expect(iter).toMatchObject({
-      ok: false,
       code: "unsupported_runner"
     });
+    expect(payload["message"]).toMatch(/claude-code/);
     expect(result.stdout).toBe("");
   });
 
-  it("goal start returns init_error when data dir cannot initialize", async () => {
+  it("goal start (queued) accepts --runner trusted-shell without executing anything", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+
+    const result = await run([
+      "goal", "start", goalFile,
+      "--repo", repo,
+      "--runner", "trusted-shell",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      command: "goal start",
+      mode: "queued",
+      runner: "trusted-shell"
+    });
+    const profile = payload["runnerProfile"] as Record<string, unknown>;
+    expect(profile).toMatchObject({
+      kind: "trusted-shell",
+      name: "trusted-shell",
+      executes: false
+    });
+    expect(payload["runnerProfileSource"]).toBe("cli_override");
+
+    expect(fs.existsSync(path.join(repo, FAKE_RUNNER_FIXTURE_FILENAME))).toBe(
+      false
+    );
+  });
+
+  it("goal start returns init_failed when data dir cannot initialize", async () => {
     const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "momentum-cli-"));
     const goalFile = path.join(dataDir, "goal.md");
     const blockedDataDir = path.join(dataDir, "blocked");
@@ -315,14 +362,14 @@ describe("momentum CLI scaffold", () => {
     expect(payload).toMatchObject({
       ok: false,
       command: "goal start",
-      code: "init_error"
+      code: "init_failed"
     });
     expect(result.stdout).toBe("");
 
     fs.rmSync(dataDir, { recursive: true });
   });
 
-  it("goal start returns init_error for a missing goal file", async () => {
+  it("goal start returns parse_error for a missing goal file", async () => {
     const result = await run([
       "goal", "start", "/no/such/goal.md",
       "--foreground",
@@ -334,7 +381,7 @@ describe("momentum CLI scaffold", () => {
     expect(payload).toMatchObject({
       ok: false,
       command: "goal start",
-      code: "init_error"
+      code: "parse_error"
     });
     expect(result.stdout).toBe("");
   });
@@ -1027,12 +1074,23 @@ describe("momentum CLI scaffold", () => {
     const fileJson = JSON.parse(fs.readFileSync(handoffJsonPath, "utf-8"));
     expect(fileJson).toMatchObject({
       schema_version: 1,
-      goal: { id: goalId, title: "CLI Test Goal", state: "iteration_complete" }
+      goal: {
+        id: goalId,
+        title: "CLI Test Goal",
+        state: "iteration_complete",
+        runner: "fake",
+        runner_profile: {
+          kind: "fake",
+          name: "fake",
+          executes: false
+        }
+      }
     });
 
     const md = fs.readFileSync(handoffMdPath, "utf-8");
     expect(md).toContain("# Momentum handoff: CLI Test Goal");
     expect(md).toMatch(/Commit SHA: [0-9a-f]{40}/);
+    expect(md).toContain("Runner profile: fake (executes=false)");
     expect(result.stderr).toBe("");
   });
 
@@ -1121,6 +1179,13 @@ describe("momentum CLI scaffold", () => {
       repo,
       branch: "momentum/cli-test-goal",
       runner: "fake"
+    });
+    expect(statusPayload["runnerProfile"]).toEqual({
+      kind: "fake",
+      name: "fake",
+      description:
+        "Built-in in-process fake runner; writes a fixture file and no external command runs.",
+      executes: false
     });
     const iter = statusPayload["iteration"] as Record<string, unknown>;
     expect(iter).toMatchObject({

@@ -108,6 +108,7 @@ export type WorkerRunResult =
 type GoalRow = {
   id: string;
   repo: string | null;
+  runner: string;
 };
 
 export function runWorkerOnce(input: WorkerRunInput): WorkerRunResult {
@@ -193,7 +194,8 @@ export function runWorkerOnce(input: WorkerRunInput): WorkerRunResult {
 
   const spec = {
     ...specResult.spec,
-    repo: goal.repo
+    repo: goal.repo,
+    runner: goal.runner
   };
   if (spec.repo.trim().length === 0) {
     const released = releaseClaimedGoalIterationJob(input.db, {
@@ -460,7 +462,7 @@ export function runWorkerOnce(input: WorkerRunInput): WorkerRunResult {
 function getGoalRow(db: MomentumDb, goalId: string): GoalRow | undefined {
   const goal = getGoal(db, goalId);
   if (!goal) return undefined;
-  return { id: goal.id, repo: goal.repo };
+  return { id: goal.id, repo: goal.repo, runner: goal.runner };
 }
 
 function summarizeIterationFailure(result: ExecuteIterationJobResult["iteration"]): string {

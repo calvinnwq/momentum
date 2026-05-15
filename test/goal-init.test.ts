@@ -165,18 +165,82 @@ describe("initGoal integration", () => {
 
     const result = initGoal({
       goalPath: goalFile,
-      runnerOverride: "custom-runner",
+      runnerOverride: "trusted-shell",
       dataDirOptions: { dataDir }
     });
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.spec.runner).toBe("custom-runner");
+    expect(result.spec.runner).toBe("trusted-shell");
+    expect(result.runnerProfile.kind).toBe("trusted-shell");
+    expect(result.runnerProfileSource).toBe("cli_override");
 
     const db = new DatabaseSync(path.join(dataDir, "momentum.db"));
     const row = db.prepare("SELECT runner FROM goals WHERE id = ?").get(result.goalId) as Record<string, unknown>;
     db.close();
-    expect(row["runner"]).toBe("custom-runner");
+    expect(row["runner"]).toBe("trusted-shell");
+
+    fs.rmSync(dataDir, { recursive: true });
+  });
+
+  it("returns unsupported_runner when --runner is not a built-in profile", () => {
+    const dataDir = makeTempDir();
+    const goalFile = path.join(dataDir, "goal.md");
+    fs.writeFileSync(goalFile, VALID_SPEC, "utf-8");
+
+    const result = initGoal({
+      goalPath: goalFile,
+      runnerOverride: "claude-code",
+      dataDirOptions: { dataDir }
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe("unsupported_runner");
+    expect(result.error).toMatch(/claude-code/);
+
+    fs.rmSync(dataDir, { recursive: true });
+  });
+
+  it("returns malformed_profile when frontmatter runner is not a string", () => {
+    const dataDir = makeTempDir();
+    const goalFile = path.join(dataDir, "goal.md");
+    fs.writeFileSync(goalFile, `---
+title: Bad Runner
+runner: 42
+---
+`, "utf-8");
+
+    const result = initGoal({
+      goalPath: goalFile,
+      dataDirOptions: { dataDir }
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe("malformed_profile");
+    expect(result.error).toMatch(/number/);
+
+    fs.rmSync(dataDir, { recursive: true });
+  });
+
+  it("returns malformed_profile when frontmatter runner is empty", () => {
+    const dataDir = makeTempDir();
+    const goalFile = path.join(dataDir, "goal.md");
+    fs.writeFileSync(goalFile, `---
+title: Empty Runner
+runner:
+---
+`, "utf-8");
+
+    const result = initGoal({
+      goalPath: goalFile,
+      dataDirOptions: { dataDir }
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe("malformed_profile");
 
     fs.rmSync(dataDir, { recursive: true });
   });

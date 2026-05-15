@@ -91,17 +91,23 @@ function initRepo(): string {
 function seedQueuedGoal(
   dataDir: string,
   repo: string,
-  spec: string = GOAL_SPEC
+  spec: string = GOAL_SPEC,
+  runnerOverride?: string
 ): WorkerGoalSeed {
   const goalFile = path.join(dataDir, "goal.md");
   fs.writeFileSync(goalFile, spec, "utf-8");
 
-  const result = initGoal({
+  const initOptions = {
     goalPath: goalFile,
     repoOverride: repo,
     dataDirOptions: { dataDir },
-    mode: "queued"
-  });
+    mode: "queued" as const
+  };
+  const result = initGoal(
+    runnerOverride === undefined
+      ? initOptions
+      : { ...initOptions, runnerOverride }
+  );
   if (!result.ok) {
     throw new Error(`seedQueuedGoal: ${result.error}`);
   }
@@ -198,6 +204,47 @@ describe("runWorkerOnce", () => {
         "goal.reduced",
         "goal.failed"
       ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("executes queued jobs with the validated DB runner instead of raw artifact runner", () => {
+    const dataDir = makeTempDir("momentum-worker-run-db-runner-");
+    const repo = initRepo();
+    const seed = seedQueuedGoal(dataDir, repo, GOAL_SPEC, "trusted-shell");
+
+    const db = openDb(seed.dataDir);
+    try {
+      const out = runWorkerOnce({
+        db,
+        dataDir: seed.dataDir,
+        workerId: "worker-db-runner"
+      });
+
+      expect(out.code).toBe("ran_job");
+      if (out.code !== "ran_job") return;
+      expect(out.jobIterationResult.ok).toBe(false);
+      if (out.jobIterationResult.ok) return;
+      expect(out.jobIterationResult.jobState).toBe("failed");
+      expect(out.jobIterationResult.iteration.code).toBe("unsupported_runner");
+      expect(out.jobIterationResult.iteration.error).toContain("trusted-shell");
+      expect(
+        fs.existsSync(path.join(repo, FAKE_RUNNER_FIXTURE_FILENAME))
+      ).toBe(false);
+
+      const job = getQueueJob(db, seed.jobId);
+      expect(job?.state).toBe("failed");
+      expect(job?.error).toContain("unsupported_runner");
+
+      const iterationStarted = db
+        .prepare(
+          "SELECT payload FROM events WHERE goal_id = ? AND type = 'iteration_started'"
+        )
+        .get(seed.goalId) as { payload: string };
+      expect(JSON.parse(iterationStarted.payload)).toMatchObject({
+        runner: "trusted-shell"
+      });
     } finally {
       db.close();
     }

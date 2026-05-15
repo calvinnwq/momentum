@@ -15,6 +15,12 @@ import {
   enqueueGoalIterationJob,
   type QueueJobState
 } from "./queue-jobs.js";
+import {
+  resolveRunnerProfile,
+  type RunnerProfile,
+  type RunnerProfileErrorCode,
+  type RunnerProfileSource
+} from "./runner-profile.js";
 
 export type GoalInitMode = "foreground" | "queued";
 
@@ -26,7 +32,12 @@ export type GoalInitOptions = {
   mode?: GoalInitMode;
 };
 
-export type GoalInitError = { ok: false; error: string };
+export type GoalInitErrorCode = "parse_error" | RunnerProfileErrorCode | "init_failed";
+export type GoalInitError = {
+  ok: false;
+  code: GoalInitErrorCode;
+  error: string;
+};
 export type GoalInitSuccess = {
   ok: true;
   goalId: string;
@@ -37,6 +48,8 @@ export type GoalInitSuccess = {
   iteration: number;
   idempotencyKey: string | null;
   spec: GoalSpec;
+  runnerProfile: RunnerProfile;
+  runnerProfileSource: RunnerProfileSource;
   dataDir: string;
   artifactPaths: GoalArtifactPaths;
   resumed: boolean;
@@ -58,19 +71,34 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
   try {
     rawContent = readFileSync(options.goalPath, "utf-8");
   } catch {
-    return { ok: false, error: `Cannot read goal file: ${options.goalPath}` };
+    return {
+      ok: false,
+      code: "parse_error",
+      error: `Cannot read goal file: ${options.goalPath}`
+    };
   }
 
-  const parseResult = parseGoalSpec(
-    rawContent,
-    options.repoOverride,
-    options.runnerOverride
-  );
+  const parseResult = parseGoalSpec(rawContent, options.repoOverride);
   if (!parseResult.ok) {
-    return { ok: false, error: parseResult.error };
+    return { ok: false, code: "parse_error", error: parseResult.error };
   }
-  const spec =
-    mode === "queued" ? normalizeGoalSpecRepo(parseResult.spec) : parseResult.spec;
+  const profileResolution = resolveRunnerProfile({
+    cliOverride: options.runnerOverride,
+    frontmatterValue: parseResult.rawFrontmatter.runner
+  });
+  if (!profileResolution.ok) {
+    return {
+      ok: false,
+      code: profileResolution.code,
+      error: profileResolution.error
+    };
+  }
+  const runnerProfile = profileResolution.profile;
+  const specBase: GoalSpec = {
+    ...parseResult.spec,
+    runner: runnerProfile.name
+  };
+  const spec = mode === "queued" ? normalizeGoalSpecRepo(specBase) : specBase;
 
   let db: MomentumDb | undefined;
 
@@ -100,6 +128,8 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
           iteration: 1,
           idempotencyKey: null,
           spec,
+          runnerProfile,
+          runnerProfileSource: profileResolution.source,
           dataDir,
           artifactPaths,
           resumed: true,
@@ -123,6 +153,8 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
         iteration: 1,
         idempotencyKey,
         spec,
+        runnerProfile,
+        runnerProfileSource: profileResolution.source,
         dataDir,
         artifactPaths,
         resumed: true,
@@ -172,6 +204,8 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
         iteration: 1,
         idempotencyKey: null,
         spec,
+        runnerProfile,
+        runnerProfileSource: profileResolution.source,
         dataDir,
         artifactPaths,
         resumed: false,
@@ -197,13 +231,15 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
       iteration: 1,
       idempotencyKey,
       spec,
+      runnerProfile,
+      runnerProfileSource: profileResolution.source,
       dataDir,
       artifactPaths,
       resumed: false,
       enqueueCreated: enqueue.created
     };
   } catch (error) {
-    return { ok: false, error: formatInitError(error) };
+    return { ok: false, code: "init_failed", error: formatInitError(error) };
   } finally {
     db?.close();
   }
