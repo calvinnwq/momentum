@@ -1149,7 +1149,7 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
     node: process.version,
     platform: process.platform,
     milestone:
-      "Milestone 3: operational safety (NGX-272, NGX-273, NGX-274, NGX-275, NGX-276, NGX-277)",
+      "Milestone 3: operational safety (NGX-272, NGX-273, NGX-274, NGX-275, NGX-276, NGX-277, NGX-278) complete",
     daemon: daemonPayload
   };
 
