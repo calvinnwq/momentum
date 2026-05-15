@@ -3,7 +3,6 @@ import fs from "node:fs";
 
 import type { GoalArtifactPaths } from "./artifacts.js";
 import { ensureMomentumBranch } from "./branch-manager.js";
-import { runFakeRunner } from "./fake-runner.js";
 import type { GoalSpec } from "./goal-spec.js";
 import {
   finalizeIteration,
@@ -11,6 +10,12 @@ import {
 } from "./iteration-finalize.js";
 import { renderIterationPrompt } from "./iteration-prompt.js";
 import { inspectRepo } from "./repo-guard.js";
+import {
+  dispatchRunnerAdapter,
+  getRunnerAdapter,
+  listExecutingRunnerAdapterKinds,
+  type RunnerAdapterResult
+} from "./runner-adapter.js";
 import type { RunnerResult } from "./runner-result.js";
 
 export type ForegroundIterationErrorCode =
@@ -104,11 +109,14 @@ export function runForegroundIteration(
         "Goal spec is missing repo path; pass --repo or set repo in goal frontmatter."
     };
   }
-  if (spec.runner !== "fake") {
+
+  const preAdapter = getRunnerAdapter(spec.runner);
+  if (!preAdapter || !preAdapter.executes) {
+    const executing = listExecutingRunnerAdapterKinds();
     return {
       ok: false,
       code: "unsupported_runner",
-      error: `Runner "${spec.runner}" is not supported for execution; only the "fake" runner is implemented.`
+      error: `Runner "${spec.runner}" is not supported for execution; supported executing runners: ${executing.join(", ") || "<none>"}.`
     };
   }
 
@@ -151,21 +159,35 @@ export function runForegroundIteration(
     };
   }
 
-  let runnerOut;
-  try {
-    runnerOut = runFakeRunner({
-      repoPath: guard.repoPath,
-      iterationDir: artifactPaths.iterationDir,
-      iteration
-    });
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : "unknown error";
+  const dispatch: RunnerAdapterResult = dispatchRunnerAdapter(spec.runner, {
+    goalId,
+    iteration,
+    repoPath: guard.repoPath,
+    baseHead,
+    branch: branchResult.branch,
+    promptPath: artifactPaths.promptMd,
+    iterationDir: artifactPaths.iterationDir,
+    resultJsonPath: artifactPaths.resultJson,
+    runnerLogPath: artifactPaths.runnerLog,
+    spec
+  });
+
+  if (!dispatch.ok) {
+    if (dispatch.code === "unsupported_runner") {
+      return {
+        ok: false,
+        code: "unsupported_runner",
+        error: dispatch.error
+      };
+    }
     return {
       ok: false,
       code: "runner_failed",
-      error: `fake runner failed: ${detail}`
+      error: `runner "${spec.runner}" failed: ${dispatch.error}`
     };
   }
+
+  const runnerOut = dispatch;
 
   let postRunnerHead: string;
   try {

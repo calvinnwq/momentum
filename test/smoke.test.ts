@@ -1262,7 +1262,7 @@ End-to-end smoke goal that fails verification.
       expect(lines[3]).toBe(`Repo: ${repo}`);
       expect(lines[4]).toBe(`Branch: ${branch}`);
       expect(lines[5]).toBe("Runner: fake");
-      expect(lines[6]).toBe("Runner profile: fake (executes=false)");
+      expect(lines[6]).toBe("Runner profile: fake (executes=true)");
       expect(lines[7]).toBe(`Artifact dir: ${artifactDir}`);
       expect(lines[8]).toMatch(
         new RegExp(`^Recovery: missing \\(.*/${goalId}/recovery\\.md\\)$`)

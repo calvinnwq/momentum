@@ -100,7 +100,7 @@ Parses the goal spec and initializes (or resumes) goal state under the resolved 
     "branch": "momentum/example-goal",
     "baseHead": null,
     "runner": "fake",
-    "runnerProfile": { "kind": "fake", "name": "fake", "description": "Built-in in-process fake runner; writes a fixture file and no external command runs.", "executes": false },
+    "runnerProfile": { "kind": "fake", "name": "fake", "description": "Built-in in-process fake runner; writes a fixture file and reports a normalized result. Dispatches through the RunnerAdapter boundary.", "executes": true },
     "runnerProfileSource": "builtin_default",
     "dataDir": "/path/to/data-dir",
     "artifactDir": "/path/to/data-dir/goals/<uuid>",
@@ -125,7 +125,7 @@ Parses the goal spec and initializes (or resumes) goal state under the resolved 
     "jobType": "foreground_iteration",
     "title": "Example Goal",
     "runner": "fake",
-    "runnerProfile": { "kind": "fake", "name": "fake", "description": "Built-in in-process fake runner; writes a fixture file and no external command runs.", "executes": false },
+    "runnerProfile": { "kind": "fake", "name": "fake", "description": "Built-in in-process fake runner; writes a fixture file and reports a normalized result. Dispatches through the RunnerAdapter boundary.", "executes": true },
     "runnerProfileSource": "builtin_default",
     "dataDir": "/path/to/data-dir",
     "artifactDir": "/path/to/data-dir/goals/<uuid>",
@@ -197,7 +197,7 @@ Consumes queued `goal_iteration` work in single-job batches:
 - On `continue`, enqueues one next `goal_iteration` job with idempotency key `goal:<id>:iteration:<n>`, bumps the goal to state `queued`, and emits `goal.reduced`. On `goal_complete`, sets the goal to `completed` and emits `goal.reduced` + `goal.completed`. On `max_iterations_reached` or `iteration_failed`, sets the goal to the corresponding terminal state and emits `goal.reduced` + `goal.failed`.
 - Releases the repo lock with the appropriate `recovery_status` and emits a deterministic CLI JSON result (`code: no_work | not_executed | ran_job`) for automation.
 
-Queued jobs execute the runner profile stored on the Goal row. In M4-01, `trusted-shell` is accepted at init time so the profile can be persisted and surfaced, but execution still supports only `fake`; a queued job with a non-`fake` built-in runner fails with `unsupported_runner` until the NGX-281 `RunnerAdapter` boundary lands.
+Queued jobs execute the runner profile stored on the Goal row. Both foreground and queued paths dispatch through the `RunnerAdapter` boundary (NGX-281); only runners with `executes: true` in the adapter registry can be invoked. In M4-02, `fake` is the sole executing runner; `trusted-shell` is recognized as a profile but returns `unsupported_runner` at execution time until NGX-282 lands the real shell runner.
 
 `--worker-id` is optional; default is `worker-<pid>`. For queued work, use:
 
@@ -406,7 +406,7 @@ Text output includes the goal ID, previous reason, previous marked-at timestamp,
 momentum doctor [--data-dir <path>] [--json]
 ```
 
-Reports CLI version, Node.js version, platform, the current milestone scope label, and a compact daemon-readiness block read from `daemon_runs` (`{ok, dataDir, hasRun, state, isActive, stale, staleRunCount, staleRepoLockCount, staleClaimedJobCount, goalsNeedingRecoveryCount, runId}` on success, `{ok: false, code, message}` on failure). The stale-lease counts surface orphaned repo locks and claimed/running jobs whose lease expired more than `staleLeaseGraceMs` ago. The `goalsNeedingRecoveryCount` surface shows how many goals currently have the durable `needs_manual_recovery` flag set in the selected data directory; pass `--data-dir <path>` to inspect a non-default Momentum home. The `runners` block in JSON output lists `supported` (the current set of built-in runner profile names, `["fake", "trusted-shell"]`), `default` (the built-in default runner kind, `"fake"`), and `profiles` (an array of `{kind, name, description, executes}` objects for each built-in runner). Both profiles currently have `executes: false`; the `trusted-shell` profile recognizes the identity but does not execute a shell command. Text output includes a `runners:` line showing the supported kinds and default. Useful as a first sanity check after install and as a quick orchestrator-health probe.
+Reports CLI version, Node.js version, platform, the current milestone scope label, and a compact daemon-readiness block read from `daemon_runs` (`{ok, dataDir, hasRun, state, isActive, stale, staleRunCount, staleRepoLockCount, staleClaimedJobCount, goalsNeedingRecoveryCount, runId}` on success, `{ok: false, code, message}` on failure). The stale-lease counts surface orphaned repo locks and claimed/running jobs whose lease expired more than `staleLeaseGraceMs` ago. The `goalsNeedingRecoveryCount` surface shows how many goals currently have the durable `needs_manual_recovery` flag set in the selected data directory; pass `--data-dir <path>` to inspect a non-default Momentum home. The `runners` block in JSON output lists `supported` (the current set of built-in runner profile names, `["fake", "trusted-shell"]`), `default` (the built-in default runner kind, `"fake"`), and `profiles` (an array of `{kind, name, description, executes}` objects for each built-in runner). The `fake` profile currently has `executes: true`; the `trusted-shell` profile has `executes: false`, recognizing the identity but not executing a shell command yet. Text output includes a `runners:` line showing the supported kinds and default. Useful as a first sanity check after install and as a quick orchestrator-health probe.
 
 ### Stale-lease detection and auto-recovery (NGX-276)
 
@@ -639,7 +639,7 @@ Land a `RunnerAdapter` boundary so Momentum can execute Goals through more than 
 ### Initial supported runner family
 
 - `fake`: existing in-process runner (Milestone 1/2 baseline) — kept as the default for tests and smoke coverage.
-- `trusted-shell`: invokes a configured shell command for the iteration prompt and captures stdout/stderr to `runner.log`. Trust posture is explicit ("trusted shell" — operator opts in).
+- `trusted-shell`: planned operator-trusted shell runner; in M4-02 the profile identity is recognized, but execution is still a placeholder that returns `unsupported_runner` until NGX-282 lands shell command invocation and stdout/stderr capture to `runner.log`.
 - One live ACP/acpx-style runtime smoke path is admitted if a local binary is available; otherwise its smoke is gated behind an opt-in env var so CI stays self-contained.
 
 External writes remain adapter-mediated and policy-gated (Linear/GitHub/Jira adapters or workflow steps). M4 does **not** implement any external tracker writes.
@@ -649,15 +649,15 @@ External writes remain adapter-mediated and policy-gated (Linear/GitHub/Jira ada
 The Linear milestone "Milestone 4: Real Runner Profiles" sequences the work as:
 
 1. **NGX-279 — M4-00 M4 contract, roadmap, and docs setup** *(done)*
-2. **NGX-280 — M4-01 Runner profile model and resolver** *(done)*: added `src/runner-profile.ts` with the built-in registry (`BUILTIN_RUNNER_KINDS = ["fake", "trusted-shell"]`, `DEFAULT_RUNNER_KIND = "fake"`), `parseRunnerProfile` (validates and normalizes runner names, returning `unsupported_runner` or `malformed_profile` on bad input), `resolveRunnerProfile` (applies precedence: `cli_override > goal_frontmatter > builtin_default`), and `safeRunnerProfileSummary`; wired the resolver into `goal-init.ts` so `goal start` validates the runner profile at init time and persists the resolved name to `goals.runner`; surfaced `runnerProfile` and `runnerProfileSource` on `goal start` JSON, `runnerProfile` on `status` JSON/text and `handoff` JSON/markdown, and a `runners` block on `doctor` JSON/text with `supported`, `default`, and `profiles` arrays; both profiles ship as non-executing in M4-01 (`executes: false`); replaced the generic `init_error` code with specific stable codes (`parse_error`, `unsupported_runner`, `malformed_profile`, `init_failed`); `foreground-iteration.ts` still rejects non-`fake` runners at execution time, which is intentional until NGX-281 migrates the execution layer behind the `RunnerAdapter` boundary.
-3. **NGX-281 — M4-02 RunnerAdapter boundary and fake-runner migration**
+2. **NGX-280 — M4-01 Runner profile model and resolver** *(done)*: added `src/runner-profile.ts` with the built-in registry (`BUILTIN_RUNNER_KINDS = ["fake", "trusted-shell"]`, `DEFAULT_RUNNER_KIND = "fake"`), `parseRunnerProfile` (validates and normalizes runner names, returning `unsupported_runner` or `malformed_profile` on bad input), `resolveRunnerProfile` (applies precedence: `cli_override > goal_frontmatter > builtin_default`), and `safeRunnerProfileSummary`; wired the resolver into `goal-init.ts` so `goal start` validates the runner profile at init time and persists the resolved name to `goals.runner`; surfaced `runnerProfile` and `runnerProfileSource` on `goal start` JSON, `runnerProfile` on `status` JSON/text and `handoff` JSON/markdown, and a `runners` block on `doctor` JSON/text with `supported`, `default`, and `profiles` arrays; replaced the generic `init_error` code with specific stable codes (`parse_error`, `unsupported_runner`, `malformed_profile`, `init_failed`).
+3. **NGX-281 — M4-02 RunnerAdapter boundary and fake-runner migration** *(done)*: added `src/runner-adapter.ts` with `RunnerAdapter`, `RunnerAdapterInput`, `RunnerAdapterResult`, and `RunnerAdapterError` types; an adapter registry (`ADAPTERS`) with `getRunnerAdapter`, `listRunnerAdapterKinds`, `listExecutingRunnerAdapterKinds`; `dispatchRunnerAdapter` validates input, resolves the adapter by kind, checks `executes`, and calls the adapter's `execute` method with a try/catch for `runner_threw`; the `fake` adapter wraps `runFakeRunner` behind the boundary with normalized output and diagnostics, while `trusted-shell` is a placeholder that returns `unsupported_runner`; `foreground-iteration.ts` replaces the direct `runFakeRunner` call and the hard-coded `spec.runner !== "fake"` guard with `dispatchRunnerAdapter`, preserving an early adapter-kind/executes validation before git operations; the queued `worker-run` → `iteration-job` → `foreground-iteration` path uses the same adapter dispatch; the fake runner profile now has `executes: true` and a description reflecting dispatch through the boundary; focused adapter tests cover the registry, dispatch contract, input validation, fake-runner integration, env threading, diagnostics, and error taxonomy.
 4. **NGX-282 — M4-03 Trusted-shell runner profile**
 5. **NGX-283 — M4-04 ACP/acpx runtime smoke runner**
 6. **NGX-284 — M4-05 Runtime MOMENTUM.md policy loader**
 7. **NGX-285 — M4-06 Real-runner status, logs, and recovery hardening**
 8. **NGX-286 — M4-07 M4 smoke, docs, and milestone closeout**
 
-The closeout marker for M4 will be pinned by NGX-286 when the smoke and docs alignment lands. Until then, `doctor`'s milestone string intentionally still reads "Milestone 3: operational safety … complete" — NGX-279 opens the contract and NGX-280 adds the profile model and resolver, but neither flips the readiness marker.
+The closeout marker for M4 will be pinned by NGX-286 when the smoke and docs alignment lands. Until then, `doctor`'s milestone string intentionally still reads "Milestone 3: operational safety … complete" — the landed M4 setup, profile-model, and RunnerAdapter slices do not flip the readiness marker.
 
 ### M4 non-goals (explicit)
 
