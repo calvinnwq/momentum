@@ -4,9 +4,9 @@
  * Momentum core owns Goal/Iteration/Job state, the git transaction,
  * verification, and the artifact layout. A runner profile identifies how
  * the iteration prompt is executed and surfaces a safe summary for
- * operators. M4-01 ships the model only — no shell command is executed
- * here and the `MOMENTUM.md` loader stays a placeholder until a future
- * milestone proves it.
+ * operators. NGX-281 routes executing profiles through RunnerAdapter;
+ * `trusted-shell` remains non-executing until NGX-282 and the
+ * `MOMENTUM.md` loader stays a placeholder until a future milestone proves it.
  */
 
 export const BUILTIN_RUNNER_KINDS = ["fake", "trusted-shell"] as const;

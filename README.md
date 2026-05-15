@@ -639,7 +639,7 @@ Land a `RunnerAdapter` boundary so Momentum can execute Goals through more than 
 ### Initial supported runner family
 
 - `fake`: existing in-process runner (Milestone 1/2 baseline) — kept as the default for tests and smoke coverage.
-- `trusted-shell`: invokes a configured shell command for the iteration prompt and captures stdout/stderr to `runner.log`. Trust posture is explicit ("trusted shell" — operator opts in).
+- `trusted-shell`: planned operator-trusted shell runner; in M4-02 the profile identity is recognized, but execution is still a placeholder that returns `unsupported_runner` until NGX-282 lands shell command invocation and stdout/stderr capture to `runner.log`.
 - One live ACP/acpx-style runtime smoke path is admitted if a local binary is available; otherwise its smoke is gated behind an opt-in env var so CI stays self-contained.
 
 External writes remain adapter-mediated and policy-gated (Linear/GitHub/Jira adapters or workflow steps). M4 does **not** implement any external tracker writes.
