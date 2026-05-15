@@ -613,9 +613,63 @@ Momentum's product model is centered on these durable concepts; M3 must not brea
 - Core-owned tracker writes; adapters or approved workflow steps own external writes.
 - A runtime `MOMENTUM.md` loader before a future milestone proves it is needed.
 
+## Milestone 4 Roadmap
+
+Milestone 4 (Real Runner Profiles) is the **active milestone** following the operational-safety closeout. It is **not complete**. The headline goal is to put real, observable runner profiles behind the existing Goal/Iteration/verification/handoff contract, then add a runtime `MOMENTUM.md` policy loader, while keeping external tracker automation deferred.
+
+### Milestone goal
+
+Land a `RunnerAdapter` boundary so Momentum can execute Goals through more than the in-process `fake` runner without changing the Goal/Iteration/Job contract or the M3 daemon/recovery surfaces. The first real profile is a `trusted-shell` runner; one live ACP/acpx-style runtime is admitted as the smoke path if available locally. Runtime `MOMENTUM.md` policy loading lands second so repo-owned policy can gate runner choice and verification. External tracker automation (Linear/GitHub/Jira writes, webhooks) remains deferred and is **not** part of M4.
+
+### Architecture decision: core vs runner adapters
+
+- **Momentum core** owns the durable Goal/Iteration/Job state machine, Momentum-owned verification, the git transaction (commit/reset on the Momentum branch), the on-disk artifact layout, and the queue/daemon/recovery surfaces shipped in M2 and M3.
+- **`RunnerAdapter` implementations** execute the iteration prompt against an external runtime (shell, agent, ACP backend), stream runner output to `runner.log`, and report a normalized `RunnerResult` (success, optional `goal_complete`, optional artifacts pointer). Adapters do not touch git, do not own verification, do not own the queue, and do not write to external trackers.
+- The boundary stays single-process and trust-explicit for v0; sandbox/isolation hardening is out of scope for M4.
+
+### Initial supported runner family
+
+- `fake`: existing in-process runner (Milestone 1/2 baseline) — kept as the default for tests and smoke coverage.
+- `trusted-shell`: invokes a configured shell command for the iteration prompt and captures stdout/stderr to `runner.log`. Trust posture is explicit ("trusted shell" — operator opts in).
+- One live ACP/acpx-style runtime smoke path is admitted if a local binary is available; otherwise its smoke is gated behind an opt-in env var so CI stays self-contained.
+
+External writes remain adapter-mediated and policy-gated (Linear/GitHub/Jira adapters or workflow steps). M4 does **not** implement any external tracker writes.
+
+### Planned issue order
+
+The Linear milestone "Milestone 4: Real Runner Profiles" sequences the work as:
+
+1. **NGX-279 — M4-00 M4 contract, roadmap, and docs setup** *(this slice; in progress)*
+2. **NGX-280 — M4-01 Runner profile model and resolver**
+3. **NGX-281 — M4-02 RunnerAdapter boundary and fake-runner migration**
+4. **NGX-282 — M4-03 Trusted-shell runner profile**
+5. **NGX-283 — M4-04 ACP/acpx runtime smoke runner**
+6. **NGX-284 — M4-05 Runtime MOMENTUM.md policy loader**
+7. **NGX-285 — M4-06 Real-runner status, logs, and recovery hardening**
+8. **NGX-286 — M4-07 M4 smoke, docs, and milestone closeout**
+
+The closeout marker for M4 will be pinned by NGX-286 when the smoke and docs alignment lands. Until then, `doctor`'s milestone string intentionally still reads "Milestone 3: operational safety … complete" — M4-00 only opens the contract; it does not flip the readiness marker.
+
+### M4 non-goals (explicit)
+
+The following are **explicitly out of scope** for Milestone 4 and remain deferred regardless of how far M4 advances:
+
+- **External tracker writes** — Linear/GitHub/Jira/etc. issue/PR creation, comments, status changes, label edits driven from Momentum.
+- **Inbound webhooks** — adapters stay pull/reconcile first; Momentum does not expose an HTTP listener in M4.
+- **Worktrees / per-source-item workspaces** — a Goal still uses one shared repo lease.
+- **Background runner supervision** — forking, daemonization, restart-on-crash; the M3 single-process managed loop remains the supervision contract.
+- **Dashboard or UI surface** — CLI JSON/text remains the only interface in M4.
+- **Strong sandboxing** — `trusted-shell` is exactly that: explicitly trusted. Container/VM/seccomp isolation is not part of M4.
+- **Cooperative mid-job cancellation / signal handling** — stop semantics stay observation-only as in M3.
+- **Remote git operations** — no `fetch` / `pull` / `push` / `rebase` driven from Momentum.
+
+### M3 contracts preserved
+
+M4 must not break or rename any M3 surfaces. Specifically: the `daemon start` / `daemon stop` / `daemon status` / `recovery clear` CLI shapes, the `daemon_runs` / `repo_locks` / `goals.needs_manual_recovery` schema, the stale-lease detection / startup-recovery pass, the manual-recovery `recovery.md` artifact + flag, and the `status` / `handoff` / `doctor` daemon and recovery fields all remain wire-stable. The M3 closeout marker on `doctor` (and its smoke expectations in `test/cli.test.ts`) stays intact until NGX-286 intentionally updates it as part of M4 closeout.
+
 ## Current Exclusions
 
-Milestone 3 is complete. The following remain deferred to future milestones so the operational-safety surface stays scoped to bounded local queue draining, explicit stop requests, and auditable recovery:
+Milestone 3 is complete. Milestone 4 has absorbed runner profiles and runtime `MOMENTUM.md` policy loading (see the Milestone 4 Roadmap above). The following remain deferred beyond M4 so the runner-boundary and policy-loading surface stays scoped:
 
 - **Background runner supervision.** NGX-272 landed `daemon start` / `daemon stop` / `daemon status` as orchestrator-state contracts; NGX-273 wired an opt-in managed loop on `daemon start` that drains queued goal iterations in-process by composing `runWorkerOnce`. Background detachment / supervision (forking, daemonization, restart-on-crash) remains out of scope.
 - **Cooperative shutdown.** NGX-274 surfaces the daemon stop-request state in `status --json` / text and `handoff` JSON / markdown so operators can see why work is not draining without running `daemon status` separately; the daemon loop test suite covers stop-between-jobs observation. NGX-275 adds `daemon stop --now` as an immediate stop request observed between daemon-loop cycles, with a `canceled` terminal state and cancel-outcome visibility. Stop commands still do not signal, kill, or otherwise terminate any running runner, worker, or external process; mid-job cancellation and a full cooperative-shutdown handshake are deferred.
@@ -624,5 +678,4 @@ Milestone 3 is complete. The following remain deferred to future milestones so t
 - Worktree management, per-source-item worktrees/workspaces, remote git operations (`fetch`, `pull`, `push`, `rebase`), and parallel same-repo Goals.
 - PR/GitHub/Linear automation, external tracker writes, inbound webhooks, and other external integrations driven from inside Momentum.
 - A dashboard or other UI surface beyond the CLI JSON/text outputs.
-- A runtime `MOMENTUM.md` loader/parser/precedence model.
-- Real runner profiles beyond `fake` (Codex / Claude / OpenCode / ACP backends).
+- **Strong sandboxing** (container / VM / seccomp isolation); M4's `trusted-shell` is explicitly trusted, not sandboxed.
