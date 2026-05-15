@@ -174,14 +174,14 @@ describe("momentum CLI scaffold", () => {
           kind: "fake",
           name: "fake",
           description:
-            "Built-in in-process fake runner; writes a fixture file and no external command runs.",
-          executes: false
+            "Built-in in-process fake runner; writes a fixture file and reports a normalized result. Dispatches through the RunnerAdapter boundary.",
+          executes: true
         },
         {
           kind: "trusted-shell",
           name: "trusted-shell",
           description:
-            "Operator-trusted shell runner; identity recognized but no shell command executes in M4-01.",
+            "Operator-trusted shell runner; identity recognized but no shell command executes yet.",
           executes: false
         }
       ]
@@ -1079,18 +1079,18 @@ describe("momentum CLI scaffold", () => {
         title: "CLI Test Goal",
         state: "iteration_complete",
         runner: "fake",
-        runner_profile: {
-          kind: "fake",
-          name: "fake",
-          executes: false
-        }
+runner_profile: {
+           kind: "fake",
+           name: "fake",
+           executes: true
+         }
       }
     });
 
     const md = fs.readFileSync(handoffMdPath, "utf-8");
     expect(md).toContain("# Momentum handoff: CLI Test Goal");
     expect(md).toMatch(/Commit SHA: [0-9a-f]{40}/);
-    expect(md).toContain("Runner profile: fake (executes=false)");
+    expect(md).toContain("Runner profile: fake (executes=true)");
     expect(result.stderr).toBe("");
   });
 
@@ -1184,8 +1184,8 @@ describe("momentum CLI scaffold", () => {
       kind: "fake",
       name: "fake",
       description:
-        "Built-in in-process fake runner; writes a fixture file and no external command runs.",
-      executes: false
+        "Built-in in-process fake runner; writes a fixture file and reports a normalized result. Dispatches through the RunnerAdapter boundary.",
+      executes: true
     });
     const iter = statusPayload["iteration"] as Record<string, unknown>;
     expect(iter).toMatchObject({

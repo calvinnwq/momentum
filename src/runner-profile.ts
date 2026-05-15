@@ -71,15 +71,15 @@ export function buildRunnerProfile(kind: BuiltinRunnerKind): RunnerProfile {
         kind,
         name: kind,
         description:
-          "Built-in in-process fake runner; writes a fixture file and no external command runs.",
-        executes: false
+          "Built-in in-process fake runner; writes a fixture file and reports a normalized result. Dispatches through the RunnerAdapter boundary.",
+        executes: true
       };
     case "trusted-shell":
       return {
         kind,
         name: kind,
         description:
-          "Operator-trusted shell runner; identity recognized but no shell command executes in M4-01.",
+          "Operator-trusted shell runner; identity recognized but no shell command executes yet.",
         executes: false
       };
   }

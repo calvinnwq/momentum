@@ -22,22 +22,22 @@ describe("runner-profile registry", () => {
     expect(isBuiltinRunnerKind("")).toBe(false);
   });
 
-  it("builds the fake profile as non-executing with a safe summary", () => {
+  it("builds the fake profile as executing through the RunnerAdapter boundary with a safe summary", () => {
     const profile = buildRunnerProfile("fake");
     expect(profile).toEqual({
       kind: "fake",
       name: "fake",
       description:
-        "Built-in in-process fake runner; writes a fixture file and no external command runs.",
-      executes: false
+        "Built-in in-process fake runner; writes a fixture file and reports a normalized result. Dispatches through the RunnerAdapter boundary.",
+      executes: true
     });
   });
 
-  it("builds the trusted-shell profile but flags it as non-executing in M4-01", () => {
+  it("builds the trusted-shell profile but flags it as non-executing until the adapter lands", () => {
     const profile = buildRunnerProfile("trusted-shell");
     expect(profile.kind).toBe("trusted-shell");
     expect(profile.executes).toBe(false);
-    expect(profile.description).toContain("no shell command executes");
+    expect(profile.description).toContain("no shell command executes yet");
   });
 });
 
@@ -47,7 +47,7 @@ describe("parseRunnerProfile", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.profile.kind).toBe("fake");
-    expect(result.profile.executes).toBe(false);
+    expect(result.profile.executes).toBe(true);
   });
 
   it("accepts a syntactically valid trusted-shell identity without executing it", () => {
@@ -177,8 +177,8 @@ describe("safeRunnerProfileSummary", () => {
       kind: "fake",
       name: "fake",
       description:
-        "Built-in in-process fake runner; writes a fixture file and no external command runs.",
-      executes: false
+        "Built-in in-process fake runner; writes a fixture file and reports a normalized result. Dispatches through the RunnerAdapter boundary.",
+      executes: true
     });
   });
 });
