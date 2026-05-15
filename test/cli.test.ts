@@ -343,7 +343,7 @@ describe("momentum CLI scaffold", () => {
     );
   });
 
-  it("goal start returns init_error when data dir cannot initialize", async () => {
+  it("goal start returns init_failed when data dir cannot initialize", async () => {
     const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "momentum-cli-"));
     const goalFile = path.join(dataDir, "goal.md");
     const blockedDataDir = path.join(dataDir, "blocked");
