@@ -200,5 +200,3 @@ function invalidInputError(field: string): RunnerAdapterError {
     resultJsonPath: undefined
   };
 }
-
-
