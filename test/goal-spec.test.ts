@@ -214,6 +214,80 @@ verification_timeout_sec: ${value}
       expect(result.error).toMatch(/verification_timeout_sec/);
     }
   });
+
+  it("parses a nested trusted_shell mapping with scalars, inline arrays, and an env mapping", () => {
+    const result = parseGoalSpec(`---
+title: Trusted Shell Goal
+runner: trusted-shell
+trusted_shell:
+  command: /usr/local/bin/agent
+  args:
+    - --prompt
+    - {{promptPath}}
+  cwd: repo
+  timeout_sec: 600
+  env:
+    AGENT_MODE: iteration
+    COUNT: 3
+  env_allow:
+    - PATH
+    - HOME
+---
+
+Body.
+`);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.spec.runner).toBe("trusted-shell");
+    expect(result.spec.trusted_shell).toEqual({
+      command: "/usr/local/bin/agent",
+      args: ["--prompt", "{{promptPath}}"],
+      cwd: "repo",
+      timeout_sec: 600,
+      env: {
+        AGENT_MODE: "iteration",
+        COUNT: 3
+      },
+      env_allow: ["PATH", "HOME"]
+    });
+    expect(result.rawFrontmatter.trusted_shell).toEqual(
+      result.spec.trusted_shell
+    );
+  });
+
+  it("omits trusted_shell from spec when absent", () => {
+    const result = parseGoalSpec(`---
+title: No Shell Config
+runner: fake
+---
+`);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.spec.trusted_shell).toBeUndefined();
+    expect(result.rawFrontmatter.trusted_shell).toBeUndefined();
+  });
+
+  it("keeps top-level keys after a nested trusted_shell block", () => {
+    const result = parseGoalSpec(`---
+title: Mixed
+runner: trusted-shell
+trusted_shell:
+  command: /bin/sh
+  args: ["-c", "true"]
+max_iterations: 2
+verification:
+  - pnpm test
+---
+`);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.spec.max_iterations).toBe(2);
+    expect(result.spec.verification).toEqual(["pnpm test"]);
+    expect(result.spec.trusted_shell).toEqual({
+      command: "/bin/sh",
+      args: ["-c", "true"]
+    });
+  });
 });
 
 describe("parseGoalSpecFile", () => {

@@ -8,6 +8,7 @@ export type GoalSpec = {
   max_iterations: number;
   verification: string[];
   verification_timeout_sec: number;
+  trusted_shell?: unknown;
   body: string;
 };
 
@@ -15,7 +16,7 @@ export type GoalSpecError = { ok: false; error: string };
 export type GoalSpecSuccess = {
   ok: true;
   spec: GoalSpec;
-  rawFrontmatter: { runner?: unknown };
+  rawFrontmatter: { runner?: unknown; trusted_shell?: unknown };
 };
 export type GoalSpecResult = GoalSpecError | GoalSpecSuccess;
 
@@ -103,6 +104,8 @@ export function parseGoalSpec(
     return { ok: false, error: "`verification_timeout_sec` must be a positive integer" };
   }
 
+  const trustedShellValue = fields["trusted_shell"];
+
   return {
     ok: true,
     spec: {
@@ -113,57 +116,111 @@ export function parseGoalSpec(
       max_iterations,
       verification,
       verification_timeout_sec,
+      ...(trustedShellValue !== undefined ? { trusted_shell: trustedShellValue } : {}),
       body: (body ?? "").trimEnd()
     },
     rawFrontmatter: {
-      runner: rawRunner
+      runner: rawRunner,
+      ...(trustedShellValue !== undefined ? { trusted_shell: trustedShellValue } : {})
     }
   };
 }
 
 type YamlScalar = string | number;
-type YamlValue = YamlScalar | string[];
-type YamlFields = Record<string, YamlValue>;
+type YamlMapping = { [key: string]: YamlValue };
+type YamlValue = YamlScalar | string[] | YamlMapping;
+type YamlFields = YamlMapping;
 
 function parseSimpleYaml(yaml: string): YamlFields {
-  const fields: YamlFields = {};
   const lines = yaml.split("\n");
-  let i = 0;
+  return parseYamlBlock(lines, 0, 0).value;
+}
+
+type ParseFrame = { value: YamlFields; nextIndex: number };
+
+function parseYamlBlock(
+  lines: string[],
+  startIndex: number,
+  baseIndent: number
+): ParseFrame {
+  const fields: YamlFields = {};
+  let i = startIndex;
 
   while (i < lines.length) {
     const line = lines[i] ?? "";
-    if (!line.trim()) {
+    if (!line.trim() || line.trim().startsWith("#")) {
+      i++;
+      continue;
+    }
+    const indent = leadingIndentWidth(line);
+    if (indent < baseIndent) break;
+    if (indent > baseIndent) {
+      // Indented content owned by a sibling block we already consumed; skip
+      // defensively to avoid an infinite loop.
       i++;
       continue;
     }
 
-    const colonIdx = line.indexOf(":");
+    const trimmed = line.slice(indent);
+    const colonIdx = trimmed.indexOf(":");
     if (colonIdx < 0) {
       i++;
       continue;
     }
 
-    const key = line.slice(0, colonIdx).trim();
-    const rest = line.slice(colonIdx + 1).trim();
+    const key = trimmed.slice(0, colonIdx).trim();
+    const rest = trimmed.slice(colonIdx + 1);
     const commentStrippedRest = stripInlineComment(rest).trim();
 
     if (commentStrippedRest === "") {
-      // Possibly a list
-      const items: string[] = [];
-      i++;
-      while (i < lines.length) {
-        const next = lines[i] ?? "";
-        if (/^\s*-\s/.test(next)) {
-          items.push(String(parseYamlScalar(next.replace(/^\s*-\s*/, "").trim())));
-          i++;
-        } else if (!next.trim() || next.trim().startsWith("#")) {
-          i++;
-        } else {
+      const probe = peekNextContentfulLine(lines, i + 1);
+      if (probe === null || probe.indent <= baseIndent) {
+        fields[key] = "";
+        i = probe === null ? lines.length : probe.index;
+        continue;
+      }
+
+      const childIndent = probe.indent;
+      const probeBody = probe.line.slice(childIndent);
+
+      if (probeBody.startsWith("- ") || probeBody === "-") {
+        const items: string[] = [];
+        let j = i + 1;
+        while (j < lines.length) {
+          const next = lines[j] ?? "";
+          if (!next.trim() || next.trim().startsWith("#")) {
+            j++;
+            continue;
+          }
+          const li = leadingIndentWidth(next);
+          if (li < childIndent) break;
+          if (li > childIndent) {
+            // Nested continuation lines inside a list item are not supported;
+            // skip them defensively.
+            j++;
+            continue;
+          }
+          const body = next.slice(li);
+          if (body.startsWith("- ") || body === "-") {
+            items.push(
+              String(parseYamlScalar(body.replace(/^-\s*/, "").trim()))
+            );
+            j++;
+            continue;
+          }
           break;
         }
+        fields[key] = items;
+        i = j;
+      } else {
+        const nested = parseYamlBlock(lines, i + 1, childIndent);
+        fields[key] = nested.value;
+        i = nested.nextIndex;
       }
-      fields[key] = items;
-    } else if (commentStrippedRest.startsWith("[") && commentStrippedRest.endsWith("]")) {
+    } else if (
+      commentStrippedRest.startsWith("[") &&
+      commentStrippedRest.endsWith("]")
+    ) {
       fields[key] = parseYamlInlineArray(commentStrippedRest);
       i++;
     } else {
@@ -172,7 +229,32 @@ function parseSimpleYaml(yaml: string): YamlFields {
     }
   }
 
-  return fields;
+  return { value: fields, nextIndex: i };
+}
+
+function leadingIndentWidth(line: string): number {
+  let n = 0;
+  while (n < line.length) {
+    const ch = line[n];
+    if (ch === " " || ch === "\t") {
+      n++;
+    } else {
+      break;
+    }
+  }
+  return n;
+}
+
+function peekNextContentfulLine(
+  lines: string[],
+  from: number
+): { index: number; line: string; indent: number } | null {
+  for (let i = from; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    if (!line.trim() || line.trim().startsWith("#")) continue;
+    return { index: i, line, indent: leadingIndentWidth(line) };
+  }
+  return null;
 }
 
 function parseYamlScalar(raw: string): YamlScalar {
