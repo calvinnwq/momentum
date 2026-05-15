@@ -142,6 +142,24 @@ describe("resolveRunnerProfile precedence", () => {
     expect(result.rawValue).toBe("codex");
   });
 
+  it("surfaces malformed_profile from non-string goal frontmatter", () => {
+    const result = resolveRunnerProfile({ frontmatterValue: 42 });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe("malformed_profile");
+    expect(result.source).toBe("goal_frontmatter");
+    expect(result.rawValue).toBe("42");
+  });
+
+  it("surfaces malformed_profile from blank goal frontmatter", () => {
+    const result = resolveRunnerProfile({ frontmatterValue: "   " });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe("malformed_profile");
+    expect(result.source).toBe("goal_frontmatter");
+    expect(result.rawValue).toBe("");
+  });
+
   it("surfaces unsupported_runner from goal frontmatter when CLI override is absent", () => {
     const result = resolveRunnerProfile({ frontmatterValue: "claude" });
     expect(result.ok).toBe(false);

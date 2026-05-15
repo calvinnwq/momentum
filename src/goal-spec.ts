@@ -12,7 +12,11 @@ export type GoalSpec = {
 };
 
 export type GoalSpecError = { ok: false; error: string };
-export type GoalSpecSuccess = { ok: true; spec: GoalSpec };
+export type GoalSpecSuccess = {
+  ok: true;
+  spec: GoalSpec;
+  rawFrontmatter: { runner?: unknown };
+};
 export type GoalSpecResult = GoalSpecError | GoalSpecSuccess;
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\n---\r?\n?([\s\S]*)$/;
@@ -110,6 +114,9 @@ export function parseGoalSpec(
       verification,
       verification_timeout_sec,
       body: (body ?? "").trimEnd()
+    },
+    rawFrontmatter: {
+      runner: rawRunner
     }
   };
 }

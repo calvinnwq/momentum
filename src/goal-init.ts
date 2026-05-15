@@ -84,7 +84,7 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
   }
   const profileResolution = resolveRunnerProfile({
     cliOverride: options.runnerOverride,
-    frontmatterValue: parseResult.spec.runner
+    frontmatterValue: parseResult.rawFrontmatter.runner
   });
   if (!profileResolution.ok) {
     return {

@@ -45,7 +45,7 @@ export type RunnerProfileParseResult = ParsedRunnerProfile | RunnerProfileError;
 
 export type ResolveRunnerProfileInput = {
   cliOverride?: string | undefined;
-  frontmatterValue?: string | undefined;
+  frontmatterValue?: unknown;
   builtinDefault?: BuiltinRunnerKind | undefined;
 };
 
@@ -131,22 +131,28 @@ export function resolveRunnerProfile(
   if (cli !== undefined) {
     return finalizeResolution(cli, "cli_override");
   }
-  const fm = sanitizeOptionalString(input.frontmatterValue);
-  if (fm !== undefined) {
-    return finalizeResolution(fm, "goal_frontmatter");
+  if (input.frontmatterValue !== undefined && input.frontmatterValue !== null) {
+    return finalizeResolution(input.frontmatterValue, "goal_frontmatter");
   }
   return finalizeResolution(defaultKind, "builtin_default");
 }
 
 function finalizeResolution(
-  rawValue: string,
+  rawValue: unknown,
   source: RunnerProfileSource
 ): ResolveRunnerProfileResult {
   const parsed = parseRunnerProfile(rawValue);
+  const resolvedRawValue =
+    typeof rawValue === "string" ? rawValue.trim() : String(rawValue);
   if (!parsed.ok) {
-    return { ...parsed, source, rawValue };
+    return { ...parsed, source, rawValue: resolvedRawValue };
   }
-  return { ok: true, profile: parsed.profile, source, rawValue };
+  return {
+    ok: true,
+    profile: parsed.profile,
+    source,
+    rawValue: resolvedRawValue
+  };
 }
 
 function sanitizeOptionalString(value: unknown): string | undefined {

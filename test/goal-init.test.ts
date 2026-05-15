@@ -202,6 +202,49 @@ describe("initGoal integration", () => {
     fs.rmSync(dataDir, { recursive: true });
   });
 
+  it("returns malformed_profile when frontmatter runner is not a string", () => {
+    const dataDir = makeTempDir();
+    const goalFile = path.join(dataDir, "goal.md");
+    fs.writeFileSync(goalFile, `---
+title: Bad Runner
+runner: 42
+---
+`, "utf-8");
+
+    const result = initGoal({
+      goalPath: goalFile,
+      dataDirOptions: { dataDir }
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe("malformed_profile");
+    expect(result.error).toMatch(/number/);
+
+    fs.rmSync(dataDir, { recursive: true });
+  });
+
+  it("returns malformed_profile when frontmatter runner is empty", () => {
+    const dataDir = makeTempDir();
+    const goalFile = path.join(dataDir, "goal.md");
+    fs.writeFileSync(goalFile, `---
+title: Empty Runner
+runner:
+---
+`, "utf-8");
+
+    const result = initGoal({
+      goalPath: goalFile,
+      dataDirOptions: { dataDir }
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe("malformed_profile");
+
+    fs.rmSync(dataDir, { recursive: true });
+  });
+
   it("resolves data dir from MOMENTUM_HOME env var", () => {
     const dataDir = makeTempDir();
     const goalFile = path.join(dataDir, "goal.md");
