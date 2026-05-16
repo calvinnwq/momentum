@@ -13,6 +13,8 @@ import {
 import { QUEUE_EVENT_TYPES, appendQueueEvent } from "./events.js";
 import { getGoal, type GoalRow } from "./goal-init.js";
 import { markGoalNeedsManualRecovery } from "./goal-recovery.js";
+import { parseGoalSpecFile } from "./goal-spec.js";
+import { buildRunnerProfileSummary } from "./iteration-job.js";
 import {
   getQueueJob,
   listStaleClaimedGoalIterationJobs,
@@ -23,7 +25,8 @@ import {
 import {
   writeRecoveryArtifact,
   type RecoveryArtifactPathBundle,
-  type RecoveryArtifactReason
+  type RecoveryArtifactReason,
+  type RecoveryArtifactRunnerProfile
 } from "./recovery-artifact.js";
 import { inspectRepo, type RepoGuardResult } from "./repo-guard.js";
 import {
@@ -723,12 +726,15 @@ function maybeWriteRecoveryArtifact(
   const paths = resolveGoalArtifactPaths(dataDir, job.goal_id, job.iteration);
   const artifactPaths: RecoveryArtifactPathBundle = {
     iterationDir: paths.iterationDir,
+    promptPath: fs.existsSync(paths.promptMd) ? paths.promptMd : null,
     runnerLog: fs.existsSync(paths.runnerLog) ? paths.runnerLog : null,
     verificationLog: fs.existsSync(paths.verificationLog)
       ? paths.verificationLog
       : null,
     resultJson: fs.existsSync(paths.resultJson) ? paths.resultJson : null
   };
+
+  const runnerProfile = buildRunnerProfileFromGoalMd(paths.goalMd, goal);
 
   try {
     const result = writeRecoveryArtifact({
@@ -743,6 +749,7 @@ function maybeWriteRecoveryArtifact(
         expectedCommit,
         currentCommit,
         reason,
+        runnerProfile,
         artifactPaths,
         safeNextSteps: safeNextStepsForSkip(skip.reason, repoPath),
         classifiedAt: now
@@ -768,6 +775,23 @@ function maybeWriteRecoveryArtifact(
       `manual recovery flag write failed for goal ${job.goal_id}: ${marked.reason}`
     );
   }
+}
+
+function buildRunnerProfileFromGoalMd(
+  goalMdPath: string,
+  goal: GoalRow | undefined
+): RecoveryArtifactRunnerProfile {
+  if (!fs.existsSync(goalMdPath)) {
+    return { runner: goal?.runner ?? "unknown" };
+  }
+  const parsed = parseGoalSpecFile(goalMdPath);
+  if (!parsed.ok) {
+    return {
+      runner: goal?.runner ?? "unknown",
+      note: `goal spec parse error: ${parsed.error}`
+    };
+  }
+  return buildRunnerProfileSummary(parsed.spec);
 }
 
 function readExpectedCommitForJob(

@@ -1842,6 +1842,15 @@ function emitLogs(
         bytes: data.verificationLog.bytes,
         content: data.verificationLog.content,
         error: data.verificationLog.error
+      },
+      resultJson: {
+        path: data.resultJson.path,
+        exists: data.resultJson.exists,
+        readable: data.resultJson.readable,
+        bytes: data.resultJson.bytes,
+        content: data.resultJson.content,
+        error: data.resultJson.error,
+        parseError: data.resultJson.parseError
       }
     };
     writeJson(io.stdout, payload);
@@ -1876,6 +1885,21 @@ function emitLogs(
       ? data.verificationLog.content.slice(0, -1)
       : data.verificationLog.content);
   } else if (data.verificationLog.exists) {
+    lines.push("(empty)");
+  }
+  lines.push("");
+  lines.push(
+    `## result.json (${data.resultJson.exists ? `${data.resultJson.bytes} bytes` : "missing"}): ${data.resultJson.path}`
+  );
+  if (data.resultJson.error !== undefined) {
+    lines.push(`(unreadable: ${data.resultJson.error})`);
+  } else if (data.resultJson.parseError !== undefined) {
+    lines.push(`(parse error: ${data.resultJson.parseError})`);
+  } else if (data.resultJson.exists && data.resultJson.content.length > 0) {
+    lines.push(data.resultJson.content.endsWith("\n")
+      ? data.resultJson.content.slice(0, -1)
+      : data.resultJson.content);
+  } else if (data.resultJson.exists) {
     lines.push("(empty)");
   }
   lines.push("");

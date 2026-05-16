@@ -73,6 +73,7 @@ export type HandoffData = {
   iteration: GoalStatusIterationSummary | null;
   currentIterationDetail: GoalStatusCurrentIterationDetail | null;
   runnerResult: HandoffRunnerResultSummary | null;
+  runnerResultError: string | null;
   reducer: GoalStatusReducerSummary | null;
   nextJob: GoalStatusJobSummary | null;
   nextAction: string | null;
@@ -140,7 +141,7 @@ export function writeHandoff(input: WriteHandoffInput = {}): HandoffResult {
 
 function buildHandoffData(
   status: GoalStatusSuccess,
-  runnerResult: HandoffRunnerResultSummary | null,
+  runnerResult: RunnerResultRead,
   generatedAt: number
 ): HandoffData {
   return {
@@ -168,7 +169,8 @@ function buildHandoffData(
     latestJob: status.latestJob,
     iteration: status.iteration,
     currentIterationDetail: status.currentIterationDetail,
-    runnerResult,
+    runnerResult: runnerResult.result,
+    runnerResultError: runnerResult.error,
     reducer: status.reducer,
     nextJob: status.nextJob,
     nextAction: status.nextAction,
@@ -243,6 +245,7 @@ function toJsonShape(data: HandoffData): Record<string, unknown> {
           goal_complete: data.runnerResult.goalComplete
         }
       : null,
+    runner_result_error: data.runnerResultError,
     reducer: data.reducer
       ? {
           decision: data.reducer.decision,
@@ -494,6 +497,9 @@ function renderHandoffMarkdown(data: HandoffData): string {
   lines.push("## Runner result");
   if (!data.runnerResult) {
     lines.push("- No runner result captured.");
+    if (data.runnerResultError) {
+      lines.push(`- Runner result read error: ${data.runnerResultError}`);
+    }
   } else {
     if (data.runnerResult.summary) {
       lines.push(`- Summary: ${data.runnerResult.summary}`);
@@ -665,34 +671,52 @@ function oneLine(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
-function readRunnerResult(resultPath: string): HandoffRunnerResultSummary | null {
+type RunnerResultRead = {
+  result: HandoffRunnerResultSummary | null;
+  error: string | null;
+};
+
+function readRunnerResult(resultPath: string): RunnerResultRead {
   let raw: string;
   try {
     raw = fs.readFileSync(resultPath, "utf-8");
-  } catch {
-    return null;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "unknown error";
+    return { result: null, error: `failed to read runner result file: ${detail}` };
   }
+
   const trimmed = raw.trim();
-  if (trimmed.length === 0 || trimmed === "{}") return null;
+  if (trimmed.length === 0 || trimmed === "{}") {
+    return { result: null, error: null };
+  }
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
-  } catch {
-    return null;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "unknown error";
+    return { result: null, error: `malformed runner result JSON: ${detail}` };
   }
-  if (!isRecord(parsed)) return null;
+  if (!isRecord(parsed)) {
+    return {
+      result: null,
+      error: "runner result JSON is not an object"
+    };
+  }
 
   return {
-    success: typeof parsed["success"] === "boolean" ? parsed["success"] : null,
-    summary: typeof parsed["summary"] === "string" ? parsed["summary"] : null,
-    keyChangesMade: stringArray(parsed["key_changes_made"]),
-    keyLearnings: stringArray(parsed["key_learnings"]),
-    remainingWork: stringArray(parsed["remaining_work"]),
-    goalComplete:
-      typeof parsed["goal_complete"] === "boolean"
-        ? parsed["goal_complete"]
-        : null
+    result: {
+      success: typeof parsed["success"] === "boolean" ? parsed["success"] : null,
+      summary: typeof parsed["summary"] === "string" ? parsed["summary"] : null,
+      keyChangesMade: stringArray(parsed["key_changes_made"]),
+      keyLearnings: stringArray(parsed["key_learnings"]),
+      remainingWork: stringArray(parsed["remaining_work"]),
+      goalComplete:
+        typeof parsed["goal_complete"] === "boolean"
+          ? parsed["goal_complete"]
+          : null
+    },
+    error: null
   };
 }
 

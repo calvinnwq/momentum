@@ -1224,6 +1224,65 @@ describe("recoverStaleClaimedGoalIterationJobs", () => {
       }
     });
 
+    it("populates the recovery.md runner profile from goal.md when present", () => {
+      const dataDir = makeTempDir();
+      const db = openDb(dataDir);
+      try {
+        seedGoalWithRepo(db, "g1", "/tmp/repo-a");
+        seedClaimedIteration(db, {
+          leaseDurationMs: 900,
+          claimAt: 100
+        });
+        const goalDir = path.join(dataDir, "goals", "g1");
+        fs.mkdirSync(goalDir, { recursive: true });
+        fs.writeFileSync(
+          path.join(goalDir, "goal.md"),
+          `---
+title: test goal
+repo: /tmp/repo-a
+runner: trusted-shell
+trusted_shell:
+  command: /usr/bin/env
+  args:
+    - echo
+    - hi
+  cwd: repo
+  timeout_sec: 120
+  result_file: out.json
+verification:
+  - "true"
+---
+body
+`,
+          "utf-8"
+        );
+        const inspectRepoState = () => ({
+          ok: false as const,
+          code: "dirty_worktree" as const,
+          error: "Repo has uncommitted changes: /tmp/repo-a"
+        });
+
+        const out = recoverStaleClaimedGoalIterationJobs(db, {
+          now: 5_000,
+          inspectRepoState,
+          dataDir
+        });
+        expect(out.skipped).toHaveLength(1);
+        const md = fs.readFileSync(
+          out.skipped[0]!.recoveryArtifactPath!,
+          "utf-8"
+        );
+        expect(md).toContain("- Runner: trusted-shell");
+        expect(md).toContain("- Command: /usr/bin/env");
+        expect(md).toContain("- Args: echo hi");
+        expect(md).toContain("- CWD: repo");
+        expect(md).toContain("- Timeout (sec): 120");
+        expect(md).toContain("- Result file: out.json");
+      } finally {
+        db.close();
+      }
+    });
+
     it("shell-quotes repo paths in recovery.md next-step commands", () => {
       const dataDir = makeTempDir();
       const db = openDb(dataDir);

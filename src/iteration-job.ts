@@ -10,10 +10,12 @@ import {
 } from "./foreground-iteration.js";
 import type { GoalSpec } from "./goal-spec.js";
 import { markGoalNeedsManualRecovery } from "./goal-recovery.js";
+import { parseAcpConfig } from "./acp-config.js";
 import {
   writeRecoveryArtifact,
   type RecoveryArtifactPathBundle
 } from "./recovery-artifact.js";
+import { parseTrustedShellConfig } from "./trusted-shell-config.js";
 
 export type ExecuteIterationJobInput = {
   db: MomentumDb;
@@ -196,6 +198,9 @@ function recordManualRecoveryIfNeeded(input: {
   const resultJsonPath = recovery.resultJsonPath ?? input.artifactPaths.resultJson;
   const artifactPaths: RecoveryArtifactPathBundle = {
     iterationDir: input.artifactPaths.iterationDir,
+    promptPath: fs.existsSync(input.artifactPaths.promptMd)
+      ? input.artifactPaths.promptMd
+      : null,
     runnerLog: fs.existsSync(input.artifactPaths.runnerLog)
       ? input.artifactPaths.runnerLog
       : null,
@@ -218,6 +223,7 @@ function recordManualRecoveryIfNeeded(input: {
         expectedCommit: recovery.expectedCommit,
         currentCommit: recovery.currentCommit,
         reason: recovery.reason,
+        runnerProfile: buildRunnerProfileSummary(input.spec),
         artifactPaths,
         safeNextSteps: recovery.safeNextSteps,
         classifiedAt: input.now
@@ -236,6 +242,58 @@ function recordManualRecoveryIfNeeded(input: {
       `manual recovery flag write failed for goal ${input.goalId}: ${marked.reason}`
     );
   }
+}
+
+export function buildRunnerProfileSummary(
+  spec: GoalSpec
+): {
+  runner: string;
+  command?: string;
+  args?: string[];
+  cwd?: "repo" | "iteration";
+  timeoutSec?: number;
+  resultFile?: string;
+  note?: string;
+} {
+  if (spec.runner === "trusted-shell") {
+    const parsed = parseTrustedShellConfig(spec.trusted_shell);
+    if (!parsed.ok) {
+      return {
+        runner: spec.runner,
+        note: `runner profile parse error: ${parsed.error}`
+      };
+    }
+    return {
+      runner: spec.runner,
+      command: parsed.config.command,
+      args: [...parsed.config.args],
+      cwd: parsed.config.cwd,
+      timeoutSec: parsed.config.timeoutSec,
+      resultFile: parsed.config.resultFile
+    };
+  }
+
+  if (spec.runner === "acp") {
+    const parsed = parseAcpConfig(spec.acp);
+    if (!parsed.ok) {
+      return {
+        runner: spec.runner,
+        note: `runner profile parse error: ${parsed.error}`
+      };
+    }
+    return {
+      runner: spec.runner,
+      command: parsed.config.command,
+      args: [...parsed.config.args],
+      cwd: parsed.config.cwd,
+      timeoutSec: parsed.config.timeoutSec,
+      resultFile: parsed.config.resultFile
+    };
+  }
+
+  return {
+    runner: spec.runner
+  };
 }
 
 function pickErrorArtifactPath(

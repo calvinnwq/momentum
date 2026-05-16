@@ -68,6 +68,24 @@ Apply the fixture file deterministically.
 `;
 }
 
+function makeAcpRuntimeUnavailableSpecContent(
+  repoPath: string,
+  title: string,
+  command = "/definitely-missing-acp-runtime"
+): string {
+  return `---
+title: ${title}
+repo: ${repoPath}
+runner: acp
+acp:
+  command: ${command}
+verification:
+  - true
+---
+Apply this goal via an ACP runtime that does not exist.
+`;
+}
+
 type GoalSetup = GoalInitSuccess & { dataDir: string };
 
 function setupGoal(
@@ -93,6 +111,43 @@ function setupGoal(
     throw new Error(`initGoal failed: ${init.error}`);
   }
   return { ...init, dataDir };
+}
+
+function setupAcpRuntimeUnavailableGoal(
+  repo: string,
+  title = "Handoff ACP startup runtime unavailable",
+  mode: "foreground" | "queued" = "foreground",
+  command: string = "/definitely-missing-acp-runtime"
+): GoalSetup {
+  const dataDir = makeTempDir("momentum-handoff-data-");
+  const specDir = makeTempDir("momentum-handoff-spec-");
+  const goalFile = path.join(specDir, "goal.md");
+  fs.writeFileSync(
+    goalFile,
+    makeAcpRuntimeUnavailableSpecContent(repo, title, command),
+    "utf-8"
+  );
+  const init = initGoal({
+    goalPath: goalFile,
+    dataDirOptions: { dataDir },
+    mode
+  });
+  if (!init.ok) {
+    throw new Error(`initGoal failed: ${init.error}`);
+  }
+  return { ...init, dataDir };
+}
+
+function makeStartupFailedAcpCommand(): string {
+  const commandDir = makeTempDir("momentum-handoff-acp-startup-failed-");
+  const commandPath = path.join(commandDir, "acp-startup-failed.sh");
+  fs.writeFileSync(
+    commandPath,
+    "#!/bin/sh\necho should-not-run\n",
+    "utf-8"
+  );
+  fs.chmodSync(commandPath, 0o644);
+  return commandPath;
 }
 
 function runVerifiedIteration(setup: GoalSetup): void {
@@ -279,6 +334,7 @@ describe("writeHandoff", () => {
         },
         artifactPaths: {
           iterationDir: setup.artifactPaths.iterationDir,
+          promptPath: setup.artifactPaths.promptMd,
           runnerLog: setup.artifactPaths.runnerLog,
           verificationLog: setup.artifactPaths.verificationLog,
           resultJson: setup.artifactPaths.resultJson
@@ -404,6 +460,116 @@ describe("writeHandoff", () => {
     expect(markdown).not.toContain("Result path:");
   });
 
+  it("captures runtime-unavailable startup failure in handoff failure summary and markdown", () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const repo = initRepo();
+    const setup = setupAcpRuntimeUnavailableGoal(
+      repo,
+      "Handoff ACP startup runtime unavailable",
+      "queued"
+    );
+    const db = openDb(setup.dataDir);
+    try {
+      const job = executeIterationJob({
+        db,
+        goalId: setup.goalId,
+        jobId: setup.jobId,
+        spec: setup.spec,
+        artifactPaths: setup.artifactPaths
+      });
+      expect(job.ok).toBe(false);
+      if (job.ok) return;
+      expect(job.iteration.code).toBe("runtime_unavailable");
+    } finally {
+      db.close();
+    }
+
+    const result = writeHandoff({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+    const handoff = expectSuccess(result);
+
+    expect(handoff.data.iteration?.failure?.code).toBe("runtime_unavailable");
+    expect(handoff.data.latestJob?.errorPath).toBe(setup.artifactPaths.runnerLog);
+
+    const json = JSON.parse(
+      fs.readFileSync(setup.artifactPaths.handoffJson, "utf-8")
+    ) as Record<string, unknown>;
+    const iteration = json["iteration"] as Record<string, unknown>;
+    const failure = iteration["failure"] as Record<string, unknown>;
+    expect(iteration["runner_success"]).toBeNull();
+    expect(failure["code"]).toBe("runtime_unavailable");
+    expect((json["latest_job"] as Record<string, unknown>)["error_path"]).toBe(
+      setup.artifactPaths.runnerLog
+    );
+
+    const markdown = fs.readFileSync(setup.artifactPaths.handoffMd, "utf-8");
+    expect(markdown).toContain("Failure: runtime_unavailable");
+    expect(markdown).toContain(`Error path: ${setup.artifactPaths.runnerLog}`);
+    expect(markdown).not.toContain(`Result path: ${setup.artifactPaths.resultJson}`);
+  });
+
+  it("captures startup-failed ACP startup error in handoff failure summary and markdown", () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const repo = initRepo();
+    const startupFailedCommand = makeStartupFailedAcpCommand();
+
+    const setup = setupAcpRuntimeUnavailableGoal(
+      repo,
+      "Handoff ACP startup startup_failed",
+      "queued",
+      startupFailedCommand
+    );
+    const db = openDb(setup.dataDir);
+    try {
+      const job = executeIterationJob({
+        db,
+        goalId: setup.goalId,
+        jobId: setup.jobId,
+        spec: setup.spec,
+        artifactPaths: setup.artifactPaths
+      });
+      expect(job.ok).toBe(false);
+      if (job.ok) {
+        throw new Error("iteration unexpectedly succeeded");
+      }
+      expect(job.iteration.code).toBe("startup_failed");
+      expect(job.iteration.error).toContain("acp failed to start");
+    } finally {
+      db.close();
+    }
+
+    const result = writeHandoff({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+    const handoff = expectSuccess(result);
+
+    expect(handoff.data.iteration?.failure?.code).toBe("startup_failed");
+    expect(handoff.data.latestJob?.errorPath).toBe(setup.artifactPaths.runnerLog);
+
+    const json = JSON.parse(
+      fs.readFileSync(setup.artifactPaths.handoffJson, "utf-8")
+    ) as Record<string, unknown>;
+    const iteration = json["iteration"] as Record<string, unknown>;
+    const failure = iteration["failure"] as Record<string, unknown>;
+    expect(iteration["runner_success"]).toBeNull();
+    expect(failure["code"]).toBe("startup_failed");
+    expect((json["latest_job"] as Record<string, unknown>)["error_path"]).toBe(
+      setup.artifactPaths.runnerLog
+    );
+
+    const markdown = fs.readFileSync(setup.artifactPaths.handoffMd, "utf-8");
+    expect(markdown).toContain("Failure: startup_failed");
+    expect(markdown).toContain(`Error path: ${setup.artifactPaths.runnerLog}`);
+    expect(markdown).not.toContain(`Result path: ${setup.artifactPaths.resultJson}`);
+  });
+
   it("returns null runner_result when result.json is the empty initializer", () => {
     const repo = initRepo();
     const setup = setupGoal(repo, "Handoff initialized only");
@@ -428,6 +594,62 @@ describe("writeHandoff", () => {
     expect(markdown).toContain("No iteration has run yet.");
     expect(markdown).toContain("No runner result captured.");
     expect(markdown).not.toContain("Commit SHA:");
+  });
+
+  it("records a malformed runner result parse error in handoff output", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Handoff malformed result");
+    runVerifiedIteration(setup);
+
+    fs.writeFileSync(setup.artifactPaths.resultJson, "{not valid json", "utf-8");
+
+    const result = writeHandoff({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+    const handoff = expectSuccess(result);
+
+    expect(handoff.data.runnerResult).toBeNull();
+    expect(handoff.data.runnerResultError).toContain("malformed runner result JSON");
+
+    const json = JSON.parse(
+      fs.readFileSync(setup.artifactPaths.handoffJson, "utf-8")
+    ) as Record<string, unknown>;
+    expect(json["runner_result"]).toBeNull();
+    expect(json["runner_result_error"]).toContain("malformed runner result JSON");
+
+    const markdown = fs.readFileSync(setup.artifactPaths.handoffMd, "utf-8");
+    expect(markdown).toContain("No runner result captured.");
+    expect(markdown).toContain("Runner result read error:");
+    expect(markdown).toContain("malformed runner result JSON");
+  });
+
+  it("records a missing runner result read error in handoff output", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Handoff missing result");
+    runVerifiedIteration(setup);
+
+    fs.rmSync(setup.artifactPaths.resultJson);
+
+    const result = writeHandoff({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+    const handoff = expectSuccess(result);
+
+    expect(handoff.data.runnerResult).toBeNull();
+    expect(handoff.data.runnerResultError).toContain("failed to read runner result file");
+
+    const json = JSON.parse(
+      fs.readFileSync(setup.artifactPaths.handoffJson, "utf-8")
+    ) as Record<string, unknown>;
+    expect(json["runner_result"]).toBeNull();
+    expect(json["runner_result_error"]).toContain("failed to read runner result file");
+
+    const markdown = fs.readFileSync(setup.artifactPaths.handoffMd, "utf-8");
+    expect(markdown).toContain("No runner result captured.");
+    expect(markdown).toContain("Runner result read error:");
+    expect(markdown).toContain("failed to read runner result file");
   });
 
   it("captures reducer decision, next job, and next-action hint when a reducer has run", () => {

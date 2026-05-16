@@ -16,6 +16,7 @@ import {
   dispatchRunnerAdapter,
   getRunnerAdapter,
   listExecutingRunnerAdapterKinds,
+  type RunnerAdapterErrorCode,
   type RunnerAdapterResult
 } from "./runner-adapter.js";
 import type { RunnerResult } from "./runner-result.js";
@@ -29,6 +30,14 @@ export type ForegroundIterationErrorCode =
   | "branch_manager_failed"
   | "artifact_write_failed"
   | "runner_failed"
+  | "command_failed"
+  | "command_timed_out"
+  | "result_missing"
+  | "result_invalid"
+  | "runtime_unavailable"
+  | "startup_failed"
+  | "spawn_failed"
+  | "output_overflow"
   | "runner_changed_head"
   | "runner_reported_failure"
   | "verification_failed"
@@ -207,6 +216,10 @@ export function runForegroundIteration(
         error: `runner "${spec.runner}" failed: ${dispatch.error}`
       };
     }
+
+    const failureCode = runnerAdapterErrorToIterationCode(dispatch.code);
+    const failureMessage = `runner "${spec.runner}" failed (${dispatch.code}): ${dispatch.error}`;
+
     const currentHead = getCurrentHead(guard.repoPath);
     if (!currentHead.ok) {
       return currentHead;
@@ -229,8 +242,8 @@ export function runForegroundIteration(
     }
     return {
       ok: false,
-      code: "runner_failed",
-      error: `runner "${spec.runner}" failed: ${dispatch.error}`
+      code: failureCode,
+      error: failureMessage
     };
   }
 
@@ -432,6 +445,31 @@ function headMismatchManualRecoveryError(input: {
         : {})
     }
   };
+}
+
+function runnerAdapterErrorToIterationCode(
+  code: RunnerAdapterErrorCode
+): ForegroundIterationErrorCode {
+  switch (code) {
+    case "command_failed":
+      return "command_failed";
+    case "command_timed_out":
+      return "command_timed_out";
+    case "result_missing":
+      return "result_missing";
+    case "result_invalid":
+      return "result_invalid";
+    case "runtime_unavailable":
+      return "runtime_unavailable";
+    case "startup_failed":
+      return "startup_failed";
+    case "spawn_failed":
+      return "spawn_failed";
+    case "output_overflow":
+      return "output_overflow";
+    default:
+      return "runner_failed";
+  }
 }
 
 function getCurrentHead(

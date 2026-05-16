@@ -63,6 +63,44 @@ Apply the fixture file deterministically.
 `;
 }
 
+function makeTrustedShellFailureSpecContent(
+  repoPath: string,
+  title: string
+): string {
+  return `---
+title: ${title}
+repo: ${repoPath}
+runner: trusted-shell
+trusted_shell:
+  command: /bin/sh
+  args:
+    - -c
+    - "echo from-stdout; echo from-stderr >&2; exit 2"
+verification:
+  - true
+---
+Apply the failure fixture deterministically.
+`;
+}
+
+function makeAcpRuntimeUnavailableSpecContent(
+  repoPath: string,
+  title: string,
+  command = "/definitely-missing-acp-runtime"
+): string {
+  return `---
+title: ${title}
+repo: ${repoPath}
+runner: acp
+acp:
+  command: ${command}
+verification:
+  - true
+---
+Apply this goal via an ACP runtime that does not exist.
+`;
+}
+
 type GoalSetup = GoalInitSuccess & { dataDir: string };
 
 function setupGoal(
@@ -87,6 +125,43 @@ function setupGoal(
     throw new Error(`initGoal failed: ${init.error}`);
   }
   return { ...init, dataDir };
+}
+
+function setupAcpRuntimeUnavailableGoal(
+  repo: string,
+  title = "Logs ACP startup runtime unavailable",
+  mode: "foreground" | "queued" = "queued",
+  command: string = "/definitely-missing-acp-runtime"
+): GoalSetup {
+  const dataDir = makeTempDir("momentum-logs-data-");
+  const specDir = makeTempDir("momentum-logs-spec-");
+  const goalFile = path.join(specDir, "goal.md");
+  fs.writeFileSync(
+    goalFile,
+    makeAcpRuntimeUnavailableSpecContent(repo, title, command),
+    "utf-8"
+  );
+  const init = initGoal({
+    goalPath: goalFile,
+    dataDirOptions: { dataDir },
+    mode
+  });
+  if (!init.ok) {
+    throw new Error(`initGoal failed: ${init.error}`);
+  }
+  return { ...init, dataDir };
+}
+
+function makeStartupFailedAcpCommand(): string {
+  const commandDir = makeTempDir("momentum-logs-acp-startup-failed-");
+  const commandPath = path.join(commandDir, "acp-startup-failed.sh");
+  fs.writeFileSync(
+    commandPath,
+    "#!/bin/sh\necho should-not-run\n",
+    "utf-8"
+  );
+  fs.chmodSync(commandPath, 0o644);
+  return commandPath;
 }
 
 describe("loadGoalLogs", () => {
@@ -180,6 +255,177 @@ describe("loadGoalLogs", () => {
     expect(result.verificationLog.exists).toBe(true);
     expect(result.verificationLog.bytes).toBeGreaterThan(0);
     expect(result.verificationLog.content.length).toBeGreaterThan(0);
+  });
+
+  it("returns parse errors for malformed runner result JSON", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Malformed runner result");
+    const db = openDb(setup.dataDir);
+    try {
+      const job = executeIterationJob({
+        db,
+        goalId: setup.goalId,
+        jobId: setup.jobId,
+        spec: setup.spec,
+        artifactPaths: setup.artifactPaths
+      });
+      expect(job.ok).toBe(true);
+    } finally {
+      db.close();
+    }
+
+    fs.writeFileSync(
+      setup.artifactPaths.resultJson,
+      "{\"summary\": true",
+      "utf-8"
+    );
+    const result = loadGoalLogs({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.resultJson.exists).toBe(true);
+    expect(result.resultJson.readable).toBe(true);
+    expect(result.resultJson.parseError).toContain("Invalid runner result JSON");
+  });
+
+  it("includes command stdout and stderr in runner.log for trusted-shell command failures", () => {
+    const repo = initRepo();
+    const dataDir = makeTempDir("momentum-logs-data-");
+    const specDir = makeTempDir("momentum-logs-spec-");
+    const goalFile = path.join(specDir, "goal.md");
+    fs.writeFileSync(
+      goalFile,
+      makeTrustedShellFailureSpecContent(repo, "trusted shell command failure"),
+      "utf-8"
+    );
+    const init = initGoal({
+      goalPath: goalFile,
+      dataDirOptions: { dataDir },
+      mode: "queued"
+    });
+    if (!init.ok) {
+      throw new Error(`initGoal failed: ${init.error}`);
+    }
+
+    const db = openDb(dataDir);
+    try {
+      const job = executeIterationJob({
+        db,
+        goalId: init.goalId,
+        jobId: init.jobId,
+        spec: init.spec,
+        artifactPaths: init.artifactPaths
+      });
+      expect(job.ok).toBe(false);
+      if (job.ok) return;
+      expect(job.iteration.code).toBe("command_failed");
+    } finally {
+      db.close();
+    }
+
+    const result = loadGoalLogs({
+      goalId: init.goalId,
+      dataDirOptions: { dataDir }
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.runnerLog.readable).toBe(true);
+    expect(result.runnerLog.content).toContain("from-stdout");
+    expect(result.runnerLog.content).toContain("from-stderr");
+    expect(result.runnerLog.content).toContain("[trusted-shell] exit_code: 2");
+  });
+
+  it("surfaces runtime-unavailable startup failures from ACP in runner.log", () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const repo = initRepo();
+    const setup = setupAcpRuntimeUnavailableGoal(
+      repo,
+      "ACP runtime unavailable logs"
+    );
+
+    const db = openDb(setup.dataDir);
+    try {
+      const job = executeIterationJob({
+        db,
+        goalId: setup.goalId,
+        jobId: setup.jobId,
+        spec: setup.spec,
+        artifactPaths: setup.artifactPaths
+      });
+      expect(job.ok).toBe(false);
+      if (job.ok) return;
+      expect(job.iteration.code).toBe("runtime_unavailable");
+    } finally {
+      db.close();
+    }
+
+    const result = loadGoalLogs({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.runnerLog.readable).toBe(true);
+    expect(result.runnerLog.content).toContain("[acp] runtime_unavailable:");
+    expect(result.verificationLog.readable).toBe(true);
+    expect(result.verificationLog.content).toBe("");
+    expect(result.resultJson.exists).toBe(true);
+    expect(result.resultJson.parseError).toBeUndefined();
+  });
+
+  it("surfaces startup failures from ACP in runner.log", () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const repo = initRepo();
+    const startupFailedCommand = makeStartupFailedAcpCommand();
+
+    const setup = setupAcpRuntimeUnavailableGoal(
+      repo,
+      "ACP startup_failed logs",
+      "queued",
+      startupFailedCommand
+    );
+    const db = openDb(setup.dataDir);
+    try {
+      const job = executeIterationJob({
+        db,
+        goalId: setup.goalId,
+        jobId: setup.jobId,
+        spec: setup.spec,
+        artifactPaths: setup.artifactPaths
+      });
+      expect(job.ok).toBe(false);
+      if (job.ok) {
+        throw new Error("iteration unexpectedly succeeded");
+      }
+      expect(job.iteration.code).toBe("startup_failed");
+      expect(job.iteration.error).toContain("acp failed to start");
+    } finally {
+      db.close();
+    }
+
+    const result = loadGoalLogs({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.runnerLog.readable).toBe(true);
+    expect(result.runnerLog.content).toContain("[acp] spawn_error:");
+    expect(result.runnerLog.content).toContain("[acp] summary: startup failed");
+    expect(result.verificationLog.readable).toBe(true);
+    expect(result.verificationLog.content).toBe("");
+    expect(result.resultJson.exists).toBe(true);
+    expect(result.resultJson.parseError).toBeUndefined();
   });
 
   it("marks existing log files unreadable when content cannot be read", () => {

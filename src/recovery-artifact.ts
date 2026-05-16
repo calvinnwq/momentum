@@ -14,6 +14,16 @@ export const RECOVERY_ARTIFACT_FILENAME = "recovery.md";
  */
 export const RECOVERY_ARTIFACT_SCHEMA_VERSION = 1;
 
+export type RecoveryArtifactRunnerProfile = {
+  runner: string;
+  command?: string;
+  args?: readonly string[];
+  cwd?: "repo" | "iteration";
+  timeoutSec?: number;
+  resultFile?: string;
+  note?: string;
+};
+
 /**
  * Compact reason payload describing why a goal was routed to manual recovery.
  * `code` is the stable taxonomy string (e.g. `repo_dirty`, `repo_unknown_commit`,
@@ -33,6 +43,7 @@ export type RecoveryArtifactReason = {
  */
 export type RecoveryArtifactPathBundle = {
   iterationDir: string;
+  promptPath?: string | null;
   runnerLog: string | null;
   verificationLog: string | null;
   resultJson: string | null;
@@ -55,6 +66,7 @@ export type RecoveryArtifactInput = {
   expectedCommit: string | null;
   currentCommit: string | null;
   reason: RecoveryArtifactReason;
+  runnerProfile?: RecoveryArtifactRunnerProfile;
   artifactPaths: RecoveryArtifactPathBundle;
   safeNextSteps: readonly string[];
   classifiedAt: number;
@@ -109,6 +121,29 @@ export function buildRecoveryMarkdown(input: RecoveryArtifactInput): string {
   lines.push(`- Message: ${input.reason.message}`);
   lines.push("");
 
+  lines.push("## Runner/profile summary");
+  const runnerProfile = input.runnerProfile ?? { runner: "unknown" };
+  lines.push(`- Runner: ${runnerProfile.runner}`);
+  if (runnerProfile.command !== undefined && runnerProfile.command.length > 0) {
+    lines.push(`- Command: ${runnerProfile.command}`);
+  }
+  if (runnerProfile.args !== undefined && runnerProfile.args.length > 0) {
+    lines.push(`- Args: ${runnerProfile.args.join(" ")}`);
+  }
+  if (runnerProfile.cwd !== undefined) {
+    lines.push(`- CWD: ${runnerProfile.cwd}`);
+  }
+  if (runnerProfile.timeoutSec !== undefined) {
+    lines.push(`- Timeout (sec): ${runnerProfile.timeoutSec}`);
+  }
+  if (runnerProfile.resultFile !== undefined && runnerProfile.resultFile.length > 0) {
+    lines.push(`- Result file: ${runnerProfile.resultFile}`);
+  }
+  if (runnerProfile.note !== undefined && runnerProfile.note.length > 0) {
+    lines.push(`- Note: ${runnerProfile.note}`);
+  }
+  lines.push("");
+
   lines.push("## Commit pointers");
   lines.push(
     `- Expected (pre-iteration) commit: ${input.expectedCommit ?? "(unknown)"}`
@@ -118,6 +153,7 @@ export function buildRecoveryMarkdown(input: RecoveryArtifactInput): string {
 
   lines.push("## Relevant artifacts");
   lines.push(`- Iteration dir: ${input.artifactPaths.iterationDir}`);
+  lines.push(`- Prompt: ${input.artifactPaths.promptPath ?? "(none)"}`);
   lines.push(`- Runner log: ${input.artifactPaths.runnerLog ?? "(none)"}`);
   lines.push(
     `- Verification log: ${input.artifactPaths.verificationLog ?? "(none)"}`
