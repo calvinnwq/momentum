@@ -572,8 +572,14 @@ function renderHandoffMarkdown(data: HandoffData): string {
   lines.push(
     `- verification.log (${existsMark(data.artifactFiles.verificationLog)}): ${data.artifactPaths.verificationLog}`
   );
+  if (
+    data.latestJob?.resultPath &&
+    data.latestJob.resultPath !== data.artifactPaths.resultJson
+  ) {
+    lines.push(`- runner result (latest job): ${data.latestJob.resultPath}`);
+  }
   lines.push(
-    `- result.json (${existsMark(data.artifactFiles.resultJson)}): ${data.artifactPaths.resultJson}`
+    `- result.json (${existsMark(data.artifactFiles.resultJson)}): ${data.artifactPaths.resultJson} (default placeholder)`
   );
   lines.push("");
 

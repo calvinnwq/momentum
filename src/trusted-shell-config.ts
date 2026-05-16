@@ -115,8 +115,10 @@ function parseStringArray(
     return { ok: true, value: [] };
   }
   if (!Array.isArray(raw)) {
+    const valueDescription =
+      field === "args" ? "strings or numbers" : "strings";
     return invalidError(
-      `\`trusted_shell.${field}\` must be an array of strings.`
+      `\`trusted_shell.${field}\` must be an array of ${valueDescription}.`
     );
   }
   const out: string[] = [];
@@ -127,8 +129,10 @@ function parseStringArray(
     } else if (typeof entry === "number") {
       out.push(String(entry));
     } else {
+      const valueDescription =
+        field === "args" ? "a string or number" : "a string";
       return invalidError(
-        `\`trusted_shell.${field}[${i}]\` must be a string.`
+        `\`trusted_shell.${field}[${i}]\` must be ${valueDescription}.`
       );
     }
   }
