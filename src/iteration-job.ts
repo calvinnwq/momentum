@@ -244,7 +244,7 @@ function recordManualRecoveryIfNeeded(input: {
   }
 }
 
-function buildRunnerProfileSummary(
+export function buildRunnerProfileSummary(
   spec: GoalSpec
 ): {
   runner: string;

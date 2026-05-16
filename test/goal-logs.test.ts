@@ -377,7 +377,7 @@ describe("loadGoalLogs", () => {
     expect(result.verificationLog.readable).toBe(true);
     expect(result.verificationLog.content).toBe("");
     expect(result.resultJson.exists).toBe(true);
-    expect(result.resultJson.parseError).toContain("Runner result `success`");
+    expect(result.resultJson.parseError).toBeUndefined();
   });
 
   it("surfaces startup failures from ACP in runner.log", () => {
@@ -425,7 +425,7 @@ describe("loadGoalLogs", () => {
     expect(result.verificationLog.readable).toBe(true);
     expect(result.verificationLog.content).toBe("");
     expect(result.resultJson.exists).toBe(true);
-    expect(result.resultJson.parseError).toContain("Runner result `success`");
+    expect(result.resultJson.parseError).toBeUndefined();
   });
 
   it("marks existing log files unreadable when content cannot be read", () => {

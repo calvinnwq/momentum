@@ -214,6 +214,10 @@ function readResultJsonFile(filePath: string): GoalLogFile {
   if (!file.exists || !file.readable) {
     return file;
   }
+  const trimmed = file.content.trim();
+  if (trimmed.length === 0 || trimmed === "{}") {
+    return file;
+  }
   const parsed = parseRunnerResult(file.content);
   if (parsed.ok) {
     return file;
