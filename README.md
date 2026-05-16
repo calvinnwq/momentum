@@ -258,7 +258,11 @@ Parses the goal spec and initializes (or resumes) goal state under the resolved 
       "path": null,
       "policyNotes": "",
       "config": { "runner": null, "verification": null, "verificationTimeoutSec": null },
-      "effective": { "verification": [], "verificationTimeoutSec": 900, "source": "builtin_default" }
+      "effective": {
+        "verification": [],
+        "verificationTimeoutSec": 900,
+        "source": { "verification": "builtin_default", "verificationTimeoutSec": "builtin_default" }
+      }
     },
     "nextAction": "Goal queued. Run `momentum worker run --data-dir <path>` to claim and execute one goal_iteration job."
   }
@@ -310,7 +314,11 @@ Parses the goal spec and initializes (or resumes) goal state under the resolved 
       "path": null,
       "policyNotes": "",
       "config": { "runner": null, "verification": null, "verificationTimeoutSec": null },
-      "effective": { "verification": [], "verificationTimeoutSec": 900, "source": "builtin_default" }
+      "effective": {
+        "verification": [],
+        "verificationTimeoutSec": 900,
+        "source": { "verification": "builtin_default", "verificationTimeoutSec": "builtin_default" }
+      }
     }
   }
   ```
