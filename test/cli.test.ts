@@ -181,7 +181,7 @@ describe("momentum CLI scaffold", () => {
           kind: "trusted-shell",
           name: "trusted-shell",
           description:
-            "Operator-trusted shell runner; executes the goal-configured shell command with no sandbox and no privilege drop. The command has full privileges of the Momentum invoker.",
+            "Operator-trusted executable-plus-argv runner; executes the goal-configured command with no implicit shell, no sandbox, and no privilege drop. The command has full privileges of the Momentum invoker.",
           executes: true
         }
       ]
