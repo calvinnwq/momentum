@@ -8,6 +8,7 @@ import {
 import { resolveDataDir, type DataDirOptions } from "./data-dir.js";
 import { openDb, type MomentumDb } from "./db.js";
 import { getGoal, type GoalRow } from "./goal-init.js";
+import { parseRunnerResult } from "./runner-result.js";
 
 export type GoalLogsErrorCode =
   | "invalid_input"
@@ -29,6 +30,7 @@ export type GoalLogFile = {
   bytes: number;
   content: string;
   error?: string;
+  parseError?: string;
 };
 
 export type GoalLogsSuccess = {
@@ -42,6 +44,7 @@ export type GoalLogsSuccess = {
   artifactPaths: GoalArtifactPaths;
   runnerLog: GoalLogFile;
   verificationLog: GoalLogFile;
+  resultJson: GoalLogFile;
 };
 
 export type GoalLogsResult = GoalLogsError | GoalLogsSuccess;
@@ -137,7 +140,8 @@ export function loadGoalLogs(input: LoadGoalLogsInput = {}): GoalLogsResult {
       iterationDir: artifactPaths.iterationDir,
       artifactPaths,
       runnerLog: readLogFile(artifactPaths.runnerLog),
-      verificationLog: readLogFile(artifactPaths.verificationLog)
+      verificationLog: readLogFile(artifactPaths.verificationLog),
+      resultJson: readResultJsonFile(artifactPaths.resultJson)
     };
   } finally {
     db?.close();
@@ -203,4 +207,19 @@ function readLogFile(filePath: string): GoalLogFile {
     };
   }
   return { path: filePath, exists: true, readable: true, bytes: stat.size, content };
+}
+
+function readResultJsonFile(filePath: string): GoalLogFile {
+  const file = readLogFile(filePath);
+  if (!file.exists || !file.readable) {
+    return file;
+  }
+  const parsed = parseRunnerResult(file.content);
+  if (parsed.ok) {
+    return file;
+  }
+  return {
+    ...file,
+    parseError: parsed.error
+  };
 }

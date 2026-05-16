@@ -522,6 +522,18 @@ describe("runWorkerOnce", () => {
       expect(fs.readFileSync(recoveryPath, "utf-8")).toContain(
         "runner_changed_head"
       );
+      const recoveryContents = fs.readFileSync(recoveryPath, "utf-8");
+      expect(recoveryContents).toContain("## Runner/profile summary");
+      expect(recoveryContents).toContain("- Runner: trusted-shell");
+      expect(recoveryContents).toContain("- Command: /bin/sh");
+      expect(recoveryContents).toContain("- Args: -c");
+      expect(recoveryContents).toContain("- CWD: repo");
+      expect(recoveryContents).toContain("- Timeout (sec): 900");
+      expect(recoveryContents).toContain("- Result file: result.json");
+      expect(recoveryContents).toContain("- Prompt:");
+      expect(recoveryContents).toContain(
+        path.join(seed.dataDir, "goals", seed.goalId, "iterations", "1", "prompt.md")
+      );
 
       const lock = db
         .prepare(

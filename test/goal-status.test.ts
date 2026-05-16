@@ -70,6 +70,61 @@ Apply the fixture file deterministically.
 `;
 }
 
+function makeTrustedShellTimeoutSpecContent(repoPath: string, title: string): string {
+  return `---
+title: ${title}
+repo: ${repoPath}
+runner: trusted-shell
+trusted_shell:
+  command: /bin/sh
+  args:
+    - -c
+    - "sleep 5"
+  timeout_sec: 1
+verification:
+  - true
+---
+Apply the fixture file via trusted-shell, but timeout before writing result.
+`;
+}
+
+function makeTrustedShellSpawnFailedSpecContent(
+  repoPath: string,
+  title: string,
+  command = "/definitely-missing-trusted-shell"
+): string {
+  return `---
+title: ${title}
+repo: ${repoPath}
+runner: trusted-shell
+trusted_shell:
+  command: ${command}
+  args: []
+verification:
+  - true
+---
+Apply this goal via trusted-shell with a missing executable.
+`;
+}
+
+function makeAcpRuntimeUnavailableSpecContent(
+  repoPath: string,
+  title: string,
+  command = "/definitely-missing-acp-runtime"
+): string {
+  return `---
+title: ${title}
+repo: ${repoPath}
+runner: acp
+acp:
+  command: ${command}
+verification:
+  - true
+---
+Apply the fixture file via ACP runtime, but runtime is missing.
+`;
+}
+
 type GoalSetup = GoalInitSuccess & { dataDir: string };
 
 type SetupOptions = {
@@ -114,6 +169,146 @@ function setupGoalInDataDir(
     throw new Error(`initGoal failed: ${init.error}`);
   }
   return { ...init, dataDir };
+}
+
+function setupTrustedShellTimeoutGoal(repo: string, title = "Status trusted-shell timeout"): GoalSetup {
+  const dataDir = makeTempDir("momentum-status-data-");
+  const specDir = makeTempDir("momentum-status-spec-");
+  const goalFile = path.join(specDir, "goal.md");
+  fs.writeFileSync(
+    goalFile,
+    makeTrustedShellTimeoutSpecContent(repo, title),
+    "utf-8"
+  );
+  const init = initGoal({
+    goalPath: goalFile,
+    dataDirOptions: { dataDir },
+    mode: "queued"
+  });
+  if (!init.ok) {
+    throw new Error(`initGoal failed: ${init.error}`);
+  }
+  return { ...init, dataDir };
+}
+
+function setupTrustedShellSpawnFailedGoal(
+  repo: string,
+  title = "Status trusted-shell spawn_failed",
+  command = "/definitely-missing-trusted-shell",
+  mode: "foreground" | "queued" = "queued"
+): GoalSetup {
+  const dataDir = makeTempDir("momentum-status-data-");
+  const specDir = makeTempDir("momentum-status-spec-");
+  const goalFile = path.join(specDir, "goal.md");
+  fs.writeFileSync(
+    goalFile,
+    makeTrustedShellSpawnFailedSpecContent(repo, title, command),
+    "utf-8"
+  );
+  const init = initGoal({
+    goalPath: goalFile,
+    dataDirOptions: { dataDir },
+    mode
+  });
+  if (!init.ok) {
+    throw new Error(`initGoal failed: ${init.error}`);
+  }
+  return { ...init, dataDir };
+}
+
+function setupAcpRuntimeUnavailableGoal(repo: string, title = "Status ACP startup runtime unavailable"): GoalSetup {
+  const dataDir = makeTempDir("momentum-status-data-");
+  const specDir = makeTempDir("momentum-status-spec-");
+  const goalFile = path.join(specDir, "goal.md");
+  fs.writeFileSync(
+    goalFile,
+    makeAcpRuntimeUnavailableSpecContent(repo, title),
+    "utf-8"
+  );
+  const init = initGoal({
+    goalPath: goalFile,
+    dataDirOptions: { dataDir },
+    mode: "queued"
+  });
+  if (!init.ok) {
+    throw new Error(`initGoal failed: ${init.error}`);
+  }
+  return { ...init, dataDir };
+}
+
+function setupAcpStartupFailedGoal(
+  repo: string,
+  title: string,
+  command: string,
+  mode: "foreground" | "queued" = "queued"
+): GoalSetup {
+  const dataDir = makeTempDir("momentum-status-data-");
+  const specDir = makeTempDir("momentum-status-spec-");
+  const goalFile = path.join(specDir, "goal.md");
+  fs.writeFileSync(
+    goalFile,
+    makeAcpRuntimeUnavailableSpecContent(repo, title, command),
+    "utf-8"
+  );
+  const init = initGoal({
+    goalPath: goalFile,
+    dataDirOptions: { dataDir },
+    mode
+  });
+  if (!init.ok) {
+    throw new Error(`initGoal failed: ${init.error}`);
+  }
+  return { ...init, dataDir };
+}
+
+function setupTrustedShellResultStateGoal(
+  repo: string,
+  title: string,
+  mode: "foreground" | "queued",
+  script: string
+): GoalSetup {
+  const dataDir = makeTempDir("momentum-status-data-");
+  const specDir = makeTempDir("momentum-status-spec-");
+  const goalFile = path.join(specDir, "goal.md");
+  fs.writeFileSync(
+    goalFile,
+    `---
+title: ${title}
+repo: ${repo}
+runner: trusted-shell
+trusted_shell:
+  command: /bin/sh
+  args:
+    - -c
+    - "${script}"
+verification:
+  - true
+---
+Apply this goal via trusted-shell and exercise result handling.
+`,
+    "utf-8"
+  );
+  const init = initGoal({
+    goalPath: goalFile,
+    dataDirOptions: { dataDir },
+    mode
+  });
+  if (!init.ok) {
+    throw new Error(`initGoal failed: ${init.error}`);
+  }
+  return { ...init, dataDir };
+}
+
+function makeStartupFailedAcpCommand(): string {
+  const commandDir = makeTempDir("momentum-status-acp-startup-failed-");
+  const commandPath = path.join(commandDir, "acp-startup-failed.sh");
+  fs.writeFileSync(
+    commandPath,
+    "#!/bin/sh\necho should-not-run\n",
+    "utf-8"
+  );
+  fs.chmodSync(commandPath, 0o644);
+  return commandPath;
 }
 
 describe("loadGoalStatus", () => {
@@ -286,6 +481,81 @@ describe("loadGoalStatus", () => {
     expect(status.latestJob?.errorPath).toBe(setup.artifactPaths.verificationLog);
   });
 
+  it("preserves adapter timeout failure code in status --json", () => {
+    const repo = initRepo();
+    const setup = setupTrustedShellTimeoutGoal(repo);
+
+    const db = openDb(setup.dataDir);
+    try {
+      const job = executeIterationJob({
+        db,
+        goalId: setup.goalId,
+        jobId: setup.jobId,
+        spec: setup.spec,
+        artifactPaths: setup.artifactPaths
+      });
+      expect(job.ok).toBe(false);
+    } finally {
+      db.close();
+    }
+
+    const status = loadGoalStatus({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+
+    expect(status.ok).toBe(true);
+    if (!status.ok) return;
+
+    expect(status.state).toBe("failed");
+    expect(status.iteration).not.toBeNull();
+    expect(status.iteration?.failure).not.toBeNull();
+    expect(status.iteration?.failure?.code).toBe("command_timed_out");
+    expect(status.iteration?.failure?.error).toContain("command timed out");
+    expect(status.latestJob?.errorPath).toBe(setup.artifactPaths.runnerLog);
+    expect(status.artifactFiles.runnerLog).toBe(true);
+  });
+
+  it("preserves adapter runtime-unavailable startup failure in status --json", () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const repo = initRepo();
+    const setup = setupAcpRuntimeUnavailableGoal(repo);
+
+    const db = openDb(setup.dataDir);
+    try {
+      const job = executeIterationJob({
+        db,
+        goalId: setup.goalId,
+        jobId: setup.jobId,
+        spec: setup.spec,
+        artifactPaths: setup.artifactPaths
+      });
+      expect(job.ok).toBe(false);
+      if (job.ok) return;
+      expect(job.iteration.code).toBe("runtime_unavailable");
+    } finally {
+      db.close();
+    }
+
+    const status = loadGoalStatus({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+
+    expect(status.ok).toBe(true);
+    if (!status.ok) return;
+
+    expect(status.state).toBe("failed");
+    expect(status.iteration).not.toBeNull();
+    expect(status.iteration?.failure?.code).toBe("runtime_unavailable");
+    expect(status.iteration?.failure?.error).toContain("runtime_unavailable");
+    expect(status.latestJob?.errorPath).toBe(setup.artifactPaths.runnerLog);
+    expect(status.artifactFiles.runnerLog).toBe(true);
+    expect(status.artifacts.runnerLog.path).toBe(setup.artifactPaths.runnerLog);
+  });
+
   it("reports null result/error paths for a pending job that has not yet executed", () => {
     const repo = initRepo();
     const setup = setupGoal(repo, "Status pending paths");
@@ -300,6 +570,188 @@ describe("loadGoalStatus", () => {
     expect(result.latestJob?.state).toBe("pending");
     expect(result.latestJob?.resultPath).toBeNull();
     expect(result.latestJob?.errorPath).toBeNull();
+  });
+
+  it("preserves adapter startup_failed in status --json", () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const repo = initRepo();
+    const startupFailedCommand = makeStartupFailedAcpCommand();
+
+    const setup = setupAcpStartupFailedGoal(
+      repo,
+      "Status ACP startup_failed",
+      startupFailedCommand
+    );
+
+    const db = openDb(setup.dataDir);
+    try {
+      const job = executeIterationJob({
+        db,
+        goalId: setup.goalId,
+        jobId: setup.jobId,
+        spec: setup.spec,
+        artifactPaths: setup.artifactPaths
+      });
+      expect(job.ok).toBe(false);
+      if (job.ok) {
+        throw new Error("iteration unexpectedly succeeded");
+      }
+      expect(job.iteration.code).toBe("startup_failed");
+      expect(job.iteration.error).toContain("acp failed to start");
+    } finally {
+      db.close();
+    }
+
+    const status = loadGoalStatus({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+    expect(status.ok).toBe(true);
+    if (!status.ok) return;
+
+    expect(status.state).toBe("failed");
+    expect(status.iteration).not.toBeNull();
+    expect(status.iteration?.failure).not.toBeNull();
+    expect(status.iteration?.failure?.code).toBe("startup_failed");
+    expect(status.iteration?.failure?.error).toContain("acp failed to start");
+    expect(status.latestJob?.errorPath).toBe(setup.artifactPaths.runnerLog);
+  });
+
+  it("preserves adapter spawn_failed in status --json", () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const repo = initRepo();
+    const setup = setupTrustedShellSpawnFailedGoal(
+      repo,
+      "Status trusted-shell spawn_failed"
+    );
+
+    const db = openDb(setup.dataDir);
+    try {
+      const job = executeIterationJob({
+        db,
+        goalId: setup.goalId,
+        jobId: setup.jobId,
+        spec: setup.spec,
+        artifactPaths: setup.artifactPaths
+      });
+      expect(job.ok).toBe(false);
+      if (job.ok) {
+        throw new Error("iteration unexpectedly succeeded");
+      }
+      expect(job.iteration.code).toBe("spawn_failed");
+      expect(job.iteration.error).toContain("trusted-shell failed to spawn");
+    } finally {
+      db.close();
+    }
+
+    const status = loadGoalStatus({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+    expect(status.ok).toBe(true);
+    if (!status.ok) return;
+
+    expect(status.state).toBe("failed");
+    expect(status.iteration).not.toBeNull();
+    expect(status.iteration?.failure).not.toBeNull();
+    expect(status.iteration?.failure?.code).toBe("spawn_failed");
+    expect(status.iteration?.failure?.error).toContain("trusted-shell failed to spawn");
+    expect(status.latestJob?.errorPath).toBe(setup.artifactPaths.runnerLog);
+    expect(status.artifactFiles.runnerLog).toBe(true);
+    expect(status.artifacts.runnerLog.path).toBe(setup.artifactPaths.runnerLog);
+  });
+
+  it("preserves adapter result_missing in status --json", () => {
+    const repo = initRepo();
+    const setup = setupTrustedShellResultStateGoal(
+      repo,
+      "Status trusted-shell result_missing",
+      "queued",
+      "exit 0"
+    );
+    fs.rmSync(setup.artifactPaths.resultJson, { force: true });
+
+    const db = openDb(setup.dataDir);
+    try {
+      const job = executeIterationJob({
+        db,
+        goalId: setup.goalId,
+        jobId: setup.jobId,
+        spec: setup.spec,
+        artifactPaths: setup.artifactPaths
+      });
+      expect(job.ok).toBe(false);
+      if (job.ok) {
+        throw new Error("iteration unexpectedly succeeded");
+      }
+      expect(job.iteration.code).toBe("result_missing");
+      expect(job.iteration.error).toContain("result file was not written");
+    } finally {
+      db.close();
+    }
+
+    const status = loadGoalStatus({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+    expect(status.ok).toBe(true);
+    if (!status.ok) return;
+
+    expect(status.state).toBe("failed");
+    expect(status.iteration).not.toBeNull();
+    expect(status.iteration?.failure).not.toBeNull();
+    expect(status.iteration?.failure?.code).toBe("result_missing");
+    expect(status.iteration?.failure?.error).toContain("result file was not written");
+    expect(status.latestJob?.errorPath).toBe(setup.artifactPaths.runnerLog);
+    expect(status.artifactFiles.resultJson).toBe(false);
+  });
+
+  it("preserves adapter result_invalid in status --json", () => {
+    const repo = initRepo();
+    const setup = setupTrustedShellResultStateGoal(
+      repo,
+      "Status trusted-shell result_invalid",
+      "queued",
+      "printf 'not json' > \"$MOMENTUM_RESULT_PATH\"; exit 0"
+    );
+
+    const db = openDb(setup.dataDir);
+    try {
+      const job = executeIterationJob({
+        db,
+        goalId: setup.goalId,
+        jobId: setup.jobId,
+        spec: setup.spec,
+        artifactPaths: setup.artifactPaths
+      });
+      expect(job.ok).toBe(false);
+      if (job.ok) {
+        throw new Error("iteration unexpectedly succeeded");
+      }
+      expect(job.iteration.code).toBe("result_invalid");
+      expect(job.iteration.error).toContain("result JSON is invalid");
+    } finally {
+      db.close();
+    }
+
+    const status = loadGoalStatus({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+    expect(status.ok).toBe(true);
+    if (!status.ok) return;
+
+    expect(status.state).toBe("failed");
+    expect(status.iteration).not.toBeNull();
+    expect(status.iteration?.failure).not.toBeNull();
+    expect(status.iteration?.failure?.code).toBe("result_invalid");
+    expect(status.iteration?.failure?.error).toContain("result JSON is invalid");
+    expect(status.latestJob?.errorPath).toBe(setup.artifactPaths.runnerLog);
+    expect(status.artifactFiles.resultJson).toBe(true);
   });
 
   it("reports null reducer and a queued next-action hint before the worker runs", () => {
@@ -1194,6 +1646,7 @@ describe("loadGoalStatus", () => {
           },
           artifactPaths: {
             iterationDir: setup.artifactPaths.iterationDir,
+            promptPath: setup.artifactPaths.promptMd,
             runnerLog: setup.artifactPaths.runnerLog,
             verificationLog: setup.artifactPaths.verificationLog,
             resultJson: setup.artifactPaths.resultJson

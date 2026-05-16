@@ -3440,6 +3440,7 @@ describe("Milestone 3 daemon drain end-to-end smoke (NGX-278)", () => {
           },
           artifactPaths: {
             iterationDir,
+            promptPath: path.join(iterationDir, "prompt.md"),
             runnerLog: null,
             verificationLog: null,
             resultJson: null

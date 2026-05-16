@@ -150,7 +150,7 @@ describe("runForegroundIteration with trusted-shell", () => {
     expect(parsed.ok).toBe(true);
   });
 
-  it("resets the repo and surfaces runner_failed when the shell exits non-zero after dirtying the repo", () => {
+  it("surfaces command_failed and resets when the shell exits non-zero after dirtying the repo", () => {
     const repo = initRepo();
     const artifactPaths = setupArtifacts();
     const dirtyPath = path.join(repo, "half-done.txt");
@@ -174,7 +174,7 @@ describe("runForegroundIteration with trusted-shell", () => {
 
     expect(out.ok).toBe(false);
     if (out.ok) return;
-    expect(out.code).toBe("runner_failed");
+    expect(out.code).toBe("command_failed");
     expect(out.error).toContain("17");
 
     const head = runGit(repo, ["rev-parse", "HEAD"]).trim();
@@ -269,7 +269,7 @@ describe("runForegroundIteration with trusted-shell", () => {
     }
   });
 
-  it("surfaces runner_failed and resets when the shell times out", () => {
+  it("surfaces command_timed_out and resets when the shell times out", () => {
     const repo = initRepo();
     const artifactPaths = setupArtifacts();
     const dirtyPath = path.join(repo, "before-timeout.txt");
@@ -296,7 +296,7 @@ describe("runForegroundIteration with trusted-shell", () => {
 
     expect(out.ok).toBe(false);
     if (out.ok) return;
-    expect(out.code).toBe("runner_failed");
+    expect(out.code).toBe("command_timed_out");
     expect(out.error).toContain("timed out");
 
     const head = runGit(repo, ["rev-parse", "HEAD"]).trim();
@@ -308,7 +308,7 @@ describe("runForegroundIteration with trusted-shell", () => {
     expect(log).toContain("[trusted-shell] result: timed_out");
   });
 
-  it("surfaces runner_failed and resets when the shell exits 0 but never writes result.json", () => {
+  it("surfaces result_missing and resets when the shell exits 0 but never writes result.json", () => {
     const repo = initRepo();
     const artifactPaths = setupArtifacts();
     fs.rmSync(artifactPaths.resultJson, { force: true });
@@ -332,7 +332,7 @@ describe("runForegroundIteration with trusted-shell", () => {
 
     expect(out.ok).toBe(false);
     if (out.ok) return;
-    expect(out.code).toBe("runner_failed");
+    expect(out.code).toBe("result_missing");
     expect(out.error).toContain("result file");
 
     const head = runGit(repo, ["rev-parse", "HEAD"]).trim();
@@ -343,7 +343,7 @@ describe("runForegroundIteration with trusted-shell", () => {
     expect(log).toContain("[trusted-shell] result_missing:");
   });
 
-  it("surfaces runner_failed and resets when the result file is malformed JSON", () => {
+  it("surfaces result_invalid and resets when the result file is malformed JSON", () => {
     const repo = initRepo();
     const artifactPaths = setupArtifacts();
     const resultPath = artifactPaths.resultJson;
@@ -367,7 +367,7 @@ describe("runForegroundIteration with trusted-shell", () => {
 
     expect(out.ok).toBe(false);
     if (out.ok) return;
-    expect(out.code).toBe("runner_failed");
+    expect(out.code).toBe("result_invalid");
     expect(out.error).toContain("invalid");
 
     const head = runGit(repo, ["rev-parse", "HEAD"]).trim();

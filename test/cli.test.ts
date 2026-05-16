@@ -20,6 +20,24 @@ verification:
 Goal body.
 `;
 
+function makeTrustedShellHeadMovedFailureSpecContent(
+  repoPath: string,
+  title = "CLI Trusted Shell Manual Recovery Goal"
+): string {
+  return `---
+title: ${title}
+repo: ${repoPath}
+runner: trusted-shell
+verification:
+  - true
+trusted_shell:
+  command: /bin/sh
+  args: [-c, echo "runner-created commit" > "$MOMENTUM_REPO_PATH/runner-created.txt"; git -C "$MOMENTUM_REPO_PATH" add runner-created.txt; git -C "$MOMENTUM_REPO_PATH" commit -m "runner commit before failure" --quiet; exit 17]
+---
+Runner changes HEAD before failing; this forces manual recovery for real-runner safety.
+`;
+}
+
 const FAILING_GOAL_SPEC = `---
 title: Failing CLI Goal
 runner: fake
@@ -194,6 +212,47 @@ describe("momentum CLI scaffold", () => {
       ]
     });
     expect(result.stderr).toBe("");
+  });
+
+  it("doctor --json counts goals needing manual recovery from real-runner state", async () => {
+    const dataDir = makeTempDir("momentum-cli-doctor-recovery-");
+    const repo = initRepo();
+    const goalFile = path.join(dataDir, "goal.md");
+    fs.writeFileSync(
+      goalFile,
+      makeTrustedShellHeadMovedFailureSpecContent(
+        repo,
+        "Doctor CLI real-runner recovery"
+      ),
+      "utf-8"
+    );
+
+    const goalRun = await run([
+      "goal", "start",
+      goalFile,
+      "--foreground",
+      "--repo", repo,
+      "--data-dir", dataDir
+    ]);
+
+    expect(goalRun.code).not.toBe(0);
+
+    const jsonResult = await run([
+      "doctor",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(jsonResult.code).toBe(0);
+    const payload = JSON.parse(jsonResult.stdout) as Record<string, unknown>;
+    const daemon = payload["daemon"] as Record<string, unknown>;
+    expect(daemon["goalsNeedingRecoveryCount"]).toBe(1);
+
+    const textResult = await run([
+      "doctor",
+      "--data-dir", dataDir
+    ]);
+    expect(textResult.code).toBe(0);
+    expect(textResult.stdout).toContain("goals needing manual recovery: 1");
   });
 
   it("doctor --json surfaces MOMENTUM.md policy when --repo points at a repo with a policy file", async () => {
@@ -1395,6 +1454,41 @@ runner_profile: {
     expect(logsResult.stderr).toBe("");
   });
 
+  it("logs --json includes parse errors for malformed runner.result.json", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+
+    const startResult = await run([
+      "goal", "start", goalFile,
+      "--foreground",
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    const startPayload = JSON.parse(startResult.stdout) as Record<string, unknown>;
+    const goalId = startPayload["goalId"] as string;
+    const resultJsonPath = path.join(
+      dataDir,
+      "goals",
+      goalId,
+      "iterations",
+      "1",
+      "result.json"
+    );
+    fs.writeFileSync(resultJsonPath, "{\"summary\":", "utf-8");
+
+    const logsResult = await run([
+      "logs", goalId, "--data-dir", dataDir, "--json"
+    ]);
+
+    expect(logsResult.code).toBe(0);
+    const payload = JSON.parse(logsResult.stdout) as Record<string, unknown>;
+    const resultJson = payload["resultJson"] as Record<string, unknown>;
+    expect(resultJson).toBeDefined();
+    expect(resultJson["exists"]).toBe(true);
+    expect(resultJson["parseError"]).toContain("Invalid runner result JSON");
+    expect(logsResult.stderr).toBe("");
+  });
+
   it("logs --iteration returns iteration_not_found for an unknown iteration", async () => {
     const { dataDir, goalFile, repo } = setupGoalAndData();
 
@@ -1452,6 +1546,7 @@ runner_profile: {
     expect(result.stdout).toContain("Available iterations: 1");
     expect(result.stdout).toContain("## runner.log");
     expect(result.stdout).toContain("## verification.log");
+    expect(result.stdout).toContain("## result.json");
     expect(result.stderr).toBe("");
   });
 
@@ -2115,6 +2210,7 @@ Goal body.
           reason: { code: "repo_dirty", message: "uncommitted changes" },
           artifactPaths: {
             iterationDir: "/tmp/test/iterations/1",
+            promptPath: "/tmp/test/iterations/1/prompt.md",
             runnerLog: null,
             verificationLog: null,
             resultJson: null

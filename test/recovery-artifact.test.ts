@@ -42,8 +42,17 @@ function makeFullInput(overrides: Partial<RecoveryArtifactInput> = {}): Recovery
       code: "repo_dirty",
       message: "Uncommitted changes detected during stale claim recovery."
     },
+    runnerProfile: {
+      runner: "trusted-shell",
+      command: "/bin/sh",
+      args: ["-c", "echo hi"],
+      cwd: "repo",
+      timeoutSec: 900,
+      resultFile: "result.json"
+    },
     artifactPaths: {
       iterationDir: "/tmp/data/goals/goal-abc/iterations/3",
+      promptPath: "/tmp/data/goals/goal-abc/iterations/3/prompt.md",
       runnerLog: "/tmp/data/goals/goal-abc/iterations/3/runner.log",
       verificationLog:
         "/tmp/data/goals/goal-abc/iterations/3/verification.log",
@@ -75,12 +84,22 @@ describe("recovery-artifact", () => {
     expect(md).toContain(
       "- Message: Uncommitted changes detected during stale claim recovery."
     );
+    expect(md).toContain("## Runner/profile summary");
+    expect(md).toContain("- Runner: trusted-shell");
+    expect(md).toContain("- Command: /bin/sh");
+    expect(md).toContain("- Args: -c echo hi");
+    expect(md).toContain("- CWD: repo");
+    expect(md).toContain("- Timeout (sec): 900");
+    expect(md).toContain("- Result file: result.json");
     expect(md).toContain("## Commit pointers");
     expect(md).toContain("- Expected (pre-iteration) commit: aaaaaaa");
     expect(md).toContain("- Current commit: bbbbbbb");
     expect(md).toContain("## Relevant artifacts");
     expect(md).toContain(
       "- Iteration dir: /tmp/data/goals/goal-abc/iterations/3"
+    );
+    expect(md).toContain(
+      "- Prompt: /tmp/data/goals/goal-abc/iterations/3/prompt.md"
     );
     expect(md).toContain(
       "- Runner log: /tmp/data/goals/goal-abc/iterations/3/runner.log"
@@ -107,6 +126,7 @@ describe("recovery-artifact", () => {
         currentCommit: null,
         artifactPaths: {
           iterationDir: "/tmp/iter",
+          promptPath: "/tmp/iter/prompt.md",
           runnerLog: null,
           verificationLog: null,
           resultJson: null

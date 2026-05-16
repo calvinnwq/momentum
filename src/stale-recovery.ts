@@ -723,6 +723,7 @@ function maybeWriteRecoveryArtifact(
   const paths = resolveGoalArtifactPaths(dataDir, job.goal_id, job.iteration);
   const artifactPaths: RecoveryArtifactPathBundle = {
     iterationDir: paths.iterationDir,
+    promptPath: fs.existsSync(paths.promptMd) ? paths.promptMd : null,
     runnerLog: fs.existsSync(paths.runnerLog) ? paths.runnerLog : null,
     verificationLog: fs.existsSync(paths.verificationLog)
       ? paths.verificationLog
@@ -743,6 +744,9 @@ function maybeWriteRecoveryArtifact(
         expectedCommit,
         currentCommit,
         reason,
+        runnerProfile: {
+          runner: goal?.runner ?? "unknown"
+        },
         artifactPaths,
         safeNextSteps: safeNextStepsForSkip(skip.reason, repoPath),
         classifiedAt: now

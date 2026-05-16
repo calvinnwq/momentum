@@ -332,6 +332,7 @@ describe("loadDaemonStatus goals needing manual recovery", () => {
           reason: { code: "repo_dirty", message: "uncommitted changes" },
           artifactPaths: {
             iterationDir: "/tmp/test/iterations/1",
+            promptPath: "/tmp/test/iterations/1/prompt.md",
             runnerLog: null,
             verificationLog: null,
             resultJson: null
@@ -354,6 +355,7 @@ describe("loadDaemonStatus goals needing manual recovery", () => {
           reason: { code: "repo_dirty", message: "uncommitted changes" },
           artifactPaths: {
             iterationDir: "/tmp/test/iterations/1",
+            promptPath: "/tmp/test/iterations/1/prompt.md",
             runnerLog: null,
             verificationLog: null,
             resultJson: null
@@ -432,6 +434,7 @@ describe("loadDaemonStatus goals needing manual recovery", () => {
             reason: { code: "repo_dirty", message: "dirty" },
             artifactPaths: {
               iterationDir: `/tmp/test/${goalId}/iterations/1`,
+              promptPath: `/tmp/test/${goalId}/iterations/1/prompt.md`,
               runnerLog: null,
               verificationLog: null,
               resultJson: null
