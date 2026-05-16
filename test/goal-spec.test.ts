@@ -132,6 +132,19 @@ verification:
     expect(result.spec.verification).toEqual(["pnpm test", "pnpm build"]);
   });
 
+  it("parses same-indent verification block lists", () => {
+    const result = parseGoalSpec(`---
+title: Same Indent Verification Block
+verification:
+- pnpm test
+- pnpm build
+---
+`);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.spec.verification).toEqual(["pnpm test", "pnpm build"]);
+  });
+
   it("repoOverride can supply repo when frontmatter has none", () => {
     const result = parseGoalSpec(MINIMAL_SPEC, "/from/flag");
     expect(result.ok).toBe(true);
@@ -253,6 +266,25 @@ Body.
     expect(result.rawFrontmatter.trusted_shell).toEqual(
       result.spec.trusted_shell
     );
+  });
+
+  it("parses same-indent nested trusted_shell list fields", () => {
+    const result = parseGoalSpec(`---
+title: Same Indent Trusted Shell Args
+runner: trusted-shell
+trusted_shell:
+  command: /bin/sh
+  args:
+  - -c
+  - "true"
+---
+`);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.spec.trusted_shell).toEqual({
+      command: "/bin/sh",
+      args: ["-c", "true"]
+    });
   });
 
   it("omits trusted_shell from spec when absent", () => {

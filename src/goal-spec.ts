@@ -174,7 +174,7 @@ function parseYamlBlock(
 
     if (commentStrippedRest === "") {
       const probe = peekNextContentfulLine(lines, i + 1);
-      if (probe === null || probe.indent <= baseIndent) {
+      if (probe === null || probe.indent < baseIndent) {
         fields[key] = "";
         i = probe === null ? lines.length : probe.index;
         continue;
@@ -212,6 +212,9 @@ function parseYamlBlock(
         }
         fields[key] = items;
         i = j;
+      } else if (probe.indent <= baseIndent) {
+        fields[key] = "";
+        i = probe.index;
       } else {
         const nested = parseYamlBlock(lines, i + 1, childIndent);
         fields[key] = nested.value;
