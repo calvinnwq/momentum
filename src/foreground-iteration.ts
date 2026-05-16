@@ -289,6 +289,18 @@ export function runForegroundIteration(
         finalize
       };
     case "reset_failed":
+      if (finalize.reset.code === "head_mismatch") {
+        const currentHead = getCurrentHead(guard.repoPath);
+        if (!currentHead.ok) return currentHead;
+        return headMismatchManualRecoveryError({
+          code: "reset_failed",
+          runner: spec.runner,
+          baseHead,
+          currentHead: currentHead.head,
+          detail: `reset after ${finalize.trigger} failed: ${finalize.reset.error}`,
+          finalize
+        });
+      }
       return {
         ok: false,
         code: "reset_failed",
@@ -296,7 +308,31 @@ export function runForegroundIteration(
         finalize
       };
     case "commit_failed":
+      if (finalize.commit.code === "head_mismatch") {
+        const currentHead = getCurrentHead(guard.repoPath);
+        if (!currentHead.ok) return currentHead;
+        return headMismatchManualRecoveryError({
+          code: "commit_failed",
+          runner: spec.runner,
+          baseHead,
+          currentHead: currentHead.head,
+          detail: `commit after verified runner failed: ${finalize.commit.error}`,
+          finalize
+        });
+      }
       if (finalize.reset !== undefined && !finalize.reset.ok) {
+        if (finalize.reset.code === "head_mismatch") {
+          const currentHead = getCurrentHead(guard.repoPath);
+          if (!currentHead.ok) return currentHead;
+          return headMismatchManualRecoveryError({
+            code: "reset_failed",
+            runner: spec.runner,
+            baseHead,
+            currentHead: currentHead.head,
+            detail: `reset after commit_failure failed: ${finalize.reset.error} (commit error: ${finalize.commit.error})`,
+            finalize
+          });
+        }
         return {
           ok: false,
           code: "reset_failed",
@@ -341,6 +377,36 @@ function runnerChangedHeadError(input: {
       safeNextSteps: [
         "Inspect the runner-created commit and repository state.",
         "Decide whether to keep, amend, or reset the runner-created commit.",
+        "Run `momentum recovery clear <goal-id>` after the repository is safe for queued work."
+      ]
+    }
+  };
+}
+
+function headMismatchManualRecoveryError(input: {
+  code: "commit_failed" | "reset_failed";
+  runner: string;
+  baseHead: string;
+  currentHead: string;
+  detail: string;
+  finalize: FinalizeIterationResult;
+}): ForegroundIterationError {
+  const message = `finalization for runner "${input.runner}" found HEAD moved from ${input.baseHead} to ${input.currentHead}; leaving repo unchanged for manual recovery (${input.detail})`;
+  return {
+    ok: false,
+    code: input.code,
+    error: message,
+    finalize: input.finalize,
+    manualRecovery: {
+      expectedCommit: input.baseHead,
+      currentCommit: input.currentHead,
+      reason: {
+        code: "head_mismatch",
+        message
+      },
+      safeNextSteps: [
+        "Inspect the commit that moved HEAD during finalization.",
+        "Decide whether to keep, amend, or reset the non-Momentum commit.",
         "Run `momentum recovery clear <goal-id>` after the repository is safe for queued work."
       ]
     }

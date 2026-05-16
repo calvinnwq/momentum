@@ -325,14 +325,14 @@ export function runWorkerOnce(input: WorkerRunInput): WorkerRunResult {
   });
 
   const releaseNow = now();
-  const needsManualRecovery =
-    !iterationResult.ok &&
-    iterationResult.iteration.code === "runner_changed_head";
+  const manualRecovery =
+    !iterationResult.ok ? iterationResult.iteration.manualRecovery : undefined;
+  const needsManualRecovery = manualRecovery !== undefined;
   if (needsManualRecovery) {
     markRepoLockNeedsManualRecovery(input.db, {
       lockId: lock.id,
       now: releaseNow,
-      recoveryStatus: "runner_changed_head"
+      recoveryStatus: manualRecovery.reason.code
     });
   } else {
     releaseRepoLock(input.db, {

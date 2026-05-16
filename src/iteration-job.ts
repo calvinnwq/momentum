@@ -188,7 +188,7 @@ function recordManualRecoveryIfNeeded(input: {
   now: number;
 }): void {
   const recovery = input.result.manualRecovery;
-  if (input.result.code !== "runner_changed_head" || recovery === undefined) {
+  if (recovery === undefined) {
     return;
   }
 
