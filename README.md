@@ -69,6 +69,46 @@ verification_timeout_sec: 900
 Describe the goal and constraints here.
 ```
 
+### Trusted-shell runner example
+
+The `trusted-shell` runner profile (NGX-282) runs an operator-configured shell command in the target repo. Selecting `runner: trusted-shell` requires a `trusted_shell` block in the goal frontmatter; the parser rejects missing/malformed config at init time with `trusted_shell_config_missing` or `trusted_shell_config_invalid`.
+
+> **Explicit trust posture.** `trusted-shell` is not sandboxed. The configured command runs with the full privileges of the user who invoked Momentum: no container, no VM, no seccomp, no privilege drop, and no input scrubbing. The operator is responsible for the command and any scripts it invokes. Container/VM/seccomp isolation is explicitly out of scope for M4.
+
+Minimal example:
+
+```markdown
+---
+title: Trusted-shell example
+repo: /path/to/repo
+runner: trusted-shell
+branch: momentum/trusted-shell-example
+max_iterations: 1
+verification:
+  - pnpm test
+trusted_shell:
+  command: bash
+  args:
+    - -lc
+    - ./scripts/momentum-iteration.sh
+  cwd: repo
+  timeout_sec: 900
+  env_allow:
+    - HOME
+  env:
+    EXTRA_FLAG: "1"
+  result_file: result.json
+---
+
+Describe the goal and constraints here.
+```
+
+`trusted_shell` keys: `command` (required, non-empty string), `args` (string array, default `[]`), `cwd` (`repo` default or `iteration`), `timeout_sec` (positive integer, default `900`), `env_allow` (string array of env-var names to forward from the parent process; `PATH` is always forwarded), `env` (explicit string key/value pairs merged after the allowlist), and `result_file` (relative path inside the iteration artifact directory, default `result.json`; absolute paths and `..` escapes are rejected).
+
+The runner injects the following environment variables for the command: `MOMENTUM_GOAL_ID`, `MOMENTUM_ITERATION`, `MOMENTUM_REPO_PATH`, `MOMENTUM_BASE_HEAD`, `MOMENTUM_BRANCH`, `MOMENTUM_PROMPT_PATH`, `MOMENTUM_ITERATION_DIR`, and `MOMENTUM_RESULT_PATH`. The command must write a JSON file at `$MOMENTUM_RESULT_PATH` matching the normalized `RunnerResult` schema (`{success: boolean, summary?: string, goal_complete?: boolean, commit?: string}`). Stdout and stderr are captured into the iteration's `runner.log`.
+
+Failure modes return stable error codes through the `RunnerAdapter` boundary: `spawn_failed` (binary not found), `command_failed` (non-zero exit), `command_timed_out` (exceeded `timeout_sec`), `result_missing` (no result file written), `result_invalid` (malformed or non-conforming result JSON), and `output_overflow`. Any post-execution adapter failure resets the worktree to base HEAD so the repo is never left dirty.
+
 ## Commands
 
 ### `goal start`
