@@ -514,8 +514,9 @@ The operator acknowledgement flow is `momentum recovery clear <goal-id> [--reaso
 1. Checks that the goal exists and is currently flagged (`not_flagged` otherwise).
 2. Checks that no claimed/running jobs hold the goal (`job_active` with `activeJobIds` otherwise).
 3. Clears `needs_manual_recovery`, `manual_recovery_reason`, and `manual_recovery_at` on the goal row.
-4. Appends a `goal.recovery_cleared` audit event with the previous reason, previous marked-at timestamp, cleared-at timestamp, and optional `operatorReason`.
-5. Leaves `recovery.md` on disk as durable evidence (operators remove it manually after capturing context).
+4. Releases repo locks for the goal that are in `needs_manual_recovery` state.
+5. Appends a `goal.recovery_cleared` audit event with the previous reason, previous marked-at timestamp, cleared-at timestamp, optional `operatorReason`, and released lock IDs.
+6. Leaves `recovery.md` on disk as durable evidence (operators remove it manually after capturing context).
 
 On successful clear, the goal immediately becomes eligible for queue claims again.
 

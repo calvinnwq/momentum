@@ -111,8 +111,10 @@ export type GoalManualRecoveryState = {
  * Operator-facing clear flow: refuses safely when the goal is missing, not
  * flagged, or still has a live `claimed`/`running` job. This guards against
  * accidental clears that would let the queue claim path proceed while another
- * worker still holds the iteration. On success it clears the flag and appends
- * a `goal.recovery_cleared` audit event with the previously-recorded reason.
+ * worker still holds the iteration. On success it clears the flag, releases
+ * repo locks in `needs_manual_recovery` state, and appends a
+ * `goal.recovery_cleared` audit event with the previously-recorded reason and
+ * any released lock IDs.
  *
  * recovery.md is left on disk so the durable audit trail survives the clear —
  * operators delete it manually after capturing the context elsewhere.

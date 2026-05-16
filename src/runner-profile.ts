@@ -6,8 +6,8 @@
  * the iteration prompt is executed and surfaces a safe summary for
  * operators. NGX-281 routes executing profiles through RunnerAdapter;
  * NGX-282 promotes `trusted-shell` to an executing profile backed by an
- * operator-trusted shell command. The `MOMENTUM.md` loader stays a
- * placeholder until a future milestone proves it.
+ * operator-trusted executable plus argv, with no implicit shell. The
+ * `MOMENTUM.md` loader stays a placeholder until a future milestone proves it.
  */
 
 export const BUILTIN_RUNNER_KINDS = ["fake", "trusted-shell"] as const;
@@ -80,7 +80,7 @@ export function buildRunnerProfile(kind: BuiltinRunnerKind): RunnerProfile {
         kind,
         name: kind,
         description:
-          "Operator-trusted shell runner; executes the goal-configured shell command with no sandbox and no privilege drop. The command has full privileges of the Momentum invoker.",
+          "Operator-trusted executable-plus-argv runner; executes the goal-configured command with no implicit shell, no sandbox, and no privilege drop. The command has full privileges of the Momentum invoker.",
         executes: true
       };
   }
