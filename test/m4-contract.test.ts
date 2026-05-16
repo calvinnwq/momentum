@@ -43,16 +43,16 @@ const M4_NON_GOALS_AGENTS = [
   "remote git operations"
 ] as const;
 
-describe("M4-00 contract docs (NGX-279)", () => {
+describe("M4 contract docs (NGX-279..NGX-286)", () => {
   describe("README.md", () => {
     const readme = readDoc("README.md");
 
-    it("names Milestone 4 as the active milestone without claiming it complete", () => {
+    it("names Milestone 4 complete with the NGX-279..NGX-286 closeout (NGX-286)", () => {
       expect(readme).toContain("## Milestone 4 Roadmap");
-      expect(readme).toContain("active milestone");
-      expect(readme).toContain("not complete");
-      expect(readme).not.toMatch(/Milestone 4[^\n]*\bis complete\b/);
-      expect(readme).not.toMatch(/Milestone 4[^\n]*\bcomplete\.\B/);
+      expect(readme).toContain("Milestone 4 (Real Runner Profiles) is complete");
+      for (const id of M4_ISSUE_ORDER) {
+        expect(readme).toContain(id);
+      }
     });
 
     it("documents the runner architecture decision (core vs RunnerAdapter)", () => {
@@ -118,9 +118,11 @@ describe("M4-00 contract docs (NGX-279)", () => {
   describe("AGENTS.md", () => {
     const agents = readDoc("AGENTS.md");
 
-    it("names Milestone 4 as the active milestone without claiming it complete", () => {
-      expect(agents).toContain("Milestone 4: Real Runner Profiles is the **active milestone**");
-      expect(agents).toContain("not yet complete");
+    it("names Milestone 4 complete with the NGX-279..NGX-286 closeout (NGX-286)", () => {
+      expect(agents).toContain("Milestone 4: Real Runner Profiles is complete");
+      for (const id of M4_ISSUE_ORDER) {
+        expect(agents).toContain(id);
+      }
     });
 
     it("documents the M4 contract block (runner architecture + non-goals)", () => {
@@ -169,9 +171,12 @@ describe("M4-00 contract docs (NGX-279)", () => {
     });
   });
 
-  it("keeps the doctor milestone string at the M3 closeout marker until M4 closeout", () => {
+  it("pins the doctor milestone string to the M4 closeout marker (NGX-286)", () => {
     const cli = fs.readFileSync(path.join(repoRoot, "src", "cli.ts"), "utf8");
     expect(cli).toContain(
+      "Milestone 4: real runner profiles (NGX-279, NGX-280, NGX-281, NGX-282, NGX-283, NGX-284, NGX-285, NGX-286) complete"
+    );
+    expect(cli).not.toContain(
       "Milestone 3: operational safety (NGX-272, NGX-273, NGX-274, NGX-275, NGX-276, NGX-277, NGX-278) complete"
     );
   });
