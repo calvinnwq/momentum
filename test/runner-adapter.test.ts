@@ -93,8 +93,8 @@ describe("runner-adapter registry", () => {
     expect(listRunnerAdapterKinds()).toEqual(["fake", "trusted-shell"]);
   });
 
-  it("only marks fake as an executing adapter in M4-02", () => {
-    expect(listExecutingRunnerAdapterKinds()).toEqual(["fake"]);
+  it("marks both fake and trusted-shell as executing adapters after M4-03", () => {
+    expect(listExecutingRunnerAdapterKinds()).toEqual(["fake", "trusted-shell"]);
   });
 
   it("returns the fake adapter from getRunnerAdapter('fake') with executes=true", () => {
@@ -104,11 +104,11 @@ describe("runner-adapter registry", () => {
     expect(adapter?.executes).toBe(true);
   });
 
-  it("returns a placeholder trusted-shell adapter with executes=false", () => {
+  it("returns the trusted-shell adapter with executes=true after M4-03", () => {
     const adapter = getRunnerAdapter("trusted-shell");
     expect(adapter).toBeDefined();
     expect(adapter?.kind).toBe("trusted-shell");
-    expect(adapter?.executes).toBe(false);
+    expect(adapter?.executes).toBe(true);
   });
 
   it("returns undefined for unknown runner kinds", () => {
@@ -158,14 +158,57 @@ describe("dispatchRunnerAdapter", () => {
     }
   });
 
-  it("surfaces unsupported_runner for trusted-shell with executing kinds in the message", () => {
+  it("dispatches trusted-shell to its adapter and surfaces invalid_input when no trusted_shell block is configured", () => {
     const input = makeInput();
     const out = dispatchRunnerAdapter("trusted-shell", input);
     expect(out.ok).toBe(false);
     if (out.ok) return;
-    expect(out.code).toBe("unsupported_runner");
-    expect(out.error).toContain("trusted-shell");
-    expect(out.error).toContain("fake");
+    expect(out.code).toBe("invalid_input");
+    expect(out.error).toContain("trusted_shell");
+  });
+
+  it("dispatches trusted-shell to its adapter and runs the configured shell command", () => {
+    const repoPath = initRepo();
+    const iterationDir = makeTempDir("momentum-runner-adapter-iter-");
+    const resultPath = path.join(iterationDir, "result.json");
+    const resultJson = JSON.stringify({
+      success: true,
+      summary: "Trusted shell smoke through dispatch.",
+      key_changes_made: [],
+      key_learnings: [],
+      remaining_work: [],
+      goal_complete: false,
+      commit: {
+        type: "test",
+        scope: "milestone-4",
+        subject: "trusted shell smoke",
+        body: "",
+        breaking: false
+      }
+    });
+    const script = [
+      `cat <<'JSON' > "${resultPath}"`,
+      resultJson,
+      "JSON"
+    ].join("\n");
+
+    const baseSpec = makeSpec(repoPath, "trusted-shell");
+    const input = makeInput({
+      repoPath,
+      iterationDir,
+      spec: {
+        ...baseSpec,
+        trusted_shell: { command: "/bin/sh", args: ["-c", script] }
+      } as unknown as GoalSpec
+    });
+
+    const out = dispatchRunnerAdapter("trusted-shell", input);
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.result.success).toBe(true);
+    expect(out.result.summary).toBe("Trusted shell smoke through dispatch.");
+    expect(out.runnerLogPath).toBe(input.runnerLogPath);
+    expect(out.resultJsonPath).toBe(resultPath);
   });
 
   it("surfaces unsupported_runner for unregistered kinds", () => {

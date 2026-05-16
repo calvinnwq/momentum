@@ -3,6 +3,7 @@ import fs from "node:fs";
 
 import type { GoalArtifactPaths } from "./artifacts.js";
 import { ensureMomentumBranch } from "./branch-manager.js";
+import { resetToBase } from "./git-transaction.js";
 import type { GoalSpec } from "./goal-spec.js";
 import {
   finalizeIteration,
@@ -178,6 +179,24 @@ export function runForegroundIteration(
         ok: false,
         code: "unsupported_runner",
         error: dispatch.error
+      };
+    }
+    if (dispatch.code === "invalid_input") {
+      return {
+        ok: false,
+        code: "runner_failed",
+        error: `runner "${spec.runner}" failed: ${dispatch.error}`
+      };
+    }
+    // The runner attempted execution and may have dirtied the worktree before
+    // failing (notably trusted-shell with cwd=repo). Reset to baseHead so the
+    // repo state matches the runner-failure invariant from finalizeIteration.
+    const reset = resetToBase({ repoPath: guard.repoPath, baseHead });
+    if (!reset.ok) {
+      return {
+        ok: false,
+        code: "reset_failed",
+        error: `reset after ${dispatch.code} failed: ${reset.error} (runner error: ${dispatch.error})`
       };
     }
     return {

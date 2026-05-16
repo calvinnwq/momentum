@@ -227,15 +227,21 @@ describe("runWorkerOnce", () => {
       expect(out.jobIterationResult.ok).toBe(false);
       if (out.jobIterationResult.ok) return;
       expect(out.jobIterationResult.jobState).toBe("failed");
-      expect(out.jobIterationResult.iteration.code).toBe("unsupported_runner");
+      // The DB-stored runner is trusted-shell, which now executes via its
+      // RunnerAdapter (NGX-282); without a trusted_shell config block the
+      // adapter fails with invalid_input, which foreground-iteration maps to
+      // runner_failed. This still proves the worker honored the DB runner
+      // rather than the goal-spec default (fake).
+      expect(out.jobIterationResult.iteration.code).toBe("runner_failed");
       expect(out.jobIterationResult.iteration.error).toContain("trusted-shell");
+      expect(out.jobIterationResult.iteration.error).toContain("trusted_shell");
       expect(
         fs.existsSync(path.join(repo, FAKE_RUNNER_FIXTURE_FILENAME))
       ).toBe(false);
 
       const job = getQueueJob(db, seed.jobId);
       expect(job?.state).toBe("failed");
-      expect(job?.error).toContain("unsupported_runner");
+      expect(job?.error).toContain("trusted-shell");
 
       const iterationStarted = db
         .prepare(
