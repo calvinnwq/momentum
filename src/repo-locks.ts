@@ -39,9 +39,9 @@ export type AcquireRepoLockResult =
     };
 
 /**
- * Take an exclusive active lease on `repoRoot`. Returns the existing active
- * lease when one is already held; rely on the partial unique index to keep
- * concurrent callers honest.
+ * Take an exclusive active lease on `repoRoot`. Returns an existing blocking
+ * lock (`active` or `needs_manual_recovery`) when one is already held; rely on
+ * the partial unique index to keep concurrent active callers honest.
  */
 export function acquireRepoLock(
   db: MomentumDb,
