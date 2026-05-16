@@ -21,6 +21,13 @@ import {
   type RunnerProfileErrorCode,
   type RunnerProfileSource
 } from "./runner-profile.js";
+import {
+  loadMomentumPolicy,
+  resolvePolicyEffectiveValues,
+  type MomentumPolicy,
+  type MomentumPolicyErrorCode,
+  type PolicyEffectiveSource
+} from "./momentum-policy.js";
 
 export type GoalInitMode = "foreground" | "queued";
 
@@ -32,12 +39,33 @@ export type GoalInitOptions = {
   mode?: GoalInitMode;
 };
 
-export type GoalInitErrorCode = "parse_error" | RunnerProfileErrorCode | "init_failed";
+export type GoalInitErrorCode =
+  | "parse_error"
+  | RunnerProfileErrorCode
+  | MomentumPolicyErrorCode
+  | "init_failed";
 export type GoalInitError = {
   ok: false;
   code: GoalInitErrorCode;
   error: string;
 };
+
+export type GoalInitPolicySummary = {
+  present: boolean;
+  path: string | null;
+  policyNotes: string;
+  config: {
+    runner: string | null;
+    verification: readonly string[] | null;
+    verificationTimeoutSec: number | null;
+  };
+  effective: {
+    verification: readonly string[];
+    verificationTimeoutSec: number;
+    source: PolicyEffectiveSource;
+  };
+};
+
 export type GoalInitSuccess = {
   ok: true;
   goalId: string;
@@ -54,6 +82,7 @@ export type GoalInitSuccess = {
   artifactPaths: GoalArtifactPaths;
   resumed: boolean;
   enqueueCreated: boolean;
+  policy: GoalInitPolicySummary;
 };
 export type GoalInitResult = GoalInitError | GoalInitSuccess;
 
@@ -82,9 +111,26 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
   if (!parseResult.ok) {
     return { ok: false, code: "parse_error", error: parseResult.error };
   }
+
+  let policy: MomentumPolicy | undefined;
+  let policyPath: string | null = null;
+  let policyPresent = false;
+  if (typeof parseResult.spec.repo === "string" && parseResult.spec.repo.length > 0) {
+    const policyResult = loadMomentumPolicy(parseResult.spec.repo);
+    if (!policyResult.ok) {
+      return { ok: false, code: policyResult.code, error: policyResult.error };
+    }
+    policyPath = policyResult.path;
+    if (policyResult.present) {
+      policy = policyResult.policy;
+      policyPresent = true;
+    }
+  }
+
   const profileResolution = resolveRunnerProfile({
     cliOverride: options.runnerOverride,
-    frontmatterValue: parseResult.rawFrontmatter.runner
+    frontmatterValue: parseResult.rawFrontmatter.runner,
+    policyValue: policy?.config.runner
   });
   if (!profileResolution.ok) {
     return {
@@ -94,11 +140,42 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
     };
   }
   const runnerProfile = profileResolution.profile;
+
+  const effective = resolvePolicyEffectiveValues({
+    goalVerificationProvided: parseResult.rawFrontmatter.verificationProvided,
+    goalVerification: parseResult.spec.verification,
+    goalVerificationTimeoutSecProvided:
+      parseResult.rawFrontmatter.verificationTimeoutProvided,
+    goalVerificationTimeoutSec: parseResult.spec.verification_timeout_sec,
+    policyConfig: policy?.config
+  });
+
   const specBase: GoalSpec = {
     ...parseResult.spec,
-    runner: runnerProfile.name
+    runner: runnerProfile.name,
+    verification: [...effective.verification],
+    verification_timeout_sec: effective.verificationTimeoutSec
   };
   const spec = mode === "queued" ? normalizeGoalSpecRepo(specBase) : specBase;
+
+  const policySummary: GoalInitPolicySummary = {
+    present: policyPresent,
+    path: policyPath,
+    policyNotes: policy?.notes ?? "",
+    config: {
+      runner: policy?.config.runner ?? null,
+      verification:
+        policy?.config.verification === undefined
+          ? null
+          : [...policy.config.verification],
+      verificationTimeoutSec: policy?.config.verificationTimeoutSec ?? null
+    },
+    effective: {
+      verification: effective.verification,
+      verificationTimeoutSec: effective.verificationTimeoutSec,
+      source: effective.source
+    }
+  };
 
   let db: MomentumDb | undefined;
 
@@ -133,7 +210,8 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
           dataDir,
           artifactPaths,
           resumed: true,
-          enqueueCreated: false
+          enqueueCreated: false,
+          policy: policySummary
         };
       }
       const idempotencyKey = buildIterationIdempotencyKey(existingGoal.id, 1);
@@ -158,7 +236,8 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
         dataDir,
         artifactPaths,
         resumed: true,
-        enqueueCreated: enqueue.created
+        enqueueCreated: enqueue.created,
+        policy: policySummary
       };
     }
 
@@ -209,7 +288,8 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
         dataDir,
         artifactPaths,
         resumed: false,
-        enqueueCreated: false
+        enqueueCreated: false,
+        policy: policySummary
       };
     }
 
@@ -236,7 +316,8 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
       dataDir,
       artifactPaths,
       resumed: false,
-      enqueueCreated: enqueue.created
+      enqueueCreated: enqueue.created,
+      policy: policySummary
     };
   } catch (error) {
     return { ok: false, code: "init_failed", error: formatInitError(error) };

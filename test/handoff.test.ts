@@ -1079,4 +1079,70 @@ describe("writeHandoff", () => {
     expect(markdown).toContain("## Daemon");
     expect(markdown).toContain("No daemon run recorded for this data directory.");
   });
+
+  it("emits a MOMENTUM.md policy block in JSON and markdown when no policy file is present", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Handoff no policy");
+
+    expectSuccess(
+      writeHandoff({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      })
+    );
+
+    const json = JSON.parse(
+      fs.readFileSync(setup.artifactPaths.handoffJson, "utf-8")
+    ) as Record<string, unknown>;
+    expect(json["policy"]).toMatchObject({
+      configured: true,
+      present: false,
+      has_notes: false,
+      error: null
+    });
+
+    const markdown = fs.readFileSync(setup.artifactPaths.handoffMd, "utf-8");
+    expect(markdown).toContain("## Policy (MOMENTUM.md)");
+    expect(markdown).toContain("Not present at:");
+  });
+
+  it("emits a MOMENTUM.md policy block with config and notes when a policy file is present", () => {
+    const repo = initRepo();
+    fs.writeFileSync(
+      path.join(repo, "MOMENTUM.md"),
+      `---\nrunner: trusted-shell\nverification:\n  - pnpm test\nverification_timeout_sec: 1200\n---\nNotes body.\n`,
+      "utf-8"
+    );
+    const setup = setupGoal(repo, "Handoff with policy");
+
+    expectSuccess(
+      writeHandoff({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      })
+    );
+
+    const json = JSON.parse(
+      fs.readFileSync(setup.artifactPaths.handoffJson, "utf-8")
+    ) as Record<string, unknown>;
+    expect(json["policy"]).toMatchObject({
+      configured: true,
+      present: true,
+      has_notes: true,
+      error: null
+    });
+    expect((json["policy"] as Record<string, unknown>)["config"]).toEqual({
+      runner: "trusted-shell",
+      verification: ["pnpm test"],
+      verification_timeout_sec: 1200
+    });
+
+    const markdown = fs.readFileSync(setup.artifactPaths.handoffMd, "utf-8");
+    expect(markdown).toContain("## Policy (MOMENTUM.md)");
+    expect(markdown).toContain("Loaded from:");
+    expect(markdown).toContain("Default runner: trusted-shell");
+    expect(markdown).toContain("Default verification: pnpm test");
+    expect(markdown).toContain("Default verification_timeout_sec: 1200");
+    expect(markdown).toContain("Policy notes: present");
+  });
 });

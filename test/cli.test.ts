@@ -112,7 +112,7 @@ describe("momentum CLI scaffold", () => {
       "momentum daemon status [--data-dir <path>] [--json]"
     );
     expect(result.stdout).toContain(
-      "momentum doctor [--data-dir <path>] [--json]"
+      "momentum doctor [--repo <path>] [--data-dir <path>] [--json]"
     );
     expect(result.stderr).toBe("");
   });
@@ -194,6 +194,84 @@ describe("momentum CLI scaffold", () => {
       ]
     });
     expect(result.stderr).toBe("");
+  });
+
+  it("doctor --json surfaces MOMENTUM.md policy when --repo points at a repo with a policy file", async () => {
+    const dataDir = makeTempDir("momentum-cli-doctor-policy-");
+    const repo = makeTempDir("momentum-cli-doctor-repo-");
+    fs.writeFileSync(
+      path.join(repo, "MOMENTUM.md"),
+      `---\nrunner: trusted-shell\nverification:\n  - pnpm test\nverification_timeout_sec: 1200\n---\nPolicy notes body.\n`,
+      "utf-8"
+    );
+
+    const result = await run([
+      "doctor",
+      "--repo",
+      repo,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    const policy = payload["policy"] as Record<string, unknown>;
+    expect(policy).toMatchObject({
+      repoConfigured: true,
+      present: true,
+      hasNotes: true,
+      error: null
+    });
+    expect(policy["path"]).toBe(path.join(path.resolve(repo), "MOMENTUM.md"));
+    const cfg = policy["config"] as Record<string, unknown>;
+    expect(cfg).toEqual({
+      runner: "trusted-shell",
+      verification: ["pnpm test"],
+      verificationTimeoutSec: 1200
+    });
+  });
+
+  it("doctor --json reports repoConfigured:false when --repo is omitted", async () => {
+    const dataDir = makeTempDir("momentum-cli-doctor-nopol-");
+    const result = await run(["doctor", "--data-dir", dataDir, "--json"]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    const policy = payload["policy"] as Record<string, unknown>;
+    expect(policy).toMatchObject({
+      repoConfigured: false,
+      present: false,
+      path: null,
+      error: null,
+      config: null
+    });
+  });
+
+  it("doctor --json reports policy_schema_invalid when MOMENTUM.md is malformed", async () => {
+    const dataDir = makeTempDir("momentum-cli-doctor-bad-policy-");
+    const repo = makeTempDir("momentum-cli-doctor-bad-repo-");
+    fs.writeFileSync(
+      path.join(repo, "MOMENTUM.md"),
+      `---\nrunner: 42\n---\n`,
+      "utf-8"
+    );
+    const result = await run([
+      "doctor",
+      "--repo",
+      repo,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    const policy = payload["policy"] as Record<string, unknown>;
+    expect(policy).toMatchObject({
+      repoConfigured: true,
+      present: false
+    });
+    const error = policy["error"] as Record<string, unknown>;
+    expect(error["code"]).toBe("policy_schema_invalid");
+    expect(typeof error["message"]).toBe("string");
   });
 
   it("doctor --json surfaces an active daemon run", async () => {
@@ -1229,6 +1307,7 @@ runner_profile: {
     expect(result.stdout).toContain("Recovery: missing");
     expect(result.stdout).toContain(`${goalId}/recovery.md`);
     expect(result.stdout).toMatch(/Commit: [0-9a-f]{40}/);
+    expect(result.stdout).toMatch(/Policy \(MOMENTUM\.md\): (present|not present|error|repo path not set)/);
     expect(result.stderr).toBe("");
   });
 

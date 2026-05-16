@@ -21,6 +21,8 @@ export type GoalSpecSuccess = {
     runner?: unknown;
     trusted_shell?: unknown;
     acp?: unknown;
+    verificationProvided: boolean;
+    verificationTimeoutProvided: boolean;
   };
 };
 export type GoalSpecResult = GoalSpecError | GoalSpecSuccess;
@@ -95,6 +97,7 @@ export function parseGoalSpec(
   }
 
   const rawVerification = fields["verification"];
+  const verificationProvided = rawVerification !== undefined;
   const verification = Array.isArray(rawVerification)
     ? (rawVerification as string[])
     : [];
@@ -103,6 +106,7 @@ export function parseGoalSpec(
   if (rawTimeout !== undefined && typeof rawTimeout !== "number") {
     return { ok: false, error: "`verification_timeout_sec` must be a positive integer" };
   }
+  const verificationTimeoutProvided = typeof rawTimeout === "number";
   const verification_timeout_sec =
     typeof rawTimeout === "number" ? rawTimeout : 900;
   if (!isPositiveInteger(verification_timeout_sec)) {
@@ -129,7 +133,9 @@ export function parseGoalSpec(
     rawFrontmatter: {
       runner: rawRunner,
       ...(trustedShellValue !== undefined ? { trusted_shell: trustedShellValue } : {}),
-      ...(acpValue !== undefined ? { acp: acpValue } : {})
+      ...(acpValue !== undefined ? { acp: acpValue } : {}),
+      verificationProvided,
+      verificationTimeoutProvided
     }
   };
 }

@@ -373,6 +373,162 @@ runner:
     fs.rmSync(dataDir, { recursive: true });
   });
 
+  it("loads MOMENTUM.md policy from spec.repo and surfaces it in policy summary", () => {
+    const dataDir = makeTempDir();
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), "momentum-policy-repo-"));
+    fs.writeFileSync(
+      path.join(repo, "MOMENTUM.md"),
+      `---\nrunner: trusted-shell\nverification:\n  - pnpm test\nverification_timeout_sec: 1500\n---\nRepo policy notes.\n`,
+      "utf-8"
+    );
+    const goalFile = path.join(dataDir, "goal.md");
+    fs.writeFileSync(
+      goalFile,
+      `---\ntitle: Policy Goal\nrepo: ${repo}\n---\nBody.\n`,
+      "utf-8"
+    );
+
+    const result = initGoal({ goalPath: goalFile, dataDirOptions: { dataDir } });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    // Policy summary surfaces config + path
+    expect(result.policy.present).toBe(true);
+    expect(result.policy.path).toBe(path.join(path.resolve(repo), "MOMENTUM.md"));
+    expect(result.policy.config.runner).toBe("trusted-shell");
+    expect(result.policy.config.verification).toEqual(["pnpm test"]);
+    expect(result.policy.config.verificationTimeoutSec).toBe(1500);
+    expect(result.policy.policyNotes).toContain("Repo policy notes.");
+
+    // Effective resolution: goal didn't set verification or timeout, so policy wins
+    expect(result.policy.effective.verification).toEqual(["pnpm test"]);
+    expect(result.policy.effective.verificationTimeoutSec).toBe(1500);
+    expect(result.policy.effective.source.verification).toBe("momentum_policy");
+    expect(result.policy.effective.source.verificationTimeoutSec).toBe(
+      "momentum_policy"
+    );
+
+    // Runner precedence: policy > builtin default
+    expect(result.spec.runner).toBe("trusted-shell");
+    expect(result.runnerProfileSource).toBe("momentum_policy");
+
+    // spec.verification reflects the effective values
+    expect(result.spec.verification).toEqual(["pnpm test"]);
+    expect(result.spec.verification_timeout_sec).toBe(1500);
+
+    fs.rmSync(repo, { recursive: true });
+    fs.rmSync(dataDir, { recursive: true });
+  });
+
+  it("goal frontmatter overrides MOMENTUM.md policy for verification and runner", () => {
+    const dataDir = makeTempDir();
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), "momentum-policy-repo-"));
+    fs.writeFileSync(
+      path.join(repo, "MOMENTUM.md"),
+      `---\nrunner: trusted-shell\nverification:\n  - pnpm typecheck\nverification_timeout_sec: 1500\n---\n`,
+      "utf-8"
+    );
+    const goalFile = path.join(dataDir, "goal.md");
+    fs.writeFileSync(
+      goalFile,
+      `---\ntitle: Override Goal\nrepo: ${repo}\nrunner: fake\nverification:\n  - pnpm test\nverification_timeout_sec: 300\n---\nBody.\n`,
+      "utf-8"
+    );
+
+    const result = initGoal({ goalPath: goalFile, dataDirOptions: { dataDir } });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.spec.runner).toBe("fake");
+    expect(result.runnerProfileSource).toBe("goal_frontmatter");
+    expect(result.spec.verification).toEqual(["pnpm test"]);
+    expect(result.spec.verification_timeout_sec).toBe(300);
+    expect(result.policy.effective.source.verification).toBe("goal_frontmatter");
+    expect(result.policy.effective.source.verificationTimeoutSec).toBe(
+      "goal_frontmatter"
+    );
+
+    fs.rmSync(repo, { recursive: true });
+    fs.rmSync(dataDir, { recursive: true });
+  });
+
+  it("CLI runnerOverride beats both goal frontmatter and MOMENTUM.md", () => {
+    const dataDir = makeTempDir();
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), "momentum-policy-repo-"));
+    fs.writeFileSync(
+      path.join(repo, "MOMENTUM.md"),
+      `---\nrunner: trusted-shell\n---\n`,
+      "utf-8"
+    );
+    const goalFile = path.join(dataDir, "goal.md");
+    fs.writeFileSync(
+      goalFile,
+      `---\ntitle: CLI Override Goal\nrepo: ${repo}\nrunner: fake\n---\nBody.\n`,
+      "utf-8"
+    );
+
+    const result = initGoal({
+      goalPath: goalFile,
+      runnerOverride: "acp",
+      dataDirOptions: { dataDir }
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.spec.runner).toBe("acp");
+    expect(result.runnerProfileSource).toBe("cli_override");
+
+    fs.rmSync(repo, { recursive: true });
+    fs.rmSync(dataDir, { recursive: true });
+  });
+
+  it("returns policy_schema_invalid when MOMENTUM.md is malformed", () => {
+    const dataDir = makeTempDir();
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), "momentum-policy-repo-"));
+    fs.writeFileSync(
+      path.join(repo, "MOMENTUM.md"),
+      `---\nrunner: 42\n---\n`,
+      "utf-8"
+    );
+    const goalFile = path.join(dataDir, "goal.md");
+    fs.writeFileSync(
+      goalFile,
+      `---\ntitle: Bad Policy Goal\nrepo: ${repo}\n---\nBody.\n`,
+      "utf-8"
+    );
+
+    const result = initGoal({ goalPath: goalFile, dataDirOptions: { dataDir } });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe("policy_schema_invalid");
+
+    fs.rmSync(repo, { recursive: true });
+    fs.rmSync(dataDir, { recursive: true });
+  });
+
+  it("preserves existing-goal behavior when MOMENTUM.md is absent", () => {
+    const dataDir = makeTempDir();
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), "momentum-policy-repo-"));
+    const goalFile = path.join(dataDir, "goal.md");
+    fs.writeFileSync(
+      goalFile,
+      `---\ntitle: No Policy Goal\nrepo: ${repo}\nverification:\n  - pnpm test\n---\nBody.\n`,
+      "utf-8"
+    );
+
+    const result = initGoal({ goalPath: goalFile, dataDirOptions: { dataDir } });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.policy.present).toBe(false);
+    expect(result.policy.config.runner).toBeNull();
+    expect(result.policy.effective.source.verification).toBe("goal_frontmatter");
+    expect(result.spec.runner).toBe("fake");
+    expect(result.runnerProfileSource).toBe("builtin_default");
+    expect(result.spec.verification).toEqual(["pnpm test"]);
+
+    fs.rmSync(repo, { recursive: true });
+    fs.rmSync(dataDir, { recursive: true });
+  });
+
   it("returns init error when data dir is not a directory", () => {
     const dataDir = makeTempDir();
     const goalFile = path.join(dataDir, "goal.md");
