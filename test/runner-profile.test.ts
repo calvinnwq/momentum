@@ -187,6 +187,46 @@ describe("resolveRunnerProfile precedence", () => {
     expect(result.source).toBe("goal_frontmatter");
     expect(result.rawValue).toBe("claude");
   });
+
+  it("uses MOMENTUM.md policy when goal frontmatter is absent", () => {
+    const result = resolveRunnerProfile({ policyValue: "trusted-shell" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.profile.kind).toBe("trusted-shell");
+    expect(result.source).toBe("momentum_policy");
+    expect(result.rawValue).toBe("trusted-shell");
+  });
+
+  it("lets goal frontmatter beat MOMENTUM.md policy", () => {
+    const result = resolveRunnerProfile({
+      frontmatterValue: "fake",
+      policyValue: "trusted-shell"
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.profile.kind).toBe("fake");
+    expect(result.source).toBe("goal_frontmatter");
+  });
+
+  it("lets CLI --runner beat both goal frontmatter and MOMENTUM.md policy", () => {
+    const result = resolveRunnerProfile({
+      cliOverride: "acp",
+      frontmatterValue: "fake",
+      policyValue: "trusted-shell"
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.profile.kind).toBe("acp");
+    expect(result.source).toBe("cli_override");
+  });
+
+  it("treats blank MOMENTUM.md policy value as absent and falls back to the built-in default", () => {
+    const result = resolveRunnerProfile({ policyValue: "   " });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.profile.kind).toBe("fake");
+    expect(result.source).toBe("builtin_default");
+  });
 });
 
 describe("safeRunnerProfileSummary", () => {

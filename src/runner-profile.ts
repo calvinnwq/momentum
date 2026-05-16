@@ -11,8 +11,10 @@
  * around the existing adapter boundary with explicit runtime detection,
  * an optional auth/availability probe, and a distinct `runtime_unavailable`
  * error code so missing prerequisites are not conflated with command
- * failures or verification failures. The `MOMENTUM.md` loader stays a
- * placeholder until a future milestone proves it.
+ * failures or verification failures. NGX-284 adds the `momentum_policy`
+ * resolver source, sitting between goal frontmatter and the built-in
+ * default so a repo's `MOMENTUM.md` can set the default runner profile
+ * without overriding goal-level or CLI-level choices.
  */
 
 export const BUILTIN_RUNNER_KINDS = ["fake", "trusted-shell", "acp"] as const;
@@ -23,6 +25,7 @@ export const DEFAULT_RUNNER_KIND: BuiltinRunnerKind = "fake";
 export type RunnerProfileSource =
   | "cli_override"
   | "goal_frontmatter"
+  | "momentum_policy"
   | "builtin_default";
 
 export type RunnerProfile = {
@@ -52,6 +55,7 @@ export type RunnerProfileParseResult = ParsedRunnerProfile | RunnerProfileError;
 export type ResolveRunnerProfileInput = {
   cliOverride?: string | undefined;
   frontmatterValue?: unknown;
+  policyValue?: unknown;
   builtinDefault?: BuiltinRunnerKind | undefined;
 };
 
@@ -147,6 +151,12 @@ export function resolveRunnerProfile(
   }
   if (input.frontmatterValue !== undefined && input.frontmatterValue !== null) {
     return finalizeResolution(input.frontmatterValue, "goal_frontmatter");
+  }
+  if (input.policyValue !== undefined && input.policyValue !== null) {
+    const policy = sanitizeOptionalString(input.policyValue);
+    if (policy !== undefined) {
+      return finalizeResolution(policy, "momentum_policy");
+    }
   }
   return finalizeResolution(defaultKind, "builtin_default");
 }

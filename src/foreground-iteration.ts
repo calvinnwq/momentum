@@ -10,6 +10,7 @@ import {
   type FinalizeIterationResult
 } from "./iteration-finalize.js";
 import { renderIterationPrompt } from "./iteration-prompt.js";
+import { loadMomentumPolicy } from "./momentum-policy.js";
 import { inspectRepo } from "./repo-guard.js";
 import {
   dispatchRunnerAdapter,
@@ -153,12 +154,19 @@ export function runForegroundIteration(
 
   const baseHead = branchResult.head;
 
+  const policyLoad = loadMomentumPolicy(guard.repoPath);
+  const policyNotes =
+    policyLoad.ok && policyLoad.present ? policyLoad.policy.notes : "";
+  const policyPath = policyLoad.ok && policyLoad.present ? policyLoad.path : undefined;
+
   const promptText = renderIterationPrompt({
     spec,
     goalId,
     iteration,
     repoPath: guard.repoPath,
-    baseHead
+    baseHead,
+    policyNotes,
+    ...(policyPath !== undefined ? { policyPath } : {})
   });
   try {
     fs.writeFileSync(artifactPaths.promptMd, promptText, "utf-8");

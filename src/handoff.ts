@@ -12,6 +12,7 @@ import {
   type GoalStatusIterationSummary,
   type GoalStatusJobSummary,
   type GoalStatusNextActionDetail,
+  type GoalStatusPolicySummary,
   type GoalStatusReducerSummary,
   type GoalStatusStaleRecoverySummary,
   type GoalStatusSuccess
@@ -79,6 +80,7 @@ export type HandoffData = {
   latestCommitSha: string | null;
   daemon: GoalStatusDaemonSummary | null;
   staleRecovery: GoalStatusStaleRecoverySummary;
+  policy: GoalStatusPolicySummary;
   artifactPaths: GoalArtifactPaths;
   artifactFiles: GoalStatusArtifactFiles;
 };
@@ -174,6 +176,7 @@ function buildHandoffData(
     latestCommitSha: status.latestCommitSha,
     daemon: status.daemon,
     staleRecovery: status.staleRecovery,
+    policy: status.policy,
     artifactPaths: status.artifactPaths,
     artifactFiles: status.artifactFiles
   };
@@ -322,6 +325,22 @@ function toJsonShape(data: HandoffData): Record<string, unknown> {
       stale_repo_lock_count: data.staleRecovery.staleRepoLockCount,
       stale_claimed_job_count: data.staleRecovery.staleClaimedJobCount,
       stale_lease_grace_ms: data.staleRecovery.staleLeaseGraceMs
+    },
+    policy: {
+      configured: data.policy.configured,
+      present: data.policy.present,
+      path: data.policy.path,
+      has_notes: data.policy.hasNotes,
+      config: data.policy.config
+        ? {
+            runner: data.policy.config.runner,
+            verification: data.policy.config.verification,
+            verification_timeout_sec: data.policy.config.verificationTimeoutSec
+          }
+        : null,
+      error: data.policy.error
+        ? { code: data.policy.error.code, message: data.policy.error.message }
+        : null
     },
     artifacts: {
       goal_md: data.artifactPaths.goalMd,
@@ -556,6 +575,39 @@ function renderHandoffMarkdown(data: HandoffData): string {
       `- Stale claimed jobs pending manual recovery: ${sr.staleClaimedJobCount}`
     );
     lines.push(`- Stale lease grace (ms): ${sr.staleLeaseGraceMs}`);
+  }
+  lines.push("");
+
+  lines.push("## Policy (MOMENTUM.md)");
+  if (!data.policy.configured) {
+    lines.push("- Repo path is not set; MOMENTUM.md discovery skipped.");
+  } else if (data.policy.error) {
+    lines.push(
+      `- Error (${data.policy.error.code}): ${data.policy.error.message}`
+    );
+    if (data.policy.path) lines.push(`- Expected at: ${data.policy.path}`);
+  } else if (!data.policy.present) {
+    lines.push(
+      `- Not present at: ${data.policy.path ?? "(unresolved)"} (using built-in / goal defaults)`
+    );
+  } else {
+    lines.push(`- Loaded from: ${data.policy.path}`);
+    if (data.policy.config?.runner) {
+      lines.push(`- Default runner: ${data.policy.config.runner}`);
+    }
+    if (data.policy.config?.verification) {
+      lines.push(
+        `- Default verification: ${data.policy.config.verification.join(", ")}`
+      );
+    }
+    if (data.policy.config?.verificationTimeoutSec !== null && data.policy.config?.verificationTimeoutSec !== undefined) {
+      lines.push(
+        `- Default verification_timeout_sec: ${data.policy.config.verificationTimeoutSec}`
+      );
+    }
+    if (data.policy.hasNotes) {
+      lines.push("- Policy notes: present (surfaced into iteration prompts as context only).");
+    }
   }
   lines.push("");
 

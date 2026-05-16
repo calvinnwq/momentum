@@ -482,4 +482,46 @@ describe("runForegroundIteration", () => {
     expect(out.resultJsonPath).toBe(expected.resultJson);
     expect(out.verificationLogPath).toBe(expected.verificationLog);
   });
+
+  it("includes MOMENTUM.md policy notes in the rendered iteration prompt", () => {
+    const repo = initRepo();
+    const policyBody = `---\nrunner: fake\n---\nNGX-284 SENTINEL: prefer focused tests.\n`;
+    fs.writeFileSync(path.join(repo, "MOMENTUM.md"), policyBody, "utf-8");
+    runGit(repo, ["add", "MOMENTUM.md"]);
+    runGit(repo, ["commit", "-m", "add MOMENTUM.md", "--quiet"]);
+    const spec = makeSpec(repo);
+    const artifactPaths = setupArtifacts();
+
+    const out = runForegroundIteration({
+      goalId: GOAL_ID,
+      spec,
+      iteration: 1,
+      artifactPaths
+    });
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+
+    const prompt = fs.readFileSync(out.promptPath, "utf-8");
+    expect(prompt).toContain("## Policy notes (from MOMENTUM.md)");
+    expect(prompt).toContain("NGX-284 SENTINEL: prefer focused tests.");
+    expect(prompt).toContain(path.join(repo, "MOMENTUM.md"));
+  });
+
+  it("omits the policy section when MOMENTUM.md is absent (backwards compatible)", () => {
+    const repo = initRepo();
+    const spec = makeSpec(repo);
+    const artifactPaths = setupArtifacts();
+
+    const out = runForegroundIteration({
+      goalId: GOAL_ID,
+      spec,
+      iteration: 1,
+      artifactPaths
+    });
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+
+    const prompt = fs.readFileSync(out.promptPath, "utf-8");
+    expect(prompt).not.toContain("Policy notes (from MOMENTUM.md)");
+  });
 });

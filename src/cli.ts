@@ -53,6 +53,7 @@ import {
   buildRunnerProfile,
   safeRunnerProfileSummary
 } from "./runner-profile.js";
+import { loadMomentumPolicy } from "./momentum-policy.js";
 
 export const VERSION = "0.0.0";
 
@@ -95,7 +96,7 @@ const COMMANDS = [
   "momentum daemon stop [--now] [--reason <text>] [--data-dir <path>] [--json]",
   "momentum daemon status [--data-dir <path>] [--json]",
   "momentum recovery clear <goal-id> [--reason <text>] [--data-dir <path>] [--json]",
-  "momentum doctor [--data-dir <path>] [--json]"
+  "momentum doctor [--repo <path>] [--data-dir <path>] [--json]"
 ];
 
 const QUEUED_NEXT_ACTION =
@@ -1148,6 +1149,8 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
         message: daemonStatus.error
       };
 
+  const policyPayload = buildDoctorPolicyPayload(parsed.repo);
+
   const payload = {
     ok: true,
     command: "doctor",
@@ -1163,7 +1166,8 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
       profiles: BUILTIN_RUNNER_KINDS.map((kind) =>
         safeRunnerProfileSummary(buildRunnerProfile(kind))
       )
-    }
+    },
+    policy: policyPayload
   };
 
   if (parsed.json) {
@@ -1212,9 +1216,109 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
   lines.push(
     `runners: ${BUILTIN_RUNNER_KINDS.join(", ")} (default ${DEFAULT_RUNNER_KIND})`
   );
+  if (policyPayload.repoConfigured) {
+    if (policyPayload.error) {
+      lines.push(
+        `policy (MOMENTUM.md): error ${policyPayload.error.code} at ${policyPayload.path ?? "(unresolved)"}`
+      );
+    } else if (policyPayload.present) {
+      const fields = describePolicyFields(policyPayload);
+      lines.push(
+        `policy (MOMENTUM.md): present at ${policyPayload.path}${fields ? ` (${fields})` : ""}`
+      );
+    } else {
+      lines.push(
+        `policy (MOMENTUM.md): not present (expected at ${policyPayload.path ?? "(unresolved)"})`
+      );
+    }
+  } else {
+    lines.push("policy (MOMENTUM.md): pass --repo <path> to inspect repo policy");
+  }
   lines.push("");
   write(io.stdout, lines.join("\n"));
   return 0;
+}
+
+type DoctorPolicyPayload = {
+  repoConfigured: boolean;
+  repoPath: string | null;
+  present: boolean;
+  path: string | null;
+  hasNotes: boolean;
+  config: {
+    runner: string | null;
+    verification: readonly string[] | null;
+    verificationTimeoutSec: number | null;
+  } | null;
+  error: { code: string; message: string } | null;
+};
+
+function buildDoctorPolicyPayload(repoOverride?: string): DoctorPolicyPayload {
+  if (typeof repoOverride !== "string" || repoOverride.trim().length === 0) {
+    return {
+      repoConfigured: false,
+      repoPath: null,
+      present: false,
+      path: null,
+      hasNotes: false,
+      config: null,
+      error: null
+    };
+  }
+  const repoPath = repoOverride;
+  const load = loadMomentumPolicy(repoPath);
+  if (!load.ok) {
+    return {
+      repoConfigured: true,
+      repoPath,
+      present: false,
+      path: load.path,
+      hasNotes: false,
+      config: null,
+      error: { code: load.code, message: load.error }
+    };
+  }
+  if (!load.present) {
+    return {
+      repoConfigured: true,
+      repoPath,
+      present: false,
+      path: load.path,
+      hasNotes: false,
+      config: null,
+      error: null
+    };
+  }
+  return {
+    repoConfigured: true,
+    repoPath,
+    present: true,
+    path: load.path,
+    hasNotes: load.policy.notes.length > 0,
+    config: {
+      runner: load.policy.config.runner ?? null,
+      verification:
+        load.policy.config.verification === undefined
+          ? null
+          : [...load.policy.config.verification],
+      verificationTimeoutSec: load.policy.config.verificationTimeoutSec ?? null
+    },
+    error: null
+  };
+}
+
+function describePolicyFields(payload: DoctorPolicyPayload): string {
+  if (!payload.config) return "";
+  const parts: string[] = [];
+  if (payload.config.runner) parts.push(`runner=${payload.config.runner}`);
+  if (payload.config.verification) {
+    parts.push(`verification=${payload.config.verification.length} cmd(s)`);
+  }
+  if (payload.config.verificationTimeoutSec !== null) {
+    parts.push(`timeout_sec=${payload.config.verificationTimeoutSec}`);
+  }
+  if (payload.hasNotes) parts.push("notes");
+  return parts.join(", ");
 }
 
 function summarizeExistingDaemonRun(
@@ -1321,6 +1425,7 @@ function emitGoalStartQueued(
     iterationArtifactDir: init.artifactPaths.iterationDir,
     resumed: init.resumed,
     enqueueCreated: init.enqueueCreated,
+    policy: init.policy,
     nextAction: QUEUED_NEXT_ACTION
   };
 
@@ -1377,7 +1482,8 @@ function emitGoalStart(
     runnerProfileSource: init.runnerProfileSource,
     dataDir: init.dataDir,
     artifactDir: init.artifactPaths.goalDir,
-    resumed: init.resumed
+    resumed: init.resumed,
+    policy: init.policy
   };
 
   if (iteration.ok && iteration.iteration.ok) {
@@ -1538,7 +1644,8 @@ function emitStatus(
     nextActionDetail: data.nextActionDetail,
     latestCommitSha: data.latestCommitSha,
     daemon: data.daemon,
-    staleRecovery: data.staleRecovery
+    staleRecovery: data.staleRecovery,
+    policy: data.policy
   };
 
   if (parsed.json) {
@@ -1821,7 +1928,8 @@ function emitHandoff(
     nextActionDetail: data.nextActionDetail,
     latestCommitSha: data.latestCommitSha,
     daemon: data.daemon,
-    staleRecovery: data.staleRecovery
+    staleRecovery: data.staleRecovery,
+    policy: data.policy
   };
 
   if (parsed.json) {

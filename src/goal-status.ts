@@ -24,6 +24,10 @@ import {
   isBuiltinRunnerKind,
   type RunnerProfile
 } from "./runner-profile.js";
+import {
+  loadMomentumPolicy,
+  type MomentumPolicyErrorCode
+} from "./momentum-policy.js";
 
 export type GoalStatusErrorCode =
   | "invalid_input"
@@ -213,6 +217,24 @@ export type GoalStatusStaleRecoverySummary = {
   staleLeaseGraceMs: number;
 };
 
+export type GoalStatusPolicyError = {
+  code: MomentumPolicyErrorCode;
+  message: string;
+};
+
+export type GoalStatusPolicySummary = {
+  configured: boolean;
+  present: boolean;
+  path: string | null;
+  hasNotes: boolean;
+  config: {
+    runner: string | null;
+    verification: readonly string[] | null;
+    verificationTimeoutSec: number | null;
+  } | null;
+  error: GoalStatusPolicyError | null;
+};
+
 export type GoalStatusSuccess = {
   ok: true;
   dataDir: string;
@@ -245,6 +267,7 @@ export type GoalStatusSuccess = {
   latestCommitSha: string | null;
   daemon: GoalStatusDaemonSummary | null;
   staleRecovery: GoalStatusStaleRecoverySummary;
+  policy: GoalStatusPolicySummary;
 };
 
 export type GoalStatusResult = GoalStatusError | GoalStatusSuccess;
@@ -362,6 +385,7 @@ export function loadGoalStatus(input: LoadGoalStatusInput = {}): GoalStatusResul
 
     const daemon = buildDaemonSummary(db);
     const staleRecovery = buildStaleRecoverySummary(db, goal.id);
+    const policy = buildPolicySummary(goal.repo);
 
     return {
       ok: true,
@@ -396,11 +420,62 @@ export function loadGoalStatus(input: LoadGoalStatusInput = {}): GoalStatusResul
       nextActionDetail,
       latestCommitSha,
       daemon,
-      staleRecovery
+      staleRecovery,
+      policy
     };
   } finally {
     db?.close();
   }
+}
+
+function buildPolicySummary(repoPath: string | null): GoalStatusPolicySummary {
+  if (typeof repoPath !== "string" || repoPath.trim().length === 0) {
+    return {
+      configured: false,
+      present: false,
+      path: null,
+      hasNotes: false,
+      config: null,
+      error: null
+    };
+  }
+  const load = loadMomentumPolicy(repoPath);
+  if (!load.ok) {
+    return {
+      configured: true,
+      present: false,
+      path: load.path,
+      hasNotes: false,
+      config: null,
+      error: { code: load.code, message: load.error }
+    };
+  }
+  if (!load.present) {
+    return {
+      configured: true,
+      present: false,
+      path: load.path,
+      hasNotes: false,
+      config: null,
+      error: null
+    };
+  }
+  const { policy } = load;
+  return {
+    configured: true,
+    present: true,
+    path: load.path,
+    hasNotes: policy.notes.length > 0,
+    config: {
+      runner: policy.config.runner ?? null,
+      verification:
+        policy.config.verification === undefined
+          ? null
+          : [...policy.config.verification],
+      verificationTimeoutSec: policy.config.verificationTimeoutSec ?? null
+    },
+    error: null
+  };
 }
 
 type RecoveryEventAggregateRow = {

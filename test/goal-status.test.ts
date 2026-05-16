@@ -1553,4 +1553,72 @@ describe("loadGoalStatus", () => {
       expect(status.staleRecovery.staleLeaseGraceMs).toBe(5_000);
     });
   });
+
+  describe("MOMENTUM.md policy surface", () => {
+    it("reports policy.configured:true and present:false when no MOMENTUM.md is in the repo", () => {
+      const repo = initRepo();
+      const setup = setupGoal(repo, "Status without policy");
+
+      const status = loadGoalStatus({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      });
+      expect(status.ok).toBe(true);
+      if (!status.ok) return;
+      expect(status.policy.configured).toBe(true);
+      expect(status.policy.present).toBe(false);
+      expect(status.policy.path).toBe(path.join(repo, "MOMENTUM.md"));
+      expect(status.policy.hasNotes).toBe(false);
+      expect(status.policy.config).toBeNull();
+      expect(status.policy.error).toBeNull();
+    });
+
+    it("reports a present MOMENTUM.md with its config and notes flag", () => {
+      const repo = initRepo();
+      fs.writeFileSync(
+        path.join(repo, "MOMENTUM.md"),
+        `---\nrunner: trusted-shell\nverification:\n  - pnpm test\nverification_timeout_sec: 1200\n---\nNotes body.\n`,
+        "utf-8"
+      );
+      const setup = setupGoal(repo, "Status with policy");
+
+      const status = loadGoalStatus({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      });
+      expect(status.ok).toBe(true);
+      if (!status.ok) return;
+      expect(status.policy.configured).toBe(true);
+      expect(status.policy.present).toBe(true);
+      expect(status.policy.path).toBe(path.join(repo, "MOMENTUM.md"));
+      expect(status.policy.hasNotes).toBe(true);
+      expect(status.policy.config).toEqual({
+        runner: "trusted-shell",
+        verification: ["pnpm test"],
+        verificationTimeoutSec: 1200
+      });
+      expect(status.policy.error).toBeNull();
+    });
+
+    it("surfaces policy_schema_invalid in policy.error without failing the status call", () => {
+      const repo = initRepo();
+      const setup = setupGoal(repo, "Status with bad policy");
+      fs.writeFileSync(
+        path.join(repo, "MOMENTUM.md"),
+        `---\nverification: pnpm test\n---\n`,
+        "utf-8"
+      );
+
+      const status = loadGoalStatus({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      });
+      expect(status.ok).toBe(true);
+      if (!status.ok) return;
+      expect(status.policy.configured).toBe(true);
+      expect(status.policy.present).toBe(false);
+      expect(status.policy.error).not.toBeNull();
+      expect(status.policy.error?.code).toBe("policy_schema_invalid");
+    });
+  });
 });
