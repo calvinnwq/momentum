@@ -4,7 +4,8 @@
  * Runs the configured `trusted_shell.command` (with `args`) as an explicitly
  * trusted child process: there is no sandbox, no privilege drop, and the
  * command runs with the privileges of the Momentum invoker. The runner
- * streams stdout/stderr into `runner.log`, then reads and parses the
+ * captures stdout/stderr and writes them into `runner.log` after the
+ * command exits, then reads and parses the
  * normalized `RunnerResult` from the configured result file (relative to the
  * iteration artifact directory).
  *
