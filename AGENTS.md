@@ -90,7 +90,7 @@ Common commands:
 - `doctor`
 - Preserve stable CLI behavior across both JSON and text outputs.
 - When changing user-facing output, update tests and verify callers that rely on stable formatting.
-- `logs <goal-id> [--iteration N]` reads on-disk `runner.log` and `verification.log` only; it must not consult live worker state.
+- `logs <goal-id> [--iteration N]` reads on-disk `runner.log`, `verification.log`, and runner result JSON artifacts only; it must not consult live worker state. Empty result scaffolds (`{}`) are not parse errors, while malformed/non-conforming result JSON should surface a `parseError`.
 
 ## Data and artifact layout
 - State uses `MOMENTUM_HOME` env var → `~/.momentum` fallback; override with `--data-dir`.
