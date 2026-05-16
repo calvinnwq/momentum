@@ -70,22 +70,25 @@ export function renderIterationPrompt(ctx: IterationPromptContext): string {
   lines.push('  "success": boolean,');
   lines.push('  "summary": string,');
   lines.push('  "key_changes_made": string[],');
-  lines.push('  "key_learnings": string[], // optional, defaults to []');
-  lines.push('  "remaining_work": string[], // optional, defaults to []');
+  lines.push('  "key_learnings": string[],');
+  lines.push('  "remaining_work": string[],');
   lines.push('  "goal_complete": boolean,');
   lines.push('  "commit": {');
   lines.push(
     '    "type": "build" | "ci" | "docs" | "feat" | "fix" | "perf" | "refactor" | "test" | "chore",'
   );
-  lines.push('    "scope": string, // optional, defaults to no scope');
+  lines.push('    "scope": string,');
   lines.push('    "subject": string,');
-  lines.push('    "body": string, // optional, defaults to ""');
-  lines.push('    "breaking": boolean // optional, defaults to false');
+  lines.push('    "body": string,');
+  lines.push('    "breaking": boolean');
   lines.push("  }");
   lines.push("}");
   lines.push("```");
   lines.push(
-    "`success`, `summary`, `key_changes_made`, `goal_complete`, `commit.type`, and `commit.subject` are required."
+    "`success`, `summary`, `key_changes_made`, `goal_complete`, `commit`, `commit.type`, and `commit.subject` are required."
+  );
+  lines.push(
+    "`key_learnings` and `remaining_work` are optional and default to `[]`; `commit.scope` is optional and defaults to no scope; `commit.body` is optional and defaults to `\"\"`; `commit.breaking` is optional and defaults to `false`."
   );
   lines.push("");
 
