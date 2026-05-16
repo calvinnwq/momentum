@@ -203,25 +203,12 @@ export function runForegroundIteration(
       return currentHead;
     }
     if (currentHead.head !== baseHead) {
-      const message = `runner "${spec.runner}" failed after moving HEAD from ${baseHead} to ${currentHead.head}; leaving repo unchanged for manual recovery (runner error: ${dispatch.error})`;
-      return {
-        ok: false,
-        code: "runner_changed_head",
-        error: message,
-        manualRecovery: {
-          expectedCommit: baseHead,
-          currentCommit: currentHead.head,
-          reason: {
-            code: "runner_changed_head",
-            message
-          },
-          safeNextSteps: [
-            "Inspect the runner-created commit and repository state.",
-            "Decide whether to keep, amend, or reset the runner-created commit.",
-            "Run `momentum recovery clear <goal-id>` after the repository is safe for queued work."
-          ]
-        }
-      };
+      return runnerChangedHeadError({
+        runner: spec.runner,
+        baseHead,
+        currentHead: currentHead.head,
+        detail: `runner error: ${dispatch.error}`
+      });
     }
     const reset = resetToBase({ repoPath: guard.repoPath, baseHead });
     if (!reset.ok) {
@@ -243,6 +230,15 @@ export function runForegroundIteration(
   const currentHead = getCurrentHead(guard.repoPath);
   if (!currentHead.ok) return currentHead;
   const postRunnerHead = currentHead.head;
+
+  if (postRunnerHead !== baseHead) {
+    return runnerChangedHeadError({
+      runner: spec.runner,
+      baseHead,
+      currentHead: postRunnerHead,
+      detail: "runner completed before Momentum finalization"
+    });
+  }
 
   const finalize = finalizeIteration({
     repoPath: guard.repoPath,
@@ -322,6 +318,33 @@ export function runForegroundIteration(
         finalize
       };
   }
+}
+
+function runnerChangedHeadError(input: {
+  runner: string;
+  baseHead: string;
+  currentHead: string;
+  detail: string;
+}): ForegroundIterationError {
+  const message = `runner "${input.runner}" moved HEAD from ${input.baseHead} to ${input.currentHead}; leaving repo unchanged for manual recovery (${input.detail})`;
+  return {
+    ok: false,
+    code: "runner_changed_head",
+    error: message,
+    manualRecovery: {
+      expectedCommit: input.baseHead,
+      currentCommit: input.currentHead,
+      reason: {
+        code: "runner_changed_head",
+        message
+      },
+      safeNextSteps: [
+        "Inspect the runner-created commit and repository state.",
+        "Decide whether to keep, amend, or reset the runner-created commit.",
+        "Run `momentum recovery clear <goal-id>` after the repository is safe for queued work."
+      ]
+    }
+  };
 }
 
 function getCurrentHead(

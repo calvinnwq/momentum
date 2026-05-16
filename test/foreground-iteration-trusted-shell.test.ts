@@ -225,6 +225,50 @@ describe("runForegroundIteration with trusted-shell", () => {
     expect(fs.existsSync(committedPath)).toBe(true);
   });
 
+  it("leaves a runner-created commit in place when execution succeeds after moving HEAD", () => {
+    const repo = initRepo();
+    const artifactPaths = setupArtifacts();
+    const committedPath = path.join(repo, "committed-before-success.txt");
+    const script = [
+      `printf 'committed before success\n' > "${committedPath}"`,
+      `git -C "${repo}" add committed-before-success.txt`,
+      `git -C "${repo}" commit -m 'runner commit before success' --quiet`,
+      `cat <<'JSON' > "$MOMENTUM_RESULT_PATH"`,
+      RESULT_JSON_VALID,
+      "JSON"
+    ].join("\n");
+    const spec = makeSpec(repo, {
+      trusted_shell: { command: "/bin/sh", args: ["-c", script] }
+    } as unknown as Partial<GoalSpec>);
+
+    const baseHead = runGit(repo, ["rev-parse", "HEAD"]).trim();
+
+    const out = runForegroundIteration({
+      goalId: GOAL_ID,
+      spec,
+      iteration: 1,
+      artifactPaths
+    });
+
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.code).toBe("runner_changed_head");
+    expect(out.error).toContain("manual recovery");
+
+    const head = runGit(repo, ["rev-parse", "HEAD"]).trim();
+    expect(head).not.toBe(baseHead);
+    expect(runGit(repo, ["log", "-1", "--pretty=%s"]).trim()).toBe(
+      "runner commit before success"
+    );
+    expect(runGit(repo, ["status", "--porcelain"]).trim()).toBe("");
+    expect(fs.existsSync(committedPath)).toBe(true);
+    if (fs.existsSync(artifactPaths.verificationLog)) {
+      expect(fs.readFileSync(artifactPaths.verificationLog, "utf-8")).not.toContain(
+        "[verify]"
+      );
+    }
+  });
+
   it("surfaces runner_failed and resets when the shell times out", () => {
     const repo = initRepo();
     const artifactPaths = setupArtifacts();
