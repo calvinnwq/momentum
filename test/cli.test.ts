@@ -1307,6 +1307,7 @@ runner_profile: {
     expect(result.stdout).toContain("Recovery: missing");
     expect(result.stdout).toContain(`${goalId}/recovery.md`);
     expect(result.stdout).toMatch(/Commit: [0-9a-f]{40}/);
+    expect(result.stdout).toMatch(/Policy \(MOMENTUM\.md\): (present|not present|error|repo path not set)/);
     expect(result.stderr).toBe("");
   });
 

@@ -1307,7 +1307,14 @@ function buildDoctorPolicyPayload(repoOverride?: string): DoctorPolicyPayload {
   };
 }
 
-function describePolicyFields(payload: DoctorPolicyPayload): string {
+function describePolicyFields(payload: {
+  config: {
+    runner: string | null;
+    verification: readonly string[] | null;
+    verificationTimeoutSec: number | null;
+  } | null;
+  hasNotes: boolean;
+}): string {
   if (!payload.config) return "";
   const parts: string[] = [];
   if (payload.config.runner) parts.push(`runner=${payload.config.runner}`);
@@ -1734,6 +1741,24 @@ function emitStatus(
         `jobs recovered=${sr.recoveredJobCount} ` +
         `pending locks=${sr.staleRepoLockCount} ` +
         `pending jobs=${sr.staleClaimedJobCount}`
+    );
+  }
+
+  const policy = data.policy;
+  if (!policy.configured) {
+    lines.push("Policy (MOMENTUM.md): repo path not set; discovery skipped");
+  } else if (policy.error) {
+    lines.push(
+      `Policy (MOMENTUM.md): error ${policy.error.code} at ${policy.path ?? "(unresolved)"}`
+    );
+  } else if (policy.present) {
+    const fields = describePolicyFields(policy);
+    lines.push(
+      `Policy (MOMENTUM.md): present at ${policy.path}${fields ? ` (${fields})` : ""}`
+    );
+  } else {
+    lines.push(
+      `Policy (MOMENTUM.md): not present (expected at ${policy.path ?? "(unresolved)"})`
     );
   }
 
