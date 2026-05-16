@@ -739,7 +739,7 @@ Milestone 4 (Real Runner Profiles) is the **active milestone** following the ope
 
 ### Milestone goal
 
-Land a `RunnerAdapter` boundary so Momentum can execute Goals through more than the in-process `fake` runner without changing the Goal/Iteration/Job contract or the M3 daemon/recovery surfaces. The first real profile is a `trusted-shell` runner; one live ACP/acpx-style runtime is admitted as the smoke path if available locally. Runtime `MOMENTUM.md` policy loading lands second so repo-owned policy can gate runner choice and verification. External tracker automation (Linear/GitHub/Jira writes, webhooks) remains deferred and is **not** part of M4.
+Land a `RunnerAdapter` boundary so Momentum can execute Goals through more than the in-process `fake` runner without changing the Goal/Iteration/Job contract or the M3 daemon/recovery surfaces. The first real profile is a `trusted-shell` runner; an `acp` ACP/acpx-style runtime smoke profile has also landed alongside it. Runtime `MOMENTUM.md` policy loading lands second so repo-owned policy can gate runner choice and verification. External tracker automation (Linear/GitHub/Jira writes, webhooks) remains deferred and is **not** part of M4.
 
 ### Architecture decision: core vs runner adapters
 
@@ -779,7 +779,7 @@ The following are **explicitly out of scope** for Milestone 4 and remain deferre
 - **Worktrees / per-source-item workspaces** — a Goal still uses one shared repo lease.
 - **Background runner supervision** — forking, daemonization, restart-on-crash; the M3 single-process managed loop remains the supervision contract.
 - **Dashboard or UI surface** — CLI JSON/text remains the only interface in M4.
-- **Strong sandboxing** — `trusted-shell` is exactly that: explicitly trusted. Container/VM/seccomp isolation is not part of M4.
+- **Strong sandboxing** — `trusted-shell` and `acp` are exactly that: explicitly trusted. Container/VM/seccomp isolation is not part of M4.
 - **Cooperative mid-job cancellation / signal handling** — stop semantics stay observation-only as in M3.
 - **Remote git operations** — no `fetch` / `pull` / `push` / `rebase` driven from Momentum.
 
@@ -798,4 +798,4 @@ Milestone 3 is complete. Milestone 4 has absorbed runner profiles and runtime `M
 - Worktree management, per-source-item worktrees/workspaces, remote git operations (`fetch`, `pull`, `push`, `rebase`), and parallel same-repo Goals.
 - PR/GitHub/Linear automation, external tracker writes, inbound webhooks, and other external integrations driven from inside Momentum.
 - A dashboard or other UI surface beyond the CLI JSON/text outputs.
-- **Strong sandboxing** (container / VM / seccomp isolation); M4's `trusted-shell` is explicitly trusted, not sandboxed.
+- **Strong sandboxing** (container / VM / seccomp isolation); M4's `trusted-shell` and `acp` runners are explicitly trusted, not sandboxed.

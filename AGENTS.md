@@ -39,7 +39,7 @@ Typical loop:
 Milestone 4 lands real runner profiles behind the existing Goal/Iteration/verification/handoff contract, then a runtime `MOMENTUM.md` policy loader, while keeping external tracker automation deferred. The canonical narrative lives in `README.md` under "Milestone 4 Roadmap"; read it before starting any M4 implementation slice. Headline rules:
 
 - Momentum core owns Goal/Iteration/Job state, Momentum-owned verification, the git transaction, the on-disk artifact layout, and the M2/M3 queue/daemon/recovery surfaces. `RunnerAdapter` implementations execute the iteration prompt and report a normalized `RunnerResult`; adapters do not touch git, do not own verification, and do not perform external tracker writes.
-- Initial M4 runner family: `fake` (existing in-process baseline), `trusted-shell` (operator-trusted executable-plus-argv runner with no sandbox; landed in NGX-282), and one live ACP/acpx-style runtime as the smoke path if available locally (otherwise opt-in env-gated).
+- Initial M4 runner family: `fake` (existing in-process baseline), `trusted-shell` (operator-trusted executable-plus-argv runner with no sandbox; landed in NGX-282), and `acp` (ACP/acpx-style runtime smoke profile with `runtime_unavailable` / `startup_failed` taxonomy; landed in NGX-283).
 - External tracker writes stay adapter-mediated and policy-gated and are **not implemented in M4**.
 - M4 explicit non-goals: external tracker writes, inbound webhooks, per-source-item worktrees / parallel same-repo Goals, background runner supervision (forking / daemonization / restart-on-crash), dashboards / UI surfaces, strong sandboxing (container / VM / seccomp), cooperative mid-job cancellation / signal handling, and remote git operations.
 - All M3 daemon and recovery contracts are preserved verbatim through M4 until NGX-286 intentionally flips the `doctor` readiness marker as part of M4 closeout.
@@ -95,7 +95,7 @@ Common commands:
 ## Data and artifact layout
 - State uses `MOMENTUM_HOME` env var → `~/.momentum` fallback; override with `--data-dir`.
 - SQLite database at `<data-dir>/momentum.db` with `goals`, `jobs`, `events`, `repo_locks`, `daemon_runs` tables.
-- Goal artifacts at `<data-dir>/goals/<goal-id>/`: `goal.md`, `ledger.md`, `handoff.md`, `handoff.json`, optional `recovery.md` (created lazily when manual recovery is classified), and `iterations/<n>/{prompt.md,runner.log,verification.log,result.json}` by default; runner profiles such as `trusted-shell` may report a different result JSON file inside the iteration directory via `trusted_shell.result_file`.
+- Goal artifacts at `<data-dir>/goals/<goal-id>/`: `goal.md`, `ledger.md`, `handoff.md`, `handoff.json`, optional `recovery.md` (created lazily when manual recovery is classified), and `iterations/<n>/{prompt.md,runner.log,verification.log,result.json}` by default; runner profiles such as `trusted-shell` and `acp` may report a different result JSON file inside the iteration directory via `trusted_shell.result_file` / `acp.result_file`.
 - Avoid hard-coded paths tied to a single user.
 - Only use explicit local paths when existing documentation in-repo explicitly mandates them.
 
