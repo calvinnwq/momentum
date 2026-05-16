@@ -22,7 +22,12 @@ export type RunnerAdapterErrorCode =
   | "invalid_input"
   | "unsupported_runner"
   | "runner_threw"
-  | "result_invalid";
+  | "result_invalid"
+  | "result_missing"
+  | "command_failed"
+  | "command_timed_out"
+  | "spawn_failed"
+  | "output_overflow";
 
 export type RunnerAdapterError = {
   ok: false;
