@@ -9,6 +9,7 @@ export type GoalSpec = {
   verification: string[];
   verification_timeout_sec: number;
   trusted_shell?: unknown;
+  acp?: unknown;
   body: string;
 };
 
@@ -16,7 +17,11 @@ export type GoalSpecError = { ok: false; error: string };
 export type GoalSpecSuccess = {
   ok: true;
   spec: GoalSpec;
-  rawFrontmatter: { runner?: unknown; trusted_shell?: unknown };
+  rawFrontmatter: {
+    runner?: unknown;
+    trusted_shell?: unknown;
+    acp?: unknown;
+  };
 };
 export type GoalSpecResult = GoalSpecError | GoalSpecSuccess;
 
@@ -105,6 +110,7 @@ export function parseGoalSpec(
   }
 
   const trustedShellValue = fields["trusted_shell"];
+  const acpValue = fields["acp"];
 
   return {
     ok: true,
@@ -117,11 +123,13 @@ export function parseGoalSpec(
       verification,
       verification_timeout_sec,
       ...(trustedShellValue !== undefined ? { trusted_shell: trustedShellValue } : {}),
+      ...(acpValue !== undefined ? { acp: acpValue } : {}),
       body: (body ?? "").trimEnd()
     },
     rawFrontmatter: {
       runner: rawRunner,
-      ...(trustedShellValue !== undefined ? { trusted_shell: trustedShellValue } : {})
+      ...(trustedShellValue !== undefined ? { trusted_shell: trustedShellValue } : {}),
+      ...(acpValue !== undefined ? { acp: acpValue } : {})
     }
   };
 }

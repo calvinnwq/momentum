@@ -6,11 +6,16 @@
  * the iteration prompt is executed and surfaces a safe summary for
  * operators. NGX-281 routes executing profiles through RunnerAdapter;
  * NGX-282 promotes `trusted-shell` to an executing profile backed by an
- * operator-trusted executable plus argv, with no implicit shell. The
- * `MOMENTUM.md` loader stays a placeholder until a future milestone proves it.
+ * operator-trusted executable plus argv, with no implicit shell. NGX-283
+ * adds an `acp` (ACP/acpx-style) runner profile: a thin smoke harness
+ * around the existing adapter boundary with explicit runtime detection,
+ * an optional auth/availability probe, and a distinct `runtime_unavailable`
+ * error code so missing prerequisites are not conflated with command
+ * failures or verification failures. The `MOMENTUM.md` loader stays a
+ * placeholder until a future milestone proves it.
  */
 
-export const BUILTIN_RUNNER_KINDS = ["fake", "trusted-shell"] as const;
+export const BUILTIN_RUNNER_KINDS = ["fake", "trusted-shell", "acp"] as const;
 export type BuiltinRunnerKind = (typeof BUILTIN_RUNNER_KINDS)[number];
 
 export const DEFAULT_RUNNER_KIND: BuiltinRunnerKind = "fake";
@@ -81,6 +86,14 @@ export function buildRunnerProfile(kind: BuiltinRunnerKind): RunnerProfile {
         name: kind,
         description:
           "Operator-trusted executable-plus-argv runner; executes the goal-configured command with no implicit shell, no sandbox, and no privilege drop. The command has full privileges of the Momentum invoker.",
+        executes: true
+      };
+    case "acp":
+      return {
+        kind,
+        name: kind,
+        description:
+          "ACP/acpx-style smoke runner; spawns the configured external agent runtime via the RunnerAdapter boundary. Detects missing runtime/auth as `runtime_unavailable` without corrupting Goal state, distinct from command_failed and verification failures.",
         executes: true
       };
   }

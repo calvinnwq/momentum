@@ -62,7 +62,7 @@ export function renderIterationPrompt(ctx: IterationPromptContext): string {
 
   lines.push("## Output contract");
   lines.push(
-    "Write a single JSON object to result.json by default, or to the configured result path with this schema (trusted-shell runners must use $MOMENTUM_RESULT_PATH):"
+    "Write a single JSON object to result.json by default, or to the configured result path with this schema (trusted-shell and acp runners must use $MOMENTUM_RESULT_PATH):"
   );
   lines.push("");
   lines.push("```json");

@@ -9,6 +9,7 @@
  * writes.
  */
 
+import { runAcpRunner } from "./acp-runner.js";
 import type { GoalSpec } from "./goal-spec.js";
 import { runFakeRunner } from "./fake-runner.js";
 import {
@@ -28,7 +29,9 @@ export type RunnerAdapterErrorCode =
   | "command_failed"
   | "command_timed_out"
   | "spawn_failed"
-  | "output_overflow";
+  | "output_overflow"
+  | "runtime_unavailable"
+  | "startup_failed";
 
 export type RunnerAdapterError = {
   ok: false;
@@ -70,7 +73,8 @@ export type RunnerAdapter = {
 
 const ADAPTERS: ReadonlyMap<BuiltinRunnerKind, RunnerAdapter> = new Map([
   ["fake", buildFakeAdapter()],
-  ["trusted-shell", buildTrustedShellAdapter()]
+  ["trusted-shell", buildTrustedShellAdapter()],
+  ["acp", buildAcpAdapter()]
 ]);
 
 export function getRunnerAdapter(kind: string): RunnerAdapter | undefined {
@@ -150,6 +154,15 @@ function buildTrustedShellAdapter(): RunnerAdapter {
     executes: true,
     execute: (input: RunnerAdapterInput): RunnerAdapterResult =>
       runTrustedShellRunner(input)
+  };
+}
+
+function buildAcpAdapter(): RunnerAdapter {
+  return {
+    kind: "acp",
+    executes: true,
+    execute: (input: RunnerAdapterInput): RunnerAdapterResult =>
+      runAcpRunner(input)
   };
 }
 
