@@ -98,7 +98,7 @@ describe("M4 contract docs (NGX-279..NGX-286)", () => {
     });
 
     it("keeps the top milestone summary aligned with M4 scope", () => {
-      expect(readme).toContain("Real runner profiles and a runtime `MOMENTUM.md` policy loader are now in M4 scope");
+      expect(readme).toContain("Real runner profiles and the runtime `MOMENTUM.md` policy loader shipped in Milestone 4");
       expect(readme).not.toContain("real runner profiles (Codex / Claude / OpenCode / ACP backends), and a runtime `MOMENTUM.md` loader");
     });
 
