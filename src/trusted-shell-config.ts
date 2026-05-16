@@ -7,8 +7,8 @@ import path from "node:path";
  * verification, and the artifact layout. The trusted-shell runner profile
  * adds an *explicitly trusted* shell command as the runner: it runs with
  * exactly the privileges of the user who invoked Momentum. There is no
- * sandbox, no privilege drop, and no automatic input scrubbing — the
- * operator is responsible for what the configured command can do.
+ * sandbox and no privilege drop — the operator is responsible for what the
+ * configured command can do.
  *
  * This module parses and validates the `trusted_shell` block from goal
  * frontmatter into a typed `TrustedShellConfig`. It does not execute

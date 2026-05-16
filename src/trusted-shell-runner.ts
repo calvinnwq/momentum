@@ -3,8 +3,8 @@
  *
  * Runs the configured `trusted_shell.command` (with `args`) as an explicitly
  * trusted child process: there is no sandbox, no privilege drop, and the
- * command inherits exactly the privileges of the Momentum invoker. The
- * runner streams stdout/stderr into `runner.log`, then reads and parses the
+ * command runs with the privileges of the Momentum invoker. The runner
+ * streams stdout/stderr into `runner.log`, then reads and parses the
  * normalized `RunnerResult` from the configured result file (relative to the
  * iteration artifact directory).
  *
@@ -312,18 +312,12 @@ function resolveEnv(
   const source = input.env ?? process.env;
   const env: NodeJS.ProcessEnv = {};
 
-  if (config.envAllow.length === 0) {
-    for (const [key, value] of Object.entries(source)) {
-      if (value !== undefined) env[key] = value;
-    }
-  } else {
-    for (const key of config.envAllow) {
-      const value = source[key];
-      if (value !== undefined) env[key] = value;
-    }
-    if (env["PATH"] === undefined && source["PATH"] !== undefined) {
-      env["PATH"] = source["PATH"];
-    }
+  for (const key of config.envAllow) {
+    const value = source[key];
+    if (value !== undefined) env[key] = value;
+  }
+  if (env["PATH"] === undefined && source["PATH"] !== undefined) {
+    env["PATH"] = source["PATH"];
   }
 
   for (const [key, value] of Object.entries(config.env)) {

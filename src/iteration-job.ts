@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+
 import type { GoalArtifactPaths } from "./artifacts.js";
 import type { MomentumDb } from "./db.js";
 import {
@@ -6,6 +9,11 @@ import {
   type ForegroundIterationSuccess
 } from "./foreground-iteration.js";
 import type { GoalSpec } from "./goal-spec.js";
+import { markGoalNeedsManualRecovery } from "./goal-recovery.js";
+import {
+  writeRecoveryArtifact,
+  type RecoveryArtifactPathBundle
+} from "./recovery-artifact.js";
 
 export type ExecuteIterationJobInput = {
   db: MomentumDb;
@@ -151,12 +159,84 @@ export function executeIterationJob(
     code: result.code,
     error: result.error
   });
+  recordManualRecoveryIfNeeded({
+    db,
+    goalId,
+    jobId,
+    spec,
+    artifactPaths,
+    iteration,
+    result,
+    now: finishTs
+  });
   return {
     ok: false,
     iteration: result,
     goalState: "failed",
     jobState: "failed"
   };
+}
+
+function recordManualRecoveryIfNeeded(input: {
+  db: MomentumDb;
+  goalId: string;
+  jobId: string;
+  spec: GoalSpec;
+  artifactPaths: GoalArtifactPaths;
+  iteration: number;
+  result: ForegroundIterationError;
+  now: number;
+}): void {
+  const recovery = input.result.manualRecovery;
+  if (input.result.code !== "runner_changed_head" || recovery === undefined) {
+    return;
+  }
+
+  const dataDir = path.dirname(path.dirname(input.artifactPaths.goalDir));
+  const artifactPaths: RecoveryArtifactPathBundle = {
+    iterationDir: input.artifactPaths.iterationDir,
+    runnerLog: fs.existsSync(input.artifactPaths.runnerLog)
+      ? input.artifactPaths.runnerLog
+      : null,
+    verificationLog: fs.existsSync(input.artifactPaths.verificationLog)
+      ? input.artifactPaths.verificationLog
+      : null,
+    resultJson: fs.existsSync(input.artifactPaths.resultJson)
+      ? input.artifactPaths.resultJson
+      : null
+  };
+
+  try {
+    writeRecoveryArtifact({
+      dataDir,
+      input: {
+        goalId: input.goalId,
+        goalTitle: input.spec.title,
+        iteration: input.iteration,
+        jobId: input.jobId,
+        daemonRunId: null,
+        repoPath: input.spec.repo ?? null,
+        expectedCommit: recovery.expectedCommit,
+        currentCommit: recovery.currentCommit,
+        reason: recovery.reason,
+        artifactPaths,
+        safeNextSteps: recovery.safeNextSteps,
+        classifiedAt: input.now
+      }
+    });
+  } catch {
+  }
+
+  const marked = markGoalNeedsManualRecovery(input.db, {
+    goalId: input.goalId,
+    reason: recovery.reason.code,
+    now: input.now
+  });
+  if (!marked.ok) {
+    throw new Error(
+      `manual recovery flag write failed for goal ${input.goalId}: ${marked.reason}`
+    );
+  }
 }
 
 function pickErrorArtifactPath(

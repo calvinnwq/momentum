@@ -10,6 +10,7 @@ import {
 } from "./queue-jobs.js";
 import {
   acquireRepoLock,
+  markRepoLockNeedsManualRecovery,
   releaseRepoLock
 } from "./repo-locks.js";
 import { getGoal } from "./goal-init.js";
@@ -324,11 +325,22 @@ export function runWorkerOnce(input: WorkerRunInput): WorkerRunResult {
   });
 
   const releaseNow = now();
-  releaseRepoLock(input.db, {
-    lockId: lock.id,
-    now: releaseNow,
-    recoveryStatus: iterationResult.ok ? "iteration_success" : "iteration_failure"
-  });
+  const needsManualRecovery =
+    !iterationResult.ok &&
+    iterationResult.iteration.code === "runner_changed_head";
+  if (needsManualRecovery) {
+    markRepoLockNeedsManualRecovery(input.db, {
+      lockId: lock.id,
+      now: releaseNow,
+      recoveryStatus: "runner_changed_head"
+    });
+  } else {
+    releaseRepoLock(input.db, {
+      lockId: lock.id,
+      now: releaseNow,
+      recoveryStatus: iterationResult.ok ? "iteration_success" : "iteration_failure"
+    });
+  }
 
   let releaseHookError: Error | null = null;
   try {

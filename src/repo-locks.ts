@@ -50,7 +50,7 @@ export function acquireRepoLock(
   validateAcquireInput(input);
   const now = input.now ?? Date.now();
 
-  const existing = getActiveRepoLock(db, input.repoRoot);
+  const existing = getBlockingRepoLock(db, input.repoRoot);
   if (existing) {
     return { ok: false, reason: "already_locked", existing };
   }
@@ -129,9 +129,32 @@ export function releaseRepoLock(
              released_at = ?,
              updated_at = ?,
              recovery_status = COALESCE(?, recovery_status)
-       WHERE id = ? AND state = 'active'`
+       WHERE id = ? AND state IN ('active', 'needs_manual_recovery')`
     )
     .run(now, now, input.recoveryStatus ?? null, input.lockId);
+  return { ok: Number(result.changes) > 0 };
+}
+
+export type MarkRepoLockNeedsManualRecoveryInput = {
+  lockId: string;
+  now?: number;
+  recoveryStatus?: string;
+};
+
+export function markRepoLockNeedsManualRecovery(
+  db: MomentumDb,
+  input: MarkRepoLockNeedsManualRecoveryInput
+): { ok: boolean } {
+  const now = input.now ?? Date.now();
+  const result = db
+    .prepare(
+      `UPDATE repo_locks
+         SET state = 'needs_manual_recovery',
+             updated_at = ?,
+             recovery_status = COALESCE(?, recovery_status)
+       WHERE id = ? AND state = 'active'`
+    )
+    .run(now, input.recoveryStatus ?? null, input.lockId);
   return { ok: Number(result.changes) > 0 };
 }
 
@@ -207,6 +230,20 @@ export function getActiveRepoLock(
     .get(repoRoot) as RepoLockRow | undefined;
 }
 
+export function getBlockingRepoLock(
+  db: MomentumDb,
+  repoRoot: string
+): RepoLockRow | undefined {
+  return db
+    .prepare(
+      `SELECT * FROM repo_locks
+       WHERE repo_root = ? AND state IN ('active', 'needs_manual_recovery')
+       ORDER BY CASE state WHEN 'active' THEN 0 ELSE 1 END, acquired_at DESC
+       LIMIT 1`
+    )
+    .get(repoRoot) as RepoLockRow | undefined;
+}
+
 export function getRepoLock(
   db: MomentumDb,
   lockId: string
@@ -241,4 +278,3 @@ function validateAcquireInput(input: AcquireRepoLockInput): void {
     );
   }
 }
-

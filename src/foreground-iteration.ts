@@ -42,6 +42,15 @@ export type ForegroundIterationError = {
   code: ForegroundIterationErrorCode;
   error: string;
   finalize?: FinalizeIterationResult;
+  manualRecovery?: {
+    expectedCommit: string;
+    currentCommit: string;
+    reason: {
+      code: string;
+      message: string;
+    };
+    safeNextSteps: string[];
+  };
 };
 
 export type ForegroundIterationSuccess = {
@@ -194,10 +203,24 @@ export function runForegroundIteration(
       return currentHead;
     }
     if (currentHead.head !== baseHead) {
+      const message = `runner "${spec.runner}" failed after moving HEAD from ${baseHead} to ${currentHead.head}; leaving repo unchanged for manual recovery (runner error: ${dispatch.error})`;
       return {
         ok: false,
         code: "runner_changed_head",
-        error: `runner "${spec.runner}" failed after moving HEAD from ${baseHead} to ${currentHead.head}; leaving repo unchanged for manual recovery (runner error: ${dispatch.error})`
+        error: message,
+        manualRecovery: {
+          expectedCommit: baseHead,
+          currentCommit: currentHead.head,
+          reason: {
+            code: "runner_changed_head",
+            message
+          },
+          safeNextSteps: [
+            "Inspect the runner-created commit and repository state.",
+            "Decide whether to keep, amend, or reset the runner-created commit.",
+            "Run `momentum recovery clear <goal-id>` after the repository is safe for queued work."
+          ]
+        }
       };
     }
     const reset = resetToBase({ repoPath: guard.repoPath, baseHead });

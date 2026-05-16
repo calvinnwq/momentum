@@ -238,7 +238,7 @@ describe("runTrustedShellRunner — success path", () => {
     expect(dump).toContain(`RESULT=${input.resultJsonPath}`);
   });
 
-  it("merges config env block on top of inherited env", () => {
+  it("merges config env block on top of the least-privilege env", () => {
     const iterationDir = makeTempDir("momentum-trusted-shell-iter-");
     const resultPath = path.join(iterationDir, "result.json");
     const dump = path.join(iterationDir, "env.txt");
@@ -259,6 +259,33 @@ describe("runTrustedShellRunner — success path", () => {
     const out = runTrustedShellRunner(input);
     expect(out.ok).toBe(true);
     expect(fs.readFileSync(dump, "utf-8")).toContain("PROMPT=from-config");
+  });
+
+  it("does not inherit parent env variables without env_allow", () => {
+    const iterationDir = makeTempDir("momentum-trusted-shell-iter-");
+    const resultPath = path.join(iterationDir, "result.json");
+    const dump = path.join(iterationDir, "env.txt");
+    const script = [
+      `printf 'SECRET=%s\\n' "$SECRET_TOKEN" > "${dump}"`,
+      `printf 'PATH_SET=%s\\n' "$([ -n "$PATH" ] && echo yes || echo no)" >> "${dump}"`,
+      `cat <<'JSON' > "${resultPath}"`,
+      VALID_RESULT_JSON,
+      "JSON"
+    ].join("\n");
+    const input = setup({
+      iterationDir,
+      env: {
+        SECRET_TOKEN: "do-not-forward",
+        PATH: process.env["PATH"] ?? ""
+      },
+      trustedShell: shellScript(script)
+    });
+
+    const out = runTrustedShellRunner(input);
+    expect(out.ok).toBe(true);
+    const text = fs.readFileSync(dump, "utf-8");
+    expect(text).toContain("SECRET=\n");
+    expect(text).toContain("PATH_SET=yes");
   });
 
   it("restricts env to env_allow when set, keeping PATH for command resolution", () => {
