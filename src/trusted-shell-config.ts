@@ -178,7 +178,7 @@ function parseEnv(
   }
   if (!isRecord(raw)) {
     return invalidError(
-      "`trusted_shell.env` must be a mapping of string keys to string values."
+      "`trusted_shell.env` must be a mapping of string keys to string, number, or boolean values."
     );
   }
   const out: Record<string, string> = {};

@@ -62,7 +62,7 @@ export function renderIterationPrompt(ctx: IterationPromptContext): string {
 
   lines.push("## Output contract");
   lines.push(
-    "Write a single JSON object to the configured result path with this exact shape (trusted-shell runners must use $MOMENTUM_RESULT_PATH; result.json is the default):"
+    "Write a single JSON object to result.json by default, or to the configured result path with this schema (trusted-shell runners must use $MOMENTUM_RESULT_PATH):"
   );
   lines.push("");
   lines.push("```json");
@@ -70,20 +70,23 @@ export function renderIterationPrompt(ctx: IterationPromptContext): string {
   lines.push('  "success": boolean,');
   lines.push('  "summary": string,');
   lines.push('  "key_changes_made": string[],');
-  lines.push('  "key_learnings": string[],');
-  lines.push('  "remaining_work": string[],');
+  lines.push('  "key_learnings": string[], // optional, defaults to []');
+  lines.push('  "remaining_work": string[], // optional, defaults to []');
   lines.push('  "goal_complete": boolean,');
   lines.push('  "commit": {');
   lines.push(
     '    "type": "build" | "ci" | "docs" | "feat" | "fix" | "perf" | "refactor" | "test" | "chore",'
   );
-  lines.push('    "scope": string,');
+  lines.push('    "scope": string, // optional, defaults to no scope');
   lines.push('    "subject": string,');
-  lines.push('    "body": string,');
-  lines.push('    "breaking": boolean');
+  lines.push('    "body": string, // optional, defaults to ""');
+  lines.push('    "breaking": boolean // optional, defaults to false');
   lines.push("  }");
   lines.push("}");
   lines.push("```");
+  lines.push(
+    "`success`, `summary`, `key_changes_made`, `goal_complete`, `commit.type`, and `commit.subject` are required."
+  );
   lines.push("");
 
   lines.push("## Rules");
