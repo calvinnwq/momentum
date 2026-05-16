@@ -33,11 +33,12 @@ describe("runner-profile registry", () => {
     });
   });
 
-  it("builds the trusted-shell profile but flags it as non-executing until the adapter lands", () => {
+  it("builds the trusted-shell profile as executing after M4-03 with the explicit-trust caveat", () => {
     const profile = buildRunnerProfile("trusted-shell");
     expect(profile.kind).toBe("trusted-shell");
-    expect(profile.executes).toBe(false);
-    expect(profile.description).toContain("no shell command executes yet");
+    expect(profile.executes).toBe(true);
+    expect(profile.description).toContain("no sandbox");
+    expect(profile.description).toContain("full privileges");
   });
 });
 
@@ -50,12 +51,12 @@ describe("parseRunnerProfile", () => {
     expect(result.profile.executes).toBe(true);
   });
 
-  it("accepts a syntactically valid trusted-shell identity without executing it", () => {
+  it("accepts a syntactically valid trusted-shell identity as executing", () => {
     const result = parseRunnerProfile("trusted-shell");
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.profile.kind).toBe("trusted-shell");
-    expect(result.profile.executes).toBe(false);
+    expect(result.profile.executes).toBe(true);
   });
 
   it("trims surrounding whitespace before validating", () => {

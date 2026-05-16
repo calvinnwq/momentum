@@ -3,6 +3,7 @@ import fs from "node:fs";
 
 import type { GoalArtifactPaths } from "./artifacts.js";
 import { ensureMomentumBranch } from "./branch-manager.js";
+import { resetToBase } from "./git-transaction.js";
 import type { GoalSpec } from "./goal-spec.js";
 import {
   finalizeIteration,
@@ -27,6 +28,7 @@ export type ForegroundIterationErrorCode =
   | "branch_manager_failed"
   | "artifact_write_failed"
   | "runner_failed"
+  | "runner_changed_head"
   | "runner_reported_failure"
   | "verification_failed"
   | "commit_failed"
@@ -40,6 +42,16 @@ export type ForegroundIterationError = {
   code: ForegroundIterationErrorCode;
   error: string;
   finalize?: FinalizeIterationResult;
+  manualRecovery?: {
+    expectedCommit: string;
+    currentCommit: string;
+    reason: {
+      code: string;
+      message: string;
+    };
+    safeNextSteps: string[];
+    resultJsonPath?: string;
+  };
 };
 
 export type ForegroundIterationSuccess = {
@@ -180,6 +192,33 @@ export function runForegroundIteration(
         error: dispatch.error
       };
     }
+    if (dispatch.code === "invalid_input") {
+      return {
+        ok: false,
+        code: "runner_failed",
+        error: `runner "${spec.runner}" failed: ${dispatch.error}`
+      };
+    }
+    const currentHead = getCurrentHead(guard.repoPath);
+    if (!currentHead.ok) {
+      return currentHead;
+    }
+    if (currentHead.head !== baseHead) {
+      return runnerChangedHeadError({
+        runner: spec.runner,
+        baseHead,
+        currentHead: currentHead.head,
+        detail: `runner error: ${dispatch.error}`
+      });
+    }
+    const reset = resetToBase({ repoPath: guard.repoPath, baseHead });
+    if (!reset.ok) {
+      return {
+        ok: false,
+        code: "reset_failed",
+        error: `reset after ${dispatch.code} failed: ${reset.error} (runner error: ${dispatch.error})`
+      };
+    }
     return {
       ok: false,
       code: "runner_failed",
@@ -189,20 +228,18 @@ export function runForegroundIteration(
 
   const runnerOut = dispatch;
 
-  let postRunnerHead: string;
-  try {
-    postRunnerHead = execFileSync(
-      "git",
-      ["-C", guard.repoPath, "rev-parse", "HEAD"],
-      { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }
-    ).trim();
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : "unknown error";
-    return {
-      ok: false,
-      code: "git_failed",
-      error: `git rev-parse HEAD failed: ${detail}`
-    };
+  const currentHead = getCurrentHead(guard.repoPath);
+  if (!currentHead.ok) return currentHead;
+  const postRunnerHead = currentHead.head;
+
+  if (postRunnerHead !== baseHead) {
+    return runnerChangedHeadError({
+      runner: spec.runner,
+      baseHead,
+      currentHead: postRunnerHead,
+      detail: "runner completed before Momentum finalization",
+      resultJsonPath: runnerOut.resultJsonPath
+    });
   }
 
   const finalize = finalizeIteration({
@@ -254,6 +291,19 @@ export function runForegroundIteration(
         finalize
       };
     case "reset_failed":
+      if (finalize.reset.code === "head_mismatch") {
+        const currentHead = getCurrentHead(guard.repoPath);
+        if (!currentHead.ok) return currentHead;
+        return headMismatchManualRecoveryError({
+          code: "reset_failed",
+          runner: spec.runner,
+          baseHead,
+          currentHead: currentHead.head,
+          detail: `reset after ${finalize.trigger} failed: ${finalize.reset.error}`,
+          finalize,
+          resultJsonPath: runnerOut.resultJsonPath
+        });
+      }
       return {
         ok: false,
         code: "reset_failed",
@@ -261,7 +311,33 @@ export function runForegroundIteration(
         finalize
       };
     case "commit_failed":
+      if (finalize.commit.code === "head_mismatch") {
+        const currentHead = getCurrentHead(guard.repoPath);
+        if (!currentHead.ok) return currentHead;
+        return headMismatchManualRecoveryError({
+          code: "commit_failed",
+          runner: spec.runner,
+          baseHead,
+          currentHead: currentHead.head,
+          detail: `commit after verified runner failed: ${finalize.commit.error}`,
+          finalize,
+          resultJsonPath: runnerOut.resultJsonPath
+        });
+      }
       if (finalize.reset !== undefined && !finalize.reset.ok) {
+        if (finalize.reset.code === "head_mismatch") {
+          const currentHead = getCurrentHead(guard.repoPath);
+          if (!currentHead.ok) return currentHead;
+          return headMismatchManualRecoveryError({
+            code: "reset_failed",
+            runner: spec.runner,
+            baseHead,
+            currentHead: currentHead.head,
+            detail: `reset after commit_failure failed: ${finalize.reset.error} (commit error: ${finalize.commit.error})`,
+            finalize,
+            resultJsonPath: runnerOut.resultJsonPath
+          });
+        }
         return {
           ok: false,
           code: "reset_failed",
@@ -282,5 +358,89 @@ export function runForegroundIteration(
         error: finalize.error,
         finalize
       };
+  }
+}
+
+function runnerChangedHeadError(input: {
+  runner: string;
+  baseHead: string;
+  currentHead: string;
+  detail: string;
+  resultJsonPath?: string;
+}): ForegroundIterationError {
+  const message = `runner "${input.runner}" moved HEAD from ${input.baseHead} to ${input.currentHead}; leaving repo unchanged for manual recovery (${input.detail})`;
+  return {
+    ok: false,
+    code: "runner_changed_head",
+    error: message,
+    manualRecovery: {
+      expectedCommit: input.baseHead,
+      currentCommit: input.currentHead,
+      reason: {
+        code: "runner_changed_head",
+        message
+      },
+      safeNextSteps: [
+        "Inspect the runner-created commit and repository state.",
+        "Decide whether to keep, amend, or reset the runner-created commit.",
+        "Run `momentum recovery clear <goal-id>` after the repository is safe for queued work."
+      ],
+      ...(input.resultJsonPath !== undefined
+        ? { resultJsonPath: input.resultJsonPath }
+        : {})
+    }
+  };
+}
+
+function headMismatchManualRecoveryError(input: {
+  code: "commit_failed" | "reset_failed";
+  runner: string;
+  baseHead: string;
+  currentHead: string;
+  detail: string;
+  finalize: FinalizeIterationResult;
+  resultJsonPath?: string;
+}): ForegroundIterationError {
+  const message = `finalization for runner "${input.runner}" found HEAD moved from ${input.baseHead} to ${input.currentHead}; leaving repo unchanged for manual recovery (${input.detail})`;
+  return {
+    ok: false,
+    code: input.code,
+    error: message,
+    finalize: input.finalize,
+    manualRecovery: {
+      expectedCommit: input.baseHead,
+      currentCommit: input.currentHead,
+      reason: {
+        code: "head_mismatch",
+        message
+      },
+      safeNextSteps: [
+        "Inspect the commit that moved HEAD during finalization.",
+        "Decide whether to keep, amend, or reset the non-Momentum commit.",
+        "Run `momentum recovery clear <goal-id>` after the repository is safe for queued work."
+      ],
+      ...(input.resultJsonPath !== undefined
+        ? { resultJsonPath: input.resultJsonPath }
+        : {})
+    }
+  };
+}
+
+function getCurrentHead(
+  repoPath: string
+): { ok: true; head: string } | ForegroundIterationError {
+  try {
+    const head = execFileSync("git", ["-C", repoPath, "rev-parse", "HEAD"], {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "pipe"]
+    }).trim();
+    return { ok: true, head };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "unknown error";
+    return {
+      ok: false,
+      code: "git_failed",
+      error: `git rev-parse HEAD failed: ${detail}`
+    };
   }
 }

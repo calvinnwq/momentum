@@ -42,6 +42,50 @@ Test goal for worker run loop coverage.
 `;
 }
 
+function makeTrustedShellCommitThenFailSpec(): string {
+  return `---
+title: Worker Trusted Shell Manual Recovery Test
+runner: trusted-shell
+verification:
+  - "true"
+trusted_shell:
+  command: /bin/sh
+  args: [-c, echo runner-created commit > "$MOMENTUM_REPO_PATH/runner-created.txt"; git -C "$MOMENTUM_REPO_PATH" add runner-created.txt; git -C "$MOMENTUM_REPO_PATH" commit -m "runner commit before failure" --quiet; exit 17]
+---
+
+Trusted shell commits before failing.
+`;
+}
+
+function makeTrustedShellCommitThenSucceedSpec(): string {
+  return `---
+title: Worker Trusted Shell Manual Recovery Test
+runner: trusted-shell
+verification:
+  - "true"
+trusted_shell:
+  command: /bin/sh
+  args: [-c, echo runner-created commit > "$MOMENTUM_REPO_PATH/runner-created.txt"; git -C "$MOMENTUM_REPO_PATH" add runner-created.txt; git -C "$MOMENTUM_REPO_PATH" commit -m "runner commit before success" --quiet; printf %s "$RESULT_JSON" > "$MOMENTUM_RESULT_PATH"]
+  env:
+    RESULT_JSON: '{"success":true,"summary":"runner committed before success","key_changes_made":["created commit"],"key_learnings":[],"remaining_work":[],"goal_complete":false,"commit":{"type":"test","scope":"trusted-shell","subject":"runner commit success","body":"","breaking":false}}'
+---
+
+Trusted shell commits before succeeding.
+`;
+}
+
+function makeVerificationCommitsThenFailsSpec(): string {
+  return makeGoalSpec(
+    "git add -A && git commit -m verification-moved-head --quiet && false"
+  );
+}
+
+function makeVerificationCommitsThenPassesSpec(): string {
+  return makeGoalSpec(
+    "git add -A && git commit -m verification-moved-head --quiet"
+  );
+}
+
 type WorkerGoalSeed = {
   dataDir: string;
   goalId: string;
@@ -227,15 +271,21 @@ describe("runWorkerOnce", () => {
       expect(out.jobIterationResult.ok).toBe(false);
       if (out.jobIterationResult.ok) return;
       expect(out.jobIterationResult.jobState).toBe("failed");
-      expect(out.jobIterationResult.iteration.code).toBe("unsupported_runner");
+      // The DB-stored runner is trusted-shell, which now executes via its
+      // RunnerAdapter (NGX-282); without a trusted_shell config block the
+      // adapter fails with invalid_input, which foreground-iteration maps to
+      // runner_failed. This still proves the worker honored the DB runner
+      // rather than the goal-spec default (fake).
+      expect(out.jobIterationResult.iteration.code).toBe("runner_failed");
       expect(out.jobIterationResult.iteration.error).toContain("trusted-shell");
+      expect(out.jobIterationResult.iteration.error).toContain("trusted_shell");
       expect(
         fs.existsSync(path.join(repo, FAKE_RUNNER_FIXTURE_FILENAME))
       ).toBe(false);
 
       const job = getQueueJob(db, seed.jobId);
       expect(job?.state).toBe("failed");
-      expect(job?.error).toContain("unsupported_runner");
+      expect(job?.error).toContain("trusted-shell");
 
       const iterationStarted = db
         .prepare(
@@ -414,6 +464,292 @@ describe("runWorkerOnce", () => {
       expect(verificationLog).toContain(
         "[verify] skipped: runner reported failure"
       );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("blocks manual recovery when a trusted-shell failure advances HEAD", () => {
+    const dataDir = makeTempDir("momentum-worker-run-head-moved-");
+    const repo = initRepo();
+    const seed = seedQueuedGoal(
+      dataDir,
+      repo,
+      makeTrustedShellCommitThenFailSpec()
+    );
+    const baseHead = runGit(repo, ["rev-parse", "HEAD"]).trim();
+
+    const db = openDb(seed.dataDir);
+    try {
+      const out = runWorkerOnce({
+        db,
+        dataDir: seed.dataDir,
+        workerId: "worker-head-moved",
+        now: () => 1_700_000_000_000
+      });
+
+      expect(out.code).toBe("ran_job");
+      if (out.code !== "ran_job") return;
+      expect(out.jobIterationResult.ok).toBe(false);
+      if (out.jobIterationResult.ok) return;
+      expect(out.jobIterationResult.iteration.code).toBe("runner_changed_head");
+
+      const head = runGit(repo, ["rev-parse", "HEAD"]).trim();
+      expect(head).not.toBe(baseHead);
+      expect(runGit(repo, ["log", "-1", "--pretty=%s"]).trim()).toBe(
+        "runner commit before failure"
+      );
+
+      const goalRow = db
+        .prepare(
+          "SELECT needs_manual_recovery, manual_recovery_reason FROM goals WHERE id = ?"
+        )
+        .get(seed.goalId) as {
+        needs_manual_recovery: number;
+        manual_recovery_reason: string | null;
+      };
+      expect(goalRow).toEqual({
+        needs_manual_recovery: 1,
+        manual_recovery_reason: "runner_changed_head"
+      });
+
+      const recoveryPath = path.join(
+        seed.dataDir,
+        "goals",
+        seed.goalId,
+        "recovery.md"
+      );
+      expect(fs.readFileSync(recoveryPath, "utf-8")).toContain(
+        "runner_changed_head"
+      );
+
+      const lock = db
+        .prepare(
+          "SELECT state, recovery_status FROM repo_locks WHERE job_id = ? ORDER BY acquired_at DESC LIMIT 1"
+        )
+        .get(seed.jobId) as { state: string; recovery_status: string | null };
+      expect(lock).toEqual({
+        state: "needs_manual_recovery",
+        recovery_status: "runner_changed_head"
+      });
+
+      const next = runWorkerOnce({
+        db,
+        dataDir: seed.dataDir,
+        workerId: "worker-after-head-moved"
+      });
+      expect(next.code).toBe("no_work");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("blocks manual recovery when a trusted-shell success advances HEAD", () => {
+    const dataDir = makeTempDir("momentum-worker-run-head-moved-success-");
+    const repo = initRepo();
+    const seed = seedQueuedGoal(
+      dataDir,
+      repo,
+      makeTrustedShellCommitThenSucceedSpec()
+    );
+    const baseHead = runGit(repo, ["rev-parse", "HEAD"]).trim();
+
+    const db = openDb(seed.dataDir);
+    try {
+      const out = runWorkerOnce({
+        db,
+        dataDir: seed.dataDir,
+        workerId: "worker-head-moved-success",
+        now: () => 1_700_000_000_000
+      });
+
+      expect(out.code).toBe("ran_job");
+      if (out.code !== "ran_job") return;
+      expect(out.jobIterationResult.ok).toBe(false);
+      if (out.jobIterationResult.ok) return;
+      expect(out.jobIterationResult.iteration.code).toBe("runner_changed_head");
+
+      const head = runGit(repo, ["rev-parse", "HEAD"]).trim();
+      expect(head).not.toBe(baseHead);
+      expect(runGit(repo, ["log", "-1", "--pretty=%s"]).trim()).toBe(
+        "runner commit before success"
+      );
+
+      const goalRow = db
+        .prepare(
+          "SELECT needs_manual_recovery, manual_recovery_reason FROM goals WHERE id = ?"
+        )
+        .get(seed.goalId) as {
+        needs_manual_recovery: number;
+        manual_recovery_reason: string | null;
+      };
+      expect(goalRow).toEqual({
+        needs_manual_recovery: 1,
+        manual_recovery_reason: "runner_changed_head"
+      });
+
+      const recoveryPath = path.join(
+        seed.dataDir,
+        "goals",
+        seed.goalId,
+        "recovery.md"
+      );
+      expect(fs.readFileSync(recoveryPath, "utf-8")).toContain(
+        "runner_changed_head"
+      );
+
+      const lock = db
+        .prepare(
+          "SELECT state, recovery_status FROM repo_locks WHERE job_id = ? ORDER BY acquired_at DESC LIMIT 1"
+        )
+        .get(seed.jobId) as { state: string; recovery_status: string | null };
+      expect(lock).toEqual({
+        state: "needs_manual_recovery",
+        recovery_status: "runner_changed_head"
+      });
+
+      const next = runWorkerOnce({
+        db,
+        dataDir: seed.dataDir,
+        workerId: "worker-after-head-moved-success"
+      });
+      expect(next.code).toBe("no_work");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("blocks manual recovery when verification failure advances HEAD", () => {
+    const dataDir = makeTempDir("momentum-worker-run-verify-head-moved-");
+    const repo = initRepo();
+    const seed = seedQueuedGoal(
+      dataDir,
+      repo,
+      makeVerificationCommitsThenFailsSpec()
+    );
+    const baseHead = runGit(repo, ["rev-parse", "HEAD"]).trim();
+
+    const db = openDb(seed.dataDir);
+    try {
+      const out = runWorkerOnce({
+        db,
+        dataDir: seed.dataDir,
+        workerId: "worker-verify-head-moved",
+        now: () => 1_700_000_000_000
+      });
+
+      expect(out.code).toBe("ran_job");
+      if (out.code !== "ran_job") return;
+      expect(out.jobIterationResult.ok).toBe(false);
+      if (out.jobIterationResult.ok) return;
+      expect(out.jobIterationResult.iteration.code).toBe("reset_failed");
+      expect(out.jobIterationResult.iteration.manualRecovery?.reason.code).toBe(
+        "head_mismatch"
+      );
+
+      const head = runGit(repo, ["rev-parse", "HEAD"]).trim();
+      expect(head).not.toBe(baseHead);
+      expect(runGit(repo, ["log", "-1", "--pretty=%s"]).trim()).toBe(
+        "verification-moved-head"
+      );
+
+      const goalRow = db
+        .prepare(
+          "SELECT needs_manual_recovery, manual_recovery_reason FROM goals WHERE id = ?"
+        )
+        .get(seed.goalId) as {
+        needs_manual_recovery: number;
+        manual_recovery_reason: string | null;
+      };
+      expect(goalRow).toEqual({
+        needs_manual_recovery: 1,
+        manual_recovery_reason: "head_mismatch"
+      });
+
+      const lock = db
+        .prepare(
+          "SELECT state, recovery_status FROM repo_locks WHERE job_id = ? ORDER BY acquired_at DESC LIMIT 1"
+        )
+        .get(seed.jobId) as { state: string; recovery_status: string | null };
+      expect(lock).toEqual({
+        state: "needs_manual_recovery",
+        recovery_status: "head_mismatch"
+      });
+
+      const next = runWorkerOnce({
+        db,
+        dataDir: seed.dataDir,
+        workerId: "worker-after-verify-head-moved"
+      });
+      expect(next.code).toBe("no_work");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("blocks manual recovery when verification success advances HEAD", () => {
+    const dataDir = makeTempDir("momentum-worker-run-verify-head-committed-");
+    const repo = initRepo();
+    const seed = seedQueuedGoal(
+      dataDir,
+      repo,
+      makeVerificationCommitsThenPassesSpec()
+    );
+    const baseHead = runGit(repo, ["rev-parse", "HEAD"]).trim();
+
+    const db = openDb(seed.dataDir);
+    try {
+      const out = runWorkerOnce({
+        db,
+        dataDir: seed.dataDir,
+        workerId: "worker-verify-head-committed",
+        now: () => 1_700_000_000_000
+      });
+
+      expect(out.code).toBe("ran_job");
+      if (out.code !== "ran_job") return;
+      expect(out.jobIterationResult.ok).toBe(false);
+      if (out.jobIterationResult.ok) return;
+      expect(out.jobIterationResult.iteration.code).toBe("commit_failed");
+      expect(out.jobIterationResult.iteration.manualRecovery?.reason.code).toBe(
+        "head_mismatch"
+      );
+
+      const head = runGit(repo, ["rev-parse", "HEAD"]).trim();
+      expect(head).not.toBe(baseHead);
+      expect(runGit(repo, ["log", "-1", "--pretty=%s"]).trim()).toBe(
+        "verification-moved-head"
+      );
+
+      const goalRow = db
+        .prepare(
+          "SELECT needs_manual_recovery, manual_recovery_reason FROM goals WHERE id = ?"
+        )
+        .get(seed.goalId) as {
+        needs_manual_recovery: number;
+        manual_recovery_reason: string | null;
+      };
+      expect(goalRow).toEqual({
+        needs_manual_recovery: 1,
+        manual_recovery_reason: "head_mismatch"
+      });
+
+      const lock = db
+        .prepare(
+          "SELECT state, recovery_status FROM repo_locks WHERE job_id = ? ORDER BY acquired_at DESC LIMIT 1"
+        )
+        .get(seed.jobId) as { state: string; recovery_status: string | null };
+      expect(lock).toEqual({
+        state: "needs_manual_recovery",
+        recovery_status: "head_mismatch"
+      });
+
+      const next = runWorkerOnce({
+        db,
+        dataDir: seed.dataDir,
+        workerId: "worker-after-verify-head-committed"
+      });
+      expect(next.code).toBe("no_work");
     } finally {
       db.close();
     }

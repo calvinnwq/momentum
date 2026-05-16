@@ -1,5 +1,6 @@
 import type { MomentumDb } from "./db.js";
 import { QUEUE_EVENT_TYPES, appendQueueEvent } from "./events.js";
+import { releaseRepoLock } from "./repo-locks.js";
 
 /**
  * Mark a goal as needing manual recovery so the queue claim path skips it until
@@ -110,8 +111,10 @@ export type GoalManualRecoveryState = {
  * Operator-facing clear flow: refuses safely when the goal is missing, not
  * flagged, or still has a live `claimed`/`running` job. This guards against
  * accidental clears that would let the queue claim path proceed while another
- * worker still holds the iteration. On success it clears the flag and appends
- * a `goal.recovery_cleared` audit event with the previously-recorded reason.
+ * worker still holds the iteration. On success it clears the flag, releases
+ * repo locks in `needs_manual_recovery` state, and appends a
+ * `goal.recovery_cleared` audit event with the previously-recorded reason and
+ * any released lock IDs.
  *
  * recovery.md is left on disk so the durable audit trail survives the clear —
  * operators delete it manually after capturing the context elsewhere.
@@ -213,12 +216,29 @@ export function clearGoalManualRecoveryGuarded(
         message: `Goal ${input.goalId} disappeared during clear.`
       };
     }
+    const manualLocks = db
+      .prepare(
+        `SELECT id FROM repo_locks
+          WHERE goal_id = ? AND state = 'needs_manual_recovery'
+          ORDER BY acquired_at ASC, id ASC`
+      )
+      .all(input.goalId) as Array<{ id: string }>;
+    for (const lock of manualLocks) {
+      releaseRepoLock(db, {
+        lockId: lock.id,
+        now,
+        recoveryStatus: "manual_recovery_cleared"
+      });
+    }
 
     const payload: Record<string, unknown> = {
       previousReason: state.reason,
       previousMarkedAt: state.markedAt,
       clearedAt: now
     };
+    if (manualLocks.length > 0) {
+      payload["releasedRepoLockIds"] = manualLocks.map((lock) => lock.id);
+    }
     if (input.operatorReason !== undefined) {
       payload["operatorReason"] = input.operatorReason;
     }

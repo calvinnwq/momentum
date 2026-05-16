@@ -5,7 +5,8 @@
  * verification, and the artifact layout. A runner profile identifies how
  * the iteration prompt is executed and surfaces a safe summary for
  * operators. NGX-281 routes executing profiles through RunnerAdapter;
- * `trusted-shell` remains non-executing until NGX-282 and the
+ * NGX-282 promotes `trusted-shell` to an executing profile backed by an
+ * operator-trusted executable plus argv, with no implicit shell. The
  * `MOMENTUM.md` loader stays a placeholder until a future milestone proves it.
  */
 
@@ -79,8 +80,8 @@ export function buildRunnerProfile(kind: BuiltinRunnerKind): RunnerProfile {
         kind,
         name: kind,
         description:
-          "Operator-trusted shell runner; identity recognized but no shell command executes yet.",
-        executes: false
+          "Operator-trusted executable-plus-argv runner; executes the goal-configured command with no implicit shell, no sandbox, and no privilege drop. The command has full privileges of the Momentum invoker.",
+        executes: true
       };
   }
 }

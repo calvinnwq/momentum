@@ -29,9 +29,9 @@ momentum recovery clear <goal-id> [--reason <text>] [--data-dir <path>] [--json]
 momentum doctor [--data-dir <path>] [--json]
 ```
 
-The `daemon` subcommands record orchestrator-run state in SQLite (`daemon_runs`) and expose an inspection contract. They are scoped to the completed Milestone 3 operational-safety slices (NGX-272 through NGX-278): without any loop-bound flags, `daemon start` registers a new orchestrator run and returns immediately (preserving the NGX-272 register-only contract); passing `--max-loop-iterations` or `--max-idle-cycles` opts into the NGX-273 managed loop and drains queued goal iterations in-process until a bound, `stop_requested`, `stop_now_requested`, or a terminal daemon-run state is reached. `--poll-interval-ms` tunes that bounded loop and must be paired with a loop bound. `daemon stop` records a graceful stop request that the managed loop observes between cycles; `daemon stop --now` records an immediate-stop request that causes the loop to finalize the run as `canceled` rather than `stopped`. Neither command kills any external runner, worker, or process. The managed loop runs a one-shot NGX-276 startup-recovery pass before its first cycle, auto-releases stale repo locks whose owning job is terminal, re-pends orphaned stale claims whose repo state is clean, and auto-finalizes idle stale `daemon_runs` rows; dirty / active / ambiguous cases are reported on the response under a stable skip taxonomy so operators can drive manual recovery deliberately. Manual-recovery skip reasons (`repo_dirty`, `repo_unknown_commit`, `repo_unavailable`, `job_running`) also write a `recovery.md` artifact for the goal and set a `needs_manual_recovery` flag that blocks future queue claims until an operator explicitly clears it via `momentum recovery clear`. NGX-278 closes M3 by pinning built-CLI smoke coverage for the daemon drain, graceful stop, stop-now, safe stale recovery, and manual-recovery visibility paths plus the public M3-complete markers.
+The `daemon` subcommands record orchestrator-run state in SQLite (`daemon_runs`) and expose an inspection contract. They are scoped to the completed Milestone 3 operational-safety slices (NGX-272 through NGX-278): without any loop-bound flags, `daemon start` registers a new orchestrator run and returns immediately (preserving the NGX-272 register-only contract); passing `--max-loop-iterations` or `--max-idle-cycles` opts into the NGX-273 managed loop and drains queued goal iterations in-process until a bound, `stop_requested`, `stop_now_requested`, or a terminal daemon-run state is reached. `--poll-interval-ms` tunes that bounded loop and must be paired with a loop bound. `daemon stop` records a graceful stop request that the managed loop observes between cycles; `daemon stop --now` records an immediate-stop request that causes the loop to finalize the run as `canceled` rather than `stopped`. Neither command kills any external runner, worker, or process. The managed loop runs a one-shot NGX-276 startup-recovery pass before its first cycle, auto-releases stale repo locks whose owning job is terminal, re-pends orphaned stale claims whose repo state is clean, and auto-finalizes idle stale `daemon_runs` rows; dirty / active / ambiguous cases are reported on the response under a stable skip taxonomy so operators can drive manual recovery deliberately. Manual-recovery skip reasons (`repo_dirty`, `repo_unknown_commit`, `repo_unavailable`, `job_running`) and iteration-time HEAD movement (`runner_changed_head`, `head_mismatch`) also write a `recovery.md` artifact for the goal and set a `needs_manual_recovery` flag that blocks future queue claims until an operator explicitly clears it via `momentum recovery clear`. NGX-278 closes M3 by pinning built-CLI smoke coverage for the daemon drain, graceful stop, stop-now, safe stale recovery, and manual-recovery visibility paths plus the public M3-complete markers.
 
-`goal start --foreground` parses the goal spec, resolves the data directory, initializes SQLite (`goals`, `jobs`, `events`, `repo_locks` tables), creates the artifact layout, and runs one foreground iteration: it inspects the target repo, captures the pre-iteration HEAD, creates or reuses a Momentum branch, renders the iteration prompt, invokes the configured runner (currently `fake` only), runs each verification command from the repo root, and either stages and commits the full repo diff as one Momentum commit on verified success or hard-resets the worktree back to the pre-iteration HEAD on runner failure or verification failure. The iteration writes `prompt.md`, `runner.log`, `verification.log`, and `result.json` under `iterations/<n>/`. On a verified commit the goal transitions to `iteration_complete` (or `completed` if the runner reports `goal_complete: true`); on runner failure, verification failure, or any pipeline error it transitions to `failed`. `status [goal-id] --json` reads the SQLite/artifact state and emits a stable JSON shape including reducer state, next job, and next-action hints, and `handoff <goal-id> --json` writes `handoff.md` and `handoff.json` (schema v1) into the goal's artifact dir.
+`goal start --foreground` parses the goal spec, resolves the data directory, initializes SQLite (`goals`, `jobs`, `events`, `repo_locks` tables), creates the artifact layout, and runs one foreground iteration: it inspects the target repo, captures the pre-iteration HEAD, creates or reuses a Momentum branch, renders the iteration prompt, invokes the configured executing runner profile (`fake` or `trusted-shell`), runs each verification command from the repo root, and either stages and commits the full repo diff as one Momentum commit on verified success or hard-resets the worktree back to the pre-iteration HEAD on runner failure or verification failure when HEAD has not moved. If a runner or finalization step moves HEAD outside Momentum's transaction, Momentum leaves the repo unchanged; the public foreground JSON failure envelope reports only `iteration.code` / `iteration.error`, while durable manual-recovery evidence is written to `recovery.md` and surfaced through `status` and `handoff`. The iteration writes `prompt.md`, `runner.log`, `verification.log`, and a runner result JSON file under `iterations/<n>/` (`result.json` by default). On a verified commit the goal transitions to `iteration_complete` (or `completed` if the runner reports `goal_complete: true`); on runner failure, verification failure, or any pipeline error it transitions to `failed`. `status [goal-id] --json` reads the SQLite/artifact state and emits a stable JSON shape including reducer state, next job, and next-action hints, and `handoff <goal-id> --json` writes `handoff.md` and `handoff.json` (schema v1) into the goal's artifact dir.
 
 Without `--foreground`, `goal start` takes the Milestone 2 default path: it parses the goal spec, initializes (or resumes) durable Goal state in SQLite, prepares the artifact layout, and enqueues a single `goal_iteration` job (state `pending`, iteration `1`) with idempotency key `goal:<goal-id>:iteration:1`. The Goal row is written with state `queued`; `momentum worker run` consumes that queue, executes the job, then runs the completion reducer which can enqueue subsequent iterations (up to `max_iterations`), mark the goal as `completed`, or mark the goal as `max_iterations_reached` or `failed`. Repeated `worker run` invocations drain the goal iteration by iteration. `--foreground` is retained as the Milestone 1 inline debugging path.
 
@@ -52,7 +52,7 @@ The `pnpm test` suite includes a built-binary end-to-end smoke (`test/smoke.test
 
 ## Goal Spec
 
-Goal files are Markdown that begin with YAML frontmatter. `title` is required; `repo`, `runner`, `branch`, `max_iterations`, `verification`, and `verification_timeout_sec` are optional. Defaults are `runner: fake`, `branch: momentum/<title-slug>`, `max_iterations: 1`, `verification: []`, and `verification_timeout_sec: 900`. `max_iterations` and `verification_timeout_sec` must be positive integers. If `branch` is omitted, `title` must contain letters or numbers so Momentum can derive `momentum/<title-slug>`. The `runner` field accepts built-in runner profile names (`fake`, `trusted-shell`); unknown names are rejected at init time. The `--runner` CLI flag overrides the frontmatter value, and built-in default resolution precedence is `--runner` CLI flag > goal frontmatter `runner` > `fake` (the built-in default). In the default queued path, relative `repo` values are resolved to absolute paths before being persisted or emitted.
+Goal files are Markdown that begin with YAML frontmatter. `title` is required; `repo`, `runner`, `branch`, `max_iterations`, `verification`, `verification_timeout_sec`, and `trusted_shell` are optional. Defaults are `runner: fake`, `branch: momentum/<title-slug>`, `max_iterations: 1`, `verification: []`, and `verification_timeout_sec: 900`. `max_iterations` and `verification_timeout_sec` must be positive integers. If `branch` is omitted, `title` must contain letters or numbers so Momentum can derive `momentum/<title-slug>`. The `runner` field accepts built-in runner profile names (`fake`, `trusted-shell`); unknown names are rejected at init time. `trusted_shell` is required for trusted-shell execution and ignored by the fake runner; queued initialization can persist a trusted-shell goal before the worker validates missing or malformed trusted-shell config at execution time. The `--runner` CLI flag overrides the frontmatter value, and built-in default resolution precedence is `--runner` CLI flag > goal frontmatter `runner` > `fake` (the built-in default). In the default queued path, relative `repo` values are resolved to absolute paths before being persisted or emitted.
 
 ```markdown
 ---
@@ -68,6 +68,66 @@ verification_timeout_sec: 900
 
 Describe the goal and constraints here.
 ```
+
+### Trusted-shell runner example
+
+The `trusted-shell` runner profile (NGX-282) runs an operator-configured executable plus argv in the target repo by default, or in the iteration artifact directory when `trusted_shell.cwd: iteration` is set. Trusted-shell execution requires a `trusted_shell` block in the goal frontmatter; queued `goal start` stores the goal before validating that block, while foreground execution and workers validate it when the adapter runs. The config parser classifies missing/malformed config as `trusted_shell_config_missing` or `trusted_shell_config_invalid`, and the public adapter surface reports those validation failures as `invalid_input` (foreground and queued iteration surfaces map them to `runner_failed` with the parser code in the message).
+
+> **Explicit trust posture.** `trusted-shell` is not sandboxed. The configured command runs with the full privileges of the user who invoked Momentum: no container, no VM, no seccomp, no privilege drop, and no input scrubbing. The operator is responsible for the command and any scripts it invokes. Container/VM/seccomp isolation is explicitly out of scope for M4.
+
+Minimal example:
+
+```markdown
+---
+title: Trusted-shell example
+repo: /path/to/repo
+runner: trusted-shell
+branch: momentum/trusted-shell-example
+max_iterations: 1
+verification:
+  - pnpm test
+trusted_shell:
+  command: bash
+  args:
+    - -lc
+    - ./scripts/momentum-iteration.sh
+  cwd: repo
+  timeout_sec: 900
+  env_allow:
+    - HOME
+  env:
+    EXTRA_FLAG: "1"
+  result_file: result.json
+---
+
+Describe the goal and constraints here.
+```
+
+`trusted_shell` keys: `command` (required executable path/name, non-empty string), `args` (argv string/number array stringified before execution, default `[]`), `cwd` (`repo` default or `iteration`), `timeout_sec` (positive integer, default `900`), `env_allow` (string array of env-var names to forward from the parent process; `PATH` is always forwarded), `env` (explicit string/number/boolean key/value pairs merged after the allowlist, with numbers and booleans stringified), and `result_file` (relative file path beneath the iteration artifact directory, default `result.json`; absolute paths, `..` escapes, and paths resolving to the iteration directory itself are rejected). `env` keys must be valid environment variable names (`[A-Za-z_][A-Za-z0-9_]*`); Momentum injects the `MOMENTUM_*` variables after configured `env`, so those names are reserved for Momentum's runtime contract and cannot be overridden by goal frontmatter. Momentum calls `spawnSync(command, args)` without an implicit shell, so shell builtins, globbing, pipes, redirects, and variable expansion are not interpreted unless the configured executable is itself a shell such as `bash -lc`.
+
+The runner injects the following environment variables for the command: `MOMENTUM_GOAL_ID`, `MOMENTUM_ITERATION`, `MOMENTUM_REPO_PATH`, `MOMENTUM_BASE_HEAD`, `MOMENTUM_BRANCH`, `MOMENTUM_PROMPT_PATH`, `MOMENTUM_ITERATION_DIR`, and `MOMENTUM_RESULT_PATH`. The command must write a JSON file at `$MOMENTUM_RESULT_PATH` matching the normalized `RunnerResult` schema:
+
+```json
+{
+  "success": true,
+  "summary": "one-line iteration summary",
+  "key_changes_made": ["implemented the requested change"],
+  "key_learnings": [],
+  "remaining_work": [],
+  "goal_complete": false,
+  "commit": {
+    "type": "feat",
+    "scope": "optional-scope",
+    "subject": "short imperative subject without trailing period",
+    "body": "optional longer message body",
+    "breaking": false
+  }
+}
+```
+
+`success`, `summary`, `key_changes_made`, `goal_complete`, `commit`, `commit.type`, and `commit.subject` are required. `key_learnings` and `remaining_work` default to empty arrays when omitted. The `commit.type` must be one of `build`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `test`, or `chore`; `commit.scope`, `commit.body`, and `commit.breaking` are optional and default to no scope, an empty body, and `false`. Momentum formats the verified git commit message from this commit intent as `type(scope)!: subject` plus the optional body, and surfaces that message as `commitMessage` / `commit_message`. The iteration's `runner.log` records trusted-shell metadata before execution (`command` with argv, `cwd`, `timeout_sec`, and `result_path`), then captures stdout and stderr after the command exits; avoid putting secrets in argv because they are written to local artifacts.
+
+Failure modes return stable diagnostic codes through the `RunnerAdapter` boundary: `invalid_input` (missing/malformed config), `runner_threw` (runner log could not be opened), `spawn_failed` (spawn errors such as a missing binary), `command_failed` (non-zero exit), `command_timed_out` (exceeded `timeout_sec`), `result_missing` (no result file written), `result_invalid` (unreadable, malformed, or non-conforming result JSON), and `output_overflow` (stdout/stderr exceeded the 256 MiB capture limit). The foreground and queued iteration surfaces wrap these adapter failures as `runner_failed` in `iteration.code` / job errors, with the adapter diagnostic included in the error text and logs. Post-execution adapter failures reset the worktree to base HEAD only when the runner has not moved HEAD; if HEAD changed, Momentum returns `runner_changed_head` and leaves the repo for manual recovery rather than dropping runner-created commits.
 
 ## Commands
 
@@ -113,7 +173,7 @@ Parses the goal spec and initializes (or resumes) goal state under the resolved 
 
   Init-time validation rejects unsupported runner profiles before touching the database or repo. The `code` field on failure envelopes is one of `parse_error` (malformed goal spec or unreadable file), `unsupported_runner` (unknown runner name), `malformed_profile` (blank or non-string runner value), or `init_failed` (data directory or database failure).
 
-- **`--foreground` (Milestone 1 inline path):** drives a single foreground iteration through the runner and Momentum-owned verification immediately, returning the iteration outcome on the same invocation. Only the `fake` runner is implemented for execution; other built-in profiles are accepted at init time but fail at execution with `unsupported_runner`. The foreground envelope also includes `runner` and `runnerProfile` / `runnerProfileSource` fields. JSON envelope shape:
+- **`--foreground` (Milestone 1 inline path):** drives a single foreground iteration through the configured executing runner profile and Momentum-owned verification immediately, returning the iteration outcome on the same invocation. Both `fake` and `trusted-shell` execute through the shared `RunnerAdapter` boundary; unknown or non-executing profiles fail with `unsupported_runner`. The foreground envelope also includes `runner` and `runnerProfile` / `runnerProfileSource` fields. JSON envelope shape:
 
   ```json
   {
@@ -142,7 +202,7 @@ Parses the goal spec and initializes (or resumes) goal state under the resolved 
       "baseHead": "<sha>",
       "postRunnerHead": "<sha>",
       "commitSha": "<sha>",
-      "commitMessage": "Momentum iteration 1: Example Goal",
+      "commitMessage": "feat: short imperative subject without trailing period",
       "runnerSuccess": true,
       "goalComplete": false,
       "promptPath": "/path/to/data-dir/goals/<uuid>/iterations/1/prompt.md",
@@ -190,14 +250,14 @@ Consumes queued `goal_iteration` work in single-job batches:
 - Claims the oldest pending `goal_iteration` job and stamps `worker` / `lease` metadata.
 - Acquires a repo lock for the goal repo before launching the iteration.
 - Refreshes lease metadata with a heartbeat before execution.
-- Executes the claimed `goal_iteration` through the same `finalizeIteration` transaction as the foreground path: runner → Momentum-owned verification → commit on verified success or hard reset to `baseHead` on runner/verification/commit failure.
-- Persists `jobs.result_path` to `iterations/<n>/result.json` on success and `jobs.error_path` to `iterations/<n>/verification.log` (or `runner.log` for pre-runner failures) on failure.
-- Emits `job.succeeded` with commit + artifact pointers (`commit_sha`, `commit_message`, `branch`, `branch_created`, `base_head`, `goal_complete`, `result_path`, and an `artifacts` block with `iteration_dir` / `prompt` / `runner_log` / `verification_log` / `result_json`) or `job.failed` with the matching `artifacts` block on the failure path.
+- Executes the claimed `goal_iteration` through the same `finalizeIteration` transaction as the foreground path: runner → Momentum-owned verification → commit on verified success, hard reset to `baseHead` on runner/verification/commit failure when HEAD is still at the expected base, or manual recovery when HEAD moved outside Momentum's transaction.
+- Persists `jobs.result_path` to the runner-reported result JSON path on success (`iterations/<n>/result.json` by default; `trusted-shell` may use another `trusted_shell.result_file` inside the iteration directory) and `jobs.error_path` to `iterations/<n>/verification.log` (or `runner.log` for pre-runner failures) on failure.
+- Emits `job.succeeded` with commit + artifact pointers (`commit_sha`, `commit_message`, `branch`, `branch_created`, `base_head`, `goal_complete`, `result_path`, and an `artifacts` block with `iteration_dir` / `prompt` / `runner_log` / `verification_log` / `result_json`). On the failure path, `job.failed` emits the summarized error and a narrower `artifacts` block with `iteration_dir` / `runner_log` / `verification_log`.
 - After the job completes, runs the completion reducer (`reduceGoalIteration`), which classifies the terminal job as `continue` (enqueue next iteration), `goal_complete` (mark goal completed), `max_iterations_reached` (mark goal terminal), or `iteration_failed` (mark goal failed). The reducer is idempotent: re-invoking it on the same job short-circuits to `already_reduced` without duplicating events or enqueueing duplicate work. If the reducer throws, the worker emits a defensive `goal.reduce_failed` event with the error message and surfaces `reducerError` on the `worker run` result so the job's commit/reset is preserved for inspection and manual recovery.
 - On `continue`, enqueues one next `goal_iteration` job with idempotency key `goal:<id>:iteration:<n>`, bumps the goal to state `queued`, and emits `goal.reduced`. On `goal_complete`, sets the goal to `completed` and emits `goal.reduced` + `goal.completed`. On `max_iterations_reached` or `iteration_failed`, sets the goal to the corresponding terminal state and emits `goal.reduced` + `goal.failed`.
-- Releases the repo lock with the appropriate `recovery_status` and emits a deterministic CLI JSON result (`code: no_work | not_executed | ran_job`) for automation.
+- Releases the repo lock with the appropriate `recovery_status` and emits a deterministic CLI JSON result (`code: no_work | not_executed | ran_job`) for automation; if the iteration returns manual-recovery metadata (`runner_changed_head` / `head_mismatch`), the lock is marked `needs_manual_recovery` and continues blocking claims until `recovery clear` releases it.
 
-Queued jobs execute the runner profile stored on the Goal row. Both foreground and queued paths dispatch through the `RunnerAdapter` boundary (NGX-281); only runners with `executes: true` in the adapter registry can be invoked. In M4-02, `fake` is the sole executing runner; `trusted-shell` is recognized as a profile but returns `unsupported_runner` at execution time until NGX-282 lands the real shell runner.
+Queued jobs execute the runner profile stored on the Goal row. Both foreground and queued paths dispatch through the `RunnerAdapter` boundary (NGX-281); only runners with `executes: true` in the adapter registry can be invoked. After NGX-282, both `fake` and `trusted-shell` are executing runners; `trusted-shell` runs an operator-trusted executable plus argv in the target repo by default (or the iteration artifact directory with `trusted_shell.cwd: iteration`) with no sandbox and reports a normalized `RunnerResult` via a configured result file.
 
 `--worker-id` is optional; default is `worker-<pid>`. For queued work, use:
 
@@ -367,7 +427,7 @@ JSON envelope shape (active run with no stop request or error):
 momentum recovery clear <goal-id> [--reason <text>] [--data-dir <path>] [--json]
 ```
 
-Clears the `needs_manual_recovery` flag on a goal so it becomes eligible for queue claims again. Refuses safely when the goal does not exist (`code: goal_not_found`), is not currently flagged (`code: not_flagged`), or still has an active `claimed`/`running` job (`code: job_active` with `activeJobIds`). On success, appends a `goal.recovery_cleared` audit event with the previous reason, previous marked-at timestamp, cleared-at timestamp, and optional `operatorReason`. The `recovery.md` artifact is intentionally left on disk as durable evidence — operators should remove it manually after capturing the context elsewhere. Idempotent in the sense that a second clear on the same goal fails with `code: not_flagged`.
+Clears the `needs_manual_recovery` flag on a goal so it becomes eligible for queue claims again. Refuses safely when the goal does not exist (`code: goal_not_found`), is not currently flagged (`code: not_flagged`), or still has an active `claimed`/`running` job (`code: job_active` with `activeJobIds`). On success, releases any repo locks for the goal in `needs_manual_recovery` state and appends a `goal.recovery_cleared` audit event with the previous reason, previous marked-at timestamp, cleared-at timestamp, optional `operatorReason`, and `releasedRepoLockIds` when locks were released. The `recovery.md` artifact is intentionally left on disk as durable evidence — operators should remove it manually after capturing the context elsewhere. Idempotent in the sense that a second clear on the same goal fails with `code: not_flagged`.
 
 JSON envelope shape (success):
 
@@ -406,7 +466,7 @@ Text output includes the goal ID, previous reason, previous marked-at timestamp,
 momentum doctor [--data-dir <path>] [--json]
 ```
 
-Reports CLI version, Node.js version, platform, the current milestone scope label, and a compact daemon-readiness block read from `daemon_runs` (`{ok, dataDir, hasRun, state, isActive, stale, staleRunCount, staleRepoLockCount, staleClaimedJobCount, goalsNeedingRecoveryCount, runId}` on success, `{ok: false, code, message}` on failure). The stale-lease counts surface orphaned repo locks and claimed/running jobs whose lease expired more than `staleLeaseGraceMs` ago. The `goalsNeedingRecoveryCount` surface shows how many goals currently have the durable `needs_manual_recovery` flag set in the selected data directory; pass `--data-dir <path>` to inspect a non-default Momentum home. The `runners` block in JSON output lists `supported` (the current set of built-in runner profile names, `["fake", "trusted-shell"]`), `default` (the built-in default runner kind, `"fake"`), and `profiles` (an array of `{kind, name, description, executes}` objects for each built-in runner). The `fake` profile currently has `executes: true`; the `trusted-shell` profile has `executes: false`, recognizing the identity but not executing a shell command yet. Text output includes a `runners:` line showing the supported kinds and default. Useful as a first sanity check after install and as a quick orchestrator-health probe.
+Reports CLI version, Node.js version, platform, the current milestone scope label, and a compact daemon-readiness block read from `daemon_runs` (`{ok, dataDir, hasRun, state, isActive, stale, staleRunCount, staleRepoLockCount, staleClaimedJobCount, goalsNeedingRecoveryCount, runId}` on success, `{ok: false, code, message}` on failure). The stale-lease counts surface orphaned repo locks and claimed/running jobs whose lease expired more than `staleLeaseGraceMs` ago. The `goalsNeedingRecoveryCount` surface shows how many goals currently have the durable `needs_manual_recovery` flag set in the selected data directory; pass `--data-dir <path>` to inspect a non-default Momentum home. The `runners` block in JSON output lists `supported` (the current set of built-in runner profile names, `["fake", "trusted-shell"]`), `default` (the built-in default runner kind, `"fake"`), and `profiles` (an array of `{kind, name, description, executes}` objects for each built-in runner). Both the `fake` and `trusted-shell` profiles now have `executes: true`; `trusted-shell` runs the operator-configured executable plus argv with no sandbox and no privilege drop. Text output includes a `runners:` line showing the supported kinds and default. Useful as a first sanity check after install and as a quick orchestrator-health probe.
 
 ### Stale-lease detection and auto-recovery (NGX-276)
 
@@ -426,16 +486,16 @@ The managed `daemon start` loop runs a one-shot `runStartupRecovery` pass before
 - `status --json` / text and `handoff` — goal-scoped `staleRecovery` block with `recoveredRepoLockCount`, `recoveredJobCount`, `latestRecoveredRepoLockAt`, `latestRecoveredJobAt`, current `staleRepoLockCount`, current `staleClaimedJobCount`, and `staleLeaseGraceMs`; markdown handoff includes a `## Stale recovery` section.
 - `worker run --json` / text — pre-claim `stalePreCheck` snapshot listing stale repo locks and claimed/running jobs observed before the worker attempts to claim a job.
 
-Manual recovery is the operator-driven path for everything that lands in a skip taxonomy. Stale-claim skip reasons (`repo_dirty`, `repo_unknown_commit`, `repo_unavailable`, `job_running`) now write a goal-scoped `recovery.md` artifact and set a durable `needs_manual_recovery` flag on the goal row; the flag blocks future queue claims until an operator explicitly clears it via `momentum recovery clear`. Skip reasons that indicate live ownership (`daemon_active`, `lock_active`, `job_state_changed`) do not produce an artifact since they resolve on their own.
+Manual recovery is the operator-driven path for everything that lands in a skip taxonomy. Stale-claim skip reasons (`repo_dirty`, `repo_unknown_commit`, `repo_unavailable`, `job_running`) and iteration-time HEAD movement (`runner_changed_head`, `head_mismatch`) write a goal-scoped `recovery.md` artifact and set a durable `needs_manual_recovery` flag on the goal row; the flag blocks future queue claims until an operator explicitly clears it via `momentum recovery clear`. Skip reasons that indicate live ownership (`daemon_active`, `lock_active`, `job_state_changed`) do not produce an artifact since they resolve on their own.
 
 ### Manual recovery artifacts and flag (NGX-277)
 
-When the daemon's startup-recovery pass or manual inspection identifies a stale claim that cannot be auto-recovered (because the repo is dirty, HEAD is unresolvable, the repo path is missing, or the job is still in a `running` state), Momentum writes a `recovery.md` artifact to the goal's artifact directory and sets a durable `needs_manual_recovery` flag on the goal row. The flag blocks `claimPendingGoalIterationJob` from claiming any pending iteration for that goal until the operator explicitly clears it.
+When the daemon's startup-recovery pass or manual inspection identifies a stale claim that cannot be auto-recovered (because the repo is dirty, HEAD is unresolvable, the repo path is missing, or the job is still in a `running` state), or when iteration execution detects runner/finalization HEAD movement, Momentum writes a `recovery.md` artifact to the goal's artifact directory and sets a durable `needs_manual_recovery` flag on the goal row. The flag blocks `claimPendingGoalIterationJob` from claiming any pending iteration for that goal until the operator explicitly clears it.
 
 The `recovery.md` artifact contains:
 
 - Schema version, goal ID, job ID, iteration, daemon run ID, repo path
-- The reason code and human-readable message (`repo_dirty`, `repo_unknown_commit`, `repo_unavailable`, or `job_running`)
+- The reason code and human-readable message (`repo_dirty`, `repo_unknown_commit`, `repo_unavailable`, `job_running`, `runner_changed_head`, or `head_mismatch`)
 - Commit pointers (expected pre-iteration commit vs current commit)
 - Paths to relevant iteration artifacts (runner log, verification log, result JSON)
 - Safe next steps with actionable guidance
@@ -454,8 +514,9 @@ The operator acknowledgement flow is `momentum recovery clear <goal-id> [--reaso
 1. Checks that the goal exists and is currently flagged (`not_flagged` otherwise).
 2. Checks that no claimed/running jobs hold the goal (`job_active` with `activeJobIds` otherwise).
 3. Clears `needs_manual_recovery`, `manual_recovery_reason`, and `manual_recovery_at` on the goal row.
-4. Appends a `goal.recovery_cleared` audit event with the previous reason, previous marked-at timestamp, cleared-at timestamp, and optional `operatorReason`.
-5. Leaves `recovery.md` on disk as durable evidence (operators remove it manually after capturing context).
+4. Releases repo locks for the goal that are in `needs_manual_recovery` state.
+5. Appends a `goal.recovery_cleared` audit event with the previous reason, previous marked-at timestamp, cleared-at timestamp, optional `operatorReason`, and released lock IDs.
+6. Leaves `recovery.md` on disk as durable evidence (operators remove it manually after capturing context).
 
 On successful clear, the goal immediately becomes eligible for queue claims again.
 
@@ -472,16 +533,16 @@ State is stored under `--data-dir <path>`, then the `MOMENTUM_HOME` environment 
       ledger.md                # Append-only iteration ledger
       handoff.md               # Populated by `handoff` (empty placeholder until then)
       handoff.json             # Populated by `handoff` (schema v1)
-      recovery.md               # Populated by stale-recovery when a goal is flagged for manual recovery
+      recovery.md               # Populated when a goal is flagged for manual recovery
       iterations/
         <n>/
           prompt.md            # Rendered iteration prompt
-          runner.log           # Runner stdout/stderr
+          runner.log           # Runner metadata and captured stdout/stderr
           verification.log     # Tagged verification command output, capped buffer
-          result.json          # Runner result envelope
+          result.json          # Default runner result envelope; trusted-shell may report another in-dir result file
 ```
 
-`goal.md`, `ledger.md`, `handoff.md`, `handoff.json`, and the first iteration artifact files are created up-front during goal initialization; `handoff.md`, `prompt.md`, `runner.log`, and `verification.log` start empty, while `handoff.json` and `result.json` start as `{}`. `goal start --foreground` populates the iteration artifacts during inline execution. In the queued path, iteration 1 starts with placeholders; later iteration directories and jobs are created by the reducer, and their artifact files are materialized when `momentum worker run` claims and executes that iteration.
+`goal.md`, `ledger.md`, `handoff.md`, `handoff.json`, and the first iteration artifact files are created up-front during goal initialization; `handoff.md`, `prompt.md`, `runner.log`, and `verification.log` start empty, while `handoff.json` and the default `result.json` start as `{}`. `goal start --foreground` populates the iteration artifacts during inline execution. In the queued path, iteration 1 starts with placeholders; later iteration directories and jobs are created by the reducer, and their artifact files are materialized when `momentum worker run` claims and executes that iteration.
 
 ## Failure and Reset Semantics
 
@@ -494,6 +555,7 @@ Momentum treats each iteration as a transaction over the target repo. The pre-it
 | `reset_verification_failure` | Any verification command exits non-zero | Hard reset to `baseHead` | `failed` | `failed` (iteration_failed) | `verification_failed` |
 | `commit_failed` | Verification passed but `git commit` failed | Best-effort hard reset to `baseHead`; if the reset also fails the JSON error code becomes `reset_failed` | `failed` | `failed` (iteration_failed) | `commit_failed` (or `reset_failed`) |
 | `reset_failed` | The reset itself failed after a runner or verification failure | Repo may still have uncommitted changes; requires manual inspection | `failed` | `failed` | `reset_failed` |
+| `manual_recovery` | Runner advanced HEAD (`runner_changed_head`) or commit/reset saw HEAD no longer at `baseHead` (`head_mismatch`) | Repo is left unchanged so Momentum does not drop non-Momentum commits; both foreground and queued paths write `recovery.md` and set `needs_manual_recovery`; queued workers also keep the repo lock blocking until `recovery clear` | `failed` | `failed` (claims blocked until cleared) | `runner_changed_head`, or `commit_failed` / `reset_failed` with manual-recovery reason `head_mismatch` |
 
 Other early-pipeline errors surface as their own codes (`invalid_input`, `missing_repo`, `unsupported_runner`, `repo_guard_failed`, `branch_manager_failed`, `artifact_write_failed`, `git_failed`, `unexpected_error`) and do not produce a commit. Verification output is captured to `verification.log` with `[verify]` prefixes; the on-disk buffer is capped so a runaway command cannot fill the data directory.
 
@@ -576,7 +638,7 @@ Momentum's product model is centered on these durable concepts; M3 must not brea
 - **Source Item**: a durable intake record under a Goal, drawn from a Source. Not the completion authority.
 - **Iteration**: one verified attempt at the Goal, with prompt, runner log, verification log, and result artifacts.
 - **Job**: a queued unit of work (today: `goal_iteration`) with idempotency key, lease, and result/error pointers.
-- **RunnerAdapter**: the boundary for invoking an agent runner (currently `fake`; later Codex, Claude, OpenCode, ACP/app-server backends).
+- **RunnerAdapter**: the boundary for invoking an agent runner (currently `fake` and `trusted-shell`; later Codex, Claude, OpenCode, ACP/app-server backends).
 - **Workflow / Policy**: repo-owned configuration and prompt contract, the future `MOMENTUM.md`.
 - **Workspace / Repo Lease**: the shared per-Goal repo lock that protects the working tree during an iteration.
 - **Event**: append-only record on the durable event log (`job.enqueued`, `job.claimed`, `job.heartbeat`, `iteration_*`, `job.succeeded`/`job.failed`, `repo_lock.recovered`, `job.recovered`, `goal.reduced`, `goal.completed`/`goal.failed`, `goal.reduce_failed`, `goal.recovery_cleared`).
@@ -633,13 +695,13 @@ Land a `RunnerAdapter` boundary so Momentum can execute Goals through more than 
 ### Architecture decision: core vs runner adapters
 
 - **Momentum core** owns the durable Goal/Iteration/Job state machine, Momentum-owned verification, the git transaction (commit/reset on the Momentum branch), the on-disk artifact layout, and the queue/daemon/recovery surfaces shipped in M2 and M3.
-- **`RunnerAdapter` implementations** execute the iteration prompt against an external runtime (shell, agent, ACP backend), stream runner output to `runner.log`, and report a normalized `RunnerResult` (success, optional `goal_complete`, optional artifacts pointer). Adapters do not touch git, do not own verification, do not own the queue, and do not write to external trackers.
+- **`RunnerAdapter` implementations** execute the iteration prompt against an external runtime (shell, agent, ACP backend), capture runner output in the adapter-specific manner and write it to `runner.log`, and report a normalized `RunnerResult` containing `success`, `summary`, change/learning/work arrays, `goal_complete`, and commit intent. Adapters do not touch git, do not own verification, do not own the queue, and do not write to external trackers.
 - The boundary stays single-process and trust-explicit for v0; sandbox/isolation hardening is out of scope for M4.
 
 ### Initial supported runner family
 
 - `fake`: existing in-process runner (Milestone 1/2 baseline) — kept as the default for tests and smoke coverage.
-- `trusted-shell`: planned operator-trusted shell runner; in M4-02 the profile identity is recognized, but execution is still a placeholder that returns `unsupported_runner` until NGX-282 lands shell command invocation and stdout/stderr capture to `runner.log`.
+- `trusted-shell`: operator-trusted executable/argv profile (NGX-282); a goal frontmatter `trusted_shell` block configures the executable `command`, argv `args`, `cwd` (`repo` default or `iteration`), `env_allow` / `env`, `timeout_sec`, and `result_file`. The runner executes `command` with `args` directly (no implicit shell), with no sandbox, records command/cwd/result metadata in `runner.log`, captures stdout/stderr after the command exits, and reads the normalized `RunnerResult` from the configured result file. Stable error codes cover `invalid_input` (missing/malformed config), `runner_threw` (runner log could not be opened), `spawn_failed` (spawn errors such as a missing binary), `command_failed` (non-zero exit), `command_timed_out` (exceeded `timeout_sec`), `result_missing` (no result file written), `result_invalid` (unreadable, malformed, or non-conforming result JSON), and `output_overflow` (stdout/stderr exceeded the 256 MiB capture limit).
 - One live ACP/acpx-style runtime smoke path is admitted if a local binary is available; otherwise its smoke is gated behind an opt-in env var so CI stays self-contained.
 
 External writes remain adapter-mediated and policy-gated (Linear/GitHub/Jira adapters or workflow steps). M4 does **not** implement any external tracker writes.
@@ -651,7 +713,7 @@ The Linear milestone "Milestone 4: Real Runner Profiles" sequences the work as:
 1. **NGX-279 — M4-00 M4 contract, roadmap, and docs setup** *(done)*
 2. **NGX-280 — M4-01 Runner profile model and resolver** *(done)*: added `src/runner-profile.ts` with the built-in registry (`BUILTIN_RUNNER_KINDS = ["fake", "trusted-shell"]`, `DEFAULT_RUNNER_KIND = "fake"`), `parseRunnerProfile` (validates and normalizes runner names, returning `unsupported_runner` or `malformed_profile` on bad input), `resolveRunnerProfile` (applies precedence: `cli_override > goal_frontmatter > builtin_default`), and `safeRunnerProfileSummary`; wired the resolver into `goal-init.ts` so `goal start` validates the runner profile at init time and persists the resolved name to `goals.runner`; surfaced `runnerProfile` and `runnerProfileSource` on `goal start` JSON, `runnerProfile` on `status` JSON/text and `handoff` JSON/markdown, and a `runners` block on `doctor` JSON/text with `supported`, `default`, and `profiles` arrays; replaced the generic `init_error` code with specific stable codes (`parse_error`, `unsupported_runner`, `malformed_profile`, `init_failed`).
 3. **NGX-281 — M4-02 RunnerAdapter boundary and fake-runner migration** *(done)*: added `src/runner-adapter.ts` with `RunnerAdapter`, `RunnerAdapterInput`, `RunnerAdapterResult`, and `RunnerAdapterError` types; an adapter registry (`ADAPTERS`) with `getRunnerAdapter`, `listRunnerAdapterKinds`, `listExecutingRunnerAdapterKinds`; `dispatchRunnerAdapter` validates input, resolves the adapter by kind, checks `executes`, and calls the adapter's `execute` method with a try/catch for `runner_threw`; the `fake` adapter wraps `runFakeRunner` behind the boundary with normalized output and diagnostics, while `trusted-shell` is a placeholder that returns `unsupported_runner`; `foreground-iteration.ts` replaces the direct `runFakeRunner` call and the hard-coded `spec.runner !== "fake"` guard with `dispatchRunnerAdapter`, preserving an early adapter-kind/executes validation before git operations; the queued `worker-run` → `iteration-job` → `foreground-iteration` path uses the same adapter dispatch; the fake runner profile now has `executes: true` and a description reflecting dispatch through the boundary; focused adapter tests cover the registry, dispatch contract, input validation, fake-runner integration, env threading, diagnostics, and error taxonomy.
-4. **NGX-282 — M4-03 Trusted-shell runner profile**
+4. **NGX-282 — M4-03 Trusted-shell runner profile** *(done)*: added `src/trusted-shell-config.ts` (typed `parseTrustedShellConfig` with stable `trusted_shell_config_missing` / `trusted_shell_config_invalid` codes, defaults `cwd=repo`, `timeout_sec=900`, `result_file=result.json`, and refusal of absolute, `..`-escaping, or directory-resolving result paths) and `src/trusted-shell-runner.ts` (spawns the configured executable plus argv via `spawnSync` with no shell, applies `env_allow` filtering with implicit `PATH` preservation, supports `cwd=repo|iteration`, records command/cwd/result metadata in `runner.log`, captures stdout/stderr with section headers after the command exits, and parses the normalized `RunnerResult` from the configured result file); promoted the trusted-shell `RunnerAdapter` from a placeholder to a real adapter with `executes: true`; flipped the `trusted-shell` runner profile to `executes: true` with an explicit-trust description; extended `runForegroundIteration` to reset the worktree to base HEAD when an executing adapter fails after attempting execution without moving HEAD, and to return manual-recovery reasons `runner_changed_head` when the runner advances HEAD or `head_mismatch` when finalization detects unexpected HEAD movement; broadened the `RunnerAdapterErrorCode` taxonomy with `result_missing`, `command_failed`, `command_timed_out`, `spawn_failed`, and `output_overflow`, while `runner_threw` now also covers runner-log open failures and `result_invalid` includes unreadable result files; added focused tests covering config parsing (22 cases), the runner module (16 cases including success, env_allow, cwd modes, timeout, command_failed, result_missing, malformed JSON, spawn ENOENT), the adapter registry / dispatch surface, and end-to-end foreground iteration paths (commit on success, reset on command_failed / timeout / result_missing / result_invalid / runner success=false).
 5. **NGX-283 — M4-04 ACP/acpx runtime smoke runner**
 6. **NGX-284 — M4-05 Runtime MOMENTUM.md policy loader**
 7. **NGX-285 — M4-06 Real-runner status, logs, and recovery hardening**
@@ -682,7 +744,7 @@ Milestone 3 is complete. Milestone 4 has absorbed runner profiles and runtime `M
 
 - **Background runner supervision.** NGX-272 landed `daemon start` / `daemon stop` / `daemon status` as orchestrator-state contracts; NGX-273 wired an opt-in managed loop on `daemon start` that drains queued goal iterations in-process by composing `runWorkerOnce`. Background detachment / supervision (forking, daemonization, restart-on-crash) remains out of scope.
 - **Cooperative shutdown.** NGX-274 surfaces the daemon stop-request state in `status --json` / text and `handoff` JSON / markdown so operators can see why work is not draining without running `daemon status` separately; the daemon loop test suite covers stop-between-jobs observation. NGX-275 adds `daemon stop --now` as an immediate stop request observed between daemon-loop cycles, with a `canceled` terminal state and cancel-outcome visibility. Stop commands still do not signal, kill, or otherwise terminate any running runner, worker, or external process; mid-job cancellation and a full cooperative-shutdown handshake are deferred.
-- **Manual recovery beyond safe local cases.** Automatic stale-lease recovery landed in NGX-276: the managed `daemon start` loop runs a one-shot startup-recovery pass that auto-releases stale repo locks owned by terminal jobs, re-pends orphaned stale claims whose repo state is clean, and auto-finalizes idle stale `daemon_runs` rows; dirty / active / ambiguous cases (`job_running`, `daemon_active`, `lock_active`, `repo_dirty`, `repo_unknown_commit`, `repo_unavailable`, `job_state_changed`, `active_job_present`, `active_lock_present`, `self`, `run_state_changed`) are surfaced through a stable skip taxonomy. NGX-277 adds the manual-recovery path for blocked stale claims: `repo_dirty`, `repo_unknown_commit`, `repo_unavailable`, and `job_running` skips write `recovery.md`, set `needs_manual_recovery`, block future queue claims, and remain visible through `status`, `handoff`, `daemon status`, and `doctor` until an operator runs `recovery clear`.
+- **Manual recovery beyond safe local cases.** Automatic stale-lease recovery landed in NGX-276: the managed `daemon start` loop runs a one-shot startup-recovery pass that auto-releases stale repo locks owned by terminal jobs, re-pends orphaned stale claims whose repo state is clean, and auto-finalizes idle stale `daemon_runs` rows; dirty / active / ambiguous cases (`job_running`, `daemon_active`, `lock_active`, `repo_dirty`, `repo_unknown_commit`, `repo_unavailable`, `job_state_changed`, `active_job_present`, `active_lock_present`, `self`, `run_state_changed`) are surfaced through a stable skip taxonomy. NGX-277 adds the manual-recovery path for blocked stale claims, and M4 also uses it for iteration-time HEAD movement: `repo_dirty`, `repo_unknown_commit`, `repo_unavailable`, `job_running`, `runner_changed_head`, and `head_mismatch` write `recovery.md`, set `needs_manual_recovery`, block future queue claims, and remain visible through `status`, `handoff`, `daemon status`, and `doctor` until an operator runs `recovery clear`.
 - `worker run` remains a single-shot consumer that processes one claimed job per invocation and then exits; the NGX-273 managed loop is the bounded continuous-draining path on `daemon start`.
 - Worktree management, per-source-item worktrees/workspaces, remote git operations (`fetch`, `pull`, `push`, `rebase`), and parallel same-repo Goals.
 - PR/GitHub/Linear automation, external tracker writes, inbound webhooks, and other external integrations driven from inside Momentum.

@@ -62,7 +62,7 @@ export function renderIterationPrompt(ctx: IterationPromptContext): string {
 
   lines.push("## Output contract");
   lines.push(
-    "Write a single JSON object to result.json with this exact shape:"
+    "Write a single JSON object to result.json by default, or to the configured result path with this schema (trusted-shell runners must use $MOMENTUM_RESULT_PATH):"
   );
   lines.push("");
   lines.push("```json");
@@ -84,6 +84,12 @@ export function renderIterationPrompt(ctx: IterationPromptContext): string {
   lines.push("  }");
   lines.push("}");
   lines.push("```");
+  lines.push(
+    "`success`, `summary`, `key_changes_made`, `goal_complete`, `commit`, `commit.type`, and `commit.subject` are required."
+  );
+  lines.push(
+    "`key_learnings` and `remaining_work` are optional and default to `[]`; `commit.scope` is optional and defaults to no scope; `commit.body` is optional and defaults to `\"\"`; `commit.breaking` is optional and defaults to `false`."
+  );
   lines.push("");
 
   lines.push("## Rules");

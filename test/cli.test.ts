@@ -181,8 +181,8 @@ describe("momentum CLI scaffold", () => {
           kind: "trusted-shell",
           name: "trusted-shell",
           description:
-            "Operator-trusted shell runner; identity recognized but no shell command executes yet.",
-          executes: false
+            "Operator-trusted shell runner; executes the goal-configured shell command with no sandbox and no privilege drop. The command has full privileges of the Momentum invoker.",
+          executes: true
         }
       ]
     });
@@ -334,7 +334,7 @@ describe("momentum CLI scaffold", () => {
     expect(profile).toMatchObject({
       kind: "trusted-shell",
       name: "trusted-shell",
-      executes: false
+      executes: true
     });
     expect(payload["runnerProfileSource"]).toBe("cli_override");
 

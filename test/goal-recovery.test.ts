@@ -17,6 +17,11 @@ import {
   markGoalNeedsManualRecovery
 } from "../src/goal-recovery.js";
 import { QUEUE_EVENT_TYPES } from "../src/events.js";
+import {
+  acquireRepoLock,
+  getBlockingRepoLock,
+  markRepoLockNeedsManualRecovery
+} from "../src/repo-locks.js";
 
 const tempRoots: string[] = [];
 
@@ -361,6 +366,64 @@ describe("clearGoalManualRecoveryGuarded", () => {
         clearedAt: 1_700_000_999_000,
         operatorReason: "operator inspected repo"
       });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("releases repo locks that were blocking on manual recovery for the cleared goal", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedGoal(db, "g-lock");
+      markGoalNeedsManualRecovery(db, {
+        goalId: "g-lock",
+        reason: "runner_changed_head",
+        now: 1_700_000_000_000
+      });
+      const lock = acquireRepoLock(db, {
+        repoRoot: "/tmp/repo-lock",
+        holder: "worker",
+        goalId: "g-lock",
+        iteration: 1,
+        jobId: "j-lock",
+        leaseExpiresAt: 1_700_000_100_000,
+        now: 1_700_000_010_000
+      });
+      expect(lock.ok).toBe(true);
+      if (!lock.ok) return;
+      markRepoLockNeedsManualRecovery(db, {
+        lockId: lock.lockId,
+        now: 1_700_000_020_000,
+        recoveryStatus: "runner_changed_head"
+      });
+
+      const out = clearGoalManualRecoveryGuarded(db, {
+        goalId: "g-lock",
+        operatorReason: "repo fixed",
+        now: 1_700_000_999_000
+      });
+
+      expect(out.ok).toBe(true);
+      expect(getBlockingRepoLock(db, "/tmp/repo-lock")).toBeUndefined();
+      const row = db
+        .prepare("SELECT state, recovery_status, released_at FROM repo_locks WHERE id = ?")
+        .get(lock.lockId) as {
+        state: string;
+        recovery_status: string | null;
+        released_at: number | null;
+      };
+      expect(row).toEqual({
+        state: "released",
+        recovery_status: "manual_recovery_cleared",
+        released_at: 1_700_000_999_000
+      });
+      const event = readLatestEventOfType(
+        db,
+        "g-lock",
+        QUEUE_EVENT_TYPES.GOAL_RECOVERY_CLEARED
+      );
+      expect(event?.payload["releasedRepoLockIds"]).toEqual([lock.lockId]);
     } finally {
       db.close();
     }

@@ -17,12 +17,18 @@ import {
   isBuiltinRunnerKind
 } from "./runner-profile.js";
 import type { RunnerResult } from "./runner-result.js";
+import { runTrustedShellRunner } from "./trusted-shell-runner.js";
 
 export type RunnerAdapterErrorCode =
   | "invalid_input"
   | "unsupported_runner"
   | "runner_threw"
-  | "result_invalid";
+  | "result_invalid"
+  | "result_missing"
+  | "command_failed"
+  | "command_timed_out"
+  | "spawn_failed"
+  | "output_overflow";
 
 export type RunnerAdapterError = {
   ok: false;
@@ -64,7 +70,7 @@ export type RunnerAdapter = {
 
 const ADAPTERS: ReadonlyMap<BuiltinRunnerKind, RunnerAdapter> = new Map([
   ["fake", buildFakeAdapter()],
-  ["trusted-shell", buildPlaceholderAdapter("trusted-shell")]
+  ["trusted-shell", buildTrustedShellAdapter()]
 ]);
 
 export function getRunnerAdapter(kind: string): RunnerAdapter | undefined {
@@ -138,11 +144,12 @@ function buildFakeAdapter(): RunnerAdapter {
   };
 }
 
-function buildPlaceholderAdapter(kind: BuiltinRunnerKind): RunnerAdapter {
+function buildTrustedShellAdapter(): RunnerAdapter {
   return {
-    kind,
-    executes: false,
-    execute: (): RunnerAdapterResult => unsupportedRunnerError(kind)
+    kind: "trusted-shell",
+    executes: true,
+    execute: (input: RunnerAdapterInput): RunnerAdapterResult =>
+      runTrustedShellRunner(input)
   };
 }
 
