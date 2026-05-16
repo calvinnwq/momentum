@@ -108,7 +108,9 @@ export function writeHandoff(input: WriteHandoffInput = {}): HandoffResult {
   }
 
   const now = input.now ?? (() => Date.now());
-  const runnerResult = readRunnerResult(status.artifactPaths.resultJson);
+  const runnerResult = readRunnerResult(
+    status.latestJob?.resultPath ?? status.artifactPaths.resultJson
+  );
   const data = buildHandoffData(status, runnerResult, now());
 
   const jsonBody = `${JSON.stringify(toJsonShape(data), null, 2)}\n`;

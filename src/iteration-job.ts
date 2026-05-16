@@ -193,6 +193,7 @@ function recordManualRecoveryIfNeeded(input: {
   }
 
   const dataDir = path.dirname(path.dirname(input.artifactPaths.goalDir));
+  const resultJsonPath = recovery.resultJsonPath ?? input.artifactPaths.resultJson;
   const artifactPaths: RecoveryArtifactPathBundle = {
     iterationDir: input.artifactPaths.iterationDir,
     runnerLog: fs.existsSync(input.artifactPaths.runnerLog)
@@ -201,9 +202,7 @@ function recordManualRecoveryIfNeeded(input: {
     verificationLog: fs.existsSync(input.artifactPaths.verificationLog)
       ? input.artifactPaths.verificationLog
       : null,
-    resultJson: fs.existsSync(input.artifactPaths.resultJson)
-      ? input.artifactPaths.resultJson
-      : null
+    resultJson: fs.existsSync(resultJsonPath) ? resultJsonPath : null
   };
 
   try {

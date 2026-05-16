@@ -50,6 +50,7 @@ export type ForegroundIterationError = {
       message: string;
     };
     safeNextSteps: string[];
+    resultJsonPath?: string;
   };
 };
 
@@ -236,7 +237,8 @@ export function runForegroundIteration(
       runner: spec.runner,
       baseHead,
       currentHead: postRunnerHead,
-      detail: "runner completed before Momentum finalization"
+      detail: "runner completed before Momentum finalization",
+      resultJsonPath: runnerOut.resultJsonPath
     });
   }
 
@@ -298,7 +300,8 @@ export function runForegroundIteration(
           baseHead,
           currentHead: currentHead.head,
           detail: `reset after ${finalize.trigger} failed: ${finalize.reset.error}`,
-          finalize
+          finalize,
+          resultJsonPath: runnerOut.resultJsonPath
         });
       }
       return {
@@ -317,7 +320,8 @@ export function runForegroundIteration(
           baseHead,
           currentHead: currentHead.head,
           detail: `commit after verified runner failed: ${finalize.commit.error}`,
-          finalize
+          finalize,
+          resultJsonPath: runnerOut.resultJsonPath
         });
       }
       if (finalize.reset !== undefined && !finalize.reset.ok) {
@@ -330,7 +334,8 @@ export function runForegroundIteration(
             baseHead,
             currentHead: currentHead.head,
             detail: `reset after commit_failure failed: ${finalize.reset.error} (commit error: ${finalize.commit.error})`,
-            finalize
+            finalize,
+            resultJsonPath: runnerOut.resultJsonPath
           });
         }
         return {
@@ -361,6 +366,7 @@ function runnerChangedHeadError(input: {
   baseHead: string;
   currentHead: string;
   detail: string;
+  resultJsonPath?: string;
 }): ForegroundIterationError {
   const message = `runner "${input.runner}" moved HEAD from ${input.baseHead} to ${input.currentHead}; leaving repo unchanged for manual recovery (${input.detail})`;
   return {
@@ -378,7 +384,10 @@ function runnerChangedHeadError(input: {
         "Inspect the runner-created commit and repository state.",
         "Decide whether to keep, amend, or reset the runner-created commit.",
         "Run `momentum recovery clear <goal-id>` after the repository is safe for queued work."
-      ]
+      ],
+      ...(input.resultJsonPath !== undefined
+        ? { resultJsonPath: input.resultJsonPath }
+        : {})
     }
   };
 }
@@ -390,6 +399,7 @@ function headMismatchManualRecoveryError(input: {
   currentHead: string;
   detail: string;
   finalize: FinalizeIterationResult;
+  resultJsonPath?: string;
 }): ForegroundIterationError {
   const message = `finalization for runner "${input.runner}" found HEAD moved from ${input.baseHead} to ${input.currentHead}; leaving repo unchanged for manual recovery (${input.detail})`;
   return {
@@ -408,7 +418,10 @@ function headMismatchManualRecoveryError(input: {
         "Inspect the commit that moved HEAD during finalization.",
         "Decide whether to keep, amend, or reset the non-Momentum commit.",
         "Run `momentum recovery clear <goal-id>` after the repository is safe for queued work."
-      ]
+      ],
+      ...(input.resultJsonPath !== undefined
+        ? { resultJsonPath: input.resultJsonPath }
+        : {})
     }
   };
 }
