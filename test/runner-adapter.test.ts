@@ -89,12 +89,16 @@ function makeInput(overrides: Partial<RunnerAdapterInput> = {}): RunnerAdapterIn
 }
 
 describe("runner-adapter registry", () => {
-  it("lists fake and trusted-shell as registered kinds", () => {
-    expect(listRunnerAdapterKinds()).toEqual(["fake", "trusted-shell"]);
+  it("lists fake, trusted-shell, and acp as registered kinds", () => {
+    expect(listRunnerAdapterKinds()).toEqual(["fake", "trusted-shell", "acp"]);
   });
 
-  it("marks both fake and trusted-shell as executing adapters after M4-03", () => {
-    expect(listExecutingRunnerAdapterKinds()).toEqual(["fake", "trusted-shell"]);
+  it("marks fake, trusted-shell, and acp as executing adapters after M4-04", () => {
+    expect(listExecutingRunnerAdapterKinds()).toEqual([
+      "fake",
+      "trusted-shell",
+      "acp"
+    ]);
   });
 
   it("returns the fake adapter from getRunnerAdapter('fake') with executes=true", () => {
@@ -108,6 +112,13 @@ describe("runner-adapter registry", () => {
     const adapter = getRunnerAdapter("trusted-shell");
     expect(adapter).toBeDefined();
     expect(adapter?.kind).toBe("trusted-shell");
+    expect(adapter?.executes).toBe(true);
+  });
+
+  it("returns the acp adapter with executes=true after M4-04", () => {
+    const adapter = getRunnerAdapter("acp");
+    expect(adapter).toBeDefined();
+    expect(adapter?.kind).toBe("acp");
     expect(adapter?.executes).toBe(true);
   });
 

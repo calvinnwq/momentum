@@ -10,14 +10,15 @@ import {
 } from "../src/runner-profile.js";
 
 describe("runner-profile registry", () => {
-  it("exposes a stable set of supported built-in kinds including fake and trusted-shell", () => {
-    expect(BUILTIN_RUNNER_KINDS).toEqual(["fake", "trusted-shell"]);
+  it("exposes a stable set of supported built-in kinds including fake, trusted-shell, and acp", () => {
+    expect(BUILTIN_RUNNER_KINDS).toEqual(["fake", "trusted-shell", "acp"]);
     expect(DEFAULT_RUNNER_KIND).toBe("fake");
   });
 
   it("recognizes supported runner names via isBuiltinRunnerKind", () => {
     expect(isBuiltinRunnerKind("fake")).toBe(true);
     expect(isBuiltinRunnerKind("trusted-shell")).toBe(true);
+    expect(isBuiltinRunnerKind("acp")).toBe(true);
     expect(isBuiltinRunnerKind("codex")).toBe(false);
     expect(isBuiltinRunnerKind("")).toBe(false);
   });
@@ -40,6 +41,14 @@ describe("runner-profile registry", () => {
     expect(profile.description).toContain("no sandbox");
     expect(profile.description).toContain("full privileges");
   });
+
+  it("builds the acp profile as executing after M4-04 with a runtime_unavailable caveat", () => {
+    const profile = buildRunnerProfile("acp");
+    expect(profile.kind).toBe("acp");
+    expect(profile.executes).toBe(true);
+    expect(profile.description).toContain("ACP");
+    expect(profile.description).toContain("runtime_unavailable");
+  });
 });
 
 describe("parseRunnerProfile", () => {
@@ -59,6 +68,14 @@ describe("parseRunnerProfile", () => {
     expect(result.profile.executes).toBe(true);
   });
 
+  it("accepts a syntactically valid acp identity as executing after M4-04", () => {
+    const result = parseRunnerProfile("acp");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.profile.kind).toBe("acp");
+    expect(result.profile.executes).toBe(true);
+  });
+
   it("trims surrounding whitespace before validating", () => {
     const result = parseRunnerProfile("  fake  ");
     expect(result.ok).toBe(true);
@@ -74,6 +91,7 @@ describe("parseRunnerProfile", () => {
     expect(result.error).toMatch(/Unsupported runner profile "codex"/);
     expect(result.error).toContain("fake");
     expect(result.error).toContain("trusted-shell");
+    expect(result.error).toContain("acp");
   });
 
   it("returns malformed_profile for empty strings", () => {

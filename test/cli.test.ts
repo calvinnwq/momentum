@@ -167,7 +167,7 @@ describe("momentum CLI scaffold", () => {
       runId: null
     });
     expect(payload["runners"]).toEqual({
-      supported: ["fake", "trusted-shell"],
+      supported: ["fake", "trusted-shell", "acp"],
       default: "fake",
       profiles: [
         {
@@ -182,6 +182,13 @@ describe("momentum CLI scaffold", () => {
           name: "trusted-shell",
           description:
             "Operator-trusted executable-plus-argv runner; executes the goal-configured command with no implicit shell, no sandbox, and no privilege drop. The command has full privileges of the Momentum invoker.",
+          executes: true
+        },
+        {
+          kind: "acp",
+          name: "acp",
+          description:
+            "ACP/acpx-style smoke runner; spawns the configured external agent runtime via the RunnerAdapter boundary. Detects missing runtime/auth as `runtime_unavailable` without corrupting Goal state, distinct from command_failed and verification failures.",
           executes: true
         }
       ]
