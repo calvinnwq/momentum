@@ -71,7 +71,7 @@ Describe the goal and constraints here.
 
 ### Trusted-shell runner example
 
-The `trusted-shell` runner profile (NGX-282) runs an operator-configured shell command in the target repo. Selecting `runner: trusted-shell` requires a `trusted_shell` block in the goal frontmatter; the parser rejects missing/malformed config at init time with `trusted_shell_config_missing` or `trusted_shell_config_invalid`.
+The `trusted-shell` runner profile (NGX-282) runs an operator-configured shell command in the target repo. Selecting `runner: trusted-shell` requires a `trusted_shell` block in the goal frontmatter; the runner validates missing/malformed config when the trusted-shell adapter executes and reports `trusted_shell_config_missing` or `trusted_shell_config_invalid`.
 
 > **Explicit trust posture.** `trusted-shell` is not sandboxed. The configured command runs with the full privileges of the user who invoked Momentum: no container, no VM, no seccomp, no privilege drop, and no input scrubbing. The operator is responsible for the command and any scripts it invokes. Container/VM/seccomp isolation is explicitly out of scope for M4.
 

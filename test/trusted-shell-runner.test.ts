@@ -471,6 +471,30 @@ describe("runTrustedShellRunner — failure paths", () => {
     const log = fs.readFileSync(input.runnerLogPath, "utf-8");
     expect(log).toContain("[trusted-shell] spawn_error:");
   });
+
+  it("returns spawn_failed for non-ENOENT spawn errors", () => {
+    if (process.platform === "win32") return;
+    const iterationDir = makeTempDir("momentum-trusted-shell-iter-");
+    const commandPath = path.join(iterationDir, "not-executable.sh");
+    fs.writeFileSync(commandPath, "#!/bin/sh\necho should-not-run\n", "utf-8");
+    fs.chmodSync(commandPath, 0o644);
+    const input = setup({
+      iterationDir,
+      trustedShell: {
+        command: commandPath,
+        args: []
+      }
+    });
+
+    const out = runTrustedShellRunner(input);
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.code).toBe("spawn_failed");
+    expect(out.error).toContain("EACCES");
+    const log = fs.readFileSync(input.runnerLogPath, "utf-8");
+    expect(log).toContain("[trusted-shell] spawn_error:");
+    expect(log).not.toContain("nonzero_exit");
+  });
 });
 
 describe("TRUSTED_SHELL_ENV_VARS", () => {

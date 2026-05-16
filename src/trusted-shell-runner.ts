@@ -128,20 +128,6 @@ export function runTrustedShellRunner(
 
     if (
       spawn.error !== undefined &&
-      (spawn.error as NodeJS.ErrnoException).code === "ENOENT"
-    ) {
-      writeLine(logHandle, `[trusted-shell] spawn_error: ${spawn.error.message}`);
-      writeLine(logHandle, "[trusted-shell] summary: spawn failed");
-      return adapterError(
-        input,
-        resultJsonPath,
-        "spawn_failed",
-        `trusted-shell failed to spawn ${config.command}: ${spawn.error.message}`
-      );
-    }
-
-    if (
-      spawn.error !== undefined &&
       (spawn.error as NodeJS.ErrnoException).code === "ENOBUFS"
     ) {
       writeLine(
@@ -157,23 +143,14 @@ export function runTrustedShellRunner(
       );
     }
 
-    const exitCode = spawn.status;
-    const signal = spawn.signal ?? null;
     const timedOut =
       spawn.signal === "SIGTERM" &&
       spawn.error !== undefined &&
       (spawn.error as NodeJS.ErrnoException).code === "ETIMEDOUT";
 
-    writeLine(
-      logHandle,
-      `[trusted-shell] exit_code: ${exitCode === null ? "null" : String(exitCode)}`
-    );
-    if (signal !== null) {
-      writeLine(logHandle, `[trusted-shell] signal: ${signal}`);
-    }
-    writeLine(logHandle, `[trusted-shell] duration_ms: ${durationMs}`);
-
     if (timedOut) {
+      writeLine(logHandle, `[trusted-shell] signal: ${spawn.signal}`);
+      writeLine(logHandle, `[trusted-shell] duration_ms: ${durationMs}`);
       writeLine(logHandle, "[trusted-shell] result: timed_out");
       writeLine(
         logHandle,
@@ -186,6 +163,29 @@ export function runTrustedShellRunner(
         `trusted-shell command timed out after ${config.timeoutSec}s: ${config.command}`
       );
     }
+
+    if (spawn.error !== undefined) {
+      writeLine(logHandle, `[trusted-shell] spawn_error: ${spawn.error.message}`);
+      writeLine(logHandle, "[trusted-shell] summary: spawn failed");
+      return adapterError(
+        input,
+        resultJsonPath,
+        "spawn_failed",
+        `trusted-shell failed to spawn ${config.command}: ${spawn.error.message}`
+      );
+    }
+
+    const exitCode = spawn.status;
+    const signal = spawn.signal ?? null;
+
+    writeLine(
+      logHandle,
+      `[trusted-shell] exit_code: ${exitCode === null ? "null" : String(exitCode)}`
+    );
+    if (signal !== null) {
+      writeLine(logHandle, `[trusted-shell] signal: ${signal}`);
+    }
+    writeLine(logHandle, `[trusted-shell] duration_ms: ${durationMs}`);
 
     if (exitCode === null || exitCode !== 0) {
       writeLine(logHandle, "[trusted-shell] result: nonzero_exit");
