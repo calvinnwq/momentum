@@ -264,6 +264,24 @@ describe("resetToBase", () => {
     expect(result.head).toBe(baseHead);
   });
 
+  it("refuses to reset when HEAD advanced beyond baseHead", () => {
+    const dir = initRepo();
+    const baseHead = commitInitial(dir);
+    fs.writeFileSync(path.join(dir, "runner-commit.txt"), "x\n", "utf-8");
+    runGit(dir, ["add", "runner-commit.txt"]);
+    runGit(dir, ["commit", "-m", "runner commit", "--quiet"]);
+
+    const result = resetToBase({ repoPath: dir, baseHead });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe("head_mismatch");
+    expect(result.error).toContain("refusing to reset");
+    expect(runGit(dir, ["log", "-1", "--pretty=%s"]).trim()).toBe(
+      "runner commit"
+    );
+  });
+
   it("returns missing_base when baseHead does not exist in the repo", () => {
     const dir = initRepo();
     commitInitial(dir);

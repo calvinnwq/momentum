@@ -1,3 +1,5 @@
+import path from "node:path";
+
 /**
  * Trusted-shell runner configuration introduced by NGX-282 (M4-03).
  *
@@ -211,12 +213,20 @@ function parseResultFile(
     );
   }
   const value = raw.trim();
-  if (value.includes("..") || value.startsWith("/")) {
+  if (
+    path.isAbsolute(value) ||
+    path.win32.isAbsolute(value) ||
+    hasParentTraversalSegment(value)
+  ) {
     return invalidError(
       "`trusted_shell.result_file` must be a relative path inside the iteration artifact directory."
     );
   }
   return { ok: true, value };
+}
+
+function hasParentTraversalSegment(value: string): boolean {
+  return value.split(/[\\/]+/u).includes("..");
 }
 
 function isValidEnvName(name: string): boolean {

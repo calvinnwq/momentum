@@ -231,25 +231,43 @@ describe("parseTrustedShellConfig cwd / timeout / env / env_allow / result_file"
     expect(result.config.resultFile).toBe("runner-output.json");
   });
 
-  it("rejects an absolute result_file path", () => {
-    const result = parseTrustedShellConfig({
-      command: "/bin/sh",
-      result_file: "/tmp/result.json"
-    });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.code).toBe("trusted_shell_config_invalid");
-    expect(result.error).toContain("result_file");
+  it("rejects absolute result_file paths", () => {
+    for (const resultFile of [
+      "/tmp/result.json",
+      "C:\\temp\\result.json",
+      "\\\\server\\share\\result.json"
+    ]) {
+      const result = parseTrustedShellConfig({
+        command: "/bin/sh",
+        result_file: resultFile
+      });
+      expect(result.ok, `expected invalid for ${resultFile}`).toBe(false);
+      if (result.ok) continue;
+      expect(result.code).toBe("trusted_shell_config_invalid");
+      expect(result.error).toContain("result_file");
+    }
   });
 
-  it("rejects a result_file that escapes via ..", () => {
+  it("rejects a result_file that escapes via parent directory segments", () => {
+    for (const resultFile of ["../escape.json", "nested\\..\\escape.json"]) {
+      const result = parseTrustedShellConfig({
+        command: "/bin/sh",
+        result_file: resultFile
+      });
+      expect(result.ok, `expected invalid for ${resultFile}`).toBe(false);
+      if (result.ok) continue;
+      expect(result.code).toBe("trusted_shell_config_invalid");
+      expect(result.error).toContain("result_file");
+    }
+  });
+
+  it("accepts non-traversal dot characters in result_file", () => {
     const result = parseTrustedShellConfig({
       command: "/bin/sh",
-      result_file: "../escape.json"
+      result_file: "reports/v1..2.result.json"
     });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.code).toBe("trusted_shell_config_invalid");
-    expect(result.error).toContain("result_file");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.config.resultFile).toBe("reports/v1..2.result.json");
   });
 });

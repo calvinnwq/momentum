@@ -28,6 +28,7 @@ export type ForegroundIterationErrorCode =
   | "branch_manager_failed"
   | "artifact_write_failed"
   | "runner_failed"
+  | "runner_changed_head"
   | "runner_reported_failure"
   | "verification_failed"
   | "commit_failed"
@@ -188,9 +189,17 @@ export function runForegroundIteration(
         error: `runner "${spec.runner}" failed: ${dispatch.error}`
       };
     }
-    // The runner attempted execution and may have dirtied the worktree before
-    // failing (notably trusted-shell with cwd=repo). Reset to baseHead so the
-    // repo state matches the runner-failure invariant from finalizeIteration.
+    const currentHead = getCurrentHead(guard.repoPath);
+    if (!currentHead.ok) {
+      return currentHead;
+    }
+    if (currentHead.head !== baseHead) {
+      return {
+        ok: false,
+        code: "runner_changed_head",
+        error: `runner "${spec.runner}" failed after moving HEAD from ${baseHead} to ${currentHead.head}; leaving repo unchanged for manual recovery (runner error: ${dispatch.error})`
+      };
+    }
     const reset = resetToBase({ repoPath: guard.repoPath, baseHead });
     if (!reset.ok) {
       return {
@@ -208,21 +217,9 @@ export function runForegroundIteration(
 
   const runnerOut = dispatch;
 
-  let postRunnerHead: string;
-  try {
-    postRunnerHead = execFileSync(
-      "git",
-      ["-C", guard.repoPath, "rev-parse", "HEAD"],
-      { encoding: "utf-8", stdio: ["ignore", "pipe", "pipe"] }
-    ).trim();
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : "unknown error";
-    return {
-      ok: false,
-      code: "git_failed",
-      error: `git rev-parse HEAD failed: ${detail}`
-    };
-  }
+  const currentHead = getCurrentHead(guard.repoPath);
+  if (!currentHead.ok) return currentHead;
+  const postRunnerHead = currentHead.head;
 
   const finalize = finalizeIteration({
     repoPath: guard.repoPath,
@@ -301,5 +298,24 @@ export function runForegroundIteration(
         error: finalize.error,
         finalize
       };
+  }
+}
+
+function getCurrentHead(
+  repoPath: string
+): { ok: true; head: string } | ForegroundIterationError {
+  try {
+    const head = execFileSync("git", ["-C", repoPath, "rev-parse", "HEAD"], {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "pipe"]
+    }).trim();
+    return { ok: true, head };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "unknown error";
+    return {
+      ok: false,
+      code: "git_failed",
+      error: `git rev-parse HEAD failed: ${detail}`
+    };
   }
 }

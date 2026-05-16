@@ -153,6 +153,20 @@ export function resetToBase(input: ResetInput): ResetResult {
     };
   }
 
+  let currentHead: string;
+  try {
+    currentHead = runGit(repoPath, ["rev-parse", "HEAD"]).trim();
+  } catch (error) {
+    return gitFailure("git rev-parse HEAD failed", error);
+  }
+  if (currentHead !== baseHead) {
+    return {
+      ok: false,
+      code: "head_mismatch",
+      error: `HEAD ${currentHead} does not match expected base ${baseHead}; refusing to reset commits made outside Momentum.`
+    };
+  }
+
   try {
     runGit(repoPath, ["reset", "--hard", "--quiet", baseHead]);
   } catch (error) {

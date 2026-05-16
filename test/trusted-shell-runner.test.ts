@@ -185,6 +185,22 @@ describe("runTrustedShellRunner — success path", () => {
     expect(out.resultJsonPath).toBe(customResult);
   });
 
+  it("rejects a result_file that resolves to the iteration directory", () => {
+    const input = setup({
+      trustedShell: {
+        ...shellScript("true"),
+        result_file: "."
+      }
+    });
+
+    const out = runTrustedShellRunner(input);
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.code).toBe("invalid_input");
+    expect(out.error).toContain("inside the iteration artifact directory");
+    expect(out.resultJsonPath).toBe(input.resultJsonPath);
+  });
+
   it("passes Momentum context to the child via MOMENTUM_* env vars", () => {
     const iterationDir = makeTempDir("momentum-trusted-shell-iter-");
     const resultPath = path.join(iterationDir, "result.json");

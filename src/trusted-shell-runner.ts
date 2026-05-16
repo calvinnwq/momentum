@@ -60,7 +60,19 @@ export function runTrustedShellRunner(
   const config = configParse.config;
 
   const resultFile = config.resultFile ?? DEFAULT_TRUSTED_SHELL_RESULT_FILE;
-  const resultJsonPath = path.join(input.iterationDir, resultFile);
+  const resultJsonPathResult = resolveResultJsonPath(
+    input.iterationDir,
+    resultFile
+  );
+  if (!resultJsonPathResult.ok) {
+    return adapterError(
+      input,
+      input.resultJsonPath,
+      "invalid_input",
+      resultJsonPathResult.error
+    );
+  }
+  const resultJsonPath = resultJsonPathResult.path;
 
   const runnerLogPath = input.runnerLogPath;
   let logHandle: number;
@@ -262,6 +274,27 @@ export function runTrustedShellRunner(
       // ignore close failures
     }
   }
+}
+
+function resolveResultJsonPath(
+  iterationDir: string,
+  resultFile: string
+): { ok: true; path: string } | { ok: false; error: string } {
+  const base = path.resolve(iterationDir);
+  const resolved = path.resolve(base, resultFile);
+  const relative = path.relative(base, resolved);
+  if (
+    relative === "" ||
+    relative.startsWith("..") ||
+    path.isAbsolute(relative)
+  ) {
+    return {
+      ok: false,
+      error:
+        "trusted-shell result_file must resolve inside the iteration artifact directory."
+    };
+  }
+  return { ok: true, path: resolved };
 }
 
 function resolveCwd(
