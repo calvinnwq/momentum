@@ -10,6 +10,16 @@ function readDoc(filename: string): string {
   return fs.readFileSync(path.join(repoRoot, filename), "utf8");
 }
 
+function sectionBetween(doc: string, start: string, end: string): string {
+  const startIndex = doc.indexOf(start);
+  expect(startIndex, `${start} section should exist`).toBeGreaterThanOrEqual(0);
+
+  const endIndex = doc.indexOf(end, startIndex + start.length);
+  expect(endIndex, `${end} section should exist after ${start}`).toBeGreaterThan(startIndex);
+
+  return doc.slice(startIndex, endIndex);
+}
+
 const M5_ISSUE_ORDER = [
   "NGX-287",
   "NGX-288",
@@ -95,9 +105,14 @@ describe("M5 contract docs (NGX-287 setup)", () => {
 
     it("documents the planned M5 issue order matching the Linear milestone", () => {
       expect(readme).toContain("Planned M5 issue order");
+      const plannedOrder = sectionBetween(
+        readme,
+        "### Planned M5 issue order",
+        "### M5 non-goals (explicit)"
+      );
       let cursor = -1;
       for (const id of M5_ISSUE_ORDER) {
-        const next = readme.indexOf(id, cursor + 1);
+        const next = plannedOrder.indexOf(id, cursor + 1);
         expect(next, `${id} should appear after the previous M5 id`).toBeGreaterThan(cursor);
         cursor = next;
       }
@@ -175,9 +190,14 @@ describe("M5 contract docs (NGX-287 setup)", () => {
     });
 
     it("documents the planned M5 issue order in the same sequence as README", () => {
+      const plannedOrder = sectionBetween(
+        agents,
+        "- Planned M5 issue order (matches the Linear milestone):",
+        "- M5 composition with existing contracts:"
+      );
       let cursor = -1;
       for (const id of M5_ISSUE_ORDER) {
-        const next = agents.indexOf(id, cursor + 1);
+        const next = plannedOrder.indexOf(id, cursor + 1);
         expect(next, `${id} should appear after the previous M5 id`).toBeGreaterThan(cursor);
         cursor = next;
       }
