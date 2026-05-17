@@ -4281,6 +4281,74 @@ describe("momentum recovery clear", () => {
       command: "goal start",
       code: "source_item_not_found"
     });
+
+    const { openDb } = await import("../src/db.js");
+    const db = openDb(dataDir);
+    try {
+      const goalCount = db
+        .prepare("SELECT COUNT(*) AS count FROM goals")
+        .get() as { count: number };
+      expect(goalCount.count).toBe(0);
+    } finally {
+      db.close();
+    }
+    const goalsDir = path.join(dataDir, "goals");
+    expect(fs.existsSync(goalsDir) ? fs.readdirSync(goalsDir) : []).toEqual([]);
+  });
+
+  it("goal start --from-source does not persist a partial goal when the source is already linked", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+
+    const { openDb } = await import("../src/db.js");
+    const { upsertSourceItem } = await import("../src/source-items.js");
+    const db = openDb(dataDir);
+    let sourceItemId: string;
+    try {
+      db.prepare(
+        `INSERT INTO goals
+           (id, title, branch, artifact_dir, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).run("goal-existing", "Existing", "momentum/existing", "/tmp/existing", 1, 1);
+      const item = upsertSourceItem(db, {
+        adapterKind: "local-fixture",
+        externalId: "fixture-from-source-linked",
+        externalKey: "SRC-LINKED",
+        title: "Already linked item",
+        observedAt: 1_700_000_000_000,
+        goalId: "goal-existing"
+      });
+      sourceItemId = item.id;
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "goal", "start", goalFile,
+      "--foreground",
+      "--repo", repo,
+      "--from-source", sourceItemId,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "goal start",
+      code: "linked_to_other_goal"
+    });
+
+    const verifyDb = openDb(dataDir);
+    try {
+      const goalCount = verifyDb
+        .prepare("SELECT COUNT(*) AS count FROM goals")
+        .get() as { count: number };
+      expect(goalCount.count).toBe(1);
+    } finally {
+      verifyDb.close();
+    }
+    const goalsDir = path.join(dataDir, "goals");
+    expect(fs.existsSync(goalsDir) ? fs.readdirSync(goalsDir) : []).toEqual([]);
   });
 
   it("goal start without --from-source returns linkedSourceItem: null and omits Source context in the prompt", async () => {

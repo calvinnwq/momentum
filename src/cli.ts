@@ -529,6 +529,7 @@ function sourceUnlink(parsed: ParsedFlags, io: CliIo): number {
         code: result.code,
         message: result.message,
         sourceItemId,
+        currentGoalId: result.currentGoalId ?? null,
         dataDir
       });
     }

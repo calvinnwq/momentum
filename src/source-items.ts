@@ -206,7 +206,8 @@ export function listSourceItems(
 export type LinkGoalToSourceItemErrorCode =
   | "goal_not_found"
   | "source_item_not_found"
-  | "linked_to_other_goal";
+  | "linked_to_other_goal"
+  | "link_changed";
 
 export type LinkGoalToSourceItemSkippedReason =
   | "already_linked_to_target";
@@ -227,7 +228,8 @@ export type LinkGoalToSourceItemResult =
     };
 
 export type UnlinkGoalFromSourceItemErrorCode =
-  | "source_item_not_found";
+  | "source_item_not_found"
+  | "link_changed";
 
 export type UnlinkGoalFromSourceItemResult =
   | {
@@ -240,6 +242,7 @@ export type UnlinkGoalFromSourceItemResult =
       ok: false;
       code: UnlinkGoalFromSourceItemErrorCode;
       message: string;
+      currentGoalId?: string | null;
     };
 
 export function linkGoalToSourceItem(
@@ -291,14 +294,41 @@ export function linkGoalToSourceItem(
       `UPDATE source_items
           SET goal_id = ?, updated_at = ?
         WHERE id = ?
+          AND goal_id IS NULL
         RETURNING *`
     )
     .get(input.goalId, now, input.sourceItemId) as SourceItemRow | undefined;
   if (!row) {
+    const current = getSourceItemById(db, input.sourceItemId);
+    if (!current) {
+      return {
+        ok: false,
+        code: "source_item_not_found",
+        message: `Source item not found: ${input.sourceItemId}`
+      };
+    }
+    if (current.goalId === input.goalId) {
+      return {
+        ok: true,
+        changed: false,
+        skippedReason: "already_linked_to_target",
+        sourceItem: current,
+        previousGoalId: current.goalId
+      };
+    }
+    if (current.goalId === null) {
+      return {
+        ok: false,
+        code: "link_changed",
+        message: `Source item ${input.sourceItemId} link changed while linking; retry the operation.`,
+        currentGoalId: null
+      };
+    }
     return {
       ok: false,
-      code: "source_item_not_found",
-      message: `Source item not found: ${input.sourceItemId}`
+      code: "linked_to_other_goal",
+      message: `Source item ${input.sourceItemId} is already linked to goal ${current.goalId}. Unlink it first.`,
+      currentGoalId: current.goalId
     };
   }
 
@@ -339,14 +369,32 @@ export function unlinkGoalFromSourceItem(
       `UPDATE source_items
           SET goal_id = NULL, updated_at = ?
         WHERE id = ?
+          AND goal_id = ?
         RETURNING *`
     )
-    .get(now, input.sourceItemId) as SourceItemRow | undefined;
+    .get(now, input.sourceItemId, existing.goalId) as SourceItemRow | undefined;
   if (!row) {
+    const current = getSourceItemById(db, input.sourceItemId);
+    if (!current) {
+      return {
+        ok: false,
+        code: "source_item_not_found",
+        message: `Source item not found: ${input.sourceItemId}`
+      };
+    }
+    if (current.goalId === null) {
+      return {
+        ok: true,
+        changed: false,
+        sourceItem: current,
+        previousGoalId: null
+      };
+    }
     return {
       ok: false,
-      code: "source_item_not_found",
-      message: `Source item not found: ${input.sourceItemId}`
+      code: "link_changed",
+      message: `Source item ${input.sourceItemId} link changed to goal ${current.goalId}; retry after confirming the current link.`,
+      currentGoalId: current.goalId
     };
   }
 

@@ -29,6 +29,7 @@ import {
   type PolicyEffectiveSource
 } from "./momentum-policy.js";
 import {
+  getSourceItemById,
   linkGoalToSourceItem,
   type LinkGoalToSourceItemErrorCode,
   type SourceItemSummary
@@ -258,42 +259,87 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
 
     const goalId = crypto.randomUUID();
     const now = Date.now();
+    const sourcePreflight = preflightNewGoalSourceItemLink(
+      db,
+      options.linkSourceItemId
+    );
+    if (!sourcePreflight.ok) {
+      return sourcePreflight.error;
+    }
     const artifactPaths = initGoalArtifacts(dataDir, goalId, rawContent);
 
     const goalState = mode === "foreground" ? "initialized" : "queued";
-    db.prepare(
-      `INSERT INTO goals
-         (id, title, repo, runner, branch, max_iterations, verification,
-          verification_timeout_sec, state, artifact_dir, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      goalId,
-      spec.title,
-      spec.repo ?? null,
-      spec.runner,
-      spec.branch,
-      spec.max_iterations,
-      JSON.stringify(spec.verification),
-      spec.verification_timeout_sec,
-      goalState,
-      artifactPaths.goalDir,
-      now,
-      now
-    );
 
-    const linkResult = applySourceItemLink(db, goalId, options.linkSourceItemId);
-    if (!linkResult.ok) {
-      return linkResult.error;
-    }
-    const linkedSourceItem = linkResult.summary;
+    let linkedSourceItem: SourceItemSummary | null;
+    let jobId: string;
+    let idempotencyKey: string | null = null;
+    let enqueueCreated = false;
+    let queuedJobState: QueueJobState = "pending";
 
-    if (mode === "foreground") {
-      const jobId = createForegroundJob(
-        db,
+    let transactionOpen = false;
+    try {
+      db.exec("BEGIN IMMEDIATE");
+      transactionOpen = true;
+      db.prepare(
+        `INSERT INTO goals
+           (id, title, repo, runner, branch, max_iterations, verification,
+            verification_timeout_sec, state, artifact_dir, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
         goalId,
-        artifactPaths.iterationDir,
+        spec.title,
+        spec.repo ?? null,
+        spec.runner,
+        spec.branch,
+        spec.max_iterations,
+        JSON.stringify(spec.verification),
+        spec.verification_timeout_sec,
+        goalState,
+        artifactPaths.goalDir,
+        now,
         now
       );
+
+      const linkResult = applySourceItemLink(db, goalId, options.linkSourceItemId);
+      if (!linkResult.ok) {
+        db.exec("ROLLBACK");
+        transactionOpen = false;
+        cleanupGoalArtifacts(artifactPaths.goalDir);
+        return linkResult.error;
+      }
+      linkedSourceItem = linkResult.summary;
+
+      if (mode === "foreground") {
+        jobId = createForegroundJob(
+          db,
+          goalId,
+          artifactPaths.iterationDir,
+          now
+        );
+      } else {
+        idempotencyKey = buildIterationIdempotencyKey(goalId, 1);
+        const enqueue = enqueueGoalIterationJob(db, {
+          goalId,
+          iteration: 1,
+          idempotencyKey,
+          artifactPath: artifactPaths.iterationDir,
+          now
+        });
+        jobId = enqueue.jobId;
+        queuedJobState = enqueue.jobState;
+        enqueueCreated = enqueue.created;
+      }
+      db.exec("COMMIT");
+      transactionOpen = false;
+    } catch (error) {
+      if (transactionOpen) {
+        db.exec("ROLLBACK");
+      }
+      cleanupGoalArtifacts(artifactPaths.goalDir);
+      throw error;
+    }
+
+    if (mode === "foreground") {
       return {
         ok: true,
         goalId,
@@ -315,20 +361,12 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
       };
     }
 
-    const idempotencyKey = buildIterationIdempotencyKey(goalId, 1);
-    const enqueue = enqueueGoalIterationJob(db, {
-      goalId,
-      iteration: 1,
-      idempotencyKey,
-      artifactPath: artifactPaths.iterationDir,
-      now
-    });
     return {
       ok: true,
       goalId,
-      jobId: enqueue.jobId,
+      jobId,
       jobType: GOAL_ITERATION_JOB_TYPE,
-      jobState: enqueue.jobState,
+      jobState: queuedJobState,
       goalState: "queued",
       iteration: 1,
       idempotencyKey,
@@ -338,7 +376,7 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
       dataDir,
       artifactPaths,
       resumed: false,
-      enqueueCreated: enqueue.created,
+      enqueueCreated,
       policy: policySummary,
       linkedSourceItem
     };
@@ -347,6 +385,39 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
   } finally {
     db?.close();
   }
+}
+
+function preflightNewGoalSourceItemLink(
+  db: MomentumDb,
+  sourceItemId: string | undefined
+):
+  | { ok: true }
+  | { ok: false; error: GoalInitError } {
+  if (sourceItemId === undefined) {
+    return { ok: true };
+  }
+  const sourceItem = getSourceItemById(db, sourceItemId);
+  if (!sourceItem) {
+    return {
+      ok: false,
+      error: {
+        ok: false,
+        code: "source_item_not_found",
+        error: `Source item not found: ${sourceItemId}`
+      }
+    };
+  }
+  if (sourceItem.goalId !== null) {
+    return {
+      ok: false,
+      error: {
+        ok: false,
+        code: "linked_to_other_goal",
+        error: `Source item ${sourceItemId} is already linked to goal ${sourceItem.goalId}. Unlink it first.`
+      }
+    };
+  }
+  return { ok: true };
 }
 
 function applySourceItemLink(
@@ -383,6 +454,10 @@ function applySourceItemLink(
       lastObservedAt: linkResult.sourceItem.lastObservedAt
     }
   };
+}
+
+function cleanupGoalArtifacts(goalDir: string): void {
+  fs.rmSync(goalDir, { recursive: true, force: true });
 }
 
 export type GoalRow = {
