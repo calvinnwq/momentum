@@ -54,6 +54,69 @@ describe("buildLinearHttpReconciliationClient", () => {
     });
   });
 
+  it("requests and preserves Linear issue descriptions for source context snapshots", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const fetch = async (
+      _input: string,
+      init: {
+        method: string;
+        headers: Record<string, string>;
+        body: string;
+        signal?: AbortSignal;
+      }
+    ) => {
+      bodies.push(JSON.parse(init.body) as Record<string, unknown>);
+      return {
+        ok: true,
+        status: 200,
+        text: async () =>
+          JSON.stringify({
+            data: {
+              issues: {
+                pageInfo: { hasNextPage: false, endCursor: null },
+                nodes: [
+                  {
+                    id: "issue-with-body",
+                    identifier: "NGX-290",
+                    title: "Goal/source linkage",
+                    description: "Use this Linear issue body in planning context.",
+                    url: "https://linear.app/ngxcalvin/issue/NGX-290",
+                    updatedAt: "2026-05-17T00:00:00.000Z"
+                  }
+                ]
+              }
+            }
+          })
+      };
+    };
+
+    const client = buildLinearHttpReconciliationClient({
+      apiKey: "lin_api_key",
+      fetch
+    });
+
+    const result = await client.fetchPage({ cursor: null, filters: {} });
+
+    const query = String(bodies[0]?.["query"] ?? "");
+    expect(query).toContain("description");
+    expect(result).toEqual({
+      ok: true,
+      page: {
+        issues: [
+          {
+            id: "issue-with-body",
+            identifier: "NGX-290",
+            title: "Goal/source linkage",
+            description: "Use this Linear issue body in planning context.",
+            url: "https://linear.app/ngxcalvin/issue/NGX-290",
+            updatedAt: "2026-05-17T00:00:00.000Z"
+          }
+        ],
+        nextCursor: null
+      }
+    });
+  });
+
   it("returns a transport failure and aborts when a Linear request exceeds the timeout", async () => {
     let observedSignal: AbortSignal | undefined;
     const fetch = async (
