@@ -77,7 +77,7 @@ function makeStaticPaginatedClient(
 }
 
 describe("reconcileLinearSource", () => {
-  it("upserts items from a single page and records a succeeded run with detailed counts", () => {
+  it("upserts items from a single page and records a succeeded run with detailed counts", async () => {
     const db = openDb(makeTempDir());
     try {
       const issue = makeLinearIssue({ id: "issue-a", identifier: "NGX-1", updatedAt: 1_000 });
@@ -85,7 +85,7 @@ describe("reconcileLinearSource", () => {
         { ok: true, page: { issues: [issue], nextCursor: null } }
       ]);
 
-      const result = reconcileLinearSource(
+      const result = await reconcileLinearSource(
         db,
         { client, filters: { projectId: "project-uuid-1" } },
         { now: () => 9_000 }
@@ -125,7 +125,7 @@ describe("reconcileLinearSource", () => {
     }
   });
 
-  it("dry-run reports classifications without writing source items or persisting a run", () => {
+  it("dry-run reports classifications without writing source items or persisting a run", async () => {
     const db = openDb(makeTempDir());
     try {
       const issue = makeLinearIssue({ id: "issue-dry", identifier: "NGX-DR" });
@@ -133,7 +133,7 @@ describe("reconcileLinearSource", () => {
         { ok: true, page: { issues: [issue], nextCursor: null } }
       ]);
 
-      const result = reconcileLinearSource(db, { client, dryRun: true });
+      const result = await reconcileLinearSource(db, { client, dryRun: true });
 
       expect(result.counts.itemsObserved).toBe(1);
       expect(result.counts.itemsCreated).toBe(1);
@@ -150,7 +150,7 @@ describe("reconcileLinearSource", () => {
     }
   });
 
-  it("merges multiple pages into one run and one count summary", () => {
+  it("merges multiple pages into one run and one count summary", async () => {
     const db = openDb(makeTempDir());
     try {
       const issueA = makeLinearIssue({ id: "issue-1", identifier: "NGX-1", updatedAt: 1_000 });
@@ -162,7 +162,7 @@ describe("reconcileLinearSource", () => {
         { ok: true, page: { issues: [issueC], nextCursor: null } }
       ]);
 
-      const result = reconcileLinearSource(db, { client });
+      const result = await reconcileLinearSource(db, { client });
 
       expect(result.counts).toEqual({
         pages: 2,
@@ -181,7 +181,7 @@ describe("reconcileLinearSource", () => {
     }
   });
 
-  it("persists items from earlier pages when a later page returns source_auth_unavailable", () => {
+  it("persists items from earlier pages when a later page returns source_auth_unavailable", async () => {
     const db = openDb(makeTempDir());
     try {
       const issueA = makeLinearIssue({ id: "issue-1", identifier: "NGX-1", updatedAt: 1_000 });
@@ -195,7 +195,7 @@ describe("reconcileLinearSource", () => {
         }
       ]);
 
-      const result = reconcileLinearSource(db, { client });
+      const result = await reconcileLinearSource(db, { client });
 
       expect(result.paginationStopped).toEqual({
         reason: "auth_unavailable",
@@ -217,7 +217,7 @@ describe("reconcileLinearSource", () => {
     }
   });
 
-  it("returns source_config_invalid without writing items when the first page reports a config error", () => {
+  it("returns source_config_invalid without writing items when the first page reports a config error", async () => {
     const db = openDb(makeTempDir());
     try {
       const client = makeStaticPaginatedClient([
@@ -228,7 +228,7 @@ describe("reconcileLinearSource", () => {
         }
       ]);
 
-      const result = reconcileLinearSource(db, { client });
+      const result = await reconcileLinearSource(db, { client });
 
       expect(result.paginationStopped).toEqual({
         reason: "config_invalid",
@@ -244,7 +244,7 @@ describe("reconcileLinearSource", () => {
     }
   });
 
-  it("is idempotent across repeated reconciliations of the same data", () => {
+  it("is idempotent across repeated reconciliations of the same data", async () => {
     const db = openDb(makeTempDir());
     try {
       const issue = makeLinearIssue({ id: "issue-idem", identifier: "NGX-7", updatedAt: 5_000 });
@@ -255,12 +255,12 @@ describe("reconcileLinearSource", () => {
         { ok: true, page: { issues: [issue], nextCursor: null } }
       ]);
 
-      const first = reconcileLinearSource(db, { client: firstClient });
+      const first = await reconcileLinearSource(db, { client: firstClient });
       expect(first.counts.itemsCreated).toBe(1);
       expect(first.counts.itemsUpdated).toBe(0);
       expect(first.counts.itemsSkipped).toBe(0);
 
-      const second = reconcileLinearSource(db, { client: secondClient });
+      const second = await reconcileLinearSource(db, { client: secondClient });
       expect(second.counts.itemsObserved).toBe(1);
       // Same observedAt — neither created (already exists) nor a strict update.
       expect(second.counts.itemsCreated).toBe(0);
@@ -276,7 +276,7 @@ describe("reconcileLinearSource", () => {
     }
   });
 
-  it("skips items whose observedAt is older than the persisted lastObservedAt", () => {
+  it("skips items whose observedAt is older than the persisted lastObservedAt", async () => {
     const db = openDb(makeTempDir());
     try {
       const newer = makeLinearIssue({ id: "issue-skip", identifier: "NGX-SK", updatedAt: 5_000 });
@@ -288,8 +288,8 @@ describe("reconcileLinearSource", () => {
         { ok: true, page: { issues: [older], nextCursor: null } }
       ]);
 
-      reconcileLinearSource(db, { client: firstClient });
-      const stale = reconcileLinearSource(db, { client: olderClient });
+      await reconcileLinearSource(db, { client: firstClient });
+      const stale = await reconcileLinearSource(db, { client: olderClient });
 
       expect(stale.counts.itemsObserved).toBe(1);
       expect(stale.counts.itemsSkipped).toBe(1);
@@ -303,7 +303,7 @@ describe("reconcileLinearSource", () => {
     }
   });
 
-  it("records normalization errors per item without aborting the page", () => {
+  it("records normalization errors per item without aborting the page", async () => {
     const db = openDb(makeTempDir());
     try {
       const good = makeLinearIssue({ id: "issue-good", identifier: "NGX-OK", updatedAt: 1_000 });
@@ -312,7 +312,7 @@ describe("reconcileLinearSource", () => {
         { ok: true, page: { issues: [broken, good], nextCursor: null } }
       ]);
 
-      const result = reconcileLinearSource(db, { client });
+      const result = await reconcileLinearSource(db, { client });
 
       expect(result.counts.itemsObserved).toBe(2);
       expect(result.counts.itemsCreated).toBe(1);
@@ -329,7 +329,7 @@ describe("reconcileLinearSource", () => {
     }
   });
 
-  it("enforces maxPages to prevent runaway pagination and records the stop reason", () => {
+  it("enforces maxPages to prevent runaway pagination and records the stop reason", async () => {
     const db = openDb(makeTempDir());
     try {
       const issueA = makeLinearIssue({ id: "issue-1", identifier: "NGX-1", updatedAt: 1_000 });
@@ -342,7 +342,7 @@ describe("reconcileLinearSource", () => {
         { ok: true, page: { issues: [issueC], nextCursor: null } }
       ]);
 
-      const result = reconcileLinearSource(db, { client, maxPages: 2 });
+      const result = await reconcileLinearSource(db, { client, maxPages: 2 });
 
       expect(result.paginationStopped).toEqual({ reason: "max_pages", pageIndex: 2 });
       expect(result.counts.pages).toBe(2);
@@ -357,7 +357,7 @@ describe("reconcileLinearSource", () => {
     }
   });
 
-  it("passes filters and the rolling cursor to the client on each fetchPage call", () => {
+  it("passes filters and the rolling cursor to the client on each fetchPage call", async () => {
     const db = openDb(makeTempDir());
     try {
       const calls: LinearReconciliationFetchPageInput[] = [];
@@ -377,7 +377,7 @@ describe("reconcileLinearSource", () => {
         }
       };
 
-      reconcileLinearSource(db, {
+      await reconcileLinearSource(db, {
         client,
         filters: { projectId: "project-uuid-1", milestoneName: "Milestone One" }
       });
@@ -397,14 +397,14 @@ describe("reconcileLinearSource", () => {
     }
   });
 
-  it("surfaces an existing run via getSourceReconciliationRun by id", () => {
+  it("surfaces an existing run via getSourceReconciliationRun by id", async () => {
     const db = openDb(makeTempDir());
     try {
       const issue = makeLinearIssue({ id: "issue-x", identifier: "NGX-X", updatedAt: 1_000 });
       const client = makeStaticPaginatedClient([
         { ok: true, page: { issues: [issue], nextCursor: null } }
       ]);
-      const result = reconcileLinearSource(db, { client });
+      const result = await reconcileLinearSource(db, { client });
       const fetched = getSourceReconciliationRun(db, result.run.id);
       expect(fetched?.state).toBe("succeeded");
       expect(fetched?.adapterKind).toBe("linear");

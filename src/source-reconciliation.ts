@@ -80,7 +80,7 @@ export type LinearReconciliationFetchPageResult =
 export type LinearReconciliationClient = {
   fetchPage: (
     input: LinearReconciliationFetchPageInput
-  ) => LinearReconciliationFetchPageResult;
+  ) => LinearReconciliationFetchPageResult | Promise<LinearReconciliationFetchPageResult>;
 };
 
 export type ReconcileLinearSourceInput = {
@@ -141,11 +141,11 @@ export type ReconcileLinearSourceResult = {
 
 const DEFAULT_MAX_PAGES = 100;
 
-export function reconcileLinearSource(
+export async function reconcileLinearSource(
   db: MomentumDb,
   input: ReconcileLinearSourceInput,
   clock: ReconcileLinearSourceClock = {}
-): ReconcileLinearSourceResult {
+): Promise<ReconcileLinearSourceResult> {
   const filters = input.filters ?? {};
   const dryRun = input.dryRun === true;
   const maxPages = resolveMaxPages(input.maxPages);
@@ -177,7 +177,7 @@ export function reconcileLinearSource(
       break;
     }
     pageIndex += 1;
-    const response = input.client.fetchPage({ cursor, filters });
+    const response = await input.client.fetchPage({ cursor, filters });
     if (!response.ok) {
       stop = {
         reason: stopReasonForCode(response.code),
