@@ -81,8 +81,25 @@ describe("parseWorkflowArtifact", () => {
       {
         runId: "cwfp-abc123def456",
         step: "postflight:1",
+        status: "failed",
+        ts: "2026-05-17T10:34:00Z"
+      },
+      {
+        runId: "cwfp-abc123def456",
+        step: "postflight:1",
         status: "complete",
         ts: "2026-05-17T10:35:00Z"
+      },
+      {
+        runId: "cwfp-abc123def456",
+        step: "no-mistakes",
+        status: "complete",
+        ts: "2026-05-17T10:40:00Z",
+        prUrl: "https://github.com/example/momentum/pull/98",
+        toolRunId: "01KTEST",
+        head: "abcdef0123456789",
+        harness: "claude",
+        model: "opus"
       },
       {
         runId: "cwfp-abc123def456",
@@ -106,7 +123,9 @@ describe("parseWorkflowArtifact", () => {
       "preflight_complete",
       "implementation_started",
       "implementation_complete",
+      "postflight_failed",
       "postflight_complete",
+      "no_mistakes_complete",
       "merge_complete"
     ]);
     expect(new Set(result.records.map((r) => r.source))).toEqual(
@@ -123,7 +142,9 @@ describe("parseWorkflowArtifact", () => {
       "agent-workflow:cwfp-abc123def456:preflight:complete",
       "agent-workflow:cwfp-abc123def456:implementation:started",
       "agent-workflow:cwfp-abc123def456:implementation:complete",
+      "agent-workflow:cwfp-abc123def456:postflight:1:failed",
       "agent-workflow:cwfp-abc123def456:postflight:1:complete",
+      "agent-workflow:cwfp-abc123def456:no-mistakes:complete",
       "agent-workflow:cwfp-abc123def456:merge-cleanup:complete"
     ]);
 
@@ -139,7 +160,22 @@ describe("parseWorkflowArtifact", () => {
       issues: ["NGX-291"]
     });
 
-    const merge = result.records[5]!;
+    const noMistakes = result.records[6]!;
+    expect(noMistakes.metadata).toMatchObject({
+      step: "no-mistakes",
+      status: "complete",
+      prUrl: "https://github.com/example/momentum/pull/98",
+      toolRunId: "01KTEST",
+      head: "abcdef0123456789",
+      harness: "claude",
+      model: "opus"
+    });
+    expect(noMistakes.summary).toContain("No-mistakes complete");
+    expect(noMistakes.summary).toContain(
+      "pr=https://github.com/example/momentum/pull/98"
+    );
+
+    const merge = result.records[7]!;
     expect(merge.occurredAt).toBe(Date.parse("2026-05-17T10:45:00Z"));
     expect(merge.metadata).toMatchObject({
       step: "merge-cleanup",

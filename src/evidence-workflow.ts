@@ -58,7 +58,7 @@ export type ParseWorkflowArtifactResult = {
   sources: WorkflowEvidenceSource[];
 };
 
-type LedgerStatus = "started" | "complete";
+type LedgerStatus = "started" | "complete" | "failed";
 
 type NormalizedStep = {
   /** Stable event type for the (step, status) pair. */
@@ -67,19 +67,25 @@ type NormalizedStep = {
   ingestSuffix: string;
 };
 
-const KNOWN_STEPS: Record<string, { started?: string; complete?: string }> = {
-  preflight: { complete: "preflight_complete" },
+const KNOWN_STEPS: Record<
+  string,
+  { started?: string; complete?: string; failed?: string }
+> = {
+  preflight: { complete: "preflight_complete", failed: "preflight_failed" },
   implementation: {
     started: "implementation_started",
-    complete: "implementation_complete"
+    complete: "implementation_complete",
+    failed: "implementation_failed"
   },
   "no-mistakes": {
     started: "no_mistakes_started",
-    complete: "no_mistakes_complete"
+    complete: "no_mistakes_complete",
+    failed: "no_mistakes_failed"
   },
   "merge-cleanup": {
     started: "merge_cleanup_started",
-    complete: "merge_complete"
+    complete: "merge_complete",
+    failed: "merge_cleanup_failed"
   }
 };
 
@@ -461,7 +467,9 @@ function parseApprovalFile(
 }
 
 function normalizeStep(step: string, status: string): NormalizedStep | null {
-  if (status !== "started" && status !== "complete") return null;
+  if (status !== "started" && status !== "complete" && status !== "failed") {
+    return null;
+  }
   const ledgerStatus = status as LedgerStatus;
 
   // Bare known step (preflight, implementation, no-mistakes, merge-cleanup).
@@ -476,8 +484,11 @@ function normalizeStep(step: string, status: string): NormalizedStep | null {
   const postflight = /^postflight:(\d+)$/.exec(step);
   if (postflight) {
     const attempt = postflight[1];
+    let type = "postflight_failed";
+    if (status === "started") type = "postflight_started";
+    if (status === "complete") type = "postflight_complete";
     return {
-      type: status === "started" ? "postflight_started" : "postflight_complete",
+      type,
       ingestSuffix: `postflight:${attempt}:${status}`
     };
   }
@@ -502,23 +513,33 @@ function buildLedgerSummary(
       return parts.join(" ");
     }
     case "no_mistakes_complete": {
-      const pr = stringField(entry, "pr");
+      const pr = stringField(entry, "pr") ?? stringField(entry, "prUrl");
       return pr ? `No-mistakes complete (pr=${pr})` : `No-mistakes complete (${runId})`;
     }
     case "implementation_complete":
       return `Implementation complete (${runId})`;
+    case "implementation_failed":
+      return `Implementation failed (${runId})`;
     case "implementation_started":
       return `Implementation started (${runId})`;
     case "preflight_complete":
       return `Preflight complete (${runId})`;
+    case "preflight_failed":
+      return `Preflight failed (${runId})`;
     case "postflight_started":
       return `Postflight started (${runId})`;
     case "postflight_complete":
       return `Postflight complete (${runId})`;
+    case "postflight_failed":
+      return `Postflight failed (${runId})`;
     case "no_mistakes_started":
       return `No-mistakes started (${runId})`;
+    case "no_mistakes_failed":
+      return `No-mistakes failed (${runId})`;
     case "merge_cleanup_started":
       return `Merge cleanup started (${runId})`;
+    case "merge_cleanup_failed":
+      return `Merge cleanup failed (${runId})`;
     default:
       return `${type} (${runId})`;
   }
@@ -532,6 +553,7 @@ function buildLedgerMetadata(
   const metadata: Record<string, unknown> = { step, status };
   const passthrough = [
     "pr",
+    "prUrl",
     "mergeCommit",
     "cleanupCommit",
     "branch",
@@ -539,7 +561,11 @@ function buildLedgerMetadata(
     "linearState",
     "source",
     "gnhfRunId",
-    "gnhfRunDir"
+    "gnhfRunDir",
+    "toolRunId",
+    "head",
+    "harness",
+    "model"
   ] as const;
   for (const key of passthrough) {
     const value = entry[key];
