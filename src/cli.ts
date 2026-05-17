@@ -2180,7 +2180,7 @@ function emitHandoff(
   result: HandoffSuccess
 ): number {
   const { data } = result;
-  const payload = {
+  const payload: Record<string, unknown> = {
     ok: true,
     command: "handoff",
     goalId: data.goal.id,
@@ -2208,6 +2208,9 @@ function emitHandoff(
     staleRecovery: data.staleRecovery,
     policy: data.policy
   };
+  if (data.sourceItems.length > 0) {
+    payload["sourceItems"] = data.sourceItems;
+  }
 
   if (parsed.json) {
     writeJson(io.stdout, payload);

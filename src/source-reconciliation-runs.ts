@@ -118,7 +118,7 @@ export function finishSourceReconciliationRun(
               items_upserted = ?,
               metadata_json = ?,
               updated_at = ?
-        WHERE id = ?
+        WHERE id = ? AND state = 'running'
         RETURNING *`
     )
     .get(
@@ -132,7 +132,9 @@ export function finishSourceReconciliationRun(
       input.runId
     ) as SourceReconciliationRunRow | undefined;
 
-  return row ? sourceReconciliationRunFromRow(row) : null;
+  return row
+    ? sourceReconciliationRunFromRow(row)
+    : getSourceReconciliationRun(db, input.runId);
 }
 
 export function getSourceReconciliationRun(

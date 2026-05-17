@@ -112,6 +112,46 @@ describe("source reconciliation run storage", () => {
     }
   });
 
+  it("does not overwrite a reconciliation run after it reaches a terminal state", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const started = startSourceReconciliationRun(
+        db,
+        { adapterKind: "local-fixture", metadata: { cursor: "first" } },
+        { now: () => 3_000 }
+      );
+
+      const finished = finishSourceReconciliationRun(
+        db,
+        {
+          runId: started.id,
+          state: "succeeded",
+          itemsSeen: 4,
+          itemsUpserted: 4,
+          metadata: { cursor: null }
+        },
+        { now: () => 3_500 }
+      );
+      const lateFinish = finishSourceReconciliationRun(
+        db,
+        {
+          runId: started.id,
+          state: "failed",
+          error: "late failure",
+          itemsSeen: 0,
+          itemsUpserted: 0,
+          metadata: { cursor: "stale" }
+        },
+        { now: () => 4_000 }
+      );
+
+      expect(lateFinish).toEqual(finished);
+      expect(getSourceReconciliationRun(db, started.id)).toEqual(finished);
+    } finally {
+      db.close();
+    }
+  });
+
   it("lists reconciliation runs deterministically with optional adapter filtering", () => {
     const db = openDb(makeTempDir());
     try {

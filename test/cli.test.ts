@@ -1238,6 +1238,62 @@ runner_profile: {
     expect(result.stderr).toBe("");
   });
 
+  it("handoff --json surfaces linked source item summaries", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+
+    const startResult = await run([
+      "goal", "start", goalFile,
+      "--foreground",
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    const startPayload = JSON.parse(startResult.stdout) as Record<string, unknown>;
+    const goalId = startPayload["goalId"] as string;
+
+    const { openDb } = await import("../src/db.js");
+    const { upsertSourceItem } = await import("../src/source-items.js");
+    const db = openDb(dataDir);
+    try {
+      upsertSourceItem(
+        db,
+        {
+          adapterKind: "local-fixture",
+          externalId: "fixture-handoff-json-1",
+          externalKey: "SRC-HANDOFF-1",
+          title: "Handoff JSON source item",
+          status: "Todo",
+          metadata: { opaque: "not surfaced here" },
+          observedAt: 1_700_000_000_000,
+          goalId
+        },
+        { now: () => 1_700_000_000_100 }
+      );
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "handoff", goalId, "--data-dir", dataDir, "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload["sourceItems"]).toEqual([
+      {
+        id: expect.any(String),
+        adapterKind: "local-fixture",
+        externalId: "fixture-handoff-json-1",
+        externalKey: "SRC-HANDOFF-1",
+        url: null,
+        title: "Handoff JSON source item",
+        status: "Todo",
+        lastObservedAt: 1_700_000_000_000
+      }
+    ]);
+    expect(JSON.stringify(payload["sourceItems"])).not.toContain("opaque");
+  });
+
   it("handoff text mode prints the artifact paths", async () => {
     const { dataDir, goalFile, repo } = setupGoalAndData();
 
