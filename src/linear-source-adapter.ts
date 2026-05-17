@@ -1,16 +1,18 @@
 /**
- * Linear source adapter (NGX-289 / M5-02 first slice).
+ * Linear source adapter (NGX-289 / M5-02).
  *
  * This module owns the read-only normalization of Linear issue payloads into
  * Momentum's SourceAdapterItem vocabulary, plus the in-process list/get
- * surface a reconciliation orchestrator (later NGX-289 slice) can drive
- * against either a real Linear HTTP client or an in-test fake client.
+ * surface used by tests and local callers that already have Linear issue
+ * payloads.
  *
  * The adapter never performs HTTP itself, never reads credentials, and never
- * writes back to Linear. Higher-level reconciliation code threads in an
- * injected `LinearSourceAdapterClient` that has already fetched issues (and
- * applied any cursor/auth handling); this module is the deterministic
- * normalization boundary on top of that.
+ * writes back to Linear. The paginated reconciliation orchestrator lives in
+ * `source-reconciliation.ts` and normalizes each fetched issue through
+ * `normalizeLinearIssue`; the HTTP-backed Linear client lives in
+ * `linear-http-client.ts` and handles GraphQL transport, pagination input,
+ * and auth/transport error mapping before the orchestrator persists local
+ * SourceItem rows and snapshots.
  */
 
 import type {
