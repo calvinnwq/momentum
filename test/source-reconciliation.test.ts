@@ -244,6 +244,52 @@ describe("reconcileLinearSource", () => {
     }
   });
 
+  it("finishes the run as failed when the client throws during pagination", async () => {
+    const db = openDb(makeTempDir());
+    try {
+      const issue = makeLinearIssue({ id: "issue-before-throw", identifier: "NGX-THROW" });
+      let calls = 0;
+      const client: LinearReconciliationClient = {
+        async fetchPage() {
+          calls += 1;
+          if (calls === 1) {
+            return { ok: true, page: { issues: [issue], nextCursor: "next" } };
+          }
+          throw new Error("transport exploded");
+        }
+      };
+
+      const result = await reconcileLinearSource(db, { client });
+
+      expect(result.paginationStopped).toEqual({
+        reason: "adapter_threw",
+        pageIndex: 2,
+        code: "source_adapter_threw",
+        error: "transport exploded"
+      });
+      expect(result.counts.itemsObserved).toBe(1);
+      expect(result.counts.itemsCreated).toBe(1);
+      expect(result.run.state).toBe("failed");
+      expect(result.run.error).toBe("source_adapter_threw: transport exploded");
+      expect(result.run.finishedAt).not.toBeNull();
+
+      const runs = listSourceReconciliationRuns(db, { adapterKind: "linear" });
+      expect(runs).toHaveLength(1);
+      expect(runs[0]?.state).toBe("failed");
+      expect(runs[0]?.metadata).toMatchObject({
+        paginationStopped: {
+          reason: "adapter_threw",
+          pageIndex: 2,
+          code: "source_adapter_threw",
+          error: "transport exploded"
+        }
+      });
+      expect(listSourceItems(db, { adapterKind: "linear" })).toHaveLength(1);
+    } finally {
+      db.close();
+    }
+  });
+
   it("is idempotent across repeated reconciliations of the same data", async () => {
     const db = openDb(makeTempDir());
     try {

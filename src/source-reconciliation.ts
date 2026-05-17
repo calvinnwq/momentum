@@ -176,7 +176,18 @@ export async function reconcileLinearSource(
       break;
     }
     pageIndex += 1;
-    const response = await input.client.fetchPage({ cursor, filters });
+    let response: LinearReconciliationFetchPageResult;
+    try {
+      response = await input.client.fetchPage({ cursor, filters });
+    } catch (err) {
+      stop = {
+        reason: "adapter_threw",
+        pageIndex,
+        code: "source_adapter_threw",
+        error: err instanceof Error ? err.message : String(err)
+      };
+      break;
+    }
     if (!response.ok) {
       stop = {
         reason: stopReasonForCode(response.code),
