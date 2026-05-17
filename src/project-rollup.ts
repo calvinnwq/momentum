@@ -563,7 +563,7 @@ function buildReconciliationWarnings(
   for (const adapter of adapters) {
     const adapterRuns = runs.filter(
       (run) =>
-        run.adapterKind === adapter && runCoversFilteredRollup(run, filters, items)
+        run.adapterKind === adapter && runCoversFilteredRollup(run, filters)
     );
     if (adapterRuns.length === 0) {
       byAdapter.set(adapter, {
@@ -644,31 +644,21 @@ function selectReconciliationRunForWarning(
 
 function runCoversFilteredRollup(
   run: SourceReconciliationRun,
-  rollupFilters: ProjectRollupFilters,
-  items: readonly SourceItem[]
+  rollupFilters: ProjectRollupFilters
 ): boolean {
   if (run.metadata["dryRun"] === true) return false;
+  if (reconciliationStoppedBeforeComplete(run)) return false;
   const filters = readNested(run.metadata, "filters");
   if (filters === null || !filtersHaveScope(filters)) return true;
-  if (!rollupFiltersHaveScope(rollupFilters)) return false;
-  if (items.length === 0) return false;
-  return items.every((item) => {
-    const project = readNested(item.metadata, "project");
-    const milestone = readNested(item.metadata, "milestone");
-    return (
-      itemDimensionCoveredByRun(project, filters, "project") &&
-      itemDimensionCoveredByRun(milestone, filters, "milestone")
-    );
-  });
+  return (
+    runDimensionCoversRollup(filters, rollupFilters, "project") &&
+    runDimensionCoversRollup(filters, rollupFilters, "milestone")
+  );
 }
 
-function rollupFiltersHaveScope(filters: ProjectRollupFilters): boolean {
-  return (
-    filters.projectId !== undefined ||
-    filters.projectName !== undefined ||
-    filters.milestoneId !== undefined ||
-    filters.milestoneName !== undefined
-  );
+function reconciliationStoppedBeforeComplete(run: SourceReconciliationRun): boolean {
+  const stop = readNested(run.metadata, "paginationStopped");
+  return readString(stop, "reason") === "max_pages";
 }
 
 function filtersHaveScope(filters: Record<string, unknown>): boolean {
@@ -680,27 +670,24 @@ function filtersHaveScope(filters: Record<string, unknown>): boolean {
   );
 }
 
-function itemDimensionCoveredByRun(
-  itemRecord: Record<string, unknown> | null,
+function runDimensionCoversRollup(
   runFilters: Record<string, unknown>,
+  rollupFilters: ProjectRollupFilters,
   dimension: "project" | "milestone"
 ): boolean {
-  const id = readString(runFilters, `${dimension}Id`);
-  const name = readString(runFilters, `${dimension}Name`);
-  if (id === null && name === null) return true;
-  return matchesAnyIdOrNameValue(itemRecord, [id, name]);
-}
+  const runValues = [
+    readString(runFilters, `${dimension}Id`),
+    readString(runFilters, `${dimension}Name`)
+  ].filter((value): value is string => value !== null);
+  if (runValues.length === 0) return true;
 
-function matchesAnyIdOrNameValue(
-  record: Record<string, unknown> | null,
-  values: readonly (string | null)[]
-): boolean {
-  const id = readString(record, "id");
-  const name = readString(record, "name");
-  for (const value of values) {
-    if (value !== null && (id === value || name === value)) return true;
-  }
-  return false;
+  const rollupValues = [
+    rollupFilters[`${dimension}Id`],
+    rollupFilters[`${dimension}Name`]
+  ].filter((value): value is string => value !== undefined);
+  if (rollupValues.length === 0) return false;
+
+  return runValues.some((runValue) => rollupValues.includes(runValue));
 }
 
 function pickNextAction(

@@ -697,6 +697,83 @@ describe("buildProjectRollup", () => {
     }
   });
 
+  it("does not count milestone-scoped reconciliations as fresh for project-wide rollups", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedSourceItem(db, {
+        externalId: "issue-alpha-m1",
+        projectName: "Alpha",
+        milestoneName: "M1"
+      });
+      const run = startSourceReconciliationRun(
+        db,
+        {
+          adapterKind: "linear",
+          metadata: { filters: { projectName: "Alpha", milestoneName: "M1" } }
+        },
+        { now: () => 1_000 }
+      );
+      finishSourceReconciliationRun(
+        db,
+        {
+          runId: run.id,
+          state: "succeeded",
+          itemsSeen: 1,
+          itemsUpserted: 1
+        },
+        { now: () => 2_000 }
+      );
+
+      const broadRollup = buildProjectRollup(db, {
+        filters: { projectName: "Alpha" },
+        now: 3_000
+      });
+      expect(broadRollup.reconciliationWarnings).toMatchObject([
+        { adapterKind: "linear", reason: "never_run" }
+      ]);
+      expect(broadRollup.nextAction.kind).toBe("reconcile_stale_source");
+
+      const matchingRollup = buildProjectRollup(db, {
+        filters: { projectName: "Alpha", milestoneName: "M1" },
+        now: 3_000
+      });
+      expect(matchingRollup.reconciliationWarnings).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("ignores max-pages reconciliation runs when checking freshness", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedSourceItem(db, { externalId: "issue-max-pages" });
+      const run = startSourceReconciliationRun(
+        db,
+        { adapterKind: "linear" },
+        { now: () => 1_000 }
+      );
+      finishSourceReconciliationRun(
+        db,
+        {
+          runId: run.id,
+          state: "succeeded",
+          itemsSeen: 1,
+          itemsUpserted: 1,
+          metadata: { paginationStopped: { reason: "max_pages", pageIndex: 1 } }
+        },
+        { now: () => 2_000 }
+      );
+
+      const rollup = buildProjectRollup(db, { now: 3_000 });
+      expect(rollup.reconciliationWarnings).toMatchObject([
+        { adapterKind: "linear", reason: "never_run" }
+      ]);
+      expect(rollup.nextAction.kind).toBe("reconcile_stale_source");
+    } finally {
+      db.close();
+    }
+  });
+
   it("truncates large source item lists to the bounded limit with deterministic ordering", () => {
     const db = openDb(makeTempDir());
     try {
