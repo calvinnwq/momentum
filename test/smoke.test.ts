@@ -249,6 +249,7 @@ describe("Milestone 1 end-to-end smoke", () => {
         "momentum daemon start [--max-loop-iterations <n>] [--max-idle-cycles <n>] [--poll-interval-ms <ms>] [--data-dir <path>] [--json]",
         "momentum daemon stop [--now] [--reason <text>] [--data-dir <path>] [--json]",
         "momentum daemon status [--data-dir <path>] [--json]",
+        "momentum project status [--source <adapter>] [--project <id-or-name>] [--milestone <id-or-name>] [--stale-threshold-hours <n>] [--data-dir <path>] [--json]",
         "momentum recovery clear <goal-id> [--reason <text>] [--data-dir <path>] [--json]",
         "momentum evidence ingest --path <file-or-dir> [--goal <id>] [--source-item <id>] [--data-dir <path>] [--json]",
         "momentum evidence list [--goal <id>] [--source-item <id>] [--source <source>] [--type <type>] [--limit <n>] [--data-dir <path>] [--json]",

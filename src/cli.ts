@@ -88,6 +88,14 @@ import {
   parseWorkflowArtifact,
   type WorkflowEvidenceDiagnostic
 } from "./evidence-workflow.js";
+import {
+  DEFAULT_RECONCILIATION_STALE_THRESHOLD_MS,
+  PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT,
+  buildProjectRollup,
+  type ProjectRollup,
+  type ProjectRollupFilters,
+  type ProjectRollupOptions
+} from "./project-rollup.js";
 
 export const VERSION = "0.0.0";
 
@@ -144,6 +152,7 @@ type ParsedFlags = {
   source?: string;
   evidenceType?: string;
   limit?: number;
+  staleThresholdHours?: number;
   error?: string;
 };
 
@@ -161,6 +170,7 @@ const COMMANDS = [
   "momentum daemon start [--max-loop-iterations <n>] [--max-idle-cycles <n>] [--poll-interval-ms <ms>] [--data-dir <path>] [--json]",
   "momentum daemon stop [--now] [--reason <text>] [--data-dir <path>] [--json]",
   "momentum daemon status [--data-dir <path>] [--json]",
+  "momentum project status [--source <adapter>] [--project <id-or-name>] [--milestone <id-or-name>] [--stale-threshold-hours <n>] [--data-dir <path>] [--json]",
   "momentum recovery clear <goal-id> [--reason <text>] [--data-dir <path>] [--json]",
   "momentum evidence ingest --path <file-or-dir> [--goal <id>] [--source-item <id>] [--data-dir <path>] [--json]",
   "momentum evidence list [--goal <id>] [--source-item <id>] [--source <source>] [--type <type>] [--limit <n>] [--data-dir <path>] [--json]",
@@ -230,6 +240,10 @@ export async function runCli(
 
   if (command === "recovery") {
     return recovery(parsed, io);
+  }
+
+  if (command === "project") {
+    return project(parsed, io);
   }
 
   if (command === "evidence") {
@@ -919,6 +933,223 @@ function sourceItemToJsonShape(item: SourceItem): Record<string, unknown> {
     createdAt: item.createdAt,
     updatedAt: item.updatedAt
   };
+}
+
+function project(parsed: ParsedFlags, io: CliIo): number {
+  const subcommand = parsed.args[1];
+  if (!subcommand) {
+    return usageError(
+      "Missing required subcommand for project. Expected: status.",
+      parsed,
+      io
+    );
+  }
+  if (subcommand === "status") {
+    return projectStatus(parsed, io);
+  }
+  return usageError(`Unknown project subcommand: ${subcommand}`, parsed, io);
+}
+
+function projectStatus(parsed: ParsedFlags, io: CliIo): number {
+  if (parsed.args.length > 2) {
+    return usageError(
+      `Unexpected argument for project status: ${parsed.args[2]}`,
+      parsed,
+      io
+    );
+  }
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return emitProjectStatusFailure(parsed, io, {
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err)
+    });
+  }
+
+  const filters: ProjectRollupFilters = {};
+  if (parsed.source !== undefined) filters.adapterKind = parsed.source;
+  if (parsed.project !== undefined) {
+    filters.projectId = parsed.project;
+    filters.projectName = parsed.project;
+  }
+  if (parsed.milestone !== undefined) {
+    filters.milestoneId = parsed.milestone;
+    filters.milestoneName = parsed.milestone;
+  }
+
+  const options: ProjectRollupOptions = { filters };
+  if (parsed.staleThresholdHours !== undefined) {
+    options.reconciliationStaleThresholdMs = Math.round(
+      parsed.staleThresholdHours * 60 * 60 * 1000
+    );
+  }
+
+  const db = openDb(dataDir);
+  let rollup: ProjectRollup;
+  try {
+    rollup = buildProjectRollup(db, options);
+  } finally {
+    db.close();
+  }
+
+  if (parsed.json) {
+    const payload = {
+      ok: true,
+      command: "project status",
+      dataDir,
+      filters: {
+        source: filters.adapterKind ?? null,
+        projectId: filters.projectId ?? null,
+        projectName: filters.projectName ?? null,
+        milestoneId: filters.milestoneId ?? null,
+        milestoneName: filters.milestoneName ?? null
+      },
+      staleThresholdMs: rollup.reconciliationStaleThresholdMs,
+      generatedAt: rollup.generatedAt,
+      counts: rollup.counts,
+      sourceItems: rollup.sourceItems,
+      totalSourceItemCount: rollup.totalSourceItemCount,
+      truncatedSourceItems: rollup.truncatedSourceItems,
+      mismatches: rollup.mismatches,
+      totalMismatchCount: rollup.totalMismatchCount,
+      truncatedMismatches: rollup.truncatedMismatches,
+      reconciliationWarnings: rollup.reconciliationWarnings,
+      pendingUpdateIntents: rollup.pendingUpdateIntents,
+      nextAction: rollup.nextAction
+    };
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  write(io.stdout, renderProjectStatusText(rollup, filters, dataDir));
+  return 0;
+}
+
+function renderProjectStatusText(
+  rollup: ProjectRollup,
+  filters: ProjectRollupFilters,
+  dataDir: string
+): string {
+  const lines: string[] = ["Project status"];
+  lines.push(
+    `Filters: source=${filters.adapterKind ?? "(any)"} project=${
+      filters.projectId ?? filters.projectName ?? "(any)"
+    } milestone=${filters.milestoneId ?? filters.milestoneName ?? "(any)"}`
+  );
+  lines.push(`Data dir: ${dataDir}`);
+  lines.push(
+    `Source items: ${rollup.counts.sourceItems.total} ` +
+      `(linked=${rollup.counts.sourceItems.linkedToGoal}, unlinked=${rollup.counts.sourceItems.unlinked})`
+  );
+  const statusSummary = Object.entries(rollup.counts.sourceItems.byStatus)
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([status, count]) => `${status}=${count}`)
+    .join(", ");
+  if (statusSummary.length > 0) {
+    lines.push(`Source status: ${statusSummary}`);
+  }
+  const goalSummary = Object.entries(rollup.counts.goals.byState)
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([state, count]) => `${state}=${count}`)
+    .join(", ");
+  lines.push(
+    `Goals: total=${rollup.counts.goals.total}` +
+      (goalSummary.length > 0 ? ` (${goalSummary})` : "") +
+      `, manual_recovery=${rollup.counts.goals.needingManualRecovery}`
+  );
+  lines.push(
+    `Evidence: total=${rollup.counts.evidence.totalRecords}, ` +
+      `goals_with_evidence=${rollup.counts.evidence.goalsWithEvidence}, ` +
+      `goals_without_evidence=${rollup.counts.evidence.goalsWithoutEvidence}`
+  );
+  lines.push(
+    `Mismatches: source_done_goal_not_terminal=${rollup.counts.mismatches.source_done_goal_not_terminal}, ` +
+      `goal_done_source_not_done=${rollup.counts.mismatches.goal_done_source_not_done}, ` +
+      `evidence_missing_after_completion=${rollup.counts.mismatches.evidence_missing_after_completion}, ` +
+      `manual_recovery_required=${rollup.counts.mismatches.manual_recovery_required}`
+  );
+  lines.push(
+    `Pending external update intents: ${rollup.counts.pendingUpdateIntents} (NGX-293 not implemented)`
+  );
+  if (rollup.reconciliationWarnings.length === 0) {
+    lines.push("Reconciliation: ok");
+  } else {
+    for (const warning of rollup.reconciliationWarnings) {
+      const ageText =
+        warning.ageMs === null ? "" : ` (age_ms=${warning.ageMs})`;
+      const errorText = warning.error ? ` error=${warning.error}` : "";
+      lines.push(
+        `Reconciliation warning: ${warning.adapterKind} ${warning.reason}${ageText}${errorText}`
+      );
+    }
+  }
+  lines.push("");
+  lines.push("Top source items:");
+  if (rollup.sourceItems.length === 0) {
+    lines.push("  (none)");
+  } else {
+    for (const item of rollup.sourceItems) {
+      const goalText = item.goalId
+        ? `goal=${item.goalId} (${item.goalState ?? "unknown"})`
+        : "goal=(none)";
+      lines.push(
+        `  - [${item.adapterKind}] ${item.externalKey ?? item.externalId} ` +
+          `${item.title}${item.status ? ` (${item.status})` : ""} ${goalText}`
+      );
+    }
+    if (rollup.truncatedSourceItems) {
+      lines.push(
+        `  ... and ${rollup.totalSourceItemCount - rollup.sourceItems.length} more`
+      );
+    }
+  }
+  lines.push("");
+  lines.push("Mismatches:");
+  if (rollup.mismatches.length === 0) {
+    lines.push("  (none)");
+  } else {
+    for (const mismatch of rollup.mismatches) {
+      lines.push(
+        `  - [${mismatch.kind}] ${mismatch.externalKey ?? mismatch.sourceItemId} ` +
+          `source=${mismatch.sourceStatus ?? "(none)"} goal=${mismatch.goalId ?? "(none)"} (${mismatch.goalState ?? "unknown"})`
+      );
+    }
+    if (rollup.truncatedMismatches) {
+      lines.push(
+        `  ... and ${rollup.totalMismatchCount - rollup.mismatches.length} more`
+      );
+    }
+  }
+  lines.push("");
+  lines.push(`Next action: ${rollup.nextAction.kind} — ${rollup.nextAction.message}`);
+  lines.push("");
+  return lines.join("\n");
+}
+
+function emitProjectStatusFailure(
+  parsed: ParsedFlags,
+  io: CliIo,
+  failure: { code: string; message: string }
+): number {
+  const payload = {
+    ok: false,
+    command: "project status",
+    code: failure.code,
+    message: failure.message
+  };
+  if (parsed.json) {
+    writeJson(io.stderr, payload);
+    return 1;
+  }
+  write(io.stderr, `${failure.message}\n`);
+  return 1;
 }
 
 function recovery(parsed: ParsedFlags, io: CliIo): number {
@@ -3458,6 +3689,7 @@ function parseFlags(argv: string[]): ParsedFlags {
   let source: string | undefined;
   let evidenceType: string | undefined;
   let limit: number | undefined;
+  let staleThresholdHours: number | undefined;
   let error: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -3705,6 +3937,24 @@ function parseFlags(argv: string[]): ParsedFlags {
       continue;
     }
 
+    if (arg === "--stale-threshold-hours") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --stale-threshold-hours.";
+      } else {
+        const parsedValue = /^\d+(?:\.\d+)?$/.test(value)
+          ? Number.parseFloat(value)
+          : NaN;
+        if (!Number.isFinite(parsedValue) || parsedValue < 0) {
+          error ??= `Invalid value for --stale-threshold-hours: ${value}`;
+        } else {
+          staleThresholdHours = parsedValue;
+        }
+        index += 1;
+      }
+      continue;
+    }
+
     if (arg === "--iteration") {
       const value = readFlagValue(argv, index);
       if (value === undefined) {
@@ -3803,6 +4053,9 @@ function parseFlags(argv: string[]): ParsedFlags {
   if (source !== undefined) parsed.source = source;
   if (evidenceType !== undefined) parsed.evidenceType = evidenceType;
   if (limit !== undefined) parsed.limit = limit;
+  if (staleThresholdHours !== undefined) {
+    parsed.staleThresholdHours = staleThresholdHours;
+  }
   if (error !== undefined) parsed.error = error;
 
   return parsed;
