@@ -125,7 +125,7 @@ describe("reconcileLinearSource", () => {
     }
   });
 
-  it("dry-run reports classifications without writing source items or persisting a run", async () => {
+  it("dry-run reports planned classifications without persisting item upserts", async () => {
     const db = openDb(makeTempDir());
     try {
       const issue = makeLinearIssue({ id: "issue-dry", identifier: "NGX-DR" });
@@ -138,13 +138,19 @@ describe("reconcileLinearSource", () => {
       expect(result.counts.itemsObserved).toBe(1);
       expect(result.counts.itemsCreated).toBe(1);
       expect(result.run.state).toBe("succeeded");
+      expect(result.run.itemsSeen).toBe(1);
+      expect(result.run.itemsUpserted).toBe(0);
       expect(result.run.metadata).toMatchObject({ dryRun: true });
+      expect(result.run.metadata).toMatchObject({
+        counts: { itemsCreated: 1, itemsUpdated: 0 }
+      });
 
       expect(listSourceItems(db, { adapterKind: "linear" })).toEqual([]);
       // Dry-run still records the run for audit; verify it is persisted exactly once.
       const runs = listSourceReconciliationRuns(db, { adapterKind: "linear" });
       expect(runs).toHaveLength(1);
       expect(runs[0]?.metadata).toMatchObject({ dryRun: true });
+      expect(runs[0]?.itemsUpserted).toBe(0);
     } finally {
       db.close();
     }
@@ -285,6 +291,43 @@ describe("reconcileLinearSource", () => {
         }
       });
       expect(listSourceItems(db, { adapterKind: "linear" })).toHaveLength(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("finishes the run as failed when page processing throws", async () => {
+    const db = openDb(makeTempDir());
+    try {
+      const client: LinearReconciliationClient = {
+        fetchPage() {
+          return {
+            ok: true,
+            page: {
+              issues: undefined as unknown as readonly unknown[],
+              nextCursor: null
+            }
+          };
+        }
+      };
+
+      const result = await reconcileLinearSource(db, { client });
+
+      expect(result.paginationStopped).toMatchObject({
+        reason: "adapter_threw",
+        pageIndex: 1,
+        code: "source_adapter_threw"
+      });
+      expect(result.counts.pages).toBe(1);
+      expect(result.counts.itemsObserved).toBe(0);
+      expect(result.run.state).toBe("failed");
+      expect(result.run.error).toContain("source_adapter_threw:");
+      expect(result.run.finishedAt).not.toBeNull();
+
+      const runs = listSourceReconciliationRuns(db, { adapterKind: "linear" });
+      expect(runs).toHaveLength(1);
+      expect(runs[0]?.state).toBe("failed");
+      expect(runs[0]?.finishedAt).not.toBeNull();
     } finally {
       db.close();
     }

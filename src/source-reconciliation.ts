@@ -170,40 +170,38 @@ export async function reconcileLinearSource(
   let pageIndex = 0;
   let stop: LinearReconciliationStop | null = null;
 
-  while (true) {
-    if (counts.pages >= maxPages) {
-      stop = { reason: "max_pages", pageIndex };
-      break;
+  try {
+    while (true) {
+      if (counts.pages >= maxPages) {
+        stop = { reason: "max_pages", pageIndex };
+        break;
+      }
+      pageIndex += 1;
+      const response = await input.client.fetchPage({ cursor, filters });
+      if (!response.ok) {
+        stop = {
+          reason: stopReasonForCode(response.code),
+          pageIndex,
+          code: response.code,
+          error: response.error
+        };
+        break;
+      }
+      counts.pages += 1;
+      processPage(db, response.page.issues, pageIndex, dryRun, items, counts, clock);
+      if (response.page.nextCursor === null) {
+        stop = { reason: "complete", pageIndex };
+        break;
+      }
+      cursor = response.page.nextCursor;
     }
-    pageIndex += 1;
-    let response: LinearReconciliationFetchPageResult;
-    try {
-      response = await input.client.fetchPage({ cursor, filters });
-    } catch (err) {
-      stop = {
-        reason: "adapter_threw",
-        pageIndex,
-        code: "source_adapter_threw",
-        error: err instanceof Error ? err.message : String(err)
-      };
-      break;
-    }
-    if (!response.ok) {
-      stop = {
-        reason: stopReasonForCode(response.code),
-        pageIndex,
-        code: response.code,
-        error: response.error
-      };
-      break;
-    }
-    counts.pages += 1;
-    processPage(db, response.page.issues, pageIndex, dryRun, items, counts, clock);
-    if (response.page.nextCursor === null) {
-      stop = { reason: "complete", pageIndex };
-      break;
-    }
-    cursor = response.page.nextCursor;
+  } catch (err) {
+    stop = {
+      reason: "adapter_threw",
+      pageIndex,
+      code: "source_adapter_threw",
+      error: err instanceof Error ? err.message : String(err)
+    };
   }
 
   const terminalState: SourceReconciliationTerminalState =
@@ -224,7 +222,7 @@ export async function reconcileLinearSource(
       runId: startedRun.id,
       state: terminalState,
       itemsSeen: counts.itemsObserved,
-      itemsUpserted: counts.itemsCreated + counts.itemsUpdated,
+      itemsUpserted: dryRun ? 0 : counts.itemsCreated + counts.itemsUpdated,
       error: errorText,
       metadata: finishMetadata
     },
