@@ -21,6 +21,7 @@ import type {
 
 export const DEFAULT_LINEAR_GRAPHQL_ENDPOINT = "https://api.linear.app/graphql";
 export const DEFAULT_LINEAR_PAGE_SIZE = 50;
+export const DEFAULT_LINEAR_HTTP_REQUEST_TIMEOUT_MS = 30_000;
 
 export type FetchLike = (
   input: string,
@@ -28,6 +29,7 @@ export type FetchLike = (
     method: string;
     headers: Record<string, string>;
     body: string;
+    signal?: AbortSignal;
   }
 ) => Promise<{
   ok: boolean;
@@ -39,8 +41,16 @@ export type LinearHttpClientOptions = {
   apiKey?: string | null;
   endpoint?: string;
   pageSize?: number;
+  requestTimeoutMs?: number;
   fetch?: FetchLike;
 };
+
+class LinearHttpRequestTimeoutError extends Error {
+  constructor(readonly timeoutMs: number) {
+    super(`linear http request timed out after ${timeoutMs}ms`);
+    this.name = "LinearHttpRequestTimeoutError";
+  }
+}
 
 const LINEAR_ISSUES_QUERY = `
 query MomentumLinearIssues($filter: IssueFilter, $first: Int!, $after: String) {
@@ -68,6 +78,7 @@ export function buildLinearHttpReconciliationClient(
   const apiKey = (options.apiKey ?? "").trim();
   const endpoint = options.endpoint ?? DEFAULT_LINEAR_GRAPHQL_ENDPOINT;
   const pageSize = resolvePageSize(options.pageSize);
+  const requestTimeoutMs = resolveRequestTimeoutMs(options.requestTimeoutMs);
   const fetchImpl = options.fetch ?? (globalThis.fetch as FetchLike | undefined);
 
   return {
@@ -96,21 +107,48 @@ export function buildLinearHttpReconciliationClient(
       };
 
       let response: Awaited<ReturnType<FetchLike>>;
+      let timeout: NodeJS.Timeout | undefined;
+      let timedOut = false;
+      const controller = new AbortController();
       try {
-        response = await fetchImpl(endpoint, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: apiKey
-          },
-          body: JSON.stringify({ query: LINEAR_ISSUES_QUERY, variables })
-        });
+        response = await Promise.race([
+          fetchImpl(endpoint, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: apiKey
+            },
+            body: JSON.stringify({ query: LINEAR_ISSUES_QUERY, variables }),
+            signal: controller.signal
+          }),
+          new Promise<never>((_, reject) => {
+            timeout = setTimeout(() => {
+              timedOut = true;
+              controller.abort();
+              reject(new LinearHttpRequestTimeoutError(requestTimeoutMs));
+            }, requestTimeoutMs);
+          })
+        ]);
       } catch (error) {
+        if (
+          error instanceof LinearHttpRequestTimeoutError ||
+          (timedOut &&
+            error instanceof Error &&
+            (error.name === "AbortError" || error.name === "TimeoutError"))
+        ) {
+          return {
+            ok: false,
+            code: "source_adapter_threw",
+            error: `linear http request timed out after ${requestTimeoutMs}ms`
+          };
+        }
         return {
           ok: false,
           code: "source_adapter_threw",
           error: `linear http transport failed: ${describeError(error)}`
         };
+      } finally {
+        if (timeout !== undefined) clearTimeout(timeout);
       }
 
       if (response.status === 401 || response.status === 403) {
@@ -289,4 +327,14 @@ function resolvePageSize(pageSize: number | undefined): number {
     );
   }
   return pageSize;
+}
+
+function resolveRequestTimeoutMs(timeoutMs: number | undefined): number {
+  if (timeoutMs === undefined) return DEFAULT_LINEAR_HTTP_REQUEST_TIMEOUT_MS;
+  if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) {
+    throw new Error(
+      `linear http request timeout must be a positive integer in milliseconds, got ${timeoutMs}`
+    );
+  }
+  return timeoutMs;
 }
