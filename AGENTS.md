@@ -105,6 +105,7 @@ Common commands:
 - `daemon status`
 - `recovery clear`
 - `evidence ingest`
+- `evidence list`
 - `doctor`
 - Preserve stable CLI behavior across both JSON and text outputs.
 - When changing user-facing output, update tests and verify callers that rely on stable formatting.

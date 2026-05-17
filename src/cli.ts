@@ -77,8 +77,10 @@ import {
 import { buildLinearHttpReconciliationClient } from "./linear-http-client.js";
 import {
   ingestEvidenceRecord,
+  listEvidenceRecords,
   type EvidenceRecord,
-  type EvidenceRecordIngestInput
+  type EvidenceRecordIngestInput,
+  type ListEvidenceRecordsOptions
 } from "./evidence-records.js";
 import {
   parseWorkflowArtifact,
@@ -137,6 +139,9 @@ type ParsedFlags = {
   fromSource?: string;
   path?: string;
   sourceItem?: string;
+  source?: string;
+  evidenceType?: string;
+  limit?: number;
   error?: string;
 };
 
@@ -156,6 +161,7 @@ const COMMANDS = [
   "momentum daemon status [--data-dir <path>] [--json]",
   "momentum recovery clear <goal-id> [--reason <text>] [--data-dir <path>] [--json]",
   "momentum evidence ingest --path <file-or-dir> [--goal <id>] [--source-item <id>] [--data-dir <path>] [--json]",
+  "momentum evidence list [--goal <id>] [--source-item <id>] [--source <source>] [--type <type>] [--limit <n>] [--data-dir <path>] [--json]",
   "momentum doctor [--repo <path>] [--data-dir <path>] [--json]"
 ];
 
@@ -1060,13 +1066,16 @@ function evidence(parsed: ParsedFlags, io: CliIo): number | Promise<number> {
   const subcommand = parsed.args[1];
   if (!subcommand) {
     return usageError(
-      "Missing required subcommand for evidence. Expected: ingest.",
+      "Missing required subcommand for evidence. Expected: ingest, list.",
       parsed,
       io
     );
   }
   if (subcommand === "ingest") {
     return evidenceIngest(parsed, io);
+  }
+  if (subcommand === "list") {
+    return evidenceList(parsed, io);
   }
   return usageError(`Unknown evidence subcommand: ${subcommand}`, parsed, io);
 }
@@ -1285,6 +1294,153 @@ function evidenceRecordToJsonShape(record: EvidenceRecord): Record<string, unkno
     createdAt: record.createdAt,
     updatedAt: record.updatedAt
   };
+}
+
+type EvidenceListFailureCode =
+  | "data_dir_failed"
+  | "goal_not_found"
+  | "source_item_not_found";
+
+type EvidenceListFailure = {
+  code: EvidenceListFailureCode;
+  message: string;
+  dataDir?: string;
+  goalId?: string | null;
+  sourceItemId?: string | null;
+};
+
+function evidenceList(parsed: ParsedFlags, io: CliIo): number {
+  if (parsed.args.length > 2) {
+    return usageError(
+      `Unexpected argument for evidence list: ${parsed.args[2]}`,
+      parsed,
+      io
+    );
+  }
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return emitEvidenceListFailure(parsed, io, {
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err)
+    });
+  }
+
+  const filters: ListEvidenceRecordsOptions = {};
+  if (parsed.goal !== undefined && parsed.goal.length > 0) {
+    filters.goalId = parsed.goal;
+  }
+  if (parsed.sourceItem !== undefined && parsed.sourceItem.length > 0) {
+    filters.sourceItemId = parsed.sourceItem;
+  }
+  if (parsed.source !== undefined && parsed.source.length > 0) {
+    filters.source = parsed.source;
+  }
+  if (parsed.evidenceType !== undefined && parsed.evidenceType.length > 0) {
+    filters.type = parsed.evidenceType;
+  }
+  if (parsed.limit !== undefined) {
+    filters.limit = parsed.limit;
+  }
+
+  const db = openDb(dataDir);
+  let records: EvidenceRecord[];
+  try {
+    if (filters.goalId !== undefined && filters.goalId !== null) {
+      const goalRow = db
+        .prepare("SELECT id FROM goals WHERE id = ?")
+        .get(filters.goalId) as { id: string } | undefined;
+      if (!goalRow) {
+        return emitEvidenceListFailure(parsed, io, {
+          code: "goal_not_found",
+          message: `Goal not found: ${filters.goalId}`,
+          dataDir,
+          goalId: filters.goalId
+        });
+      }
+    }
+    if (filters.sourceItemId !== undefined && filters.sourceItemId !== null) {
+      const itemRow = db
+        .prepare("SELECT id FROM source_items WHERE id = ?")
+        .get(filters.sourceItemId) as { id: string } | undefined;
+      if (!itemRow) {
+        return emitEvidenceListFailure(parsed, io, {
+          code: "source_item_not_found",
+          message: `Source item not found: ${filters.sourceItemId}`,
+          dataDir,
+          sourceItemId: filters.sourceItemId
+        });
+      }
+    }
+    records = listEvidenceRecords(db, filters);
+  } finally {
+    db.close();
+  }
+
+  const payload = {
+    ok: true,
+    command: "evidence list",
+    dataDir,
+    goalId: filters.goalId ?? null,
+    sourceItemId: filters.sourceItemId ?? null,
+    source: filters.source ?? null,
+    type: filters.type ?? null,
+    limit: filters.limit ?? null,
+    count: records.length,
+    records: records.map(evidenceRecordToJsonShape)
+  };
+
+  if (parsed.json) {
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  const lines = [
+    `Evidence records: ${records.length}`,
+    `Goal: ${filters.goalId ?? "(any)"}`,
+    `Source item: ${filters.sourceItemId ?? "(any)"}`,
+    `Source: ${filters.source ?? "(any)"}`,
+    `Type: ${filters.type ?? "(any)"}`,
+    `Data dir: ${dataDir}`,
+    ...records.map(
+      (record) =>
+        `- ${record.id} [${record.source}/${record.type}] @${record.occurredAt}: ${record.summary}`
+    ),
+    ""
+  ];
+  write(io.stdout, lines.join("\n"));
+  return 0;
+}
+
+function emitEvidenceListFailure(
+  parsed: ParsedFlags,
+  io: CliIo,
+  failure: EvidenceListFailure
+): number {
+  const payload: Record<string, unknown> = {
+    ok: false,
+    command: "evidence list",
+    code: failure.code,
+    message: failure.message
+  };
+  if (failure.dataDir !== undefined) payload["dataDir"] = failure.dataDir;
+  if (failure.goalId !== undefined) payload["goalId"] = failure.goalId;
+  if (failure.sourceItemId !== undefined) {
+    payload["sourceItemId"] = failure.sourceItemId;
+  }
+
+  if (parsed.json) {
+    writeJson(io.stderr, payload);
+    return 1;
+  }
+  write(io.stderr, `${failure.message}\n`);
+  return 1;
 }
 
 function daemon(parsed: ParsedFlags, io: CliIo): number | Promise<number> {
@@ -3185,6 +3341,9 @@ function parseFlags(argv: string[]): ParsedFlags {
   let fromSource: string | undefined;
   let pathFlag: string | undefined;
   let sourceItem: string | undefined;
+  let source: string | undefined;
+  let evidenceType: string | undefined;
+  let limit: number | undefined;
   let error: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -3381,6 +3540,46 @@ function parseFlags(argv: string[]): ParsedFlags {
       continue;
     }
 
+    if (arg === "--source") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --source.";
+      } else {
+        source = value;
+        index += 1;
+      }
+      continue;
+    }
+
+    if (arg === "--type") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --type.";
+      } else {
+        evidenceType = value;
+        index += 1;
+      }
+      continue;
+    }
+
+    if (arg === "--limit") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --limit.";
+      } else {
+        const parsedValue = /^\d+$/.test(value)
+          ? Number.parseInt(value, 10)
+          : NaN;
+        if (!Number.isInteger(parsedValue) || parsedValue < 0) {
+          error ??= `Invalid value for --limit: ${value}`;
+        } else {
+          limit = parsedValue;
+        }
+        index += 1;
+      }
+      continue;
+    }
+
     if (arg === "--reason") {
       const value = readFlagValue(argv, index);
       if (value === undefined) {
@@ -3487,6 +3686,9 @@ function parseFlags(argv: string[]): ParsedFlags {
   if (fromSource !== undefined) parsed.fromSource = fromSource;
   if (pathFlag !== undefined) parsed.path = pathFlag;
   if (sourceItem !== undefined) parsed.sourceItem = sourceItem;
+  if (source !== undefined) parsed.source = source;
+  if (evidenceType !== undefined) parsed.evidenceType = evidenceType;
+  if (limit !== undefined) parsed.limit = limit;
   if (error !== undefined) parsed.error = error;
 
   return parsed;
