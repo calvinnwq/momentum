@@ -75,6 +75,15 @@ import {
   type ReconcileLinearSourceResult
 } from "./source-reconciliation.js";
 import { buildLinearHttpReconciliationClient } from "./linear-http-client.js";
+import {
+  ingestEvidenceRecord,
+  type EvidenceRecord,
+  type EvidenceRecordIngestInput
+} from "./evidence-records.js";
+import {
+  parseWorkflowArtifact,
+  type WorkflowEvidenceDiagnostic
+} from "./evidence-workflow.js";
 
 export const VERSION = "0.0.0";
 
@@ -126,6 +135,8 @@ type ParsedFlags = {
   maxPages?: number;
   goal?: string;
   fromSource?: string;
+  path?: string;
+  sourceItem?: string;
   error?: string;
 };
 
@@ -144,6 +155,7 @@ const COMMANDS = [
   "momentum daemon stop [--now] [--reason <text>] [--data-dir <path>] [--json]",
   "momentum daemon status [--data-dir <path>] [--json]",
   "momentum recovery clear <goal-id> [--reason <text>] [--data-dir <path>] [--json]",
+  "momentum evidence ingest --path <file-or-dir> [--goal <id>] [--source-item <id>] [--data-dir <path>] [--json]",
   "momentum doctor [--repo <path>] [--data-dir <path>] [--json]"
 ];
 
@@ -210,6 +222,10 @@ export async function runCli(
 
   if (command === "recovery") {
     return recovery(parsed, io);
+  }
+
+  if (command === "evidence") {
+    return evidence(parsed, io);
   }
 
   return usageError(`Unknown command: ${command}`, parsed, io);
@@ -1023,6 +1039,252 @@ function emitRecoveryClear(
   ];
   write(io.stdout, lines.join("\n"));
   return 0;
+}
+
+type EvidenceIngestFailureCode =
+  | "data_dir_failed"
+  | "path_required"
+  | "goal_not_found"
+  | "source_item_not_found";
+
+type EvidenceIngestFailure = {
+  code: EvidenceIngestFailureCode;
+  message: string;
+  dataDir?: string;
+  goalId?: string | null;
+  sourceItemId?: string | null;
+  path?: string | null;
+};
+
+function evidence(parsed: ParsedFlags, io: CliIo): number | Promise<number> {
+  const subcommand = parsed.args[1];
+  if (!subcommand) {
+    return usageError(
+      "Missing required subcommand for evidence. Expected: ingest.",
+      parsed,
+      io
+    );
+  }
+  if (subcommand === "ingest") {
+    return evidenceIngest(parsed, io);
+  }
+  return usageError(`Unknown evidence subcommand: ${subcommand}`, parsed, io);
+}
+
+function evidenceIngest(parsed: ParsedFlags, io: CliIo): number {
+  if (parsed.args.length > 2) {
+    return usageError(
+      `Unexpected argument for evidence ingest: ${parsed.args[2]}`,
+      parsed,
+      io
+    );
+  }
+  if (parsed.path === undefined || parsed.path.length === 0) {
+    return emitEvidenceIngestFailure(parsed, io, {
+      code: "path_required",
+      message: "Missing required --path <file-or-dir> for evidence ingest."
+    });
+  }
+  const artifactPath = parsed.path;
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return emitEvidenceIngestFailure(parsed, io, {
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err),
+      path: artifactPath
+    });
+  }
+
+  const parseOptions: Parameters<typeof parseWorkflowArtifact>[1] = {};
+  if (parsed.goal !== undefined && parsed.goal.length > 0) {
+    parseOptions.goalId = parsed.goal;
+  }
+  if (parsed.sourceItem !== undefined && parsed.sourceItem.length > 0) {
+    parseOptions.sourceItemId = parsed.sourceItem;
+  }
+
+  const db = openDb(dataDir);
+  try {
+    if (parseOptions.goalId !== undefined && parseOptions.goalId !== null) {
+      const goalRow = db
+        .prepare("SELECT id FROM goals WHERE id = ?")
+        .get(parseOptions.goalId) as { id: string } | undefined;
+      if (!goalRow) {
+        return emitEvidenceIngestFailure(parsed, io, {
+          code: "goal_not_found",
+          message: `Goal not found: ${parseOptions.goalId}`,
+          dataDir,
+          goalId: parseOptions.goalId,
+          path: artifactPath
+        });
+      }
+    }
+    if (
+      parseOptions.sourceItemId !== undefined &&
+      parseOptions.sourceItemId !== null
+    ) {
+      const itemRow = db
+        .prepare("SELECT id FROM source_items WHERE id = ?")
+        .get(parseOptions.sourceItemId) as { id: string } | undefined;
+      if (!itemRow) {
+        return emitEvidenceIngestFailure(parsed, io, {
+          code: "source_item_not_found",
+          message: `Source item not found: ${parseOptions.sourceItemId}`,
+          dataDir,
+          sourceItemId: parseOptions.sourceItemId,
+          path: artifactPath
+        });
+      }
+    }
+
+    const parseResult = parseWorkflowArtifact(artifactPath, parseOptions);
+    const created: EvidenceRecord[] = [];
+    const skipped: EvidenceRecord[] = [];
+    const errors: Array<{
+      ingestKey: string;
+      type: string;
+      message: string;
+    }> = [];
+
+    for (const input of parseResult.records) {
+      try {
+        const result = ingestEvidenceRecord(db, input as EvidenceRecordIngestInput);
+        if (result.created) {
+          created.push(result.record);
+        } else {
+          skipped.push(result.record);
+        }
+      } catch (err) {
+        errors.push({
+          ingestKey: input.ingestKey,
+          type: input.type,
+          message: err instanceof Error ? err.message : String(err)
+        });
+      }
+    }
+
+    return emitEvidenceIngestSuccess(parsed, io, {
+      dataDir,
+      artifactPath,
+      goalId: parseOptions.goalId ?? null,
+      sourceItemId: parseOptions.sourceItemId ?? null,
+      observed: parseResult.records.length,
+      created,
+      skipped,
+      diagnostics: parseResult.diagnostics,
+      errors
+    });
+  } finally {
+    db.close();
+  }
+}
+
+function emitEvidenceIngestSuccess(
+  parsed: ParsedFlags,
+  io: CliIo,
+  result: {
+    dataDir: string;
+    artifactPath: string;
+    goalId: string | null;
+    sourceItemId: string | null;
+    observed: number;
+    created: EvidenceRecord[];
+    skipped: EvidenceRecord[];
+    diagnostics: WorkflowEvidenceDiagnostic[];
+    errors: Array<{ ingestKey: string; type: string; message: string }>;
+  }
+): number {
+  const payload = {
+    ok: true,
+    command: "evidence ingest",
+    dataDir: result.dataDir,
+    path: result.artifactPath,
+    goalId: result.goalId,
+    sourceItemId: result.sourceItemId,
+    counts: {
+      observed: result.observed,
+      created: result.created.length,
+      skipped: result.skipped.length,
+      diagnostics: result.diagnostics.length,
+      errors: result.errors.length
+    },
+    created: result.created.map(evidenceRecordToJsonShape),
+    skipped: result.skipped.map(evidenceRecordToJsonShape),
+    diagnostics: result.diagnostics.map((diagnostic) => ({ ...diagnostic })),
+    errors: result.errors.map((entry) => ({ ...entry }))
+  };
+
+  if (parsed.json) {
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  const lines = [
+    `Evidence ingest: ${result.artifactPath}`,
+    `Goal: ${result.goalId ?? "(unlinked)"}`,
+    `Source item: ${result.sourceItemId ?? "(unlinked)"}`,
+    `Observed: ${result.observed}`,
+    `Created: ${result.created.length}`,
+    `Skipped (idempotent): ${result.skipped.length}`,
+    `Diagnostics: ${result.diagnostics.length}`,
+    `Errors: ${result.errors.length}`,
+    `Data dir: ${result.dataDir}`,
+    ""
+  ];
+  write(io.stdout, lines.join("\n"));
+  return 0;
+}
+
+function emitEvidenceIngestFailure(
+  parsed: ParsedFlags,
+  io: CliIo,
+  failure: EvidenceIngestFailure
+): number {
+  const payload: Record<string, unknown> = {
+    ok: false,
+    command: "evidence ingest",
+    code: failure.code,
+    message: failure.message
+  };
+  if (failure.dataDir !== undefined) payload["dataDir"] = failure.dataDir;
+  if (failure.goalId !== undefined) payload["goalId"] = failure.goalId;
+  if (failure.sourceItemId !== undefined) {
+    payload["sourceItemId"] = failure.sourceItemId;
+  }
+  if (failure.path !== undefined) payload["path"] = failure.path;
+
+  if (parsed.json) {
+    writeJson(io.stderr, payload);
+    return 1;
+  }
+  write(io.stderr, `${failure.message}\n`);
+  return 1;
+}
+
+function evidenceRecordToJsonShape(record: EvidenceRecord): Record<string, unknown> {
+  return {
+    id: record.id,
+    source: record.source,
+    type: record.type,
+    formatVersion: record.formatVersion,
+    artifactPath: record.artifactPath,
+    externalId: record.externalId,
+    occurredAt: record.occurredAt,
+    summary: record.summary,
+    metadata: record.metadata,
+    goalId: record.goalId,
+    sourceItemId: record.sourceItemId,
+    ingestKey: record.ingestKey,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt
+  };
 }
 
 function daemon(parsed: ParsedFlags, io: CliIo): number | Promise<number> {
@@ -2921,6 +3183,8 @@ function parseFlags(argv: string[]): ParsedFlags {
   let maxPages: number | undefined;
   let goal: string | undefined;
   let fromSource: string | undefined;
+  let pathFlag: string | undefined;
+  let sourceItem: string | undefined;
   let error: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -3095,6 +3359,28 @@ function parseFlags(argv: string[]): ParsedFlags {
       continue;
     }
 
+    if (arg === "--path") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --path.";
+      } else {
+        pathFlag = value;
+        index += 1;
+      }
+      continue;
+    }
+
+    if (arg === "--source-item") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --source-item.";
+      } else {
+        sourceItem = value;
+        index += 1;
+      }
+      continue;
+    }
+
     if (arg === "--reason") {
       const value = readFlagValue(argv, index);
       if (value === undefined) {
@@ -3199,6 +3485,8 @@ function parseFlags(argv: string[]): ParsedFlags {
   if (maxPages !== undefined) parsed.maxPages = maxPages;
   if (goal !== undefined) parsed.goal = goal;
   if (fromSource !== undefined) parsed.fromSource = fromSource;
+  if (pathFlag !== undefined) parsed.path = pathFlag;
+  if (sourceItem !== undefined) parsed.sourceItem = sourceItem;
   if (error !== undefined) parsed.error = error;
 
   return parsed;
