@@ -39,4 +39,44 @@ describe("buildLinearHttpReconciliationClient", () => {
     });
     expect(observedSignal?.aborted).toBe(true);
   });
+
+  it("returns a timeout when the Linear response body read stalls", async () => {
+    let observedSignal: AbortSignal | undefined;
+    const fetch = async (
+      _input: string,
+      init: {
+        method: string;
+        headers: Record<string, string>;
+        body: string;
+        signal?: AbortSignal;
+      }
+    ) => {
+      observedSignal = init.signal;
+      return {
+        ok: true,
+        status: 200,
+        text: () => new Promise<string>(() => {})
+      };
+    };
+
+    const client = buildLinearHttpReconciliationClient({
+      apiKey: "lin_api_key",
+      fetch,
+      requestTimeoutMs: 10
+    });
+
+    const result = await Promise.race([
+      client.fetchPage({ cursor: null, filters: {} }),
+      new Promise<"unsettled">((resolve) => setTimeout(() => resolve("unsettled"), 100))
+    ]);
+
+    expect(result).not.toBe("unsettled");
+    expect(result).toMatchObject({
+      ok: false,
+      code: "source_adapter_threw",
+      error: "linear http request timed out after 10ms"
+    });
+    expect(observedSignal?.aborted).toBe(true);
+  });
+
 });

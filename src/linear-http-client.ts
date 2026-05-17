@@ -107,20 +107,29 @@ export function buildLinearHttpReconciliationClient(
       };
 
       let response: Awaited<ReturnType<FetchLike>>;
+      let bodyText: string | null;
       let timeout: NodeJS.Timeout | undefined;
       let timedOut = false;
+      const requestState: { phase: "request" | "response_body" } = { phase: "request" };
       const controller = new AbortController();
       try {
-        response = await Promise.race([
-          fetchImpl(endpoint, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: apiKey
-            },
-            body: JSON.stringify({ query: LINEAR_ISSUES_QUERY, variables }),
-            signal: controller.signal
-          }),
+        const requestResult = await Promise.race([
+          (async () => {
+            const fetched = await fetchImpl(endpoint, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: apiKey
+              },
+              body: JSON.stringify({ query: LINEAR_ISSUES_QUERY, variables }),
+              signal: controller.signal
+            });
+            if (fetched.status === 401 || fetched.status === 403 || !fetched.ok) {
+              return { response: fetched, bodyText: null };
+            }
+            requestState.phase = "response_body";
+            return { response: fetched, bodyText: await fetched.text() };
+          })(),
           new Promise<never>((_, reject) => {
             timeout = setTimeout(() => {
               timedOut = true;
@@ -129,6 +138,8 @@ export function buildLinearHttpReconciliationClient(
             }, requestTimeoutMs);
           })
         ]);
+        response = requestResult.response;
+        bodyText = requestResult.bodyText;
       } catch (error) {
         if (
           error instanceof LinearHttpRequestTimeoutError ||
@@ -140,6 +151,13 @@ export function buildLinearHttpReconciliationClient(
             ok: false,
             code: "source_adapter_threw",
             error: `linear http request timed out after ${requestTimeoutMs}ms`
+          };
+        }
+        if (requestState.phase === "response_body") {
+          return {
+            ok: false,
+            code: "source_adapter_threw",
+            error: `linear http response body read failed: ${describeError(error)}`
           };
         }
         return {
@@ -165,15 +183,11 @@ export function buildLinearHttpReconciliationClient(
           error: `Linear API returned HTTP ${response.status}.`
         };
       }
-
-      let bodyText: string;
-      try {
-        bodyText = await response.text();
-      } catch (error) {
+      if (bodyText === null) {
         return {
           ok: false,
           code: "source_adapter_threw",
-          error: `linear http response body read failed: ${describeError(error)}`
+          error: "linear http response body was not read"
         };
       }
 
