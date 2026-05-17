@@ -4138,6 +4138,114 @@ describe("momentum recovery clear", () => {
     });
   });
 
+  it("source list and doctor surface capped Linear reconciliation stop reasons", async () => {
+    const dataDir = makeTempDir("momentum-cli-source-reconcile-capped-");
+    const issueA = {
+      id: "lin-cap-1",
+      identifier: "NGX-CAP-1",
+      title: "First capped issue",
+      url: "https://linear.app/example/issue/NGX-CAP-1",
+      state: { id: "state-1", name: "Todo" },
+      project: { id: "project-1", name: "Project One" },
+      projectMilestone: null,
+      labels: { nodes: [] },
+      assignee: null,
+      priority: 0,
+      updatedAt: "2026-04-02T00:00:00.000Z"
+    };
+    const issueB = {
+      ...issueA,
+      id: "lin-cap-2",
+      identifier: "NGX-CAP-2",
+      title: "Second capped issue",
+      updatedAt: "2026-04-03T00:00:00.000Z"
+    };
+    let pageIndex = 0;
+    const deps = {
+      buildLinearReconciliationClient: () => ({
+        fetchPage: async () => {
+          pageIndex += 1;
+          return pageIndex === 1
+            ? { ok: true as const, page: { issues: [issueA], nextCursor: "next-page" } }
+            : { ok: true as const, page: { issues: [issueB], nextCursor: null } };
+        }
+      })
+    };
+
+    const reconcile = await runWithDeps(
+      [
+        "source",
+        "reconcile",
+        "linear",
+        "--data-dir",
+        dataDir,
+        "--max-pages",
+        "1",
+        "--json"
+      ],
+      { LINEAR_API_KEY: "test-key" },
+      deps
+    );
+    expect(reconcile.code).toBe(0);
+    const reconcilePayload = JSON.parse(reconcile.stdout) as Record<string, unknown>;
+    expect(reconcilePayload).toMatchObject({
+      ok: true,
+      run: { state: "succeeded" },
+      paginationStopped: { reason: "max_pages", pageIndex: 1 }
+    });
+
+    const listJson = await run([
+      "source",
+      "list",
+      "--adapter",
+      "linear",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(listJson.code).toBe(0);
+    const listPayload = JSON.parse(listJson.stdout) as Record<string, unknown>;
+    expect(listPayload).toMatchObject({
+      ok: true,
+      count: 1,
+      lastReconciliation: {
+        state: "succeeded",
+        paginationStopped: { reason: "max_pages", pageIndex: 1 }
+      }
+    });
+
+    const listText = await run([
+      "source",
+      "list",
+      "--adapter",
+      "linear",
+      "--data-dir",
+      dataDir
+    ]);
+    expect(listText.code).toBe(0);
+    expect(listText.stdout).toContain("Last reconciliation: linear succeeded");
+    expect(listText.stdout).toContain("stopped=max_pages");
+
+    const doctorJson = await run(["doctor", "--data-dir", dataDir, "--json"]);
+    expect(doctorJson.code).toBe(0);
+    const doctorPayload = JSON.parse(doctorJson.stdout) as Record<string, unknown>;
+    expect(doctorPayload).toMatchObject({
+      sources: {
+        ok: true,
+        lastReconciliation: {
+          adapterKind: "linear",
+          state: "succeeded",
+          paginationStopped: { reason: "max_pages", pageIndex: 1 }
+        }
+      }
+    });
+
+    const doctorText = await run(["doctor", "--data-dir", dataDir]);
+    expect(doctorText.code).toBe(0);
+    expect(doctorText.stdout).toContain("sources: last linear reconciliation succeeded");
+    expect(doctorText.stdout).toContain("stopped=max_pages");
+  });
+
   it("source reconcile linear without LINEAR_API_KEY returns source_auth_unavailable from the default client", async () => {
     const dataDir = makeTempDir("momentum-cli-source-reconcile-noauth-");
     const result = await runWithDeps(

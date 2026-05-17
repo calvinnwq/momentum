@@ -299,9 +299,11 @@ function sourceList(parsed: ParsedFlags, io: CliIo): number {
     )
   ];
   if (lastReconciliation) {
+    const paginationStopped = sourceReconciliationPaginationStopped(lastReconciliation);
+    const stoppedText = paginationStopped ? `, stopped=${paginationStopped.reason}` : "";
     lines.push(
       `Last reconciliation: ${lastReconciliation.adapterKind} ${lastReconciliation.state}` +
-        ` (seen=${lastReconciliation.itemsSeen}, upserted=${lastReconciliation.itemsUpserted})`
+        ` (seen=${lastReconciliation.itemsSeen}, upserted=${lastReconciliation.itemsUpserted}${stoppedText})`
     );
   } else {
     lines.push("Last reconciliation: (none)");
@@ -613,6 +615,13 @@ function emitSourceReconcileFailure(
   return 1;
 }
 
+type SourceReconciliationPaginationStoppedJson = {
+  reason: string;
+  pageIndex: number;
+  code: string | null;
+  error: string | null;
+};
+
 function sourceReconciliationRunToJsonShape(
   run: SourceReconciliationRun
 ): Record<string, unknown> {
@@ -626,8 +635,26 @@ function sourceReconciliationRunToJsonShape(
     itemsSeen: run.itemsSeen,
     itemsUpserted: run.itemsUpserted,
     metadata: run.metadata,
+    paginationStopped: sourceReconciliationPaginationStopped(run),
     createdAt: run.createdAt,
     updatedAt: run.updatedAt
+  };
+}
+
+function sourceReconciliationPaginationStopped(
+  run: SourceReconciliationRun
+): SourceReconciliationPaginationStoppedJson | null {
+  const stop = run.metadata["paginationStopped"];
+  if (!stop || typeof stop !== "object" || Array.isArray(stop)) return null;
+  const record = stop as Record<string, unknown>;
+  if (typeof record["reason"] !== "string") return null;
+  const pageIndex = record["pageIndex"];
+  if (!Number.isInteger(pageIndex)) return null;
+  return {
+    reason: record["reason"],
+    pageIndex: pageIndex as number,
+    code: typeof record["code"] === "string" ? record["code"] : null,
+    error: typeof record["error"] === "string" ? record["error"] : null
   };
 }
 
@@ -1760,9 +1787,12 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
   if (sourcesPayload.ok) {
     const last = sourcesPayload.lastReconciliation;
     if (last) {
+      const stoppedText = last.paginationStopped
+        ? `, stopped=${last.paginationStopped.reason}`
+        : "";
       lines.push(
         `sources: last ${last.adapterKind} reconciliation ${last.state} (` +
-          `seen=${last.itemsSeen}, upserted=${last.itemsUpserted}, finished_at=${last.finishedAt ?? "(running)"})`
+          `seen=${last.itemsSeen}, upserted=${last.itemsUpserted}${stoppedText}, finished_at=${last.finishedAt ?? "(running)"})`
       );
     } else {
       lines.push("sources: no reconciliation runs recorded yet");
@@ -1787,6 +1817,7 @@ type DoctorSourcesPayload =
         error: string | null;
         itemsSeen: number;
         itemsUpserted: number;
+        paginationStopped: SourceReconciliationPaginationStoppedJson | null;
       } | null;
     }
   | {
@@ -1825,7 +1856,8 @@ function buildDoctorSourcesPayload(
         finishedAt: last.finishedAt,
         error: last.error,
         itemsSeen: last.itemsSeen,
-        itemsUpserted: last.itemsUpserted
+        itemsUpserted: last.itemsUpserted,
+        paginationStopped: sourceReconciliationPaginationStopped(last)
       }
     };
   } finally {
