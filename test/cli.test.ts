@@ -132,6 +132,9 @@ describe("momentum CLI scaffold", () => {
     expect(result.stdout).toContain(
       "momentum doctor [--repo <path>] [--data-dir <path>] [--json]"
     );
+    expect(result.stdout).toContain(
+      "momentum project status [--source <adapter>] [--project <id-or-name>] [--milestone <id-or-name>] [--stale-threshold-hours <n>] [--data-dir <path>] [--json]"
+    );
     expect(result.stderr).toBe("");
   });
 
@@ -4827,6 +4830,312 @@ describe("momentum recovery clear", () => {
       command: "source reconcile linear",
       code: "unsupported_source_adapter"
     });
+  });
+});
+
+describe("momentum project status", () => {
+  it("returns a stable empty rollup JSON shape on a fresh data dir", async () => {
+    const dataDir = makeTempDir("momentum-cli-project-");
+
+    const result = await run([
+      "project", "status", "--data-dir", dataDir, "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      command: "project status",
+      dataDir,
+      filters: {
+        source: null,
+        projectId: null,
+        projectName: null,
+        milestoneId: null,
+        milestoneName: null
+      },
+      staleThresholdMs: 24 * 60 * 60 * 1000,
+      totalSourceItemCount: 0,
+      truncatedSourceItems: false,
+      sourceItems: [],
+      mismatches: [],
+      totalMismatchCount: 0,
+      truncatedMismatches: false,
+      reconciliationWarnings: [],
+      pendingUpdateIntents: []
+    });
+    expect((payload["counts"] as Record<string, unknown>)["pendingUpdateIntents"]).toBe(0);
+    expect((payload["nextAction"] as Record<string, unknown>)["kind"]).toBe(
+      "no_action_required"
+    );
+    expect(result.stderr).toBe("");
+  });
+
+  it("echoes filter values back when --source, --project, and --milestone are passed", async () => {
+    const dataDir = makeTempDir("momentum-cli-project-");
+    const { openDb } = await import("../src/db.js");
+    const { upsertSourceItem } = await import("../src/source-items.js");
+    const db = openDb(dataDir);
+    try {
+      upsertSourceItem(
+        db,
+        {
+          adapterKind: "linear",
+          externalId: "issue-filter-1",
+          externalKey: "NGX-FILTER-1",
+          title: "Filter test issue",
+          status: "Todo",
+          metadata: {
+            project: { id: "proj-1", name: "Alpha" },
+            milestone: { id: "ms-1", name: "Mile 1" }
+          },
+          observedAt: 1_700_000_000_000,
+          goalId: null
+        },
+        { now: () => 1_700_000_000_100 }
+      );
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "project", "status",
+      "--source", "linear",
+      "--project", "Alpha",
+      "--milestone", "Mile 1",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload["filters"]).toEqual({
+      source: "linear",
+      projectId: null,
+      projectName: "Alpha",
+      milestoneId: null,
+      milestoneName: "Mile 1"
+    });
+    expect((payload["counts"] as Record<string, unknown>)["sourceItems"]).toMatchObject({
+      total: 1
+    });
+  });
+
+  it("applies --stale-threshold-hours to reconciliation warning detection", async () => {
+    const dataDir = makeTempDir("momentum-cli-project-");
+    const { openDb } = await import("../src/db.js");
+    const { upsertSourceItem } = await import("../src/source-items.js");
+    const {
+      startSourceReconciliationRun,
+      finishSourceReconciliationRun
+    } = await import("../src/source-reconciliation-runs.js");
+    const db = openDb(dataDir);
+    try {
+      upsertSourceItem(
+        db,
+        {
+          adapterKind: "linear",
+          externalId: "issue-stale-cli-1",
+          externalKey: null,
+          title: "Stale issue",
+          status: "Todo",
+          metadata: {},
+          observedAt: 1_000,
+          goalId: null
+        },
+        { now: () => 1_000 }
+      );
+      const longAgo = Date.now() - 48 * 60 * 60 * 1000;
+      const reconRun = startSourceReconciliationRun(
+        db,
+        { adapterKind: "linear" },
+        { now: () => longAgo }
+      );
+      finishSourceReconciliationRun(
+        db,
+        {
+          runId: reconRun.id,
+          state: "succeeded",
+          itemsSeen: 1,
+          itemsUpserted: 1
+        },
+        { now: () => longAgo + 1_000 }
+      );
+    } finally {
+      db.close();
+    }
+
+    const generous = await run([
+      "project", "status",
+      "--stale-threshold-hours", "72",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(generous.code).toBe(0);
+    const generousPayload = JSON.parse(generous.stdout) as Record<string, unknown>;
+    expect(generousPayload["staleThresholdMs"]).toBe(72 * 60 * 60 * 1000);
+    expect(generousPayload["reconciliationWarnings"]).toEqual([]);
+
+    const tight = await run([
+      "project", "status",
+      "--stale-threshold-hours", "1",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    const tightPayload = JSON.parse(tight.stdout) as Record<string, unknown>;
+    const warnings = tightPayload["reconciliationWarnings"] as Array<{
+      reason: string;
+      adapterKind: string;
+    }>;
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.reason).toBe("stale");
+    expect(warnings[0]?.adapterKind).toBe("linear");
+  });
+
+  it("surfaces manual_recovery_required as the highest-priority next action", async () => {
+    const dataDir = makeTempDir("momentum-cli-project-");
+    const { openDb } = await import("../src/db.js");
+    const { upsertSourceItem } = await import("../src/source-items.js");
+    const db = openDb(dataDir);
+    try {
+      db.prepare(
+        `INSERT INTO goals
+           (id, title, branch, artifact_dir, state, current_iteration,
+            needs_manual_recovery, manual_recovery_reason, manual_recovery_at,
+            created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        "goal-recover-cli",
+        "Recover CLI Goal",
+        "momentum/goal-recover-cli",
+        path.join(dataDir, "goals", "goal-recover-cli"),
+        "queued",
+        1,
+        1,
+        "head_mismatch",
+        1_700_000_000_500,
+        1_700_000_000_000,
+        1_700_000_000_500
+      );
+      upsertSourceItem(
+        db,
+        {
+          adapterKind: "linear",
+          externalId: "issue-recover-cli",
+          externalKey: "NGX-RECOVER",
+          title: "Recover linked",
+          status: "In Progress",
+          metadata: {},
+          observedAt: 1_700_000_000_000,
+          goalId: "goal-recover-cli"
+        },
+        { now: () => 1_700_000_000_100 }
+      );
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "project", "status", "--data-dir", dataDir, "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    const counts = payload["counts"] as Record<string, unknown>;
+    expect((counts["goals"] as Record<string, unknown>)["needingManualRecovery"]).toBe(1);
+    expect((payload["nextAction"] as Record<string, unknown>)["kind"]).toBe(
+      "manual_recovery_required"
+    );
+    const mismatchKinds = (payload["mismatches"] as Array<{ kind: string }>).map(
+      (m) => m.kind
+    );
+    expect(mismatchKinds).toContain("manual_recovery_required");
+  });
+
+  it("text mode truncates large source item lists with an `and N more` line", async () => {
+    const dataDir = makeTempDir("momentum-cli-project-");
+    const { openDb } = await import("../src/db.js");
+    const { upsertSourceItem } = await import("../src/source-items.js");
+    const db = openDb(dataDir);
+    try {
+      for (let i = 0; i < 25; i += 1) {
+        const key = `NGX-BIG-${String(i).padStart(3, "0")}`;
+        upsertSourceItem(
+          db,
+          {
+            adapterKind: "linear",
+            externalId: `issue-big-${i}`,
+            externalKey: key,
+            title: `Big issue ${i}`,
+            status: "Todo",
+            metadata: {},
+            observedAt: 1_700_000_000_000 + i,
+            goalId: null
+          },
+          { now: () => 1_700_000_000_000 + i }
+        );
+      }
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "project", "status", "--data-dir", dataDir
+    ]);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("Project status");
+    expect(result.stdout).toContain("Source items: 25");
+    expect(result.stdout).toContain("Top source items:");
+    expect(result.stdout).toContain("... and 5 more");
+    expect(result.stdout).toContain("Next action:");
+    expect(result.stderr).toBe("");
+  });
+
+  it("rejects unexpected positional arguments for project status", async () => {
+    const dataDir = makeTempDir("momentum-cli-project-");
+
+    const result = await run([
+      "project", "status", "stray-arg", "--data-dir", dataDir, "--json"
+    ]);
+
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("Unexpected argument for project status: stray-arg");
+  });
+
+  it("rejects unknown project subcommands", async () => {
+    const dataDir = makeTempDir("momentum-cli-project-");
+
+    const result = await run([
+      "project", "explode", "--data-dir", dataDir
+    ]);
+
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("Unknown project subcommand: explode");
+  });
+
+  it("requires a project subcommand", async () => {
+    const dataDir = makeTempDir("momentum-cli-project-");
+
+    const result = await run(["project", "--data-dir", dataDir]);
+
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain(
+      "Missing required subcommand for project. Expected: status."
+    );
+  });
+
+  it("rejects --stale-threshold-hours without a numeric value", async () => {
+    const dataDir = makeTempDir("momentum-cli-project-");
+
+    const result = await run([
+      "project", "status",
+      "--stale-threshold-hours", "not-a-number",
+      "--data-dir", dataDir
+    ]);
+
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("--stale-threshold-hours");
   });
 });
 
