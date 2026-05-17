@@ -212,6 +212,56 @@ export function listLatestEvidenceRecordsForGoal(
   return rows.map(evidenceRecordFromRow);
 }
 
+export type EvidenceRecordsSummary = {
+  totalRecords: number;
+  goalLinkedRecords: number;
+  sourceItemLinkedRecords: number;
+  lastRecord: EvidenceRecord | null;
+};
+
+export function summarizeEvidenceRecords(db: MomentumDb): EvidenceRecordsSummary {
+  const counts = db
+    .prepare(
+      `SELECT
+          COUNT(*) AS total,
+          SUM(CASE WHEN goal_id IS NULL THEN 0 ELSE 1 END) AS goal_linked,
+          SUM(CASE WHEN source_item_id IS NULL THEN 0 ELSE 1 END) AS source_item_linked
+         FROM evidence_records`
+    )
+    .get() as
+    | { total: number; goal_linked: number | null; source_item_linked: number | null }
+    | undefined;
+
+  const totalRecords = counts?.total ?? 0;
+  const goalLinkedRecords = counts?.goal_linked ?? 0;
+  const sourceItemLinkedRecords = counts?.source_item_linked ?? 0;
+
+  if (totalRecords === 0) {
+    return {
+      totalRecords,
+      goalLinkedRecords,
+      sourceItemLinkedRecords,
+      lastRecord: null
+    };
+  }
+
+  const row = db
+    .prepare(
+      `SELECT *
+         FROM evidence_records
+        ORDER BY occurred_at DESC, created_at DESC, id DESC
+        LIMIT 1`
+    )
+    .get() as EvidenceRecordRow | undefined;
+
+  return {
+    totalRecords,
+    goalLinkedRecords,
+    sourceItemLinkedRecords,
+    lastRecord: row ? evidenceRecordFromRow(row) : null
+  };
+}
+
 function getEvidenceRecordRowByIngestKey(
   db: MomentumDb,
   ingestKey: string

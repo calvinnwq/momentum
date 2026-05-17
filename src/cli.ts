@@ -78,8 +78,10 @@ import { buildLinearHttpReconciliationClient } from "./linear-http-client.js";
 import {
   ingestEvidenceRecord,
   listEvidenceRecords,
+  summarizeEvidenceRecords,
   type EvidenceRecord,
   type EvidenceRecordIngestInput,
+  type EvidenceRecordsSummary,
   type ListEvidenceRecordsOptions
 } from "./evidence-records.js";
 import {
@@ -2307,6 +2309,7 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
 
   const policyPayload = buildDoctorPolicyPayload(parsed.repo);
   const sourcesPayload = buildDoctorSourcesPayload(dataDirOptions);
+  const evidencePayload = buildDoctorEvidencePayload(dataDirOptions);
 
   const payload = {
     ok: true,
@@ -2325,7 +2328,8 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
       )
     },
     policy: policyPayload,
-    sources: sourcesPayload
+    sources: sourcesPayload,
+    evidence: evidencePayload
   };
 
   if (parsed.json) {
@@ -2411,9 +2415,92 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
   } else {
     lines.push(`sources: error (${sourcesPayload.code})`);
   }
+  if (evidencePayload.ok) {
+    lines.push(
+      `evidence: total=${evidencePayload.totalRecords} goal_linked=${evidencePayload.goalLinkedRecords} source_item_linked=${evidencePayload.sourceItemLinkedRecords}`
+    );
+    const last = evidencePayload.lastRecord;
+    if (last) {
+      lines.push(
+        `evidence: last ${last.source}/${last.type} at ${last.occurredAt}` +
+          ` (goal=${last.goalId ?? "(none)"}, source_item=${last.sourceItemId ?? "(none)"})`
+      );
+    } else {
+      lines.push("evidence: no records ingested yet");
+    }
+  } else {
+    lines.push(`evidence: error (${evidencePayload.code})`);
+  }
   lines.push("");
   write(io.stdout, lines.join("\n"));
   return 0;
+}
+
+type DoctorEvidencePayload =
+  | {
+      ok: true;
+      totalRecords: number;
+      goalLinkedRecords: number;
+      sourceItemLinkedRecords: number;
+      lastRecord: {
+        id: string;
+        source: string;
+        type: string;
+        occurredAt: number;
+        summary: string;
+        goalId: string | null;
+        sourceItemId: string | null;
+      } | null;
+    }
+  | {
+      ok: false;
+      code: string;
+      message: string;
+    };
+
+function buildDoctorEvidencePayload(
+  dataDirOptions: DataDirOptions
+): DoctorEvidencePayload {
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return {
+      ok: false,
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err)
+    };
+  }
+  const db = openDb(dataDir);
+  try {
+    const summary: EvidenceRecordsSummary = summarizeEvidenceRecords(db);
+    if (!summary.lastRecord) {
+      return {
+        ok: true,
+        totalRecords: summary.totalRecords,
+        goalLinkedRecords: summary.goalLinkedRecords,
+        sourceItemLinkedRecords: summary.sourceItemLinkedRecords,
+        lastRecord: null
+      };
+    }
+    return {
+      ok: true,
+      totalRecords: summary.totalRecords,
+      goalLinkedRecords: summary.goalLinkedRecords,
+      sourceItemLinkedRecords: summary.sourceItemLinkedRecords,
+      lastRecord: {
+        id: summary.lastRecord.id,
+        source: summary.lastRecord.source,
+        type: summary.lastRecord.type,
+        occurredAt: summary.lastRecord.occurredAt,
+        summary: summary.lastRecord.summary,
+        goalId: summary.lastRecord.goalId,
+        sourceItemId: summary.lastRecord.sourceItemId
+      }
+    };
+  } finally {
+    db.close();
+  }
 }
 
 type DoctorSourcesPayload =

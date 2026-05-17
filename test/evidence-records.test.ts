@@ -10,6 +10,7 @@ import {
   ingestEvidenceRecord,
   listEvidenceRecords,
   listLatestEvidenceRecordsForGoal,
+  summarizeEvidenceRecords,
   type EvidenceRecordIngestInput
 } from "../src/evidence-records.js";
 
@@ -51,6 +52,33 @@ function insertGoal(db: ReturnType<typeof openDb>, id: string): void {
        (id, title, branch, artifact_dir, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?)`
   ).run(id, `Goal ${id}`, `momentum/${id}`, `/tmp/${id}`, 1, 1);
+}
+
+function insertSourceItem(
+  db: ReturnType<typeof openDb>,
+  id: string,
+  externalKey = id
+): void {
+  db.prepare(
+    `INSERT INTO source_items
+       (id, adapter_kind, external_id, external_key, url, title,
+        status, metadata_json, last_observed_at, goal_id,
+        created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    id,
+    "linear",
+    `ext-${id}`,
+    externalKey,
+    `https://linear.app/example/issue/${externalKey}`,
+    `SourceItem ${id}`,
+    "open",
+    "{}",
+    1,
+    null,
+    1,
+    1
+  );
 }
 
 describe("evidence record storage", () => {
@@ -321,5 +349,77 @@ describe("evidence record storage", () => {
     } finally {
       db.close();
     }
+  });
+
+  describe("summarizeEvidenceRecords", () => {
+    it("returns zero counts and null last record for an empty database", () => {
+      const db = openDb(makeTempDir());
+      try {
+        const summary = summarizeEvidenceRecords(db);
+        expect(summary).toEqual({
+          totalRecords: 0,
+          goalLinkedRecords: 0,
+          sourceItemLinkedRecords: 0,
+          lastRecord: null
+        });
+      } finally {
+        db.close();
+      }
+    });
+
+    it("counts goal and source-item linkage independently and picks the newest record", () => {
+      const db = openDb(makeTempDir());
+      try {
+        insertGoal(db, "goal-sum-a");
+        insertSourceItem(db, "si-sum-a");
+
+        ingestEvidenceRecord(
+          db,
+          baseInput({
+            ingestKey: "agent-workflow:cwfp-sum-1:plan_created",
+            externalId: "cwfp-sum-1",
+            type: "plan_created",
+            occurredAt: 1000
+          }),
+          { now: () => 1100 }
+        );
+        ingestEvidenceRecord(
+          db,
+          baseInput({
+            ingestKey: "agent-workflow:cwfp-sum-2:implementation_complete",
+            externalId: "cwfp-sum-2",
+            type: "implementation_complete",
+            summary: "Implementation complete",
+            occurredAt: 2000,
+            goalId: "goal-sum-a"
+          }),
+          { now: () => 2100 }
+        );
+        const newest = ingestEvidenceRecord(
+          db,
+          baseInput({
+            ingestKey: "agent-workflow:cwfp-sum-3:merge_complete",
+            externalId: "cwfp-sum-3",
+            type: "merge_complete",
+            summary: "Merge complete",
+            occurredAt: 3000,
+            goalId: "goal-sum-a",
+            sourceItemId: "si-sum-a"
+          }),
+          { now: () => 3100 }
+        );
+
+        const summary = summarizeEvidenceRecords(db);
+        expect(summary.totalRecords).toBe(3);
+        expect(summary.goalLinkedRecords).toBe(2);
+        expect(summary.sourceItemLinkedRecords).toBe(1);
+        expect(summary.lastRecord?.id).toBe(newest.record.id);
+        expect(summary.lastRecord?.type).toBe("merge_complete");
+        expect(summary.lastRecord?.goalId).toBe("goal-sum-a");
+        expect(summary.lastRecord?.sourceItemId).toBe("si-sum-a");
+      } finally {
+        db.close();
+      }
+    });
   });
 });

@@ -155,6 +155,10 @@ describe("momentum CLI scaffold", () => {
       "scope: Milestone 4: real runner profiles (NGX-279, NGX-280, NGX-281, NGX-282, NGX-283, NGX-284, NGX-285, NGX-286) complete"
     );
     expect(result.stdout).toContain("daemon: never started");
+    expect(result.stdout).toContain(
+      "evidence: total=0 goal_linked=0 source_item_linked=0"
+    );
+    expect(result.stdout).toContain("evidence: no records ingested yet");
     expect(result.stderr).toBe("");
   });
 
@@ -210,6 +214,13 @@ describe("momentum CLI scaffold", () => {
           executes: true
         }
       ]
+    });
+    expect(payload["evidence"]).toEqual({
+      ok: true,
+      totalRecords: 0,
+      goalLinkedRecords: 0,
+      sourceItemLinkedRecords: 0,
+      lastRecord: null
     });
     expect(result.stderr).toBe("");
   });
@@ -331,6 +342,108 @@ describe("momentum CLI scaffold", () => {
     const error = policy["error"] as Record<string, unknown>;
     expect(error["code"]).toBe("policy_schema_invalid");
     expect(typeof error["message"]).toBe("string");
+  });
+
+  it("doctor surfaces an ingested-evidence summary with last record details", async () => {
+    const dataDir = makeTempDir("momentum-cli-doctor-evidence-");
+    const { openDb } = await import("../src/db.js");
+    const { ingestEvidenceRecord } = await import(
+      "../src/evidence-records.js"
+    );
+    const db = openDb(dataDir);
+    try {
+      db.prepare(
+        `INSERT INTO goals
+           (id, title, branch, artifact_dir, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).run("goal-doctor", "doctor evidence goal", "momentum/test", "/tmp/test", 1, 1);
+      db.prepare(
+        `INSERT INTO source_items
+           (id, adapter_kind, external_id, external_key, url, title,
+            status, metadata_json, last_observed_at, goal_id,
+            created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        "si-doctor",
+        "linear",
+        "ext-doctor",
+        "NGX-291",
+        "https://linear.app/example/issue/NGX-291",
+        "Workflow evidence ingestion",
+        "open",
+        "{}",
+        1,
+        null,
+        1,
+        1
+      );
+
+      ingestEvidenceRecord(
+        db,
+        {
+          source: "agent-workflow",
+          type: "plan_created",
+          formatVersion: 1,
+          artifactPath: "/tmp/.agent-workflows/cwfp-doc/plan.json",
+          externalId: "cwfp-doc",
+          occurredAt: 1_000,
+          summary: "Plan created",
+          metadata: { mode: "execute-ready" },
+          ingestKey: "agent-workflow:cwfp-doc:plan_created"
+        },
+        { now: () => 1_100 }
+      );
+      ingestEvidenceRecord(
+        db,
+        {
+          source: "agent-workflow",
+          type: "merge_complete",
+          formatVersion: 1,
+          artifactPath: "/tmp/.agent-workflows/cwfp-doc/ledger.jsonl",
+          externalId: "cwfp-doc",
+          occurredAt: 9_000,
+          summary: "Merge complete",
+          metadata: { pr: "https://example/pull/1" },
+          ingestKey: "agent-workflow:cwfp-doc:merge_complete",
+          goalId: "goal-doctor",
+          sourceItemId: "si-doctor"
+        },
+        { now: () => 9_100 }
+      );
+    } finally {
+      db.close();
+    }
+
+    const jsonResult = await run(["doctor", "--data-dir", dataDir, "--json"]);
+    expect(jsonResult.code).toBe(0);
+    const payload = JSON.parse(jsonResult.stdout) as Record<string, unknown>;
+    const evidence = payload["evidence"] as Record<string, unknown>;
+    expect(evidence).toMatchObject({
+      ok: true,
+      totalRecords: 2,
+      goalLinkedRecords: 1,
+      sourceItemLinkedRecords: 1,
+      lastRecord: {
+        source: "agent-workflow",
+        type: "merge_complete",
+        occurredAt: 9_000,
+        summary: "Merge complete",
+        goalId: "goal-doctor",
+        sourceItemId: "si-doctor"
+      }
+    });
+    expect(typeof (evidence["lastRecord"] as Record<string, unknown>)["id"]).toBe(
+      "string"
+    );
+
+    const textResult = await run(["doctor", "--data-dir", dataDir]);
+    expect(textResult.code).toBe(0);
+    expect(textResult.stdout).toContain(
+      "evidence: total=2 goal_linked=1 source_item_linked=1"
+    );
+    expect(textResult.stdout).toContain(
+      "evidence: last agent-workflow/merge_complete at 9000 (goal=goal-doctor, source_item=si-doctor)"
+    );
   });
 
   it("doctor --json surfaces an active daemon run", async () => {
