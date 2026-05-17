@@ -10,10 +10,9 @@
  * `source_reconciliation_runs` row that summarizes the whole drain.
  *
  * Design notes:
- *   - The orchestrator is sync to match the SourceAdapter / `node:sqlite`
- *     surface; the real Linear HTTP/auth handling is expected to live behind
- *     `LinearReconciliationClient.fetchPage`, which a higher-level CLI / job
- *     wires up (out of scope for this slice).
+ *   - The orchestrator accepts an async `LinearReconciliationClient` so that
+ *     the real Linear HTTP client can perform network I/O; `node:sqlite`
+ *     writes remain synchronous within the orchestrator loop.
  *   - Pages are persisted as they are observed so that partial failures
  *     (auth revoked on page N, transient adapter error) do not lose earlier
  *     successfully observed items.
