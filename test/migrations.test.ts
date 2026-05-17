@@ -91,6 +91,28 @@ describe("applyQueueMigrations", () => {
       }
 
       expect(tableNames(db)).toContain("daemon_runs");
+      expect(tableNames(db)).toContain("source_items");
+      expect(tableNames(db)).toContain("source_snapshots");
+      expect(tableNames(db)).toContain("source_reconciliation_runs");
+
+      const sourceItemColumns = getColumns(db, "source_items").map((row) => row.name);
+      for (const col of [
+        "id",
+        "adapter_kind",
+        "external_id",
+        "external_key",
+        "url",
+        "title",
+        "status",
+        "metadata_json",
+        "last_observed_at",
+        "goal_id",
+        "created_at",
+        "updated_at"
+      ]) {
+        expect(sourceItemColumns, `missing source_items column: ${col}`).toContain(col);
+      }
+
       const daemonColumns = getColumns(db, "daemon_runs").map(
         (row) => row.name
       );

@@ -90,6 +90,63 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_daemon_runs_one_active
   WHERE state IN ('starting', 'running', 'stop_requested');
 `;
 
+
+const SOURCE_ITEMS_DDL = `
+CREATE TABLE IF NOT EXISTS source_items (
+  id TEXT PRIMARY KEY,
+  adapter_kind TEXT NOT NULL,
+  external_id TEXT NOT NULL,
+  external_key TEXT,
+  url TEXT,
+  title TEXT NOT NULL,
+  status TEXT,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  last_observed_at INTEGER NOT NULL,
+  goal_id TEXT REFERENCES goals(id),
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+) STRICT;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_source_items_adapter_external
+  ON source_items(adapter_kind, external_id);
+
+CREATE INDEX IF NOT EXISTS idx_source_items_goal_id
+  ON source_items(goal_id) WHERE goal_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_source_items_adapter_kind
+  ON source_items(adapter_kind);
+
+CREATE TABLE IF NOT EXISTS source_snapshots (
+  id TEXT PRIMARY KEY,
+  source_item_id TEXT NOT NULL REFERENCES source_items(id),
+  adapter_kind TEXT NOT NULL,
+  external_id TEXT NOT NULL,
+  observed_at INTEGER NOT NULL,
+  snapshot_json TEXT NOT NULL,
+  created_at INTEGER NOT NULL
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS idx_source_snapshots_item_observed
+  ON source_snapshots(source_item_id, observed_at);
+
+CREATE TABLE IF NOT EXISTS source_reconciliation_runs (
+  id TEXT PRIMARY KEY,
+  adapter_kind TEXT NOT NULL,
+  state TEXT NOT NULL,
+  started_at INTEGER NOT NULL,
+  finished_at INTEGER,
+  error TEXT,
+  items_seen INTEGER NOT NULL DEFAULT 0,
+  items_upserted INTEGER NOT NULL DEFAULT 0,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS idx_source_reconciliation_runs_adapter_started
+  ON source_reconciliation_runs(adapter_kind, started_at);
+`;
+
 const JOB_IDEMPOTENCY_INDEX_DDL = `
 CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_idempotency_key
   ON jobs(idempotency_key) WHERE idempotency_key IS NOT NULL;
@@ -114,6 +171,7 @@ export function applyQueueMigrations(db: MomentumDb): void {
     db.exec(JOB_IDEMPOTENCY_INDEX_DDL);
     db.exec(REPO_LOCKS_DDL);
     db.exec(DAEMON_RUNS_DDL);
+    db.exec(SOURCE_ITEMS_DDL);
     if (tableExists(db, "daemon_runs")) {
       for (const column of DAEMON_RUN_COLUMNS) {
         ensureColumn(db, "daemon_runs", column);
