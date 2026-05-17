@@ -477,6 +477,23 @@ export function listSourceSnapshotsForItem(
   return rows.map(sourceSnapshotFromRow);
 }
 
+export function getLatestSourceSnapshotForItem(
+  db: MomentumDb,
+  sourceItemId: string
+): SourceSnapshot | null {
+  const row = db
+    .prepare(
+      `SELECT *
+         FROM source_snapshots
+        WHERE source_item_id = ?
+        ORDER BY observed_at DESC, created_at DESC, id DESC
+        LIMIT 1`
+    )
+    .get(sourceItemId) as SourceSnapshotRow | undefined;
+
+  return row ? sourceSnapshotFromRow(row) : null;
+}
+
 function sourceItemFromRow(row: SourceItemRow): SourceItem {
   return {
     id: row.id,

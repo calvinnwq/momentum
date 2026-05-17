@@ -1,8 +1,11 @@
 import type { MomentumDb } from "./db.js";
-import type { IterationPromptSourceContext } from "./iteration-prompt.js";
+import type {
+  IterationPromptSourceContext,
+  IterationPromptSourceContextItem
+} from "./iteration-prompt.js";
 import {
+  getLatestSourceSnapshotForItem,
   listSourceItemSummariesForGoal,
-  listSourceSnapshotsForItem
 } from "./source-items.js";
 
 export function buildIterationSourceContext(
@@ -13,11 +16,15 @@ export function buildIterationSourceContext(
   if (summaries.length === 0) {
     return null;
   }
-  const summary = summaries[0]!;
-  const body = extractLatestSnapshotBody(db, summary.id);
-  return {
+  const sourceItems = summaries.map((summary): IterationPromptSourceContextItem => ({
     sourceItem: summary,
-    body
+    body: extractLatestSnapshotBody(db, summary.id)
+  }));
+  const first = sourceItems[0]!;
+  return {
+    sourceItem: first.sourceItem,
+    body: first.body ?? null,
+    sourceItems
   };
 }
 
@@ -25,11 +32,8 @@ function extractLatestSnapshotBody(
   db: MomentumDb,
   sourceItemId: string
 ): string | null {
-  const snapshots = listSourceSnapshotsForItem(db, sourceItemId);
-  if (snapshots.length === 0) {
-    return null;
-  }
-  const latest = snapshots[snapshots.length - 1]!;
+  const latest = getLatestSourceSnapshotForItem(db, sourceItemId);
+  if (!latest) return null;
   return extractTextBody(latest.snapshot);
 }
 
