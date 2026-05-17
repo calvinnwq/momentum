@@ -380,7 +380,7 @@ Retrieves a single source item by ID. JSON output includes `ok`, `command`, `dat
 momentum source link <source-item-id> --goal <goal-id> [--data-dir <path>] [--json]
 ```
 
-Links a source item to a goal. A source item can be linked to at most one goal; attempting to link a source item already linked to a different goal fails with `code: "linked_to_other_goal"` (including `currentGoalId` on the error payload). Linking to the same goal again is idempotent: `changed` is `false` and `skippedReason` is `"already_linked_to_target"`. JSON output includes `ok`, `command`, `dataDir`, `goalId`, `sourceItemId`, `changed`, `skippedReason`, `previousGoalId`, and `item` (the updated source item). Text output confirms the link and shows adapter, external key, title, and data dir. On failure, exits non-zero with `code: "goal_not_found"`, `"source_item_not_found"`, `"linked_to_other_goal"`, or `"link_changed"`.
+Links a source item to a goal. A source item can be linked to at most one goal; attempting to link a source item already linked to a different goal fails with `code: "linked_to_other_goal"` (including `currentGoalId` on the error payload). Linking to the same goal again is idempotent: `changed` is `false` and `skippedReason` is `"already_linked_to_target"`. JSON output includes `ok`, `command`, `dataDir`, `goalId`, `sourceItemId`, `changed`, `skippedReason`, `previousGoalId`, and `item` (the updated source item). Text output confirms the link and shows adapter, external key, title, and data dir. On failure, exits non-zero with `code: "data_dir_failed"`, `"goal_not_found"`, `"source_item_not_found"`, `"linked_to_other_goal"`, or `"link_changed"`.
 
 ### `source unlink`
 
@@ -388,7 +388,7 @@ Links a source item to a goal. A source item can be linked to at most one goal; 
 momentum source unlink <source-item-id> [--data-dir <path>] [--json]
 ```
 
-Unlinks a source item from its goal. Unlinking an already-unlinked source item is idempotent: `changed` is `false` and `previousGoalId` is `null`. JSON output includes `ok`, `command`, `dataDir`, `sourceItemId`, `changed`, `previousGoalId`, and `item`. Text output confirms the unlink and shows adapter, title, and data dir. On failure, exits non-zero with `code: "source_item_not_found"` or `"link_changed"`.
+Unlinks a source item from its goal. Unlinking an already-unlinked source item is idempotent: `changed` is `false` and `previousGoalId` is `null`. JSON output includes `ok`, `command`, `dataDir`, `sourceItemId`, `changed`, `previousGoalId`, and `item`. Text output confirms the unlink and shows adapter, title, and data dir. On failure, exits non-zero with `code: "data_dir_failed"`, `"source_item_not_found"`, or `"link_changed"`.
 
 ### `source reconcile linear`
 
