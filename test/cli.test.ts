@@ -3961,6 +3961,343 @@ describe("momentum recovery clear", () => {
       "momentum recovery clear <goal-id> [--reason <text>] [--data-dir <path>] [--json]"
     );
   });
+
+  it("source reconcile linear --dry-run records an audit-only run without writing items", async () => {
+    const dataDir = makeTempDir("momentum-cli-source-reconcile-dry-");
+    const fakeIssue = {
+      id: "lin-1",
+      identifier: "NGX-DR-1",
+      title: "Dry-run linear issue",
+      url: "https://linear.app/example/issue/NGX-DR-1",
+      state: { id: "state-1", name: "In Progress" },
+      project: { id: "project-1", name: "Project One" },
+      projectMilestone: { id: "milestone-1", name: "Milestone One" },
+      labels: { nodes: [] },
+      assignee: null,
+      priority: 0,
+      updatedAt: "2026-04-01T00:00:00.000Z"
+    };
+    const factoryCalls: Array<{ apiKey: string | null; endpoint: string | null }> = [];
+    const fetchCalls: Array<{ filters: Record<string, unknown> }> = [];
+    const deps = {
+      buildLinearReconciliationClient: (input: {
+        apiKey: string | null;
+        endpoint: string | null;
+      }) => {
+        factoryCalls.push({ apiKey: input.apiKey, endpoint: input.endpoint });
+        return {
+          fetchPage: async (input: { filters: Record<string, unknown> }) => {
+            fetchCalls.push({ filters: input.filters });
+            return {
+              ok: true as const,
+              page: { issues: [fakeIssue], nextCursor: null }
+            };
+          }
+        };
+      }
+    };
+
+    const result = await runWithDeps(
+      [
+        "source",
+        "reconcile",
+        "linear",
+        "--dry-run",
+        "--project",
+        "Project One",
+        "--milestone",
+        "Milestone One",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      { LINEAR_API_KEY: "test-key" },
+      deps
+    );
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      command: "source reconcile linear",
+      adapter: "linear",
+      dryRun: true,
+      counts: { itemsObserved: 1, itemsCreated: 1 }
+    });
+    const run0 = payload["run"] as Record<string, unknown>;
+    expect(run0["state"]).toBe("succeeded");
+    expect(run0["adapterKind"]).toBe("linear");
+    const itemsSampled = payload["itemsSampled"] as Array<Record<string, unknown>>;
+    expect(itemsSampled[0]).toMatchObject({
+      classification: "created",
+      externalKey: "NGX-DR-1"
+    });
+    expect(factoryCalls).toHaveLength(1);
+    expect(factoryCalls[0]?.apiKey).toBe("test-key");
+    expect(fetchCalls).toEqual([
+      {
+        filters: {
+          projectName: "Project One",
+          milestoneName: "Milestone One"
+        }
+      }
+    ]);
+
+    const { openDb } = await import("../src/db.js");
+    const { listSourceItems } = await import("../src/source-items.js");
+    const db = openDb(dataDir);
+    try {
+      expect(listSourceItems(db, { adapterKind: "linear" })).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("source reconcile linear live path upserts items and surfaces them via source list + doctor", async () => {
+    const dataDir = makeTempDir("momentum-cli-source-reconcile-live-");
+    const fakeIssue = {
+      id: "lin-live-1",
+      identifier: "NGX-LV-1",
+      title: "Live linear issue",
+      url: "https://linear.app/example/issue/NGX-LV-1",
+      state: { id: "state-2", name: "Todo" },
+      project: { id: "project-1", name: "Project One" },
+      projectMilestone: { id: "milestone-1", name: "Milestone One" },
+      labels: { nodes: [{ id: "label-1", name: "infra" }] },
+      assignee: null,
+      priority: 1,
+      updatedAt: "2026-04-02T00:00:00.000Z"
+    };
+    const deps = {
+      buildLinearReconciliationClient: () => ({
+        fetchPage: async () => ({
+          ok: true as const,
+          page: { issues: [fakeIssue], nextCursor: null }
+        })
+      })
+    };
+
+    const reconcile = await runWithDeps(
+      [
+        "source",
+        "reconcile",
+        "linear",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      { LINEAR_API_KEY: "test-key" },
+      deps
+    );
+    expect(reconcile.code).toBe(0);
+    const reconcilePayload = JSON.parse(reconcile.stdout) as Record<string, unknown>;
+    expect(reconcilePayload).toMatchObject({
+      ok: true,
+      command: "source reconcile linear",
+      dryRun: false,
+      counts: { itemsObserved: 1, itemsCreated: 1 }
+    });
+
+    const listResult = await run([
+      "source",
+      "list",
+      "--adapter",
+      "linear",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(listResult.code).toBe(0);
+    const listPayload = JSON.parse(listResult.stdout) as Record<string, unknown>;
+    expect(listPayload).toMatchObject({
+      ok: true,
+      count: 1,
+      lastReconciliation: { state: "succeeded", itemsSeen: 1, itemsUpserted: 1 }
+    });
+    const items = listPayload["items"] as Array<Record<string, unknown>>;
+    expect(items[0]).toMatchObject({
+      adapterKind: "linear",
+      externalId: "lin-live-1",
+      externalKey: "NGX-LV-1",
+      title: "Live linear issue",
+      status: "Todo"
+    });
+
+    const doctorResult = await run([
+      "doctor",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(doctorResult.code).toBe(0);
+    const doctorPayload = JSON.parse(doctorResult.stdout) as Record<string, unknown>;
+    const sources = doctorPayload["sources"] as Record<string, unknown>;
+    expect(sources).toMatchObject({
+      ok: true,
+      lastReconciliation: { adapterKind: "linear", state: "succeeded" }
+    });
+  });
+
+  it("source list and doctor surface capped Linear reconciliation stop reasons", async () => {
+    const dataDir = makeTempDir("momentum-cli-source-reconcile-capped-");
+    const issueA = {
+      id: "lin-cap-1",
+      identifier: "NGX-CAP-1",
+      title: "First capped issue",
+      url: "https://linear.app/example/issue/NGX-CAP-1",
+      state: { id: "state-1", name: "Todo" },
+      project: { id: "project-1", name: "Project One" },
+      projectMilestone: null,
+      labels: { nodes: [] },
+      assignee: null,
+      priority: 0,
+      updatedAt: "2026-04-02T00:00:00.000Z"
+    };
+    const issueB = {
+      ...issueA,
+      id: "lin-cap-2",
+      identifier: "NGX-CAP-2",
+      title: "Second capped issue",
+      updatedAt: "2026-04-03T00:00:00.000Z"
+    };
+    let pageIndex = 0;
+    const deps = {
+      buildLinearReconciliationClient: () => ({
+        fetchPage: async () => {
+          pageIndex += 1;
+          return pageIndex === 1
+            ? { ok: true as const, page: { issues: [issueA], nextCursor: "next-page" } }
+            : { ok: true as const, page: { issues: [issueB], nextCursor: null } };
+        }
+      })
+    };
+
+    const reconcile = await runWithDeps(
+      [
+        "source",
+        "reconcile",
+        "linear",
+        "--data-dir",
+        dataDir,
+        "--max-pages",
+        "1",
+        "--json"
+      ],
+      { LINEAR_API_KEY: "test-key" },
+      deps
+    );
+    expect(reconcile.code).toBe(0);
+    const reconcilePayload = JSON.parse(reconcile.stdout) as Record<string, unknown>;
+    expect(reconcilePayload).toMatchObject({
+      ok: true,
+      run: { state: "succeeded" },
+      paginationStopped: { reason: "max_pages", pageIndex: 1 }
+    });
+
+    const listJson = await run([
+      "source",
+      "list",
+      "--adapter",
+      "linear",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(listJson.code).toBe(0);
+    const listPayload = JSON.parse(listJson.stdout) as Record<string, unknown>;
+    expect(listPayload).toMatchObject({
+      ok: true,
+      count: 1,
+      lastReconciliation: {
+        state: "succeeded",
+        paginationStopped: { reason: "max_pages", pageIndex: 1 }
+      }
+    });
+
+    const listText = await run([
+      "source",
+      "list",
+      "--adapter",
+      "linear",
+      "--data-dir",
+      dataDir
+    ]);
+    expect(listText.code).toBe(0);
+    expect(listText.stdout).toContain("Last reconciliation: linear succeeded");
+    expect(listText.stdout).toContain("stopped=max_pages");
+
+    const doctorJson = await run(["doctor", "--data-dir", dataDir, "--json"]);
+    expect(doctorJson.code).toBe(0);
+    const doctorPayload = JSON.parse(doctorJson.stdout) as Record<string, unknown>;
+    expect(doctorPayload).toMatchObject({
+      sources: {
+        ok: true,
+        lastReconciliation: {
+          adapterKind: "linear",
+          state: "succeeded",
+          paginationStopped: { reason: "max_pages", pageIndex: 1 }
+        }
+      }
+    });
+
+    const doctorText = await run(["doctor", "--data-dir", dataDir]);
+    expect(doctorText.code).toBe(0);
+    expect(doctorText.stdout).toContain("sources: last linear reconciliation succeeded");
+    expect(doctorText.stdout).toContain("stopped=max_pages");
+  });
+
+  it("source reconcile linear without LINEAR_API_KEY returns source_auth_unavailable from the default client", async () => {
+    const dataDir = makeTempDir("momentum-cli-source-reconcile-noauth-");
+    const result = await runWithDeps(
+      [
+        "source",
+        "reconcile",
+        "linear",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      {},
+      {}
+    );
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "source reconcile linear",
+      adapter: "linear"
+    });
+    const paginationStopped = payload["paginationStopped"] as Record<string, unknown>;
+    expect(paginationStopped).toMatchObject({
+      reason: "auth_unavailable",
+      code: "source_auth_unavailable"
+    });
+    const runPayload = payload["run"] as Record<string, unknown>;
+    expect(runPayload["state"]).toBe("failed");
+  });
+
+  it("source reconcile rejects unknown adapter kinds with unsupported_source_adapter", async () => {
+    const dataDir = makeTempDir("momentum-cli-source-reconcile-bad-");
+    const result = await runWithDeps(
+      [
+        "source",
+        "reconcile",
+        "github",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      { LINEAR_API_KEY: "x" },
+      {}
+    );
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "source reconcile linear",
+      code: "unsupported_source_adapter"
+    });
+  });
 });
 
 async function run(argv: string[]): Promise<RunResult> {
@@ -3982,6 +4319,37 @@ async function run(argv: string[]): Promise<RunResult> {
     },
     env: {}
   });
+
+  return { code, stdout, stderr };
+}
+
+async function runWithDeps(
+  argv: string[],
+  env: NodeJS.ProcessEnv,
+  deps: Parameters<typeof runCli>[2]
+): Promise<RunResult> {
+  let stdout = "";
+  let stderr = "";
+
+  const code = await runCli(
+    argv,
+    {
+      stdout: {
+        write(chunk: string) {
+          stdout += chunk;
+          return true;
+        }
+      },
+      stderr: {
+        write(chunk: string) {
+          stderr += chunk;
+          return true;
+        }
+      },
+      env
+    },
+    deps
+  );
 
   return { code, stdout, stderr };
 }

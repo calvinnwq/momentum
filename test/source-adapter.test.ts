@@ -28,8 +28,8 @@ function fixtureClient(items = fixtureItems): SourceAdapterClient {
 }
 
 describe("source adapter registry", () => {
-  it("lists the built-in local-fixture adapter", () => {
-    expect(listSourceAdapterKinds()).toEqual(["local-fixture"]);
+  it("lists the built-in source adapter kinds", () => {
+    expect(listSourceAdapterKinds()).toEqual(["local-fixture", "linear"]);
   });
 
   it("returns the local-fixture adapter from getSourceAdapter", () => {
@@ -38,8 +38,14 @@ describe("source adapter registry", () => {
     expect(adapter?.kind).toBe("local-fixture");
   });
 
+  it("returns the linear adapter from getSourceAdapter", () => {
+    const adapter = getSourceAdapter("linear");
+    expect(adapter).toBeDefined();
+    expect(adapter?.kind).toBe("linear");
+  });
+
   it("returns undefined for unknown source adapter kinds", () => {
-    expect(getSourceAdapter("linear")).toBeUndefined();
+    expect(getSourceAdapter("github")).toBeUndefined();
   });
 });
 
@@ -55,12 +61,12 @@ describe("dispatchSourceAdapterList", () => {
   });
 
   it("rejects unsupported adapter kinds with a stable code", () => {
-    const out = dispatchSourceAdapterList("linear", { client: fixtureClient() });
+    const out = dispatchSourceAdapterList("github", { client: fixtureClient() });
 
     expect(out.ok).toBe(false);
     if (out.ok) return;
     expect(out.code).toBe("unsupported_source_adapter");
-    expect(out.error).toContain("linear");
+    expect(out.error).toContain("github");
   });
 
   it("wraps adapter exceptions instead of throwing raw errors", () => {

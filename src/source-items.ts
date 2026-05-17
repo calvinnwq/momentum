@@ -148,6 +148,19 @@ export function getSourceItemById(
   return row ? sourceItemFromRow(row) : null;
 }
 
+export function getSourceItemByAdapterExternalId(
+  db: MomentumDb,
+  adapterKind: string,
+  externalId: string
+): SourceItem | null {
+  const row = db
+    .prepare(
+      "SELECT * FROM source_items WHERE adapter_kind = ? AND external_id = ?"
+    )
+    .get(adapterKind, externalId) as SourceItemRow | undefined;
+  return row ? sourceItemFromRow(row) : null;
+}
+
 function getSourceItemRowByAdapterExternalId(
   db: MomentumDb,
   adapterKind: string,
