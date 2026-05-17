@@ -762,7 +762,7 @@ Momentum's product model is centered on these durable concepts; M3 must not brea
 - Momentum's core product primitive is `Goal`, not `Issue`. A Goal may be seeded from one or more source items; Linear projects/issues are one source shape, not the source of truth.
 - Goal completion is decided by the Goal Markdown acceptance criteria plus runner, verification, and handoff evidence, not by source-item count or external tracker state alone.
 - Tracker writes are **adapter-mediated and policy-gated**. Momentum core records durable facts and emits external-update intents; Linear/GitHub/Jira/etc. adapters or approved workflow steps perform the external writes.
-- Source adapters are **pull / reconcile first** in M3. No inbound webhook infrastructure in the operational-safety milestone.
+- Source adapters were scoped as **pull / reconcile first** in M3 alignment; active source-adapter implementation now belongs to M5. No inbound webhook infrastructure in the operational-safety milestone.
 - A Goal uses **one shared repo / workspace lease** for now. Per-source-item worktrees or workspaces are deferred until daemon, stop, and recovery behavior are solid.
 - `MOMENTUM.md` is the canonical future repo policy file. M3 documents it as a contract but does **not** add a runtime loader, parser, or precedence rules unless a future milestone explicitly proves it is required.
 
