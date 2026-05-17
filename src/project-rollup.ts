@@ -561,9 +561,11 @@ function buildReconciliationWarnings(
     ? new Set(items.map((item) => item.adapterKind))
     : new Set([adapterKind]);
   for (const adapter of adapters) {
+    const adapterItems = items.filter((item) => item.adapterKind === adapter);
     const adapterRuns = runs.filter(
       (run) =>
-        run.adapterKind === adapter && runCoversFilteredRollup(run, filters)
+        run.adapterKind === adapter &&
+        runCoversFilteredRollup(run, filters, adapterItems)
     );
     if (adapterRuns.length === 0) {
       byAdapter.set(adapter, {
@@ -644,15 +646,16 @@ function selectReconciliationRunForWarning(
 
 function runCoversFilteredRollup(
   run: SourceReconciliationRun,
-  rollupFilters: ProjectRollupFilters
+  rollupFilters: ProjectRollupFilters,
+  items: readonly SourceItem[]
 ): boolean {
   if (run.metadata["dryRun"] === true) return false;
   if (reconciliationStoppedBeforeComplete(run)) return false;
   const filters = readNested(run.metadata, "filters");
   if (filters === null || !filtersHaveScope(filters)) return true;
   return (
-    runDimensionCoversRollup(filters, rollupFilters, "project") &&
-    runDimensionCoversRollup(filters, rollupFilters, "milestone")
+    runDimensionCoversRollup(filters, rollupFilters, "project", items) &&
+    runDimensionCoversRollup(filters, rollupFilters, "milestone", items)
   );
 }
 
@@ -673,7 +676,8 @@ function filtersHaveScope(filters: Record<string, unknown>): boolean {
 function runDimensionCoversRollup(
   runFilters: Record<string, unknown>,
   rollupFilters: ProjectRollupFilters,
-  dimension: "project" | "milestone"
+  dimension: "project" | "milestone",
+  items: readonly SourceItem[]
 ): boolean {
   const runValues = [
     readString(runFilters, `${dimension}Id`),
@@ -686,8 +690,21 @@ function runDimensionCoversRollup(
     rollupFilters[`${dimension}Name`]
   ].filter((value): value is string => value !== undefined);
   if (rollupValues.length === 0) return false;
+  if (runValues.some((runValue) => rollupValues.includes(runValue))) return true;
 
-  return runValues.some((runValue) => rollupValues.includes(runValue));
+  return items.every((item) => itemDimensionMatchesRunFilter(item, dimension, runValues));
+}
+
+function itemDimensionMatchesRunFilter(
+  item: SourceItem,
+  dimension: "project" | "milestone",
+  runValues: readonly string[]
+): boolean {
+  const record = readNested(item.metadata, dimension);
+  const itemValues = [readString(record, "id"), readString(record, "name")].filter(
+    (value): value is string => value !== null
+  );
+  return itemValues.some((itemValue) => runValues.includes(itemValue));
 }
 
 function pickNextAction(

@@ -667,6 +667,86 @@ describe("buildProjectRollup", () => {
     }
   });
 
+  it("matches reconciliation filter ids against rollup filter names through source metadata", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedSourceItem(db, {
+        externalId: "issue-proj-name",
+        projectId: "proj-1",
+        projectName: "Alpha",
+        milestoneId: "mile-1",
+        milestoneName: "M1"
+      });
+      const run = startSourceReconciliationRun(
+        db,
+        {
+          adapterKind: "linear",
+          metadata: { filters: { projectId: "proj-1", milestoneId: "mile-1" } }
+        },
+        { now: () => 1_000 }
+      );
+      finishSourceReconciliationRun(
+        db,
+        {
+          runId: run.id,
+          state: "succeeded",
+          itemsSeen: 1,
+          itemsUpserted: 1
+        },
+        { now: () => 2_000 }
+      );
+
+      const rollup = buildProjectRollup(db, {
+        filters: { projectName: "Alpha", milestoneName: "M1" },
+        now: 3_000
+      });
+      expect(rollup.reconciliationWarnings).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("does not treat one id-scoped reconciliation as covering an ambiguous name rollup", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedSourceItem(db, {
+        externalId: "issue-alpha-1",
+        projectId: "proj-1",
+        projectName: "Alpha"
+      });
+      seedSourceItem(db, {
+        externalId: "issue-alpha-2",
+        projectId: "proj-2",
+        projectName: "Alpha"
+      });
+      const run = startSourceReconciliationRun(
+        db,
+        { adapterKind: "linear", metadata: { filters: { projectId: "proj-1" } } },
+        { now: () => 1_000 }
+      );
+      finishSourceReconciliationRun(
+        db,
+        {
+          runId: run.id,
+          state: "succeeded",
+          itemsSeen: 1,
+          itemsUpserted: 1
+        },
+        { now: () => 2_000 }
+      );
+
+      const rollup = buildProjectRollup(db, {
+        filters: { projectName: "Alpha" },
+        now: 3_000
+      });
+      expect(rollup.reconciliationWarnings).toMatchObject([
+        { adapterKind: "linear", reason: "never_run" }
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("ignores successful dry-run reconciliations when checking freshness", () => {
     const db = openDb(makeTempDir());
     try {
