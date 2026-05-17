@@ -91,6 +91,40 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_daemon_runs_one_active
 `;
 
 
+const EVIDENCE_RECORDS_DDL = `
+CREATE TABLE IF NOT EXISTS evidence_records (
+  id TEXT PRIMARY KEY,
+  source TEXT NOT NULL,
+  type TEXT NOT NULL,
+  format_version INTEGER NOT NULL DEFAULT 1,
+  artifact_path TEXT,
+  external_id TEXT,
+  occurred_at INTEGER NOT NULL,
+  summary TEXT NOT NULL,
+  metadata_json TEXT NOT NULL DEFAULT '{}',
+  goal_id TEXT REFERENCES goals(id),
+  source_item_id TEXT REFERENCES source_items(id),
+  ingest_key TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+) STRICT;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_evidence_records_ingest_key
+  ON evidence_records(ingest_key);
+
+CREATE INDEX IF NOT EXISTS idx_evidence_records_goal
+  ON evidence_records(goal_id) WHERE goal_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_evidence_records_source_item
+  ON evidence_records(source_item_id) WHERE source_item_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_evidence_records_source_type
+  ON evidence_records(source, type);
+
+CREATE INDEX IF NOT EXISTS idx_evidence_records_occurred_at
+  ON evidence_records(occurred_at);
+`;
+
 const SOURCE_ITEMS_DDL = `
 CREATE TABLE IF NOT EXISTS source_items (
   id TEXT PRIMARY KEY,
@@ -172,6 +206,7 @@ export function applyQueueMigrations(db: MomentumDb): void {
     db.exec(REPO_LOCKS_DDL);
     db.exec(DAEMON_RUNS_DDL);
     db.exec(SOURCE_ITEMS_DDL);
+    db.exec(EVIDENCE_RECORDS_DDL);
     if (tableExists(db, "daemon_runs")) {
       for (const column of DAEMON_RUN_COLUMNS) {
         ensureColumn(db, "daemon_runs", column);
