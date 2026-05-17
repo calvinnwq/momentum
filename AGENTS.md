@@ -109,11 +109,11 @@ Common commands:
 - `doctor`
 - Preserve stable CLI behavior across both JSON and text outputs.
 - When changing user-facing output, update tests and verify callers that rely on stable formatting.
-- `logs <goal-id> [--iteration N]` reads on-disk `runner.log`, `verification.log`, runner result JSON artifacts, and linked source item summaries from SQLite; it must not consult live worker state. Empty result scaffolds (`{}`) are not parse errors, while malformed/non-conforming result JSON should surface a `parseError`.
+- `logs <goal-id> [--iteration N]` reads on-disk `runner.log`, `verification.log`, runner result JSON artifacts, linked source item summaries, and latest evidence summaries from SQLite; it must not consult live worker state. Empty result scaffolds (`{}`) are not parse errors, while malformed/non-conforming result JSON should surface a `parseError`.
 
 ## Data and artifact layout
 - State uses `MOMENTUM_HOME` env var → `~/.momentum` fallback; override with `--data-dir`.
-- SQLite database at `<data-dir>/momentum.db` with `goals`, `jobs`, `events`, `repo_locks`, `daemon_runs`, `source_items`, `source_snapshots`, and `source_reconciliation_runs` tables.
+- SQLite database at `<data-dir>/momentum.db` with `goals`, `jobs`, `events`, `repo_locks`, `daemon_runs`, `source_items`, `source_snapshots`, `source_reconciliation_runs`, and `evidence_records` tables.
 - Goal artifacts at `<data-dir>/goals/<goal-id>/`: `goal.md`, `ledger.md`, `handoff.md`, `handoff.json`, optional `recovery.md` (created lazily when manual recovery is classified), and `iterations/<n>/{prompt.md,runner.log,verification.log,result.json}` by default; runner profiles such as `trusted-shell` and `acp` may report a different result JSON file inside the iteration directory via `trusted_shell.result_file` / `acp.result_file`.
 - Avoid hard-coded paths tied to a single user.
 - Only use explicit local paths when existing documentation in-repo explicitly mandates them.
