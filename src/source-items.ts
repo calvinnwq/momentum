@@ -17,6 +17,17 @@ export type SourceItem = {
   updatedAt: number;
 };
 
+export type SourceItemSummary = {
+  id: string;
+  adapterKind: string;
+  externalId: string;
+  externalKey: string | null;
+  url: string | null;
+  title: string;
+  status: string | null;
+  lastObservedAt: number;
+};
+
 export type SourceItemUpsertInput = {
   adapterKind: string;
   externalId: string;
@@ -100,6 +111,33 @@ export function getSourceItemById(
   return row ? sourceItemFromRow(row) : null;
 }
 
+export function listSourceItemSummariesForGoal(
+  db: MomentumDb,
+  goalId: string
+): SourceItemSummary[] {
+  const rows = db
+    .prepare(
+      `SELECT id, adapter_kind, external_id, external_key, url, title, status,
+              last_observed_at
+         FROM source_items
+        WHERE goal_id = ?
+        ORDER BY adapter_kind ASC, external_key ASC, external_id ASC`
+    )
+    .all(goalId) as Pick<
+    SourceItemRow,
+    | "id"
+    | "adapter_kind"
+    | "external_id"
+    | "external_key"
+    | "url"
+    | "title"
+    | "status"
+    | "last_observed_at"
+  >[];
+
+  return rows.map(sourceItemSummaryFromRow);
+}
+
 function sourceItemFromRow(row: SourceItemRow): SourceItem {
   return {
     id: row.id,
@@ -114,6 +152,31 @@ function sourceItemFromRow(row: SourceItemRow): SourceItem {
     goalId: row.goal_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at
+  };
+}
+
+function sourceItemSummaryFromRow(
+  row: Pick<
+    SourceItemRow,
+    | "id"
+    | "adapter_kind"
+    | "external_id"
+    | "external_key"
+    | "url"
+    | "title"
+    | "status"
+    | "last_observed_at"
+  >
+): SourceItemSummary {
+  return {
+    id: row.id,
+    adapterKind: row.adapter_kind,
+    externalId: row.external_id,
+    externalKey: row.external_key,
+    url: row.url,
+    title: row.title,
+    status: row.status,
+    lastObservedAt: row.last_observed_at
   };
 }
 

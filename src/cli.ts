@@ -1652,7 +1652,8 @@ function emitStatus(
     latestCommitSha: data.latestCommitSha,
     daemon: data.daemon,
     staleRecovery: data.staleRecovery,
-    policy: data.policy
+    policy: data.policy,
+    ...(data.sourceItems.length > 0 ? { sourceItems: data.sourceItems } : {})
   };
 
   if (parsed.json) {

@@ -28,6 +28,10 @@ import {
   loadMomentumPolicy,
   type MomentumPolicyErrorCode
 } from "./momentum-policy.js";
+import {
+  listSourceItemSummariesForGoal,
+  type SourceItemSummary
+} from "./source-items.js";
 
 export type GoalStatusErrorCode =
   | "invalid_input"
@@ -268,6 +272,7 @@ export type GoalStatusSuccess = {
   daemon: GoalStatusDaemonSummary | null;
   staleRecovery: GoalStatusStaleRecoverySummary;
   policy: GoalStatusPolicySummary;
+  sourceItems: SourceItemSummary[];
 };
 
 export type GoalStatusResult = GoalStatusError | GoalStatusSuccess;
@@ -386,6 +391,7 @@ export function loadGoalStatus(input: LoadGoalStatusInput = {}): GoalStatusResul
     const daemon = buildDaemonSummary(db);
     const staleRecovery = buildStaleRecoverySummary(db, goal.id);
     const policy = buildPolicySummary(goal.repo);
+    const sourceItems = listSourceItemSummariesForGoal(db, goal.id);
 
     return {
       ok: true,
@@ -421,7 +427,8 @@ export function loadGoalStatus(input: LoadGoalStatusInput = {}): GoalStatusResul
       latestCommitSha,
       daemon,
       staleRecovery,
-      policy
+      policy,
+      sourceItems
     };
   } finally {
     db?.close();

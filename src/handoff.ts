@@ -17,6 +17,7 @@ import {
   type GoalStatusStaleRecoverySummary,
   type GoalStatusSuccess
 } from "./goal-status.js";
+import type { SourceItemSummary } from "./source-items.js";
 
 export const HANDOFF_SCHEMA_VERSION = 1;
 
@@ -82,6 +83,7 @@ export type HandoffData = {
   daemon: GoalStatusDaemonSummary | null;
   staleRecovery: GoalStatusStaleRecoverySummary;
   policy: GoalStatusPolicySummary;
+  sourceItems: SourceItemSummary[];
   artifactPaths: GoalArtifactPaths;
   artifactFiles: GoalStatusArtifactFiles;
 };
@@ -179,6 +181,7 @@ function buildHandoffData(
     daemon: status.daemon,
     staleRecovery: status.staleRecovery,
     policy: status.policy,
+    sourceItems: status.sourceItems,
     artifactPaths: status.artifactPaths,
     artifactFiles: status.artifactFiles
   };
@@ -345,6 +348,11 @@ function toJsonShape(data: HandoffData): Record<string, unknown> {
         ? { code: data.policy.error.code, message: data.policy.error.message }
         : null
     },
+    ...(data.sourceItems.length > 0
+      ? {
+          source_items: data.sourceItems.map(sourceItemToJsonShape)
+        }
+      : {}),
     artifacts: {
       goal_md: data.artifactPaths.goalMd,
       ledger_md: data.artifactPaths.ledgerMd,
@@ -367,6 +375,19 @@ function toJsonShape(data: HandoffData): Record<string, unknown> {
       verification_log: data.artifactFiles.verificationLog,
       result_json: data.artifactFiles.resultJson
     }
+  };
+}
+
+function sourceItemToJsonShape(item: SourceItemSummary): Record<string, unknown> {
+  return {
+    id: item.id,
+    adapter_kind: item.adapterKind,
+    external_id: item.externalId,
+    external_key: item.externalKey,
+    url: item.url,
+    title: item.title,
+    status: item.status,
+    last_observed_at: item.lastObservedAt
   };
 }
 
