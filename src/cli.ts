@@ -1980,6 +1980,16 @@ function emitStatus(
     );
   }
 
+  if (data.sourceItems.length > 0) {
+    lines.push(`Source items: ${data.sourceItems.length}`);
+    for (const item of data.sourceItems) {
+      lines.push(
+        `- ${item.id} [${item.adapterKind}] ${item.externalKey ?? item.externalId}: ` +
+        `${item.title}${item.status ? ` (${item.status})` : ""}`
+      );
+    }
+  }
+
   lines.push("");
   write(io.stdout, lines.join("\n"));
   return 0;

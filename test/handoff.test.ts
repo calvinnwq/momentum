@@ -1427,5 +1427,31 @@ describe("writeHandoff", () => {
       }
     ]);
     expect(JSON.stringify(json["source_items"])).not.toContain("opaque");
+
+    const markdown = fs.readFileSync(
+      setup.artifactPaths.handoffMd,
+      "utf-8"
+    );
+    expect(markdown).toContain("## Source items");
+    expect(markdown).toContain("local-fixture/SRC-2");
+    expect(markdown).toContain("Linked source context");
+  });
+
+  it("omits the source items section from handoff markdown when no items are linked", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Handoff without source items");
+
+    const result = writeHandoff({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+    const handoff = expectSuccess(result);
+    expect(handoff.data.sourceItems).toEqual([]);
+
+    const markdown = fs.readFileSync(
+      setup.artifactPaths.handoffMd,
+      "utf-8"
+    );
+    expect(markdown).not.toContain("## Source items");
   });
 });

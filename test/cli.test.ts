@@ -3860,6 +3860,44 @@ describe("momentum recovery clear", () => {
     });
   });
 
+  it("status text surfaces linked source items", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+    const { openDb } = await import("../src/db.js");
+    const { upsertSourceItem } = await import("../src/source-items.js");
+    const db = openDb(dataDir);
+
+    const startResult = await run([
+      "goal", "start", goalFile,
+      "--foreground",
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    const startPayload = JSON.parse(startResult.stdout) as Record<string, unknown>;
+    const goalId = startPayload["goalId"] as string;
+
+    upsertSourceItem(
+      db,
+      {
+        adapterKind: "local-fixture",
+        externalId: "fixture-status-1",
+        externalKey: "SRC-STATUS-1",
+        title: "Status source item",
+        status: "In Progress",
+        observedAt: 1_700_000_000_000,
+        goalId
+      },
+      { now: () => 1_700_000_000_100 }
+    );
+    db.close();
+
+    const statusResult = await run(["status", "--data-dir", dataDir]);
+    expect(statusResult.code).toBe(0);
+    expect(statusResult.stdout).toContain("Source items: 1");
+    expect(statusResult.stdout).toContain("[local-fixture] SRC-STATUS-1");
+    expect(statusResult.stdout).toContain("Status source item");
+  });
+
   it("help lists the new recovery clear command", async () => {
     const result = await run(["--help"]);
     expect(result.code).toBe(0);

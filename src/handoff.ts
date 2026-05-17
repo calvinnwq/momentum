@@ -636,7 +636,17 @@ function renderHandoffMarkdown(data: HandoffData): string {
       lines.push("- Policy notes: present (surfaced into iteration prompts as context only).");
     }
   }
-  lines.push("");
+  if (data.sourceItems.length > 0) {
+    lines.push("## Source items");
+    for (const item of data.sourceItems) {
+      lines.push(
+        `- ${item.adapterKind}/${item.externalKey ?? item.externalId}: ` +
+        `${item.title}${item.status ? ` (${item.status})` : ""} ` +
+        `observed ${item.lastObservedAt}`
+      );
+    }
+    lines.push("");
+  }
 
   lines.push("## Artifacts");
   lines.push(`- Data dir: ${data.goal.dataDir}`);
