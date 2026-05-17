@@ -439,6 +439,15 @@ function parseApprovalFile(
 
   const approvedAt = stringField(approval, "approvedAt");
   const occurredAt = approvedAt ? parseIsoTimestamp(approvedAt) : null;
+  if (approvedAt && occurredAt === null) {
+    diagnostics.push({
+      code: "evidence_format_invalid",
+      path: filePath,
+      reason: "approval_invalid_timestamp",
+      detail: approvedAt
+    });
+    return;
+  }
   const effectiveOccurredAt = occurredAt ?? (stat ? Math.floor(stat.mtimeMs) : 0);
 
   sources.push({ kind: "approval", path: filePath, runId });

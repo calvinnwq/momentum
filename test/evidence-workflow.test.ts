@@ -342,6 +342,29 @@ describe("parseWorkflowArtifact", () => {
     );
   });
 
+  it("reports evidence_format_invalid for invalid approval timestamps", () => {
+    const root = makeTempDir();
+    const runDir = path.join(root, "cwfp-approval-invalid-ts");
+    const approvalPath = path.join(runDir, "approval-through-merge-cleanup.json");
+    writeJsonFile(approvalPath, {
+      runId: "cwfp-approval-invalid-ts",
+      schemaVersion: 1,
+      boundary: "through-merge-cleanup",
+      approvedAt: "not-a-date"
+    });
+
+    const result = parseWorkflowArtifact(approvalPath);
+    expect(result.records).toEqual([]);
+    expect(result.diagnostics).toEqual([
+      {
+        code: "evidence_format_invalid",
+        path: approvalPath,
+        reason: "approval_invalid_timestamp",
+        detail: "not-a-date"
+      }
+    ]);
+  });
+
   it("propagates goalId and sourceItemId options onto every emitted record", () => {
     const root = makeTempDir();
     const runDir = path.join(root, "cwfp-link");
