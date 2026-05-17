@@ -413,6 +413,8 @@ momentum project status [--source <adapter>] [--project <id-or-name>] [--milesto
 
 Computes the NGX-292 project rollup from local SQLite state only; it does not call source adapters or external APIs. `--source` filters by adapter kind, while `--project` and `--milestone` match either the `id` or `name` stored in SourceItem metadata. `--stale-threshold-hours` controls when a last reconciliation run is reported as stale (default 24 hours). JSON output includes `counts`, `sourceItems`, `mismatches`, `reconciliationWarnings`, `pendingUpdateIntents`, and `nextAction`; source item and mismatch lists are truncated to the first 20 entries with total/truncated flags. Text output prints the active filters, count summaries, reconciliation warnings, top source items, mismatches, and next action. `pendingUpdateIntents` is a stable empty/zero placeholder until NGX-293 lands.
 
+The rollup exposes stable operator-facing taxonomy values. `mismatches[].kind` is one of `source_done_goal_not_terminal`, `goal_done_source_not_done`, `evidence_missing_after_completion`, or `manual_recovery_required`. `reconciliationWarnings[].reason` is one of `never_run`, `stale`, or `last_failed`. `nextAction.kind` is one of `manual_recovery_required`, `reconcile_failed`, `reconcile_stale_source`, `address_mismatch`, `missing_evidence`, or `no_action_required`; `nextAction.detail` carries the matching goal IDs, adapter kind, reconciliation reason, error, or mismatch kind when applicable.
+
 ### `evidence ingest`
 
 ```text
