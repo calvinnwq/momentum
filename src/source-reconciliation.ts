@@ -3,7 +3,8 @@
  *
  * This module composes:
  *   - the read-only Linear `SourceAdapter` (normalization boundary), and
- *   - the durable `source_items` / `source_reconciliation_runs` storage
+ *   - the durable `source_items` / `source_snapshots` /
+ *     `source_reconciliation_runs` storage
  *
  * into a deterministic, single-process orchestrator that drains a paginated
  * Linear client into SourceItem records and records a single
@@ -18,7 +19,7 @@
  *     successfully observed items.
  *   - Dry-run still records a `source_reconciliation_runs` row so operators
  *     have an audit trail of what was planned, but it never writes
- *     `source_items` and never mutates existing item rows.
+ *     `source_items` / `source_snapshots` and never mutates existing item rows.
  *   - Item classification (created / updated / skipped / errored) is derived
  *     by inspecting the existing row before each upsert; the orchestrator is
  *     single-process and there is no in-orchestrator race to worry about.
