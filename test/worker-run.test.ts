@@ -20,6 +20,10 @@ import {
 } from "../src/queue-jobs.js";
 import { runWorkerOnce } from "../src/worker-run.js";
 import * as goalReducerModule from "../src/goal-reducer.js";
+import {
+  recordSourceSnapshot,
+  upsertSourceItem
+} from "../src/source-items.js";
 
 const GOAL_SPEC = makeGoalSpec("true");
 
@@ -374,6 +378,66 @@ describe("runWorkerOnce", () => {
         "job.claimed",
         "job.released"
       ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("fails and releases the lock when linked source context is malformed", () => {
+    const dataDir = makeTempDir("momentum-worker-run-source-context-fail-");
+    const repo = initRepo();
+    const seed = seedQueuedGoal(dataDir, repo);
+
+    const db = openDb(seed.dataDir);
+    try {
+      const sourceItem = upsertSourceItem(db, {
+        adapterKind: "linear",
+        externalId: "issue-source-context-fail",
+        externalKey: "NGX-SOURCE",
+        title: "Malformed source context",
+        observedAt: 1,
+        goalId: seed.goalId
+      });
+      const snapshot = recordSourceSnapshot(db, {
+        sourceItemId: sourceItem.id,
+        adapterKind: sourceItem.adapterKind,
+        externalId: sourceItem.externalId,
+        observedAt: 1,
+        snapshot: { description: "valid before corruption" }
+      });
+      db.prepare("UPDATE source_snapshots SET snapshot_json = ? WHERE id = ?").run(
+        "{not-json",
+        snapshot.id
+      );
+
+      const out = runWorkerOnce({
+        db,
+        dataDir: seed.dataDir,
+        workerId: "worker-source-context-fail"
+      });
+
+      expect(out.code).toBe("ran_job");
+      if (out.code !== "ran_job") return;
+      expect(out.jobIterationResult.ok).toBe(false);
+      if (out.jobIterationResult.ok) return;
+      expect(out.jobIterationResult.iteration.code).toBe("unexpected_error");
+      expect(out.jobIterationResult.iteration.error).toContain(
+        "executeIterationJob failed unexpectedly"
+      );
+
+      const job = getQueueJob(db, seed.jobId);
+      expect(job?.state).toBe("failed");
+      expect(job?.error).toContain("unexpected_error");
+
+      const lock = db
+        .prepare(
+          "SELECT state, recovery_status FROM repo_locks WHERE job_id = ? ORDER BY acquired_at DESC LIMIT 1"
+        )
+        .get(seed.jobId) as { state: string; recovery_status: string };
+      expect(lock).toMatchObject({
+        state: "released",
+        recovery_status: "iteration_failure"
+      });
     } finally {
       db.close();
     }

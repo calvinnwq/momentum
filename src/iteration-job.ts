@@ -82,10 +82,9 @@ export function executeIterationJob(
     runner: spec.runner
   });
 
-  const iterationSourceContext = buildIterationSourceContext(db, goalId);
-
   let result: ForegroundIterationSuccess | ForegroundIterationError;
   try {
+    const iterationSourceContext = buildIterationSourceContext(db, goalId);
     result = runForegroundIteration({
       goalId,
       spec,
@@ -98,7 +97,7 @@ export function executeIterationJob(
     const synthetic: ForegroundIterationError = {
       ok: false,
       code: "unexpected_error",
-      error: `runForegroundIteration threw unexpectedly: ${detail}`
+      error: `executeIterationJob failed unexpectedly: ${detail}`
     };
     result = synthetic;
   }
