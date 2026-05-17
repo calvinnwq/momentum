@@ -6,7 +6,12 @@
  * not perform external writes, and do not own repo safety decisions.
  */
 
-export const BUILTIN_SOURCE_ADAPTER_KINDS = ["local-fixture"] as const;
+import { buildLinearSourceAdapter } from "./linear-source-adapter.js";
+
+export const BUILTIN_SOURCE_ADAPTER_KINDS = [
+  "local-fixture",
+  "linear"
+] as const;
 
 export type BuiltinSourceAdapterKind =
   (typeof BUILTIN_SOURCE_ADAPTER_KINDS)[number];
@@ -15,7 +20,9 @@ export type SourceAdapterErrorCode =
   | "unsupported_source_adapter"
   | "source_adapter_threw"
   | "source_item_not_found"
-  | "source_item_invalid";
+  | "source_item_invalid"
+  | "source_auth_unavailable"
+  | "source_config_invalid";
 
 export type SourceAdapterItem = {
   externalId: string;
@@ -31,6 +38,7 @@ export type SourceAdapterClient = {
   fixtures?: {
     items?: readonly SourceAdapterItem[];
   };
+  [adapterKind: string]: unknown;
 };
 
 export type SourceAdapterListInput = {
@@ -84,7 +92,10 @@ export type SourceAdapterDispatchOptions = {
 };
 
 const SOURCE_ADAPTERS: ReadonlyMap<BuiltinSourceAdapterKind, SourceAdapter> =
-  new Map([["local-fixture", buildLocalFixtureAdapter()]]);
+  new Map<BuiltinSourceAdapterKind, SourceAdapter>([
+    ["local-fixture", buildLocalFixtureAdapter()],
+    ["linear", buildLinearSourceAdapter()]
+  ]);
 
 export function listSourceAdapterKinds(): readonly BuiltinSourceAdapterKind[] {
   return BUILTIN_SOURCE_ADAPTER_KINDS;
