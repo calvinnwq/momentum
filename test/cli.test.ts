@@ -110,7 +110,7 @@ describe("momentum CLI scaffold", () => {
 
     expect(result.code).toBe(0);
     expect(result.stdout).toContain(
-      "momentum goal start <goal.md> [--repo <path>] [--foreground] [--runner <profile>] [--data-dir <path>] [--json]"
+      "momentum goal start <goal.md> [--repo <path>] [--foreground] [--runner <profile>] [--from-source <source-item-id>] [--data-dir <path>] [--json]"
     );
     expect(result.stdout).toContain("momentum status [goal-id] [--data-dir <path>] [--json]");
     expect(result.stdout).toContain(
@@ -3952,6 +3952,423 @@ describe("momentum recovery clear", () => {
     expect(statusResult.stdout).toContain("Source items: 1");
     expect(statusResult.stdout).toContain("[local-fixture] SRC-STATUS-1");
     expect(statusResult.stdout).toContain("Status source item");
+  });
+
+  it("source link is idempotent and surfaces previous/current goal ids", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+
+    const startResult = await run([
+      "goal", "start", goalFile,
+      "--foreground",
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    const startPayload = JSON.parse(startResult.stdout) as Record<string, unknown>;
+    const goalId = startPayload["goalId"] as string;
+
+    const { openDb } = await import("../src/db.js");
+    const { upsertSourceItem } = await import("../src/source-items.js");
+    const db = openDb(dataDir);
+    let sourceItemId: string;
+    try {
+      const item = upsertSourceItem(
+        db,
+        {
+          adapterKind: "local-fixture",
+          externalId: "fixture-link-1",
+          externalKey: "SRC-LINK-1",
+          title: "Linkable source item",
+          status: "Todo",
+          observedAt: 1_700_000_000_000
+        },
+        { now: () => 1_700_000_000_100 }
+      );
+      sourceItemId = item.id;
+    } finally {
+      db.close();
+    }
+
+    const firstLink = await run([
+      "source", "link", sourceItemId,
+      "--goal", goalId,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(firstLink.code).toBe(0);
+    const firstPayload = JSON.parse(firstLink.stdout) as Record<string, unknown>;
+    expect(firstPayload).toMatchObject({
+      ok: true,
+      command: "source link",
+      goalId,
+      sourceItemId,
+      changed: true,
+      previousGoalId: null,
+      skippedReason: null
+    });
+
+    const secondLink = await run([
+      "source", "link", sourceItemId,
+      "--goal", goalId,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(secondLink.code).toBe(0);
+    const secondPayload = JSON.parse(secondLink.stdout) as Record<string, unknown>;
+    expect(secondPayload).toMatchObject({
+      ok: true,
+      command: "source link",
+      goalId,
+      sourceItemId,
+      changed: false,
+      skippedReason: "already_linked_to_target",
+      previousGoalId: goalId
+    });
+  });
+
+  it("source link returns goal_not_found, source_item_not_found, and linked_to_other_goal errors", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+
+    const startA = await run([
+      "goal", "start", goalFile,
+      "--foreground",
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    const goalAId = (JSON.parse(startA.stdout) as Record<string, unknown>)["goalId"] as string;
+
+    const { openDb } = await import("../src/db.js");
+    const { upsertSourceItem } = await import("../src/source-items.js");
+    const db = openDb(dataDir);
+    const goalBId = "goal-b-link-target";
+    let sourceItemId: string;
+    try {
+      db.prepare(
+        `INSERT INTO goals
+           (id, title, branch, artifact_dir, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).run(goalBId, "Goal B", "momentum/goal-b", "/tmp/goal-b", 1, 1);
+      const item = upsertSourceItem(
+        db,
+        {
+          adapterKind: "local-fixture",
+          externalId: "fixture-link-errors-1",
+          externalKey: "SRC-LINK-ERR-1",
+          title: "Link errors source item",
+          status: "Todo",
+          observedAt: 1_700_000_000_000
+        },
+        { now: () => 1_700_000_000_100 }
+      );
+      sourceItemId = item.id;
+    } finally {
+      db.close();
+    }
+
+    const missingGoal = await run([
+      "source", "link", sourceItemId,
+      "--goal", "goal-missing",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(missingGoal.code).toBe(1);
+    const missingGoalPayload = JSON.parse(missingGoal.stderr) as Record<string, unknown>;
+    expect(missingGoalPayload).toMatchObject({
+      ok: false,
+      command: "source link",
+      code: "goal_not_found",
+      goalId: "goal-missing",
+      sourceItemId
+    });
+
+    const missingItem = await run([
+      "source", "link", "source_item_missing",
+      "--goal", goalAId,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(missingItem.code).toBe(1);
+    const missingItemPayload = JSON.parse(missingItem.stderr) as Record<string, unknown>;
+    expect(missingItemPayload).toMatchObject({
+      ok: false,
+      command: "source link",
+      code: "source_item_not_found",
+      sourceItemId: "source_item_missing",
+      goalId: goalAId
+    });
+
+    const linkA = await run([
+      "source", "link", sourceItemId,
+      "--goal", goalAId,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(linkA.code).toBe(0);
+
+    const collision = await run([
+      "source", "link", sourceItemId,
+      "--goal", goalBId,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(collision.code).toBe(1);
+    const collisionPayload = JSON.parse(collision.stderr) as Record<string, unknown>;
+    expect(collisionPayload).toMatchObject({
+      ok: false,
+      command: "source link",
+      code: "linked_to_other_goal",
+      sourceItemId,
+      goalId: goalBId,
+      currentGoalId: goalAId
+    });
+  });
+
+  it("source unlink clears the link idempotently and surfaces source_item_not_found", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+
+    const startResult = await run([
+      "goal", "start", goalFile,
+      "--foreground",
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    const goalId = (JSON.parse(startResult.stdout) as Record<string, unknown>)["goalId"] as string;
+
+    const { openDb } = await import("../src/db.js");
+    const { upsertSourceItem } = await import("../src/source-items.js");
+    const db = openDb(dataDir);
+    let sourceItemId: string;
+    try {
+      const item = upsertSourceItem(
+        db,
+        {
+          adapterKind: "local-fixture",
+          externalId: "fixture-unlink-1",
+          externalKey: "SRC-UNLINK-1",
+          title: "Unlinkable source item",
+          status: "Todo",
+          observedAt: 1_700_000_000_000,
+          goalId
+        },
+        { now: () => 1_700_000_000_100 }
+      );
+      sourceItemId = item.id;
+    } finally {
+      db.close();
+    }
+
+    const firstUnlink = await run([
+      "source", "unlink", sourceItemId,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(firstUnlink.code).toBe(0);
+    const firstPayload = JSON.parse(firstUnlink.stdout) as Record<string, unknown>;
+    expect(firstPayload).toMatchObject({
+      ok: true,
+      command: "source unlink",
+      sourceItemId,
+      changed: true,
+      previousGoalId: goalId
+    });
+
+    const secondUnlink = await run([
+      "source", "unlink", sourceItemId,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(secondUnlink.code).toBe(0);
+    const secondPayload = JSON.parse(secondUnlink.stdout) as Record<string, unknown>;
+    expect(secondPayload).toMatchObject({
+      ok: true,
+      command: "source unlink",
+      sourceItemId,
+      changed: false,
+      previousGoalId: null
+    });
+
+    const missing = await run([
+      "source", "unlink", "source_item_missing",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(missing.code).toBe(1);
+    const missingPayload = JSON.parse(missing.stderr) as Record<string, unknown>;
+    expect(missingPayload).toMatchObject({
+      ok: false,
+      command: "source unlink",
+      code: "source_item_not_found",
+      sourceItemId: "source_item_missing"
+    });
+  });
+
+  it("goal start --from-source links the goal at init time and surfaces linkedSourceItem", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+
+    const { openDb } = await import("../src/db.js");
+    const { upsertSourceItem } = await import("../src/source-items.js");
+    const db = openDb(dataDir);
+    let sourceItemId: string;
+    try {
+      const item = upsertSourceItem(
+        db,
+        {
+          adapterKind: "local-fixture",
+          externalId: "fixture-from-source-1",
+          externalKey: "SRC-FROM-1",
+          url: "https://example.test/source/SRC-FROM-1",
+          title: "Init-from-source item",
+          status: "In Progress",
+          observedAt: 1_700_000_000_000
+        },
+        { now: () => 1_700_000_000_100 }
+      );
+      sourceItemId = item.id;
+    } finally {
+      db.close();
+    }
+
+    const startResult = await run([
+      "goal", "start", goalFile,
+      "--foreground",
+      "--repo", repo,
+      "--from-source", sourceItemId,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(startResult.code).toBe(0);
+    const payload = JSON.parse(startResult.stdout) as Record<string, unknown>;
+    expect(payload["linkedSourceItem"]).toMatchObject({
+      id: sourceItemId,
+      adapterKind: "local-fixture",
+      externalId: "fixture-from-source-1",
+      externalKey: "SRC-FROM-1",
+      url: "https://example.test/source/SRC-FROM-1",
+      title: "Init-from-source item",
+      status: "In Progress",
+      lastObservedAt: 1_700_000_000_000
+    });
+
+    const goalId = payload["goalId"] as string;
+    const verifyDb = openDb(dataDir);
+    const { listSourceItemSummariesForGoal } = await import("../src/source-items.js");
+    try {
+      const linked = listSourceItemSummariesForGoal(verifyDb, goalId);
+      expect(linked).toHaveLength(1);
+      expect(linked[0]?.id).toBe(sourceItemId);
+    } finally {
+      verifyDb.close();
+    }
+  });
+
+  it("goal start --from-source surfaces source_item_not_found when the source id is unknown", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+
+    const result = await run([
+      "goal", "start", goalFile,
+      "--foreground",
+      "--repo", repo,
+      "--from-source", "source_item_missing",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "goal start",
+      code: "source_item_not_found"
+    });
+
+    const { openDb } = await import("../src/db.js");
+    const db = openDb(dataDir);
+    try {
+      const goalCount = db
+        .prepare("SELECT COUNT(*) AS count FROM goals")
+        .get() as { count: number };
+      expect(goalCount.count).toBe(0);
+    } finally {
+      db.close();
+    }
+    const goalsDir = path.join(dataDir, "goals");
+    expect(fs.existsSync(goalsDir) ? fs.readdirSync(goalsDir) : []).toEqual([]);
+  });
+
+  it("goal start --from-source does not persist a partial goal when the source is already linked", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+
+    const { openDb } = await import("../src/db.js");
+    const { upsertSourceItem } = await import("../src/source-items.js");
+    const db = openDb(dataDir);
+    let sourceItemId: string;
+    try {
+      db.prepare(
+        `INSERT INTO goals
+           (id, title, branch, artifact_dir, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).run("goal-existing", "Existing", "momentum/existing", "/tmp/existing", 1, 1);
+      const item = upsertSourceItem(db, {
+        adapterKind: "local-fixture",
+        externalId: "fixture-from-source-linked",
+        externalKey: "SRC-LINKED",
+        title: "Already linked item",
+        observedAt: 1_700_000_000_000,
+        goalId: "goal-existing"
+      });
+      sourceItemId = item.id;
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "goal", "start", goalFile,
+      "--foreground",
+      "--repo", repo,
+      "--from-source", sourceItemId,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "goal start",
+      code: "linked_to_other_goal"
+    });
+
+    const verifyDb = openDb(dataDir);
+    try {
+      const goalCount = verifyDb
+        .prepare("SELECT COUNT(*) AS count FROM goals")
+        .get() as { count: number };
+      expect(goalCount.count).toBe(1);
+    } finally {
+      verifyDb.close();
+    }
+    const goalsDir = path.join(dataDir, "goals");
+    expect(fs.existsSync(goalsDir) ? fs.readdirSync(goalsDir) : []).toEqual([]);
+  });
+
+  it("goal start without --from-source returns linkedSourceItem: null and omits Source context in the prompt", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+
+    const startResult = await run([
+      "goal", "start", goalFile,
+      "--foreground",
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(startResult.code).toBe(0);
+    const payload = JSON.parse(startResult.stdout) as Record<string, unknown>;
+    expect(payload["linkedSourceItem"]).toBeNull();
+
+    const artifactDir = payload["artifactDir"] as string;
+    const promptPath = path.join(artifactDir, "iterations", "1", "prompt.md");
+    const promptContent = fs.readFileSync(promptPath, "utf-8");
+    expect(promptContent).not.toContain("## Source context");
   });
 
   it("help lists the new recovery clear command", async () => {

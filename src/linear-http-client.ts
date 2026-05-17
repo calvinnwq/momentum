@@ -60,6 +60,7 @@ query MomentumLinearIssues($filter: IssueFilter, $first: Int!, $after: String) {
       id
       identifier
       title
+      description
       url
       updatedAt
       priority

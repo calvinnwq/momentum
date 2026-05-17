@@ -9,6 +9,10 @@ import { resolveDataDir, type DataDirOptions } from "./data-dir.js";
 import { openDb, type MomentumDb } from "./db.js";
 import { getGoal, type GoalRow } from "./goal-init.js";
 import { parseRunnerResult } from "./runner-result.js";
+import {
+  listSourceItemSummariesForGoal,
+  type SourceItemSummary
+} from "./source-items.js";
 
 export type GoalLogsErrorCode =
   | "invalid_input"
@@ -45,6 +49,7 @@ export type GoalLogsSuccess = {
   runnerLog: GoalLogFile;
   verificationLog: GoalLogFile;
   resultJson: GoalLogFile;
+  sourceItems: SourceItemSummary[];
 };
 
 export type GoalLogsResult = GoalLogsError | GoalLogsSuccess;
@@ -141,7 +146,8 @@ export function loadGoalLogs(input: LoadGoalLogsInput = {}): GoalLogsResult {
       artifactPaths,
       runnerLog: readLogFile(artifactPaths.runnerLog),
       verificationLog: readLogFile(artifactPaths.verificationLog),
-      resultJson: readResultJsonFile(artifactPaths.resultJson)
+      resultJson: readResultJsonFile(artifactPaths.resultJson),
+      sourceItems: listSourceItemSummariesForGoal(db, goal.id)
     };
   } finally {
     db?.close();

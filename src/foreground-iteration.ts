@@ -9,7 +9,10 @@ import {
   finalizeIteration,
   type FinalizeIterationResult
 } from "./iteration-finalize.js";
-import { renderIterationPrompt } from "./iteration-prompt.js";
+import {
+  renderIterationPrompt,
+  type IterationPromptSourceContext
+} from "./iteration-prompt.js";
 import { loadMomentumPolicy } from "./momentum-policy.js";
 import { inspectRepo } from "./repo-guard.js";
 import {
@@ -92,12 +95,15 @@ export type ForegroundIterationInput = {
   spec: GoalSpec;
   iteration: number;
   artifactPaths: GoalArtifactPaths;
+  sourceContext?: IterationPromptSourceContext | null;
+  sourceContextMaxChars?: number;
 };
 
 export function runForegroundIteration(
   input: ForegroundIterationInput
 ): ForegroundIterationResult {
-  const { goalId, spec, iteration, artifactPaths } = input;
+  const { goalId, spec, iteration, artifactPaths, sourceContext, sourceContextMaxChars } =
+    input;
 
   if (typeof goalId !== "string" || goalId.trim().length === 0) {
     return { ok: false, code: "invalid_input", error: "goalId is required." };
@@ -175,7 +181,9 @@ export function runForegroundIteration(
     repoPath: guard.repoPath,
     baseHead,
     policyNotes,
-    ...(policyPath !== undefined ? { policyPath } : {})
+    ...(policyPath !== undefined ? { policyPath } : {}),
+    ...(sourceContext ? { sourceContext } : {}),
+    ...(sourceContextMaxChars !== undefined ? { sourceContextMaxChars } : {})
   });
   try {
     fs.writeFileSync(artifactPaths.promptMd, promptText, "utf-8");

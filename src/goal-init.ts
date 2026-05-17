@@ -28,6 +28,12 @@ import {
   type MomentumPolicyErrorCode,
   type PolicyEffectiveSource
 } from "./momentum-policy.js";
+import {
+  getSourceItemById,
+  linkGoalToSourceItem,
+  type LinkGoalToSourceItemErrorCode,
+  type SourceItemSummary
+} from "./source-items.js";
 
 export type GoalInitMode = "foreground" | "queued";
 
@@ -37,12 +43,14 @@ export type GoalInitOptions = {
   runnerOverride?: string;
   dataDirOptions?: DataDirOptions;
   mode?: GoalInitMode;
+  linkSourceItemId?: string;
 };
 
 export type GoalInitErrorCode =
   | "parse_error"
   | RunnerProfileErrorCode
   | MomentumPolicyErrorCode
+  | LinkGoalToSourceItemErrorCode
   | "init_failed";
 export type GoalInitError = {
   ok: false;
@@ -83,6 +91,7 @@ export type GoalInitSuccess = {
   resumed: boolean;
   enqueueCreated: boolean;
   policy: GoalInitPolicySummary;
+  linkedSourceItem: SourceItemSummary | null;
 };
 export type GoalInitResult = GoalInitError | GoalInitSuccess;
 
@@ -189,6 +198,11 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
     );
     if (existingGoal) {
       const artifactPaths = resolveGoalArtifactPaths(dataDir, existingGoal.id);
+      const linkResult = applySourceItemLink(db, existingGoal.id, options.linkSourceItemId);
+      if (!linkResult.ok) {
+        return linkResult.error;
+      }
+      const linkedSourceItem = linkResult.summary;
       if (mode === "foreground") {
         const jobId = ensureInitialForegroundJob(
           db,
@@ -211,7 +225,8 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
           artifactPaths,
           resumed: true,
           enqueueCreated: false,
-          policy: policySummary
+          policy: policySummary,
+          linkedSourceItem
         };
       }
       const idempotencyKey = buildIterationIdempotencyKey(existingGoal.id, 1);
@@ -237,42 +252,94 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
         artifactPaths,
         resumed: true,
         enqueueCreated: enqueue.created,
-        policy: policySummary
+        policy: policySummary,
+        linkedSourceItem
       };
     }
 
     const goalId = crypto.randomUUID();
     const now = Date.now();
+    const sourcePreflight = preflightNewGoalSourceItemLink(
+      db,
+      options.linkSourceItemId
+    );
+    if (!sourcePreflight.ok) {
+      return sourcePreflight.error;
+    }
     const artifactPaths = initGoalArtifacts(dataDir, goalId, rawContent);
 
     const goalState = mode === "foreground" ? "initialized" : "queued";
-    db.prepare(
-      `INSERT INTO goals
-         (id, title, repo, runner, branch, max_iterations, verification,
-          verification_timeout_sec, state, artifact_dir, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      goalId,
-      spec.title,
-      spec.repo ?? null,
-      spec.runner,
-      spec.branch,
-      spec.max_iterations,
-      JSON.stringify(spec.verification),
-      spec.verification_timeout_sec,
-      goalState,
-      artifactPaths.goalDir,
-      now,
-      now
-    );
 
-    if (mode === "foreground") {
-      const jobId = createForegroundJob(
-        db,
+    let linkedSourceItem: SourceItemSummary | null;
+    let jobId: string;
+    let idempotencyKey: string | null = null;
+    let enqueueCreated = false;
+    let queuedJobState: QueueJobState = "pending";
+
+    let transactionOpen = false;
+    try {
+      db.exec("BEGIN IMMEDIATE");
+      transactionOpen = true;
+      db.prepare(
+        `INSERT INTO goals
+           (id, title, repo, runner, branch, max_iterations, verification,
+            verification_timeout_sec, state, artifact_dir, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
         goalId,
-        artifactPaths.iterationDir,
+        spec.title,
+        spec.repo ?? null,
+        spec.runner,
+        spec.branch,
+        spec.max_iterations,
+        JSON.stringify(spec.verification),
+        spec.verification_timeout_sec,
+        goalState,
+        artifactPaths.goalDir,
+        now,
         now
       );
+
+      const linkResult = applySourceItemLink(db, goalId, options.linkSourceItemId);
+      if (!linkResult.ok) {
+        db.exec("ROLLBACK");
+        transactionOpen = false;
+        cleanupGoalArtifacts(artifactPaths.goalDir);
+        return linkResult.error;
+      }
+      linkedSourceItem = linkResult.summary;
+
+      if (mode === "foreground") {
+        jobId = createForegroundJob(
+          db,
+          goalId,
+          artifactPaths.iterationDir,
+          now
+        );
+      } else {
+        idempotencyKey = buildIterationIdempotencyKey(goalId, 1);
+        const enqueue = enqueueGoalIterationJob(db, {
+          goalId,
+          iteration: 1,
+          idempotencyKey,
+          artifactPath: artifactPaths.iterationDir,
+          now
+        });
+        jobId = enqueue.jobId;
+        queuedJobState = enqueue.jobState;
+        enqueueCreated = enqueue.created;
+      }
+      db.exec("COMMIT");
+      transactionOpen = false;
+    } catch (error) {
+      if (transactionOpen) {
+        db.exec("ROLLBACK");
+      }
+      cleanupGoalArtifacts(artifactPaths.goalDir);
+      throw error;
+    }
+
+    if (mode === "foreground") {
       return {
         ok: true,
         goalId,
@@ -289,24 +356,17 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
         artifactPaths,
         resumed: false,
         enqueueCreated: false,
-        policy: policySummary
+        policy: policySummary,
+        linkedSourceItem
       };
     }
 
-    const idempotencyKey = buildIterationIdempotencyKey(goalId, 1);
-    const enqueue = enqueueGoalIterationJob(db, {
-      goalId,
-      iteration: 1,
-      idempotencyKey,
-      artifactPath: artifactPaths.iterationDir,
-      now
-    });
     return {
       ok: true,
       goalId,
-      jobId: enqueue.jobId,
+      jobId,
       jobType: GOAL_ITERATION_JOB_TYPE,
-      jobState: enqueue.jobState,
+      jobState: queuedJobState,
       goalState: "queued",
       iteration: 1,
       idempotencyKey,
@@ -316,14 +376,88 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
       dataDir,
       artifactPaths,
       resumed: false,
-      enqueueCreated: enqueue.created,
-      policy: policySummary
+      enqueueCreated,
+      policy: policySummary,
+      linkedSourceItem
     };
   } catch (error) {
     return { ok: false, code: "init_failed", error: formatInitError(error) };
   } finally {
     db?.close();
   }
+}
+
+function preflightNewGoalSourceItemLink(
+  db: MomentumDb,
+  sourceItemId: string | undefined
+):
+  | { ok: true }
+  | { ok: false; error: GoalInitError } {
+  if (sourceItemId === undefined) {
+    return { ok: true };
+  }
+  const sourceItem = getSourceItemById(db, sourceItemId);
+  if (!sourceItem) {
+    return {
+      ok: false,
+      error: {
+        ok: false,
+        code: "source_item_not_found",
+        error: `Source item not found: ${sourceItemId}`
+      }
+    };
+  }
+  if (sourceItem.goalId !== null) {
+    return {
+      ok: false,
+      error: {
+        ok: false,
+        code: "linked_to_other_goal",
+        error: `Source item ${sourceItemId} is already linked to goal ${sourceItem.goalId}. Unlink it first.`
+      }
+    };
+  }
+  return { ok: true };
+}
+
+function applySourceItemLink(
+  db: MomentumDb,
+  goalId: string,
+  sourceItemId: string | undefined
+):
+  | { ok: true; summary: SourceItemSummary | null }
+  | { ok: false; error: GoalInitError } {
+  if (sourceItemId === undefined) {
+    return { ok: true, summary: null };
+  }
+  const linkResult = linkGoalToSourceItem(db, { goalId, sourceItemId });
+  if (!linkResult.ok) {
+    return {
+      ok: false,
+      error: {
+        ok: false,
+        code: linkResult.code,
+        error: linkResult.message
+      }
+    };
+  }
+  return {
+    ok: true,
+    summary: {
+      id: linkResult.sourceItem.id,
+      adapterKind: linkResult.sourceItem.adapterKind,
+      externalId: linkResult.sourceItem.externalId,
+      externalKey: linkResult.sourceItem.externalKey,
+      url: linkResult.sourceItem.url,
+      title: linkResult.sourceItem.title,
+      status: linkResult.sourceItem.status,
+      lastObservedAt: linkResult.sourceItem.lastObservedAt
+    }
+  };
+}
+
+function cleanupGoalArtifacts(goalDir: string): void {
+  fs.rmSync(goalDir, { recursive: true, force: true });
 }
 
 export type GoalRow = {
