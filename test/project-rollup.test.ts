@@ -667,6 +667,36 @@ describe("buildProjectRollup", () => {
     }
   });
 
+  it("ignores successful dry-run reconciliations when checking freshness", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedSourceItem(db, { externalId: "issue-dry-run" });
+      const run = startSourceReconciliationRun(
+        db,
+        { adapterKind: "linear", metadata: { dryRun: true } },
+        { now: () => 1_000 }
+      );
+      finishSourceReconciliationRun(
+        db,
+        {
+          runId: run.id,
+          state: "succeeded",
+          itemsSeen: 1,
+          itemsUpserted: 0
+        },
+        { now: () => 2_000 }
+      );
+
+      const rollup = buildProjectRollup(db, { now: 3_000 });
+      expect(rollup.reconciliationWarnings).toMatchObject([
+        { adapterKind: "linear", reason: "never_run" }
+      ]);
+      expect(rollup.nextAction.kind).toBe("reconcile_stale_source");
+    } finally {
+      db.close();
+    }
+  });
+
   it("truncates large source item lists to the bounded limit with deterministic ordering", () => {
     const db = openDb(makeTempDir());
     try {

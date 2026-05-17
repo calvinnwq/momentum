@@ -647,6 +647,7 @@ function runCoversFilteredRollup(
   rollupFilters: ProjectRollupFilters,
   items: readonly SourceItem[]
 ): boolean {
+  if (run.metadata["dryRun"] === true) return false;
   const filters = readNested(run.metadata, "filters");
   if (filters === null || !filtersHaveScope(filters)) return true;
   if (!rollupFiltersHaveScope(rollupFilters)) return false;
