@@ -92,7 +92,7 @@ export type ProjectRollupReconciliationWarningReason =
 
 export type ProjectRollupReconciliationWarning = {
   adapterKind: string;
-  lastRunState: "succeeded" | "failed" | null;
+  lastRunState: "running" | "succeeded" | "failed" | null;
   lastRunFinishedAt: number | null;
   ageMs: number | null;
   reason: ProjectRollupReconciliationWarningReason;
@@ -174,8 +174,8 @@ export function buildProjectRollup(
 
   const linkedGoalIds = collectLinkedGoalIds(items);
   const goals = linkedGoalIds.size === 0 ? new Map<string, GoalSnapshot>() : loadGoalSnapshots(db, linkedGoalIds);
-  const goalsWithEvidence = goals.size === 0 ? new Set<string>() : loadGoalsWithEvidence(db, goals);
-  const evidenceTotal = goals.size === 0 ? 0 : countEvidenceRecordsForGoals(db, goals);
+  const goalsWithEvidence = goals.size === 0 ? new Set<string>() : loadGoalsWithEvidence(db, goals, items);
+  const evidenceTotal = goals.size === 0 ? 0 : countEvidenceRecordsForGoals(db, goals, items);
 
   const summaries = buildSourceItemSummaries(items, goals);
   const mismatches = buildMismatches(items, goals, goalsWithEvidence);
@@ -308,36 +308,80 @@ function loadGoalSnapshots(
 
 function loadGoalsWithEvidence(
   db: MomentumDb,
-  goals: Map<string, GoalSnapshot>
+  goals: Map<string, GoalSnapshot>,
+  items: readonly SourceItem[]
 ): Set<string> {
   if (goals.size === 0) return new Set();
-  const ids = [...goals.keys()];
-  const placeholders = ids.map(() => "?").join(", ");
+  const goalIds = [...goals.keys()];
+  const sourceItemGoalIds = collectLinkedSourceItemGoalIds(items, goals);
+  const sourceItemIds = [...sourceItemGoalIds.keys()];
+  const clauses: string[] = [];
+  const params: string[] = [];
+  if (goalIds.length > 0) {
+    clauses.push(`goal_id IN (${goalIds.map(() => "?").join(", ")})`);
+    params.push(...goalIds);
+  }
+  if (sourceItemIds.length > 0) {
+    clauses.push(`source_item_id IN (${sourceItemIds.map(() => "?").join(", ")})`);
+    params.push(...sourceItemIds);
+  }
   const rows = db
     .prepare(
-      `SELECT DISTINCT goal_id AS goal_id
+      `SELECT DISTINCT goal_id AS goal_id, source_item_id AS source_item_id
          FROM evidence_records
-        WHERE goal_id IN (${placeholders})`
+        WHERE ${clauses.join(" OR ")}`
     )
-    .all(...ids) as { goal_id: string }[];
-  return new Set(rows.map((row) => row.goal_id));
+    .all(...params) as { goal_id: string | null; source_item_id: string | null }[];
+  const ids = new Set<string>();
+  for (const row of rows) {
+    if (row.goal_id !== null && goals.has(row.goal_id)) ids.add(row.goal_id);
+    if (row.source_item_id !== null) {
+      const linkedGoalId = sourceItemGoalIds.get(row.source_item_id);
+      if (linkedGoalId !== undefined) ids.add(linkedGoalId);
+    }
+  }
+  return ids;
 }
 
 function countEvidenceRecordsForGoals(
   db: MomentumDb,
-  goals: Map<string, GoalSnapshot>
+  goals: Map<string, GoalSnapshot>,
+  items: readonly SourceItem[]
 ): number {
   if (goals.size === 0) return 0;
-  const ids = [...goals.keys()];
-  const placeholders = ids.map(() => "?").join(", ");
+  const goalIds = [...goals.keys()];
+  const sourceItemIds = [...collectLinkedSourceItemGoalIds(items, goals).keys()];
+  const clauses: string[] = [];
+  const params: string[] = [];
+  if (goalIds.length > 0) {
+    clauses.push(`goal_id IN (${goalIds.map(() => "?").join(", ")})`);
+    params.push(...goalIds);
+  }
+  if (sourceItemIds.length > 0) {
+    clauses.push(`source_item_id IN (${sourceItemIds.map(() => "?").join(", ")})`);
+    params.push(...sourceItemIds);
+  }
   const row = db
     .prepare(
       `SELECT COUNT(*) AS total
          FROM evidence_records
-        WHERE goal_id IN (${placeholders})`
+        WHERE ${clauses.join(" OR ")}`
     )
-    .get(...ids) as { total: number } | undefined;
+    .get(...params) as { total: number } | undefined;
   return row?.total ?? 0;
+}
+
+function collectLinkedSourceItemGoalIds(
+  items: readonly SourceItem[],
+  goals: Map<string, GoalSnapshot>
+): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const item of items) {
+    if (item.goalId && goals.has(item.goalId)) {
+      map.set(item.id, item.goalId);
+    }
+  }
+  return map;
 }
 
 function buildSourceItemSummaries(
@@ -521,8 +565,7 @@ function buildReconciliationWarnings(
       (run) =>
         run.adapterKind === adapter && runCoversFilteredRollup(run, filters, items)
     );
-    const last = adapterRuns[adapterRuns.length - 1];
-    if (!last) {
+    if (adapterRuns.length === 0) {
       byAdapter.set(adapter, {
         adapterKind: adapter,
         lastRunState: null,
@@ -533,20 +576,45 @@ function buildReconciliationWarnings(
       });
       continue;
     }
-    if (last.state === "running") continue;
+    const last = selectReconciliationRunForWarning(adapterRuns, now, staleThresholdMs);
+    if (last === null) {
+      continue;
+    }
+    if (last === undefined) {
+      byAdapter.set(adapter, {
+        adapterKind: adapter,
+        lastRunState: null,
+        lastRunFinishedAt: null,
+        ageMs: null,
+        reason: "never_run",
+        error: null
+      });
+      continue;
+    }
     const lastTimestamp = last.finishedAt ?? last.startedAt;
+    const age = now - lastTimestamp;
+    if (last.state === "running") {
+      byAdapter.set(adapter, {
+        adapterKind: adapter,
+        lastRunState: "running",
+        lastRunFinishedAt: null,
+        ageMs: age,
+        reason: "stale",
+        error: null
+      });
+      continue;
+    }
     if (last.state === "failed") {
       byAdapter.set(adapter, {
         adapterKind: adapter,
         lastRunState: "failed",
         lastRunFinishedAt: last.finishedAt,
-        ageMs: now - lastTimestamp,
+        ageMs: age,
         reason: "last_failed",
         error: last.error
       });
       continue;
     }
-    const age = now - lastTimestamp;
     if (age > staleThresholdMs) {
       byAdapter.set(adapter, {
         adapterKind: adapter,
@@ -559,6 +627,19 @@ function buildReconciliationWarnings(
     }
   }
   return [...byAdapter.values()].sort((a, b) => (a.adapterKind < b.adapterKind ? -1 : 1));
+}
+
+function selectReconciliationRunForWarning(
+  runs: readonly SourceReconciliationRun[],
+  now: number,
+  staleThresholdMs: number
+): SourceReconciliationRun | null | undefined {
+  const last = runs.at(-1);
+  if (!last) return undefined;
+  if (last.state !== "running") return last;
+  const age = now - last.startedAt;
+  if (age <= staleThresholdMs) return null;
+  return runs.slice(0, -1).reverse().find((run) => run.state !== "running") ?? last;
 }
 
 function runCoversFilteredRollup(
@@ -606,11 +687,19 @@ function itemDimensionCoveredByRun(
   const id = readString(runFilters, `${dimension}Id`);
   const name = readString(runFilters, `${dimension}Name`);
   if (id === null && name === null) return true;
-  return matchesIdOrNameFilter(
-    itemRecord,
-    id === null ? undefined : id,
-    name === null ? undefined : name
-  );
+  return matchesAnyIdOrNameValue(itemRecord, [id, name]);
+}
+
+function matchesAnyIdOrNameValue(
+  record: Record<string, unknown> | null,
+  values: readonly (string | null)[]
+): boolean {
+  const id = readString(record, "id");
+  const name = readString(record, "name");
+  for (const value of values) {
+    if (value !== null && (id === value || name === value)) return true;
+  }
+  return false;
 }
 
 function pickNextAction(

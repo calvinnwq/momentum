@@ -288,6 +288,36 @@ describe("buildProjectRollup", () => {
     }
   });
 
+  it("counts source-item-linked evidence for completed linked goals", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedGoal(db, { id: "goal-source-evidence", state: "completed" });
+      const sourceItemId = seedSourceItem(db, {
+        externalId: "issue-source-evidence",
+        status: "Done",
+        goalId: "goal-source-evidence"
+      });
+      ingestEvidenceRecord(db, {
+        source: "workflow",
+        type: "verification",
+        occurredAt: 1_500,
+        summary: "verification passed",
+        sourceItemId,
+        ingestKey: "ingest-source-evidence-1"
+      });
+
+      const rollup = buildProjectRollup(db, { now: 2_000_000 });
+      expect(
+        rollup.mismatches.filter((m) => m.kind === "evidence_missing_after_completion")
+      ).toEqual([]);
+      expect(rollup.counts.evidence.goalsWithEvidence).toBe(1);
+      expect(rollup.counts.evidence.goalsWithoutEvidence).toBe(0);
+      expect(rollup.counts.evidence.totalRecords).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
   it("flags manual recovery required goals as a mismatch and counts them", () => {
     const db = openDb(makeTempDir());
     try {
@@ -457,6 +487,64 @@ describe("buildProjectRollup", () => {
     }
   });
 
+  it("falls back past stale running reconciliation runs when checking freshness", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedSourceItem(db, { externalId: "issue-running-stale" });
+      const succeeded = startSourceReconciliationRun(
+        db,
+        { adapterKind: "linear" },
+        { now: () => 1_000 }
+      );
+      finishSourceReconciliationRun(
+        db,
+        {
+          runId: succeeded.id,
+          state: "succeeded",
+          itemsSeen: 1,
+          itemsUpserted: 1
+        },
+        { now: () => 2_000 }
+      );
+      startSourceReconciliationRun(
+        db,
+        { adapterKind: "linear" },
+        { now: () => 3_000 }
+      );
+
+      const rollup = buildProjectRollup(db, {
+        now: 3_000 + DEFAULT_RECONCILIATION_STALE_THRESHOLD_MS + 60_000
+      });
+      expect(rollup.reconciliationWarnings).toMatchObject([
+        { adapterKind: "linear", reason: "stale", lastRunState: "succeeded" }
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("marks stale running reconciliation runs when no terminal run exists", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedSourceItem(db, { externalId: "issue-running-only" });
+      startSourceReconciliationRun(
+        db,
+        { adapterKind: "linear" },
+        { now: () => 3_000 }
+      );
+
+      const rollup = buildProjectRollup(db, {
+        now: 3_000 + DEFAULT_RECONCILIATION_STALE_THRESHOLD_MS + 60_000
+      });
+      expect(rollup.reconciliationWarnings).toMatchObject([
+        { adapterKind: "linear", reason: "stale", lastRunState: "running" }
+      ]);
+      expect(rollup.nextAction.kind).toBe("reconcile_stale_source");
+    } finally {
+      db.close();
+    }
+  });
+
   it("scopes reconciliation warnings to runs covering filtered source items", () => {
     const db = openDb(makeTempDir());
     try {
@@ -540,6 +628,40 @@ describe("buildProjectRollup", () => {
         { adapterKind: "linear", reason: "never_run" }
       ]);
       expect(rollup.nextAction.kind).toBe("reconcile_stale_source");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("matches stored reconciliation filter names against source metadata ids", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedSourceItem(db, {
+        externalId: "issue-proj-id",
+        projectId: "proj-1",
+        projectName: "Alpha"
+      });
+      const run = startSourceReconciliationRun(
+        db,
+        { adapterKind: "linear", metadata: { filters: { projectName: "proj-1" } } },
+        { now: () => 1_000 }
+      );
+      finishSourceReconciliationRun(
+        db,
+        {
+          runId: run.id,
+          state: "succeeded",
+          itemsSeen: 1,
+          itemsUpserted: 1
+        },
+        { now: () => 2_000 }
+      );
+
+      const rollup = buildProjectRollup(db, {
+        filters: { projectId: "proj-1", projectName: "proj-1" },
+        now: 3_000
+      });
+      expect(rollup.reconciliationWarnings).toEqual([]);
     } finally {
       db.close();
     }
