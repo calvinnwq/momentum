@@ -12,7 +12,10 @@
 
 import type { MomentumDb } from "./db.js";
 import { listSourceItems, type SourceItem } from "./source-items.js";
-import { listSourceReconciliationRuns } from "./source-reconciliation-runs.js";
+import {
+  listSourceReconciliationRuns,
+  type SourceReconciliationRun
+} from "./source-reconciliation-runs.js";
 
 export const DEFAULT_RECONCILIATION_STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 export const PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT = 20;
@@ -180,6 +183,7 @@ export function buildProjectRollup(
   const reconciliationWarnings = buildReconciliationWarnings(
     db,
     filters.adapterKind,
+    filters,
     generatedAt,
     reconciliationStaleThresholdMs,
     items
@@ -230,19 +234,26 @@ function matchesProjectMilestoneFilters(
   }
   const project = readNested(item.metadata, "project");
   const milestone = readNested(item.metadata, "milestone");
-  if (filters.projectId !== undefined && readString(project, "id") !== filters.projectId) {
+  if (!matchesIdOrNameFilter(project, filters.projectId, filters.projectName)) {
     return false;
   }
-  if (filters.projectName !== undefined && readString(project, "name") !== filters.projectName) {
-    return false;
-  }
-  if (filters.milestoneId !== undefined && readString(milestone, "id") !== filters.milestoneId) {
-    return false;
-  }
-  if (filters.milestoneName !== undefined && readString(milestone, "name") !== filters.milestoneName) {
+  if (!matchesIdOrNameFilter(milestone, filters.milestoneId, filters.milestoneName)) {
     return false;
   }
   return true;
+}
+
+function matchesIdOrNameFilter(
+  record: Record<string, unknown> | null,
+  idFilter: string | undefined,
+  nameFilter: string | undefined
+): boolean {
+  if (idFilter === undefined && nameFilter === undefined) return true;
+  const id = readString(record, "id");
+  const name = readString(record, "name");
+  if (idFilter !== undefined && id === idFilter) return true;
+  if (nameFilter !== undefined && name === nameFilter) return true;
+  return false;
 }
 
 function readNested(metadata: Record<string, unknown>, key: string): Record<string, unknown> | null {
@@ -475,6 +486,7 @@ function computeCounts(
 function buildReconciliationWarnings(
   db: MomentumDb,
   adapterKind: string | undefined,
+  filters: ProjectRollupFilters,
   now: number,
   staleThresholdMs: number,
   items: readonly SourceItem[]
@@ -505,7 +517,10 @@ function buildReconciliationWarnings(
     ? new Set(items.map((item) => item.adapterKind))
     : new Set([adapterKind]);
   for (const adapter of adapters) {
-    const adapterRuns = runs.filter((run) => run.adapterKind === adapter);
+    const adapterRuns = runs.filter(
+      (run) =>
+        run.adapterKind === adapter && runCoversFilteredRollup(run, filters, items)
+    );
     const last = adapterRuns[adapterRuns.length - 1];
     if (!last) {
       byAdapter.set(adapter, {
@@ -544,6 +559,58 @@ function buildReconciliationWarnings(
     }
   }
   return [...byAdapter.values()].sort((a, b) => (a.adapterKind < b.adapterKind ? -1 : 1));
+}
+
+function runCoversFilteredRollup(
+  run: SourceReconciliationRun,
+  rollupFilters: ProjectRollupFilters,
+  items: readonly SourceItem[]
+): boolean {
+  const filters = readNested(run.metadata, "filters");
+  if (filters === null || !filtersHaveScope(filters)) return true;
+  if (!rollupFiltersHaveScope(rollupFilters)) return false;
+  if (items.length === 0) return false;
+  return items.every((item) => {
+    const project = readNested(item.metadata, "project");
+    const milestone = readNested(item.metadata, "milestone");
+    return (
+      itemDimensionCoveredByRun(project, filters, "project") &&
+      itemDimensionCoveredByRun(milestone, filters, "milestone")
+    );
+  });
+}
+
+function rollupFiltersHaveScope(filters: ProjectRollupFilters): boolean {
+  return (
+    filters.projectId !== undefined ||
+    filters.projectName !== undefined ||
+    filters.milestoneId !== undefined ||
+    filters.milestoneName !== undefined
+  );
+}
+
+function filtersHaveScope(filters: Record<string, unknown>): boolean {
+  return (
+    readString(filters, "projectId") !== null ||
+    readString(filters, "projectName") !== null ||
+    readString(filters, "milestoneId") !== null ||
+    readString(filters, "milestoneName") !== null
+  );
+}
+
+function itemDimensionCoveredByRun(
+  itemRecord: Record<string, unknown> | null,
+  runFilters: Record<string, unknown>,
+  dimension: "project" | "milestone"
+): boolean {
+  const id = readString(runFilters, `${dimension}Id`);
+  const name = readString(runFilters, `${dimension}Name`);
+  if (id === null && name === null) return true;
+  return matchesIdOrNameFilter(
+    itemRecord,
+    id === null ? undefined : id,
+    name === null ? undefined : name
+  );
 }
 
 function pickNextAction(

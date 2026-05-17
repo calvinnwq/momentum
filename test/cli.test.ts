@@ -4911,10 +4911,60 @@ describe("momentum project status", () => {
     const payload = JSON.parse(result.stdout) as Record<string, unknown>;
     expect(payload["filters"]).toEqual({
       source: "linear",
-      projectId: null,
+      projectId: "Alpha",
       projectName: "Alpha",
-      milestoneId: null,
+      milestoneId: "Mile 1",
       milestoneName: "Mile 1"
+    });
+    expect((payload["counts"] as Record<string, unknown>)["sourceItems"]).toMatchObject({
+      total: 1
+    });
+  });
+
+  it("matches --project and --milestone against non-UUID metadata ids", async () => {
+    const dataDir = makeTempDir("momentum-cli-project-");
+    const { openDb } = await import("../src/db.js");
+    const { upsertSourceItem } = await import("../src/source-items.js");
+    const db = openDb(dataDir);
+    try {
+      upsertSourceItem(
+        db,
+        {
+          adapterKind: "linear",
+          externalId: "issue-filter-id-1",
+          externalKey: "NGX-FILTER-ID-1",
+          title: "Filter id test issue",
+          status: "Todo",
+          metadata: {
+            project: { id: "proj-1", name: "Alpha" },
+            milestone: { id: "ms-1", name: "Mile 1" }
+          },
+          observedAt: 1_700_000_000_000,
+          goalId: null
+        },
+        { now: () => 1_700_000_000_100 }
+      );
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "project", "status",
+      "--source", "linear",
+      "--project", "proj-1",
+      "--milestone", "ms-1",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload["filters"]).toEqual({
+      source: "linear",
+      projectId: "proj-1",
+      projectName: "proj-1",
+      milestoneId: "ms-1",
+      milestoneName: "ms-1"
     });
     expect((payload["counts"] as Record<string, unknown>)["sourceItems"]).toMatchObject({
       total: 1

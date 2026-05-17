@@ -976,21 +976,12 @@ function projectStatus(parsed: ParsedFlags, io: CliIo): number {
   const filters: ProjectRollupFilters = {};
   if (parsed.source !== undefined) filters.adapterKind = parsed.source;
   if (parsed.project !== undefined) {
-    if (/^[0-9a-f-]{8,}$/i.test(parsed.project) && parsed.project.includes("-")) {
-      filters.projectId = parsed.project;
-    } else {
-      filters.projectName = parsed.project;
-    }
+    filters.projectId = parsed.project;
+    filters.projectName = parsed.project;
   }
   if (parsed.milestone !== undefined) {
-    if (
-      /^[0-9a-f-]{8,}$/i.test(parsed.milestone) &&
-      parsed.milestone.includes("-")
-    ) {
-      filters.milestoneId = parsed.milestone;
-    } else {
-      filters.milestoneName = parsed.milestone;
-    }
+    filters.milestoneId = parsed.milestone;
+    filters.milestoneName = parsed.milestone;
   }
 
   const options: ProjectRollupOptions = { filters };

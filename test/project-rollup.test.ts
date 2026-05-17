@@ -457,6 +457,94 @@ describe("buildProjectRollup", () => {
     }
   });
 
+  it("scopes reconciliation warnings to runs covering filtered source items", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedSourceItem(db, {
+        externalId: "issue-alpha",
+        projectId: "proj-alpha",
+        projectName: "Alpha"
+      });
+      const alphaRun = startSourceReconciliationRun(
+        db,
+        { adapterKind: "linear", metadata: { filters: { projectName: "Alpha" } } },
+        { now: () => 1_000 }
+      );
+      finishSourceReconciliationRun(
+        db,
+        {
+          runId: alphaRun.id,
+          state: "succeeded",
+          itemsSeen: 1,
+          itemsUpserted: 1
+        },
+        { now: () => 2_000 }
+      );
+      const betaRun = startSourceReconciliationRun(
+        db,
+        { adapterKind: "linear", metadata: { filters: { projectName: "Beta" } } },
+        { now: () => 3_000 }
+      );
+      finishSourceReconciliationRun(
+        db,
+        {
+          runId: betaRun.id,
+          state: "failed",
+          itemsSeen: 0,
+          itemsUpserted: 0,
+          error: "source_auth_unavailable: beta token"
+        },
+        { now: () => 4_000 }
+      );
+
+      const rollup = buildProjectRollup(db, {
+        filters: { projectName: "Alpha" },
+        now: 5_000
+      });
+      expect(rollup.reconciliationWarnings).toEqual([]);
+      expect(rollup.nextAction.kind).toBe("no_action_required");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("reports never-run when scoped source items have no compatible reconciliation run", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedSourceItem(db, {
+        externalId: "issue-alpha-never",
+        projectId: "proj-alpha",
+        projectName: "Alpha"
+      });
+      const betaRun = startSourceReconciliationRun(
+        db,
+        { adapterKind: "linear", metadata: { filters: { projectName: "Beta" } } },
+        { now: () => 1_000 }
+      );
+      finishSourceReconciliationRun(
+        db,
+        {
+          runId: betaRun.id,
+          state: "succeeded",
+          itemsSeen: 1,
+          itemsUpserted: 1
+        },
+        { now: () => 2_000 }
+      );
+
+      const rollup = buildProjectRollup(db, {
+        filters: { projectName: "Alpha" },
+        now: 3_000
+      });
+      expect(rollup.reconciliationWarnings).toMatchObject([
+        { adapterKind: "linear", reason: "never_run" }
+      ]);
+      expect(rollup.nextAction.kind).toBe("reconcile_stale_source");
+    } finally {
+      db.close();
+    }
+  });
+
   it("truncates large source item lists to the bounded limit with deterministic ordering", () => {
     const db = openDb(makeTempDir());
     try {
