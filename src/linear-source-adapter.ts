@@ -29,7 +29,7 @@ export const LINEAR_SOURCE_ADAPTER_KIND = "linear" as const;
 
 export type LinearSourceAdapterFilters = {
   projectId?: string;
-  projectKey?: string;
+  projectName?: string;
   milestoneId?: string;
   milestoneName?: string;
 };
@@ -162,11 +162,9 @@ function matchesLinearFilters(
     const id = readNestedField(record["project"], "id");
     if (id !== filters.projectId) return false;
   }
-  if (filters.projectKey !== undefined) {
-    const key =
-      readNestedField(record["project"], "key") ??
-      readNestedField(record["project"], "name");
-    if (key !== filters.projectKey) return false;
+  if (filters.projectName !== undefined) {
+    const name = readNestedField(record["project"], "name");
+    if (name !== filters.projectName) return false;
   }
   if (filters.milestoneId !== undefined) {
     const id = readNestedField(record["projectMilestone"], "id");

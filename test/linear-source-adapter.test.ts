@@ -234,6 +234,24 @@ describe("linear adapter list/get via dispatchSourceAdapter*", () => {
     expect(out.items.map((item) => item.externalKey)).toEqual(["NGX-289"]);
   });
 
+  it("scopes list to a projectName filter and rejects other-project issues", () => {
+    const out = dispatchSourceAdapterList(
+      "linear",
+      {
+        client: linearClient({
+          issues: [ISSUE_ONE_RAW, OTHER_PROJECT_ISSUE_RAW],
+          filters: {
+            projectName: "Momentum"
+          }
+        })
+      }
+    );
+
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.items.map((item) => item.externalKey)).toEqual(["NGX-289"]);
+  });
+
   it("returns source_item_invalid if any injected raw issue cannot be normalized", () => {
     const out = dispatchSourceAdapterList(
       "linear",

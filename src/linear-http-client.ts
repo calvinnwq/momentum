@@ -213,8 +213,8 @@ function buildIssueFilter(
   const filter: Record<string, unknown> = {};
   if (filters.projectId !== undefined) {
     filter["project"] = { id: { eq: filters.projectId } };
-  } else if (filters.projectKey !== undefined) {
-    filter["project"] = { name: { eq: filters.projectKey } };
+  } else if (filters.projectName !== undefined) {
+    filter["project"] = { name: { eq: filters.projectName } };
   }
   if (filters.milestoneId !== undefined) {
     filter["projectMilestone"] = { id: { eq: filters.milestoneId } };

@@ -130,7 +130,7 @@ const COMMANDS = [
   "momentum handoff <goal-id> [--data-dir <path>] [--json]",
   "momentum source list [--adapter <kind>] [--data-dir <path>] [--json]",
   "momentum source get <source-item-id> [--data-dir <path>] [--json]",
-  "momentum source reconcile linear [--project <id-or-key>] [--milestone <id-or-name>] [--dry-run] [--max-pages <n>] [--linear-endpoint <url>] [--linear-page-size <n>] [--data-dir <path>] [--json]",
+  "momentum source reconcile linear [--project <id-or-name>] [--milestone <id-or-name>] [--dry-run] [--max-pages <n>] [--linear-endpoint <url>] [--linear-page-size <n>] [--data-dir <path>] [--json]",
   "momentum worker run [--worker-id <id>] [--data-dir <path>] [--json]",
   "momentum daemon start [--max-loop-iterations <n>] [--max-idle-cycles <n>] [--poll-interval-ms <ms>] [--data-dir <path>] [--json]",
   "momentum daemon stop [--now] [--reason <text>] [--data-dir <path>] [--json]",
@@ -466,7 +466,7 @@ async function sourceReconcile(
     if (/^[0-9a-f-]{8,}$/i.test(parsed.project) && parsed.project.includes("-")) {
       filters.projectId = parsed.project;
     } else {
-      filters.projectKey = parsed.project;
+      filters.projectName = parsed.project;
     }
   }
   if (parsed.milestone !== undefined) {

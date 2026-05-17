@@ -23,7 +23,7 @@ momentum logs <goal-id> [--iteration <n>] [--data-dir <path>] [--json]
 momentum handoff <goal-id> [--data-dir <path>] [--json]
 momentum source list [--adapter <kind>] [--data-dir <path>] [--json]
 momentum source get <source-item-id> [--data-dir <path>] [--json]
-momentum source reconcile linear [--project <id-or-key>] [--milestone <id-or-name>] [--dry-run] [--max-pages <n>] [--linear-endpoint <url>] [--linear-page-size <n>] [--data-dir <path>] [--json]
+momentum source reconcile linear [--project <id-or-name>] [--milestone <id-or-name>] [--dry-run] [--max-pages <n>] [--linear-endpoint <url>] [--linear-page-size <n>] [--data-dir <path>] [--json]
 momentum worker run [--worker-id <id>] [--data-dir <path>] [--json]
 momentum daemon start [--max-loop-iterations <n>] [--max-idle-cycles <n>] [--poll-interval-ms <ms>] [--data-dir <path>] [--json]
 momentum daemon stop [--now] [--reason <text>] [--data-dir <path>] [--json]
@@ -373,7 +373,7 @@ Retrieves a single source item by ID. JSON output includes `ok`, `command`, `dat
 ### `source reconcile linear`
 
 ```text
-momentum source reconcile linear [--project <id-or-key>] [--milestone <id-or-name>] [--dry-run] [--max-pages <n>] [--linear-endpoint <url>] [--linear-page-size <n>] [--data-dir <path>] [--json]
+momentum source reconcile linear [--project <id-or-name>] [--milestone <id-or-name>] [--dry-run] [--max-pages <n>] [--linear-endpoint <url>] [--linear-page-size <n>] [--data-dir <path>] [--json]
 ```
 
 Reconciles Linear issues into durable `source_items` records by paginating the Linear GraphQL API. Requires the `LINEAR_API_KEY` environment variable. On success, creates or updates `source_items` for each normalized Linear issue and records a `source_reconciliation_runs` row summarizing the drain. Dry-run mode (`--dry-run`) records a reconciliation run and reports planned classifications without writing `source_items`. Pagination stops after 100 pages by default; `--max-pages` caps the drain. `--project` accepts a Linear project UUID or name; `--milestone` accepts a milestone UUID or name. `--linear-endpoint` overrides the default `https://api.linear.app/graphql`; `--linear-page-size` sets the page size (1–250, default 50).

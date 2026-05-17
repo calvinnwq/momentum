@@ -3,6 +3,57 @@ import { describe, expect, it } from "vitest";
 import { buildLinearHttpReconciliationClient } from "../src/linear-http-client.js";
 
 describe("buildLinearHttpReconciliationClient", () => {
+  it("maps project name filters to Linear project name variables", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const fetch = async (
+      _input: string,
+      init: {
+        method: string;
+        headers: Record<string, string>;
+        body: string;
+        signal?: AbortSignal;
+      }
+    ) => {
+      bodies.push(JSON.parse(init.body) as Record<string, unknown>);
+      return {
+        ok: true,
+        status: 200,
+        text: async () =>
+          JSON.stringify({
+            data: {
+              issues: {
+                pageInfo: { hasNextPage: false, endCursor: null },
+                nodes: []
+              }
+            }
+          })
+      };
+    };
+
+    const client = buildLinearHttpReconciliationClient({
+      apiKey: "lin_api_key",
+      fetch
+    });
+
+    const result = await client.fetchPage({
+      cursor: null,
+      filters: { projectName: "Momentum", milestoneName: "Milestone 5" }
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      page: { issues: [], nextCursor: null }
+    });
+    expect(bodies[0]?.["variables"]).toEqual({
+      filter: {
+        project: { name: { eq: "Momentum" } },
+        projectMilestone: { name: { eq: "Milestone 5" } }
+      },
+      first: 50,
+      after: null
+    });
+  });
+
   it("returns a transport failure and aborts when a Linear request exceeds the timeout", async () => {
     let observedSignal: AbortSignal | undefined;
     const fetch = async (

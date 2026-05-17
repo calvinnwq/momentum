@@ -3978,6 +3978,7 @@ describe("momentum recovery clear", () => {
       updatedAt: "2026-04-01T00:00:00.000Z"
     };
     const factoryCalls: Array<{ apiKey: string | null; endpoint: string | null }> = [];
+    const fetchCalls: Array<{ filters: Record<string, unknown> }> = [];
     const deps = {
       buildLinearReconciliationClient: (input: {
         apiKey: string | null;
@@ -3985,10 +3986,13 @@ describe("momentum recovery clear", () => {
       }) => {
         factoryCalls.push({ apiKey: input.apiKey, endpoint: input.endpoint });
         return {
-          fetchPage: async () => ({
-            ok: true as const,
-            page: { issues: [fakeIssue], nextCursor: null }
-          })
+          fetchPage: async (input: { filters: Record<string, unknown> }) => {
+            fetchCalls.push({ filters: input.filters });
+            return {
+              ok: true as const,
+              page: { issues: [fakeIssue], nextCursor: null }
+            };
+          }
         };
       }
     };
@@ -4030,6 +4034,14 @@ describe("momentum recovery clear", () => {
     });
     expect(factoryCalls).toHaveLength(1);
     expect(factoryCalls[0]?.apiKey).toBe("test-key");
+    expect(fetchCalls).toEqual([
+      {
+        filters: {
+          projectName: "Project One",
+          milestoneName: "Milestone One"
+        }
+      }
+    ]);
 
     const { openDb } = await import("../src/db.js");
     const { listSourceItems } = await import("../src/source-items.js");
