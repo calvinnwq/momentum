@@ -7,7 +7,7 @@
  * passes an `apiKey` it sourced from operator-controlled env or config.
  *
  * The client maps:
- *   - missing/empty apiKey → `source_config_invalid`
+ *   - missing/empty apiKey → `source_auth_unavailable`
  *   - 401/403 / non-OK auth-shaped responses → `source_auth_unavailable`
  *   - other transport / parse failures → `source_adapter_threw`
  */
