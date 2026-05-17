@@ -81,6 +81,7 @@ export function upsertSourceItem(
          last_observed_at = excluded.last_observed_at,
          goal_id = excluded.goal_id,
          updated_at = excluded.updated_at
+        WHERE excluded.last_observed_at >= source_items.last_observed_at
        RETURNING *`
     )
     .get(
@@ -98,7 +99,10 @@ export function upsertSourceItem(
       now
     ) as SourceItemRow;
 
-  return sourceItemFromRow(row);
+  return sourceItemFromRow(
+    row ??
+      getSourceItemRowByAdapterExternalId(db, input.adapterKind, input.externalId)
+  );
 }
 
 export function getSourceItemById(
@@ -109,6 +113,24 @@ export function getSourceItemById(
     .prepare("SELECT * FROM source_items WHERE id = ?")
     .get(id) as SourceItemRow | undefined;
   return row ? sourceItemFromRow(row) : null;
+}
+
+function getSourceItemRowByAdapterExternalId(
+  db: MomentumDb,
+  adapterKind: string,
+  externalId: string
+): SourceItemRow {
+  const row = db
+    .prepare(
+      "SELECT * FROM source_items WHERE adapter_kind = ? AND external_id = ?"
+    )
+    .get(adapterKind, externalId) as SourceItemRow | undefined;
+  if (!row) {
+    throw new Error(
+      `Source item missing after upsert conflict for adapter "${adapterKind}" and external id "${externalId}".`
+    );
+  }
+  return row;
 }
 
 export function listSourceItems(

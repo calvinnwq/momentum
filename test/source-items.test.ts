@@ -6,6 +6,7 @@ import path from "node:path";
 import { openDb } from "../src/db.js";
 import {
   getSourceItemById,
+  listSourceItems,
   upsertSourceItem,
   type SourceItemUpsertInput
 } from "../src/source-items.js";
@@ -95,6 +96,41 @@ describe("source item storage", () => {
       expect(fixture.adapterKind).toBe("local-fixture");
     } finally {
       db.close();
+    }
+  });
+
+  it("keeps the newest observation when out-of-order upserts race for the same source item", () => {
+    const dataDir = makeTempDir();
+    const firstConnection = openDb(dataDir);
+    const secondConnection = openDb(dataDir);
+    try {
+      const newest = upsertSourceItem(
+        firstConnection,
+        baseInput({
+          title: "Newest title",
+          status: "Done",
+          metadata: { observed: "newest" },
+          observedAt: 2000
+        }),
+        { now: () => 2100 }
+      );
+
+      const stale = upsertSourceItem(
+        secondConnection,
+        baseInput({
+          title: "Stale title",
+          status: "Todo",
+          metadata: { observed: "stale" },
+          observedAt: 1500
+        }),
+        { now: () => 2200 }
+      );
+
+      expect(stale).toEqual(newest);
+      expect(listSourceItems(firstConnection)).toEqual([newest]);
+    } finally {
+      firstConnection.close();
+      secondConnection.close();
     }
   });
 });
