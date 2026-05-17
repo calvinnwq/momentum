@@ -6,6 +6,8 @@ import path from "node:path";
 import { openDb } from "../src/db.js";
 import {
   getSourceItemById,
+  listSourceSnapshotsForItem,
+  recordSourceSnapshot,
   listSourceItems,
   upsertSourceItem,
   type SourceItemUpsertInput
@@ -131,6 +133,53 @@ describe("source item storage", () => {
     } finally {
       firstConnection.close();
       secondConnection.close();
+    }
+  });
+
+  it("records immutable source snapshots for observed source item payloads", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const item = upsertSourceItem(db, baseInput(), { now: () => 1100 });
+
+      const firstSnapshot = recordSourceSnapshot(
+        db,
+        {
+          sourceItemId: item.id,
+          adapterKind: item.adapterKind,
+          externalId: item.externalId,
+          observedAt: 1000,
+          snapshot: { title: "Original title", nested: { status: "Todo" } }
+        },
+        { now: () => 1200 }
+      );
+      const secondSnapshot = recordSourceSnapshot(
+        db,
+        {
+          sourceItemId: item.id,
+          adapterKind: item.adapterKind,
+          externalId: item.externalId,
+          observedAt: 1300,
+          snapshot: { title: "Updated title", labels: ["m5"] }
+        },
+        { now: () => 1400 }
+      );
+
+      expect(firstSnapshot).toEqual({
+        id: expect.any(String),
+        sourceItemId: item.id,
+        adapterKind: "manual",
+        externalId: "issue-1",
+        observedAt: 1000,
+        snapshot: { title: "Original title", nested: { status: "Todo" } },
+        createdAt: 1200
+      });
+      expect(secondSnapshot.id).not.toBe(firstSnapshot.id);
+      expect(listSourceSnapshotsForItem(db, item.id)).toEqual([
+        firstSnapshot,
+        secondSnapshot
+      ]);
+    } finally {
+      db.close();
     }
   });
 });

@@ -28,6 +28,16 @@ export type SourceItemSummary = {
   lastObservedAt: number;
 };
 
+export type SourceSnapshot = {
+  id: string;
+  sourceItemId: string;
+  adapterKind: string;
+  externalId: string;
+  observedAt: number;
+  snapshot: Record<string, unknown>;
+  createdAt: number;
+};
+
 export type SourceItemUpsertInput = {
   adapterKind: string;
   externalId: string;
@@ -38,6 +48,14 @@ export type SourceItemUpsertInput = {
   metadata?: Record<string, unknown>;
   observedAt: number;
   goalId?: string | null;
+};
+
+export type SourceSnapshotInput = {
+  sourceItemId: string;
+  adapterKind: string;
+  externalId: string;
+  observedAt: number;
+  snapshot: Record<string, unknown>;
 };
 
 export type SourceItemClock = {
@@ -57,6 +75,16 @@ type SourceItemRow = {
   goal_id: string | null;
   created_at: number;
   updated_at: number;
+};
+
+type SourceSnapshotRow = {
+  id: string;
+  source_item_id: string;
+  adapter_kind: string;
+  external_id: string;
+  observed_at: number;
+  snapshot_json: string;
+  created_at: number;
 };
 
 export function upsertSourceItem(
@@ -184,6 +212,50 @@ export function listSourceItemSummariesForGoal(
   return rows.map(sourceItemSummaryFromRow);
 }
 
+export function recordSourceSnapshot(
+  db: MomentumDb,
+  input: SourceSnapshotInput,
+  clock: SourceItemClock = {}
+): SourceSnapshot {
+  const now = clock.now?.() ?? Date.now();
+  const snapshotJson = JSON.stringify(input.snapshot);
+  const row = db
+    .prepare(
+      `INSERT INTO source_snapshots
+         (id, source_item_id, adapter_kind, external_id, observed_at,
+          snapshot_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       RETURNING *`
+    )
+    .get(
+      `source_snapshot_${randomUUID()}`,
+      input.sourceItemId,
+      input.adapterKind,
+      input.externalId,
+      input.observedAt,
+      snapshotJson,
+      now
+    ) as SourceSnapshotRow;
+
+  return sourceSnapshotFromRow(row);
+}
+
+export function listSourceSnapshotsForItem(
+  db: MomentumDb,
+  sourceItemId: string
+): SourceSnapshot[] {
+  const rows = db
+    .prepare(
+      `SELECT *
+         FROM source_snapshots
+        WHERE source_item_id = ?
+        ORDER BY observed_at ASC, created_at ASC, id ASC`
+    )
+    .all(sourceItemId) as SourceSnapshotRow[];
+
+  return rows.map(sourceSnapshotFromRow);
+}
+
 function sourceItemFromRow(row: SourceItemRow): SourceItem {
   return {
     id: row.id,
@@ -223,6 +295,18 @@ function sourceItemSummaryFromRow(
     title: row.title,
     status: row.status,
     lastObservedAt: row.last_observed_at
+  };
+}
+
+function sourceSnapshotFromRow(row: SourceSnapshotRow): SourceSnapshot {
+  return {
+    id: row.id,
+    sourceItemId: row.source_item_id,
+    adapterKind: row.adapter_kind,
+    externalId: row.external_id,
+    observedAt: row.observed_at,
+    snapshot: parseMetadata(row.snapshot_json),
+    createdAt: row.created_at
   };
 }
 
