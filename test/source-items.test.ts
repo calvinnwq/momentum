@@ -136,6 +136,45 @@ describe("source item storage", () => {
     }
   });
 
+  it("preserves goal linkage on refresh unless goalId is explicitly supplied", () => {
+    const db = openDb(makeTempDir());
+    try {
+      db.prepare(
+        `INSERT INTO goals
+           (id, title, branch, artifact_dir, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).run("goal-1", "Linked goal", "momentum/linked", "/tmp/linked", 1, 1);
+      const linked = upsertSourceItem(
+        db,
+        baseInput({ goalId: "goal-1" }),
+        { now: () => 1100 }
+      );
+      const refreshed = upsertSourceItem(
+        db,
+        baseInput({
+          title: "Refreshed title",
+          observedAt: 1200
+        }),
+        { now: () => 1300 }
+      );
+      const cleared = upsertSourceItem(
+        db,
+        baseInput({
+          title: "Cleared title",
+          observedAt: 1400,
+          goalId: null
+        }),
+        { now: () => 1500 }
+      );
+
+      expect(linked.goalId).toBe("goal-1");
+      expect(refreshed.goalId).toBe("goal-1");
+      expect(cleared.goalId).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
   it("records immutable source snapshots for observed source item payloads", () => {
     const db = openDb(makeTempDir());
     try {

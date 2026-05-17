@@ -94,6 +94,7 @@ export function upsertSourceItem(
 ): SourceItem {
   const now = clock.now?.() ?? Date.now();
   const metadataJson = JSON.stringify(input.metadata ?? {});
+  const hasGoalId = Object.hasOwn(input, "goalId");
   const row = db
     .prepare(
       `INSERT INTO source_items
@@ -107,7 +108,10 @@ export function upsertSourceItem(
          status = excluded.status,
          metadata_json = excluded.metadata_json,
          last_observed_at = excluded.last_observed_at,
-         goal_id = excluded.goal_id,
+         goal_id = CASE
+           WHEN ? = 1 THEN excluded.goal_id
+           ELSE source_items.goal_id
+         END,
          updated_at = excluded.updated_at
         WHERE excluded.last_observed_at >= source_items.last_observed_at
        RETURNING *`
@@ -124,7 +128,8 @@ export function upsertSourceItem(
       input.observedAt,
       input.goalId ?? null,
       now,
-      now
+      now,
+      hasGoalId ? 1 : 0
     ) as SourceItemRow;
 
   return sourceItemFromRow(
