@@ -1212,8 +1212,9 @@ function emitEvidenceIngestSuccess(
     errors: Array<{ ingestKey: string; type: string; message: string }>;
   }
 ): number {
+  const ok = result.errors.length === 0;
   const payload = {
-    ok: true,
+    ok,
     command: "evidence ingest",
     dataDir: result.dataDir,
     path: result.artifactPath,
@@ -1233,8 +1234,8 @@ function emitEvidenceIngestSuccess(
   };
 
   if (parsed.json) {
-    writeJson(io.stdout, payload);
-    return 0;
+    writeJson(ok ? io.stdout : io.stderr, payload);
+    return ok ? 0 : 1;
   }
 
   const lines = [
@@ -1249,8 +1250,8 @@ function emitEvidenceIngestSuccess(
     `Data dir: ${result.dataDir}`,
     ""
   ];
-  write(io.stdout, lines.join("\n"));
-  return 0;
+  write(ok ? io.stdout : io.stderr, lines.join("\n"));
+  return ok ? 0 : 1;
 }
 
 function emitEvidenceIngestFailure(

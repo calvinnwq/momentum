@@ -138,6 +138,51 @@ describe("evidence record storage", () => {
     }
   });
 
+  it("attaches missing goal and source-item links on idempotent replay without rebinding existing links", () => {
+    const db = openDb(makeTempDir());
+    try {
+      insertGoal(db, "goal-linked");
+      insertGoal(db, "goal-other");
+      insertSourceItem(db, "si-linked");
+      insertSourceItem(db, "si-other");
+
+      const first = ingestEvidenceRecord(db, baseInput(), { now: () => 2100 });
+      expect(first.record.goalId).toBeNull();
+      expect(first.record.sourceItemId).toBeNull();
+
+      const linked = ingestEvidenceRecord(
+        db,
+        baseInput({
+          goalId: "goal-linked",
+          sourceItemId: "si-linked"
+        }),
+        { now: () => 2200 }
+      );
+
+      expect(linked.created).toBe(false);
+      expect(linked.record.id).toBe(first.record.id);
+      expect(linked.record.goalId).toBe("goal-linked");
+      expect(linked.record.sourceItemId).toBe("si-linked");
+      expect(linked.record.updatedAt).toBe(2200);
+
+      const rebound = ingestEvidenceRecord(
+        db,
+        baseInput({
+          goalId: "goal-other",
+          sourceItemId: "si-other"
+        }),
+        { now: () => 2300 }
+      );
+
+      expect(rebound.created).toBe(false);
+      expect(rebound.record.goalId).toBe("goal-linked");
+      expect(rebound.record.sourceItemId).toBe("si-linked");
+      expect(rebound.record.updatedAt).toBe(2200);
+    } finally {
+      db.close();
+    }
+  });
+
   it("allows distinct ingest keys for separate events from the same workflow", () => {
     const db = openDb(makeTempDir());
     try {

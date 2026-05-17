@@ -119,6 +119,30 @@ export function ingestEvidenceRecord(
       `Evidence record missing after ingest conflict for ingest key "${input.ingestKey}".`
     );
   }
+
+  const requestedGoalId = input.goalId ?? null;
+  const requestedSourceItemId = input.sourceItemId ?? null;
+  const shouldAttachGoal = existing.goal_id === null && requestedGoalId !== null;
+  const shouldAttachSourceItem =
+    existing.source_item_id === null && requestedSourceItemId !== null;
+
+  if (shouldAttachGoal || shouldAttachSourceItem) {
+    db.prepare(
+      `UPDATE evidence_records
+          SET goal_id = CASE WHEN goal_id IS NULL THEN ? ELSE goal_id END,
+              source_item_id = CASE WHEN source_item_id IS NULL THEN ? ELSE source_item_id END,
+              updated_at = ?
+        WHERE ingest_key = ?`
+    ).run(requestedGoalId, requestedSourceItemId, now, input.ingestKey);
+    const updated = getEvidenceRecordRowByIngestKey(db, input.ingestKey);
+    if (!updated) {
+      throw new Error(
+        `Evidence record missing after attaching links for ingest key "${input.ingestKey}".`
+      );
+    }
+    return { record: evidenceRecordFromRow(updated), created: false };
+  }
+
   return { record: evidenceRecordFromRow(existing), created: false };
 }
 

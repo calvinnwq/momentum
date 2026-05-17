@@ -300,6 +300,53 @@ describe("momentum evidence ingest", () => {
     }
   });
 
+  it("attaches existing unlinked records when an idempotent replay provides a goal", async () => {
+    const dataDir = makeTempDir();
+    const workflowRoot = makeTempDir("momentum-cli-evidence-workflows-");
+    const runDir = buildWorkflowFixture(workflowRoot, "cwfp-idemlinkgoal");
+    seedGoal(dataDir, "g-evidence-replay");
+
+    const first = await run([
+      "evidence",
+      "ingest",
+      "--path",
+      runDir,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(first.code).toBe(0);
+
+    const second = await run([
+      "evidence",
+      "ingest",
+      "--path",
+      runDir,
+      "--goal",
+      "g-evidence-replay",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(second.code).toBe(0);
+    const payload = JSON.parse(second.stdout) as {
+      goalId: string | null;
+      counts: { created: number; skipped: number };
+    };
+    expect(payload.goalId).toBe("g-evidence-replay");
+    expect(payload.counts.created).toBe(0);
+    expect(payload.counts.skipped).toBe(5);
+
+    const db = openDb(dataDir);
+    try {
+      const records = listEvidenceRecords(db, { goalId: "g-evidence-replay" });
+      expect(records.length).toBe(5);
+      expect(records.every((r) => r.goalId === "g-evidence-replay")).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+
   it("returns evidence_format_unknown diagnostics for unsupported sibling files without crashing", async () => {
     const dataDir = makeTempDir();
     const workflowRoot = makeTempDir("momentum-cli-evidence-workflows-");
