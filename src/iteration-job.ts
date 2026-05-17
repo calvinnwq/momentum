@@ -15,6 +15,7 @@ import {
   writeRecoveryArtifact,
   type RecoveryArtifactPathBundle
 } from "./recovery-artifact.js";
+import { buildIterationSourceContext } from "./source-context.js";
 import { parseTrustedShellConfig } from "./trusted-shell-config.js";
 
 export type ExecuteIterationJobInput = {
@@ -81,13 +82,16 @@ export function executeIterationJob(
     runner: spec.runner
   });
 
+  const iterationSourceContext = buildIterationSourceContext(db, goalId);
+
   let result: ForegroundIterationSuccess | ForegroundIterationError;
   try {
     result = runForegroundIteration({
       goalId,
       spec,
       iteration,
-      artifactPaths
+      artifactPaths,
+      ...(iterationSourceContext ? { sourceContext: iterationSourceContext } : {})
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "unknown error";

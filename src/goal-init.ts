@@ -28,6 +28,11 @@ import {
   type MomentumPolicyErrorCode,
   type PolicyEffectiveSource
 } from "./momentum-policy.js";
+import {
+  linkGoalToSourceItem,
+  type LinkGoalToSourceItemErrorCode,
+  type SourceItemSummary
+} from "./source-items.js";
 
 export type GoalInitMode = "foreground" | "queued";
 
@@ -37,12 +42,14 @@ export type GoalInitOptions = {
   runnerOverride?: string;
   dataDirOptions?: DataDirOptions;
   mode?: GoalInitMode;
+  linkSourceItemId?: string;
 };
 
 export type GoalInitErrorCode =
   | "parse_error"
   | RunnerProfileErrorCode
   | MomentumPolicyErrorCode
+  | LinkGoalToSourceItemErrorCode
   | "init_failed";
 export type GoalInitError = {
   ok: false;
@@ -83,6 +90,7 @@ export type GoalInitSuccess = {
   resumed: boolean;
   enqueueCreated: boolean;
   policy: GoalInitPolicySummary;
+  linkedSourceItem: SourceItemSummary | null;
 };
 export type GoalInitResult = GoalInitError | GoalInitSuccess;
 
@@ -189,6 +197,11 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
     );
     if (existingGoal) {
       const artifactPaths = resolveGoalArtifactPaths(dataDir, existingGoal.id);
+      const linkResult = applySourceItemLink(db, existingGoal.id, options.linkSourceItemId);
+      if (!linkResult.ok) {
+        return linkResult.error;
+      }
+      const linkedSourceItem = linkResult.summary;
       if (mode === "foreground") {
         const jobId = ensureInitialForegroundJob(
           db,
@@ -211,7 +224,8 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
           artifactPaths,
           resumed: true,
           enqueueCreated: false,
-          policy: policySummary
+          policy: policySummary,
+          linkedSourceItem
         };
       }
       const idempotencyKey = buildIterationIdempotencyKey(existingGoal.id, 1);
@@ -237,7 +251,8 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
         artifactPaths,
         resumed: true,
         enqueueCreated: enqueue.created,
-        policy: policySummary
+        policy: policySummary,
+        linkedSourceItem
       };
     }
 
@@ -266,6 +281,12 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
       now
     );
 
+    const linkResult = applySourceItemLink(db, goalId, options.linkSourceItemId);
+    if (!linkResult.ok) {
+      return linkResult.error;
+    }
+    const linkedSourceItem = linkResult.summary;
+
     if (mode === "foreground") {
       const jobId = createForegroundJob(
         db,
@@ -289,7 +310,8 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
         artifactPaths,
         resumed: false,
         enqueueCreated: false,
-        policy: policySummary
+        policy: policySummary,
+        linkedSourceItem
       };
     }
 
@@ -317,13 +339,50 @@ export function initGoal(options: GoalInitOptions): GoalInitResult {
       artifactPaths,
       resumed: false,
       enqueueCreated: enqueue.created,
-      policy: policySummary
+      policy: policySummary,
+      linkedSourceItem
     };
   } catch (error) {
     return { ok: false, code: "init_failed", error: formatInitError(error) };
   } finally {
     db?.close();
   }
+}
+
+function applySourceItemLink(
+  db: MomentumDb,
+  goalId: string,
+  sourceItemId: string | undefined
+):
+  | { ok: true; summary: SourceItemSummary | null }
+  | { ok: false; error: GoalInitError } {
+  if (sourceItemId === undefined) {
+    return { ok: true, summary: null };
+  }
+  const linkResult = linkGoalToSourceItem(db, { goalId, sourceItemId });
+  if (!linkResult.ok) {
+    return {
+      ok: false,
+      error: {
+        ok: false,
+        code: linkResult.code,
+        error: linkResult.message
+      }
+    };
+  }
+  return {
+    ok: true,
+    summary: {
+      id: linkResult.sourceItem.id,
+      adapterKind: linkResult.sourceItem.adapterKind,
+      externalId: linkResult.sourceItem.externalId,
+      externalKey: linkResult.sourceItem.externalKey,
+      url: linkResult.sourceItem.url,
+      title: linkResult.sourceItem.title,
+      status: linkResult.sourceItem.status,
+      lastObservedAt: linkResult.sourceItem.lastObservedAt
+    }
+  };
 }
 
 export type GoalRow = {

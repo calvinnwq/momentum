@@ -203,6 +203,161 @@ export function listSourceItems(
   return rows.map(sourceItemFromRow);
 }
 
+export type LinkGoalToSourceItemErrorCode =
+  | "goal_not_found"
+  | "source_item_not_found"
+  | "linked_to_other_goal";
+
+export type LinkGoalToSourceItemSkippedReason =
+  | "already_linked_to_target";
+
+export type LinkGoalToSourceItemResult =
+  | {
+      ok: true;
+      changed: boolean;
+      skippedReason: LinkGoalToSourceItemSkippedReason | null;
+      sourceItem: SourceItem;
+      previousGoalId: string | null;
+    }
+  | {
+      ok: false;
+      code: LinkGoalToSourceItemErrorCode;
+      message: string;
+      currentGoalId?: string | null;
+    };
+
+export type UnlinkGoalFromSourceItemErrorCode =
+  | "source_item_not_found";
+
+export type UnlinkGoalFromSourceItemResult =
+  | {
+      ok: true;
+      changed: boolean;
+      sourceItem: SourceItem;
+      previousGoalId: string | null;
+    }
+  | {
+      ok: false;
+      code: UnlinkGoalFromSourceItemErrorCode;
+      message: string;
+    };
+
+export function linkGoalToSourceItem(
+  db: MomentumDb,
+  input: { goalId: string; sourceItemId: string; now?: number }
+): LinkGoalToSourceItemResult {
+  const goalExists = db
+    .prepare("SELECT id FROM goals WHERE id = ?")
+    .get(input.goalId) as { id: string } | undefined;
+  if (!goalExists) {
+    return {
+      ok: false,
+      code: "goal_not_found",
+      message: `Goal not found: ${input.goalId}`
+    };
+  }
+
+  const existing = getSourceItemById(db, input.sourceItemId);
+  if (!existing) {
+    return {
+      ok: false,
+      code: "source_item_not_found",
+      message: `Source item not found: ${input.sourceItemId}`
+    };
+  }
+
+  if (existing.goalId === input.goalId) {
+    return {
+      ok: true,
+      changed: false,
+      skippedReason: "already_linked_to_target",
+      sourceItem: existing,
+      previousGoalId: existing.goalId
+    };
+  }
+
+  if (existing.goalId !== null && existing.goalId !== input.goalId) {
+    return {
+      ok: false,
+      code: "linked_to_other_goal",
+      message: `Source item ${input.sourceItemId} is already linked to goal ${existing.goalId}. Unlink it first.`,
+      currentGoalId: existing.goalId
+    };
+  }
+
+  const now = input.now ?? Date.now();
+  const row = db
+    .prepare(
+      `UPDATE source_items
+          SET goal_id = ?, updated_at = ?
+        WHERE id = ?
+        RETURNING *`
+    )
+    .get(input.goalId, now, input.sourceItemId) as SourceItemRow | undefined;
+  if (!row) {
+    return {
+      ok: false,
+      code: "source_item_not_found",
+      message: `Source item not found: ${input.sourceItemId}`
+    };
+  }
+
+  return {
+    ok: true,
+    changed: true,
+    skippedReason: null,
+    sourceItem: sourceItemFromRow(row),
+    previousGoalId: existing.goalId
+  };
+}
+
+export function unlinkGoalFromSourceItem(
+  db: MomentumDb,
+  input: { sourceItemId: string; now?: number }
+): UnlinkGoalFromSourceItemResult {
+  const existing = getSourceItemById(db, input.sourceItemId);
+  if (!existing) {
+    return {
+      ok: false,
+      code: "source_item_not_found",
+      message: `Source item not found: ${input.sourceItemId}`
+    };
+  }
+
+  if (existing.goalId === null) {
+    return {
+      ok: true,
+      changed: false,
+      sourceItem: existing,
+      previousGoalId: null
+    };
+  }
+
+  const now = input.now ?? Date.now();
+  const row = db
+    .prepare(
+      `UPDATE source_items
+          SET goal_id = NULL, updated_at = ?
+        WHERE id = ?
+        RETURNING *`
+    )
+    .get(now, input.sourceItemId) as SourceItemRow | undefined;
+  if (!row) {
+    return {
+      ok: false,
+      code: "source_item_not_found",
+      message: `Source item not found: ${input.sourceItemId}`
+    };
+  }
+
+  return {
+    ok: true,
+    changed: true,
+    sourceItem: sourceItemFromRow(row),
+    previousGoalId: existing.goalId
+  };
+}
+
 export function listSourceItemSummariesForGoal(
   db: MomentumDb,
   goalId: string

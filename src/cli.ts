@@ -56,8 +56,12 @@ import {
 import { loadMomentumPolicy } from "./momentum-policy.js";
 import {
   getSourceItemById,
+  linkGoalToSourceItem,
   listSourceItems,
-  type SourceItem
+  unlinkGoalFromSourceItem,
+  type LinkGoalToSourceItemErrorCode,
+  type SourceItem,
+  type UnlinkGoalFromSourceItemErrorCode
 } from "./source-items.js";
 import {
   listSourceReconciliationRuns,
@@ -120,16 +124,20 @@ type ParsedFlags = {
   linearEndpoint?: string;
   linearPageSize?: number;
   maxPages?: number;
+  goal?: string;
+  fromSource?: string;
   error?: string;
 };
 
 const COMMANDS = [
-  "momentum goal start <goal.md> [--repo <path>] [--foreground] [--runner <profile>] [--data-dir <path>] [--json]",
+  "momentum goal start <goal.md> [--repo <path>] [--foreground] [--runner <profile>] [--from-source <source-item-id>] [--data-dir <path>] [--json]",
   "momentum status [goal-id] [--data-dir <path>] [--json]",
   "momentum logs <goal-id> [--iteration <n>] [--data-dir <path>] [--json]",
   "momentum handoff <goal-id> [--data-dir <path>] [--json]",
   "momentum source list [--adapter <kind>] [--data-dir <path>] [--json]",
   "momentum source get <source-item-id> [--data-dir <path>] [--json]",
+  "momentum source link <source-item-id> --goal <goal-id> [--data-dir <path>] [--json]",
+  "momentum source unlink <source-item-id> [--data-dir <path>] [--json]",
   "momentum source reconcile linear [--project <id-or-name>] [--milestone <id-or-name>] [--dry-run] [--max-pages <n>] [--linear-endpoint <url>] [--linear-page-size <n>] [--data-dir <path>] [--json]",
   "momentum worker run [--worker-id <id>] [--data-dir <path>] [--json]",
   "momentum daemon start [--max-loop-iterations <n>] [--max-idle-cycles <n>] [--poll-interval-ms <ms>] [--data-dir <path>] [--json]",
@@ -215,7 +223,7 @@ function source(
   const subcommand = parsed.args[1];
   if (!subcommand) {
     return usageError(
-      "Missing required subcommand for source. Expected: list, get, reconcile.",
+      "Missing required subcommand for source. Expected: list, get, link, unlink, reconcile.",
       parsed,
       io
     );
@@ -225,6 +233,12 @@ function source(
   }
   if (subcommand === "get") {
     return sourceGet(parsed, io);
+  }
+  if (subcommand === "link") {
+    return sourceLink(parsed, io);
+  }
+  if (subcommand === "unlink") {
+    return sourceUnlink(parsed, io);
   }
   if (subcommand === "reconcile") {
     return sourceReconcile(parsed, io, deps);
@@ -387,6 +401,167 @@ function sourceGet(parsed: ParsedFlags, io: CliIo): number {
     ""
   ].join("\n"));
   return 0;
+}
+
+function sourceLink(parsed: ParsedFlags, io: CliIo): number {
+  const sourceItemId = parsed.args[2];
+  if (!sourceItemId) {
+    return usageError(
+      "Missing required <source-item-id> for source link.",
+      parsed,
+      io
+    );
+  }
+  if (parsed.args.length > 3) {
+    return usageError(
+      `Unexpected argument for source link: ${parsed.args[3]}`,
+      parsed,
+      io
+    );
+  }
+  if (parsed.goal === undefined || parsed.goal.length === 0) {
+    return usageError(
+      "Missing required --goal <goal-id> for source link.",
+      parsed,
+      io
+    );
+  }
+  const goalId = parsed.goal;
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return emitSourceFailure(parsed, io, "source link", {
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err)
+    });
+  }
+
+  const db = openDb(dataDir);
+  try {
+    const result = linkGoalToSourceItem(db, { goalId, sourceItemId });
+    if (!result.ok) {
+      return emitSourceFailure(parsed, io, "source link", {
+        code: result.code,
+        message: result.message,
+        sourceItemId,
+        goalId,
+        currentGoalId: result.currentGoalId ?? null,
+        dataDir
+      });
+    }
+
+    const payload = {
+      ok: true,
+      command: "source link",
+      dataDir,
+      goalId,
+      sourceItemId: result.sourceItem.id,
+      changed: result.changed,
+      skippedReason: result.skippedReason,
+      previousGoalId: result.previousGoalId,
+      item: sourceItemToJsonShape(result.sourceItem)
+    };
+
+    if (parsed.json) {
+      writeJson(io.stdout, payload);
+      return 0;
+    }
+
+    const lines = [
+      result.changed
+        ? `Linked source item ${result.sourceItem.id} to goal ${goalId}.`
+        : `Source item ${result.sourceItem.id} already linked to goal ${goalId}; no change.`,
+      `Adapter: ${result.sourceItem.adapterKind}`,
+      `External key: ${result.sourceItem.externalKey ?? "(unset)"}`,
+      `Title: ${result.sourceItem.title}`,
+      `Data dir: ${dataDir}`,
+      ""
+    ];
+    write(io.stdout, lines.join("\n"));
+    return 0;
+  } finally {
+    db.close();
+  }
+}
+
+function sourceUnlink(parsed: ParsedFlags, io: CliIo): number {
+  const sourceItemId = parsed.args[2];
+  if (!sourceItemId) {
+    return usageError(
+      "Missing required <source-item-id> for source unlink.",
+      parsed,
+      io
+    );
+  }
+  if (parsed.args.length > 3) {
+    return usageError(
+      `Unexpected argument for source unlink: ${parsed.args[3]}`,
+      parsed,
+      io
+    );
+  }
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return emitSourceFailure(parsed, io, "source unlink", {
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err)
+    });
+  }
+
+  const db = openDb(dataDir);
+  try {
+    const result = unlinkGoalFromSourceItem(db, { sourceItemId });
+    if (!result.ok) {
+      return emitSourceFailure(parsed, io, "source unlink", {
+        code: result.code,
+        message: result.message,
+        sourceItemId,
+        dataDir
+      });
+    }
+
+    const payload = {
+      ok: true,
+      command: "source unlink",
+      dataDir,
+      sourceItemId: result.sourceItem.id,
+      changed: result.changed,
+      previousGoalId: result.previousGoalId,
+      item: sourceItemToJsonShape(result.sourceItem)
+    };
+
+    if (parsed.json) {
+      writeJson(io.stdout, payload);
+      return 0;
+    }
+
+    const lines = [
+      result.changed
+        ? `Unlinked source item ${result.sourceItem.id} (was goal ${result.previousGoalId}).`
+        : `Source item ${result.sourceItem.id} was already unlinked; no change.`,
+      `Adapter: ${result.sourceItem.adapterKind}`,
+      `Title: ${result.sourceItem.title}`,
+      `Data dir: ${dataDir}`,
+      ""
+    ];
+    write(io.stdout, lines.join("\n"));
+    return 0;
+  } finally {
+    db.close();
+  }
 }
 
 const LINEAR_API_KEY_ENV = "LINEAR_API_KEY";
@@ -658,17 +833,25 @@ function sourceReconciliationPaginationStopped(
   };
 }
 
+type SourceFailureCode =
+  | "data_dir_failed"
+  | "source_item_not_found"
+  | LinkGoalToSourceItemErrorCode
+  | UnlinkGoalFromSourceItemErrorCode;
+
 type SourceFailure = {
-  code: "data_dir_failed" | "source_item_not_found";
+  code: SourceFailureCode;
   message: string;
   sourceItemId?: string;
+  goalId?: string;
+  currentGoalId?: string | null;
   dataDir?: string;
 };
 
 function emitSourceFailure(
   parsed: ParsedFlags,
   io: CliIo,
-  command: "source list" | "source get",
+  command: "source list" | "source get" | "source link" | "source unlink",
   failure: SourceFailure
 ): number {
   const payload: Record<string, unknown> = {
@@ -679,6 +862,12 @@ function emitSourceFailure(
   };
   if (failure.sourceItemId !== undefined) {
     payload["sourceItemId"] = failure.sourceItemId;
+  }
+  if (failure.goalId !== undefined) {
+    payload["goalId"] = failure.goalId;
+  }
+  if (failure.currentGoalId !== undefined) {
+    payload["currentGoalId"] = failure.currentGoalId;
   }
   if (failure.dataDir !== undefined) payload["dataDir"] = failure.dataDir;
 
@@ -1785,6 +1974,9 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
     lines.push("policy (MOMENTUM.md): pass --repo <path> to inspect repo policy");
   }
   if (sourcesPayload.ok) {
+    lines.push(
+      `sources: total=${sourcesPayload.totalSourceItems} linked=${sourcesPayload.linkedSourceItems} unlinked=${sourcesPayload.unlinkedSourceItems}`
+    );
     const last = sourcesPayload.lastReconciliation;
     if (last) {
       const stoppedText = last.paginationStopped
@@ -1808,6 +2000,9 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
 type DoctorSourcesPayload =
   | {
       ok: true;
+      totalSourceItems: number;
+      linkedSourceItems: number;
+      unlinkedSourceItems: number;
       lastReconciliation: {
         id: string;
         adapterKind: string;
@@ -1841,13 +2036,34 @@ function buildDoctorSourcesPayload(
   }
   const db = openDb(dataDir);
   try {
+    const counts = db
+      .prepare(
+        `SELECT
+            COUNT(*) AS total,
+            SUM(CASE WHEN goal_id IS NULL THEN 0 ELSE 1 END) AS linked
+           FROM source_items`
+      )
+      .get() as { total: number; linked: number | null } | undefined;
+    const totalSourceItems = counts?.total ?? 0;
+    const linkedSourceItems = counts?.linked ?? 0;
+    const unlinkedSourceItems = totalSourceItems - linkedSourceItems;
+
     const runs = listSourceReconciliationRuns(db);
     if (runs.length === 0) {
-      return { ok: true, lastReconciliation: null };
+      return {
+        ok: true,
+        totalSourceItems,
+        linkedSourceItems,
+        unlinkedSourceItems,
+        lastReconciliation: null
+      };
     }
     const last = runs[runs.length - 1] as SourceReconciliationRun;
     return {
       ok: true,
+      totalSourceItems,
+      linkedSourceItems,
+      unlinkedSourceItems,
       lastReconciliation: {
         id: last.id,
         adapterKind: last.adapterKind,
@@ -2001,6 +2217,7 @@ function goalStart(parsed: ParsedFlags, io: CliIo): number {
   const initOptions: GoalInitOptions = { goalPath };
   if (parsed.repo !== undefined) initOptions.repoOverride = parsed.repo;
   if (parsed.runner !== undefined) initOptions.runnerOverride = parsed.runner;
+  if (parsed.fromSource !== undefined) initOptions.linkSourceItemId = parsed.fromSource;
   initOptions.dataDirOptions = dataDirOptions;
   initOptions.mode = parsed.foreground ? "foreground" : "queued";
 
@@ -2059,6 +2276,7 @@ function emitGoalStartQueued(
     resumed: init.resumed,
     enqueueCreated: init.enqueueCreated,
     policy: init.policy,
+    linkedSourceItem: init.linkedSourceItem,
     nextAction: QUEUED_NEXT_ACTION
   };
 
@@ -2116,7 +2334,8 @@ function emitGoalStart(
     dataDir: init.dataDir,
     artifactDir: init.artifactPaths.goalDir,
     resumed: init.resumed,
-    policy: init.policy
+    policy: init.policy,
+    linkedSourceItem: init.linkedSourceItem
   };
 
   if (iteration.ok && iteration.iteration.ok) {
@@ -2488,10 +2707,22 @@ function emitLogs(
         content: data.resultJson.content,
         error: data.resultJson.error,
         parseError: data.resultJson.parseError
-      }
+      },
+      sourceItems: data.sourceItems
     };
     writeJson(io.stdout, payload);
     return 0;
+  }
+
+  const sourceItemsLines: string[] = [];
+  if (data.sourceItems.length > 0) {
+    sourceItemsLines.push(`Source items: ${data.sourceItems.length}`);
+    for (const item of data.sourceItems) {
+      sourceItemsLines.push(
+        `- ${item.id} [${item.adapterKind}] ${item.externalKey ?? item.externalId}: ` +
+        `${item.title}${item.status ? ` (${item.status})` : ""}`
+      );
+    }
   }
 
   const lines: string[] = [
@@ -2499,6 +2730,7 @@ function emitLogs(
     `Iteration: ${data.iteration}`,
     `Available iterations: ${data.availableIterations.length === 0 ? "(none)" : data.availableIterations.join(", ")}`,
     `Iteration dir: ${data.iterationDir}`,
+    ...sourceItemsLines,
     "",
     `## runner.log (${data.runnerLog.exists ? `${data.runnerLog.bytes} bytes` : "missing"}): ${data.runnerLog.path}`
   ];
@@ -2686,6 +2918,8 @@ function parseFlags(argv: string[]): ParsedFlags {
   let linearEndpoint: string | undefined;
   let linearPageSize: number | undefined;
   let maxPages: number | undefined;
+  let goal: string | undefined;
+  let fromSource: string | undefined;
   let error: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -2838,6 +3072,28 @@ function parseFlags(argv: string[]): ParsedFlags {
       continue;
     }
 
+    if (arg === "--goal") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --goal.";
+      } else {
+        goal = value;
+        index += 1;
+      }
+      continue;
+    }
+
+    if (arg === "--from-source") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --from-source.";
+      } else {
+        fromSource = value;
+        index += 1;
+      }
+      continue;
+    }
+
     if (arg === "--reason") {
       const value = readFlagValue(argv, index);
       if (value === undefined) {
@@ -2940,6 +3196,8 @@ function parseFlags(argv: string[]): ParsedFlags {
   if (linearEndpoint !== undefined) parsed.linearEndpoint = linearEndpoint;
   if (linearPageSize !== undefined) parsed.linearPageSize = linearPageSize;
   if (maxPages !== undefined) parsed.maxPages = maxPages;
+  if (goal !== undefined) parsed.goal = goal;
+  if (fromSource !== undefined) parsed.fromSource = fromSource;
   if (error !== undefined) parsed.error = error;
 
   return parsed;

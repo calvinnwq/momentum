@@ -143,7 +143,7 @@ describe("Milestone 1 end-to-end smoke", () => {
       expect(result.stdout.startsWith("Momentum\n")).toBe(true);
       expect(result.stdout).toContain("Usage:");
       expect(result.stdout).toContain(
-        "momentum goal start <goal.md> [--repo <path>] [--foreground] [--runner <profile>] [--data-dir <path>] [--json]"
+        "momentum goal start <goal.md> [--repo <path>] [--foreground] [--runner <profile>] [--from-source <source-item-id>] [--data-dir <path>] [--json]"
       );
       expect(result.stdout).toContain(
         "momentum status [goal-id] [--data-dir <path>] [--json]"
@@ -236,12 +236,14 @@ describe("Milestone 1 end-to-end smoke", () => {
       const commands = payload["commands"];
       expect(Array.isArray(commands)).toBe(true);
       expect(commands).toEqual([
-        "momentum goal start <goal.md> [--repo <path>] [--foreground] [--runner <profile>] [--data-dir <path>] [--json]",
+        "momentum goal start <goal.md> [--repo <path>] [--foreground] [--runner <profile>] [--from-source <source-item-id>] [--data-dir <path>] [--json]",
         "momentum status [goal-id] [--data-dir <path>] [--json]",
         "momentum logs <goal-id> [--iteration <n>] [--data-dir <path>] [--json]",
         "momentum handoff <goal-id> [--data-dir <path>] [--json]",
         "momentum source list [--adapter <kind>] [--data-dir <path>] [--json]",
         "momentum source get <source-item-id> [--data-dir <path>] [--json]",
+        "momentum source link <source-item-id> --goal <goal-id> [--data-dir <path>] [--json]",
+        "momentum source unlink <source-item-id> [--data-dir <path>] [--json]",
         "momentum source reconcile linear [--project <id-or-name>] [--milestone <id-or-name>] [--dry-run] [--max-pages <n>] [--linear-endpoint <url>] [--linear-page-size <n>] [--data-dir <path>] [--json]",
         "momentum worker run [--worker-id <id>] [--data-dir <path>] [--json]",
         "momentum daemon start [--max-loop-iterations <n>] [--max-idle-cycles <n>] [--poll-interval-ms <ms>] [--data-dir <path>] [--json]",
