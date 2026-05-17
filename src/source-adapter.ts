@@ -14,7 +14,8 @@ export type BuiltinSourceAdapterKind =
 export type SourceAdapterErrorCode =
   | "unsupported_source_adapter"
   | "source_adapter_threw"
-  | "source_item_not_found";
+  | "source_item_not_found"
+  | "source_item_invalid";
 
 export type SourceAdapterItem = {
   externalId: string;
@@ -40,6 +41,10 @@ export type SourceAdapterGetInput = SourceAdapterListInput & {
   externalId: string;
 };
 
+export type SourceAdapterNormalizeInput = SourceAdapterListInput & {
+  raw: unknown;
+};
+
 export type SourceAdapterListSuccess = {
   ok: true;
   items: SourceAdapterItem[];
@@ -62,10 +67,15 @@ export type SourceAdapterListResult =
 
 export type SourceAdapterGetResult = SourceAdapterGetSuccess | SourceAdapterError;
 
+export type SourceAdapterNormalizeResult =
+  | SourceAdapterGetSuccess
+  | SourceAdapterError;
+
 export type SourceAdapter = {
   kind: BuiltinSourceAdapterKind;
   list: (input: SourceAdapterListInput) => SourceAdapterListResult;
   get: (input: SourceAdapterGetInput) => SourceAdapterGetResult;
+  normalize: (input: SourceAdapterNormalizeInput) => SourceAdapterNormalizeResult;
 };
 
 export type SourceAdapterDispatchOptions = {
@@ -114,6 +124,21 @@ export function dispatchSourceAdapterGet(
   }
 }
 
+export function dispatchSourceAdapterNormalize(
+  kind: string,
+  raw: unknown,
+  options: SourceAdapterDispatchOptions = {}
+): SourceAdapterNormalizeResult {
+  const adapter = resolveSourceAdapter(kind, options.adapters);
+  if (!adapter) return unsupportedSourceAdapterError(kind);
+
+  try {
+    return adapter.normalize(buildNormalizeInput(raw, options));
+  } catch (error) {
+    return sourceAdapterThrewError(kind, error);
+  }
+}
+
 function buildListInput(
   options: SourceAdapterDispatchOptions
 ): SourceAdapterListInput {
@@ -127,6 +152,13 @@ function buildGetInput(
   return options.client === undefined
     ? { externalId }
     : { externalId, client: options.client };
+}
+
+function buildNormalizeInput(
+  raw: unknown,
+  options: SourceAdapterDispatchOptions
+): SourceAdapterNormalizeInput {
+  return options.client === undefined ? { raw } : { raw, client: options.client };
 }
 
 function buildLocalFixtureAdapter(): SourceAdapter {
@@ -148,8 +180,62 @@ function buildLocalFixtureAdapter(): SourceAdapter {
         };
       }
       return { ok: true, item };
-    }
+    },
+    normalize: (input: SourceAdapterNormalizeInput): SourceAdapterNormalizeResult =>
+      normalizeLocalFixtureSourceItem(input.raw)
   };
+}
+
+function normalizeLocalFixtureSourceItem(raw: unknown): SourceAdapterNormalizeResult {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return sourceItemInvalidError("local-fixture", "raw source item must be an object");
+  }
+
+  const record = raw as Record<string, unknown>;
+  const externalId = record["externalId"];
+  const title = record["title"];
+  const observedAt = record["observedAt"];
+
+  if (typeof externalId !== "string" || externalId.length === 0) {
+    return sourceItemInvalidError("local-fixture", "externalId must be a non-empty string");
+  }
+  if (typeof title !== "string" || title.length === 0) {
+    return sourceItemInvalidError("local-fixture", "title must be a non-empty string");
+  }
+  if (typeof observedAt !== "number" || !Number.isFinite(observedAt)) {
+    return sourceItemInvalidError("local-fixture", "observedAt must be a finite number");
+  }
+
+  const item: SourceAdapterItem = {
+    externalId,
+    title,
+    observedAt
+  };
+
+  const externalKey = optionalStringOrNull(record["externalKey"]);
+  if (externalKey !== undefined) item.externalKey = externalKey;
+  const url = optionalStringOrNull(record["url"]);
+  if (url !== undefined) item.url = url;
+  const status = optionalStringOrNull(record["status"]);
+  if (status !== undefined) item.status = status;
+  const metadata = optionalRecord(record["metadata"]);
+  if (metadata !== undefined) item.metadata = metadata;
+
+  return { ok: true, item };
+}
+
+function optionalStringOrNull(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || typeof value === "string") return value;
+  return undefined;
+}
+
+function optionalRecord(value: unknown): Record<string, unknown> | undefined {
+  if (value === undefined) return undefined;
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  return undefined;
 }
 
 function resolveSourceAdapter(
@@ -183,5 +269,13 @@ function sourceAdapterThrewError(
     ok: false,
     code: "source_adapter_threw",
     error: `Source adapter "${kind}" threw: ${detail}`
+  };
+}
+
+function sourceItemInvalidError(kind: string, reason: string): SourceAdapterError {
+  return {
+    ok: false,
+    code: "source_item_invalid",
+    error: `Source adapter "${kind}" could not normalize source item: ${reason}.`
   };
 }

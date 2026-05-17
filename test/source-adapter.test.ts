@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   dispatchSourceAdapterGet,
   dispatchSourceAdapterList,
+  dispatchSourceAdapterNormalize,
   getSourceAdapter,
   listSourceAdapterKinds,
   type SourceAdapter,
@@ -70,6 +71,9 @@ describe("dispatchSourceAdapterList", () => {
       },
       get: () => {
         throw new Error("not used");
+      },
+      normalize: () => {
+        throw new Error("not used");
       }
     };
 
@@ -105,5 +109,44 @@ describe("dispatchSourceAdapterGet", () => {
     if (out.ok) return;
     expect(out.code).toBe("source_item_not_found");
     expect(out.error).toContain("missing");
+  });
+});
+
+
+describe("dispatchSourceAdapterNormalize", () => {
+  it("normalizes raw local-fixture source payloads into SourceAdapterItem values", () => {
+    const out = dispatchSourceAdapterNormalize("local-fixture", {
+      externalId: "local-2",
+      externalKey: "LOCAL-2",
+      url: "file:///fixtures/LOCAL-2",
+      title: "Second fixture",
+      status: "In Progress",
+      metadata: { labels: ["m5"] },
+      observedAt: 2000
+    });
+
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.item).toEqual({
+      externalId: "local-2",
+      externalKey: "LOCAL-2",
+      url: "file:///fixtures/LOCAL-2",
+      title: "Second fixture",
+      status: "In Progress",
+      metadata: { labels: ["m5"] },
+      observedAt: 2000
+    });
+  });
+
+  it("rejects malformed raw local-fixture payloads with a stable code", () => {
+    const out = dispatchSourceAdapterNormalize("local-fixture", {
+      externalId: "local-3",
+      observedAt: 3000
+    });
+
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.code).toBe("source_item_invalid");
+    expect(out.error).toContain("title");
   });
 });
