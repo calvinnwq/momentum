@@ -13,6 +13,23 @@ import {
   listSourceItemSummariesForGoal,
   type SourceItemSummary
 } from "./source-items.js";
+import {
+  listLatestEvidenceRecordsForGoal,
+  type EvidenceRecord
+} from "./evidence-records.js";
+
+export const DEFAULT_GOAL_LOGS_EVIDENCE_LIMIT = 5;
+
+export type GoalLogsEvidenceSummary = {
+  id: string;
+  source: string;
+  type: string;
+  formatVersion: number;
+  occurredAt: number;
+  summary: string;
+  artifactPath: string | null;
+  sourceItemId: string | null;
+};
 
 export type GoalLogsErrorCode =
   | "invalid_input"
@@ -50,6 +67,7 @@ export type GoalLogsSuccess = {
   verificationLog: GoalLogFile;
   resultJson: GoalLogFile;
   sourceItems: SourceItemSummary[];
+  latestEvidence: GoalLogsEvidenceSummary[];
 };
 
 export type GoalLogsResult = GoalLogsError | GoalLogsSuccess;
@@ -147,11 +165,29 @@ export function loadGoalLogs(input: LoadGoalLogsInput = {}): GoalLogsResult {
       runnerLog: readLogFile(artifactPaths.runnerLog),
       verificationLog: readLogFile(artifactPaths.verificationLog),
       resultJson: readResultJsonFile(artifactPaths.resultJson),
-      sourceItems: listSourceItemSummariesForGoal(db, goal.id)
+      sourceItems: listSourceItemSummariesForGoal(db, goal.id),
+      latestEvidence: listLatestEvidenceRecordsForGoal(
+        db,
+        goal.id,
+        DEFAULT_GOAL_LOGS_EVIDENCE_LIMIT
+      ).map(toEvidenceSummary)
     };
   } finally {
     db?.close();
   }
+}
+
+function toEvidenceSummary(record: EvidenceRecord): GoalLogsEvidenceSummary {
+  return {
+    id: record.id,
+    source: record.source,
+    type: record.type,
+    formatVersion: record.formatVersion,
+    occurredAt: record.occurredAt,
+    summary: record.summary,
+    artifactPath: record.artifactPath,
+    sourceItemId: record.sourceItemId
+  };
 }
 
 function findLatestGoal(db: MomentumDb): GoalRow | undefined {

@@ -16,6 +16,7 @@ import {
 } from "../src/handoff.js";
 import { writeRecoveryArtifact } from "../src/recovery-artifact.js";
 import { upsertSourceItem } from "../src/source-items.js";
+import { ingestEvidenceRecord } from "../src/evidence-records.js";
 
 const tempRoots: string[] = [];
 
@@ -1453,5 +1454,107 @@ describe("writeHandoff", () => {
       "utf-8"
     );
     expect(markdown).not.toContain("## Source items");
+  });
+
+  it("writes latest evidence summaries to handoff JSON and markdown only when present", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Handoff with evidence");
+    const db = openDb(setup.dataDir);
+    try {
+      ingestEvidenceRecord(
+        db,
+        {
+          source: "agent-workflow",
+          type: "plan_created",
+          occurredAt: 1700000010000,
+          summary: "Plan created for run cwfp-test-1",
+          ingestKey: "agent-workflow:cwfp-test-1:plan:plan_created",
+          artifactPath: "/tmp/.agent-workflows/cwfp-test-1/plan.json",
+          goalId: setup.goalId,
+          metadata: { runId: "cwfp-test-1" }
+        },
+        { now: () => 1700000010500 }
+      );
+      ingestEvidenceRecord(
+        db,
+        {
+          source: "agent-workflow",
+          type: "merge_complete",
+          occurredAt: 1700000020000,
+          summary: "Merge complete for run cwfp-test-1",
+          ingestKey: "agent-workflow:cwfp-test-1:merge:merge_complete",
+          artifactPath: "/tmp/.agent-workflows/cwfp-test-1/ledger.jsonl",
+          goalId: setup.goalId,
+          metadata: { mergeCommit: "deadbeef" }
+        },
+        { now: () => 1700000020500 }
+      );
+    } finally {
+      db.close();
+    }
+
+    const result = writeHandoff({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+    const handoff = expectSuccess(result);
+    expect(handoff.data.latestEvidence).toHaveLength(2);
+    expect(handoff.data.latestEvidence[0]).toMatchObject({
+      source: "agent-workflow",
+      type: "merge_complete",
+      occurredAt: 1700000020000,
+      summary: "Merge complete for run cwfp-test-1",
+      formatVersion: 1,
+      sourceItemId: null
+    });
+
+    const json = JSON.parse(
+      fs.readFileSync(setup.artifactPaths.handoffJson, "utf-8")
+    ) as Record<string, unknown>;
+    const evidence = json["latest_evidence"] as Array<Record<string, unknown>>;
+    expect(evidence).toHaveLength(2);
+    expect(evidence[0]).toMatchObject({
+      source: "agent-workflow",
+      type: "merge_complete",
+      occurred_at: 1700000020000,
+      summary: "Merge complete for run cwfp-test-1",
+      format_version: 1
+    });
+    expect(evidence[1]).toMatchObject({
+      source: "agent-workflow",
+      type: "plan_created",
+      occurred_at: 1700000010000
+    });
+
+    const markdown = fs.readFileSync(
+      setup.artifactPaths.handoffMd,
+      "utf-8"
+    );
+    expect(markdown).toContain("## Latest evidence");
+    expect(markdown).toContain("Merge complete for run cwfp-test-1");
+    expect(markdown).toContain("Plan created for run cwfp-test-1");
+  });
+
+  it("omits the latest evidence section from handoff JSON and markdown when no evidence is linked", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Handoff without evidence");
+
+    const result = writeHandoff({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+    const handoff = expectSuccess(result);
+    expect(handoff.data.latestEvidence).toEqual([]);
+
+    const json = JSON.parse(
+      fs.readFileSync(setup.artifactPaths.handoffJson, "utf-8")
+    ) as Record<string, unknown>;
+    expect(json).not.toHaveProperty("latest_evidence");
+
+    const markdown = fs.readFileSync(
+      setup.artifactPaths.handoffMd,
+      "utf-8"
+    );
+    expect(markdown).not.toContain("## Latest evidence");
   });
 });

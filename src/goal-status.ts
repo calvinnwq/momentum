@@ -32,6 +32,12 @@ import {
   listSourceItemSummariesForGoal,
   type SourceItemSummary
 } from "./source-items.js";
+import {
+  listLatestEvidenceRecordsForGoal,
+  type EvidenceRecord
+} from "./evidence-records.js";
+
+export const DEFAULT_GOAL_STATUS_EVIDENCE_LIMIT = 5;
 
 export type GoalStatusErrorCode =
   | "invalid_input"
@@ -226,6 +232,17 @@ export type GoalStatusPolicyError = {
   message: string;
 };
 
+export type GoalStatusEvidenceSummary = {
+  id: string;
+  source: string;
+  type: string;
+  formatVersion: number;
+  occurredAt: number;
+  summary: string;
+  artifactPath: string | null;
+  sourceItemId: string | null;
+};
+
 export type GoalStatusPolicySummary = {
   configured: boolean;
   present: boolean;
@@ -273,6 +290,7 @@ export type GoalStatusSuccess = {
   staleRecovery: GoalStatusStaleRecoverySummary;
   policy: GoalStatusPolicySummary;
   sourceItems: SourceItemSummary[];
+  latestEvidence: GoalStatusEvidenceSummary[];
 };
 
 export type GoalStatusResult = GoalStatusError | GoalStatusSuccess;
@@ -392,6 +410,11 @@ export function loadGoalStatus(input: LoadGoalStatusInput = {}): GoalStatusResul
     const staleRecovery = buildStaleRecoverySummary(db, goal.id);
     const policy = buildPolicySummary(goal.repo);
     const sourceItems = listSourceItemSummariesForGoal(db, goal.id);
+    const latestEvidence = listLatestEvidenceRecordsForGoal(
+      db,
+      goal.id,
+      DEFAULT_GOAL_STATUS_EVIDENCE_LIMIT
+    ).map(toEvidenceSummary);
 
     return {
       ok: true,
@@ -428,11 +451,25 @@ export function loadGoalStatus(input: LoadGoalStatusInput = {}): GoalStatusResul
       daemon,
       staleRecovery,
       policy,
-      sourceItems
+      sourceItems,
+      latestEvidence
     };
   } finally {
     db?.close();
   }
+}
+
+function toEvidenceSummary(record: EvidenceRecord): GoalStatusEvidenceSummary {
+  return {
+    id: record.id,
+    source: record.source,
+    type: record.type,
+    formatVersion: record.formatVersion,
+    occurredAt: record.occurredAt,
+    summary: record.summary,
+    artifactPath: record.artifactPath,
+    sourceItemId: record.sourceItemId
+  };
 }
 
 function buildPolicySummary(repoPath: string | null): GoalStatusPolicySummary {

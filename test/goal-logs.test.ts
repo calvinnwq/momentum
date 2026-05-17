@@ -9,6 +9,7 @@ import { openDb } from "../src/db.js";
 import { initGoal, type GoalInitSuccess } from "../src/goal-init.js";
 import { executeIterationJob } from "../src/iteration-job.js";
 import { loadGoalLogs } from "../src/goal-logs.js";
+import { ingestEvidenceRecord } from "../src/evidence-records.js";
 
 const tempRoots: string[] = [];
 
@@ -512,5 +513,71 @@ describe("loadGoalLogs", () => {
     expect(result.code).toBe("iteration_not_found");
     expect(result.error).toContain("Iteration 9");
     expect(result.error).toContain("Available iterations");
+  });
+
+  it("includes latestEvidence summaries newest-first for linked goals", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Logs with evidence");
+    const db = openDb(setup.dataDir);
+    try {
+      ingestEvidenceRecord(
+        db,
+        {
+          source: "agent-workflow",
+          type: "plan_created",
+          occurredAt: 1700000010000,
+          summary: "plan for logs-run-1",
+          ingestKey: "agent-workflow:logs-run-1:plan",
+          artifactPath: "/tmp/.agent-workflows/logs-run-1/plan.json",
+          goalId: setup.goalId
+        },
+        { now: () => 1700000010500 }
+      );
+      ingestEvidenceRecord(
+        db,
+        {
+          source: "agent-workflow",
+          type: "merge_complete",
+          occurredAt: 1700000020000,
+          summary: "merge for logs-run-1",
+          ingestKey: "agent-workflow:logs-run-1:merge",
+          artifactPath: "/tmp/.agent-workflows/logs-run-1/ledger.jsonl",
+          goalId: setup.goalId
+        },
+        { now: () => 1700000020500 }
+      );
+    } finally {
+      db.close();
+    }
+
+    const result = loadGoalLogs({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.latestEvidence).toHaveLength(2);
+    expect(result.latestEvidence[0]).toMatchObject({
+      type: "merge_complete",
+      occurredAt: 1700000020000,
+      summary: "merge for logs-run-1"
+    });
+    expect(result.latestEvidence[1]).toMatchObject({
+      type: "plan_created",
+      occurredAt: 1700000010000
+    });
+  });
+
+  it("returns an empty latestEvidence list for goals with no evidence", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Logs without evidence");
+    const result = loadGoalLogs({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.latestEvidence).toEqual([]);
   });
 });

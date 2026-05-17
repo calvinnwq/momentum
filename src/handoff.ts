@@ -9,6 +9,7 @@ import {
   type GoalStatusCurrentIterationDetail,
   type GoalStatusDaemonSummary,
   type GoalStatusError,
+  type GoalStatusEvidenceSummary,
   type GoalStatusIterationSummary,
   type GoalStatusJobSummary,
   type GoalStatusNextActionDetail,
@@ -84,6 +85,7 @@ export type HandoffData = {
   staleRecovery: GoalStatusStaleRecoverySummary;
   policy: GoalStatusPolicySummary;
   sourceItems: SourceItemSummary[];
+  latestEvidence: GoalStatusEvidenceSummary[];
   artifactPaths: GoalArtifactPaths;
   artifactFiles: GoalStatusArtifactFiles;
 };
@@ -182,6 +184,7 @@ function buildHandoffData(
     staleRecovery: status.staleRecovery,
     policy: status.policy,
     sourceItems: status.sourceItems,
+    latestEvidence: status.latestEvidence,
     artifactPaths: status.artifactPaths,
     artifactFiles: status.artifactFiles
   };
@@ -353,6 +356,11 @@ function toJsonShape(data: HandoffData): Record<string, unknown> {
           source_items: data.sourceItems.map(sourceItemToJsonShape)
         }
       : {}),
+    ...(data.latestEvidence.length > 0
+      ? {
+          latest_evidence: data.latestEvidence.map(evidenceToJsonShape)
+        }
+      : {}),
     artifacts: {
       goal_md: data.artifactPaths.goalMd,
       ledger_md: data.artifactPaths.ledgerMd,
@@ -375,6 +383,21 @@ function toJsonShape(data: HandoffData): Record<string, unknown> {
       verification_log: data.artifactFiles.verificationLog,
       result_json: data.artifactFiles.resultJson
     }
+  };
+}
+
+function evidenceToJsonShape(
+  record: GoalStatusEvidenceSummary
+): Record<string, unknown> {
+  return {
+    id: record.id,
+    source: record.source,
+    type: record.type,
+    format_version: record.formatVersion,
+    occurred_at: record.occurredAt,
+    summary: record.summary,
+    artifact_path: record.artifactPath,
+    source_item_id: record.sourceItemId
   };
 }
 
@@ -643,6 +666,16 @@ function renderHandoffMarkdown(data: HandoffData): string {
         `- ${item.adapterKind}/${item.externalKey ?? item.externalId}: ` +
         `${item.title}${item.status ? ` (${item.status})` : ""} ` +
         `observed ${item.lastObservedAt}`
+      );
+    }
+    lines.push("");
+  }
+
+  if (data.latestEvidence.length > 0) {
+    lines.push("## Latest evidence");
+    for (const record of data.latestEvidence) {
+      lines.push(
+        `- ${record.occurredAt} [${record.source}/${record.type}] ${record.summary}`
       );
     }
     lines.push("");

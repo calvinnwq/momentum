@@ -2917,7 +2917,10 @@ function emitStatus(
     daemon: data.daemon,
     staleRecovery: data.staleRecovery,
     policy: data.policy,
-    ...(data.sourceItems.length > 0 ? { sourceItems: data.sourceItems } : {})
+    ...(data.sourceItems.length > 0 ? { sourceItems: data.sourceItems } : {}),
+    ...(data.latestEvidence.length > 0
+      ? { latestEvidence: data.latestEvidence }
+      : {})
   };
 
   if (parsed.json) {
@@ -3037,6 +3040,15 @@ function emitStatus(
     }
   }
 
+  if (data.latestEvidence.length > 0) {
+    lines.push(`Latest evidence: ${data.latestEvidence.length}`);
+    for (const record of data.latestEvidence) {
+      lines.push(
+        `- ${record.occurredAt} [${record.source}/${record.type}] ${record.summary}`
+      );
+    }
+  }
+
   lines.push("");
   write(io.stdout, lines.join("\n"));
   return 0;
@@ -3127,7 +3139,10 @@ function emitLogs(
         error: data.resultJson.error,
         parseError: data.resultJson.parseError
       },
-      sourceItems: data.sourceItems
+      sourceItems: data.sourceItems,
+      ...(data.latestEvidence.length > 0
+        ? { latestEvidence: data.latestEvidence }
+        : {})
     };
     writeJson(io.stdout, payload);
     return 0;
@@ -3144,12 +3159,23 @@ function emitLogs(
     }
   }
 
+  const evidenceLines: string[] = [];
+  if (data.latestEvidence.length > 0) {
+    evidenceLines.push(`Latest evidence: ${data.latestEvidence.length}`);
+    for (const record of data.latestEvidence) {
+      evidenceLines.push(
+        `- ${record.occurredAt} [${record.source}/${record.type}] ${record.summary}`
+      );
+    }
+  }
+
   const lines: string[] = [
     `Goal: ${data.goalId}`,
     `Iteration: ${data.iteration}`,
     `Available iterations: ${data.availableIterations.length === 0 ? "(none)" : data.availableIterations.join(", ")}`,
     `Iteration dir: ${data.iterationDir}`,
     ...sourceItemsLines,
+    ...evidenceLines,
     "",
     `## runner.log (${data.runnerLog.exists ? `${data.runnerLog.bytes} bytes` : "missing"}): ${data.runnerLog.path}`
   ];
