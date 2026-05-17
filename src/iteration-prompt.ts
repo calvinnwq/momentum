@@ -153,22 +153,18 @@ export function renderIterationPrompt(ctx: IterationPromptContext): string {
     lines.push("");
     lines.push("<untrusted_source_context_json>");
     lines.push(
-      JSON.stringify(
-        {
-          sources: sourceItems.map(({ sourceItem, body: itemBody }) => ({
-            adapter: sourceItem.adapterKind,
-            external_id: sourceItem.externalId,
-            external_key: sourceItem.externalKey,
-            title: sourceItem.title,
-            status: sourceItem.status,
-            url: sourceItem.url,
-            last_observed_at: sourceItem.lastObservedAt,
-            body: truncateSourceBody(itemBody, maxChars)
-          }))
-        },
-        null,
-        2
-      )
+      serializeUntrustedSourceContextJson({
+        sources: sourceItems.map(({ sourceItem, body: itemBody }) => ({
+          adapter: sourceItem.adapterKind,
+          external_id: sourceItem.externalId,
+          external_key: sourceItem.externalKey,
+          title: sourceItem.title,
+          status: sourceItem.status,
+          url: sourceItem.url,
+          last_observed_at: sourceItem.lastObservedAt,
+          body: truncateSourceBody(itemBody, maxChars)
+        }))
+      })
     );
     lines.push("</untrusted_source_context_json>");
     lines.push("");
@@ -196,4 +192,12 @@ function truncateSourceBody(
   if (rawBody.length === 0) return null;
   if (rawBody.length <= maxChars) return rawBody;
   return `${rawBody.slice(0, maxChars)}\n\n[truncated: source body exceeded ${maxChars} chars]`;
+}
+
+function serializeUntrustedSourceContextJson(value: unknown): string {
+  return JSON.stringify(value, null, 2).replace(/[<>&]/g, (char) => {
+    if (char === "<") return "\\u003c";
+    if (char === ">") return "\\u003e";
+    return "\\u0026";
+  });
 }
