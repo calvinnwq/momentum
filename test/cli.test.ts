@@ -1238,6 +1238,62 @@ runner_profile: {
     expect(result.stderr).toBe("");
   });
 
+  it("handoff --json surfaces linked source item summaries", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+
+    const startResult = await run([
+      "goal", "start", goalFile,
+      "--foreground",
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    const startPayload = JSON.parse(startResult.stdout) as Record<string, unknown>;
+    const goalId = startPayload["goalId"] as string;
+
+    const { openDb } = await import("../src/db.js");
+    const { upsertSourceItem } = await import("../src/source-items.js");
+    const db = openDb(dataDir);
+    try {
+      upsertSourceItem(
+        db,
+        {
+          adapterKind: "local-fixture",
+          externalId: "fixture-handoff-json-1",
+          externalKey: "SRC-HANDOFF-1",
+          title: "Handoff JSON source item",
+          status: "Todo",
+          metadata: { opaque: "not surfaced here" },
+          observedAt: 1_700_000_000_000,
+          goalId
+        },
+        { now: () => 1_700_000_000_100 }
+      );
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "handoff", goalId, "--data-dir", dataDir, "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload["sourceItems"]).toEqual([
+      {
+        id: expect.any(String),
+        adapterKind: "local-fixture",
+        externalId: "fixture-handoff-json-1",
+        externalKey: "SRC-HANDOFF-1",
+        url: null,
+        title: "Handoff JSON source item",
+        status: "Todo",
+        lastObservedAt: 1_700_000_000_000
+      }
+    ]);
+    expect(JSON.stringify(payload["sourceItems"])).not.toContain("opaque");
+  });
+
   it("handoff text mode prints the artifact paths", async () => {
     const { dataDir, goalFile, repo } = setupGoalAndData();
 
@@ -3745,6 +3801,157 @@ describe("momentum recovery clear", () => {
       "Manual recovery cleared for goal: g-flagged"
     );
     expect(textResult.stdout).toContain("Previous reason: job_running");
+  });
+
+  it("lists and gets source items for operator inspection", async () => {
+    const dataDir = makeTempDir("momentum-cli-source-");
+    const { openDb } = await import("../src/db.js");
+    const { upsertSourceItem } = await import("../src/source-items.js");
+    const db = openDb(dataDir);
+    try {
+      upsertSourceItem(
+        db,
+        {
+          adapterKind: "local-fixture",
+          externalId: "fixture-1",
+          externalKey: "SRC-1",
+          url: "https://example.test/source/SRC-1",
+          title: "Fixture source item",
+          status: "In Progress",
+          metadata: { opaque: { priority: "high" } },
+          observedAt: 1_700_000_000_000
+        },
+        { now: () => 1_700_000_000_100 }
+      );
+      upsertSourceItem(
+        db,
+        {
+          adapterKind: "manual",
+          externalId: "manual-1",
+          externalKey: "MAN-1",
+          title: "Manual source item",
+          status: "Todo",
+          metadata: { note: "kept opaque" },
+          observedAt: 1_700_000_000_200
+        },
+        { now: () => 1_700_000_000_300 }
+      );
+    } finally {
+      db.close();
+    }
+
+    const listResult = await run([
+      "source",
+      "list",
+      "--adapter",
+      "local-fixture",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(listResult.code).toBe(0);
+    expect(listResult.stderr).toBe("");
+    const listPayload = JSON.parse(listResult.stdout) as Record<string, unknown>;
+    expect(listPayload).toMatchObject({
+      ok: true,
+      command: "source list",
+      adapter: "local-fixture",
+      count: 1
+    });
+    const items = listPayload["items"] as Record<string, unknown>[];
+    expect(items).toHaveLength(1);
+    const firstItem = items[0];
+    expect(firstItem).toBeDefined();
+    expect(firstItem).toMatchObject({
+      adapterKind: "local-fixture",
+      externalId: "fixture-1",
+      externalKey: "SRC-1",
+      title: "Fixture source item",
+      status: "In Progress",
+      goalId: null,
+      metadata: { opaque: { priority: "high" } }
+    });
+
+    const sourceId = firstItem!["id"] as string;
+    const getResult = await run([
+      "source",
+      "get",
+      sourceId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(getResult.code).toBe(0);
+    const getPayload = JSON.parse(getResult.stdout) as Record<string, unknown>;
+    expect(getPayload).toMatchObject({
+      ok: true,
+      command: "source get",
+      item: {
+        id: sourceId,
+        adapterKind: "local-fixture",
+        externalId: "fixture-1",
+        metadata: { opaque: { priority: "high" } }
+      }
+    });
+  });
+
+  it("source get reports a stable not_found error for unknown source item ids", async () => {
+    const dataDir = makeTempDir("momentum-cli-source-missing-");
+    const result = await run([
+      "source",
+      "get",
+      "source_item_missing",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "source get",
+      code: "source_item_not_found",
+      sourceItemId: "source_item_missing"
+    });
+  });
+
+  it("status text surfaces linked source items", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+    const { openDb } = await import("../src/db.js");
+    const { upsertSourceItem } = await import("../src/source-items.js");
+    const db = openDb(dataDir);
+
+    const startResult = await run([
+      "goal", "start", goalFile,
+      "--foreground",
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    const startPayload = JSON.parse(startResult.stdout) as Record<string, unknown>;
+    const goalId = startPayload["goalId"] as string;
+
+    upsertSourceItem(
+      db,
+      {
+        adapterKind: "local-fixture",
+        externalId: "fixture-status-1",
+        externalKey: "SRC-STATUS-1",
+        title: "Status source item",
+        status: "In Progress",
+        observedAt: 1_700_000_000_000,
+        goalId
+      },
+      { now: () => 1_700_000_000_100 }
+    );
+    db.close();
+
+    const statusResult = await run(["status", "--data-dir", dataDir]);
+    expect(statusResult.code).toBe(0);
+    expect(statusResult.stdout).toContain("Source items: 1");
+    expect(statusResult.stdout).toContain("[local-fixture] SRC-STATUS-1");
+    expect(statusResult.stdout).toContain("Status source item");
   });
 
   it("help lists the new recovery clear command", async () => {

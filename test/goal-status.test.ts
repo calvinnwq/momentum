@@ -14,6 +14,7 @@ import { reduceGoalIteration } from "../src/goal-reducer.js";
 import { ensureIterationArtifactDir } from "../src/artifacts.js";
 import { claimPendingGoalIterationJob } from "../src/queue-jobs.js";
 import { writeRecoveryArtifact } from "../src/recovery-artifact.js";
+import { upsertSourceItem } from "../src/source-items.js";
 
 const tempRoots: string[] = [];
 
@@ -2072,6 +2073,54 @@ describe("loadGoalStatus", () => {
       expect(status.policy.present).toBe(false);
       expect(status.policy.error).not.toBeNull();
       expect(status.policy.error?.code).toBe("policy_schema_invalid");
+    });
+  });
+
+  describe("linked source item surface", () => {
+    it("includes linked source item summaries without adapter metadata in status data", () => {
+      const repo = initRepo();
+      const setup = setupGoal(repo, "Status with source item");
+      const db = openDb(setup.dataDir);
+      try {
+        upsertSourceItem(
+          db,
+          {
+            adapterKind: "local-fixture",
+            externalId: "fixture-1",
+            externalKey: "SRC-1",
+            url: "https://example.test/source/SRC-1",
+            title: "Fixture source item",
+            status: "In Progress",
+            metadata: { privateShape: true },
+            observedAt: 1700000000000,
+            goalId: setup.goalId
+          },
+          { now: () => 1700000001000 }
+        );
+      } finally {
+        db.close();
+      }
+
+      const status = loadGoalStatus({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      });
+
+      expect(status.ok).toBe(true);
+      if (!status.ok) return;
+      expect(status.sourceItems).toEqual([
+        {
+          id: expect.any(String),
+          adapterKind: "local-fixture",
+          externalId: "fixture-1",
+          externalKey: "SRC-1",
+          url: "https://example.test/source/SRC-1",
+          title: "Fixture source item",
+          status: "In Progress",
+          lastObservedAt: 1700000000000
+        }
+      ]);
+      expect(status.sourceItems[0]).not.toHaveProperty("metadata");
     });
   });
 });

@@ -15,6 +15,7 @@ import {
   type HandoffSuccess
 } from "../src/handoff.js";
 import { writeRecoveryArtifact } from "../src/recovery-artifact.js";
+import { upsertSourceItem } from "../src/source-items.js";
 
 const tempRoots: string[] = [];
 
@@ -1366,5 +1367,91 @@ describe("writeHandoff", () => {
     expect(markdown).toContain("Default verification: pnpm test");
     expect(markdown).toContain("Default verification_timeout_sec: 1200");
     expect(markdown).toContain("Policy notes: present");
+  });
+
+  it("writes linked source item summaries to handoff JSON only when present", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Handoff with source item");
+    const db = openDb(setup.dataDir);
+    try {
+      upsertSourceItem(
+        db,
+        {
+          adapterKind: "local-fixture",
+          externalId: "fixture-2",
+          externalKey: "SRC-2",
+          url: "https://example.test/source/SRC-2",
+          title: "Linked source context",
+          status: "Todo",
+          metadata: { opaque: "not surfaced here" },
+          observedAt: 1700000002000,
+          goalId: setup.goalId
+        },
+        { now: () => 1700000003000 }
+      );
+    } finally {
+      db.close();
+    }
+
+    const result = writeHandoff({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+    const handoff = expectSuccess(result);
+    expect(handoff.data.sourceItems).toEqual([
+      {
+        id: expect.any(String),
+        adapterKind: "local-fixture",
+        externalId: "fixture-2",
+        externalKey: "SRC-2",
+        url: "https://example.test/source/SRC-2",
+        title: "Linked source context",
+        status: "Todo",
+        lastObservedAt: 1700000002000
+      }
+    ]);
+
+    const json = JSON.parse(
+      fs.readFileSync(setup.artifactPaths.handoffJson, "utf-8")
+    ) as Record<string, unknown>;
+    expect(json["source_items"]).toEqual([
+      {
+        id: expect.any(String),
+        adapter_kind: "local-fixture",
+        external_id: "fixture-2",
+        external_key: "SRC-2",
+        url: "https://example.test/source/SRC-2",
+        title: "Linked source context",
+        status: "Todo",
+        last_observed_at: 1700000002000
+      }
+    ]);
+    expect(JSON.stringify(json["source_items"])).not.toContain("opaque");
+
+    const markdown = fs.readFileSync(
+      setup.artifactPaths.handoffMd,
+      "utf-8"
+    );
+    expect(markdown).toContain("## Source items");
+    expect(markdown).toContain("local-fixture/SRC-2");
+    expect(markdown).toContain("Linked source context");
+  });
+
+  it("omits the source items section from handoff markdown when no items are linked", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Handoff without source items");
+
+    const result = writeHandoff({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+    const handoff = expectSuccess(result);
+    expect(handoff.data.sourceItems).toEqual([]);
+
+    const markdown = fs.readFileSync(
+      setup.artifactPaths.handoffMd,
+      "utf-8"
+    );
+    expect(markdown).not.toContain("## Source items");
   });
 });
