@@ -17,12 +17,14 @@ Markdown Goal spec -> foreground runner -> Momentum-owned verification -> commit
 The public CLI shape is:
 
 ```text
-momentum goal start <goal.md> [--repo <path>] [--foreground] [--runner <profile>] [--data-dir <path>] [--json]
+momentum goal start <goal.md> [--repo <path>] [--foreground] [--runner <profile>] [--from-source <source-item-id>] [--data-dir <path>] [--json]
 momentum status [goal-id] [--data-dir <path>] [--json]
 momentum logs <goal-id> [--iteration <n>] [--data-dir <path>] [--json]
 momentum handoff <goal-id> [--data-dir <path>] [--json]
 momentum source list [--adapter <kind>] [--data-dir <path>] [--json]
 momentum source get <source-item-id> [--data-dir <path>] [--json]
+momentum source link <source-item-id> --goal <goal-id> [--data-dir <path>] [--json]
+momentum source unlink <source-item-id> [--data-dir <path>] [--json]
 momentum source reconcile linear [--project <id-or-name>] [--milestone <id-or-name>] [--dry-run] [--max-pages <n>] [--linear-endpoint <url>] [--linear-page-size <n>] [--data-dir <path>] [--json]
 momentum worker run [--worker-id <id>] [--data-dir <path>] [--json]
 momentum daemon start [--max-loop-iterations <n>] [--max-idle-cycles <n>] [--poll-interval-ms <ms>] [--data-dir <path>] [--json]
@@ -223,10 +225,10 @@ A `MOMENTUM.md` with no frontmatter at all is also valid: the entire body become
 ### `goal start`
 
 ```text
-momentum goal start <goal.md> [--repo <path>] [--foreground] [--runner <profile>] [--data-dir <path>] [--json]
+momentum goal start <goal.md> [--repo <path>] [--foreground] [--runner <profile>] [--from-source <source-item-id>] [--data-dir <path>] [--json]
 ```
 
-Parses the goal spec and initializes (or resumes) goal state under the resolved data directory. Behavior then branches on `--foreground`:
+Parses the goal spec and initializes (or resumes) goal state under the resolved data directory. When `--from-source <source-item-id>` is provided, the goal is linked to that source item at init time (the link must refer to an existing source item; linking fails with `source_item_not_found` if the item does not exist, `goal_not_found` if the goal does not exist, or `linked_to_other_goal` if the source item is already linked to a different goal). The `linkedSourceItem` field on the success envelope is `null` when `--from-source` is not provided, or a source item summary (`{id, adapterKind, externalId, externalKey, url, title, status, lastObservedAt}`) when the link succeeds. Behavior then branches on `--foreground`:
 
 - **Default (queued enqueue path, Milestone 2):** writes the Goal row with state `queued` and enqueues a single `goal_iteration` job (state `pending`, iteration `1`) with idempotency key `goal:<goal-id>:iteration:1`. Repo, branch, and base HEAD are not inspected at enqueue time — that is the worker's job. Re-running with the same spec returns the same `goalId` and `jobId`, sets `resumed: true` / `enqueueCreated: false`, and emits exactly one `job.enqueued` event per idempotent first-iteration enqueue. `momentum worker run` consumes that queue and executes a claimed job once. The resolved runner profile and its source are surfaced on the JSON envelope.
 
@@ -267,6 +269,7 @@ Parses the goal spec and initializes (or resumes) goal state under the resolved 
         "source": { "verification": "builtin_default", "verificationTimeoutSec": "builtin_default" }
       }
     },
+    "linkedSourceItem": null,
     "nextAction": "Goal queued. Run `momentum worker run --data-dir <path>` to claim and execute one goal_iteration job."
   }
   ```
@@ -322,11 +325,12 @@ Parses the goal spec and initializes (or resumes) goal state under the resolved 
         "verificationTimeoutSec": 900,
         "source": { "verification": "builtin_default", "verificationTimeoutSec": "builtin_default" }
       }
-    }
+    },
+    "linkedSourceItem": null
   }
   ```
 
-  The foreground envelope `policy` block has the same shape as the queued envelope and reflects the `MOMENTUM.md` summary loaded from the goal's `repo`.
+  The foreground envelope `policy` block has the same shape as the queued envelope and reflects the `MOMENTUM.md` summary loaded from the goal's `repo`. The `linkedSourceItem` field is `null` when `--from-source` is not provided, or a source item summary when the link succeeds.
 
 Re-running `goal start` with the same goal spec against the same data directory resumes the existing goal instead of creating duplicate state in either mode. Text output begins with `Goal resumed`; JSON output sets `resumed: true`.
 
@@ -369,6 +373,22 @@ momentum source get <source-item-id> [--data-dir <path>] [--json]
 ```
 
 Retrieves a single source item by ID. JSON output includes `ok`, `command`, `dataDir`, and an `item` object with the full source item fields (`id`, `adapterKind`, `externalId`, `externalKey`, `url`, `title`, `status`, `metadata`, `lastObservedAt`, `goalId`, `createdAt`, `updatedAt`). When the source item does not exist, exits non-zero with `code: "source_item_not_found"` and includes `sourceItemId` in the error payload. Text output shows adapter, external id, external key, URL, title, status, linked goal, and last-observed timestamp.
+
+### `source link`
+
+```text
+momentum source link <source-item-id> --goal <goal-id> [--data-dir <path>] [--json]
+```
+
+Links a source item to a goal. A source item can be linked to at most one goal; attempting to link a source item already linked to a different goal fails with `code: "linked_to_other_goal"` (including `currentGoalId` on the error payload). Linking to the same goal again is idempotent: `changed` is `false` and `skippedReason` is `"already_linked_to_target"`. JSON output includes `ok`, `command`, `goalId`, `sourceItemId`, `changed`, `skippedReason`, `previousGoalId`, and `item` (the updated source item). Text output confirms the link and shows adapter, external key, title, and data dir. On failure, exits non-zero with `code: "goal_not_found"`, `"source_item_not_found"`, or `"linked_to_other_goal"`.
+
+### `source unlink`
+
+```text
+momentum source unlink <source-item-id> [--data-dir <path>] [--json]
+```
+
+Unlinks a source item from its goal. Unlinking an already-unlinked source item is idempotent: `changed` is `false` and `previousGoalId` is `null`. JSON output includes `ok`, `command`, `sourceItemId`, `changed`, `previousGoalId`, and `item`. Text output confirms the unlink and shows adapter, title, and data dir. On failure (`source_item_not_found`), exits non-zero.
 
 ### `source reconcile linear`
 

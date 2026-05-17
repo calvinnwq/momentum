@@ -2,8 +2,7 @@ import type { MomentumDb } from "./db.js";
 import type { IterationPromptSourceContext } from "./iteration-prompt.js";
 import {
   listSourceItemSummariesForGoal,
-  listSourceSnapshotsForItem,
-  type SourceItemSummary
+  listSourceSnapshotsForItem
 } from "./source-items.js";
 
 export function buildIterationSourceContext(
@@ -42,26 +41,4 @@ function extractTextBody(snapshot: Record<string, unknown>): string | null {
     }
   }
   return null;
-}
-
-export function summarizeSourceItemForSurface(summary: SourceItemSummary): {
-  id: string;
-  adapterKind: string;
-  externalId: string;
-  externalKey: string | null;
-  url: string | null;
-  title: string;
-  status: string | null;
-  lastObservedAt: number;
-} {
-  return {
-    id: summary.id,
-    adapterKind: summary.adapterKind,
-    externalId: summary.externalId,
-    externalKey: summary.externalKey,
-    url: summary.url,
-    title: summary.title,
-    status: summary.status,
-    lastObservedAt: summary.lastObservedAt
-  };
 }
