@@ -54,6 +54,11 @@ import {
   safeRunnerProfileSummary
 } from "./runner-profile.js";
 import { loadMomentumPolicy } from "./momentum-policy.js";
+import {
+  getSourceItemById,
+  listSourceItems,
+  type SourceItem
+} from "./source-items.js";
 
 export const VERSION = "0.0.0";
 
@@ -83,6 +88,7 @@ type ParsedFlags = {
   maxLoopIterations?: number;
   maxIdleCycles?: number;
   pollIntervalMs?: number;
+  adapter?: string;
   error?: string;
 };
 
@@ -91,6 +97,8 @@ const COMMANDS = [
   "momentum status [goal-id] [--data-dir <path>] [--json]",
   "momentum logs <goal-id> [--iteration <n>] [--data-dir <path>] [--json]",
   "momentum handoff <goal-id> [--data-dir <path>] [--json]",
+  "momentum source list [--adapter <kind>] [--data-dir <path>] [--json]",
+  "momentum source get <source-item-id> [--data-dir <path>] [--json]",
   "momentum worker run [--worker-id <id>] [--data-dir <path>] [--json]",
   "momentum daemon start [--max-loop-iterations <n>] [--max-idle-cycles <n>] [--poll-interval-ms <ms>] [--data-dir <path>] [--json]",
   "momentum daemon stop [--now] [--reason <text>] [--data-dir <path>] [--json]",
@@ -144,6 +152,10 @@ export async function runCli(argv: string[], io: CliIo = defaultIo()): Promise<n
     return handoff(parsed, io);
   }
 
+  if (command === "source") {
+    return source(parsed, io);
+  }
+
   if (command === "worker" && subcommand === "run") {
     return workerRun(parsed, io);
   }
@@ -157,6 +169,211 @@ export async function runCli(argv: string[], io: CliIo = defaultIo()): Promise<n
   }
 
   return usageError(`Unknown command: ${command}`, parsed, io);
+}
+
+function source(parsed: ParsedFlags, io: CliIo): number {
+  const subcommand = parsed.args[1];
+  if (!subcommand) {
+    return usageError(
+      "Missing required subcommand for source. Expected: list, get.",
+      parsed,
+      io
+    );
+  }
+  if (subcommand === "list") {
+    return sourceList(parsed, io);
+  }
+  if (subcommand === "get") {
+    return sourceGet(parsed, io);
+  }
+  return usageError(`Unknown source subcommand: ${subcommand}`, parsed, io);
+}
+
+function sourceList(parsed: ParsedFlags, io: CliIo): number {
+  if (parsed.args.length > 2) {
+    return usageError(
+      `Unexpected argument for source list: ${parsed.args[2]}`,
+      parsed,
+      io
+    );
+  }
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return emitSourceFailure(parsed, io, "source list", {
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err)
+    });
+  }
+
+  const db = openDb(dataDir);
+  let items: SourceItem[];
+  try {
+    items = listSourceItems(
+      db,
+      parsed.adapter === undefined ? {} : { adapterKind: parsed.adapter }
+    );
+  } finally {
+    db.close();
+  }
+
+  const payload = {
+    ok: true,
+    command: "source list",
+    dataDir,
+    adapter: parsed.adapter ?? null,
+    count: items.length,
+    items: items.map(sourceItemToJsonShape)
+  };
+
+  if (parsed.json) {
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  const lines = [
+    `Source items: ${items.length}`,
+    `Adapter: ${parsed.adapter ?? "(all)"}`,
+    `Data dir: ${dataDir}`,
+    ...items.map((item) =>
+      `- ${item.id} [${item.adapterKind}] ${item.externalKey ?? item.externalId}: ` +
+      `${item.title}${item.status ? ` (${item.status})` : ""}`
+    ),
+    ""
+  ];
+  write(io.stdout, lines.join("\n"));
+  return 0;
+}
+
+function sourceGet(parsed: ParsedFlags, io: CliIo): number {
+  const sourceItemId = parsed.args[2];
+  if (!sourceItemId) {
+    return usageError(
+      "Missing required <source-item-id> for source get.",
+      parsed,
+      io
+    );
+  }
+  if (parsed.args.length > 3) {
+    return usageError(
+      `Unexpected argument for source get: ${parsed.args[3]}`,
+      parsed,
+      io
+    );
+  }
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return emitSourceFailure(parsed, io, "source get", {
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err)
+    });
+  }
+
+  const db = openDb(dataDir);
+  let item: SourceItem | null;
+  try {
+    item = getSourceItemById(db, sourceItemId);
+  } finally {
+    db.close();
+  }
+
+  if (!item) {
+    return emitSourceFailure(parsed, io, "source get", {
+      code: "source_item_not_found",
+      message: `Source item not found: ${sourceItemId}`,
+      sourceItemId,
+      dataDir
+    });
+  }
+
+  const payload = {
+    ok: true,
+    command: "source get",
+    dataDir,
+    item: sourceItemToJsonShape(item)
+  };
+
+  if (parsed.json) {
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  write(io.stdout, [
+    `Source item: ${item.id}`,
+    `Adapter: ${item.adapterKind}`,
+    `External id: ${item.externalId}`,
+    `External key: ${item.externalKey ?? "(unset)"}`,
+    `URL: ${item.url ?? "(unset)"}`,
+    `Title: ${item.title}`,
+    `Status: ${item.status ?? "(unset)"}`,
+    `Goal: ${item.goalId ?? "(unlinked)"}`,
+    `Last observed at: ${item.lastObservedAt}`,
+    `Data dir: ${dataDir}`,
+    ""
+  ].join("\n"));
+  return 0;
+}
+
+type SourceFailure = {
+  code: "data_dir_failed" | "source_item_not_found";
+  message: string;
+  sourceItemId?: string;
+  dataDir?: string;
+};
+
+function emitSourceFailure(
+  parsed: ParsedFlags,
+  io: CliIo,
+  command: "source list" | "source get",
+  failure: SourceFailure
+): number {
+  const payload: Record<string, unknown> = {
+    ok: false,
+    command,
+    code: failure.code,
+    message: failure.message
+  };
+  if (failure.sourceItemId !== undefined) {
+    payload["sourceItemId"] = failure.sourceItemId;
+  }
+  if (failure.dataDir !== undefined) payload["dataDir"] = failure.dataDir;
+
+  if (parsed.json) {
+    writeJson(io.stderr, payload);
+    return 1;
+  }
+  write(io.stderr, `${failure.message}\n`);
+  return 1;
+}
+
+function sourceItemToJsonShape(item: SourceItem): Record<string, unknown> {
+  return {
+    id: item.id,
+    adapterKind: item.adapterKind,
+    externalId: item.externalId,
+    externalKey: item.externalKey,
+    url: item.url,
+    title: item.title,
+    status: item.status,
+    metadata: item.metadata,
+    lastObservedAt: item.lastObservedAt,
+    goalId: item.goalId,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt
+  };
 }
 
 function recovery(parsed: ParsedFlags, io: CliIo): number {
@@ -2040,6 +2257,7 @@ function parseFlags(argv: string[]): ParsedFlags {
   let maxLoopIterations: number | undefined;
   let maxIdleCycles: number | undefined;
   let pollIntervalMs: number | undefined;
+  let adapter: string | undefined;
   let error: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -2102,6 +2320,17 @@ function parseFlags(argv: string[]): ParsedFlags {
         error ??= "Missing required value for --data-dir.";
       } else {
         dataDir = value;
+        index += 1;
+      }
+      continue;
+    }
+
+    if (arg === "--adapter") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --adapter.";
+      } else {
+        adapter = value;
         index += 1;
       }
       continue;
@@ -2203,6 +2432,7 @@ function parseFlags(argv: string[]): ParsedFlags {
   if (maxLoopIterations !== undefined) parsed.maxLoopIterations = maxLoopIterations;
   if (maxIdleCycles !== undefined) parsed.maxIdleCycles = maxIdleCycles;
   if (pollIntervalMs !== undefined) parsed.pollIntervalMs = pollIntervalMs;
+  if (adapter !== undefined) parsed.adapter = adapter;
   if (error !== undefined) parsed.error = error;
 
   return parsed;

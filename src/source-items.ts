@@ -111,6 +111,30 @@ export function getSourceItemById(
   return row ? sourceItemFromRow(row) : null;
 }
 
+export function listSourceItems(
+  db: MomentumDb,
+  options: { adapterKind?: string } = {}
+): SourceItem[] {
+  const rows = options.adapterKind === undefined
+    ? (db
+        .prepare(
+          `SELECT *
+             FROM source_items
+            ORDER BY adapter_kind ASC, external_key ASC, external_id ASC`
+        )
+        .all() as SourceItemRow[])
+    : (db
+        .prepare(
+          `SELECT *
+             FROM source_items
+            WHERE adapter_kind = ?
+            ORDER BY adapter_kind ASC, external_key ASC, external_id ASC`
+        )
+        .all(options.adapterKind) as SourceItemRow[]);
+
+  return rows.map(sourceItemFromRow);
+}
+
 export function listSourceItemSummariesForGoal(
   db: MomentumDb,
   goalId: string
