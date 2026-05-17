@@ -33,6 +33,7 @@ import { normalizeLinearIssue, LINEAR_SOURCE_ADAPTER_KIND } from "./linear-sourc
 import type { LinearSourceAdapterFilters } from "./linear-source-adapter.js";
 import {
   getSourceItemByAdapterExternalId,
+  recordSourceSnapshot,
   upsertSourceItem,
   type SourceItem
 } from "./source-items.js";
@@ -293,7 +294,7 @@ function processPage(
       }
       continue;
     }
-    upsertSourceItem(
+    const persistedItem = upsertSourceItem(
       db,
       {
         adapterKind: LINEAR_SOURCE_ADAPTER_KIND,
@@ -304,6 +305,17 @@ function processPage(
         status: item.status ?? null,
         metadata: item.metadata ?? {},
         observedAt: item.observedAt
+      },
+      clock
+    );
+    recordSourceSnapshot(
+      db,
+      {
+        sourceItemId: persistedItem.id,
+        adapterKind: LINEAR_SOURCE_ADAPTER_KIND,
+        externalId: item.externalId,
+        observedAt: item.observedAt,
+        snapshot: snapshotPayloadForItem(item.metadata ?? {})
       },
       clock
     );
@@ -366,4 +378,12 @@ function buildErrorText(stop: LinearReconciliationStop | null): string | null {
   if (stop.reason === "complete" || stop.reason === "max_pages") return null;
   const code = stop.code ?? "source_adapter_threw";
   return `${code}: ${stop.error ?? "linear pagination halted"}`;
+}
+
+function snapshotPayloadForItem(metadata: Record<string, unknown>): Record<string, unknown> {
+  const raw = metadata["raw"];
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    return raw as Record<string, unknown>;
+  }
+  return metadata;
 }

@@ -11,7 +11,8 @@ import {
   type LinearReconciliationFetchPageResult
 } from "../src/source-reconciliation.js";
 import {
-  listSourceItems
+  listSourceItems,
+  listSourceSnapshotsForItem
 } from "../src/source-items.js";
 import {
   getSourceReconciliationRun,
@@ -120,6 +121,10 @@ describe("reconcileLinearSource", () => {
       expect(items).toHaveLength(1);
       expect(items[0]?.externalKey).toBe("NGX-1");
       expect(items[0]?.lastObservedAt).toBe(1_000);
+      const snapshots = listSourceSnapshotsForItem(db, items[0]?.id ?? "");
+      expect(snapshots).toHaveLength(1);
+      expect(snapshots[0]?.observedAt).toBe(1_000);
+      expect(snapshots[0]?.snapshot).toEqual(issue);
     } finally {
       db.close();
     }
@@ -360,6 +365,7 @@ describe("reconcileLinearSource", () => {
       const items = listSourceItems(db, { adapterKind: "linear" });
       expect(items).toHaveLength(1);
       expect(items[0]?.lastObservedAt).toBe(5_000);
+      expect(listSourceSnapshotsForItem(db, items[0]?.id ?? "")).toHaveLength(2);
     } finally {
       db.close();
     }
