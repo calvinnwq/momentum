@@ -871,7 +871,7 @@ M4 did not break or rename any M3 surfaces. Specifically: the `daemon start` / `
 
 ## Milestone 5 Roadmap
 
-Milestone 5 (Source Adapters and Evidence Sync) is the active milestone. M5 makes Momentum source-and-evidence aware while preserving the M4 runner contract and the M3 operational-safety surface. The first slice (NGX-287) is this contract/roadmap/docs setup; implementation slices follow it. M5 is **not** complete and the `doctor --json` milestone string remains the M4 closeout marker until M5-07 (NGX-294) intentionally flips it as part of M5 closeout.
+Milestone 5 (Source Adapters and Evidence Sync) is the active milestone. M5 makes Momentum source-and-evidence aware while preserving the M4 runner contract and the M3 operational-safety surface. NGX-287 and NGX-288 are done; NGX-289 through NGX-294 remain. M5 is **not** complete and the `doctor --json` milestone string remains the M4 closeout marker until M5-07 (NGX-294) intentionally flips it as part of M5 closeout.
 
 ### Milestone goal
 
@@ -914,7 +914,7 @@ M5 composes with the M1–M4 surfaces without breaking them:
 
 The Linear milestone "Milestone 5: Source Adapters And Evidence Sync" sequences the work as:
 
-1. **NGX-287 — M5-00 M5 contract, roadmap, and docs setup** *(this slice)*: define vocabulary, trust boundary, planned issue order, non-goals, and how M5 composes with M3/M4 contracts; do not modify execution surfaces.
+1. **NGX-287 — M5-00 M5 contract, roadmap, and docs setup** *(done)*: defined vocabulary, trust boundary, planned issue order, non-goals, and how M5 composes with M3/M4 contracts; did not modify execution surfaces.
 2. **NGX-288 — M5-01 SourceItem state model and adapter boundary** *(done)*: durable SourceItem / snapshot / reconciliation-run schema, `SourceAdapter` interface and registry, a built-in `local-fixture` adapter for tests, `source list` / `source get` CLI commands, and SourceItem visibility in Goal status / handoff JSON and markdown where data exists.
 3. **NGX-289 — M5-02 Linear source adapter read and reconciliation**: first real source adapter — read-only Linear reconciliation for configured project / milestone / issues, normalized SourceItem records, a `source reconcile linear` CLI, and durable reconciliation-run summaries.
 4. **NGX-290 — M5-03 Goal/source linkage and planning context**: CLI to link / initialize Goals from SourceItems, threading source context into iteration prompt rendering as context-only input, and linked-source visibility through `goal start --json`, `status`, `logs`, `handoff`, and `doctor` where relevant.
