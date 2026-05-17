@@ -94,6 +94,32 @@ describe("applyQueueMigrations", () => {
       expect(tableNames(db)).toContain("source_items");
       expect(tableNames(db)).toContain("source_snapshots");
       expect(tableNames(db)).toContain("source_reconciliation_runs");
+      expect(tableNames(db)).toContain("evidence_records");
+
+      const evidenceColumns = getColumns(db, "evidence_records").map(
+        (row) => row.name
+      );
+      for (const col of [
+        "id",
+        "source",
+        "type",
+        "format_version",
+        "artifact_path",
+        "external_id",
+        "occurred_at",
+        "summary",
+        "metadata_json",
+        "goal_id",
+        "source_item_id",
+        "ingest_key",
+        "created_at",
+        "updated_at"
+      ]) {
+        expect(
+          evidenceColumns,
+          `missing evidence_records column: ${col}`
+        ).toContain(col);
+      }
 
       const sourceItemColumns = getColumns(db, "source_items").map((row) => row.name);
       for (const col of [
@@ -152,6 +178,11 @@ describe("applyQueueMigrations", () => {
       expect(indexes).toContain("idx_daemon_runs_state");
       expect(indexes).toContain("idx_daemon_runs_heartbeat_at");
       expect(indexes).toContain("idx_daemon_runs_one_active");
+      expect(indexes).toContain("idx_evidence_records_ingest_key");
+      expect(indexes).toContain("idx_evidence_records_goal");
+      expect(indexes).toContain("idx_evidence_records_source_item");
+      expect(indexes).toContain("idx_evidence_records_source_type");
+      expect(indexes).toContain("idx_evidence_records_occurred_at");
     } finally {
       db.close();
     }

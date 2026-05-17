@@ -75,6 +75,19 @@ import {
   type ReconcileLinearSourceResult
 } from "./source-reconciliation.js";
 import { buildLinearHttpReconciliationClient } from "./linear-http-client.js";
+import {
+  ingestEvidenceRecord,
+  listEvidenceRecords,
+  summarizeEvidenceRecords,
+  type EvidenceRecord,
+  type EvidenceRecordIngestInput,
+  type EvidenceRecordsSummary,
+  type ListEvidenceRecordsOptions
+} from "./evidence-records.js";
+import {
+  parseWorkflowArtifact,
+  type WorkflowEvidenceDiagnostic
+} from "./evidence-workflow.js";
 
 export const VERSION = "0.0.0";
 
@@ -126,6 +139,11 @@ type ParsedFlags = {
   maxPages?: number;
   goal?: string;
   fromSource?: string;
+  path?: string;
+  sourceItem?: string;
+  source?: string;
+  evidenceType?: string;
+  limit?: number;
   error?: string;
 };
 
@@ -144,6 +162,8 @@ const COMMANDS = [
   "momentum daemon stop [--now] [--reason <text>] [--data-dir <path>] [--json]",
   "momentum daemon status [--data-dir <path>] [--json]",
   "momentum recovery clear <goal-id> [--reason <text>] [--data-dir <path>] [--json]",
+  "momentum evidence ingest --path <file-or-dir> [--goal <id>] [--source-item <id>] [--data-dir <path>] [--json]",
+  "momentum evidence list [--goal <id>] [--source-item <id>] [--source <source>] [--type <type>] [--limit <n>] [--data-dir <path>] [--json]",
   "momentum doctor [--repo <path>] [--data-dir <path>] [--json]"
 ];
 
@@ -210,6 +230,10 @@ export async function runCli(
 
   if (command === "recovery") {
     return recovery(parsed, io);
+  }
+
+  if (command === "evidence") {
+    return evidence(parsed, io);
   }
 
   return usageError(`Unknown command: ${command}`, parsed, io);
@@ -1023,6 +1047,403 @@ function emitRecoveryClear(
   ];
   write(io.stdout, lines.join("\n"));
   return 0;
+}
+
+type EvidenceIngestFailureCode =
+  | "data_dir_failed"
+  | "path_required"
+  | "goal_not_found"
+  | "source_item_not_found";
+
+type EvidenceIngestFailure = {
+  code: EvidenceIngestFailureCode;
+  message: string;
+  dataDir?: string;
+  goalId?: string | null;
+  sourceItemId?: string | null;
+  path?: string | null;
+};
+
+function evidence(parsed: ParsedFlags, io: CliIo): number | Promise<number> {
+  const subcommand = parsed.args[1];
+  if (!subcommand) {
+    return usageError(
+      "Missing required subcommand for evidence. Expected: ingest, list.",
+      parsed,
+      io
+    );
+  }
+  if (subcommand === "ingest") {
+    return evidenceIngest(parsed, io);
+  }
+  if (subcommand === "list") {
+    return evidenceList(parsed, io);
+  }
+  return usageError(`Unknown evidence subcommand: ${subcommand}`, parsed, io);
+}
+
+function evidenceIngest(parsed: ParsedFlags, io: CliIo): number {
+  if (parsed.args.length > 2) {
+    return usageError(
+      `Unexpected argument for evidence ingest: ${parsed.args[2]}`,
+      parsed,
+      io
+    );
+  }
+  if (parsed.path === undefined || parsed.path.length === 0) {
+    return emitEvidenceIngestFailure(parsed, io, {
+      code: "path_required",
+      message: "Missing required --path <file-or-dir> for evidence ingest."
+    });
+  }
+  const artifactPath = parsed.path;
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return emitEvidenceIngestFailure(parsed, io, {
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err),
+      path: artifactPath
+    });
+  }
+
+  const parseOptions: Parameters<typeof parseWorkflowArtifact>[1] = {};
+  if (parsed.goal !== undefined && parsed.goal.length > 0) {
+    parseOptions.goalId = parsed.goal;
+  }
+  if (parsed.sourceItem !== undefined && parsed.sourceItem.length > 0) {
+    parseOptions.sourceItemId = parsed.sourceItem;
+  }
+
+  const db = openDb(dataDir);
+  try {
+    if (parseOptions.goalId !== undefined && parseOptions.goalId !== null) {
+      const goalRow = db
+        .prepare("SELECT id FROM goals WHERE id = ?")
+        .get(parseOptions.goalId) as { id: string } | undefined;
+      if (!goalRow) {
+        return emitEvidenceIngestFailure(parsed, io, {
+          code: "goal_not_found",
+          message: `Goal not found: ${parseOptions.goalId}`,
+          dataDir,
+          goalId: parseOptions.goalId,
+          path: artifactPath
+        });
+      }
+    }
+    if (
+      parseOptions.sourceItemId !== undefined &&
+      parseOptions.sourceItemId !== null
+    ) {
+      const itemRow = db
+        .prepare("SELECT id FROM source_items WHERE id = ?")
+        .get(parseOptions.sourceItemId) as { id: string } | undefined;
+      if (!itemRow) {
+        return emitEvidenceIngestFailure(parsed, io, {
+          code: "source_item_not_found",
+          message: `Source item not found: ${parseOptions.sourceItemId}`,
+          dataDir,
+          sourceItemId: parseOptions.sourceItemId,
+          path: artifactPath
+        });
+      }
+    }
+
+    const parseResult = parseWorkflowArtifact(artifactPath, parseOptions);
+    const created: EvidenceRecord[] = [];
+    const skipped: EvidenceRecord[] = [];
+    const errors: Array<{
+      ingestKey: string;
+      type: string;
+      message: string;
+    }> = [];
+
+    for (const input of parseResult.records) {
+      try {
+        const result = ingestEvidenceRecord(db, input as EvidenceRecordIngestInput);
+        if (result.created) {
+          created.push(result.record);
+        } else {
+          skipped.push(result.record);
+        }
+      } catch (err) {
+        errors.push({
+          ingestKey: input.ingestKey,
+          type: input.type,
+          message: err instanceof Error ? err.message : String(err)
+        });
+      }
+    }
+
+    return emitEvidenceIngestSuccess(parsed, io, {
+      dataDir,
+      artifactPath,
+      goalId: parseOptions.goalId ?? null,
+      sourceItemId: parseOptions.sourceItemId ?? null,
+      observed: parseResult.records.length,
+      created,
+      skipped,
+      diagnostics: parseResult.diagnostics,
+      errors
+    });
+  } finally {
+    db.close();
+  }
+}
+
+function emitEvidenceIngestSuccess(
+  parsed: ParsedFlags,
+  io: CliIo,
+  result: {
+    dataDir: string;
+    artifactPath: string;
+    goalId: string | null;
+    sourceItemId: string | null;
+    observed: number;
+    created: EvidenceRecord[];
+    skipped: EvidenceRecord[];
+    diagnostics: WorkflowEvidenceDiagnostic[];
+    errors: Array<{ ingestKey: string; type: string; message: string }>;
+  }
+): number {
+  const ok = result.errors.length === 0;
+  const payload = {
+    ok,
+    command: "evidence ingest",
+    dataDir: result.dataDir,
+    path: result.artifactPath,
+    goalId: result.goalId,
+    sourceItemId: result.sourceItemId,
+    counts: {
+      observed: result.observed,
+      created: result.created.length,
+      skipped: result.skipped.length,
+      diagnostics: result.diagnostics.length,
+      errors: result.errors.length
+    },
+    created: result.created.map(evidenceRecordToJsonShape),
+    skipped: result.skipped.map(evidenceRecordToJsonShape),
+    diagnostics: result.diagnostics.map((diagnostic) => ({ ...diagnostic })),
+    errors: result.errors.map((entry) => ({ ...entry }))
+  };
+
+  if (parsed.json) {
+    writeJson(ok ? io.stdout : io.stderr, payload);
+    return ok ? 0 : 1;
+  }
+
+  const lines = [
+    `Evidence ingest: ${result.artifactPath}`,
+    `Goal: ${result.goalId ?? "(unlinked)"}`,
+    `Source item: ${result.sourceItemId ?? "(unlinked)"}`,
+    `Observed: ${result.observed}`,
+    `Created: ${result.created.length}`,
+    `Skipped (idempotent): ${result.skipped.length}`,
+    `Diagnostics: ${result.diagnostics.length}`,
+    `Errors: ${result.errors.length}`,
+    `Data dir: ${result.dataDir}`,
+    ""
+  ];
+  write(ok ? io.stdout : io.stderr, lines.join("\n"));
+  return ok ? 0 : 1;
+}
+
+function emitEvidenceIngestFailure(
+  parsed: ParsedFlags,
+  io: CliIo,
+  failure: EvidenceIngestFailure
+): number {
+  const payload: Record<string, unknown> = {
+    ok: false,
+    command: "evidence ingest",
+    code: failure.code,
+    message: failure.message
+  };
+  if (failure.dataDir !== undefined) payload["dataDir"] = failure.dataDir;
+  if (failure.goalId !== undefined) payload["goalId"] = failure.goalId;
+  if (failure.sourceItemId !== undefined) {
+    payload["sourceItemId"] = failure.sourceItemId;
+  }
+  if (failure.path !== undefined) payload["path"] = failure.path;
+
+  if (parsed.json) {
+    writeJson(io.stderr, payload);
+    return 1;
+  }
+  write(io.stderr, `${failure.message}\n`);
+  return 1;
+}
+
+function evidenceRecordToJsonShape(record: EvidenceRecord): Record<string, unknown> {
+  return {
+    id: record.id,
+    source: record.source,
+    type: record.type,
+    formatVersion: record.formatVersion,
+    artifactPath: record.artifactPath,
+    externalId: record.externalId,
+    occurredAt: record.occurredAt,
+    summary: record.summary,
+    metadata: record.metadata,
+    goalId: record.goalId,
+    sourceItemId: record.sourceItemId,
+    ingestKey: record.ingestKey,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt
+  };
+}
+
+type EvidenceListFailureCode =
+  | "data_dir_failed"
+  | "goal_not_found"
+  | "source_item_not_found";
+
+type EvidenceListFailure = {
+  code: EvidenceListFailureCode;
+  message: string;
+  dataDir?: string;
+  goalId?: string | null;
+  sourceItemId?: string | null;
+};
+
+function evidenceList(parsed: ParsedFlags, io: CliIo): number {
+  if (parsed.args.length > 2) {
+    return usageError(
+      `Unexpected argument for evidence list: ${parsed.args[2]}`,
+      parsed,
+      io
+    );
+  }
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return emitEvidenceListFailure(parsed, io, {
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err)
+    });
+  }
+
+  const filters: ListEvidenceRecordsOptions = {};
+  if (parsed.goal !== undefined && parsed.goal.length > 0) {
+    filters.goalId = parsed.goal;
+  }
+  if (parsed.sourceItem !== undefined && parsed.sourceItem.length > 0) {
+    filters.sourceItemId = parsed.sourceItem;
+  }
+  if (parsed.source !== undefined && parsed.source.length > 0) {
+    filters.source = parsed.source;
+  }
+  if (parsed.evidenceType !== undefined && parsed.evidenceType.length > 0) {
+    filters.type = parsed.evidenceType;
+  }
+  if (parsed.limit !== undefined) {
+    filters.limit = parsed.limit;
+  }
+
+  const db = openDb(dataDir);
+  let records: EvidenceRecord[];
+  try {
+    if (filters.goalId !== undefined && filters.goalId !== null) {
+      const goalRow = db
+        .prepare("SELECT id FROM goals WHERE id = ?")
+        .get(filters.goalId) as { id: string } | undefined;
+      if (!goalRow) {
+        return emitEvidenceListFailure(parsed, io, {
+          code: "goal_not_found",
+          message: `Goal not found: ${filters.goalId}`,
+          dataDir,
+          goalId: filters.goalId
+        });
+      }
+    }
+    if (filters.sourceItemId !== undefined && filters.sourceItemId !== null) {
+      const itemRow = db
+        .prepare("SELECT id FROM source_items WHERE id = ?")
+        .get(filters.sourceItemId) as { id: string } | undefined;
+      if (!itemRow) {
+        return emitEvidenceListFailure(parsed, io, {
+          code: "source_item_not_found",
+          message: `Source item not found: ${filters.sourceItemId}`,
+          dataDir,
+          sourceItemId: filters.sourceItemId
+        });
+      }
+    }
+    records = listEvidenceRecords(db, filters);
+  } finally {
+    db.close();
+  }
+
+  const payload = {
+    ok: true,
+    command: "evidence list",
+    dataDir,
+    goalId: filters.goalId ?? null,
+    sourceItemId: filters.sourceItemId ?? null,
+    source: filters.source ?? null,
+    type: filters.type ?? null,
+    limit: filters.limit ?? null,
+    count: records.length,
+    records: records.map(evidenceRecordToJsonShape)
+  };
+
+  if (parsed.json) {
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  const lines = [
+    `Evidence records: ${records.length}`,
+    `Goal: ${filters.goalId ?? "(any)"}`,
+    `Source item: ${filters.sourceItemId ?? "(any)"}`,
+    `Source: ${filters.source ?? "(any)"}`,
+    `Type: ${filters.type ?? "(any)"}`,
+    `Data dir: ${dataDir}`,
+    ...records.map(
+      (record) =>
+        `- ${record.id} [${record.source}/${record.type}] @${record.occurredAt}: ${record.summary}`
+    ),
+    ""
+  ];
+  write(io.stdout, lines.join("\n"));
+  return 0;
+}
+
+function emitEvidenceListFailure(
+  parsed: ParsedFlags,
+  io: CliIo,
+  failure: EvidenceListFailure
+): number {
+  const payload: Record<string, unknown> = {
+    ok: false,
+    command: "evidence list",
+    code: failure.code,
+    message: failure.message
+  };
+  if (failure.dataDir !== undefined) payload["dataDir"] = failure.dataDir;
+  if (failure.goalId !== undefined) payload["goalId"] = failure.goalId;
+  if (failure.sourceItemId !== undefined) {
+    payload["sourceItemId"] = failure.sourceItemId;
+  }
+
+  if (parsed.json) {
+    writeJson(io.stderr, payload);
+    return 1;
+  }
+  write(io.stderr, `${failure.message}\n`);
+  return 1;
 }
 
 function daemon(parsed: ParsedFlags, io: CliIo): number | Promise<number> {
@@ -1889,6 +2310,7 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
 
   const policyPayload = buildDoctorPolicyPayload(parsed.repo);
   const sourcesPayload = buildDoctorSourcesPayload(dataDirOptions);
+  const evidencePayload = buildDoctorEvidencePayload(dataDirOptions);
 
   const payload = {
     ok: true,
@@ -1907,7 +2329,8 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
       )
     },
     policy: policyPayload,
-    sources: sourcesPayload
+    sources: sourcesPayload,
+    evidence: evidencePayload
   };
 
   if (parsed.json) {
@@ -1993,9 +2416,92 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
   } else {
     lines.push(`sources: error (${sourcesPayload.code})`);
   }
+  if (evidencePayload.ok) {
+    lines.push(
+      `evidence: total=${evidencePayload.totalRecords} goal_linked=${evidencePayload.goalLinkedRecords} source_item_linked=${evidencePayload.sourceItemLinkedRecords}`
+    );
+    const last = evidencePayload.lastRecord;
+    if (last) {
+      lines.push(
+        `evidence: last ${last.source}/${last.type} at ${last.occurredAt}` +
+          ` (goal=${last.goalId ?? "(none)"}, source_item=${last.sourceItemId ?? "(none)"})`
+      );
+    } else {
+      lines.push("evidence: no records ingested yet");
+    }
+  } else {
+    lines.push(`evidence: error (${evidencePayload.code})`);
+  }
   lines.push("");
   write(io.stdout, lines.join("\n"));
   return 0;
+}
+
+type DoctorEvidencePayload =
+  | {
+      ok: true;
+      totalRecords: number;
+      goalLinkedRecords: number;
+      sourceItemLinkedRecords: number;
+      lastRecord: {
+        id: string;
+        source: string;
+        type: string;
+        occurredAt: number;
+        summary: string;
+        goalId: string | null;
+        sourceItemId: string | null;
+      } | null;
+    }
+  | {
+      ok: false;
+      code: string;
+      message: string;
+    };
+
+function buildDoctorEvidencePayload(
+  dataDirOptions: DataDirOptions
+): DoctorEvidencePayload {
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return {
+      ok: false,
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err)
+    };
+  }
+  const db = openDb(dataDir);
+  try {
+    const summary: EvidenceRecordsSummary = summarizeEvidenceRecords(db);
+    if (!summary.lastRecord) {
+      return {
+        ok: true,
+        totalRecords: summary.totalRecords,
+        goalLinkedRecords: summary.goalLinkedRecords,
+        sourceItemLinkedRecords: summary.sourceItemLinkedRecords,
+        lastRecord: null
+      };
+    }
+    return {
+      ok: true,
+      totalRecords: summary.totalRecords,
+      goalLinkedRecords: summary.goalLinkedRecords,
+      sourceItemLinkedRecords: summary.sourceItemLinkedRecords,
+      lastRecord: {
+        id: summary.lastRecord.id,
+        source: summary.lastRecord.source,
+        type: summary.lastRecord.type,
+        occurredAt: summary.lastRecord.occurredAt,
+        summary: summary.lastRecord.summary,
+        goalId: summary.lastRecord.goalId,
+        sourceItemId: summary.lastRecord.sourceItemId
+      }
+    };
+  } finally {
+    db.close();
+  }
 }
 
 type DoctorSourcesPayload =
@@ -2499,7 +3005,10 @@ function emitStatus(
     daemon: data.daemon,
     staleRecovery: data.staleRecovery,
     policy: data.policy,
-    ...(data.sourceItems.length > 0 ? { sourceItems: data.sourceItems } : {})
+    ...(data.sourceItems.length > 0 ? { sourceItems: data.sourceItems } : {}),
+    ...(data.latestEvidence.length > 0
+      ? { latestEvidence: data.latestEvidence }
+      : {})
   };
 
   if (parsed.json) {
@@ -2619,6 +3128,15 @@ function emitStatus(
     }
   }
 
+  if (data.latestEvidence.length > 0) {
+    lines.push(`Latest evidence: ${data.latestEvidence.length}`);
+    for (const record of data.latestEvidence) {
+      lines.push(
+        `- ${record.occurredAt} [${record.source}/${record.type}] ${record.summary}`
+      );
+    }
+  }
+
   lines.push("");
   write(io.stdout, lines.join("\n"));
   return 0;
@@ -2709,7 +3227,10 @@ function emitLogs(
         error: data.resultJson.error,
         parseError: data.resultJson.parseError
       },
-      sourceItems: data.sourceItems
+      sourceItems: data.sourceItems,
+      ...(data.latestEvidence.length > 0
+        ? { latestEvidence: data.latestEvidence }
+        : {})
     };
     writeJson(io.stdout, payload);
     return 0;
@@ -2726,12 +3247,23 @@ function emitLogs(
     }
   }
 
+  const evidenceLines: string[] = [];
+  if (data.latestEvidence.length > 0) {
+    evidenceLines.push(`Latest evidence: ${data.latestEvidence.length}`);
+    for (const record of data.latestEvidence) {
+      evidenceLines.push(
+        `- ${record.occurredAt} [${record.source}/${record.type}] ${record.summary}`
+      );
+    }
+  }
+
   const lines: string[] = [
     `Goal: ${data.goalId}`,
     `Iteration: ${data.iteration}`,
     `Available iterations: ${data.availableIterations.length === 0 ? "(none)" : data.availableIterations.join(", ")}`,
     `Iteration dir: ${data.iterationDir}`,
     ...sourceItemsLines,
+    ...evidenceLines,
     "",
     `## runner.log (${data.runnerLog.exists ? `${data.runnerLog.bytes} bytes` : "missing"}): ${data.runnerLog.path}`
   ];
@@ -2921,6 +3453,11 @@ function parseFlags(argv: string[]): ParsedFlags {
   let maxPages: number | undefined;
   let goal: string | undefined;
   let fromSource: string | undefined;
+  let pathFlag: string | undefined;
+  let sourceItem: string | undefined;
+  let source: string | undefined;
+  let evidenceType: string | undefined;
+  let limit: number | undefined;
   let error: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -3095,6 +3632,68 @@ function parseFlags(argv: string[]): ParsedFlags {
       continue;
     }
 
+    if (arg === "--path") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --path.";
+      } else {
+        pathFlag = value;
+        index += 1;
+      }
+      continue;
+    }
+
+    if (arg === "--source-item") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --source-item.";
+      } else {
+        sourceItem = value;
+        index += 1;
+      }
+      continue;
+    }
+
+    if (arg === "--source") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --source.";
+      } else {
+        source = value;
+        index += 1;
+      }
+      continue;
+    }
+
+    if (arg === "--type") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --type.";
+      } else {
+        evidenceType = value;
+        index += 1;
+      }
+      continue;
+    }
+
+    if (arg === "--limit") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --limit.";
+      } else {
+        const parsedValue = /^\d+$/.test(value)
+          ? Number.parseInt(value, 10)
+          : NaN;
+        if (!Number.isInteger(parsedValue) || parsedValue < 0) {
+          error ??= `Invalid value for --limit: ${value}`;
+        } else {
+          limit = parsedValue;
+        }
+        index += 1;
+      }
+      continue;
+    }
+
     if (arg === "--reason") {
       const value = readFlagValue(argv, index);
       if (value === undefined) {
@@ -3199,6 +3798,11 @@ function parseFlags(argv: string[]): ParsedFlags {
   if (maxPages !== undefined) parsed.maxPages = maxPages;
   if (goal !== undefined) parsed.goal = goal;
   if (fromSource !== undefined) parsed.fromSource = fromSource;
+  if (pathFlag !== undefined) parsed.path = pathFlag;
+  if (sourceItem !== undefined) parsed.sourceItem = sourceItem;
+  if (source !== undefined) parsed.source = source;
+  if (evidenceType !== undefined) parsed.evidenceType = evidenceType;
+  if (limit !== undefined) parsed.limit = limit;
   if (error !== undefined) parsed.error = error;
 
   return parsed;

@@ -250,6 +250,8 @@ describe("Milestone 1 end-to-end smoke", () => {
         "momentum daemon stop [--now] [--reason <text>] [--data-dir <path>] [--json]",
         "momentum daemon status [--data-dir <path>] [--json]",
         "momentum recovery clear <goal-id> [--reason <text>] [--data-dir <path>] [--json]",
+        "momentum evidence ingest --path <file-or-dir> [--goal <id>] [--source-item <id>] [--data-dir <path>] [--json]",
+        "momentum evidence list [--goal <id>] [--source-item <id>] [--source <source>] [--type <type>] [--limit <n>] [--data-dir <path>] [--json]",
         "momentum doctor [--repo <path>] [--data-dir <path>] [--json]"
       ]);
     },

@@ -15,6 +15,7 @@ import { ensureIterationArtifactDir } from "../src/artifacts.js";
 import { claimPendingGoalIterationJob } from "../src/queue-jobs.js";
 import { writeRecoveryArtifact } from "../src/recovery-artifact.js";
 import { upsertSourceItem } from "../src/source-items.js";
+import { ingestEvidenceRecord } from "../src/evidence-records.js";
 
 const tempRoots: string[] = [];
 
@@ -2121,6 +2122,132 @@ describe("loadGoalStatus", () => {
         }
       ]);
       expect(status.sourceItems[0]).not.toHaveProperty("metadata");
+    });
+  });
+
+  describe("latest evidence surface", () => {
+    it("returns linked evidence records ordered newest first, capped at the default limit", () => {
+      const repo = initRepo();
+      const setup = setupGoal(repo, "Status with evidence");
+      const db = openDb(setup.dataDir);
+      try {
+        for (let i = 0; i < 7; i += 1) {
+          ingestEvidenceRecord(
+            db,
+            {
+              source: "agent-workflow",
+              type: i === 6 ? "merge_complete" : "plan_created",
+              occurredAt: 1700000000000 + i * 1000,
+              summary: `evidence-${i}`,
+              ingestKey: `agent-workflow:status-test:event-${i}`,
+              artifactPath: `/tmp/.agent-workflows/status-test/${i}.json`,
+              goalId: setup.goalId,
+              metadata: { i }
+            },
+            { now: () => 1700000000500 + i * 1000 }
+          );
+        }
+      } finally {
+        db.close();
+      }
+
+      const status = loadGoalStatus({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      });
+
+      expect(status.ok).toBe(true);
+      if (!status.ok) return;
+      expect(status.latestEvidence).toHaveLength(5);
+      expect(status.latestEvidence[0]).toMatchObject({
+        source: "agent-workflow",
+        type: "merge_complete",
+        occurredAt: 1700000006000,
+        summary: "evidence-6",
+        formatVersion: 1,
+        sourceItemId: null
+      });
+      const occurredAts = status.latestEvidence.map(
+        (record) => record.occurredAt
+      );
+      expect(occurredAts).toEqual([...occurredAts].sort((a, b) => b - a));
+      expect(status.latestEvidence[0]).not.toHaveProperty("metadata");
+    });
+
+    it("returns an empty latest evidence list when no evidence is linked to the goal", () => {
+      const repo = initRepo();
+      const setup = setupGoal(repo, "Status without evidence");
+      const status = loadGoalStatus({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      });
+      expect(status.ok).toBe(true);
+      if (!status.ok) return;
+      expect(status.latestEvidence).toEqual([]);
+    });
+
+    it("filters out evidence linked to other goals", () => {
+      const repo = initRepo();
+      const sharedDataDir = makeTempDir("momentum-status-data-");
+      const setupA = setupGoalInDataDir(
+        repo,
+        sharedDataDir,
+        "Status evidence goal A"
+      );
+      const setupB = setupGoalInDataDir(
+        repo,
+        sharedDataDir,
+        "Status evidence goal B"
+      );
+      const db = openDb(sharedDataDir);
+      try {
+        ingestEvidenceRecord(
+          db,
+          {
+            source: "agent-workflow",
+            type: "plan_created",
+            occurredAt: 1700000100000,
+            summary: "goal-a evidence",
+            ingestKey: "agent-workflow:goal-a:plan",
+            artifactPath: "/tmp/.agent-workflows/goal-a/plan.json",
+            goalId: setupA.goalId
+          },
+          { now: () => 1700000100500 }
+        );
+        ingestEvidenceRecord(
+          db,
+          {
+            source: "agent-workflow",
+            type: "plan_created",
+            occurredAt: 1700000200000,
+            summary: "goal-b evidence",
+            ingestKey: "agent-workflow:goal-b:plan",
+            artifactPath: "/tmp/.agent-workflows/goal-b/plan.json",
+            goalId: setupB.goalId
+          },
+          { now: () => 1700000200500 }
+        );
+      } finally {
+        db.close();
+      }
+
+      const statusA = loadGoalStatus({
+        goalId: setupA.goalId,
+        dataDirOptions: { dataDir: sharedDataDir }
+      });
+      const statusB = loadGoalStatus({
+        goalId: setupB.goalId,
+        dataDirOptions: { dataDir: sharedDataDir }
+      });
+      expect(statusA.ok).toBe(true);
+      expect(statusB.ok).toBe(true);
+      if (!statusA.ok || !statusB.ok) return;
+      expect(statusA.latestEvidence.map((r) => r.summary)).toEqual([
+        "goal-a evidence"
+      ]);
+      expect(statusB.latestEvidence.map((r) => r.summary)).toEqual([
+        "goal-b evidence"
+      ]);
     });
   });
 });
