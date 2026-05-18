@@ -16,6 +16,8 @@ import { claimPendingGoalIterationJob } from "../src/queue-jobs.js";
 import { writeRecoveryArtifact } from "../src/recovery-artifact.js";
 import { upsertSourceItem } from "../src/source-items.js";
 import { ingestEvidenceRecord } from "../src/evidence-records.js";
+import { createUpdateIntent } from "../src/update-intents.js";
+import { DEFAULT_INTENT_STALE_THRESHOLD_MS } from "../src/project-rollup.js";
 
 const tempRoots: string[] = [];
 
@@ -2248,6 +2250,179 @@ describe("loadGoalStatus", () => {
       expect(statusB.latestEvidence.map((r) => r.summary)).toEqual([
         "goal-b evidence"
       ]);
+    });
+  });
+
+  describe("pendingUpdateIntents", () => {
+    it("returns an empty list and the default stale threshold when no intents exist", () => {
+      const repo = initRepo();
+      const setup = setupGoal(repo, "Status without intents");
+      const result = loadGoalStatus({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.pendingUpdateIntents).toEqual([]);
+      expect(result.intentStaleThresholdMs).toBe(
+        DEFAULT_INTENT_STALE_THRESHOLD_MS
+      );
+    });
+
+    it("surfaces pending intents linked to the goal with the stale flag computed via the default TTL", () => {
+      const repo = initRepo();
+      const setup = setupGoal(repo, "Status with pending intents");
+      const freshCreatedAt = Date.now() - 60_000;
+      const staleCreatedAt =
+        Date.now() - (DEFAULT_INTENT_STALE_THRESHOLD_MS + 60_000);
+      const db = openDb(setup.dataDir);
+      try {
+        createUpdateIntent(
+          db,
+          {
+            adapterKind: "linear",
+            targetExternalId: "issue-fresh",
+            intentType: "source_satisfied",
+            reason: "Fresh goal-satisfied intent.",
+            goalId: setup.goalId,
+            idempotencyKey: "linear:issue-fresh:source_satisfied:goal-status"
+          },
+          { now: () => freshCreatedAt }
+        );
+        createUpdateIntent(
+          db,
+          {
+            adapterKind: "linear",
+            targetExternalId: "issue-stale",
+            intentType: "source_satisfied",
+            reason: "Stale goal-satisfied intent.",
+            goalId: setup.goalId,
+            idempotencyKey: "linear:issue-stale:source_satisfied:goal-status"
+          },
+          { now: () => staleCreatedAt }
+        );
+      } finally {
+        db.close();
+      }
+
+      const result = loadGoalStatus({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.pendingUpdateIntents).toHaveLength(2);
+      const byTarget = new Map(
+        result.pendingUpdateIntents.map((intent) => [
+          intent.targetExternalId,
+          intent
+        ])
+      );
+      expect(byTarget.get("issue-fresh")?.stale).toBe(false);
+      expect(byTarget.get("issue-stale")?.stale).toBe(true);
+      expect(byTarget.get("issue-fresh")?.adapterKind).toBe("linear");
+      expect(byTarget.get("issue-fresh")?.intentType).toBe(
+        "source_satisfied"
+      );
+      expect(byTarget.get("issue-fresh")?.reason).toBe(
+        "Fresh goal-satisfied intent."
+      );
+    });
+
+    it("scopes pending intents to the goal under inspection in shared data dirs", () => {
+      const sharedDataDir = makeTempDir("momentum-status-shared-intent-");
+      const repoA = initRepo();
+      const repoB = initRepo();
+      const setupA = setupGoalInDataDir(
+        repoA,
+        sharedDataDir,
+        "Status intent goal A"
+      );
+      const setupB = setupGoalInDataDir(
+        repoB,
+        sharedDataDir,
+        "Status intent goal B"
+      );
+
+      const db = openDb(sharedDataDir);
+      try {
+        createUpdateIntent(db, {
+          adapterKind: "linear",
+          targetExternalId: "issue-A",
+          intentType: "source_satisfied",
+          reason: "Goal A satisfied.",
+          goalId: setupA.goalId,
+          idempotencyKey: "linear:issue-A:source_satisfied:scope"
+        });
+        createUpdateIntent(db, {
+          adapterKind: "linear",
+          targetExternalId: "issue-B",
+          intentType: "source_satisfied",
+          reason: "Goal B satisfied.",
+          goalId: setupB.goalId,
+          idempotencyKey: "linear:issue-B:source_satisfied:scope"
+        });
+      } finally {
+        db.close();
+      }
+
+      const statusA = loadGoalStatus({
+        goalId: setupA.goalId,
+        dataDirOptions: { dataDir: sharedDataDir }
+      });
+      const statusB = loadGoalStatus({
+        goalId: setupB.goalId,
+        dataDirOptions: { dataDir: sharedDataDir }
+      });
+      expect(statusA.ok).toBe(true);
+      expect(statusB.ok).toBe(true);
+      if (!statusA.ok || !statusB.ok) return;
+      expect(
+        statusA.pendingUpdateIntents.map((intent) => intent.targetExternalId)
+      ).toEqual(["issue-A"]);
+      expect(
+        statusB.pendingUpdateIntents.map((intent) => intent.targetExternalId)
+      ).toEqual(["issue-B"]);
+    });
+
+    it("excludes terminal intents from the per-goal pending list", () => {
+      const repo = initRepo();
+      const setup = setupGoal(repo, "Status terminal intent excluded");
+      const db = openDb(setup.dataDir);
+      try {
+        createUpdateIntent(db, {
+          adapterKind: "linear",
+          targetExternalId: "issue-pending",
+          intentType: "source_satisfied",
+          reason: "Still pending.",
+          goalId: setup.goalId,
+          idempotencyKey: "linear:issue-pending:source_satisfied:s"
+        });
+        const applied = createUpdateIntent(db, {
+          adapterKind: "linear",
+          targetExternalId: "issue-applied",
+          intentType: "source_satisfied",
+          reason: "Will be marked applied.",
+          goalId: setup.goalId,
+          idempotencyKey: "linear:issue-applied:source_satisfied:s"
+        });
+        db.prepare(
+          "UPDATE update_intents SET status = 'applied' WHERE id = ?"
+        ).run(applied.intent.id);
+      } finally {
+        db.close();
+      }
+
+      const result = loadGoalStatus({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.pendingUpdateIntents).toHaveLength(1);
+      expect(result.pendingUpdateIntents[0]?.targetExternalId).toBe(
+        "issue-pending"
+      );
     });
   });
 });

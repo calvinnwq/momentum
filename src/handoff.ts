@@ -13,6 +13,7 @@ import {
   type GoalStatusIterationSummary,
   type GoalStatusJobSummary,
   type GoalStatusNextActionDetail,
+  type GoalStatusPendingIntentSummary,
   type GoalStatusPolicySummary,
   type GoalStatusReducerSummary,
   type GoalStatusStaleRecoverySummary,
@@ -86,6 +87,8 @@ export type HandoffData = {
   policy: GoalStatusPolicySummary;
   sourceItems: SourceItemSummary[];
   latestEvidence: GoalStatusEvidenceSummary[];
+  pendingUpdateIntents: GoalStatusPendingIntentSummary[];
+  intentStaleThresholdMs: number;
   artifactPaths: GoalArtifactPaths;
   artifactFiles: GoalStatusArtifactFiles;
 };
@@ -185,6 +188,8 @@ function buildHandoffData(
     policy: status.policy,
     sourceItems: status.sourceItems,
     latestEvidence: status.latestEvidence,
+    pendingUpdateIntents: status.pendingUpdateIntents,
+    intentStaleThresholdMs: status.intentStaleThresholdMs,
     artifactPaths: status.artifactPaths,
     artifactFiles: status.artifactFiles
   };
@@ -361,6 +366,14 @@ function toJsonShape(data: HandoffData): Record<string, unknown> {
           latest_evidence: data.latestEvidence.map(evidenceToJsonShape)
         }
       : {}),
+    ...(data.pendingUpdateIntents.length > 0
+      ? {
+          pending_update_intents: data.pendingUpdateIntents.map(
+            pendingIntentToJsonShape
+          ),
+          intent_stale_threshold_ms: data.intentStaleThresholdMs
+        }
+      : {}),
     artifacts: {
       goal_md: data.artifactPaths.goalMd,
       ledger_md: data.artifactPaths.ledgerMd,
@@ -398,6 +411,23 @@ function evidenceToJsonShape(
     summary: record.summary,
     artifact_path: record.artifactPath,
     source_item_id: record.sourceItemId
+  };
+}
+
+function pendingIntentToJsonShape(
+  intent: GoalStatusPendingIntentSummary
+): Record<string, unknown> {
+  return {
+    intent_id: intent.intentId,
+    adapter_kind: intent.adapterKind,
+    intent_type: intent.intentType,
+    target_external_id: intent.targetExternalId,
+    reason: intent.reason,
+    source_item_id: intent.sourceItemId,
+    evidence_record_id: intent.evidenceRecordId,
+    created_at: intent.createdAt,
+    age_ms: intent.ageMs,
+    stale: intent.stale
   };
 }
 
@@ -678,6 +708,30 @@ function renderHandoffMarkdown(data: HandoffData): string {
         `- ${record.occurredAt} [${record.source}/${record.type}] ${record.summary}`
       );
     }
+    lines.push("");
+  }
+
+  if (data.pendingUpdateIntents.length > 0) {
+    const staleCount = data.pendingUpdateIntents.filter(
+      (intent) => intent.stale
+    ).length;
+    const staleSuffix = staleCount > 0 ? ` (${staleCount} stale)` : "";
+    lines.push(
+      `## Pending update intents${staleSuffix}`
+    );
+    for (const intent of data.pendingUpdateIntents) {
+      const staleFlag = intent.stale ? " STALE" : "";
+      lines.push(
+        `- ${intent.intentId} [${intent.adapterKind}/${intent.intentType}] ` +
+          `target=${intent.targetExternalId ?? "(none)"} ageMs=${intent.ageMs}${staleFlag}: ${intent.reason}`
+      );
+    }
+    lines.push(
+      `- Stale threshold (ms): ${data.intentStaleThresholdMs}`
+    );
+    lines.push(
+      "- Review with `momentum intent list --status pending` and apply/skip/cancel with a reason."
+    );
     lines.push("");
   }
 

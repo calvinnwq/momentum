@@ -17,6 +17,8 @@ import {
 import { writeRecoveryArtifact } from "../src/recovery-artifact.js";
 import { upsertSourceItem } from "../src/source-items.js";
 import { ingestEvidenceRecord } from "../src/evidence-records.js";
+import { createUpdateIntent } from "../src/update-intents.js";
+import { DEFAULT_INTENT_STALE_THRESHOLD_MS } from "../src/project-rollup.js";
 
 const tempRoots: string[] = [];
 
@@ -97,6 +99,16 @@ function setupGoal(
   mode: "foreground" | "queued" = "foreground"
 ): GoalSetup {
   const dataDir = makeTempDir("momentum-handoff-data-");
+  return setupGoalInDataDir(repo, dataDir, title, verificationCommand, mode);
+}
+
+function setupGoalInDataDir(
+  repo: string,
+  dataDir: string,
+  title: string,
+  verificationCommand = "true",
+  mode: "foreground" | "queued" = "foreground"
+): GoalSetup {
   const specDir = makeTempDir("momentum-handoff-spec-");
   const goalFile = path.join(specDir, "goal.md");
   fs.writeFileSync(
@@ -1556,5 +1568,212 @@ describe("writeHandoff", () => {
       "utf-8"
     );
     expect(markdown).not.toContain("## Latest evidence");
+  });
+
+  it("writes pending update intents to handoff JSON and markdown with stale flag when present", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Handoff with pending intents");
+    const freshCreatedAt = Date.now() - 60_000;
+    const staleCreatedAt = Date.now() - (DEFAULT_INTENT_STALE_THRESHOLD_MS + 60_000);
+    const db = openDb(setup.dataDir);
+    try {
+      createUpdateIntent(
+        db,
+        {
+          adapterKind: "linear",
+          targetExternalId: "issue-fresh",
+          intentType: "source_satisfied",
+          payload: { status: "done" },
+          reason: "Goal completed with verification evidence.",
+          goalId: setup.goalId,
+          idempotencyKey: "linear:issue-fresh:source_satisfied:fresh"
+        },
+        { now: () => freshCreatedAt }
+      );
+      createUpdateIntent(
+        db,
+        {
+          adapterKind: "linear",
+          targetExternalId: "issue-stale",
+          intentType: "source_satisfied",
+          payload: { status: "done" },
+          reason: "Goal completed long ago.",
+          goalId: setup.goalId,
+          idempotencyKey: "linear:issue-stale:source_satisfied:stale"
+        },
+        { now: () => staleCreatedAt }
+      );
+    } finally {
+      db.close();
+    }
+
+    const result = writeHandoff({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+    const handoff = expectSuccess(result);
+    expect(handoff.data.pendingUpdateIntents).toHaveLength(2);
+    expect(handoff.data.intentStaleThresholdMs).toBe(
+      DEFAULT_INTENT_STALE_THRESHOLD_MS
+    );
+
+    const byTarget = new Map(
+      handoff.data.pendingUpdateIntents.map((intent) => [
+        intent.targetExternalId,
+        intent
+      ])
+    );
+    const freshIntent = byTarget.get("issue-fresh");
+    const staleIntent = byTarget.get("issue-stale");
+    expect(freshIntent).toBeDefined();
+    expect(staleIntent).toBeDefined();
+    expect(freshIntent?.stale).toBe(false);
+    expect(staleIntent?.stale).toBe(true);
+    expect(freshIntent?.adapterKind).toBe("linear");
+    expect(freshIntent?.intentType).toBe("source_satisfied");
+
+    const json = JSON.parse(
+      fs.readFileSync(setup.artifactPaths.handoffJson, "utf-8")
+    ) as Record<string, unknown>;
+    const intents = json["pending_update_intents"] as Array<
+      Record<string, unknown>
+    >;
+    expect(intents).toHaveLength(2);
+    expect(intents[0]).toMatchObject({
+      adapter_kind: "linear",
+      intent_type: "source_satisfied"
+    });
+    expect(json["intent_stale_threshold_ms"]).toBe(
+      DEFAULT_INTENT_STALE_THRESHOLD_MS
+    );
+
+    const markdown = fs.readFileSync(setup.artifactPaths.handoffMd, "utf-8");
+    expect(markdown).toContain("## Pending update intents");
+    expect(markdown).toContain("(1 stale)");
+    expect(markdown).toContain("issue-fresh");
+    expect(markdown).toContain("issue-stale");
+    expect(markdown).toContain("STALE");
+    expect(markdown).toContain("`momentum intent list --status pending`");
+  });
+
+  it("omits pending update intents from handoff JSON and markdown when none are pending for the goal", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Handoff without intents");
+
+    const result = writeHandoff({
+      goalId: setup.goalId,
+      dataDirOptions: { dataDir: setup.dataDir }
+    });
+    const handoff = expectSuccess(result);
+    expect(handoff.data.pendingUpdateIntents).toEqual([]);
+    expect(handoff.data.intentStaleThresholdMs).toBe(
+      DEFAULT_INTENT_STALE_THRESHOLD_MS
+    );
+
+    const json = JSON.parse(
+      fs.readFileSync(setup.artifactPaths.handoffJson, "utf-8")
+    ) as Record<string, unknown>;
+    expect(json).not.toHaveProperty("pending_update_intents");
+    expect(json).not.toHaveProperty("intent_stale_threshold_ms");
+
+    const markdown = fs.readFileSync(
+      setup.artifactPaths.handoffMd,
+      "utf-8"
+    );
+    expect(markdown).not.toContain("## Pending update intents");
+  });
+
+  it("scopes pending update intents in handoff to the goal under inspection", () => {
+    const sharedDataDir = makeTempDir("momentum-handoff-shared-intent-");
+    const repoA = initRepo();
+    const repoB = initRepo();
+    const setupA = setupGoalInDataDir(repoA, sharedDataDir, "Handoff intent goal A");
+    const setupB = setupGoalInDataDir(repoB, sharedDataDir, "Handoff intent goal B");
+    const db = openDb(sharedDataDir);
+    try {
+      createUpdateIntent(db, {
+        adapterKind: "linear",
+        targetExternalId: "issue-A",
+        intentType: "source_satisfied",
+        reason: "Goal A satisfied.",
+        goalId: setupA.goalId,
+        idempotencyKey: "linear:issue-A:source_satisfied:A"
+      });
+      createUpdateIntent(db, {
+        adapterKind: "linear",
+        targetExternalId: "issue-B",
+        intentType: "source_satisfied",
+        reason: "Goal B satisfied.",
+        goalId: setupB.goalId,
+        idempotencyKey: "linear:issue-B:source_satisfied:B"
+      });
+    } finally {
+      db.close();
+    }
+
+    const handoffA = expectSuccess(
+      writeHandoff({
+        goalId: setupA.goalId,
+        dataDirOptions: { dataDir: sharedDataDir }
+      })
+    );
+    expect(handoffA.data.pendingUpdateIntents).toHaveLength(1);
+    expect(handoffA.data.pendingUpdateIntents[0]?.targetExternalId).toBe(
+      "issue-A"
+    );
+
+    const handoffB = expectSuccess(
+      writeHandoff({
+        goalId: setupB.goalId,
+        dataDirOptions: { dataDir: sharedDataDir }
+      })
+    );
+    expect(handoffB.data.pendingUpdateIntents).toHaveLength(1);
+    expect(handoffB.data.pendingUpdateIntents[0]?.targetExternalId).toBe(
+      "issue-B"
+    );
+  });
+
+  it("excludes terminal update intents from handoff pending lists", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Handoff terminal intent excluded");
+    const db = openDb(setup.dataDir);
+    try {
+      const pending = createUpdateIntent(db, {
+        adapterKind: "linear",
+        targetExternalId: "issue-pending",
+        intentType: "source_satisfied",
+        reason: "Still pending.",
+        goalId: setup.goalId,
+        idempotencyKey: "linear:issue-pending:source_satisfied:p"
+      });
+      expect(pending.created).toBe(true);
+      const applied = createUpdateIntent(db, {
+        adapterKind: "linear",
+        targetExternalId: "issue-applied",
+        intentType: "source_satisfied",
+        reason: "Will be marked applied.",
+        goalId: setup.goalId,
+        idempotencyKey: "linear:issue-applied:source_satisfied:a"
+      });
+      expect(applied.created).toBe(true);
+      // Manually flip one to applied so it is excluded by the pending filter.
+      db.prepare("UPDATE update_intents SET status = 'applied' WHERE id = ?").run(
+        applied.intent.id
+      );
+    } finally {
+      db.close();
+    }
+
+    const handoff = expectSuccess(
+      writeHandoff({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      })
+    );
+    expect(handoff.data.pendingUpdateIntents).toHaveLength(1);
+    expect(handoff.data.pendingUpdateIntents[0]?.targetExternalId).toBe(
+      "issue-pending"
+    );
   });
 });

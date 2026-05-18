@@ -3776,6 +3776,12 @@ function emitStatus(
     ...(data.sourceItems.length > 0 ? { sourceItems: data.sourceItems } : {}),
     ...(data.latestEvidence.length > 0
       ? { latestEvidence: data.latestEvidence }
+      : {}),
+    ...(data.pendingUpdateIntents.length > 0
+      ? {
+          pendingUpdateIntents: data.pendingUpdateIntents,
+          intentStaleThresholdMs: data.intentStaleThresholdMs
+        }
       : {})
   };
 
@@ -3901,6 +3907,23 @@ function emitStatus(
     for (const record of data.latestEvidence) {
       lines.push(
         `- ${record.occurredAt} [${record.source}/${record.type}] ${record.summary}`
+      );
+    }
+  }
+
+  if (data.pendingUpdateIntents.length > 0) {
+    const staleCount = data.pendingUpdateIntents.filter(
+      (intent) => intent.stale
+    ).length;
+    const staleSuffix = staleCount > 0 ? ` (${staleCount} stale)` : "";
+    lines.push(
+      `Pending update intents: ${data.pendingUpdateIntents.length}${staleSuffix}`
+    );
+    for (const intent of data.pendingUpdateIntents) {
+      const staleFlag = intent.stale ? " STALE" : "";
+      lines.push(
+        `- ${intent.intentId} [${intent.adapterKind}/${intent.intentType}] ` +
+          `target=${intent.targetExternalId ?? "(none)"} ageMs=${intent.ageMs}${staleFlag}: ${intent.reason}`
       );
     }
   }
