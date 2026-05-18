@@ -1,6 +1,8 @@
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import http from "node:http";
+import type { AddressInfo } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -109,6 +111,34 @@ function runCliBinary(
     stdout: result.stdout ?? "",
     stderr: stripNodeWarnings(result.stderr ?? "")
   };
+}
+
+async function runCliBinaryAsync(
+  args: string[],
+  options: { env?: NodeJS.ProcessEnv } = {}
+): Promise<CliResult> {
+  const env = options.env
+    ? { ...process.env, ...options.env }
+    : process.env;
+  return await new Promise<CliResult>((resolve, reject) => {
+    const child = spawn(process.execPath, [CLI_BIN, ...args], {
+      cwd: REPO_ROOT,
+      stdio: ["ignore", "pipe", "pipe"],
+      env
+    });
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+    child.stdout.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
+    child.stderr.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+    child.on("error", reject);
+    child.on("close", (code) => {
+      resolve({
+        code: code ?? -1,
+        stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
+        stderr: stripNodeWarnings(Buffer.concat(stderrChunks).toString("utf-8"))
+      });
+    });
+  });
 }
 
 describe("Milestone 1 end-to-end smoke", () => {
@@ -4274,6 +4304,61 @@ function writeM5WorkflowFixture(rootDir: string): string {
   return runDir;
 }
 
+type LinearMockServer = {
+  endpoint: string;
+  bodies: Array<Record<string, unknown>>;
+  close: () => Promise<void>;
+};
+
+async function startLinearMockServer(
+  issues: Array<Record<string, unknown>>
+): Promise<LinearMockServer> {
+  const bodies: Array<Record<string, unknown>> = [];
+  const server = http.createServer((req, res) => {
+    const chunks: Buffer[] = [];
+    req.on("data", (chunk: Buffer) => {
+      chunks.push(chunk);
+    });
+    req.on("end", () => {
+      const raw = Buffer.concat(chunks).toString("utf-8");
+      try {
+        bodies.push(JSON.parse(raw) as Record<string, unknown>);
+      } catch {
+        bodies.push({ rawBody: raw });
+      }
+      res.statusCode = 200;
+      res.setHeader("Content-Type", "application/json");
+      res.end(
+        JSON.stringify({
+          data: {
+            issues: {
+              pageInfo: { hasNextPage: false, endCursor: null },
+              nodes: issues
+            }
+          }
+        })
+      );
+    });
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.removeListener("error", reject);
+      resolve();
+    });
+  });
+  const address = server.address() as AddressInfo;
+  const endpoint = `http://127.0.0.1:${address.port}/graphql`;
+  return {
+    endpoint,
+    bodies,
+    close: () =>
+      new Promise<void>((resolve, reject) => {
+        server.close((err) => (err ? reject(err) : resolve()));
+      })
+  };
+}
+
 describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () => {
   it(
     "ingests workflow fixtures and surfaces them through evidence list and doctor",
@@ -4478,6 +4563,189 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
       const nextAction = payload["nextAction"] as Record<string, unknown>;
       expect(typeof nextAction["kind"]).toBe("string");
       expect(typeof nextAction["message"]).toBe("string");
+    },
+    60_000
+  );
+
+  it(
+    "reconciles fixture Linear issues against a mock endpoint and surfaces them through source list and source get",
+    async () => {
+      const dataDir = makeTempDir("momentum-smoke-m5-reconcile-data-");
+      const issue = {
+        id: "issue-smoke-ngx-294",
+        identifier: "NGX-294",
+        title: "M5-07 M5 smoke, docs, and milestone closeout",
+        description: "Smoke fixture for the M5 closeout reconciliation path.",
+        url: "https://linear.app/ngxcalvin/issue/NGX-294",
+        updatedAt: "2026-05-18T10:00:00.000Z",
+        priority: 0,
+        state: { id: "state-in-progress", name: "In Progress" },
+        project: {
+          id: "project-momentum",
+          name: "Momentum",
+          url: "https://linear.app/ngxcalvin/project/momentum"
+        },
+        projectMilestone: {
+          id: "milestone-m5",
+          name: "Milestone 5: Source Adapters And Evidence Sync"
+        },
+        labels: { nodes: [] },
+        assignee: null
+      };
+      const mock = await startLinearMockServer([issue]);
+      try {
+        const reconcile = await runCliBinaryAsync(
+          [
+            "source",
+            "reconcile",
+            "linear",
+            "--linear-endpoint",
+            mock.endpoint,
+            "--data-dir",
+            dataDir,
+            "--json"
+          ],
+          { env: { LINEAR_API_KEY: "lin_api_smoke_fixture_key" } }
+        );
+        expect(
+          reconcile.code,
+          `source reconcile linear stderr: ${reconcile.stderr}`
+        ).toBe(0);
+        const reconcilePayload = JSON.parse(reconcile.stdout) as Record<
+          string,
+          unknown
+        >;
+        expect(reconcilePayload).toMatchObject({
+          ok: true,
+          command: "source reconcile linear",
+          dataDir,
+          adapter: "linear",
+          dryRun: false
+        });
+        const reconcileCounts = reconcilePayload["counts"] as Record<
+          string,
+          number
+        >;
+        expect(reconcileCounts).toMatchObject({
+          pages: 1,
+          itemsObserved: 1,
+          itemsCreated: 1,
+          itemsUpdated: 0,
+          itemsSkipped: 0,
+          itemsErrored: 0
+        });
+        const paginationStopped = reconcilePayload["paginationStopped"] as Record<
+          string,
+          unknown
+        >;
+        expect(paginationStopped["reason"]).toBe("complete");
+        expect(paginationStopped["code"]).toBeNull();
+        const itemsSampled = reconcilePayload["itemsSampled"] as Array<
+          Record<string, unknown>
+        >;
+        expect(itemsSampled).toHaveLength(1);
+        expect(itemsSampled[0]).toMatchObject({
+          classification: "created",
+          externalId: "issue-smoke-ngx-294",
+          externalKey: "NGX-294"
+        });
+        const run = reconcilePayload["run"] as Record<string, unknown>;
+        expect(run["state"]).toBe("succeeded");
+        expect(run["adapterKind"]).toBe("linear");
+
+        expect(mock.bodies).toHaveLength(1);
+        const requestBody = mock.bodies[0];
+        expect(typeof requestBody?.["query"]).toBe("string");
+        const variables = requestBody?.["variables"] as Record<string, unknown>;
+        expect(variables).toMatchObject({ first: 50, after: null });
+
+        const list = runCliBinary([
+          "source",
+          "list",
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(list.code, `source list stderr: ${list.stderr}`).toBe(0);
+        const listPayload = JSON.parse(list.stdout) as Record<string, unknown>;
+        expect(listPayload).toMatchObject({
+          ok: true,
+          command: "source list",
+          dataDir
+        });
+        const listedItems = listPayload["items"] as Array<Record<string, unknown>>;
+        expect(listedItems).toHaveLength(1);
+        const listedItem = listedItems[0]!;
+        expect(listedItem).toMatchObject({
+          adapterKind: "linear",
+          externalId: "issue-smoke-ngx-294",
+          externalKey: "NGX-294",
+          title: "M5-07 M5 smoke, docs, and milestone closeout",
+          status: "In Progress",
+          url: "https://linear.app/ngxcalvin/issue/NGX-294",
+          goalId: null
+        });
+        expect(typeof listedItem["id"]).toBe("string");
+
+        const sourceItemId = listedItem["id"] as string;
+        const get = runCliBinary([
+          "source",
+          "get",
+          sourceItemId,
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(get.code, `source get stderr: ${get.stderr}`).toBe(0);
+        const getPayload = JSON.parse(get.stdout) as Record<string, unknown>;
+        expect(getPayload).toMatchObject({
+          ok: true,
+          command: "source get",
+          dataDir
+        });
+        const fetchedItem = getPayload["item"] as Record<string, unknown>;
+        expect(fetchedItem).toMatchObject({
+          id: sourceItemId,
+          adapterKind: "linear",
+          externalId: "issue-smoke-ngx-294",
+          externalKey: "NGX-294"
+        });
+        const metadata = fetchedItem["metadata"] as Record<string, unknown>;
+        expect((metadata["project"] as Record<string, unknown>)?.["name"]).toBe(
+          "Momentum"
+        );
+        expect(
+          (metadata["milestone"] as Record<string, unknown>)?.["name"]
+        ).toBe("Milestone 5: Source Adapters And Evidence Sync");
+
+        const doctor = runCliBinary([
+          "doctor",
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(doctor.code, `doctor stderr: ${doctor.stderr}`).toBe(0);
+        const doctorPayload = JSON.parse(doctor.stdout) as Record<string, unknown>;
+        const sourcesPayload = doctorPayload["sources"] as Record<string, unknown>;
+        expect(sourcesPayload).toMatchObject({
+          ok: true,
+          totalSourceItems: 1,
+          linkedSourceItems: 0,
+          unlinkedSourceItems: 1
+        });
+        const lastReconciliation = sourcesPayload["lastReconciliation"] as Record<
+          string,
+          unknown
+        >;
+        expect(lastReconciliation).toMatchObject({
+          adapterKind: "linear",
+          state: "succeeded",
+          itemsSeen: 1,
+          itemsUpserted: 1
+        });
+      } finally {
+        await mock.close();
+      }
     },
     60_000
   );
