@@ -5410,4 +5410,321 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
     },
     180_000
   );
+
+  it(
+    "computes a project rollup with mismatches and pending intents through the built CLI",
+    async () => {
+      const dataDir = makeTempDir("momentum-smoke-m5-rollup-data-");
+      const repo = initDisposableRepo();
+      const goalFile = path.join(dataDir, "goal.md");
+      fs.writeFileSync(goalFile, SMOKE_GOAL_SPEC, "utf-8");
+
+      // SourceItem stays in a non-terminal state ("In Progress") while the
+      // Goal completes; that asymmetry is what produces the
+      // `goal_done_source_not_done` mismatch the rollup must surface.
+      const issue = {
+        id: "issue-smoke-ngx-294-rollup",
+        identifier: "NGX-294",
+        title: "M5-07 M5 smoke, docs, and milestone closeout",
+        description: "Smoke fixture for the M5 project rollup path.",
+        url: "https://linear.app/ngxcalvin/issue/NGX-294",
+        updatedAt: "2026-05-18T12:00:00.000Z",
+        priority: 0,
+        state: { id: "state-in-progress", name: "In Progress" },
+        project: {
+          id: "project-momentum",
+          name: "Momentum",
+          url: "https://linear.app/ngxcalvin/project/momentum"
+        },
+        projectMilestone: {
+          id: "milestone-m5",
+          name: "Milestone 5: Source Adapters And Evidence Sync"
+        },
+        labels: { nodes: [] },
+        assignee: null
+      };
+      const mock = await startLinearMockServer([issue]);
+      try {
+        const reconcile = await runCliBinaryAsync(
+          [
+            "source",
+            "reconcile",
+            "linear",
+            "--linear-endpoint",
+            mock.endpoint,
+            "--data-dir",
+            dataDir,
+            "--json"
+          ],
+          { env: { LINEAR_API_KEY: "lin_api_smoke_fixture_key" } }
+        );
+        expect(
+          reconcile.code,
+          `source reconcile linear stderr: ${reconcile.stderr}`
+        ).toBe(0);
+
+        const sourceList = runCliBinary([
+          "source",
+          "list",
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(sourceList.code, `source list stderr: ${sourceList.stderr}`).toBe(0);
+        const sourceListPayload = JSON.parse(sourceList.stdout) as Record<
+          string,
+          unknown
+        >;
+        const sourceItems = sourceListPayload["items"] as Array<
+          Record<string, unknown>
+        >;
+        expect(sourceItems).toHaveLength(1);
+        const sourceItemId = sourceItems[0]?.["id"] as string;
+        expect(typeof sourceItemId).toBe("string");
+
+        const goalStart = runCliBinary([
+          "goal",
+          "start",
+          goalFile,
+          "--repo",
+          repo,
+          "--data-dir",
+          dataDir,
+          "--runner",
+          "fake",
+          "--json"
+        ]);
+        expect(goalStart.code, `goal start stderr: ${goalStart.stderr}`).toBe(0);
+        const goalStartPayload = JSON.parse(goalStart.stdout) as Record<
+          string,
+          unknown
+        >;
+        const goalId = goalStartPayload["goalId"] as string;
+        expect(typeof goalId).toBe("string");
+        expect(goalStartPayload["goalState"]).toBe("queued");
+
+        const drain = runCliBinary(
+          [
+            "daemon",
+            "start",
+            "--max-idle-cycles",
+            "2",
+            "--poll-interval-ms",
+            "0",
+            "--data-dir",
+            dataDir,
+            "--json"
+          ],
+          { env: { [FAKE_RUNNER_GOAL_COMPLETE_ENV]: "1" } }
+        );
+        expect(drain.code, `daemon start stderr: ${drain.stderr}`).toBe(0);
+        const drainPayload = JSON.parse(drain.stdout) as Record<string, unknown>;
+        const loop = drainPayload["loop"] as Record<string, unknown>;
+        expect(loop).toMatchObject({
+          workSucceeded: true,
+          jobsRun: 1,
+          jobsFailed: 0
+        });
+
+        // Ingest workflow evidence with a no-mistakes complete entry so the
+        // intent generator finds an accepted verification evidence type.
+        const fixtureRoot = makeTempDir("momentum-smoke-m5-rollup-fixture-");
+        const runId = "smoke-m5-rollup-run-1";
+        const runDir = path.join(fixtureRoot, ".agent-workflows", runId);
+        fs.mkdirSync(runDir, { recursive: true });
+        fs.writeFileSync(
+          path.join(runDir, "plan.json"),
+          JSON.stringify(
+            {
+              runId,
+              schemaVersion: 1,
+              mode: "execute-ready",
+              profile: "momentum-m5-smoke",
+              objective: "NGX-294 smoke fixture for project rollup",
+              resolvedScope: {
+                issues: ["NGX-294"],
+                source: "explicit",
+                status: "resolved"
+              }
+            },
+            null,
+            2
+          )
+        );
+        const ledger = [
+          {
+            runId,
+            step: "implementation",
+            status: "complete",
+            ts: "2026-05-18T12:20:00Z"
+          },
+          {
+            runId,
+            step: "no-mistakes",
+            status: "complete",
+            ts: "2026-05-18T12:25:00Z"
+          }
+        ];
+        fs.writeFileSync(
+          path.join(runDir, "ledger.jsonl"),
+          `${ledger.map((line) => JSON.stringify(line)).join("\n")}\n`
+        );
+
+        const ingest = runCliBinary([
+          "evidence",
+          "ingest",
+          "--path",
+          runDir,
+          "--goal",
+          goalId,
+          "--source-item",
+          sourceItemId,
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(ingest.code, `evidence ingest stderr: ${ingest.stderr}`).toBe(0);
+
+        // Link the SourceItem to the completed Goal — this triggers intent
+        // creation (completed goal + non-terminal source + no_mistakes_complete).
+        const link = runCliBinary([
+          "source",
+          "link",
+          sourceItemId,
+          "--goal",
+          goalId,
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(link.code, `source link stderr: ${link.stderr}`).toBe(0);
+        const linkPayload = JSON.parse(link.stdout) as Record<string, unknown>;
+        const linkCounts = linkPayload["counts"] as Record<string, number>;
+        expect(linkCounts).toMatchObject({
+          intentsCreated: 1,
+          intentsReplayed: 0,
+          intentWarnings: 0
+        });
+
+        const project = runCliBinary([
+          "project",
+          "status",
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(project.code, `project status stderr: ${project.stderr}`).toBe(0);
+        const projectPayload = JSON.parse(project.stdout) as Record<
+          string,
+          unknown
+        >;
+        expect(projectPayload).toMatchObject({
+          ok: true,
+          command: "project status",
+          dataDir
+        });
+
+        const counts = projectPayload["counts"] as Record<
+          string,
+          Record<string, unknown>
+        >;
+        expect(counts.sourceItems).toMatchObject({
+          total: 1,
+          linkedToGoal: 1,
+          unlinked: 0
+        });
+        const sourceByStatus = counts.sourceItems?.["byStatus"] as Record<
+          string,
+          number
+        >;
+        expect(sourceByStatus["In Progress"]).toBe(1);
+        expect(counts.goals).toMatchObject({
+          total: 1,
+          needingManualRecovery: 0
+        });
+        const goalByState = counts.goals?.["byState"] as Record<string, number>;
+        expect(goalByState["completed"]).toBe(1);
+        const evidenceCounts = counts.evidence as Record<string, number>;
+        expect(evidenceCounts.totalRecords).toBeGreaterThanOrEqual(1);
+        expect(evidenceCounts.goalsWithEvidence).toBe(1);
+        expect(evidenceCounts.goalsWithoutEvidence).toBe(0);
+
+        const mismatchCounts = counts.mismatches as Record<string, number>;
+        expect(mismatchCounts.goal_done_source_not_done).toBe(1);
+        expect(mismatchCounts.source_done_goal_not_terminal).toBe(0);
+        expect(mismatchCounts.evidence_missing_after_completion).toBe(0);
+        expect(mismatchCounts.manual_recovery_required).toBe(0);
+        expect(counts["pendingUpdateIntents"]).toBe(1);
+        expect(counts["staleUpdateIntents"]).toBe(0);
+
+        // `project status` source-item summaries use `sourceItemId`, not the
+        // bare `id` shape that `source list`/`source get` return — verify the
+        // local id ties back to the SourceItem created by reconciliation.
+        const rolledItems = projectPayload["sourceItems"] as Array<
+          Record<string, unknown>
+        >;
+        expect(rolledItems).toHaveLength(1);
+        expect(rolledItems[0]).toMatchObject({
+          sourceItemId,
+          adapterKind: "linear",
+          externalKey: "NGX-294",
+          status: "In Progress",
+          goalId,
+          goalState: "completed"
+        });
+
+        const mismatches = projectPayload["mismatches"] as Array<
+          Record<string, unknown>
+        >;
+        expect(mismatches).toHaveLength(1);
+        expect(mismatches[0]).toMatchObject({
+          kind: "goal_done_source_not_done",
+          sourceItemId,
+          externalKey: "NGX-294",
+          goalId,
+          goalState: "completed",
+          sourceStatus: "In Progress"
+        });
+        expect(projectPayload["totalMismatchCount"]).toBe(1);
+        expect(projectPayload["truncatedMismatches"]).toBe(false);
+
+        const pendingIntents = projectPayload["pendingUpdateIntents"] as Array<
+          Record<string, unknown>
+        >;
+        expect(pendingIntents).toHaveLength(1);
+        expect(pendingIntents[0]).toMatchObject({
+          adapterKind: "linear",
+          intentType: "source_satisfied",
+          goalId,
+          sourceItemId,
+          targetExternalId: "issue-smoke-ngx-294-rollup",
+          stale: false
+        });
+        expect(typeof pendingIntents[0]?.["intentId"]).toBe("string");
+        expect(typeof pendingIntents[0]?.["ageMs"]).toBe("number");
+        expect(projectPayload["totalPendingUpdateIntentCount"]).toBe(1);
+        expect(projectPayload["truncatedPendingUpdateIntents"]).toBe(false);
+        expect(projectPayload["reconciliationWarnings"]).toEqual([]);
+
+        // `pickNextAction` prioritizes pending intents above the
+        // `goal_done_source_not_done` mismatch, so the operator-facing
+        // hint should steer to the intent review path here.
+        const nextAction = projectPayload["nextAction"] as Record<
+          string,
+          unknown
+        >;
+        expect(nextAction["kind"]).toBe("review_pending_intents");
+        expect(typeof nextAction["message"]).toBe("string");
+        const nextActionDetail = nextAction["detail"] as Record<string, unknown>;
+        expect(nextActionDetail["total"]).toBe(1);
+        expect(nextActionDetail["stale"]).toBe(0);
+        const intentIds = nextActionDetail["intentIds"] as string[];
+        expect(Array.isArray(intentIds)).toBe(true);
+        expect(intentIds).toHaveLength(1);
+      } finally {
+        await mock.close();
+      }
+    },
+    180_000
+  );
 });
