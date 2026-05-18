@@ -63,14 +63,14 @@ const M5_NON_GOALS_AGENTS = [
   "remote git operations"
 ] as const;
 
-describe("M5 contract docs (NGX-287 setup)", () => {
+describe("M5 contract docs (NGX-287 setup, NGX-294 closeout)", () => {
   describe("README.md", () => {
     const readme = readDoc("README.md");
 
-    it("names Milestone 5 as the active milestone without claiming completion (NGX-287)", () => {
+    it("names Milestone 5 complete with the NGX-287..NGX-294 closeout (NGX-294)", () => {
       expect(readme).toContain("## Milestone 5 Roadmap");
-      expect(readme).toMatch(/Milestone 5 \(Source Adapters and Evidence Sync\) is the active milestone/);
-      expect(readme).not.toMatch(/Milestone 5 \(Source Adapters and Evidence Sync\) is complete/);
+      expect(readme).toMatch(/Milestone 5 \(Source Adapters and Evidence Sync\) is complete/);
+      expect(readme).not.toMatch(/Milestone 5 \(Source Adapters and Evidence Sync\) is the active milestone/);
     });
 
     it("defines the M5 vocabulary explicitly", () => {
@@ -174,9 +174,9 @@ describe("M5 contract docs (NGX-287 setup)", () => {
   describe("AGENTS.md", () => {
     const agents = readDoc("AGENTS.md");
 
-    it("names Milestone 5 as the active milestone (not complete)", () => {
-      expect(agents).toMatch(/Milestone 5: Source Adapters and Evidence Sync is the active milestone/);
-      expect(agents).not.toMatch(/Milestone 5: Source Adapters and Evidence Sync is complete/);
+    it("names Milestone 5 complete with the NGX-287..NGX-294 closeout (NGX-294)", () => {
+      expect(agents).toMatch(/Milestone 5: Source Adapters and Evidence Sync is complete/);
+      expect(agents).not.toMatch(/Milestone 5: Source Adapters and Evidence Sync is the active milestone/);
     });
 
     it("documents the M5 contract block with vocabulary, trust boundary, and non-goals", () => {
@@ -247,13 +247,13 @@ describe("M5 contract docs (NGX-287 setup)", () => {
     });
   });
 
-  it("keeps the doctor milestone string pinned to the M4 closeout marker until M5 closeout intentionally flips it", () => {
+  it("pins the doctor milestone string to the M5 closeout marker (NGX-294)", () => {
     const cli = fs.readFileSync(path.join(repoRoot, "src", "cli.ts"), "utf8");
     expect(cli).toContain(
-      "Milestone 4: real runner profiles (NGX-279, NGX-280, NGX-281, NGX-282, NGX-283, NGX-284, NGX-285, NGX-286) complete"
+      "Milestone 5: source adapters and evidence sync (NGX-287, NGX-288, NGX-289, NGX-290, NGX-291, NGX-292, NGX-293, NGX-294) complete"
     );
-    expect(cli).not.toMatch(
-      /Milestone 5: source adapters and evidence sync .* complete/i
+    expect(cli).not.toContain(
+      "Milestone 4: real runner profiles (NGX-279, NGX-280, NGX-281, NGX-282, NGX-283, NGX-284, NGX-285, NGX-286) complete"
     );
   });
 });
