@@ -3308,7 +3308,7 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
     node: process.version,
     platform: process.platform,
     milestone:
-      "Milestone 4: real runner profiles (NGX-279, NGX-280, NGX-281, NGX-282, NGX-283, NGX-284, NGX-285, NGX-286) complete",
+      "Milestone 5: source adapters and evidence sync (NGX-287, NGX-288, NGX-289, NGX-290, NGX-291, NGX-292, NGX-293, NGX-294) complete",
     daemon: daemonPayload,
     runners: {
       supported: [...BUILTIN_RUNNER_KINDS],

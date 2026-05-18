@@ -155,7 +155,7 @@ describe("momentum CLI scaffold", () => {
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Momentum doctor: ok");
     expect(result.stdout).toContain(
-      "scope: Milestone 4: real runner profiles (NGX-279, NGX-280, NGX-281, NGX-282, NGX-283, NGX-284, NGX-285, NGX-286) complete"
+      "scope: Milestone 5: source adapters and evidence sync (NGX-287, NGX-288, NGX-289, NGX-290, NGX-291, NGX-292, NGX-293, NGX-294) complete"
     );
     expect(result.stdout).toContain("daemon: never started");
     expect(result.stdout).toContain(
@@ -176,7 +176,7 @@ describe("momentum CLI scaffold", () => {
       command: "doctor",
       version: VERSION,
       milestone:
-        "Milestone 4: real runner profiles (NGX-279, NGX-280, NGX-281, NGX-282, NGX-283, NGX-284, NGX-285, NGX-286) complete"
+        "Milestone 5: source adapters and evidence sync (NGX-287, NGX-288, NGX-289, NGX-290, NGX-291, NGX-292, NGX-293, NGX-294) complete"
     });
     expect(payload["daemon"]).toEqual({
       ok: true,

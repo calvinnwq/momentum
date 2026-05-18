@@ -171,11 +171,11 @@ describe("M4 contract docs (NGX-279..NGX-286)", () => {
     });
   });
 
-  it("pins the doctor milestone string to the M4 closeout marker (NGX-286)", () => {
+  it("keeps the doctor milestone string moved off the M3 closeout marker after the M4 closeout (NGX-286)", () => {
+    // NGX-294 (M5-07) intentionally flipped the doctor marker forward from M4 to M5;
+    // this test continues to assert the M3 closeout marker is no longer pinned, mirroring
+    // NGX-286's original intent of preserving the post-flip invariant.
     const cli = fs.readFileSync(path.join(repoRoot, "src", "cli.ts"), "utf8");
-    expect(cli).toContain(
-      "Milestone 4: real runner profiles (NGX-279, NGX-280, NGX-281, NGX-282, NGX-283, NGX-284, NGX-285, NGX-286) complete"
-    );
     expect(cli).not.toContain(
       "Milestone 3: operational safety (NGX-272, NGX-273, NGX-274, NGX-275, NGX-276, NGX-277, NGX-278) complete"
     );

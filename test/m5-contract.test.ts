@@ -247,13 +247,13 @@ describe("M5 contract docs (NGX-287 setup)", () => {
     });
   });
 
-  it("keeps the doctor milestone string pinned to the M4 closeout marker until M5 closeout intentionally flips it", () => {
+  it("pins the doctor milestone string to the M5 closeout marker (NGX-294)", () => {
     const cli = fs.readFileSync(path.join(repoRoot, "src", "cli.ts"), "utf8");
     expect(cli).toContain(
-      "Milestone 4: real runner profiles (NGX-279, NGX-280, NGX-281, NGX-282, NGX-283, NGX-284, NGX-285, NGX-286) complete"
+      "Milestone 5: source adapters and evidence sync (NGX-287, NGX-288, NGX-289, NGX-290, NGX-291, NGX-292, NGX-293, NGX-294) complete"
     );
-    expect(cli).not.toMatch(
-      /Milestone 5: source adapters and evidence sync .* complete/i
+    expect(cli).not.toContain(
+      "Milestone 4: real runner profiles (NGX-279, NGX-280, NGX-281, NGX-282, NGX-283, NGX-284, NGX-285, NGX-286) complete"
     );
   });
 });

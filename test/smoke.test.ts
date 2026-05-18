@@ -3796,18 +3796,6 @@ const TRUSTED_SHELL_RESULT_JSON = JSON.stringify({
 });
 
 describe("Milestone 4 real-runner end-to-end smoke (NGX-286)", () => {
-  it(
-    "doctor --json reports the M4 closeout milestone marker",
-    () => {
-      const result = runCliBinary(["doctor", "--json"]);
-      expect(result.code, `doctor stderr: ${result.stderr}`).toBe(0);
-      const payload = JSON.parse(result.stdout) as Record<string, unknown>;
-      expect(payload["milestone"]).toBe(
-        "Milestone 4: real runner profiles (NGX-279, NGX-280, NGX-281, NGX-282, NGX-283, NGX-284, NGX-285, NGX-286) complete"
-      );
-    },
-    60_000
-  );
 
   it(
     "runs a trusted-shell happy-path goal end-to-end through the built CLI and surfaces commit/logs/handoff",
@@ -4360,6 +4348,19 @@ async function startLinearMockServer(
 }
 
 describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () => {
+  it(
+    "doctor --json reports the M5 closeout milestone marker",
+    () => {
+      const result = runCliBinary(["doctor", "--json"]);
+      expect(result.code, `doctor stderr: ${result.stderr}`).toBe(0);
+      const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+      expect(payload["milestone"]).toBe(
+        "Milestone 5: source adapters and evidence sync (NGX-287, NGX-288, NGX-289, NGX-290, NGX-291, NGX-292, NGX-293, NGX-294) complete"
+      );
+    },
+    60_000
+  );
+
   it(
     "ingests workflow fixtures and surfaces them through evidence list and doctor",
     () => {
