@@ -181,6 +181,51 @@ CREATE INDEX IF NOT EXISTS idx_source_reconciliation_runs_adapter_started
   ON source_reconciliation_runs(adapter_kind, started_at);
 `;
 
+const UPDATE_INTENTS_DDL = `
+CREATE TABLE IF NOT EXISTS update_intents (
+  id TEXT PRIMARY KEY,
+  adapter_kind TEXT NOT NULL,
+  target_external_id TEXT,
+  intent_type TEXT NOT NULL,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  reason TEXT NOT NULL,
+  goal_id TEXT REFERENCES goals(id),
+  source_item_id TEXT REFERENCES source_items(id),
+  evidence_record_id TEXT REFERENCES evidence_records(id),
+  status TEXT NOT NULL DEFAULT 'pending',
+  idempotency_key TEXT NOT NULL,
+  decision_reason TEXT,
+  error_code TEXT,
+  error_message TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  applied_at INTEGER,
+  skipped_at INTEGER,
+  canceled_at INTEGER
+) STRICT;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_update_intents_idempotency_key
+  ON update_intents(idempotency_key);
+
+CREATE INDEX IF NOT EXISTS idx_update_intents_status
+  ON update_intents(status);
+
+CREATE INDEX IF NOT EXISTS idx_update_intents_goal
+  ON update_intents(goal_id) WHERE goal_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_update_intents_source_item
+  ON update_intents(source_item_id) WHERE source_item_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_update_intents_evidence
+  ON update_intents(evidence_record_id) WHERE evidence_record_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_update_intents_adapter_target
+  ON update_intents(adapter_kind, target_external_id);
+
+CREATE INDEX IF NOT EXISTS idx_update_intents_created_at
+  ON update_intents(created_at);
+`;
+
 const JOB_IDEMPOTENCY_INDEX_DDL = `
 CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_idempotency_key
   ON jobs(idempotency_key) WHERE idempotency_key IS NOT NULL;
@@ -207,6 +252,7 @@ export function applyQueueMigrations(db: MomentumDb): void {
     db.exec(DAEMON_RUNS_DDL);
     db.exec(SOURCE_ITEMS_DDL);
     db.exec(EVIDENCE_RECORDS_DDL);
+    db.exec(UPDATE_INTENTS_DDL);
     if (tableExists(db, "daemon_runs")) {
       for (const column of DAEMON_RUN_COLUMNS) {
         ensureColumn(db, "daemon_runs", column);
