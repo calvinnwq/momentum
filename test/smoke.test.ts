@@ -4749,4 +4749,247 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
     },
     60_000
   );
+
+  it(
+    "links a reconciled SourceItem to a queued Goal and surfaces it through status and handoff",
+    async () => {
+      const dataDir = makeTempDir("momentum-smoke-m5-link-data-");
+      const repo = initDisposableRepo();
+      const goalFile = path.join(dataDir, "goal.md");
+      fs.writeFileSync(goalFile, SMOKE_GOAL_SPEC, "utf-8");
+
+      const issue = {
+        id: "issue-smoke-ngx-294-link",
+        identifier: "NGX-294",
+        title: "M5-07 M5 smoke, docs, and milestone closeout",
+        description: "Smoke fixture for the M5 Goal/SourceItem linkage path.",
+        url: "https://linear.app/ngxcalvin/issue/NGX-294",
+        updatedAt: "2026-05-18T10:30:00.000Z",
+        priority: 0,
+        state: { id: "state-in-progress", name: "In Progress" },
+        project: {
+          id: "project-momentum",
+          name: "Momentum",
+          url: "https://linear.app/ngxcalvin/project/momentum"
+        },
+        projectMilestone: {
+          id: "milestone-m5",
+          name: "Milestone 5: Source Adapters And Evidence Sync"
+        },
+        labels: { nodes: [] },
+        assignee: null
+      };
+      const mock = await startLinearMockServer([issue]);
+      try {
+        const reconcile = await runCliBinaryAsync(
+          [
+            "source",
+            "reconcile",
+            "linear",
+            "--linear-endpoint",
+            mock.endpoint,
+            "--data-dir",
+            dataDir,
+            "--json"
+          ],
+          { env: { LINEAR_API_KEY: "lin_api_smoke_fixture_key" } }
+        );
+        expect(
+          reconcile.code,
+          `source reconcile linear stderr: ${reconcile.stderr}`
+        ).toBe(0);
+        const reconcilePayload = JSON.parse(reconcile.stdout) as Record<
+          string,
+          unknown
+        >;
+        expect(reconcilePayload["ok"]).toBe(true);
+        const reconciledSample = reconcilePayload["itemsSampled"] as Array<
+          Record<string, unknown>
+        >;
+        expect(reconciledSample).toHaveLength(1);
+        expect(reconciledSample[0]).toMatchObject({
+          classification: "created",
+          externalKey: "NGX-294"
+        });
+
+        // Resolve the new SourceItem id via source list (reconcile payload omits the local id).
+        const initialList = runCliBinary([
+          "source",
+          "list",
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(
+          initialList.code,
+          `initial source list stderr: ${initialList.stderr}`
+        ).toBe(0);
+        const initialListPayload = JSON.parse(initialList.stdout) as Record<
+          string,
+          unknown
+        >;
+        const initialListedItems = initialListPayload["items"] as Array<
+          Record<string, unknown>
+        >;
+        expect(initialListedItems).toHaveLength(1);
+        const sourceItemId = initialListedItems[0]?.["id"] as string;
+        expect(typeof sourceItemId).toBe("string");
+        expect(sourceItemId.length).toBeGreaterThan(0);
+        expect(initialListedItems[0]?.["goalId"]).toBeNull();
+
+        const goalStart = runCliBinary([
+          "goal",
+          "start",
+          goalFile,
+          "--repo",
+          repo,
+          "--data-dir",
+          dataDir,
+          "--runner",
+          "fake",
+          "--json"
+        ]);
+        expect(goalStart.code, `goal start stderr: ${goalStart.stderr}`).toBe(0);
+        const goalPayload = JSON.parse(goalStart.stdout) as Record<string, unknown>;
+        const goalId = goalPayload["goalId"] as string;
+        expect(typeof goalId).toBe("string");
+        expect(goalId.length).toBeGreaterThan(0);
+        expect(goalPayload["goalState"]).toBe("queued");
+
+        const link = runCliBinary([
+          "source",
+          "link",
+          sourceItemId,
+          "--goal",
+          goalId,
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(link.code, `source link stderr: ${link.stderr}`).toBe(0);
+        const linkPayload = JSON.parse(link.stdout) as Record<string, unknown>;
+        expect(linkPayload).toMatchObject({
+          ok: true,
+          command: "source link",
+          dataDir,
+          goalId,
+          sourceItemId,
+          changed: true,
+          previousGoalId: null
+        });
+        const linkedItem = linkPayload["item"] as Record<string, unknown>;
+        expect(linkedItem).toMatchObject({
+          id: sourceItemId,
+          adapterKind: "linear",
+          externalKey: "NGX-294",
+          goalId
+        });
+
+        // Linking the same item again is a no-op (changed=false, skippedReason=already_linked).
+        const relink = runCliBinary([
+          "source",
+          "link",
+          sourceItemId,
+          "--goal",
+          goalId,
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(relink.code, `source relink stderr: ${relink.stderr}`).toBe(0);
+        const relinkPayload = JSON.parse(relink.stdout) as Record<string, unknown>;
+        expect(relinkPayload).toMatchObject({
+          ok: true,
+          changed: false,
+          skippedReason: "already_linked_to_target"
+        });
+
+        const status = runCliBinary([
+          "status",
+          goalId,
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(status.code, `status stderr: ${status.stderr}`).toBe(0);
+        const statusPayload = JSON.parse(status.stdout) as Record<string, unknown>;
+        expect(statusPayload).toMatchObject({
+          ok: true,
+          command: "status",
+          goalId
+        });
+        const statusSourceItems = statusPayload["sourceItems"] as Array<
+          Record<string, unknown>
+        >;
+        expect(Array.isArray(statusSourceItems)).toBe(true);
+        expect(statusSourceItems).toHaveLength(1);
+        expect(statusSourceItems[0]).toMatchObject({
+          id: sourceItemId,
+          adapterKind: "linear",
+          externalId: "issue-smoke-ngx-294-link",
+          externalKey: "NGX-294",
+          title: "M5-07 M5 smoke, docs, and milestone closeout",
+          status: "In Progress",
+          url: "https://linear.app/ngxcalvin/issue/NGX-294"
+        });
+        expect(typeof statusSourceItems[0]?.["lastObservedAt"]).toBe("number");
+
+        const handoff = runCliBinary([
+          "handoff",
+          goalId,
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(handoff.code, `handoff stderr: ${handoff.stderr}`).toBe(0);
+        const handoffPayload = JSON.parse(handoff.stdout) as Record<string, unknown>;
+        expect(handoffPayload).toMatchObject({
+          ok: true,
+          command: "handoff",
+          goalId
+        });
+        const handoffSourceItems = handoffPayload["sourceItems"] as Array<
+          Record<string, unknown>
+        >;
+        expect(Array.isArray(handoffSourceItems)).toBe(true);
+        expect(handoffSourceItems).toHaveLength(1);
+        expect(handoffSourceItems[0]).toMatchObject({
+          id: sourceItemId,
+          adapterKind: "linear",
+          externalKey: "NGX-294",
+          title: "M5-07 M5 smoke, docs, and milestone closeout"
+        });
+
+        // handoff.md on disk surfaces the linked source item as well.
+        const handoffMdPath = handoffPayload["handoffMdPath"] as string;
+        expect(typeof handoffMdPath).toBe("string");
+        const handoffMd = fs.readFileSync(handoffMdPath, "utf-8");
+        expect(handoffMd).toContain("## Source items");
+        expect(handoffMd).toContain("linear/NGX-294");
+        expect(handoffMd).toContain(
+          "M5-07 M5 smoke, docs, and milestone closeout"
+        );
+
+        // doctor --json now reports the linked source item, not the unlinked one.
+        const doctor = runCliBinary([
+          "doctor",
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(doctor.code, `doctor stderr: ${doctor.stderr}`).toBe(0);
+        const doctorPayload = JSON.parse(doctor.stdout) as Record<string, unknown>;
+        const sourcesPayload = doctorPayload["sources"] as Record<string, unknown>;
+        expect(sourcesPayload).toMatchObject({
+          ok: true,
+          totalSourceItems: 1,
+          linkedSourceItems: 1,
+          unlinkedSourceItems: 0
+        });
+      } finally {
+        await mock.close();
+      }
+    },
+    60_000
+  );
 });
