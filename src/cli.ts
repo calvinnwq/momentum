@@ -166,6 +166,7 @@ type ParsedFlags = {
   evidenceType?: string;
   limit?: number;
   staleThresholdHours?: number;
+  intentStaleThresholdDays?: number;
   status?: string;
   evidenceRecord?: string;
   error?: string;
@@ -185,7 +186,7 @@ const COMMANDS = [
   "momentum daemon start [--max-loop-iterations <n>] [--max-idle-cycles <n>] [--poll-interval-ms <ms>] [--data-dir <path>] [--json]",
   "momentum daemon stop [--now] [--reason <text>] [--data-dir <path>] [--json]",
   "momentum daemon status [--data-dir <path>] [--json]",
-  "momentum project status [--source <adapter>] [--project <id-or-name>] [--milestone <id-or-name>] [--stale-threshold-hours <n>] [--data-dir <path>] [--json]",
+  "momentum project status [--source <adapter>] [--project <id-or-name>] [--milestone <id-or-name>] [--stale-threshold-hours <n>] [--intent-stale-threshold-days <n>] [--data-dir <path>] [--json]",
   "momentum recovery clear <goal-id> [--reason <text>] [--data-dir <path>] [--json]",
   "momentum evidence ingest --path <file-or-dir> [--goal <id>] [--source-item <id>] [--data-dir <path>] [--json]",
   "momentum evidence list [--goal <id>] [--source-item <id>] [--source <source>] [--type <type>] [--limit <n>] [--data-dir <path>] [--json]",
@@ -1014,6 +1015,11 @@ function projectStatus(parsed: ParsedFlags, io: CliIo): number {
       parsed.staleThresholdHours * 60 * 60 * 1000
     );
   }
+  if (parsed.intentStaleThresholdDays !== undefined) {
+    options.intentStaleThresholdMs = Math.round(
+      parsed.intentStaleThresholdDays * 24 * 60 * 60 * 1000
+    );
+  }
 
   const db = openDb(dataDir);
   let rollup: ProjectRollup;
@@ -1036,6 +1042,7 @@ function projectStatus(parsed: ParsedFlags, io: CliIo): number {
         milestoneName: filters.milestoneName ?? null
       },
       staleThresholdMs: rollup.reconciliationStaleThresholdMs,
+      intentStaleThresholdMs: rollup.intentStaleThresholdMs,
       generatedAt: rollup.generatedAt,
       counts: rollup.counts,
       sourceItems: rollup.sourceItems,
@@ -1046,6 +1053,8 @@ function projectStatus(parsed: ParsedFlags, io: CliIo): number {
       truncatedMismatches: rollup.truncatedMismatches,
       reconciliationWarnings: rollup.reconciliationWarnings,
       pendingUpdateIntents: rollup.pendingUpdateIntents,
+      totalPendingUpdateIntentCount: rollup.totalPendingUpdateIntentCount,
+      truncatedPendingUpdateIntents: rollup.truncatedPendingUpdateIntents,
       nextAction: rollup.nextAction
     };
     writeJson(io.stdout, payload);
@@ -1100,7 +1109,9 @@ function renderProjectStatusText(
       `manual_recovery_required=${rollup.counts.mismatches.manual_recovery_required}`
   );
   lines.push(
-    `Pending external update intents: ${rollup.counts.pendingUpdateIntents} (NGX-293 not implemented)`
+    `Pending external update intents: ${rollup.counts.pendingUpdateIntents} ` +
+      `(stale=${rollup.counts.staleUpdateIntents}, ` +
+      `stale_threshold_ms=${rollup.intentStaleThresholdMs})`
   );
   if (rollup.reconciliationWarnings.length === 0) {
     lines.push("Reconciliation: ok");
@@ -1148,6 +1159,31 @@ function renderProjectStatusText(
     if (rollup.truncatedMismatches) {
       lines.push(
         `  ... and ${rollup.totalMismatchCount - rollup.mismatches.length} more`
+      );
+    }
+  }
+  lines.push("");
+  lines.push("Pending update intents:");
+  if (rollup.pendingUpdateIntents.length === 0) {
+    lines.push("  (none)");
+  } else {
+    for (const intent of rollup.pendingUpdateIntents) {
+      const staleText = intent.stale ? " STALE" : "";
+      const targetText = intent.targetExternalId
+        ? ` target=${intent.targetExternalId}`
+        : "";
+      const goalText = intent.goalId ? ` goal=${intent.goalId}` : "";
+      const sourceText = intent.sourceItemId
+        ? ` source=${intent.sourceItemId}`
+        : "";
+      lines.push(
+        `  - [${intent.adapterKind}/${intent.intentType}] ${intent.intentId}` +
+          `${targetText}${goalText}${sourceText} age_ms=${intent.ageMs}${staleText}`
+      );
+    }
+    if (rollup.truncatedPendingUpdateIntents) {
+      lines.push(
+        `  ... and ${rollup.totalPendingUpdateIntentCount - rollup.pendingUpdateIntents.length} more`
       );
     }
   }
@@ -4191,6 +4227,7 @@ function parseFlags(argv: string[]): ParsedFlags {
   let evidenceType: string | undefined;
   let limit: number | undefined;
   let staleThresholdHours: number | undefined;
+  let intentStaleThresholdDays: number | undefined;
   let status: string | undefined;
   let evidenceRecord: string | undefined;
   let error: string | undefined;
@@ -4480,6 +4517,24 @@ function parseFlags(argv: string[]): ParsedFlags {
       continue;
     }
 
+    if (arg === "--intent-stale-threshold-days") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --intent-stale-threshold-days.";
+      } else {
+        const parsedValue = /^\d+(?:\.\d+)?$/.test(value)
+          ? Number.parseFloat(value)
+          : NaN;
+        if (!Number.isFinite(parsedValue) || parsedValue < 0) {
+          error ??= `Invalid value for --intent-stale-threshold-days: ${value}`;
+        } else {
+          intentStaleThresholdDays = parsedValue;
+        }
+        index += 1;
+      }
+      continue;
+    }
+
     if (arg === "--iteration") {
       const value = readFlagValue(argv, index);
       if (value === undefined) {
@@ -4580,6 +4635,9 @@ function parseFlags(argv: string[]): ParsedFlags {
   if (limit !== undefined) parsed.limit = limit;
   if (staleThresholdHours !== undefined) {
     parsed.staleThresholdHours = staleThresholdHours;
+  }
+  if (intentStaleThresholdDays !== undefined) {
+    parsed.intentStaleThresholdDays = intentStaleThresholdDays;
   }
   if (status !== undefined) parsed.status = status;
   if (evidenceRecord !== undefined) parsed.evidenceRecord = evidenceRecord;

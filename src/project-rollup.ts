@@ -1,13 +1,15 @@
 /**
- * Project rollup (NGX-292 / M5-05).
+ * Project rollup (NGX-292 / M5-05; pending-intent surfaces added in NGX-293 / M5-06).
  *
  * Computes an operator-facing summary of SourceItem / Goal / evidence /
  * reconciliation state from local durable records only. Never calls source
  * adapters or runs external API requests. Filter scope is source-centric:
  * goals are included if they are linked to a SourceItem matching the filters.
  *
- * External update intents (NGX-293) are not implemented yet, so the
- * pendingUpdateIntents list/count are stable empty / zero placeholders.
+ * Pending external update intents are read from local durable state and
+ * scoped to the same SourceItem / Goal set so the rollup never widens past
+ * the operator's filter context. Stale pending intents are flagged via a
+ * configurable TTL (default 30 days); the rollup never auto-deletes intents.
  */
 
 import type { MomentumDb } from "./db.js";
@@ -16,8 +18,10 @@ import {
   listSourceReconciliationRuns,
   type SourceReconciliationRun
 } from "./source-reconciliation-runs.js";
+import { listUpdateIntents, type UpdateIntent } from "./update-intents.js";
 
 export const DEFAULT_RECONCILIATION_STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000;
+export const DEFAULT_INTENT_STALE_THRESHOLD_MS = 30 * 24 * 60 * 60 * 1000;
 export const PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT = 20;
 
 const TERMINAL_SOURCE_STATUSES = new Set(
@@ -53,6 +57,7 @@ export type ProjectRollupFilters = {
 export type ProjectRollupOptions = {
   filters?: ProjectRollupFilters;
   reconciliationStaleThresholdMs?: number;
+  intentStaleThresholdMs?: number;
   now?: number;
 };
 
@@ -105,7 +110,22 @@ export type ProjectRollupNextActionKind =
   | "reconcile_stale_source"
   | "address_mismatch"
   | "missing_evidence"
+  | "review_pending_intents"
   | "no_action_required";
+
+export type ProjectRollupPendingIntentSummary = {
+  intentId: string;
+  adapterKind: string;
+  intentType: string;
+  targetExternalId: string | null;
+  reason: string;
+  goalId: string | null;
+  sourceItemId: string | null;
+  evidenceRecordId: string | null;
+  createdAt: number;
+  ageMs: number;
+  stale: boolean;
+};
 
 export type ProjectRollupNextAction = {
   kind: ProjectRollupNextActionKind;
@@ -132,12 +152,14 @@ export type ProjectRollupCounts = {
   };
   mismatches: Record<ProjectRollupMismatchKind, number>;
   pendingUpdateIntents: number;
+  staleUpdateIntents: number;
 };
 
 export type ProjectRollup = {
   filters: ProjectRollupFilters;
   generatedAt: number;
   reconciliationStaleThresholdMs: number;
+  intentStaleThresholdMs: number;
   counts: ProjectRollupCounts;
   sourceItems: ProjectRollupSourceItemSummary[];
   totalSourceItemCount: number;
@@ -146,7 +168,9 @@ export type ProjectRollup = {
   totalMismatchCount: number;
   truncatedMismatches: boolean;
   reconciliationWarnings: ProjectRollupReconciliationWarning[];
-  pendingUpdateIntents: never[];
+  pendingUpdateIntents: ProjectRollupPendingIntentSummary[];
+  totalPendingUpdateIntentCount: number;
+  truncatedPendingUpdateIntents: boolean;
   nextAction: ProjectRollupNextAction;
 };
 
@@ -162,7 +186,14 @@ export function buildProjectRollup(
 ): ProjectRollup {
   const filters = options.filters ?? {};
   const reconciliationStaleThresholdMs = resolveStaleThreshold(
-    options.reconciliationStaleThresholdMs
+    options.reconciliationStaleThresholdMs,
+    "reconciliationStaleThresholdMs",
+    DEFAULT_RECONCILIATION_STALE_THRESHOLD_MS
+  );
+  const intentStaleThresholdMs = resolveStaleThreshold(
+    options.intentStaleThresholdMs,
+    "intentStaleThresholdMs",
+    DEFAULT_INTENT_STALE_THRESHOLD_MS
   );
   const generatedAt = options.now ?? Date.now();
 
@@ -179,7 +210,22 @@ export function buildProjectRollup(
 
   const summaries = buildSourceItemSummaries(items, goals);
   const mismatches = buildMismatches(items, goals, goalsWithEvidence);
-  const counts = computeCounts(items, goals, goalsWithEvidence, mismatches, evidenceTotal);
+  const pendingIntents = buildPendingIntentSummaries(
+    db,
+    filters,
+    items,
+    goals,
+    generatedAt,
+    intentStaleThresholdMs
+  );
+  const counts = computeCounts(
+    items,
+    goals,
+    goalsWithEvidence,
+    mismatches,
+    evidenceTotal,
+    pendingIntents
+  );
   const reconciliationWarnings = buildReconciliationWarnings(
     db,
     filters.adapterKind,
@@ -188,15 +234,23 @@ export function buildProjectRollup(
     reconciliationStaleThresholdMs,
     items
   );
-  const nextAction = pickNextAction(counts, mismatches, reconciliationWarnings);
+  const nextAction = pickNextAction(
+    counts,
+    mismatches,
+    reconciliationWarnings,
+    pendingIntents
+  );
 
   const truncatedSourceItems = summaries.length > PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT;
   const truncatedMismatches = mismatches.length > PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT;
+  const truncatedPendingIntents =
+    pendingIntents.length > PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT;
 
   return {
     filters,
     generatedAt,
     reconciliationStaleThresholdMs,
+    intentStaleThresholdMs,
     counts,
     sourceItems: summaries.slice(0, PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT),
     totalSourceItemCount: summaries.length,
@@ -205,16 +259,25 @@ export function buildProjectRollup(
     totalMismatchCount: mismatches.length,
     truncatedMismatches,
     reconciliationWarnings,
-    pendingUpdateIntents: [],
+    pendingUpdateIntents: pendingIntents.slice(
+      0,
+      PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT
+    ),
+    totalPendingUpdateIntentCount: pendingIntents.length,
+    truncatedPendingUpdateIntents: truncatedPendingIntents,
     nextAction
   };
 }
 
-function resolveStaleThreshold(value: number | undefined): number {
-  if (value === undefined) return DEFAULT_RECONCILIATION_STALE_THRESHOLD_MS;
+function resolveStaleThreshold(
+  value: number | undefined,
+  name: string,
+  fallback: number
+): number {
+  if (value === undefined) return fallback;
   if (!Number.isFinite(value) || value < 0) {
     throw new Error(
-      `reconciliationStaleThresholdMs must be a non-negative finite number, got ${value}`
+      `${name} must be a non-negative finite number, got ${value}`
     );
   }
   return value;
@@ -476,7 +539,8 @@ function computeCounts(
   goals: Map<string, GoalSnapshot>,
   goalsWithEvidence: Set<string>,
   mismatches: readonly ProjectRollupMismatch[],
-  evidenceTotal: number
+  evidenceTotal: number,
+  pendingIntents: readonly ProjectRollupPendingIntentSummary[]
 ): ProjectRollupCounts {
   const byStatus: Record<string, number> = {};
   let linkedToGoal = 0;
@@ -505,6 +569,7 @@ function computeCounts(
   const goalsWithoutEvidence = [...goals.values()].filter(
     (goal) => goal.state === COMPLETED_GOAL_STATE && !goalsWithEvidence.has(goal.id)
   ).length;
+  const stalePendingIntents = pendingIntents.filter((intent) => intent.stale).length;
   return {
     sourceItems: {
       total: items.length,
@@ -523,7 +588,8 @@ function computeCounts(
       goalsWithoutEvidence
     },
     mismatches: mismatchCounts,
-    pendingUpdateIntents: 0
+    pendingUpdateIntents: pendingIntents.length,
+    staleUpdateIntents: stalePendingIntents
   };
 }
 
@@ -707,10 +773,75 @@ function itemDimensionMatchesRunFilter(
   return itemValues.some((itemValue) => runValues.includes(itemValue));
 }
 
+function buildPendingIntentSummaries(
+  db: MomentumDb,
+  filters: ProjectRollupFilters,
+  items: readonly SourceItem[],
+  goals: Map<string, GoalSnapshot>,
+  now: number,
+  staleThresholdMs: number
+): ProjectRollupPendingIntentSummary[] {
+  const filtersScoped = isRollupScoped(filters);
+  const itemIds = new Set(items.map((item) => item.id));
+  const goalIds = new Set(goals.keys());
+
+  const listOptions: Parameters<typeof listUpdateIntents>[1] = { status: "pending" };
+  if (filters.adapterKind !== undefined) listOptions.adapterKind = filters.adapterKind;
+
+  const intents = listUpdateIntents(db, listOptions);
+  const scoped = intents.filter((intent) => {
+    if (!filtersScoped) return true;
+    if (intent.sourceItemId && itemIds.has(intent.sourceItemId)) return true;
+    if (intent.goalId && goalIds.has(intent.goalId)) return true;
+    return false;
+  });
+
+  return scoped
+    .slice()
+    .sort(pendingIntentOrder)
+    .map((intent) => toPendingIntentSummary(intent, now, staleThresholdMs));
+}
+
+function isRollupScoped(filters: ProjectRollupFilters): boolean {
+  return (
+    filters.projectId !== undefined ||
+    filters.projectName !== undefined ||
+    filters.milestoneId !== undefined ||
+    filters.milestoneName !== undefined
+  );
+}
+
+function pendingIntentOrder(a: UpdateIntent, b: UpdateIntent): number {
+  if (a.createdAt !== b.createdAt) return a.createdAt - b.createdAt;
+  return a.id < b.id ? -1 : 1;
+}
+
+function toPendingIntentSummary(
+  intent: UpdateIntent,
+  now: number,
+  staleThresholdMs: number
+): ProjectRollupPendingIntentSummary {
+  const ageMs = Math.max(0, now - intent.createdAt);
+  return {
+    intentId: intent.id,
+    adapterKind: intent.adapterKind,
+    intentType: intent.intentType,
+    targetExternalId: intent.targetExternalId,
+    reason: intent.reason,
+    goalId: intent.goalId,
+    sourceItemId: intent.sourceItemId,
+    evidenceRecordId: intent.evidenceRecordId,
+    createdAt: intent.createdAt,
+    ageMs,
+    stale: ageMs > staleThresholdMs
+  };
+}
+
 function pickNextAction(
   counts: ProjectRollupCounts,
   mismatches: readonly ProjectRollupMismatch[],
-  reconciliationWarnings: readonly ProjectRollupReconciliationWarning[]
+  reconciliationWarnings: readonly ProjectRollupReconciliationWarning[],
+  pendingIntents: readonly ProjectRollupPendingIntentSummary[]
 ): ProjectRollupNextAction {
   if (counts.goals.needingManualRecovery > 0) {
     const goalIds = mismatches
@@ -768,6 +899,18 @@ function pickNextAction(
         adapterKind: staleReconciliation.adapterKind,
         reason: staleReconciliation.reason
       }
+    };
+  }
+  if (pendingIntents.length > 0) {
+    const stale = pendingIntents.filter((intent) => intent.stale).length;
+    const intentIds = pendingIntents.slice(0, 5).map((intent) => intent.intentId);
+    const staleSuffix = stale > 0 ? ` (${stale} stale)` : "";
+    return {
+      kind: "review_pending_intents",
+      message:
+        `${pendingIntents.length} pending external update intent(s)${staleSuffix}; ` +
+        "review with `momentum intent list --status pending` and apply/skip/cancel with a reason.",
+      detail: { total: pendingIntents.length, stale, intentIds }
     };
   }
   return {
