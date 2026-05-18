@@ -4992,4 +4992,422 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
     },
     60_000
   );
+
+  it(
+    "generates a source_satisfied update intent through source link after a goal completes and refuses --external-apply",
+    async () => {
+      const dataDir = makeTempDir("momentum-smoke-m5-intent-gen-data-");
+      const repo = initDisposableRepo();
+      const goalFile = path.join(dataDir, "goal.md");
+      fs.writeFileSync(goalFile, SMOKE_GOAL_SPEC, "utf-8");
+
+      const issue = {
+        id: "issue-smoke-ngx-294-intent",
+        identifier: "NGX-294",
+        title: "M5-07 M5 smoke, docs, and milestone closeout",
+        description: "Smoke fixture for the M5 intent generation path.",
+        url: "https://linear.app/ngxcalvin/issue/NGX-294",
+        updatedAt: "2026-05-18T11:00:00.000Z",
+        priority: 0,
+        state: { id: "state-in-progress", name: "In Progress" },
+        project: {
+          id: "project-momentum",
+          name: "Momentum",
+          url: "https://linear.app/ngxcalvin/project/momentum"
+        },
+        projectMilestone: {
+          id: "milestone-m5",
+          name: "Milestone 5: Source Adapters And Evidence Sync"
+        },
+        labels: { nodes: [] },
+        assignee: null
+      };
+      const mock = await startLinearMockServer([issue]);
+      try {
+        const reconcile = await runCliBinaryAsync(
+          [
+            "source",
+            "reconcile",
+            "linear",
+            "--linear-endpoint",
+            mock.endpoint,
+            "--data-dir",
+            dataDir,
+            "--json"
+          ],
+          { env: { LINEAR_API_KEY: "lin_api_smoke_fixture_key" } }
+        );
+        expect(
+          reconcile.code,
+          `source reconcile linear stderr: ${reconcile.stderr}`
+        ).toBe(0);
+
+        const sourceList = runCliBinary([
+          "source",
+          "list",
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(sourceList.code, `source list stderr: ${sourceList.stderr}`).toBe(0);
+        const sourceListPayload = JSON.parse(sourceList.stdout) as Record<
+          string,
+          unknown
+        >;
+        const sourceItems = sourceListPayload["items"] as Array<
+          Record<string, unknown>
+        >;
+        expect(sourceItems).toHaveLength(1);
+        const sourceItemId = sourceItems[0]?.["id"] as string;
+        expect(typeof sourceItemId).toBe("string");
+        expect(sourceItemId.length).toBeGreaterThan(0);
+
+        const goalStart = runCliBinary([
+          "goal",
+          "start",
+          goalFile,
+          "--repo",
+          repo,
+          "--data-dir",
+          dataDir,
+          "--runner",
+          "fake",
+          "--json"
+        ]);
+        expect(goalStart.code, `goal start stderr: ${goalStart.stderr}`).toBe(0);
+        const goalStartPayload = JSON.parse(goalStart.stdout) as Record<
+          string,
+          unknown
+        >;
+        const goalId = goalStartPayload["goalId"] as string;
+        expect(typeof goalId).toBe("string");
+        expect(goalStartPayload["goalState"]).toBe("queued");
+
+        // Drain the queued goal to completion. FAKE_RUNNER_GOAL_COMPLETE makes
+        // the single iteration mark goal_complete so the reducer transitions
+        // the goal to the `completed` state — required by the intent generator.
+        const drain = runCliBinary(
+          [
+            "daemon",
+            "start",
+            "--max-idle-cycles",
+            "2",
+            "--poll-interval-ms",
+            "0",
+            "--data-dir",
+            dataDir,
+            "--json"
+          ],
+          { env: { [FAKE_RUNNER_GOAL_COMPLETE_ENV]: "1" } }
+        );
+        expect(drain.code, `daemon start stderr: ${drain.stderr}`).toBe(0);
+        const drainPayload = JSON.parse(drain.stdout) as Record<string, unknown>;
+        const loop = drainPayload["loop"] as Record<string, unknown>;
+        expect(loop).toMatchObject({
+          workSucceeded: true,
+          jobsRun: 1,
+          jobsFailed: 0
+        });
+
+        const completedStatus = runCliBinary([
+          "status",
+          goalId,
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(completedStatus.code).toBe(0);
+        expect(
+          (JSON.parse(completedStatus.stdout) as Record<string, unknown>)[
+            "state"
+          ]
+        ).toBe("completed");
+
+        // Ingest a workflow evidence fixture with `no-mistakes complete` so
+        // the intent generator finds an accepted verification evidence type.
+        const fixtureRoot = makeTempDir("momentum-smoke-m5-intent-fixture-");
+        const intentRunId = "smoke-m5-intent-run-1";
+        const runDir = path.join(fixtureRoot, ".agent-workflows", intentRunId);
+        fs.mkdirSync(runDir, { recursive: true });
+        fs.writeFileSync(
+          path.join(runDir, "plan.json"),
+          JSON.stringify(
+            {
+              runId: intentRunId,
+              schemaVersion: 1,
+              mode: "execute-ready",
+              profile: "momentum-m5-smoke",
+              objective: "NGX-294 smoke fixture for intent generation",
+              resolvedScope: {
+                issues: ["NGX-294"],
+                source: "explicit",
+                status: "resolved"
+              }
+            },
+            null,
+            2
+          )
+        );
+        const ledger = [
+          {
+            runId: intentRunId,
+            step: "implementation",
+            status: "complete",
+            ts: "2026-05-18T11:20:00Z"
+          },
+          {
+            runId: intentRunId,
+            step: "no-mistakes",
+            status: "complete",
+            ts: "2026-05-18T11:25:00Z"
+          }
+        ];
+        fs.writeFileSync(
+          path.join(runDir, "ledger.jsonl"),
+          `${ledger.map((line) => JSON.stringify(line)).join("\n")}\n`
+        );
+
+        const ingest = runCliBinary([
+          "evidence",
+          "ingest",
+          "--path",
+          runDir,
+          "--goal",
+          goalId,
+          "--source-item",
+          sourceItemId,
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(ingest.code, `evidence ingest stderr: ${ingest.stderr}`).toBe(0);
+        const ingestPayload = JSON.parse(ingest.stdout) as Record<
+          string,
+          unknown
+        >;
+        const ingestCreated = ingestPayload["created"] as Array<
+          Record<string, unknown>
+        >;
+        expect(
+          ingestCreated.some(
+            (record) => record["type"] === "no_mistakes_complete"
+          ),
+          `expected no_mistakes_complete in created evidence: ${JSON.stringify(
+            ingestCreated
+          )}`
+        ).toBe(true);
+
+        // Linking now triggers `evaluateGoalForSourceSatisfiedIntents` against
+        // the completed goal + non-terminal source item + accepted evidence.
+        const link = runCliBinary([
+          "source",
+          "link",
+          sourceItemId,
+          "--goal",
+          goalId,
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(link.code, `source link stderr: ${link.stderr}`).toBe(0);
+        const linkPayload = JSON.parse(link.stdout) as Record<string, unknown>;
+        const linkCounts = linkPayload["counts"] as Record<string, number>;
+        expect(linkCounts).toMatchObject({
+          intentsCreated: 1,
+          intentsReplayed: 0,
+          intentWarnings: 0
+        });
+
+        const intentList = runCliBinary([
+          "intent",
+          "list",
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(intentList.code, `intent list stderr: ${intentList.stderr}`).toBe(
+          0
+        );
+        const intentListPayload = JSON.parse(intentList.stdout) as Record<
+          string,
+          unknown
+        >;
+        expect(intentListPayload["count"]).toBe(1);
+        const listedIntents = intentListPayload["intents"] as Array<
+          Record<string, unknown>
+        >;
+        expect(listedIntents).toHaveLength(1);
+        const intent = listedIntents[0]!;
+        expect(intent).toMatchObject({
+          adapterKind: "linear",
+          intentType: "source_satisfied",
+          status: "pending",
+          goalId,
+          sourceItemId,
+          targetExternalId: "issue-smoke-ngx-294-intent"
+        });
+        const intentId = intent["id"] as string;
+        expect(typeof intentId).toBe("string");
+        expect(intentId.length).toBeGreaterThan(0);
+
+        // Re-running the eval (e.g. relinking) replays the same intent rather
+        // than creating a new one — proves idempotency through the built CLI.
+        const relink = runCliBinary([
+          "source",
+          "link",
+          sourceItemId,
+          "--goal",
+          goalId,
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(relink.code).toBe(0);
+        const relinkPayload = JSON.parse(relink.stdout) as Record<string, unknown>;
+        const relinkCounts = relinkPayload["counts"] as Record<string, number>;
+        expect(relinkCounts).toMatchObject({
+          intentsCreated: 0,
+          intentsReplayed: 1
+        });
+
+        // `intent apply --external-apply` is the M5 trust-boundary guard:
+        // it must refuse with external_apply_unsupported and leave the
+        // intent pending. No external write occurs.
+        const externalApply = runCliBinary([
+          "intent",
+          "apply",
+          intentId,
+          "--reason",
+          "smoke external apply attempt",
+          "--external-apply",
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(externalApply.code).toBe(1);
+        expect(externalApply.stdout).toBe("");
+        const externalApplyPayload = JSON.parse(externalApply.stderr) as Record<
+          string,
+          unknown
+        >;
+        expect(externalApplyPayload).toMatchObject({
+          ok: false,
+          command: "intent apply",
+          code: "external_apply_unsupported",
+          intentId
+        });
+        const externalApplyPolicy = externalApplyPayload["applyPolicy"] as Record<
+          string,
+          unknown
+        >;
+        expect(externalApplyPolicy).toMatchObject({
+          effective: "create_intents_only",
+          source: "builtin_default",
+          externalApplyRequested: true,
+          externalApplyPerformed: false
+        });
+
+        const stillPending = runCliBinary([
+          "intent",
+          "get",
+          intentId,
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(stillPending.code).toBe(0);
+        const stillPendingPayload = JSON.parse(stillPending.stdout) as Record<
+          string,
+          unknown
+        >;
+        expect(
+          (stillPendingPayload["intent"] as Record<string, unknown>)["status"]
+        ).toBe("pending");
+
+        // `intent apply` without --external-apply records the operator's
+        // manual mark only; the intent moves to `applied` with no external
+        // write attempted.
+        const manualApply = runCliBinary([
+          "intent",
+          "apply",
+          intentId,
+          "--reason",
+          "operator manual mark in smoke run",
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(
+          manualApply.code,
+          `manual apply stderr: ${manualApply.stderr}`
+        ).toBe(0);
+        const manualApplyPayload = JSON.parse(manualApply.stdout) as Record<
+          string,
+          unknown
+        >;
+        expect(manualApplyPayload["previousStatus"]).toBe("pending");
+        const appliedIntent = manualApplyPayload["intent"] as Record<
+          string,
+          unknown
+        >;
+        expect(appliedIntent).toMatchObject({
+          id: intentId,
+          status: "applied",
+          decisionReason: "operator manual mark in smoke run"
+        });
+        const manualApplyPolicy = manualApplyPayload["applyPolicy"] as Record<
+          string,
+          unknown
+        >;
+        expect(manualApplyPolicy).toMatchObject({
+          effective: "create_intents_only",
+          source: "builtin_default",
+          externalApplyRequested: false,
+          externalApplyPerformed: false
+        });
+
+        const pendingList = runCliBinary([
+          "intent",
+          "list",
+          "--status",
+          "pending",
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(pendingList.code).toBe(0);
+        const pendingListPayload = JSON.parse(pendingList.stdout) as Record<
+          string,
+          unknown
+        >;
+        expect(pendingListPayload["count"]).toBe(0);
+
+        const appliedList = runCliBinary([
+          "intent",
+          "list",
+          "--status",
+          "applied",
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(appliedList.code).toBe(0);
+        const appliedListPayload = JSON.parse(appliedList.stdout) as Record<
+          string,
+          unknown
+        >;
+        expect(appliedListPayload["count"]).toBe(1);
+        const appliedListedIntents = appliedListPayload["intents"] as Array<
+          Record<string, unknown>
+        >;
+        expect(appliedListedIntents[0]).toMatchObject({
+          id: intentId,
+          status: "applied"
+        });
+      } finally {
+        await mock.close();
+      }
+    },
+    180_000
+  );
 });
