@@ -63,14 +63,14 @@ const M5_NON_GOALS_AGENTS = [
   "remote git operations"
 ] as const;
 
-describe("M5 contract docs (NGX-287 setup)", () => {
+describe("M5 contract docs (NGX-287 setup, NGX-294 closeout)", () => {
   describe("README.md", () => {
     const readme = readDoc("README.md");
 
-    it("names Milestone 5 as the active milestone without claiming completion (NGX-287)", () => {
+    it("names Milestone 5 complete with the NGX-287..NGX-294 closeout (NGX-294)", () => {
       expect(readme).toContain("## Milestone 5 Roadmap");
-      expect(readme).toMatch(/Milestone 5 \(Source Adapters and Evidence Sync\) is the active milestone/);
-      expect(readme).not.toMatch(/Milestone 5 \(Source Adapters and Evidence Sync\) is complete/);
+      expect(readme).toMatch(/Milestone 5 \(Source Adapters and Evidence Sync\) is complete/);
+      expect(readme).not.toMatch(/Milestone 5 \(Source Adapters and Evidence Sync\) is the active milestone/);
     });
 
     it("defines the M5 vocabulary explicitly", () => {
@@ -174,9 +174,9 @@ describe("M5 contract docs (NGX-287 setup)", () => {
   describe("AGENTS.md", () => {
     const agents = readDoc("AGENTS.md");
 
-    it("names Milestone 5 as the active milestone (not complete)", () => {
-      expect(agents).toMatch(/Milestone 5: Source Adapters and Evidence Sync is the active milestone/);
-      expect(agents).not.toMatch(/Milestone 5: Source Adapters and Evidence Sync is complete/);
+    it("names Milestone 5 complete with the NGX-287..NGX-294 closeout (NGX-294)", () => {
+      expect(agents).toMatch(/Milestone 5: Source Adapters and Evidence Sync is complete/);
+      expect(agents).not.toMatch(/Milestone 5: Source Adapters and Evidence Sync is the active milestone/);
     });
 
     it("documents the M5 contract block with vocabulary, trust boundary, and non-goals", () => {
