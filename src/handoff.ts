@@ -88,6 +88,8 @@ export type HandoffData = {
   sourceItems: SourceItemSummary[];
   latestEvidence: GoalStatusEvidenceSummary[];
   pendingUpdateIntents: GoalStatusPendingIntentSummary[];
+  totalPendingUpdateIntentCount: number;
+  truncatedPendingUpdateIntents: boolean;
   intentStaleThresholdMs: number;
   artifactPaths: GoalArtifactPaths;
   artifactFiles: GoalStatusArtifactFiles;
@@ -189,6 +191,8 @@ function buildHandoffData(
     sourceItems: status.sourceItems,
     latestEvidence: status.latestEvidence,
     pendingUpdateIntents: status.pendingUpdateIntents,
+    totalPendingUpdateIntentCount: status.totalPendingUpdateIntentCount,
+    truncatedPendingUpdateIntents: status.truncatedPendingUpdateIntents,
     intentStaleThresholdMs: status.intentStaleThresholdMs,
     artifactPaths: status.artifactPaths,
     artifactFiles: status.artifactFiles
@@ -368,6 +372,9 @@ function toJsonShape(data: HandoffData): Record<string, unknown> {
       : {}),
     ...(data.pendingUpdateIntents.length > 0
       ? {
+          pending_update_intent_count: data.totalPendingUpdateIntentCount,
+          pending_update_intents_truncated:
+            data.truncatedPendingUpdateIntents,
           pending_update_intents: data.pendingUpdateIntents.map(
             pendingIntentToJsonShape
           ),
@@ -423,6 +430,7 @@ function pendingIntentToJsonShape(
     intent_type: intent.intentType,
     target_external_id: intent.targetExternalId,
     reason: intent.reason,
+    goal_id: intent.goalId,
     source_item_id: intent.sourceItemId,
     evidence_record_id: intent.evidenceRecordId,
     created_at: intent.createdAt,
@@ -716,9 +724,12 @@ function renderHandoffMarkdown(data: HandoffData): string {
       (intent) => intent.stale
     ).length;
     const staleSuffix = staleCount > 0 ? ` (${staleCount} stale)` : "";
-    lines.push(
-      `## Pending update intents${staleSuffix}`
-    );
+    const shownCount = data.pendingUpdateIntents.length;
+    const totalCount = data.totalPendingUpdateIntentCount;
+    const countSuffix = data.truncatedPendingUpdateIntents
+      ? ` (showing ${shownCount} of ${totalCount})`
+      : "";
+    lines.push(`## Pending update intents${countSuffix}${staleSuffix}`);
     for (const intent of data.pendingUpdateIntents) {
       const staleFlag = intent.stale ? " STALE" : "";
       lines.push(
@@ -729,6 +740,11 @@ function renderHandoffMarkdown(data: HandoffData): string {
     lines.push(
       `- Stale threshold (ms): ${data.intentStaleThresholdMs}`
     );
+    if (data.truncatedPendingUpdateIntents) {
+      lines.push(
+        `- ${totalCount - shownCount} additional pending update intents are hidden from this handoff.`
+      );
+    }
     lines.push(
       "- Review with `momentum intent list --status pending` and apply/skip/cancel with a reason."
     );

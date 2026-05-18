@@ -1105,6 +1105,55 @@ describe("momentum intent apply policy gating", () => {
     expect(payload.applyPolicy.source).toBe("momentum_policy");
   });
 
+  it("fails intent apply when an explicit repo policy is invalid", async () => {
+    const dataDir = makeTempDir();
+    const repo = makeRepoWithPolicy(
+      `---\nintent_apply_policy: definitely_not_valid\n---\n`
+    );
+    const intentId = seedIntent(dataDir, {
+      adapterKind: "linear",
+      intentType: "source_satisfied",
+      reason: "satisfied",
+      idempotencyKey: "linear:invalid-policy:source_satisfied:goal-policy"
+    });
+
+    const result = await run([
+      "intent",
+      "apply",
+      intentId,
+      "--reason",
+      "operator decision",
+      "--repo",
+      repo,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as {
+      ok: false;
+      command: string;
+      code: string;
+      intentId: string;
+      message: string;
+    };
+    expect(payload.ok).toBe(false);
+    expect(payload.command).toBe("intent apply");
+    expect(payload.code).toBe("policy_load_failed");
+    expect(payload.intentId).toBe(intentId);
+    expect(payload.message).toContain("intent_apply_policy");
+
+    const db = openDb(dataDir);
+    try {
+      const row = db
+        .prepare("SELECT status FROM update_intents WHERE id = ?")
+        .get(intentId) as { status: string };
+      expect(row.status).toBe("pending");
+    } finally {
+      db.close();
+    }
+  });
+
   it("refuses --external-apply even when MOMENTUM.md sets external_apply_allowed (M5 trust boundary)", async () => {
     const dataDir = makeTempDir();
     const repo = makeRepoWithPolicy(
@@ -1139,6 +1188,42 @@ describe("momentum intent apply policy gating", () => {
     expect(payload.code).toBe("external_apply_unsupported");
     expect(payload.applyPolicy.effective).toBe("external_apply_allowed");
     expect(payload.applyPolicy.source).toBe("momentum_policy");
+  });
+
+  it("keeps --external-apply refusal stable when an explicit repo policy is invalid", async () => {
+    const dataDir = makeTempDir();
+    const repo = makeRepoWithPolicy(
+      `---\nintent_apply_policy: definitely_not_valid\n---\n`
+    );
+    const intentId = seedIntent(dataDir, {
+      adapterKind: "linear",
+      intentType: "source_satisfied",
+      reason: "satisfied",
+      idempotencyKey:
+        "linear:invalid-policy-external:source_satisfied:goal-policy"
+    });
+
+    const result = await run([
+      "intent",
+      "apply",
+      intentId,
+      "--reason",
+      "operator decision",
+      "--external-apply",
+      "--repo",
+      repo,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as {
+      code: string;
+      applyPolicy: { effective: string; source: string };
+    };
+    expect(payload.code).toBe("external_apply_unsupported");
+    expect(payload.applyPolicy.effective).toBe("create_intents_only");
+    expect(payload.applyPolicy.source).toBe("builtin_default");
   });
 
   it("emits the apply policy line in non-JSON text mode", async () => {

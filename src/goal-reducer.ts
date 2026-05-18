@@ -15,6 +15,7 @@ import {
   type QueueJobRow,
   type QueueJobState
 } from "./queue-jobs.js";
+import { evaluateGoalForSourceSatisfiedIntents } from "./update-intent-generator.js";
 
 export const REDUCER_DECISIONS = {
   CONTINUE: "continue",
@@ -183,6 +184,7 @@ export function reduceGoalIteration(
     });
 
     if (plan.decision === REDUCER_DECISIONS.GOAL_COMPLETE) {
+      evaluateGoalForSourceSatisfiedIntents(db, { goalId });
       appendQueueEvent(db, {
         goalId,
         jobId,

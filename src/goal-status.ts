@@ -259,6 +259,7 @@ export type GoalStatusPendingIntentSummary = {
   intentType: string;
   targetExternalId: string | null;
   reason: string;
+  goalId: string | null;
   sourceItemId: string | null;
   evidenceRecordId: string | null;
   createdAt: number;
@@ -315,6 +316,8 @@ export type GoalStatusSuccess = {
   sourceItems: SourceItemSummary[];
   latestEvidence: GoalStatusEvidenceSummary[];
   pendingUpdateIntents: GoalStatusPendingIntentSummary[];
+  totalPendingUpdateIntentCount: number;
+  truncatedPendingUpdateIntents: boolean;
   intentStaleThresholdMs: number;
 };
 
@@ -441,11 +444,22 @@ export function loadGoalStatus(input: LoadGoalStatusInput = {}): GoalStatusResul
       DEFAULT_GOAL_STATUS_EVIDENCE_LIMIT
     ).map(toEvidenceSummary);
     const intentStaleThresholdMs = DEFAULT_INTENT_STALE_THRESHOLD_MS;
-    const pendingUpdateIntents = listUpdateIntents(db, {
-      status: "pending",
-      goalId: goal.id,
-      limit: DEFAULT_GOAL_STATUS_PENDING_INTENT_LIMIT
-    }).map((intent) => toPendingIntentSummary(intent, intentStaleThresholdMs));
+    const sourceItemIds = new Set(sourceItems.map((item) => item.id));
+    const allPendingUpdateIntents = listUpdateIntents(db, {
+      status: "pending"
+    }).filter((intent) => {
+      if (intent.goalId === goal.id) return true;
+      return (
+        intent.sourceItemId !== null &&
+        sourceItemIds.has(intent.sourceItemId)
+      );
+    });
+    const pendingUpdateIntents = allPendingUpdateIntents
+      .slice(0, DEFAULT_GOAL_STATUS_PENDING_INTENT_LIMIT)
+      .map((intent) => toPendingIntentSummary(intent, intentStaleThresholdMs));
+    const totalPendingUpdateIntentCount = allPendingUpdateIntents.length;
+    const truncatedPendingUpdateIntents =
+      totalPendingUpdateIntentCount > pendingUpdateIntents.length;
 
     return {
       ok: true,
@@ -485,6 +499,8 @@ export function loadGoalStatus(input: LoadGoalStatusInput = {}): GoalStatusResul
       sourceItems,
       latestEvidence,
       pendingUpdateIntents,
+      totalPendingUpdateIntentCount,
+      truncatedPendingUpdateIntents,
       intentStaleThresholdMs
     };
   } finally {
@@ -504,6 +520,7 @@ function toPendingIntentSummary(
     intentType: intent.intentType,
     targetExternalId: intent.targetExternalId,
     reason: intent.reason,
+    goalId: intent.goalId,
     sourceItemId: intent.sourceItemId,
     evidenceRecordId: intent.evidenceRecordId,
     createdAt: intent.createdAt,

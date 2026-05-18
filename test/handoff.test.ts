@@ -1613,6 +1613,8 @@ describe("writeHandoff", () => {
     });
     const handoff = expectSuccess(result);
     expect(handoff.data.pendingUpdateIntents).toHaveLength(2);
+    expect(handoff.data.totalPendingUpdateIntentCount).toBe(2);
+    expect(handoff.data.truncatedPendingUpdateIntents).toBe(false);
     expect(handoff.data.intentStaleThresholdMs).toBe(
       DEFAULT_INTENT_STALE_THRESHOLD_MS
     );
@@ -1638,6 +1640,8 @@ describe("writeHandoff", () => {
     const intents = json["pending_update_intents"] as Array<
       Record<string, unknown>
     >;
+    expect(json["pending_update_intent_count"]).toBe(2);
+    expect(json["pending_update_intents_truncated"]).toBe(false);
     expect(intents).toHaveLength(2);
     expect(intents[0]).toMatchObject({
       adapter_kind: "linear",
@@ -1666,6 +1670,8 @@ describe("writeHandoff", () => {
     });
     const handoff = expectSuccess(result);
     expect(handoff.data.pendingUpdateIntents).toEqual([]);
+    expect(handoff.data.totalPendingUpdateIntentCount).toBe(0);
+    expect(handoff.data.truncatedPendingUpdateIntents).toBe(false);
     expect(handoff.data.intentStaleThresholdMs).toBe(
       DEFAULT_INTENT_STALE_THRESHOLD_MS
     );
@@ -1774,6 +1780,50 @@ describe("writeHandoff", () => {
     expect(handoff.data.pendingUpdateIntents).toHaveLength(1);
     expect(handoff.data.pendingUpdateIntents[0]?.targetExternalId).toBe(
       "issue-pending"
+    );
+  });
+
+  it("reports total and truncation metadata when handoff pending intents are capped", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Handoff pending intents truncated");
+    const db = openDb(setup.dataDir);
+    try {
+      for (let i = 0; i < 12; i += 1) {
+        createUpdateIntent(db, {
+          adapterKind: "linear",
+          targetExternalId: `issue-${String(i).padStart(2, "0")}`,
+          intentType: "source_satisfied",
+          payload: { status: "done" },
+          reason: `Pending intent ${i}.`,
+          goalId: setup.goalId,
+          idempotencyKey: `linear:issue-${i}:source_satisfied:handoff-truncate`
+        });
+      }
+    } finally {
+      db.close();
+    }
+
+    const handoff = expectSuccess(
+      writeHandoff({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      })
+    );
+    expect(handoff.data.pendingUpdateIntents).toHaveLength(10);
+    expect(handoff.data.totalPendingUpdateIntentCount).toBe(12);
+    expect(handoff.data.truncatedPendingUpdateIntents).toBe(true);
+
+    const json = JSON.parse(
+      fs.readFileSync(setup.artifactPaths.handoffJson, "utf-8")
+    ) as Record<string, unknown>;
+    expect(json["pending_update_intent_count"]).toBe(12);
+    expect(json["pending_update_intents_truncated"]).toBe(true);
+    expect(json["pending_update_intents"]).toHaveLength(10);
+
+    const markdown = fs.readFileSync(setup.artifactPaths.handoffMd, "utf-8");
+    expect(markdown).toContain("## Pending update intents (showing 10 of 12)");
+    expect(markdown).toContain(
+      "2 additional pending update intents are hidden"
     );
   });
 });

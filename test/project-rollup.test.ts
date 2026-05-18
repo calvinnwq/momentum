@@ -1092,6 +1092,11 @@ describe("buildProjectRollup", () => {
         projectName: "Alpha",
         goalId: "goal-alpha"
       });
+      const crossScopeItemId = seedSourceItem(db, {
+        externalId: "beta-same-goal",
+        projectName: "Beta",
+        goalId: "goal-alpha"
+      });
       seedSourceItem(db, {
         externalId: "beta-1",
         projectName: "Beta",
@@ -1114,6 +1119,18 @@ describe("buildProjectRollup", () => {
         {
           adapterKind: "linear",
           intentType: "source_satisfied",
+          reason: "Same goal but Beta source item",
+          goalId: "goal-alpha",
+          sourceItemId: crossScopeItemId,
+          idempotencyKey: "linear:beta-same-goal:source_satisfied:goal-alpha"
+        },
+        { now: () => 1_050 }
+      );
+      createUpdateIntent(
+        db,
+        {
+          adapterKind: "linear",
+          intentType: "source_satisfied",
           reason: "Beta satisfied",
           goalId: "goal-beta",
           idempotencyKey: "linear:beta-1:source_satisfied:goal-beta"
@@ -1128,9 +1145,12 @@ describe("buildProjectRollup", () => {
       expect(alphaRollup.pendingUpdateIntents.map((intent) => intent.goalId)).toEqual([
         "goal-alpha"
       ]);
+      expect(
+        alphaRollup.pendingUpdateIntents.map((intent) => intent.sourceItemId)
+      ).toEqual([alphaItemId]);
 
       const allRollup = buildProjectRollup(db, { now: 2_000 });
-      expect(allRollup.counts.pendingUpdateIntents).toBe(2);
+      expect(allRollup.counts.pendingUpdateIntents).toBe(3);
     } finally {
       db.close();
     }
@@ -1217,6 +1237,43 @@ describe("buildProjectRollup", () => {
       const rollup = buildProjectRollup(db, { now: 2_000 });
       expect(rollup.counts.pendingUpdateIntents).toBe(1);
       expect(rollup.pendingUpdateIntents[0]?.intentType).toBe("source_satisfied");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("prioritizes reviewing an existing pending source_satisfied intent over re-reporting the source mismatch it resolves", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedGoal(db, { id: "goal-pending-source-satisfied", state: "completed" });
+      const sourceItemId = seedSourceItem(db, {
+        externalId: "issue-pending-source-satisfied",
+        status: "In Progress",
+        goalId: "goal-pending-source-satisfied"
+      });
+      createUpdateIntent(
+        db,
+        {
+          adapterKind: "linear",
+          intentType: "source_satisfied",
+          reason: "Goal completed; source item needs operator review.",
+          targetExternalId: "issue-pending-source-satisfied",
+          goalId: "goal-pending-source-satisfied",
+          sourceItemId,
+          idempotencyKey:
+            "linear:issue-pending-source-satisfied:source_satisfied:goal-pending-source-satisfied"
+        },
+        { now: () => 1_000 }
+      );
+
+      const rollup = buildProjectRollup(db, { now: 2_000 });
+      expect(rollup.counts.mismatches.goal_done_source_not_done).toBe(1);
+      expect(rollup.counts.pendingUpdateIntents).toBe(1);
+      expect(rollup.nextAction.kind).toBe("review_pending_intents");
+      expect(rollup.nextAction.detail).toMatchObject({
+        total: 1,
+        stale: 0
+      });
     } finally {
       db.close();
     }

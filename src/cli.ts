@@ -115,6 +115,10 @@ import {
   type UpdateIntentDecisionResult,
   type UpdateIntentStatus
 } from "./update-intents.js";
+import {
+  evaluateGoalForSourceSatisfiedIntents,
+  type EvaluateGoalForSourceSatisfiedIntentResult
+} from "./update-intent-generator.js";
 
 export const VERSION = "0.0.0";
 
@@ -533,6 +537,18 @@ function sourceLink(parsed: ParsedFlags, io: CliIo): number {
         dataDir
       });
     }
+    const intentEvaluations = evaluateGoalForSourceSatisfiedIntents(db, {
+      goalId
+    });
+    const intentsCreated = intentEvaluations.filter(
+      (entry) => entry.outcome === "intent_created"
+    ).length;
+    const intentsReplayed = intentEvaluations.filter(
+      (entry) => entry.outcome === "intent_replayed"
+    ).length;
+    const intentWarnings = intentEvaluations.filter(
+      (entry) => entry.outcome === "evidence_insufficient"
+    ).length;
 
     const payload = {
       ok: true,
@@ -543,6 +559,12 @@ function sourceLink(parsed: ParsedFlags, io: CliIo): number {
       changed: result.changed,
       skippedReason: result.skippedReason,
       previousGoalId: result.previousGoalId,
+      counts: {
+        intentsCreated,
+        intentsReplayed,
+        intentWarnings
+      },
+      intentEvaluations: intentEvaluations.map(intentEvaluationToJsonShape),
       item: sourceItemToJsonShape(result.sourceItem)
     };
 
@@ -558,6 +580,9 @@ function sourceLink(parsed: ParsedFlags, io: CliIo): number {
       `Adapter: ${result.sourceItem.adapterKind}`,
       `External key: ${result.sourceItem.externalKey ?? "(unset)"}`,
       `Title: ${result.sourceItem.title}`,
+      `Intents created: ${intentsCreated}`,
+      `Intents replayed: ${intentsReplayed}`,
+      `Intent warnings: ${intentWarnings}`,
       `Data dir: ${dataDir}`,
       ""
     ];
@@ -1486,6 +1511,10 @@ function evidenceIngest(parsed: ParsedFlags, io: CliIo): number {
         });
       }
     }
+    const intentEvaluations = evaluateIntentsForEvidenceRecords(db, [
+      ...created,
+      ...skipped
+    ]);
 
     return emitEvidenceIngestSuccess(parsed, io, {
       dataDir,
@@ -1495,12 +1524,35 @@ function evidenceIngest(parsed: ParsedFlags, io: CliIo): number {
       observed: parseResult.records.length,
       created,
       skipped,
+      intentEvaluations,
       diagnostics: parseResult.diagnostics,
       errors
     });
   } finally {
     db.close();
   }
+}
+
+function evaluateIntentsForEvidenceRecords(
+  db: MomentumDb,
+  records: readonly EvidenceRecord[]
+): EvaluateGoalForSourceSatisfiedIntentResult[] {
+  const goalIds = new Set<string>();
+  for (const record of records) {
+    if (record.goalId) {
+      goalIds.add(record.goalId);
+      continue;
+    }
+    if (record.sourceItemId) {
+      const sourceItem = getSourceItemById(db, record.sourceItemId);
+      if (sourceItem?.goalId) goalIds.add(sourceItem.goalId);
+    }
+  }
+  return [...goalIds]
+    .sort()
+    .flatMap((goalId) =>
+      evaluateGoalForSourceSatisfiedIntents(db, { goalId })
+    );
 }
 
 function emitEvidenceIngestSuccess(
@@ -1514,11 +1566,21 @@ function emitEvidenceIngestSuccess(
     observed: number;
     created: EvidenceRecord[];
     skipped: EvidenceRecord[];
+    intentEvaluations: EvaluateGoalForSourceSatisfiedIntentResult[];
     diagnostics: WorkflowEvidenceDiagnostic[];
     errors: Array<{ ingestKey: string; type: string; message: string }>;
   }
 ): number {
   const ok = result.errors.length === 0;
+  const createdIntents = result.intentEvaluations.filter(
+    (entry) => entry.outcome === "intent_created"
+  );
+  const replayedIntents = result.intentEvaluations.filter(
+    (entry) => entry.outcome === "intent_replayed"
+  );
+  const intentWarnings = result.intentEvaluations.filter(
+    (entry) => entry.outcome === "evidence_insufficient"
+  );
   const payload = {
     ok,
     command: "evidence ingest",
@@ -1530,11 +1592,15 @@ function emitEvidenceIngestSuccess(
       observed: result.observed,
       created: result.created.length,
       skipped: result.skipped.length,
+      intentsCreated: createdIntents.length,
+      intentsReplayed: replayedIntents.length,
+      intentWarnings: intentWarnings.length,
       diagnostics: result.diagnostics.length,
       errors: result.errors.length
     },
     created: result.created.map(evidenceRecordToJsonShape),
     skipped: result.skipped.map(evidenceRecordToJsonShape),
+    intentEvaluations: result.intentEvaluations.map(intentEvaluationToJsonShape),
     diagnostics: result.diagnostics.map((diagnostic) => ({ ...diagnostic })),
     errors: result.errors.map((entry) => ({ ...entry }))
   };
@@ -1551,6 +1617,9 @@ function emitEvidenceIngestSuccess(
     `Observed: ${result.observed}`,
     `Created: ${result.created.length}`,
     `Skipped (idempotent): ${result.skipped.length}`,
+    `Intents created: ${createdIntents.length}`,
+    `Intents replayed: ${replayedIntents.length}`,
+    `Intent warnings: ${intentWarnings.length}`,
     `Diagnostics: ${result.diagnostics.length}`,
     `Errors: ${result.errors.length}`,
     `Data dir: ${result.dataDir}`,
@@ -1603,6 +1672,37 @@ function evidenceRecordToJsonShape(record: EvidenceRecord): Record<string, unkno
     createdAt: record.createdAt,
     updatedAt: record.updatedAt
   };
+}
+
+function intentEvaluationToJsonShape(
+  result: EvaluateGoalForSourceSatisfiedIntentResult
+): Record<string, unknown> {
+  if (
+    result.outcome === "intent_created" ||
+    result.outcome === "intent_replayed"
+  ) {
+    return {
+      outcome: result.outcome,
+      intent: updateIntentToJsonShape(result.intent),
+      sourceItem: sourceItemToJsonShape(result.sourceItem),
+      verificationEvidence: evidenceRecordToJsonShape(
+        result.verificationEvidence
+      )
+    };
+  }
+  if (result.outcome === "evidence_insufficient") {
+    return {
+      outcome: result.outcome,
+      warning: { ...result.warning }
+    };
+  }
+  if (result.outcome === "source_already_terminal") {
+    return {
+      outcome: result.outcome,
+      sourceItem: sourceItemToJsonShape(result.sourceItem)
+    };
+  }
+  return { ...result };
 }
 
 type EvidenceListFailureCode =
@@ -1761,6 +1861,7 @@ type IntentFailureCode =
   | "intent_not_found"
   | "reason_required"
   | "intent_already_terminal"
+  | "policy_load_failed"
   | "external_apply_unsupported";
 
 type IntentCommand =
@@ -1791,6 +1892,24 @@ type IntentApplyPolicySummary = {
   externalApplyPerformed: false;
   note: string;
 };
+
+type IntentApplyPolicyResolution =
+  | { ok: true; summary: IntentApplyPolicySummary }
+  | { ok: false; code: string; message: string; path?: string | null };
+
+function buildFallbackIntentApplyPolicySummary(
+  externalApplyRequested: boolean
+): IntentApplyPolicySummary {
+  return {
+    effective: DEFAULT_INTENT_APPLY_POLICY,
+    source: "builtin_default",
+    externalApplyRequested,
+    externalApplyPerformed: false,
+    note:
+      "Milestone 5 does not perform external tracker writes; " +
+      "`intent apply` records the operator's manual mark only."
+  };
+}
 
 function intent(parsed: ParsedFlags, io: CliIo): number {
   const subcommand = parsed.args[1];
@@ -2097,12 +2216,15 @@ function intentDecision(
     });
   }
 
-  const applyPolicy = buildIntentApplyPolicySummary(
+  const applyPolicyResolution = buildIntentApplyPolicySummary(
     parsed.repo,
     action === "apply" && parsed.externalApply
   );
 
   if (action === "apply" && parsed.externalApply) {
+    const applyPolicy = applyPolicyResolution.ok
+      ? applyPolicyResolution.summary
+      : buildFallbackIntentApplyPolicySummary(true);
     return emitIntentFailure(parsed, io, {
       command,
       code: "external_apply_unsupported",
@@ -2114,6 +2236,16 @@ function intentDecision(
       applyPolicy
     });
   }
+
+  if (!applyPolicyResolution.ok) {
+    return emitIntentFailure(parsed, io, {
+      command,
+      code: "policy_load_failed",
+      message: applyPolicyResolution.message,
+      intentId
+    });
+  }
+  const applyPolicy = applyPolicyResolution.summary;
 
   const dataDirOptions: DataDirOptions = {};
   if (io.env !== undefined) dataDirOptions.env = io.env;
@@ -2210,11 +2342,19 @@ function intentDecision(
 function buildIntentApplyPolicySummary(
   repoOverride: string | undefined,
   externalApplyRequested: boolean
-): IntentApplyPolicySummary {
+): IntentApplyPolicyResolution {
   let effective: UpdateIntentApplyPolicy = DEFAULT_INTENT_APPLY_POLICY;
   let source: PolicyEffectiveFieldSource = "builtin_default";
   if (typeof repoOverride === "string" && repoOverride.trim().length > 0) {
     const load = loadMomentumPolicy(repoOverride);
+    if (!load.ok) {
+      return {
+        ok: false,
+        code: load.code,
+        message: load.error,
+        path: load.path
+      };
+    }
     if (load.ok && load.present) {
       const resolved = resolveIntentApplyPolicy(load.policy.config);
       effective = resolved.value;
@@ -2222,13 +2362,12 @@ function buildIntentApplyPolicySummary(
     }
   }
   return {
-    effective,
-    source,
-    externalApplyRequested,
-    externalApplyPerformed: false,
-    note:
-      "Milestone 5 does not perform external tracker writes; " +
-      "`intent apply` records the operator's manual mark only."
+    ok: true,
+    summary: {
+      ...buildFallbackIntentApplyPolicySummary(externalApplyRequested),
+      effective,
+      source
+    }
   };
 }
 
@@ -3882,6 +4021,8 @@ function emitStatus(
       : {}),
     ...(data.pendingUpdateIntents.length > 0
       ? {
+          totalPendingUpdateIntentCount: data.totalPendingUpdateIntentCount,
+          truncatedPendingUpdateIntents: data.truncatedPendingUpdateIntents,
           pendingUpdateIntents: data.pendingUpdateIntents,
           intentStaleThresholdMs: data.intentStaleThresholdMs
         }
@@ -4019,8 +4160,13 @@ function emitStatus(
       (intent) => intent.stale
     ).length;
     const staleSuffix = staleCount > 0 ? ` (${staleCount} stale)` : "";
+    const shownCount = data.pendingUpdateIntents.length;
+    const totalCount = data.totalPendingUpdateIntentCount;
+    const countLabel = data.truncatedPendingUpdateIntents
+      ? `${shownCount}/${totalCount}`
+      : `${shownCount}`;
     lines.push(
-      `Pending update intents: ${data.pendingUpdateIntents.length}${staleSuffix}`
+      `Pending update intents: ${countLabel}${staleSuffix}`
     );
     for (const intent of data.pendingUpdateIntents) {
       const staleFlag = intent.stale ? " STALE" : "";
@@ -4028,6 +4174,9 @@ function emitStatus(
         `- ${intent.intentId} [${intent.adapterKind}/${intent.intentType}] ` +
           `target=${intent.targetExternalId ?? "(none)"} ageMs=${intent.ageMs}${staleFlag}: ${intent.reason}`
       );
+    }
+    if (data.truncatedPendingUpdateIntents) {
+      lines.push(`... and ${totalCount - shownCount} more`);
     }
   }
 

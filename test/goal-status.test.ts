@@ -2264,6 +2264,8 @@ describe("loadGoalStatus", () => {
       expect(result.ok).toBe(true);
       if (!result.ok) return;
       expect(result.pendingUpdateIntents).toEqual([]);
+      expect(result.totalPendingUpdateIntentCount).toBe(0);
+      expect(result.truncatedPendingUpdateIntents).toBe(false);
       expect(result.intentStaleThresholdMs).toBe(
         DEFAULT_INTENT_STALE_THRESHOLD_MS
       );
@@ -2312,6 +2314,8 @@ describe("loadGoalStatus", () => {
       expect(result.ok).toBe(true);
       if (!result.ok) return;
       expect(result.pendingUpdateIntents).toHaveLength(2);
+      expect(result.totalPendingUpdateIntentCount).toBe(2);
+      expect(result.truncatedPendingUpdateIntents).toBe(false);
       const byTarget = new Map(
         result.pendingUpdateIntents.map((intent) => [
           intent.targetExternalId,
@@ -2423,6 +2427,91 @@ describe("loadGoalStatus", () => {
       expect(result.pendingUpdateIntents[0]?.targetExternalId).toBe(
         "issue-pending"
       );
+      expect(result.totalPendingUpdateIntentCount).toBe(1);
+      expect(result.truncatedPendingUpdateIntents).toBe(false);
+    });
+
+    it("reports total and truncation metadata when more than ten pending intents exist", () => {
+      const repo = initRepo();
+      const setup = setupGoal(repo, "Status pending intents truncated");
+      const db = openDb(setup.dataDir);
+      try {
+        for (let i = 0; i < 12; i += 1) {
+          createUpdateIntent(db, {
+            adapterKind: "linear",
+            targetExternalId: `issue-${String(i).padStart(2, "0")}`,
+            intentType: "source_satisfied",
+            reason: `Pending intent ${i}.`,
+            goalId: setup.goalId,
+            idempotencyKey: `linear:issue-${i}:source_satisfied:truncate`
+          });
+        }
+      } finally {
+        db.close();
+      }
+
+      const result = loadGoalStatus({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.pendingUpdateIntents).toHaveLength(10);
+      expect(result.totalPendingUpdateIntentCount).toBe(12);
+      expect(result.truncatedPendingUpdateIntents).toBe(true);
+    });
+
+    it("includes source-item-linked pending intents even when the intent goal id is null", () => {
+      const repo = initRepo();
+      const setup = setupGoal(repo, "Status source-item-only intent");
+      const db = openDb(setup.dataDir);
+      try {
+        db.prepare(
+          `INSERT INTO source_items
+             (id, adapter_kind, external_id, external_key, url, title,
+              status, metadata_json, last_observed_at, goal_id,
+              created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).run(
+          "si-status-only",
+          "linear",
+          "issue-source-only",
+          "NGX-SOURCE-ONLY",
+          "https://linear.app/example/issue/NGX-SOURCE-ONLY",
+          "Source linked issue",
+          "In Progress",
+          "{}",
+          1,
+          setup.goalId,
+          1,
+          1
+        );
+        createUpdateIntent(db, {
+          adapterKind: "linear",
+          targetExternalId: "issue-source-only",
+          intentType: "source_satisfied",
+          reason: "Source-item-linked intent.",
+          goalId: null,
+          sourceItemId: "si-status-only",
+          idempotencyKey: "linear:issue-source-only:source_satisfied:source-only"
+        });
+      } finally {
+        db.close();
+      }
+
+      const result = loadGoalStatus({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.pendingUpdateIntents).toHaveLength(1);
+      expect(result.pendingUpdateIntents[0]?.sourceItemId).toBe(
+        "si-status-only"
+      );
+      expect(result.pendingUpdateIntents[0]?.goalId).toBeNull();
+      expect(result.totalPendingUpdateIntentCount).toBe(1);
+      expect(result.truncatedPendingUpdateIntents).toBe(false);
     });
   });
 });

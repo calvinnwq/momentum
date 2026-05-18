@@ -791,7 +791,7 @@ function buildPendingIntentSummaries(
   const intents = listUpdateIntents(db, listOptions);
   const scoped = intents.filter((intent) => {
     if (!filtersScoped) return true;
-    if (intent.sourceItemId && itemIds.has(intent.sourceItemId)) return true;
+    if (intent.sourceItemId) return itemIds.has(intent.sourceItemId);
     if (intent.goalId && goalIds.has(intent.goalId)) return true;
     return false;
   });
@@ -874,6 +874,18 @@ function pickNextAction(
       detail: { mismatchKind: "source_done_goal_not_terminal" }
     };
   }
+  if (pendingIntents.length > 0) {
+    const stale = pendingIntents.filter((intent) => intent.stale).length;
+    const intentIds = pendingIntents.slice(0, 5).map((intent) => intent.intentId);
+    const staleSuffix = stale > 0 ? ` (${stale} stale)` : "";
+    return {
+      kind: "review_pending_intents",
+      message:
+        `${pendingIntents.length} pending external update intent(s)${staleSuffix}; ` +
+        "review with `momentum intent list --status pending` and apply/skip/cancel with a reason.",
+      detail: { total: pendingIntents.length, stale, intentIds }
+    };
+  }
   if (counts.mismatches.goal_done_source_not_done > 0) {
     return {
       kind: "address_mismatch",
@@ -899,18 +911,6 @@ function pickNextAction(
         adapterKind: staleReconciliation.adapterKind,
         reason: staleReconciliation.reason
       }
-    };
-  }
-  if (pendingIntents.length > 0) {
-    const stale = pendingIntents.filter((intent) => intent.stale).length;
-    const intentIds = pendingIntents.slice(0, 5).map((intent) => intent.intentId);
-    const staleSuffix = stale > 0 ? ` (${stale} stale)` : "";
-    return {
-      kind: "review_pending_intents",
-      message:
-        `${pendingIntents.length} pending external update intent(s)${staleSuffix}; ` +
-        "review with `momentum intent list --status pending` and apply/skip/cancel with a reason.",
-      detail: { total: pendingIntents.length, stale, intentIds }
     };
   }
   return {

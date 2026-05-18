@@ -6,7 +6,8 @@ import path from "node:path";
 import { openDb, type MomentumDb } from "../src/db.js";
 import {
   DEFAULT_VERIFICATION_EVIDENCE_TYPES,
-  evaluateGoalForSourceSatisfiedIntent
+  evaluateGoalForSourceSatisfiedIntent,
+  evaluateGoalForSourceSatisfiedIntents
 } from "../src/update-intent-generator.js";
 import {
   getUpdateIntentById,
@@ -88,7 +89,8 @@ function insertEvidenceRecord(
   id: string,
   type: string,
   goalId: string | null,
-  occurredAt = 1000
+  occurredAt = 1000,
+  sourceItemId: string | null = null
 ): void {
   db.prepare(
     `INSERT INTO evidence_records
@@ -107,7 +109,7 @@ function insertEvidenceRecord(
     `${type} for ${goalId ?? "(no goal)"}`,
     "{}",
     goalId,
-    null,
+    sourceItemId,
     `ingest:${id}`,
     occurredAt,
     occurredAt
@@ -200,6 +202,234 @@ describe("evaluateGoalForSourceSatisfiedIntent", () => {
 
       expect(listUpdateIntents(db).map((i) => i.id)).toEqual([first.intent.id]);
       expect(getUpdateIntentById(db, first.intent.id)?.updatedAt).toBe(1000);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("uses verification evidence linked through the source item when goal_id is absent", () => {
+    const db = openDb(makeTempDir());
+    try {
+      insertGoal(db, "goal-source-evidence", "completed");
+      insertSourceItem(db, {
+        id: "si-source-evidence",
+        goalId: "goal-source-evidence",
+        status: "in_progress",
+        adapterKind: "linear",
+        externalId: "NGX-SOURCE-EVIDENCE"
+      });
+      insertEvidenceRecord(
+        db,
+        "ev-source-only",
+        "verification_passed",
+        null,
+        1000,
+        "si-source-evidence"
+      );
+
+      const result = evaluateGoalForSourceSatisfiedIntent(
+        db,
+        { goalId: "goal-source-evidence" },
+        { now: () => 5000 }
+      );
+
+      expect(result.outcome).toBe("intent_created");
+      if (result.outcome !== "intent_created") return;
+      expect(result.verificationEvidence.id).toBe("ev-source-only");
+      expect(result.verificationEvidence.goalId).toBeNull();
+      expect(result.verificationEvidence.sourceItemId).toBe(
+        "si-source-evidence"
+      );
+      expect(result.intent.evidenceRecordId).toBe("ev-source-only");
+      expect(result.intent.sourceItemId).toBe("si-source-evidence");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("creates intents for every linked open source item and skips terminal source items", () => {
+    const db = openDb(makeTempDir());
+    try {
+      insertGoal(db, "goal-multi-source", "completed");
+      insertSourceItem(db, {
+        id: "si-closed",
+        goalId: "goal-multi-source",
+        status: "Done",
+        adapterKind: "linear",
+        externalId: "NGX-CLOSED"
+      });
+      insertSourceItem(db, {
+        id: "si-open-a",
+        goalId: "goal-multi-source",
+        status: "In Progress",
+        adapterKind: "linear",
+        externalId: "NGX-OPEN-A"
+      });
+      insertSourceItem(db, {
+        id: "si-open-b",
+        goalId: "goal-multi-source",
+        status: "Todo",
+        adapterKind: "linear",
+        externalId: "NGX-OPEN-B"
+      });
+      insertEvidenceRecord(
+        db,
+        "ev-goal-wide",
+        "no_mistakes_complete",
+        "goal-multi-source",
+        1000
+      );
+
+      const result = evaluateGoalForSourceSatisfiedIntent(
+        db,
+        { goalId: "goal-multi-source" },
+        { now: () => 5000 }
+      );
+
+      expect(result.outcome).toBe("intent_created");
+      const intents = listUpdateIntents(db).sort((a, b) =>
+        (a.targetExternalId ?? "").localeCompare(b.targetExternalId ?? "")
+      );
+      expect(intents.map((intent) => intent.targetExternalId)).toEqual([
+        "NGX-OPEN-A",
+        "NGX-OPEN-B"
+      ]);
+      expect(intents.map((intent) => intent.sourceItemId)).toEqual([
+        "si-open-a",
+        "si-open-b"
+      ]);
+      expect(
+        intents.every((intent) => intent.evidenceRecordId === "ev-goal-wide")
+      ).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("returns every created or replayed intent from the plural evaluator", () => {
+    const db = openDb(makeTempDir());
+    try {
+      insertGoal(db, "goal-plural", "completed");
+      insertSourceItem(db, {
+        id: "si-plural-a",
+        goalId: "goal-plural",
+        status: "In Progress",
+        externalId: "NGX-PLURAL-A"
+      });
+      insertSourceItem(db, {
+        id: "si-plural-b",
+        goalId: "goal-plural",
+        status: "Todo",
+        externalId: "NGX-PLURAL-B"
+      });
+      insertEvidenceRecord(
+        db,
+        "ev-plural",
+        "verification_passed",
+        "goal-plural",
+        1000
+      );
+
+      const first = evaluateGoalForSourceSatisfiedIntents(
+        db,
+        { goalId: "goal-plural" },
+        { now: () => 5000 }
+      );
+      expect(first.map((result) => result.outcome)).toEqual([
+        "intent_created",
+        "intent_created"
+      ]);
+
+      const replay = evaluateGoalForSourceSatisfiedIntents(
+        db,
+        { goalId: "goal-plural" },
+        { now: () => 6000 }
+      );
+      expect(replay.map((result) => result.outcome)).toEqual([
+        "intent_replayed",
+        "intent_replayed"
+      ]);
+      expect(listUpdateIntents(db)).toHaveLength(2);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("returns evidence warnings alongside created intents for partially covered source items", () => {
+    const db = openDb(makeTempDir());
+    try {
+      insertGoal(db, "goal-partial", "completed");
+      insertSourceItem(db, {
+        id: "si-covered",
+        goalId: "goal-partial",
+        status: "In Progress",
+        externalId: "NGX-COVERED"
+      });
+      insertSourceItem(db, {
+        id: "si-uncovered",
+        goalId: "goal-partial",
+        status: "Todo",
+        externalId: "NGX-UNCOVERED"
+      });
+      insertEvidenceRecord(
+        db,
+        "ev-covered",
+        "verification_passed",
+        null,
+        1000,
+        "si-covered"
+      );
+
+      const results = evaluateGoalForSourceSatisfiedIntents(
+        db,
+        { goalId: "goal-partial" },
+        { now: () => 5000 }
+      );
+      expect(results.map((result) => result.outcome)).toEqual([
+        "intent_created",
+        "evidence_insufficient"
+      ]);
+      const warning = results.find(
+        (result) => result.outcome === "evidence_insufficient"
+      );
+      expect(warning?.warning.sourceItemId).toBe("si-uncovered");
+      expect(listUpdateIntents(db)).toHaveLength(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("returns every evidence warning when no linked source item has evidence", () => {
+    const db = openDb(makeTempDir());
+    try {
+      insertGoal(db, "goal-all-uncovered", "completed");
+      insertSourceItem(db, {
+        id: "si-uncovered-a",
+        goalId: "goal-all-uncovered",
+        status: "In Progress",
+        externalId: "NGX-UNCOVERED-A"
+      });
+      insertSourceItem(db, {
+        id: "si-uncovered-b",
+        goalId: "goal-all-uncovered",
+        status: "Todo",
+        externalId: "NGX-UNCOVERED-B"
+      });
+
+      const results = evaluateGoalForSourceSatisfiedIntents(db, {
+        goalId: "goal-all-uncovered"
+      });
+
+      expect(results.map((result) => result.outcome)).toEqual([
+        "evidence_insufficient",
+        "evidence_insufficient"
+      ]);
+      expect(
+        results
+          .filter((result) => result.outcome === "evidence_insufficient")
+          .map((result) => result.warning.sourceItemId)
+      ).toEqual(["si-uncovered-a", "si-uncovered-b"]);
+      expect(listUpdateIntents(db)).toHaveLength(0);
     } finally {
       db.close();
     }

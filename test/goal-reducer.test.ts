@@ -13,6 +13,7 @@ import {
   enqueueGoalIterationJob,
   getQueueJob
 } from "../src/queue-jobs.js";
+import { listUpdateIntents } from "../src/update-intents.js";
 
 const tempRoots: string[] = [];
 
@@ -143,6 +144,62 @@ function insertFailedEvent(
     `INSERT INTO events (goal_id, job_id, type, payload, created_at)
        VALUES (?, ?, 'iteration_failed', ?, ?)`
   ).run(goalId, jobId, JSON.stringify(payload), 1_700_000_000_015);
+}
+
+function insertLinkedSourceItem(
+  db: ReturnType<typeof openDb>,
+  goalId: string,
+  sourceItemId = "si-reducer"
+): void {
+  db.prepare(
+    "INSERT INTO source_items " +
+      "(id, adapter_kind, external_id, external_key, url, title, " +
+      "status, metadata_json, last_observed_at, goal_id, " +
+      "created_at, updated_at) " +
+      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ).run(
+    sourceItemId,
+    "linear",
+    `ext-${sourceItemId}`,
+    sourceItemId.toUpperCase(),
+    `https://linear.app/example/issue/${sourceItemId}`,
+    `Source ${sourceItemId}`,
+    "In Progress",
+    "{}",
+    1_700_000_000_000,
+    goalId,
+    1_700_000_000_000,
+    1_700_000_000_000
+  );
+}
+
+function insertVerificationEvidence(
+  db: ReturnType<typeof openDb>,
+  goalId: string,
+  evidenceId = "ev-reducer"
+): void {
+  db.prepare(
+    "INSERT INTO evidence_records " +
+      "(id, source, type, format_version, artifact_path, external_id, " +
+      "occurred_at, summary, metadata_json, goal_id, source_item_id, " +
+      "ingest_key, created_at, updated_at) " +
+      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ).run(
+    evidenceId,
+    "agent-workflow",
+    "verification_passed",
+    1,
+    null,
+    null,
+    1_700_000_000_020,
+    "verification passed",
+    "{}",
+    goalId,
+    null,
+    `reducer:${evidenceId}`,
+    1_700_000_000_020,
+    1_700_000_000_020
+  );
 }
 
 function reducerEvents(
@@ -282,6 +339,38 @@ describe("reduceGoalIteration", () => {
         | { id: string }
         | undefined;
       expect(nextJobByKey).toBeUndefined();
+    } finally {
+      seed.db.close();
+    }
+  });
+
+  it("creates a pending source_satisfied intent when reducing a goal to completed", () => {
+    const seed = seedGoal({ maxIterations: 5, iteration: 1 });
+    try {
+      insertLinkedSourceItem(seed.db, seed.goalId, "si-reducer-complete");
+      insertVerificationEvidence(seed.db, seed.goalId, "ev-reducer-complete");
+      markJobSucceeded(seed.db, seed.jobId);
+      insertCompletedEvent(seed.db, seed.goalId, seed.jobId, {
+        iteration: 1,
+        goal_complete: true,
+        commit_sha: "done-sha"
+      });
+
+      const result = reduceGoalIteration({
+        db: seed.db,
+        goalId: seed.goalId,
+        jobId: seed.jobId,
+        now: () => 1_700_000_000_030
+      });
+
+      expect(result.decision).toBe(REDUCER_DECISIONS.GOAL_COMPLETE);
+      const intents = listUpdateIntents(seed.db, {
+        status: "pending",
+        goalId: seed.goalId
+      });
+      expect(intents).toHaveLength(1);
+      expect(intents[0]?.sourceItemId).toBe("si-reducer-complete");
+      expect(intents[0]?.evidenceRecordId).toBe("ev-reducer-complete");
     } finally {
       seed.db.close();
     }

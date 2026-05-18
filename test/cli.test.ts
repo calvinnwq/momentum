@@ -4147,6 +4147,79 @@ describe("momentum recovery clear", () => {
     });
   });
 
+  it("source link creates a pending source_satisfied intent when completed goal evidence already exists", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+
+    const startResult = await run([
+      "goal", "start", goalFile,
+      "--foreground",
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    const startPayload = JSON.parse(startResult.stdout) as Record<string, unknown>;
+    const goalId = startPayload["goalId"] as string;
+
+    const { openDb } = await import("../src/db.js");
+    const { upsertSourceItem } = await import("../src/source-items.js");
+    const { ingestEvidenceRecord } = await import("../src/evidence-records.js");
+    const { listUpdateIntents } = await import("../src/update-intents.js");
+    const db = openDb(dataDir);
+    let sourceItemId: string;
+    try {
+      db.prepare("UPDATE goals SET state = 'completed' WHERE id = ?").run(goalId);
+      ingestEvidenceRecord(db, {
+        source: "agent-workflow",
+        type: "verification_passed",
+        occurredAt: 1_700_000_000_200,
+        summary: "verification passed",
+        goalId,
+        ingestKey: `source-link-intent:${goalId}`
+      });
+      const item = upsertSourceItem(
+        db,
+        {
+          adapterKind: "local-fixture",
+          externalId: "fixture-link-intent",
+          externalKey: "SRC-LINK-INTENT",
+          title: "Intent linkable source item",
+          status: "Todo",
+          observedAt: 1_700_000_000_000
+        },
+        { now: () => 1_700_000_000_100 }
+      );
+      sourceItemId = item.id;
+    } finally {
+      db.close();
+    }
+
+    const link = await run([
+      "source", "link", sourceItemId,
+      "--goal", goalId,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(link.code).toBe(0);
+    const payload = JSON.parse(link.stdout) as Record<string, unknown>;
+    expect(payload["counts"]).toMatchObject({
+      intentsCreated: 1,
+      intentsReplayed: 0,
+      intentWarnings: 0
+    });
+
+    const verifyDb = openDb(dataDir);
+    try {
+      const intents = listUpdateIntents(verifyDb, {
+        status: "pending",
+        goalId
+      });
+      expect(intents).toHaveLength(1);
+      expect(intents[0]?.sourceItemId).toBe(sourceItemId);
+    } finally {
+      verifyDb.close();
+    }
+  });
+
   it("source link returns goal_not_found, source_item_not_found, and linked_to_other_goal errors", async () => {
     const { dataDir, goalFile, repo } = setupGoalAndData();
 
