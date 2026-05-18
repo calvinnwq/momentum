@@ -98,10 +98,15 @@ import {
 } from "./project-rollup.js";
 import {
   UPDATE_INTENT_STATUSES,
+  cancelUpdateIntent,
   getUpdateIntentById,
   listUpdateIntents,
+  markUpdateIntentApplied,
+  markUpdateIntentSkipped,
   type ListUpdateIntentsOptions,
   type UpdateIntent,
+  type UpdateIntentDecisionInput,
+  type UpdateIntentDecisionResult,
   type UpdateIntentStatus
 } from "./update-intents.js";
 
@@ -186,6 +191,9 @@ const COMMANDS = [
   "momentum evidence list [--goal <id>] [--source-item <id>] [--source <source>] [--type <type>] [--limit <n>] [--data-dir <path>] [--json]",
   "momentum intent list [--status <status>] [--adapter <kind>] [--type <intent-type>] [--goal <goal-id>] [--source-item <id>] [--evidence-record <id>] [--limit <n>] [--data-dir <path>] [--json]",
   "momentum intent get <intent-id> [--data-dir <path>] [--json]",
+  "momentum intent apply <intent-id> --reason <text> [--data-dir <path>] [--json]",
+  "momentum intent skip <intent-id> --reason <text> [--data-dir <path>] [--json]",
+  "momentum intent cancel <intent-id> --reason <text> [--data-dir <path>] [--json]",
   "momentum doctor [--repo <path>] [--data-dir <path>] [--json]"
 ];
 
@@ -1699,10 +1707,19 @@ type IntentFailureCode =
   | "goal_not_found"
   | "source_item_not_found"
   | "evidence_record_not_found"
-  | "intent_not_found";
+  | "intent_not_found"
+  | "reason_required"
+  | "intent_already_terminal";
+
+type IntentCommand =
+  | "intent list"
+  | "intent get"
+  | "intent apply"
+  | "intent skip"
+  | "intent cancel";
 
 type IntentFailure = {
-  command: "intent list" | "intent get";
+  command: IntentCommand;
   code: IntentFailureCode;
   message: string;
   dataDir?: string;
@@ -1711,13 +1728,14 @@ type IntentFailure = {
   sourceItemId?: string;
   evidenceRecordId?: string;
   status?: string;
+  currentStatus?: UpdateIntentStatus;
 };
 
 function intent(parsed: ParsedFlags, io: CliIo): number {
   const subcommand = parsed.args[1];
   if (!subcommand) {
     return usageError(
-      "Missing required subcommand for intent. Expected: list, get.",
+      "Missing required subcommand for intent. Expected: list, get, apply, skip, cancel.",
       parsed,
       io
     );
@@ -1727,6 +1745,15 @@ function intent(parsed: ParsedFlags, io: CliIo): number {
   }
   if (subcommand === "get") {
     return intentGet(parsed, io);
+  }
+  if (subcommand === "apply") {
+    return intentDecision(parsed, io, "apply");
+  }
+  if (subcommand === "skip") {
+    return intentDecision(parsed, io, "skip");
+  }
+  if (subcommand === "cancel") {
+    return intentDecision(parsed, io, "cancel");
   }
   return usageError(`Unknown intent subcommand: ${subcommand}`, parsed, io);
 }
@@ -1969,6 +1996,127 @@ function intentGet(parsed: ParsedFlags, io: CliIo): number {
   return 0;
 }
 
+type IntentDecisionAction = "apply" | "skip" | "cancel";
+
+function intentDecisionCommand(action: IntentDecisionAction): IntentCommand {
+  if (action === "apply") return "intent apply";
+  if (action === "skip") return "intent skip";
+  return "intent cancel";
+}
+
+function intentDecision(
+  parsed: ParsedFlags,
+  io: CliIo,
+  action: IntentDecisionAction
+): number {
+  const command = intentDecisionCommand(action);
+  const intentId = parsed.args[2];
+  if (!intentId) {
+    return usageError(
+      `Missing required <intent-id> for ${command}.`,
+      parsed,
+      io
+    );
+  }
+  if (parsed.args.length > 3) {
+    return usageError(
+      `Unexpected argument for ${command}: ${parsed.args[3]}`,
+      parsed,
+      io
+    );
+  }
+
+  const reason = parsed.reason?.trim() ?? "";
+  if (reason.length === 0) {
+    return emitIntentFailure(parsed, io, {
+      command,
+      code: "reason_required",
+      message: `Missing required --reason for ${command}.`,
+      intentId
+    });
+  }
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return emitIntentFailure(parsed, io, {
+      command,
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err),
+      intentId
+    });
+  }
+
+  const db = openDb(dataDir);
+  let result: UpdateIntentDecisionResult;
+  try {
+    const input: UpdateIntentDecisionInput = {
+      intentId,
+      decisionReason: reason
+    };
+    if (action === "apply") {
+      result = markUpdateIntentApplied(db, input);
+    } else if (action === "skip") {
+      result = markUpdateIntentSkipped(db, input);
+    } else {
+      result = cancelUpdateIntent(db, input);
+    }
+  } finally {
+    db.close();
+  }
+
+  if (!result.ok) {
+    const failure: IntentFailure = {
+      command,
+      code: result.code,
+      message: result.message,
+      dataDir,
+      intentId
+    };
+    if (result.code === "intent_already_terminal" && result.currentStatus) {
+      failure.currentStatus = result.currentStatus;
+    }
+    return emitIntentFailure(parsed, io, failure);
+  }
+
+  const payload = {
+    ok: true,
+    command,
+    dataDir,
+    previousStatus: result.previousStatus,
+    intent: updateIntentToJsonShape(result.intent)
+  };
+
+  if (parsed.json) {
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  const record = result.intent;
+  const lines: string[] = [
+    `Update intent ${record.id} ${record.status}`,
+    `Adapter: ${record.adapterKind}`,
+    `Target external id: ${record.targetExternalId ?? "(none)"}`,
+    `Intent type: ${record.intentType}`,
+    `Previous status: ${result.previousStatus}`,
+    `Status: ${record.status}`,
+    `Decision reason: ${record.decisionReason ?? "(none)"}`,
+    `Applied at: ${record.appliedAt ?? "(unset)"}`,
+    `Skipped at: ${record.skippedAt ?? "(unset)"}`,
+    `Canceled at: ${record.canceledAt ?? "(unset)"}`,
+    `Updated at: ${record.updatedAt}`,
+    `Data dir: ${dataDir}`,
+    ""
+  ];
+  write(io.stdout, lines.join("\n"));
+  return 0;
+}
+
 function emitIntentFailure(
   parsed: ParsedFlags,
   io: CliIo,
@@ -1990,6 +2138,9 @@ function emitIntentFailure(
     payload["evidenceRecordId"] = failure.evidenceRecordId;
   }
   if (failure.status !== undefined) payload["status"] = failure.status;
+  if (failure.currentStatus !== undefined) {
+    payload["currentStatus"] = failure.currentStatus;
+  }
 
   if (parsed.json) {
     writeJson(io.stderr, payload);

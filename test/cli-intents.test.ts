@@ -696,3 +696,280 @@ describe("momentum intent get", () => {
     expect(result.stdout).toContain(`Data dir: ${dataDir}`);
   });
 });
+
+describe.each([
+  {
+    action: "apply" as const,
+    command: "intent apply",
+    expectedStatus: "applied",
+    timestampKey: "appliedAt" as const
+  },
+  {
+    action: "skip" as const,
+    command: "intent skip",
+    expectedStatus: "skipped",
+    timestampKey: "skippedAt" as const
+  },
+  {
+    action: "cancel" as const,
+    command: "intent cancel",
+    expectedStatus: "canceled",
+    timestampKey: "canceledAt" as const
+  }
+])("momentum $command", ({ action, command, expectedStatus, timestampKey }) => {
+  it("requires a positional <intent-id>", async () => {
+    const dataDir = makeTempDir();
+    const result = await run([
+      "intent",
+      action,
+      "--reason",
+      "needed",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain(
+      `Missing required <intent-id> for ${command}.`
+    );
+  });
+
+  it("rejects unexpected positional argument after the intent id", async () => {
+    const dataDir = makeTempDir();
+    const result = await run([
+      "intent",
+      action,
+      "intent-id",
+      "extra",
+      "--reason",
+      "needed",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain(
+      `Unexpected argument for ${command}: extra`
+    );
+  });
+
+  it("requires a non-empty --reason", async () => {
+    const dataDir = makeTempDir();
+    const intentId = seedIntent(dataDir, {
+      adapterKind: "linear",
+      intentType: "source_satisfied",
+      reason: "satisfied",
+      idempotencyKey: `linear:ext-${action}-no-reason:source_satisfied:g`
+    });
+    const result = await run([
+      "intent",
+      action,
+      intentId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command,
+      code: "reason_required",
+      intentId
+    });
+  });
+
+  it("rejects a whitespace-only --reason value", async () => {
+    const dataDir = makeTempDir();
+    const intentId = seedIntent(dataDir, {
+      adapterKind: "linear",
+      intentType: "source_satisfied",
+      reason: "satisfied",
+      idempotencyKey: `linear:ext-${action}-ws-reason:source_satisfied:g`
+    });
+    const result = await run([
+      "intent",
+      action,
+      intentId,
+      "--reason",
+      "   ",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command,
+      code: "reason_required",
+      intentId
+    });
+  });
+
+  it("returns intent_not_found when the id does not exist", async () => {
+    const dataDir = makeTempDir();
+    const result = await run([
+      "intent",
+      action,
+      "missing-intent",
+      "--reason",
+      "operator decision",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command,
+      code: "intent_not_found",
+      intentId: "missing-intent"
+    });
+  });
+
+  it(`transitions a pending intent to ${expectedStatus} and surfaces previous status`, async () => {
+    const dataDir = makeTempDir();
+    const intentId = seedIntent(dataDir, {
+      adapterKind: "linear",
+      targetExternalId: "ext-42",
+      intentType: "source_satisfied",
+      reason: "satisfied",
+      idempotencyKey: `linear:ext-42:source_satisfied:goal-${action}`,
+      payload: { foo: "bar" }
+    });
+
+    const result = await run([
+      "intent",
+      action,
+      intentId,
+      "--reason",
+      `operator decided to ${action}`,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      ok: true;
+      command: string;
+      previousStatus: string;
+      intent: {
+        id: string;
+        status: string;
+        decisionReason: string | null;
+        appliedAt: number | null;
+        skippedAt: number | null;
+        canceledAt: number | null;
+        updatedAt: number;
+      };
+    };
+    expect(payload).toMatchObject({
+      ok: true,
+      command,
+      previousStatus: "pending"
+    });
+    expect(payload.intent.id).toBe(intentId);
+    expect(payload.intent.status).toBe(expectedStatus);
+    expect(payload.intent.decisionReason).toBe(`operator decided to ${action}`);
+    expect(payload.intent[timestampKey]).toBeTypeOf("number");
+    // Only the matching timestamp is stamped; the other two stay null.
+    const others = (["appliedAt", "skippedAt", "canceledAt"] as const).filter(
+      (key) => key !== timestampKey
+    );
+    for (const key of others) {
+      expect(payload.intent[key]).toBeNull();
+    }
+  });
+
+  it("refuses to overwrite a terminal intent", async () => {
+    const dataDir = makeTempDir();
+    const intentId = seedIntent(dataDir, {
+      adapterKind: "linear",
+      intentType: "source_satisfied",
+      reason: "satisfied",
+      idempotencyKey: `linear:ext-replay:source_satisfied:goal-${action}`
+    });
+
+    const first = await run([
+      "intent",
+      action,
+      intentId,
+      "--reason",
+      "first decision",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(first.code).toBe(0);
+
+    const second = await run([
+      "intent",
+      action,
+      intentId,
+      "--reason",
+      "second decision",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(second.code).toBe(1);
+    const payload = JSON.parse(second.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command,
+      code: "intent_already_terminal",
+      intentId,
+      currentStatus: expectedStatus
+    });
+  });
+
+  it("emits a text summary in non-JSON mode", async () => {
+    const dataDir = makeTempDir();
+    const intentId = seedIntent(dataDir, {
+      adapterKind: "linear",
+      targetExternalId: "ext-99",
+      intentType: "source_satisfied",
+      reason: "satisfied",
+      idempotencyKey: `linear:ext-99:source_satisfied:goal-${action}`
+    });
+    const result = await run([
+      "intent",
+      action,
+      intentId,
+      "--reason",
+      "operator decision",
+      "--data-dir",
+      dataDir
+    ]);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(`Update intent ${intentId} ${expectedStatus}`);
+    expect(result.stdout).toContain("Previous status: pending");
+    expect(result.stdout).toContain(`Status: ${expectedStatus}`);
+    expect(result.stdout).toContain("Decision reason: operator decision");
+    expect(result.stdout).toContain(`Data dir: ${dataDir}`);
+  });
+});
+
+describe("momentum intent dispatch", () => {
+  it("rejects an unknown intent subcommand", async () => {
+    const dataDir = makeTempDir();
+    const result = await run([
+      "intent",
+      "bogus",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("Unknown intent subcommand: bogus");
+  });
+
+  it("notes the new transition subcommands when none is supplied", async () => {
+    const dataDir = makeTempDir();
+    const result = await run(["intent", "--data-dir", dataDir, "--json"]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("list, get, apply, skip, cancel");
+  });
+});
