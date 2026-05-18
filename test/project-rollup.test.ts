@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/db.js";
 import {
+  DEFAULT_INTENT_STALE_THRESHOLD_MS,
   DEFAULT_RECONCILIATION_STALE_THRESHOLD_MS,
   PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT,
   buildProjectRollup,
@@ -16,6 +17,7 @@ import {
   startSourceReconciliationRun
 } from "../src/source-reconciliation-runs.js";
 import { upsertSourceItem } from "../src/source-items.js";
+import { createUpdateIntent } from "../src/update-intents.js";
 
 const tempRoots: string[] = [];
 
@@ -929,13 +931,380 @@ describe("buildProjectRollup", () => {
     }
   });
 
-  it("reports a stable pendingUpdateIntents block reserved for NGX-293", () => {
+  it("reports an empty pendingUpdateIntents block when no intents exist", () => {
     const db = openDb(makeTempDir());
     try {
       seedSourceItem(db, { externalId: "issue-intent" });
       const rollup = buildProjectRollup(db, { now: 2_000_000 });
       expect(rollup.pendingUpdateIntents).toEqual([]);
       expect(rollup.counts.pendingUpdateIntents).toBe(0);
+      expect(rollup.counts.staleUpdateIntents).toBe(0);
+      expect(rollup.totalPendingUpdateIntentCount).toBe(0);
+      expect(rollup.truncatedPendingUpdateIntents).toBe(false);
+      expect(rollup.intentStaleThresholdMs).toBe(
+        DEFAULT_INTENT_STALE_THRESHOLD_MS
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("surfaces pending update intents with stable summaries and ordering", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedGoal(db, { id: "goal-intents", state: "queued" });
+      const sourceItemId = seedSourceItem(db, {
+        externalId: "issue-intent",
+        status: "In Progress",
+        goalId: "goal-intents"
+      });
+      const recon = startSourceReconciliationRun(
+        db,
+        { adapterKind: "linear" },
+        { now: () => 1_990_000 }
+      );
+      finishSourceReconciliationRun(
+        db,
+        {
+          runId: recon.id,
+          state: "succeeded",
+          itemsSeen: 1,
+          itemsUpserted: 1
+        },
+        { now: () => 1_991_000 }
+      );
+      createUpdateIntent(
+        db,
+        {
+          adapterKind: "linear",
+          intentType: "source_satisfied",
+          reason: "Goal completed",
+          targetExternalId: "issue-intent",
+          goalId: "goal-intents",
+          sourceItemId,
+          idempotencyKey: "linear:issue-intent:source_satisfied:goal-intents"
+        },
+        { now: () => 1_500 }
+      );
+      createUpdateIntent(
+        db,
+        {
+          adapterKind: "linear",
+          intentType: "comment_requested",
+          reason: "Followup",
+          goalId: "goal-intents",
+          idempotencyKey: "linear:issue-intent:comment_requested:goal-intents"
+        },
+        { now: () => 1_400 }
+      );
+
+      const rollup = buildProjectRollup(db, { now: 2_000_000 });
+      expect(rollup.counts.pendingUpdateIntents).toBe(2);
+      expect(rollup.counts.staleUpdateIntents).toBe(0);
+      expect(rollup.pendingUpdateIntents.map((intent) => intent.intentType)).toEqual([
+        "comment_requested",
+        "source_satisfied"
+      ]);
+      const first = rollup.pendingUpdateIntents[0];
+      expect(first?.adapterKind).toBe("linear");
+      expect(first?.createdAt).toBe(1_400);
+      expect(first?.ageMs).toBe(2_000_000 - 1_400);
+      expect(first?.stale).toBe(false);
+      expect(rollup.nextAction.kind).toBe("review_pending_intents");
+      expect(rollup.nextAction.detail).toMatchObject({ total: 2, stale: 0 });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("flags stale pending intents using a configurable TTL without auto-deleting them", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedGoal(db, { id: "goal-stale-intent", state: "queued" });
+      seedSourceItem(db, {
+        externalId: "issue-stale-intent",
+        status: "In Progress",
+        goalId: "goal-stale-intent"
+      });
+      const reconTime = 1_000 + DEFAULT_INTENT_STALE_THRESHOLD_MS + 30_000;
+      const recon = startSourceReconciliationRun(
+        db,
+        { adapterKind: "linear" },
+        { now: () => reconTime }
+      );
+      finishSourceReconciliationRun(
+        db,
+        {
+          runId: recon.id,
+          state: "succeeded",
+          itemsSeen: 1,
+          itemsUpserted: 1
+        },
+        { now: () => reconTime + 1 }
+      );
+      createUpdateIntent(
+        db,
+        {
+          adapterKind: "linear",
+          intentType: "source_satisfied",
+          reason: "Old satisfaction",
+          goalId: "goal-stale-intent",
+          idempotencyKey: "linear:issue-stale-intent:source_satisfied:goal-stale-intent"
+        },
+        { now: () => 1_000 }
+      );
+
+      const withDefaultTtl = buildProjectRollup(db, {
+        now: 1_000 + DEFAULT_INTENT_STALE_THRESHOLD_MS + 60_000
+      });
+      expect(withDefaultTtl.counts.pendingUpdateIntents).toBe(1);
+      expect(withDefaultTtl.counts.staleUpdateIntents).toBe(1);
+      expect(withDefaultTtl.pendingUpdateIntents[0]?.stale).toBe(true);
+      expect(withDefaultTtl.nextAction.detail).toMatchObject({
+        total: 1,
+        stale: 1
+      });
+
+      const withGenerousTtl = buildProjectRollup(db, {
+        now: 1_000 + DEFAULT_INTENT_STALE_THRESHOLD_MS + 60_000,
+        intentStaleThresholdMs: 10 * DEFAULT_INTENT_STALE_THRESHOLD_MS
+      });
+      expect(withGenerousTtl.counts.staleUpdateIntents).toBe(0);
+      expect(withGenerousTtl.pendingUpdateIntents[0]?.stale).toBe(false);
+
+      const withTightTtl = buildProjectRollup(db, {
+        now: 5_000,
+        intentStaleThresholdMs: 1_000
+      });
+      expect(withTightTtl.counts.staleUpdateIntents).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("scopes pending intents to the rollup project/milestone filters", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedGoal(db, { id: "goal-alpha", state: "completed" });
+      seedGoal(db, { id: "goal-beta", state: "completed" });
+      const alphaItemId = seedSourceItem(db, {
+        externalId: "alpha-1",
+        projectName: "Alpha",
+        goalId: "goal-alpha"
+      });
+      const crossScopeItemId = seedSourceItem(db, {
+        externalId: "beta-same-goal",
+        projectName: "Beta",
+        goalId: "goal-alpha"
+      });
+      seedSourceItem(db, {
+        externalId: "beta-1",
+        projectName: "Beta",
+        goalId: "goal-beta"
+      });
+      createUpdateIntent(
+        db,
+        {
+          adapterKind: "linear",
+          intentType: "source_satisfied",
+          reason: "Alpha satisfied",
+          goalId: "goal-alpha",
+          sourceItemId: alphaItemId,
+          idempotencyKey: "linear:alpha-1:source_satisfied:goal-alpha"
+        },
+        { now: () => 1_000 }
+      );
+      createUpdateIntent(
+        db,
+        {
+          adapterKind: "linear",
+          intentType: "source_satisfied",
+          reason: "Same goal but Beta source item",
+          goalId: "goal-alpha",
+          sourceItemId: crossScopeItemId,
+          idempotencyKey: "linear:beta-same-goal:source_satisfied:goal-alpha"
+        },
+        { now: () => 1_050 }
+      );
+      createUpdateIntent(
+        db,
+        {
+          adapterKind: "linear",
+          intentType: "source_satisfied",
+          reason: "Beta satisfied",
+          goalId: "goal-beta",
+          idempotencyKey: "linear:beta-1:source_satisfied:goal-beta"
+        },
+        { now: () => 1_100 }
+      );
+
+      const alphaRollup = buildProjectRollup(db, {
+        filters: { projectName: "Alpha" },
+        now: 2_000
+      });
+      expect(alphaRollup.pendingUpdateIntents.map((intent) => intent.goalId)).toEqual([
+        "goal-alpha"
+      ]);
+      expect(
+        alphaRollup.pendingUpdateIntents.map((intent) => intent.sourceItemId)
+      ).toEqual([alphaItemId]);
+
+      const allRollup = buildProjectRollup(db, { now: 2_000 });
+      expect(allRollup.counts.pendingUpdateIntents).toBe(3);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("scopes pending intents by adapterKind filter", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedGoal(db, { id: "goal-multi", state: "completed" });
+      seedSourceItem(db, {
+        externalId: "linear-issue",
+        adapterKind: "linear",
+        goalId: "goal-multi"
+      });
+      createUpdateIntent(
+        db,
+        {
+          adapterKind: "linear",
+          intentType: "source_satisfied",
+          reason: "linear",
+          goalId: "goal-multi",
+          idempotencyKey: "linear:multi:source_satisfied:goal-multi"
+        },
+        { now: () => 1_000 }
+      );
+      createUpdateIntent(
+        db,
+        {
+          adapterKind: "github",
+          intentType: "source_satisfied",
+          reason: "github",
+          goalId: "goal-multi",
+          idempotencyKey: "github:multi:source_satisfied:goal-multi"
+        },
+        { now: () => 1_100 }
+      );
+
+      const linearOnly = buildProjectRollup(db, {
+        filters: { adapterKind: "linear" },
+        now: 2_000
+      });
+      expect(
+        linearOnly.pendingUpdateIntents.map((intent) => intent.adapterKind)
+      ).toEqual(["linear"]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("does not include applied, skipped, or canceled intents in pending lists", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedGoal(db, { id: "goal-mixed", state: "completed" });
+      seedSourceItem(db, {
+        externalId: "issue-mixed",
+        goalId: "goal-mixed"
+      });
+      createUpdateIntent(
+        db,
+        {
+          adapterKind: "linear",
+          intentType: "source_satisfied",
+          reason: "pending",
+          goalId: "goal-mixed",
+          idempotencyKey: "linear:mixed:source_satisfied:goal-mixed"
+        },
+        { now: () => 1_000 }
+      );
+      const applied = createUpdateIntent(
+        db,
+        {
+          adapterKind: "linear",
+          intentType: "comment_requested",
+          reason: "applied",
+          goalId: "goal-mixed",
+          idempotencyKey: "linear:mixed:comment_requested:goal-mixed"
+        },
+        { now: () => 1_100 }
+      );
+      db.prepare(
+        "UPDATE update_intents SET status = 'applied', applied_at = ?, updated_at = ? WHERE id = ?"
+      ).run(1_500, 1_500, applied.intent.id);
+
+      const rollup = buildProjectRollup(db, { now: 2_000 });
+      expect(rollup.counts.pendingUpdateIntents).toBe(1);
+      expect(rollup.pendingUpdateIntents[0]?.intentType).toBe("source_satisfied");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("prioritizes reviewing an existing pending source_satisfied intent over re-reporting the source mismatch it resolves", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedGoal(db, { id: "goal-pending-source-satisfied", state: "completed" });
+      const sourceItemId = seedSourceItem(db, {
+        externalId: "issue-pending-source-satisfied",
+        status: "In Progress",
+        goalId: "goal-pending-source-satisfied"
+      });
+      createUpdateIntent(
+        db,
+        {
+          adapterKind: "linear",
+          intentType: "source_satisfied",
+          reason: "Goal completed; source item needs operator review.",
+          targetExternalId: "issue-pending-source-satisfied",
+          goalId: "goal-pending-source-satisfied",
+          sourceItemId,
+          idempotencyKey:
+            "linear:issue-pending-source-satisfied:source_satisfied:goal-pending-source-satisfied"
+        },
+        { now: () => 1_000 }
+      );
+
+      const rollup = buildProjectRollup(db, { now: 2_000 });
+      expect(rollup.counts.mismatches.goal_done_source_not_done).toBe(1);
+      expect(rollup.counts.pendingUpdateIntents).toBe(1);
+      expect(rollup.nextAction.kind).toBe("review_pending_intents");
+      expect(rollup.nextAction.detail).toMatchObject({
+        total: 1,
+        stale: 0
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("ranks pending intent review below higher-priority next actions", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedGoal(db, {
+        id: "goal-recover-intent",
+        state: "queued",
+        needsManualRecovery: true
+      });
+      seedSourceItem(db, {
+        externalId: "issue-recover-intent",
+        goalId: "goal-recover-intent"
+      });
+      createUpdateIntent(
+        db,
+        {
+          adapterKind: "linear",
+          intentType: "source_satisfied",
+          reason: "should not pick this",
+          goalId: "goal-recover-intent",
+          idempotencyKey: "linear:recover-intent:source_satisfied:goal-recover-intent"
+        },
+        { now: () => 1_000 }
+      );
+
+      const rollup = buildProjectRollup(db, { now: 2_000 });
+      expect(rollup.nextAction.kind).toBe("manual_recovery_required");
     } finally {
       db.close();
     }

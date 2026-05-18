@@ -53,7 +53,13 @@ import {
   buildRunnerProfile,
   safeRunnerProfileSummary
 } from "./runner-profile.js";
-import { loadMomentumPolicy } from "./momentum-policy.js";
+import {
+  DEFAULT_INTENT_APPLY_POLICY,
+  loadMomentumPolicy,
+  resolveIntentApplyPolicy,
+  type PolicyEffectiveFieldSource,
+  type UpdateIntentApplyPolicy
+} from "./momentum-policy.js";
 import {
   getSourceItemById,
   linkGoalToSourceItem,
@@ -96,6 +102,23 @@ import {
   type ProjectRollupFilters,
   type ProjectRollupOptions
 } from "./project-rollup.js";
+import {
+  UPDATE_INTENT_STATUSES,
+  cancelUpdateIntent,
+  getUpdateIntentById,
+  listUpdateIntents,
+  markUpdateIntentApplied,
+  markUpdateIntentSkipped,
+  type ListUpdateIntentsOptions,
+  type UpdateIntent,
+  type UpdateIntentDecisionInput,
+  type UpdateIntentDecisionResult,
+  type UpdateIntentStatus
+} from "./update-intents.js";
+import {
+  evaluateGoalForSourceSatisfiedIntents,
+  type EvaluateGoalForSourceSatisfiedIntentResult
+} from "./update-intent-generator.js";
 
 export const VERSION = "0.0.0";
 
@@ -130,6 +153,7 @@ type ParsedFlags = {
   foreground: boolean;
   now: boolean;
   dryRun: boolean;
+  externalApply: boolean;
   repo?: string;
   runner?: string;
   workerId?: string;
@@ -153,6 +177,9 @@ type ParsedFlags = {
   evidenceType?: string;
   limit?: number;
   staleThresholdHours?: number;
+  intentStaleThresholdDays?: number;
+  status?: string;
+  evidenceRecord?: string;
   error?: string;
 };
 
@@ -170,10 +197,15 @@ const COMMANDS = [
   "momentum daemon start [--max-loop-iterations <n>] [--max-idle-cycles <n>] [--poll-interval-ms <ms>] [--data-dir <path>] [--json]",
   "momentum daemon stop [--now] [--reason <text>] [--data-dir <path>] [--json]",
   "momentum daemon status [--data-dir <path>] [--json]",
-  "momentum project status [--source <adapter>] [--project <id-or-name>] [--milestone <id-or-name>] [--stale-threshold-hours <n>] [--data-dir <path>] [--json]",
+  "momentum project status [--source <adapter>] [--project <id-or-name>] [--milestone <id-or-name>] [--stale-threshold-hours <n>] [--intent-stale-threshold-days <n>] [--data-dir <path>] [--json]",
   "momentum recovery clear <goal-id> [--reason <text>] [--data-dir <path>] [--json]",
   "momentum evidence ingest --path <file-or-dir> [--goal <id>] [--source-item <id>] [--data-dir <path>] [--json]",
   "momentum evidence list [--goal <id>] [--source-item <id>] [--source <source>] [--type <type>] [--limit <n>] [--data-dir <path>] [--json]",
+  "momentum intent list [--status <status>] [--adapter <kind>] [--type <intent-type>] [--goal <goal-id>] [--source-item <id>] [--evidence-record <id>] [--limit <n>] [--data-dir <path>] [--json]",
+  "momentum intent get <intent-id> [--data-dir <path>] [--json]",
+  "momentum intent apply <intent-id> --reason <text> [--repo <path>] [--external-apply] [--data-dir <path>] [--json]",
+  "momentum intent skip <intent-id> --reason <text> [--data-dir <path>] [--json]",
+  "momentum intent cancel <intent-id> --reason <text> [--data-dir <path>] [--json]",
   "momentum doctor [--repo <path>] [--data-dir <path>] [--json]"
 ];
 
@@ -204,6 +236,14 @@ export async function runCli(
 
   if (parsed.now && !(command === "daemon" && subcommand === "stop")) {
     return usageError("--now is only supported by `momentum daemon stop`.", parsed, io);
+  }
+
+  if (parsed.externalApply && !(command === "intent" && subcommand === "apply")) {
+    return usageError(
+      "--external-apply is only supported by `momentum intent apply`.",
+      parsed,
+      io
+    );
   }
 
   if (command === "doctor") {
@@ -248,6 +288,10 @@ export async function runCli(
 
   if (command === "evidence") {
     return evidence(parsed, io);
+  }
+
+  if (command === "intent") {
+    return intent(parsed, io);
   }
 
   return usageError(`Unknown command: ${command}`, parsed, io);
@@ -493,6 +537,18 @@ function sourceLink(parsed: ParsedFlags, io: CliIo): number {
         dataDir
       });
     }
+    const intentEvaluations = evaluateGoalForSourceSatisfiedIntents(db, {
+      goalId
+    });
+    const intentsCreated = intentEvaluations.filter(
+      (entry) => entry.outcome === "intent_created"
+    ).length;
+    const intentsReplayed = intentEvaluations.filter(
+      (entry) => entry.outcome === "intent_replayed"
+    ).length;
+    const intentWarnings = intentEvaluations.filter(
+      (entry) => entry.outcome === "evidence_insufficient"
+    ).length;
 
     const payload = {
       ok: true,
@@ -503,6 +559,12 @@ function sourceLink(parsed: ParsedFlags, io: CliIo): number {
       changed: result.changed,
       skippedReason: result.skippedReason,
       previousGoalId: result.previousGoalId,
+      counts: {
+        intentsCreated,
+        intentsReplayed,
+        intentWarnings
+      },
+      intentEvaluations: intentEvaluations.map(intentEvaluationToJsonShape),
       item: sourceItemToJsonShape(result.sourceItem)
     };
 
@@ -518,6 +580,9 @@ function sourceLink(parsed: ParsedFlags, io: CliIo): number {
       `Adapter: ${result.sourceItem.adapterKind}`,
       `External key: ${result.sourceItem.externalKey ?? "(unset)"}`,
       `Title: ${result.sourceItem.title}`,
+      `Intents created: ${intentsCreated}`,
+      `Intents replayed: ${intentsReplayed}`,
+      `Intent warnings: ${intentWarnings}`,
       `Data dir: ${dataDir}`,
       ""
     ];
@@ -990,6 +1055,11 @@ function projectStatus(parsed: ParsedFlags, io: CliIo): number {
       parsed.staleThresholdHours * 60 * 60 * 1000
     );
   }
+  if (parsed.intentStaleThresholdDays !== undefined) {
+    options.intentStaleThresholdMs = Math.round(
+      parsed.intentStaleThresholdDays * 24 * 60 * 60 * 1000
+    );
+  }
 
   const db = openDb(dataDir);
   let rollup: ProjectRollup;
@@ -1012,6 +1082,7 @@ function projectStatus(parsed: ParsedFlags, io: CliIo): number {
         milestoneName: filters.milestoneName ?? null
       },
       staleThresholdMs: rollup.reconciliationStaleThresholdMs,
+      intentStaleThresholdMs: rollup.intentStaleThresholdMs,
       generatedAt: rollup.generatedAt,
       counts: rollup.counts,
       sourceItems: rollup.sourceItems,
@@ -1022,6 +1093,8 @@ function projectStatus(parsed: ParsedFlags, io: CliIo): number {
       truncatedMismatches: rollup.truncatedMismatches,
       reconciliationWarnings: rollup.reconciliationWarnings,
       pendingUpdateIntents: rollup.pendingUpdateIntents,
+      totalPendingUpdateIntentCount: rollup.totalPendingUpdateIntentCount,
+      truncatedPendingUpdateIntents: rollup.truncatedPendingUpdateIntents,
       nextAction: rollup.nextAction
     };
     writeJson(io.stdout, payload);
@@ -1076,7 +1149,9 @@ function renderProjectStatusText(
       `manual_recovery_required=${rollup.counts.mismatches.manual_recovery_required}`
   );
   lines.push(
-    `Pending external update intents: ${rollup.counts.pendingUpdateIntents} (NGX-293 not implemented)`
+    `Pending external update intents: ${rollup.counts.pendingUpdateIntents} ` +
+      `(stale=${rollup.counts.staleUpdateIntents}, ` +
+      `stale_threshold_ms=${rollup.intentStaleThresholdMs})`
   );
   if (rollup.reconciliationWarnings.length === 0) {
     lines.push("Reconciliation: ok");
@@ -1124,6 +1199,31 @@ function renderProjectStatusText(
     if (rollup.truncatedMismatches) {
       lines.push(
         `  ... and ${rollup.totalMismatchCount - rollup.mismatches.length} more`
+      );
+    }
+  }
+  lines.push("");
+  lines.push("Pending update intents:");
+  if (rollup.pendingUpdateIntents.length === 0) {
+    lines.push("  (none)");
+  } else {
+    for (const intent of rollup.pendingUpdateIntents) {
+      const staleText = intent.stale ? " STALE" : "";
+      const targetText = intent.targetExternalId
+        ? ` target=${intent.targetExternalId}`
+        : "";
+      const goalText = intent.goalId ? ` goal=${intent.goalId}` : "";
+      const sourceText = intent.sourceItemId
+        ? ` source=${intent.sourceItemId}`
+        : "";
+      lines.push(
+        `  - [${intent.adapterKind}/${intent.intentType}] ${intent.intentId}` +
+          `${targetText}${goalText}${sourceText} age_ms=${intent.ageMs}${staleText}`
+      );
+    }
+    if (rollup.truncatedPendingUpdateIntents) {
+      lines.push(
+        `  ... and ${rollup.totalPendingUpdateIntentCount - rollup.pendingUpdateIntents.length} more`
       );
     }
   }
@@ -1411,6 +1511,10 @@ function evidenceIngest(parsed: ParsedFlags, io: CliIo): number {
         });
       }
     }
+    const intentEvaluations = evaluateIntentsForEvidenceRecords(db, [
+      ...created,
+      ...skipped
+    ]);
 
     return emitEvidenceIngestSuccess(parsed, io, {
       dataDir,
@@ -1420,12 +1524,35 @@ function evidenceIngest(parsed: ParsedFlags, io: CliIo): number {
       observed: parseResult.records.length,
       created,
       skipped,
+      intentEvaluations,
       diagnostics: parseResult.diagnostics,
       errors
     });
   } finally {
     db.close();
   }
+}
+
+function evaluateIntentsForEvidenceRecords(
+  db: MomentumDb,
+  records: readonly EvidenceRecord[]
+): EvaluateGoalForSourceSatisfiedIntentResult[] {
+  const goalIds = new Set<string>();
+  for (const record of records) {
+    if (record.goalId) {
+      goalIds.add(record.goalId);
+      continue;
+    }
+    if (record.sourceItemId) {
+      const sourceItem = getSourceItemById(db, record.sourceItemId);
+      if (sourceItem?.goalId) goalIds.add(sourceItem.goalId);
+    }
+  }
+  return [...goalIds]
+    .sort()
+    .flatMap((goalId) =>
+      evaluateGoalForSourceSatisfiedIntents(db, { goalId })
+    );
 }
 
 function emitEvidenceIngestSuccess(
@@ -1439,11 +1566,21 @@ function emitEvidenceIngestSuccess(
     observed: number;
     created: EvidenceRecord[];
     skipped: EvidenceRecord[];
+    intentEvaluations: EvaluateGoalForSourceSatisfiedIntentResult[];
     diagnostics: WorkflowEvidenceDiagnostic[];
     errors: Array<{ ingestKey: string; type: string; message: string }>;
   }
 ): number {
   const ok = result.errors.length === 0;
+  const createdIntents = result.intentEvaluations.filter(
+    (entry) => entry.outcome === "intent_created"
+  );
+  const replayedIntents = result.intentEvaluations.filter(
+    (entry) => entry.outcome === "intent_replayed"
+  );
+  const intentWarnings = result.intentEvaluations.filter(
+    (entry) => entry.outcome === "evidence_insufficient"
+  );
   const payload = {
     ok,
     command: "evidence ingest",
@@ -1455,11 +1592,15 @@ function emitEvidenceIngestSuccess(
       observed: result.observed,
       created: result.created.length,
       skipped: result.skipped.length,
+      intentsCreated: createdIntents.length,
+      intentsReplayed: replayedIntents.length,
+      intentWarnings: intentWarnings.length,
       diagnostics: result.diagnostics.length,
       errors: result.errors.length
     },
     created: result.created.map(evidenceRecordToJsonShape),
     skipped: result.skipped.map(evidenceRecordToJsonShape),
+    intentEvaluations: result.intentEvaluations.map(intentEvaluationToJsonShape),
     diagnostics: result.diagnostics.map((diagnostic) => ({ ...diagnostic })),
     errors: result.errors.map((entry) => ({ ...entry }))
   };
@@ -1476,6 +1617,9 @@ function emitEvidenceIngestSuccess(
     `Observed: ${result.observed}`,
     `Created: ${result.created.length}`,
     `Skipped (idempotent): ${result.skipped.length}`,
+    `Intents created: ${createdIntents.length}`,
+    `Intents replayed: ${replayedIntents.length}`,
+    `Intent warnings: ${intentWarnings.length}`,
     `Diagnostics: ${result.diagnostics.length}`,
     `Errors: ${result.errors.length}`,
     `Data dir: ${result.dataDir}`,
@@ -1528,6 +1672,37 @@ function evidenceRecordToJsonShape(record: EvidenceRecord): Record<string, unkno
     createdAt: record.createdAt,
     updatedAt: record.updatedAt
   };
+}
+
+function intentEvaluationToJsonShape(
+  result: EvaluateGoalForSourceSatisfiedIntentResult
+): Record<string, unknown> {
+  if (
+    result.outcome === "intent_created" ||
+    result.outcome === "intent_replayed"
+  ) {
+    return {
+      outcome: result.outcome,
+      intent: updateIntentToJsonShape(result.intent),
+      sourceItem: sourceItemToJsonShape(result.sourceItem),
+      verificationEvidence: evidenceRecordToJsonShape(
+        result.verificationEvidence
+      )
+    };
+  }
+  if (result.outcome === "evidence_insufficient") {
+    return {
+      outcome: result.outcome,
+      warning: { ...result.warning }
+    };
+  }
+  if (result.outcome === "source_already_terminal") {
+    return {
+      outcome: result.outcome,
+      sourceItem: sourceItemToJsonShape(result.sourceItem)
+    };
+  }
+  return { ...result };
 }
 
 type EvidenceListFailureCode =
@@ -1675,6 +1850,589 @@ function emitEvidenceListFailure(
   }
   write(io.stderr, `${failure.message}\n`);
   return 1;
+}
+
+type IntentFailureCode =
+  | "data_dir_failed"
+  | "invalid_status"
+  | "goal_not_found"
+  | "source_item_not_found"
+  | "evidence_record_not_found"
+  | "intent_not_found"
+  | "reason_required"
+  | "intent_already_terminal"
+  | "policy_load_failed"
+  | "external_apply_unsupported";
+
+type IntentCommand =
+  | "intent list"
+  | "intent get"
+  | "intent apply"
+  | "intent skip"
+  | "intent cancel";
+
+type IntentFailure = {
+  command: IntentCommand;
+  code: IntentFailureCode;
+  message: string;
+  dataDir?: string;
+  intentId?: string;
+  goalId?: string;
+  sourceItemId?: string;
+  evidenceRecordId?: string;
+  status?: string;
+  currentStatus?: UpdateIntentStatus;
+  applyPolicy?: IntentApplyPolicySummary;
+};
+
+type IntentApplyPolicySummary = {
+  effective: UpdateIntentApplyPolicy;
+  source: PolicyEffectiveFieldSource;
+  externalApplyRequested: boolean;
+  externalApplyPerformed: false;
+  note: string;
+};
+
+type IntentApplyPolicyResolution =
+  | { ok: true; summary: IntentApplyPolicySummary }
+  | { ok: false; code: string; message: string; path?: string | null };
+
+function buildFallbackIntentApplyPolicySummary(
+  externalApplyRequested: boolean
+): IntentApplyPolicySummary {
+  return {
+    effective: DEFAULT_INTENT_APPLY_POLICY,
+    source: "builtin_default",
+    externalApplyRequested,
+    externalApplyPerformed: false,
+    note:
+      "Milestone 5 does not perform external tracker writes; " +
+      "`intent apply` records the operator's manual mark only."
+  };
+}
+
+function intent(parsed: ParsedFlags, io: CliIo): number {
+  const subcommand = parsed.args[1];
+  if (!subcommand) {
+    return usageError(
+      "Missing required subcommand for intent. Expected: list, get, apply, skip, cancel.",
+      parsed,
+      io
+    );
+  }
+  if (subcommand === "list") {
+    return intentList(parsed, io);
+  }
+  if (subcommand === "get") {
+    return intentGet(parsed, io);
+  }
+  if (subcommand === "apply") {
+    return intentDecision(parsed, io, "apply");
+  }
+  if (subcommand === "skip") {
+    return intentDecision(parsed, io, "skip");
+  }
+  if (subcommand === "cancel") {
+    return intentDecision(parsed, io, "cancel");
+  }
+  return usageError(`Unknown intent subcommand: ${subcommand}`, parsed, io);
+}
+
+function intentList(parsed: ParsedFlags, io: CliIo): number {
+  if (parsed.args.length > 2) {
+    return usageError(
+      `Unexpected argument for intent list: ${parsed.args[2]}`,
+      parsed,
+      io
+    );
+  }
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return emitIntentFailure(parsed, io, {
+      command: "intent list",
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err)
+    });
+  }
+
+  let statusFilter: UpdateIntentStatus | undefined;
+  if (parsed.status !== undefined && parsed.status.length > 0) {
+    if (!isUpdateIntentStatus(parsed.status)) {
+      return emitIntentFailure(parsed, io, {
+        command: "intent list",
+        code: "invalid_status",
+        message: `Invalid --status value: ${parsed.status}. Expected one of: ${UPDATE_INTENT_STATUSES.join(", ")}.`,
+        dataDir,
+        status: parsed.status
+      });
+    }
+    statusFilter = parsed.status;
+  }
+
+  const filters: ListUpdateIntentsOptions = {};
+  if (statusFilter !== undefined) filters.status = statusFilter;
+  if (parsed.adapter !== undefined && parsed.adapter.length > 0) {
+    filters.adapterKind = parsed.adapter;
+  }
+  if (parsed.evidenceType !== undefined && parsed.evidenceType.length > 0) {
+    filters.intentType = parsed.evidenceType;
+  }
+  if (parsed.goal !== undefined && parsed.goal.length > 0) {
+    filters.goalId = parsed.goal;
+  }
+  if (parsed.sourceItem !== undefined && parsed.sourceItem.length > 0) {
+    filters.sourceItemId = parsed.sourceItem;
+  }
+  if (parsed.evidenceRecord !== undefined && parsed.evidenceRecord.length > 0) {
+    filters.evidenceRecordId = parsed.evidenceRecord;
+  }
+  if (parsed.limit !== undefined) {
+    filters.limit = parsed.limit;
+  }
+
+  const db = openDb(dataDir);
+  let intents: UpdateIntent[];
+  try {
+    if (filters.goalId !== undefined && filters.goalId !== null) {
+      const row = db
+        .prepare("SELECT id FROM goals WHERE id = ?")
+        .get(filters.goalId) as { id: string } | undefined;
+      if (!row) {
+        return emitIntentFailure(parsed, io, {
+          command: "intent list",
+          code: "goal_not_found",
+          message: `Goal not found: ${filters.goalId}`,
+          dataDir,
+          goalId: filters.goalId
+        });
+      }
+    }
+    if (filters.sourceItemId !== undefined && filters.sourceItemId !== null) {
+      const row = db
+        .prepare("SELECT id FROM source_items WHERE id = ?")
+        .get(filters.sourceItemId) as { id: string } | undefined;
+      if (!row) {
+        return emitIntentFailure(parsed, io, {
+          command: "intent list",
+          code: "source_item_not_found",
+          message: `Source item not found: ${filters.sourceItemId}`,
+          dataDir,
+          sourceItemId: filters.sourceItemId
+        });
+      }
+    }
+    if (
+      filters.evidenceRecordId !== undefined &&
+      filters.evidenceRecordId !== null
+    ) {
+      const row = db
+        .prepare("SELECT id FROM evidence_records WHERE id = ?")
+        .get(filters.evidenceRecordId) as { id: string } | undefined;
+      if (!row) {
+        return emitIntentFailure(parsed, io, {
+          command: "intent list",
+          code: "evidence_record_not_found",
+          message: `Evidence record not found: ${filters.evidenceRecordId}`,
+          dataDir,
+          evidenceRecordId: filters.evidenceRecordId
+        });
+      }
+    }
+    intents = listUpdateIntents(db, filters);
+  } finally {
+    db.close();
+  }
+
+  const payload = {
+    ok: true,
+    command: "intent list",
+    dataDir,
+    status: statusFilter ?? null,
+    adapter: filters.adapterKind ?? null,
+    intentType: filters.intentType ?? null,
+    goalId: filters.goalId ?? null,
+    sourceItemId: filters.sourceItemId ?? null,
+    evidenceRecordId: filters.evidenceRecordId ?? null,
+    limit: filters.limit ?? null,
+    count: intents.length,
+    intents: intents.map(updateIntentToJsonShape)
+  };
+
+  if (parsed.json) {
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  const lines: string[] = [
+    `Update intents: ${intents.length}`,
+    `Status: ${statusFilter ?? "(any)"}`,
+    `Adapter: ${filters.adapterKind ?? "(any)"}`,
+    `Intent type: ${filters.intentType ?? "(any)"}`,
+    `Goal: ${filters.goalId ?? "(any)"}`,
+    `Source item: ${filters.sourceItemId ?? "(any)"}`,
+    `Evidence record: ${filters.evidenceRecordId ?? "(any)"}`,
+    `Data dir: ${dataDir}`,
+    ...intents.map(
+      (record) =>
+        `- ${record.id} [${record.adapterKind}/${record.intentType}] ${record.status} target=${record.targetExternalId ?? "(none)"}: ${record.reason}`
+    ),
+    ""
+  ];
+  write(io.stdout, lines.join("\n"));
+  return 0;
+}
+
+function intentGet(parsed: ParsedFlags, io: CliIo): number {
+  const intentId = parsed.args[2];
+  if (!intentId) {
+    return usageError(
+      "Missing required <intent-id> for intent get.",
+      parsed,
+      io
+    );
+  }
+  if (parsed.args.length > 3) {
+    return usageError(
+      `Unexpected argument for intent get: ${parsed.args[3]}`,
+      parsed,
+      io
+    );
+  }
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return emitIntentFailure(parsed, io, {
+      command: "intent get",
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err),
+      intentId
+    });
+  }
+
+  const db = openDb(dataDir);
+  let record: UpdateIntent | null;
+  try {
+    record = getUpdateIntentById(db, intentId);
+  } finally {
+    db.close();
+  }
+
+  if (!record) {
+    return emitIntentFailure(parsed, io, {
+      command: "intent get",
+      code: "intent_not_found",
+      message: `Update intent not found: ${intentId}`,
+      dataDir,
+      intentId
+    });
+  }
+
+  const payload = {
+    ok: true,
+    command: "intent get",
+    dataDir,
+    intent: updateIntentToJsonShape(record)
+  };
+
+  if (parsed.json) {
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  const lines: string[] = [
+    `Update intent: ${record.id}`,
+    `Adapter: ${record.adapterKind}`,
+    `Target external id: ${record.targetExternalId ?? "(none)"}`,
+    `Intent type: ${record.intentType}`,
+    `Status: ${record.status}`,
+    `Goal: ${record.goalId ?? "(unlinked)"}`,
+    `Source item: ${record.sourceItemId ?? "(unlinked)"}`,
+    `Evidence record: ${record.evidenceRecordId ?? "(unlinked)"}`,
+    `Idempotency key: ${record.idempotencyKey}`,
+    `Reason: ${record.reason}`,
+    `Decision reason: ${record.decisionReason ?? "(none)"}`,
+    `Created at: ${record.createdAt}`,
+    `Updated at: ${record.updatedAt}`,
+    `Applied at: ${record.appliedAt ?? "(unset)"}`,
+    `Skipped at: ${record.skippedAt ?? "(unset)"}`,
+    `Canceled at: ${record.canceledAt ?? "(unset)"}`,
+    `Data dir: ${dataDir}`,
+    ""
+  ];
+  write(io.stdout, lines.join("\n"));
+  return 0;
+}
+
+type IntentDecisionAction = "apply" | "skip" | "cancel";
+
+function intentDecisionCommand(action: IntentDecisionAction): IntentCommand {
+  if (action === "apply") return "intent apply";
+  if (action === "skip") return "intent skip";
+  return "intent cancel";
+}
+
+function intentDecision(
+  parsed: ParsedFlags,
+  io: CliIo,
+  action: IntentDecisionAction
+): number {
+  const command = intentDecisionCommand(action);
+  const intentId = parsed.args[2];
+  if (!intentId) {
+    return usageError(
+      `Missing required <intent-id> for ${command}.`,
+      parsed,
+      io
+    );
+  }
+  if (parsed.args.length > 3) {
+    return usageError(
+      `Unexpected argument for ${command}: ${parsed.args[3]}`,
+      parsed,
+      io
+    );
+  }
+
+  const reason = parsed.reason?.trim() ?? "";
+  if (reason.length === 0) {
+    return emitIntentFailure(parsed, io, {
+      command,
+      code: "reason_required",
+      message: `Missing required --reason for ${command}.`,
+      intentId
+    });
+  }
+
+  const applyPolicyResolution = buildIntentApplyPolicySummary(
+    parsed.repo,
+    action === "apply" && parsed.externalApply
+  );
+
+  if (action === "apply" && parsed.externalApply) {
+    const applyPolicy = applyPolicyResolution.ok
+      ? applyPolicyResolution.summary
+      : buildFallbackIntentApplyPolicySummary(true);
+    return emitIntentFailure(parsed, io, {
+      command,
+      code: "external_apply_unsupported",
+      message:
+        "External apply is not supported in Milestone 5. " +
+        "Momentum represents external tracker writes as durable intents only; " +
+        "use `momentum intent apply` without --external-apply to record an operator's manual mark.",
+      intentId,
+      applyPolicy
+    });
+  }
+
+  if (!applyPolicyResolution.ok) {
+    return emitIntentFailure(parsed, io, {
+      command,
+      code: "policy_load_failed",
+      message: applyPolicyResolution.message,
+      intentId
+    });
+  }
+  const applyPolicy = applyPolicyResolution.summary;
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return emitIntentFailure(parsed, io, {
+      command,
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err),
+      intentId
+    });
+  }
+
+  const db = openDb(dataDir);
+  let result: UpdateIntentDecisionResult;
+  try {
+    const input: UpdateIntentDecisionInput = {
+      intentId,
+      decisionReason: reason
+    };
+    if (action === "apply") {
+      result = markUpdateIntentApplied(db, input);
+    } else if (action === "skip") {
+      result = markUpdateIntentSkipped(db, input);
+    } else {
+      result = cancelUpdateIntent(db, input);
+    }
+  } finally {
+    db.close();
+  }
+
+  if (!result.ok) {
+    const failure: IntentFailure = {
+      command,
+      code: result.code,
+      message: result.message,
+      dataDir,
+      intentId
+    };
+    if (result.code === "intent_already_terminal" && result.currentStatus) {
+      failure.currentStatus = result.currentStatus;
+    }
+    if (action === "apply") {
+      failure.applyPolicy = applyPolicy;
+    }
+    return emitIntentFailure(parsed, io, failure);
+  }
+
+  const payload: JsonPayload = {
+    ok: true,
+    command,
+    dataDir,
+    previousStatus: result.previousStatus,
+    intent: updateIntentToJsonShape(result.intent)
+  };
+  if (action === "apply") {
+    payload["applyPolicy"] = applyPolicy;
+  }
+
+  if (parsed.json) {
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  const record = result.intent;
+  const lines: string[] = [
+    `Update intent ${record.id} ${record.status}`,
+    `Adapter: ${record.adapterKind}`,
+    `Target external id: ${record.targetExternalId ?? "(none)"}`,
+    `Intent type: ${record.intentType}`,
+    `Previous status: ${result.previousStatus}`,
+    `Status: ${record.status}`,
+    `Decision reason: ${record.decisionReason ?? "(none)"}`,
+    `Applied at: ${record.appliedAt ?? "(unset)"}`,
+    `Skipped at: ${record.skippedAt ?? "(unset)"}`,
+    `Canceled at: ${record.canceledAt ?? "(unset)"}`,
+    `Updated at: ${record.updatedAt}`,
+    `Data dir: ${dataDir}`
+  ];
+  if (action === "apply") {
+    lines.push(
+      `Apply policy: ${applyPolicy.effective} (${applyPolicy.source}); ${applyPolicy.note}`
+    );
+  }
+  lines.push("");
+  write(io.stdout, lines.join("\n"));
+  return 0;
+}
+
+function buildIntentApplyPolicySummary(
+  repoOverride: string | undefined,
+  externalApplyRequested: boolean
+): IntentApplyPolicyResolution {
+  let effective: UpdateIntentApplyPolicy = DEFAULT_INTENT_APPLY_POLICY;
+  let source: PolicyEffectiveFieldSource = "builtin_default";
+  if (typeof repoOverride === "string" && repoOverride.trim().length > 0) {
+    const load = loadMomentumPolicy(repoOverride);
+    if (!load.ok) {
+      return {
+        ok: false,
+        code: load.code,
+        message: load.error,
+        path: load.path
+      };
+    }
+    if (load.ok && load.present) {
+      const resolved = resolveIntentApplyPolicy(load.policy.config);
+      effective = resolved.value;
+      source = resolved.source;
+    }
+  }
+  return {
+    ok: true,
+    summary: {
+      ...buildFallbackIntentApplyPolicySummary(externalApplyRequested),
+      effective,
+      source
+    }
+  };
+}
+
+function emitIntentFailure(
+  parsed: ParsedFlags,
+  io: CliIo,
+  failure: IntentFailure
+): number {
+  const payload: Record<string, unknown> = {
+    ok: false,
+    command: failure.command,
+    code: failure.code,
+    message: failure.message
+  };
+  if (failure.dataDir !== undefined) payload["dataDir"] = failure.dataDir;
+  if (failure.intentId !== undefined) payload["intentId"] = failure.intentId;
+  if (failure.goalId !== undefined) payload["goalId"] = failure.goalId;
+  if (failure.sourceItemId !== undefined) {
+    payload["sourceItemId"] = failure.sourceItemId;
+  }
+  if (failure.evidenceRecordId !== undefined) {
+    payload["evidenceRecordId"] = failure.evidenceRecordId;
+  }
+  if (failure.status !== undefined) payload["status"] = failure.status;
+  if (failure.currentStatus !== undefined) {
+    payload["currentStatus"] = failure.currentStatus;
+  }
+  if (failure.applyPolicy !== undefined) {
+    payload["applyPolicy"] = failure.applyPolicy;
+  }
+
+  if (parsed.json) {
+    writeJson(io.stderr, payload);
+    return 1;
+  }
+  write(io.stderr, `${failure.message}\n`);
+  return 1;
+}
+
+function isUpdateIntentStatus(value: string): value is UpdateIntentStatus {
+  return (UPDATE_INTENT_STATUSES as readonly string[]).includes(value);
+}
+
+function updateIntentToJsonShape(record: UpdateIntent): Record<string, unknown> {
+  return {
+    id: record.id,
+    adapterKind: record.adapterKind,
+    targetExternalId: record.targetExternalId,
+    intentType: record.intentType,
+    payload: record.payload,
+    reason: record.reason,
+    goalId: record.goalId,
+    sourceItemId: record.sourceItemId,
+    evidenceRecordId: record.evidenceRecordId,
+    status: record.status,
+    idempotencyKey: record.idempotencyKey,
+    decisionReason: record.decisionReason,
+    errorCode: record.errorCode,
+    errorMessage: record.errorMessage,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+    appliedAt: record.appliedAt,
+    skippedAt: record.skippedAt,
+    canceledAt: record.canceledAt
+  };
 }
 
 function daemon(parsed: ParsedFlags, io: CliIo): number | Promise<number> {
@@ -2628,6 +3386,9 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
   } else {
     lines.push("policy (MOMENTUM.md): pass --repo <path> to inspect repo policy");
   }
+  lines.push(
+    `intent_apply_policy: ${policyPayload.effectiveIntentApply.value} (${policyPayload.effectiveIntentApply.source})`
+  );
   if (sourcesPayload.ok) {
     lines.push(
       `sources: total=${sourcesPayload.totalSourceItems} linked=${sourcesPayload.linkedSourceItems} unlinked=${sourcesPayload.unlinkedSourceItems}`
@@ -2829,11 +3590,20 @@ type DoctorPolicyPayload = {
     runner: string | null;
     verification: readonly string[] | null;
     verificationTimeoutSec: number | null;
+    intentApplyPolicy: UpdateIntentApplyPolicy | null;
   } | null;
+  effectiveIntentApply: {
+    value: UpdateIntentApplyPolicy;
+    source: PolicyEffectiveFieldSource;
+  };
   error: { code: string; message: string } | null;
 };
 
 function buildDoctorPolicyPayload(repoOverride?: string): DoctorPolicyPayload {
+  const defaultEffective = {
+    value: DEFAULT_INTENT_APPLY_POLICY,
+    source: "builtin_default" as const
+  };
   if (typeof repoOverride !== "string" || repoOverride.trim().length === 0) {
     return {
       repoConfigured: false,
@@ -2842,6 +3612,7 @@ function buildDoctorPolicyPayload(repoOverride?: string): DoctorPolicyPayload {
       path: null,
       hasNotes: false,
       config: null,
+      effectiveIntentApply: defaultEffective,
       error: null
     };
   }
@@ -2855,6 +3626,7 @@ function buildDoctorPolicyPayload(repoOverride?: string): DoctorPolicyPayload {
       path: load.path,
       hasNotes: false,
       config: null,
+      effectiveIntentApply: defaultEffective,
       error: { code: load.code, message: load.error }
     };
   }
@@ -2866,6 +3638,7 @@ function buildDoctorPolicyPayload(repoOverride?: string): DoctorPolicyPayload {
       path: load.path,
       hasNotes: false,
       config: null,
+      effectiveIntentApply: defaultEffective,
       error: null
     };
   }
@@ -2881,8 +3654,10 @@ function buildDoctorPolicyPayload(repoOverride?: string): DoctorPolicyPayload {
         load.policy.config.verification === undefined
           ? null
           : [...load.policy.config.verification],
-      verificationTimeoutSec: load.policy.config.verificationTimeoutSec ?? null
+      verificationTimeoutSec: load.policy.config.verificationTimeoutSec ?? null,
+      intentApplyPolicy: load.policy.config.intentApplyPolicy ?? null
     },
+    effectiveIntentApply: resolveIntentApplyPolicy(load.policy.config),
     error: null
   };
 }
@@ -2892,6 +3667,7 @@ function describePolicyFields(payload: {
     runner: string | null;
     verification: readonly string[] | null;
     verificationTimeoutSec: number | null;
+    intentApplyPolicy?: UpdateIntentApplyPolicy | null;
   } | null;
   hasNotes: boolean;
 }): string {
@@ -2903,6 +3679,9 @@ function describePolicyFields(payload: {
   }
   if (payload.config.verificationTimeoutSec !== null) {
     parts.push(`timeout_sec=${payload.config.verificationTimeoutSec}`);
+  }
+  if (payload.config.intentApplyPolicy) {
+    parts.push(`intent_apply=${payload.config.intentApplyPolicy}`);
   }
   if (payload.hasNotes) parts.push("notes");
   return parts.join(", ");
@@ -3239,6 +4018,14 @@ function emitStatus(
     ...(data.sourceItems.length > 0 ? { sourceItems: data.sourceItems } : {}),
     ...(data.latestEvidence.length > 0
       ? { latestEvidence: data.latestEvidence }
+      : {}),
+    ...(data.pendingUpdateIntents.length > 0
+      ? {
+          totalPendingUpdateIntentCount: data.totalPendingUpdateIntentCount,
+          truncatedPendingUpdateIntents: data.truncatedPendingUpdateIntents,
+          pendingUpdateIntents: data.pendingUpdateIntents,
+          intentStaleThresholdMs: data.intentStaleThresholdMs
+        }
       : {})
   };
 
@@ -3365,6 +4152,31 @@ function emitStatus(
       lines.push(
         `- ${record.occurredAt} [${record.source}/${record.type}] ${record.summary}`
       );
+    }
+  }
+
+  if (data.pendingUpdateIntents.length > 0) {
+    const staleCount = data.pendingUpdateIntents.filter(
+      (intent) => intent.stale
+    ).length;
+    const staleSuffix = staleCount > 0 ? ` (${staleCount} stale)` : "";
+    const shownCount = data.pendingUpdateIntents.length;
+    const totalCount = data.totalPendingUpdateIntentCount;
+    const countLabel = data.truncatedPendingUpdateIntents
+      ? `${shownCount}/${totalCount}`
+      : `${shownCount}`;
+    lines.push(
+      `Pending update intents: ${countLabel}${staleSuffix}`
+    );
+    for (const intent of data.pendingUpdateIntents) {
+      const staleFlag = intent.stale ? " STALE" : "";
+      lines.push(
+        `- ${intent.intentId} [${intent.adapterKind}/${intent.intentType}] ` +
+          `target=${intent.targetExternalId ?? "(none)"} ageMs=${intent.ageMs}${staleFlag}: ${intent.reason}`
+      );
+    }
+    if (data.truncatedPendingUpdateIntents) {
+      lines.push(`... and ${totalCount - shownCount} more`);
     }
   }
 
@@ -3667,6 +4479,7 @@ function parseFlags(argv: string[]): ParsedFlags {
   let foreground = false;
   let now = false;
   let dryRun = false;
+  let externalApply = false;
   let repo: string | undefined;
   let runner: string | undefined;
   let workerId: string | undefined;
@@ -3690,6 +4503,9 @@ function parseFlags(argv: string[]): ParsedFlags {
   let evidenceType: string | undefined;
   let limit: number | undefined;
   let staleThresholdHours: number | undefined;
+  let intentStaleThresholdDays: number | undefined;
+  let status: string | undefined;
+  let evidenceRecord: string | undefined;
   let error: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -3715,6 +4531,11 @@ function parseFlags(argv: string[]): ParsedFlags {
 
     if (arg === "--dry-run") {
       dryRun = true;
+      continue;
+    }
+
+    if (arg === "--external-apply") {
+      externalApply = true;
       continue;
     }
 
@@ -3937,6 +4758,28 @@ function parseFlags(argv: string[]): ParsedFlags {
       continue;
     }
 
+    if (arg === "--status") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --status.";
+      } else {
+        status = value;
+        index += 1;
+      }
+      continue;
+    }
+
+    if (arg === "--evidence-record") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --evidence-record.";
+      } else {
+        evidenceRecord = value;
+        index += 1;
+      }
+      continue;
+    }
+
     if (arg === "--stale-threshold-hours") {
       const value = readFlagValue(argv, index);
       if (value === undefined) {
@@ -3949,6 +4792,24 @@ function parseFlags(argv: string[]): ParsedFlags {
           error ??= `Invalid value for --stale-threshold-hours: ${value}`;
         } else {
           staleThresholdHours = parsedValue;
+        }
+        index += 1;
+      }
+      continue;
+    }
+
+    if (arg === "--intent-stale-threshold-days") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --intent-stale-threshold-days.";
+      } else {
+        const parsedValue = /^\d+(?:\.\d+)?$/.test(value)
+          ? Number.parseFloat(value)
+          : NaN;
+        if (!Number.isFinite(parsedValue) || parsedValue < 0) {
+          error ??= `Invalid value for --intent-stale-threshold-days: ${value}`;
+        } else {
+          intentStaleThresholdDays = parsedValue;
         }
         index += 1;
       }
@@ -4030,7 +4891,7 @@ function parseFlags(argv: string[]): ParsedFlags {
     args.push(arg);
   }
 
-  const parsed: ParsedFlags = { args, json, foreground, now, dryRun };
+  const parsed: ParsedFlags = { args, json, foreground, now, dryRun, externalApply };
   if (repo !== undefined) parsed.repo = repo;
   if (runner !== undefined) parsed.runner = runner;
   if (dataDir !== undefined) parsed.dataDir = dataDir;
@@ -4056,6 +4917,11 @@ function parseFlags(argv: string[]): ParsedFlags {
   if (staleThresholdHours !== undefined) {
     parsed.staleThresholdHours = staleThresholdHours;
   }
+  if (intentStaleThresholdDays !== undefined) {
+    parsed.intentStaleThresholdDays = intentStaleThresholdDays;
+  }
+  if (status !== undefined) parsed.status = status;
+  if (evidenceRecord !== undefined) parsed.evidenceRecord = evidenceRecord;
   if (error !== undefined) parsed.error = error;
 
   return parsed;

@@ -36,8 +36,11 @@ import {
   listLatestEvidenceRecordsForGoal,
   type EvidenceRecord
 } from "./evidence-records.js";
+import { listUpdateIntents, type UpdateIntent } from "./update-intents.js";
+import { DEFAULT_INTENT_STALE_THRESHOLD_MS } from "./project-rollup.js";
 
 export const DEFAULT_GOAL_STATUS_EVIDENCE_LIMIT = 5;
+export const DEFAULT_GOAL_STATUS_PENDING_INTENT_LIMIT = 10;
 
 export type GoalStatusErrorCode =
   | "invalid_input"
@@ -243,6 +246,27 @@ export type GoalStatusEvidenceSummary = {
   sourceItemId: string | null;
 };
 
+/**
+ * Per-goal pending external update intent summary surfaced through `status`
+ * and `handoff` (NGX-293 / M5-06). Mirrors the rollup pending-intent shape
+ * but is scoped to the goal under inspection and uses the same default stale
+ * TTL (30 days) so operators see the same `stale` semantics on both surfaces
+ * without having to re-derive ageMs.
+ */
+export type GoalStatusPendingIntentSummary = {
+  intentId: string;
+  adapterKind: string;
+  intentType: string;
+  targetExternalId: string | null;
+  reason: string;
+  goalId: string | null;
+  sourceItemId: string | null;
+  evidenceRecordId: string | null;
+  createdAt: number;
+  ageMs: number;
+  stale: boolean;
+};
+
 export type GoalStatusPolicySummary = {
   configured: boolean;
   present: boolean;
@@ -291,6 +315,10 @@ export type GoalStatusSuccess = {
   policy: GoalStatusPolicySummary;
   sourceItems: SourceItemSummary[];
   latestEvidence: GoalStatusEvidenceSummary[];
+  pendingUpdateIntents: GoalStatusPendingIntentSummary[];
+  totalPendingUpdateIntentCount: number;
+  truncatedPendingUpdateIntents: boolean;
+  intentStaleThresholdMs: number;
 };
 
 export type GoalStatusResult = GoalStatusError | GoalStatusSuccess;
@@ -415,6 +443,23 @@ export function loadGoalStatus(input: LoadGoalStatusInput = {}): GoalStatusResul
       goal.id,
       DEFAULT_GOAL_STATUS_EVIDENCE_LIMIT
     ).map(toEvidenceSummary);
+    const intentStaleThresholdMs = DEFAULT_INTENT_STALE_THRESHOLD_MS;
+    const sourceItemIds = new Set(sourceItems.map((item) => item.id));
+    const allPendingUpdateIntents = listUpdateIntents(db, {
+      status: "pending"
+    }).filter((intent) => {
+      if (intent.goalId === goal.id) return true;
+      return (
+        intent.sourceItemId !== null &&
+        sourceItemIds.has(intent.sourceItemId)
+      );
+    });
+    const pendingUpdateIntents = allPendingUpdateIntents
+      .slice(0, DEFAULT_GOAL_STATUS_PENDING_INTENT_LIMIT)
+      .map((intent) => toPendingIntentSummary(intent, intentStaleThresholdMs));
+    const totalPendingUpdateIntentCount = allPendingUpdateIntents.length;
+    const truncatedPendingUpdateIntents =
+      totalPendingUpdateIntentCount > pendingUpdateIntents.length;
 
     return {
       ok: true,
@@ -452,11 +497,36 @@ export function loadGoalStatus(input: LoadGoalStatusInput = {}): GoalStatusResul
       staleRecovery,
       policy,
       sourceItems,
-      latestEvidence
+      latestEvidence,
+      pendingUpdateIntents,
+      totalPendingUpdateIntentCount,
+      truncatedPendingUpdateIntents,
+      intentStaleThresholdMs
     };
   } finally {
     db?.close();
   }
+}
+
+function toPendingIntentSummary(
+  intent: UpdateIntent,
+  staleThresholdMs: number,
+  now: number = Date.now()
+): GoalStatusPendingIntentSummary {
+  const ageMs = Math.max(0, now - intent.createdAt);
+  return {
+    intentId: intent.id,
+    adapterKind: intent.adapterKind,
+    intentType: intent.intentType,
+    targetExternalId: intent.targetExternalId,
+    reason: intent.reason,
+    goalId: intent.goalId,
+    sourceItemId: intent.sourceItemId,
+    evidenceRecordId: intent.evidenceRecordId,
+    createdAt: intent.createdAt,
+    ageMs,
+    stale: ageMs > staleThresholdMs
+  };
 }
 
 function toEvidenceSummary(record: EvidenceRecord): GoalStatusEvidenceSummary {

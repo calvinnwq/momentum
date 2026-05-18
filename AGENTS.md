@@ -42,7 +42,7 @@ Milestone 5 (Source Adapters and Evidence Sync) makes Momentum source-and-eviden
 - Momentum's core primitive is still `Goal`. `SourceItem` records are normalized intake from external systems (Linear, GitHub, Jira, etc.) and remain **context**, not the completion authority for any Goal.
 - The new M5 vocabulary is: `SourceItem`, `SourceAdapter`, source snapshot, reconciliation run, evidence artifact, external update intent, and project rollup. The terms refer to the durable schemas and operator-facing surfaces M5 introduces; they do not rename any M3/M4 primitive.
 - The M5 trust boundary is read-first: source adapters read external systems and write only to Momentum's local durable tables. External tracker writes are represented as durable, policy-gated update intents. Momentum does **not** auto-apply intents in M5. Credentials never enter Momentum durable state or docs.
-- Planned M5 issue order (matches the Linear milestone): NGX-287 (M5-00 contract / roadmap / docs setup), NGX-288 (M5-01 SourceItem state model and adapter boundary, done), NGX-289 (M5-02 Linear source adapter read and reconciliation, done), NGX-290 (Goal / source linkage and planning context, done), NGX-291 (M5-04 workflow evidence artifact ingestion, done), NGX-292 (project rollup and status surfaces, done), NGX-293 (policy-gated external update intents), and NGX-294 (M5 smoke, docs, and milestone closeout).
+- Planned M5 issue order (matches the Linear milestone): NGX-287 (M5-00 contract / roadmap / docs setup), NGX-288 (M5-01 SourceItem state model and adapter boundary, done), NGX-289 (M5-02 Linear source adapter read and reconciliation, done), NGX-290 (Goal / source linkage and planning context, done), NGX-291 (M5-04 workflow evidence artifact ingestion, done), NGX-292 (project rollup and status surfaces, done), NGX-293 (policy-gated external update intents, done), and NGX-294 (M5 smoke, docs, and milestone closeout).
 - M5 composition with existing contracts: Goal / Iteration / Job / RunnerAdapter / daemon / recovery / handoff / `MOMENTUM.md` policy precedence all remain wire-stable. SourceItem / evidence / intent fields are additive on `goal start`, `status`, `logs`, `handoff`, and `doctor`. Iteration prompts may carry source / evidence context, but those notes stay context-only and cannot override Momentum safety contracts (no commits, no pushes, no staged changes).
 - M5 explicit non-goals: automatic external tracker writes, inbound webhooks, dashboards / UI surfaces, per-source-item worktrees / parallel same-repo Goals, background runner supervision, strong sandboxing (container / VM / seccomp), cooperative mid-job cancellation / signal handling, and remote git operations.
 - The `doctor --json` milestone string stays at the M4 closeout marker for the entire M5 work-in-progress phase. Only NGX-294 (M5-07) intentionally flips it to an M5 closeout marker, and only then.
@@ -107,6 +107,11 @@ Common commands:
 - `recovery clear`
 - `evidence ingest`
 - `evidence list`
+- `intent list`
+- `intent get`
+- `intent apply`
+- `intent skip`
+- `intent cancel`
 - `doctor`
 - Preserve stable CLI behavior across both JSON and text outputs.
 - When changing user-facing output, update tests and verify callers that rely on stable formatting.
@@ -114,7 +119,7 @@ Common commands:
 
 ## Data and artifact layout
 - State uses `MOMENTUM_HOME` env var → `~/.momentum` fallback; override with `--data-dir`.
-- SQLite database at `<data-dir>/momentum.db` with `goals`, `jobs`, `events`, `repo_locks`, `daemon_runs`, `source_items`, `source_snapshots`, `source_reconciliation_runs`, and `evidence_records` tables.
+- SQLite database at `<data-dir>/momentum.db` with `goals`, `jobs`, `events`, `repo_locks`, `daemon_runs`, `source_items`, `source_snapshots`, `source_reconciliation_runs`, `evidence_records`, and `update_intents` tables.
 - Goal artifacts at `<data-dir>/goals/<goal-id>/`: `goal.md`, `ledger.md`, `handoff.md`, `handoff.json`, optional `recovery.md` (created lazily when manual recovery is classified), and `iterations/<n>/{prompt.md,runner.log,verification.log,result.json}` by default; runner profiles such as `trusted-shell` and `acp` may report a different result JSON file inside the iteration directory via `trusted_shell.result_file` / `acp.result_file`.
 - Avoid hard-coded paths tied to a single user.
 - Only use explicit local paths when existing documentation in-repo explicitly mandates them.

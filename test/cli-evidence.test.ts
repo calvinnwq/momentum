@@ -6,6 +6,7 @@ import path from "node:path";
 import { runCli } from "../src/cli.js";
 import { openDb } from "../src/db.js";
 import { listEvidenceRecords } from "../src/evidence-records.js";
+import { listUpdateIntents } from "../src/update-intents.js";
 
 type RunResult = {
   code: number;
@@ -115,20 +116,28 @@ function buildWorkflowFixture(rootDir: string, runId: string): string {
   return runDir;
 }
 
-function seedGoal(dataDir: string, goalId: string): void {
+function seedGoal(
+  dataDir: string,
+  goalId: string,
+  state: string = "queued"
+): void {
   const db = openDb(dataDir);
   try {
     db.prepare(
       `INSERT INTO goals
-         (id, title, branch, artifact_dir, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    ).run(goalId, "evidence goal", "momentum/test", "/tmp/test", 1, 1);
+         (id, title, branch, artifact_dir, state, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(goalId, "evidence goal", "momentum/test", "/tmp/test", state, 1, 1);
   } finally {
     db.close();
   }
 }
 
-function seedSourceItem(dataDir: string, sourceItemId: string): void {
+function seedSourceItem(
+  dataDir: string,
+  sourceItemId: string,
+  goalId: string | null = null
+): void {
   const db = openDb(dataDir);
   try {
     db.prepare(
@@ -140,14 +149,14 @@ function seedSourceItem(dataDir: string, sourceItemId: string): void {
     ).run(
       sourceItemId,
       "linear",
-      "ext-1",
-      "NGX-291",
-      "https://linear.app/example/issue/NGX-291",
+      `ext-${sourceItemId}`,
+      `KEY-${sourceItemId}`,
+      `https://linear.app/example/issue/${sourceItemId}`,
       "Workflow evidence ingestion",
       "open",
       "{}",
       1,
-      null,
+      goalId,
       1,
       1
     );
@@ -411,6 +420,129 @@ describe("momentum evidence ingest", () => {
     }
   });
 
+  it("creates a pending source_satisfied intent when ingesting completed goal evidence", async () => {
+    const dataDir = makeTempDir();
+    const workflowRoot = makeTempDir("momentum-cli-evidence-workflows-");
+    const runDir = buildWorkflowFixture(workflowRoot, "cwfp-intentgoal000");
+    seedGoal(dataDir, "g-evidence-intent", "completed");
+    seedSourceItem(dataDir, "si-intent-goal", "g-evidence-intent");
+
+    const result = await run([
+      "evidence",
+      "ingest",
+      "--path",
+      runDir,
+      "--goal",
+      "g-evidence-intent",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      counts: { intentsCreated: number; intentsReplayed: number };
+      intentEvaluations: Array<{
+        outcome: string;
+        intent?: { status: string; sourceItemId: string | null };
+      }>;
+    };
+    expect(payload.counts.intentsCreated).toBe(1);
+    expect(payload.counts.intentsReplayed).toBe(0);
+    expect(payload.intentEvaluations[0]?.outcome).toBe("intent_created");
+    expect(payload.intentEvaluations[0]?.intent).toMatchObject({
+      status: "pending",
+      sourceItemId: "si-intent-goal"
+    });
+
+    const db = openDb(dataDir);
+    try {
+      const intents = listUpdateIntents(db, {
+        status: "pending",
+        goalId: "g-evidence-intent"
+      });
+      expect(intents).toHaveLength(1);
+      expect(intents[0]?.sourceItemId).toBe("si-intent-goal");
+      expect(intents[0]?.intentType).toBe("source_satisfied");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("reports every pending source_satisfied intent created for a multi-source completed goal", async () => {
+    const dataDir = makeTempDir();
+    const workflowRoot = makeTempDir("momentum-cli-evidence-workflows-");
+    const runDir = buildWorkflowFixture(workflowRoot, "cwfp-intentmulti00");
+    seedGoal(dataDir, "g-evidence-multi", "completed");
+    seedSourceItem(dataDir, "si-intent-a", "g-evidence-multi");
+    seedSourceItem(dataDir, "si-intent-b", "g-evidence-multi");
+
+    const result = await run([
+      "evidence",
+      "ingest",
+      "--path",
+      runDir,
+      "--goal",
+      "g-evidence-multi",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      counts: { intentsCreated: number };
+      intentEvaluations: Array<{
+        outcome: string;
+        intent?: { sourceItemId: string | null };
+      }>;
+    };
+    expect(payload.counts.intentsCreated).toBe(2);
+    expect(payload.intentEvaluations.map((entry) => entry.outcome)).toEqual([
+      "intent_created",
+      "intent_created"
+    ]);
+    expect(
+      payload.intentEvaluations.map((entry) => entry.intent?.sourceItemId).sort()
+    ).toEqual(["si-intent-a", "si-intent-b"]);
+  });
+
+  it("reports an intent warning when multi-source evidence covers only one linked source item", async () => {
+    const dataDir = makeTempDir();
+    const workflowRoot = makeTempDir("momentum-cli-evidence-workflows-");
+    const runDir = buildWorkflowFixture(workflowRoot, "cwfp-intentpartial");
+    seedGoal(dataDir, "g-evidence-partial", "completed");
+    seedSourceItem(dataDir, "si-covered", "g-evidence-partial");
+    seedSourceItem(dataDir, "si-uncovered", "g-evidence-partial");
+
+    const result = await run([
+      "evidence",
+      "ingest",
+      "--path",
+      runDir,
+      "--source-item",
+      "si-covered",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      counts: { intentsCreated: number; intentWarnings: number };
+      intentEvaluations: Array<{
+        outcome: string;
+        warning?: { sourceItemId: string };
+      }>;
+    };
+    expect(payload.counts.intentsCreated).toBe(1);
+    expect(payload.counts.intentWarnings).toBe(1);
+    expect(payload.intentEvaluations.map((entry) => entry.outcome)).toEqual([
+      "intent_created",
+      "evidence_insufficient"
+    ]);
+    expect(payload.intentEvaluations[1]?.warning?.sourceItemId).toBe(
+      "si-uncovered"
+    );
+  });
+
   it("rejects --goal pointing at a missing goal before parsing", async () => {
     const dataDir = makeTempDir();
     const workflowRoot = makeTempDir("momentum-cli-evidence-workflows-");
@@ -506,6 +638,51 @@ describe("momentum evidence ingest", () => {
     try {
       const records = listEvidenceRecords(db, { sourceItemId: "si-1" });
       expect(records.length).toBe(5);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("creates a pending source_satisfied intent from source-item-linked completed goal evidence", async () => {
+    const dataDir = makeTempDir();
+    const workflowRoot = makeTempDir("momentum-cli-evidence-workflows-");
+    const runDir = buildWorkflowFixture(workflowRoot, "cwfp-intentsource00");
+    seedGoal(dataDir, "g-source-intent", "completed");
+    seedSourceItem(dataDir, "si-intent-source", "g-source-intent");
+
+    const result = await run([
+      "evidence",
+      "ingest",
+      "--path",
+      runDir,
+      "--source-item",
+      "si-intent-source",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      counts: { intentsCreated: number };
+      intentEvaluations: Array<{
+        outcome: string;
+        verificationEvidence?: { sourceItemId: string | null };
+      }>;
+    };
+    expect(payload.counts.intentsCreated).toBe(1);
+    expect(payload.intentEvaluations[0]?.outcome).toBe("intent_created");
+    expect(payload.intentEvaluations[0]?.verificationEvidence).toMatchObject({
+      sourceItemId: "si-intent-source"
+    });
+
+    const db = openDb(dataDir);
+    try {
+      const intents = listUpdateIntents(db, {
+        status: "pending",
+        goalId: "g-source-intent"
+      });
+      expect(intents).toHaveLength(1);
+      expect(intents[0]?.sourceItemId).toBe("si-intent-source");
     } finally {
       db.close();
     }
