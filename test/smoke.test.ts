@@ -4222,3 +4222,263 @@ describe("Milestone 4 real-runner end-to-end smoke (NGX-286)", () => {
     120_000
   );
 });
+
+const M5_SMOKE_RUN_ID = "smoke-m5-workflow-run-1";
+
+function writeM5WorkflowFixture(rootDir: string): string {
+  const runDir = path.join(rootDir, ".agent-workflows", M5_SMOKE_RUN_ID);
+  fs.mkdirSync(runDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(runDir, "plan.json"),
+    JSON.stringify(
+      {
+        runId: M5_SMOKE_RUN_ID,
+        schemaVersion: 1,
+        mode: "execute-ready",
+        profile: "momentum-m5-smoke",
+        objective: "NGX-294 smoke fixture for evidence ingestion",
+        resolvedScope: {
+          issues: ["NGX-294"],
+          source: "explicit",
+          status: "resolved"
+        }
+      },
+      null,
+      2
+    )
+  );
+  const ledgerLines = [
+    {
+      runId: M5_SMOKE_RUN_ID,
+      step: "preflight",
+      status: "complete",
+      ts: "2026-05-18T09:00:00Z"
+    },
+    {
+      runId: M5_SMOKE_RUN_ID,
+      step: "implementation",
+      status: "started",
+      ts: "2026-05-18T09:01:00Z"
+    },
+    {
+      runId: M5_SMOKE_RUN_ID,
+      step: "implementation",
+      status: "complete",
+      ts: "2026-05-18T09:30:00Z"
+    }
+  ];
+  fs.writeFileSync(
+    path.join(runDir, "ledger.jsonl"),
+    `${ledgerLines.map((line) => JSON.stringify(line)).join("\n")}\n`
+  );
+  return runDir;
+}
+
+describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () => {
+  it(
+    "ingests workflow fixtures and surfaces them through evidence list and doctor",
+    () => {
+      const dataDir = makeTempDir("momentum-smoke-m5-evidence-data-");
+      const fixtureRoot = makeTempDir("momentum-smoke-m5-evidence-fixture-");
+      const runDir = writeM5WorkflowFixture(fixtureRoot);
+
+      const ingest = runCliBinary([
+        "evidence",
+        "ingest",
+        "--path",
+        runDir,
+        "--data-dir",
+        dataDir,
+        "--json"
+      ]);
+      expect(ingest.code, `evidence ingest stderr: ${ingest.stderr}`).toBe(0);
+      const ingestPayload = JSON.parse(ingest.stdout) as Record<string, unknown>;
+      expect(ingestPayload).toMatchObject({
+        ok: true,
+        command: "evidence ingest",
+        dataDir,
+        path: runDir,
+        goalId: null,
+        sourceItemId: null
+      });
+      const ingestCounts = ingestPayload["counts"] as Record<string, number>;
+      expect(ingestCounts.observed).toBe(4);
+      expect(ingestCounts.created).toBe(4);
+      expect(ingestCounts.skipped).toBe(0);
+      expect(ingestCounts.errors).toBe(0);
+      expect(ingestCounts.diagnostics).toBe(0);
+      const createdTypes = (ingestPayload["created"] as Array<Record<string, unknown>>)
+        .map((record) => record["type"])
+        .sort();
+      expect(createdTypes).toEqual([
+        "implementation_complete",
+        "implementation_started",
+        "plan_created",
+        "preflight_complete"
+      ]);
+
+      // Re-running ingestion is idempotent via stable ingest_key.
+      const reIngest = runCliBinary([
+        "evidence",
+        "ingest",
+        "--path",
+        runDir,
+        "--data-dir",
+        dataDir,
+        "--json"
+      ]);
+      expect(
+        reIngest.code,
+        `re-ingest stderr: ${reIngest.stderr}`
+      ).toBe(0);
+      const reIngestPayload = JSON.parse(reIngest.stdout) as Record<
+        string,
+        unknown
+      >;
+      const reIngestCounts = reIngestPayload["counts"] as Record<string, number>;
+      expect(reIngestCounts.observed).toBe(4);
+      expect(reIngestCounts.created).toBe(0);
+      expect(reIngestCounts.skipped).toBe(4);
+
+      const list = runCliBinary([
+        "evidence",
+        "list",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ]);
+      expect(list.code, `evidence list stderr: ${list.stderr}`).toBe(0);
+      const listPayload = JSON.parse(list.stdout) as Record<string, unknown>;
+      expect(listPayload).toMatchObject({
+        ok: true,
+        command: "evidence list",
+        dataDir
+      });
+      expect(listPayload["count"]).toBe(4);
+      const listedTypes = (listPayload["records"] as Array<Record<string, unknown>>)
+        .map((record) => record["type"])
+        .sort();
+      expect(listedTypes).toEqual([
+        "implementation_complete",
+        "implementation_started",
+        "plan_created",
+        "preflight_complete"
+      ]);
+      const records = listPayload["records"] as Array<Record<string, unknown>>;
+      for (const record of records) {
+        expect(record["source"]).toBe("agent-workflow");
+        expect(record["formatVersion"]).toBe(1);
+        expect(typeof record["ingestKey"]).toBe("string");
+        expect((record["ingestKey"] as string).startsWith("agent-workflow:")).toBe(
+          true
+        );
+      }
+
+      const filtered = runCliBinary([
+        "evidence",
+        "list",
+        "--type",
+        "plan_created",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ]);
+      expect(filtered.code, `filtered evidence list stderr: ${filtered.stderr}`).toBe(
+        0
+      );
+      const filteredPayload = JSON.parse(filtered.stdout) as Record<
+        string,
+        unknown
+      >;
+      expect(filteredPayload["count"]).toBe(1);
+      expect(
+        (filteredPayload["records"] as Array<Record<string, unknown>>)[0]?.["type"]
+      ).toBe("plan_created");
+
+      const doctor = runCliBinary([
+        "doctor",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ]);
+      expect(doctor.code, `doctor stderr: ${doctor.stderr}`).toBe(0);
+      const doctorPayload = JSON.parse(doctor.stdout) as Record<string, unknown>;
+      const evidencePayload = doctorPayload["evidence"] as Record<string, unknown>;
+      expect(evidencePayload).toMatchObject({
+        ok: true,
+        totalRecords: 4,
+        goalLinkedRecords: 0,
+        sourceItemLinkedRecords: 0
+      });
+    },
+    60_000
+  );
+
+  it(
+    "reports an empty intent list cleanly when no update intents exist",
+    () => {
+      const dataDir = makeTempDir("momentum-smoke-m5-intent-data-");
+      const result = runCliBinary([
+        "intent",
+        "list",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ]);
+      expect(result.code, `intent list stderr: ${result.stderr}`).toBe(0);
+      const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+      expect(payload).toMatchObject({
+        ok: true,
+        command: "intent list",
+        dataDir,
+        count: 0
+      });
+      expect(payload["intents"]).toEqual([]);
+    },
+    60_000
+  );
+
+  it(
+    "reports a deterministic project status rollup when no source items exist",
+    () => {
+      const dataDir = makeTempDir("momentum-smoke-m5-project-data-");
+      const result = runCliBinary([
+        "project",
+        "status",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ]);
+      expect(
+        result.code,
+        `project status stderr: ${result.stderr}`
+      ).toBe(0);
+      const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+      expect(payload).toMatchObject({
+        ok: true,
+        command: "project status",
+        dataDir
+      });
+      const counts = payload["counts"] as Record<string, Record<string, unknown>>;
+      expect(counts.sourceItems).toMatchObject({
+        total: 0,
+        linkedToGoal: 0,
+        unlinked: 0
+      });
+      expect(counts.goals).toMatchObject({ total: 0, needingManualRecovery: 0 });
+      expect(counts.evidence).toMatchObject({
+        totalRecords: 0,
+        goalsWithEvidence: 0,
+        goalsWithoutEvidence: 0
+      });
+      expect(payload["sourceItems"]).toEqual([]);
+      expect(payload["mismatches"]).toEqual([]);
+      expect(payload["pendingUpdateIntents"]).toEqual([]);
+      expect(payload["reconciliationWarnings"]).toEqual([]);
+      const nextAction = payload["nextAction"] as Record<string, unknown>;
+      expect(typeof nextAction["kind"]).toBe("string");
+      expect(typeof nextAction["message"]).toBe("string");
+    },
+    60_000
+  );
+});
