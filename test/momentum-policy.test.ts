@@ -5,9 +5,12 @@ import path from "node:path";
 import {
   BUILTIN_DEFAULT_VERIFICATION,
   BUILTIN_DEFAULT_VERIFICATION_TIMEOUT_SEC,
+  DEFAULT_INTENT_APPLY_POLICY,
   MOMENTUM_POLICY_FILENAME,
+  isExternalApplyAllowedByPolicy,
   loadMomentumPolicy,
   parseMomentumPolicy,
+  resolveIntentApplyPolicy,
   resolvePolicyEffectiveValues,
   resolvePolicyPath
 } from "../src/momentum-policy.js";
@@ -93,6 +96,7 @@ Repo policy notes:
       "pnpm typecheck"
     ]);
     expect(result.policy.config.verificationTimeoutSec).toBe(1800);
+    expect(result.policy.config.intentApplyPolicy).toBeUndefined();
     expect(result.policy.notes).toContain("Repo policy notes:");
     expect(result.policy.notes).toContain("Prefer focused tests");
   });
@@ -236,7 +240,8 @@ describe("resolvePolicyEffectiveValues", () => {
       policyConfig: {
         runner: undefined,
         verification: ["policy cmd"],
-        verificationTimeoutSec: 999
+        verificationTimeoutSec: 999,
+        intentApplyPolicy: undefined
       }
     });
     expect(eff.verification).toEqual(["goal cmd"]);
@@ -254,7 +259,8 @@ describe("resolvePolicyEffectiveValues", () => {
       policyConfig: {
         runner: undefined,
         verification: ["policy cmd"],
-        verificationTimeoutSec: 1200
+        verificationTimeoutSec: 1200,
+        intentApplyPolicy: undefined
       }
     });
     expect(eff.verification).toEqual(["policy cmd"]);
@@ -277,5 +283,113 @@ describe("resolvePolicyEffectiveValues", () => {
     );
     expect(eff.source.verification).toBe("builtin_default");
     expect(eff.source.verificationTimeoutSec).toBe("builtin_default");
+  });
+});
+
+describe("parseMomentumPolicy intent_apply_policy", () => {
+  it("parses `intent_apply_policy: create_intents_only`", () => {
+    const result = parseMomentumPolicy(
+      `---\nintent_apply_policy: create_intents_only\n---\n`
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.policy.config.intentApplyPolicy).toBe("create_intents_only");
+  });
+
+  it("parses `intent_apply_policy: external_apply_allowed`", () => {
+    const result = parseMomentumPolicy(
+      `---\nintent_apply_policy: external_apply_allowed\n---\n`
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.policy.config.intentApplyPolicy).toBe(
+      "external_apply_allowed"
+    );
+  });
+
+  it("treats an empty `intent_apply_policy` as unset", () => {
+    const result = parseMomentumPolicy(`---\nintent_apply_policy:\n---\n`);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.policy.config.intentApplyPolicy).toBeUndefined();
+  });
+
+  it("rejects an unknown `intent_apply_policy` string with policy_schema_invalid", () => {
+    const result = parseMomentumPolicy(
+      `---\nintent_apply_policy: write_everything\n---\n`
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe("policy_schema_invalid");
+    expect(result.error).toMatch(/intent_apply_policy/);
+  });
+
+  it("rejects a non-string `intent_apply_policy` value with policy_schema_invalid", () => {
+    const result = parseMomentumPolicy(
+      `---\nintent_apply_policy: 42\n---\n`
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe("policy_schema_invalid");
+    expect(result.error).toMatch(/intent_apply_policy/);
+  });
+});
+
+describe("resolveIntentApplyPolicy", () => {
+  it("returns the built-in default when no policy config is provided", () => {
+    const resolved = resolveIntentApplyPolicy(undefined);
+    expect(resolved.value).toBe(DEFAULT_INTENT_APPLY_POLICY);
+    expect(resolved.value).toBe("create_intents_only");
+    expect(resolved.source).toBe("builtin_default");
+  });
+
+  it("returns the built-in default when the policy config omits intent_apply_policy", () => {
+    const resolved = resolveIntentApplyPolicy({
+      runner: undefined,
+      verification: undefined,
+      verificationTimeoutSec: undefined,
+      intentApplyPolicy: undefined
+    });
+    expect(resolved.value).toBe("create_intents_only");
+    expect(resolved.source).toBe("builtin_default");
+  });
+
+  it("returns the policy value with source=momentum_policy when explicitly set", () => {
+    const resolved = resolveIntentApplyPolicy({
+      runner: undefined,
+      verification: undefined,
+      verificationTimeoutSec: undefined,
+      intentApplyPolicy: "external_apply_allowed"
+    });
+    expect(resolved.value).toBe("external_apply_allowed");
+    expect(resolved.source).toBe("momentum_policy");
+  });
+});
+
+describe("isExternalApplyAllowedByPolicy", () => {
+  it("returns false for undefined policy (built-in default is create_intents_only)", () => {
+    expect(isExternalApplyAllowedByPolicy(undefined)).toBe(false);
+  });
+
+  it("returns false for create_intents_only", () => {
+    expect(
+      isExternalApplyAllowedByPolicy({
+        runner: undefined,
+        verification: undefined,
+        verificationTimeoutSec: undefined,
+        intentApplyPolicy: "create_intents_only"
+      })
+    ).toBe(false);
+  });
+
+  it("returns true for external_apply_allowed", () => {
+    expect(
+      isExternalApplyAllowedByPolicy({
+        runner: undefined,
+        verification: undefined,
+        verificationTimeoutSec: undefined,
+        intentApplyPolicy: "external_apply_allowed"
+      })
+    ).toBe(true);
   });
 });

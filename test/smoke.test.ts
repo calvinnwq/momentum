@@ -255,7 +255,7 @@ describe("Milestone 1 end-to-end smoke", () => {
         "momentum evidence list [--goal <id>] [--source-item <id>] [--source <source>] [--type <type>] [--limit <n>] [--data-dir <path>] [--json]",
         "momentum intent list [--status <status>] [--adapter <kind>] [--type <intent-type>] [--goal <goal-id>] [--source-item <id>] [--evidence-record <id>] [--limit <n>] [--data-dir <path>] [--json]",
         "momentum intent get <intent-id> [--data-dir <path>] [--json]",
-        "momentum intent apply <intent-id> --reason <text> [--data-dir <path>] [--json]",
+        "momentum intent apply <intent-id> --reason <text> [--repo <path>] [--external-apply] [--data-dir <path>] [--json]",
         "momentum intent skip <intent-id> --reason <text> [--data-dir <path>] [--json]",
         "momentum intent cancel <intent-id> --reason <text> [--data-dir <path>] [--json]",
         "momentum doctor [--repo <path>] [--data-dir <path>] [--json]"

@@ -952,6 +952,221 @@ describe.each([
   });
 });
 
+describe("momentum intent apply policy gating", () => {
+  function makeRepoWithPolicy(policyBody: string): string {
+    const repo = makeTempDir("momentum-cli-intent-policy-repo-");
+    fs.writeFileSync(path.join(repo, "MOMENTUM.md"), policyBody, "utf-8");
+    return repo;
+  }
+
+  it("refuses --external-apply with external_apply_unsupported and surfaces applyPolicy", async () => {
+    const dataDir = makeTempDir();
+    const intentId = seedIntent(dataDir, {
+      adapterKind: "linear",
+      intentType: "source_satisfied",
+      reason: "satisfied",
+      idempotencyKey: "linear:ext-policy-refuse:source_satisfied:goal-policy"
+    });
+
+    const result = await run([
+      "intent",
+      "apply",
+      intentId,
+      "--reason",
+      "operator decision",
+      "--external-apply",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as {
+      ok: false;
+      command: string;
+      code: string;
+      intentId: string;
+      applyPolicy: {
+        effective: string;
+        source: string;
+        externalApplyRequested: boolean;
+        externalApplyPerformed: boolean;
+        note: string;
+      };
+    };
+    expect(payload.ok).toBe(false);
+    expect(payload.command).toBe("intent apply");
+    expect(payload.code).toBe("external_apply_unsupported");
+    expect(payload.intentId).toBe(intentId);
+    expect(payload.applyPolicy.effective).toBe("create_intents_only");
+    expect(payload.applyPolicy.source).toBe("builtin_default");
+    expect(payload.applyPolicy.externalApplyRequested).toBe(true);
+    expect(payload.applyPolicy.externalApplyPerformed).toBe(false);
+    expect(payload.applyPolicy.note).toMatch(/Milestone 5/);
+
+    // The intent itself must remain pending; refusal must not transition it.
+    const db = openDb(dataDir);
+    try {
+      const row = db
+        .prepare("SELECT status FROM update_intents WHERE id = ?")
+        .get(intentId) as { status: string };
+      expect(row.status).toBe("pending");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("usage-errors when --external-apply is paired with a non-apply command", async () => {
+    const dataDir = makeTempDir();
+    const result = await run([
+      "intent",
+      "skip",
+      "some-id",
+      "--reason",
+      "x",
+      "--external-apply",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain(
+      "--external-apply is only supported by `momentum intent apply`."
+    );
+  });
+
+  it("records a manual mark and includes the built-in default applyPolicy when --repo is not set", async () => {
+    const dataDir = makeTempDir();
+    const intentId = seedIntent(dataDir, {
+      adapterKind: "linear",
+      intentType: "source_satisfied",
+      reason: "satisfied",
+      idempotencyKey: "linear:ext-policy-default:source_satisfied:goal-policy"
+    });
+
+    const result = await run([
+      "intent",
+      "apply",
+      intentId,
+      "--reason",
+      "operator decision",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      ok: true;
+      intent: { id: string; status: string };
+      applyPolicy: {
+        effective: string;
+        source: string;
+        externalApplyRequested: boolean;
+        externalApplyPerformed: boolean;
+      };
+    };
+    expect(payload.intent.id).toBe(intentId);
+    expect(payload.intent.status).toBe("applied");
+    expect(payload.applyPolicy.effective).toBe("create_intents_only");
+    expect(payload.applyPolicy.source).toBe("builtin_default");
+    expect(payload.applyPolicy.externalApplyRequested).toBe(false);
+    expect(payload.applyPolicy.externalApplyPerformed).toBe(false);
+  });
+
+  it("surfaces source=momentum_policy when --repo points at a MOMENTUM.md that sets intent_apply_policy", async () => {
+    const dataDir = makeTempDir();
+    const repo = makeRepoWithPolicy(
+      `---\nintent_apply_policy: external_apply_allowed\n---\nrepo policy\n`
+    );
+    const intentId = seedIntent(dataDir, {
+      adapterKind: "linear",
+      intentType: "source_satisfied",
+      reason: "satisfied",
+      idempotencyKey: "linear:ext-policy-repo:source_satisfied:goal-policy"
+    });
+
+    const result = await run([
+      "intent",
+      "apply",
+      intentId,
+      "--reason",
+      "operator decision",
+      "--repo",
+      repo,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      ok: true;
+      applyPolicy: { effective: string; source: string };
+    };
+    expect(payload.applyPolicy.effective).toBe("external_apply_allowed");
+    expect(payload.applyPolicy.source).toBe("momentum_policy");
+  });
+
+  it("refuses --external-apply even when MOMENTUM.md sets external_apply_allowed (M5 trust boundary)", async () => {
+    const dataDir = makeTempDir();
+    const repo = makeRepoWithPolicy(
+      `---\nintent_apply_policy: external_apply_allowed\n---\n`
+    );
+    const intentId = seedIntent(dataDir, {
+      adapterKind: "linear",
+      intentType: "source_satisfied",
+      reason: "satisfied",
+      idempotencyKey:
+        "linear:ext-policy-repo-refuse:source_satisfied:goal-policy"
+    });
+
+    const result = await run([
+      "intent",
+      "apply",
+      intentId,
+      "--reason",
+      "operator decision",
+      "--external-apply",
+      "--repo",
+      repo,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as {
+      code: string;
+      applyPolicy: { effective: string; source: string };
+    };
+    expect(payload.code).toBe("external_apply_unsupported");
+    expect(payload.applyPolicy.effective).toBe("external_apply_allowed");
+    expect(payload.applyPolicy.source).toBe("momentum_policy");
+  });
+
+  it("emits the apply policy line in non-JSON text mode", async () => {
+    const dataDir = makeTempDir();
+    const intentId = seedIntent(dataDir, {
+      adapterKind: "linear",
+      intentType: "source_satisfied",
+      reason: "satisfied",
+      idempotencyKey: "linear:ext-policy-text:source_satisfied:goal-policy"
+    });
+
+    const result = await run([
+      "intent",
+      "apply",
+      intentId,
+      "--reason",
+      "operator decision",
+      "--data-dir",
+      dataDir
+    ]);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(
+      "Apply policy: create_intents_only (builtin_default)"
+    );
+    expect(result.stdout).toContain("Milestone 5");
+  });
+});
+
 describe("momentum intent dispatch", () => {
   it("rejects an unknown intent subcommand", async () => {
     const dataDir = makeTempDir();

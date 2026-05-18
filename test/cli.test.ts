@@ -300,7 +300,12 @@ describe("momentum CLI scaffold", () => {
     expect(cfg).toEqual({
       runner: "trusted-shell",
       verification: ["pnpm test"],
-      verificationTimeoutSec: 1200
+      verificationTimeoutSec: 1200,
+      intentApplyPolicy: null
+    });
+    expect(policy["effectiveIntentApply"]).toEqual({
+      value: "create_intents_only",
+      source: "builtin_default"
     });
   });
 

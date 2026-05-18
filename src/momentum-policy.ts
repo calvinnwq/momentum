@@ -33,10 +33,35 @@ import path from "node:path";
 
 export const MOMENTUM_POLICY_FILENAME = "MOMENTUM.md";
 
+/**
+ * Policy values for the `intent_apply_policy` MOMENTUM.md field introduced by
+ * NGX-293 (M5-06). The field gates whether the `momentum intent apply` CLI is
+ * allowed to perform an external write through an adapter.
+ *
+ * - `create_intents_only` (default): the only safe-for-M5 mode. The apply CLI
+ *   may record an operator's manual mark, but the system refuses to perform
+ *   any external tracker writes. This matches the M5 trust boundary verbatim.
+ * - `external_apply_allowed`: a forward-looking opt-in for future milestones
+ *   that ship adapter-mediated external writes. M5 does not implement any
+ *   external write code path, so requesting an external apply in M5 always
+ *   refuses with `external_apply_unsupported` even when this policy is set.
+ */
+export const UPDATE_INTENT_APPLY_POLICIES = [
+  "create_intents_only",
+  "external_apply_allowed"
+] as const;
+
+export type UpdateIntentApplyPolicy =
+  (typeof UPDATE_INTENT_APPLY_POLICIES)[number];
+
+export const DEFAULT_INTENT_APPLY_POLICY: UpdateIntentApplyPolicy =
+  "create_intents_only";
+
 export type MomentumPolicyConfig = {
   runner: string | undefined;
   verification: readonly string[] | undefined;
   verificationTimeoutSec: number | undefined;
+  intentApplyPolicy: UpdateIntentApplyPolicy | undefined;
 };
 
 export type MomentumPolicy = {
@@ -188,7 +213,8 @@ export function parseMomentumPolicy(
         config: {
           runner: undefined,
           verification: undefined,
-          verificationTimeoutSec: undefined
+          verificationTimeoutSec: undefined,
+          intentApplyPolicy: undefined
         },
         notes: content.trim(),
         rawFrontmatter: Object.freeze({})
@@ -214,10 +240,16 @@ export function parseMomentumPolicy(
   );
   if (!timeoutResult.ok) return timeoutResult;
 
+  const intentApplyResult = parsePolicyIntentApplyPolicy(
+    fields["intent_apply_policy"]
+  );
+  if (!intentApplyResult.ok) return intentApplyResult;
+
   const config: MomentumPolicyConfig = {
     runner: runnerResult.value,
     verification: verificationResult.value,
-    verificationTimeoutSec: timeoutResult.value
+    verificationTimeoutSec: timeoutResult.value,
+    intentApplyPolicy: intentApplyResult.value
   };
 
   return {
@@ -286,6 +318,37 @@ function parsePolicyVerificationTimeout(
     );
   }
   return { ok: true, value: raw };
+}
+
+function parsePolicyIntentApplyPolicy(
+  raw: unknown
+):
+  | { ok: true; value: UpdateIntentApplyPolicy | undefined }
+  | MomentumPolicyParseError {
+  if (raw === undefined || raw === null || raw === "") {
+    return { ok: true, value: undefined };
+  }
+  if (typeof raw !== "string") {
+    return schemaError(
+      "`intent_apply_policy` must be a string when set in MOMENTUM.md."
+    );
+  }
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) {
+    return { ok: true, value: undefined };
+  }
+  if (!isUpdateIntentApplyPolicy(trimmed)) {
+    return schemaError(
+      `\`intent_apply_policy\` must be one of: ${UPDATE_INTENT_APPLY_POLICIES.join(", ")}.`
+    );
+  }
+  return { ok: true, value: trimmed };
+}
+
+function isUpdateIntentApplyPolicy(
+  value: string
+): value is UpdateIntentApplyPolicy {
+  return (UPDATE_INTENT_APPLY_POLICIES as readonly string[]).includes(value);
 }
 
 function schemaError(message: string): MomentumPolicyParseError {
@@ -532,4 +595,39 @@ export function resolvePolicyEffectiveValues(
       verificationTimeoutSec: timeoutSource
     }
   };
+}
+
+export type ResolvedIntentApplyPolicy = {
+  value: UpdateIntentApplyPolicy;
+  source: PolicyEffectiveFieldSource;
+};
+
+/**
+ * Resolve the effective `intent_apply_policy` for the current Goal/repo, with
+ * precedence: MOMENTUM.md frontmatter > built-in default. NGX-293 does not
+ * expose this field to goal frontmatter or CLI overrides; M5 keeps the
+ * effective gate at the repo policy or built-in default to make the
+ * "no auto-apply" trust boundary visible in one place.
+ */
+export function resolveIntentApplyPolicy(
+  policyConfig: MomentumPolicyConfig | undefined
+): ResolvedIntentApplyPolicy {
+  const policyValue = policyConfig?.intentApplyPolicy;
+  if (policyValue !== undefined) {
+    return { value: policyValue, source: "momentum_policy" };
+  }
+  return { value: DEFAULT_INTENT_APPLY_POLICY, source: "builtin_default" };
+}
+
+/**
+ * Convenience check: does the effective policy allow external apply through
+ * an adapter? M5 still does not implement any external write path, so even
+ * `external_apply_allowed` does not authorize an actual external write in
+ * M5 — callers must additionally refuse `--external-apply` with
+ * `external_apply_unsupported` while M5 is in flight.
+ */
+export function isExternalApplyAllowedByPolicy(
+  policyConfig: MomentumPolicyConfig | undefined
+): boolean {
+  return resolveIntentApplyPolicy(policyConfig).value === "external_apply_allowed";
 }

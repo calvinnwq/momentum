@@ -53,7 +53,13 @@ import {
   buildRunnerProfile,
   safeRunnerProfileSummary
 } from "./runner-profile.js";
-import { loadMomentumPolicy } from "./momentum-policy.js";
+import {
+  DEFAULT_INTENT_APPLY_POLICY,
+  loadMomentumPolicy,
+  resolveIntentApplyPolicy,
+  type PolicyEffectiveFieldSource,
+  type UpdateIntentApplyPolicy
+} from "./momentum-policy.js";
 import {
   getSourceItemById,
   linkGoalToSourceItem,
@@ -143,6 +149,7 @@ type ParsedFlags = {
   foreground: boolean;
   now: boolean;
   dryRun: boolean;
+  externalApply: boolean;
   repo?: string;
   runner?: string;
   workerId?: string;
@@ -192,7 +199,7 @@ const COMMANDS = [
   "momentum evidence list [--goal <id>] [--source-item <id>] [--source <source>] [--type <type>] [--limit <n>] [--data-dir <path>] [--json]",
   "momentum intent list [--status <status>] [--adapter <kind>] [--type <intent-type>] [--goal <goal-id>] [--source-item <id>] [--evidence-record <id>] [--limit <n>] [--data-dir <path>] [--json]",
   "momentum intent get <intent-id> [--data-dir <path>] [--json]",
-  "momentum intent apply <intent-id> --reason <text> [--data-dir <path>] [--json]",
+  "momentum intent apply <intent-id> --reason <text> [--repo <path>] [--external-apply] [--data-dir <path>] [--json]",
   "momentum intent skip <intent-id> --reason <text> [--data-dir <path>] [--json]",
   "momentum intent cancel <intent-id> --reason <text> [--data-dir <path>] [--json]",
   "momentum doctor [--repo <path>] [--data-dir <path>] [--json]"
@@ -225,6 +232,14 @@ export async function runCli(
 
   if (parsed.now && !(command === "daemon" && subcommand === "stop")) {
     return usageError("--now is only supported by `momentum daemon stop`.", parsed, io);
+  }
+
+  if (parsed.externalApply && !(command === "intent" && subcommand === "apply")) {
+    return usageError(
+      "--external-apply is only supported by `momentum intent apply`.",
+      parsed,
+      io
+    );
   }
 
   if (command === "doctor") {
@@ -1745,7 +1760,8 @@ type IntentFailureCode =
   | "evidence_record_not_found"
   | "intent_not_found"
   | "reason_required"
-  | "intent_already_terminal";
+  | "intent_already_terminal"
+  | "external_apply_unsupported";
 
 type IntentCommand =
   | "intent list"
@@ -1765,6 +1781,15 @@ type IntentFailure = {
   evidenceRecordId?: string;
   status?: string;
   currentStatus?: UpdateIntentStatus;
+  applyPolicy?: IntentApplyPolicySummary;
+};
+
+type IntentApplyPolicySummary = {
+  effective: UpdateIntentApplyPolicy;
+  source: PolicyEffectiveFieldSource;
+  externalApplyRequested: boolean;
+  externalApplyPerformed: false;
+  note: string;
 };
 
 function intent(parsed: ParsedFlags, io: CliIo): number {
@@ -2072,6 +2097,24 @@ function intentDecision(
     });
   }
 
+  const applyPolicy = buildIntentApplyPolicySummary(
+    parsed.repo,
+    action === "apply" && parsed.externalApply
+  );
+
+  if (action === "apply" && parsed.externalApply) {
+    return emitIntentFailure(parsed, io, {
+      command,
+      code: "external_apply_unsupported",
+      message:
+        "External apply is not supported in Milestone 5. " +
+        "Momentum represents external tracker writes as durable intents only; " +
+        "use `momentum intent apply` without --external-apply to record an operator's manual mark.",
+      intentId,
+      applyPolicy
+    });
+  }
+
   const dataDirOptions: DataDirOptions = {};
   if (io.env !== undefined) dataDirOptions.env = io.env;
   if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
@@ -2117,16 +2160,22 @@ function intentDecision(
     if (result.code === "intent_already_terminal" && result.currentStatus) {
       failure.currentStatus = result.currentStatus;
     }
+    if (action === "apply") {
+      failure.applyPolicy = applyPolicy;
+    }
     return emitIntentFailure(parsed, io, failure);
   }
 
-  const payload = {
+  const payload: JsonPayload = {
     ok: true,
     command,
     dataDir,
     previousStatus: result.previousStatus,
     intent: updateIntentToJsonShape(result.intent)
   };
+  if (action === "apply") {
+    payload["applyPolicy"] = applyPolicy;
+  }
 
   if (parsed.json) {
     writeJson(io.stdout, payload);
@@ -2146,11 +2195,41 @@ function intentDecision(
     `Skipped at: ${record.skippedAt ?? "(unset)"}`,
     `Canceled at: ${record.canceledAt ?? "(unset)"}`,
     `Updated at: ${record.updatedAt}`,
-    `Data dir: ${dataDir}`,
-    ""
+    `Data dir: ${dataDir}`
   ];
+  if (action === "apply") {
+    lines.push(
+      `Apply policy: ${applyPolicy.effective} (${applyPolicy.source}); ${applyPolicy.note}`
+    );
+  }
+  lines.push("");
   write(io.stdout, lines.join("\n"));
   return 0;
+}
+
+function buildIntentApplyPolicySummary(
+  repoOverride: string | undefined,
+  externalApplyRequested: boolean
+): IntentApplyPolicySummary {
+  let effective: UpdateIntentApplyPolicy = DEFAULT_INTENT_APPLY_POLICY;
+  let source: PolicyEffectiveFieldSource = "builtin_default";
+  if (typeof repoOverride === "string" && repoOverride.trim().length > 0) {
+    const load = loadMomentumPolicy(repoOverride);
+    if (load.ok && load.present) {
+      const resolved = resolveIntentApplyPolicy(load.policy.config);
+      effective = resolved.value;
+      source = resolved.source;
+    }
+  }
+  return {
+    effective,
+    source,
+    externalApplyRequested,
+    externalApplyPerformed: false,
+    note:
+      "Milestone 5 does not perform external tracker writes; " +
+      "`intent apply` records the operator's manual mark only."
+  };
 }
 
 function emitIntentFailure(
@@ -2176,6 +2255,9 @@ function emitIntentFailure(
   if (failure.status !== undefined) payload["status"] = failure.status;
   if (failure.currentStatus !== undefined) {
     payload["currentStatus"] = failure.currentStatus;
+  }
+  if (failure.applyPolicy !== undefined) {
+    payload["applyPolicy"] = failure.applyPolicy;
   }
 
   if (parsed.json) {
@@ -3165,6 +3247,9 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
   } else {
     lines.push("policy (MOMENTUM.md): pass --repo <path> to inspect repo policy");
   }
+  lines.push(
+    `intent_apply_policy: ${policyPayload.effectiveIntentApply.value} (${policyPayload.effectiveIntentApply.source})`
+  );
   if (sourcesPayload.ok) {
     lines.push(
       `sources: total=${sourcesPayload.totalSourceItems} linked=${sourcesPayload.linkedSourceItems} unlinked=${sourcesPayload.unlinkedSourceItems}`
@@ -3366,11 +3451,20 @@ type DoctorPolicyPayload = {
     runner: string | null;
     verification: readonly string[] | null;
     verificationTimeoutSec: number | null;
+    intentApplyPolicy: UpdateIntentApplyPolicy | null;
   } | null;
+  effectiveIntentApply: {
+    value: UpdateIntentApplyPolicy;
+    source: PolicyEffectiveFieldSource;
+  };
   error: { code: string; message: string } | null;
 };
 
 function buildDoctorPolicyPayload(repoOverride?: string): DoctorPolicyPayload {
+  const defaultEffective = {
+    value: DEFAULT_INTENT_APPLY_POLICY,
+    source: "builtin_default" as const
+  };
   if (typeof repoOverride !== "string" || repoOverride.trim().length === 0) {
     return {
       repoConfigured: false,
@@ -3379,6 +3473,7 @@ function buildDoctorPolicyPayload(repoOverride?: string): DoctorPolicyPayload {
       path: null,
       hasNotes: false,
       config: null,
+      effectiveIntentApply: defaultEffective,
       error: null
     };
   }
@@ -3392,6 +3487,7 @@ function buildDoctorPolicyPayload(repoOverride?: string): DoctorPolicyPayload {
       path: load.path,
       hasNotes: false,
       config: null,
+      effectiveIntentApply: defaultEffective,
       error: { code: load.code, message: load.error }
     };
   }
@@ -3403,6 +3499,7 @@ function buildDoctorPolicyPayload(repoOverride?: string): DoctorPolicyPayload {
       path: load.path,
       hasNotes: false,
       config: null,
+      effectiveIntentApply: defaultEffective,
       error: null
     };
   }
@@ -3418,8 +3515,10 @@ function buildDoctorPolicyPayload(repoOverride?: string): DoctorPolicyPayload {
         load.policy.config.verification === undefined
           ? null
           : [...load.policy.config.verification],
-      verificationTimeoutSec: load.policy.config.verificationTimeoutSec ?? null
+      verificationTimeoutSec: load.policy.config.verificationTimeoutSec ?? null,
+      intentApplyPolicy: load.policy.config.intentApplyPolicy ?? null
     },
+    effectiveIntentApply: resolveIntentApplyPolicy(load.policy.config),
     error: null
   };
 }
@@ -3429,6 +3528,7 @@ function describePolicyFields(payload: {
     runner: string | null;
     verification: readonly string[] | null;
     verificationTimeoutSec: number | null;
+    intentApplyPolicy?: UpdateIntentApplyPolicy | null;
   } | null;
   hasNotes: boolean;
 }): string {
@@ -3440,6 +3540,9 @@ function describePolicyFields(payload: {
   }
   if (payload.config.verificationTimeoutSec !== null) {
     parts.push(`timeout_sec=${payload.config.verificationTimeoutSec}`);
+  }
+  if (payload.config.intentApplyPolicy) {
+    parts.push(`intent_apply=${payload.config.intentApplyPolicy}`);
   }
   if (payload.hasNotes) parts.push("notes");
   return parts.join(", ");
@@ -4227,6 +4330,7 @@ function parseFlags(argv: string[]): ParsedFlags {
   let foreground = false;
   let now = false;
   let dryRun = false;
+  let externalApply = false;
   let repo: string | undefined;
   let runner: string | undefined;
   let workerId: string | undefined;
@@ -4278,6 +4382,11 @@ function parseFlags(argv: string[]): ParsedFlags {
 
     if (arg === "--dry-run") {
       dryRun = true;
+      continue;
+    }
+
+    if (arg === "--external-apply") {
+      externalApply = true;
       continue;
     }
 
@@ -4633,7 +4742,7 @@ function parseFlags(argv: string[]): ParsedFlags {
     args.push(arg);
   }
 
-  const parsed: ParsedFlags = { args, json, foreground, now, dryRun };
+  const parsed: ParsedFlags = { args, json, foreground, now, dryRun, externalApply };
   if (repo !== undefined) parsed.repo = repo;
   if (runner !== undefined) parsed.runner = runner;
   if (dataDir !== undefined) parsed.dataDir = dataDir;
