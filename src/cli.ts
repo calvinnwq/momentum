@@ -96,6 +96,14 @@ import {
   type ProjectRollupFilters,
   type ProjectRollupOptions
 } from "./project-rollup.js";
+import {
+  UPDATE_INTENT_STATUSES,
+  getUpdateIntentById,
+  listUpdateIntents,
+  type ListUpdateIntentsOptions,
+  type UpdateIntent,
+  type UpdateIntentStatus
+} from "./update-intents.js";
 
 export const VERSION = "0.0.0";
 
@@ -153,6 +161,8 @@ type ParsedFlags = {
   evidenceType?: string;
   limit?: number;
   staleThresholdHours?: number;
+  status?: string;
+  evidenceRecord?: string;
   error?: string;
 };
 
@@ -174,6 +184,8 @@ const COMMANDS = [
   "momentum recovery clear <goal-id> [--reason <text>] [--data-dir <path>] [--json]",
   "momentum evidence ingest --path <file-or-dir> [--goal <id>] [--source-item <id>] [--data-dir <path>] [--json]",
   "momentum evidence list [--goal <id>] [--source-item <id>] [--source <source>] [--type <type>] [--limit <n>] [--data-dir <path>] [--json]",
+  "momentum intent list [--status <status>] [--adapter <kind>] [--type <intent-type>] [--goal <goal-id>] [--source-item <id>] [--evidence-record <id>] [--limit <n>] [--data-dir <path>] [--json]",
+  "momentum intent get <intent-id> [--data-dir <path>] [--json]",
   "momentum doctor [--repo <path>] [--data-dir <path>] [--json]"
 ];
 
@@ -248,6 +260,10 @@ export async function runCli(
 
   if (command === "evidence") {
     return evidence(parsed, io);
+  }
+
+  if (command === "intent") {
+    return intent(parsed, io);
   }
 
   return usageError(`Unknown command: ${command}`, parsed, io);
@@ -1675,6 +1691,340 @@ function emitEvidenceListFailure(
   }
   write(io.stderr, `${failure.message}\n`);
   return 1;
+}
+
+type IntentFailureCode =
+  | "data_dir_failed"
+  | "invalid_status"
+  | "goal_not_found"
+  | "source_item_not_found"
+  | "evidence_record_not_found"
+  | "intent_not_found";
+
+type IntentFailure = {
+  command: "intent list" | "intent get";
+  code: IntentFailureCode;
+  message: string;
+  dataDir?: string;
+  intentId?: string;
+  goalId?: string;
+  sourceItemId?: string;
+  evidenceRecordId?: string;
+  status?: string;
+};
+
+function intent(parsed: ParsedFlags, io: CliIo): number {
+  const subcommand = parsed.args[1];
+  if (!subcommand) {
+    return usageError(
+      "Missing required subcommand for intent. Expected: list, get.",
+      parsed,
+      io
+    );
+  }
+  if (subcommand === "list") {
+    return intentList(parsed, io);
+  }
+  if (subcommand === "get") {
+    return intentGet(parsed, io);
+  }
+  return usageError(`Unknown intent subcommand: ${subcommand}`, parsed, io);
+}
+
+function intentList(parsed: ParsedFlags, io: CliIo): number {
+  if (parsed.args.length > 2) {
+    return usageError(
+      `Unexpected argument for intent list: ${parsed.args[2]}`,
+      parsed,
+      io
+    );
+  }
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return emitIntentFailure(parsed, io, {
+      command: "intent list",
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err)
+    });
+  }
+
+  let statusFilter: UpdateIntentStatus | undefined;
+  if (parsed.status !== undefined && parsed.status.length > 0) {
+    if (!isUpdateIntentStatus(parsed.status)) {
+      return emitIntentFailure(parsed, io, {
+        command: "intent list",
+        code: "invalid_status",
+        message: `Invalid --status value: ${parsed.status}. Expected one of: ${UPDATE_INTENT_STATUSES.join(", ")}.`,
+        dataDir,
+        status: parsed.status
+      });
+    }
+    statusFilter = parsed.status;
+  }
+
+  const filters: ListUpdateIntentsOptions = {};
+  if (statusFilter !== undefined) filters.status = statusFilter;
+  if (parsed.adapter !== undefined && parsed.adapter.length > 0) {
+    filters.adapterKind = parsed.adapter;
+  }
+  if (parsed.evidenceType !== undefined && parsed.evidenceType.length > 0) {
+    filters.intentType = parsed.evidenceType;
+  }
+  if (parsed.goal !== undefined && parsed.goal.length > 0) {
+    filters.goalId = parsed.goal;
+  }
+  if (parsed.sourceItem !== undefined && parsed.sourceItem.length > 0) {
+    filters.sourceItemId = parsed.sourceItem;
+  }
+  if (parsed.evidenceRecord !== undefined && parsed.evidenceRecord.length > 0) {
+    filters.evidenceRecordId = parsed.evidenceRecord;
+  }
+  if (parsed.limit !== undefined) {
+    filters.limit = parsed.limit;
+  }
+
+  const db = openDb(dataDir);
+  let intents: UpdateIntent[];
+  try {
+    if (filters.goalId !== undefined && filters.goalId !== null) {
+      const row = db
+        .prepare("SELECT id FROM goals WHERE id = ?")
+        .get(filters.goalId) as { id: string } | undefined;
+      if (!row) {
+        return emitIntentFailure(parsed, io, {
+          command: "intent list",
+          code: "goal_not_found",
+          message: `Goal not found: ${filters.goalId}`,
+          dataDir,
+          goalId: filters.goalId
+        });
+      }
+    }
+    if (filters.sourceItemId !== undefined && filters.sourceItemId !== null) {
+      const row = db
+        .prepare("SELECT id FROM source_items WHERE id = ?")
+        .get(filters.sourceItemId) as { id: string } | undefined;
+      if (!row) {
+        return emitIntentFailure(parsed, io, {
+          command: "intent list",
+          code: "source_item_not_found",
+          message: `Source item not found: ${filters.sourceItemId}`,
+          dataDir,
+          sourceItemId: filters.sourceItemId
+        });
+      }
+    }
+    if (
+      filters.evidenceRecordId !== undefined &&
+      filters.evidenceRecordId !== null
+    ) {
+      const row = db
+        .prepare("SELECT id FROM evidence_records WHERE id = ?")
+        .get(filters.evidenceRecordId) as { id: string } | undefined;
+      if (!row) {
+        return emitIntentFailure(parsed, io, {
+          command: "intent list",
+          code: "evidence_record_not_found",
+          message: `Evidence record not found: ${filters.evidenceRecordId}`,
+          dataDir,
+          evidenceRecordId: filters.evidenceRecordId
+        });
+      }
+    }
+    intents = listUpdateIntents(db, filters);
+  } finally {
+    db.close();
+  }
+
+  const payload = {
+    ok: true,
+    command: "intent list",
+    dataDir,
+    status: statusFilter ?? null,
+    adapter: filters.adapterKind ?? null,
+    intentType: filters.intentType ?? null,
+    goalId: filters.goalId ?? null,
+    sourceItemId: filters.sourceItemId ?? null,
+    evidenceRecordId: filters.evidenceRecordId ?? null,
+    limit: filters.limit ?? null,
+    count: intents.length,
+    intents: intents.map(updateIntentToJsonShape)
+  };
+
+  if (parsed.json) {
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  const lines: string[] = [
+    `Update intents: ${intents.length}`,
+    `Status: ${statusFilter ?? "(any)"}`,
+    `Adapter: ${filters.adapterKind ?? "(any)"}`,
+    `Intent type: ${filters.intentType ?? "(any)"}`,
+    `Goal: ${filters.goalId ?? "(any)"}`,
+    `Source item: ${filters.sourceItemId ?? "(any)"}`,
+    `Evidence record: ${filters.evidenceRecordId ?? "(any)"}`,
+    `Data dir: ${dataDir}`,
+    ...intents.map(
+      (record) =>
+        `- ${record.id} [${record.adapterKind}/${record.intentType}] ${record.status} target=${record.targetExternalId ?? "(none)"}: ${record.reason}`
+    ),
+    ""
+  ];
+  write(io.stdout, lines.join("\n"));
+  return 0;
+}
+
+function intentGet(parsed: ParsedFlags, io: CliIo): number {
+  const intentId = parsed.args[2];
+  if (!intentId) {
+    return usageError(
+      "Missing required <intent-id> for intent get.",
+      parsed,
+      io
+    );
+  }
+  if (parsed.args.length > 3) {
+    return usageError(
+      `Unexpected argument for intent get: ${parsed.args[3]}`,
+      parsed,
+      io
+    );
+  }
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return emitIntentFailure(parsed, io, {
+      command: "intent get",
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err),
+      intentId
+    });
+  }
+
+  const db = openDb(dataDir);
+  let record: UpdateIntent | null;
+  try {
+    record = getUpdateIntentById(db, intentId);
+  } finally {
+    db.close();
+  }
+
+  if (!record) {
+    return emitIntentFailure(parsed, io, {
+      command: "intent get",
+      code: "intent_not_found",
+      message: `Update intent not found: ${intentId}`,
+      dataDir,
+      intentId
+    });
+  }
+
+  const payload = {
+    ok: true,
+    command: "intent get",
+    dataDir,
+    intent: updateIntentToJsonShape(record)
+  };
+
+  if (parsed.json) {
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  const lines: string[] = [
+    `Update intent: ${record.id}`,
+    `Adapter: ${record.adapterKind}`,
+    `Target external id: ${record.targetExternalId ?? "(none)"}`,
+    `Intent type: ${record.intentType}`,
+    `Status: ${record.status}`,
+    `Goal: ${record.goalId ?? "(unlinked)"}`,
+    `Source item: ${record.sourceItemId ?? "(unlinked)"}`,
+    `Evidence record: ${record.evidenceRecordId ?? "(unlinked)"}`,
+    `Idempotency key: ${record.idempotencyKey}`,
+    `Reason: ${record.reason}`,
+    `Decision reason: ${record.decisionReason ?? "(none)"}`,
+    `Created at: ${record.createdAt}`,
+    `Updated at: ${record.updatedAt}`,
+    `Applied at: ${record.appliedAt ?? "(unset)"}`,
+    `Skipped at: ${record.skippedAt ?? "(unset)"}`,
+    `Canceled at: ${record.canceledAt ?? "(unset)"}`,
+    `Data dir: ${dataDir}`,
+    ""
+  ];
+  write(io.stdout, lines.join("\n"));
+  return 0;
+}
+
+function emitIntentFailure(
+  parsed: ParsedFlags,
+  io: CliIo,
+  failure: IntentFailure
+): number {
+  const payload: Record<string, unknown> = {
+    ok: false,
+    command: failure.command,
+    code: failure.code,
+    message: failure.message
+  };
+  if (failure.dataDir !== undefined) payload["dataDir"] = failure.dataDir;
+  if (failure.intentId !== undefined) payload["intentId"] = failure.intentId;
+  if (failure.goalId !== undefined) payload["goalId"] = failure.goalId;
+  if (failure.sourceItemId !== undefined) {
+    payload["sourceItemId"] = failure.sourceItemId;
+  }
+  if (failure.evidenceRecordId !== undefined) {
+    payload["evidenceRecordId"] = failure.evidenceRecordId;
+  }
+  if (failure.status !== undefined) payload["status"] = failure.status;
+
+  if (parsed.json) {
+    writeJson(io.stderr, payload);
+    return 1;
+  }
+  write(io.stderr, `${failure.message}\n`);
+  return 1;
+}
+
+function isUpdateIntentStatus(value: string): value is UpdateIntentStatus {
+  return (UPDATE_INTENT_STATUSES as readonly string[]).includes(value);
+}
+
+function updateIntentToJsonShape(record: UpdateIntent): Record<string, unknown> {
+  return {
+    id: record.id,
+    adapterKind: record.adapterKind,
+    targetExternalId: record.targetExternalId,
+    intentType: record.intentType,
+    payload: record.payload,
+    reason: record.reason,
+    goalId: record.goalId,
+    sourceItemId: record.sourceItemId,
+    evidenceRecordId: record.evidenceRecordId,
+    status: record.status,
+    idempotencyKey: record.idempotencyKey,
+    decisionReason: record.decisionReason,
+    errorCode: record.errorCode,
+    errorMessage: record.errorMessage,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+    appliedAt: record.appliedAt,
+    skippedAt: record.skippedAt,
+    canceledAt: record.canceledAt
+  };
 }
 
 function daemon(parsed: ParsedFlags, io: CliIo): number | Promise<number> {
@@ -3690,6 +4040,8 @@ function parseFlags(argv: string[]): ParsedFlags {
   let evidenceType: string | undefined;
   let limit: number | undefined;
   let staleThresholdHours: number | undefined;
+  let status: string | undefined;
+  let evidenceRecord: string | undefined;
   let error: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -3937,6 +4289,28 @@ function parseFlags(argv: string[]): ParsedFlags {
       continue;
     }
 
+    if (arg === "--status") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --status.";
+      } else {
+        status = value;
+        index += 1;
+      }
+      continue;
+    }
+
+    if (arg === "--evidence-record") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --evidence-record.";
+      } else {
+        evidenceRecord = value;
+        index += 1;
+      }
+      continue;
+    }
+
     if (arg === "--stale-threshold-hours") {
       const value = readFlagValue(argv, index);
       if (value === undefined) {
@@ -4056,6 +4430,8 @@ function parseFlags(argv: string[]): ParsedFlags {
   if (staleThresholdHours !== undefined) {
     parsed.staleThresholdHours = staleThresholdHours;
   }
+  if (status !== undefined) parsed.status = status;
+  if (evidenceRecord !== undefined) parsed.evidenceRecord = evidenceRecord;
   if (error !== undefined) parsed.error = error;
 
   return parsed;
