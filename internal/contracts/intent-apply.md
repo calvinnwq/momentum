@@ -51,10 +51,10 @@ Unless target Linear status mutation is **explicitly configured** for the adapte
 
 Every external write carries a **stable, documented idempotency marker** that the dedupe, post-apply reconcile, and recovery paths all key off of.
 
-- The marker is composed from `(adapter_kind, intent_id, intent_payload_hash)` so the same intent applied twice (even after a crash) is detectable from Linear-side artifacts alone.
+- The marker is composed from adapter kind, intent id, and a deterministic SHA-256 digest input over `(adapter_kind, intent_id, canonical_intent_payload)` so the same intent applied twice (even after a crash) is detectable from Linear-side artifacts alone.
+- The marker format is `momentum-intent:<adapterKind>:<intentId>:<digest>`, where `<digest>` is the first 16 hex characters of that SHA-256 digest. NGX-296 owns this helper and asserts the shape in adapter-boundary tests.
 - The marker is included in the Linear comment body (or, when configured, in the structured comment metadata) so an operator can grep Linear for a Momentum-written comment without consulting the local store.
 - The post-apply single-issue reconcile (NGX-301) uses the marker to confirm whether the comment / status mutation Momentum intended is already present on the issue.
-- The marker shape is pinned by NGX-300 (M6-05) and asserted in tests.
 
 ## Post-apply single-issue reconcile
 
