@@ -1616,6 +1616,72 @@ describe("M6 contract docs (NGX-295 setup)", () => {
         `consolidated daemon sub-section should have one pointer paragraph alongside the combined CLI shape block (was ${narrative.length} narrative paragraphs)`
       ).toBe(1);
     });
+
+    it("keeps every Commands sub-section a compact single-paragraph pointer with a docs link", () => {
+      const cmdStart = readme.indexOf("## Commands");
+      const cmdEnd = readme.indexOf("\n## ", cmdStart + 1);
+      expect(cmdStart, "## Commands section should exist").toBeGreaterThanOrEqual(0);
+      expect(cmdEnd, "a ## section should follow ## Commands").toBeGreaterThan(cmdStart);
+      const commands = readme.slice(cmdStart, cmdEnd);
+      const headings = [...commands.matchAll(/^### .+$/gm)];
+      expect(
+        headings.length,
+        "## Commands should contain at least one ### sub-section"
+      ).toBeGreaterThan(0);
+      for (let i = 0; i < headings.length; i++) {
+        const heading = headings[i]!;
+        const next = headings[i + 1];
+        const start = (heading.index ?? 0) + heading[0].length;
+        const end = next ? (next.index ?? commands.length) : commands.length;
+        const section = commands.slice(start, end);
+        const label = heading[0];
+        expect(
+          section.length,
+          `${label} should be a compact pointer (was ${section.length} chars); move reference content into a docs/<command>.md page`
+        ).toBeLessThan(1600);
+        const narrative = section
+          .split(/\n{2,}/)
+          .filter((p) => p.trim().length > 0 && !p.trim().startsWith("```"));
+        expect(
+          narrative.length,
+          `${label} should have exactly one pointer paragraph alongside its CLI shape block (was ${narrative.length} narrative paragraphs); collapse duplicated taxonomy or bullet lists into the linked docs page`
+        ).toBe(1);
+        expect(
+          section,
+          `${label} should link to its canonical docs/<command>.md reference`
+        ).toMatch(/docs\/[\w./-]+\.md/);
+      }
+    });
+
+    it("keeps the trailing README pointer sections compact (Failure and Reset / Walkthrough / Current Exclusions)", () => {
+      const pointers: { heading: string; maxChars: number; docsLink: string }[] = [
+        { heading: "## Failure and Reset Semantics", maxChars: 600, docsLink: "docs/failure-reset.md" },
+        { heading: "## End-to-end Walkthrough", maxChars: 600, docsLink: "docs/walkthrough.md" },
+        { heading: "## Current Exclusions", maxChars: 700, docsLink: "docs/exclusions.md" },
+      ];
+      for (const { heading, maxChars, docsLink } of pointers) {
+        const sectionStart = readme.indexOf(heading);
+        expect(sectionStart, `${heading} section should exist`).toBeGreaterThanOrEqual(0);
+        const after = readme.slice(sectionStart + heading.length);
+        const nextHeadingOffset = after.search(/\n## /);
+        const section = nextHeadingOffset >= 0 ? after.slice(0, nextHeadingOffset) : after;
+        expect(
+          section.length,
+          `${heading} should be a compact pointer (was ${section.length} chars); move bullet content into ${docsLink}`
+        ).toBeLessThan(maxChars);
+        const narrative = section
+          .split(/\n{2,}/)
+          .filter((p) => p.trim().length > 0 && !p.trim().startsWith("```"));
+        expect(
+          narrative.length,
+          `${heading} should be a single pointer paragraph (was ${narrative.length} narrative paragraphs); collapse duplicated narrative into ${docsLink}`
+        ).toBe(1);
+        expect(
+          section,
+          `${heading} should link to its canonical ${docsLink} reference`
+        ).toContain(docsLink);
+      }
+    });
   });
 
   describe("docs/data-directory.md artifact layout reference", () => {
@@ -1804,6 +1870,280 @@ describe("M6 contract docs (NGX-295 setup)", () => {
         section.length,
         `## Stack and workflow commands section should be compact (was ${section.length} chars); move command listings into README.md's ## Local Development block`
       ).toBeLessThan(400);
+    });
+
+    it("Current milestone section stays compact (docs/roadmap.md pointer + per-milestone status bullets, not per-NGX changelog)", () => {
+      const start = agents.indexOf("## Current milestone");
+      expect(
+        start,
+        "AGENTS.md should still declare a ## Current milestone section"
+      ).toBeGreaterThan(-1);
+      const end = agents.indexOf("\n## ", start + 1);
+      const section = agents.slice(start, end > start ? end : undefined);
+      expect(
+        section,
+        "## Current milestone should link to docs/roadmap.md as the canonical timeline pointer"
+      ).toMatch(/docs\/roadmap\.md/);
+      expect(
+        section.length,
+        `## Current milestone section should be compact (was ${section.length} chars); move per-NGX changelog detail into the linked docs/milestones/*.md pages`
+      ).toBeLessThan(1500);
+    });
+
+    it("Milestone 6 contract section stays bounded (headline rules + docs/ pointers, not unbounded re-bloat)", () => {
+      const start = agents.indexOf("## Milestone 6 contract");
+      expect(
+        start,
+        "AGENTS.md should still declare a ## Milestone 6 contract section"
+      ).toBeGreaterThan(-1);
+      const end = agents.indexOf("\n## ", start + 1);
+      const section = agents.slice(start, end > start ? end : undefined);
+      expect(
+        section,
+        "## Milestone 6 contract should link to docs/milestones/m6-external-apply.md as the canonical M6 scope pointer"
+      ).toMatch(/docs\/milestones\/m6-external-apply\.md/);
+      expect(
+        section,
+        "## Milestone 6 contract should link to docs/contracts/intent-apply.md as the canonical two-phase apply contract pointer"
+      ).toMatch(/docs\/contracts\/intent-apply\.md/);
+      expect(
+        section.length,
+        `## Milestone 6 contract section should stay bounded (was ${section.length} chars); add new M6 detail to the linked docs/milestones/m6-external-apply.md or docs/contracts/intent-apply.md instead of growing AGENTS.md`
+      ).toBeLessThan(2500);
+    });
+
+    it("Milestone 3/4/5 contract pointer sections stay compact docs/ pointers", () => {
+      const milestonePointerBudgets: Array<{
+        heading: string;
+        docsLink: RegExp;
+        maxChars: number;
+      }> = [
+        {
+          heading: "## Milestone 3 alignment",
+          docsLink: /docs\/milestones\/m3-operational-safety\.md/,
+          maxChars: 800,
+        },
+        {
+          heading: "## Milestone 4 contract",
+          docsLink: /docs\/milestones\/m4-real-runners\.md/,
+          maxChars: 1200,
+        },
+        {
+          heading: "## Milestone 5 contract",
+          docsLink: /docs\/milestones\/m5-source-adapters\.md/,
+          maxChars: 1500,
+        },
+      ];
+
+      for (const { heading, docsLink, maxChars } of milestonePointerBudgets) {
+        const start = agents.indexOf(heading);
+        expect(start, `AGENTS.md should still declare a ${heading} section`).toBeGreaterThan(-1);
+        const end = agents.indexOf("\n## ", start + 1);
+        const section = agents.slice(start, end > start ? end : undefined);
+        expect(
+          section,
+          `${heading} section should link to its canonical docs/ page`
+        ).toMatch(docsLink);
+        expect(
+          section.length,
+          `${heading} section should be a compact docs pointer (was ${section.length} chars); move per-milestone narrative into the linked docs/milestones/*.md page`
+        ).toBeLessThan(maxChars);
+      }
+    });
+
+    it("agent operating-instruction sections stay compact (no narrative re-bloat)", () => {
+      const operatingSectionBudgets: Array<{
+        heading: string;
+        maxChars: number;
+      }> = [
+        { heading: "## Project purpose", maxChars: 500 },
+        { heading: "## Coding discipline", maxChars: 500 },
+        { heading: "## Local agent run artifacts", maxChars: 500 },
+        { heading: "## Verification before completion", maxChars: 500 },
+      ];
+
+      for (const { heading, maxChars } of operatingSectionBudgets) {
+        const start = agents.indexOf(heading);
+        expect(
+          start,
+          `AGENTS.md should still declare a ${heading} section`
+        ).toBeGreaterThan(-1);
+        const end = agents.indexOf("\n## ", start + 1);
+        const section = agents.slice(start, end > start ? end : undefined);
+        expect(
+          section.length,
+          `${heading} section should stay a compact agent-operating-instruction block (was ${section.length} chars); move detail into docs/ rather than growing AGENTS.md`
+        ).toBeLessThan(maxChars);
+      }
+    });
+  });
+
+  describe("docs link integrity", () => {
+    const sources: { file: string }[] = [{ file: "README.md" }, { file: "AGENTS.md" }];
+    for (const { file } of sources) {
+      it(`every docs/*.md link in ${file} targets a file that exists`, () => {
+        const body = readDoc(file);
+        const matches = body.match(/docs\/[A-Za-z0-9./_-]+\.md/g) ?? [];
+        const unique = Array.from(new Set(matches));
+        expect(
+          unique.length,
+          `${file} should reference at least one docs/*.md page`
+        ).toBeGreaterThan(0);
+        const missing: string[] = [];
+        for (const relPath of unique) {
+          if (!fs.existsSync(path.join(repoRoot, relPath))) {
+            missing.push(relPath);
+          }
+        }
+        expect(
+          missing,
+          `${file} references docs/*.md paths that do not exist on disk: ${missing.join(", ")}`
+        ).toEqual([]);
+      });
+    }
+
+    it("every docs/*.md file on disk is linked from README.md", () => {
+      const docsDir = path.join(repoRoot, "docs");
+      const allDocs: string[] = [];
+      function walk(dir: string): void {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          const full = path.join(dir, entry.name);
+          if (entry.isDirectory()) {
+            walk(full);
+          } else if (entry.isFile() && entry.name.endsWith(".md")) {
+            allDocs.push(path.relative(repoRoot, full).split(path.sep).join("/"));
+          }
+        }
+      }
+      walk(docsDir);
+      expect(allDocs.length, "docs/ should contain at least one *.md file").toBeGreaterThan(0);
+
+      const readme = readDoc("README.md");
+      const matches = readme.match(/docs\/[A-Za-z0-9./_-]+\.md/g) ?? [];
+      const linked = new Set(matches);
+
+      const orphans = allDocs.filter((doc) => !linked.has(doc));
+      expect(
+        orphans,
+        `README.md should link to every docs/*.md page so each is reachable from the OSS front door (orphans: ${orphans.join(", ")})`
+      ).toEqual([]);
+    });
+
+    it("every relative .md link inside docs/*.md targets a file that exists", () => {
+      const docsDir = path.join(repoRoot, "docs");
+      const allDocs: string[] = [];
+      function walk(dir: string): void {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          const full = path.join(dir, entry.name);
+          if (entry.isDirectory()) {
+            walk(full);
+          } else if (entry.isFile() && entry.name.endsWith(".md")) {
+            allDocs.push(full);
+          }
+        }
+      }
+      walk(docsDir);
+      expect(
+        allDocs.length,
+        "docs/ should contain at least one *.md file"
+      ).toBeGreaterThan(0);
+
+      const broken: string[] = [];
+      const linkRe = /\]\(([^)\s]+\.md)(?:#[^)]*)?\)/g;
+      for (const docPath of allDocs) {
+        const body = fs.readFileSync(docPath, "utf8");
+        const sourceDir = path.dirname(docPath);
+        const relSource = path
+          .relative(repoRoot, docPath)
+          .split(path.sep)
+          .join("/");
+        let match: RegExpExecArray | null;
+        while ((match = linkRe.exec(body)) !== null) {
+          const target = match[1]!;
+          if (/^https?:/i.test(target)) continue;
+          if (target.startsWith("#")) continue;
+          const resolved = path.resolve(sourceDir, target);
+          if (!fs.existsSync(resolved)) {
+            const relResolved = path
+              .relative(repoRoot, resolved)
+              .split(path.sep)
+              .join("/");
+            broken.push(`${relSource} -> ${target} (resolves to ${relResolved})`);
+          }
+        }
+      }
+      expect(
+        broken,
+        `docs/*.md files contain markdown links to .md targets that do not exist on disk: ${broken.join("; ")}`
+      ).toEqual([]);
+    });
+
+    it("every #anchor in markdown links across docs/, README, and AGENTS resolves to a heading in the target file", () => {
+      const docsDir = path.join(repoRoot, "docs");
+      const allSources: string[] = [];
+      function walk(dir: string): void {
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          const full = path.join(dir, entry.name);
+          if (entry.isDirectory()) {
+            walk(full);
+          } else if (entry.isFile() && entry.name.endsWith(".md")) {
+            allSources.push(full);
+          }
+        }
+      }
+      walk(docsDir);
+      allSources.push(path.join(repoRoot, "README.md"));
+      allSources.push(path.join(repoRoot, "AGENTS.md"));
+
+      function slugify(heading: string): string {
+        return heading
+          .toLowerCase()
+          .replace(/[^a-z0-9 \-]/g, "")
+          .trim()
+          .replace(/\s+/g, "-");
+      }
+
+      function headingSlugsOf(body: string): Set<string> {
+        const slugs = new Set<string>();
+        const re = /^#{1,6}\s+(.+?)\s*$/gm;
+        let m: RegExpExecArray | null;
+        while ((m = re.exec(body)) !== null) {
+          slugs.add(slugify(m[1]!));
+        }
+        return slugs;
+      }
+
+      const broken: string[] = [];
+      const anchorLinkRe = /\]\(([^)\s#]+\.md)#([^)\s]+)\)/g;
+      for (const sourcePath of allSources) {
+        const body = fs.readFileSync(sourcePath, "utf8");
+        const sourceDir = path.dirname(sourcePath);
+        const relSource = path
+          .relative(repoRoot, sourcePath)
+          .split(path.sep)
+          .join("/");
+        let match: RegExpExecArray | null;
+        while ((match = anchorLinkRe.exec(body)) !== null) {
+          const target = match[1]!;
+          const anchor = match[2]!;
+          if (/^https?:/i.test(target)) continue;
+          const resolved = path.resolve(sourceDir, target);
+          if (!fs.existsSync(resolved)) continue;
+          const targetBody = fs.readFileSync(resolved, "utf8");
+          const slugs = headingSlugsOf(targetBody);
+          if (!slugs.has(anchor)) {
+            const relResolved = path
+              .relative(repoRoot, resolved)
+              .split(path.sep)
+              .join("/");
+            broken.push(`${relSource} -> ${relResolved}#${anchor}`);
+          }
+        }
+      }
+      expect(
+        broken,
+        `markdown links contain #anchor suffixes that do not match any heading in the target file: ${broken.join("; ")}`
+      ).toEqual([]);
     });
   });
 
