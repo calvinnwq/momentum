@@ -59,21 +59,17 @@ describe("M4 contract docs (NGX-279..NGX-286)", () => {
   describe("README.md", () => {
     const readme = readDoc("README.md");
 
-    it("names Milestone 4 complete with the NGX-279..NGX-286 closeout (NGX-286)", () => {
-      expect(readme).toContain("## Milestone 4 Roadmap");
-      expect(readme).toContain("Milestone 4 (Real Runner Profiles) is complete");
+    it("keeps milestone detail out of the concise OSS front door", () => {
+      expect(readme).not.toContain("## Milestone 4 Roadmap");
+      expect(readme).not.toContain("Milestone 4 (Real Runner Profiles) is complete");
       for (const id of M4_ISSUE_ORDER) {
-        expect(readme).toContain(id);
+        expect(readme).not.toContain(id);
       }
     });
 
-    it("links to the canonical M4 docs page (NGX-295 OSS reshape)", () => {
-      expect(readme).toMatch(/docs\/milestones\/m4-real-runners\.md/);
-    });
-
-    it("preserves M3 closeout markers and the M3 Alignment narrative", () => {
-      expect(readme).toContain("Milestone 3 (Operational Safety) is complete");
-      expect(readme).toContain("## Milestone 3 Alignment");
+    it("keeps prior M3 closeout detail out of README", () => {
+      expect(readme).not.toContain("Milestone 3 (Operational Safety) is complete");
+      expect(readme).not.toContain("## Milestone 3 Alignment");
       for (const id of [
         "NGX-272",
         "NGX-273",
@@ -83,25 +79,33 @@ describe("M4 contract docs (NGX-279..NGX-286)", () => {
         "NGX-277",
         "NGX-278"
       ]) {
-        expect(readme).toContain(id);
+        expect(readme).not.toContain(id);
       }
     });
 
-    it("keeps the top milestone summary aligned with M4 scope", () => {
-      expect(readme).toContain("Real runner profiles and the runtime `MOMENTUM.md` policy loader shipped in Milestone 4");
+    it("keeps the top milestone summary high-level", () => {
+      expect(readme).toContain("Milestones 1-5 are complete");
       expect(readme).not.toContain("real runner profiles (Codex / Claude / OpenCode / ACP backends), and a runtime `MOMENTUM.md` loader");
     });
 
-    it("preserves the M3 CLI surface", () => {
+    it("preserves the M3 CLI surface in the compact command overview", () => {
       for (const cmd of [
         "momentum daemon start",
-        "momentum daemon stop",
-        "momentum daemon status",
+        "stop",
+        "status",
         "momentum recovery clear",
         "momentum doctor"
       ]) {
         expect(readme).toContain(cmd);
       }
+    });
+  });
+
+  describe("docs/index.md", () => {
+    const docsIndex = readDoc("docs/index.md");
+
+    it("links to the canonical M4 docs page now that README is concise", () => {
+      expect(docsIndex).toMatch(/milestones\/m4-real-runners\.md/);
     });
   });
 
