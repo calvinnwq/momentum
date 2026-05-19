@@ -1,6 +1,6 @@
 # Contract: Source Adapters
 
-**Status:** Active. Captures the boundary that landed in M5 (NGX-288..NGX-294) and the read-only invariants that M6 must preserve while it adds the policy-gated external write path described in [docs/contracts/intent-apply.md](intent-apply.md).
+**Status:** Active. Captures the boundary that landed in M5 (NGX-288..NGX-294) and the read-only invariants that M6 must preserve while it adds the policy-gated external write path described in [internal/contracts/intent-apply.md](intent-apply.md).
 
 A **source adapter** is the read / list / get / normalize boundary for an external source system (Linear, GitHub, Jira, etc.). Adapters are analogous to `RunnerAdapter`: they wrap an external runtime behind a stable, typed boundary so Momentum core does not couple to any single vendor.
 
@@ -52,4 +52,4 @@ M6 introduces a Linear write client behind `intent apply --external-apply`. The 
 - Is gated by the two-phase claim / audit / write / finalize flow documented in [intent-apply.md](intent-apply.md), including the per-intent CAS guard, the blocked / non-replay state, the comment-only default, the stable idempotency marker, and the single-issue post-apply reconcile.
 - Must not be called from any code path other than the M6 apply flow. In particular, the M5 reconciliation orchestrator stays read-only.
 
-See [docs/milestones/m6-external-apply.md](../milestones/m6-external-apply.md) for the M6 scope and sequencing, and [intent-apply.md](intent-apply.md) for the apply-path safety invariants.
+See [internal/milestones/m6-external-apply.md](../milestones/m6-external-apply.md) for the M6 scope and sequencing, and [intent-apply.md](intent-apply.md) for the apply-path safety invariants.

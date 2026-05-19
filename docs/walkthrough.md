@@ -1,11 +1,10 @@
 # End-to-end Walkthrough
 
-This page documents the disposable end-to-end run that exercises Momentum's queued default path, the M3 managed daemon drain alternative, and the Milestone 1 foreground debug path. It composes the M2 queue / worker, the M3 daemon / recovery, and the iteration → verification → commit / reset transaction into a single repeatable smoke that can be run from any clone of this repo.
+This page documents the disposable end-to-end run that exercises Momentum's queued default path, the managed daemon drain alternative, and the foreground debug path. It composes the queue / worker, the daemon / recovery, and the iteration → verification → commit / reset transaction into a single repeatable smoke that can be run from any clone of this repo.
 
 See also:
 
-- [Roadmap and milestone status](roadmap.md) — current milestone and per-milestone docs.
-- [Recovery surfaces (NGX-276, NGX-277)](recovery.md) — stale-lease auto-recovery and manual recovery artifacts that this walkthrough's daemon path exercises.
+- [Recovery surfaces](recovery.md) — stale-lease auto-recovery and manual recovery artifacts that this walkthrough's daemon path exercises.
 - [Runner profiles and repo policy](runners.md) — runner family detail referenced by the `runner: fake` example below.
 
 ## Queued default path
@@ -51,9 +50,9 @@ node dist/index.js handoff "$GOAL_ID" --data-dir "$DATA" --json
 
 Replacing the `verification: ["true"]` line with `verification: ["false"]` exercises the failure-reset path: the queued `goal_iteration` job fails, the worktree is reset to its pre-iteration HEAD, `verification.log` records the failed command, and `status --json` exposes `latestJob.errorPath` plus the `artifacts` block for inspection.
 
-## Managed daemon drain (M3 alternative)
+## Managed daemon drain
 
-`worker run` is the single-shot consumer (step 2 above): one invocation drains one claimed job. The M3 managed loop on `daemon start` is the bounded continuous-draining equivalent — composes `runWorkerOnce` in-process, runs the NGX-276 startup-recovery pre-pass, and exits cleanly when a bound, `daemon stop`, `daemon stop --now`, or terminal daemon-run state is observed:
+`worker run` is the single-shot consumer (step 2 above): one invocation drains one claimed job. The managed loop on `daemon start` is the bounded continuous-draining equivalent — composes `runWorkerOnce` in-process, runs the startup-recovery pre-pass, and exits cleanly when a bound, `daemon stop`, `daemon stop --now`, or terminal daemon-run state is observed:
 
 ```bash
 # Drain queued goal_iteration jobs until idle (alternative to repeated `worker run`).
@@ -65,7 +64,7 @@ Pick `worker run` when you want a one-shot iteration claim with no orchestrator-
 
 ## Foreground debug path
 
-`--foreground` is retained as a Milestone 1 inline debugging path. It bypasses the queue and runs one iteration synchronously, useful when iterating on runner profiles or reproducing a single iteration locally without the worker:
+`--foreground` is an inline debugging path. It bypasses the queue and runs one iteration synchronously, useful when iterating on runner profiles or reproducing a single iteration locally without the worker:
 
 ```bash
 node dist/index.js goal start "$DATA/goal.md" \

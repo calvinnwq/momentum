@@ -1,6 +1,6 @@
 # Failure and reset semantics
 
-> See also: [docs/recovery.md](recovery.md) for NGX-276 stale-lease auto-recovery and NGX-277 manual recovery artifacts; [docs/walkthrough.md](walkthrough.md) for the failure-reset path in the end-to-end smoke; [docs/runners.md](runners.md) for runner-side failure surfaces.
+> See also: [docs/recovery.md](recovery.md) for stale-lease auto-recovery and manual recovery artifacts; [docs/walkthrough.md](walkthrough.md) for the failure-reset path in the end-to-end smoke; [docs/runners.md](runners.md) for runner-side failure surfaces.
 
 Momentum treats each iteration as a transaction over the target repo. The pre-iteration HEAD on the Momentum branch is captured as `baseHead` before the runner runs. From there, exactly one of the outcomes in the table below applies.
 

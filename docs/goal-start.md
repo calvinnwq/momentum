@@ -35,7 +35,7 @@ containing JSON-encoded untrusted external content; Momentum extracts text
 from the latest source snapshot (`description`, `body`, `summary`, or `text`)
 and truncates each body before prompt rendering.
 
-## Default queued enqueue path (Milestone 2)
+## Default queued enqueue path
 
 Writes the Goal row with state `queued` and enqueues a single `goal_iteration`
 job (state `pending`, iteration `1`) with idempotency key
@@ -114,7 +114,7 @@ database or repo. The `code` field on failure envelopes is one of:
 - `link_changed` — the source-item link changed concurrently between read and write.
 - `init_failed` — data directory or database failure.
 
-## `--foreground` (Milestone 1 inline path)
+## `--foreground` (inline path)
 
 Drives a single foreground iteration through the configured executing runner
 profile and Momentum-owned verification immediately, returning the iteration

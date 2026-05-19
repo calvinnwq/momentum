@@ -53,7 +53,7 @@ const M4_NON_GOALS_AGENTS = [
   "remote git operations"
 ] as const;
 
-const M4_DOC_PATH = path.join("docs", "milestones", "m4-real-runners.md");
+const M4_DOC_PATH = path.join("internal", "milestones", "m4-real-runners.md");
 
 describe("M4 contract docs (NGX-279..NGX-286)", () => {
   describe("README.md", () => {
@@ -83,9 +83,10 @@ describe("M4 contract docs (NGX-279..NGX-286)", () => {
       }
     });
 
-    it("keeps the top milestone summary high-level", () => {
-      expect(readme).toContain("Milestones 1-5 are complete");
+    it("keeps the top project status public-facing", () => {
+      expect(readme).toContain("Momentum is pre-release");
       expect(readme).not.toContain("real runner profiles (Codex / Claude / OpenCode / ACP backends), and a runtime `MOMENTUM.md` loader");
+      expect(readme).not.toContain("Milestones 1-5 are complete");
     });
 
     it("preserves the M3 CLI surface in the compact command overview", () => {
@@ -104,12 +105,12 @@ describe("M4 contract docs (NGX-279..NGX-286)", () => {
   describe("docs/index.md", () => {
     const docsIndex = readDoc("docs/index.md");
 
-    it("links to the canonical M4 docs page now that README is concise", () => {
-      expect(docsIndex).toMatch(/milestones\/m4-real-runners\.md/);
+    it("keeps the internal M4 docs page out of the public docs index", () => {
+      expect(docsIndex).not.toMatch(/milestones\/m4-real-runners\.md/);
     });
   });
 
-  describe("docs/milestones/m4-real-runners.md", () => {
+  describe("internal/milestones/m4-real-runners.md", () => {
     const m4doc = readDoc(M4_DOC_PATH);
 
     it("names M4 complete with the NGX-279..NGX-286 closeout", () => {
@@ -167,33 +168,27 @@ describe("M4 contract docs (NGX-279..NGX-286)", () => {
   describe("AGENTS.md", () => {
     const agents = readDoc("AGENTS.md");
 
-    it("names Milestone 4 complete with the NGX-279..NGX-286 closeout (NGX-286)", () => {
-      expect(agents).toContain("Milestone 4: Real Runner Profiles is complete");
+    it("points agents to the internal M4 planning page instead of duplicating it", () => {
+      expect(agents).toContain("internal/milestones/");
+      expect(agents).toContain("m4-real-runners.md");
       for (const id of M4_ISSUE_ORDER) {
-        expect(agents).toContain(id);
+        expect(agents).not.toContain(id);
       }
     });
 
-    it("documents the M4 contract block (runner architecture + non-goals)", () => {
-      expect(agents).toContain("## Milestone 4 contract");
-      expect(agents).toContain("`RunnerAdapter`");
-      expect(agents).toContain("`trusted-shell`");
-      for (const ng of M4_NON_GOALS_AGENTS) {
-        expect(agents).toContain(ng);
-      }
+    it("keeps old M4 contract prose out of AGENTS.md", () => {
+      expect(agents).not.toContain("## Milestone 4 contract");
+      expect(agents).not.toContain("Planned M4 issue order");
     });
 
-    it("documents the planned M4 issue order in the same sequence as README", () => {
-      let cursor = -1;
+    it("keeps planned M4 issue order in internal docs only", () => {
       for (const id of M4_ISSUE_ORDER) {
-        const next = agents.indexOf(id, cursor + 1);
-        expect(next, `${id} should appear after the previous M4 id`).toBeGreaterThan(cursor);
-        cursor = next;
+        expect(agents).not.toContain(id);
       }
     });
 
-    it("preserves the M3 complete bullets verbatim", () => {
-      expect(agents).toContain("Milestone 3: Operational Safety is complete");
+    it("keeps old M3 complete bullets out of AGENTS.md", () => {
+      expect(agents).not.toContain("Milestone 3: Operational Safety is complete");
       for (const id of [
         "NGX-272",
         "NGX-273",
@@ -203,17 +198,17 @@ describe("M4 contract docs (NGX-279..NGX-286)", () => {
         "NGX-277",
         "NGX-278"
       ]) {
-        expect(agents).toContain(id);
+        expect(agents).not.toContain(id);
       }
     });
 
-    it("preserves the M3 CLI surface bullets", () => {
+    it("preserves the M3 CLI surface compactly", () => {
       for (const cmd of [
-        "`daemon start`",
-        "`daemon stop`",
-        "`daemon status`",
-        "`recovery clear`",
-        "`doctor`"
+        "daemon start",
+        "daemon stop",
+        "daemon status",
+        "recovery clear",
+        "doctor"
       ]) {
         expect(agents).toContain(cmd);
       }

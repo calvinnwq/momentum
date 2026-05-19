@@ -1,11 +1,10 @@
 # Intent commands
 
-Operator-facing CLI envelopes for the `intent list`, `intent get`, `intent apply`, `intent skip`, and `intent cancel` commands. Intents are durable update-intent rows that source adapters and evidence ingestion record locally; in Milestone 5 they never trigger external tracker writes, and in Milestone 6 they become the entry point for the policy-gated external apply contract.
+Operator-facing CLI envelopes for the `intent list`, `intent get`, `intent apply`, `intent skip`, and `intent cancel` commands. Intents are durable update-intent rows that source adapters and evidence ingestion record locally; today they never trigger automatic external tracker writes.
 
 See also:
 
-- [docs/contracts/intent-apply.md](contracts/intent-apply.md) — the two-phase external apply contract layered on top of `intent apply --external-apply`.
-- [docs/contracts/source-adapters.md](contracts/source-adapters.md) — source-adapter boundaries that produce update intents.
+- [docs/source-commands.md](source-commands.md) — source-adapter commands that produce update intents.
 - [docs/status.md](status.md) and [docs/handoff.md](handoff.md) — the `pendingUpdateIntents` / `pending_update_intents` summaries on the inspector commands.
 - [docs/doctor.md](doctor.md) — the `effectiveIntentApply` block (built-in default `create_intents_only` vs `external_apply_allowed` from `MOMENTUM.md`).
 
@@ -71,14 +70,14 @@ Policy resolution:
 
 - `--repo <path>` loads the repo's `MOMENTUM.md` policy file to resolve the effective `intent_apply_policy`.
 - When `--repo` is not provided, the effective policy falls back to the built-in default (`create_intents_only`).
-- `--external-apply` is **not supported in Milestone 5** and always refuses with `code: "external_apply_unsupported"` regardless of the effective policy; Momentum does not perform automatic external tracker writes.
+- `--external-apply` is **not currently supported** and always refuses with `code: "external_apply_unsupported"` regardless of the effective policy; Momentum does not perform automatic external tracker writes.
 
 On success, JSON output includes `previousStatus` and the `intent` object. When `--external-apply` is requested, the response also includes an `applyPolicy` block:
 
 - `effective` — the resolved `intent_apply_policy` value (`create_intents_only` or `external_apply_allowed`).
 - `source` — `builtin_default` or `momentum_policy`.
 - `externalApplyRequested` — `true` when `--external-apply` was passed.
-- `externalApplyPerformed` — always `false` in Milestone 5.
+- `externalApplyPerformed` — always `false` today.
 - `note` — operator-facing explanation of the refusal.
 
 On terminal refusal, JSON output includes `currentStatus` and `applyPolicy`.

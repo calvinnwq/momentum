@@ -6,9 +6,7 @@ operator handoff renderer. It reads the same SQLite + on-disk state that
 `handoff.md` (human-readable markdown) and `handoff.json` (schema v1
 machine-readable envelope). Both render the reducer decision, next-job
 details, daemon run summary, `MOMENTUM.md` policy summary, linked source
-items, latest evidence, and pending update intents. The shape remains
-wire-stable across Milestones 3, 4, and 5 and continues unchanged through
-the active Milestone 6.
+items, latest evidence, and pending update intents.
 
 See also:
 
@@ -128,7 +126,7 @@ auto-recovery counts plus current pending-recovery counters:
   treating a lease as stale.
 
 See [`docs/recovery.md`](recovery.md) for the stale-lease auto-recovery
-contract (NGX-276) and the manual-recovery flag (NGX-277).
+contract and the manual-recovery flag.
 
 ## Policy block (`MOMENTUM.md`)
 
@@ -140,7 +138,7 @@ section describing whether the goal's repo policy is configured, present,
 missing, or errored, with the loaded `runner` / `verification` /
 `verification_timeout_sec` defaults and a notes-present flag when
 applicable. The `Repo policy via MOMENTUM.md` reference lives in
-[`docs/runners.md`](runners.md#repo-policy-via-momentummd-ngx-284).
+[`docs/runners.md`](runners.md#repo-policy-via-momentummd).
 
 ## Source items and latest evidence
 
@@ -167,8 +165,8 @@ The markdown includes a `## Pending update intents` section with a stale
 count suffix, per-intent lines showing ID, adapter/type, target, age, and
 stale flag, the stale threshold, and a review hint recommending
 `momentum intent list --status pending`. See
-[`docs/contracts/intent-apply.md`](contracts/intent-apply.md) for the
-two-phase external apply lifecycle that consumes these intents.
+[`docs/intent-commands.md`](intent-commands.md) for the intent lifecycle
+that consumes these entries.
 
 ## Markdown output
 

@@ -54,7 +54,7 @@ const M3_NON_GOALS_DOC = [
   "External tracker writes"
 ] as const;
 
-const M3_DOC_PATH = path.join("docs", "milestones", "m3-operational-safety.md");
+const M3_DOC_PATH = path.join("internal", "milestones", "m3-operational-safety.md");
 
 describe("M3 contract docs (NGX-272..NGX-278)", () => {
   describe("README.md", () => {
@@ -84,12 +84,12 @@ describe("M3 contract docs (NGX-272..NGX-278)", () => {
   describe("docs/index.md", () => {
     const docsIndex = readDoc("docs/index.md");
 
-    it("links to the canonical M3 docs page now that README is concise", () => {
-      expect(docsIndex).toMatch(/milestones\/m3-operational-safety\.md/);
+    it("keeps the internal M3 docs page out of the public docs index", () => {
+      expect(docsIndex).not.toMatch(/milestones\/m3-operational-safety\.md/);
     });
   });
 
-  describe("docs/milestones/m3-operational-safety.md", () => {
+  describe("internal/milestones/m3-operational-safety.md", () => {
     const m3doc = readDoc(M3_DOC_PATH);
 
     it("names M3 complete with the NGX-272..NGX-278 closeout", () => {
@@ -144,15 +144,16 @@ describe("M3 contract docs (NGX-272..NGX-278)", () => {
   describe("AGENTS.md", () => {
     const agents = readDoc("AGENTS.md");
 
-    it("names Milestone 3 complete with the NGX-272..NGX-278 closeout (NGX-278)", () => {
-      expect(agents).toContain("Milestone 3: Operational Safety is complete");
+    it("points agents to the internal M3 planning page instead of duplicating it", () => {
+      expect(agents).toContain("internal/milestones/");
+      expect(agents).toContain("m3-operational-safety.md");
       for (const id of M3_ISSUE_ORDER) {
-        expect(agents).toContain(id);
+        expect(agents).not.toContain(id);
       }
     });
 
-    it("preserves the ## Milestone 3 alignment block", () => {
-      expect(agents).toContain("## Milestone 3 alignment");
+    it("keeps old M3 alignment prose out of AGENTS.md", () => {
+      expect(agents).not.toContain("## Milestone 3 alignment");
     });
   });
 

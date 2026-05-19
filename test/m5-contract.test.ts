@@ -63,7 +63,7 @@ const M5_NON_GOALS_AGENTS = [
   "remote git operations"
 ] as const;
 
-const M5_DOC_PATH = path.join("docs", "milestones", "m5-source-adapters.md");
+const M5_DOC_PATH = path.join("internal", "milestones", "m5-source-adapters.md");
 
 describe("M5 contract docs (NGX-287 setup, NGX-294 closeout)", () => {
   describe("README.md", () => {
@@ -126,12 +126,12 @@ describe("M5 contract docs (NGX-287 setup, NGX-294 closeout)", () => {
   describe("docs/index.md", () => {
     const docsIndex = readDoc("docs/index.md");
 
-    it("links to the canonical M5 docs page now that README is concise", () => {
-      expect(docsIndex).toMatch(/milestones\/m5-source-adapters\.md/);
+    it("keeps the internal M5 docs page out of the public docs index", () => {
+      expect(docsIndex).not.toMatch(/milestones\/m5-source-adapters\.md/);
     });
   });
 
-  describe("docs/milestones/m5-source-adapters.md", () => {
+  describe("internal/milestones/m5-source-adapters.md", () => {
     const m5doc = readDoc(M5_DOC_PATH);
 
     it("names M5 complete with the NGX-287..NGX-294 closeout", () => {
@@ -210,37 +210,28 @@ describe("M5 contract docs (NGX-287 setup, NGX-294 closeout)", () => {
   describe("AGENTS.md", () => {
     const agents = readDoc("AGENTS.md");
 
-    it("names Milestone 5 complete with the NGX-287..NGX-294 closeout (NGX-294)", () => {
-      expect(agents).toMatch(/Milestone 5: Source Adapters and Evidence Sync is complete/);
+    it("points agents to the internal M5 planning page instead of duplicating it", () => {
+      expect(agents).toContain("internal/milestones/");
+      expect(agents).toContain("m5-source-adapters.md");
+      for (const id of M5_ISSUE_ORDER) {
+        expect(agents).not.toContain(id);
+      }
       expect(agents).not.toMatch(/Milestone 5: Source Adapters and Evidence Sync is the active milestone/);
     });
 
-    it("documents the M5 contract block with vocabulary, trust boundary, and non-goals", () => {
-      expect(agents).toContain("## Milestone 5 contract");
-      for (const term of M5_VOCABULARY) {
-        expect(agents).toContain(term);
-      }
-      for (const ng of M5_NON_GOALS_AGENTS) {
-        expect(agents).toContain(ng);
-      }
+    it("keeps old M5 contract prose out of AGENTS.md", () => {
+      expect(agents).not.toContain("## Milestone 5 contract");
+      expect(agents).not.toContain("Planned M5 issue order");
     });
 
-    it("documents the planned M5 issue order in the same sequence as the docs file", () => {
-      const plannedOrder = sectionBetween(
-        agents,
-        "- Planned M5 issue order (matches the Linear milestone):",
-        "- M5 composition with existing contracts:"
-      );
-      let cursor = -1;
+    it("keeps planned M5 issue order in internal docs only", () => {
       for (const id of M5_ISSUE_ORDER) {
-        const next = plannedOrder.indexOf(id, cursor + 1);
-        expect(next, `${id} should appear after the previous M5 id`).toBeGreaterThan(cursor);
-        cursor = next;
+        expect(agents).not.toContain(id);
       }
     });
 
-    it("preserves the M4 complete bullet verbatim", () => {
-      expect(agents).toContain("Milestone 4: Real Runner Profiles is complete");
+    it("keeps old M4 complete bullets out of AGENTS.md", () => {
+      expect(agents).not.toContain("Milestone 4: Real Runner Profiles is complete");
       for (const id of [
         "NGX-279",
         "NGX-280",
@@ -251,12 +242,12 @@ describe("M5 contract docs (NGX-287 setup, NGX-294 closeout)", () => {
         "NGX-285",
         "NGX-286"
       ]) {
-        expect(agents).toContain(id);
+        expect(agents).not.toContain(id);
       }
     });
 
-    it("preserves the M3 complete bullets verbatim", () => {
-      expect(agents).toContain("Milestone 3: Operational Safety is complete");
+    it("keeps old M3 complete bullets out of AGENTS.md", () => {
+      expect(agents).not.toContain("Milestone 3: Operational Safety is complete");
       for (const id of [
         "NGX-272",
         "NGX-273",
@@ -266,17 +257,17 @@ describe("M5 contract docs (NGX-287 setup, NGX-294 closeout)", () => {
         "NGX-277",
         "NGX-278"
       ]) {
-        expect(agents).toContain(id);
+        expect(agents).not.toContain(id);
       }
     });
 
-    it("preserves the M3 CLI surface bullets", () => {
+    it("preserves the M3 CLI surface compactly", () => {
       for (const cmd of [
-        "`daemon start`",
-        "`daemon stop`",
-        "`daemon status`",
-        "`recovery clear`",
-        "`doctor`"
+        "daemon start",
+        "daemon stop",
+        "daemon status",
+        "recovery clear",
+        "doctor"
       ]) {
         expect(agents).toContain(cmd);
       }

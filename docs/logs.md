@@ -5,8 +5,7 @@ read-only iteration-artifact inspector. It reads the on-disk artifact
 directory for a goal's iteration plus SQLite linked-source and evidence
 summaries, and emits a stable JSON envelope (or human-readable text) that
 exposes `runner.log`, `verification.log`, and the runner result JSON
-artifact. It remains wire-stable across Milestones 3, 4, and 5 and
-continues unchanged through the active Milestone 6.
+artifact.
 
 See also:
 

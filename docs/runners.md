@@ -1,9 +1,7 @@
 # Runner profiles and repo policy
 
 This page is the source of truth for the runner-specific goal frontmatter and
-the runtime `MOMENTUM.md` policy loader. For the higher-level M4 contract
-(architecture, runner family, planned issue order, M3 contracts preserved), see
-[`docs/milestones/m4-real-runners.md`](milestones/m4-real-runners.md).
+the runtime `MOMENTUM.md` policy loader.
 
 Built-in runner profile names: `fake`, `trusted-shell`, and `acp`. The `runner`
 field on a goal spec must be one of these; unknown names are rejected at init
@@ -15,9 +13,9 @@ precedence is `--runner` CLI flag > goal frontmatter `runner` > `MOMENTUM.md`
 
 ## Trusted-shell runner example
 
-The `trusted-shell` runner profile (NGX-282) runs an operator-configured executable plus argv in the target repo by default, or in the iteration artifact directory when `trusted_shell.cwd: iteration` is set. Trusted-shell execution requires a `trusted_shell` block in the goal frontmatter; queued `goal start` stores the goal before validating that block, while foreground execution and workers validate it when the adapter runs. The config parser classifies missing/malformed config as `trusted_shell_config_missing` or `trusted_shell_config_invalid`, and the public adapter surface reports those validation failures as `invalid_input` (foreground and queued iteration surfaces map them to `runner_failed` with the parser code in the message).
+The `trusted-shell` runner profile runs an operator-configured executable plus argv in the target repo by default, or in the iteration artifact directory when `trusted_shell.cwd: iteration` is set. Trusted-shell execution requires a `trusted_shell` block in the goal frontmatter; queued `goal start` stores the goal before validating that block, while foreground execution and workers validate it when the adapter runs. The config parser classifies missing/malformed config as `trusted_shell_config_missing` or `trusted_shell_config_invalid`, and the public adapter surface reports those validation failures as `invalid_input` (foreground and queued iteration surfaces map them to `runner_failed` with the parser code in the message).
 
-> **Explicit trust posture.** `trusted-shell` is not sandboxed. The configured command runs with the full privileges of the user who invoked Momentum: no container, no VM, no seccomp, no privilege drop, and no input scrubbing. The operator is responsible for the command and any scripts it invokes. Container/VM/seccomp isolation is explicitly out of scope for M4.
+> **Explicit trust posture.** `trusted-shell` is not sandboxed. The configured command runs with the full privileges of the user who invoked Momentum: no container, no VM, no seccomp, no privilege drop, and no input scrubbing. The operator is responsible for the command and any scripts it invokes. Container/VM/seccomp isolation is explicitly out of scope.
 
 Minimal example:
 
@@ -75,7 +73,7 @@ Failure modes return stable diagnostic codes through the `RunnerAdapter` boundar
 
 ## ACP runner example
 
-The `acp` runner profile (NGX-283) is a smoke harness around the `RunnerAdapter` boundary for ACP/acpx-style external agent runtimes. Like `trusted-shell` it spawns an operator-configured executable plus argv via `spawnSync` with no implicit shell, applies `env_allow` filtering with implicit `PATH` preservation, supports `cwd: repo` (default) or `cwd: iteration`, injects the same `MOMENTUM_*` environment variables, and parses a normalized `RunnerResult` from `acp.result_file` (default `result.json`). It adds two pre-flight detections trusted-shell does not need: an absolute `acp.command` whose binary is missing on disk short-circuits with `runtime_unavailable` before any spawn attempt, and an optional `acp.probe` block runs first so missing auth or runtime is observed before the main command. Missing runtime, missing probe binary, probe non-zero exit, probe timeout, and main spawn ENOENT all return `runtime_unavailable`; non-ENOENT spawn errors return `startup_failed`; these stay distinct from `command_failed` (the runtime ran and exited non-zero) and from verification failures, so missing prerequisites never corrupt Goal state.
+The `acp` runner profile is a smoke harness around the `RunnerAdapter` boundary for ACP/acpx-style external agent runtimes. Like `trusted-shell` it spawns an operator-configured executable plus argv via `spawnSync` with no implicit shell, applies `env_allow` filtering with implicit `PATH` preservation, supports `cwd: repo` (default) or `cwd: iteration`, injects the same `MOMENTUM_*` environment variables, and parses a normalized `RunnerResult` from `acp.result_file` (default `result.json`). It adds two pre-flight detections trusted-shell does not need: an absolute `acp.command` whose binary is missing on disk short-circuits with `runtime_unavailable` before any spawn attempt, and an optional `acp.probe` block runs first so missing auth or runtime is observed before the main command. Missing runtime, missing probe binary, probe non-zero exit, probe timeout, and main spawn ENOENT all return `runtime_unavailable`; non-ENOENT spawn errors return `startup_failed`; these stay distinct from `command_failed` (the runtime ran and exited non-zero) and from verification failures, so missing prerequisites never corrupt Goal state.
 
 > **Explicit trust posture.** The `acp` runtime command runs with the full privileges of the user who invoked Momentum: no container, no VM, no seccomp, no privilege drop, and no input scrubbing. Live ACP/acpx smoke is opt-in — keep it disabled in CI unless the runtime and its auth prerequisites are explicitly provisioned. The operator is responsible for the configured runtime and any scripts it invokes.
 
@@ -122,7 +120,7 @@ The iteration's `runner.log` records `[acp] start`, an optional `[acp] probe …
 
 Failure modes return stable diagnostic codes through the `RunnerAdapter` boundary. In addition to the codes shared with `trusted-shell` (`invalid_input`, `runner_threw`, `command_failed`, `command_timed_out`, `result_missing`, `result_invalid`, `output_overflow`), the `acp` adapter adds `runtime_unavailable` (missing runtime binary, missing probe binary, probe non-zero exit, probe timeout, or main spawn ENOENT) and `startup_failed` (non-ENOENT spawn errors on the main command or the probe) so missing prerequisites stay distinct from runtime errors and from verification failures. The foreground and queued iteration surfaces preserve `command_failed`, `command_timed_out`, `result_missing`, `result_invalid`, `output_overflow`, `runtime_unavailable`, and `startup_failed` verbatim as `iteration.code` / job error codes; only `invalid_input`, `unsupported_runner`, and `runner_threw` collapse to the generic `runner_failed`. As with `trusted-shell`, post-execution adapter failures reset the worktree to base HEAD only when the runner has not moved HEAD; HEAD movement returns `runner_changed_head` / `head_mismatch` and leaves the repo for manual recovery.
 
-## Repo policy via MOMENTUM.md (NGX-284)
+## Repo policy via MOMENTUM.md
 
 A repo can ship a `MOMENTUM.md` file at its root to provide repo-owned defaults that sit between goal frontmatter and Momentum's built-in defaults. Discovery is **repo-root only**: only `<repo>/MOMENTUM.md` is read, and no parent walk-up is performed. If the file is absent, the loader returns `present: false` and Momentum behaves exactly as before — existing goals without a policy file are unaffected.
 
@@ -147,7 +145,7 @@ Supported frontmatter keys (all optional, strict types when present):
 - `runner` — default runner profile name for this repo. Must be a built-in (`fake`, `trusted-shell`, `acp`).
 - `verification` — array of non-empty verification command strings.
 - `verification_timeout_sec` — positive integer.
-- `intent_apply_policy` — policy for how update intents are applied. Valid values: `create_intents_only` (default, Momentum records intents but does not perform external writes) or `external_apply_allowed` (forward-compatible, reserved for future milestones). In Milestone 5, `intent apply` always records a manual operator mark regardless of this setting; `--external-apply` is refused with `external_apply_unsupported`.
+- `intent_apply_policy` — policy for how update intents are applied. Valid values: `create_intents_only` (default, Momentum records intents but does not perform external writes) or `external_apply_allowed` (forward-compatible, reserved for future use). Today, `intent apply` always records a manual operator mark regardless of this setting; `--external-apply` is refused with `external_apply_unsupported`.
 
 A `MOMENTUM.md` with no frontmatter at all is also valid: the entire body becomes policy notes and no config defaults are set. Parse / schema errors map to stable codes (`policy_path_invalid`, `policy_file_unreadable`, `policy_parse_invalid`, `policy_schema_invalid`) and are surfaced through `goal start --json`, `status --json` / text, `handoff` JSON / markdown, and `doctor --json` / text.
 
@@ -158,6 +156,6 @@ A `MOMENTUM.md` with no frontmatter at all is also valid: the entire body become
 3. `MOMENTUM.md` frontmatter
 4. Built-in defaults (`runner: fake`, `verification: []`, `verification_timeout_sec: 900`, `intent_apply_policy: create_intents_only`)
 
-Intent apply policy has a narrower precedence chain: `MOMENTUM.md` > `builtin_default`. Goal frontmatter and CLI overrides do not set `intent_apply_policy` in M5.
+Intent apply policy has a narrower precedence chain: `MOMENTUM.md` > `builtin_default`. Goal frontmatter and CLI overrides do not set `intent_apply_policy`.
 
 `doctor` accepts an optional `--repo <path>` flag (`momentum doctor [--repo <path>] [--data-dir <path>] [--json]`) so operators can inspect a repo's policy file in isolation; without `--repo`, the doctor `policy` block reports `repoConfigured: false`. `status` and `handoff` re-read the policy file from each goal's `repo` path at observation time rather than persisting it to the database, so editing `MOMENTUM.md` between iterations is immediately reflected without a schema migration.

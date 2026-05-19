@@ -1,13 +1,14 @@
 # Momentum Documentation
 
-Momentum's README is intentionally short. This page is the simple documentation front door for users and operators.
+Momentum is a TypeScript CLI for durable autonomous repo-work orchestration. This site is the user and operator front door — install, run, inspect, recover.
+
+For a quick install / quick-start, see the [README](https://github.com/calvinnwq/momentum#readme).
 
 ## Start Here
 
-- [Roadmap](roadmap.md)
-- [Goal spec](goal-spec.md)
-- [Data directory](data-directory.md)
-- [Smoke tests](smoke-tests.md)
+- [Goal spec](goal-spec.md) — the Markdown goal file and supported frontmatter.
+- [Data directory](data-directory.md) — where state and artifacts live, and how `--data-dir` / `MOMENTUM_HOME` / `~/.momentum` resolve.
+- [End-to-end walkthrough](walkthrough.md) — a small disposable run exercising the queued, daemon, and foreground paths.
 
 ## Commands
 
@@ -27,17 +28,3 @@ Momentum's README is intentionally short. This page is the simple documentation 
 
 - [Runner profiles and repo policy](runners.md)
 - [Failure and reset semantics](failure-reset.md)
-- [End-to-end walkthrough](walkthrough.md)
-- [Current exclusions](exclusions.md)
-
-## Contracts
-
-- [Intent apply contract](contracts/intent-apply.md)
-- [Source adapters contract](contracts/source-adapters.md)
-
-## Milestones
-
-- [Milestone 3: operational safety](milestones/m3-operational-safety.md)
-- [Milestone 4: real runner profiles](milestones/m4-real-runners.md)
-- [Milestone 5: source adapters and evidence sync](milestones/m5-source-adapters.md)
-- [Milestone 6: policy-gated external apply](milestones/m6-external-apply.md)

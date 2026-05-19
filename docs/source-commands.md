@@ -1,10 +1,9 @@
 # Source commands
 
-Operator-facing CLI envelopes for the `source list`, `source get`, `source link`, `source unlink`, `source reconcile linear`, and `project status` commands. These commands inspect, mutate links on, and reconcile durable `source_items` rows produced by Milestone 5 source adapters, plus the deterministic project rollup that composes source items, evidence, and pending update intents into operator next-actions.
+Operator-facing CLI envelopes for the `source list`, `source get`, `source link`, `source unlink`, `source reconcile linear`, and `project status` commands. These commands inspect, mutate links on, and reconcile durable `source_items` rows produced by source adapters, plus the deterministic project rollup that composes source items, evidence, and pending update intents into operator next-actions.
 
 See also:
 
-- [docs/contracts/source-adapters.md](contracts/source-adapters.md) — source-adapter boundary (read-only invariants, snapshot / reconciliation outputs).
 - [docs/intent-commands.md](intent-commands.md) — the `intent list` / `get` / `apply` / `skip` / `cancel` envelopes that the project rollup surfaces.
 - [docs/status.md](status.md) and [docs/handoff.md](handoff.md) — linked `sourceItems` / `source_items` summaries on the per-goal inspectors.
 - [docs/doctor.md](doctor.md) — the aggregate `sources` block (`totalSourceItems`, `linkedSourceItems`, `lastReconciliation`).
