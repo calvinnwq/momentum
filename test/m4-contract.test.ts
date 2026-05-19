@@ -10,6 +10,16 @@ function readDoc(filename: string): string {
   return fs.readFileSync(path.join(repoRoot, filename), "utf8");
 }
 
+function sectionBetween(doc: string, start: string, end: string): string {
+  const startIndex = doc.indexOf(start);
+  expect(startIndex, `${start} section should exist`).toBeGreaterThanOrEqual(0);
+
+  const endIndex = doc.indexOf(end, startIndex + start.length);
+  expect(endIndex, `${end} section should exist after ${start}`).toBeGreaterThan(startIndex);
+
+  return doc.slice(startIndex, endIndex);
+}
+
 const M4_ISSUE_ORDER = [
   "NGX-279",
   "NGX-280",
@@ -21,7 +31,7 @@ const M4_ISSUE_ORDER = [
   "NGX-286"
 ] as const;
 
-const M4_NON_GOALS_README = [
+const M4_NON_GOALS_DOC = [
   "External tracker writes",
   "Inbound webhooks",
   "Worktrees / per-source-item workspaces",
@@ -43,6 +53,8 @@ const M4_NON_GOALS_AGENTS = [
   "remote git operations"
 ] as const;
 
+const M4_DOC_PATH = path.join("docs", "milestones", "m4-real-runners.md");
+
 describe("M4 contract docs (NGX-279..NGX-286)", () => {
   describe("README.md", () => {
     const readme = readDoc("README.md");
@@ -55,30 +67,8 @@ describe("M4 contract docs (NGX-279..NGX-286)", () => {
       }
     });
 
-    it("documents the runner architecture decision (core vs RunnerAdapter)", () => {
-      expect(readme).toContain("Architecture decision: core vs runner adapters");
-      expect(readme).toContain("`RunnerAdapter`");
-      expect(readme).toContain("Momentum core");
-    });
-
-    it("names the initial supported M4 runner family", () => {
-      expect(readme).toMatch(/`fake`/);
-      expect(readme).toMatch(/`trusted-shell`/);
-      expect(readme).toMatch(/ACP\/acpx/);
-    });
-
-    it("documents the planned M4 issue order and matches the Linear milestone", () => {
-      expect(readme).toContain("Planned issue order");
-      for (const id of M4_ISSUE_ORDER) {
-        expect(readme).toContain(id);
-      }
-    });
-
-    it("calls out explicit M4 non-goals", () => {
-      expect(readme).toContain("M4 non-goals");
-      for (const ng of M4_NON_GOALS_README) {
-        expect(readme).toContain(ng);
-      }
+    it("links to the canonical M4 docs page (NGX-295 OSS reshape)", () => {
+      expect(readme).toMatch(/docs\/milestones\/m4-real-runners\.md/);
     });
 
     it("preserves M3 closeout markers and the M3 Alignment narrative", () => {
@@ -111,6 +101,61 @@ describe("M4 contract docs (NGX-279..NGX-286)", () => {
         "momentum doctor"
       ]) {
         expect(readme).toContain(cmd);
+      }
+    });
+  });
+
+  describe("docs/milestones/m4-real-runners.md", () => {
+    const m4doc = readDoc(M4_DOC_PATH);
+
+    it("names M4 complete with the NGX-279..NGX-286 closeout", () => {
+      expect(m4doc).toMatch(/Complete \(NGX-279 through NGX-286\)/);
+    });
+
+    it("documents the runner architecture decision (core vs RunnerAdapter)", () => {
+      expect(m4doc).toContain("## M4 architecture: Momentum core vs runner adapters");
+      expect(m4doc).toContain("`RunnerAdapter`");
+      expect(m4doc).toContain("Momentum core");
+    });
+
+    it("names the initial supported M4 runner family", () => {
+      expect(m4doc).toContain("## M4 runner family");
+      expect(m4doc).toMatch(/`fake`/);
+      expect(m4doc).toMatch(/`trusted-shell`/);
+      expect(m4doc).toMatch(/ACP\/acpx/);
+    });
+
+    it("documents the planned M4 issue order matching the Linear milestone", () => {
+      expect(m4doc).toContain("## Planned M4 issue order");
+      const plannedOrder = sectionBetween(
+        m4doc,
+        "## Planned M4 issue order",
+        "## M4 non-goals (explicit)"
+      );
+      let cursor = -1;
+      for (const id of M4_ISSUE_ORDER) {
+        const next = plannedOrder.indexOf(id, cursor + 1);
+        expect(next, `${id} should appear after the previous M4 id`).toBeGreaterThan(cursor);
+        cursor = next;
+      }
+    });
+
+    it("calls out explicit M4 non-goals", () => {
+      expect(m4doc).toContain("## M4 non-goals (explicit)");
+      for (const ng of M4_NON_GOALS_DOC) {
+        expect(m4doc).toContain(ng);
+      }
+    });
+
+    it("preserves M3 contracts through M4", () => {
+      expect(m4doc).toContain("## M3 contracts preserved");
+      for (const cmd of [
+        "daemon start",
+        "daemon stop",
+        "daemon status",
+        "recovery clear"
+      ]) {
+        expect(m4doc).toContain(cmd);
       }
     });
   });
