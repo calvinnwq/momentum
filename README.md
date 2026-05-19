@@ -1,6 +1,23 @@
 # Momentum
 
+![Node](https://img.shields.io/badge/node-%3E%3D24-339933?logo=node.js&logoColor=white)
+![TypeScript](https://img.shields.io/badge/typescript-5.9-3178C6?logo=typescript&logoColor=white)
+![Status](https://img.shields.io/badge/status-pre--release-orange)
+![License](https://img.shields.io/badge/license-unpublished-lightgrey)
+
 Momentum is a TypeScript CLI targeting Node.js for autonomous repo-work orchestration. It turns a durable Goal into verified Iterations, with local artifacts and handoff state.
+
+## Documentation
+
+The roadmap, milestone scopes, and cross-milestone contracts live under `docs/`:
+
+- [docs/roadmap.md](docs/roadmap.md) — milestone timeline and current ordering.
+- [docs/milestones/m5-source-adapters.md](docs/milestones/m5-source-adapters.md) — M5: source adapters and evidence sync (complete). Framed as durable intents only; no external apply.
+- [docs/milestones/m6-external-apply.md](docs/milestones/m6-external-apply.md) — M6: policy-gated external apply (active).
+- [docs/contracts/intent-apply.md](docs/contracts/intent-apply.md) — Two-phase external apply: claim, audit-before-write, external write, finalize, blocked / non-replay state, CAS, comment-only default, idempotency marker, single-issue reconcile, and the test guard against real `api.linear.app` calls.
+- [docs/contracts/source-adapters.md](docs/contracts/source-adapters.md) — Source adapter boundary: read-only invariants, snapshot / reconciliation outputs, and how M6's Linear write client layers on top.
+
+The detailed milestone narratives below remain in this README for now (M3 Alignment, M4 Roadmap, M5 Roadmap); future slices will trim them in favor of the dedicated milestone docs above.
 
 Milestone 1 (Foreground Proof Loop) is complete. Milestone 2 (Queue and Worker Model) is complete, with NGX-235, NGX-236, NGX-237, NGX-238, NGX-239, NGX-245, NGX-246, NGX-247, NGX-248, NGX-249, and NGX-250 implemented and verified. NGX-249 is M2-05 completion reducer and idempotent chaining (`reduceGoalIteration` classifies terminal `goal_iteration` jobs as `continue` / `goal_complete` / `max_iterations_reached` / `iteration_failed`; updates `goals.state` / `current_iteration` / `completion_reason`; enqueues next iterations with stable idempotency keys; emits `goal.reduced` + `goal.completed` / `goal.failed`; surfaces reducer state, next job, and next-action via `status`/`handoff`; and runs after each completed queued job). NGX-250 pins the Milestone 2 CLI contract around queued status/handoff fields, local log inspection, queued smoke coverage, and user-facing docs. Milestone 2 also includes queued-path execution without a long-lived daemon, stable single-shot worker behavior, and explicit artifact pointers on job success/failure.
 
