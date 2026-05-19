@@ -14,7 +14,7 @@ Land a two-phase external apply path for the Linear source adapter so an operato
 
 The Linear milestone "Milestone 6: Policy-Gated External Apply" sequences the work as:
 
-1. **NGX-295 — M6-00 M6 contract, roadmap, and docs setup** *(this slice)*: reshape the public docs surface so README is the OSS front door, AGENTS is a compact agent contract, and the M6 invariants land in `docs/`.
+1. **NGX-295 — M6-00 M6 contract, roadmap, and docs setup** *(this slice)*: reshape the public docs surface so README is the OSS front door, AGENTS is a compact agent contract, and the M6 invariants land in `internal/`.
 2. **NGX-296 — M6-01 Intent apply state model and CAS guard**: extend `update_intents` with per-intent concurrency control and the `intent_apply_in_progress` / `blocked` states. Document the `claim → audit → external write → finalize` lifecycle in code and tests.
 3. **NGX-297 — M6-02 Linear write client and dry-run harness**: introduce the credential-handling write client and the local dry-run harness. Tests use a mock endpoint; **no real `api.linear.app` calls**.
 4. **NGX-299 — M6-03 Operator audit surfaces**: land audit and operator-visible surfaces (`intent get` audit fields, `status` / `handoff` flags, doctor surface) **before** any real external write so operators can see what would happen before it happens. NGX-299 must merge before NGX-298.

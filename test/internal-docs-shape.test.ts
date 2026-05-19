@@ -97,4 +97,57 @@ describe("AGENTS.md points agents at internal/", () => {
   it("references the public-docs hygiene guard", () => {
     expect(agents).toMatch(/test\/public-docs-hygiene\.test\.ts/);
   });
+
+  it("every internal/*.md link in AGENTS.md targets a file that exists", () => {
+    const matches = agents.match(/internal\/[A-Za-z0-9./_-]+\.md/g) ?? [];
+    const unique = Array.from(new Set(matches));
+    expect(unique.length, "AGENTS.md should reference internal planning docs").toBeGreaterThan(0);
+
+    const missing = unique.filter((rel) => !fs.existsSync(path.join(repoRoot, rel)));
+    expect(
+      missing,
+      `AGENTS.md references internal/*.md paths that do not exist on disk: ${missing.join(", ")}`
+    ).toEqual([]);
+  });
+});
+
+describe("internal markdown links", () => {
+  it("every relative .md link inside internal/*.md targets a file that exists", () => {
+    const internalDir = path.join(repoRoot, "internal");
+    const allDocs: string[] = [];
+    function walk(dir: string): void {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          walk(full);
+        } else if (entry.isFile() && entry.name.endsWith(".md")) {
+          allDocs.push(full);
+        }
+      }
+    }
+    walk(internalDir);
+
+    const broken: string[] = [];
+    const linkRe = /\]\(([^)\s]+\.md)(?:#[^)]*)?\)/g;
+    for (const docPath of allDocs) {
+      const body = fs.readFileSync(docPath, "utf8");
+      const sourceDir = path.dirname(docPath);
+      const relSource = path.relative(repoRoot, docPath).split(path.sep).join("/");
+      let match: RegExpExecArray | null;
+      while ((match = linkRe.exec(body)) !== null) {
+        const target = match[1]!;
+        if (/^https?:/i.test(target)) continue;
+        const resolved = path.resolve(sourceDir, target);
+        if (!fs.existsSync(resolved)) {
+          const relResolved = path.relative(repoRoot, resolved).split(path.sep).join("/");
+          broken.push(`${relSource} -> ${target} (resolves to ${relResolved})`);
+        }
+      }
+    }
+
+    expect(
+      broken,
+      `internal/*.md files contain markdown links to .md targets that do not exist on disk: ${broken.join("; ")}`
+    ).toEqual([]);
+  });
 });

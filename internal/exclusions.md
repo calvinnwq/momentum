@@ -12,7 +12,7 @@ Milestone status:
 - **Milestone 4 (Real Runner Profiles)** is complete and absorbed runner
   profiles plus the runtime `MOMENTUM.md` policy loader. See
   [`internal/milestones/m4-real-runners.md`](milestones/m4-real-runners.md) and
-  [`docs/runners.md`](runners.md).
+  [`docs/runners.md`](../docs/runners.md).
 - **Milestone 5 (Source Adapters and Evidence Sync)** is complete and added
   read-only source reconciliation, local evidence ingestion, project rollups,
   and durable external-update intents. See
@@ -58,7 +58,7 @@ for blocked stale claims, and M4 also uses it for iteration-time HEAD movement:
 `runner_changed_head`, and `head_mismatch` write `recovery.md`, set
 `needs_manual_recovery`, block future queue claims, and remain visible through
 `status`, `handoff`, `daemon status`, and `doctor` until an operator runs
-`recovery clear`. See [`docs/recovery.md`](recovery.md) for the full surface.
+`recovery clear`. See [`docs/recovery.md`](../docs/recovery.md) for the full surface.
 
 ## Single-shot worker
 

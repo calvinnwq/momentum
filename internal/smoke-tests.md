@@ -8,9 +8,9 @@ artifact in the repo — it pins public CLI behaviour against the real
 SQLite-backed orchestrator without mocking the runner adapter, the daemon
 loop, or the source / evidence / intent stores.
 
-See also: [docs/walkthrough.md](walkthrough.md) for the operator-facing copy-paste
-disposable smoke, [docs/daemon.md](daemon.md) for the managed-loop envelopes, and
-[docs/worker-run.md](worker-run.md) for the single-job pipeline that the queued
+See also: [docs/walkthrough.md](../docs/walkthrough.md) for the operator-facing copy-paste
+disposable smoke, [docs/daemon.md](../docs/daemon.md) for the managed-loop envelopes, and
+[docs/worker-run.md](../docs/worker-run.md) for the single-job pipeline that the queued
 paths below exercise.
 
 ## Milestone 1 / 2 coverage
@@ -60,7 +60,7 @@ The smoke exercises the M4 real-runner profile contract:
   error code through `status` and `logs`.
 - `MOMENTUM.md` policy precedence: the policy file's `runner` default is
   overridden by a CLI `--runner` flag while policy notes thread into the
-  iteration prompt (see [docs/runners.md](runners.md) for the full precedence
+  iteration prompt (see [docs/runners.md](../docs/runners.md) for the full precedence
   chain).
 - `acp` `runtime_unavailable` path when the configured runtime is missing.
 
@@ -75,7 +75,7 @@ boundary that M6 inherits):
   string (the M6 milestone flip is reserved for NGX-302 — see
   [internal/milestones/m6-external-apply.md](milestones/m6-external-apply.md)).
 - workflow evidence ingestion through `momentum evidence ingest` and
-  `evidence list` (see [docs/evidence-commands.md](evidence-commands.md)).
+  `evidence list` (see [docs/evidence-commands.md](../docs/evidence-commands.md)).
 - empty intent and project-status surfaces (`pendingUpdateIntents: []`,
   `mismatches: []`).
 - Linear reconciliation through a mock endpoint: `source reconcile linear`
@@ -84,9 +84,9 @@ boundary that M6 inherits):
 - source linking into `status`, `handoff`, and `doctor` surfaces.
 - `source_satisfied` intent generation with external-apply refusal
   (`external_apply_unsupported` in M5) and manual apply through
-  `momentum intent apply` (see [docs/intent-commands.md](intent-commands.md)).
+  `momentum intent apply` (see [docs/intent-commands.md](../docs/intent-commands.md)).
 - project rollup mismatch and pending-intent next-action reporting via
-  `momentum project status` (see [docs/source-commands.md](source-commands.md)
+  `momentum project status` (see [docs/source-commands.md](../docs/source-commands.md)
   for the stable `mismatches[].kind`, `reconciliationWarnings[].reason`, and
   `nextAction.kind` taxonomies).
 

@@ -56,8 +56,9 @@ describe("public docs hygiene", () => {
       /\bM[3-9]\s+(contract|alignment|closeout|scope|non-goals|invariant)/i,
       /\b(Milestone\s+[0-9]+|M[3-9])\s+is\s+(complete|the\s+active\s+milestone)\b/i,
       /\bactive\s+milestone\b/i,
+      /\bLinear\s+milestone\b/i,
       /\bclose(?:out)?\s+marker\b/i,
-      /\bplanned\s+M[0-9]+\s+issue\s+order\b/i,
+      /\bplanned(?:\s+M[0-9]+)?\s+issue\s+order\b/i,
     ];
     for (const surface of publicSurfaces) {
       it(`${surface.label} must not use internal milestone vocabulary`, () => {

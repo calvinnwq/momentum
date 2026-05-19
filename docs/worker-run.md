@@ -1,7 +1,6 @@
 # `worker run`
 
-This page is the canonical reference for the `worker run` command — the
-queued execution path that drains pending `goal_iteration` jobs in
+This page is the canonical reference for the `worker run` command — the queued execution path that drains pending `goal_iteration` jobs in
 single-job batches.
 
 See also:
