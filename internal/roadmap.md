@@ -25,8 +25,8 @@ The full M6 contract — runtime invariants, the two-phase apply flow, audit ord
 
 The Linear milestone "Milestone 6: Policy-Gated External Apply" sequences the work as:
 
-1. **NGX-295 — M6-00 M6 contract, roadmap, and docs setup** *(this slice)*: reshape the public docs surface so README is the OSS front door, AGENTS is a compact agent contract, and the M6 invariants land in `internal/`.
-2. **NGX-296 — M6-01 ExternalUpdateAdapter boundary and result taxonomy**: add the write-side adapter boundary, registry, input/result types, deterministic dry-run preview shape, idempotency marker helper, and stable adapter/write error taxonomy. No real Linear mutations or CLI external apply integration land in this slice.
+1. **NGX-295 — M6-00 M6 contract, roadmap, and docs setup**: reshape the public docs surface so README is the OSS front door, AGENTS is a compact agent contract, and the M6 invariants land in `internal/`.
+2. **NGX-296 — M6-01 ExternalUpdateAdapter boundary and result taxonomy** *(this slice)*: add the write-side adapter boundary, registry, input/result types, deterministic dry-run preview shape, idempotency marker helper, and stable adapter/write error taxonomy. No real Linear mutations or CLI external apply integration land in this slice.
 3. **NGX-297 — M6-02 Linear external update client**: introduce the credential-handling Linear GraphQL mutation client behind the adapter boundary. Tests use mock fetch/endpoints; no real `api.linear.app` calls in tests, and the CLI path is still not wired.
 4. **NGX-299 — M6-03 Apply audit ledger and operator surfaces**: land durable audit/claim storage, the per-intent CAS guard with `intent_apply_in_progress`, blocked/audit-incomplete state representation, and operator-visible surfaces **before** any CLI external write can mutate Linear.
 5. **NGX-298 — M6-04 External apply execution**: wire the two-phase external write behind `intent apply --external-apply` gated by `intent_apply_policy: external_apply_allowed`. Comment-only by default; status mutation only when explicitly configured.
