@@ -218,6 +218,22 @@ describe("M6 contract docs (NGX-295 setup)", () => {
     it("links to docs/contracts/intent-apply.md", () => {
       expect(readme).toMatch(/docs\/contracts\/intent-apply\.md/);
     });
+
+    it("keeps the top milestone summary compact (no wall-of-text paragraph before CLI Surface)", () => {
+      const docStart = readme.indexOf("## Documentation");
+      const cliStart = readme.indexOf("## CLI Surface");
+      expect(docStart, "## Documentation section should exist").toBeGreaterThanOrEqual(0);
+      expect(cliStart, "## CLI Surface section should exist after ## Documentation").toBeGreaterThan(docStart);
+
+      const intro = readme.slice(docStart, cliStart);
+      const longestParagraph = intro
+        .split(/\n{2,}/)
+        .reduce((max, p) => Math.max(max, p.length), 0);
+      expect(
+        longestParagraph,
+        `intro paragraph should be compact (was ${longestParagraph} chars); move milestone history into docs/ or dedicated README sections`
+      ).toBeLessThan(1500);
+    });
   });
 
   describe("AGENTS.md compact agent contract", () => {
@@ -229,6 +245,30 @@ describe("M6 contract docs (NGX-295 setup)", () => {
 
     it("points future agents to docs/ for the source of truth", () => {
       expect(agents).toMatch(/docs\/(roadmap|milestones|contracts)/);
+    });
+
+    it("stays compact (under 200 lines) after the OSS reshape", () => {
+      const lineCount = agents.split("\n").length;
+      expect(lineCount, `AGENTS.md should be compact, was ${lineCount} lines`).toBeLessThan(200);
+    });
+
+    it("Milestone 3 alignment section points to the canonical M3 docs page", () => {
+      const section = agents.slice(agents.indexOf("## Milestone 3 alignment"));
+      expect(section).toMatch(/docs\/milestones\/m3-operational-safety\.md/);
+    });
+
+    it("Milestone 4 contract section points to the canonical M4 docs page", () => {
+      const start = agents.indexOf("## Milestone 4 contract");
+      const end = agents.indexOf("## Milestone 3 alignment", start + 1);
+      const section = agents.slice(start, end > start ? end : undefined);
+      expect(section).toMatch(/docs\/milestones\/m4-real-runners\.md/);
+    });
+
+    it("Milestone 5 contract section points to the canonical M5 docs page", () => {
+      const start = agents.indexOf("## Milestone 5 contract");
+      const end = agents.indexOf("## Milestone 4 contract", start + 1);
+      const section = agents.slice(start, end > start ? end : undefined);
+      expect(section).toMatch(/docs\/milestones\/m5-source-adapters\.md/);
     });
   });
 
