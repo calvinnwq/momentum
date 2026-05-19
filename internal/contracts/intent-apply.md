@@ -6,7 +6,7 @@ In Milestone 5, `intent apply --external-apply` is always refused with `external
 
 ## Scope
 
-This contract covers `intent apply --external-apply` for the Linear external write adapter introduced in M6 (NGX-297). It does not cover M5's manual-mark `intent apply` (which records the operator decision locally without any external write), `intent skip`, or `intent cancel`. Those remain wire-stable and are not affected by this contract.
+This contract covers `intent apply --external-apply` for the Linear external-write path introduced in M6: the write-side adapter boundary starts in NGX-296 and the Linear mutation client follows in NGX-297. It does not cover M5's manual-mark `intent apply` (which records the operator decision locally without any external write), `intent skip`, or `intent cancel`. Those remain wire-stable and are not affected by this contract.
 
 ## Lifecycle: claim → audit → external write → finalize
 
@@ -34,7 +34,7 @@ The contract is: external writes are not auto-replayed under any circumstance, b
 
 Concurrency control is per-intent. Two `intent apply --external-apply` invocations against the same intent id must not both reach the external write step.
 
-- The runtime uses a compare-and-swap (CAS) on the per-intent apply state to enforce single-claim semantics. The CAS column / claim id / claim timestamp shape lands in NGX-296.
+- The runtime uses a compare-and-swap (CAS) on the per-intent apply state to enforce single-claim semantics. The durable claim / audit shape and stable `intent_apply_in_progress` result land before CLI external apply, in NGX-299.
 - A failed claim returns a **stable `intent_apply_in_progress` result** (not a generic error, not a 500-class crash). Tests pin this exact code so operator tooling and CI can detect the race deterministically.
 - The CAS guard is symmetric: it protects against simultaneous CLI invocations, accidental daemon-loop replay (M6 does not loop external apply, but the guard still prevents it from being introduced later by accident), and any future automation.
 
@@ -51,10 +51,11 @@ Unless target Linear status mutation is **explicitly configured** for the adapte
 
 Every external write carries a **stable, documented idempotency marker** that the dedupe, post-apply reconcile, and recovery paths all key off of.
 
-- The marker is composed from `(adapter_kind, intent_id, intent_payload_hash)` so the same intent applied twice (even after a crash) is detectable from Linear-side artifacts alone.
+- The marker is composed from adapter kind, intent id, and a deterministic SHA-256 digest input over `(adapter_kind, intent_id, canonical_intent_payload)` so the same intent applied twice (even after a crash) is detectable from Linear-side artifacts alone.
+- The canonical intent payload recursively sorts object keys before hashing while preserving array order, so object key insertion order does not change the marker but list-like payload order still does.
+- The marker format is `momentum-intent:<adapterKind>:<intentId>:<digest>`, where `<digest>` is the first 16 hex characters of that SHA-256 digest. NGX-296 owns this helper and asserts the shape in adapter-boundary tests.
 - The marker is included in the Linear comment body (or, when configured, in the structured comment metadata) so an operator can grep Linear for a Momentum-written comment without consulting the local store.
 - The post-apply single-issue reconcile (NGX-301) uses the marker to confirm whether the comment / status mutation Momentum intended is already present on the issue.
-- The marker shape is pinned by NGX-300 (M6-05) and asserted in tests.
 
 ## Post-apply single-issue reconcile
 

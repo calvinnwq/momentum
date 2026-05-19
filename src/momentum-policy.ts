@@ -38,13 +38,13 @@ export const MOMENTUM_POLICY_FILENAME = "MOMENTUM.md";
  * NGX-293 (M5-06). The field gates whether the `momentum intent apply` CLI is
  * allowed to perform an external write through an adapter.
  *
- * - `create_intents_only` (default): the only safe-for-M5 mode. The apply CLI
- *   may record an operator's manual mark, but the system refuses to perform
- *   any external tracker writes. This matches the M5 trust boundary verbatim.
- * - `external_apply_allowed`: a forward-looking opt-in for future milestones
- *   that ship adapter-mediated external writes. M5 does not implement any
- *   external write code path, so requesting an external apply in M5 always
- *   refuses with `external_apply_unsupported` even when this policy is set.
+ * - `create_intents_only` (default): the safe default. The apply CLI may
+ *   record an operator's manual mark, but the system refuses to perform any
+ *   external tracker writes unless the repo explicitly opts in.
+ * - `external_apply_allowed`: opts the repo into the M6 adapter-mediated
+ *   external apply path. In the NGX-296 boundary slice this authorizes
+ *   adapter dry-run previews; public CLI execution may still be refused until
+ *   the later two-phase write slice is wired.
  */
 export const UPDATE_INTENT_APPLY_POLICIES = [
   "create_intents_only",
@@ -604,10 +604,9 @@ export type ResolvedIntentApplyPolicy = {
 
 /**
  * Resolve the effective `intent_apply_policy` for the current Goal/repo, with
- * precedence: MOMENTUM.md frontmatter > built-in default. NGX-293 does not
- * expose this field to goal frontmatter or CLI overrides; M5 keeps the
- * effective gate at the repo policy or built-in default to make the
- * "no auto-apply" trust boundary visible in one place.
+ * precedence: MOMENTUM.md frontmatter > built-in default. The effective gate
+ * stays at the repo policy or built-in default so the no-auto-apply trust
+ * boundary and any M6 external-apply opt-in remain visible in one place.
  */
 export function resolveIntentApplyPolicy(
   policyConfig: MomentumPolicyConfig | undefined
@@ -621,10 +620,10 @@ export function resolveIntentApplyPolicy(
 
 /**
  * Convenience check: does the effective policy allow external apply through
- * an adapter? M5 still does not implement any external write path, so even
- * `external_apply_allowed` does not authorize an actual external write in
- * M5 — callers must additionally refuse `--external-apply` with
- * `external_apply_unsupported` while M5 is in flight.
+ * an adapter? In M6 this is the required policy gate for adapter-boundary
+ * previews and the later two-phase external write path. Callers still decide
+ * whether the current slice can execute a public CLI external write or must
+ * refuse it until the execution path is wired.
  */
 export function isExternalApplyAllowedByPolicy(
   policyConfig: MomentumPolicyConfig | undefined
