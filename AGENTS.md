@@ -71,17 +71,7 @@ Milestone 3: Operational Safety is complete. The canonical M3 alignment lives in
 - A Goal uses one shared repo / workspace lease.
 
 ## Stack and workflow commands
-- Runtime: Node.js
-- Language: TypeScript
-- Tests: Vitest
-- Package manager: pnpm
-
-Common commands:
-- `pnpm test`
-- `pnpm typecheck`
-- `pnpm build`
-- `node dist/index.js doctor`
-- `node dist/index.js --help`
+TypeScript on Node.js with Vitest tests, managed by pnpm. See [README.md](README.md)'s `## Local Development` block for the workflow commands (`pnpm install`, `pnpm test`, `pnpm typecheck`, `pnpm build`, `node dist/index.js --help`, `node dist/index.js doctor`).
 
 ## Coding discipline
 - Follow existing code patterns and naming in `src/` and `test/`.
@@ -91,38 +81,13 @@ Common commands:
 - Add focused tests for behavior changes.
 
 ## CLI expectations
-- Public surface currently includes:
-- `goal start`
-- `status`
-- `logs`
-- `handoff`
-- `source list`
-- `source get`
-- `source link`
-- `source unlink`
-- `source reconcile linear`
-- `project status`
-- `worker run`
-- `daemon start`
-- `daemon stop`
-- `daemon status`
-- `recovery clear`
-- `evidence ingest`
-- `evidence list`
-- `intent list`
-- `intent get`
-- `intent apply`
-- `intent skip`
-- `intent cancel`
-- `doctor`
+The full public CLI surface lives in [README.md](README.md)'s `## CLI Surface` block; per-command JSON envelopes, refusal codes, and idempotency semantics live in the `docs/` pages linked from `README.md`'s `## Documentation` list. The M3 operational-safety surfaces — `daemon start`, `daemon stop`, `daemon status`, `recovery clear`, and `doctor` — remain wire-stable through M4, M5, and M6.
+
 - Preserve stable CLI behavior across both JSON and text outputs.
 - When changing user-facing output, update tests and verify callers that rely on stable formatting.
-- `logs <goal-id> [--iteration N]` reads on-disk `runner.log`, `verification.log`, runner result JSON artifacts, linked source item summaries, and latest evidence summaries from SQLite; it must not consult live worker state. Empty result scaffolds (`{}`) are not parse errors, while malformed/non-conforming result JSON should surface a `parseError`.
 
 ## Data and artifact layout
-- State uses `MOMENTUM_HOME` env var → `~/.momentum` fallback; override with `--data-dir`.
-- SQLite database at `<data-dir>/momentum.db` with `goals`, `jobs`, `events`, `repo_locks`, `daemon_runs`, `source_items`, `source_snapshots`, `source_reconciliation_runs`, `evidence_records`, and `update_intents` tables.
-- Goal artifacts at `<data-dir>/goals/<goal-id>/`: `goal.md`, `ledger.md`, `handoff.md`, `handoff.json`, optional `recovery.md` (created lazily when manual recovery is classified), and `iterations/<n>/{prompt.md,runner.log,verification.log,result.json}` by default; runner profiles such as `trusted-shell` and `acp` may report a different result JSON file inside the iteration directory via `trusted_shell.result_file` / `acp.result_file`.
+State (`<data-dir>/momentum.db` SQLite plus per-goal `goals/<goal-id>/` artifact trees) is resolved as `--data-dir` > `MOMENTUM_HOME` > `~/.momentum`. See [docs/data-directory.md](docs/data-directory.md) for the full layout (SQLite tables, per-goal and per-iteration artifact files, the `trusted_shell.result_file` / `acp.result_file` overrides, initialization lifecycle, and operational invariants).
 - Avoid hard-coded paths tied to a single user.
 - Only use explicit local paths when existing documentation in-repo explicitly mandates them.
 

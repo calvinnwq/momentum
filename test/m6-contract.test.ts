@@ -1448,6 +1448,271 @@ describe("M6 contract docs (NGX-295 setup)", () => {
         `CLI Surface narrative paragraph should be compact (was ${longestNarrative} chars); move per-command reference content into docs/daemon.md / docs/goal-start.md / docs/worker-run.md`
       ).toBeLessThan(800);
     });
+
+    it("keeps the Runner profiles and repo policy sub-section compact (pointer, not bullet wall)", () => {
+      const sectionStart = readme.indexOf("### Runner profiles and repo policy");
+      expect(sectionStart, "### Runner profiles and repo policy sub-section should exist").toBeGreaterThanOrEqual(0);
+      const after = readme.slice(sectionStart + "### Runner profiles and repo policy".length);
+      const nextHeadingOffset = after.search(/\n## |\n### /);
+      const section = nextHeadingOffset >= 0 ? after.slice(0, nextHeadingOffset) : after;
+      expect(
+        section.length,
+        `### Runner profiles and repo policy section should be a compact pointer (was ${section.length} chars); move bullet content into docs/runners.md`
+      ).toBeLessThan(500);
+    });
+
+    it("keeps the Recovery surfaces sub-section compact (pointer, not bullet wall)", () => {
+      const sectionStart = readme.indexOf("### Recovery surfaces (NGX-276, NGX-277)");
+      expect(sectionStart, "### Recovery surfaces (NGX-276, NGX-277) sub-section should exist").toBeGreaterThanOrEqual(0);
+      const after = readme.slice(sectionStart + "### Recovery surfaces (NGX-276, NGX-277)".length);
+      const nextHeadingOffset = after.search(/\n## |\n### /);
+      const section = nextHeadingOffset >= 0 ? after.slice(0, nextHeadingOffset) : after;
+      expect(
+        section.length,
+        `### Recovery surfaces section should be a compact pointer (was ${section.length} chars); move bullet content into docs/recovery.md`
+      ).toBeLessThan(400);
+    });
+
+    it("keeps the Milestone 3 Alignment section compact (pointer, not duplicated narrative)", () => {
+      const sectionStart = readme.indexOf("## Milestone 3 Alignment");
+      expect(sectionStart, "## Milestone 3 Alignment section should exist").toBeGreaterThanOrEqual(0);
+      const after = readme.slice(sectionStart + "## Milestone 3 Alignment".length);
+      const nextHeadingOffset = after.search(/\n## /);
+      const section = nextHeadingOffset >= 0 ? after.slice(0, nextHeadingOffset) : after;
+      expect(
+        section.length,
+        `## Milestone 3 Alignment section should be a compact pointer (was ${section.length} chars); move narrative into docs/milestones/m3-operational-safety.md`
+      ).toBeLessThan(400);
+    });
+
+    it("keeps the Milestone 4 Roadmap section compact (pointer, not duplicated narrative)", () => {
+      const sectionStart = readme.indexOf("## Milestone 4 Roadmap");
+      expect(sectionStart, "## Milestone 4 Roadmap section should exist").toBeGreaterThanOrEqual(0);
+      const after = readme.slice(sectionStart + "## Milestone 4 Roadmap".length);
+      const nextHeadingOffset = after.search(/\n## /);
+      const section = nextHeadingOffset >= 0 ? after.slice(0, nextHeadingOffset) : after;
+      expect(
+        section.length,
+        `## Milestone 4 Roadmap section should be a compact pointer (was ${section.length} chars); move narrative into docs/milestones/m4-real-runners.md`
+      ).toBeLessThan(550);
+    });
+
+    it("keeps the Milestone 5 Roadmap section compact (pointer, not duplicated narrative)", () => {
+      const sectionStart = readme.indexOf("## Milestone 5 Roadmap");
+      expect(sectionStart, "## Milestone 5 Roadmap section should exist").toBeGreaterThanOrEqual(0);
+      const after = readme.slice(sectionStart + "## Milestone 5 Roadmap".length);
+      const nextHeadingOffset = after.search(/\n## /);
+      const section = nextHeadingOffset >= 0 ? after.slice(0, nextHeadingOffset) : after;
+      expect(
+        section.length,
+        `## Milestone 5 Roadmap section should be a compact pointer (was ${section.length} chars); move narrative into docs/milestones/m5-source-adapters.md`
+      ).toBeLessThan(400);
+    });
+
+    it("keeps the Goal Spec narrative compact (orientation prose, not reference wall)", () => {
+      const goalSpecStart = readme.indexOf("## Goal Spec");
+      const commandsStart = readme.indexOf("## Commands");
+      expect(goalSpecStart, "## Goal Spec section should exist").toBeGreaterThanOrEqual(0);
+      expect(commandsStart, "## Commands section should exist after ## Goal Spec").toBeGreaterThan(goalSpecStart);
+      const goalSpec = readme.slice(goalSpecStart, commandsStart);
+      const longestNarrative = goalSpec
+        .split(/\n{2,}/)
+        .filter((p) => !p.startsWith("```"))
+        .reduce((max, p) => Math.max(max, p.length), 0);
+      expect(
+        longestNarrative,
+        `Goal Spec narrative paragraph should be compact (was ${longestNarrative} chars); move frontmatter reference into docs/goal-spec.md`
+      ).toBeLessThan(700);
+    });
+
+    it("links to docs/goal-spec.md", () => {
+      expect(readme).toMatch(/docs\/goal-spec\.md/);
+    });
+
+    it("keeps the Data Directory section compact (pointer + tree, not duplicated lifecycle prose)", () => {
+      const sectionStart = readme.indexOf("## Data Directory");
+      expect(sectionStart, "## Data Directory section should exist").toBeGreaterThanOrEqual(0);
+      const after = readme.slice(sectionStart + "## Data Directory".length);
+      const nextHeadingOffset = after.search(/\n## /);
+      const section = nextHeadingOffset >= 0 ? after.slice(0, nextHeadingOffset) : after;
+      const longestNarrative = section
+        .split(/\n{2,}/)
+        .filter((p) => !p.startsWith("```"))
+        .reduce((max, p) => Math.max(max, p.length), 0);
+      expect(
+        longestNarrative,
+        `Data Directory narrative paragraph should be compact (was ${longestNarrative} chars); move artifact-lifecycle prose into docs/data-directory.md`
+      ).toBeLessThan(600);
+    });
+
+    it("links to docs/data-directory.md", () => {
+      expect(readme).toMatch(/docs\/data-directory\.md/);
+    });
+
+    it("keeps the `goal start` sub-section compact (single pointer paragraph, not duplicated taxonomy)", () => {
+      const sectionStart = readme.indexOf("### `goal start`");
+      expect(sectionStart, "### `goal start` sub-section should exist").toBeGreaterThanOrEqual(0);
+      const after = readme.slice(sectionStart + "### `goal start`".length);
+      const nextHeadingOffset = after.search(/\n## |\n### /);
+      const section = nextHeadingOffset >= 0 ? after.slice(0, nextHeadingOffset) : after;
+      expect(
+        section.length,
+        `### \`goal start\` section should be a compact pointer (was ${section.length} chars); move taxonomy listing into docs/goal-start.md`
+      ).toBeLessThan(1200);
+      const narrative = section
+        .split(/\n{2,}/)
+        .filter((p) => p.trim().length > 0 && !p.trim().startsWith("```"));
+      expect(
+        narrative.length,
+        `### \`goal start\` should have one pointer paragraph alongside the CLI shape block (was ${narrative.length} narrative paragraphs)`
+      ).toBe(1);
+    });
+
+    it("consolidates the daemon start / stop / status commands under a single combined ### heading", () => {
+      const combinedHeading = "### `daemon start`, `daemon stop`, `daemon status`";
+      const sectionStart = readme.indexOf(combinedHeading);
+      expect(
+        sectionStart,
+        `${combinedHeading} consolidated sub-section should exist (matches the source / intent / evidence consolidation pattern)`
+      ).toBeGreaterThanOrEqual(0);
+      expect(
+        readme.indexOf("### `daemon start`\n"),
+        "standalone ### `daemon start` heading should be removed in favour of the combined heading"
+      ).toBe(-1);
+      expect(
+        readme.indexOf("### `daemon stop`\n"),
+        "standalone ### `daemon stop` heading should be removed in favour of the combined heading"
+      ).toBe(-1);
+      expect(
+        readme.indexOf("### `daemon status`\n"),
+        "standalone ### `daemon status` heading should be removed in favour of the combined heading"
+      ).toBe(-1);
+      const after = readme.slice(sectionStart + combinedHeading.length);
+      const nextHeadingOffset = after.search(/\n## |\n### /);
+      const section = nextHeadingOffset >= 0 ? after.slice(0, nextHeadingOffset) : after;
+      for (const cmd of [
+        "momentum daemon start",
+        "momentum daemon stop",
+        "momentum daemon status"
+      ]) {
+        expect(
+          section,
+          `consolidated daemon sub-section should preserve the ${cmd} CLI shape line`
+        ).toContain(cmd);
+      }
+      expect(
+        section,
+        "consolidated daemon sub-section should point at docs/daemon.md"
+      ).toMatch(/docs\/daemon\.md/);
+      expect(
+        section.length,
+        `consolidated daemon sub-section should be a compact pointer (was ${section.length} chars); move register-only / managed-loop / stop-now / inspector detail into docs/daemon.md`
+      ).toBeLessThan(1400);
+      const narrative = section
+        .split(/\n{2,}/)
+        .filter((p) => p.trim().length > 0 && !p.trim().startsWith("```"));
+      expect(
+        narrative.length,
+        `consolidated daemon sub-section should have one pointer paragraph alongside the combined CLI shape block (was ${narrative.length} narrative paragraphs)`
+      ).toBe(1);
+    });
+  });
+
+  describe("docs/data-directory.md artifact layout reference", () => {
+    const dataDir = readDoc("docs/data-directory.md");
+
+    it("documents the data-directory resolution chain (--data-dir > MOMENTUM_HOME > ~/.momentum)", () => {
+      expect(dataDir).toContain("--data-dir");
+      expect(dataDir).toContain("MOMENTUM_HOME");
+      expect(dataDir).toContain("~/.momentum");
+    });
+
+    it("documents the SQLite tables that live under momentum.db", () => {
+      expect(dataDir).toContain("momentum.db");
+      expect(dataDir).toContain("goals");
+      expect(dataDir).toContain("jobs");
+      expect(dataDir).toContain("events");
+      expect(dataDir).toContain("repo_locks");
+      expect(dataDir).toContain("daemon_runs");
+      expect(dataDir).toContain("source_items");
+      expect(dataDir).toContain("source_snapshots");
+      expect(dataDir).toContain("source_reconciliation_runs");
+      expect(dataDir).toContain("evidence_records");
+      expect(dataDir).toContain("update_intents");
+    });
+
+    it("documents the per-goal artifact files (goal.md, ledger.md, handoff.md, handoff.json, recovery.md)", () => {
+      expect(dataDir).toContain("goal.md");
+      expect(dataDir).toContain("ledger.md");
+      expect(dataDir).toContain("handoff.md");
+      expect(dataDir).toContain("handoff.json");
+      expect(dataDir).toContain("recovery.md");
+    });
+
+    it("documents the per-iteration artifact files (prompt.md, runner.log, verification.log, result.json)", () => {
+      expect(dataDir).toContain("prompt.md");
+      expect(dataDir).toContain("runner.log");
+      expect(dataDir).toContain("verification.log");
+      expect(dataDir).toContain("result.json");
+    });
+
+    it("documents the initialization lifecycle (placeholders vs queued worker run vs foreground)", () => {
+      expect(dataDir).toMatch(/placeholder|empty/i);
+      expect(dataDir).toContain("{}");
+      expect(dataDir).toMatch(/foreground/i);
+      expect(dataDir).toMatch(/worker run|queued/i);
+    });
+
+    it("notes that goals share one SQLite database but isolated artifact trees", () => {
+      expect(dataDir).toMatch(/share[^\n]*SQLite|same SQLite/i);
+      expect(dataDir).toMatch(/isolated|per-goal/i);
+    });
+
+    it("notes that trusted-shell / acp may report another result file in the iteration directory", () => {
+      expect(dataDir).toContain("trusted-shell");
+      expect(dataDir).toContain("acp");
+    });
+  });
+
+  describe("docs/goal-spec.md goal frontmatter reference", () => {
+    const goalSpec = readDoc("docs/goal-spec.md");
+
+    it("documents the required title and optional frontmatter fields", () => {
+      expect(goalSpec).toContain("title");
+      expect(goalSpec).toContain("repo");
+      expect(goalSpec).toContain("runner");
+      expect(goalSpec).toContain("branch");
+      expect(goalSpec).toContain("max_iterations");
+      expect(goalSpec).toContain("verification");
+      expect(goalSpec).toContain("verification_timeout_sec");
+      expect(goalSpec).toContain("trusted_shell");
+      expect(goalSpec).toContain("acp");
+    });
+
+    it("documents the built-in defaults", () => {
+      expect(goalSpec).toContain("runner: fake");
+      expect(goalSpec).toContain("momentum/<title-slug>");
+      expect(goalSpec).toContain("max_iterations: 1");
+      expect(goalSpec).toContain("verification: []");
+      expect(goalSpec).toContain("verification_timeout_sec: 900");
+    });
+
+    it("documents the strict-type validation rules and accepted runner names", () => {
+      expect(goalSpec).toMatch(/positive integer/);
+      expect(goalSpec).toContain("fake");
+      expect(goalSpec).toContain("trusted-shell");
+      expect(goalSpec).toContain("acp");
+      expect(goalSpec).toMatch(/rejected at init time|init time/i);
+    });
+
+    it("documents the runner precedence chain (CLI > frontmatter > MOMENTUM.md > built-in)", () => {
+      expect(goalSpec).toMatch(/--runner[^\n]*frontmatter[^\n]*MOMENTUM\.md/);
+      expect(goalSpec).toContain("MOMENTUM.md");
+    });
+
+    it("documents the relative-repo absolute resolution in the queued path", () => {
+      expect(goalSpec).toMatch(/relative.*repo.*absolute|absolute.*before.*persisted|resolved to absolute/i);
+    });
   });
 
   describe("AGENTS.md compact agent contract", () => {
@@ -1483,6 +1748,62 @@ describe("M6 contract docs (NGX-295 setup)", () => {
       const end = agents.indexOf("## Milestone 4 contract", start + 1);
       const section = agents.slice(start, end > start ? end : undefined);
       expect(section).toMatch(/docs\/milestones\/m5-source-adapters\.md/);
+    });
+
+    it("Data and artifact layout section points to docs/data-directory.md and stays compact", () => {
+      const start = agents.indexOf("## Data and artifact layout");
+      expect(start, "AGENTS.md should still declare a ## Data and artifact layout section").toBeGreaterThan(-1);
+      const end = agents.indexOf("\n## ", start + 1);
+      const section = agents.slice(start, end > start ? end : undefined);
+      expect(section).toMatch(/docs\/data-directory\.md/);
+      expect(
+        section.length,
+        `## Data and artifact layout section should be compact (was ${section.length} chars); move per-table / per-file detail into docs/data-directory.md`
+      ).toBeLessThan(700);
+    });
+
+    it("CLI expectations section points to README/docs and stays compact while preserving the M3 CLI bullets", () => {
+      const start = agents.indexOf("## CLI expectations");
+      expect(start, "AGENTS.md should still declare a ## CLI expectations section").toBeGreaterThan(-1);
+      const end = agents.indexOf("\n## ", start + 1);
+      const section = agents.slice(start, end > start ? end : undefined);
+      expect(section, "## CLI expectations should point at README.md for the CLI surface").toMatch(
+        /README\.md/
+      );
+      expect(section, "## CLI expectations should point at docs/ for per-command envelopes").toMatch(
+        /docs\//
+      );
+      for (const cmd of ["`daemon start`", "`daemon stop`", "`daemon status`", "`recovery clear`", "`doctor`"]) {
+        expect(section, `## CLI expectations should preserve the M3 CLI bullet ${cmd}`).toContain(cmd);
+      }
+      expect(
+        section.length,
+        `## CLI expectations section should be compact (was ${section.length} chars); move per-command surface listings into README.md and docs/<command>.md`
+      ).toBeLessThan(800);
+    });
+
+    it("Stack and workflow commands section points to README and stays compact", () => {
+      const start = agents.indexOf("## Stack and workflow commands");
+      expect(
+        start,
+        "AGENTS.md should still declare a ## Stack and workflow commands section"
+      ).toBeGreaterThan(-1);
+      const end = agents.indexOf("\n## ", start + 1);
+      const section = agents.slice(start, end > start ? end : undefined);
+      expect(
+        section,
+        "## Stack and workflow commands should point at README.md's ## Local Development block"
+      ).toMatch(/README\.md/);
+      for (const tech of ["TypeScript", "Node.js", "Vitest", "pnpm"]) {
+        expect(
+          section,
+          `## Stack and workflow commands should still name the ${tech} stack token`
+        ).toContain(tech);
+      }
+      expect(
+        section.length,
+        `## Stack and workflow commands section should be compact (was ${section.length} chars); move command listings into README.md's ## Local Development block`
+      ).toBeLessThan(400);
     });
   });
 

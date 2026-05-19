@@ -113,7 +113,7 @@ The `pnpm test` suite includes a built-binary end-to-end smoke (`test/smoke.test
 
 ## Goal Spec
 
-Goal files are Markdown that begin with YAML frontmatter. `title` is required; `repo`, `runner`, `branch`, `max_iterations`, `verification`, `verification_timeout_sec`, `trusted_shell`, and `acp` are optional. Defaults are `runner: fake`, `branch: momentum/<title-slug>`, `max_iterations: 1`, `verification: []`, and `verification_timeout_sec: 900`. `max_iterations` and `verification_timeout_sec` must be positive integers. If `branch` is omitted, `title` must contain letters or numbers so Momentum can derive `momentum/<title-slug>`. The `runner` field accepts built-in runner profile names (`fake`, `trusted-shell`, `acp`); unknown names are rejected at init time. `trusted_shell` is required for trusted-shell execution and `acp` is required for ACP execution; both blocks are ignored by the fake runner, and queued initialization can persist either goal before the worker validates missing or malformed config at execution time. The `--runner` CLI flag overrides the frontmatter value, and built-in default resolution precedence is `--runner` CLI flag > goal frontmatter `runner` > `MOMENTUM.md` `runner` > `fake` (the built-in default). See the [Repo policy via MOMENTUM.md](docs/runners.md#repo-policy-via-momentummd-ngx-284) section for the full policy precedence. In the default queued path, relative `repo` values are resolved to absolute paths before being persisted or emitted.
+Goal files are Markdown with YAML frontmatter. `title` is required; `repo`, `runner`, `branch`, `max_iterations`, `verification`, `verification_timeout_sec`, `trusted_shell`, and `acp` are optional. The `runner` field accepts `fake`, `trusted-shell`, or `acp`; the default-resolution precedence is `--runner` CLI flag > goal frontmatter `runner` > `MOMENTUM.md` `runner` > `fake`. See [`docs/goal-spec.md`](docs/goal-spec.md) for the full frontmatter reference (built-in defaults, strict-type validation rules, title-slug derivation, queued-path relative-repo absolute resolution, and the runner precedence chain).
 
 ```markdown
 ---
@@ -132,13 +132,7 @@ Describe the goal and constraints here.
 
 ### Runner profiles and repo policy
 
-The `trusted-shell` (NGX-282) and `acp` (NGX-283) runner profiles and the runtime `MOMENTUM.md` policy loader (NGX-284) are documented in [`docs/runners.md`](docs/runners.md), including:
-
-- Goal frontmatter shape for `trusted_shell` and `acp` (command, args, cwd, timeout, env_allow, env, result_file, probe).
-- The normalized `RunnerResult` JSON schema runners must write.
-- Stable failure codes (`runner_failed`, `command_failed`, `command_timed_out`, `result_missing`, `result_invalid`, `output_overflow`, `runtime_unavailable`, `startup_failed`, `runner_changed_head`).
-- The `MOMENTUM.md` precedence chain — CLI > goal frontmatter > `MOMENTUM.md` > built-in defaults — and the narrower `intent_apply_policy` chain (`MOMENTUM.md` > built-in).
-- Explicit trust posture: neither runner is sandboxed; the configured command runs with the invoking user's privileges.
+The `trusted-shell` (NGX-282) and `acp` (NGX-283) runner profiles, the normalized `RunnerResult` schema, the stable runner failure-code taxonomy, the runtime `MOMENTUM.md` policy loader (NGX-284), the CLI > frontmatter > `MOMENTUM.md` > built-in precedence chain, and the explicit (unsandboxed) trust posture live in [`docs/runners.md`](docs/runners.md).
 
 ## Commands
 
@@ -148,9 +142,7 @@ The `trusted-shell` (NGX-282) and `acp` (NGX-283) runner profiles and the runtim
 momentum goal start <goal.md> [--repo <path>] [--foreground] [--runner <profile>] [--from-source <source-item-id>] [--data-dir <path>] [--json]
 ```
 
-Parses the goal spec and initializes (or resumes) goal state under the resolved data directory, then branches on `--foreground`: the default queued path writes the Goal row with state `queued`, enqueues one `goal_iteration` job (idempotency key `goal:<goal-id>:iteration:1`), and returns immediately for `momentum worker run` to claim and execute; `--foreground` drives one inline iteration through the configured runner profile and Momentum-owned verification, returning the iteration outcome on the same invocation. `--from-source <source-item-id>` links the goal to a source item at init time, surfaced as `linkedSourceItem` on the envelope and a `## Source context` block in each iteration prompt. Re-running the same goal spec against the same data directory resumes the existing goal (`resumed: true`).
-
-The full queued / foreground JSON envelope shapes, the init-time validation taxonomy (`parse_error`, `unsupported_runner`, `malformed_profile`, `source_item_not_found`, `goal_not_found`, `linked_to_other_goal`, `link_changed`, `init_failed`), the `MOMENTUM.md` `policy` block, and the resume / idempotency semantics live in [docs/goal-start.md](docs/goal-start.md).
+Parses the goal spec and initializes (or resumes) goal state under the resolved data directory, then branches on `--foreground`: the default queued path writes the Goal row with state `queued`, enqueues one `goal_iteration` job (idempotency key `goal:<goal-id>:iteration:1`), and returns immediately for `momentum worker run` to claim and execute; `--foreground` drives one inline iteration through the configured runner profile and Momentum-owned verification, returning the iteration outcome on the same invocation. `--from-source <source-item-id>` links the goal to a source item at init time, surfaced as `linkedSourceItem` on the envelope and a `## Source context` block in each iteration prompt. Re-running the same goal spec resumes the existing goal (`resumed: true`). See [docs/goal-start.md](docs/goal-start.md) for the full queued / foreground JSON envelopes, the init-time validation taxonomy, the `MOMENTUM.md` `policy` block, and the resume / idempotency semantics.
 
 ### `status`
 
@@ -218,29 +210,15 @@ momentum worker run [--worker-id <id>] [--data-dir <path>] [--json]
 
 Claims one pending `goal_iteration` job, finalizes the iteration through the same transaction as the foreground path (runner → verification → commit on verified success or hard reset to `baseHead` on failure), persists `result_path` / `error_path` artifact pointers, emits `job.succeeded` / `job.failed`, runs the idempotent completion reducer (`continue` / `goal_complete` / `max_iterations_reached` / `iteration_failed`), and releases the repo lock with the appropriate `recovery_status`. CLI exits with a deterministic `code: no_work | not_executed | ran_job` JSON result. The NGX-276 `stalePreCheck` runs before every claim and surfaces stale leases without auto-releasing them; manual-recovery metadata leaves the goal blocked behind `momentum recovery clear`. See [`docs/worker-run.md`](docs/worker-run.md) for the full pipeline, event surfaces, reducer outcomes, `RunnerAdapter` dispatch, and interrupt policy.
 
-### `daemon start`
+### `daemon start`, `daemon stop`, `daemon status`
 
 ```text
 momentum daemon start [--max-loop-iterations <n>] [--max-idle-cycles <n>] [--poll-interval-ms <ms>] [--data-dir <path>] [--json]
-```
-
-Records a new orchestrator run in `daemon_runs`. Without loop bounds, it returns immediately (the NGX-272 register-only contract); with `--max-loop-iterations` or `--max-idle-cycles`, it opts into the NGX-273 managed loop that drains queued `goal_iteration` jobs in-process and finalizes on bound, stop request, stop-now, or terminal state. The concurrency guard surfaces `daemon_already_active` with the existing run summary. See [`docs/daemon.md`](docs/daemon.md) for the full register-only and managed-loop JSON envelopes, the `loop.exitReason` taxonomy, and the `loop.startupRecovery` summary.
-
-### `daemon stop`
-
-```text
 momentum daemon stop [--now] [--reason <text>] [--data-dir <path>] [--json]
-```
-
-Records a graceful stop request against the active daemon run (`stop_requested`); `--now` records an immediate stop-now request and the managed loop exits as `canceled` rather than `stopped`. Idempotent on repeat calls (`alreadyStopRequested` / `alreadyStopNow`). Returns `no_active_daemon` when no active run exists, with a `latest` summary if the most recent record is terminal. Neither command kills any external process. See [`docs/daemon.md`](docs/daemon.md) for the full JSON envelope.
-
-### `daemon status`
-
-```text
 momentum daemon status [--data-dir <path>] [--json]
 ```
 
-Read-only inspector for `daemon_runs`. Surfaces the active run (or the most recent terminal one), `staleAfterMs` / `activeJobStaleAfterMs` / `staleLeaseGraceMs`, `staleRepoLocks`, `staleClaimedJobs`, and `goalsNeedingRecovery` for operator visibility. Triggers no recovery action — auto-recovery happens on managed `daemon start`. See [`docs/daemon.md`](docs/daemon.md) for the full envelope and field reference.
+`daemon start` records a new orchestrator run in `daemon_runs` — register-only by default (NGX-272), or opting into the NGX-273 managed loop with `--max-loop-iterations` / `--max-idle-cycles` to drain queued jobs in-process until a bound, stop request, stop-now, or terminal state; the concurrency guard surfaces `daemon_already_active`. `daemon stop` records a graceful `stop_requested` or an immediate `--now` stop (managed loop exits as `canceled` instead of `stopped`), is idempotent on repeat (`alreadyStopRequested` / `alreadyStopNow`), refuses with `no_active_daemon` when nothing is running, and never kills an external process. `daemon status` is a read-only inspector that surfaces the active or most-recent terminal run plus `staleAfterMs` / `staleLeaseGraceMs`, `staleRepoLocks`, `staleClaimedJobs`, and `goalsNeedingRecovery`; auto-recovery happens on managed `daemon start`, not here. See [`docs/daemon.md`](docs/daemon.md) for the full register-only / managed-loop JSON envelopes, the `loop.exitReason` taxonomy, the `loop.startupRecovery` summary, and the `daemon status` field reference.
 
 ### `recovery clear`
 
@@ -260,21 +238,11 @@ Reports CLI version, Node.js version, platform, the current milestone scope labe
 
 ### Recovery surfaces (NGX-276, NGX-277)
 
-The stale-lease detection / auto-recovery contract (NGX-276) and the manual
-recovery artifacts plus durable `needs_manual_recovery` flag (NGX-277) are
-documented in [`docs/recovery.md`](docs/recovery.md), including:
-
-- The stale-lease table for `repo_locks`, claimed `goal_iteration` jobs, and
-  `daemon_runs` (stale condition, auto-recovery action, and skip taxonomy).
-- The CLI surfaces that expose stale and recovered state (`daemon start`
-  `loop.startupRecovery`, `daemon status`, `doctor`, `status`, `handoff`, and
-  `worker run` `stalePreCheck`).
-- The `recovery.md` artifact shape and the operator `momentum recovery clear`
-  acknowledgement flow.
+The stale-lease auto-recovery contract (NGX-276), the manual recovery artifacts and `needs_manual_recovery` flag (NGX-277), the CLI surfaces (`daemon start` `loop.startupRecovery`, `daemon status`, `doctor`, `status`, `handoff`, `worker run` `stalePreCheck`), and the `momentum recovery clear` flow live in [`docs/recovery.md`](docs/recovery.md).
 
 ## Data Directory
 
-State is stored under `--data-dir <path>`, then the `MOMENTUM_HOME` environment variable, then `~/.momentum`. Momentum never modifies the data directory outside this resolved path. Each goal lives in its own directory keyed by goal ID, so multiple concurrent goals share the same SQLite database but isolated artifact trees.
+State is resolved as `--data-dir <path>` > `MOMENTUM_HOME` > `~/.momentum`. Each goal lives in its own `goals/<goal-id>/` artifact tree alongside a shared `momentum.db` SQLite database. See [`docs/data-directory.md`](docs/data-directory.md) for the full layout (SQLite tables, per-goal and per-iteration artifact files, initialization lifecycle, and operational invariants).
 
 ```text
 <data-dir>/
@@ -285,7 +253,7 @@ State is stored under `--data-dir <path>`, then the `MOMENTUM_HOME` environment 
       ledger.md                # Append-only iteration ledger
       handoff.md               # Populated by `handoff` (empty placeholder until then)
       handoff.json             # Populated by `handoff` (schema v1)
-      recovery.md               # Populated when a goal is flagged for manual recovery; includes reason, artifact paths, runner/profile metadata, and prompt path when available
+      recovery.md              # Populated when a goal is flagged for manual recovery
       iterations/
         <n>/
           prompt.md            # Rendered iteration prompt
@@ -293,8 +261,6 @@ State is stored under `--data-dir <path>`, then the `MOMENTUM_HOME` environment 
           verification.log     # Tagged verification command output, capped buffer
           result.json          # Default runner result envelope; trusted-shell / acp may report another in-dir result file
 ```
-
-`goal.md`, `ledger.md`, `handoff.md`, `handoff.json`, and the first iteration artifact files are created up-front during goal initialization; `handoff.md`, `prompt.md`, `runner.log`, and `verification.log` start empty, while `handoff.json` and the default `result.json` start as `{}`. `goal start --foreground` populates the iteration artifacts during inline execution. In the queued path, iteration 1 starts with placeholders; later iteration directories and jobs are created by the reducer, and their artifact files are materialized when `momentum worker run` claims and executes that iteration.
 
 ## Failure and Reset Semantics
 
@@ -306,57 +272,15 @@ A copy-paste-runnable smoke that drives a fresh disposable run through the queue
 
 ## Milestone 3 Alignment
 
-Milestone 3 (Operational Safety) is complete. M3 landed durable daemon /
-orchestrator state, stop-request visibility, stale-lease recovery, manual
-recovery artifacts, and closeout smoke / docs while preserving Momentum's
-durable Goal / Iteration / Job / Handoff model and SQLite-backed queue. NGX-272
-through NGX-278 are all done.
-
-For the full M3 contract — durable primitives, locked decisions, planned issue
-order, explicit non-goals, and the Symphony adopt / avoid mapping — see
-[`docs/milestones/m3-operational-safety.md`](docs/milestones/m3-operational-safety.md).
-M6 (Policy-Gated External Apply) is the active milestone; see
-[`docs/milestones/m6-external-apply.md`](docs/milestones/m6-external-apply.md)
-and [`docs/contracts/intent-apply.md`](docs/contracts/intent-apply.md) for the
-two-phase apply contract.
+Milestone 3 (Operational Safety) is complete. See [`docs/milestones/m3-operational-safety.md`](docs/milestones/m3-operational-safety.md) for the full M3 contract (durable primitives, locked decisions, planned issue order, explicit non-goals, and the Symphony adopt / avoid mapping).
 
 ## Milestone 4 Roadmap
 
-Real runner profiles and the runtime `MOMENTUM.md` policy loader shipped in Milestone 4 (NGX-279..NGX-286). M4 introduced the `RunnerAdapter`
-boundary so Momentum can execute Goals through more than the in-process `fake`
-runner without changing the Goal / Iteration / Job contract or the M3 daemon /
-recovery surfaces, added the `trusted-shell` and `acp` runner profiles, landed
-the runtime `MOMENTUM.md` policy loader with CLI > frontmatter > policy >
-built-in precedence, and pinned status / logs / recovery surfaces against the
-full command / runtime / result taxonomy. NGX-279, NGX-280, NGX-281, NGX-282,
-NGX-283, NGX-284, NGX-285, and NGX-286 are all done; external tracker
-automation (Linear / GitHub / Jira writes, webhooks) remains deferred and is
-**not** part of M4.
-
-For the full M4 contract — runner architecture, runner family, planned issue
-order, explicit non-goals, and the M3 contracts preserved through M4 — see
-[`docs/milestones/m4-real-runners.md`](docs/milestones/m4-real-runners.md).
-M6 (Policy-Gated External Apply) is the active milestone; see
-[`docs/milestones/m6-external-apply.md`](docs/milestones/m6-external-apply.md)
-and [`docs/contracts/intent-apply.md`](docs/contracts/intent-apply.md) for the
-two-phase apply contract.
+Real runner profiles and the runtime `MOMENTUM.md` policy loader shipped in Milestone 4 (NGX-279..NGX-286). Milestone 4 (Real Runner Profiles) is complete. See [`docs/milestones/m4-real-runners.md`](docs/milestones/m4-real-runners.md) for the full M4 contract (runner architecture, runner family, planned issue order, explicit non-goals, and the M3 contracts preserved through M4).
 
 ## Milestone 5 Roadmap
 
-Milestone 5 (Source Adapters and Evidence Sync) is complete. M5 added durable
-SourceItems, source adapters (read-only Linear reconciliation), workflow
-evidence ingestion, deterministic project rollups, and policy-gated update
-intents — all without performing automatic external writes. NGX-287 through
-NGX-294 are done, and the `doctor --json` milestone string is pinned to the M5
-closeout marker.
-
-For the full M5 contract — vocabulary, trust boundary, composition with M3/M4
-surfaces, planned issue order, and explicit non-goals — see
-[`docs/milestones/m5-source-adapters.md`](docs/milestones/m5-source-adapters.md).
-M6 (Policy-Gated External Apply) is the active milestone; see
-[`docs/milestones/m6-external-apply.md`](docs/milestones/m6-external-apply.md)
-and [`docs/contracts/intent-apply.md`](docs/contracts/intent-apply.md) for the
-two-phase apply contract.
+Milestone 5 (Source Adapters and Evidence Sync) is complete. See [`docs/milestones/m5-source-adapters.md`](docs/milestones/m5-source-adapters.md) for the full M5 contract (vocabulary, trust boundary, composition with M3 / M4 surfaces, planned issue order, and explicit non-goals).
 
 ## Current Exclusions
 
