@@ -16,9 +16,9 @@
  *
  * The boundary deliberately exposes only `preview` in this slice; no code path
  * here can perform an external mutation. The real Linear write client lands in
- * NGX-297, gated behind `intent apply --external-apply` in NGX-298 and the
- * blocked / non-replay enforcement in NGX-300. Reconciliation result codes are
- * owned by NGX-300/NGX-301 and intentionally absent from this taxonomy.
+ * NGX-297, audit/claim surfaces land in NGX-299 before CLI execution in
+ * NGX-298, and reconciliation result codes are owned by NGX-300/NGX-301 and
+ * intentionally absent from this taxonomy.
  */
 
 import { createHash } from "node:crypto";
@@ -28,12 +28,14 @@ import type { SourceItem } from "./source-items.js";
 import type { UpdateIntentApplyPolicy } from "./momentum-policy.js";
 import type { UpdateIntent } from "./update-intents.js";
 
-export const BUILTIN_EXTERNAL_UPDATE_ADAPTER_KINDS = ["linear"] as const;
+export const BUILTIN_EXTERNAL_UPDATE_ADAPTER_KINDS = Object.freeze([
+  "linear"
+] as const);
 
 export type BuiltinExternalUpdateAdapterKind =
   (typeof BUILTIN_EXTERNAL_UPDATE_ADAPTER_KINDS)[number];
 
-export const EXTERNAL_UPDATE_ADAPTER_ERROR_CODES = [
+export const EXTERNAL_UPDATE_ADAPTER_ERROR_CODES = Object.freeze([
   "unsupported_adapter",
   "unsupported_intent_type",
   "target_missing",
@@ -45,15 +47,15 @@ export const EXTERNAL_UPDATE_ADAPTER_ERROR_CODES = [
   "write_timeout",
   "malformed_response",
   "validation_failed"
-] as const;
+] as const);
 
 export type ExternalUpdateAdapterErrorCode =
   (typeof EXTERNAL_UPDATE_ADAPTER_ERROR_CODES)[number];
 
-export const EXTERNAL_UPDATE_MUTATION_KINDS = [
+export const EXTERNAL_UPDATE_MUTATION_KINDS = Object.freeze([
   "comment",
   "status_transition"
-] as const;
+] as const);
 
 export type ExternalUpdateMutationKind =
   (typeof EXTERNAL_UPDATE_MUTATION_KINDS)[number];
@@ -114,7 +116,9 @@ export type ExternalUpdateAdapterPreviewResult =
 export type ExternalUpdateAdapter = {
   kind: BuiltinExternalUpdateAdapterKind;
   supportedIntentTypes: readonly string[];
-  preview: (input: ExternalUpdateAdapterInput) => ExternalUpdateAdapterPreviewResult;
+  preview: (
+    input: ExternalUpdateAdapterInput
+  ) => ExternalUpdateAdapterPreviewResult;
 };
 
 export type ExternalUpdateAdapterSummary = {
@@ -133,8 +137,9 @@ const EXTERNAL_UPDATE_ADAPTERS: ReadonlyMap<
   ["linear", buildLinearExternalUpdateAdapter()]
 ]);
 
-export function listExternalUpdateAdapterKinds(): readonly BuiltinExternalUpdateAdapterKind[] {
-  return BUILTIN_EXTERNAL_UPDATE_ADAPTER_KINDS;
+export function listExternalUpdateAdapterKinds():
+  readonly BuiltinExternalUpdateAdapterKind[] {
+  return [...BUILTIN_EXTERNAL_UPDATE_ADAPTER_KINDS];
 }
 
 export function listExternalUpdateAdapters(
@@ -209,13 +214,18 @@ export function previewExternalUpdate(
   input: ExternalUpdateAdapterInput,
   options: ExternalUpdateAdapterDispatchOptions = {}
 ): ExternalUpdateAdapterPreviewResult {
-  const adapter = getExternalUpdateAdapter(input.intent.adapterKind, options.adapters);
+  const adapter = getExternalUpdateAdapter(
+    input.intent.adapterKind,
+    options.adapters
+  );
   if (!adapter) {
     return unsupportedAdapterError(input.intent.adapterKind);
   }
   if (!adapter.supportedIntentTypes.includes(input.intent.intentType)) {
     return unsupportedIntentTypeError(adapter.kind, input.intent.intentType);
   }
+  const policyError = validateExternalUpdatePolicy(input);
+  if (policyError) return policyError;
   try {
     return adapter.preview(input);
   } catch (error) {
@@ -234,7 +244,11 @@ function buildLinearExternalUpdateAdapter(): ExternalUpdateAdapter {
 function linearPreview(
   input: ExternalUpdateAdapterInput
 ): ExternalUpdateAdapterPreviewResult {
-  const targetExternalId = input.intent.targetExternalId ?? input.target.externalId;
+  const policyError = validateExternalUpdatePolicy(input);
+  if (policyError) return policyError;
+
+  const targetExternalId =
+    input.intent.targetExternalId ?? input.target.externalId;
   if (typeof targetExternalId !== "string" || targetExternalId.length === 0) {
     return {
       ok: false,
@@ -256,7 +270,10 @@ function linearPreview(
       error: `Linear external update adapter requires target.externalId to match intent.targetExternalId ("${input.target.externalId}" vs "${targetExternalId}").`
     };
   }
-  if (typeof input.operator.reason !== "string" || input.operator.reason.trim().length === 0) {
+  if (
+    typeof input.operator.reason !== "string" ||
+    input.operator.reason.trim().length === 0
+  ) {
     return {
       ok: false,
       code: "validation_failed",
@@ -324,7 +341,22 @@ function renderLinearCommentBody(
 function isBuiltinExternalUpdateAdapterKind(
   kind: string
 ): kind is BuiltinExternalUpdateAdapterKind {
-  return (BUILTIN_EXTERNAL_UPDATE_ADAPTER_KINDS as readonly string[]).includes(kind);
+  return (BUILTIN_EXTERNAL_UPDATE_ADAPTER_KINDS as readonly string[]).includes(
+    kind
+  );
+}
+
+function validateExternalUpdatePolicy(
+  input: ExternalUpdateAdapterInput
+): ExternalUpdateAdapterError | null {
+  if (input.policy.intentApplyPolicy === "external_apply_allowed") {
+    return null;
+  }
+  return {
+    ok: false,
+    code: "policy_denied",
+    error: `External update preview for intent ${input.intent.id} requires intent_apply_policy=external_apply_allowed (got ${input.policy.intentApplyPolicy}).`
+  };
 }
 
 function unsupportedAdapterError(kind: string): ExternalUpdateAdapterError {

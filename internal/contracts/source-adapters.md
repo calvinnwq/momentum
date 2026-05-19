@@ -45,9 +45,10 @@ Source adapters surface failures through a stable taxonomy so operator tooling c
 
 ## What M6 adds on top of this boundary
 
-M6 introduces a Linear write client behind `intent apply --external-apply`. The write client:
+M6 introduces a write-side adapter boundary and Linear write client behind `intent apply --external-apply`. The boundary/client path:
 
-- Reuses the read adapter's transport configuration (endpoint, auth) but is a **separate** code path so the read-only invariant on the read adapter is preserved.
+- Starts with the NGX-296 `ExternalUpdateAdapter` boundary: registry, input/result types, deterministic dry-run preview, idempotency marker helper, and stable adapter/write error taxonomy with no mutation capability.
+- Reuses the read adapter's transport configuration (endpoint, auth) once the Linear client lands, but remains a **separate** code path so the read-only invariant on the read adapter is preserved.
 - Lives behind `intent_apply_policy: external_apply_allowed` in `MOMENTUM.md` policy.
 - Is gated by the two-phase claim / audit / write / finalize flow documented in [intent-apply.md](intent-apply.md), including the per-intent CAS guard, the blocked / non-replay state, the comment-only default, the stable idempotency marker, and the single-issue post-apply reconcile.
 - Must not be called from any code path other than the M6 apply flow. In particular, the M5 reconciliation orchestrator stays read-only.

@@ -300,6 +300,20 @@ describe("previewExternalUpdate", () => {
     if (result.ok) return;
     expect(result.code).toBe("validation_failed");
   });
+  it("returns policy_denied when repo policy does not allow external apply", () => {
+    const result = previewExternalUpdate(
+      buildInput({
+        policy: {
+          intentApplyPolicy: "create_intents_only",
+          allowStatusMutation: false
+        }
+      })
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe("policy_denied");
+    expect(result.error).toContain("external_apply_allowed");
+  });
 
   it("returns validation_failed when intent target id does not match the resolved target", () => {
     const result = previewExternalUpdate(

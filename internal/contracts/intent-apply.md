@@ -6,7 +6,7 @@ In Milestone 5, `intent apply --external-apply` is always refused with `external
 
 ## Scope
 
-This contract covers `intent apply --external-apply` for the Linear external write adapter introduced in M6 (NGX-297). It does not cover M5's manual-mark `intent apply` (which records the operator decision locally without any external write), `intent skip`, or `intent cancel`. Those remain wire-stable and are not affected by this contract.
+This contract covers `intent apply --external-apply` for the Linear external-write path introduced in M6: the write-side adapter boundary starts in NGX-296 and the Linear mutation client follows in NGX-297. It does not cover M5's manual-mark `intent apply` (which records the operator decision locally without any external write), `intent skip`, or `intent cancel`. Those remain wire-stable and are not affected by this contract.
 
 ## Lifecycle: claim → audit → external write → finalize
 
@@ -34,7 +34,7 @@ The contract is: external writes are not auto-replayed under any circumstance, b
 
 Concurrency control is per-intent. Two `intent apply --external-apply` invocations against the same intent id must not both reach the external write step.
 
-- The runtime uses a compare-and-swap (CAS) on the per-intent apply state to enforce single-claim semantics. The CAS column / claim id / claim timestamp shape lands in NGX-296.
+- The runtime uses a compare-and-swap (CAS) on the per-intent apply state to enforce single-claim semantics. The durable claim / audit shape and stable `intent_apply_in_progress` result land before CLI external apply, in NGX-299.
 - A failed claim returns a **stable `intent_apply_in_progress` result** (not a generic error, not a 500-class crash). Tests pin this exact code so operator tooling and CI can detect the race deterministically.
 - The CAS guard is symmetric: it protects against simultaneous CLI invocations, accidental daemon-loop replay (M6 does not loop external apply, but the guard still prevents it from being introduced later by accident), and any future automation.
 
