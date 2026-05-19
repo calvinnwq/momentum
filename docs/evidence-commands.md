@@ -1,6 +1,6 @@
 # Evidence commands
 
-Operator-facing CLI envelopes for the `evidence ingest` and `evidence list` commands. These commands read local `.agent-workflows/<run-id>/` artifacts produced by external agent runs and persist normalized rows into the durable `evidence_records` table introduced by Milestone 5. Records are local-only: ingest neither calls external trackers nor mutates source items beyond opportunistically attaching `goalId` / `sourceItemId` links on the first ingest that supplies them.
+Operator-facing CLI envelopes for the `evidence ingest` and `evidence list` commands. These commands read local `.agent-workflows/<run-id>/` artifacts produced by external agent runs and persist normalized rows into the durable `evidence_records` table. Records are local-only: ingest neither calls external trackers nor mutates source items beyond opportunistically attaching `goalId` / `sourceItemId` links on the first ingest that supplies them.
 
 See also:
 

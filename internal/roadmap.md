@@ -19,7 +19,7 @@ The `doctor` readiness marker tracks the **most recently closed** milestone. It 
 
 Milestone 6 introduces **policy-gated external apply**: a single concrete adapter (Linear) gains a two-phase external write path behind operator-mediated configuration. M5 already records durable update intents; M6 lets an operator turn an intent into a real external write while preserving every M3/M4/M5 safety contract.
 
-The full M6 contract — runtime invariants, the two-phase apply flow, audit ordering, and the comment-only default — lives in [docs/contracts/intent-apply.md](contracts/intent-apply.md). The milestone-level scope and sequencing live in [docs/milestones/m6-external-apply.md](milestones/m6-external-apply.md).
+The full M6 contract — runtime invariants, the two-phase apply flow, audit ordering, and the comment-only default — lives in [internal/contracts/intent-apply.md](contracts/intent-apply.md). The milestone-level scope and sequencing live in [internal/milestones/m6-external-apply.md](milestones/m6-external-apply.md).
 
 ### Planned M6 issue order
 

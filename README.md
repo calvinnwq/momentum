@@ -9,7 +9,7 @@ Momentum is a TypeScript CLI for durable autonomous repo-work orchestration. It 
 - **Durable by default** - state lives in SQLite plus per-goal artifact directories.
 - **Runner-flexible** - use the fake runner for tests, trusted shell for local automation, or ACP-backed agents for real work.
 - **Operator-first** - status, logs, handoff, doctor, daemon, and recovery commands are all inspectable.
-- **External writes stay gated** - tracker updates are intent-based first; M6 adds policy-gated apply instead of silent mutation.
+- **External writes stay gated** - tracker updates are intent-based and policy-gated rather than silent mutations.
 
 Full documentation: <https://calvinnwq.github.io/momentum/>
 
@@ -78,7 +78,7 @@ momentum intent list|get|apply|skip|cancel [options]
 momentum doctor [--repo <path>] [--data-dir <path>] [--json]
 ```
 
-See the [docs site](docs/index.md) for command envelopes, runner policy, data layout, milestone contracts, and recovery details.
+See the [docs site](docs/index.md) for command envelopes, runner policy, data layout, and recovery details.
 
 ## Development
 
@@ -92,15 +92,8 @@ pnpm build
 node dist/index.js --help
 ```
 
-The test suite includes CLI smoke coverage across foreground goals, queued workers, daemon/recovery paths, runner profiles, source/evidence/intent commands, and M6 contract docs.
+The test suite covers foreground goals, queued workers, daemon/recovery, runner profiles, source/evidence/intent commands, and a public-docs hygiene guard.
 
 ## Project Status
 
-Momentum is pre-release. Milestones 1-5 are complete; Milestone 6 is active and focused on policy-gated external apply.
-
-Key references:
-
-- [Documentation home](docs/index.md)
-- [Roadmap](docs/roadmap.md)
-- [M6 external apply plan](docs/milestones/m6-external-apply.md)
-- [Intent apply contract](docs/contracts/intent-apply.md)
+Momentum is pre-release. The CLI surface above is stable; expect additional adapters and policy options over time.

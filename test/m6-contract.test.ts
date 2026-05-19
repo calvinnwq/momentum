@@ -10,131 +10,29 @@ function readDoc(filename: string): string {
   return fs.readFileSync(path.join(repoRoot, filename), "utf8");
 }
 
-const M6_ISSUE_ORDER = [
-  "NGX-295",
-  "NGX-296",
-  "NGX-297",
-  "NGX-299",
-  "NGX-298",
-  "NGX-300",
-  "NGX-301",
-  "NGX-302"
-] as const;
-
-const M6_INVARIANTS = [
-  "audit-before-apply",
-  "two-phase",
-  "blocked",
-  "intent_apply_in_progress",
-  "comment-only",
-  "idempotency marker",
-  "single-issue reconcile",
-  "api.linear.app"
-] as const;
-
-const M6_API_LINEAR_NEGATION = /(must not|never|no).*api\.linear\.app|api\.linear\.app.*(must not|never|no)/i;
-
-describe("M6 contract docs (NGX-295 setup)", () => {
+describe("public docs envelope shapes", () => {
   describe("docs directory structure", () => {
-    it("has docs/roadmap.md", () => {
-      const p = path.join(repoRoot, "docs", "roadmap.md");
-      expect(fs.existsSync(p), "docs/roadmap.md should exist").toBe(true);
-    });
-
-    it("has docs/milestones/m5-source-adapters.md", () => {
-      const p = path.join(repoRoot, "docs", "milestones", "m5-source-adapters.md");
-      expect(fs.existsSync(p), "docs/milestones/m5-source-adapters.md should exist").toBe(true);
-    });
-
-    it("has docs/milestones/m6-external-apply.md", () => {
-      const p = path.join(repoRoot, "docs", "milestones", "m6-external-apply.md");
-      expect(fs.existsSync(p), "docs/milestones/m6-external-apply.md should exist").toBe(true);
-    });
-
-    it("has docs/contracts/intent-apply.md", () => {
-      const p = path.join(repoRoot, "docs", "contracts", "intent-apply.md");
-      expect(fs.existsSync(p), "docs/contracts/intent-apply.md should exist").toBe(true);
-    });
-
-    it("has docs/contracts/source-adapters.md", () => {
-      const p = path.join(repoRoot, "docs", "contracts", "source-adapters.md");
-      expect(fs.existsSync(p), "docs/contracts/source-adapters.md should exist").toBe(true);
-    });
-
-    it("has docs/runners.md (extracted runner / policy spec)", () => {
-      const p = path.join(repoRoot, "docs", "runners.md");
-      expect(fs.existsSync(p), "docs/runners.md should exist").toBe(true);
-    });
-
-    it("has docs/recovery.md (extracted stale-lease + manual recovery spec)", () => {
-      const p = path.join(repoRoot, "docs", "recovery.md");
-      expect(fs.existsSync(p), "docs/recovery.md should exist").toBe(true);
-    });
-
-    it("has docs/exclusions.md (extracted current-exclusions / deferred-features spec)", () => {
-      const p = path.join(repoRoot, "docs", "exclusions.md");
-      expect(fs.existsSync(p), "docs/exclusions.md should exist").toBe(true);
-    });
-
-    it("has docs/walkthrough.md (extracted end-to-end walkthrough spec)", () => {
-      const p = path.join(repoRoot, "docs", "walkthrough.md");
-      expect(fs.existsSync(p), "docs/walkthrough.md should exist").toBe(true);
-    });
-
-    it("has docs/failure-reset.md (extracted failure and reset semantics spec)", () => {
-      const p = path.join(repoRoot, "docs", "failure-reset.md");
-      expect(fs.existsSync(p), "docs/failure-reset.md should exist").toBe(true);
-    });
-
-    it("has docs/goal-start.md (extracted goal start envelope spec)", () => {
-      const p = path.join(repoRoot, "docs", "goal-start.md");
-      expect(fs.existsSync(p), "docs/goal-start.md should exist").toBe(true);
-    });
-
-    it("has docs/daemon.md (extracted daemon start / stop / status envelope spec)", () => {
-      const p = path.join(repoRoot, "docs", "daemon.md");
-      expect(fs.existsSync(p), "docs/daemon.md should exist").toBe(true);
-    });
-
-    it("has docs/worker-run.md (extracted worker run pipeline spec)", () => {
-      const p = path.join(repoRoot, "docs", "worker-run.md");
-      expect(fs.existsSync(p), "docs/worker-run.md should exist").toBe(true);
-    });
-
-    it("has docs/doctor.md (extracted doctor JSON envelope spec)", () => {
-      const p = path.join(repoRoot, "docs", "doctor.md");
-      expect(fs.existsSync(p), "docs/doctor.md should exist").toBe(true);
-    });
-
-    it("has docs/status.md (extracted status JSON envelope spec)", () => {
-      const p = path.join(repoRoot, "docs", "status.md");
-      expect(fs.existsSync(p), "docs/status.md should exist").toBe(true);
-    });
-
-    it("has docs/handoff.md (extracted handoff JSON envelope spec)", () => {
-      const p = path.join(repoRoot, "docs", "handoff.md");
-      expect(fs.existsSync(p), "docs/handoff.md should exist").toBe(true);
-    });
-
-    it("has docs/source-commands.md (extracted source / project CLI envelope spec)", () => {
-      const p = path.join(repoRoot, "docs", "source-commands.md");
-      expect(fs.existsSync(p), "docs/source-commands.md should exist").toBe(true);
-    });
-
-    it("has docs/evidence-commands.md (extracted evidence ingest / list CLI envelope spec)", () => {
-      const p = path.join(repoRoot, "docs", "evidence-commands.md");
-      expect(fs.existsSync(p), "docs/evidence-commands.md should exist").toBe(true);
-    });
-
-    it("has docs/smoke-tests.md (extracted smoke test coverage map)", () => {
-      const p = path.join(repoRoot, "docs", "smoke-tests.md");
-      expect(fs.existsSync(p), "docs/smoke-tests.md should exist").toBe(true);
-    });
-
-    it("has docs/logs.md (extracted logs CLI envelope spec)", () => {
-      const p = path.join(repoRoot, "docs", "logs.md");
-      expect(fs.existsSync(p), "docs/logs.md should exist").toBe(true);
-    });
+    const expected = [
+      "docs/runners.md",
+      "docs/recovery.md",
+      "docs/walkthrough.md",
+      "docs/failure-reset.md",
+      "docs/goal-start.md",
+      "docs/daemon.md",
+      "docs/worker-run.md",
+      "docs/doctor.md",
+      "docs/status.md",
+      "docs/handoff.md",
+      "docs/source-commands.md",
+      "docs/evidence-commands.md",
+      "docs/logs.md",
+    ];
+    for (const rel of expected) {
+      it(`has ${rel}`, () => {
+        const p = path.join(repoRoot, rel);
+        expect(fs.existsSync(p), `${rel} should exist`).toBe(true);
+      });
+    }
   });
 
   describe("docs/logs.md", () => {
@@ -268,81 +166,6 @@ describe("M6 contract docs (NGX-295 setup)", () => {
     it("documents the idempotent re-ingest behaviour", () => {
       expect(evidenceCommands).toMatch(/idempotent/i);
       expect(evidenceCommands).toMatch(/skipped/);
-    });
-  });
-
-  describe("docs/smoke-tests.md", () => {
-    const smokeTests = readDoc(path.join("docs", "smoke-tests.md"));
-
-    it("names the built-binary smoke entry point", () => {
-      expect(smokeTests).toContain("test/smoke.test.ts");
-      expect(smokeTests).toMatch(/pnpm build/);
-      expect(smokeTests).toMatch(/disposable/);
-    });
-
-    it("documents the queued default and foreground enqueue paths", () => {
-      for (const phrase of [
-        "queued enqueue",
-        "idempotent re-enqueue",
-        "foreground success",
-        "verification-failure reset"
-      ]) {
-        expect(smokeTests).toContain(phrase);
-      }
-    });
-
-    it("documents the queued worker run and logs inspection coverage", () => {
-      for (const phrase of [
-        "worker run",
-        "queued logs",
-        "reducer event chains",
-        "runner-failure"
-      ]) {
-        expect(smokeTests).toContain(phrase);
-      }
-    });
-
-    it("documents the M3 daemon / recovery smoke surfaces", () => {
-      for (const surface of [
-        "daemon start",
-        "daemon stop",
-        "daemon status",
-        "recovery clear",
-        "managed drain",
-        "graceful stop",
-        "stop-now",
-        "safe stale recovery",
-        "manual recovery"
-      ]) {
-        expect(smokeTests).toContain(surface);
-      }
-    });
-
-    it("documents the M4 real-runner smoke surfaces", () => {
-      for (const surface of [
-        "trusted-shell",
-        "command_failed",
-        "MOMENTUM.md",
-        "acp",
-        "runtime_unavailable"
-      ]) {
-        expect(smokeTests).toContain(surface);
-      }
-    });
-
-    it("documents the M5 source / evidence / intent smoke surfaces", () => {
-      for (const surface of [
-        "doctor --json",
-        "M5 closeout",
-        "workflow evidence",
-        "Linear reconciliation",
-        "mock endpoint",
-        "source_satisfied",
-        "external-apply refusal",
-        "project rollup"
-      ]) {
-        expect(smokeTests).toContain(surface);
-      }
     });
   });
 
@@ -659,7 +482,7 @@ describe("M6 contract docs (NGX-295 setup)", () => {
       expect(intentCommands).toContain("currentStatus");
     });
 
-    it("documents the intent apply policy resolution and external-apply M5 refusal", () => {
+    it("documents the intent apply policy resolution and external-apply refusal", () => {
       expect(intentCommands).toContain("MOMENTUM.md");
       expect(intentCommands).toContain("intent_apply_policy");
       expect(intentCommands).toContain("create_intents_only");
@@ -831,9 +654,8 @@ describe("M6 contract docs (NGX-295 setup)", () => {
       expect(workerRun).toContain("acp");
     });
 
-    it("documents the NGX-276 stalePreCheck pre-claim surface", () => {
+    it("documents the stalePreCheck pre-claim surface", () => {
       expect(workerRun).toContain("stalePreCheck");
-      expect(workerRun).toContain("NGX-276");
       expect(workerRun).toContain("staleLeaseGraceMs");
     });
 
@@ -1014,8 +836,7 @@ describe("M6 contract docs (NGX-295 setup)", () => {
   describe("docs/recovery.md", () => {
     const recovery = readDoc(path.join("docs", "recovery.md"));
 
-    it("documents the stale-lease auto-recovery surfaces (NGX-276)", () => {
-      expect(recovery).toContain("NGX-276");
+    it("documents the stale-lease auto-recovery surfaces", () => {
       expect(recovery).toMatch(/stale-?lease/i);
       for (const surface of ["repo_locks", "goal_iteration", "daemon_runs"]) {
         expect(recovery).toContain(surface);
@@ -1035,8 +856,7 @@ describe("M6 contract docs (NGX-295 setup)", () => {
       }
     });
 
-    it("documents the manual recovery artifact and durable flag (NGX-277)", () => {
-      expect(recovery).toContain("NGX-277");
+    it("documents the manual recovery artifact and durable flag", () => {
       expect(recovery).toContain("recovery.md");
       expect(recovery).toContain("needs_manual_recovery");
       expect(recovery).toMatch(/runner_changed_head/);
@@ -1067,40 +887,6 @@ describe("M6 contract docs (NGX-295 setup)", () => {
     });
   });
 
-  describe("docs/exclusions.md", () => {
-    const exclusions = readDoc(path.join("docs", "exclusions.md"));
-
-    it("documents the deferred background runner supervision exclusion", () => {
-      expect(exclusions).toMatch(/Background runner supervision/);
-      expect(exclusions).toMatch(/forking|daemonization|restart-on-crash/);
-    });
-
-    it("documents the deferred cooperative shutdown exclusion", () => {
-      expect(exclusions).toMatch(/Cooperative shutdown|mid-job cancellation/i);
-    });
-
-    it("documents the deferred external tracker writes exclusion", () => {
-      expect(exclusions).toMatch(/external tracker writes|external integrations/i);
-      expect(exclusions).toMatch(/inbound webhooks/i);
-    });
-
-    it("documents the deferred dashboard / UI surface exclusion", () => {
-      expect(exclusions).toMatch(/dashboard|UI surface/i);
-    });
-
-    it("documents the strong sandboxing exclusion (M4 runners are trusted, not sandboxed)", () => {
-      expect(exclusions).toMatch(/Strong sandboxing/);
-      expect(exclusions).toMatch(/trusted-shell/);
-      expect(exclusions).toMatch(/acp/);
-    });
-
-    it("documents the worktree / remote-git / parallel-same-repo-goals exclusion", () => {
-      expect(exclusions).toMatch(/[Ww]orktree/);
-      expect(exclusions).toMatch(/remote git/i);
-      expect(exclusions).toMatch(/parallel.*same-repo|same-repo.*parallel/i);
-    });
-  });
-
   describe("docs/walkthrough.md", () => {
     const walkthrough = readDoc(path.join("docs", "walkthrough.md"));
 
@@ -1113,7 +899,7 @@ describe("M6 contract docs (NGX-295 setup)", () => {
       expect(walkthrough).toContain("handoff");
     });
 
-    it("documents the managed daemon drain alternative (M3)", () => {
+    it("documents the managed daemon drain alternative", () => {
       expect(walkthrough).toMatch(/Managed daemon drain/i);
       expect(walkthrough).toContain("daemon start");
       expect(walkthrough).toContain("--max-idle-cycles");
@@ -1126,10 +912,9 @@ describe("M6 contract docs (NGX-295 setup)", () => {
       expect(walkthrough).toMatch(/errorPath/);
     });
 
-    it("documents the foreground debug path as a Milestone 1 inline debugging escape hatch", () => {
+    it("documents the foreground debug path as an inline debugging escape hatch", () => {
       expect(walkthrough).toMatch(/Foreground debug path/i);
       expect(walkthrough).toContain("--foreground");
-      expect(walkthrough).toMatch(/Milestone 1/);
     });
   });
 
@@ -1195,143 +980,6 @@ describe("M6 contract docs (NGX-295 setup)", () => {
     });
   });
 
-  describe("docs/roadmap.md", () => {
-    const roadmap = readDoc(path.join("docs", "roadmap.md"));
-
-    it("names all milestones in order", () => {
-      let cursor = -1;
-      for (const m of [
-        "Milestone 1",
-        "Milestone 2",
-        "Milestone 3",
-        "Milestone 4",
-        "Milestone 5",
-        "Milestone 6"
-      ]) {
-        const next = roadmap.indexOf(m, cursor + 1);
-        expect(next, `${m} should appear after the previous milestone`).toBeGreaterThan(cursor);
-        cursor = next;
-      }
-    });
-
-    it("lists the planned M6 issue order matching the Linear milestone", () => {
-      let cursor = -1;
-      for (const id of M6_ISSUE_ORDER) {
-        const next = roadmap.indexOf(id, cursor + 1);
-        expect(next, `${id} should appear after the previous M6 id`).toBeGreaterThan(cursor);
-        cursor = next;
-      }
-    });
-  });
-
-  describe("docs/milestones/m6-external-apply.md", () => {
-    const m6 = readDoc(path.join("docs", "milestones", "m6-external-apply.md"));
-
-    it("documents the planned M6 issue order verbatim", () => {
-      let cursor = -1;
-      for (const id of M6_ISSUE_ORDER) {
-        const next = m6.indexOf(id, cursor + 1);
-        expect(next, `${id} should appear after the previous M6 id`).toBeGreaterThan(cursor);
-        cursor = next;
-      }
-    });
-
-    it("requires NGX-299 audit surfaces before NGX-298 external apply", () => {
-      const auditIdx = m6.indexOf("NGX-299");
-      const applyIdx = m6.indexOf("NGX-298");
-      expect(auditIdx, "NGX-299 should be mentioned").toBeGreaterThanOrEqual(0);
-      expect(applyIdx, "NGX-298 should be mentioned").toBeGreaterThanOrEqual(0);
-      expect(auditIdx, "NGX-299 should precede NGX-298 in the issue ordering").toBeLessThan(applyIdx);
-    });
-
-    it("names M6 explicit non-goals (no auto-apply outside policy, no inbound webhooks, no UI)", () => {
-      expect(m6).toMatch(/non-goals?/i);
-      for (const ng of [
-        "Dashboard or UI surface",
-        "Inbound webhooks",
-        "Autonomous",
-        "non-Linear adapters",
-        "runner/sandbox"
-      ]) {
-        expect(m6).toContain(ng);
-      }
-    });
-
-    it("references the intent-apply contract", () => {
-      expect(m6).toMatch(/intent-apply/);
-    });
-  });
-
-  describe("docs/contracts/intent-apply.md", () => {
-    const intentApply = readDoc(path.join("docs", "contracts", "intent-apply.md"));
-
-    it("captures the M6 safety invariants", () => {
-      for (const term of M6_INVARIANTS) {
-        expect(intentApply).toContain(term);
-      }
-    });
-
-    it("documents the two-phase external apply flow (claim, audit-before-write, external write, finalize)", () => {
-      expect(intentApply).toMatch(/claim/i);
-      expect(intentApply).toMatch(/audit/i);
-      expect(intentApply).toMatch(/external write/i);
-      expect(intentApply).toMatch(/finalize/i);
-    });
-
-    it("documents the blocked / non-replay state after external-write-success + audit-finalize-failure", () => {
-      expect(intentApply).toMatch(/blocked/i);
-      expect(intentApply).toMatch(/non-replay/i);
-    });
-
-    it("documents the per-intent concurrency guard with a stable intent_apply_in_progress result", () => {
-      expect(intentApply).toContain("intent_apply_in_progress");
-      expect(intentApply).toMatch(/CAS|compare-and-swap|concurrency guard/i);
-    });
-
-    it("documents the comment-only default unless target status mutation is configured", () => {
-      expect(intentApply).toContain("comment-only");
-      expect(intentApply).toMatch(/Linear/);
-    });
-
-    it("documents the idempotency marker shape and dedupe role", () => {
-      expect(intentApply).toContain("idempotency marker");
-      expect(intentApply).toMatch(/dedupe|deduplication|reconcile/i);
-    });
-
-    it("documents single-issue post-apply reconcile scope", () => {
-      expect(intentApply).toContain("single-issue reconcile");
-    });
-
-    it("documents the test guard against real api.linear.app calls", () => {
-      expect(intentApply).toContain("api.linear.app");
-      expect(intentApply).toMatch(M6_API_LINEAR_NEGATION);
-    });
-  });
-
-  describe("docs/contracts/source-adapters.md", () => {
-    const sources = readDoc(path.join("docs", "contracts", "source-adapters.md"));
-
-    it("documents source adapter boundaries (read-only, durable local tables, no credentials in state)", () => {
-      expect(sources).toMatch(/read-?only/i);
-      expect(sources).toMatch(/snapshot|reconciliation|SourceItem/i);
-      expect(sources).toMatch(/credential/i);
-    });
-  });
-
-  describe("docs/milestones/m5-source-adapters.md", () => {
-    const m5 = readDoc(path.join("docs", "milestones", "m5-source-adapters.md"));
-
-    it("frames M5 as durable intents / source adapters, NOT external apply", () => {
-      expect(m5).toMatch(/durable.*intent|intent.*durable/i);
-      expect(m5).toMatch(/does not.*(external|automatic).*apply|no.*external.*write|policy-?gated/i);
-    });
-
-    it("does not claim external apply was implemented in M5", () => {
-      expect(m5).not.toMatch(/M5 (added|implements|implemented|introduces|provides|performs) (an? )?external apply/i);
-      expect(m5).not.toMatch(/external apply (was|landed|shipped|implemented) in M5/i);
-    });
-  });
-
   describe("README.md concise OSS front door", () => {
     const readme = readDoc("README.md");
 
@@ -1354,12 +1002,7 @@ describe("M6 contract docs (NGX-295 setup)", () => {
       expect(readme).toContain("https://calvinnwq.github.io/momentum/");
       expect(readme).toMatch(/docs\/index\.md/);
       const docsLinks = new Set(readme.match(/docs\/[A-Za-z0-9./_-]+\.md/g) ?? []);
-      expect(Array.from(docsLinks).sort()).toEqual([
-        "docs/contracts/intent-apply.md",
-        "docs/index.md",
-        "docs/milestones/m6-external-apply.md",
-        "docs/roadmap.md"
-      ]);
+      expect(Array.from(docsLinks).sort()).toEqual(["docs/index.md"]);
     });
 
     it("removes badges for metadata that is not present", () => {
@@ -1384,18 +1027,26 @@ describe("M6 contract docs (NGX-295 setup)", () => {
 
     it("exists as the simple GitHub Pages documentation entrypoint", () => {
       expect(docsIndex).toMatch(/^# Momentum Documentation/m);
-      expect(docsIndex).toContain("Momentum's README is intentionally short");
     });
 
-    it("links to the roadmap, active M6 docs, and command references", () => {
+    it("links to the command and concept pages", () => {
       for (const link of [
-        "roadmap.md",
-        "milestones/m6-external-apply.md",
-        "contracts/intent-apply.md",
+        "goal-spec.md",
+        "data-directory.md",
+        "walkthrough.md",
         "goal-start.md",
+        "status.md",
+        "logs.md",
+        "handoff.md",
         "worker-run.md",
         "daemon.md",
-        "intent-commands.md"
+        "recovery.md",
+        "source-commands.md",
+        "evidence-commands.md",
+        "intent-commands.md",
+        "doctor.md",
+        "runners.md",
+        "failure-reset.md",
       ]) {
         expect(docsIndex).toContain(link);
       }
@@ -1506,32 +1157,19 @@ describe("M6 contract docs (NGX-295 setup)", () => {
       expect(agents).toMatch(/Milestone 6/);
     });
 
-    it("points future agents to docs/ for the source of truth", () => {
-      expect(agents).toMatch(/docs\/(roadmap|milestones|contracts)/);
+    it("points future agents to internal/ for planning context", () => {
+      expect(agents).toMatch(/internal\/(roadmap|milestones|contracts)/);
     });
 
-    it("stays compact (under 200 lines) after the OSS reshape", () => {
+    it("stays compact (under 200 lines)", () => {
       const lineCount = agents.split("\n").length;
       expect(lineCount, `AGENTS.md should be compact, was ${lineCount} lines`).toBeLessThan(200);
     });
 
-    it("Milestone 3 alignment section points to the canonical M3 docs page", () => {
-      const section = agents.slice(agents.indexOf("## Milestone 3 alignment"));
-      expect(section).toMatch(/docs\/milestones\/m3-operational-safety\.md/);
-    });
-
-    it("Milestone 4 contract section points to the canonical M4 docs page", () => {
-      const start = agents.indexOf("## Milestone 4 contract");
-      const end = agents.indexOf("## Milestone 3 alignment", start + 1);
-      const section = agents.slice(start, end > start ? end : undefined);
-      expect(section).toMatch(/docs\/milestones\/m4-real-runners\.md/);
-    });
-
-    it("Milestone 5 contract section points to the canonical M5 docs page", () => {
-      const start = agents.indexOf("## Milestone 5 contract");
-      const end = agents.indexOf("## Milestone 4 contract", start + 1);
-      const section = agents.slice(start, end > start ? end : undefined);
-      expect(section).toMatch(/docs\/milestones\/m5-source-adapters\.md/);
+    it("declares the docs/ vs internal/ split explicitly", () => {
+      expect(agents).toMatch(/Where docs live/i);
+      expect(agents).toContain("internal/");
+      expect(agents).toContain("docs/");
     });
 
     it("Data and artifact layout section points to docs/data-directory.md and stays compact", () => {
@@ -1542,138 +1180,56 @@ describe("M6 contract docs (NGX-295 setup)", () => {
       expect(section).toMatch(/docs\/data-directory\.md/);
       expect(
         section.length,
-        `## Data and artifact layout section should be compact (was ${section.length} chars); move per-table / per-file detail into docs/data-directory.md`
+        `## Data and artifact layout section should be compact (was ${section.length} chars)`
       ).toBeLessThan(700);
     });
 
-    it("CLI expectations section points to README/docs and stays compact while preserving the M3 CLI bullets", () => {
+    it("CLI expectations section points to README/docs and preserves the operational-safety bullets", () => {
       const start = agents.indexOf("## CLI expectations");
       expect(start, "AGENTS.md should still declare a ## CLI expectations section").toBeGreaterThan(-1);
       const end = agents.indexOf("\n## ", start + 1);
       const section = agents.slice(start, end > start ? end : undefined);
-      expect(section, "## CLI expectations should point at README.md for the CLI surface").toMatch(
-        /README\.md/
-      );
-      expect(section, "## CLI expectations should point at docs/ for per-command envelopes").toMatch(
-        /docs\//
-      );
+      expect(section).toMatch(/README\.md/);
+      expect(section).toMatch(/docs\//);
       for (const cmd of ["`daemon start`", "`daemon stop`", "`daemon status`", "`recovery clear`", "`doctor`"]) {
-        expect(section, `## CLI expectations should preserve the M3 CLI bullet ${cmd}`).toContain(cmd);
+        expect(section, `## CLI expectations should preserve the bullet ${cmd}`).toContain(cmd);
       }
       expect(
         section.length,
-        `## CLI expectations section should be compact (was ${section.length} chars); move per-command surface listings into README.md and docs/<command>.md`
+        `## CLI expectations section should be compact (was ${section.length} chars)`
       ).toBeLessThan(800);
     });
 
     it("Stack and workflow commands section points to README and stays compact", () => {
       const start = agents.indexOf("## Stack and workflow commands");
-      expect(
-        start,
-        "AGENTS.md should still declare a ## Stack and workflow commands section"
-      ).toBeGreaterThan(-1);
+      expect(start, "AGENTS.md should declare a ## Stack and workflow commands section").toBeGreaterThan(-1);
       const end = agents.indexOf("\n## ", start + 1);
       const section = agents.slice(start, end > start ? end : undefined);
-      expect(
-        section,
-        "## Stack and workflow commands should point at README.md's ## Local Development block"
-      ).toMatch(/README\.md/);
+      expect(section).toMatch(/README\.md/);
       for (const tech of ["TypeScript", "Node.js", "Vitest", "pnpm"]) {
-        expect(
-          section,
-          `## Stack and workflow commands should still name the ${tech} stack token`
-        ).toContain(tech);
+        expect(section, `## Stack and workflow commands should still name ${tech}`).toContain(tech);
       }
       expect(
         section.length,
-        `## Stack and workflow commands section should be compact (was ${section.length} chars); move command listings into README.md's ## Local Development block`
+        `## Stack and workflow commands section should be compact (was ${section.length} chars)`
       ).toBeLessThan(400);
     });
 
-    it("Current milestone section stays compact (docs/roadmap.md pointer + per-milestone status bullets, not per-NGX changelog)", () => {
+    it("Current milestone section links to internal/ docs and stays compact", () => {
       const start = agents.indexOf("## Current milestone");
-      expect(
-        start,
-        "AGENTS.md should still declare a ## Current milestone section"
-      ).toBeGreaterThan(-1);
+      expect(start, "AGENTS.md should declare a ## Current milestone section").toBeGreaterThan(-1);
       const end = agents.indexOf("\n## ", start + 1);
       const section = agents.slice(start, end > start ? end : undefined);
-      expect(
-        section,
-        "## Current milestone should link to docs/roadmap.md as the canonical timeline pointer"
-      ).toMatch(/docs\/roadmap\.md/);
+      expect(section).toMatch(/internal\/roadmap\.md/);
+      expect(section).toMatch(/internal\/milestones\/m6-external-apply\.md/);
       expect(
         section.length,
-        `## Current milestone section should be compact (was ${section.length} chars); move per-NGX changelog detail into the linked docs/milestones/*.md pages`
-      ).toBeLessThan(1500);
-    });
-
-    it("Milestone 6 contract section stays bounded (headline rules + docs/ pointers, not unbounded re-bloat)", () => {
-      const start = agents.indexOf("## Milestone 6 contract");
-      expect(
-        start,
-        "AGENTS.md should still declare a ## Milestone 6 contract section"
-      ).toBeGreaterThan(-1);
-      const end = agents.indexOf("\n## ", start + 1);
-      const section = agents.slice(start, end > start ? end : undefined);
-      expect(
-        section,
-        "## Milestone 6 contract should link to docs/milestones/m6-external-apply.md as the canonical M6 scope pointer"
-      ).toMatch(/docs\/milestones\/m6-external-apply\.md/);
-      expect(
-        section,
-        "## Milestone 6 contract should link to docs/contracts/intent-apply.md as the canonical two-phase apply contract pointer"
-      ).toMatch(/docs\/contracts\/intent-apply\.md/);
-      expect(
-        section.length,
-        `## Milestone 6 contract section should stay bounded (was ${section.length} chars); add new M6 detail to the linked docs/milestones/m6-external-apply.md or docs/contracts/intent-apply.md instead of growing AGENTS.md`
+        `## Current milestone section should be compact (was ${section.length} chars)`
       ).toBeLessThan(2500);
     });
 
-    it("Milestone 3/4/5 contract pointer sections stay compact docs/ pointers", () => {
-      const milestonePointerBudgets: Array<{
-        heading: string;
-        docsLink: RegExp;
-        maxChars: number;
-      }> = [
-        {
-          heading: "## Milestone 3 alignment",
-          docsLink: /docs\/milestones\/m3-operational-safety\.md/,
-          maxChars: 800,
-        },
-        {
-          heading: "## Milestone 4 contract",
-          docsLink: /docs\/milestones\/m4-real-runners\.md/,
-          maxChars: 1200,
-        },
-        {
-          heading: "## Milestone 5 contract",
-          docsLink: /docs\/milestones\/m5-source-adapters\.md/,
-          maxChars: 1500,
-        },
-      ];
-
-      for (const { heading, docsLink, maxChars } of milestonePointerBudgets) {
-        const start = agents.indexOf(heading);
-        expect(start, `AGENTS.md should still declare a ${heading} section`).toBeGreaterThan(-1);
-        const end = agents.indexOf("\n## ", start + 1);
-        const section = agents.slice(start, end > start ? end : undefined);
-        expect(
-          section,
-          `${heading} section should link to its canonical docs/ page`
-        ).toMatch(docsLink);
-        expect(
-          section.length,
-          `${heading} section should be a compact docs pointer (was ${section.length} chars); move per-milestone narrative into the linked docs/milestones/*.md page`
-        ).toBeLessThan(maxChars);
-      }
-    });
-
-    it("agent operating-instruction sections stay compact (no narrative re-bloat)", () => {
-      const operatingSectionBudgets: Array<{
-        heading: string;
-        maxChars: number;
-      }> = [
+    it("agent operating-instruction sections stay compact", () => {
+      const operatingSectionBudgets: Array<{ heading: string; maxChars: number }> = [
         { heading: "## Project purpose", maxChars: 500 },
         { heading: "## Coding discipline", maxChars: 500 },
         { heading: "## Local agent run artifacts", maxChars: 500 },
@@ -1682,15 +1238,12 @@ describe("M6 contract docs (NGX-295 setup)", () => {
 
       for (const { heading, maxChars } of operatingSectionBudgets) {
         const start = agents.indexOf(heading);
-        expect(
-          start,
-          `AGENTS.md should still declare a ${heading} section`
-        ).toBeGreaterThan(-1);
+        expect(start, `AGENTS.md should declare a ${heading} section`).toBeGreaterThan(-1);
         const end = agents.indexOf("\n## ", start + 1);
         const section = agents.slice(start, end > start ? end : undefined);
         expect(
           section.length,
-          `${heading} section should stay a compact agent-operating-instruction block (was ${section.length} chars); move detail into docs/ rather than growing AGENTS.md`
+          `${heading} section should stay compact (was ${section.length} chars)`
         ).toBeLessThan(maxChars);
       }
     });

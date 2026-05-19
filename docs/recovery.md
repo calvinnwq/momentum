@@ -1,20 +1,18 @@
-# Recovery surfaces (M3)
+# Recovery surfaces
 
-Momentum's M3 operational-safety milestone landed two operator-facing recovery
+Momentum's operational-safety surfaces ship two operator-facing recovery
 contracts that are intentionally separate but composed by the same CLI surfaces:
 
-- **Stale-lease detection and auto-recovery (NGX-276)** — what Momentum can
-  prove is safe to release, re-pend, or finalize, and the stable skip taxonomy
-  for everything it refuses.
-- **Manual recovery artifacts and the durable `needs_manual_recovery` flag
-  (NGX-277)** — what Momentum writes to disk and blocks at the queue when an
-  auto-recovery refusal would lose audit context or risk a non-Momentum commit.
+- **Stale-lease detection and auto-recovery** — what Momentum can prove is
+  safe to release, re-pend, or finalize, and the stable skip taxonomy for
+  everything it refuses.
+- **Manual recovery artifacts and the durable `needs_manual_recovery` flag** —
+  what Momentum writes to disk and blocks at the queue when an auto-recovery
+  refusal would lose audit context or risk a non-Momentum commit.
 
-This page is the canonical reference for both. README links here; the M3
-milestone narrative is in
-[`docs/milestones/m3-operational-safety.md`](milestones/m3-operational-safety.md).
+This page is the canonical reference for both.
 
-## Stale-lease detection and auto-recovery (NGX-276)
+## Stale-lease detection and auto-recovery
 
 Momentum detects stale leases on three durable surfaces and auto-recovers only
 those it can prove are safe; everything else is surfaced for explicit manual
@@ -57,7 +55,7 @@ flag blocks future queue claims until an operator explicitly clears it via
 (`daemon_active`, `lock_active`, `job_state_changed`) do not produce an
 artifact since they resolve on their own.
 
-## Manual recovery artifacts and flag (NGX-277)
+## Manual recovery artifacts and flag
 
 When the daemon's startup-recovery pass or manual inspection identifies a stale
 claim that cannot be auto-recovered (because the repo is dirty, HEAD is

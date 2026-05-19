@@ -68,12 +68,12 @@ The smoke exercises the M4 real-runner profile contract:
 
 The smoke exercises the M5 source-adapter and evidence-sync surfaces against
 mock Linear endpoints (no real `api.linear.app` calls — see
-[docs/contracts/intent-apply.md](contracts/intent-apply.md) for the test
+[internal/contracts/intent-apply.md](contracts/intent-apply.md) for the test
 boundary that M6 inherits):
 
 - the `doctor --json` M5 closeout milestone marker stays pinned to the M5
   string (the M6 milestone flip is reserved for NGX-302 — see
-  [docs/milestones/m6-external-apply.md](milestones/m6-external-apply.md)).
+  [internal/milestones/m6-external-apply.md](milestones/m6-external-apply.md)).
 - workflow evidence ingestion through `momentum evidence ingest` and
   `evidence list` (see [docs/evidence-commands.md](evidence-commands.md)).
 - empty intent and project-status surfaces (`pendingUpdateIntents: []`,
@@ -93,6 +93,6 @@ boundary that M6 inherits):
 ## Test boundary
 
 The smoke must not make real `api.linear.app` calls — see
-[docs/contracts/intent-apply.md](contracts/intent-apply.md) for the M6 test
+[internal/contracts/intent-apply.md](contracts/intent-apply.md) for the M6 test
 guard that continues this rule into the policy-gated external apply slices.
 All Linear interactions use the existing mock endpoint pattern.

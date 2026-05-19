@@ -4,7 +4,7 @@
 
 Milestone 6 turns the durable `update_intents` rows from M5 into **policy-gated external writes against Linear**. M6 adds a real external write path through a single, explicitly-trusted adapter without weakening any M3/M4/M5 safety contract. External apply remains operator-mediated: nothing in M6 makes Momentum write to an external tracker automatically.
 
-The runtime invariants for the apply path itself live in [docs/contracts/intent-apply.md](../contracts/intent-apply.md). The source-adapter boundary that the write client extends lives in [docs/contracts/source-adapters.md](../contracts/source-adapters.md). Treat those two contract docs as the source of truth; the milestone doc here scopes and sequences the work.
+The runtime invariants for the apply path itself live in [internal/contracts/intent-apply.md](../contracts/intent-apply.md). The source-adapter boundary that the write client extends lives in [internal/contracts/source-adapters.md](../contracts/source-adapters.md). Treat those two contract docs as the source of truth; the milestone doc here scopes and sequences the work.
 
 ## Milestone goal
 
@@ -27,7 +27,7 @@ The Linear milestone "Milestone 6: Policy-Gated External Apply" sequences the wo
 
 ## Headline safety invariants
 
-The full text lives in [docs/contracts/intent-apply.md](../contracts/intent-apply.md). The non-negotiable invariants are:
+The full text lives in [internal/contracts/intent-apply.md](../contracts/intent-apply.md). The non-negotiable invariants are:
 
 - **Two-phase apply.** `intent apply --external-apply` is a `claim → audit-before-write → external write → finalize` flow, not a single round-trip.
 - **Audit-before-apply.** The audit step must run and persist before any external write is attempted. If audit fails, the external write does not happen.

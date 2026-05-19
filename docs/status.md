@@ -6,8 +6,7 @@ emits a stable JSON envelope (or human-readable text) that summarizes the
 goal's current state, the active runner profile, the most recent iteration,
 the reducer decision, the next queued job, the daemon run, the repo's
 `MOMENTUM.md` policy state, linked source items, latest evidence, and
-pending update intents. It remains wire-stable across Milestones 3, 4, and 5
-and continues unchanged through the active Milestone 6.
+pending update intents.
 
 See also:
 
@@ -115,7 +114,7 @@ auto-recovery counts plus current pending-recovery counters:
   lease as stale.
 
 See [`docs/recovery.md`](recovery.md) for the stale-lease auto-recovery
-contract (NGX-276) and the manual-recovery flag (NGX-277).
+contract and the manual-recovery flag.
 
 ## Policy block (`MOMENTUM.md`)
 
@@ -123,7 +122,7 @@ The `policy` block reports the repo's `MOMENTUM.md` policy summary as
 `{configured, present, path, hasNotes, config, error}` so operators can
 verify that the loaded policy matches what the runner used. The
 `Repo policy via MOMENTUM.md` reference lives in
-[`docs/runners.md`](runners.md#repo-policy-via-momentummd-ngx-284).
+[`docs/runners.md`](runners.md#repo-policy-via-momentummd).
 
 ## Source items and latest evidence
 
@@ -143,8 +142,8 @@ newest-first array of up to ten entries, each with `{intentId,
 adapterKind, intentType, targetExternalId, reason, sourceItemId,
 evidenceRecordId, createdAt, ageMs, stale}`. `intentStaleThresholdMs`
 carries the threshold used to compute the per-intent `stale` flag (default
-30 days). See [`docs/contracts/intent-apply.md`](contracts/intent-apply.md)
-for the two-phase external apply lifecycle that consumes these intents.
+30 days). See [`docs/intent-commands.md`](intent-commands.md) for the
+intent lifecycle that consumes these entries.
 
 ## Text output
 

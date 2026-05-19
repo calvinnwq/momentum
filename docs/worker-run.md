@@ -1,16 +1,15 @@
 # `worker run`
 
 This page is the canonical reference for the `worker run` command — the
-Milestone 2 queued execution path that drains pending `goal_iteration` jobs in
-single-job batches. It remains wire-stable through Milestone 3, Milestone 4,
-Milestone 5, and the active Milestone 6.
+queued execution path that drains pending `goal_iteration` jobs in
+single-job batches.
 
 See also:
 
 - [`docs/daemon.md`](daemon.md) for the managed-loop `daemon start` mode that
   composes `worker run` semantics into a bounded in-process drain.
-- [`docs/recovery.md`](recovery.md) for the NGX-276 stale-lease pre-check and
-  the NGX-277 manual-recovery artifact / `needs_manual_recovery` flag.
+- [`docs/recovery.md`](recovery.md) for the stale-lease pre-check and the
+  manual-recovery artifact / `needs_manual_recovery` flag.
 - [`docs/failure-reset.md`](failure-reset.md) for the per-iteration outcome
   taxonomy that `finalizeIteration` produces.
 - [`docs/runners.md`](runners.md) for the `RunnerAdapter` boundary and the
@@ -31,7 +30,7 @@ queued drain, see the managed `daemon start` mode in
 
 ## Single-job pipeline
 
-1. Run the NGX-276 stale-lease pre-check (see below) and surface stale records
+1. Run the stale-lease pre-check (see below) and surface stale records
    without auto-releasing them.
 2. Claim the oldest pending `goal_iteration` job, stamping `worker` / `lease`
    metadata.
@@ -120,9 +119,9 @@ reducer throws), and lock release metadata.
 ## Runner profile dispatch
 
 Queued jobs execute the runner profile stored on the Goal row. Both foreground
-and queued paths dispatch through the `RunnerAdapter` boundary (NGX-281); only
-runners with `executes: true` in the adapter registry can be invoked. After
-NGX-283, `fake`, `trusted-shell`, and `acp` are all executing runners:
+and queued paths dispatch through the `RunnerAdapter` boundary; only runners
+with `executes: true` in the adapter registry can be invoked. `fake`,
+`trusted-shell`, and `acp` are all executing runners:
 
 - `trusted-shell` runs an operator-trusted executable plus argv in the target
   repo by default (or the iteration artifact directory with
@@ -134,9 +133,9 @@ NGX-283, `fake`, `trusted-shell`, and `acp` are all executing runners:
 Both report a normalized `RunnerResult` via a configured result file; see
 [`docs/runners.md`](runners.md) for the full schema and failure-code taxonomy.
 
-## NGX-276 stalePreCheck
+## stalePreCheck
 
-The NGX-276 stale-lease pre-check runs before any claim attempt. It surfaces a
+The stale-lease pre-check runs before any claim attempt. It surfaces a
 `stalePreCheck` block on the JSON response (and a one-line notice on text mode)
 listing any active repo locks and claimed / running `goal_iteration` jobs whose
 lease has expired beyond `staleLeaseGraceMs` (5s default skew tolerance), so
@@ -151,8 +150,8 @@ stale leases (see [`docs/recovery.md`](recovery.md)).
 
 `worker run` is a foreground one-shot command. If the process is interrupted
 mid-run, jobs and locks may remain `claimed` or `active` until lock expiry;
-re-running the command is the supported local recovery path. The NGX-276
-pre-check will surface the stale records on the next invocation so the operator
+re-running the command is the supported local recovery path. The pre-check
+will surface the stale records on the next invocation so the operator
 can drive manual recovery deliberately.
 
 On lock release, the worker stamps `recovery_status` on the lock so the

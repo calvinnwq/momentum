@@ -8,18 +8,18 @@ is expected (or explicitly deferred indefinitely).
 Milestone status:
 
 - **Milestone 3 (Operational Safety)** is complete. See
-  [`docs/milestones/m3-operational-safety.md`](milestones/m3-operational-safety.md).
+  [`internal/milestones/m3-operational-safety.md`](milestones/m3-operational-safety.md).
 - **Milestone 4 (Real Runner Profiles)** is complete and absorbed runner
   profiles plus the runtime `MOMENTUM.md` policy loader. See
-  [`docs/milestones/m4-real-runners.md`](milestones/m4-real-runners.md) and
+  [`internal/milestones/m4-real-runners.md`](milestones/m4-real-runners.md) and
   [`docs/runners.md`](runners.md).
 - **Milestone 5 (Source Adapters and Evidence Sync)** is complete and added
   read-only source reconciliation, local evidence ingestion, project rollups,
   and durable external-update intents. See
-  [`docs/milestones/m5-source-adapters.md`](milestones/m5-source-adapters.md).
+  [`internal/milestones/m5-source-adapters.md`](milestones/m5-source-adapters.md).
 - **Milestone 6 (Policy-Gated External Apply)** is the active milestone. See
-  [`docs/milestones/m6-external-apply.md`](milestones/m6-external-apply.md) and
-  [`docs/contracts/intent-apply.md`](contracts/intent-apply.md).
+  [`internal/milestones/m6-external-apply.md`](milestones/m6-external-apply.md) and
+  [`internal/contracts/intent-apply.md`](contracts/intent-apply.md).
 
 The following surfaces remain deferred so the runner-boundary, policy-loading,
 and M5 read-first source surfaces stay scoped.
@@ -80,7 +80,7 @@ of scope through M5. M5 may read configured sources and generate durable update
 intents, but it must not apply external writes automatically. M6 introduces
 policy-gated external apply through a two-phase claim / audit-before-write /
 external write / finalize flow (see
-[`docs/contracts/intent-apply.md`](contracts/intent-apply.md)), still scoped to
+[`internal/contracts/intent-apply.md`](contracts/intent-apply.md)), still scoped to
 the touched issue and still gated by `MOMENTUM.md` policy; autonomous /
 background external writes and non-Linear adapters remain explicit M6
 non-goals.

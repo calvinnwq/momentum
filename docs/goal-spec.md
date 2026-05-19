@@ -82,7 +82,7 @@ The `--runner` CLI flag overrides the goal-spec `runner` field at every
 invocation; the goal-spec `runner` field overrides any `MOMENTUM.md` default in
 the target repo; and an absent `MOMENTUM.md` policy falls through to the
 built-in `fake` default. See the
-[Repo policy via MOMENTUM.md](runners.md#repo-policy-via-momentummd-ngx-284)
+[Repo policy via MOMENTUM.md](runners.md#repo-policy-via-momentummd)
 section for the full policy precedence including `verification`,
 `verification_timeout_sec`, and `intent_apply_policy`.
 

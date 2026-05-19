@@ -1,9 +1,7 @@
 # `doctor`
 
 This page is the canonical reference for the `doctor` command — Momentum's
-first-sanity-check, orchestrator-health probe, and policy-file validator. It
-remains wire-stable across Milestones 3, 4, and 5 and continues unchanged
-through the active Milestone 6.
+first-sanity-check, orchestrator-health probe, and policy-file validator.
 
 See also:
 
@@ -20,8 +18,8 @@ See also:
 momentum doctor [--repo <path>] [--data-dir <path>] [--json]
 ```
 
-Reports CLI version, Node.js version, platform, the current milestone scope
-label, and a compact daemon-readiness block. `--data-dir <path>` selects a
+Reports CLI version, Node.js version, platform, the current scope label,
+and a compact daemon-readiness block. `--data-dir <path>` selects a
 non-default Momentum home (otherwise `MOMENTUM_HOME` env / `~/.momentum`
 fallback). `--repo <path>` opts the run into loading the repo's
 `MOMENTUM.md` policy file for inspection; without `--repo`, the `policy`
@@ -60,7 +58,7 @@ surface orphaned repo locks and claimed/running jobs whose lease expired
 more than `staleLeaseGraceMs` ago. The `goalsNeedingRecoveryCount` surface
 shows how many goals currently have the durable `needs_manual_recovery`
 flag set in the selected data directory (see [`docs/recovery.md`](recovery.md)
-for the NGX-277 manual recovery contract).
+for the manual recovery contract).
 
 ## Runners block
 

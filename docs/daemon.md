@@ -1,14 +1,12 @@
 # Daemon commands
 
 This page is the canonical reference for the `daemon start`, `daemon stop`, and
-`daemon status` commands and their JSON envelope shapes. They form the Milestone
-3 operational-safety surface (NGX-272 through NGX-278) and remain wire-stable
-through Milestone 4, Milestone 5, and the active Milestone 6.
+`daemon status` commands and their JSON envelope shapes.
 
 See also:
 
-- [`docs/recovery.md`](recovery.md) for stale-lease auto-recovery (NGX-276) and
-  the manual-recovery artifact / `needs_manual_recovery` flag (NGX-277).
+- [`docs/recovery.md`](recovery.md) for stale-lease auto-recovery and the
+  manual-recovery artifact / `needs_manual_recovery` flag.
 - [`docs/walkthrough.md`](walkthrough.md) for the end-to-end managed daemon
   drain narrative.
 - [`docs/failure-reset.md`](failure-reset.md) for per-iteration outcome
@@ -35,10 +33,10 @@ the managed loop still reports its own pre-loop `loop.startupRecovery` summary.
 After a terminal record (`stopped` / `canceled` / `error`), a fresh start is
 allowed.
 
-### Register-only mode (NGX-272)
+### Register-only mode
 
 Without any loop-bound flag, `daemon start` returns immediately after
-registering the run (the NGX-272 register-only contract).
+registering the run.
 
 JSON envelope shape (register-only):
 
@@ -56,10 +54,10 @@ JSON envelope shape (register-only):
 }
 ```
 
-### Managed loop mode (NGX-273)
+### Managed loop mode
 
-Passing `--max-loop-iterations` or `--max-idle-cycles` opts into the NGX-273
-managed loop: the process keeps running and drains queued `goal_iteration` jobs
+Passing `--max-loop-iterations` or `--max-idle-cycles` opts into the managed
+loop: the process keeps running and drains queued `goal_iteration` jobs
 in-process by composing `runWorkerOnce`, refreshes `daemon_runs.heartbeat_at` /
 `active_job_id` / `reconcile_count` per cycle, applies deterministic idle
 backoff between empty polls or unexecutable jobs, and exits cleanly when one of
@@ -144,14 +142,14 @@ exists; if the latest record is terminal, the failure payload includes a
 `latest` summary so operators can see what was already stopped, canceled, or
 failed.
 
-The NGX-273/NGX-275 managed loop observes graceful and immediate stop requests
-between cycles. Graceful stop exits as `stopped`; stop-now exits as `canceled`
+The managed loop observes graceful and immediate stop requests between
+cycles. Graceful stop exits as `stopped`; stop-now exits as `canceled`
 and records `cancelOutcome` (`idle` if no job ran in that loop session,
 `active_job_completed` if an in-flight iteration completed before cancellation
 was observed). The command does not signal, kill, or otherwise terminate any
 running runner, worker, or external process; process signaling, forced
-termination, and mid-job cancellation are deferred to a future milestone (M3
-stop semantics are intentionally observation-only).
+termination, and mid-job cancellation are intentionally out of scope — stop
+semantics are observation-only.
 
 JSON envelope shape:
 
@@ -204,7 +202,7 @@ listing goals whose durable `needs_manual_recovery` flag is set (each entry
 includes `goalId`, `title`, `goalState`, `recoveryMdPath`, and
 `recoveryMdExists`). `daemon status` itself is read-only — running it triggers
 no recovery action. Automatic recovery for known-safe stale leases is performed
-by the NGX-276 startup-recovery pass when a managed `daemon start` boots; rows
+by the startup-recovery pass when a managed `daemon start` boots; rows
 surfaced by `daemon status` are the current stale snapshot and may still need
 manual recovery if a startup-recovery pass skips them.
 
