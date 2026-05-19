@@ -12,12 +12,14 @@ Momentum is a TypeScript CLI targeting Node.js for autonomous repo-work orchestr
 The roadmap, milestone scopes, and cross-milestone contracts live under `docs/`:
 
 - [docs/roadmap.md](docs/roadmap.md) — milestone timeline and current ordering.
+- [docs/milestones/m3-operational-safety.md](docs/milestones/m3-operational-safety.md) — M3: operational safety (complete). Daemon / orchestrator state, stop-request visibility, stale-lease recovery, and manual-recovery artifacts.
+- [docs/milestones/m4-real-runners.md](docs/milestones/m4-real-runners.md) — M4: real runner profiles (complete). `RunnerAdapter` boundary, `fake` / `trusted-shell` / `acp` profiles, and the runtime `MOMENTUM.md` policy loader.
 - [docs/milestones/m5-source-adapters.md](docs/milestones/m5-source-adapters.md) — M5: source adapters and evidence sync (complete). Framed as durable intents only; no external apply.
 - [docs/milestones/m6-external-apply.md](docs/milestones/m6-external-apply.md) — M6: policy-gated external apply (active).
 - [docs/contracts/intent-apply.md](docs/contracts/intent-apply.md) — Two-phase external apply: claim, audit-before-write, external write, finalize, blocked / non-replay state, CAS, comment-only default, idempotency marker, single-issue reconcile, and the test guard against real `api.linear.app` calls.
 - [docs/contracts/source-adapters.md](docs/contracts/source-adapters.md) — Source adapter boundary: read-only invariants, snapshot / reconciliation outputs, and how M6's Linear write client layers on top.
 
-The detailed milestone narratives below remain in this README for now (M3 Alignment, M4 Roadmap, M5 Roadmap); future slices will trim them in favor of the dedicated milestone docs above.
+The detailed milestone narratives below remain in this README as short summaries; the full contracts live in the milestone docs linked above.
 
 Milestone 1 (Foreground Proof Loop) is complete. Milestone 2 (Queue and Worker Model) is complete, with NGX-235, NGX-236, NGX-237, NGX-238, NGX-239, NGX-245, NGX-246, NGX-247, NGX-248, NGX-249, and NGX-250 implemented and verified. NGX-249 is M2-05 completion reducer and idempotent chaining (`reduceGoalIteration` classifies terminal `goal_iteration` jobs as `continue` / `goal_complete` / `max_iterations_reached` / `iteration_failed`; updates `goals.state` / `current_iteration` / `completion_reason`; enqueues next iterations with stable idempotency keys; emits `goal.reduced` + `goal.completed` / `goal.failed`; surfaces reducer state, next job, and next-action via `status`/`handoff`; and runs after each completed queued job). NGX-250 pins the Milestone 2 CLI contract around queued status/handoff fields, local log inspection, queued smoke coverage, and user-facing docs. Milestone 2 also includes queued-path execution without a long-lived daemon, stable single-shot worker behavior, and explicit artifact pointers on job success/failure.
 
@@ -887,187 +889,57 @@ Day-to-day execution should use the default queued path so the reducer can chain
 
 ## Milestone 3 Alignment
 
-Milestone 3 is **orchestrator lifecycle / operational safety**, not merely daemon process plumbing. It completed daemon/orchestrator state, stop-request visibility, stale-lease recovery, manual recovery artifacts, and closeout smoke/docs while preserving Momentum's durable Goal/Iteration/Job/Handoff model and SQLite-backed queue. The work is informed by OpenAI Symphony's orchestration model ([SPEC.md](https://github.com/openai/symphony/blob/main/SPEC.md)) but Momentum is a durable local-first engine, not an issue-tracker poller / Codex app-server clone.
+Milestone 3 (Operational Safety) is complete. M3 landed durable daemon /
+orchestrator state, stop-request visibility, stale-lease recovery, manual
+recovery artifacts, and closeout smoke / docs while preserving Momentum's
+durable Goal / Iteration / Job / Handoff model and SQLite-backed queue. NGX-272
+through NGX-278 are all done.
 
-### Durable primitives
-
-Momentum's product model is centered on these durable concepts; M3 must not break or rename them:
-
-- **Goal**: the core product primitive. A Markdown spec plus acceptance criteria, durably tracked in SQLite with its own state machine.
-- **Source**: an external system that can seed Goals or reconcile context (Linear, GitHub, Jira, etc.).
-- **Source Item**: a durable intake record under a Goal, drawn from a Source. Not the completion authority.
-- **Iteration**: one verified attempt at the Goal, with prompt, runner log, verification log, and result artifacts.
-- **Job**: a queued unit of work (today: `goal_iteration`) with idempotency key, lease, and result/error pointers.
-- **RunnerAdapter**: the boundary for invoking an agent runner (currently `fake`, `trusted-shell`, and `acp`; later Codex, Claude, OpenCode, and other ACP/app-server backends through the same boundary).
-- **Workflow / Policy**: repo-owned configuration and prompt contract, `MOMENTUM.md` (runtime loader shipped in M4 via NGX-284; M3 documented the contract only).
-- **Workspace / Repo Lease**: the shared per-Goal repo lock that protects the working tree during an iteration.
-- **Event**: append-only record on the durable event log (`job.enqueued`, `job.claimed`, `job.heartbeat`, `iteration_*`, `job.succeeded`/`job.failed`, `repo_lock.recovered`, `job.recovered`, `goal.reduced`, `goal.completed`/`goal.failed`, `goal.reduce_failed`, `goal.recovery_cleared`).
-- **Handoff**: the `handoff.md` + `handoff.json` artifacts that snapshot state for continuity.
-
-### Locked decisions
-
-- Momentum's core product primitive is `Goal`, not `Issue`. A Goal may be seeded from one or more source items; Linear projects/issues are one source shape, not the source of truth.
-- Goal completion is decided by the Goal Markdown acceptance criteria plus runner, verification, and handoff evidence, not by source-item count or external tracker state alone.
-- Tracker writes are **adapter-mediated and policy-gated**. Momentum core records durable facts and emits external-update intents; Linear/GitHub/Jira/etc. adapters or approved workflow steps perform the external writes.
-- Source adapters were scoped as **pull / reconcile first** in M3 alignment; active source-adapter implementation now belongs to M5. No inbound webhook infrastructure in the operational-safety milestone.
-- A Goal uses **one shared repo / workspace lease** for now. Per-source-item worktrees or workspaces are deferred until daemon, stop, and recovery behavior are solid.
-- `MOMENTUM.md` is the canonical future repo policy file. M3 documents it as a contract but does **not** add a runtime loader, parser, or precedence rules unless a future milestone explicitly proves it is required.
-
-### Symphony to Momentum domain mapping
-
-| Symphony concept | Momentum equivalent |
-|---|---|
-| `WORKFLOW.md` | Future `MOMENTUM.md` repo policy contract (doc-only in M3). |
-| Issue | Source item / intake record under a Momentum Goal. |
-| Orchestrator state (in-memory) | Momentum daemon/orchestrator state plus durable queue/job records in SQLite. |
-| Per-issue workspace | Current Goal repo-lease boundary; future worktree support deferred. |
-| Agent runner | Momentum `RunnerAdapter` boundary (Codex, Claude, OpenCode, ACP/app-server backends). |
-| Status / log snapshots | Momentum events, `status --json`, `logs`, and `handoff` artifacts. |
-
-### Adopt from Symphony
-
-- Repo-owned workflow config and prompt contract (future `MOMENTUM.md`), with typed config loading and dynamic reload semantics added later only when justified.
-- Single-authority scheduling and explicit reconciliation passes.
-- Retry / backoff taxonomy on jobs and runner calls.
-- Workspace safety invariants (clean tree, captured base HEAD, deterministic reset).
-- A runner event taxonomy that makes runner progress observable without coupling to one vendor.
-- Token / rate-limit observability and an explicit trust / sandbox posture for runners.
-
-### Avoid from Symphony
-
-- In-memory-only scheduler state; Momentum's queue stays durable in SQLite.
-- A Codex-only runner protocol; keep the `RunnerAdapter` boundary multi-backend.
-- An issue-tracker-only product model; Goal remains the durable primitive.
-- High-trust auto-approval as an implicit default; every external/destructive action must be policy-gated.
-- Inbound webhooks in M3; adapters stay pull / reconcile first.
-- Per-issue workspace cleanup that risks losing audit artifacts.
-- Core-owned tracker writes; adapters or approved workflow steps own external writes.
-- A runtime `MOMENTUM.md` loader before a future milestone proves it is needed.
+For the full M3 contract — durable primitives, locked decisions, planned issue
+order, explicit non-goals, and the Symphony adopt / avoid mapping — see
+[`docs/milestones/m3-operational-safety.md`](docs/milestones/m3-operational-safety.md).
+M6 (Policy-Gated External Apply) is the active milestone; see
+[`docs/milestones/m6-external-apply.md`](docs/milestones/m6-external-apply.md)
+and [`docs/contracts/intent-apply.md`](docs/contracts/intent-apply.md) for the
+two-phase apply contract.
 
 ## Milestone 4 Roadmap
 
-Milestone 4 (Real Runner Profiles) is complete. NGX-279..NGX-286 are all shipped: the `RunnerAdapter` boundary executes goals through real runner profiles (`fake`, `trusted-shell`, `acp`) without changing the Goal/Iteration/Job contract or the M3 daemon/recovery surfaces, the runtime `MOMENTUM.md` policy loader lands repo-owned defaults between goal frontmatter and built-in defaults, real-runner status/logs/recovery surfaces preserve the full command/runtime/result taxonomy, and NGX-286 pinned the M4 closeout with built-CLI smoke coverage for the trusted-shell happy and failure paths plus `MOMENTUM.md` precedence, marked the milestone complete in `doctor`, README, and AGENTS, and re-stated the explicit M5/post-M4 deferral set. External tracker automation (Linear/GitHub/Jira writes, webhooks) remains deferred and is **not** part of M4.
+Milestone 4 (Real Runner Profiles) is complete. M4 introduced the `RunnerAdapter`
+boundary so Momentum can execute Goals through more than the in-process `fake`
+runner without changing the Goal / Iteration / Job contract or the M3 daemon /
+recovery surfaces, added the `trusted-shell` and `acp` runner profiles, landed
+the runtime `MOMENTUM.md` policy loader with CLI > frontmatter > policy >
+built-in precedence, and pinned status / logs / recovery surfaces against the
+full command / runtime / result taxonomy. NGX-279, NGX-280, NGX-281, NGX-282,
+NGX-283, NGX-284, NGX-285, and NGX-286 are all done; external tracker
+automation (Linear / GitHub / Jira writes, webhooks) remains deferred and is
+**not** part of M4.
 
-### Milestone goal
-
-Land a `RunnerAdapter` boundary so Momentum can execute Goals through more than the in-process `fake` runner without changing the Goal/Iteration/Job contract or the M3 daemon/recovery surfaces. The first real profile is a `trusted-shell` runner; an `acp` ACP/acpx-style runtime smoke profile has also landed alongside it. Runtime `MOMENTUM.md` policy loading lands second so repo-owned policy can gate runner choice and verification. External tracker automation (Linear/GitHub/Jira writes, webhooks) remains deferred and is **not** part of M4.
-
-### Architecture decision: core vs runner adapters
-
-- **Momentum core** owns the durable Goal/Iteration/Job state machine, Momentum-owned verification, the git transaction (commit/reset on the Momentum branch), the on-disk artifact layout, and the queue/daemon/recovery surfaces shipped in M2 and M3.
-- **`RunnerAdapter` implementations** execute the iteration prompt against an external runtime (shell, agent, ACP backend), capture runner output in the adapter-specific manner and write it to `runner.log`, and report a normalized `RunnerResult` containing `success`, `summary`, change/learning/work arrays, `goal_complete`, and commit intent. Adapters do not touch git, do not own verification, do not own the queue, and do not write to external trackers.
-- The boundary stays single-process and trust-explicit for v0; sandbox/isolation hardening is out of scope for M4.
-
-### Initial supported runner family
-
-- `fake`: existing in-process runner (Milestone 1/2 baseline) — kept as the default for tests and smoke coverage.
-- `trusted-shell`: operator-trusted executable/argv profile (NGX-282); a goal frontmatter `trusted_shell` block configures the executable `command`, argv `args`, `cwd` (`repo` default or `iteration`), `env_allow` / `env`, `timeout_sec`, and `result_file`. The runner executes `command` with `args` directly (no implicit shell), with no sandbox, records command/cwd/result metadata in `runner.log`, captures stdout/stderr after the command exits, and reads the normalized `RunnerResult` from the configured result file. Stable error codes cover `invalid_input` (missing/malformed config), `runner_threw` (runner log could not be opened), `spawn_failed` (spawn errors such as a missing binary), `command_failed` (non-zero exit), `command_timed_out` (exceeded `timeout_sec`), `result_missing` (no result file written), `result_invalid` (unreadable, malformed, or non-conforming result JSON), and `output_overflow` (stdout/stderr exceeded the 256 MiB capture limit).
-- `acp`: ACP/acpx-style runtime smoke profile (NGX-283); a goal frontmatter `acp` block configures the executable `command`, argv `args`, `cwd` (`repo` default or `iteration`), `env_allow` / `env`, `timeout_sec`, `result_file`, and an optional `probe` sub-block with its own `command` / `args` / `timeout_sec` (default `30`). The runner performs a pre-flight availability check on absolute `acp.command` paths, runs the probe (if configured) before the main command so missing runtime or auth is caught early, then spawns the configured command via `spawnSync` with no implicit shell and reads the normalized `RunnerResult` from `acp.result_file`. Failure codes inherit the `trusted-shell` taxonomy (`invalid_input`, `runner_threw`, `command_failed`, `command_timed_out`, `result_missing`, `result_invalid`, `output_overflow`) and add `runtime_unavailable` (missing runtime binary, missing probe binary, probe non-zero exit, probe timeout, or main spawn ENOENT) and `startup_failed` (non-ENOENT spawn errors on the main command or the probe), keeping missing prerequisites distinct from `command_failed` and from verification failures. Live ACP/acpx smoke is opt-in: when the configured runtime or its auth is missing, the runner returns `runtime_unavailable` without modifying repo state instead of corrupting the Goal.
-
-External writes remain adapter-mediated and policy-gated (Linear/GitHub/Jira adapters or workflow steps). M4 does **not** implement any external tracker writes.
-
-### Planned issue order
-
-The Linear milestone "Milestone 4: Real Runner Profiles" sequences the work as:
-
-1. **NGX-279 — M4-00 M4 contract, roadmap, and docs setup** *(done)*
-2. **NGX-280 — M4-01 Runner profile model and resolver** *(done)*: added `src/runner-profile.ts` with the built-in registry (`BUILTIN_RUNNER_KINDS = ["fake", "trusted-shell"]`, `DEFAULT_RUNNER_KIND = "fake"`), `parseRunnerProfile` (validates and normalizes runner names, returning `unsupported_runner` or `malformed_profile` on bad input), `resolveRunnerProfile` (applies precedence: `cli_override > goal_frontmatter > builtin_default`), and `safeRunnerProfileSummary`; wired the resolver into `goal-init.ts` so `goal start` validates the runner profile at init time and persists the resolved name to `goals.runner`; surfaced `runnerProfile` and `runnerProfileSource` on `goal start` JSON, `runnerProfile` on `status` JSON/text and `handoff` JSON/markdown, and a `runners` block on `doctor` JSON/text with `supported`, `default`, and `profiles` arrays; replaced the generic `init_error` code with specific stable codes (`parse_error`, `unsupported_runner`, `malformed_profile`, `init_failed`).
-3. **NGX-281 — M4-02 RunnerAdapter boundary and fake-runner migration** *(done)*: added `src/runner-adapter.ts` with `RunnerAdapter`, `RunnerAdapterInput`, `RunnerAdapterResult`, and `RunnerAdapterError` types; an adapter registry (`ADAPTERS`) with `getRunnerAdapter`, `listRunnerAdapterKinds`, `listExecutingRunnerAdapterKinds`; `dispatchRunnerAdapter` validates input, resolves the adapter by kind, checks `executes`, and calls the adapter's `execute` method with a try/catch for `runner_threw`; the `fake` adapter wraps `runFakeRunner` behind the boundary with normalized output and diagnostics, while `trusted-shell` is a placeholder that returns `unsupported_runner`; `foreground-iteration.ts` replaces the direct `runFakeRunner` call and the hard-coded `spec.runner !== "fake"` guard with `dispatchRunnerAdapter`, preserving an early adapter-kind/executes validation before git operations; the queued `worker-run` → `iteration-job` → `foreground-iteration` path uses the same adapter dispatch; the fake runner profile now has `executes: true` and a description reflecting dispatch through the boundary; focused adapter tests cover the registry, dispatch contract, input validation, fake-runner integration, env threading, diagnostics, and error taxonomy.
-4. **NGX-282 — M4-03 Trusted-shell runner profile** *(done)*: added `src/trusted-shell-config.ts` (typed `parseTrustedShellConfig` with stable `trusted_shell_config_missing` / `trusted_shell_config_invalid` codes, defaults `cwd=repo`, `timeout_sec=900`, `result_file=result.json`, and refusal of absolute, `..`-escaping, or directory-resolving result paths) and `src/trusted-shell-runner.ts` (spawns the configured executable plus argv via `spawnSync` with no shell, applies `env_allow` filtering with implicit `PATH` preservation, supports `cwd=repo|iteration`, records command/cwd/result metadata in `runner.log`, captures stdout/stderr with section headers after the command exits, and parses the normalized `RunnerResult` from the configured result file); promoted the trusted-shell `RunnerAdapter` from a placeholder to a real adapter with `executes: true`; flipped the `trusted-shell` runner profile to `executes: true` with an explicit-trust description; extended `runForegroundIteration` to reset the worktree to base HEAD when an executing adapter fails after attempting execution without moving HEAD, and to return manual-recovery reasons `runner_changed_head` when the runner advances HEAD or `head_mismatch` when finalization detects unexpected HEAD movement; broadened the `RunnerAdapterErrorCode` taxonomy with `result_missing`, `command_failed`, `command_timed_out`, `spawn_failed`, and `output_overflow`, while `runner_threw` now also covers runner-log open failures and `result_invalid` includes unreadable result files; added focused tests covering config parsing (22 cases), the runner module (16 cases including success, env_allow, cwd modes, timeout, command_failed, result_missing, malformed JSON, spawn ENOENT), the adapter registry / dispatch surface, and end-to-end foreground iteration paths (commit on success, reset on command_failed / timeout / result_missing / result_invalid / runner success=false).
-5. **NGX-283 — M4-04 ACP/acpx runtime smoke runner** *(done)*: added `src/acp-config.ts` (typed `parseAcpConfig` with stable `acp_config_missing` / `acp_config_invalid` codes, defaults `cwd=repo`, `timeout_sec=900`, `result_file=result.json`, optional `probe` block with `command` / `args` / `timeout_sec` defaulting to 30s, and refusal of absolute or `..`-escaping result paths) and `src/acp-runner.ts` (pre-flight runtime-availability check on absolute `acp.command` paths, optional probe spawn run before the main command, shared `spawnSync` execution with no implicit shell, `env_allow` filtering with implicit `PATH` preservation, `cwd=repo|iteration`, MOMENTUM_* env vars, stdout/stderr capture after command exit, and normalized `RunnerResult` parsing from the configured result file); registered the `acp` adapter with `executes: true` in the `RunnerAdapter` registry alongside `fake` and `trusted-shell`; promoted the `acp` runner profile to `executes: true` with a description that calls out the `runtime_unavailable` taxonomy; threaded an optional `acp` block through `GoalSpec` and `rawFrontmatter`; broadened `RunnerAdapterErrorCode` with stable `runtime_unavailable` (runtime binary missing, probe binary missing, probe non-zero exit, probe timeout, or main spawn ENOENT) and `startup_failed` (main or probe non-ENOENT spawn errors) so missing prerequisites stay distinct from `command_failed` and from verification failures; added focused tests covering acp config parsing (29 cases) and the acp runner module (success, runner-reported failure, runtime_unavailable for missing binary / missing probe / non-zero probe exit, startup_failed for non-ENOENT spawn errors on both main and probe, command_failed, command_timed_out, result_missing, result_invalid, MOMENTUM_* env contract, env isolation, and probe-before-main ordering); preserved the M3 closeout marker on `doctor`.
-6. **NGX-284 — M4-05 Runtime MOMENTUM.md policy loader** *(done)*: added `src/momentum-policy.ts` (typed `loadMomentumPolicy` / `parseMomentumPolicy` / `resolvePolicyEffectiveValues` with stable `policy_path_invalid` / `policy_file_unreadable` / `policy_parse_invalid` / `policy_schema_invalid` codes, a minimal schema of `runner`, `verification`, `verification_timeout_sec`, and a free-form notes body; a body-only file with no frontmatter is treated as notes with empty config); discovery is repo-root only — `MOMENTUM.md` at the resolved repo root is the only path the loader inspects (no parent traversal, no walk-up); missing files return `{ ok: true, present: false }` so existing goals without a policy file behave exactly as before. Precedence is CLI overrides > goal frontmatter > MOMENTUM.md > built-in defaults: `resolveRunnerProfile` now accepts a `policyValue` between goal frontmatter and the built-in default, and `resolvePolicyEffectiveValues` applies the same ordering to `verification` and `verification_timeout_sec`. `goal-init.ts` loads the policy whenever `spec.repo` is set and surfaces a `policy` summary on `GoalInitSuccess`. The iteration prompt renderer accepts optional `policyNotes` + `policyPath` and emits a `## Policy notes (from MOMENTUM.md)` section before the Rules section with an explicit reminder that "Policy notes are context, not executable overrides. Momentum safety contracts (no commits, no pushes, no staged changes) always win." `runForegroundIteration` loads policy from the verified `repoPath` and threads notes into the prompt. `goal start --json`, `status --json` / text, `handoff` JSON / markdown, and `doctor --json` / text all surface a `policy` block (`configured`, `present`, `path`, `hasNotes`, `config`, `error`); `doctor` accepts a new `--repo <path>` flag to inspect a repo's policy file in isolation. Focused tests cover loader behavior (missing / present / invalid frontmatter / invalid schema / repo-root-only discovery / inline-array verification), precedence resolution, prompt inclusion, goal-init integration (policy beats default; goal frontmatter beats policy; CLI override beats both; malformed policy surfaces `policy_schema_invalid`), `doctor --repo` policy surface, status/handoff policy surface, and a foreground-iteration sanity test that asserts the rendered prompt contains policy notes when the file is present and omits the section when absent.
-7. **NGX-285 — M4-06 Real-runner status, logs, and recovery hardening** *(done)*: mapped real-runner adapter error codes to stable `ForegroundIterationErrorCode` values (`command_failed`, `command_timed_out`, `result_missing`, `result_invalid`, `runtime_unavailable`, `startup_failed`, `spawn_failed`, `output_overflow`) so `status` and other operator surfaces preserve command/runtime/result taxonomy instead of collapsing to a generic `runner_failed`; added `runnerResultError` and `parseError` to `handoff` JSON/markdown and `logs` output so malformed or missing runner result artifacts surface explicit operator-visible errors instead of silently returning null; added `resultJson` as a `GoalLogFile` with parse diagnostics to `logs --json` and text output; hardened `recovery.md` artifacts with a Runner/profile summary section (runner, command, args, cwd, timeout, result file) and prompt path; updated `stale-recovery.ts` `maybeWriteRecoveryArtifact` to include runner and prompt-path context; extended `ForegroundIterationErrorCode`, `RecoveryArtifactPathBundle`, `RecoveryArtifactInput`, `RecoveryArtifactRunnerProfile`, `GoalLogFile`, and `HandoffData` types; added focused tests covering every new error code through `status`, `logs`, `handoff`, `doctor`, CLI, worker-run, and recovery-artifact surfaces for both `trusted-shell` and `acp` adapter failures.
-8. **NGX-286 — M4-07 M4 smoke, docs, and milestone closeout** *(done)*: added built-CLI smoke coverage for the trusted-shell happy path (`goal start --foreground` runs the configured command, commits the verified diff, and surfaces the iteration through `status`, `logs`, and `handoff`), the trusted-shell failure path (`command_failed` from a non-zero exit resets the worktree and preserves the stable error code through `status` and `logs`), and `MOMENTUM.md` precedence (the policy file's `runner` default loses to a CLI override and the policy notes thread into iteration prompts); flipped the `doctor` milestone string from the M3 closeout marker to `"Milestone 4: real runner profiles (NGX-279, NGX-280, NGX-281, NGX-282, NGX-283, NGX-284, NGX-285, NGX-286) complete"`; updated README, AGENTS, and the M4 contract docs test to name Milestone 4 complete; and re-stated the post-M4 deferral set (external tracker writes, inbound webhooks, per-source-item worktrees, background runner supervision, dashboards/UI, strong sandboxing, cooperative mid-job cancellation, remote git operations).
-
-NGX-286 introduced the M4 closeout marker (`Milestone 4: real runner profiles (NGX-279, NGX-280, NGX-281, NGX-282, NGX-283, NGX-284, NGX-285, NGX-286) complete`) on `doctor --json` / text. NGX-294 later superseded it with the M5 closeout marker; `test/m4-contract.test.ts` now only preserves the post-M3 marker invariant while `test/cli.test.ts` and `test/m5-contract.test.ts` assert the current M5 marker.
-
-### M4 non-goals (explicit)
-
-The following are **explicitly out of scope** for Milestone 4 and remain deferred regardless of how far M4 advances:
-
-- **External tracker writes** — Linear/GitHub/Jira/etc. issue/PR creation, comments, status changes, label edits driven from Momentum.
-- **Inbound webhooks** — adapters stay pull/reconcile first; Momentum does not expose an HTTP listener in M4.
-- **Worktrees / per-source-item workspaces** — a Goal still uses one shared repo lease.
-- **Background runner supervision** — forking, daemonization, restart-on-crash; the M3 single-process managed loop remains the supervision contract.
-- **Dashboard or UI surface** — CLI JSON/text remains the only interface in M4.
-- **Strong sandboxing** — `trusted-shell` and `acp` are exactly that: explicitly trusted. Container/VM/seccomp isolation is not part of M4.
-- **Cooperative mid-job cancellation / signal handling** — stop semantics stay observation-only as in M3.
-- **Remote git operations** — no `fetch` / `pull` / `push` / `rebase` driven from Momentum.
-
-### M3 contracts preserved
-
-M4 did not break or rename any M3 surfaces. Specifically: the `daemon start` / `daemon stop` / `daemon status` / `recovery clear` CLI shapes, the `daemon_runs` / `repo_locks` / `goals.needs_manual_recovery` schema, the stale-lease detection / startup-recovery pass, the manual-recovery `recovery.md` artifact + flag, and the `status` / `handoff` / `doctor` daemon and recovery fields all remain wire-stable. The Milestone 3 daemon drain, graceful stop, stop-now, stale recovery, and manual recovery smoke coverage in `test/smoke.test.ts` continues to pass alongside the M4 smoke additions. NGX-286 intentionally flipped the `doctor` milestone string from the M3 closeout marker to the M4 closeout marker as part of M4 closeout; NGX-294 later moved the current marker to M5 while `test/m4-contract.test.ts` keeps asserting that the M3 closeout marker is no longer pinned.
+For the full M4 contract — runner architecture, runner family, planned issue
+order, explicit non-goals, and the M3 contracts preserved through M4 — see
+[`docs/milestones/m4-real-runners.md`](docs/milestones/m4-real-runners.md).
+M6 (Policy-Gated External Apply) is the active milestone; see
+[`docs/milestones/m6-external-apply.md`](docs/milestones/m6-external-apply.md)
+and [`docs/contracts/intent-apply.md`](docs/contracts/intent-apply.md) for the
+two-phase apply contract.
 
 ## Milestone 5 Roadmap
 
-Milestone 5 (Source Adapters and Evidence Sync) is complete. M5 made Momentum source-and-evidence aware while preserving the M4 runner contract and the M3 operational-safety surface. NGX-287..NGX-294 are all done. NGX-294 (M5-07) flipped the `doctor --json` milestone string from the M4 closeout marker to the M5 closeout marker (`Milestone 5: source adapters and evidence sync (NGX-287, NGX-288, NGX-289, NGX-290, NGX-291, NGX-292, NGX-293, NGX-294) complete`) as part of M5 closeout.
+Milestone 5 (Source Adapters and Evidence Sync) is complete. M5 added durable
+SourceItems, source adapters (read-only Linear reconciliation), workflow
+evidence ingestion, deterministic project rollups, and policy-gated update
+intents — all without performing automatic external writes. NGX-287 through
+NGX-294 are done, and the `doctor --json` milestone string is pinned to the M5
+closeout marker.
 
-### Milestone goal
-
-Add the durable bridge between Goals and external work items: a `SourceAdapter` boundary, durable `SourceItem` records, reconciliation runs, evidence artifact ingestion, project rollups computed from local state, and policy-gated external update intents — all without performing automatic writes to external trackers. Read-only Linear reconciliation is the first real source adapter. External tracker writes are represented as durable intents only; applying them stays manual / operator-mediated in M5.
-
-### M5 vocabulary
-
-Durable concepts introduced or formalized by M5; none of them rename or replace the M3/M4 primitives:
-
-- **SourceItem** — a normalized record drawn from an external system (Linear issue, GitHub PR/issue, Jira ticket) with stable identity fields (adapter kind, external id, external key, URL, title, status, metadata JSON, last observed timestamp, optional linked Goal id). A SourceItem is **context**, not the completion authority for any Goal.
-- **SourceAdapter** — the read/list/get/normalize boundary for a source system, analogous to `RunnerAdapter`. Adapters do not own Goal/Iteration/Job state, do not perform external writes in M5, and do not touch git.
-- **source snapshot** — the durable raw state captured for a SourceItem at a point in time. Snapshots feed reconciliation and provide an audit trail for drift detection.
-- **reconciliation run** — a single invocation of a source adapter that records started/finished timestamps, adapter kind, input filters or other metadata, state, top-level error, `items_seen` / `items_upserted` counts, and pagination-stop metadata; reconciliation output also reports created / updated / skipped / errored counts and sampled per-item errors.
-- **evidence artifact** — a normalized record of execution evidence (plan files, ledgers, no-mistakes outputs, PR links, merge evidence, verification summaries) attached to Goals and/or SourceItems with stable identity, type, path/URL, source, timestamp, summary, and metadata JSON. Ingestion is idempotent.
-- **external update intent** — a durable, auditable record of a desired external write (state change, comment, label edit, project update) targeting a specific adapter and external id. Intents include payload JSON, reason, linked Goal / SourceItem / evidence ids, status, created / applied / skipped timestamps, and error metadata. **M5 does not apply intents automatically.**
-- **project rollup** — a deterministic local computation grouping SourceItems by observed state, linked Goal state, evidence freshness, reconciliation freshness, and pending update intents, with explicit drift / mismatch surfacing.
-
-### M5 trust boundary
-
-M5 keeps Momentum's existing trust posture and tightens the source/intent surface:
-
-- Source adapters are **read-only** in M5. They read external state and write only to Momentum's local durable tables (snapshots, SourceItems, reconciliation runs).
-- External writes are represented as durable, policy-gated **external update intents**. Generating an intent is **not** the same as applying it; Momentum does **not** perform automatic external writes in M5. Applying an intent is operator-mediated through CLI or an explicitly approved workflow step.
-- Credentials never enter Momentum durable state or docs. Source adapters accept credential paths / env vars through operator-controlled config only.
-- Evidence ingestion reads local artifacts under operator-controlled paths (such as `.agent-workflows/`); Momentum does not scrape chat or external systems for evidence.
-- Iteration prompts may carry source / evidence context, but policy notes from `MOMENTUM.md` and source context are **context-only**: they cannot override Momentum safety contracts (no commits, no pushes, no staged changes, runner / verification / git transaction boundaries).
-
-### M5 composition with existing contracts
-
-M5 composes with the M1–M4 surfaces without breaking them:
-
-- **Goal / Iteration / Job** remain the durable execution units. SourceItems link **into** Goals (optional linkage); the Goal is still the completion authority.
-- **RunnerAdapter** and the existing runner profiles (`fake`, `trusted-shell`, `acp`) keep their M4 contract; source / evidence context is threaded through prompt rendering only, not the adapter input shape.
-- **daemon** start / stop / status, the managed loop, stop / stop-now semantics, and stale-lease recovery from M3 remain wire-stable. Reconciliation runs and evidence ingestion are explicit CLI operations, not daemon-loop side effects.
-- **recovery** flags, `recovery.md`, and `recovery clear` from M3/M4 stay unchanged; M5 does not auto-clear manual recovery and does not generate new recovery codes from source / evidence ingestion.
-- **handoff** JSON / markdown grows new optional fields for linked source context, recent reconciliation summary, evidence summaries, and pending update intents. Existing M2–M4 fields are preserved.
-- **MOMENTUM.md** stays the canonical repo policy file. M5 may add optional `source` / `evidence` / `intents` policy keys but defaults remain conservative (read-only sources, intent-create-only, no auto-apply).
-
-### Planned M5 issue order
-
-The Linear milestone "Milestone 5: Source Adapters And Evidence Sync" sequences the work as:
-
-1. **NGX-287 — M5-00 M5 contract, roadmap, and docs setup** *(done)*: defined vocabulary, trust boundary, planned issue order, non-goals, and how M5 composes with M3/M4 contracts; did not modify execution surfaces.
-2. **NGX-288 — M5-01 SourceItem state model and adapter boundary** *(done)*: durable SourceItem / snapshot / reconciliation-run schema, `SourceAdapter` interface and registry, a built-in `local-fixture` adapter for tests, `source list` / `source get` CLI commands, and SourceItem visibility in Goal status / handoff JSON and markdown where data exists.
-3. **NGX-289 — M5-02 Linear source adapter read and reconciliation** *(done)*: first real source adapter — read-only Linear reconciliation for configured project / milestone / issues, normalized SourceItem records, a `source reconcile linear` CLI, and durable reconciliation-run summaries surfaced through `source list`, `doctor`, and the reconciliation JSON output.
-4. **NGX-290 — M5-03 Goal/source linkage and planning context** *(done)*: added `source link` / `source unlink`, `goal start --from-source`, context-only `## Source context` prompt injection from linked SourceItem snapshots, linked-source visibility through `goal start --json`, `status`, `logs`, and `handoff`, and SourceItem count visibility in `doctor`.
-5. **NGX-291 — M5-04 Workflow evidence artifact ingestion** *(done)*: durable `evidence_records` schema with `format_version` and stable `ingest_key` idempotency; a pure `.agent-workflows` artifact parser that normalizes `plan.json` / `ledger.jsonl` / `approval-*.json` into evidence records and emits `evidence_format_unknown` / `evidence_format_invalid` diagnostics for unknown shapes; idempotent `momentum evidence ingest --path <file-or-dir> [--goal <id>] [--source-item <id>] [--json]` and filterable `momentum evidence list [--goal <id>] [--source-item <id>] [--source <source>] [--type <type>] [--limit <n>] [--json]` CLIs; and latest-evidence visibility through `status`, `logs`, `handoff` (JSON + markdown), and `doctor --json`.
-6. **NGX-292 — M5-05 Project rollup and status surfaces** *(done)*: added deterministic local rollup logic and a `project status` CLI that filters by source / project / milestone, applies reconciliation staleness thresholds, surfaces source / Goal / evidence counts, mismatch categories, reconciliation warnings, pending-intent placeholders, and next-action hints computed from local state only.
-7. **NGX-293 — M5-06 Policy-gated external update intents** *(done)*: durable `update_intents` schema (status transitions `pending` → `applied` / `skipped` / `canceled` with idempotency keys, reason tracking, and error metadata columns); `evaluateGoalForSourceSatisfiedIntent` generator that inspects terminal `completed` Goals with linked SourceItems and verification evidence, producing `source_satisfied` intents or `evidence_insufficient` warnings; `intent list` / `intent get` / `intent apply` / `intent skip` / `intent cancel` CLI commands with `--reason` required for transitions and `--external-apply` refused with `external_apply_unsupported` in M5; `MOMENTUM.md` policy gating via `intent_apply_policy` (`create_intents_only` default, `external_apply_allowed` forward-compatible) resolved behind `resolveIntentApplyPolicy` with precedence `momentum_policy > builtin_default`; `pendingUpdateIntents` visibility through `status` (per-goal), `handoff` (JSON + markdown with stale flags), `project status` (with configurable `--intent-stale-threshold-days`, default 30 days), and `doctor --json` (`policy.config.intentApplyPolicy` + `effectiveIntentApply` block); `review_pending_intents` next-action in project rollup ranked below `manual_recovery_required` but above `missing_evidence`.
-8. **NGX-294 — M5-07 M5 smoke, docs, and milestone closeout** *(done)*: added built-CLI smoke coverage for the M5 path through the built `dist/index.js` — empty intent list / empty project status against a fresh data dir, fixture Linear reconciliation through an in-process mock endpoint with downstream `source list` / `source get` / `doctor` assertions, `source link` carrying a reconciled SourceItem into `status` / `handoff` / `doctor`, queued-goal completion via daemon drain followed by workflow evidence ingest and `source link` triggering a `source_satisfied` update intent with `--external-apply` refused and a manual-mark apply path, and `project status` populated with both a `goal_done_source_not_done` mismatch and a pending intent ranked through `pickNextAction` to `review_pending_intents`; flipped the `doctor --json` milestone string from the M4 closeout marker to `Milestone 5: source adapters and evidence sync (NGX-287, NGX-288, NGX-289, NGX-290, NGX-291, NGX-292, NGX-293, NGX-294) complete`; updated `test/cli.test.ts` and `test/m5-contract.test.ts` to pin the new marker, kept `test/m4-contract.test.ts` focused on the post-M3 marker invariant, and pinned the M5-complete docs; and updated README and AGENTS to name M5 complete and restate the explicit post-M5 deferral set (automatic external tracker writes, inbound webhooks, dashboards / UI surfaces, per-source-item worktrees / parallel same-repo Goals, background runner supervision, strong sandboxing, cooperative mid-job cancellation / signal handling, and remote git operations).
-
-### M5 non-goals (explicit)
-
-The following are **explicitly out of scope** for Milestone 5 and remain deferred regardless of how far M5 advances:
-
-- **Automatic external tracker writes** — Linear / GitHub / Jira / etc. issue / PR creation, comments, status changes, label edits driven automatically from Momentum. M5 generates durable intents only.
-- **Inbound webhooks** — source adapters stay pull / reconcile first; Momentum does not expose an HTTP listener in M5.
-- **Dashboard or UI surface** — CLI JSON / text remains the only interface in M5.
-- **Per-source-item worktrees** / parallel same-repo Goals — a Goal still uses one shared repo lease.
-- **Background runner supervision** — forking, daemonization, restart-on-crash; the M3 single-process managed loop remains the supervision contract.
-- **Strong sandboxing** — `trusted-shell` and `acp` remain explicitly trusted; container / VM / seccomp isolation is not part of M5.
-- **Cooperative mid-job cancellation / signal handling** — stop semantics stay observation-only as in M3.
-- **Remote git operations** — no `fetch` / `pull` / `push` / `rebase` driven from Momentum.
-
-### M3 and M4 contracts preserved
-
-M5 did not break or rename any M3 or M4 surfaces. Specifically: the `daemon start` / `daemon stop` / `daemon status` / `recovery clear` CLI shapes, the `daemon_runs` / `repo_locks` / `goals.needs_manual_recovery` schema, stale-lease detection and startup-recovery, the manual-recovery `recovery.md` artifact + flag, the `RunnerAdapter` boundary and the `fake` / `trusted-shell` / `acp` runner profiles, the runtime `MOMENTUM.md` policy loader and its precedence rules, and the `status` / `handoff` / `doctor` daemon, recovery, runner, and policy fields all remain wire-stable. NGX-294 (M5-07) intentionally flipped the `doctor` milestone string from the M4 closeout marker to the M5 closeout marker as part of M5 closeout; `test/cli.test.ts` and `test/m5-contract.test.ts` now assert the M5 marker.
+For the full M5 contract — vocabulary, trust boundary, composition with M3/M4
+surfaces, planned issue order, and explicit non-goals — see
+[`docs/milestones/m5-source-adapters.md`](docs/milestones/m5-source-adapters.md).
+M6 (Policy-Gated External Apply) is the active milestone; see
+[`docs/milestones/m6-external-apply.md`](docs/milestones/m6-external-apply.md)
+and [`docs/contracts/intent-apply.md`](docs/contracts/intent-apply.md) for the
+two-phase apply contract.
 
 ## Current Exclusions
 

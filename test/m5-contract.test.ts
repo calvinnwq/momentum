@@ -41,7 +41,7 @@ const M5_VOCABULARY = [
   "project rollup"
 ] as const;
 
-const M5_NON_GOALS_README = [
+const M5_NON_GOALS_DOC = [
   "Automatic external tracker writes",
   "Inbound webhooks",
   "Dashboard or UI surface",
@@ -63,66 +63,19 @@ const M5_NON_GOALS_AGENTS = [
   "remote git operations"
 ] as const;
 
+const M5_DOC_PATH = path.join("docs", "milestones", "m5-source-adapters.md");
+
 describe("M5 contract docs (NGX-287 setup, NGX-294 closeout)", () => {
   describe("README.md", () => {
     const readme = readDoc("README.md");
 
     it("names Milestone 5 complete with the NGX-287..NGX-294 closeout (NGX-294)", () => {
-      expect(readme).toContain("## Milestone 5 Roadmap");
       expect(readme).toMatch(/Milestone 5 \(Source Adapters and Evidence Sync\) is complete/);
       expect(readme).not.toMatch(/Milestone 5 \(Source Adapters and Evidence Sync\) is the active milestone/);
     });
 
-    it("defines the M5 vocabulary explicitly", () => {
-      for (const term of M5_VOCABULARY) {
-        expect(readme).toContain(term);
-      }
-    });
-
-    it("states the M5 trust boundary (read-only sources, durable intents, no auto external writes)", () => {
-      expect(readme).toContain("M5 trust boundary");
-      expect(readme).toMatch(/durable .*intent/i);
-      expect(readme).toContain(
-        "Momentum does **not** perform automatic external writes in M5"
-      );
-    });
-
-    it("documents how M5 composes with existing contracts", () => {
-      expect(readme).toContain("M5 composition with existing contracts");
-      for (const surface of [
-        "Goal",
-        "Iteration",
-        "Job",
-        "RunnerAdapter",
-        "daemon",
-        "recovery",
-        "handoff",
-        "MOMENTUM.md"
-      ]) {
-        expect(readme).toContain(surface);
-      }
-    });
-
-    it("documents the planned M5 issue order matching the Linear milestone", () => {
-      expect(readme).toContain("Planned M5 issue order");
-      const plannedOrder = sectionBetween(
-        readme,
-        "### Planned M5 issue order",
-        "### M5 non-goals (explicit)"
-      );
-      let cursor = -1;
-      for (const id of M5_ISSUE_ORDER) {
-        const next = plannedOrder.indexOf(id, cursor + 1);
-        expect(next, `${id} should appear after the previous M5 id`).toBeGreaterThan(cursor);
-        cursor = next;
-      }
-    });
-
-    it("calls out explicit M5 non-goals", () => {
-      expect(readme).toContain("M5 non-goals");
-      for (const ng of M5_NON_GOALS_README) {
-        expect(readme).toContain(ng);
-      }
+    it("links to the canonical M5 docs page (NGX-295 OSS reshape)", () => {
+      expect(readme).toMatch(/docs\/milestones\/m5-source-adapters\.md/);
     });
 
     it("preserves the M4 closeout markers and the M4 Roadmap", () => {
@@ -171,6 +124,82 @@ describe("M5 contract docs (NGX-287 setup, NGX-294 closeout)", () => {
     });
   });
 
+  describe("docs/milestones/m5-source-adapters.md", () => {
+    const m5doc = readDoc(M5_DOC_PATH);
+
+    it("names M5 complete with the NGX-287..NGX-294 closeout", () => {
+      expect(m5doc).toMatch(/Complete \(NGX-287 through NGX-294\)/);
+    });
+
+    it("defines the M5 vocabulary explicitly", () => {
+      expect(m5doc).toContain("## M5 vocabulary");
+      for (const term of M5_VOCABULARY) {
+        expect(m5doc).toContain(term);
+      }
+    });
+
+    it("states the M5 trust boundary (read-only sources, durable intents, no auto external writes)", () => {
+      expect(m5doc).toContain("## M5 trust boundary");
+      expect(m5doc).toMatch(/durable .*intent/i);
+      expect(m5doc).toContain(
+        "Momentum does **not** perform automatic external writes in M5"
+      );
+    });
+
+    it("documents how M5 composes with existing contracts", () => {
+      expect(m5doc).toContain("## M5 composition with existing contracts");
+      for (const surface of [
+        "Goal",
+        "Iteration",
+        "Job",
+        "RunnerAdapter",
+        "daemon",
+        "recovery",
+        "handoff",
+        "MOMENTUM.md"
+      ]) {
+        expect(m5doc).toContain(surface);
+      }
+    });
+
+    it("documents the planned M5 issue order matching the Linear milestone", () => {
+      expect(m5doc).toContain("## Planned M5 issue order");
+      const plannedOrder = sectionBetween(
+        m5doc,
+        "## Planned M5 issue order",
+        "## M5 non-goals (explicit)"
+      );
+      let cursor = -1;
+      for (const id of M5_ISSUE_ORDER) {
+        const next = plannedOrder.indexOf(id, cursor + 1);
+        expect(next, `${id} should appear after the previous M5 id`).toBeGreaterThan(cursor);
+        cursor = next;
+      }
+    });
+
+    it("calls out explicit M5 non-goals", () => {
+      expect(m5doc).toContain("## M5 non-goals (explicit)");
+      for (const ng of M5_NON_GOALS_DOC) {
+        expect(m5doc).toContain(ng);
+      }
+    });
+
+    it("preserves M3 and M4 contracts through M5", () => {
+      expect(m5doc).toContain("## M3 and M4 contracts preserved");
+      for (const cmd of [
+        "daemon start",
+        "daemon stop",
+        "daemon status",
+        "recovery clear"
+      ]) {
+        expect(m5doc).toContain(cmd);
+      }
+      for (const profile of ["fake", "trusted-shell", "acp"]) {
+        expect(m5doc).toContain(profile);
+      }
+    });
+  });
+
   describe("AGENTS.md", () => {
     const agents = readDoc("AGENTS.md");
 
@@ -189,7 +218,7 @@ describe("M5 contract docs (NGX-287 setup, NGX-294 closeout)", () => {
       }
     });
 
-    it("documents the planned M5 issue order in the same sequence as README", () => {
+    it("documents the planned M5 issue order in the same sequence as the docs file", () => {
       const plannedOrder = sectionBetween(
         agents,
         "- Planned M5 issue order (matches the Linear milestone):",

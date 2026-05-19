@@ -4,7 +4,9 @@
 
 Milestone 5 made Momentum source-and-evidence aware while preserving the M4 runner contract and the M3 operational-safety surface. M5 is **durable intents and source adapters**, **not** external apply: source adapters read, the local SQLite store records durable update intents, and any external write stays operator-mediated. External apply lands in M6.
 
-## What M5 added
+## M5 vocabulary
+
+Durable concepts introduced or formalized by M5; none of them rename or replace the M3/M4 primitives:
 
 - **SourceItem** — a normalized record drawn from an external system (Linear issue, GitHub PR/issue, Jira ticket) with stable identity fields (adapter kind, external id, external key, URL, title, status, metadata JSON, last observed timestamp, optional linked Goal id). A SourceItem is **context**, not the completion authority for any Goal.
 - **SourceAdapter** — the read / list / get / normalize boundary for a source system, analogous to `RunnerAdapter`. Adapters do not own Goal/Iteration/Job state, do not perform external writes in M5, and do not touch git.
@@ -14,10 +16,12 @@ Milestone 5 made Momentum source-and-evidence aware while preserving the M4 runn
 - **external update intent** — a durable, auditable record of a desired external write (state change, comment, label edit, project update) targeting a specific adapter and external id. Intents include payload JSON, reason, linked Goal / SourceItem / evidence ids, status, created / applied / skipped timestamps, and error metadata.
 - **project rollup** — a deterministic local computation grouping SourceItems by observed state, linked Goal state, evidence freshness, reconciliation freshness, and pending update intents, with explicit drift / mismatch surfacing.
 
-## The M5 trust boundary (read-only, durable intents only)
+## M5 trust boundary
+
+M5 keeps Momentum's existing trust posture and tightens the source/intent surface:
 
 - Source adapters are **read-only** in M5. They read external state and write only to Momentum's local durable tables (snapshots, SourceItems, reconciliation runs).
-- External writes are represented as **durable, policy-gated update intents**. Generating an intent is not the same as applying it. **Momentum does not perform automatic external writes in M5**, and `intent apply --external-apply` is always refused with `external_apply_unsupported`.
+- External writes are represented as durable, policy-gated **external update intents**. Generating an intent is not the same as applying it. Momentum does **not** perform automatic external writes in M5, and `intent apply --external-apply` is always refused with `external_apply_unsupported`.
 - Applying an intent in M5 is a manual operator mark via `intent apply` (without `--external-apply`), `intent skip`, or `intent cancel`, each requiring `--reason`.
 - Credentials never enter Momentum durable state or docs. Source adapters accept credential paths / env vars through operator-controlled config only.
 - Evidence ingestion reads local artifacts under operator-controlled paths (such as `.agent-workflows/`); Momentum does not scrape chat or external systems for evidence.
@@ -32,7 +36,9 @@ Milestone 5 made Momentum source-and-evidence aware while preserving the M4 runn
 - **handoff** JSON / markdown grows new optional fields for linked source context, recent reconciliation summary, evidence summaries, and pending update intents. Existing M2–M4 fields are preserved.
 - **MOMENTUM.md** stays the canonical repo policy file. M5 adds the optional `intent_apply_policy` key with defaults of `create_intents_only` (Momentum records intents but does not perform external writes) and the forward-compatible `external_apply_allowed` (reserved for M6).
 
-## M5 closed-out scope (NGX-287..NGX-294)
+## Planned M5 issue order
+
+The Linear milestone "Milestone 5: Source Adapters And Evidence Sync" sequenced the work as (all closed):
 
 1. **NGX-287 — M5-00 M5 contract, roadmap, and docs setup** *(done)*.
 2. **NGX-288 — M5-01 SourceItem state model and adapter boundary** *(done)*: durable SourceItem / snapshot / reconciliation-run schema, `SourceAdapter` interface and registry, a built-in `local-fixture` adapter for tests, `source list` / `source get` CLIs, and SourceItem visibility in Goal status / handoff JSON and markdown.
@@ -43,9 +49,9 @@ Milestone 5 made Momentum source-and-evidence aware while preserving the M4 runn
 7. **NGX-293 — M5-06 Policy-gated external update intents** *(done)*: durable `update_intents` schema (status transitions `pending` → `applied` / `skipped` / `canceled` with idempotency keys, reason tracking, and error metadata); `evaluateGoalForSourceSatisfiedIntent` generator; `intent list` / `intent get` / `intent apply` / `intent skip` / `intent cancel` CLIs with `--reason` required for transitions and `--external-apply` always refused with `external_apply_unsupported`; `MOMENTUM.md` `intent_apply_policy` precedence resolution; `pendingUpdateIntents` visibility through `status`, `handoff`, `project status`, and `doctor`.
 8. **NGX-294 — M5-07 M5 smoke, docs, and milestone closeout** *(done)*: built-CLI smoke coverage for empty data dirs, fixture Linear reconciliation through an in-process mock endpoint, `source link` carrying a reconciled SourceItem through `status` / `handoff` / `doctor`, queued-goal completion via daemon drain followed by workflow evidence ingest and `source link` triggering a `source_satisfied` intent with `--external-apply` refused and a manual-mark apply path, and `project status` populated with a `goal_done_source_not_done` mismatch plus a pending intent. The `doctor --json` milestone string is the M5 closeout marker.
 
-## What M5 explicitly did NOT implement
+## M5 non-goals (explicit)
 
-External apply landed in M6, not M5. M5 generated durable intents only; it did not perform any external write. Specifically, the following remained explicitly out of scope for M5 and are tracked as M6 (or later) work:
+External apply landed in M6, not M5. M5 generated durable intents only; it did not perform any external write. The following remained explicitly out of scope for M5 and are tracked as M6 (or later) work:
 
 - **Automatic external tracker writes** — Linear / GitHub / Jira / etc. issue / PR creation, comments, status changes, label edits driven automatically from Momentum.
 - **Inbound webhooks** — source adapters stay pull / reconcile first; Momentum does not expose an HTTP listener in M5.
@@ -56,6 +62,6 @@ External apply landed in M6, not M5. M5 generated durable intents only; it did n
 - **Cooperative mid-job cancellation / signal handling**.
 - **Remote git operations** — no `fetch` / `pull` / `push` / `rebase` driven from Momentum.
 
-## M3 and M4 contracts preserved through M5
+## M3 and M4 contracts preserved
 
 M5 did not break or rename any M3 or M4 surfaces. The `daemon start` / `daemon stop` / `daemon status` / `recovery clear` CLI shapes, the `daemon_runs` / `repo_locks` / `goals.needs_manual_recovery` schema, stale-lease detection and startup-recovery, the manual-recovery `recovery.md` artifact + flag, the `RunnerAdapter` boundary and the `fake` / `trusted-shell` / `acp` runner profiles, the runtime `MOMENTUM.md` policy loader and its precedence rules, and the `status` / `handoff` / `doctor` daemon, recovery, runner, and policy fields all remain wire-stable.

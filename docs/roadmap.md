@@ -8,8 +8,8 @@ Momentum is built milestone by milestone. Each milestone has a single durable sh
 |---|---|---|---|
 | Milestone 1 | Foreground Proof Loop | Complete | See [README](../README.md) and milestone bullets in [AGENTS.md](../AGENTS.md) |
 | Milestone 2 | Queue and Worker Model | Complete | See [README](../README.md) and milestone bullets in [AGENTS.md](../AGENTS.md) |
-| Milestone 3 | Operational Safety | Complete | See [README](../README.md) and milestone bullets in [AGENTS.md](../AGENTS.md) |
-| Milestone 4 | Real Runner Profiles | Complete | See [README](../README.md) and milestone bullets in [AGENTS.md](../AGENTS.md) |
+| Milestone 3 | Operational Safety | Complete | [m3-operational-safety.md](milestones/m3-operational-safety.md) |
+| Milestone 4 | Real Runner Profiles | Complete | [m4-real-runners.md](milestones/m4-real-runners.md) |
 | Milestone 5 | Source Adapters and Evidence Sync | Complete | [m5-source-adapters.md](milestones/m5-source-adapters.md) |
 | Milestone 6 | Policy-Gated External Apply | Active | [m6-external-apply.md](milestones/m6-external-apply.md) |
 
