@@ -60,31 +60,32 @@ describe("M3 contract docs (NGX-272..NGX-278)", () => {
   describe("README.md", () => {
     const readme = readDoc("README.md");
 
-    it("names Milestone 3 complete with the NGX-272..NGX-278 closeout (NGX-278)", () => {
-      expect(readme).toContain("Milestone 3 (Operational Safety) is complete");
+    it("keeps milestone detail out of the concise OSS front door", () => {
+      expect(readme).not.toContain("## Milestone 3 Alignment");
+      expect(readme).not.toContain("Milestone 3 (Operational Safety) is complete");
       for (const id of M3_ISSUE_ORDER) {
-        expect(readme).toContain(id);
+        expect(readme).not.toContain(id);
       }
     });
 
-    it("preserves the ## Milestone 3 Alignment heading as the README anchor", () => {
-      expect(readme).toContain("## Milestone 3 Alignment");
-    });
-
-    it("links to the canonical M3 docs page (NGX-295 OSS reshape)", () => {
-      expect(readme).toMatch(/docs\/milestones\/m3-operational-safety\.md/);
-    });
-
-    it("preserves the M3 CLI surface in command examples", () => {
+    it("preserves the M3 CLI surface in the compact command overview", () => {
       for (const cmd of [
         "momentum daemon start",
-        "momentum daemon stop",
-        "momentum daemon status",
+        "stop",
+        "status",
         "momentum recovery clear",
         "momentum doctor"
       ]) {
         expect(readme).toContain(cmd);
       }
+    });
+  });
+
+  describe("docs/index.md", () => {
+    const docsIndex = readDoc("docs/index.md");
+
+    it("links to the canonical M3 docs page now that README is concise", () => {
+      expect(docsIndex).toMatch(/milestones\/m3-operational-safety\.md/);
     });
   });
 

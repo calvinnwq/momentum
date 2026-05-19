@@ -69,18 +69,17 @@ describe("M5 contract docs (NGX-287 setup, NGX-294 closeout)", () => {
   describe("README.md", () => {
     const readme = readDoc("README.md");
 
-    it("names Milestone 5 complete with the NGX-287..NGX-294 closeout (NGX-294)", () => {
-      expect(readme).toMatch(/Milestone 5 \(Source Adapters and Evidence Sync\) is complete/);
+    it("keeps milestone closeout detail out of the concise OSS front door", () => {
+      expect(readme).not.toMatch(/Milestone 5 \(Source Adapters and Evidence Sync\) is complete/);
       expect(readme).not.toMatch(/Milestone 5 \(Source Adapters and Evidence Sync\) is the active milestone/);
+      for (const id of M5_ISSUE_ORDER) {
+        expect(readme).not.toContain(id);
+      }
     });
 
-    it("links to the canonical M5 docs page (NGX-295 OSS reshape)", () => {
-      expect(readme).toMatch(/docs\/milestones\/m5-source-adapters\.md/);
-    });
-
-    it("preserves the M4 closeout markers and the M4 Roadmap", () => {
-      expect(readme).toContain("## Milestone 4 Roadmap");
-      expect(readme).toContain("Milestone 4 (Real Runner Profiles) is complete");
+    it("keeps prior M4 closeout detail out of README", () => {
+      expect(readme).not.toContain("## Milestone 4 Roadmap");
+      expect(readme).not.toContain("Milestone 4 (Real Runner Profiles) is complete");
       for (const id of [
         "NGX-279",
         "NGX-280",
@@ -91,13 +90,13 @@ describe("M5 contract docs (NGX-287 setup, NGX-294 closeout)", () => {
         "NGX-285",
         "NGX-286"
       ]) {
-        expect(readme).toContain(id);
+        expect(readme).not.toContain(id);
       }
     });
 
-    it("preserves M3 closeout markers and the M3 Alignment narrative", () => {
-      expect(readme).toContain("Milestone 3 (Operational Safety) is complete");
-      expect(readme).toContain("## Milestone 3 Alignment");
+    it("keeps prior M3 closeout detail out of README", () => {
+      expect(readme).not.toContain("Milestone 3 (Operational Safety) is complete");
+      expect(readme).not.toContain("## Milestone 3 Alignment");
       for (const id of [
         "NGX-272",
         "NGX-273",
@@ -107,20 +106,28 @@ describe("M5 contract docs (NGX-287 setup, NGX-294 closeout)", () => {
         "NGX-277",
         "NGX-278"
       ]) {
-        expect(readme).toContain(id);
+        expect(readme).not.toContain(id);
       }
     });
 
-    it("preserves the M3 CLI surface in command examples", () => {
+    it("preserves the M3 CLI surface in the compact command overview", () => {
       for (const cmd of [
         "momentum daemon start",
-        "momentum daemon stop",
-        "momentum daemon status",
+        "stop",
+        "status",
         "momentum recovery clear",
         "momentum doctor"
       ]) {
         expect(readme).toContain(cmd);
       }
+    });
+  });
+
+  describe("docs/index.md", () => {
+    const docsIndex = readDoc("docs/index.md");
+
+    it("links to the canonical M5 docs page now that README is concise", () => {
+      expect(docsIndex).toMatch(/milestones\/m5-source-adapters\.md/);
     });
   });
 
