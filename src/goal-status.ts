@@ -38,6 +38,13 @@ import {
 } from "./evidence-records.js";
 import { listUpdateIntents, type UpdateIntent } from "./update-intents.js";
 import { DEFAULT_INTENT_STALE_THRESHOLD_MS } from "./project-rollup.js";
+import {
+  summarizeIntentApplyAuditsForIntent,
+  type IntentApplyAudit,
+  type IntentApplyAuditCounts,
+  type IntentApplyState,
+  type IntentApplyStateCounts
+} from "./intent-apply-audits.js";
 
 export const DEFAULT_GOAL_STATUS_EVIDENCE_LIMIT = 5;
 export const DEFAULT_GOAL_STATUS_PENDING_INTENT_LIMIT = 10;
@@ -253,6 +260,13 @@ export type GoalStatusEvidenceSummary = {
  * TTL (30 days) so operators see the same `stale` semantics on both surfaces
  * without having to re-derive ageMs.
  */
+export type GoalStatusPendingIntentExternalApply = {
+  applyState: IntentApplyState;
+  totalAttempts: number;
+  counts: IntentApplyAuditCounts;
+  latestAttempt: IntentApplyAudit | null;
+};
+
 export type GoalStatusPendingIntentSummary = {
   intentId: string;
   adapterKind: string;
@@ -265,6 +279,14 @@ export type GoalStatusPendingIntentSummary = {
   createdAt: number;
   ageMs: number;
   stale: boolean;
+  externalApply: GoalStatusPendingIntentExternalApply;
+};
+
+export type GoalStatusExternalApply = {
+  pendingIntentApplyStateCounts: IntentApplyStateCounts;
+  pendingAuditCounts: IntentApplyAuditCounts;
+  totalAttempts: number;
+  latestAttempt: IntentApplyAudit | null;
 };
 
 export type GoalStatusPolicySummary = {
@@ -319,6 +341,7 @@ export type GoalStatusSuccess = {
   totalPendingUpdateIntentCount: number;
   truncatedPendingUpdateIntents: boolean;
   intentStaleThresholdMs: number;
+  externalApply: GoalStatusExternalApply;
 };
 
 export type GoalStatusResult = GoalStatusError | GoalStatusSuccess;
@@ -454,12 +477,16 @@ export function loadGoalStatus(input: LoadGoalStatusInput = {}): GoalStatusResul
         sourceItemIds.has(intent.sourceItemId)
       );
     });
+    const dbForSummary = db;
     const pendingUpdateIntents = allPendingUpdateIntents
       .slice(0, DEFAULT_GOAL_STATUS_PENDING_INTENT_LIMIT)
-      .map((intent) => toPendingIntentSummary(intent, intentStaleThresholdMs));
+      .map((intent) =>
+        toPendingIntentSummary(dbForSummary, intent, intentStaleThresholdMs)
+      );
     const totalPendingUpdateIntentCount = allPendingUpdateIntents.length;
     const truncatedPendingUpdateIntents =
       totalPendingUpdateIntentCount > pendingUpdateIntents.length;
+    const externalApply = buildExternalApplyRollup(pendingUpdateIntents);
 
     return {
       ok: true,
@@ -501,7 +528,8 @@ export function loadGoalStatus(input: LoadGoalStatusInput = {}): GoalStatusResul
       pendingUpdateIntents,
       totalPendingUpdateIntentCount,
       truncatedPendingUpdateIntents,
-      intentStaleThresholdMs
+      intentStaleThresholdMs,
+      externalApply
     };
   } finally {
     db?.close();
@@ -509,11 +537,32 @@ export function loadGoalStatus(input: LoadGoalStatusInput = {}): GoalStatusResul
 }
 
 function toPendingIntentSummary(
+  db: MomentumDb,
   intent: UpdateIntent,
   staleThresholdMs: number,
   now: number = Date.now()
 ): GoalStatusPendingIntentSummary {
   const ageMs = Math.max(0, now - intent.createdAt);
+  const summary = summarizeIntentApplyAuditsForIntent(db, intent.id);
+  const externalApply: GoalStatusPendingIntentExternalApply = summary
+    ? {
+        applyState: summary.applyState,
+        totalAttempts: summary.totalAttempts,
+        counts: summary.counts,
+        latestAttempt: summary.latestAttempt
+      }
+    : {
+        applyState: "idle",
+        totalAttempts: 0,
+        counts: {
+          claimed: 0,
+          succeeded: 0,
+          failed: 0,
+          blocked: 0,
+          audit_incomplete: 0
+        },
+        latestAttempt: null
+      };
   return {
     intentId: intent.id,
     adapterKind: intent.adapterKind,
@@ -525,7 +574,53 @@ function toPendingIntentSummary(
     evidenceRecordId: intent.evidenceRecordId,
     createdAt: intent.createdAt,
     ageMs,
-    stale: ageMs > staleThresholdMs
+    stale: ageMs > staleThresholdMs,
+    externalApply
+  };
+}
+
+function buildExternalApplyRollup(
+  pendingIntents: readonly GoalStatusPendingIntentSummary[]
+): GoalStatusExternalApply {
+  const pendingIntentApplyStateCounts: IntentApplyStateCounts = {
+    idle: 0,
+    in_flight: 0,
+    blocked: 0
+  };
+  const pendingAuditCounts: IntentApplyAuditCounts = {
+    claimed: 0,
+    succeeded: 0,
+    failed: 0,
+    blocked: 0,
+    audit_incomplete: 0
+  };
+  let totalAttempts = 0;
+  let latestAttempt: IntentApplyAudit | null = null;
+  for (const intent of pendingIntents) {
+    pendingIntentApplyStateCounts[intent.externalApply.applyState] += 1;
+    const counts = intent.externalApply.counts;
+    pendingAuditCounts.claimed += counts.claimed;
+    pendingAuditCounts.succeeded += counts.succeeded;
+    pendingAuditCounts.failed += counts.failed;
+    pendingAuditCounts.blocked += counts.blocked;
+    pendingAuditCounts.audit_incomplete += counts.audit_incomplete;
+    totalAttempts += intent.externalApply.totalAttempts;
+    const candidate = intent.externalApply.latestAttempt;
+    if (!candidate) continue;
+    if (
+      !latestAttempt ||
+      candidate.requestedAt > latestAttempt.requestedAt ||
+      (candidate.requestedAt === latestAttempt.requestedAt &&
+        candidate.id > latestAttempt.id)
+    ) {
+      latestAttempt = candidate;
+    }
+  }
+  return {
+    pendingIntentApplyStateCounts,
+    pendingAuditCounts,
+    totalAttempts,
+    latestAttempt
   };
 }
 

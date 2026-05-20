@@ -9,6 +9,9 @@ import {
 } from "./iteration-job.js";
 import {
   loadGoalStatus,
+  type GoalStatusExternalApply,
+  type GoalStatusPendingIntentExternalApply,
+  type GoalStatusPendingIntentSummary,
   type GoalStatusSuccess
 } from "./goal-status.js";
 import { loadGoalLogs, type GoalLogsSuccess } from "./goal-logs.js";
@@ -4356,10 +4359,13 @@ function emitStatus(
       ? {
           totalPendingUpdateIntentCount: data.totalPendingUpdateIntentCount,
           truncatedPendingUpdateIntents: data.truncatedPendingUpdateIntents,
-          pendingUpdateIntents: data.pendingUpdateIntents,
+          pendingUpdateIntents: data.pendingUpdateIntents.map(
+            (intent) => goalStatusPendingIntentToJsonShape(intent)
+          ),
           intentStaleThresholdMs: data.intentStaleThresholdMs
         }
-      : {})
+      : {}),
+    externalApply: goalStatusExternalApplyToJsonShape(data.externalApply)
   };
 
   if (parsed.json) {
@@ -4503,9 +4509,14 @@ function emitStatus(
     );
     for (const intent of data.pendingUpdateIntents) {
       const staleFlag = intent.stale ? " STALE" : "";
+      const latestText = intent.externalApply.latestAttempt
+        ? ` latest=${intent.externalApply.latestAttempt.lifecycleState}`
+        : "";
       lines.push(
         `- ${intent.intentId} [${intent.adapterKind}/${intent.intentType}] ` +
-          `target=${intent.targetExternalId ?? "(none)"} ageMs=${intent.ageMs}${staleFlag}: ${intent.reason}`
+          `target=${intent.targetExternalId ?? "(none)"} ageMs=${intent.ageMs}${staleFlag}` +
+          ` apply=${intent.externalApply.applyState}` +
+          ` attempts=${intent.externalApply.totalAttempts}${latestText}: ${intent.reason}`
       );
     }
     if (data.truncatedPendingUpdateIntents) {
@@ -4513,9 +4524,99 @@ function emitStatus(
     }
   }
 
+  const externalApply = data.externalApply;
+  const applyStateCounts = externalApply.pendingIntentApplyStateCounts;
+  const auditCounts = externalApply.pendingAuditCounts;
+  lines.push(
+    `Pending external apply state: idle=${applyStateCounts.idle}, ` +
+      `in_flight=${applyStateCounts.in_flight}, ` +
+      `blocked=${applyStateCounts.blocked}`
+  );
+  lines.push(
+    `Pending external apply audits: total=${externalApply.totalAttempts}, ` +
+      `succeeded=${auditCounts.succeeded}, ` +
+      `failed=${auditCounts.failed}, ` +
+      `claimed=${auditCounts.claimed}, ` +
+      `blocked=${auditCounts.blocked}, ` +
+      `audit_incomplete=${auditCounts.audit_incomplete}`
+  );
+  const latestExternalApply = externalApply.latestAttempt;
+  if (latestExternalApply) {
+    lines.push(
+      `Latest external apply: ${latestExternalApply.id} ${latestExternalApply.lifecycleState}` +
+        ` intent=${latestExternalApply.intentId}` +
+        ` (result=${latestExternalApply.resultStatus ?? "(none)"}` +
+        ` code=${latestExternalApply.resultCode ?? "(none)"})`
+    );
+  } else {
+    lines.push("Latest external apply: (none)");
+  }
+
   lines.push("");
   write(io.stdout, lines.join("\n"));
   return 0;
+}
+
+function goalStatusPendingIntentToJsonShape(
+  intent: GoalStatusPendingIntentSummary
+): Record<string, unknown> {
+  return {
+    intentId: intent.intentId,
+    adapterKind: intent.adapterKind,
+    intentType: intent.intentType,
+    targetExternalId: intent.targetExternalId,
+    reason: intent.reason,
+    goalId: intent.goalId,
+    sourceItemId: intent.sourceItemId,
+    evidenceRecordId: intent.evidenceRecordId,
+    createdAt: intent.createdAt,
+    ageMs: intent.ageMs,
+    stale: intent.stale,
+    externalApply: goalStatusPendingIntentExternalApplyToJsonShape(
+      intent.externalApply
+    )
+  };
+}
+
+function goalStatusPendingIntentExternalApplyToJsonShape(
+  external: GoalStatusPendingIntentExternalApply
+): {
+  applyState: GoalStatusPendingIntentExternalApply["applyState"];
+  totalAttempts: number;
+  counts: GoalStatusPendingIntentExternalApply["counts"];
+  latestAttempt: Record<string, unknown> | null;
+} {
+  return {
+    applyState: external.applyState,
+    totalAttempts: external.totalAttempts,
+    counts: external.counts,
+    latestAttempt: external.latestAttempt
+      ? intentApplyAuditToJsonShape(external.latestAttempt)
+      : null
+  };
+}
+
+function goalStatusExternalApplyToJsonShape(
+  external: GoalStatusExternalApply
+): {
+  pendingIntentApplyStateCounts: GoalStatusExternalApply["pendingIntentApplyStateCounts"];
+  pendingAuditCounts: GoalStatusExternalApply["pendingAuditCounts"];
+  totalAttempts: number;
+  latestAttempt:
+    | ({ intentId: string } & ReturnType<typeof intentApplyAuditToJsonShape>)
+    | null;
+} {
+  return {
+    pendingIntentApplyStateCounts: external.pendingIntentApplyStateCounts,
+    pendingAuditCounts: external.pendingAuditCounts,
+    totalAttempts: external.totalAttempts,
+    latestAttempt: external.latestAttempt
+      ? {
+          intentId: external.latestAttempt.intentId,
+          ...intentApplyAuditToJsonShape(external.latestAttempt)
+        }
+      : null
+  };
 }
 
 function logs(parsed: ParsedFlags, io: CliIo): number {

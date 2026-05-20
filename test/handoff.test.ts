@@ -18,6 +18,10 @@ import { writeRecoveryArtifact } from "../src/recovery-artifact.js";
 import { upsertSourceItem } from "../src/source-items.js";
 import { ingestEvidenceRecord } from "../src/evidence-records.js";
 import { createUpdateIntent } from "../src/update-intents.js";
+import {
+  claimIntentApply,
+  finalizeIntentApply
+} from "../src/intent-apply-audits.js";
 import { DEFAULT_INTENT_STALE_THRESHOLD_MS } from "../src/project-rollup.js";
 
 const tempRoots: string[] = [];
@@ -1824,6 +1828,291 @@ describe("writeHandoff", () => {
     expect(markdown).toContain("## Pending update intents (showing 10 of 12)");
     expect(markdown).toContain(
       "2 additional pending update intents are hidden"
+    );
+  });
+
+  it("writes an empty external apply rollup when no audits exist", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Handoff external apply empty");
+
+    const handoff = expectSuccess(
+      writeHandoff({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      })
+    );
+    expect(handoff.data.externalApply).toEqual({
+      pendingIntentApplyStateCounts: { idle: 0, in_flight: 0, blocked: 0 },
+      pendingAuditCounts: {
+        claimed: 0,
+        succeeded: 0,
+        failed: 0,
+        blocked: 0,
+        audit_incomplete: 0
+      },
+      totalAttempts: 0,
+      latestAttempt: null
+    });
+
+    const json = JSON.parse(
+      fs.readFileSync(setup.artifactPaths.handoffJson, "utf-8")
+    ) as Record<string, unknown>;
+    expect(json["external_apply"]).toEqual({
+      pending_intent_apply_state_counts: {
+        idle: 0,
+        in_flight: 0,
+        blocked: 0
+      },
+      pending_audit_counts: {
+        claimed: 0,
+        succeeded: 0,
+        failed: 0,
+        blocked: 0,
+        audit_incomplete: 0
+      },
+      total_attempts: 0,
+      latest_attempt: null
+    });
+
+    const markdown = fs.readFileSync(setup.artifactPaths.handoffMd, "utf-8");
+    expect(markdown).toContain("## External apply");
+    expect(markdown).toContain(
+      "- Pending intent apply state: idle=0, in_flight=0, blocked=0"
+    );
+    expect(markdown).toContain(
+      "- Pending audits: total=0, succeeded=0, failed=0, claimed=0, blocked=0, audit_incomplete=0"
+    );
+    expect(markdown).toContain("- Latest attempt: (none)");
+  });
+
+  it("aggregates per-intent audit surfaces in handoff JSON and markdown", () => {
+    const repo = initRepo();
+    const setup = setupGoal(repo, "Handoff external apply mixed");
+    const baseNow = 1_700_000_000_000;
+    const db = openDb(setup.dataDir);
+    let succeededIntentId = "";
+    let blockedIntentId = "";
+    try {
+      const succeeded = createUpdateIntent(
+        db,
+        {
+          adapterKind: "linear",
+          intentType: "source_satisfied",
+          reason: "Goal completed",
+          targetExternalId: "issue-handoff-succeeded",
+          goalId: setup.goalId,
+          idempotencyKey:
+            "linear:issue-handoff-succeeded:source_satisfied:handoff"
+        },
+        { now: () => baseNow }
+      );
+      succeededIntentId = succeeded.intent.id;
+      const blocked = createUpdateIntent(
+        db,
+        {
+          adapterKind: "linear",
+          intentType: "comment_requested",
+          reason: "Followup",
+          targetExternalId: "issue-handoff-blocked",
+          goalId: setup.goalId,
+          idempotencyKey:
+            "linear:issue-handoff-blocked:comment_requested:handoff"
+        },
+        { now: () => baseNow + 1 }
+      );
+      blockedIntentId = blocked.intent.id;
+
+      const claimSucceeded = claimIntentApply(db, {
+        intentId: succeededIntentId,
+        adapterKind: "linear",
+        provider: "linear",
+        target: {
+          externalId: "issue-handoff-succeeded",
+          externalKey: "NGX-HANDOFF-SUCCEEDED",
+          url: "https://linear.app/example/issue/issue-handoff-succeeded",
+          title: "Handoff succeeded issue"
+        },
+        operatorReason: "verified done",
+        operatorActor: "operator@example.com",
+        intentApplyPolicy: "external_apply_allowed",
+        allowStatusMutation: false,
+        mutationKind: "comment",
+        previewSummary: "Linear comment: source_satisfied",
+        idempotencyMarker: `momentum-intent:linear:${succeededIntentId}:deadbeef`,
+        now: baseNow + 10
+      });
+      if (!claimSucceeded.ok) {
+        throw new Error(`seed: claim succeeded failed (${claimSucceeded.code})`);
+      }
+      const finalizeSucceeded = finalizeIntentApply(db, {
+        auditId: claimSucceeded.audit.id,
+        lifecycleState: "succeeded",
+        resultStatus: "ok",
+        resultCode: "ok",
+        resultMessage: "wrote comment",
+        externalRefs: {
+          commentId: "linear_comment_ok",
+          commentUrl:
+            "https://linear.app/example/issue/issue-handoff-succeeded#c1",
+          stateTransitionId: null
+        },
+        now: baseNow + 11
+      });
+      if (!finalizeSucceeded.ok) {
+        throw new Error(
+          `seed: finalize succeeded failed (${finalizeSucceeded.code})`
+        );
+      }
+
+      const claimBlocked = claimIntentApply(db, {
+        intentId: blockedIntentId,
+        adapterKind: "linear",
+        provider: "linear",
+        target: {
+          externalId: "issue-handoff-blocked",
+          externalKey: "NGX-HANDOFF-BLOCKED",
+          url: "https://linear.app/example/issue/issue-handoff-blocked",
+          title: "Handoff blocked issue"
+        },
+        operatorReason: "needs followup",
+        operatorActor: "operator@example.com",
+        intentApplyPolicy: "external_apply_allowed",
+        allowStatusMutation: false,
+        mutationKind: "comment",
+        previewSummary: "Linear comment: comment_requested",
+        idempotencyMarker: `momentum-intent:linear:${blockedIntentId}:deadbeef`,
+        now: baseNow + 20
+      });
+      if (!claimBlocked.ok) {
+        throw new Error(`seed: claim blocked failed (${claimBlocked.code})`);
+      }
+      const finalizeBlocked = finalizeIntentApply(db, {
+        auditId: claimBlocked.audit.id,
+        lifecycleState: "audit_incomplete",
+        resultStatus: "wrote_no_audit",
+        resultCode: "audit_finalize_failed",
+        resultMessage: "linear succeeded but audit could not be finalized",
+        externalRefs: {
+          commentId: "linear_comment_late",
+          commentUrl:
+            "https://linear.app/example/issue/issue-handoff-blocked#c2",
+          stateTransitionId: null
+        },
+        now: baseNow + 21
+      });
+      if (!finalizeBlocked.ok) {
+        throw new Error(
+          `seed: finalize blocked failed (${finalizeBlocked.code})`
+        );
+      }
+    } finally {
+      db.close();
+    }
+
+    const handoff = expectSuccess(
+      writeHandoff({
+        goalId: setup.goalId,
+        dataDirOptions: { dataDir: setup.dataDir }
+      })
+    );
+    expect(handoff.data.externalApply.pendingIntentApplyStateCounts).toEqual({
+      idle: 1,
+      in_flight: 0,
+      blocked: 1
+    });
+    expect(handoff.data.externalApply.pendingAuditCounts).toEqual({
+      claimed: 0,
+      succeeded: 1,
+      failed: 0,
+      blocked: 0,
+      audit_incomplete: 1
+    });
+    expect(handoff.data.externalApply.totalAttempts).toBe(2);
+    expect(handoff.data.externalApply.latestAttempt?.intentId).toBe(
+      blockedIntentId
+    );
+    expect(handoff.data.externalApply.latestAttempt?.lifecycleState).toBe(
+      "audit_incomplete"
+    );
+
+    const json = JSON.parse(
+      fs.readFileSync(setup.artifactPaths.handoffJson, "utf-8")
+    ) as Record<string, unknown>;
+    const externalApply = json["external_apply"] as Record<string, unknown>;
+    expect(externalApply).toMatchObject({
+      pending_intent_apply_state_counts: {
+        idle: 1,
+        in_flight: 0,
+        blocked: 1
+      },
+      pending_audit_counts: {
+        claimed: 0,
+        succeeded: 1,
+        failed: 0,
+        blocked: 0,
+        audit_incomplete: 1
+      },
+      total_attempts: 2
+    });
+    const latest = externalApply["latest_attempt"] as Record<string, unknown>;
+    expect(latest["intent_id"]).toBe(blockedIntentId);
+    expect(latest["lifecycle_state"]).toBe("audit_incomplete");
+    expect(latest["result_code"]).toBe("audit_finalize_failed");
+
+    const intents = json["pending_update_intents"] as Array<
+      Record<string, unknown>
+    >;
+    expect(intents).toHaveLength(2);
+    const succeededRow = intents.find(
+      (intent) => intent["intent_id"] === succeededIntentId
+    );
+    expect(succeededRow?.["external_apply"]).toMatchObject({
+      apply_state: "idle",
+      total_attempts: 1,
+      counts: {
+        claimed: 0,
+        succeeded: 1,
+        failed: 0,
+        blocked: 0,
+        audit_incomplete: 0
+      }
+    });
+    const succeededLatest = (succeededRow?.["external_apply"] as Record<
+      string,
+      unknown
+    >)["latest_attempt"] as Record<string, unknown>;
+    expect(succeededLatest["lifecycle_state"]).toBe("succeeded");
+    expect(succeededLatest["result_code"]).toBe("ok");
+
+    const blockedRow = intents.find(
+      (intent) => intent["intent_id"] === blockedIntentId
+    );
+    expect(blockedRow?.["external_apply"]).toMatchObject({
+      apply_state: "blocked",
+      total_attempts: 1,
+      counts: {
+        claimed: 0,
+        succeeded: 0,
+        failed: 0,
+        blocked: 0,
+        audit_incomplete: 1
+      }
+    });
+
+    const markdown = fs.readFileSync(setup.artifactPaths.handoffMd, "utf-8");
+    expect(markdown).toContain("## External apply");
+    expect(markdown).toContain(
+      "- Pending intent apply state: idle=1, in_flight=0, blocked=1"
+    );
+    expect(markdown).toContain(
+      "- Pending audits: total=2, succeeded=1, failed=0, claimed=0, blocked=0, audit_incomplete=1"
+    );
+    expect(markdown).toContain(
+      `- Latest attempt: ${latest["id"]} audit_incomplete intent=${blockedIntentId}`
+    );
+    expect(markdown).toContain("apply=idle attempts=1 latest=succeeded");
+    expect(markdown).toContain(
+      "apply=blocked attempts=1 latest=audit_incomplete"
     );
   });
 });
