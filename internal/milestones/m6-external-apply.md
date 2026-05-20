@@ -1,6 +1,6 @@
 # Milestone 6: Policy-Gated External Apply
 
-**Status:** Active. NGX-297 is the current slice; NGX-295 and NGX-296 are completed setup/boundary slices. The `doctor --json` milestone marker stays on the M5 closeout string until M6 closes out.
+**Status:** Active. NGX-295, NGX-296, NGX-297, NGX-299, and NGX-298 have landed; NGX-300, NGX-301, and NGX-302 remain. The `doctor --json` milestone marker stays on the M5 closeout string until M6 closes out.
 
 Milestone 6 turns the durable `update_intents` rows from M5 into **policy-gated external writes against Linear**. M6 adds a real external write path through a single, explicitly-trusted adapter without weakening any M3/M4/M5 safety contract. External apply remains operator-mediated: nothing in M6 makes Momentum write to an external tracker automatically.
 

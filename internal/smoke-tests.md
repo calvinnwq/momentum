@@ -82,9 +82,10 @@ boundary that M6 inherits):
   paginates a mock Linear server and populates `source_items`,
   `source_snapshots`, and `source_reconciliation_runs`.
 - source linking into `status`, `handoff`, and `doctor` surfaces.
-- `source_satisfied` intent generation with external-apply refusal
-  (`external_apply_unsupported` in M5) and manual apply through
-  `momentum intent apply` (see [docs/intent-commands.md](../docs/intent-commands.md)).
+- `source_satisfied` intent generation with external-apply policy refusal
+  (`policy_denied` without `--repo` context), pending intent preservation, no
+  external write, and manual apply through `momentum intent apply` (see
+  [docs/intent-commands.md](../docs/intent-commands.md)).
 - project rollup mismatch and pending-intent next-action reporting via
   `momentum project status` (see [docs/source-commands.md](../docs/source-commands.md)
   for the stable `mismatches[].kind`, `reconciliationWarnings[].reason`, and
