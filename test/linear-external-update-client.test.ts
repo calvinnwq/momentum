@@ -586,7 +586,10 @@ describe("buildLinearExternalUpdateClient — ambiguous / missing status target"
           url: "https://linear.app/example/issue/NGX-1",
           state: { id: "state-todo", name: "Todo" },
           team: null,
-          comments: { nodes: [] }
+          comments: {
+            nodes: [],
+            pageInfo: { hasNextPage: false, endCursor: null }
+          }
         }
       }
     };
@@ -790,6 +793,67 @@ describe("buildLinearExternalUpdateClient — idempotency marker detection", () 
       nextStateName: null
     });
     expect(calls).toHaveLength(1);
+  });
+
+
+  it("returns malformed_response instead of posting when issue lookup comments are malformed", async () => {
+    const malformedIssue = issueLookupBody({}) as {
+      data: { issue: Record<string, unknown> };
+    };
+    malformedIssue.data.issue.comments = { nodes: [] };
+
+    const { fetch, calls } = buildMockFetch([
+      { kind: "json", status: 200, body: malformedIssue }
+    ]);
+    const client = buildLinearExternalUpdateClient({
+      apiKey: "lin_api_secret",
+      fetch
+    });
+
+    const result = await client.apply({ preview: buildPreview() });
+    expect(result).toMatchObject({ ok: false, code: "malformed_response" });
+    expect(calls).toHaveLength(1);
+    expect(calls.some((c) => String(c.body["query"]).includes("commentCreate"))).toBe(
+      false
+    );
+  });
+
+  it("returns malformed_response instead of posting when a later comments page is malformed", async () => {
+    const { fetch, calls } = buildMockFetch([
+      {
+        kind: "json",
+        status: 200,
+        body: issueLookupBody({
+          comments: [{ id: "comment-1", body: "first page" }],
+          commentsPageInfo: { hasNextPage: true, endCursor: "cursor-1" }
+        })
+      },
+      {
+        kind: "json",
+        status: 200,
+        body: {
+          data: {
+            issue: {
+              comments: {
+                nodes: [{ id: "comment-51" }],
+                pageInfo: { hasNextPage: false, endCursor: null }
+              }
+            }
+          }
+        }
+      }
+    ]);
+    const client = buildLinearExternalUpdateClient({
+      apiKey: "lin_api_secret",
+      fetch
+    });
+
+    const result = await client.apply({ preview: buildPreview() });
+    expect(result).toMatchObject({ ok: false, code: "malformed_response" });
+    expect(calls).toHaveLength(2);
+    expect(calls.some((c) => String(c.body["query"]).includes("commentCreate"))).toBe(
+      false
+    );
   });
 
   it("embeds the marker the boundary built into the comment body it posts", async () => {

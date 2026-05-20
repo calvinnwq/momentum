@@ -499,13 +499,16 @@ function interpretIssueLookup(response: GraphqlResponse): InterpretedIssue {
   const url = optionalString(record["url"]);
   const state = readState(record["state"]);
   const team = readTeam(record["team"]);
-  const commentsPage = readCommentsPage(record["comments"]);
+  const commentsPageResult = readCommentsPage(record["comments"], "Linear issue lookup");
+  if (!commentsPageResult.ok) {
+    return { ok: false, error: commentsPageResult.error };
+  }
   return {
     ok: true,
     issue: { id, key: identifier ?? null, url: url ?? null },
     state,
     teamId: team,
-    commentsPage
+    commentsPage: commentsPageResult.page
   };
 }
 
@@ -616,10 +619,14 @@ async function fetchIssueCommentsPage(
       }
     };
   }
-  return {
-    ok: true,
-    page: readCommentsPage((rawIssue as Record<string, unknown>)["comments"])
-  };
+  const commentsPageResult = readCommentsPage(
+    (rawIssue as Record<string, unknown>)["comments"],
+    "Linear issue comments page lookup"
+  );
+  if (!commentsPageResult.ok) {
+    return { ok: false, error: commentsPageResult.error };
+  }
+  return { ok: true, page: commentsPageResult.page };
 }
 
 function buildUnchangedStatus(state: IssueState): LinearExternalUpdateStatusOutcome {
@@ -1092,36 +1099,76 @@ function readTeam(raw: unknown): string | null {
   return optionalString((raw as Record<string, unknown>)["id"]) ?? null;
 }
 
-function readCommentsPage(raw: unknown): CommentsPage {
+type CommentsPageReadResult =
+  | { ok: true; page: CommentsPage }
+  | { ok: false; error: LinearExternalUpdateError };
+
+function readCommentsPage(raw: unknown, context: string): CommentsPageReadResult {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    return { comments: [], hasNextPage: false, endCursor: null };
+    return malformedCommentsPage(context, "is missing a comments connection");
   }
   const record = raw as Record<string, unknown>;
   const nodes = record["nodes"];
-  const out: CommentRecord[] = [];
-  if (Array.isArray(nodes)) {
-    for (const entry of nodes) {
-      if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
-      const commentRecord = entry as Record<string, unknown>;
-      const id = optionalString(commentRecord["id"]);
-      const body = optionalString(commentRecord["body"]);
-      if (!id || body === undefined) continue;
-      out.push({
-        id,
-        body,
-        url: optionalString(commentRecord["url"]) ?? null
-      });
-    }
+  if (!Array.isArray(nodes)) {
+    return malformedCommentsPage(context, "comments.nodes is not an array");
   }
+
+  const out: CommentRecord[] = [];
+  for (const entry of nodes) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      return malformedCommentsPage(context, "comments.nodes contains a non-object node");
+    }
+    const commentRecord = entry as Record<string, unknown>;
+    const id = optionalString(commentRecord["id"]);
+    const body = commentRecord["body"];
+    if (!id || typeof body !== "string") {
+      return malformedCommentsPage(
+        context,
+        "comments.nodes contains a node without a string id and body"
+      );
+    }
+    out.push({
+      id,
+      body,
+      url: optionalString(commentRecord["url"]) ?? null
+    });
+  }
+
   const pageInfo = record["pageInfo"];
   if (!pageInfo || typeof pageInfo !== "object" || Array.isArray(pageInfo)) {
-    return { comments: out, hasNextPage: false, endCursor: null };
+    return malformedCommentsPage(context, "comments.pageInfo is missing or invalid");
   }
   const pageInfoRecord = pageInfo as Record<string, unknown>;
+  const hasNextPage = pageInfoRecord["hasNextPage"];
+  if (typeof hasNextPage !== "boolean") {
+    return malformedCommentsPage(context, "comments.pageInfo.hasNextPage is not a boolean");
+  }
+  const rawEndCursor = pageInfoRecord["endCursor"];
+  if (rawEndCursor !== null && rawEndCursor !== undefined && typeof rawEndCursor !== "string") {
+    return malformedCommentsPage(context, "comments.pageInfo.endCursor is not a string or null");
+  }
+
   return {
-    comments: out,
-    hasNextPage: pageInfoRecord["hasNextPage"] === true,
-    endCursor: optionalString(pageInfoRecord["endCursor"]) ?? null
+    ok: true,
+    page: {
+      comments: out,
+      hasNextPage,
+      endCursor: typeof rawEndCursor === "string" && rawEndCursor.length > 0 ? rawEndCursor : null
+    }
+  };
+}
+
+function malformedCommentsPage(
+  context: string,
+  detail: string
+): CommentsPageReadResult {
+  return {
+    ok: false,
+    error: {
+      ok: false,
+      code: "malformed_response",
+      error: `${context} returned a malformed comments page: ${detail}.`
+    }
   };
 }
 
