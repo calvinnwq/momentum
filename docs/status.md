@@ -140,10 +140,22 @@ payload.
 When the goal has pending update intents, `pendingUpdateIntents` is a
 newest-first array of up to ten entries, each with `{intentId,
 adapterKind, intentType, targetExternalId, reason, sourceItemId,
-evidenceRecordId, createdAt, ageMs, stale}`. `intentStaleThresholdMs`
-carries the threshold used to compute the per-intent `stale` flag (default
-30 days). See [`docs/intent-commands.md`](intent-commands.md) for the
-intent lifecycle that consumes these entries.
+evidenceRecordId, createdAt, ageMs, stale}` plus an `externalApply`
+block carrying `{applyState, totalAttempts, counts, latestAttempt}`.
+`applyState` is `idle`, `in_flight`, or `blocked`; `counts` has
+`claimed`, `succeeded`, `failed`, `blocked`, and `audit_incomplete`;
+`latestAttempt` is the most recent audit row or `null`.
+`intentStaleThresholdMs` carries the threshold used to compute the
+per-intent `stale` flag (default 30 days). See
+[`docs/intent-commands.md`](intent-commands.md) for the intent lifecycle
+that consumes these entries.
+
+The top-level `externalApply` block provides a goal-scoped rollup:
+
+- `pendingIntentApplyStateCounts` — `{idle, in_flight, blocked}` counts across pending intents.
+- `pendingAuditCounts` — `{claimed, succeeded, failed, blocked, audit_incomplete}` counts across pending intents.
+- `totalAttempts` — total audit rows across pending intents.
+- `latestAttempt` — the most recent audit row across pending intents (or `null`).
 
 ## Text output
 
@@ -164,8 +176,12 @@ Text output mirrors the JSON envelope:
   external key / id, title, and status).
 - A `Latest evidence:` section when linked evidence exists.
 - A `Pending update intents:` section with a stale count suffix, per-intent
-  lines showing ID, adapter/type, target, age, and stale flag, the stale
-  threshold, and a review hint.
+  lines showing ID, adapter/type, target, age, stale flag, apply state,
+  attempt count, and latest audit lifecycle, the stale threshold, and a
+  review hint.
+- An `External apply` section with pending apply-state counts (`idle`,
+  `in_flight`, `blocked`), audit lifecycle counts, total attempts, and the
+  latest attempt summary (or `(none)`).
 
 ## Failure surfaces
 
