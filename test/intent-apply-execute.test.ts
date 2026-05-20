@@ -675,6 +675,54 @@ describe("executeExternalApply concurrency and write failures", () => {
     }
   });
 
+  it("blocks the intent when external write rejection cannot finalize the audit as failed", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { intentId } = seedHappyPath(db);
+      const repoPath = makeRepo(externalApplyAllowedPolicy());
+      const spy = makeApplySpy(
+        makeErrorOutcome("write_rejected", "Linear rejected the mutation")
+      );
+
+      let finalizeCalls = 0;
+      const result = await executeExternalApply(
+        baseInput(db, {
+          intentId,
+          repoPath,
+          deps: {
+            buildLinearClient: () => spy.client,
+            now: () => 750,
+            finalizeIntentApply: (db, input) => {
+              finalizeCalls += 1;
+              if (finalizeCalls === 1 && input.lifecycleState === "failed") {
+                return {
+                  ok: false,
+                  code: "audit_already_finalized",
+                  message: "simulated finalize failure"
+                };
+              }
+              return finalizeIntentApply(db, input);
+            }
+          }
+        })
+      );
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("expected refusal");
+      expect(result.code).toBe("audit_incomplete");
+      expect(result.audit?.lifecycleState).toBe("audit_incomplete");
+      expect(result.audit?.resultCode).toBe("failed_finalize_failed");
+
+      const applyState = db
+        .prepare("SELECT apply_state FROM update_intents WHERE id = ?")
+        .get(intentId) as { apply_state: string };
+      expect(applyState.apply_state).toBe("blocked");
+    } finally {
+      db.close();
+    }
+  });
+
   it("transitions the intent to blocked when the audit finalize fails after a successful external write", async () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);
@@ -810,6 +858,56 @@ describe("executeExternalApply concurrency and write failures", () => {
       expect(result.code).toBe("adapter_threw");
       expect(result.message).toContain("network kaboom");
       expect(result.audit?.lifecycleState).toBe("failed");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("blocks the intent when adapter exception cannot finalize the audit as failed", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { intentId } = seedHappyPath(db);
+      const repoPath = makeRepo(externalApplyAllowedPolicy());
+      const client: LinearExternalUpdateClient = {
+        async apply() {
+          throw new Error("network kaboom");
+        }
+      };
+
+      let finalizeCalls = 0;
+      const result = await executeExternalApply(
+        baseInput(db, {
+          intentId,
+          repoPath,
+          deps: {
+            buildLinearClient: () => client,
+            now: () => 950,
+            finalizeIntentApply: (db, input) => {
+              finalizeCalls += 1;
+              if (finalizeCalls === 1 && input.lifecycleState === "failed") {
+                return {
+                  ok: false,
+                  code: "audit_already_finalized",
+                  message: "simulated finalize failure"
+                };
+              }
+              return finalizeIntentApply(db, input);
+            }
+          }
+        })
+      );
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("expected refusal");
+      expect(result.code).toBe("audit_incomplete");
+      expect(result.audit?.lifecycleState).toBe("audit_incomplete");
+      expect(result.audit?.resultCode).toBe("failed_finalize_failed");
+
+      const applyState = db
+        .prepare("SELECT apply_state FROM update_intents WHERE id = ?")
+        .get(intentId) as { apply_state: string };
+      expect(applyState.apply_state).toBe("blocked");
     } finally {
       db.close();
     }

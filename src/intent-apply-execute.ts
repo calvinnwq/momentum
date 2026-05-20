@@ -40,6 +40,7 @@ import {
 } from "./intent-apply-audits.js";
 import type { MomentumDb } from "./db.js";
 import {
+  getExternalUpdateAdapter,
   previewExternalUpdate as previewExternalUpdateFn,
   resolveExternalUpdateAdapterForIntent,
   type ExternalUpdateAdapter,
@@ -469,7 +470,7 @@ export async function executeExternalApply(
   } catch (error) {
     const message =
       error instanceof Error ? error.message : String(error ?? "unknown");
-    const finalize = finalizeFn(input.db, {
+    let finalize = finalizeFn(input.db, {
       auditId: audit.id,
       lifecycleState: "failed",
       resultStatus: "failed",
@@ -477,9 +478,26 @@ export async function executeExternalApply(
       resultMessage: message,
       now: now()
     });
+    if (!finalize.ok) {
+      finalize = markIntentApplyAuditIncompleteFn(input.db, {
+        auditId: audit.id,
+        resultCode: "failed_finalize_failed",
+        resultMessage: `External apply client threw, then audit finalize failed: ${finalize.message}`,
+        reconcile: {
+          status: "deferred",
+          warning: "external write failed; audit finalize failed"
+        },
+        now: now()
+      });
+    }
     return buildExternalFailure({
-      code: "adapter_threw",
-      message: `External apply client threw: ${message}`,
+      code: finalize.ok && finalize.audit.lifecycleState === "audit_incomplete"
+        ? "audit_incomplete"
+        : "adapter_threw",
+      message:
+        finalize.ok && finalize.audit.lifecycleState === "audit_incomplete"
+          ? `External apply client threw and audit finalize failed for intent ${intent.id}; intent is blocked from further apply.`
+          : `External apply client threw: ${message}`,
       intent,
       audit,
       finalize,
@@ -494,7 +512,7 @@ export async function executeExternalApply(
   }
 
   if (!externalResult.ok) {
-    const finalize = finalizeFn(input.db, {
+    let finalize = finalizeFn(input.db, {
       auditId: audit.id,
       lifecycleState: "failed",
       resultStatus: "failed",
@@ -506,9 +524,31 @@ export async function executeExternalApply(
       },
       now: now()
     });
+    if (!finalize.ok) {
+      finalize = markIntentApplyAuditIncompleteFn(input.db, {
+        auditId: audit.id,
+        resultCode: "failed_finalize_failed",
+        resultMessage: `External write failed, then audit finalize failed: ${finalize.message}`,
+        externalRefs: {
+          commentId: externalResult.partial?.comment?.id ?? null,
+          commentUrl: externalResult.partial?.comment?.url ?? null,
+          stateTransitionId: null
+        },
+        reconcile: {
+          status: "deferred",
+          warning: "external write failed; audit finalize failed"
+        },
+        now: now()
+      });
+    }
     return buildExternalFailure({
-      code: mapLinearErrorCode(externalResult.code),
-      message: externalResult.error,
+      code: finalize.ok && finalize.audit.lifecycleState === "audit_incomplete"
+        ? "audit_incomplete"
+        : mapLinearErrorCode(externalResult.code),
+      message:
+        finalize.ok && finalize.audit.lifecycleState === "audit_incomplete"
+          ? `External write failed and audit finalize failed for intent ${intent.id}; intent is blocked from further apply.`
+          : externalResult.error,
       intent,
       audit: finalize.ok ? finalize.audit : audit,
       finalize,
@@ -762,14 +802,7 @@ function identifyUnsupportedReason(
   intent: UpdateIntent,
   adapters: ReadonlyMap<string, ExternalUpdateAdapter> | undefined
 ): { code: "unsupported_adapter" | "unsupported_intent_type"; message: string } {
-  const adapter =
-    adapters?.get(intent.adapterKind) ??
-    (intent.adapterKind === "linear"
-      ? resolveExternalUpdateAdapterForIntent(
-          { adapterKind: "linear", intentType: "source_satisfied" },
-          adapters
-        )
-      : undefined);
+  const adapter = getExternalUpdateAdapter(intent.adapterKind, adapters);
   if (!adapter) {
     return {
       code: "unsupported_adapter",
