@@ -14,10 +14,10 @@
  *  - Computes a stable idempotency marker so dedupe / reconcile / replay paths
  *    in later slices can key off Linear-side artifacts alone.
  *
- * The boundary deliberately exposes only `preview` in this slice; no code path
- * here can perform an external mutation. The real Linear write client lands in
- * NGX-297, audit/claim surfaces land in NGX-299 before CLI execution in
- * NGX-298, and reconciliation result codes are owned by NGX-300/NGX-301 and
+ * This boundary deliberately exposes only `preview`; no code path here can
+ * perform an external mutation. The NGX-297 Linear write client consumes this
+ * preview separately, audit/claim surfaces land in NGX-299 before CLI execution
+ * in NGX-298, and reconciliation result codes are owned by NGX-300/NGX-301 and
  * intentionally absent from this taxonomy.
  */
 
@@ -207,8 +207,9 @@ export function buildIdempotencyMarker(input: {
  * result on every code path; never throws. Adapter exceptions are wrapped as
  * `adapter_threw` so callers can branch deterministically.
  *
- * No code path here performs an external mutation. The boundary deliberately
- * exposes only `preview` in this slice.
+ * No code path here performs an external mutation. This boundary deliberately
+ * exposes only `preview`; the Linear write client consumes the preview through
+ * its own apply entry point.
  */
 export function previewExternalUpdate(
   input: ExternalUpdateAdapterInput,
