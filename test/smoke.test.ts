@@ -5271,9 +5271,10 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
           intentsReplayed: 1
         });
 
-        // `intent apply --external-apply` is the M5 trust-boundary guard:
-        // it must refuse with external_apply_unsupported and leave the
-        // intent pending. No external write occurs.
+        // `intent apply --external-apply` requires a repo context whose
+        // MOMENTUM.md sets intent_apply_policy: external_apply_allowed.
+        // Without --repo, the orchestrator refuses with policy_denied and
+        // leaves the intent pending. No external write occurs.
         const externalApply = runCliBinary([
           "intent",
           "apply",
@@ -5294,7 +5295,7 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
         expect(externalApplyPayload).toMatchObject({
           ok: false,
           command: "intent apply",
-          code: "external_apply_unsupported",
+          code: "policy_denied",
           intentId
         });
         const externalApplyPolicy = externalApplyPayload["applyPolicy"] as Record<

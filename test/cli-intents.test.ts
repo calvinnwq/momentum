@@ -36,7 +36,10 @@ function makeTempDir(prefix = "momentum-cli-intent-"): string {
   return fs.realpathSync(dir);
 }
 
-async function run(argv: string[]): Promise<RunResult> {
+async function run(
+  argv: string[],
+  env: NodeJS.ProcessEnv = {}
+): Promise<RunResult> {
   let stdout = "";
   let stderr = "";
 
@@ -53,8 +56,39 @@ async function run(argv: string[]): Promise<RunResult> {
         return true;
       }
     },
-    env: {}
+    env
   });
+
+  return { code, stdout, stderr };
+}
+
+async function runWithDeps(
+  argv: string[],
+  env: NodeJS.ProcessEnv,
+  deps: Parameters<typeof runCli>[2]
+): Promise<RunResult> {
+  let stdout = "";
+  let stderr = "";
+
+  const code = await runCli(
+    argv,
+    {
+      stdout: {
+        write(chunk: string) {
+          stdout += chunk;
+          return true;
+        }
+      },
+      stderr: {
+        write(chunk: string) {
+          stderr += chunk;
+          return true;
+        }
+      },
+      env
+    },
+    deps
+  );
 
   return { code, stdout, stderr };
 }
@@ -1486,7 +1520,7 @@ describe("momentum intent apply policy gating", () => {
     return repo;
   }
 
-  it("refuses --external-apply with external_apply_unsupported and surfaces applyPolicy", async () => {
+  it("refuses --external-apply with policy_denied when no repo context is provided", async () => {
     const dataDir = makeTempDir();
     const intentId = seedIntent(dataDir, {
       adapterKind: "linear",
@@ -1522,13 +1556,13 @@ describe("momentum intent apply policy gating", () => {
     };
     expect(payload.ok).toBe(false);
     expect(payload.command).toBe("intent apply");
-    expect(payload.code).toBe("external_apply_unsupported");
+    expect(payload.code).toBe("policy_denied");
     expect(payload.intentId).toBe(intentId);
     expect(payload.applyPolicy.effective).toBe("create_intents_only");
     expect(payload.applyPolicy.source).toBe("builtin_default");
     expect(payload.applyPolicy.externalApplyRequested).toBe(true);
     expect(payload.applyPolicy.externalApplyPerformed).toBe(false);
-    expect(payload.applyPolicy.note).toMatch(/Milestone 5/);
+    expect(payload.applyPolicy.note).toMatch(/external_apply_allowed/);
 
     // The intent itself must remain pending; refusal must not transition it.
     const db = openDb(dataDir);
@@ -1681,43 +1715,47 @@ describe("momentum intent apply policy gating", () => {
     }
   });
 
-  it("refuses --external-apply even when MOMENTUM.md sets external_apply_allowed (M5 trust boundary)", async () => {
+  it("refuses --external-apply with auth_unavailable when LINEAR_API_KEY is unset", async () => {
     const dataDir = makeTempDir();
     const repo = makeRepoWithPolicy(
       `---\nintent_apply_policy: external_apply_allowed\n---\n`
     );
     const intentId = seedIntent(dataDir, {
       adapterKind: "linear",
+      targetExternalId: "linear_issue_auth_test",
       intentType: "source_satisfied",
       reason: "satisfied",
       idempotencyKey:
         "linear:ext-policy-repo-refuse:source_satisfied:goal-policy"
     });
 
-    const result = await run([
-      "intent",
-      "apply",
-      intentId,
-      "--reason",
-      "operator decision",
-      "--external-apply",
-      "--repo",
-      repo,
-      "--data-dir",
-      dataDir,
-      "--json"
-    ]);
+    const result = await run(
+      [
+        "intent",
+        "apply",
+        intentId,
+        "--reason",
+        "operator decision",
+        "--external-apply",
+        "--repo",
+        repo,
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      { LINEAR_API_KEY: "" }
+    );
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as {
       code: string;
       applyPolicy: { effective: string; source: string };
     };
-    expect(payload.code).toBe("external_apply_unsupported");
+    expect(payload.code).toBe("auth_unavailable");
     expect(payload.applyPolicy.effective).toBe("external_apply_allowed");
     expect(payload.applyPolicy.source).toBe("momentum_policy");
   });
 
-  it("keeps --external-apply refusal stable when an explicit repo policy is invalid", async () => {
+  it("surfaces policy_load_failed under --external-apply when the repo policy is invalid", async () => {
     const dataDir = makeTempDir();
     const repo = makeRepoWithPolicy(
       `---\nintent_apply_policy: definitely_not_valid\n---\n`
@@ -1748,7 +1786,7 @@ describe("momentum intent apply policy gating", () => {
       code: string;
       applyPolicy: { effective: string; source: string };
     };
-    expect(payload.code).toBe("external_apply_unsupported");
+    expect(payload.code).toBe("policy_load_failed");
     expect(payload.applyPolicy.effective).toBe("create_intents_only");
     expect(payload.applyPolicy.source).toBe("builtin_default");
   });
@@ -1775,7 +1813,192 @@ describe("momentum intent apply policy gating", () => {
     expect(result.stdout).toContain(
       "Apply policy: create_intents_only (builtin_default)"
     );
-    expect(result.stdout).toContain("Milestone 5");
+    expect(result.stdout).toContain("external_apply_allowed");
+  });
+
+  it("performs --external-apply when policy and auth are present and renders external refs", async () => {
+    const dataDir = makeTempDir();
+    const repo = makeRepoWithPolicy(
+      `---\nintent_apply_policy: external_apply_allowed\n---\n`
+    );
+    const intentId = seedIntent(dataDir, {
+      adapterKind: "linear",
+      targetExternalId: "linear_issue_ok",
+      intentType: "source_satisfied",
+      reason: "satisfied",
+      idempotencyKey: "linear:ext-policy-ok:source_satisfied:goal-policy"
+    });
+
+    const factoryCalls: Array<{ apiKey: string | null }> = [];
+    const applyCalls: Array<{ idempotencyMarker: string }> = [];
+    const result = await runWithDeps(
+      [
+        "intent",
+        "apply",
+        intentId,
+        "--reason",
+        "operator decision",
+        "--external-apply",
+        "--repo",
+        repo,
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      { LINEAR_API_KEY: "test-key" },
+      {
+        buildLinearExternalUpdateClient: (input) => {
+          factoryCalls.push({ apiKey: input.apiKey });
+          return {
+            apply: async (clientInput) => {
+              applyCalls.push({
+                idempotencyMarker: clientInput.preview.idempotencyMarker
+              });
+              return {
+                ok: true as const,
+                alreadyApplied: false,
+                issue: {
+                  id: "linear_issue_ok",
+                  key: "NGX-OK",
+                  url: "https://linear.app/example/issue/NGX-OK"
+                },
+                comment: {
+                  id: "linear_comment_1",
+                  url: "https://linear.app/example/issue/NGX-OK#comment-1"
+                },
+                status: {
+                  transitioned: false,
+                  previousStateId: null,
+                  previousStateName: null,
+                  nextStateId: null,
+                  nextStateName: null
+                },
+                idempotencyMarker: clientInput.preview.idempotencyMarker
+              };
+            }
+          };
+        }
+      }
+    );
+    expect(result.code).toBe(0);
+    expect(factoryCalls).toHaveLength(1);
+    expect(factoryCalls[0]?.apiKey).toBe("test-key");
+    expect(applyCalls).toHaveLength(1);
+    expect(applyCalls[0]?.idempotencyMarker.startsWith("momentum-intent:")).toBe(
+      true
+    );
+
+    const payload = JSON.parse(result.stdout) as {
+      ok: true;
+      command: string;
+      intent: { id: string; status: string };
+      applyPolicy: {
+        effective: string;
+        source: string;
+        externalApplyPerformed: boolean;
+      };
+      externalApply: {
+        adapterKind: string;
+        auditId: string | null;
+        target: { externalId: string | null };
+        external: {
+          alreadyApplied: boolean;
+          issueId: string | null;
+          issueKey: string | null;
+          commentId: string | null;
+          idempotencyMarker: string;
+        } | null;
+        reconcile: { status: string | null };
+      };
+    };
+    expect(payload.ok).toBe(true);
+    expect(payload.command).toBe("intent apply");
+    expect(payload.intent.id).toBe(intentId);
+    expect(payload.intent.status).toBe("applied");
+    expect(payload.applyPolicy.effective).toBe("external_apply_allowed");
+    expect(payload.applyPolicy.source).toBe("momentum_policy");
+    expect(payload.applyPolicy.externalApplyPerformed).toBe(true);
+    expect(payload.externalApply.adapterKind).toBe("linear");
+    expect(payload.externalApply.auditId).toBeTruthy();
+    expect(payload.externalApply.target.externalId).toBe("linear_issue_ok");
+    expect(payload.externalApply.external?.issueId).toBe("linear_issue_ok");
+    expect(payload.externalApply.external?.issueKey).toBe("NGX-OK");
+    expect(payload.externalApply.external?.commentId).toBe("linear_comment_1");
+    expect(payload.externalApply.external?.alreadyApplied).toBe(false);
+    expect(payload.externalApply.external?.idempotencyMarker).toMatch(
+      /^momentum-intent:linear:/
+    );
+    expect(payload.externalApply.reconcile.status).toBe("pending");
+
+    const db = openDb(dataDir);
+    try {
+      const row = db
+        .prepare("SELECT status, decision_reason FROM update_intents WHERE id = ?")
+        .get(intentId) as { status: string; decision_reason: string };
+      expect(row.status).toBe("applied");
+      expect(row.decision_reason).toBe("external_apply: operator decision");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("surfaces write_rejected from the linear client and leaves the intent pending", async () => {
+    const dataDir = makeTempDir();
+    const repo = makeRepoWithPolicy(
+      `---\nintent_apply_policy: external_apply_allowed\n---\n`
+    );
+    const intentId = seedIntent(dataDir, {
+      adapterKind: "linear",
+      targetExternalId: "linear_issue_reject",
+      intentType: "source_satisfied",
+      reason: "satisfied",
+      idempotencyKey: "linear:ext-policy-reject:source_satisfied:goal-policy"
+    });
+
+    const result = await runWithDeps(
+      [
+        "intent",
+        "apply",
+        intentId,
+        "--reason",
+        "operator decision",
+        "--external-apply",
+        "--repo",
+        repo,
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      { LINEAR_API_KEY: "test-key" },
+      {
+        buildLinearExternalUpdateClient: () => ({
+          apply: async () => ({
+            ok: false as const,
+            code: "write_rejected" as const,
+            error: "linear server rejected the comment create"
+          })
+        })
+      }
+    );
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as {
+      code: string;
+      applyPolicy: { externalApplyPerformed: boolean };
+      externalApply: { auditId: string | null };
+    };
+    expect(payload.code).toBe("write_rejected");
+    expect(payload.applyPolicy.externalApplyPerformed).toBe(false);
+    expect(payload.externalApply.auditId).toBeTruthy();
+
+    const db = openDb(dataDir);
+    try {
+      const row = db
+        .prepare("SELECT status FROM update_intents WHERE id = ?")
+        .get(intentId) as { status: string };
+      expect(row.status).toBe("pending");
+    } finally {
+      db.close();
+    }
   });
 });
 

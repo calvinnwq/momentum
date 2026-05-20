@@ -136,6 +136,15 @@ import {
   type IntentApplyAuditSummary,
   type IntentApplyStateCounts
 } from "./intent-apply-audits.js";
+import {
+  executeExternalApply,
+  type ExecuteExternalApplyDeps,
+  type ExecuteExternalApplyResult
+} from "./intent-apply-execute.js";
+import {
+  buildLinearExternalUpdateClient,
+  type LinearExternalUpdateClient
+} from "./linear-external-update-client.js";
 
 export const VERSION = "0.0.0";
 
@@ -156,10 +165,18 @@ export type LinearReconciliationClientFactoryInput = {
   env: NodeJS.ProcessEnv;
 };
 
+export type LinearExternalUpdateClientFactoryInput = {
+  apiKey: string | null;
+  env: NodeJS.ProcessEnv;
+};
+
 export type CliDeps = {
   buildLinearReconciliationClient?: (
     input: LinearReconciliationClientFactoryInput
   ) => LinearReconciliationClient;
+  buildLinearExternalUpdateClient?: (
+    input: LinearExternalUpdateClientFactoryInput
+  ) => LinearExternalUpdateClient;
 };
 
 type JsonPayload = Record<string, unknown>;
@@ -308,7 +325,7 @@ export async function runCli(
   }
 
   if (command === "intent") {
-    return intent(parsed, io);
+    return intent(parsed, io, deps);
   }
 
   return usageError(`Unknown command: ${command}`, parsed, io);
@@ -1955,7 +1972,21 @@ type IntentFailureCode =
   | "reason_required"
   | "intent_already_terminal"
   | "policy_load_failed"
-  | "external_apply_unsupported";
+  | "policy_denied"
+  | "auth_unavailable"
+  | "unsupported_adapter"
+  | "unsupported_intent_type"
+  | "target_missing"
+  | "intent_apply_in_progress"
+  | "intent_blocked"
+  | "external_conflict"
+  | "write_rejected"
+  | "write_timeout"
+  | "malformed_response"
+  | "validation_failed"
+  | "adapter_threw"
+  | "preview_failed"
+  | "audit_incomplete";
 
 type IntentCommand =
   | "intent list"
@@ -1963,6 +1994,37 @@ type IntentCommand =
   | "intent apply"
   | "intent skip"
   | "intent cancel";
+
+type IntentExternalApplySummary = {
+  adapterKind: string;
+  intentType: string;
+  target: {
+    adapterKind: string;
+    externalId: string | null;
+    externalKey: string | null;
+    url: string | null;
+    title: string | null;
+  };
+  allowStatusMutation: boolean;
+  mutationKind: string | null;
+  auditId: string | null;
+  reconcile: {
+    status: "pending" | "deferred" | null;
+    warning: string | null;
+  };
+  external: {
+    alreadyApplied: boolean;
+    issueId: string | null;
+    issueKey: string | null;
+    issueUrl: string | null;
+    commentId: string | null;
+    commentUrl: string | null;
+    statusTransitioned: boolean;
+    nextStateId: string | null;
+    nextStateName: string | null;
+    idempotencyMarker: string;
+  } | null;
+};
 
 type IntentFailure = {
   command: IntentCommand;
@@ -1976,13 +2038,14 @@ type IntentFailure = {
   status?: string;
   currentStatus?: UpdateIntentStatus;
   applyPolicy?: IntentApplyPolicySummary;
+  externalApply?: IntentExternalApplySummary;
 };
 
 type IntentApplyPolicySummary = {
   effective: UpdateIntentApplyPolicy;
   source: PolicyEffectiveFieldSource;
   externalApplyRequested: boolean;
-  externalApplyPerformed: false;
+  externalApplyPerformed: boolean;
   note: string;
 };
 
@@ -1999,12 +2062,17 @@ function buildFallbackIntentApplyPolicySummary(
     externalApplyRequested,
     externalApplyPerformed: false,
     note:
-      "Milestone 5 does not perform external tracker writes; " +
-      "`intent apply` records the operator's manual mark only."
+      "`intent apply` records the operator's manual mark only; " +
+      "pass --external-apply with a repo whose MOMENTUM.md sets " +
+      "intent_apply_policy: external_apply_allowed to perform an external tracker write."
   };
 }
 
-function intent(parsed: ParsedFlags, io: CliIo): number {
+function intent(
+  parsed: ParsedFlags,
+  io: CliIo,
+  deps: CliDeps
+): number | Promise<number> {
   const subcommand = parsed.args[1];
   if (!subcommand) {
     return usageError(
@@ -2020,13 +2088,13 @@ function intent(parsed: ParsedFlags, io: CliIo): number {
     return intentGet(parsed, io);
   }
   if (subcommand === "apply") {
-    return intentDecision(parsed, io, "apply");
+    return intentDecision(parsed, io, "apply", deps);
   }
   if (subcommand === "skip") {
-    return intentDecision(parsed, io, "skip");
+    return intentDecision(parsed, io, "skip", deps);
   }
   if (subcommand === "cancel") {
-    return intentDecision(parsed, io, "cancel");
+    return intentDecision(parsed, io, "cancel", deps);
   }
   return usageError(`Unknown intent subcommand: ${subcommand}`, parsed, io);
 }
@@ -2334,8 +2402,9 @@ function intentDecisionCommand(action: IntentDecisionAction): IntentCommand {
 function intentDecision(
   parsed: ParsedFlags,
   io: CliIo,
-  action: IntentDecisionAction
-): number {
+  action: IntentDecisionAction,
+  deps: CliDeps
+): number | Promise<number> {
   const command = intentDecisionCommand(action);
   const intentId = parsed.args[2];
   if (!intentId) {
@@ -2363,26 +2432,20 @@ function intentDecision(
     });
   }
 
+  if (action === "apply" && parsed.externalApply) {
+    return intentExternalApply({
+      parsed,
+      io,
+      deps,
+      intentId,
+      reason
+    });
+  }
+
   const applyPolicyResolution = buildIntentApplyPolicySummary(
     parsed.repo,
     action === "apply" && parsed.externalApply
   );
-
-  if (action === "apply" && parsed.externalApply) {
-    const applyPolicy = applyPolicyResolution.ok
-      ? applyPolicyResolution.summary
-      : buildFallbackIntentApplyPolicySummary(true);
-    return emitIntentFailure(parsed, io, {
-      command,
-      code: "external_apply_unsupported",
-      message:
-        "External apply is not supported in Milestone 5. " +
-        "Momentum represents external tracker writes as durable intents only; " +
-        "use `momentum intent apply` without --external-apply to record an operator's manual mark.",
-      intentId,
-      applyPolicy
-    });
-  }
 
   if (!applyPolicyResolution.ok) {
     return emitIntentFailure(parsed, io, {
@@ -2486,6 +2549,214 @@ function intentDecision(
   return 0;
 }
 
+async function intentExternalApply(args: {
+  parsed: ParsedFlags;
+  io: CliIo;
+  deps: CliDeps;
+  intentId: string;
+  reason: string;
+}): Promise<number> {
+  const { parsed, io, deps, intentId, reason } = args;
+  const command: IntentCommand = "intent apply";
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return emitIntentFailure(parsed, io, {
+      command,
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err),
+      intentId
+    });
+  }
+
+  const env = io.env ?? {};
+  const db = openDb(dataDir);
+  let result: ExecuteExternalApplyResult;
+  try {
+    const executeDeps: ExecuteExternalApplyDeps = {};
+    const factory = deps.buildLinearExternalUpdateClient;
+    if (factory) {
+      executeDeps.buildLinearClient = (clientEnv) => {
+        const apiKeyRaw = clientEnv[LINEAR_API_KEY_ENV] ?? null;
+        const apiKey =
+          typeof apiKeyRaw === "string" && apiKeyRaw.trim().length > 0
+            ? apiKeyRaw
+            : null;
+        return factory({ apiKey, env: env as NodeJS.ProcessEnv });
+      };
+    } else {
+      executeDeps.buildLinearClient = (clientEnv) => {
+        const apiKeyRaw = clientEnv[LINEAR_API_KEY_ENV] ?? null;
+        const apiKey =
+          typeof apiKeyRaw === "string" && apiKeyRaw.trim().length > 0
+            ? apiKeyRaw
+            : null;
+        return buildLinearExternalUpdateClient({ apiKey });
+      };
+    }
+    result = await executeExternalApply({
+      db,
+      intentId,
+      operatorReason: reason,
+      repoPath: parsed.repo ?? null,
+      env,
+      statusMutation: null,
+      deps: executeDeps
+    });
+  } catch (err) {
+    db.close();
+    return emitIntentFailure(parsed, io, {
+      command,
+      code: "adapter_threw",
+      message: err instanceof Error ? err.message : String(err),
+      dataDir,
+      intentId
+    });
+  }
+  db.close();
+
+  const applyPolicy = buildExternalApplyPolicySummary(result, true);
+  const externalApply = buildIntentExternalApplySummary(result);
+
+  if (!result.ok) {
+    const failure: IntentFailure = {
+      command,
+      code: result.code,
+      message: result.message,
+      dataDir,
+      intentId,
+      applyPolicy,
+      externalApply
+    };
+    if (
+      result.code === "intent_already_terminal" &&
+      result.intent &&
+      isUpdateIntentStatus(result.intent.status)
+    ) {
+      failure.currentStatus = result.intent.status;
+    }
+    return emitIntentFailure(parsed, io, failure);
+  }
+
+  const payload: JsonPayload = {
+    ok: true,
+    command,
+    dataDir,
+    previousStatus: "pending",
+    intent: updateIntentToJsonShape(result.intent),
+    applyPolicy,
+    externalApply
+  };
+
+  if (parsed.json) {
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  const record = result.intent;
+  const target = externalApply.target;
+  const lines: string[] = [
+    `Update intent ${record.id} ${record.status}`,
+    `Adapter: ${record.adapterKind}`,
+    `Target external id: ${record.targetExternalId ?? "(none)"}`,
+    `Intent type: ${record.intentType}`,
+    `Previous status: pending`,
+    `Status: ${record.status}`,
+    `Decision reason: ${record.decisionReason ?? "(none)"}`,
+    `Applied at: ${record.appliedAt ?? "(unset)"}`,
+    `Updated at: ${record.updatedAt}`,
+    `Data dir: ${dataDir}`,
+    `Apply policy: ${applyPolicy.effective} (${applyPolicy.source}); ${applyPolicy.note}`,
+    `External apply: performed (audit ${externalApply.auditId ?? "(none)"})`,
+    `Target: ${target.adapterKind} ${target.externalKey ?? target.externalId ?? "(unknown)"}${target.url ? ` <${target.url}>` : ""}`
+  ];
+  if (externalApply.external) {
+    const ext = externalApply.external;
+    lines.push(
+      `Comment: ${ext.commentId ?? "(none)"}${ext.commentUrl ? ` <${ext.commentUrl}>` : ""}${ext.alreadyApplied ? " (replay)" : ""}`
+    );
+    if (ext.statusTransitioned) {
+      lines.push(
+        `Status transition: ${ext.nextStateName ?? ext.nextStateId ?? "(unknown)"}`
+      );
+    }
+    lines.push(`Idempotency marker: ${ext.idempotencyMarker}`);
+  }
+  if (externalApply.reconcile.status) {
+    lines.push(
+      `Reconcile: ${externalApply.reconcile.status}${
+        externalApply.reconcile.warning
+          ? ` (${externalApply.reconcile.warning})`
+          : ""
+      }`
+    );
+  }
+  lines.push("");
+  write(io.stdout, lines.join("\n"));
+  return 0;
+}
+
+function buildExternalApplyPolicySummary(
+  result: ExecuteExternalApplyResult,
+  externalApplyRequested: boolean
+): IntentApplyPolicySummary {
+  const base = buildFallbackIntentApplyPolicySummary(externalApplyRequested);
+  const resolved = result.context.applyPolicy;
+  const source: PolicyEffectiveFieldSource =
+    resolved.source === "missing_repo" ? "builtin_default" : resolved.source;
+  return {
+    ...base,
+    effective: resolved.value,
+    source,
+    externalApplyPerformed: result.ok
+  };
+}
+
+function buildIntentExternalApplySummary(
+  result: ExecuteExternalApplyResult
+): IntentExternalApplySummary {
+  const ctx = result.context;
+  const external = result.ok ? result.external : result.external;
+  return {
+    adapterKind: ctx.adapterKind,
+    intentType: ctx.intentType,
+    target: {
+      adapterKind: ctx.target.adapterKind,
+      externalId: ctx.target.externalId,
+      externalKey: ctx.target.externalKey,
+      url: ctx.target.url,
+      title: ctx.target.title
+    },
+    allowStatusMutation: ctx.allowStatusMutation,
+    mutationKind: ctx.mutationKind,
+    auditId: ctx.auditId,
+    reconcile: {
+      status: ctx.reconcile.status,
+      warning: ctx.reconcile.warning
+    },
+    external: external
+      ? {
+          alreadyApplied: external.alreadyApplied,
+          issueId: external.issueId,
+          issueKey: external.issueKey,
+          issueUrl: external.issueUrl,
+          commentId: external.commentId,
+          commentUrl: external.commentUrl,
+          statusTransitioned: external.statusTransitioned,
+          nextStateId: external.nextStateId,
+          nextStateName: external.nextStateName,
+          idempotencyMarker: external.idempotencyMarker
+        }
+      : null
+  };
+}
+
 function buildIntentApplyPolicySummary(
   repoOverride: string | undefined,
   externalApplyRequested: boolean
@@ -2544,6 +2815,9 @@ function emitIntentFailure(
   }
   if (failure.applyPolicy !== undefined) {
     payload["applyPolicy"] = failure.applyPolicy;
+  }
+  if (failure.externalApply !== undefined) {
+    payload["externalApply"] = failure.externalApply;
   }
 
   if (parsed.json) {
