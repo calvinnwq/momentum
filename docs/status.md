@@ -156,7 +156,7 @@ The top-level `externalApply` block provides a goal-scoped rollup:
 - `pendingIntentApplyStateCounts` — `{idle, in_flight, blocked}` counts across pending intents.
 - `pendingAuditCounts` — `{claimed, succeeded, failed, blocked, audit_incomplete}` counts across pending intents.
 - `totalAttempts` — total audit rows across pending intents.
-- `latestAttempt` — the most recent audit row across pending intents (or `null`).
+- `latestAttempt` — the most recent audit row across pending intents (or `null`), prefixed with `intentId` to identify the source intent (see [Audit row shape](intent-commands.md#audit-row-shape) for the full field list).
 
 ## Text output
 
