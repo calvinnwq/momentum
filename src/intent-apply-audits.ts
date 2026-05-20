@@ -579,6 +579,29 @@ export function countBlockedIntents(db: MomentumDb): number {
   return row.c;
 }
 
+export type IntentApplyStateCounts = Record<IntentApplyState, number>;
+
+export function countIntentsByApplyState(
+  db: MomentumDb
+): IntentApplyStateCounts {
+  const rows = db
+    .prepare(
+      `SELECT apply_state AS state, COUNT(*) AS c
+         FROM update_intents
+        GROUP BY apply_state`
+    )
+    .all() as Array<{ state: IntentApplyState; c: number }>;
+  const counts: IntentApplyStateCounts = {
+    idle: 0,
+    in_flight: 0,
+    blocked: 0
+  };
+  for (const row of rows) {
+    counts[row.state] = row.c;
+  }
+  return counts;
+}
+
 function intentApplyAuditFromRow(row: IntentApplyAuditRow): IntentApplyAudit {
   return {
     id: row.id,

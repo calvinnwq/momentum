@@ -120,9 +120,14 @@ import {
   type EvaluateGoalForSourceSatisfiedIntentResult
 } from "./update-intent-generator.js";
 import {
+  countIntentApplyAuditsByLifecycleState,
+  countIntentsByApplyState,
+  listIntentApplyAudits,
   summarizeIntentApplyAuditsForIntent,
   type IntentApplyAudit,
-  type IntentApplyAuditSummary
+  type IntentApplyAuditCounts,
+  type IntentApplyAuditSummary,
+  type IntentApplyStateCounts
 } from "./intent-apply-audits.js";
 
 export const VERSION = "0.0.0";
@@ -3418,6 +3423,7 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
   const policyPayload = buildDoctorPolicyPayload(parsed.repo);
   const sourcesPayload = buildDoctorSourcesPayload(dataDirOptions);
   const evidencePayload = buildDoctorEvidencePayload(dataDirOptions);
+  const externalApplyPayload = buildDoctorExternalApplyPayload(dataDirOptions);
 
   const payload = {
     ok: true,
@@ -3437,7 +3443,8 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
     },
     policy: policyPayload,
     sources: sourcesPayload,
-    evidence: evidencePayload
+    evidence: evidencePayload,
+    externalApply: externalApplyPayload
   };
 
   if (parsed.json) {
@@ -3542,6 +3549,30 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
   } else {
     lines.push(`evidence: error (${evidencePayload.code})`);
   }
+  if (externalApplyPayload.ok) {
+    const intentCounts = externalApplyPayload.intentApplyStateCounts;
+    const auditCounts = externalApplyPayload.auditCounts;
+    lines.push(
+      `external apply: intents idle=${intentCounts.idle} in_flight=${intentCounts.in_flight} blocked=${intentCounts.blocked}`
+    );
+    lines.push(
+      `external apply: attempts total=${externalApplyPayload.totalAttempts} ` +
+        `succeeded=${auditCounts.succeeded} failed=${auditCounts.failed} ` +
+        `claimed=${auditCounts.claimed} blocked=${auditCounts.blocked} ` +
+        `audit_incomplete=${auditCounts.audit_incomplete}`
+    );
+    const latest = externalApplyPayload.latestAttempt;
+    if (latest) {
+      lines.push(
+        `external apply: latest ${latest.id} intent=${latest.intentId} ${latest.lifecycleState}` +
+          ` (result=${latest.resultStatus ?? "(none)"} code=${latest.resultCode ?? "(none)"})`
+      );
+    } else {
+      lines.push("external apply: no attempts recorded yet");
+    }
+  } else {
+    lines.push(`external apply: error (${externalApplyPayload.code})`);
+  }
   lines.push("");
   write(io.stdout, lines.join("\n"));
   return 0;
@@ -3608,6 +3639,63 @@ function buildDoctorEvidencePayload(
         goalId: summary.lastRecord.goalId,
         sourceItemId: summary.lastRecord.sourceItemId
       }
+    };
+  } finally {
+    db.close();
+  }
+}
+
+type DoctorExternalApplyLatestAttempt = {
+  intentId: string;
+} & ReturnType<typeof intentApplyAuditToJsonShape>;
+
+type DoctorExternalApplyPayload =
+  | {
+      ok: true;
+      intentApplyStateCounts: IntentApplyStateCounts;
+      auditCounts: IntentApplyAuditCounts;
+      totalAttempts: number;
+      latestAttempt: DoctorExternalApplyLatestAttempt | null;
+    }
+  | {
+      ok: false;
+      code: string;
+      message: string;
+    };
+
+function buildDoctorExternalApplyPayload(
+  dataDirOptions: DataDirOptions
+): DoctorExternalApplyPayload {
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return {
+      ok: false,
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err)
+    };
+  }
+  const db = openDb(dataDir);
+  try {
+    const intentApplyStateCounts = countIntentsByApplyState(db);
+    const auditCounts = countIntentApplyAuditsByLifecycleState(db);
+    const totalAttempts =
+      auditCounts.claimed +
+      auditCounts.succeeded +
+      auditCounts.failed +
+      auditCounts.blocked +
+      auditCounts.audit_incomplete;
+    const latestList = listIntentApplyAudits(db, { limit: 1 });
+    const latest = latestList[0] ?? null;
+    return {
+      ok: true,
+      intentApplyStateCounts,
+      auditCounts,
+      totalAttempts,
+      latestAttempt: latest
+        ? { intentId: latest.intentId, ...intentApplyAuditToJsonShape(latest) }
+        : null
     };
   } finally {
     db.close();
