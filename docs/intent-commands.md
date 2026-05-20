@@ -5,8 +5,8 @@ Operator-facing CLI envelopes for the `intent list`, `intent get`, `intent apply
 See also:
 
 - [docs/source-commands.md](source-commands.md) — source-adapter commands that produce update intents.
-- [docs/status.md](status.md) and [docs/handoff.md](handoff.md) — the `pendingUpdateIntents` / `pending_update_intents` summaries on the inspector commands.
-- [docs/doctor.md](doctor.md) — the `effectiveIntentApply` block (built-in default `create_intents_only` vs `external_apply_allowed` from `MOMENTUM.md`).
+- [docs/status.md](status.md) and [docs/handoff.md](handoff.md) — the `pendingUpdateIntents` / `pending_update_intents` summaries on the inspector commands, including the `externalApply` / `external_apply` rollup.
+- [docs/doctor.md](doctor.md) — the `effectiveIntentApply` block (built-in default `create_intents_only` vs `external_apply_allowed` from `MOMENTUM.md`) and the `externalApply` audit-ledger aggregate.
 
 ## `intent list`
 
@@ -24,7 +24,7 @@ Filters:
 - `--goal`, `--source-item`, and `--evidence-record` filter by their respective linked IDs; at least one of goal, source-item, or evidence-record must exist.
 - `--limit` caps the number of results.
 
-JSON output includes `ok`, `command`, `dataDir`, active filter values, `count`, and an `intents` array with full intent fields:
+JSON output includes `ok`, `command`, `dataDir`, active filter values, `count`, `totalAvailable`, `truncated`, and an `intents` array with full intent fields:
 
 - `id`
 - `adapterKind`
@@ -46,7 +46,47 @@ JSON output includes `ok`, `command`, `dataDir`, active filter values, `count`, 
 - `skippedAt`
 - `canceledAt`
 
-Text output prints the active filters and a summary line per intent.
+Each intent also carries an `externalApply` block:
+
+- `intentId` — the intent this summary belongs to.
+- `applyState` — the intent's current apply state: `idle`, `in_flight`, or `blocked`.
+- `totalAttempts` — number of audit rows for this intent.
+- `counts` — lifecycle counts: `claimed`, `succeeded`, `failed`, `blocked`, `audit_incomplete`.
+- `latestAttempt` — the most recent audit row (or `null`); see [Audit row shape](#audit-row-shape) for the full field list.
+
+When no audit rows exist, `applyState` is `idle`, `totalAttempts` is 0, all lifecycle counts are 0, and `latestAttempt` is `null`.
+
+### Audit row shape
+
+The `latestAttempt` audit row (emitted by `intent list`, `intent get`, `momentum status`, `momentum handoff`, `momentum project status`, and `momentum doctor`) carries:
+
+- `id`
+- `adapterKind`
+- `provider`
+- `target` — `{externalId, externalKey, url, title}` for the resolved external target.
+- `requestedAt`
+- `finishedAt`
+- `operatorReason`
+- `operatorActor`
+- `intentApplyPolicy`
+- `allowStatusMutation`
+- `mutationKind`
+- `previewSummary`
+- `idempotencyMarker`
+- `lifecycleState` — one of `claimed`, `succeeded`, `failed`, `blocked`, `audit_incomplete`.
+- `resultStatus`
+- `resultCode`
+- `resultMessage`
+- `externalRefs` — `{commentId, commentUrl, stateTransitionId}` for any external writes produced.
+- `reconcile` — `{status, warning}` from the post-apply reconcile step.
+- `createdAt`
+- `updatedAt`
+
+Rollup surfaces also prepend `intentId` to identify the source intent. `momentum handoff` emits the same fields in snake_case.
+
+`totalAvailable` is the total matching intent count regardless of `--limit`; `truncated` is `true` when results were capped.
+
+Text output prints the active filters, total/truncation counts, and a summary line per intent including `apply=<state>`, `attempts=<n>`, and `latest=<lifecycle>`.
 
 ## `intent get`
 
@@ -56,7 +96,7 @@ momentum intent get <intent-id> [--data-dir <path>] [--json]
 
 Retrieves a single update intent by ID.
 
-JSON output includes `ok`, `command`, `dataDir`, and an `intent` object with all intent fields. When the intent does not exist, exits non-zero with `code: "intent_not_found"` and includes `intentId` in the error payload. Text output shows the intent ID, adapter kind, target external ID, type, status, reason, linked goal/source-item/evidence-record IDs, and timestamps.
+JSON output includes `ok`, `command`, `dataDir`, an `intent` object with all intent fields, and an `externalApply` block with the same shape as the per-intent `externalApply` in `intent list` — `intentId`, `applyState`, `totalAttempts`, `counts`, and `latestAttempt`. When the intent does not exist, exits non-zero with `code: "intent_not_found"` and includes `intentId` in the error payload. Text output shows the intent ID, adapter kind, target external ID, type, status, reason, linked goal/source-item/evidence-record IDs, timestamps, and the external apply state, attempt counts, and latest attempt details.
 
 ## `intent apply`
 

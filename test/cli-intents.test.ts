@@ -6,6 +6,12 @@ import path from "node:path";
 import { runCli } from "../src/cli.js";
 import { openDb } from "../src/db.js";
 import { createUpdateIntent } from "../src/update-intents.js";
+import {
+  claimIntentApply,
+  finalizeIntentApply,
+  type ClaimIntentApplyInput,
+  type IntentApplyFinalLifecycleState
+} from "../src/intent-apply-audits.js";
 
 type RunResult = {
   code: number;
@@ -570,13 +576,208 @@ describe("momentum intent list", () => {
     const result = await run(["intent", "list", "--data-dir", dataDir]);
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Update intents: 1");
+    expect(result.stdout).toContain("Total available: 1");
+    expect(result.stdout).toContain("Truncated: no");
     expect(result.stdout).toContain("Status: (any)");
     expect(result.stdout).toContain("Adapter: (any)");
     expect(result.stdout).toContain("Intent type: (any)");
     expect(result.stdout).toContain(`Data dir: ${dataDir}`);
     expect(result.stdout).toContain("[linear/source_satisfied]");
     expect(result.stdout).toContain("target=ext-1");
+    expect(result.stdout).toContain("apply=idle attempts=0 latest=(none)");
     expect(result.stdout).toContain("wf reason");
+  });
+
+  it("reports an idle externalApply summary per intent when no audits exist", async () => {
+    const dataDir = makeTempDir();
+    seedIntent(dataDir, {
+      adapterKind: "linear",
+      targetExternalId: "ext-quiet",
+      intentType: "source_satisfied",
+      reason: "no attempts",
+      idempotencyKey: "linear:ext-quiet:source_satisfied:goal-1"
+    });
+
+    const result = await run([
+      "intent",
+      "list",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      totalAvailable: number;
+      truncated: boolean;
+      intents: Array<{
+        id: string;
+        externalApply: {
+          intentId: string;
+          applyState: string;
+          totalAttempts: number;
+          counts: Record<string, number>;
+          latestAttempt: unknown;
+        };
+      }>;
+    };
+    expect(payload.totalAvailable).toBe(1);
+    expect(payload.truncated).toBe(false);
+    const first = payload.intents[0];
+    expect(first).toBeDefined();
+    expect(first?.externalApply).toEqual({
+      intentId: first?.id,
+      applyState: "idle",
+      totalAttempts: 0,
+      counts: {
+        claimed: 0,
+        succeeded: 0,
+        failed: 0,
+        blocked: 0,
+        audit_incomplete: 0
+      },
+      latestAttempt: null
+    });
+  });
+
+  it("surfaces audit lifecycle counts, apply state, and latest attempt per intent", async () => {
+    const dataDir = makeTempDir();
+    const succeededId = seedIntent(dataDir, {
+      adapterKind: "linear",
+      targetExternalId: "NGX-succeeded",
+      intentType: "source_satisfied",
+      reason: "succeeded once",
+      idempotencyKey: "linear:NGX-succeeded:source_satisfied:goal-1",
+      now: 1000
+    });
+    const blockedId = seedIntent(dataDir, {
+      adapterKind: "linear",
+      targetExternalId: "NGX-blocked",
+      intentType: "source_satisfied",
+      reason: "blocked after write",
+      idempotencyKey: "linear:NGX-blocked:source_satisfied:goal-1",
+      now: 2000
+    });
+    runFinalizedAttempt(dataDir, succeededId, "succeeded", 1100, {
+      resultCode: "comment_created",
+      externalRefs: {
+        commentId: "linear_comment_55"
+      }
+    });
+    runFinalizedAttempt(dataDir, blockedId, "audit_incomplete", 2100, {
+      resultCode: "audit_finalize_failed"
+    });
+
+    const result = await run([
+      "intent",
+      "list",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      intents: Array<{
+        id: string;
+        externalApply: {
+          applyState: string;
+          totalAttempts: number;
+          counts: Record<string, number>;
+          latestAttempt: {
+            lifecycleState: string;
+            resultCode: string | null;
+            externalRefs: { commentId: string | null };
+          } | null;
+        };
+      }>;
+    };
+    const succeeded = payload.intents.find((i) => i.id === succeededId);
+    const blocked = payload.intents.find((i) => i.id === blockedId);
+    expect(succeeded?.externalApply.applyState).toBe("idle");
+    expect(succeeded?.externalApply.totalAttempts).toBe(1);
+    expect(succeeded?.externalApply.counts.succeeded).toBe(1);
+    expect(succeeded?.externalApply.latestAttempt?.lifecycleState).toBe(
+      "succeeded"
+    );
+    expect(
+      succeeded?.externalApply.latestAttempt?.externalRefs.commentId
+    ).toBe("linear_comment_55");
+    expect(blocked?.externalApply.applyState).toBe("blocked");
+    expect(blocked?.externalApply.totalAttempts).toBe(1);
+    expect(blocked?.externalApply.counts.audit_incomplete).toBe(1);
+    expect(blocked?.externalApply.latestAttempt?.lifecycleState).toBe(
+      "audit_incomplete"
+    );
+    expect(blocked?.externalApply.latestAttempt?.resultCode).toBe(
+      "audit_finalize_failed"
+    );
+
+    const text = await run(["intent", "list", "--data-dir", dataDir]);
+    expect(text.code).toBe(0);
+    expect(text.stdout).toContain(
+      "apply=idle attempts=1 latest=succeeded/comment_created"
+    );
+    expect(text.stdout).toContain(
+      "apply=blocked attempts=1 latest=audit_incomplete/audit_finalize_failed"
+    );
+  });
+
+  it("reports total/truncated metadata when --limit trims the result set", async () => {
+    const dataDir = makeTempDir();
+    seedIntent(dataDir, {
+      adapterKind: "linear",
+      intentType: "source_satisfied",
+      reason: "first",
+      idempotencyKey: "linear:ext-1:source_satisfied:goal-1",
+      now: 1000
+    });
+    seedIntent(dataDir, {
+      adapterKind: "linear",
+      intentType: "source_satisfied",
+      reason: "second",
+      idempotencyKey: "linear:ext-2:source_satisfied:goal-2",
+      now: 2000
+    });
+    seedIntent(dataDir, {
+      adapterKind: "linear",
+      intentType: "source_satisfied",
+      reason: "third",
+      idempotencyKey: "linear:ext-3:source_satisfied:goal-3",
+      now: 3000
+    });
+
+    const result = await run([
+      "intent",
+      "list",
+      "--limit",
+      "2",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      limit: number | null;
+      count: number;
+      totalAvailable: number;
+      truncated: boolean;
+    };
+    expect(payload.limit).toBe(2);
+    expect(payload.count).toBe(2);
+    expect(payload.totalAvailable).toBe(3);
+    expect(payload.truncated).toBe(true);
+
+    const text = await run([
+      "intent",
+      "list",
+      "--limit",
+      "2",
+      "--data-dir",
+      dataDir
+    ]);
+    expect(text.code).toBe(0);
+    expect(text.stdout).toContain("Update intents: 2");
+    expect(text.stdout).toContain("Total available: 3");
+    expect(text.stdout).toContain("Truncated: yes");
   });
 });
 
@@ -695,7 +896,333 @@ describe("momentum intent get", () => {
     expect(result.stdout).toContain("Reason: satisfied");
     expect(result.stdout).toContain(`Data dir: ${dataDir}`);
   });
+
+  it("reports an empty externalApply summary when no audits exist", async () => {
+    const dataDir = makeTempDir();
+    const intentId = seedIntent(dataDir, {
+      adapterKind: "linear",
+      targetExternalId: "ext-no-audits",
+      intentType: "source_satisfied",
+      reason: "no attempts yet",
+      idempotencyKey: "linear:ext-no-audits:source_satisfied:goal-1"
+    });
+
+    const result = await run([
+      "intent",
+      "get",
+      intentId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      externalApply: {
+        intentId: string;
+        applyState: string;
+        totalAttempts: number;
+        counts: Record<string, number>;
+        latestAttempt: unknown;
+      };
+    };
+    expect(payload.externalApply).toEqual({
+      intentId,
+      applyState: "idle",
+      totalAttempts: 0,
+      counts: {
+        claimed: 0,
+        succeeded: 0,
+        failed: 0,
+        blocked: 0,
+        audit_incomplete: 0
+      },
+      latestAttempt: null
+    });
+
+    const text = await run(["intent", "get", intentId, "--data-dir", dataDir]);
+    expect(text.code).toBe(0);
+    expect(text.stdout).toContain("External apply state: idle");
+    expect(text.stdout).toContain(
+      "External apply attempts: total=0 succeeded=0 failed=0 claimed=0 blocked=0 audit_incomplete=0"
+    );
+    expect(text.stdout).toContain("External apply latest attempt: (none)");
+  });
+
+  it("surfaces the latest succeeded attempt and lifecycle counts for an applied intent", async () => {
+    const dataDir = makeTempDir();
+    const intentId = seedIntent(dataDir, {
+      adapterKind: "linear",
+      targetExternalId: "NGX-applied",
+      intentType: "source_satisfied",
+      reason: "verified done",
+      idempotencyKey: "linear:NGX-applied:source_satisfied:goal-1"
+    });
+    runFailedAttempt(dataDir, intentId, 10);
+    runFinalizedAttempt(dataDir, intentId, "succeeded", 20, {
+      resultCode: "comment_created",
+      resultMessage: "linear comment created",
+      externalRefs: {
+        commentId: "linear_comment_99",
+        commentUrl: "https://linear.app/example/comment/99"
+      }
+    });
+
+    const result = await run([
+      "intent",
+      "get",
+      intentId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      externalApply: {
+        applyState: string;
+        totalAttempts: number;
+        counts: Record<string, number>;
+        latestAttempt: {
+          lifecycleState: string;
+          resultStatus: string;
+          resultCode: string;
+          externalRefs: {
+            commentId: string | null;
+            commentUrl: string | null;
+            stateTransitionId: string | null;
+          };
+          idempotencyMarker: string;
+        };
+      };
+    };
+    expect(payload.externalApply.applyState).toBe("idle");
+    expect(payload.externalApply.totalAttempts).toBe(2);
+    expect(payload.externalApply.counts).toMatchObject({
+      succeeded: 1,
+      failed: 1
+    });
+    expect(payload.externalApply.latestAttempt.lifecycleState).toBe(
+      "succeeded"
+    );
+    expect(payload.externalApply.latestAttempt.resultStatus).toBe("succeeded");
+    expect(payload.externalApply.latestAttempt.resultCode).toBe(
+      "comment_created"
+    );
+    expect(payload.externalApply.latestAttempt.externalRefs.commentId).toBe(
+      "linear_comment_99"
+    );
+    expect(payload.externalApply.latestAttempt.externalRefs.commentUrl).toBe(
+      "https://linear.app/example/comment/99"
+    );
+    expect(
+      payload.externalApply.latestAttempt.idempotencyMarker.startsWith(
+        "momentum-intent:"
+      )
+    ).toBe(true);
+    expect(
+      payload.externalApply.latestAttempt.idempotencyMarker.toLowerCase()
+    ).not.toContain("token");
+
+    const text = await run(["intent", "get", intentId, "--data-dir", dataDir]);
+    expect(text.code).toBe(0);
+    expect(text.stdout).toContain("External apply state: idle");
+    expect(text.stdout).toContain("succeeded=1 failed=1");
+    expect(text.stdout).toContain(" succeeded (result=succeeded");
+    expect(text.stdout).toContain(
+      "External apply refs: comment=linear_comment_99"
+    );
+  });
+
+  it("surfaces the latest failed attempt for a pending intent and leaves apply_state idle", async () => {
+    const dataDir = makeTempDir();
+    const intentId = seedIntent(dataDir, {
+      adapterKind: "linear",
+      targetExternalId: "NGX-failed",
+      intentType: "source_satisfied",
+      reason: "failed once",
+      idempotencyKey: "linear:NGX-failed:source_satisfied:goal-1"
+    });
+    runFinalizedAttempt(dataDir, intentId, "failed", 30, {
+      resultCode: "write_rejected",
+      resultMessage: "Linear rejected the mutation"
+    });
+
+    const result = await run([
+      "intent",
+      "get",
+      intentId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      intent: { status: string; appliedAt: number | null };
+      externalApply: {
+        applyState: string;
+        totalAttempts: number;
+        counts: Record<string, number>;
+        latestAttempt: {
+          lifecycleState: string;
+          resultStatus: string;
+          resultCode: string;
+        };
+      };
+    };
+    expect(payload.intent.status).toBe("pending");
+    expect(payload.intent.appliedAt).toBeNull();
+    expect(payload.externalApply.applyState).toBe("idle");
+    expect(payload.externalApply.totalAttempts).toBe(1);
+    expect(payload.externalApply.counts.failed).toBe(1);
+    expect(payload.externalApply.latestAttempt.lifecycleState).toBe("failed");
+    expect(payload.externalApply.latestAttempt.resultStatus).toBe("failed");
+    expect(payload.externalApply.latestAttempt.resultCode).toBe(
+      "write_rejected"
+    );
+  });
+
+  it("surfaces an audit_incomplete latest attempt and blocked apply state", async () => {
+    const dataDir = makeTempDir();
+    const intentId = seedIntent(dataDir, {
+      adapterKind: "linear",
+      targetExternalId: "NGX-blocked",
+      intentType: "source_satisfied",
+      reason: "external write but audit finalize failed",
+      idempotencyKey: "linear:NGX-blocked:source_satisfied:goal-1"
+    });
+    runFinalizedAttempt(dataDir, intentId, "audit_incomplete", 40, {
+      resultCode: "audit_finalize_failed",
+      resultMessage: "external write succeeded but audit finalize did not",
+      externalRefs: {
+        commentId: "linear_comment_late",
+        commentUrl: "https://linear.app/example/comment/late"
+      }
+    });
+
+    const result = await run([
+      "intent",
+      "get",
+      intentId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      intent: { status: string };
+      externalApply: {
+        applyState: string;
+        totalAttempts: number;
+        counts: Record<string, number>;
+        latestAttempt: {
+          lifecycleState: string;
+          resultCode: string;
+          externalRefs: { commentId: string | null };
+        };
+      };
+    };
+    expect(payload.intent.status).toBe("pending");
+    expect(payload.externalApply.applyState).toBe("blocked");
+    expect(payload.externalApply.totalAttempts).toBe(1);
+    expect(payload.externalApply.counts.audit_incomplete).toBe(1);
+    expect(payload.externalApply.latestAttempt.lifecycleState).toBe(
+      "audit_incomplete"
+    );
+    expect(payload.externalApply.latestAttempt.resultCode).toBe(
+      "audit_finalize_failed"
+    );
+    expect(payload.externalApply.latestAttempt.externalRefs.commentId).toBe(
+      "linear_comment_late"
+    );
+
+    const text = await run(["intent", "get", intentId, "--data-dir", dataDir]);
+    expect(text.code).toBe(0);
+    expect(text.stdout).toContain("External apply state: blocked");
+    expect(text.stdout).toContain("audit_incomplete=1");
+    expect(text.stdout).toContain(
+      "External apply refs: comment=linear_comment_late"
+    );
+  });
 });
+
+function baseClaim(
+  intentId: string,
+  now: number,
+  overrides: Partial<ClaimIntentApplyInput> = {}
+): ClaimIntentApplyInput {
+  return {
+    intentId,
+    adapterKind: "linear",
+    provider: "linear",
+    target: {
+      externalId: `NGX-${intentId}`,
+      externalKey: `NGX-${intentId}`,
+      url: `https://linear.app/example/issue/${intentId}`,
+      title: "Example issue"
+    },
+    operatorReason: "verified done",
+    operatorActor: "operator@example.com",
+    intentApplyPolicy: "external_apply_allowed",
+    allowStatusMutation: false,
+    mutationKind: "comment",
+    previewSummary: `Linear comment on ${intentId}: source_satisfied`,
+    idempotencyMarker: `momentum-intent:linear:${intentId}:deadbeef-${now}`,
+    now,
+    ...overrides
+  };
+}
+
+function runFailedAttempt(
+  dataDir: string,
+  intentId: string,
+  now: number
+): void {
+  runFinalizedAttempt(dataDir, intentId, "failed", now, {
+    resultCode: "write_rejected",
+    resultMessage: "linear rejected"
+  });
+}
+
+function runFinalizedAttempt(
+  dataDir: string,
+  intentId: string,
+  lifecycleState: IntentApplyFinalLifecycleState,
+  now: number,
+  options: {
+    resultCode?: string;
+    resultMessage?: string;
+    externalRefs?: {
+      commentId?: string | null;
+      commentUrl?: string | null;
+      stateTransitionId?: string | null;
+    };
+  } = {}
+): void {
+  const db = openDb(dataDir);
+  try {
+    const claim = claimIntentApply(db, baseClaim(intentId, now));
+    if (!claim.ok) {
+      throw new Error(
+        `seed: expected claim to succeed for ${intentId}, got ${claim.code}`
+      );
+    }
+    const finalizeInput: Parameters<typeof finalizeIntentApply>[1] = {
+      auditId: claim.audit.id,
+      lifecycleState,
+      resultCode: options.resultCode ?? null,
+      resultMessage: options.resultMessage ?? null,
+      now: now + 1
+    };
+    if (options.externalRefs) finalizeInput.externalRefs = options.externalRefs;
+    const finalize = finalizeIntentApply(db, finalizeInput);
+    if (!finalize.ok) {
+      throw new Error(
+        `seed: expected finalize to succeed for ${intentId}, got ${finalize.code}`
+      );
+    }
+  } finally {
+    db.close();
+  }
+}
 
 describe.each([
   {

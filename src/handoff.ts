@@ -10,15 +10,18 @@ import {
   type GoalStatusDaemonSummary,
   type GoalStatusError,
   type GoalStatusEvidenceSummary,
+  type GoalStatusExternalApply,
   type GoalStatusIterationSummary,
   type GoalStatusJobSummary,
   type GoalStatusNextActionDetail,
+  type GoalStatusPendingIntentExternalApply,
   type GoalStatusPendingIntentSummary,
   type GoalStatusPolicySummary,
   type GoalStatusReducerSummary,
   type GoalStatusStaleRecoverySummary,
   type GoalStatusSuccess
 } from "./goal-status.js";
+import type { IntentApplyAudit } from "./intent-apply-audits.js";
 import type { SourceItemSummary } from "./source-items.js";
 
 export const HANDOFF_SCHEMA_VERSION = 1;
@@ -91,6 +94,7 @@ export type HandoffData = {
   totalPendingUpdateIntentCount: number;
   truncatedPendingUpdateIntents: boolean;
   intentStaleThresholdMs: number;
+  externalApply: GoalStatusExternalApply;
   artifactPaths: GoalArtifactPaths;
   artifactFiles: GoalStatusArtifactFiles;
 };
@@ -194,6 +198,7 @@ function buildHandoffData(
     totalPendingUpdateIntentCount: status.totalPendingUpdateIntentCount,
     truncatedPendingUpdateIntents: status.truncatedPendingUpdateIntents,
     intentStaleThresholdMs: status.intentStaleThresholdMs,
+    externalApply: status.externalApply,
     artifactPaths: status.artifactPaths,
     artifactFiles: status.artifactFiles
   };
@@ -381,6 +386,7 @@ function toJsonShape(data: HandoffData): Record<string, unknown> {
           intent_stale_threshold_ms: data.intentStaleThresholdMs
         }
       : {}),
+    external_apply: externalApplyToJsonShape(data.externalApply),
     artifacts: {
       goal_md: data.artifactPaths.goalMd,
       ledger_md: data.artifactPaths.ledgerMd,
@@ -435,7 +441,77 @@ function pendingIntentToJsonShape(
     evidence_record_id: intent.evidenceRecordId,
     created_at: intent.createdAt,
     age_ms: intent.ageMs,
-    stale: intent.stale
+    stale: intent.stale,
+    external_apply: pendingIntentExternalApplyToJsonShape(intent.externalApply)
+  };
+}
+
+function pendingIntentExternalApplyToJsonShape(
+  external: GoalStatusPendingIntentExternalApply
+): Record<string, unknown> {
+  return {
+    apply_state: external.applyState,
+    total_attempts: external.totalAttempts,
+    counts: external.counts,
+    latest_attempt: external.latestAttempt
+      ? intentApplyAuditToJsonShape(external.latestAttempt)
+      : null
+  };
+}
+
+function externalApplyToJsonShape(
+  external: GoalStatusExternalApply
+): Record<string, unknown> {
+  return {
+    pending_intent_apply_state_counts: external.pendingIntentApplyStateCounts,
+    pending_audit_counts: external.pendingAuditCounts,
+    total_attempts: external.totalAttempts,
+    latest_attempt: external.latestAttempt
+      ? {
+          intent_id: external.latestAttempt.intentId,
+          ...intentApplyAuditToJsonShape(external.latestAttempt)
+        }
+      : null
+  };
+}
+
+function intentApplyAuditToJsonShape(
+  audit: IntentApplyAudit
+): Record<string, unknown> {
+  return {
+    id: audit.id,
+    adapter_kind: audit.adapterKind,
+    provider: audit.provider,
+    target: {
+      external_id: audit.target.externalId,
+      external_key: audit.target.externalKey,
+      url: audit.target.url,
+      title: audit.target.title
+    },
+    requested_at: audit.requestedAt,
+    finished_at: audit.finishedAt,
+    operator_reason: audit.operatorReason,
+    operator_actor: audit.operatorActor,
+    intent_apply_policy: audit.intentApplyPolicy,
+    allow_status_mutation: audit.allowStatusMutation,
+    mutation_kind: audit.mutationKind,
+    preview_summary: audit.previewSummary,
+    idempotency_marker: audit.idempotencyMarker,
+    lifecycle_state: audit.lifecycleState,
+    result_status: audit.resultStatus,
+    result_code: audit.resultCode,
+    result_message: audit.resultMessage,
+    external_refs: {
+      comment_id: audit.externalRefs.commentId,
+      comment_url: audit.externalRefs.commentUrl,
+      state_transition_id: audit.externalRefs.stateTransitionId
+    },
+    reconcile: {
+      status: audit.reconcile.status,
+      warning: audit.reconcile.warning
+    },
+    created_at: audit.createdAt,
+    updated_at: audit.updatedAt
   };
 }
 
@@ -732,9 +808,14 @@ function renderHandoffMarkdown(data: HandoffData): string {
     lines.push(`## Pending update intents${countSuffix}${staleSuffix}`);
     for (const intent of data.pendingUpdateIntents) {
       const staleFlag = intent.stale ? " STALE" : "";
+      const latestText = intent.externalApply.latestAttempt
+        ? ` latest=${intent.externalApply.latestAttempt.lifecycleState}`
+        : "";
       lines.push(
         `- ${intent.intentId} [${intent.adapterKind}/${intent.intentType}] ` +
-          `target=${intent.targetExternalId ?? "(none)"} ageMs=${intent.ageMs}${staleFlag}: ${intent.reason}`
+          `target=${intent.targetExternalId ?? "(none)"} ageMs=${intent.ageMs}${staleFlag}` +
+          ` apply=${intent.externalApply.applyState}` +
+          ` attempts=${intent.externalApply.totalAttempts}${latestText}: ${intent.reason}`
       );
     }
     lines.push(
@@ -750,6 +831,36 @@ function renderHandoffMarkdown(data: HandoffData): string {
     );
     lines.push("");
   }
+
+  lines.push("## External apply");
+  const externalApply = data.externalApply;
+  const applyStateCounts = externalApply.pendingIntentApplyStateCounts;
+  const auditCounts = externalApply.pendingAuditCounts;
+  lines.push(
+    `- Pending intent apply state: idle=${applyStateCounts.idle}, ` +
+      `in_flight=${applyStateCounts.in_flight}, ` +
+      `blocked=${applyStateCounts.blocked}`
+  );
+  lines.push(
+    `- Pending audits: total=${externalApply.totalAttempts}, ` +
+      `succeeded=${auditCounts.succeeded}, ` +
+      `failed=${auditCounts.failed}, ` +
+      `claimed=${auditCounts.claimed}, ` +
+      `blocked=${auditCounts.blocked}, ` +
+      `audit_incomplete=${auditCounts.audit_incomplete}`
+  );
+  const latestExternalApply = externalApply.latestAttempt;
+  if (latestExternalApply) {
+    lines.push(
+      `- Latest attempt: ${latestExternalApply.id} ${latestExternalApply.lifecycleState}` +
+        ` intent=${latestExternalApply.intentId}` +
+        ` (result=${latestExternalApply.resultStatus ?? "(none)"}` +
+        ` code=${latestExternalApply.resultCode ?? "(none)"})`
+    );
+  } else {
+    lines.push("- Latest attempt: (none)");
+  }
+  lines.push("");
 
   lines.push("## Artifacts");
   lines.push(`- Data dir: ${data.goal.dataDir}`);

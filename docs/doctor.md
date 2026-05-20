@@ -178,3 +178,28 @@ record:
 
 `lastRecord` is `null` when no evidence has been ingested. Text output
 mirrors this with an `evidence:` count line and a last-record line.
+
+## External apply block
+
+The JSON `externalApply` block reports global audit-ledger state across
+all update intents in the data directory:
+
+```json
+{
+  "ok": true,
+  "intentApplyStateCounts": { "idle": 0, "in_flight": 0, "blocked": 0 },
+  "auditCounts": { "claimed": 0, "succeeded": 0, "failed": 0, "blocked": 0, "audit_incomplete": 0 },
+  "totalAttempts": 0,
+  "latestAttempt": null
+}
+```
+
+- `intentApplyStateCounts` — `{idle, in_flight, blocked}` across all update intents (not just pending).
+- `auditCounts` — `{claimed, succeeded, failed, blocked, audit_incomplete}` across all audit rows.
+- `totalAttempts` — total audit rows.
+- `latestAttempt` — the most recent audit row (or `null`), prefixed with `intentId` to identify the source intent; see [Audit row shape](intent-commands.md#audit-row-shape) for the full field list.
+
+On a data-dir failure the block degrades to `{ok: false, code, message}`.
+Text output includes `external apply:` lines showing idle/in_flight/blocked
+intent counts, audit lifecycle counts, total attempts, and the latest
+attempt (or `no attempts recorded yet`).

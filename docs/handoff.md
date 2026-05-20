@@ -59,6 +59,9 @@ contrast with `status`'s camelCase). Top-level keys include:
 - `latest_evidence` — present only when evidence records are linked.
 - `pending_update_intents` — present only when the goal has pending
   intents.
+- `external_apply` — always present; goal-scoped audit-ledger rollup
+  across pending intents. See [Pending update intents](#pending-update-intents)
+  for the rollup shape.
 - `intent_stale_threshold_ms` — threshold used to compute per-intent
   staleness (default 30 days).
 - `latest_job` / `next_job` — when present, include `idempotency_key`,
@@ -159,14 +162,32 @@ evidence` section listing timestamp, source/type, and summary.
 When the goal has pending update intents, `pending_update_intents` is an
 array of entries with `{intent_id, adapter_kind, intent_type,
 target_external_id, reason, source_item_id, evidence_record_id,
-created_at, age_ms, stale}`. `intent_stale_threshold_ms` carries the
-threshold used to compute the per-intent `stale` flag (default 30 days).
+created_at, age_ms, stale, external_apply}`. Each `external_apply`
+block contains `{apply_state, total_attempts, counts, latest_attempt}`;
+`apply_state` is `idle`, `in_flight`, or `blocked`; `counts` has
+`claimed`, `succeeded`, `failed`, `blocked`, and `audit_incomplete`;
+`latest_attempt` is the most recent audit row or `null` (snake_case
+counterpart of the
+[Audit row shape](intent-commands.md#audit-row-shape) field list).
+`intent_stale_threshold_ms` carries the threshold used to compute the
+per-intent `stale` flag (default 30 days).
 The markdown includes a `## Pending update intents` section with a stale
-count suffix, per-intent lines showing ID, adapter/type, target, age, and
-stale flag, the stale threshold, and a review hint recommending
+count suffix, per-intent lines showing ID, adapter/type, target, age,
+stale flag, apply state, attempt count, and latest audit lifecycle,
+the stale threshold, and a review hint recommending
 `momentum intent list --status pending`. See
 [`docs/intent-commands.md`](intent-commands.md) for the intent lifecycle
 that consumes these entries.
+
+The top-level `external_apply` block provides a goal-scoped rollup:
+
+- `pending_intent_apply_state_counts` — `{idle, in_flight, blocked}` counts across pending intents.
+- `pending_audit_counts` — `{claimed, succeeded, failed, blocked, audit_incomplete}` counts across pending intents.
+- `total_attempts` — total audit rows across pending intents.
+- `latest_attempt` — the most recent audit row across pending intents (or `null`), including `intent_id`.
+
+The markdown includes a `## External apply` section rendering these rollup
+counts and the latest attempt summary (or `(none)`).
 
 ## Markdown output
 
@@ -184,3 +205,8 @@ The markdown artifact mirrors the JSON envelope:
 - A `## Source items` section when source items are linked.
 - A `## Latest evidence` section when evidence is linked.
 - A `## Pending update intents` section when the goal has pending intents.
+- An always-emitted `## External apply` section rendering the pending
+  intent apply-state counts (`idle` / `in_flight` / `blocked`), audit
+  lifecycle counts (`claimed` / `succeeded` / `failed` / `blocked` /
+  `audit_incomplete`), total attempts, and the latest-attempt line (or
+  `(none)`).

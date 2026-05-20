@@ -119,11 +119,21 @@ JSON output includes:
 - `pendingUpdateIntents` — each entry includes a `stale` flag computed from the intent stale threshold
 - `totalPendingUpdateIntentCount`
 - `truncatedPendingUpdateIntents`
+- `externalApply` — always present; project-scoped audit-ledger rollup across pending intents (see below).
 - `nextAction`
 
 Source item and mismatch lists are truncated to the first 20 entries with total / truncated flags. Text output prints the active filters, count summaries, reconciliation warnings, top source items, mismatches, pending update intents, and next action.
 
-Pending update intents include `intentId`, `adapterKind`, `intentType`, `targetExternalId`, `reason`, `goalId`, `sourceItemId`, `evidenceRecordId`, `createdAt`, `ageMs`, and `stale`.
+Pending update intents include `intentId`, `adapterKind`, `intentType`, `targetExternalId`, `reason`, `goalId`, `sourceItemId`, `evidenceRecordId`, `createdAt`, `ageMs`, `stale`, and an `externalApply` block with `{applyState, totalAttempts, counts, latestAttempt}`. `applyState` is `idle`, `in_flight`, or `blocked`; `counts` has `claimed`, `succeeded`, `failed`, `blocked`, `audit_incomplete`; `latestAttempt` is the most recent audit row or `null` (see [Audit row shape](intent-commands.md#audit-row-shape) for the full field list).
+
+The top-level `externalApply` block provides a project-scoped rollup:
+
+- `pendingIntentApplyStateCounts` — `{idle, in_flight, blocked}` counts across pending intents.
+- `pendingAuditCounts` — `{claimed, succeeded, failed, blocked, audit_incomplete}` counts across pending intents.
+- `totalAttempts` — total audit rows across pending intents.
+- `latestAttempt` — the most recent audit row across pending intents (or `null`), including `intentId`.
+
+Text output includes `Pending external apply state:` and `Pending external apply audits:` lines with the rollup counts, the latest attempt summary (or `(none)`), and per-intent lines showing `apply=<state>`, `attempts=<n>`, and `latest=<lifecycle>`.
 
 ### Stable operator-facing taxonomy values
 

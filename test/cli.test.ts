@@ -454,6 +454,313 @@ describe("momentum CLI scaffold", () => {
     );
   });
 
+  it("doctor --json reports an empty externalApply payload when no audits exist", async () => {
+    const dataDir = makeTempDir("momentum-cli-doctor-externalapply-empty-");
+    const result = await run(["doctor", "--data-dir", dataDir, "--json"]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload["externalApply"]).toEqual({
+      ok: true,
+      intentApplyStateCounts: { idle: 0, in_flight: 0, blocked: 0 },
+      auditCounts: {
+        claimed: 0,
+        succeeded: 0,
+        failed: 0,
+        blocked: 0,
+        audit_incomplete: 0
+      },
+      totalAttempts: 0,
+      latestAttempt: null
+    });
+
+    const textResult = await run(["doctor", "--data-dir", dataDir]);
+    expect(textResult.code).toBe(0);
+    expect(textResult.stdout).toContain(
+      "external apply: intents idle=0 in_flight=0 blocked=0"
+    );
+    expect(textResult.stdout).toContain(
+      "external apply: attempts total=0 succeeded=0 failed=0 claimed=0 blocked=0 audit_incomplete=0"
+    );
+    expect(textResult.stdout).toContain("external apply: no attempts recorded yet");
+  });
+
+  it("doctor --json surfaces audit lifecycle counts and the latest attempt across intents", async () => {
+    const dataDir = makeTempDir("momentum-cli-doctor-externalapply-counts-");
+    const { openDb } = await import("../src/db.js");
+    const { createUpdateIntent } = await import("../src/update-intents.js");
+    const { claimIntentApply, finalizeIntentApply } = await import(
+      "../src/intent-apply-audits.js"
+    );
+
+    const db = openDb(dataDir);
+    let succeededIntentId = "";
+    let failedIntentId = "";
+    let latestAuditId = "";
+    try {
+      const failed = createUpdateIntent(
+        db,
+        {
+          adapterKind: "linear",
+          targetExternalId: "NGX-failed",
+          intentType: "source_satisfied",
+          reason: "failed attempt",
+          idempotencyKey: "linear:NGX-failed:source_satisfied:goal-1"
+        },
+        { now: () => 1_000 }
+      );
+      failedIntentId = failed.intent.id;
+      const succeeded = createUpdateIntent(
+        db,
+        {
+          adapterKind: "linear",
+          targetExternalId: "NGX-succeeded",
+          intentType: "source_satisfied",
+          reason: "succeeded attempt",
+          idempotencyKey: "linear:NGX-succeeded:source_satisfied:goal-2"
+        },
+        { now: () => 1_500 }
+      );
+      succeededIntentId = succeeded.intent.id;
+
+      const failClaim = claimIntentApply(db, {
+        intentId: failedIntentId,
+        adapterKind: "linear",
+        provider: "linear",
+        target: {
+          externalId: "NGX-failed",
+          externalKey: "NGX-failed",
+          url: "https://linear.app/example/issue/NGX-failed",
+          title: "Failed issue"
+        },
+        operatorReason: "verified done",
+        intentApplyPolicy: "external_apply_allowed",
+        allowStatusMutation: false,
+        mutationKind: "comment",
+        previewSummary: "Linear comment on NGX-failed",
+        idempotencyMarker: "momentum-intent:linear:NGX-failed:f1",
+        now: 2_000
+      });
+      if (!failClaim.ok) throw new Error("expected failed claim ok");
+      const failFinalize = finalizeIntentApply(db, {
+        auditId: failClaim.audit.id,
+        lifecycleState: "failed",
+        resultCode: "write_rejected",
+        resultMessage: "Linear rejected",
+        now: 2_100
+      });
+      if (!failFinalize.ok) throw new Error("expected failed finalize ok");
+
+      const succClaim = claimIntentApply(db, {
+        intentId: succeededIntentId,
+        adapterKind: "linear",
+        provider: "linear",
+        target: {
+          externalId: "NGX-succeeded",
+          externalKey: "NGX-succeeded",
+          url: "https://linear.app/example/issue/NGX-succeeded",
+          title: "Succeeded issue"
+        },
+        operatorReason: "verified done",
+        intentApplyPolicy: "external_apply_allowed",
+        allowStatusMutation: false,
+        mutationKind: "comment",
+        previewSummary: "Linear comment on NGX-succeeded",
+        idempotencyMarker: "momentum-intent:linear:NGX-succeeded:s1",
+        now: 3_000
+      });
+      if (!succClaim.ok) throw new Error("expected succeeded claim ok");
+      const succFinalize = finalizeIntentApply(db, {
+        auditId: succClaim.audit.id,
+        lifecycleState: "succeeded",
+        resultCode: "comment_created",
+        resultMessage: "linear comment created",
+        externalRefs: {
+          commentId: "linear_comment_77",
+          commentUrl: "https://linear.app/example/comment/77"
+        },
+        now: 3_100
+      });
+      if (!succFinalize.ok) throw new Error("expected succeeded finalize ok");
+      latestAuditId = succClaim.audit.id;
+    } finally {
+      db.close();
+    }
+
+    const result = await run(["doctor", "--data-dir", dataDir, "--json"]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    const externalApply = payload["externalApply"] as {
+      ok: boolean;
+      intentApplyStateCounts: Record<string, number>;
+      auditCounts: Record<string, number>;
+      totalAttempts: number;
+      latestAttempt: {
+        id: string;
+        intentId: string;
+        lifecycleState: string;
+        resultStatus: string;
+        resultCode: string;
+        externalRefs: { commentId: string | null };
+        idempotencyMarker: string;
+      } | null;
+    };
+    expect(externalApply.ok).toBe(true);
+    expect(externalApply.intentApplyStateCounts).toEqual({
+      idle: 2,
+      in_flight: 0,
+      blocked: 0
+    });
+    expect(externalApply.auditCounts).toEqual({
+      claimed: 0,
+      succeeded: 1,
+      failed: 1,
+      blocked: 0,
+      audit_incomplete: 0
+    });
+    expect(externalApply.totalAttempts).toBe(2);
+    expect(externalApply.latestAttempt).not.toBeNull();
+    expect(externalApply.latestAttempt?.id).toBe(latestAuditId);
+    expect(externalApply.latestAttempt?.intentId).toBe(succeededIntentId);
+    expect(externalApply.latestAttempt?.lifecycleState).toBe("succeeded");
+    expect(externalApply.latestAttempt?.resultStatus).toBe("succeeded");
+    expect(externalApply.latestAttempt?.resultCode).toBe("comment_created");
+    expect(externalApply.latestAttempt?.externalRefs.commentId).toBe(
+      "linear_comment_77"
+    );
+    expect(
+      externalApply.latestAttempt?.idempotencyMarker.toLowerCase()
+    ).not.toContain("token");
+
+    const textResult = await run(["doctor", "--data-dir", dataDir]);
+    expect(textResult.code).toBe(0);
+    expect(textResult.stdout).toContain(
+      "external apply: intents idle=2 in_flight=0 blocked=0"
+    );
+    expect(textResult.stdout).toContain(
+      "external apply: attempts total=2 succeeded=1 failed=1 claimed=0 blocked=0 audit_incomplete=0"
+    );
+    expect(textResult.stdout).toContain(
+      `external apply: latest ${latestAuditId} intent=${succeededIntentId} succeeded`
+    );
+  });
+
+  it("doctor --json reflects in_flight and blocked intent counts from the CAS column", async () => {
+    const dataDir = makeTempDir("momentum-cli-doctor-externalapply-states-");
+    const { openDb } = await import("../src/db.js");
+    const { createUpdateIntent } = await import("../src/update-intents.js");
+    const { claimIntentApply, finalizeIntentApply } = await import(
+      "../src/intent-apply-audits.js"
+    );
+
+    const db = openDb(dataDir);
+    try {
+      const blocked = createUpdateIntent(
+        db,
+        {
+          adapterKind: "linear",
+          targetExternalId: "NGX-blocked",
+          intentType: "source_satisfied",
+          reason: "audit incomplete",
+          idempotencyKey: "linear:NGX-blocked:source_satisfied:goal-1"
+        },
+        { now: () => 1_000 }
+      );
+      const inflight = createUpdateIntent(
+        db,
+        {
+          adapterKind: "linear",
+          targetExternalId: "NGX-inflight",
+          intentType: "source_satisfied",
+          reason: "still claimed",
+          idempotencyKey: "linear:NGX-inflight:source_satisfied:goal-2"
+        },
+        { now: () => 1_500 }
+      );
+
+      const blockedClaim = claimIntentApply(db, {
+        intentId: blocked.intent.id,
+        adapterKind: "linear",
+        provider: "linear",
+        target: {
+          externalId: "NGX-blocked",
+          externalKey: "NGX-blocked",
+          url: "https://linear.app/example/issue/NGX-blocked",
+          title: "Blocked issue"
+        },
+        operatorReason: "verified done",
+        intentApplyPolicy: "external_apply_allowed",
+        allowStatusMutation: false,
+        mutationKind: "comment",
+        previewSummary: "Linear comment on NGX-blocked",
+        idempotencyMarker: "momentum-intent:linear:NGX-blocked:b1",
+        now: 2_000
+      });
+      if (!blockedClaim.ok) throw new Error("expected blocked claim ok");
+      const blockedFinalize = finalizeIntentApply(db, {
+        auditId: blockedClaim.audit.id,
+        lifecycleState: "audit_incomplete",
+        resultCode: "audit_finalize_failed",
+        now: 2_100
+      });
+      if (!blockedFinalize.ok) throw new Error("expected blocked finalize ok");
+
+      const inflightClaim = claimIntentApply(db, {
+        intentId: inflight.intent.id,
+        adapterKind: "linear",
+        provider: "linear",
+        target: {
+          externalId: "NGX-inflight",
+          externalKey: "NGX-inflight",
+          url: "https://linear.app/example/issue/NGX-inflight",
+          title: "Inflight issue"
+        },
+        operatorReason: "verified done",
+        intentApplyPolicy: "external_apply_allowed",
+        allowStatusMutation: false,
+        mutationKind: "comment",
+        previewSummary: "Linear comment on NGX-inflight",
+        idempotencyMarker: "momentum-intent:linear:NGX-inflight:i1",
+        now: 3_000
+      });
+      if (!inflightClaim.ok) throw new Error("expected inflight claim ok");
+    } finally {
+      db.close();
+    }
+
+    const result = await run(["doctor", "--data-dir", dataDir, "--json"]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    const externalApply = payload["externalApply"] as {
+      intentApplyStateCounts: Record<string, number>;
+      auditCounts: Record<string, number>;
+      totalAttempts: number;
+      latestAttempt: { lifecycleState: string } | null;
+    };
+    expect(externalApply.intentApplyStateCounts).toEqual({
+      idle: 0,
+      in_flight: 1,
+      blocked: 1
+    });
+    expect(externalApply.auditCounts).toEqual({
+      claimed: 1,
+      succeeded: 0,
+      failed: 0,
+      blocked: 0,
+      audit_incomplete: 1
+    });
+    expect(externalApply.totalAttempts).toBe(2);
+    expect(externalApply.latestAttempt?.lifecycleState).toBe("claimed");
+
+    const textResult = await run(["doctor", "--data-dir", dataDir]);
+    expect(textResult.code).toBe(0);
+    expect(textResult.stdout).toContain(
+      "external apply: intents idle=0 in_flight=1 blocked=1"
+    );
+    expect(textResult.stdout).toContain(
+      "external apply: attempts total=2 succeeded=0 failed=0 claimed=1 blocked=0 audit_incomplete=1"
+    );
+  });
+
   it("doctor --json surfaces an active daemon run", async () => {
     const dataDir = makeTempDir("momentum-cli-doctor-active-");
     const { openDb } = await import("../src/db.js");
@@ -1558,6 +1865,273 @@ runner_profile: {
       message: "Unexpected argument for status: extra"
     });
     expect(result.stdout).toBe("");
+  });
+
+  it("status returns an empty external apply rollup when no audits exist", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+
+    const startResult = await run([
+      "goal", "start", goalFile,
+      "--foreground",
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    const startPayload = JSON.parse(startResult.stdout) as Record<string, unknown>;
+    const goalId = startPayload["goalId"] as string;
+
+    const json = await run([
+      "status", goalId, "--data-dir", dataDir, "--json"
+    ]);
+    expect(json.code).toBe(0);
+    const payload = JSON.parse(json.stdout) as Record<string, unknown>;
+    const externalApply = payload["externalApply"] as Record<string, unknown>;
+    expect(externalApply).toEqual({
+      pendingIntentApplyStateCounts: { idle: 0, in_flight: 0, blocked: 0 },
+      pendingAuditCounts: {
+        claimed: 0,
+        succeeded: 0,
+        failed: 0,
+        blocked: 0,
+        audit_incomplete: 0
+      },
+      totalAttempts: 0,
+      latestAttempt: null
+    });
+
+    const text = await run([
+      "status", goalId, "--data-dir", dataDir
+    ]);
+    expect(text.code).toBe(0);
+    expect(text.stdout).toContain(
+      "Pending external apply state: idle=0, in_flight=0, blocked=0"
+    );
+    expect(text.stdout).toContain(
+      "Pending external apply audits: total=0, succeeded=0, failed=0, claimed=0, blocked=0, audit_incomplete=0"
+    );
+    expect(text.stdout).toContain("Latest external apply: (none)");
+  });
+
+  it("status aggregates per-intent audit surfaces in JSON and text output", async () => {
+    const { dataDir, goalFile, repo } = setupGoalAndData();
+
+    const startResult = await run([
+      "goal", "start", goalFile,
+      "--foreground",
+      "--repo", repo,
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    const startPayload = JSON.parse(startResult.stdout) as Record<string, unknown>;
+    const goalId = startPayload["goalId"] as string;
+
+    const { openDb } = await import("../src/db.js");
+    const { createUpdateIntent } = await import("../src/update-intents.js");
+    const { claimIntentApply, finalizeIntentApply } = await import(
+      "../src/intent-apply-audits.js"
+    );
+    const db = openDb(dataDir);
+    const recentNow = 1_700_000_000_000;
+    let succeededIntentId = "";
+    let blockedIntentId = "";
+    try {
+      const succeeded = createUpdateIntent(
+        db,
+        {
+          adapterKind: "linear",
+          intentType: "source_satisfied",
+          reason: "Goal completed",
+          targetExternalId: "issue-status-succeeded",
+          goalId,
+          idempotencyKey: "linear:issue-status-succeeded:source_satisfied:status"
+        },
+        { now: () => recentNow }
+      );
+      succeededIntentId = succeeded.intent.id;
+      const blocked = createUpdateIntent(
+        db,
+        {
+          adapterKind: "linear",
+          intentType: "comment_requested",
+          reason: "Followup",
+          targetExternalId: "issue-status-blocked",
+          goalId,
+          idempotencyKey: "linear:issue-status-blocked:comment_requested:status"
+        },
+        { now: () => recentNow + 1 }
+      );
+      blockedIntentId = blocked.intent.id;
+
+      const claimSucceeded = claimIntentApply(db, {
+        intentId: succeededIntentId,
+        adapterKind: "linear",
+        provider: "linear",
+        target: {
+          externalId: "issue-status-succeeded",
+          externalKey: "NGX-STATUS-SUCCEEDED",
+          url: "https://linear.app/example/issue/issue-status-succeeded",
+          title: "Status succeeded issue"
+        },
+        operatorReason: "verified done",
+        operatorActor: "operator@example.com",
+        intentApplyPolicy: "external_apply_allowed",
+        allowStatusMutation: false,
+        mutationKind: "comment",
+        previewSummary: "Linear comment: source_satisfied",
+        idempotencyMarker: `momentum-intent:linear:${succeededIntentId}:deadbeef`,
+        now: recentNow + 10
+      });
+      if (!claimSucceeded.ok) {
+        throw new Error(
+          `seed: claim succeeded failed (${claimSucceeded.code})`
+        );
+      }
+      const finalizeSucceeded = finalizeIntentApply(db, {
+        auditId: claimSucceeded.audit.id,
+        lifecycleState: "succeeded",
+        resultStatus: "ok",
+        resultCode: "ok",
+        resultMessage: "wrote comment",
+        externalRefs: {
+          commentId: "linear_comment_ok",
+          commentUrl:
+            "https://linear.app/example/issue/issue-status-succeeded#c1",
+          stateTransitionId: null
+        },
+        now: recentNow + 11
+      });
+      if (!finalizeSucceeded.ok) {
+        throw new Error(
+          `seed: finalize succeeded failed (${finalizeSucceeded.code})`
+        );
+      }
+
+      const claimBlocked = claimIntentApply(db, {
+        intentId: blockedIntentId,
+        adapterKind: "linear",
+        provider: "linear",
+        target: {
+          externalId: "issue-status-blocked",
+          externalKey: "NGX-STATUS-BLOCKED",
+          url: "https://linear.app/example/issue/issue-status-blocked",
+          title: "Status blocked issue"
+        },
+        operatorReason: "needs followup",
+        operatorActor: "operator@example.com",
+        intentApplyPolicy: "external_apply_allowed",
+        allowStatusMutation: false,
+        mutationKind: "comment",
+        previewSummary: "Linear comment: comment_requested",
+        idempotencyMarker: `momentum-intent:linear:${blockedIntentId}:deadbeef`,
+        now: recentNow + 20
+      });
+      if (!claimBlocked.ok) {
+        throw new Error(
+          `seed: claim blocked failed (${claimBlocked.code})`
+        );
+      }
+      const finalizeBlocked = finalizeIntentApply(db, {
+        auditId: claimBlocked.audit.id,
+        lifecycleState: "audit_incomplete",
+        resultStatus: "wrote_no_audit",
+        resultCode: "audit_finalize_failed",
+        resultMessage: "linear succeeded but audit could not be finalized",
+        externalRefs: {
+          commentId: "linear_comment_late",
+          commentUrl:
+            "https://linear.app/example/issue/issue-status-blocked#c2",
+          stateTransitionId: null
+        },
+        now: recentNow + 21
+      });
+      if (!finalizeBlocked.ok) {
+        throw new Error(
+          `seed: finalize blocked failed (${finalizeBlocked.code})`
+        );
+      }
+    } finally {
+      db.close();
+    }
+
+    const json = await run([
+      "status", goalId, "--data-dir", dataDir, "--json"
+    ]);
+    expect(json.code).toBe(0);
+    const payload = JSON.parse(json.stdout) as Record<string, unknown>;
+    const externalApply = payload["externalApply"] as Record<string, unknown>;
+    expect(externalApply).toMatchObject({
+      pendingIntentApplyStateCounts: { idle: 1, in_flight: 0, blocked: 1 },
+      pendingAuditCounts: {
+        claimed: 0,
+        succeeded: 1,
+        failed: 0,
+        blocked: 0,
+        audit_incomplete: 1
+      },
+      totalAttempts: 2
+    });
+    const latest = externalApply["latestAttempt"] as Record<string, unknown>;
+    expect(latest["intentId"]).toBe(blockedIntentId);
+    expect(latest["lifecycleState"]).toBe("audit_incomplete");
+    expect(latest["resultCode"]).toBe("audit_finalize_failed");
+
+    const intents = payload["pendingUpdateIntents"] as Array<
+      Record<string, unknown>
+    >;
+    expect(intents).toHaveLength(2);
+    const succeededRow = intents.find(
+      (intent) => intent["intentId"] === succeededIntentId
+    );
+    expect(succeededRow?.["externalApply"]).toMatchObject({
+      applyState: "idle",
+      totalAttempts: 1,
+      counts: {
+        claimed: 0,
+        succeeded: 1,
+        failed: 0,
+        blocked: 0,
+        audit_incomplete: 0
+      }
+    });
+    const succeededLatest = (succeededRow?.["externalApply"] as Record<
+      string,
+      unknown
+    >)["latestAttempt"] as Record<string, unknown>;
+    expect(succeededLatest["lifecycleState"]).toBe("succeeded");
+    expect(succeededLatest["resultCode"]).toBe("ok");
+
+    const blockedRow = intents.find(
+      (intent) => intent["intentId"] === blockedIntentId
+    );
+    expect(blockedRow?.["externalApply"]).toMatchObject({
+      applyState: "blocked",
+      totalAttempts: 1,
+      counts: {
+        claimed: 0,
+        succeeded: 0,
+        failed: 0,
+        blocked: 0,
+        audit_incomplete: 1
+      }
+    });
+
+    const text = await run([
+      "status", goalId, "--data-dir", dataDir
+    ]);
+    expect(text.code).toBe(0);
+    expect(text.stdout).toContain(
+      "Pending external apply state: idle=1, in_flight=0, blocked=1"
+    );
+    expect(text.stdout).toContain(
+      "Pending external apply audits: total=2, succeeded=1, failed=0, claimed=0, blocked=0, audit_incomplete=1"
+    );
+    expect(text.stdout).toContain(
+      `Latest external apply: ${latest["id"]} audit_incomplete intent=${blockedIntentId}`
+    );
+    expect(text.stdout).toContain("apply=idle attempts=1 latest=succeeded");
+    expect(text.stdout).toContain(
+      "apply=blocked attempts=1 latest=audit_incomplete"
+    );
   });
 
   it("logs usage error when goal-id is missing", async () => {
@@ -5322,6 +5896,324 @@ describe("momentum project status", () => {
     expect(payload["intentStaleThresholdMs"]).toBe(30 * 24 * 60 * 60 * 1000);
     expect(payload["totalPendingUpdateIntentCount"]).toBe(1);
     expect(payload["truncatedPendingUpdateIntents"]).toBe(false);
+  });
+
+  it("surfaces an empty external apply rollup when no audits exist", async () => {
+    const dataDir = makeTempDir("momentum-cli-project-");
+    const { openDb } = await import("../src/db.js");
+    const { upsertSourceItem } = await import("../src/source-items.js");
+    const { createUpdateIntent } = await import("../src/update-intents.js");
+    const db = openDb(dataDir);
+    const recentNow = Date.now();
+    try {
+      const item = upsertSourceItem(
+        db,
+        {
+          adapterKind: "linear",
+          externalId: "issue-no-audit",
+          externalKey: "NGX-NO-AUDIT",
+          title: "No-audit issue",
+          status: "In Progress",
+          metadata: {},
+          observedAt: recentNow,
+          goalId: null
+        },
+        { now: () => recentNow }
+      );
+      createUpdateIntent(
+        db,
+        {
+          adapterKind: "linear",
+          intentType: "source_satisfied",
+          reason: "Goal completed",
+          targetExternalId: "issue-no-audit",
+          sourceItemId: item.id,
+          idempotencyKey: "linear:issue-no-audit:source_satisfied:cli"
+        },
+        { now: () => recentNow }
+      );
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "project", "status", "--data-dir", dataDir, "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    const externalApply = payload["externalApply"] as Record<string, unknown>;
+    expect(externalApply).toMatchObject({
+      pendingIntentApplyStateCounts: { idle: 1, in_flight: 0, blocked: 0 },
+      pendingAuditCounts: {
+        claimed: 0,
+        succeeded: 0,
+        failed: 0,
+        blocked: 0,
+        audit_incomplete: 0
+      },
+      totalAttempts: 0,
+      latestAttempt: null
+    });
+    const intents = payload["pendingUpdateIntents"] as Array<Record<string, unknown>>;
+    expect(intents).toHaveLength(1);
+    expect(intents[0]?.["externalApply"]).toEqual({
+      applyState: "idle",
+      totalAttempts: 0,
+      counts: {
+        claimed: 0,
+        succeeded: 0,
+        failed: 0,
+        blocked: 0,
+        audit_incomplete: 0
+      },
+      latestAttempt: null
+    });
+
+    const text = await run([
+      "project", "status", "--data-dir", dataDir
+    ]);
+    expect(text.code).toBe(0);
+    expect(text.stdout).toContain(
+      "Pending external apply state: idle=1, in_flight=0, blocked=0"
+    );
+    expect(text.stdout).toContain(
+      "Pending external apply audits: total=0, succeeded=0, failed=0, claimed=0, blocked=0, audit_incomplete=0"
+    );
+    expect(text.stdout).toContain("Latest external apply: (none)");
+    expect(text.stdout).toContain("apply=idle attempts=0");
+  });
+
+  it("aggregates per-intent audit surfaces in project status JSON and text output", async () => {
+    const dataDir = makeTempDir("momentum-cli-project-");
+    const { openDb } = await import("../src/db.js");
+    const { upsertSourceItem } = await import("../src/source-items.js");
+    const { createUpdateIntent } = await import("../src/update-intents.js");
+    const { claimIntentApply, finalizeIntentApply } = await import(
+      "../src/intent-apply-audits.js"
+    );
+    const db = openDb(dataDir);
+    const recentNow = 1_700_000_000_000;
+    let succeededIntentId = "";
+    let blockedIntentId = "";
+    try {
+      const itemSucceeded = upsertSourceItem(
+        db,
+        {
+          adapterKind: "linear",
+          externalId: "issue-succeeded",
+          externalKey: "NGX-SUCCEEDED",
+          title: "Succeeded issue",
+          status: "In Progress",
+          metadata: {},
+          observedAt: recentNow,
+          goalId: null
+        },
+        { now: () => recentNow }
+      );
+      const succeeded = createUpdateIntent(
+        db,
+        {
+          adapterKind: "linear",
+          intentType: "source_satisfied",
+          reason: "Goal completed",
+          targetExternalId: "issue-succeeded",
+          sourceItemId: itemSucceeded.id,
+          idempotencyKey: "linear:issue-succeeded:source_satisfied:cli"
+        },
+        { now: () => recentNow }
+      );
+      succeededIntentId = succeeded.intent.id;
+      const itemBlocked = upsertSourceItem(
+        db,
+        {
+          adapterKind: "linear",
+          externalId: "issue-blocked",
+          externalKey: "NGX-BLOCKED",
+          title: "Blocked issue",
+          status: "In Progress",
+          metadata: {},
+          observedAt: recentNow + 1,
+          goalId: null
+        },
+        { now: () => recentNow + 1 }
+      );
+      const blocked = createUpdateIntent(
+        db,
+        {
+          adapterKind: "linear",
+          intentType: "comment_requested",
+          reason: "Followup",
+          targetExternalId: "issue-blocked",
+          sourceItemId: itemBlocked.id,
+          idempotencyKey: "linear:issue-blocked:comment_requested:cli"
+        },
+        { now: () => recentNow + 1 }
+      );
+      blockedIntentId = blocked.intent.id;
+
+      const claimSucceeded = claimIntentApply(db, {
+        intentId: succeededIntentId,
+        adapterKind: "linear",
+        provider: "linear",
+        target: {
+          externalId: "issue-succeeded",
+          externalKey: "NGX-SUCCEEDED",
+          url: "https://linear.app/example/issue/issue-succeeded",
+          title: "Succeeded issue"
+        },
+        operatorReason: "verified done",
+        operatorActor: "operator@example.com",
+        intentApplyPolicy: "external_apply_allowed",
+        allowStatusMutation: false,
+        mutationKind: "comment",
+        previewSummary: "Linear comment: source_satisfied",
+        idempotencyMarker: `momentum-intent:linear:${succeededIntentId}:deadbeef`,
+        now: recentNow + 10
+      });
+      if (!claimSucceeded.ok) {
+        throw new Error(
+          `seed: claim succeeded failed (${claimSucceeded.code})`
+        );
+      }
+      const finalizeSucceeded = finalizeIntentApply(db, {
+        auditId: claimSucceeded.audit.id,
+        lifecycleState: "succeeded",
+        resultStatus: "ok",
+        resultCode: "ok",
+        resultMessage: "wrote comment",
+        externalRefs: {
+          commentId: "linear_comment_ok",
+          commentUrl: "https://linear.app/example/issue/issue-succeeded#c1",
+          stateTransitionId: null
+        },
+        now: recentNow + 11
+      });
+      if (!finalizeSucceeded.ok) {
+        throw new Error(
+          `seed: finalize succeeded failed (${finalizeSucceeded.code})`
+        );
+      }
+
+      const claimBlocked = claimIntentApply(db, {
+        intentId: blockedIntentId,
+        adapterKind: "linear",
+        provider: "linear",
+        target: {
+          externalId: "issue-blocked",
+          externalKey: "NGX-BLOCKED",
+          url: "https://linear.app/example/issue/issue-blocked",
+          title: "Blocked issue"
+        },
+        operatorReason: "needs followup",
+        operatorActor: "operator@example.com",
+        intentApplyPolicy: "external_apply_allowed",
+        allowStatusMutation: false,
+        mutationKind: "comment",
+        previewSummary: "Linear comment: comment_requested",
+        idempotencyMarker: `momentum-intent:linear:${blockedIntentId}:deadbeef`,
+        now: recentNow + 20
+      });
+      if (!claimBlocked.ok) {
+        throw new Error(
+          `seed: claim blocked failed (${claimBlocked.code})`
+        );
+      }
+      const finalizeBlocked = finalizeIntentApply(db, {
+        auditId: claimBlocked.audit.id,
+        lifecycleState: "audit_incomplete",
+        resultStatus: "wrote_no_audit",
+        resultCode: "audit_finalize_failed",
+        resultMessage: "linear succeeded but audit could not be finalized",
+        externalRefs: {
+          commentId: "linear_comment_late",
+          commentUrl: "https://linear.app/example/issue/issue-blocked#c2",
+          stateTransitionId: null
+        },
+        now: recentNow + 21
+      });
+      if (!finalizeBlocked.ok) {
+        throw new Error(
+          `seed: finalize blocked failed (${finalizeBlocked.code})`
+        );
+      }
+    } finally {
+      db.close();
+    }
+
+    const json = await run([
+      "project", "status", "--data-dir", dataDir, "--json"
+    ]);
+    expect(json.code).toBe(0);
+    const payload = JSON.parse(json.stdout) as Record<string, unknown>;
+    const externalApply = payload["externalApply"] as Record<string, unknown>;
+    expect(externalApply).toMatchObject({
+      pendingIntentApplyStateCounts: { idle: 1, in_flight: 0, blocked: 1 },
+      pendingAuditCounts: {
+        claimed: 0,
+        succeeded: 1,
+        failed: 0,
+        blocked: 0,
+        audit_incomplete: 1
+      },
+      totalAttempts: 2
+    });
+    const latest = externalApply["latestAttempt"] as Record<string, unknown>;
+    expect(latest["intentId"]).toBe(blockedIntentId);
+    expect(latest["lifecycleState"]).toBe("audit_incomplete");
+    expect(latest["resultCode"]).toBe("audit_finalize_failed");
+
+    const intents = payload["pendingUpdateIntents"] as Array<Record<string, unknown>>;
+    expect(intents).toHaveLength(2);
+    const succeededRow = intents.find(
+      (intent) => intent["intentId"] === succeededIntentId
+    );
+    expect(succeededRow?.["externalApply"]).toMatchObject({
+      applyState: "idle",
+      totalAttempts: 1,
+      counts: {
+        claimed: 0,
+        succeeded: 1,
+        failed: 0,
+        blocked: 0,
+        audit_incomplete: 0
+      }
+    });
+    const succeededLatest = (succeededRow?.["externalApply"] as Record<string, unknown>)[
+      "latestAttempt"
+    ] as Record<string, unknown>;
+    expect(succeededLatest["lifecycleState"]).toBe("succeeded");
+    expect(succeededLatest["resultCode"]).toBe("ok");
+
+    const blockedRow = intents.find(
+      (intent) => intent["intentId"] === blockedIntentId
+    );
+    expect(blockedRow?.["externalApply"]).toMatchObject({
+      applyState: "blocked",
+      totalAttempts: 1,
+      counts: {
+        claimed: 0,
+        succeeded: 0,
+        failed: 0,
+        blocked: 0,
+        audit_incomplete: 1
+      }
+    });
+
+    const text = await run([
+      "project", "status", "--data-dir", dataDir
+    ]);
+    expect(text.code).toBe(0);
+    expect(text.stdout).toContain(
+      "Pending external apply state: idle=1, in_flight=0, blocked=1"
+    );
+    expect(text.stdout).toContain(
+      "Pending external apply audits: total=2, succeeded=1, failed=0, claimed=0, blocked=0, audit_incomplete=1"
+    );
+    expect(text.stdout).toContain(
+      `Latest external apply: ${latest["id"]} audit_incomplete intent=${blockedIntentId}`
+    );
+    expect(text.stdout).toContain("apply=idle attempts=1 latest=succeeded");
+    expect(text.stdout).toContain("apply=blocked attempts=1 latest=audit_incomplete");
   });
 
   it("honors --intent-stale-threshold-days to flag pending intents stale", async () => {

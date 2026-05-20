@@ -188,6 +188,42 @@ export function listUpdateIntents(
   db: MomentumDb,
   options: ListUpdateIntentsOptions = {}
 ): UpdateIntent[] {
+  const { where, params } = buildUpdateIntentsFilter(options);
+  const limitClause =
+    options.limit !== undefined && options.limit >= 0
+      ? `LIMIT ${Math.floor(options.limit)}`
+      : "";
+
+  const rows = db
+    .prepare(
+      `SELECT *
+         FROM update_intents
+         ${where}
+        ORDER BY created_at ASC, id ASC
+        ${limitClause}`
+    )
+    .all(...params) as UpdateIntentRow[];
+
+  return rows.map(updateIntentFromRow);
+}
+
+export type CountUpdateIntentsOptions = Omit<ListUpdateIntentsOptions, "limit">;
+
+export function countUpdateIntents(
+  db: MomentumDb,
+  options: CountUpdateIntentsOptions = {}
+): number {
+  const { where, params } = buildUpdateIntentsFilter(options);
+  const row = db
+    .prepare(`SELECT COUNT(*) AS c FROM update_intents ${where}`)
+    .get(...params) as { c: number } | undefined;
+  return row?.c ?? 0;
+}
+
+function buildUpdateIntentsFilter(options: CountUpdateIntentsOptions): {
+  where: string;
+  params: (string | number)[];
+} {
   const clauses: string[] = [];
   const params: (string | number)[] = [];
 
@@ -229,22 +265,7 @@ export function listUpdateIntents(
   }
 
   const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
-  const limitClause =
-    options.limit !== undefined && options.limit >= 0
-      ? `LIMIT ${Math.floor(options.limit)}`
-      : "";
-
-  const rows = db
-    .prepare(
-      `SELECT *
-         FROM update_intents
-         ${where}
-        ORDER BY created_at ASC, id ASC
-        ${limitClause}`
-    )
-    .all(...params) as UpdateIntentRow[];
-
-  return rows.map(updateIntentFromRow);
+  return { where, params };
 }
 
 /**

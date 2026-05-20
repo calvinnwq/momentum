@@ -9,6 +9,9 @@ import {
 } from "./iteration-job.js";
 import {
   loadGoalStatus,
+  type GoalStatusExternalApply,
+  type GoalStatusPendingIntentExternalApply,
+  type GoalStatusPendingIntentSummary,
   type GoalStatusSuccess
 } from "./goal-status.js";
 import { loadGoalLogs, type GoalLogsSuccess } from "./goal-logs.js";
@@ -99,16 +102,20 @@ import {
   PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT,
   buildProjectRollup,
   type ProjectRollup,
+  type ProjectRollupExternalApply,
   type ProjectRollupFilters,
-  type ProjectRollupOptions
+  type ProjectRollupOptions,
+  type ProjectRollupPendingIntentExternalApply
 } from "./project-rollup.js";
 import {
   UPDATE_INTENT_STATUSES,
   cancelUpdateIntent,
+  countUpdateIntents,
   getUpdateIntentById,
   listUpdateIntents,
   markUpdateIntentApplied,
   markUpdateIntentSkipped,
+  type CountUpdateIntentsOptions,
   type ListUpdateIntentsOptions,
   type UpdateIntent,
   type UpdateIntentDecisionInput,
@@ -119,6 +126,16 @@ import {
   evaluateGoalForSourceSatisfiedIntents,
   type EvaluateGoalForSourceSatisfiedIntentResult
 } from "./update-intent-generator.js";
+import {
+  countIntentApplyAuditsByLifecycleState,
+  countIntentsByApplyState,
+  listIntentApplyAudits,
+  summarizeIntentApplyAuditsForIntent,
+  type IntentApplyAudit,
+  type IntentApplyAuditCounts,
+  type IntentApplyAuditSummary,
+  type IntentApplyStateCounts
+} from "./intent-apply-audits.js";
 
 export const VERSION = "0.0.0";
 
@@ -1092,9 +1109,13 @@ function projectStatus(parsed: ParsedFlags, io: CliIo): number {
       totalMismatchCount: rollup.totalMismatchCount,
       truncatedMismatches: rollup.truncatedMismatches,
       reconciliationWarnings: rollup.reconciliationWarnings,
-      pendingUpdateIntents: rollup.pendingUpdateIntents,
+      pendingUpdateIntents: rollup.pendingUpdateIntents.map((intent) => ({
+        ...intent,
+        externalApply: projectRollupExternalApplyIntentToJsonShape(intent.externalApply)
+      })),
       totalPendingUpdateIntentCount: rollup.totalPendingUpdateIntentCount,
       truncatedPendingUpdateIntents: rollup.truncatedPendingUpdateIntents,
+      externalApply: projectRollupExternalApplyToJsonShape(rollup.externalApply),
       nextAction: rollup.nextAction
     };
     writeJson(io.stdout, payload);
@@ -1103,6 +1124,47 @@ function projectStatus(parsed: ParsedFlags, io: CliIo): number {
 
   write(io.stdout, renderProjectStatusText(rollup, filters, dataDir));
   return 0;
+}
+
+function projectRollupExternalApplyIntentToJsonShape(
+  external: ProjectRollupPendingIntentExternalApply
+): {
+  applyState: ProjectRollupPendingIntentExternalApply["applyState"];
+  totalAttempts: number;
+  counts: ProjectRollupPendingIntentExternalApply["counts"];
+  latestAttempt: Record<string, unknown> | null;
+} {
+  return {
+    applyState: external.applyState,
+    totalAttempts: external.totalAttempts,
+    counts: external.counts,
+    latestAttempt: external.latestAttempt
+      ? intentApplyAuditToJsonShape(external.latestAttempt)
+      : null
+  };
+}
+
+function projectRollupExternalApplyToJsonShape(
+  external: ProjectRollupExternalApply
+): {
+  pendingIntentApplyStateCounts: ProjectRollupExternalApply["pendingIntentApplyStateCounts"];
+  pendingAuditCounts: ProjectRollupExternalApply["pendingAuditCounts"];
+  totalAttempts: number;
+  latestAttempt:
+    | ({ intentId: string } & ReturnType<typeof intentApplyAuditToJsonShape>)
+    | null;
+} {
+  return {
+    pendingIntentApplyStateCounts: external.pendingIntentApplyStateCounts,
+    pendingAuditCounts: external.pendingAuditCounts,
+    totalAttempts: external.totalAttempts,
+    latestAttempt: external.latestAttempt
+      ? {
+          intentId: external.latestAttempt.intentId,
+          ...intentApplyAuditToJsonShape(external.latestAttempt)
+        }
+      : null
+  };
 }
 
 function renderProjectStatusText(
@@ -1153,6 +1215,32 @@ function renderProjectStatusText(
       `(stale=${rollup.counts.staleUpdateIntents}, ` +
       `stale_threshold_ms=${rollup.intentStaleThresholdMs})`
   );
+  const externalApplyStateCounts = rollup.externalApply.pendingIntentApplyStateCounts;
+  const externalApplyAuditCounts = rollup.externalApply.pendingAuditCounts;
+  lines.push(
+    `Pending external apply state: idle=${externalApplyStateCounts.idle}, ` +
+      `in_flight=${externalApplyStateCounts.in_flight}, ` +
+      `blocked=${externalApplyStateCounts.blocked}`
+  );
+  lines.push(
+    `Pending external apply audits: total=${rollup.externalApply.totalAttempts}, ` +
+      `succeeded=${externalApplyAuditCounts.succeeded}, ` +
+      `failed=${externalApplyAuditCounts.failed}, ` +
+      `claimed=${externalApplyAuditCounts.claimed}, ` +
+      `blocked=${externalApplyAuditCounts.blocked}, ` +
+      `audit_incomplete=${externalApplyAuditCounts.audit_incomplete}`
+  );
+  const latestExternalApply = rollup.externalApply.latestAttempt;
+  if (latestExternalApply) {
+    lines.push(
+      `Latest external apply: ${latestExternalApply.id} ${latestExternalApply.lifecycleState}` +
+        ` intent=${latestExternalApply.intentId}` +
+        ` (result=${latestExternalApply.resultStatus ?? "(none)"}` +
+        ` code=${latestExternalApply.resultCode ?? "(none)"})`
+    );
+  } else {
+    lines.push("Latest external apply: (none)");
+  }
   if (rollup.reconciliationWarnings.length === 0) {
     lines.push("Reconciliation: ok");
   } else {
@@ -1216,9 +1304,14 @@ function renderProjectStatusText(
       const sourceText = intent.sourceItemId
         ? ` source=${intent.sourceItemId}`
         : "";
+      const latestText = intent.externalApply.latestAttempt
+        ? ` latest=${intent.externalApply.latestAttempt.lifecycleState}`
+        : "";
       lines.push(
         `  - [${intent.adapterKind}/${intent.intentType}] ${intent.intentId}` +
-          `${targetText}${goalText}${sourceText} age_ms=${intent.ageMs}${staleText}`
+          `${targetText}${goalText}${sourceText} age_ms=${intent.ageMs}${staleText}` +
+          ` apply=${intent.externalApply.applyState}` +
+          ` attempts=${intent.externalApply.totalAttempts}${latestText}`
       );
     }
     if (rollup.truncatedPendingUpdateIntents) {
@@ -1999,6 +2092,8 @@ function intentList(parsed: ParsedFlags, io: CliIo): number {
 
   const db = openDb(dataDir);
   let intents: UpdateIntent[];
+  let totalAvailable: number;
+  let auditSummaries: Map<string, IntentApplyAuditSummary | null>;
   try {
     if (filters.goalId !== undefined && filters.goalId !== null) {
       const row = db
@@ -2046,9 +2141,34 @@ function intentList(parsed: ParsedFlags, io: CliIo): number {
       }
     }
     intents = listUpdateIntents(db, filters);
+    const countOptions: CountUpdateIntentsOptions = {};
+    if (filters.status !== undefined) countOptions.status = filters.status;
+    if (filters.adapterKind !== undefined)
+      countOptions.adapterKind = filters.adapterKind;
+    if (filters.intentType !== undefined)
+      countOptions.intentType = filters.intentType;
+    if (filters.goalId !== undefined) countOptions.goalId = filters.goalId;
+    if (filters.sourceItemId !== undefined)
+      countOptions.sourceItemId = filters.sourceItemId;
+    if (filters.evidenceRecordId !== undefined)
+      countOptions.evidenceRecordId = filters.evidenceRecordId;
+    totalAvailable =
+      filters.limit !== undefined
+        ? countUpdateIntents(db, countOptions)
+        : intents.length;
+    auditSummaries = new Map();
+    for (const intent of intents) {
+      auditSummaries.set(
+        intent.id,
+        summarizeIntentApplyAuditsForIntent(db, intent.id)
+      );
+    }
   } finally {
     db.close();
   }
+
+  const truncated =
+    filters.limit !== undefined && totalAvailable > intents.length;
 
   const payload = {
     ok: true,
@@ -2062,7 +2182,14 @@ function intentList(parsed: ParsedFlags, io: CliIo): number {
     evidenceRecordId: filters.evidenceRecordId ?? null,
     limit: filters.limit ?? null,
     count: intents.length,
-    intents: intents.map(updateIntentToJsonShape)
+    totalAvailable,
+    truncated,
+    intents: intents.map((record) => ({
+      ...updateIntentToJsonShape(record),
+      externalApply: intentApplyAuditSummaryToJsonShape(
+        auditSummaries.get(record.id) ?? null
+      )
+    }))
   };
 
   if (parsed.json) {
@@ -2072,6 +2199,8 @@ function intentList(parsed: ParsedFlags, io: CliIo): number {
 
   const lines: string[] = [
     `Update intents: ${intents.length}`,
+    `Total available: ${totalAvailable}`,
+    `Truncated: ${truncated ? "yes" : "no"}`,
     `Status: ${statusFilter ?? "(any)"}`,
     `Adapter: ${filters.adapterKind ?? "(any)"}`,
     `Intent type: ${filters.intentType ?? "(any)"}`,
@@ -2079,10 +2208,21 @@ function intentList(parsed: ParsedFlags, io: CliIo): number {
     `Source item: ${filters.sourceItemId ?? "(any)"}`,
     `Evidence record: ${filters.evidenceRecordId ?? "(any)"}`,
     `Data dir: ${dataDir}`,
-    ...intents.map(
-      (record) =>
-        `- ${record.id} [${record.adapterKind}/${record.intentType}] ${record.status} target=${record.targetExternalId ?? "(none)"}: ${record.reason}`
-    ),
+    ...intents.map((record) => {
+      const summary = auditSummaries.get(record.id) ?? null;
+      const applyState = summary?.applyState ?? "idle";
+      const totalAttempts = summary?.totalAttempts ?? 0;
+      const latest = summary?.latestAttempt;
+      const latestLabel = latest
+        ? `${latest.lifecycleState}${latest.resultCode ? `/${latest.resultCode}` : ""}`
+        : "(none)";
+      return (
+        `- ${record.id} [${record.adapterKind}/${record.intentType}] ` +
+        `${record.status} target=${record.targetExternalId ?? "(none)"} ` +
+        `apply=${applyState} attempts=${totalAttempts} latest=${latestLabel}: ` +
+        `${record.reason}`
+      );
+    }),
     ""
   ];
   write(io.stdout, lines.join("\n"));
@@ -2124,8 +2264,12 @@ function intentGet(parsed: ParsedFlags, io: CliIo): number {
 
   const db = openDb(dataDir);
   let record: UpdateIntent | null;
+  let auditSummary: IntentApplyAuditSummary | null;
   try {
     record = getUpdateIntentById(db, intentId);
+    auditSummary = record
+      ? summarizeIntentApplyAuditsForIntent(db, intentId)
+      : null;
   } finally {
     db.close();
   }
@@ -2140,11 +2284,13 @@ function intentGet(parsed: ParsedFlags, io: CliIo): number {
     });
   }
 
+  const externalApply = intentApplyAuditSummaryToJsonShape(auditSummary);
   const payload = {
     ok: true,
     command: "intent get",
     dataDir,
-    intent: updateIntentToJsonShape(record)
+    intent: updateIntentToJsonShape(record),
+    externalApply
   };
 
   if (parsed.json) {
@@ -2169,6 +2315,7 @@ function intentGet(parsed: ParsedFlags, io: CliIo): number {
     `Applied at: ${record.appliedAt ?? "(unset)"}`,
     `Skipped at: ${record.skippedAt ?? "(unset)"}`,
     `Canceled at: ${record.canceledAt ?? "(unset)"}`,
+    ...renderExternalApplyTextLines(externalApply),
     `Data dir: ${dataDir}`,
     ""
   ];
@@ -2433,6 +2580,112 @@ function updateIntentToJsonShape(record: UpdateIntent): Record<string, unknown> 
     skippedAt: record.skippedAt,
     canceledAt: record.canceledAt
   };
+}
+
+type IntentApplyAuditJsonShape = {
+  intentId: string;
+  applyState: IntentApplyAuditSummary["applyState"];
+  totalAttempts: number;
+  counts: IntentApplyAuditSummary["counts"];
+  latestAttempt: ReturnType<typeof intentApplyAuditToJsonShape> | null;
+};
+
+function intentApplyAuditSummaryToJsonShape(
+  summary: IntentApplyAuditSummary | null
+): IntentApplyAuditJsonShape {
+  if (!summary) {
+    return {
+      intentId: "",
+      applyState: "idle",
+      totalAttempts: 0,
+      counts: {
+        claimed: 0,
+        succeeded: 0,
+        failed: 0,
+        blocked: 0,
+        audit_incomplete: 0
+      },
+      latestAttempt: null
+    };
+  }
+  return {
+    intentId: summary.intentId,
+    applyState: summary.applyState,
+    totalAttempts: summary.totalAttempts,
+    counts: summary.counts,
+    latestAttempt: summary.latestAttempt
+      ? intentApplyAuditToJsonShape(summary.latestAttempt)
+      : null
+  };
+}
+
+function intentApplyAuditToJsonShape(
+  audit: IntentApplyAudit
+): Record<string, unknown> {
+  return {
+    id: audit.id,
+    adapterKind: audit.adapterKind,
+    provider: audit.provider,
+    target: audit.target,
+    requestedAt: audit.requestedAt,
+    finishedAt: audit.finishedAt,
+    operatorReason: audit.operatorReason,
+    operatorActor: audit.operatorActor,
+    intentApplyPolicy: audit.intentApplyPolicy,
+    allowStatusMutation: audit.allowStatusMutation,
+    mutationKind: audit.mutationKind,
+    previewSummary: audit.previewSummary,
+    idempotencyMarker: audit.idempotencyMarker,
+    lifecycleState: audit.lifecycleState,
+    resultStatus: audit.resultStatus,
+    resultCode: audit.resultCode,
+    resultMessage: audit.resultMessage,
+    externalRefs: audit.externalRefs,
+    reconcile: audit.reconcile,
+    createdAt: audit.createdAt,
+    updatedAt: audit.updatedAt
+  };
+}
+
+function renderExternalApplyTextLines(
+  external: IntentApplyAuditJsonShape
+): string[] {
+  const counts = external.counts;
+  const lines: string[] = [
+    `External apply state: ${external.applyState}`,
+    `External apply attempts: total=${external.totalAttempts} ` +
+      `succeeded=${counts.succeeded} failed=${counts.failed} ` +
+      `claimed=${counts.claimed} blocked=${counts.blocked} ` +
+      `audit_incomplete=${counts.audit_incomplete}`
+  ];
+  const latest = external.latestAttempt;
+  if (!latest) {
+    lines.push("External apply latest attempt: (none)");
+    return lines;
+  }
+  lines.push(
+    `External apply latest attempt: ${latest.id} ${latest.lifecycleState}` +
+      ` (result=${latest.resultStatus ?? "(none)"}` +
+      ` code=${latest.resultCode ?? "(none)"})`
+  );
+  lines.push(
+    `External apply latest target: ${latest.adapterKind}/` +
+      `${(latest.target as { externalKey: string | null }).externalKey ?? "(none)"}` +
+      ` (${(latest.target as { externalId: string | null }).externalId ?? "(none)"})`
+  );
+  const refs = latest.externalRefs as {
+    commentId: string | null;
+    commentUrl: string | null;
+    stateTransitionId: string | null;
+  };
+  if (refs.commentId || refs.commentUrl || refs.stateTransitionId) {
+    lines.push(
+      `External apply refs: comment=${refs.commentId ?? "(none)"}` +
+        ` url=${refs.commentUrl ?? "(none)"}` +
+        ` transition=${refs.stateTransitionId ?? "(none)"}`
+    );
+  }
+  return lines;
 }
 
 function daemon(parsed: ParsedFlags, io: CliIo): number | Promise<number> {
@@ -3300,6 +3553,7 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
   const policyPayload = buildDoctorPolicyPayload(parsed.repo);
   const sourcesPayload = buildDoctorSourcesPayload(dataDirOptions);
   const evidencePayload = buildDoctorEvidencePayload(dataDirOptions);
+  const externalApplyPayload = buildDoctorExternalApplyPayload(dataDirOptions);
 
   const payload = {
     ok: true,
@@ -3319,7 +3573,8 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
     },
     policy: policyPayload,
     sources: sourcesPayload,
-    evidence: evidencePayload
+    evidence: evidencePayload,
+    externalApply: externalApplyPayload
   };
 
   if (parsed.json) {
@@ -3424,6 +3679,30 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
   } else {
     lines.push(`evidence: error (${evidencePayload.code})`);
   }
+  if (externalApplyPayload.ok) {
+    const intentCounts = externalApplyPayload.intentApplyStateCounts;
+    const auditCounts = externalApplyPayload.auditCounts;
+    lines.push(
+      `external apply: intents idle=${intentCounts.idle} in_flight=${intentCounts.in_flight} blocked=${intentCounts.blocked}`
+    );
+    lines.push(
+      `external apply: attempts total=${externalApplyPayload.totalAttempts} ` +
+        `succeeded=${auditCounts.succeeded} failed=${auditCounts.failed} ` +
+        `claimed=${auditCounts.claimed} blocked=${auditCounts.blocked} ` +
+        `audit_incomplete=${auditCounts.audit_incomplete}`
+    );
+    const latest = externalApplyPayload.latestAttempt;
+    if (latest) {
+      lines.push(
+        `external apply: latest ${latest.id} intent=${latest.intentId} ${latest.lifecycleState}` +
+          ` (result=${latest.resultStatus ?? "(none)"} code=${latest.resultCode ?? "(none)"})`
+      );
+    } else {
+      lines.push("external apply: no attempts recorded yet");
+    }
+  } else {
+    lines.push(`external apply: error (${externalApplyPayload.code})`);
+  }
   lines.push("");
   write(io.stdout, lines.join("\n"));
   return 0;
@@ -3490,6 +3769,63 @@ function buildDoctorEvidencePayload(
         goalId: summary.lastRecord.goalId,
         sourceItemId: summary.lastRecord.sourceItemId
       }
+    };
+  } finally {
+    db.close();
+  }
+}
+
+type DoctorExternalApplyLatestAttempt = {
+  intentId: string;
+} & ReturnType<typeof intentApplyAuditToJsonShape>;
+
+type DoctorExternalApplyPayload =
+  | {
+      ok: true;
+      intentApplyStateCounts: IntentApplyStateCounts;
+      auditCounts: IntentApplyAuditCounts;
+      totalAttempts: number;
+      latestAttempt: DoctorExternalApplyLatestAttempt | null;
+    }
+  | {
+      ok: false;
+      code: string;
+      message: string;
+    };
+
+function buildDoctorExternalApplyPayload(
+  dataDirOptions: DataDirOptions
+): DoctorExternalApplyPayload {
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return {
+      ok: false,
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err)
+    };
+  }
+  const db = openDb(dataDir);
+  try {
+    const intentApplyStateCounts = countIntentsByApplyState(db);
+    const auditCounts = countIntentApplyAuditsByLifecycleState(db);
+    const totalAttempts =
+      auditCounts.claimed +
+      auditCounts.succeeded +
+      auditCounts.failed +
+      auditCounts.blocked +
+      auditCounts.audit_incomplete;
+    const latestList = listIntentApplyAudits(db, { limit: 1 });
+    const latest = latestList[0] ?? null;
+    return {
+      ok: true,
+      intentApplyStateCounts,
+      auditCounts,
+      totalAttempts,
+      latestAttempt: latest
+        ? { intentId: latest.intentId, ...intentApplyAuditToJsonShape(latest) }
+        : null
     };
   } finally {
     db.close();
@@ -4023,10 +4359,13 @@ function emitStatus(
       ? {
           totalPendingUpdateIntentCount: data.totalPendingUpdateIntentCount,
           truncatedPendingUpdateIntents: data.truncatedPendingUpdateIntents,
-          pendingUpdateIntents: data.pendingUpdateIntents,
+          pendingUpdateIntents: data.pendingUpdateIntents.map(
+            (intent) => goalStatusPendingIntentToJsonShape(intent)
+          ),
           intentStaleThresholdMs: data.intentStaleThresholdMs
         }
-      : {})
+      : {}),
+    externalApply: goalStatusExternalApplyToJsonShape(data.externalApply)
   };
 
   if (parsed.json) {
@@ -4170,9 +4509,14 @@ function emitStatus(
     );
     for (const intent of data.pendingUpdateIntents) {
       const staleFlag = intent.stale ? " STALE" : "";
+      const latestText = intent.externalApply.latestAttempt
+        ? ` latest=${intent.externalApply.latestAttempt.lifecycleState}`
+        : "";
       lines.push(
         `- ${intent.intentId} [${intent.adapterKind}/${intent.intentType}] ` +
-          `target=${intent.targetExternalId ?? "(none)"} ageMs=${intent.ageMs}${staleFlag}: ${intent.reason}`
+          `target=${intent.targetExternalId ?? "(none)"} ageMs=${intent.ageMs}${staleFlag}` +
+          ` apply=${intent.externalApply.applyState}` +
+          ` attempts=${intent.externalApply.totalAttempts}${latestText}: ${intent.reason}`
       );
     }
     if (data.truncatedPendingUpdateIntents) {
@@ -4180,9 +4524,99 @@ function emitStatus(
     }
   }
 
+  const externalApply = data.externalApply;
+  const applyStateCounts = externalApply.pendingIntentApplyStateCounts;
+  const auditCounts = externalApply.pendingAuditCounts;
+  lines.push(
+    `Pending external apply state: idle=${applyStateCounts.idle}, ` +
+      `in_flight=${applyStateCounts.in_flight}, ` +
+      `blocked=${applyStateCounts.blocked}`
+  );
+  lines.push(
+    `Pending external apply audits: total=${externalApply.totalAttempts}, ` +
+      `succeeded=${auditCounts.succeeded}, ` +
+      `failed=${auditCounts.failed}, ` +
+      `claimed=${auditCounts.claimed}, ` +
+      `blocked=${auditCounts.blocked}, ` +
+      `audit_incomplete=${auditCounts.audit_incomplete}`
+  );
+  const latestExternalApply = externalApply.latestAttempt;
+  if (latestExternalApply) {
+    lines.push(
+      `Latest external apply: ${latestExternalApply.id} ${latestExternalApply.lifecycleState}` +
+        ` intent=${latestExternalApply.intentId}` +
+        ` (result=${latestExternalApply.resultStatus ?? "(none)"}` +
+        ` code=${latestExternalApply.resultCode ?? "(none)"})`
+    );
+  } else {
+    lines.push("Latest external apply: (none)");
+  }
+
   lines.push("");
   write(io.stdout, lines.join("\n"));
   return 0;
+}
+
+function goalStatusPendingIntentToJsonShape(
+  intent: GoalStatusPendingIntentSummary
+): Record<string, unknown> {
+  return {
+    intentId: intent.intentId,
+    adapterKind: intent.adapterKind,
+    intentType: intent.intentType,
+    targetExternalId: intent.targetExternalId,
+    reason: intent.reason,
+    goalId: intent.goalId,
+    sourceItemId: intent.sourceItemId,
+    evidenceRecordId: intent.evidenceRecordId,
+    createdAt: intent.createdAt,
+    ageMs: intent.ageMs,
+    stale: intent.stale,
+    externalApply: goalStatusPendingIntentExternalApplyToJsonShape(
+      intent.externalApply
+    )
+  };
+}
+
+function goalStatusPendingIntentExternalApplyToJsonShape(
+  external: GoalStatusPendingIntentExternalApply
+): {
+  applyState: GoalStatusPendingIntentExternalApply["applyState"];
+  totalAttempts: number;
+  counts: GoalStatusPendingIntentExternalApply["counts"];
+  latestAttempt: Record<string, unknown> | null;
+} {
+  return {
+    applyState: external.applyState,
+    totalAttempts: external.totalAttempts,
+    counts: external.counts,
+    latestAttempt: external.latestAttempt
+      ? intentApplyAuditToJsonShape(external.latestAttempt)
+      : null
+  };
+}
+
+function goalStatusExternalApplyToJsonShape(
+  external: GoalStatusExternalApply
+): {
+  pendingIntentApplyStateCounts: GoalStatusExternalApply["pendingIntentApplyStateCounts"];
+  pendingAuditCounts: GoalStatusExternalApply["pendingAuditCounts"];
+  totalAttempts: number;
+  latestAttempt:
+    | ({ intentId: string } & ReturnType<typeof intentApplyAuditToJsonShape>)
+    | null;
+} {
+  return {
+    pendingIntentApplyStateCounts: external.pendingIntentApplyStateCounts,
+    pendingAuditCounts: external.pendingAuditCounts,
+    totalAttempts: external.totalAttempts,
+    latestAttempt: external.latestAttempt
+      ? {
+          intentId: external.latestAttempt.intentId,
+          ...intentApplyAuditToJsonShape(external.latestAttempt)
+        }
+      : null
+  };
 }
 
 function logs(parsed: ParsedFlags, io: CliIo): number {

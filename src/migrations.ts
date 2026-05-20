@@ -14,6 +14,10 @@ const JOB_QUEUE_COLUMNS: ColumnSpec[] = [
   { name: "error_path", type: "TEXT" }
 ];
 
+const UPDATE_INTENT_M6_COLUMNS: ColumnSpec[] = [
+  { name: "apply_state", type: "TEXT NOT NULL DEFAULT 'idle'" }
+];
+
 const GOAL_REDUCER_COLUMNS: ColumnSpec[] = [
   { name: "current_iteration", type: "INTEGER NOT NULL DEFAULT 0" },
   { name: "completion_reason", type: "TEXT" },
@@ -226,6 +230,54 @@ CREATE INDEX IF NOT EXISTS idx_update_intents_created_at
   ON update_intents(created_at);
 `;
 
+const INTENT_APPLY_AUDITS_DDL = `
+CREATE TABLE IF NOT EXISTS intent_apply_audits (
+  id TEXT PRIMARY KEY,
+  intent_id TEXT NOT NULL REFERENCES update_intents(id),
+  adapter_kind TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  external_target_external_id TEXT,
+  external_target_external_key TEXT,
+  external_target_url TEXT,
+  external_target_title TEXT,
+  requested_at INTEGER NOT NULL,
+  finished_at INTEGER,
+  operator_reason TEXT NOT NULL,
+  operator_actor TEXT,
+  intent_apply_policy TEXT NOT NULL,
+  allow_status_mutation INTEGER NOT NULL DEFAULT 0,
+  mutation_kind TEXT NOT NULL,
+  preview_summary TEXT NOT NULL,
+  idempotency_marker TEXT NOT NULL,
+  lifecycle_state TEXT NOT NULL,
+  result_status TEXT,
+  result_code TEXT,
+  result_message TEXT,
+  external_ref_comment_id TEXT,
+  external_ref_comment_url TEXT,
+  external_ref_state_transition_id TEXT,
+  reconcile_status TEXT,
+  reconcile_warning TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS idx_intent_apply_audits_intent_id
+  ON intent_apply_audits(intent_id);
+
+CREATE INDEX IF NOT EXISTS idx_intent_apply_audits_lifecycle_state
+  ON intent_apply_audits(lifecycle_state);
+
+CREATE INDEX IF NOT EXISTS idx_intent_apply_audits_finished_at
+  ON intent_apply_audits(finished_at);
+
+CREATE INDEX IF NOT EXISTS idx_intent_apply_audits_created_at
+  ON intent_apply_audits(created_at);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_intent_apply_audits_active
+  ON intent_apply_audits(intent_id) WHERE lifecycle_state = 'claimed';
+`;
+
 const JOB_IDEMPOTENCY_INDEX_DDL = `
 CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_idempotency_key
   ON jobs(idempotency_key) WHERE idempotency_key IS NOT NULL;
@@ -253,6 +305,12 @@ export function applyQueueMigrations(db: MomentumDb): void {
     db.exec(SOURCE_ITEMS_DDL);
     db.exec(EVIDENCE_RECORDS_DDL);
     db.exec(UPDATE_INTENTS_DDL);
+    if (tableExists(db, "update_intents")) {
+      for (const column of UPDATE_INTENT_M6_COLUMNS) {
+        ensureColumn(db, "update_intents", column);
+      }
+    }
+    db.exec(INTENT_APPLY_AUDITS_DDL);
     if (tableExists(db, "daemon_runs")) {
       for (const column of DAEMON_RUN_COLUMNS) {
         ensureColumn(db, "daemon_runs", column);

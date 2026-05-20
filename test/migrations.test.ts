@@ -221,8 +221,198 @@ describe("applyQueueMigrations", () => {
       expect(indexes).toContain("idx_update_intents_evidence");
       expect(indexes).toContain("idx_update_intents_adapter_target");
       expect(indexes).toContain("idx_update_intents_created_at");
+
+      expect(updateIntentColumns, "missing update_intents column: apply_state")
+        .toContain("apply_state");
+
+      expect(tableNames(db)).toContain("intent_apply_audits");
+      const auditColumns = getColumns(db, "intent_apply_audits").map(
+        (row) => row.name
+      );
+      for (const col of [
+        "id",
+        "intent_id",
+        "adapter_kind",
+        "provider",
+        "external_target_external_id",
+        "external_target_external_key",
+        "external_target_url",
+        "external_target_title",
+        "requested_at",
+        "finished_at",
+        "operator_reason",
+        "operator_actor",
+        "intent_apply_policy",
+        "allow_status_mutation",
+        "mutation_kind",
+        "preview_summary",
+        "idempotency_marker",
+        "lifecycle_state",
+        "result_status",
+        "result_code",
+        "result_message",
+        "external_ref_comment_id",
+        "external_ref_comment_url",
+        "external_ref_state_transition_id",
+        "reconcile_status",
+        "reconcile_warning",
+        "created_at",
+        "updated_at"
+      ]) {
+        expect(
+          auditColumns,
+          `missing intent_apply_audits column: ${col}`
+        ).toContain(col);
+      }
+      expect(indexes).toContain("idx_intent_apply_audits_intent_id");
+      expect(indexes).toContain("idx_intent_apply_audits_lifecycle_state");
+      expect(indexes).toContain("idx_intent_apply_audits_finished_at");
+      expect(indexes).toContain("idx_intent_apply_audits_created_at");
+      expect(indexes).toContain("idx_intent_apply_audits_active");
     } finally {
       db.close();
+    }
+  });
+
+  it("does not persist credentials or request headers on intent_apply_audits", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const auditColumns = getColumns(db, "intent_apply_audits").map(
+        (row) => row.name.toLowerCase()
+      );
+      const forbidden = [
+        "credential",
+        "credentials",
+        "token",
+        "secret",
+        "api_key",
+        "apikey",
+        "authorization",
+        "auth_header",
+        "request_headers",
+        "headers"
+      ];
+      for (const col of auditColumns) {
+        for (const banned of forbidden) {
+          expect(
+            col,
+            `intent_apply_audits should not include credential/header column "${col}"`
+          ).not.toContain(banned);
+        }
+      }
+    } finally {
+      db.close();
+    }
+  });
+
+  it("migrates a pre-M6 update_intents schema by adding apply_state and the audit ledger", () => {
+    const dataDir = makeTempDir();
+    const dbPath = path.join(dataDir, "momentum.db");
+    const pre = new DatabaseSync(dbPath);
+    try {
+      pre.exec(`
+        CREATE TABLE goals (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          repo TEXT,
+          runner TEXT NOT NULL DEFAULT 'fake',
+          branch TEXT NOT NULL,
+          max_iterations INTEGER NOT NULL DEFAULT 1,
+          verification TEXT NOT NULL DEFAULT '[]',
+          verification_timeout_sec INTEGER NOT NULL DEFAULT 900,
+          state TEXT NOT NULL DEFAULT 'initialized',
+          artifact_dir TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        ) STRICT;
+        CREATE TABLE jobs (
+          id TEXT PRIMARY KEY,
+          goal_id TEXT NOT NULL,
+          type TEXT NOT NULL DEFAULT 'foreground_iteration',
+          iteration INTEGER NOT NULL DEFAULT 1,
+          state TEXT NOT NULL DEFAULT 'pending',
+          attempt_count INTEGER NOT NULL DEFAULT 0,
+          artifact_path TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          started_at INTEGER,
+          finished_at INTEGER,
+          error TEXT
+        ) STRICT;
+        CREATE TABLE events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          goal_id TEXT NOT NULL,
+          job_id TEXT,
+          type TEXT NOT NULL,
+          payload TEXT NOT NULL DEFAULT '{}',
+          created_at INTEGER NOT NULL
+        ) STRICT;
+        CREATE TABLE update_intents (
+          id TEXT PRIMARY KEY,
+          adapter_kind TEXT NOT NULL,
+          target_external_id TEXT,
+          intent_type TEXT NOT NULL,
+          payload_json TEXT NOT NULL DEFAULT '{}',
+          reason TEXT NOT NULL,
+          goal_id TEXT,
+          source_item_id TEXT,
+          evidence_record_id TEXT,
+          status TEXT NOT NULL DEFAULT 'pending',
+          idempotency_key TEXT NOT NULL,
+          decision_reason TEXT,
+          error_code TEXT,
+          error_message TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          applied_at INTEGER,
+          skipped_at INTEGER,
+          canceled_at INTEGER
+        ) STRICT;
+      `);
+      pre.prepare(
+        `INSERT INTO update_intents
+           (id, adapter_kind, intent_type, payload_json, reason,
+            status, idempotency_key, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)`
+      ).run(
+        "intent_legacy_1",
+        "linear",
+        "source_satisfied",
+        "{}",
+        "preserved",
+        "legacy-key-1",
+        1,
+        2
+      );
+    } finally {
+      pre.close();
+    }
+
+    const upgraded = openDb(dataDir);
+    try {
+      const updateIntentCols = getColumns(upgraded, "update_intents").map(
+        (row) => row.name
+      );
+      expect(updateIntentCols).toContain("apply_state");
+      expect(tableNames(upgraded)).toContain("intent_apply_audits");
+      const preserved = upgraded
+        .prepare(
+          `SELECT id, status, apply_state, reason
+             FROM update_intents WHERE id = 'intent_legacy_1'`
+        )
+        .get() as {
+        id: string;
+        status: string;
+        apply_state: string;
+        reason: string;
+      };
+      expect(preserved.id).toBe("intent_legacy_1");
+      expect(preserved.status).toBe("pending");
+      expect(preserved.apply_state).toBe("idle");
+      expect(preserved.reason).toBe("preserved");
+    } finally {
+      upgraded.close();
     }
   });
 
