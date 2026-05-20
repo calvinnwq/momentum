@@ -735,9 +735,9 @@ describe("executeExternalApply concurrency and write failures", () => {
 
       const spy = makeApplySpy(makeSuccessOutcome({ idempotencyMarker }));
 
-      // First call to finalize (lifecycleState=succeeded) fails; second call
-      // (audit_incomplete) succeeds — modeling a DB hiccup that flips the
-      // intent into the blocked state defined by the M6 contract.
+      // The initial success finalize fails; recovery must force
+      // audit_incomplete and block replay without relying on another normal
+      // finalize call.
       let finalizeCalls = 0;
       const deps: ExecuteExternalApplyDeps = {
         buildLinearClient: () => spy.client,
@@ -762,6 +762,7 @@ describe("executeExternalApply concurrency and write failures", () => {
       if (result.ok) throw new Error("expected refusal");
       expect(result.code).toBe("audit_incomplete");
       expect(result.audit?.lifecycleState).toBe("audit_incomplete");
+      expect(result.audit?.resultCode).toBe("audit_finalize_failed");
       expect(result.context.reconcile.status).toBe("deferred");
 
       const applyState = db

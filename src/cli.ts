@@ -138,6 +138,7 @@ import {
 } from "./intent-apply-audits.js";
 import {
   executeExternalApply,
+  LINEAR_API_KEY_ENV_VAR,
   type ExecuteExternalApplyDeps,
   type ExecuteExternalApplyResult
 } from "./intent-apply-execute.js";
@@ -702,7 +703,7 @@ function sourceUnlink(parsed: ParsedFlags, io: CliIo): number {
   }
 }
 
-const LINEAR_API_KEY_ENV = "LINEAR_API_KEY";
+const LINEAR_API_KEY_ENV = LINEAR_API_KEY_ENV_VAR;
 
 async function sourceReconcile(
   parsed: ParsedFlags,

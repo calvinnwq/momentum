@@ -588,13 +588,11 @@ export async function executeExternalApply(
 
   if (!finalizeSucceeded.ok) {
     // External write succeeded but the audit row could not be marked succeeded.
-    // Try to record `audit_incomplete` so the intent moves to `blocked` and a
-    // future apply cannot replay the mutation before operator recovery clears
-    // the block.
-    const incomplete = finalizeFn(input.db, {
+    // Force `audit_incomplete` so the intent moves to `blocked` and a future
+    // apply cannot replay the mutation before operator recovery clears the
+    // block.
+    const incomplete = markIntentApplyAuditIncompleteFn(input.db, {
       auditId: audit.id,
-      lifecycleState: "audit_incomplete",
-      resultStatus: "audit_incomplete",
       resultCode: "audit_finalize_failed",
       resultMessage: `Audit finalize failed after external write: ${finalizeSucceeded.message}`,
       externalRefs: {
@@ -613,7 +611,9 @@ export async function executeExternalApply(
 
     return buildExternalFailure({
       code: "audit_incomplete",
-      message: `External write succeeded but audit finalize failed for intent ${intent.id}; intent is blocked from further apply.`,
+      message: incomplete.ok
+        ? `External write succeeded but audit finalize failed for intent ${intent.id}; intent is blocked from further apply.`
+        : `External write succeeded but audit finalize recovery failed for intent ${intent.id}: ${incomplete.message}`,
       intent,
       audit: incomplete.ok ? incomplete.audit : audit,
       finalize: incomplete,
