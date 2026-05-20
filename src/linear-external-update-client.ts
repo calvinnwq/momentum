@@ -331,7 +331,7 @@ export function buildLinearExternalUpdateClient(
 
       let statusOutcome = buildUnchangedStatus(interpretedIssue.state);
 
-      if (resolvedStateId) {
+      if (resolvedStateId && interpretedIssue.state.id !== resolvedStateId) {
         const updateResult = await postIssueStateUpdate(
           fetchImpl,
           endpoint,

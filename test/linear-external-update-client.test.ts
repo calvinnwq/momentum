@@ -438,6 +438,44 @@ describe("buildLinearExternalUpdateClient — comment + status transition", () =
     });
   });
 
+  it("does not issueUpdate on fresh apply when already in the requested state", async () => {
+    const preview = buildPreview();
+    const fetchResponses: MockGraphqlResponse[] = [
+      {
+        kind: "json",
+        status: 200,
+        body: issueLookupBody({
+          state: { id: "state-done", name: "Done" }
+        })
+      },
+      { kind: "json", status: 200, body: commentCreateBody({}) }
+    ];
+    const { fetch, calls } = buildMockFetch(fetchResponses);
+
+    const client = buildLinearExternalUpdateClient({
+      apiKey: "lin_api_secret",
+      fetch
+    });
+
+    const result = await client.apply({
+      preview,
+      statusMutation: { kind: "by_id", stateId: "state-done" }
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.alreadyApplied).toBe(false);
+    expect(result.status).toEqual({
+      transitioned: false,
+      previousStateId: "state-done",
+      previousStateName: "Done",
+      nextStateId: null,
+      nextStateName: null
+    });
+    expect(calls).toHaveLength(2);
+    expect(String(calls[1]?.body["query"])).toContain("commentCreate");
+    expect(calls.every((call) => !String(call.body["query"]).includes("issueUpdate"))).toBe(true);
+  });
+
   it("resolves a uniquely-matching state by name through workflowStates", async () => {
     const fetchResponses: MockGraphqlResponse[] = [
       { kind: "json", status: 200, body: issueLookupBody({}) },
