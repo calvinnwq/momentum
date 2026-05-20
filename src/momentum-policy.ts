@@ -42,9 +42,9 @@ export const MOMENTUM_POLICY_FILENAME = "MOMENTUM.md";
  *   record an operator's manual mark, but the system refuses to perform any
  *   external tracker writes unless the repo explicitly opts in.
  * - `external_apply_allowed`: opts the repo into the M6 adapter-mediated
- *   external apply path. In the NGX-296 boundary slice this authorizes
- *   adapter dry-run previews; public CLI execution may still be refused until
- *   the later two-phase write slice is wired.
+ *   external apply path. The policy gates the adapter preview and Linear
+ *   write-client path; public CLI execution may still be refused until the
+ *   later two-phase apply slice is wired.
  */
 export const UPDATE_INTENT_APPLY_POLICIES = [
   "create_intents_only",
