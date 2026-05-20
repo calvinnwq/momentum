@@ -119,6 +119,11 @@ import {
   evaluateGoalForSourceSatisfiedIntents,
   type EvaluateGoalForSourceSatisfiedIntentResult
 } from "./update-intent-generator.js";
+import {
+  summarizeIntentApplyAuditsForIntent,
+  type IntentApplyAudit,
+  type IntentApplyAuditSummary
+} from "./intent-apply-audits.js";
 
 export const VERSION = "0.0.0";
 
@@ -2124,8 +2129,12 @@ function intentGet(parsed: ParsedFlags, io: CliIo): number {
 
   const db = openDb(dataDir);
   let record: UpdateIntent | null;
+  let auditSummary: IntentApplyAuditSummary | null;
   try {
     record = getUpdateIntentById(db, intentId);
+    auditSummary = record
+      ? summarizeIntentApplyAuditsForIntent(db, intentId)
+      : null;
   } finally {
     db.close();
   }
@@ -2140,11 +2149,13 @@ function intentGet(parsed: ParsedFlags, io: CliIo): number {
     });
   }
 
+  const externalApply = intentApplyAuditSummaryToJsonShape(auditSummary);
   const payload = {
     ok: true,
     command: "intent get",
     dataDir,
-    intent: updateIntentToJsonShape(record)
+    intent: updateIntentToJsonShape(record),
+    externalApply
   };
 
   if (parsed.json) {
@@ -2169,6 +2180,7 @@ function intentGet(parsed: ParsedFlags, io: CliIo): number {
     `Applied at: ${record.appliedAt ?? "(unset)"}`,
     `Skipped at: ${record.skippedAt ?? "(unset)"}`,
     `Canceled at: ${record.canceledAt ?? "(unset)"}`,
+    ...renderExternalApplyTextLines(externalApply),
     `Data dir: ${dataDir}`,
     ""
   ];
@@ -2433,6 +2445,112 @@ function updateIntentToJsonShape(record: UpdateIntent): Record<string, unknown> 
     skippedAt: record.skippedAt,
     canceledAt: record.canceledAt
   };
+}
+
+type IntentApplyAuditJsonShape = {
+  intentId: string;
+  applyState: IntentApplyAuditSummary["applyState"];
+  totalAttempts: number;
+  counts: IntentApplyAuditSummary["counts"];
+  latestAttempt: ReturnType<typeof intentApplyAuditToJsonShape> | null;
+};
+
+function intentApplyAuditSummaryToJsonShape(
+  summary: IntentApplyAuditSummary | null
+): IntentApplyAuditJsonShape {
+  if (!summary) {
+    return {
+      intentId: "",
+      applyState: "idle",
+      totalAttempts: 0,
+      counts: {
+        claimed: 0,
+        succeeded: 0,
+        failed: 0,
+        blocked: 0,
+        audit_incomplete: 0
+      },
+      latestAttempt: null
+    };
+  }
+  return {
+    intentId: summary.intentId,
+    applyState: summary.applyState,
+    totalAttempts: summary.totalAttempts,
+    counts: summary.counts,
+    latestAttempt: summary.latestAttempt
+      ? intentApplyAuditToJsonShape(summary.latestAttempt)
+      : null
+  };
+}
+
+function intentApplyAuditToJsonShape(
+  audit: IntentApplyAudit
+): Record<string, unknown> {
+  return {
+    id: audit.id,
+    adapterKind: audit.adapterKind,
+    provider: audit.provider,
+    target: audit.target,
+    requestedAt: audit.requestedAt,
+    finishedAt: audit.finishedAt,
+    operatorReason: audit.operatorReason,
+    operatorActor: audit.operatorActor,
+    intentApplyPolicy: audit.intentApplyPolicy,
+    allowStatusMutation: audit.allowStatusMutation,
+    mutationKind: audit.mutationKind,
+    previewSummary: audit.previewSummary,
+    idempotencyMarker: audit.idempotencyMarker,
+    lifecycleState: audit.lifecycleState,
+    resultStatus: audit.resultStatus,
+    resultCode: audit.resultCode,
+    resultMessage: audit.resultMessage,
+    externalRefs: audit.externalRefs,
+    reconcile: audit.reconcile,
+    createdAt: audit.createdAt,
+    updatedAt: audit.updatedAt
+  };
+}
+
+function renderExternalApplyTextLines(
+  external: IntentApplyAuditJsonShape
+): string[] {
+  const counts = external.counts;
+  const lines: string[] = [
+    `External apply state: ${external.applyState}`,
+    `External apply attempts: total=${external.totalAttempts} ` +
+      `succeeded=${counts.succeeded} failed=${counts.failed} ` +
+      `claimed=${counts.claimed} blocked=${counts.blocked} ` +
+      `audit_incomplete=${counts.audit_incomplete}`
+  ];
+  const latest = external.latestAttempt;
+  if (!latest) {
+    lines.push("External apply latest attempt: (none)");
+    return lines;
+  }
+  lines.push(
+    `External apply latest attempt: ${latest.id} ${latest.lifecycleState}` +
+      ` (result=${latest.resultStatus ?? "(none)"}` +
+      ` code=${latest.resultCode ?? "(none)"})`
+  );
+  lines.push(
+    `External apply latest target: ${latest.adapterKind}/` +
+      `${(latest.target as { externalKey: string | null }).externalKey ?? "(none)"}` +
+      ` (${(latest.target as { externalId: string | null }).externalId ?? "(none)"})`
+  );
+  const refs = latest.externalRefs as {
+    commentId: string | null;
+    commentUrl: string | null;
+    stateTransitionId: string | null;
+  };
+  if (refs.commentId || refs.commentUrl || refs.stateTransitionId) {
+    lines.push(
+      `External apply refs: comment=${refs.commentId ?? "(none)"}` +
+        ` url=${refs.commentUrl ?? "(none)"}` +
+        ` transition=${refs.stateTransitionId ?? "(none)"}`
+    );
+  }
+  return lines;
 }
 
 function daemon(parsed: ParsedFlags, io: CliIo): number | Promise<number> {

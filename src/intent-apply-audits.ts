@@ -498,15 +498,23 @@ export function listIntentApplyAudits(
 }
 
 export function countIntentApplyAuditsByLifecycleState(
-  db: MomentumDb
+  db: MomentumDb,
+  options: { intentId?: string } = {}
 ): IntentApplyAuditCounts {
+  const params: string[] = [];
+  let where = "";
+  if (options.intentId !== undefined) {
+    where = "WHERE intent_id = ?";
+    params.push(options.intentId);
+  }
   const rows = db
     .prepare(
       `SELECT lifecycle_state AS state, COUNT(*) AS c
          FROM intent_apply_audits
+         ${where}
         GROUP BY lifecycle_state`
     )
-    .all() as Array<{ state: IntentApplyLifecycleState; c: number }>;
+    .all(...params) as Array<{ state: IntentApplyLifecycleState; c: number }>;
   const counts: IntentApplyAuditCounts = {
     claimed: 0,
     succeeded: 0,
@@ -518,6 +526,48 @@ export function countIntentApplyAuditsByLifecycleState(
     counts[row.state] = row.c;
   }
   return counts;
+}
+
+export type IntentApplyAuditSummary = {
+  intentId: string;
+  applyState: IntentApplyState;
+  totalAttempts: number;
+  counts: IntentApplyAuditCounts;
+  latestAttempt: IntentApplyAudit | null;
+};
+
+/**
+ * Per-intent audit summary used by CLI/operator surfaces. Returns null when
+ * the intent does not exist. The `applyState` reflects the current CAS column
+ * on `update_intents` so callers can render `idle | in_flight | blocked`
+ * alongside the latest attempt and lifecycle-state counts.
+ */
+export function summarizeIntentApplyAuditsForIntent(
+  db: MomentumDb,
+  intentId: string
+): IntentApplyAuditSummary | null {
+  validateNonEmpty(intentId, "intentId");
+  const intent = db
+    .prepare("SELECT id, apply_state FROM update_intents WHERE id = ?")
+    .get(intentId) as UpdateIntentApplyStateRow | undefined;
+  if (!intent) return null;
+
+  const counts = countIntentApplyAuditsByLifecycleState(db, { intentId });
+  const totalAttempts =
+    counts.claimed +
+    counts.succeeded +
+    counts.failed +
+    counts.blocked +
+    counts.audit_incomplete;
+  const latestAttempt = getLatestIntentApplyAudit(db, intentId);
+
+  return {
+    intentId,
+    applyState: intent.apply_state,
+    totalAttempts,
+    counts,
+    latestAttempt
+  };
 }
 
 export function countBlockedIntents(db: MomentumDb): number {
