@@ -46,6 +46,7 @@ import {
   type ExternalUpdateAdapter,
   type ExternalUpdateAdapterError,
   type ExternalUpdateAdapterInput,
+  type ExternalUpdateAdapterPreview,
   type ExternalUpdateAdapterPreviewResult,
   type ExternalUpdateAdapterTarget,
   type ExternalUpdateMutationKind
@@ -643,6 +644,23 @@ export async function executeExternalApply(
   });
 
   if (!markApplied.ok) {
+    const currentIntent = getUpdateIntentById(input.db, intent.id);
+    if (
+      markApplied.code === "intent_already_terminal" &&
+      markApplied.currentStatus === "applied" &&
+      currentIntent?.status === "applied"
+    ) {
+      return buildExternalSuccess({
+        intent: currentIntent,
+        adapter,
+        target,
+        policyResolution,
+        allowStatusMutation,
+        preview,
+        audit: finalizeSucceeded.audit,
+        externalResult
+      });
+    }
     const incomplete = markIntentApplyAuditIncompleteFn(input.db, {
       auditId: finalizeSucceeded.audit.id,
       resultCode: "mark_applied_failed",
@@ -710,6 +728,48 @@ export async function executeExternalApply(
     intent: markApplied.intent,
     audit: finalizeSucceeded.audit,
     external: externalSummary(externalResult)
+  };
+}
+
+function buildExternalSuccess(args: {
+  intent: UpdateIntent;
+  adapter: ExternalUpdateAdapter;
+  target: ExternalUpdateAdapterTarget;
+  policyResolution: { applyPolicy: ExecuteExternalApplyResolvedPolicy };
+  allowStatusMutation: boolean;
+  preview: ExternalUpdateAdapterPreview;
+  audit: IntentApplyAudit;
+  externalResult: LinearExternalUpdateResult & { ok: true };
+}): ExecuteExternalApplySuccess {
+  const successContext: ExecuteExternalApplyContext = {
+    intentId: args.intent.id,
+    intentStatus: args.intent.status,
+    adapterKind: args.adapter.kind,
+    intentType: args.intent.intentType,
+    target: {
+      adapterKind: args.target.adapterKind,
+      externalId: args.target.externalId,
+      externalKey: args.target.externalKey,
+      url: args.target.url,
+      title: args.target.title
+    },
+    applyPolicy: args.policyResolution.applyPolicy,
+    allowStatusMutation: args.allowStatusMutation,
+    mutationKind: args.preview.mutationKind,
+    auditId: args.audit.id,
+    reconcile: {
+      status: "pending",
+      warning: null
+    }
+  };
+
+  return {
+    ok: true,
+    resultCode: "applied",
+    context: successContext,
+    intent: args.intent,
+    audit: args.audit,
+    external: externalSummary(args.externalResult)
   };
 }
 

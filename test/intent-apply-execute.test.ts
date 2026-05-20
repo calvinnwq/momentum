@@ -836,6 +836,59 @@ describe("executeExternalApply concurrency and write failures", () => {
     }
   });
 
+  it("treats concurrent already-applied intent transition as success without blocking replay", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { intentId } = seedHappyPath(db);
+      const repoPath = makeRepo(externalApplyAllowedPolicy());
+      const intent = getUpdateIntentById(db, intentId);
+      if (!intent) throw new Error("intent missing");
+      const idempotencyMarker = expectedIdempotencyMarker(intentId, intent.payload);
+      const spy = makeApplySpy(makeSuccessOutcome({ idempotencyMarker }));
+
+      const result = await executeExternalApply(
+        baseInput(db, {
+          intentId,
+          repoPath,
+          deps: {
+            buildLinearClient: () => spy.client,
+            now: () => 875,
+            markUpdateIntentApplied: (db, input) => {
+              db.prepare(
+                `UPDATE update_intents
+                    SET status = 'applied',
+                        decision_reason = 'external_apply: concurrent operator',
+                        applied_at = ?,
+                        updated_at = ?
+                  WHERE id = ?`
+              ).run(input.now ?? 875, input.now ?? 875, input.intentId);
+              return {
+                ok: false,
+                code: "intent_already_terminal",
+                message: "simulated concurrent apply",
+                currentStatus: "applied"
+              };
+            }
+          }
+        })
+      );
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error(`expected ok, got ${result.code}`);
+      expect(result.intent.status).toBe("applied");
+      expect(result.audit.lifecycleState).toBe("succeeded");
+      expect(result.audit.resultCode).toBe("applied");
+
+      const applyState = db
+        .prepare("SELECT apply_state FROM update_intents WHERE id = ?")
+        .get(intentId) as { apply_state: string };
+      expect(applyState.apply_state).toBe("idle");
+    } finally {
+      db.close();
+    }
+  });
+
   it("maps a thrown adapter exception to adapter_threw and finalizes the audit as failed", async () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);
