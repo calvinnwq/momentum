@@ -144,8 +144,9 @@ evidenceRecordId, createdAt, ageMs, stale}` plus an `externalApply`
 block carrying `{applyState, totalAttempts, counts, latestAttempt}`.
 `applyState` is `idle`, `in_flight`, or `blocked`; `counts` has
 `claimed`, `succeeded`, `failed`, `blocked`, and `audit_incomplete`;
-`latestAttempt` is the most recent audit row or `null`.
-`intentStaleThresholdMs` carries the threshold used to compute the
+`latestAttempt` is the most recent audit row or `null` (see
+[Audit row shape](intent-commands.md#audit-row-shape) for the full field
+list). `intentStaleThresholdMs` carries the threshold used to compute the
 per-intent `stale` flag (default 30 days). See
 [`docs/intent-commands.md`](intent-commands.md) for the intent lifecycle
 that consumes these entries.

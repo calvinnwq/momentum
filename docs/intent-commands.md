@@ -52,9 +52,37 @@ Each intent also carries an `externalApply` block:
 - `applyState` — the intent's current apply state: `idle`, `in_flight`, or `blocked`.
 - `totalAttempts` — number of audit rows for this intent.
 - `counts` — lifecycle counts: `claimed`, `succeeded`, `failed`, `blocked`, `audit_incomplete`.
-- `latestAttempt` — the most recent audit row (or `null`), including `id`, `lifecycleState`, `resultStatus`, `resultCode`, `resultMessage`, `operatorReason`, `idempotencyMarker`, `target`, and `externalRefs`.
+- `latestAttempt` — the most recent audit row (or `null`); see [Audit row shape](#audit-row-shape) for the full field list.
 
 When no audit rows exist, `applyState` is `idle`, `totalAttempts` is 0, all lifecycle counts are 0, and `latestAttempt` is `null`.
+
+### Audit row shape
+
+The `latestAttempt` audit row (emitted by `intent list`, `intent get`, `momentum status`, `momentum handoff`, `momentum project status`, and `momentum doctor`) carries:
+
+- `id`
+- `adapterKind`
+- `provider`
+- `target` — `{externalId, externalKey, url, title}` for the resolved external target.
+- `requestedAt`
+- `finishedAt`
+- `operatorReason`
+- `operatorActor`
+- `intentApplyPolicy`
+- `allowStatusMutation`
+- `mutationKind`
+- `previewSummary`
+- `idempotencyMarker`
+- `lifecycleState` — one of `claimed`, `succeeded`, `failed`, `blocked`, `audit_incomplete`.
+- `resultStatus`
+- `resultCode`
+- `resultMessage`
+- `externalRefs` — `{commentId, commentUrl, stateTransitionId}` for any external writes produced.
+- `reconcile` — `{status, warning}` from the post-apply reconcile step.
+- `createdAt`
+- `updatedAt`
+
+Rollup surfaces also prepend `intentId` to identify the source intent. `momentum handoff` emits the same fields in snake_case.
 
 `totalAvailable` is the total matching intent count regardless of `--limit`; `truncated` is `true` when results were capped.
 

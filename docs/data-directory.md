@@ -24,7 +24,7 @@ Momentum never modifies the data directory outside the resolved path. Each goal 
 
 ```text
 <data-dir>/
-  momentum.db                  # SQLite (goals, jobs, events, repo_locks, daemon_runs, source_items, source_snapshots, source_reconciliation_runs, evidence_records, update_intents tables)
+  momentum.db                  # SQLite (goals, jobs, events, repo_locks, daemon_runs, source_items, source_snapshots, source_reconciliation_runs, evidence_records, update_intents, intent_apply_audits tables)
   goals/
     <goal-id>/
       goal.md                  # Canonical copy of the goal spec
@@ -53,7 +53,8 @@ A single `momentum.db` per data directory backs durable state across all goals:
 - `source_snapshots` — point-in-time JSON snapshots captured during reconciliation.
 - `source_reconciliation_runs` — per-run summary (counts, pagination flags, classification breakdown).
 - `evidence_records` — normalized agent-workflow rows ingested via `evidence ingest`.
-- `update_intents` — durable external-tracker update intents in `pending` / `applied` / `skipped` / `canceled` states.
+- `update_intents` — durable external-tracker update intents in `pending` / `applied` / `skipped` / `canceled` states, plus an `apply_state` column tracking the per-intent external-apply CAS state (`idle` / `in_flight` / `blocked`).
+- `intent_apply_audits` — append-only audit ledger for external-apply attempts on `update_intents`; one row per claim with lifecycle (`claimed` / `succeeded` / `failed` / `blocked` / `audit_incomplete`), idempotency marker, preview/result fields, and reconcile metadata.
 
 ## Per-goal artifact files
 

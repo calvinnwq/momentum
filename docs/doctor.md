@@ -197,7 +197,7 @@ all update intents in the data directory:
 - `intentApplyStateCounts` — `{idle, in_flight, blocked}` across all update intents (not just pending).
 - `auditCounts` — `{claimed, succeeded, failed, blocked, audit_incomplete}` across all audit rows.
 - `totalAttempts` — total audit rows.
-- `latestAttempt` — the most recent audit row (or `null`), including `intentId`, `lifecycleState`, `resultStatus`, `resultCode`, `target`, `operatorReason`, `idempotencyMarker`, and `externalRefs`.
+- `latestAttempt` — the most recent audit row (or `null`), prefixed with `intentId` to identify the source intent; see [Audit row shape](intent-commands.md#audit-row-shape) for the full field list.
 
 On a data-dir failure the block degrades to `{ok: false, code, message}`.
 Text output includes `external apply:` lines showing idle/in_flight/blocked
