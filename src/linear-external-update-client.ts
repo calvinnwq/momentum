@@ -872,6 +872,26 @@ async function postIssueStateUpdate(
   }
   const stateRecord = (issueRecord as Record<string, unknown>)["state"];
   const state = readState(stateRecord);
+  if (!state.id) {
+    return {
+      ok: false,
+      error: {
+        ok: false,
+        code: "malformed_response",
+        error: "issueUpdate response was missing issue.state.id."
+      }
+    };
+  }
+  if (state.id !== stateId) {
+    return {
+      ok: false,
+      error: {
+        ok: false,
+        code: "write_rejected",
+        error: `issueUpdate returned state "${state.id}" instead of requested state "${stateId}".`
+      }
+    };
+  }
   return { ok: true, state };
 }
 

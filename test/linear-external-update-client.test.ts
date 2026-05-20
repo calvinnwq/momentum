@@ -476,6 +476,72 @@ describe("buildLinearExternalUpdateClient — comment + status transition", () =
     expect(calls.every((call) => !String(call.body["query"]).includes("issueUpdate"))).toBe(true);
   });
 
+  it("rejects issueUpdate when the returned state is missing", async () => {
+    const fetchResponses: MockGraphqlResponse[] = [
+      { kind: "json", status: 200, body: issueLookupBody({}) },
+      { kind: "json", status: 200, body: commentCreateBody({}) },
+      {
+        kind: "json",
+        status: 200,
+        body: {
+          data: {
+            issueUpdate: {
+              success: true,
+              issue: { id: "linear-issue-1", state: null }
+            }
+          }
+        }
+      }
+    ];
+    const { fetch } = buildMockFetch(fetchResponses);
+
+    const client = buildLinearExternalUpdateClient({
+      apiKey: "lin_api_secret",
+      fetch
+    });
+
+    const result = await client.apply({
+      preview: buildPreview(),
+      statusMutation: { kind: "by_id", stateId: "state-done" }
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe("malformed_response");
+    expect(result.error).toContain("issue.state.id");
+    expect(result.partial?.comment).toEqual({
+      id: "comment-1",
+      url: "https://linear.app/example/issue/NGX-1#comment-1"
+    });
+  });
+
+  it("rejects issueUpdate when the returned state differs from the request", async () => {
+    const fetchResponses: MockGraphqlResponse[] = [
+      { kind: "json", status: 200, body: issueLookupBody({}) },
+      { kind: "json", status: 200, body: commentCreateBody({}) },
+      {
+        kind: "json",
+        status: 200,
+        body: issueUpdateBody({ state: { id: "state-blocked", name: "Blocked" } })
+      }
+    ];
+    const { fetch } = buildMockFetch(fetchResponses);
+
+    const client = buildLinearExternalUpdateClient({
+      apiKey: "lin_api_secret",
+      fetch
+    });
+
+    const result = await client.apply({
+      preview: buildPreview(),
+      statusMutation: { kind: "by_id", stateId: "state-done" }
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe("write_rejected");
+    expect(result.error).toContain("state-blocked");
+    expect(result.error).toContain("state-done");
+  });
+
   it("resolves a uniquely-matching state by name through workflowStates", async () => {
     const fetchResponses: MockGraphqlResponse[] = [
       { kind: "json", status: 200, body: issueLookupBody({}) },
