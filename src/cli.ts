@@ -99,8 +99,10 @@ import {
   PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT,
   buildProjectRollup,
   type ProjectRollup,
+  type ProjectRollupExternalApply,
   type ProjectRollupFilters,
-  type ProjectRollupOptions
+  type ProjectRollupOptions,
+  type ProjectRollupPendingIntentExternalApply
 } from "./project-rollup.js";
 import {
   UPDATE_INTENT_STATUSES,
@@ -1104,9 +1106,13 @@ function projectStatus(parsed: ParsedFlags, io: CliIo): number {
       totalMismatchCount: rollup.totalMismatchCount,
       truncatedMismatches: rollup.truncatedMismatches,
       reconciliationWarnings: rollup.reconciliationWarnings,
-      pendingUpdateIntents: rollup.pendingUpdateIntents,
+      pendingUpdateIntents: rollup.pendingUpdateIntents.map((intent) => ({
+        ...intent,
+        externalApply: projectRollupExternalApplyIntentToJsonShape(intent.externalApply)
+      })),
       totalPendingUpdateIntentCount: rollup.totalPendingUpdateIntentCount,
       truncatedPendingUpdateIntents: rollup.truncatedPendingUpdateIntents,
+      externalApply: projectRollupExternalApplyToJsonShape(rollup.externalApply),
       nextAction: rollup.nextAction
     };
     writeJson(io.stdout, payload);
@@ -1115,6 +1121,47 @@ function projectStatus(parsed: ParsedFlags, io: CliIo): number {
 
   write(io.stdout, renderProjectStatusText(rollup, filters, dataDir));
   return 0;
+}
+
+function projectRollupExternalApplyIntentToJsonShape(
+  external: ProjectRollupPendingIntentExternalApply
+): {
+  applyState: ProjectRollupPendingIntentExternalApply["applyState"];
+  totalAttempts: number;
+  counts: ProjectRollupPendingIntentExternalApply["counts"];
+  latestAttempt: Record<string, unknown> | null;
+} {
+  return {
+    applyState: external.applyState,
+    totalAttempts: external.totalAttempts,
+    counts: external.counts,
+    latestAttempt: external.latestAttempt
+      ? intentApplyAuditToJsonShape(external.latestAttempt)
+      : null
+  };
+}
+
+function projectRollupExternalApplyToJsonShape(
+  external: ProjectRollupExternalApply
+): {
+  pendingIntentApplyStateCounts: ProjectRollupExternalApply["pendingIntentApplyStateCounts"];
+  pendingAuditCounts: ProjectRollupExternalApply["pendingAuditCounts"];
+  totalAttempts: number;
+  latestAttempt:
+    | ({ intentId: string } & ReturnType<typeof intentApplyAuditToJsonShape>)
+    | null;
+} {
+  return {
+    pendingIntentApplyStateCounts: external.pendingIntentApplyStateCounts,
+    pendingAuditCounts: external.pendingAuditCounts,
+    totalAttempts: external.totalAttempts,
+    latestAttempt: external.latestAttempt
+      ? {
+          intentId: external.latestAttempt.intentId,
+          ...intentApplyAuditToJsonShape(external.latestAttempt)
+        }
+      : null
+  };
 }
 
 function renderProjectStatusText(
@@ -1165,6 +1212,32 @@ function renderProjectStatusText(
       `(stale=${rollup.counts.staleUpdateIntents}, ` +
       `stale_threshold_ms=${rollup.intentStaleThresholdMs})`
   );
+  const externalApplyStateCounts = rollup.externalApply.pendingIntentApplyStateCounts;
+  const externalApplyAuditCounts = rollup.externalApply.pendingAuditCounts;
+  lines.push(
+    `Pending external apply state: idle=${externalApplyStateCounts.idle}, ` +
+      `in_flight=${externalApplyStateCounts.in_flight}, ` +
+      `blocked=${externalApplyStateCounts.blocked}`
+  );
+  lines.push(
+    `Pending external apply audits: total=${rollup.externalApply.totalAttempts}, ` +
+      `succeeded=${externalApplyAuditCounts.succeeded}, ` +
+      `failed=${externalApplyAuditCounts.failed}, ` +
+      `claimed=${externalApplyAuditCounts.claimed}, ` +
+      `blocked=${externalApplyAuditCounts.blocked}, ` +
+      `audit_incomplete=${externalApplyAuditCounts.audit_incomplete}`
+  );
+  const latestExternalApply = rollup.externalApply.latestAttempt;
+  if (latestExternalApply) {
+    lines.push(
+      `Latest external apply: ${latestExternalApply.id} ${latestExternalApply.lifecycleState}` +
+        ` intent=${latestExternalApply.intentId}` +
+        ` (result=${latestExternalApply.resultStatus ?? "(none)"}` +
+        ` code=${latestExternalApply.resultCode ?? "(none)"})`
+    );
+  } else {
+    lines.push("Latest external apply: (none)");
+  }
   if (rollup.reconciliationWarnings.length === 0) {
     lines.push("Reconciliation: ok");
   } else {
@@ -1228,9 +1301,14 @@ function renderProjectStatusText(
       const sourceText = intent.sourceItemId
         ? ` source=${intent.sourceItemId}`
         : "";
+      const latestText = intent.externalApply.latestAttempt
+        ? ` latest=${intent.externalApply.latestAttempt.lifecycleState}`
+        : "";
       lines.push(
         `  - [${intent.adapterKind}/${intent.intentType}] ${intent.intentId}` +
-          `${targetText}${goalText}${sourceText} age_ms=${intent.ageMs}${staleText}`
+          `${targetText}${goalText}${sourceText} age_ms=${intent.ageMs}${staleText}` +
+          ` apply=${intent.externalApply.applyState}` +
+          ` attempts=${intent.externalApply.totalAttempts}${latestText}`
       );
     }
     if (rollup.truncatedPendingUpdateIntents) {

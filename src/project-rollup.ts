@@ -19,6 +19,13 @@ import {
   type SourceReconciliationRun
 } from "./source-reconciliation-runs.js";
 import { listUpdateIntents, type UpdateIntent } from "./update-intents.js";
+import {
+  summarizeIntentApplyAuditsForIntent,
+  type IntentApplyAudit,
+  type IntentApplyAuditCounts,
+  type IntentApplyState,
+  type IntentApplyStateCounts
+} from "./intent-apply-audits.js";
 
 export const DEFAULT_RECONCILIATION_STALE_THRESHOLD_MS = 24 * 60 * 60 * 1000;
 export const DEFAULT_INTENT_STALE_THRESHOLD_MS = 30 * 24 * 60 * 60 * 1000;
@@ -113,6 +120,13 @@ export type ProjectRollupNextActionKind =
   | "review_pending_intents"
   | "no_action_required";
 
+export type ProjectRollupPendingIntentExternalApply = {
+  applyState: IntentApplyState;
+  totalAttempts: number;
+  counts: IntentApplyAuditCounts;
+  latestAttempt: IntentApplyAudit | null;
+};
+
 export type ProjectRollupPendingIntentSummary = {
   intentId: string;
   adapterKind: string;
@@ -125,6 +139,14 @@ export type ProjectRollupPendingIntentSummary = {
   createdAt: number;
   ageMs: number;
   stale: boolean;
+  externalApply: ProjectRollupPendingIntentExternalApply;
+};
+
+export type ProjectRollupExternalApply = {
+  pendingIntentApplyStateCounts: IntentApplyStateCounts;
+  pendingAuditCounts: IntentApplyAuditCounts;
+  totalAttempts: number;
+  latestAttempt: IntentApplyAudit | null;
 };
 
 export type ProjectRollupNextAction = {
@@ -171,6 +193,7 @@ export type ProjectRollup = {
   pendingUpdateIntents: ProjectRollupPendingIntentSummary[];
   totalPendingUpdateIntentCount: number;
   truncatedPendingUpdateIntents: boolean;
+  externalApply: ProjectRollupExternalApply;
   nextAction: ProjectRollupNextAction;
 };
 
@@ -246,6 +269,8 @@ export function buildProjectRollup(
   const truncatedPendingIntents =
     pendingIntents.length > PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT;
 
+  const externalApply = buildExternalApplyRollup(pendingIntents);
+
   return {
     filters,
     generatedAt,
@@ -265,7 +290,53 @@ export function buildProjectRollup(
     ),
     totalPendingUpdateIntentCount: pendingIntents.length,
     truncatedPendingUpdateIntents: truncatedPendingIntents,
+    externalApply,
     nextAction
+  };
+}
+
+function buildExternalApplyRollup(
+  pendingIntents: readonly ProjectRollupPendingIntentSummary[]
+): ProjectRollupExternalApply {
+  const intentApplyStateCounts: IntentApplyStateCounts = {
+    idle: 0,
+    in_flight: 0,
+    blocked: 0
+  };
+  const auditCounts: IntentApplyAuditCounts = {
+    claimed: 0,
+    succeeded: 0,
+    failed: 0,
+    blocked: 0,
+    audit_incomplete: 0
+  };
+  let totalAttempts = 0;
+  let latestAttempt: IntentApplyAudit | null = null;
+  for (const intent of pendingIntents) {
+    intentApplyStateCounts[intent.externalApply.applyState] += 1;
+    const counts = intent.externalApply.counts;
+    auditCounts.claimed += counts.claimed;
+    auditCounts.succeeded += counts.succeeded;
+    auditCounts.failed += counts.failed;
+    auditCounts.blocked += counts.blocked;
+    auditCounts.audit_incomplete += counts.audit_incomplete;
+    totalAttempts += intent.externalApply.totalAttempts;
+    const candidate = intent.externalApply.latestAttempt;
+    if (!candidate) continue;
+    if (
+      !latestAttempt ||
+      candidate.requestedAt > latestAttempt.requestedAt ||
+      (candidate.requestedAt === latestAttempt.requestedAt &&
+        candidate.id > latestAttempt.id)
+    ) {
+      latestAttempt = candidate;
+    }
+  }
+  return {
+    pendingIntentApplyStateCounts: intentApplyStateCounts,
+    pendingAuditCounts: auditCounts,
+    totalAttempts,
+    latestAttempt
   };
 }
 
@@ -799,7 +870,7 @@ function buildPendingIntentSummaries(
   return scoped
     .slice()
     .sort(pendingIntentOrder)
-    .map((intent) => toPendingIntentSummary(intent, now, staleThresholdMs));
+    .map((intent) => toPendingIntentSummary(db, intent, now, staleThresholdMs));
 }
 
 function isRollupScoped(filters: ProjectRollupFilters): boolean {
@@ -817,11 +888,32 @@ function pendingIntentOrder(a: UpdateIntent, b: UpdateIntent): number {
 }
 
 function toPendingIntentSummary(
+  db: MomentumDb,
   intent: UpdateIntent,
   now: number,
   staleThresholdMs: number
 ): ProjectRollupPendingIntentSummary {
   const ageMs = Math.max(0, now - intent.createdAt);
+  const summary = summarizeIntentApplyAuditsForIntent(db, intent.id);
+  const externalApply: ProjectRollupPendingIntentExternalApply = summary
+    ? {
+        applyState: summary.applyState,
+        totalAttempts: summary.totalAttempts,
+        counts: summary.counts,
+        latestAttempt: summary.latestAttempt
+      }
+    : {
+        applyState: "idle",
+        totalAttempts: 0,
+        counts: {
+          claimed: 0,
+          succeeded: 0,
+          failed: 0,
+          blocked: 0,
+          audit_incomplete: 0
+        },
+        latestAttempt: null
+      };
   return {
     intentId: intent.id,
     adapterKind: intent.adapterKind,
@@ -833,7 +925,8 @@ function toPendingIntentSummary(
     evidenceRecordId: intent.evidenceRecordId,
     createdAt: intent.createdAt,
     ageMs,
-    stale: ageMs > staleThresholdMs
+    stale: ageMs > staleThresholdMs,
+    externalApply
   };
 }
 
