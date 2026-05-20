@@ -154,6 +154,7 @@ function issueLookupBody(options: {
   state?: { id: string; name: string };
   team?: { id: string };
   comments?: Array<{ id: string; body: string; url?: string | null }>;
+  commentsPageInfo?: { hasNextPage: boolean; endCursor: string | null };
 }): unknown {
   return {
     data: {
@@ -168,7 +169,11 @@ function issueLookupBody(options: {
             id: c.id,
             body: c.body,
             url: c.url ?? null
-          }))
+          })),
+          pageInfo: options.commentsPageInfo ?? {
+            hasNextPage: false,
+            endCursor: null
+          }
         }
       }
     }
@@ -217,6 +222,29 @@ function workflowStatesBody(options: {
     data: {
       workflowStates: {
         nodes: options.nodes
+      }
+    }
+  };
+}
+
+function issueCommentsPageBody(options: {
+  comments?: Array<{ id: string; body: string; url?: string | null }>;
+  pageInfo?: { hasNextPage: boolean; endCursor: string | null };
+}): unknown {
+  return {
+    data: {
+      issue: {
+        comments: {
+          nodes: (options.comments ?? []).map((c) => ({
+            id: c.id,
+            body: c.body,
+            url: c.url ?? null
+          })),
+          pageInfo: options.pageInfo ?? {
+            hasNextPage: false,
+            endCursor: null
+          }
+        }
       }
     }
   };
@@ -581,6 +609,149 @@ describe("buildLinearExternalUpdateClient — idempotency marker detection", () 
     });
     expect(calls).toHaveLength(1);
     expect(String(calls[0]?.body["query"])).toContain("issue(id: $id)");
+  });
+
+  it("continues through comment pages before deciding a marker is absent", async () => {
+    const preview = buildPreview();
+    const fetchResponses: MockGraphqlResponse[] = [
+      {
+        kind: "json",
+        status: 200,
+        body: issueLookupBody({
+          comments: [{ id: "comment-1", body: "first page" }],
+          commentsPageInfo: { hasNextPage: true, endCursor: "cursor-1" }
+        })
+      },
+      {
+        kind: "json",
+        status: 200,
+        body: issueCommentsPageBody({
+          comments: [
+            {
+              id: "comment-51",
+              body: `later page body\n${preview.idempotencyMarker}`,
+              url: "https://linear.app/example/issue/NGX-1#comment-51"
+            }
+          ]
+        })
+      }
+    ];
+    const { fetch, calls } = buildMockFetch(fetchResponses);
+
+    const client = buildLinearExternalUpdateClient({
+      apiKey: "lin_api_secret",
+      fetch
+    });
+
+    const result = await client.apply({ preview });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.alreadyApplied).toBe(true);
+    expect(result.comment).toEqual({
+      id: "comment-51",
+      url: "https://linear.app/example/issue/NGX-1#comment-51"
+    });
+    expect(calls).toHaveLength(2);
+    expect(String(calls[1]?.body["query"])).toContain(
+      "comments(first: 50, after: $after)"
+    );
+    expect(calls[1]?.body["variables"]).toEqual({
+      id: "linear-issue-1",
+      after: "cursor-1"
+    });
+  });
+
+  it("completes a requested status mutation when retry finds an existing marker", async () => {
+    const preview = buildPreview();
+    const fetchResponses: MockGraphqlResponse[] = [
+      {
+        kind: "json",
+        status: 200,
+        body: issueLookupBody({
+          comments: [
+            {
+              id: "earlier-comment",
+              body: `Some prior body\n${preview.idempotencyMarker}\n`,
+              url: "https://linear.app/example/issue/NGX-1#earlier-comment"
+            }
+          ]
+        })
+      },
+      {
+        kind: "json",
+        status: 200,
+        body: issueUpdateBody({ state: { id: "state-done", name: "Done" } })
+      }
+    ];
+    const { fetch, calls } = buildMockFetch(fetchResponses);
+
+    const client = buildLinearExternalUpdateClient({
+      apiKey: "lin_api_secret",
+      fetch
+    });
+
+    const result = await client.apply({
+      preview,
+      statusMutation: { kind: "by_id", stateId: "state-done" }
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.alreadyApplied).toBe(true);
+    expect(result.status).toEqual({
+      transitioned: true,
+      previousStateId: "state-todo",
+      previousStateName: "Todo",
+      nextStateId: "state-done",
+      nextStateName: "Done"
+    });
+    expect(calls).toHaveLength(2);
+    expect(String(calls[1]?.body["query"])).toContain("issueUpdate");
+    expect(calls[1]?.body["variables"]).toEqual({
+      id: "linear-issue-1",
+      input: { stateId: "state-done" }
+    });
+  });
+
+  it("does not repeat status mutation when retry marker already has the requested state", async () => {
+    const preview = buildPreview();
+    const fetchResponses: MockGraphqlResponse[] = [
+      {
+        kind: "json",
+        status: 200,
+        body: issueLookupBody({
+          state: { id: "state-done", name: "Done" },
+          comments: [
+            {
+              id: "earlier-comment",
+              body: `Some prior body\n${preview.idempotencyMarker}\n`,
+              url: "https://linear.app/example/issue/NGX-1#earlier-comment"
+            }
+          ]
+        })
+      }
+    ];
+    const { fetch, calls } = buildMockFetch(fetchResponses);
+
+    const client = buildLinearExternalUpdateClient({
+      apiKey: "lin_api_secret",
+      fetch
+    });
+
+    const result = await client.apply({
+      preview,
+      statusMutation: { kind: "by_id", stateId: "state-done" }
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.alreadyApplied).toBe(true);
+    expect(result.status).toEqual({
+      transitioned: false,
+      previousStateId: "state-done",
+      previousStateName: "Done",
+      nextStateId: null,
+      nextStateName: null
+    });
+    expect(calls).toHaveLength(1);
   });
 
   it("embeds the marker the boundary built into the comment body it posts", async () => {

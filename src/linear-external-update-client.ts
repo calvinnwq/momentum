@@ -135,6 +135,17 @@ query MomentumExternalUpdateIssueLookup($id: String!) {
     team { id }
     comments(first: 50) {
       nodes { id body url }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}`.trim();
+
+const ISSUE_COMMENTS_PAGE_QUERY = `
+query MomentumExternalUpdateIssueCommentsPage($id: String!, $after: String!) {
+  issue(id: $id) {
+    comments(first: 50, after: $after) {
+      nodes { id body url }
+      pageInfo { hasNextPage endCursor }
     }
   }
 }`.trim();
@@ -237,22 +248,7 @@ export function buildLinearExternalUpdateClient(
       if (!interpretedIssue.ok) {
         return interpretedIssue.error;
       }
-      const { issue, comments, teamId } = interpretedIssue;
-
-      const existing = findExistingMarkerComment(
-        comments,
-        preview.idempotencyMarker
-      );
-      if (existing) {
-        return {
-          ok: true,
-          alreadyApplied: true,
-          issue,
-          comment: existing,
-          status: buildUnchangedStatus(interpretedIssue.state),
-          idempotencyMarker: preview.idempotencyMarker
-        };
-      }
+      const { issue, commentsPage, teamId } = interpretedIssue;
 
       let resolvedStateId: string | null = null;
       let resolvedStateName: string | null = null;
@@ -270,6 +266,54 @@ export function buildLinearExternalUpdateClient(
         }
         resolvedStateId = resolution.stateId;
         resolvedStateName = resolution.stateName;
+      }
+
+      const existingResult = await findExistingMarkerComment(
+        fetchImpl,
+        endpoint,
+        apiKey,
+        requestTimeoutMs,
+        issueId,
+        commentsPage,
+        preview.idempotencyMarker
+      );
+      if (!existingResult.ok) {
+        return { ...existingResult.error, partial: { issue } };
+      }
+      const existing = existingResult.comment;
+      if (existing) {
+        let statusOutcome = buildUnchangedStatus(interpretedIssue.state);
+        if (resolvedStateId && interpretedIssue.state.id !== resolvedStateId) {
+          const updateResult = await postIssueStateUpdate(
+            fetchImpl,
+            endpoint,
+            apiKey,
+            requestTimeoutMs,
+            issueId,
+            resolvedStateId
+          );
+          if (!updateResult.ok) {
+            return {
+              ...updateResult.error,
+              partial: { issue, comment: existing }
+            };
+          }
+          statusOutcome = {
+            transitioned: true,
+            previousStateId: interpretedIssue.state.id,
+            previousStateName: interpretedIssue.state.name,
+            nextStateId: updateResult.state.id ?? resolvedStateId,
+            nextStateName: updateResult.state.name ?? resolvedStateName
+          };
+        }
+        return {
+          ok: true,
+          alreadyApplied: true,
+          issue,
+          comment: existing,
+          status: statusOutcome,
+          idempotencyMarker: preview.idempotencyMarker
+        };
       }
 
       const commentResult = await postComment(
@@ -410,7 +454,7 @@ type InterpretedIssue =
       issue: LinearExternalUpdateIssueRef;
       state: IssueState;
       teamId: string | null;
-      comments: ReadonlyArray<{ id: string; body: string; url: string | null }>;
+      commentsPage: CommentsPage;
     }
   | {
       ok: false;
@@ -455,18 +499,68 @@ function interpretIssueLookup(response: GraphqlResponse): InterpretedIssue {
   const url = optionalString(record["url"]);
   const state = readState(record["state"]);
   const team = readTeam(record["team"]);
-  const comments = readComments(record["comments"]);
+  const commentsPage = readCommentsPage(record["comments"]);
   return {
     ok: true,
     issue: { id, key: identifier ?? null, url: url ?? null },
     state,
     teamId: team,
-    comments
+    commentsPage
   };
 }
 
-function findExistingMarkerComment(
-  comments: ReadonlyArray<{ id: string; body: string; url: string | null }>,
+type CommentRecord = { id: string; body: string; url: string | null };
+
+type CommentsPage = {
+  comments: ReadonlyArray<CommentRecord>;
+  hasNextPage: boolean;
+  endCursor: string | null;
+};
+
+type FindExistingMarkerCommentResult =
+  | { ok: true; comment: LinearExternalUpdateCommentRef | null }
+  | { ok: false; error: LinearExternalUpdateError };
+
+async function findExistingMarkerComment(
+  fetchImpl: FetchLike,
+  endpoint: string,
+  apiKey: string,
+  requestTimeoutMs: number,
+  issueId: string,
+  firstPage: CommentsPage,
+  marker: string
+): Promise<FindExistingMarkerCommentResult> {
+  let page = firstPage;
+  for (;;) {
+    const found = findMarkerInComments(page.comments, marker);
+    if (found) return { ok: true, comment: found };
+    if (!page.hasNextPage) return { ok: true, comment: null };
+    if (!page.endCursor) {
+      return {
+        ok: false,
+        error: {
+          ok: false,
+          code: "malformed_response",
+          error:
+            "Linear comments pageInfo indicated another page without endCursor."
+        }
+      };
+    }
+    const nextPage = await fetchIssueCommentsPage(
+      fetchImpl,
+      endpoint,
+      apiKey,
+      requestTimeoutMs,
+      issueId,
+      page.endCursor
+    );
+    if (!nextPage.ok) return nextPage;
+    page = nextPage.page;
+  }
+}
+
+function findMarkerInComments(
+  comments: ReadonlyArray<CommentRecord>,
   marker: string
 ): LinearExternalUpdateCommentRef | null {
   for (const comment of comments) {
@@ -475,6 +569,57 @@ function findExistingMarkerComment(
     }
   }
   return null;
+}
+
+type FetchIssueCommentsPageResult =
+  | { ok: true; page: CommentsPage }
+  | { ok: false; error: LinearExternalUpdateError };
+
+async function fetchIssueCommentsPage(
+  fetchImpl: FetchLike,
+  endpoint: string,
+  apiKey: string,
+  requestTimeoutMs: number,
+  issueId: string,
+  after: string
+): Promise<FetchIssueCommentsPageResult> {
+  const transport = await sendGraphql(
+    fetchImpl,
+    endpoint,
+    apiKey,
+    requestTimeoutMs,
+    ISSUE_COMMENTS_PAGE_QUERY,
+    { id: issueId, after }
+  );
+  if (!transport.ok) {
+    return { ok: false, error: mapTransportFailure(transport.failure) };
+  }
+  const rawIssue = readGraphqlData(transport.response.body, ["issue"]);
+  if (rawIssue === null) {
+    return {
+      ok: false,
+      error: {
+        ok: false,
+        code: "target_missing",
+        error: "Linear issue comments page lookup returned no issue."
+      }
+    };
+  }
+  if (!rawIssue || typeof rawIssue !== "object" || Array.isArray(rawIssue)) {
+    return {
+      ok: false,
+      error: {
+        ok: false,
+        code: "malformed_response",
+        error:
+          "Linear issue comments page lookup returned a non-object issue payload."
+      }
+    };
+  }
+  return {
+    ok: true,
+    page: readCommentsPage((rawIssue as Record<string, unknown>)["comments"])
+  };
 }
 
 function buildUnchangedStatus(state: IssueState): LinearExternalUpdateStatusOutcome {
@@ -947,22 +1092,37 @@ function readTeam(raw: unknown): string | null {
   return optionalString((raw as Record<string, unknown>)["id"]) ?? null;
 }
 
-function readComments(
-  raw: unknown
-): ReadonlyArray<{ id: string; body: string; url: string | null }> {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
-  const nodes = (raw as Record<string, unknown>)["nodes"];
-  if (!Array.isArray(nodes)) return [];
-  const out: Array<{ id: string; body: string; url: string | null }> = [];
-  for (const entry of nodes) {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
-    const record = entry as Record<string, unknown>;
-    const id = optionalString(record["id"]);
-    const body = optionalString(record["body"]);
-    if (!id || body === undefined) continue;
-    out.push({ id, body, url: optionalString(record["url"]) ?? null });
+function readCommentsPage(raw: unknown): CommentsPage {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return { comments: [], hasNextPage: false, endCursor: null };
   }
-  return out;
+  const record = raw as Record<string, unknown>;
+  const nodes = record["nodes"];
+  const out: CommentRecord[] = [];
+  if (Array.isArray(nodes)) {
+    for (const entry of nodes) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+      const commentRecord = entry as Record<string, unknown>;
+      const id = optionalString(commentRecord["id"]);
+      const body = optionalString(commentRecord["body"]);
+      if (!id || body === undefined) continue;
+      out.push({
+        id,
+        body,
+        url: optionalString(commentRecord["url"]) ?? null
+      });
+    }
+  }
+  const pageInfo = record["pageInfo"];
+  if (!pageInfo || typeof pageInfo !== "object" || Array.isArray(pageInfo)) {
+    return { comments: out, hasNextPage: false, endCursor: null };
+  }
+  const pageInfoRecord = pageInfo as Record<string, unknown>;
+  return {
+    comments: out,
+    hasNextPage: pageInfoRecord["hasNextPage"] === true,
+    endCursor: optionalString(pageInfoRecord["endCursor"]) ?? null
+  };
 }
 
 function optionalString(value: unknown): string | undefined {
