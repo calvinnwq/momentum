@@ -576,13 +576,208 @@ describe("momentum intent list", () => {
     const result = await run(["intent", "list", "--data-dir", dataDir]);
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Update intents: 1");
+    expect(result.stdout).toContain("Total available: 1");
+    expect(result.stdout).toContain("Truncated: no");
     expect(result.stdout).toContain("Status: (any)");
     expect(result.stdout).toContain("Adapter: (any)");
     expect(result.stdout).toContain("Intent type: (any)");
     expect(result.stdout).toContain(`Data dir: ${dataDir}`);
     expect(result.stdout).toContain("[linear/source_satisfied]");
     expect(result.stdout).toContain("target=ext-1");
+    expect(result.stdout).toContain("apply=idle attempts=0 latest=(none)");
     expect(result.stdout).toContain("wf reason");
+  });
+
+  it("reports an idle externalApply summary per intent when no audits exist", async () => {
+    const dataDir = makeTempDir();
+    seedIntent(dataDir, {
+      adapterKind: "linear",
+      targetExternalId: "ext-quiet",
+      intentType: "source_satisfied",
+      reason: "no attempts",
+      idempotencyKey: "linear:ext-quiet:source_satisfied:goal-1"
+    });
+
+    const result = await run([
+      "intent",
+      "list",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      totalAvailable: number;
+      truncated: boolean;
+      intents: Array<{
+        id: string;
+        externalApply: {
+          intentId: string;
+          applyState: string;
+          totalAttempts: number;
+          counts: Record<string, number>;
+          latestAttempt: unknown;
+        };
+      }>;
+    };
+    expect(payload.totalAvailable).toBe(1);
+    expect(payload.truncated).toBe(false);
+    const first = payload.intents[0];
+    expect(first).toBeDefined();
+    expect(first?.externalApply).toEqual({
+      intentId: first?.id,
+      applyState: "idle",
+      totalAttempts: 0,
+      counts: {
+        claimed: 0,
+        succeeded: 0,
+        failed: 0,
+        blocked: 0,
+        audit_incomplete: 0
+      },
+      latestAttempt: null
+    });
+  });
+
+  it("surfaces audit lifecycle counts, apply state, and latest attempt per intent", async () => {
+    const dataDir = makeTempDir();
+    const succeededId = seedIntent(dataDir, {
+      adapterKind: "linear",
+      targetExternalId: "NGX-succeeded",
+      intentType: "source_satisfied",
+      reason: "succeeded once",
+      idempotencyKey: "linear:NGX-succeeded:source_satisfied:goal-1",
+      now: 1000
+    });
+    const blockedId = seedIntent(dataDir, {
+      adapterKind: "linear",
+      targetExternalId: "NGX-blocked",
+      intentType: "source_satisfied",
+      reason: "blocked after write",
+      idempotencyKey: "linear:NGX-blocked:source_satisfied:goal-1",
+      now: 2000
+    });
+    runFinalizedAttempt(dataDir, succeededId, "succeeded", 1100, {
+      resultCode: "comment_created",
+      externalRefs: {
+        commentId: "linear_comment_55"
+      }
+    });
+    runFinalizedAttempt(dataDir, blockedId, "audit_incomplete", 2100, {
+      resultCode: "audit_finalize_failed"
+    });
+
+    const result = await run([
+      "intent",
+      "list",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      intents: Array<{
+        id: string;
+        externalApply: {
+          applyState: string;
+          totalAttempts: number;
+          counts: Record<string, number>;
+          latestAttempt: {
+            lifecycleState: string;
+            resultCode: string | null;
+            externalRefs: { commentId: string | null };
+          } | null;
+        };
+      }>;
+    };
+    const succeeded = payload.intents.find((i) => i.id === succeededId);
+    const blocked = payload.intents.find((i) => i.id === blockedId);
+    expect(succeeded?.externalApply.applyState).toBe("idle");
+    expect(succeeded?.externalApply.totalAttempts).toBe(1);
+    expect(succeeded?.externalApply.counts.succeeded).toBe(1);
+    expect(succeeded?.externalApply.latestAttempt?.lifecycleState).toBe(
+      "succeeded"
+    );
+    expect(
+      succeeded?.externalApply.latestAttempt?.externalRefs.commentId
+    ).toBe("linear_comment_55");
+    expect(blocked?.externalApply.applyState).toBe("blocked");
+    expect(blocked?.externalApply.totalAttempts).toBe(1);
+    expect(blocked?.externalApply.counts.audit_incomplete).toBe(1);
+    expect(blocked?.externalApply.latestAttempt?.lifecycleState).toBe(
+      "audit_incomplete"
+    );
+    expect(blocked?.externalApply.latestAttempt?.resultCode).toBe(
+      "audit_finalize_failed"
+    );
+
+    const text = await run(["intent", "list", "--data-dir", dataDir]);
+    expect(text.code).toBe(0);
+    expect(text.stdout).toContain(
+      "apply=idle attempts=1 latest=succeeded/comment_created"
+    );
+    expect(text.stdout).toContain(
+      "apply=blocked attempts=1 latest=audit_incomplete/audit_finalize_failed"
+    );
+  });
+
+  it("reports total/truncated metadata when --limit trims the result set", async () => {
+    const dataDir = makeTempDir();
+    seedIntent(dataDir, {
+      adapterKind: "linear",
+      intentType: "source_satisfied",
+      reason: "first",
+      idempotencyKey: "linear:ext-1:source_satisfied:goal-1",
+      now: 1000
+    });
+    seedIntent(dataDir, {
+      adapterKind: "linear",
+      intentType: "source_satisfied",
+      reason: "second",
+      idempotencyKey: "linear:ext-2:source_satisfied:goal-2",
+      now: 2000
+    });
+    seedIntent(dataDir, {
+      adapterKind: "linear",
+      intentType: "source_satisfied",
+      reason: "third",
+      idempotencyKey: "linear:ext-3:source_satisfied:goal-3",
+      now: 3000
+    });
+
+    const result = await run([
+      "intent",
+      "list",
+      "--limit",
+      "2",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      limit: number | null;
+      count: number;
+      totalAvailable: number;
+      truncated: boolean;
+    };
+    expect(payload.limit).toBe(2);
+    expect(payload.count).toBe(2);
+    expect(payload.totalAvailable).toBe(3);
+    expect(payload.truncated).toBe(true);
+
+    const text = await run([
+      "intent",
+      "list",
+      "--limit",
+      "2",
+      "--data-dir",
+      dataDir
+    ]);
+    expect(text.code).toBe(0);
+    expect(text.stdout).toContain("Update intents: 2");
+    expect(text.stdout).toContain("Total available: 3");
+    expect(text.stdout).toContain("Truncated: yes");
   });
 });
 

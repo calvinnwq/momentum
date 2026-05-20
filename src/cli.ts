@@ -105,10 +105,12 @@ import {
 import {
   UPDATE_INTENT_STATUSES,
   cancelUpdateIntent,
+  countUpdateIntents,
   getUpdateIntentById,
   listUpdateIntents,
   markUpdateIntentApplied,
   markUpdateIntentSkipped,
+  type CountUpdateIntentsOptions,
   type ListUpdateIntentsOptions,
   type UpdateIntent,
   type UpdateIntentDecisionInput,
@@ -2009,6 +2011,8 @@ function intentList(parsed: ParsedFlags, io: CliIo): number {
 
   const db = openDb(dataDir);
   let intents: UpdateIntent[];
+  let totalAvailable: number;
+  let auditSummaries: Map<string, IntentApplyAuditSummary | null>;
   try {
     if (filters.goalId !== undefined && filters.goalId !== null) {
       const row = db
@@ -2056,9 +2060,34 @@ function intentList(parsed: ParsedFlags, io: CliIo): number {
       }
     }
     intents = listUpdateIntents(db, filters);
+    const countOptions: CountUpdateIntentsOptions = {};
+    if (filters.status !== undefined) countOptions.status = filters.status;
+    if (filters.adapterKind !== undefined)
+      countOptions.adapterKind = filters.adapterKind;
+    if (filters.intentType !== undefined)
+      countOptions.intentType = filters.intentType;
+    if (filters.goalId !== undefined) countOptions.goalId = filters.goalId;
+    if (filters.sourceItemId !== undefined)
+      countOptions.sourceItemId = filters.sourceItemId;
+    if (filters.evidenceRecordId !== undefined)
+      countOptions.evidenceRecordId = filters.evidenceRecordId;
+    totalAvailable =
+      filters.limit !== undefined
+        ? countUpdateIntents(db, countOptions)
+        : intents.length;
+    auditSummaries = new Map();
+    for (const intent of intents) {
+      auditSummaries.set(
+        intent.id,
+        summarizeIntentApplyAuditsForIntent(db, intent.id)
+      );
+    }
   } finally {
     db.close();
   }
+
+  const truncated =
+    filters.limit !== undefined && totalAvailable > intents.length;
 
   const payload = {
     ok: true,
@@ -2072,7 +2101,14 @@ function intentList(parsed: ParsedFlags, io: CliIo): number {
     evidenceRecordId: filters.evidenceRecordId ?? null,
     limit: filters.limit ?? null,
     count: intents.length,
-    intents: intents.map(updateIntentToJsonShape)
+    totalAvailable,
+    truncated,
+    intents: intents.map((record) => ({
+      ...updateIntentToJsonShape(record),
+      externalApply: intentApplyAuditSummaryToJsonShape(
+        auditSummaries.get(record.id) ?? null
+      )
+    }))
   };
 
   if (parsed.json) {
@@ -2082,6 +2118,8 @@ function intentList(parsed: ParsedFlags, io: CliIo): number {
 
   const lines: string[] = [
     `Update intents: ${intents.length}`,
+    `Total available: ${totalAvailable}`,
+    `Truncated: ${truncated ? "yes" : "no"}`,
     `Status: ${statusFilter ?? "(any)"}`,
     `Adapter: ${filters.adapterKind ?? "(any)"}`,
     `Intent type: ${filters.intentType ?? "(any)"}`,
@@ -2089,10 +2127,21 @@ function intentList(parsed: ParsedFlags, io: CliIo): number {
     `Source item: ${filters.sourceItemId ?? "(any)"}`,
     `Evidence record: ${filters.evidenceRecordId ?? "(any)"}`,
     `Data dir: ${dataDir}`,
-    ...intents.map(
-      (record) =>
-        `- ${record.id} [${record.adapterKind}/${record.intentType}] ${record.status} target=${record.targetExternalId ?? "(none)"}: ${record.reason}`
-    ),
+    ...intents.map((record) => {
+      const summary = auditSummaries.get(record.id) ?? null;
+      const applyState = summary?.applyState ?? "idle";
+      const totalAttempts = summary?.totalAttempts ?? 0;
+      const latest = summary?.latestAttempt;
+      const latestLabel = latest
+        ? `${latest.lifecycleState}${latest.resultCode ? `/${latest.resultCode}` : ""}`
+        : "(none)";
+      return (
+        `- ${record.id} [${record.adapterKind}/${record.intentType}] ` +
+        `${record.status} target=${record.targetExternalId ?? "(none)"} ` +
+        `apply=${applyState} attempts=${totalAttempts} latest=${latestLabel}: ` +
+        `${record.reason}`
+      );
+    }),
     ""
   ];
   write(io.stdout, lines.join("\n"));
