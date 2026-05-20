@@ -1896,6 +1896,7 @@ describe("momentum intent apply policy gating", () => {
         effective: string;
         source: string;
         externalApplyPerformed: boolean;
+        note: string;
       };
       externalApply: {
         adapterKind: string;
@@ -1918,6 +1919,10 @@ describe("momentum intent apply policy gating", () => {
     expect(payload.applyPolicy.effective).toBe("external_apply_allowed");
     expect(payload.applyPolicy.source).toBe("momentum_policy");
     expect(payload.applyPolicy.externalApplyPerformed).toBe(true);
+    expect(payload.applyPolicy.note).toBe(
+      "External apply was performed through the configured tracker adapter."
+    );
+    expect(payload.applyPolicy.note).not.toContain("pass --external-apply");
     expect(payload.externalApply.adapterKind).toBe("linear");
     expect(payload.externalApply.auditId).toBeTruthy();
     expect(payload.externalApply.target.externalId).toBe("linear_issue_ok");
@@ -1983,11 +1988,15 @@ describe("momentum intent apply policy gating", () => {
     expect(result.code).toBe(1);
     const payload = JSON.parse(result.stderr) as {
       code: string;
-      applyPolicy: { externalApplyPerformed: boolean };
+      applyPolicy: { externalApplyPerformed: boolean; note: string };
       externalApply: { auditId: string | null };
     };
     expect(payload.code).toBe("write_rejected");
     expect(payload.applyPolicy.externalApplyPerformed).toBe(false);
+    expect(payload.applyPolicy.note).toContain(
+      "External apply was attempted and refused"
+    );
+    expect(payload.applyPolicy.note).not.toContain("pass --external-apply");
     expect(payload.externalApply.auditId).toBeTruthy();
 
     const db = openDb(dataDir);

@@ -121,6 +121,15 @@ export type FinalizeIntentApplyResult =
       currentLifecycleState?: IntentApplyLifecycleState;
     };
 
+export type MarkIntentApplyAuditIncompleteInput = {
+  auditId: string;
+  resultCode: string;
+  resultMessage: string;
+  externalRefs?: Partial<IntentApplyAuditExternalRefs>;
+  reconcile?: Partial<IntentApplyAuditReconcile>;
+  now?: number;
+};
+
 export type ListIntentApplyAuditsOptions = {
   intentId?: string;
   lifecycleState?: IntentApplyLifecycleState;
@@ -431,6 +440,99 @@ export function finalizeIntentApply(
               updated_at = ?
         WHERE id = ?`
     ).run(nextApplyState, now, existing.intent_id);
+
+    db.exec("COMMIT");
+    return { ok: true, audit: intentApplyAuditFromRow(row) };
+  } catch (error) {
+    safeRollback(db);
+    throw error;
+  }
+}
+
+/**
+ * Recovery helper for the narrow case where the external write and initial
+ * audit-finalize succeeded, but the local intent transition failed afterward.
+ * The audit was already terminal, so this deliberately rewrites that audit to
+ * `audit_incomplete` and blocks the intent from replaying the external write.
+ */
+export function markIntentApplyAuditIncomplete(
+  db: MomentumDb,
+  input: MarkIntentApplyAuditIncompleteInput
+): FinalizeIntentApplyResult {
+  validateNonEmpty(input.auditId, "auditId");
+  validateNonEmpty(input.resultCode, "resultCode");
+  validateNonEmpty(input.resultMessage, "resultMessage");
+
+  const now = input.now ?? Date.now();
+  const externalRefs: IntentApplyAuditExternalRefs = {
+    commentId: input.externalRefs?.commentId ?? null,
+    commentUrl: input.externalRefs?.commentUrl ?? null,
+    stateTransitionId: input.externalRefs?.stateTransitionId ?? null
+  };
+  const reconcile: IntentApplyAuditReconcile = {
+    status: input.reconcile?.status ?? "deferred",
+    warning: input.reconcile?.warning ?? null
+  };
+
+  db.exec("BEGIN");
+  try {
+    const existing = db
+      .prepare("SELECT * FROM intent_apply_audits WHERE id = ?")
+      .get(input.auditId) as IntentApplyAuditRow | undefined;
+    if (!existing) {
+      db.exec("ROLLBACK");
+      return {
+        ok: false,
+        code: "audit_not_found",
+        message: `Intent apply audit not found: ${input.auditId}`
+      };
+    }
+
+    const row = db
+      .prepare(
+        `UPDATE intent_apply_audits
+            SET lifecycle_state = 'audit_incomplete',
+                finished_at = COALESCE(finished_at, ?),
+                updated_at = ?,
+                result_status = 'audit_incomplete',
+                result_code = ?,
+                result_message = ?,
+                external_ref_comment_id = ?,
+                external_ref_comment_url = ?,
+                external_ref_state_transition_id = ?,
+                reconcile_status = ?,
+                reconcile_warning = ?
+          WHERE id = ?
+          RETURNING *`
+      )
+      .get(
+        now,
+        now,
+        input.resultCode,
+        input.resultMessage,
+        externalRefs.commentId,
+        externalRefs.commentUrl,
+        externalRefs.stateTransitionId,
+        reconcile.status,
+        reconcile.warning,
+        input.auditId
+      ) as IntentApplyAuditRow | undefined;
+
+    if (!row) {
+      db.exec("ROLLBACK");
+      return {
+        ok: false,
+        code: "audit_not_found",
+        message: `Intent apply audit not found: ${input.auditId}`
+      };
+    }
+
+    db.prepare(
+      `UPDATE update_intents
+          SET apply_state = 'blocked',
+              updated_at = ?
+        WHERE id = ?`
+    ).run(now, existing.intent_id);
 
     db.exec("COMMIT");
     return { ok: true, audit: intentApplyAuditFromRow(row) };

@@ -31,6 +31,7 @@
 import {
   claimIntentApply as claimIntentApplyFn,
   finalizeIntentApply as finalizeIntentApplyFn,
+  markIntentApplyAuditIncomplete as markIntentApplyAuditIncompleteFn,
   type ClaimIntentApplyInput,
   type ClaimIntentApplyResult,
   type FinalizeIntentApplyInput,
@@ -602,12 +603,29 @@ export async function executeExternalApply(
   });
 
   if (!markApplied.ok) {
+    const incomplete = markIntentApplyAuditIncompleteFn(input.db, {
+      auditId: finalizeSucceeded.audit.id,
+      resultCode: "mark_applied_failed",
+      resultMessage: `External write succeeded but mark-applied failed: ${markApplied.message}`,
+      externalRefs: {
+        commentId: externalResult.comment.id,
+        commentUrl: externalResult.comment.url,
+        stateTransitionId: externalResult.status.transitioned
+          ? externalResult.status.nextStateId
+          : null
+      },
+      reconcile: {
+        status: "deferred",
+        warning: "external write applied; intent transition failed"
+      },
+      now: now()
+    });
     return buildExternalFailure({
       code: "audit_incomplete",
       message: `External write succeeded but mark-applied failed for intent ${intent.id}: ${markApplied.message}`,
       intent,
-      audit: finalizeSucceeded.audit,
-      finalize: { ok: true, audit: finalizeSucceeded.audit },
+      audit: incomplete.ok ? incomplete.audit : finalizeSucceeded.audit,
+      finalize: incomplete,
       contextBase: {
         ...enrichedContextBase,
         applyPolicy: policyResolution.applyPolicy,

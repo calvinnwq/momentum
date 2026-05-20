@@ -2581,25 +2581,16 @@ async function intentExternalApply(args: {
   try {
     const executeDeps: ExecuteExternalApplyDeps = {};
     const factory = deps.buildLinearExternalUpdateClient;
-    if (factory) {
-      executeDeps.buildLinearClient = (clientEnv) => {
-        const apiKeyRaw = clientEnv[LINEAR_API_KEY_ENV] ?? null;
-        const apiKey =
-          typeof apiKeyRaw === "string" && apiKeyRaw.trim().length > 0
-            ? apiKeyRaw
-            : null;
-        return factory({ apiKey, env: env as NodeJS.ProcessEnv });
-      };
-    } else {
-      executeDeps.buildLinearClient = (clientEnv) => {
-        const apiKeyRaw = clientEnv[LINEAR_API_KEY_ENV] ?? null;
-        const apiKey =
-          typeof apiKeyRaw === "string" && apiKeyRaw.trim().length > 0
-            ? apiKeyRaw
-            : null;
-        return buildLinearExternalUpdateClient({ apiKey });
-      };
-    }
+    executeDeps.buildLinearClient = (clientEnv) => {
+      const apiKeyRaw = clientEnv[LINEAR_API_KEY_ENV] ?? null;
+      const apiKey =
+        typeof apiKeyRaw === "string" && apiKeyRaw.trim().length > 0
+          ? apiKeyRaw
+          : null;
+      return factory
+        ? factory({ apiKey, env: env as NodeJS.ProcessEnv })
+        : buildLinearExternalUpdateClient({ apiKey });
+    };
     result = await executeExternalApply({
       db,
       intentId,
@@ -2710,11 +2701,17 @@ function buildExternalApplyPolicySummary(
   const resolved = result.context.applyPolicy;
   const source: PolicyEffectiveFieldSource =
     resolved.source === "missing_repo" ? "builtin_default" : resolved.source;
+  const note = result.ok
+    ? "External apply was performed through the configured tracker adapter."
+    : resolved.value !== "external_apply_allowed"
+      ? base.note
+    : "External apply was attempted and refused before marking the intent applied; inspect externalApply for audit and adapter details.";
   return {
     ...base,
     effective: resolved.value,
     source,
-    externalApplyPerformed: result.ok
+    externalApplyPerformed: result.ok,
+    note
   };
 }
 
@@ -2722,7 +2719,7 @@ function buildIntentExternalApplySummary(
   result: ExecuteExternalApplyResult
 ): IntentExternalApplySummary {
   const ctx = result.context;
-  const external = result.ok ? result.external : result.external;
+  const external = result.external;
   return {
     adapterKind: ctx.adapterKind,
     intentType: ctx.intentType,

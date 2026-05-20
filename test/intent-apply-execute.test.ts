@@ -733,6 +733,60 @@ describe("executeExternalApply concurrency and write failures", () => {
     }
   });
 
+  it("transitions the intent to blocked when mark-applied fails after a successful external write", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { intentId } = seedHappyPath(db);
+      const repoPath = makeRepo(externalApplyAllowedPolicy());
+      const intent = getUpdateIntentById(db, intentId);
+      if (!intent) throw new Error("intent missing");
+      const idempotencyMarker = expectedIdempotencyMarker(intentId, intent.payload);
+      const spy = makeApplySpy(makeSuccessOutcome({ idempotencyMarker }));
+
+      const result = await executeExternalApply(
+        baseInput(db, {
+          intentId,
+          repoPath,
+          deps: {
+            buildLinearClient: () => spy.client,
+            now: () => 850,
+            markUpdateIntentApplied: () => ({
+              ok: false,
+              code: "intent_already_terminal",
+              message: "simulated mark-applied failure"
+            })
+          }
+        })
+      );
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("expected refusal");
+      expect(result.code).toBe("audit_incomplete");
+      expect(result.audit?.lifecycleState).toBe("audit_incomplete");
+      expect(result.audit?.resultCode).toBe("mark_applied_failed");
+      expect(result.context.reconcile).toEqual({
+        status: "deferred",
+        warning: "external write applied; intent transition failed"
+      });
+
+      const applyState = db
+        .prepare("SELECT apply_state FROM update_intents WHERE id = ?")
+        .get(intentId) as { apply_state: string };
+      expect(applyState.apply_state).toBe("blocked");
+
+      const intentAfter = getUpdateIntentById(db, intentId);
+      expect(intentAfter?.status).toBe("pending");
+
+      const latest = getLatestIntentApplyAudit(db, intentId);
+      expect(latest?.lifecycleState).toBe("audit_incomplete");
+      expect(latest?.externalRefs.commentId).toBe("comment_1");
+      expect(latest?.reconcile.status).toBe("deferred");
+    } finally {
+      db.close();
+    }
+  });
+
   it("maps a thrown adapter exception to adapter_threw and finalizes the audit as failed", async () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);
