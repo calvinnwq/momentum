@@ -248,7 +248,8 @@ export async function executeExternalApply(
   const loadPolicyFn = deps.loadPolicy ?? loadMomentumPolicyFn;
   const buildLinearClient =
     deps.buildLinearClient ?? defaultBuildLinearClient;
-  const buildLinearRefreshClient = deps.buildLinearRefreshClient ?? null;
+  const buildLinearRefreshClient =
+    deps.buildLinearRefreshClient ?? defaultBuildLinearRefreshClient;
   const updateReconcileFn =
     deps.updateIntentApplyAuditReconcile ?? updateIntentApplyAuditReconcileFn;
 
@@ -839,11 +840,23 @@ async function reconcileSuccessfulExternalApply(args: {
     status: outcome.code,
     warning: outcome.code === "success" ? null : outcome.detail
   };
-  const updated = args.updateReconcileFn(args.db, {
-    auditId: args.audit.id,
-    reconcile,
-    now: args.now()
-  });
+  let updated: UpdateIntentApplyAuditReconcileResult;
+  try {
+    updated = args.updateReconcileFn(args.db, {
+      auditId: args.audit.id,
+      reconcile,
+      now: args.now()
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      audit: args.audit,
+      reconcile: {
+        status: "post_apply_reconcile_failed",
+        warning: `Post-apply reconcile completed with ${outcome.code}, but audit reconcile update threw: ${message}`
+      }
+    };
+  }
   if (!updated.ok) {
     return {
       audit: args.audit,
