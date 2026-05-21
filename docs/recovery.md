@@ -1,6 +1,6 @@
 # Recovery surfaces
 
-Momentum's operational-safety surfaces ship two operator-facing recovery
+Momentum's operational-safety surfaces ship three operator-facing recovery
 contracts that are intentionally separate but composed by the same CLI surfaces:
 
 - **Stale-lease detection and auto-recovery** — what Momentum can prove is
@@ -9,8 +9,11 @@ contracts that are intentionally separate but composed by the same CLI surfaces:
 - **Manual recovery artifacts and the durable `needs_manual_recovery` flag** —
   what Momentum writes to disk and blocks at the queue when an auto-recovery
   refusal would lose audit context or risk a non-Momentum commit.
+- **Intent apply blocked state** — the durable per-intent `apply_state =
+  'blocked'` flag set when `intent apply --external-apply` lands a partial
+  external write but cannot finalize its audit row.
 
-This page is the canonical reference for both.
+This page is the canonical reference for all three.
 
 ## Stale-lease detection and auto-recovery
 
@@ -166,3 +169,34 @@ context for the operator. The refusal codes are:
 Text output mirrors the success shape with `Previous reason`, the
 previous-marked-at and cleared-at timestamps, the event ID, and a released
 repo locks line when non-empty.
+
+## Intent apply blocked state
+
+When `momentum intent apply --external-apply` succeeds at the external write
+but cannot finalize its audit row, the orchestrator transitions the intent's
+`apply_state` to `blocked` and returns the `audit_incomplete` refusal code
+(see [docs/intent-commands.md](intent-commands.md)). The block prevents any
+future `intent apply --external-apply` for that intent — which would otherwise
+risk replaying the external write — and surfaces a stable `intent_blocked`
+refusal on subsequent attempts.
+
+The blocked state is independent of goal-side `needs_manual_recovery`; it is
+not cleared by `momentum recovery clear`. A dedicated operator surface for
+clearing intent-side `blocked` is not yet shipped — operators inspect the
+audit row, confirm the external write's actual effect on the tracker, and
+keep the intent blocked until that surface lands.
+
+Operators can detect blocked intents via:
+
+- `momentum intent get <intent-id>` / `momentum intent list` — per-intent
+  `externalApply.applyState = "blocked"` plus the `latestAttempt` audit row
+  with `lifecycleState = "audit_incomplete"`, `resultCode`, `resultMessage`,
+  and `externalRefs` for the write that did reach the tracker.
+- `momentum status` / `momentum handoff` — the goal-scoped
+  `pendingUpdateIntents` / `pending_update_intents` summary carries each
+  pending intent's `externalApply` / `external_apply` block with the same
+  `applyState` and `latestAttempt` fields.
+- `momentum project status` — `pendingIntentApplyStateCounts.blocked` rolls up
+  the count of pending intents currently in `blocked` apply state.
+- `momentum doctor` — the `externalApply` audit-ledger aggregate exposes
+  blocked counts across the data directory.
