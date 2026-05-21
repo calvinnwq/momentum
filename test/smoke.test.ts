@@ -5747,6 +5747,7 @@ type LinearExternalApplyMockServer = {
   setIssueState: (issueId: string, state: { id: string; name: string }) => void;
   setCommentCreateBehavior: (behavior: LinearMockCommentCreateBehavior) => void;
   setIssueRefreshBehavior: (behavior: LinearMockIssueRefreshBehavior) => void;
+  setCommentCreateDelayMs: (ms: number) => void;
   close: () => Promise<void>;
 };
 
@@ -5790,6 +5791,7 @@ async function startLinearExternalApplyMockServer(
   let issueRefreshBehavior: LinearMockIssueRefreshBehavior = {
     kind: "success"
   };
+  let commentCreateDelayMs = 0;
 
   function tallyOperation(query: string): void {
     const match = /(query|mutation)\s+(\w+)/.exec(query);
@@ -6026,9 +6028,19 @@ async function startLinearExternalApplyMockServer(
         return;
       }
       const result = handle(parsed);
-      res.statusCode = result.status;
-      res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify(result.body));
+      const isCommentCreate =
+        typeof parsed.query === "string" &&
+        parsed.query.includes("MomentumExternalUpdateCommentCreate");
+      const writeResponse = (): void => {
+        res.statusCode = result.status;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify(result.body));
+      };
+      if (isCommentCreate && commentCreateDelayMs > 0) {
+        setTimeout(writeResponse, commentCreateDelayMs);
+        return;
+      }
+      writeResponse();
     });
   });
   await new Promise<void>((resolve, reject) => {
@@ -6054,6 +6066,9 @@ async function startLinearExternalApplyMockServer(
     },
     setIssueRefreshBehavior(behavior) {
       issueRefreshBehavior = behavior;
+    },
+    setCommentCreateDelayMs(ms) {
+      commentCreateDelayMs = Math.max(0, ms);
     },
     close: () =>
       new Promise<void>((resolve, reject) => {
@@ -7002,6 +7017,220 @@ describe("Milestone 6 external apply end-to-end smoke (NGX-301)", () => {
         expect(latest!.reconcile.warning ?? "").toContain(
           "smoke mock injected IssueRefresh failure"
         );
+      } finally {
+        await fixture.close();
+      }
+    },
+    180_000
+  );
+
+  it(
+    "rejects a concurrent intent apply --external-apply with intent_apply_in_progress and performs only one external mutation",
+    async () => {
+      const fixture = await establishM6ExternalApplyFixture({
+        momentumPolicy: "external_apply_allowed"
+      });
+      const { repo, dataDir, intentId, mock } = fixture;
+      try {
+        const reconcileCallsBefore =
+          mock.requestCounts["MomentumLinearIssues"] ?? 0;
+        // Hold the mock's commentCreate response so the first CLI is still
+        // in flight (apply_state='in_flight') when the second CLI attempts
+        // to claim the same intent.
+        mock.setCommentCreateDelayMs(2000);
+
+        const baseArgs = [
+          "intent",
+          "apply",
+          intentId,
+          "--external-apply",
+          "--repo",
+          repo,
+          "--data-dir",
+          dataDir,
+          "--json"
+        ];
+        const env = {
+          LINEAR_API_KEY: "lin_api_smoke_fixture_key",
+          MOMENTUM_LINEAR_EXTERNAL_UPDATE_ENDPOINT: mock.endpoint,
+          MOMENTUM_LINEAR_REFRESH_ENDPOINT: mock.endpoint
+        };
+
+        const firstPromise = runCliBinaryAsync(
+          [...baseArgs, "--reason", "smoke concurrent A"],
+          { env }
+        );
+        // Give the first CLI enough headroom to finish its claim
+        // transaction (idle -> in_flight) before the second CLI's claim
+        // attempt collides on the same intent row. The external write
+        // itself is still pending against the delayed mock.
+        await new Promise((resolve) => setTimeout(resolve, 750));
+        const secondPromise = runCliBinaryAsync(
+          [...baseArgs, "--reason", "smoke concurrent B"],
+          { env }
+        );
+
+        const [first, second] = await Promise.all([firstPromise, secondPromise]);
+
+        const results = [first, second];
+        const successResult = results.find((r) => r.code === 0);
+        const blockedResult = results.find((r) => r.code !== 0);
+        expect(
+          successResult,
+          `expected one CLI to succeed but got codes a=${first.code} b=${second.code}`
+        ).toBeDefined();
+        expect(
+          blockedResult,
+          `expected one CLI to fail with intent_apply_in_progress but got codes a=${first.code} b=${second.code}`
+        ).toBeDefined();
+
+        const successPayload = JSON.parse(successResult!.stdout) as {
+          ok: boolean;
+          intent: { id: string; status: string };
+          applyPolicy: {
+            effective: string;
+            source: string;
+            externalApplyRequested: boolean;
+            externalApplyPerformed: boolean;
+          };
+          externalApply: {
+            adapterKind: string;
+            mutationKind: string;
+            external: {
+              alreadyApplied: boolean;
+              commentId: string;
+              idempotencyMarker: string;
+              statusTransitioned: boolean;
+            };
+            reconcile: { status: string; warning: string | null };
+          };
+        };
+        expect(successPayload.ok).toBe(true);
+        expect(successPayload.intent.id).toBe(intentId);
+        expect(successPayload.intent.status).toBe("applied");
+        expect(successPayload.applyPolicy).toMatchObject({
+          effective: "external_apply_allowed",
+          source: "momentum_policy",
+          externalApplyRequested: true,
+          externalApplyPerformed: true
+        });
+        expect(successPayload.externalApply.adapterKind).toBe("linear");
+        expect(successPayload.externalApply.mutationKind).toBe("comment");
+        expect(successPayload.externalApply.external.alreadyApplied).toBe(false);
+        expect(successPayload.externalApply.external.statusTransitioned).toBe(
+          false
+        );
+        expect(successPayload.externalApply.external.commentId).toBe(
+          "mock-comment-1"
+        );
+        const marker = successPayload.externalApply.external.idempotencyMarker;
+        expect(marker).toMatch(
+          new RegExp(`^momentum-intent:linear:${intentId}:[0-9a-f]{16}$`)
+        );
+        expect(successPayload.externalApply.reconcile.status).toBe("success");
+
+        const blockedPayload = JSON.parse(blockedResult!.stderr) as {
+          ok: boolean;
+          command: string;
+          code: string;
+          message: string;
+          intentId: string;
+          applyPolicy?: { effective: string; source: string };
+          externalApply?: {
+            adapterKind: string;
+            mutationKind: string | null;
+            allowStatusMutation: boolean;
+            auditId: string | null;
+          };
+        };
+        expect(blockedPayload.ok).toBe(false);
+        expect(blockedPayload.command).toBe("intent apply");
+        expect(blockedPayload.code).toBe("intent_apply_in_progress");
+        expect(blockedPayload.intentId).toBe(intentId);
+        // The refused claim must not have called the external adapter; the
+        // failure envelope still reports the resolved policy so operators see
+        // why the second invocation was refused.
+        expect(blockedPayload.applyPolicy).toMatchObject({
+          effective: "external_apply_allowed",
+          source: "momentum_policy"
+        });
+
+        // Mock observed exactly one commentCreate request and zero status
+        // mutations. The second CLI never reached the external write path.
+        expect(mock.commentsCreated).toHaveLength(1);
+        expect(mock.commentsCreated[0]!.body).toContain(
+          `idempotency: ${marker}`
+        );
+        expect(mock.issueUpdates).toHaveLength(0);
+        expect(mock.requestCounts["MomentumExternalUpdateCommentCreate"]).toBe(
+          1
+        );
+        expect(
+          mock.requestCounts["MomentumExternalUpdateIssueStateUpdate"] ?? 0
+        ).toBe(0);
+        // Post-apply reconciliation ran exactly once for the winning CLI.
+        expect(mock.requestCounts["MomentumIssueRefresh"]).toBe(1);
+        // Source reconcile traffic from the fixture is unchanged.
+        expect(mock.requestCounts["MomentumLinearIssues"] ?? 0).toBe(
+          reconcileCallsBefore
+        );
+
+        const intentGet = runCliBinary([
+          "intent",
+          "get",
+          intentId,
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(intentGet.code).toBe(0);
+        const intentGetPayload = JSON.parse(intentGet.stdout) as {
+          intent: { status: string };
+          externalApply: {
+            applyState: string;
+            totalAttempts: number;
+            counts: {
+              claimed: number;
+              succeeded: number;
+              failed: number;
+              blocked: number;
+              audit_incomplete: number;
+            };
+            latestAttempt: {
+              lifecycleState: string;
+              resultStatus: string;
+              resultCode: string;
+              idempotencyMarker: string;
+              externalRefs: {
+                commentId: string;
+                commentUrl: string;
+                stateTransitionId: string | null;
+              };
+              reconcile: { status: string; warning: string | null };
+            } | null;
+          };
+        };
+        expect(intentGetPayload.intent.status).toBe("applied");
+        expect(intentGetPayload.externalApply.applyState).toBe("idle");
+        // Only the winning claimant's audit row exists; the refused CLI was
+        // rejected at the CAS guard before any audit row was inserted.
+        expect(intentGetPayload.externalApply.totalAttempts).toBe(1);
+        expect(intentGetPayload.externalApply.counts).toMatchObject({
+          claimed: 0,
+          succeeded: 1,
+          failed: 0,
+          blocked: 0,
+          audit_incomplete: 0
+        });
+        const latest = intentGetPayload.externalApply.latestAttempt;
+        expect(latest).not.toBeNull();
+        expect(latest!.lifecycleState).toBe("succeeded");
+        expect(latest!.resultStatus).toBe("succeeded");
+        expect(latest!.resultCode).toBe("applied");
+        expect(latest!.idempotencyMarker).toBe(marker);
+        expect(latest!.externalRefs.commentId).toBe("mock-comment-1");
+        expect(latest!.externalRefs.stateTransitionId).toBeNull();
+        expect(latest!.reconcile.status).toBe("success");
       } finally {
         await fixture.close();
       }
