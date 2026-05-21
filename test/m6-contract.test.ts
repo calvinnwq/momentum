@@ -482,12 +482,17 @@ describe("public docs envelope shapes", () => {
       expect(intentCommands).toContain("currentStatus");
     });
 
-    it("documents the intent apply policy resolution and external-apply refusal", () => {
+    it("documents the intent apply policy resolution and external-apply refusal codes", () => {
       expect(intentCommands).toContain("MOMENTUM.md");
       expect(intentCommands).toContain("intent_apply_policy");
       expect(intentCommands).toContain("create_intents_only");
+      expect(intentCommands).toContain("external_apply_allowed");
       expect(intentCommands).toContain("--external-apply");
-      expect(intentCommands).toContain("external_apply_unsupported");
+      expect(intentCommands).toContain("policy_denied");
+      expect(intentCommands).toContain("auth_unavailable");
+      expect(intentCommands).toContain("intent_apply_in_progress");
+      expect(intentCommands).toContain("intent_blocked");
+      expect(intentCommands).toContain("audit_incomplete");
     });
 
     it("documents the applyPolicy block fields surfaced on --external-apply", () => {

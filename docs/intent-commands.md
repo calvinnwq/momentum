@@ -110,15 +110,32 @@ Policy resolution:
 
 - `--repo <path>` loads the repo's `MOMENTUM.md` policy file to resolve the effective `intent_apply_policy`.
 - When `--repo` is not provided, the effective policy falls back to the built-in default (`create_intents_only`).
-- `--external-apply` is **not currently supported** and always refuses with `code: "external_apply_unsupported"` regardless of the effective policy; Momentum does not perform automatic external tracker writes.
+- `--external-apply` performs a policy-gated external tracker write through the adapter's external update client. It requires a `--repo` context whose `MOMENTUM.md` sets `intent_apply_policy: external_apply_allowed`, and the adapter's credential env var (`LINEAR_API_KEY` for the linear adapter). The write is a two-phase audit-before-write flow that is idempotent under replay; comment-only is the default, status mutation requires explicit configuration.
+
+Without `--external-apply`, `intent apply` records the operator's manual mark only and does not contact the external tracker.
 
 On success, JSON output includes `previousStatus` and the `intent` object. When `--external-apply` is requested, the response also includes an `applyPolicy` block:
 
 - `effective` — the resolved `intent_apply_policy` value (`create_intents_only` or `external_apply_allowed`).
 - `source` — `builtin_default` or `momentum_policy`.
 - `externalApplyRequested` — `true` when `--external-apply` was passed.
-- `externalApplyPerformed` — always `false` today.
-- `note` — operator-facing explanation of the refusal.
+- `externalApplyPerformed` — `true` whenever the external write reached the tracker, including the partial-apply `audit_incomplete` refusal where the write succeeded but post-write finalization did not; `false` on refusals that never wrote to the tracker.
+- `note` — operator-facing explanation of the policy.
+
+When `--external-apply` is requested, JSON output also includes an `externalApply` block with the resolved adapter, target reference, audit id, reconcile status, and (on success) external refs (`issueId`, `issueKey`, `issueUrl`, `commentId`, `commentUrl`, `statusTransitioned`, `nextStateId`, `nextStateName`, `idempotencyMarker`, `alreadyApplied`).
+
+`--external-apply` refusal codes (intent stays pending unless otherwise noted):
+
+- `policy_denied` — no `--repo` context, or the effective `intent_apply_policy` is not `external_apply_allowed`.
+- `policy_load_failed` — `--repo`'s `MOMENTUM.md` failed to parse.
+- `auth_unavailable` — the adapter's credential env var (e.g. `LINEAR_API_KEY`) is unset.
+- `unsupported_adapter` / `unsupported_intent_type` — the intent's adapter or intent type is not supported by any registered external update adapter.
+- `target_missing` — no resolved external target id on the intent or its linked source item.
+- `intent_apply_in_progress` — a concurrent apply holds the CAS guard on this intent.
+- `intent_blocked` — a prior post-write audit failure left the intent in a non-replay `blocked` apply state. See [docs/recovery.md](recovery.md#intent-apply-blocked-state) for how the blocked state surfaces and is cleared.
+- `preview_failed` / `validation_failed` / `target_missing` — preview or target validation failed before the external write; no audit row is created unless the failure occurs after the audit claim.
+- `external_conflict` / `write_rejected` / `write_timeout` / `malformed_response` / `adapter_threw` — the external write client refused or could not complete the mutation; the audit row is finalized as `failed` when one exists, and the intent returns to idle.
+- `audit_incomplete` — the audit finalize could not complete after an attempted external write; the intent transitions to `blocked` apply state and must be cleared by operator recovery before another apply can run. See [docs/recovery.md](recovery.md#intent-apply-blocked-state) for the surfaces that expose the blocked state.
 
 On terminal refusal, JSON output includes `currentStatus` and `applyPolicy`.
 
