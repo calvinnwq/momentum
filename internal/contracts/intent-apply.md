@@ -25,7 +25,7 @@ If the **external write succeeds** but the **audit-finalize step fails** (databa
 
 - Linear is now mutated; Momentum's local record may not yet reflect that.
 - A retry must **not** re-issue the external write. Re-running `intent apply --external-apply` against a `blocked` intent returns a stable error (the intent is `blocked`; operator must use the recovery path).
-- The recovery path is operator-driven: the operator inspects Linear (or the audit row + Linear via the post-apply single-issue reconcile of NGX-301), confirms the external state, and explicitly clears `blocked`. Until the operator clears `blocked`, the intent stays non-replayable.
+- The recovery path is operator-driven: the operator inspects Linear (or the audit row + Linear via the post-apply single-issue reconcile of NGX-300), confirms the external state, and explicitly clears `blocked`. Until the operator clears `blocked`, the intent stays non-replayable.
 - An intent in `blocked` must remain visible through `intent list`, `intent get`, `status`, `handoff`, `project status`, and `doctor` so it is impossible to forget.
 
 The contract is: external writes are not auto-replayed under any circumstance, because the post-write window is the only window where Momentum cannot tell from local state alone whether Linear is already mutated.
@@ -55,7 +55,7 @@ Every external write carries a **stable, documented idempotency marker** that th
 - The canonical intent payload recursively sorts object keys before hashing while preserving array order, so object key insertion order does not change the marker but list-like payload order still does.
 - The marker format is `momentum-intent:<adapterKind>:<intentId>:<digest>`, where `<digest>` is the first 16 hex characters of that SHA-256 digest. NGX-296 owns this helper and asserts the shape in adapter-boundary tests.
 - The marker is included in the Linear comment body (or, when configured, in the structured comment metadata) so an operator can grep Linear for a Momentum-written comment without consulting the local store.
-- The post-apply single-issue reconcile (NGX-301) uses the marker to confirm whether the comment / status mutation Momentum intended is already present on the issue.
+- The post-apply single-issue reconcile (NGX-300) uses the marker to confirm whether the comment / status mutation Momentum intended is already present on the issue.
 
 ## Post-apply single-issue reconcile
 
