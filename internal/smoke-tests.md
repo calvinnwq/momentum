@@ -91,6 +91,57 @@ boundary that M6 inherits):
   for the stable `mismatches[].kind`, `reconciliationWarnings[].reason`, and
   `nextAction.kind` taxonomies).
 
+## Milestone 6 external apply safety smoke coverage
+
+The smoke exercises the M6 policy-gated external apply path end-to-end through
+the spawned binary against a stateful Linear mock dispatcher (no real
+`api.linear.app` calls). The mock supports injectable GraphQL errors on
+commentCreate and IssueRefresh, per-request commentCreate delay for concurrency
+testing, and tracks all comments, issue state updates, and operation request
+counts.
+
+Coverage:
+
+- the `doctor --json` M5 closeout milestone marker stays pinned to the M5
+  string (the M6 milestone flip is reserved for NGX-302).
+- happy-path external apply: a pending `source_satisfied` intent is applied
+  through `intent apply --external-apply` against the mock, producing an
+  `applied` intent, a deterministic idempotency marker matching
+  `momentum-intent:linear:<intentId>:<digest>`, comment-only mutation (zero
+  issue state updates), a single commentCreate, a successful post-apply
+  single-issue reconcile, and idempotent replay (re-running against the
+  now-applied intent refuses with `intent_already_terminal` without a second
+  commentCreate).
+- `policy_denied` refusal: `intent apply --external-apply` against a repo
+  whose `MOMENTUM.md` sets `intent_apply_policy: create_intents_only` refuses
+  with `policy_denied`, leaves the intent pending with no audit row, and never
+  reaches any mock endpoint beyond the initial source reconcile.
+- `auth_unavailable` refusal: `intent apply --external-apply` without
+  `LINEAR_API_KEY` set refuses with `auth_unavailable`, leaves the intent
+  pending, and never reaches the mock write endpoint.
+- `write_rejected` adapter failure: the mock injects a GraphQL error on
+  commentCreate; `intent apply --external-apply` exits with `write_rejected`,
+  finalizes the audit row as `failed`, leaves the intent pending and
+  retry-eligible, and records zero comments.
+- `refresh_failed` post-apply reconcile: a successful external write whose
+  post-apply IssueRefresh fails still marks the intent `applied` and surfaces
+  `reconcile.status=refresh_failed` with a warning recorded on the audit ledger.
+- `intent_apply_in_progress` concurrency guard: two parallel `intent apply
+  --external-apply` invocations against the same intent produce exactly one
+  external mutation (the winner completes with `applied`); the loser is
+  refused with `intent_apply_in_progress` and never reaches the external write
+  path.
+- audit visibility: a `write_rejected` attempt leaves the intent pending and
+  the same audit row is visible through `status --json` (top-level
+  `externalApply` and per-intent rollup), `project status --json`, `doctor
+  --json`, and the `handoff.json` artifact (snake_case `external_apply`) with
+  matching `auditId`, `lifecycleState=failed`, and
+  `resultCode=write_rejected`.
+- blocked / audit-finalize failure: a tampered audit row forces post-write
+  finalize into `audit_already_finalized`; the orchestrator marks the audit
+  incomplete and blocks the intent, and a retry is refused with
+  `intent_blocked` without a second external mutation.
+
 ## Test boundary
 
 The smoke must not make real `api.linear.app` calls — see
