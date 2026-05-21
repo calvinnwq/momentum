@@ -7551,6 +7551,274 @@ describe("Milestone 6 external apply end-to-end smoke (NGX-301)", () => {
     },
     180_000
   );
+
+  it(
+    "blocks the intent and marks the audit incomplete when audit finalize fails after a successful external write, then refuses retries with intent_blocked without a second external mutation",
+    async () => {
+      const fixture = await establishM6ExternalApplyFixture({
+        momentumPolicy: "external_apply_allowed"
+      });
+      const { repo, dataDir, intentId, mock } = fixture;
+      try {
+        const reconcileCallsBefore =
+          mock.requestCounts["MomentumLinearIssues"] ?? 0;
+        // Hold the mock's commentCreate response so the CLI is parked
+        // mid-apply (audit row in 'claimed', external write in flight)
+        // long enough for the test to tamper with the audit row and
+        // force audit_already_finalized on the post-write finalize.
+        mock.setCommentCreateDelayMs(2500);
+
+        const baseArgs = [
+          "intent",
+          "apply",
+          intentId,
+          "--external-apply",
+          "--reason",
+          "smoke audit finalize failure",
+          "--repo",
+          repo,
+          "--data-dir",
+          dataDir,
+          "--json"
+        ];
+        const env = {
+          LINEAR_API_KEY: "lin_api_smoke_fixture_key",
+          MOMENTUM_LINEAR_EXTERNAL_UPDATE_ENDPOINT: mock.endpoint,
+          MOMENTUM_LINEAR_REFRESH_ENDPOINT: mock.endpoint
+        };
+
+        const cliPromise = runCliBinaryAsync(baseArgs, { env });
+
+        // Poll the audit ledger for the in-flight claim, then flip its
+        // lifecycle_state out from under the CLI so finalizeIntentApply
+        // returns audit_already_finalized after the external write returns.
+        // The CLI is awaiting the delayed commentCreate fetch and not
+        // holding the SQLite file lock during this window, so a separate
+        // DatabaseSync connection can safely rewrite the row.
+        const inspectionDb = new DatabaseSync(
+          path.join(dataDir, "momentum.db")
+        );
+        let tamperedAuditId: string | null = null;
+        try {
+          const deadline = Date.now() + 5000;
+          while (Date.now() < deadline) {
+            const row = inspectionDb
+              .prepare(
+                `SELECT id FROM intent_apply_audits
+                  WHERE intent_id = ? AND lifecycle_state = 'claimed'`
+              )
+              .get(intentId) as { id: string } | undefined;
+            if (row) {
+              tamperedAuditId = row.id;
+              inspectionDb
+                .prepare(
+                  `UPDATE intent_apply_audits
+                      SET lifecycle_state = 'failed',
+                          result_status = 'failed',
+                          result_code = 'smoke_tampered_for_finalize_failure'
+                    WHERE id = ?`
+                )
+                .run(tamperedAuditId);
+              break;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          }
+        } finally {
+          inspectionDb.close();
+        }
+        expect(
+          tamperedAuditId,
+          "expected an in-flight 'claimed' audit row to appear before the CLI completed"
+        ).not.toBeNull();
+
+        const result = await cliPromise;
+        expect(result.code, `cli stderr: ${result.stderr}`).toBe(1);
+        const refusal = JSON.parse(result.stderr) as {
+          ok: boolean;
+          command: string;
+          code: string;
+          intentId: string;
+          applyPolicy: {
+            effective: string;
+            source: string;
+            externalApplyRequested: boolean;
+            externalApplyPerformed: boolean;
+          };
+          externalApply: {
+            adapterKind: string;
+            mutationKind: string | null;
+            allowStatusMutation: boolean;
+            auditId: string | null;
+            reconcile: { status: string | null; warning: string | null };
+            external: {
+              alreadyApplied: boolean;
+              commentId: string | null;
+              commentUrl: string | null;
+              statusTransitioned: boolean;
+              idempotencyMarker: string | null;
+            } | null;
+          };
+        };
+        expect(refusal.ok).toBe(false);
+        expect(refusal.command).toBe("intent apply");
+        expect(refusal.code).toBe("audit_incomplete");
+        expect(refusal.intentId).toBe(intentId);
+        // The external write reached the tracker before audit finalize
+        // failed, so the policy summary reports externalApplyPerformed=true
+        // even though the intent was never marked applied.
+        expect(refusal.applyPolicy).toMatchObject({
+          effective: "external_apply_allowed",
+          source: "momentum_policy",
+          externalApplyRequested: true,
+          externalApplyPerformed: true
+        });
+        expect(refusal.externalApply.adapterKind).toBe("linear");
+        expect(refusal.externalApply.mutationKind).toBe("comment");
+        expect(refusal.externalApply.allowStatusMutation).toBe(false);
+        expect(refusal.externalApply.auditId).toBe(tamperedAuditId);
+        expect(refusal.externalApply.reconcile).toEqual({
+          status: "deferred",
+          warning: "external write applied; audit finalize failed"
+        });
+        expect(refusal.externalApply.external).not.toBeNull();
+        expect(refusal.externalApply.external!.alreadyApplied).toBe(false);
+        expect(refusal.externalApply.external!.statusTransitioned).toBe(false);
+        expect(refusal.externalApply.external!.commentId).toBe(
+          "mock-comment-1"
+        );
+        const marker = refusal.externalApply.external!.idempotencyMarker;
+        expect(typeof marker).toBe("string");
+        expect(marker).toMatch(
+          new RegExp(`^momentum-intent:linear:${intentId}:[0-9a-f]{16}$`)
+        );
+
+        // Exactly one external write made it through before audit finalize
+        // failed; the post-apply reconcile path is skipped on the
+        // audit_incomplete branch so no IssueRefresh was issued.
+        expect(mock.commentsCreated).toHaveLength(1);
+        expect(mock.commentsCreated[0]!.body).toContain(
+          `idempotency: ${marker}`
+        );
+        expect(mock.issueUpdates).toHaveLength(0);
+        expect(mock.requestCounts["MomentumExternalUpdateCommentCreate"]).toBe(
+          1
+        );
+        expect(
+          mock.requestCounts["MomentumExternalUpdateIssueStateUpdate"] ?? 0
+        ).toBe(0);
+        expect(mock.requestCounts["MomentumIssueRefresh"] ?? 0).toBe(0);
+
+        const intentGet = runCliBinary([
+          "intent",
+          "get",
+          intentId,
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(intentGet.code, `intent get stderr: ${intentGet.stderr}`).toBe(0);
+        const intentGetPayload = JSON.parse(intentGet.stdout) as {
+          intent: { status: string };
+          externalApply: {
+            applyState: string;
+            totalAttempts: number;
+            counts: {
+              claimed: number;
+              succeeded: number;
+              failed: number;
+              blocked: number;
+              audit_incomplete: number;
+            };
+            latestAttempt: {
+              id: string;
+              lifecycleState: string;
+              resultStatus: string;
+              resultCode: string;
+              externalRefs: {
+                commentId: string | null;
+                commentUrl: string | null;
+                stateTransitionId: string | null;
+              };
+              reconcile: { status: string | null; warning: string | null };
+            } | null;
+          };
+        };
+        // Intent stays pending — markUpdateIntentApplied was never reached.
+        expect(intentGetPayload.intent.status).toBe("pending");
+        // ...but the CAS column is blocked so any retry must be refused
+        // at the claim guard before the external write path runs again.
+        expect(intentGetPayload.externalApply.applyState).toBe("blocked");
+        expect(intentGetPayload.externalApply.totalAttempts).toBe(1);
+        expect(intentGetPayload.externalApply.counts).toMatchObject({
+          claimed: 0,
+          succeeded: 0,
+          failed: 0,
+          blocked: 0,
+          audit_incomplete: 1
+        });
+        const latest = intentGetPayload.externalApply.latestAttempt;
+        expect(latest).not.toBeNull();
+        expect(latest!.id).toBe(tamperedAuditId);
+        expect(latest!.lifecycleState).toBe("audit_incomplete");
+        expect(latest!.resultStatus).toBe("audit_incomplete");
+        expect(latest!.resultCode).toBe("audit_finalize_failed");
+        // External write evidence is preserved on the audit row even after
+        // the forced audit_incomplete transition, so operators can correlate
+        // the surviving comment with the blocked intent.
+        expect(latest!.externalRefs.commentId).toBe("mock-comment-1");
+        expect(latest!.externalRefs.stateTransitionId).toBeNull();
+        expect(latest!.reconcile).toEqual({
+          status: "deferred",
+          warning: "external write applied; audit finalize failed"
+        });
+
+        // Retrying the apply must be refused at the CAS guard with
+        // intent_blocked and must not produce a second external write.
+        mock.setCommentCreateDelayMs(0);
+        const retry = await runCliBinaryAsync(baseArgs, { env });
+        expect(retry.code, `retry stdout: ${retry.stdout}`).toBe(1);
+        const retryRefusal = JSON.parse(retry.stderr) as {
+          ok: boolean;
+          command: string;
+          code: string;
+          intentId: string;
+          applyPolicy: {
+            effective: string;
+            source: string;
+            externalApplyRequested: boolean;
+          };
+        };
+        expect(retryRefusal.ok).toBe(false);
+        expect(retryRefusal.command).toBe("intent apply");
+        expect(retryRefusal.code).toBe("intent_blocked");
+        expect(retryRefusal.intentId).toBe(intentId);
+        expect(retryRefusal.applyPolicy).toMatchObject({
+          effective: "external_apply_allowed",
+          source: "momentum_policy",
+          externalApplyRequested: true
+        });
+
+        // Mock state is unchanged after the retry refusal: no second comment,
+        // no status mutation, no follow-up refresh.
+        expect(mock.commentsCreated).toHaveLength(1);
+        expect(mock.issueUpdates).toHaveLength(0);
+        expect(mock.requestCounts["MomentumExternalUpdateCommentCreate"]).toBe(
+          1
+        );
+        expect(
+          mock.requestCounts["MomentumExternalUpdateIssueStateUpdate"] ?? 0
+        ).toBe(0);
+        expect(mock.requestCounts["MomentumIssueRefresh"] ?? 0).toBe(0);
+        // Source reconcile traffic from the fixture is unchanged.
+        expect(mock.requestCounts["MomentumLinearIssues"] ?? 0).toBe(
+          reconcileCallsBefore
+        );
+      } finally {
+        await fixture.close();
+      }
+    },
+    180_000
+  );
 });
 
 type M6ExternalApplyFixture = {
