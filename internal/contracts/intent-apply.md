@@ -1,8 +1,8 @@
 # Contract: Intent Apply (Two-Phase External Apply)
 
-**Status:** M6 contract. This document captures the safety invariants for the two-phase external apply path that lands in Milestone 6 ([internal/milestones/m6-external-apply.md](../milestones/m6-external-apply.md)). The runtime implementation lands across NGX-296..NGX-302. NGX-295 (M6-00) pins the contract.
+**Status:** M6 contract (complete). This document captures the safety invariants for the two-phase external apply path shipped in Milestone 6 ([internal/milestones/m6-external-apply.md](../milestones/m6-external-apply.md)). The runtime implementation shipped across NGX-296..NGX-302; NGX-295 (M6-00) pinned the contract. These invariants remain wire-stable.
 
-Milestone 5 introduced durable intents while refusing external writes by default. Milestone 6 introduces the gated external apply path described below. Every constraint here is a safety invariant — runtime code, tests, and operator surfaces all must respect it.
+Milestone 5 introduced durable intents while refusing external writes by default. Milestone 6 added the gated external apply path described below. Every constraint here is a safety invariant — runtime code, tests, and operator surfaces all must respect it.
 
 ## Scope
 
