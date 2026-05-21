@@ -45,7 +45,7 @@ Source adapters surface failures through a stable taxonomy so operator tooling c
 
 ## What M6 adds on top of this boundary
 
-M6 introduces a write-side adapter boundary and Linear write client behind `intent apply --external-apply`. The boundary/client path:
+M6 added a write-side adapter boundary and Linear write client behind `intent apply --external-apply`. The boundary/client path:
 
 - Starts with the NGX-296 `ExternalUpdateAdapter` boundary: registry, input/result types, deterministic dry-run preview, idempotency marker helper, and stable adapter/write error taxonomy with no mutation capability.
   - The NGX-296 built-in registry contains exactly the Linear external update adapter, reported as `{ kind: "linear", supportedIntentTypes: ["source_satisfied"] }`. No other update intent types are externally applicable until a later slice explicitly adds support.
