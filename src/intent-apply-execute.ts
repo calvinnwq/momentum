@@ -93,6 +93,25 @@ import {
 
 export const LINEAR_API_KEY_ENV_VAR = "LINEAR_API_KEY";
 
+/**
+ * Optional test/dev escape hatch: when set, the default Linear external-update
+ * client points at this endpoint instead of the production GraphQL host. The
+ * built-CLI smoke tests use this to redirect external apply at a local mock
+ * endpoint without weakening the production default. Operator workflows should
+ * never set this in normal use.
+ */
+export const LINEAR_EXTERNAL_UPDATE_ENDPOINT_ENV_VAR =
+  "MOMENTUM_LINEAR_EXTERNAL_UPDATE_ENDPOINT";
+
+/**
+ * Optional test/dev escape hatch: when set, the default Linear single-issue
+ * refresh client used by post-apply reconciliation points at this endpoint
+ * instead of the production GraphQL host. The built-CLI smoke tests use this
+ * to redirect the post-apply reconcile fetch at the same local mock endpoint.
+ */
+export const LINEAR_REFRESH_ENDPOINT_ENV_VAR =
+  "MOMENTUM_LINEAR_REFRESH_ENDPOINT";
+
 export const EXECUTE_EXTERNAL_APPLY_ERROR_CODES = Object.freeze([
   "intent_not_found",
   "intent_already_terminal",
@@ -881,20 +900,48 @@ function pendingReconcile(): ExecuteExternalApplyReconcile {
   return { status: "pending", warning: null };
 }
 
-function defaultBuildLinearClient(
+export function defaultBuildLinearClient(
   env: ExecuteExternalApplyEnv
 ): LinearExternalUpdateClient {
-  return buildLinearExternalUpdateClient({
+  const endpointOverride = readEndpointOverride(
+    env,
+    LINEAR_EXTERNAL_UPDATE_ENDPOINT_ENV_VAR
+  );
+  const options: {
+    apiKey: string | null;
+    endpoint?: string;
+  } = {
     apiKey: env[LINEAR_API_KEY_ENV_VAR] ?? null
-  });
+  };
+  if (endpointOverride !== null) options.endpoint = endpointOverride;
+  return buildLinearExternalUpdateClient(options);
 }
 
 export function defaultBuildLinearRefreshClient(
   env: ExecuteExternalApplyEnv
 ): LinearIssueRefreshClient {
-  return buildLinearIssueRefreshClient({
+  const endpointOverride = readEndpointOverride(
+    env,
+    LINEAR_REFRESH_ENDPOINT_ENV_VAR
+  );
+  const options: {
+    apiKey: string | null;
+    endpoint?: string;
+  } = {
     apiKey: env[LINEAR_API_KEY_ENV_VAR] ?? null
-  });
+  };
+  if (endpointOverride !== null) options.endpoint = endpointOverride;
+  return buildLinearIssueRefreshClient(options);
+}
+
+function readEndpointOverride(
+  env: ExecuteExternalApplyEnv,
+  name: string
+): string | null {
+  const raw = env[name];
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  return trimmed.length === 0 ? null : trimmed;
 }
 
 function checkAdapterAuth(

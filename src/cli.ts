@@ -2599,7 +2599,7 @@ async function intentExternalApply(args: {
     const refreshFactory =
       deps.buildLinearIssueRefreshClient ??
       ((input: LinearIssueRefreshClientFactoryInput) =>
-        defaultBuildLinearRefreshClient({ [LINEAR_API_KEY_ENV]: input.apiKey ?? undefined }));
+        defaultBuildLinearRefreshClient(input.env));
     executeDeps.buildLinearRefreshClient = (clientEnv) => {
       const apiKeyRaw = clientEnv[LINEAR_API_KEY_ENV] ?? null;
       const apiKey =
