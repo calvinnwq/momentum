@@ -5731,12 +5731,17 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
   );
 });
 
+type LinearMockCommentCreateBehavior =
+  | { kind: "success" }
+  | { kind: "graphql_error"; message: string };
+
 type LinearExternalApplyMockServer = {
   endpoint: string;
   commentsCreated: Array<{ issueId: string; body: string }>;
   issueUpdates: Array<{ issueId: string; stateId: string }>;
   requestCounts: Record<string, number>;
   setIssueState: (issueId: string, state: { id: string; name: string }) => void;
+  setCommentCreateBehavior: (behavior: LinearMockCommentCreateBehavior) => void;
   close: () => Promise<void>;
 };
 
@@ -5774,6 +5779,9 @@ async function startLinearExternalApplyMockServer(
   const issueUpdates: Array<{ issueId: string; stateId: string }> = [];
   const requestCounts: Record<string, number> = {};
   let commentCounter = 0;
+  let commentCreateBehavior: LinearMockCommentCreateBehavior = {
+    kind: "success"
+  };
 
   function tallyOperation(query: string): void {
     const match = /(query|mutation)\s+(\w+)/.exec(query);
@@ -5893,6 +5901,14 @@ async function startLinearExternalApplyMockServer(
           body: { data: { commentCreate: { success: false, comment: null } } }
         };
       }
+      if (commentCreateBehavior.kind === "graphql_error") {
+        return {
+          status: 200,
+          body: {
+            errors: [{ message: commentCreateBehavior.message }]
+          }
+        };
+      }
       commentCounter += 1;
       const commentId = `mock-comment-${commentCounter}`;
       const commentUrl = `${record.url}#comment-${commentCounter}`;
@@ -6007,6 +6023,9 @@ async function startLinearExternalApplyMockServer(
     setIssueState(issueId, state) {
       const record = issueById.get(issueId);
       if (record) record.state = state;
+    },
+    setCommentCreateBehavior(behavior) {
+      commentCreateBehavior = behavior;
     },
     close: () =>
       new Promise<void>((resolve, reject) => {
@@ -6623,6 +6642,163 @@ describe("Milestone 6 external apply end-to-end smoke (NGX-301)", () => {
         expect(stillPendingPayload.externalApply.applyState).toBe("idle");
         expect(stillPendingPayload.externalApply.totalAttempts).toBe(0);
         expect(stillPendingPayload.externalApply.latestAttempt).toBeNull();
+      } finally {
+        await fixture.close();
+      }
+    },
+    180_000
+  );
+
+  it(
+    "refuses with write_rejected when the external write fails, finalizes the audit as failed, and leaves the intent pending for retry",
+    async () => {
+      const fixture = await establishM6ExternalApplyFixture({
+        momentumPolicy: "external_apply_allowed"
+      });
+      const { repo, dataDir, intentId, mock } = fixture;
+      try {
+        const reconcileCallsBefore =
+          mock.requestCounts["MomentumLinearIssues"] ?? 0;
+        mock.setCommentCreateBehavior({
+          kind: "graphql_error",
+          message: "smoke mock injected commentCreate failure"
+        });
+
+        const externalApply = await runCliBinaryAsync(
+          [
+            "intent",
+            "apply",
+            intentId,
+            "--reason",
+            "smoke adapter failure",
+            "--external-apply",
+            "--repo",
+            repo,
+            "--data-dir",
+            dataDir,
+            "--json"
+          ],
+          {
+            env: {
+              LINEAR_API_KEY: "lin_api_smoke_fixture_key",
+              MOMENTUM_LINEAR_EXTERNAL_UPDATE_ENDPOINT: mock.endpoint,
+              MOMENTUM_LINEAR_REFRESH_ENDPOINT: mock.endpoint
+            }
+          }
+        );
+        expect(externalApply.code).toBe(1);
+        expect(externalApply.stdout).toBe("");
+        const refusal = JSON.parse(externalApply.stderr) as {
+          ok: boolean;
+          command: string;
+          code: string;
+          intentId: string;
+          message: string;
+          applyPolicy: {
+            effective: string;
+            source: string;
+            externalApplyRequested: boolean;
+            externalApplyPerformed: boolean;
+          };
+          externalApply: {
+            adapterKind: string;
+            allowStatusMutation: boolean;
+            mutationKind: string | null;
+            auditId: string | null;
+            external: unknown;
+            reconcile: { status: string | null; warning: string | null };
+          };
+        };
+        expect(refusal).toMatchObject({
+          ok: false,
+          command: "intent apply",
+          code: "write_rejected",
+          intentId
+        });
+        expect(refusal.message).toContain(
+          "smoke mock injected commentCreate failure"
+        );
+        expect(refusal.applyPolicy).toMatchObject({
+          effective: "external_apply_allowed",
+          source: "momentum_policy",
+          externalApplyRequested: true,
+          externalApplyPerformed: false
+        });
+        expect(refusal.externalApply.adapterKind).toBe("linear");
+        expect(refusal.externalApply.mutationKind).toBe("comment");
+        expect(refusal.externalApply.allowStatusMutation).toBe(false);
+        expect(typeof refusal.externalApply.auditId).toBe("string");
+        // No comment was successfully created by the mock — but the mutation
+        // attempt itself must have reached the mock, proving the adapter
+        // actually performed an external request before being rejected.
+        expect(mock.commentsCreated).toHaveLength(0);
+        expect(mock.issueUpdates).toHaveLength(0);
+        expect(
+          mock.requestCounts["MomentumExternalUpdateCommentCreate"] ?? 0
+        ).toBe(1);
+        expect(
+          mock.requestCounts["MomentumExternalUpdateIssueLookup"] ?? 0
+        ).toBeGreaterThanOrEqual(1);
+        // No post-apply refresh because the apply failed before it.
+        expect(mock.requestCounts["MomentumIssueRefresh"] ?? 0).toBe(0);
+        // Source reconcile counts are unchanged by the refused apply.
+        expect(mock.requestCounts["MomentumLinearIssues"] ?? 0).toBe(
+          reconcileCallsBefore
+        );
+
+        const intentGet = runCliBinary([
+          "intent",
+          "get",
+          intentId,
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(intentGet.code).toBe(0);
+        const intentGetPayload = JSON.parse(intentGet.stdout) as {
+          intent: { status: string };
+          externalApply: {
+            applyState: string;
+            totalAttempts: number;
+            counts: {
+              claimed: number;
+              succeeded: number;
+              failed: number;
+              blocked: number;
+              audit_incomplete: number;
+            };
+            latestAttempt: {
+              lifecycleState: string;
+              resultStatus: string;
+              resultCode: string;
+              externalRefs: {
+                commentId: string | null;
+                commentUrl: string | null;
+                stateTransitionId: string | null;
+              };
+            } | null;
+          };
+        };
+        // Intent itself remains pending — only the audit attempt is marked
+        // failed, leaving the intent eligible for a later retry against a
+        // recovered Linear endpoint.
+        expect(intentGetPayload.intent.status).toBe("pending");
+        expect(intentGetPayload.externalApply.applyState).toBe("idle");
+        expect(intentGetPayload.externalApply.totalAttempts).toBe(1);
+        expect(intentGetPayload.externalApply.counts).toMatchObject({
+          claimed: 0,
+          succeeded: 0,
+          failed: 1,
+          blocked: 0,
+          audit_incomplete: 0
+        });
+        const latest = intentGetPayload.externalApply.latestAttempt;
+        expect(latest).not.toBeNull();
+        expect(latest!.lifecycleState).toBe("failed");
+        expect(latest!.resultStatus).toBe("failed");
+        expect(latest!.resultCode).toBe("write_rejected");
+        expect(latest!.externalRefs.commentId).toBeNull();
+        expect(latest!.externalRefs.stateTransitionId).toBeNull();
       } finally {
         await fixture.close();
       }
