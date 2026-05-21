@@ -2599,7 +2599,9 @@ async function intentExternalApply(args: {
     return emitIntentFailure(parsed, io, {
       command,
       code: "adapter_threw",
-      message: err instanceof Error ? err.message : String(err),
+      message: `External apply orchestration failed unexpectedly: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
       dataDir,
       intentId
     });
