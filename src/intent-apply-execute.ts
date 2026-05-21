@@ -1,8 +1,8 @@
 /**
- * Two-phase external apply orchestrator (NGX-298 / M6-04).
+ * Two-phase external apply orchestrator (NGX-298 / M6-04 + NGX-300 / M6-05).
  *
- * Glues the NGX-296 adapter, NGX-297 Linear write client, and NGX-299 audit
- * ledger into a single CLI-callable entry point. The orchestrator is pure: it
+ * Glues the NGX-296 adapter, NGX-297 Linear write client, NGX-299 audit
+ * ledger, and NGX-300 post-apply reconcile into a single CLI-callable entry point. The orchestrator is pure: it
  * accepts dependencies for the adapter registry, policy loader, Linear client
  * factory, and clock so tests can drive every branch without touching the
  * network. The CLI wires this into `intent apply --external-apply` separately.
@@ -22,7 +22,9 @@
  *   8. Finalize the audit (`succeeded` releases the intent back to idle and
  *      then marks the intent applied; `failed` releases the intent and the
  *      caller surfaces the failure code).
- *   9. If audit finalize cannot complete, including after a refused write or
+ *   9. After a successful finalize, run the targeted single-issue reconcile and
+ *      persist its outcome on the audit row.
+ *  10. If audit finalize cannot complete, including after a refused write or
  *      thrown client error, the orchestrator finalizes as `audit_incomplete`
  *      so the intent moves to `blocked` apply_state and another mutation
  *      cannot run before operator recovery clears the block.

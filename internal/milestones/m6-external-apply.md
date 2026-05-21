@@ -1,6 +1,6 @@
 # Milestone 6: Policy-Gated External Apply
 
-**Status:** Active. NGX-295, NGX-296, NGX-297, NGX-299, and NGX-298 have landed; NGX-300, NGX-301, and NGX-302 remain. The `doctor --json` milestone marker stays on the M5 closeout string until M6 closes out.
+**Status:** Active. NGX-295, NGX-296, NGX-297, NGX-299, NGX-298, and NGX-300 have landed; NGX-301 and NGX-302 remain. The `doctor --json` milestone marker stays on the M5 closeout string until M6 closes out.
 
 Milestone 6 turns the durable `update_intents` rows from M5 into **policy-gated external writes against Linear**. M6 adds a real external write path through a single, explicitly-trusted adapter without weakening any M3/M4/M5 safety contract. External apply remains operator-mediated: nothing in M6 makes Momentum write to an external tracker automatically.
 
@@ -19,7 +19,7 @@ The Linear milestone "Milestone 6: Policy-Gated External Apply" sequences the wo
 3. **NGX-297 — M6-02 Linear external update client** *(this slice)*: introduce the credential-handling Linear GraphQL mutation client behind the adapter boundary. Tests use mock fetch/endpoints; **no real `api.linear.app` calls**. The CLI path is still not wired.
 4. **NGX-299 — M6-03 Apply audit ledger and operator surfaces**: land durable audit/claim storage, the per-intent CAS guard with `intent_apply_in_progress`, blocked/audit-incomplete state representation, and operator-visible surfaces **before** any CLI external write can mutate Linear. NGX-299 must merge before NGX-298.
 5. **NGX-298 — M6-04 External apply execution**: wire the two-phase external write behind `intent apply --external-apply`, gated on `intent_apply_policy: external_apply_allowed`. Comment-only by default; status mutation only when target Linear status mutation is explicitly configured.
-6. **NGX-300 — M6-05 Post-apply reconciliation and mismatch resolution**: refresh/reconcile the touched Linear issue after a successful external write and surface stable reconciliation warning/result codes without broad project reconciliation.
+6. **NGX-300 — M6-05 Post-apply reconciliation and mismatch resolution** *(landed)*: refresh/reconcile the touched Linear issue after a successful external write and surface stable reconciliation warning/result codes without broad project reconciliation.
 7. **NGX-301 — M6-06 External apply safety smoke and failure matrix**: add built-CLI smoke coverage for the complete safe external-apply path, including policy-denied/default-safe behavior, auth failure, concurrency, idempotent replay, blocked/audit-finalize failure, comment-only mode, and mock-Linear guards.
 8. **NGX-302 — M6-07 M6 docs, contract tests, and milestone closeout**: close the milestone, preserve older contracts, and flip the `doctor` milestone marker to M6 complete.
 
