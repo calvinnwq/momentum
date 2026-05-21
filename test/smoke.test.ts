@@ -7237,6 +7237,320 @@ describe("Milestone 6 external apply end-to-end smoke (NGX-301)", () => {
     },
     180_000
   );
+
+  it(
+    "surfaces the external apply audit through status, project status, doctor, and the handoff.json artifact after a write_rejected attempt leaves the intent pending",
+    async () => {
+      const fixture = await establishM6ExternalApplyFixture({
+        momentumPolicy: "external_apply_allowed"
+      });
+      const { repo, dataDir, goalId, intentId, mock } = fixture;
+      try {
+        // Drive a write_rejected attempt so the intent stays pending — that
+        // keeps the audit row visible through the pending-intent rollups used
+        // by status, project status, and the handoff artifact, while doctor
+        // surfaces the same audit through its global listIntentApplyAudits
+        // view regardless of intent state.
+        mock.setCommentCreateBehavior({
+          kind: "graphql_error",
+          message: "smoke mock injected commentCreate failure"
+        });
+
+        const externalApply = await runCliBinaryAsync(
+          [
+            "intent",
+            "apply",
+            intentId,
+            "--reason",
+            "smoke audit visibility",
+            "--external-apply",
+            "--repo",
+            repo,
+            "--data-dir",
+            dataDir,
+            "--json"
+          ],
+          {
+            env: {
+              LINEAR_API_KEY: "lin_api_smoke_fixture_key",
+              MOMENTUM_LINEAR_EXTERNAL_UPDATE_ENDPOINT: mock.endpoint,
+              MOMENTUM_LINEAR_REFRESH_ENDPOINT: mock.endpoint
+            }
+          }
+        );
+        expect(externalApply.code).toBe(1);
+        const refusal = JSON.parse(externalApply.stderr) as {
+          ok: boolean;
+          code: string;
+          intentId: string;
+          externalApply: { auditId: string | null };
+        };
+        expect(refusal).toMatchObject({
+          ok: false,
+          code: "write_rejected",
+          intentId
+        });
+        const auditId = refusal.externalApply.auditId;
+        expect(typeof auditId).toBe("string");
+
+        // status --json shows the failed audit on the pending intent and at
+        // the rollup level so operators can see the latest attempt without
+        // drilling into intent get.
+        const statusResult = runCliBinary([
+          "status",
+          goalId,
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(statusResult.code, `status stderr: ${statusResult.stderr}`).toBe(0);
+        const statusPayload = JSON.parse(statusResult.stdout) as {
+          goalId: string;
+          artifactDir: string;
+          pendingUpdateIntents: Array<{
+            intentId: string;
+            externalApply: {
+              applyState: string;
+              totalAttempts: number;
+              counts: { failed: number };
+              latestAttempt: {
+                id: string;
+                lifecycleState: string;
+                resultCode: string;
+              } | null;
+            };
+          }>;
+          externalApply: {
+            pendingIntentApplyStateCounts: {
+              idle: number;
+              in_flight: number;
+              blocked: number;
+            };
+            pendingAuditCounts: { failed: number; succeeded: number };
+            totalAttempts: number;
+            latestAttempt: {
+              intentId: string;
+              id: string;
+              lifecycleState: string;
+              resultStatus: string;
+              resultCode: string;
+            } | null;
+          };
+        };
+        expect(statusPayload.goalId).toBe(goalId);
+        expect(statusPayload.pendingUpdateIntents).toHaveLength(1);
+        const statusIntent = statusPayload.pendingUpdateIntents[0]!;
+        expect(statusIntent.intentId).toBe(intentId);
+        expect(statusIntent.externalApply.applyState).toBe("idle");
+        expect(statusIntent.externalApply.totalAttempts).toBe(1);
+        expect(statusIntent.externalApply.counts.failed).toBe(1);
+        expect(statusIntent.externalApply.latestAttempt).not.toBeNull();
+        expect(statusIntent.externalApply.latestAttempt!.id).toBe(auditId);
+        expect(statusIntent.externalApply.latestAttempt!.lifecycleState).toBe(
+          "failed"
+        );
+        expect(statusIntent.externalApply.latestAttempt!.resultCode).toBe(
+          "write_rejected"
+        );
+        expect(statusPayload.externalApply.totalAttempts).toBe(1);
+        expect(statusPayload.externalApply.pendingAuditCounts.failed).toBe(1);
+        expect(statusPayload.externalApply.pendingAuditCounts.succeeded).toBe(0);
+        expect(statusPayload.externalApply.pendingIntentApplyStateCounts).toMatchObject({
+          idle: 1,
+          in_flight: 0,
+          blocked: 0
+        });
+        expect(statusPayload.externalApply.latestAttempt).not.toBeNull();
+        expect(statusPayload.externalApply.latestAttempt!.intentId).toBe(intentId);
+        expect(statusPayload.externalApply.latestAttempt!.id).toBe(auditId);
+        expect(statusPayload.externalApply.latestAttempt!.lifecycleState).toBe(
+          "failed"
+        );
+        expect(statusPayload.externalApply.latestAttempt!.resultCode).toBe(
+          "write_rejected"
+        );
+
+        // project status --json exposes the same audit via its pending-intent
+        // rollup; this is the operator surface for cross-goal external apply
+        // visibility.
+        const projectStatus = runCliBinary([
+          "project",
+          "status",
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(projectStatus.code, `project status stderr: ${projectStatus.stderr}`).toBe(0);
+        const projectPayload = JSON.parse(projectStatus.stdout) as {
+          externalApply: {
+            pendingIntentApplyStateCounts: { idle: number };
+            pendingAuditCounts: { failed: number; succeeded: number };
+            totalAttempts: number;
+            latestAttempt: {
+              intentId: string;
+              id: string;
+              lifecycleState: string;
+              resultCode: string;
+            } | null;
+          };
+          pendingUpdateIntents: Array<{
+            intentId: string;
+            externalApply: {
+              applyState: string;
+              totalAttempts: number;
+              latestAttempt: { id: string; lifecycleState: string } | null;
+            };
+          }>;
+        };
+        expect(projectPayload.pendingUpdateIntents).toHaveLength(1);
+        const projectIntent = projectPayload.pendingUpdateIntents[0]!;
+        expect(projectIntent.intentId).toBe(intentId);
+        expect(projectIntent.externalApply.totalAttempts).toBe(1);
+        expect(projectIntent.externalApply.latestAttempt).not.toBeNull();
+        expect(projectIntent.externalApply.latestAttempt!.id).toBe(auditId);
+        expect(projectIntent.externalApply.latestAttempt!.lifecycleState).toBe(
+          "failed"
+        );
+        expect(projectPayload.externalApply.totalAttempts).toBe(1);
+        expect(projectPayload.externalApply.pendingAuditCounts.failed).toBe(1);
+        expect(projectPayload.externalApply.pendingAuditCounts.succeeded).toBe(0);
+        expect(projectPayload.externalApply.pendingIntentApplyStateCounts.idle).toBe(
+          1
+        );
+        expect(projectPayload.externalApply.latestAttempt).not.toBeNull();
+        expect(projectPayload.externalApply.latestAttempt!.intentId).toBe(intentId);
+        expect(projectPayload.externalApply.latestAttempt!.id).toBe(auditId);
+        expect(projectPayload.externalApply.latestAttempt!.lifecycleState).toBe(
+          "failed"
+        );
+        expect(projectPayload.externalApply.latestAttempt!.resultCode).toBe(
+          "write_rejected"
+        );
+
+        // doctor --json reads from the global audit ledger, so its
+        // externalApply.latestAttempt remains visible even once the intent
+        // transitions to applied. Here it confirms the same failed audit.
+        const doctor = runCliBinary([
+          "doctor",
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(doctor.code, `doctor stderr: ${doctor.stderr}`).toBe(0);
+        const doctorPayload = JSON.parse(doctor.stdout) as {
+          externalApply: {
+            ok: boolean;
+            intentApplyStateCounts: { idle: number; in_flight: number; blocked: number };
+            auditCounts: { failed: number; succeeded: number };
+            totalAttempts: number;
+            latestAttempt: {
+              intentId: string;
+              id: string;
+              lifecycleState: string;
+              resultStatus: string;
+              resultCode: string;
+            } | null;
+          };
+        };
+        expect(doctorPayload.externalApply.ok).toBe(true);
+        expect(doctorPayload.externalApply.intentApplyStateCounts).toMatchObject({
+          idle: 1,
+          in_flight: 0,
+          blocked: 0
+        });
+        expect(doctorPayload.externalApply.auditCounts.failed).toBe(1);
+        expect(doctorPayload.externalApply.auditCounts.succeeded).toBe(0);
+        expect(doctorPayload.externalApply.totalAttempts).toBe(1);
+        expect(doctorPayload.externalApply.latestAttempt).not.toBeNull();
+        expect(doctorPayload.externalApply.latestAttempt!.intentId).toBe(intentId);
+        expect(doctorPayload.externalApply.latestAttempt!.id).toBe(auditId);
+        expect(doctorPayload.externalApply.latestAttempt!.lifecycleState).toBe(
+          "failed"
+        );
+        expect(doctorPayload.externalApply.latestAttempt!.resultStatus).toBe(
+          "failed"
+        );
+        expect(doctorPayload.externalApply.latestAttempt!.resultCode).toBe(
+          "write_rejected"
+        );
+
+        // handoff writes the same external_apply payload into handoff.json so
+        // downstream automations can pick up the audit from a single
+        // artifact file.
+        const handoff = runCliBinary([
+          "handoff",
+          goalId,
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(handoff.code, `handoff stderr: ${handoff.stderr}`).toBe(0);
+        const handoffJsonPath = path.join(statusPayload.artifactDir, "handoff.json");
+        const handoffArtifact = JSON.parse(
+          fs.readFileSync(handoffJsonPath, "utf-8")
+        ) as {
+          external_apply: {
+            pending_intent_apply_state_counts: { idle: number };
+            pending_audit_counts: { failed: number; succeeded: number };
+            total_attempts: number;
+            latest_attempt: {
+              intent_id: string;
+              id: string;
+              lifecycle_state: string;
+              result_status: string;
+              result_code: string;
+            } | null;
+          };
+          pending_update_intents: Array<{
+            intent_id: string;
+            external_apply: {
+              apply_state: string;
+              total_attempts: number;
+              latest_attempt: {
+                id: string;
+                lifecycle_state: string;
+                result_code: string;
+              } | null;
+            };
+          }>;
+        };
+        expect(handoffArtifact.pending_update_intents).toHaveLength(1);
+        const handoffIntent = handoffArtifact.pending_update_intents[0]!;
+        expect(handoffIntent.intent_id).toBe(intentId);
+        expect(handoffIntent.external_apply.total_attempts).toBe(1);
+        expect(handoffIntent.external_apply.apply_state).toBe("idle");
+        expect(handoffIntent.external_apply.latest_attempt).not.toBeNull();
+        expect(handoffIntent.external_apply.latest_attempt!.id).toBe(auditId);
+        expect(handoffIntent.external_apply.latest_attempt!.lifecycle_state).toBe(
+          "failed"
+        );
+        expect(handoffIntent.external_apply.latest_attempt!.result_code).toBe(
+          "write_rejected"
+        );
+        expect(handoffArtifact.external_apply.total_attempts).toBe(1);
+        expect(handoffArtifact.external_apply.pending_audit_counts.failed).toBe(1);
+        expect(handoffArtifact.external_apply.pending_audit_counts.succeeded).toBe(0);
+        expect(handoffArtifact.external_apply.pending_intent_apply_state_counts.idle).toBe(
+          1
+        );
+        expect(handoffArtifact.external_apply.latest_attempt).not.toBeNull();
+        expect(handoffArtifact.external_apply.latest_attempt!.intent_id).toBe(intentId);
+        expect(handoffArtifact.external_apply.latest_attempt!.id).toBe(auditId);
+        expect(handoffArtifact.external_apply.latest_attempt!.lifecycle_state).toBe(
+          "failed"
+        );
+        expect(handoffArtifact.external_apply.latest_attempt!.result_status).toBe(
+          "failed"
+        );
+        expect(handoffArtifact.external_apply.latest_attempt!.result_code).toBe(
+          "write_rejected"
+        );
+      } finally {
+        await fixture.close();
+      }
+    },
+    180_000
+  );
 });
 
 type M6ExternalApplyFixture = {
