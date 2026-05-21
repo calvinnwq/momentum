@@ -5735,6 +5735,10 @@ type LinearMockCommentCreateBehavior =
   | { kind: "success" }
   | { kind: "graphql_error"; message: string };
 
+type LinearMockIssueRefreshBehavior =
+  | { kind: "success" }
+  | { kind: "graphql_error"; message: string };
+
 type LinearExternalApplyMockServer = {
   endpoint: string;
   commentsCreated: Array<{ issueId: string; body: string }>;
@@ -5742,6 +5746,7 @@ type LinearExternalApplyMockServer = {
   requestCounts: Record<string, number>;
   setIssueState: (issueId: string, state: { id: string; name: string }) => void;
   setCommentCreateBehavior: (behavior: LinearMockCommentCreateBehavior) => void;
+  setIssueRefreshBehavior: (behavior: LinearMockIssueRefreshBehavior) => void;
   close: () => Promise<void>;
 };
 
@@ -5780,6 +5785,9 @@ async function startLinearExternalApplyMockServer(
   const requestCounts: Record<string, number> = {};
   let commentCounter = 0;
   let commentCreateBehavior: LinearMockCommentCreateBehavior = {
+    kind: "success"
+  };
+  let issueRefreshBehavior: LinearMockIssueRefreshBehavior = {
     kind: "success"
   };
 
@@ -5853,10 +5861,27 @@ async function startLinearExternalApplyMockServer(
       };
     }
 
-    if (
-      query.includes("MomentumExternalUpdateIssueLookup") ||
-      query.includes("MomentumIssueRefresh")
-    ) {
+    if (query.includes("MomentumIssueRefresh")) {
+      if (issueRefreshBehavior.kind === "graphql_error") {
+        return {
+          status: 200,
+          body: {
+            errors: [{ message: issueRefreshBehavior.message }]
+          }
+        };
+      }
+      const id = typeof variables["id"] === "string" ? (variables["id"] as string) : "";
+      const record = issueById.get(id);
+      if (!record) {
+        return { status: 200, body: { data: { issue: null } } };
+      }
+      return {
+        status: 200,
+        body: { data: { issue: serializeIssueWithComments(record) } }
+      };
+    }
+
+    if (query.includes("MomentumExternalUpdateIssueLookup")) {
       const id = typeof variables["id"] === "string" ? (variables["id"] as string) : "";
       const record = issueById.get(id);
       if (!record) {
@@ -6026,6 +6051,9 @@ async function startLinearExternalApplyMockServer(
     },
     setCommentCreateBehavior(behavior) {
       commentCreateBehavior = behavior;
+    },
+    setIssueRefreshBehavior(behavior) {
+      issueRefreshBehavior = behavior;
     },
     close: () =>
       new Promise<void>((resolve, reject) => {
@@ -6799,6 +6827,181 @@ describe("Milestone 6 external apply end-to-end smoke (NGX-301)", () => {
         expect(latest!.resultCode).toBe("write_rejected");
         expect(latest!.externalRefs.commentId).toBeNull();
         expect(latest!.externalRefs.stateTransitionId).toBeNull();
+      } finally {
+        await fixture.close();
+      }
+    },
+    180_000
+  );
+
+  it(
+    "still marks the intent applied when post-apply refresh fails, with reconcile.status=refresh_failed and a warning recorded on the audit",
+    async () => {
+      const fixture = await establishM6ExternalApplyFixture({
+        momentumPolicy: "external_apply_allowed"
+      });
+      const { repo, dataDir, intentId, mock } = fixture;
+      try {
+        const reconcileCallsBefore =
+          mock.requestCounts["MomentumLinearIssues"] ?? 0;
+        mock.setIssueRefreshBehavior({
+          kind: "graphql_error",
+          message: "smoke mock injected IssueRefresh failure"
+        });
+
+        const externalApply = await runCliBinaryAsync(
+          [
+            "intent",
+            "apply",
+            intentId,
+            "--reason",
+            "smoke reconcile refresh failed",
+            "--external-apply",
+            "--repo",
+            repo,
+            "--data-dir",
+            dataDir,
+            "--json"
+          ],
+          {
+            env: {
+              LINEAR_API_KEY: "lin_api_smoke_fixture_key",
+              MOMENTUM_LINEAR_EXTERNAL_UPDATE_ENDPOINT: mock.endpoint,
+              MOMENTUM_LINEAR_REFRESH_ENDPOINT: mock.endpoint
+            }
+          }
+        );
+        expect(
+          externalApply.code,
+          `external apply stderr: ${externalApply.stderr}`
+        ).toBe(0);
+        const payload = JSON.parse(externalApply.stdout) as {
+          ok: boolean;
+          intent: { id: string; status: string };
+          applyPolicy: {
+            effective: string;
+            source: string;
+            externalApplyRequested: boolean;
+            externalApplyPerformed: boolean;
+          };
+          externalApply: {
+            adapterKind: string;
+            allowStatusMutation: boolean;
+            mutationKind: string;
+            auditId: string | null;
+            external: {
+              alreadyApplied: boolean;
+              commentId: string;
+              commentUrl: string;
+              idempotencyMarker: string;
+              statusTransitioned: boolean;
+            };
+            reconcile: { status: string; warning: string | null };
+          };
+        };
+        expect(payload.ok).toBe(true);
+        expect(payload.intent.status).toBe("applied");
+        expect(payload.applyPolicy).toMatchObject({
+          effective: "external_apply_allowed",
+          source: "momentum_policy",
+          externalApplyRequested: true,
+          externalApplyPerformed: true
+        });
+        // The external write itself succeeded — the audit captures a real
+        // comment id even though the post-apply refresh failed.
+        expect(payload.externalApply.adapterKind).toBe("linear");
+        expect(payload.externalApply.mutationKind).toBe("comment");
+        expect(payload.externalApply.external.alreadyApplied).toBe(false);
+        expect(payload.externalApply.external.statusTransitioned).toBe(false);
+        expect(payload.externalApply.external.commentId).toBe("mock-comment-1");
+        const marker = payload.externalApply.external.idempotencyMarker;
+        expect(marker).toMatch(
+          new RegExp(`^momentum-intent:linear:${intentId}:[0-9a-f]{16}$`)
+        );
+
+        // Reconcile reports the failure code and a warning describing the
+        // refresh error, but does NOT revert the apply.
+        expect(payload.externalApply.reconcile.status).toBe("refresh_failed");
+        expect(payload.externalApply.reconcile.warning).not.toBeNull();
+        expect(payload.externalApply.reconcile.warning ?? "").toContain(
+          "smoke mock injected IssueRefresh failure"
+        );
+
+        // Mock saw exactly one commentCreate and at least one IssueRefresh
+        // attempt (the injected failure). Source reconcile traffic unchanged.
+        expect(mock.commentsCreated).toHaveLength(1);
+        expect(mock.commentsCreated[0]!.body).toContain(`idempotency: ${marker}`);
+        expect(mock.issueUpdates).toHaveLength(0);
+        expect(mock.requestCounts["MomentumExternalUpdateCommentCreate"]).toBe(1);
+        expect(
+          mock.requestCounts["MomentumExternalUpdateIssueStateUpdate"] ?? 0
+        ).toBe(0);
+        expect(mock.requestCounts["MomentumIssueRefresh"] ?? 0).toBeGreaterThanOrEqual(
+          1
+        );
+        expect(mock.requestCounts["MomentumLinearIssues"] ?? 0).toBe(
+          reconcileCallsBefore
+        );
+
+        // `intent get` rollup carries the same reconcile warning forward on
+        // the latest audit attempt while still showing the audit as succeeded.
+        const intentGet = runCliBinary([
+          "intent",
+          "get",
+          intentId,
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(intentGet.code).toBe(0);
+        const intentGetPayload = JSON.parse(intentGet.stdout) as {
+          intent: { status: string };
+          externalApply: {
+            applyState: string;
+            totalAttempts: number;
+            counts: {
+              claimed: number;
+              succeeded: number;
+              failed: number;
+              blocked: number;
+              audit_incomplete: number;
+            };
+            latestAttempt: {
+              lifecycleState: string;
+              resultStatus: string;
+              resultCode: string;
+              idempotencyMarker: string;
+              externalRefs: {
+                commentId: string;
+                commentUrl: string;
+                stateTransitionId: string | null;
+              };
+              reconcile: { status: string; warning: string | null };
+            } | null;
+          };
+        };
+        expect(intentGetPayload.intent.status).toBe("applied");
+        expect(intentGetPayload.externalApply.applyState).toBe("idle");
+        expect(intentGetPayload.externalApply.totalAttempts).toBe(1);
+        expect(intentGetPayload.externalApply.counts).toMatchObject({
+          claimed: 0,
+          succeeded: 1,
+          failed: 0,
+          blocked: 0,
+          audit_incomplete: 0
+        });
+        const latest = intentGetPayload.externalApply.latestAttempt;
+        expect(latest).not.toBeNull();
+        expect(latest!.lifecycleState).toBe("succeeded");
+        expect(latest!.resultStatus).toBe("succeeded");
+        expect(latest!.resultCode).toBe("applied");
+        expect(latest!.idempotencyMarker).toBe(marker);
+        expect(latest!.externalRefs.commentId).toBe("mock-comment-1");
+        expect(latest!.externalRefs.stateTransitionId).toBeNull();
+        expect(latest!.reconcile.status).toBe("refresh_failed");
+        expect(latest!.reconcile.warning ?? "").toContain(
+          "smoke mock injected IssueRefresh failure"
+        );
       } finally {
         await fixture.close();
       }
