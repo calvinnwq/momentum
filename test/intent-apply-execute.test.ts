@@ -11,8 +11,12 @@ import {
   listIntentApplyAudits
 } from "../src/intent-apply-audits.js";
 import {
+  defaultBuildLinearClient,
+  defaultBuildLinearRefreshClient,
   executeExternalApply,
-  LINEAR_API_KEY_ENV_VAR
+  LINEAR_API_KEY_ENV_VAR,
+  LINEAR_EXTERNAL_UPDATE_ENDPOINT_ENV_VAR,
+  LINEAR_REFRESH_ENDPOINT_ENV_VAR
 } from "../src/intent-apply-execute.js";
 import type {
   ExecuteExternalApplyDeps,
@@ -1170,6 +1174,106 @@ describe("executeExternalApply concurrency and write failures", () => {
     } finally {
       db.close();
     }
+  });
+});
+
+describe("default Linear client factories honor endpoint env var overrides", () => {
+  it("defaultBuildLinearClient points at MOMENTUM_LINEAR_EXTERNAL_UPDATE_ENDPOINT when set", async () => {
+    const overrideEndpoint = "http://127.0.0.1:65535/momentum-mock/graphql";
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({ data: { issue: null } }),
+          { status: 200 }
+        )
+      );
+    const client = defaultBuildLinearClient({
+      [LINEAR_API_KEY_ENV_VAR]: "test-key",
+      [LINEAR_EXTERNAL_UPDATE_ENDPOINT_ENV_VAR]: overrideEndpoint
+    });
+    await client.apply({
+      preview: {
+        adapterKind: "linear",
+        intentId: "intent_override",
+        intentType: "source_satisfied",
+        target: {
+          adapterKind: "linear",
+          externalId: "linear_issue_id_override",
+          externalKey: null,
+          url: null,
+          title: null
+        },
+        mutationKind: "comment",
+        summary: "preview summary",
+        commentBody: "marker line\nmomentum-intent:linear:override:0000000000000000",
+        idempotencyMarker: "momentum-intent:linear:override:0000000000000000"
+      }
+    });
+    expect(fetchSpy).toHaveBeenCalled();
+    const firstCall = fetchSpy.mock.calls[0];
+    if (!firstCall) throw new Error("expected fetch invocation");
+    expect(firstCall[0]).toBe(overrideEndpoint);
+  });
+
+  it("defaultBuildLinearRefreshClient points at MOMENTUM_LINEAR_REFRESH_ENDPOINT when set", async () => {
+    const overrideEndpoint = "http://127.0.0.1:65535/momentum-mock/graphql";
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({ data: { issue: null } }),
+          { status: 200 }
+        )
+      );
+    const client = defaultBuildLinearRefreshClient({
+      [LINEAR_API_KEY_ENV_VAR]: "test-key",
+      [LINEAR_REFRESH_ENDPOINT_ENV_VAR]: overrideEndpoint
+    });
+    await client.refresh({
+      target: { kind: "id", value: "linear_issue_id_override" }
+    });
+    expect(fetchSpy).toHaveBeenCalled();
+    const firstCall = fetchSpy.mock.calls[0];
+    if (!firstCall) throw new Error("expected fetch invocation");
+    expect(firstCall[0]).toBe(overrideEndpoint);
+  });
+
+  it("defaultBuildLinearClient falls back to the production endpoint when the override env var is unset or empty", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        new Response(
+          JSON.stringify({ data: { issue: null } }),
+          { status: 200 }
+        )
+      );
+    const client = defaultBuildLinearClient({
+      [LINEAR_API_KEY_ENV_VAR]: "test-key",
+      [LINEAR_EXTERNAL_UPDATE_ENDPOINT_ENV_VAR]: "   "
+    });
+    await client.apply({
+      preview: {
+        adapterKind: "linear",
+        intentId: "intent_fallback",
+        intentType: "source_satisfied",
+        target: {
+          adapterKind: "linear",
+          externalId: "linear_issue_id_fallback",
+          externalKey: null,
+          url: null,
+          title: null
+        },
+        mutationKind: "comment",
+        summary: "preview summary",
+        commentBody: "marker line\nmomentum-intent:linear:fallback:0000000000000000",
+        idempotencyMarker: "momentum-intent:linear:fallback:0000000000000000"
+      }
+    });
+    expect(fetchSpy).toHaveBeenCalled();
+    const firstCall = fetchSpy.mock.calls[0];
+    if (!firstCall) throw new Error("expected fetch invocation");
+    expect(firstCall[0]).toBe("https://api.linear.app/graphql");
   });
 });
 
