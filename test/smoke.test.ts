@@ -6418,4 +6418,445 @@ describe("Milestone 6 external apply end-to-end smoke (NGX-301)", () => {
     },
     180_000
   );
+
+  it(
+    "refuses with policy_denied when MOMENTUM.md does not opt into external apply and leaves the intent pending",
+    async () => {
+      const fixture = await establishM6ExternalApplyFixture({
+        momentumPolicy: "create_intents_only"
+      });
+      const { repo, dataDir, intentId, mock } = fixture;
+      try {
+        const reconcileCallsBefore =
+          mock.requestCounts["MomentumLinearIssues"] ?? 0;
+        const externalApply = await runCliBinaryAsync(
+          [
+            "intent",
+            "apply",
+            intentId,
+            "--reason",
+            "smoke policy denied refusal",
+            "--external-apply",
+            "--repo",
+            repo,
+            "--data-dir",
+            dataDir,
+            "--json"
+          ],
+          {
+            env: {
+              LINEAR_API_KEY: "lin_api_smoke_fixture_key",
+              MOMENTUM_LINEAR_EXTERNAL_UPDATE_ENDPOINT: mock.endpoint,
+              MOMENTUM_LINEAR_REFRESH_ENDPOINT: mock.endpoint
+            }
+          }
+        );
+        expect(externalApply.code).toBe(1);
+        expect(externalApply.stdout).toBe("");
+        const refusal = JSON.parse(externalApply.stderr) as {
+          ok: boolean;
+          command: string;
+          code: string;
+          intentId: string;
+          applyPolicy: {
+            effective: string;
+            source: string;
+            externalApplyRequested: boolean;
+            externalApplyPerformed: boolean;
+          };
+        };
+        expect(refusal).toMatchObject({
+          ok: false,
+          command: "intent apply",
+          code: "policy_denied",
+          intentId
+        });
+        expect(refusal.applyPolicy).toMatchObject({
+          effective: "create_intents_only",
+          source: "momentum_policy",
+          externalApplyRequested: true,
+          externalApplyPerformed: false
+        });
+
+        // No external write or post-apply refresh touches the mock.
+        expect(mock.commentsCreated).toHaveLength(0);
+        expect(mock.issueUpdates).toHaveLength(0);
+        expect(
+          mock.requestCounts["MomentumExternalUpdateCommentCreate"] ?? 0
+        ).toBe(0);
+        expect(
+          mock.requestCounts["MomentumExternalUpdateIssueStateUpdate"] ?? 0
+        ).toBe(0);
+        expect(
+          mock.requestCounts["MomentumExternalUpdateIssueLookup"] ?? 0
+        ).toBe(0);
+        expect(mock.requestCounts["MomentumIssueRefresh"] ?? 0).toBe(0);
+        // Source reconcile counts are unchanged by the refused apply.
+        expect(mock.requestCounts["MomentumLinearIssues"] ?? 0).toBe(
+          reconcileCallsBefore
+        );
+
+        const stillPending = runCliBinary([
+          "intent",
+          "get",
+          intentId,
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(stillPending.code).toBe(0);
+        const stillPendingPayload = JSON.parse(stillPending.stdout) as {
+          intent: { status: string };
+          externalApply: {
+            applyState: string;
+            totalAttempts: number;
+            latestAttempt: unknown;
+          };
+        };
+        expect(stillPendingPayload.intent.status).toBe("pending");
+        expect(stillPendingPayload.externalApply.applyState).toBe("idle");
+        expect(stillPendingPayload.externalApply.totalAttempts).toBe(0);
+        expect(stillPendingPayload.externalApply.latestAttempt).toBeNull();
+      } finally {
+        await fixture.close();
+      }
+    },
+    180_000
+  );
+
+  it(
+    "refuses with auth_unavailable when LINEAR_API_KEY is missing and leaves the intent pending",
+    async () => {
+      const fixture = await establishM6ExternalApplyFixture({
+        momentumPolicy: "external_apply_allowed"
+      });
+      const { repo, dataDir, intentId, mock } = fixture;
+      try {
+        const reconcileCallsBefore =
+          mock.requestCounts["MomentumLinearIssues"] ?? 0;
+        const externalApply = await runCliBinaryAsync(
+          [
+            "intent",
+            "apply",
+            intentId,
+            "--reason",
+            "smoke auth unavailable refusal",
+            "--external-apply",
+            "--repo",
+            repo,
+            "--data-dir",
+            dataDir,
+            "--json"
+          ],
+          {
+            env: {
+              LINEAR_API_KEY: "",
+              MOMENTUM_LINEAR_EXTERNAL_UPDATE_ENDPOINT: mock.endpoint,
+              MOMENTUM_LINEAR_REFRESH_ENDPOINT: mock.endpoint
+            }
+          }
+        );
+        expect(externalApply.code).toBe(1);
+        expect(externalApply.stdout).toBe("");
+        const refusal = JSON.parse(externalApply.stderr) as {
+          ok: boolean;
+          command: string;
+          code: string;
+          intentId: string;
+          message: string;
+          applyPolicy: {
+            effective: string;
+            source: string;
+            externalApplyRequested: boolean;
+            externalApplyPerformed: boolean;
+          };
+        };
+        expect(refusal).toMatchObject({
+          ok: false,
+          command: "intent apply",
+          code: "auth_unavailable",
+          intentId
+        });
+        expect(refusal.message).toContain("LINEAR_API_KEY");
+        expect(refusal.applyPolicy).toMatchObject({
+          effective: "external_apply_allowed",
+          source: "momentum_policy",
+          externalApplyRequested: true,
+          externalApplyPerformed: false
+        });
+
+        // Policy resolved but auth failed before any adapter call.
+        expect(mock.commentsCreated).toHaveLength(0);
+        expect(mock.issueUpdates).toHaveLength(0);
+        expect(
+          mock.requestCounts["MomentumExternalUpdateCommentCreate"] ?? 0
+        ).toBe(0);
+        expect(
+          mock.requestCounts["MomentumExternalUpdateIssueStateUpdate"] ?? 0
+        ).toBe(0);
+        expect(
+          mock.requestCounts["MomentumExternalUpdateIssueLookup"] ?? 0
+        ).toBe(0);
+        expect(mock.requestCounts["MomentumIssueRefresh"] ?? 0).toBe(0);
+        expect(mock.requestCounts["MomentumLinearIssues"] ?? 0).toBe(
+          reconcileCallsBefore
+        );
+
+        const stillPending = runCliBinary([
+          "intent",
+          "get",
+          intentId,
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(stillPending.code).toBe(0);
+        const stillPendingPayload = JSON.parse(stillPending.stdout) as {
+          intent: { status: string };
+          externalApply: {
+            applyState: string;
+            totalAttempts: number;
+            latestAttempt: unknown;
+          };
+        };
+        expect(stillPendingPayload.intent.status).toBe("pending");
+        expect(stillPendingPayload.externalApply.applyState).toBe("idle");
+        expect(stillPendingPayload.externalApply.totalAttempts).toBe(0);
+        expect(stillPendingPayload.externalApply.latestAttempt).toBeNull();
+      } finally {
+        await fixture.close();
+      }
+    },
+    180_000
+  );
 });
+
+type M6ExternalApplyFixture = {
+  repo: string;
+  dataDir: string;
+  sourceItemId: string;
+  goalId: string;
+  intentId: string;
+  mock: LinearExternalApplyMockServer;
+  close: () => Promise<void>;
+};
+
+async function establishM6ExternalApplyFixture(options: {
+  momentumPolicy: "external_apply_allowed" | "create_intents_only";
+}): Promise<M6ExternalApplyFixture> {
+  const dataDir = makeTempDir("momentum-smoke-m6-failure-data-");
+  const repo = initDisposableRepo();
+  const momentumLines =
+    options.momentumPolicy === "external_apply_allowed"
+      ? [
+          "---",
+          "intent_apply_policy: external_apply_allowed",
+          "---",
+          "",
+          "Smoke MOMENTUM.md for the M6 external apply failure matrix.",
+          ""
+        ]
+      : [
+          "---",
+          "intent_apply_policy: create_intents_only",
+          "---",
+          "",
+          "Smoke MOMENTUM.md for the M6 external apply failure matrix.",
+          ""
+        ];
+  fs.writeFileSync(
+    path.join(repo, "MOMENTUM.md"),
+    momentumLines.join("\n"),
+    "utf-8"
+  );
+  runGit(repo, ["add", "MOMENTUM.md"]);
+  runGit(repo, ["commit", "-m", "add MOMENTUM.md", "--quiet"]);
+
+  const goalFile = path.join(dataDir, "goal.md");
+  fs.writeFileSync(goalFile, SMOKE_GOAL_SPEC, "utf-8");
+
+  const issue: LinearExternalApplyMockIssue = {
+    id: "issue-smoke-ngx-301-failure",
+    identifier: "NGX-301",
+    title: "M6-06 External apply safety smoke and failure matrix",
+    description: "Smoke fixture for the M6 external apply failure matrix.",
+    url: "https://linear.app/ngxcalvin/issue/NGX-301",
+    updatedAt: "2026-05-21T08:00:00.000Z",
+    priority: 0,
+    state: { id: "state-in-progress", name: "In Progress" },
+    team: { id: "team-ngx" },
+    project: {
+      id: "project-momentum",
+      name: "Momentum",
+      url: "https://linear.app/ngxcalvin/project/momentum"
+    },
+    projectMilestone: {
+      id: "milestone-m6",
+      name: "Milestone 6: Policy-Gated External Apply"
+    },
+    labels: { nodes: [] },
+    assignee: null,
+    comments: []
+  };
+  const mock = await startLinearExternalApplyMockServer([issue]);
+
+  const reconcile = await runCliBinaryAsync(
+    [
+      "source",
+      "reconcile",
+      "linear",
+      "--linear-endpoint",
+      mock.endpoint,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ],
+    { env: { LINEAR_API_KEY: "lin_api_smoke_fixture_key" } }
+  );
+  if (reconcile.code !== 0) {
+    await mock.close();
+    throw new Error(`source reconcile linear failed: ${reconcile.stderr}`);
+  }
+
+  const sourceList = runCliBinary([
+    "source",
+    "list",
+    "--data-dir",
+    dataDir,
+    "--json"
+  ]);
+  const sourceItems = (
+    JSON.parse(sourceList.stdout) as { items: Array<{ id: string }> }
+  ).items;
+  const sourceItemId = sourceItems[0]!.id;
+
+  const goalStart = runCliBinary([
+    "goal",
+    "start",
+    goalFile,
+    "--repo",
+    repo,
+    "--data-dir",
+    dataDir,
+    "--runner",
+    "fake",
+    "--json"
+  ]);
+  const goalId = (JSON.parse(goalStart.stdout) as { goalId: string }).goalId;
+
+  const drain = runCliBinary(
+    [
+      "daemon",
+      "start",
+      "--max-idle-cycles",
+      "2",
+      "--poll-interval-ms",
+      "0",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ],
+    { env: { [FAKE_RUNNER_GOAL_COMPLETE_ENV]: "1" } }
+  );
+  if (drain.code !== 0) {
+    await mock.close();
+    throw new Error(`daemon start failed: ${drain.stderr}`);
+  }
+
+  const fixtureRoot = makeTempDir("momentum-smoke-m6-failure-fixture-");
+  const intentRunId = "smoke-m6-failure-run-1";
+  const runDir = path.join(fixtureRoot, ".agent-workflows", intentRunId);
+  fs.mkdirSync(runDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(runDir, "plan.json"),
+    JSON.stringify(
+      {
+        runId: intentRunId,
+        schemaVersion: 1,
+        mode: "execute-ready",
+        profile: "momentum-m6-smoke",
+        objective: "NGX-301 smoke fixture for failure matrix",
+        resolvedScope: {
+          issues: ["NGX-301"],
+          source: "explicit",
+          status: "resolved"
+        }
+      },
+      null,
+      2
+    )
+  );
+  const ledger = [
+    {
+      runId: intentRunId,
+      step: "implementation",
+      status: "complete",
+      ts: "2026-05-21T08:20:00Z"
+    },
+    {
+      runId: intentRunId,
+      step: "no-mistakes",
+      status: "complete",
+      ts: "2026-05-21T08:25:00Z"
+    }
+  ];
+  fs.writeFileSync(
+    path.join(runDir, "ledger.jsonl"),
+    `${ledger.map((line) => JSON.stringify(line)).join("\n")}\n`
+  );
+
+  const ingest = runCliBinary([
+    "evidence",
+    "ingest",
+    "--path",
+    runDir,
+    "--goal",
+    goalId,
+    "--source-item",
+    sourceItemId,
+    "--data-dir",
+    dataDir,
+    "--json"
+  ]);
+  if (ingest.code !== 0) {
+    await mock.close();
+    throw new Error(`evidence ingest failed: ${ingest.stderr}`);
+  }
+
+  const link = runCliBinary([
+    "source",
+    "link",
+    sourceItemId,
+    "--goal",
+    goalId,
+    "--data-dir",
+    dataDir,
+    "--json"
+  ]);
+  if (link.code !== 0) {
+    await mock.close();
+    throw new Error(`source link failed: ${link.stderr}`);
+  }
+
+  const intentList = runCliBinary([
+    "intent",
+    "list",
+    "--data-dir",
+    dataDir,
+    "--json"
+  ]);
+  const intentListPayload = JSON.parse(intentList.stdout) as {
+    intents: Array<{ id: string; status: string }>;
+  };
+  const intentId = intentListPayload.intents[0]!.id;
+
+  return {
+    repo,
+    dataDir,
+    sourceItemId,
+    goalId,
+    intentId,
+    mock,
+    close: () => mock.close()
+  };
+}
