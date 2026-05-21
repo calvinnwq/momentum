@@ -130,6 +130,20 @@ export type MarkIntentApplyAuditIncompleteInput = {
   now?: number;
 };
 
+export type UpdateIntentApplyAuditReconcileInput = {
+  auditId: string;
+  reconcile: IntentApplyAuditReconcile;
+  now?: number;
+};
+
+export type UpdateIntentApplyAuditReconcileResult =
+  | { ok: true; audit: IntentApplyAudit }
+  | {
+      ok: false;
+      code: "audit_not_found";
+      message: string;
+    };
+
 export type ListIntentApplyAuditsOptions = {
   intentId?: string;
   lifecycleState?: IntentApplyLifecycleState;
@@ -566,6 +580,37 @@ export function getLatestIntentApplyAudit(
     )
     .get(intentId) as IntentApplyAuditRow | undefined;
   return row ? intentApplyAuditFromRow(row) : null;
+}
+
+export function updateIntentApplyAuditReconcile(
+  db: MomentumDb,
+  input: UpdateIntentApplyAuditReconcileInput
+): UpdateIntentApplyAuditReconcileResult {
+  validateNonEmpty(input.auditId, "auditId");
+  const now = input.now ?? Date.now();
+  const row = db
+    .prepare(
+      `UPDATE intent_apply_audits
+          SET reconcile_status = ?,
+              reconcile_warning = ?,
+              updated_at = ?
+        WHERE id = ?
+        RETURNING *`
+    )
+    .get(
+      input.reconcile.status ?? null,
+      input.reconcile.warning ?? null,
+      now,
+      input.auditId
+    ) as IntentApplyAuditRow | undefined;
+  if (!row) {
+    return {
+      ok: false,
+      code: "audit_not_found",
+      message: `Intent apply audit not found: ${input.auditId}`
+    };
+  }
+  return { ok: true, audit: intentApplyAuditFromRow(row) };
 }
 
 export function listIntentApplyAudits(

@@ -29,6 +29,7 @@ import type {
   LinearExternalUpdateResult,
   LinearExternalUpdateSuccess
 } from "../src/linear-external-update-client.js";
+import type { LinearIssueRefreshClient } from "../src/linear-issue-refresh.js";
 import { getUpdateIntentById } from "../src/update-intents.js";
 
 const tempRoots: string[] = [];
@@ -209,6 +210,37 @@ function makeErrorOutcome(
   return { ok: false, code, error: message };
 }
 
+function makeRefreshClient(args: {
+  marker: string;
+  issueId?: string;
+  issueKey?: string;
+  status?: string;
+  comments?: Array<{ id: string; body: string; url: string | null }>;
+}): LinearIssueRefreshClient {
+  return {
+    async refresh() {
+      return {
+        ok: true,
+        issue: {
+          id: args.issueId ?? "linear_issue_id_happy",
+          identifier: args.issueKey ?? "NGX-1001",
+          title: "Happy issue",
+          url: "https://linear.app/example/issue/NGX-1001",
+          updatedAt: "2026-05-21T00:00:00.000Z",
+          state: { id: "state-done", name: args.status ?? "Done" }
+        },
+        comments: args.comments ?? [
+          {
+            id: "comment_1",
+            body: `Momentum applied ${args.marker}`,
+            url: "https://linear.app/example/comment/1"
+          }
+        ]
+      };
+    }
+  };
+}
+
 function expectedIdempotencyMarker(
   intentId: string,
   payload: Record<string, unknown>
@@ -224,6 +256,7 @@ function baseInput(
   db: MomentumDb,
   overrides: Partial<ExecuteExternalApplyInput> & { intentId: string }
 ): ExecuteExternalApplyInput {
+  const deps = overrides.deps ?? {};
   return {
     db,
     intentId: overrides.intentId,
@@ -232,7 +265,17 @@ function baseInput(
     repoPath: overrides.repoPath ?? null,
     env: overrides.env ?? { [LINEAR_API_KEY_ENV_VAR]: "test-key" },
     statusMutation: overrides.statusMutation ?? null,
-    deps: overrides.deps ?? {}
+    deps: {
+      ...deps,
+      buildLinearRefreshClient:
+        deps.buildLinearRefreshClient ??
+        (() =>
+          makeRefreshClient({
+            marker: expectedIdempotencyMarker(overrides.intentId, {
+              kind: "comment"
+            })
+          }))
+    }
   };
 }
 
@@ -470,7 +513,7 @@ describe("executeExternalApply two-phase happy path", () => {
       expect(result.context.target.externalId).toBe("linear_issue_id_happy");
       expect(result.context.target.externalKey).toBe("NGX-1001");
       expect(result.context.auditId).toBe(result.audit.id);
-      expect(result.context.reconcile.status).toBe("pending");
+      expect(result.context.reconcile.status).toBe("success");
       expect(result.external.alreadyApplied).toBe(false);
       expect(result.external.commentId).toBe("comment_1");
       expect(result.external.idempotencyMarker).toBe(idempotencyMarker);
@@ -486,6 +529,8 @@ describe("executeExternalApply two-phase happy path", () => {
       expect(result.audit.lifecycleState).toBe("succeeded");
       expect(result.audit.resultCode).toBe("applied");
       expect(result.audit.externalRefs.commentId).toBe("comment_1");
+      expect(result.audit.reconcile.status).toBe("success");
+      expect(result.audit.reconcile.warning).toBeNull();
 
       const applyState = db
         .prepare("SELECT apply_state FROM update_intents WHERE id = ?")
@@ -527,6 +572,49 @@ describe("executeExternalApply two-phase happy path", () => {
       expect(result.audit.resultCode).toBe("already_applied");
       expect(result.intent.status).toBe("applied");
       expect(spy.calls).toHaveLength(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("surfaces and persists a stable warning when targeted post-apply reconcile still mismatches", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { intentId } = seedHappyPath(db);
+      const repoPath = makeRepo(externalApplyAllowedPolicy());
+      const intent = getUpdateIntentById(db, intentId);
+      if (!intent) throw new Error("intent missing");
+      const idempotencyMarker = expectedIdempotencyMarker(intentId, intent.payload);
+      const spy = makeApplySpy(makeSuccessOutcome({ idempotencyMarker }));
+
+      const result = await executeExternalApply(
+        baseInput(db, {
+          intentId,
+          repoPath,
+          deps: {
+            buildLinearClient: () => spy.client,
+            buildLinearRefreshClient: () =>
+              makeRefreshClient({
+                marker: idempotencyMarker,
+                comments: [
+                  { id: "comment_other", body: "unrelated", url: null }
+                ]
+              }),
+            now: () => 2100
+          }
+        })
+      );
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error(`expected ok, got ${result.code}`);
+      expect(result.context.reconcile.status).toBe("mismatch_persists");
+      expect(result.context.reconcile.warning).toContain(
+        "did not surface idempotency marker"
+      );
+      expect(result.audit.lifecycleState).toBe("succeeded");
+      expect(result.audit.reconcile.status).toBe("mismatch_persists");
+      expect(result.intent.status).toBe("applied");
     } finally {
       db.close();
     }

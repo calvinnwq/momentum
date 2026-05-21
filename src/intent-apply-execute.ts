@@ -32,11 +32,15 @@ import {
   claimIntentApply as claimIntentApplyFn,
   finalizeIntentApply as finalizeIntentApplyFn,
   markIntentApplyAuditIncomplete as markIntentApplyAuditIncompleteFn,
+  updateIntentApplyAuditReconcile as updateIntentApplyAuditReconcileFn,
   type ClaimIntentApplyInput,
   type ClaimIntentApplyResult,
   type FinalizeIntentApplyInput,
   type FinalizeIntentApplyResult,
-  type IntentApplyAudit
+  type IntentApplyAudit,
+  type IntentApplyAuditReconcile,
+  type UpdateIntentApplyAuditReconcileInput,
+  type UpdateIntentApplyAuditReconcileResult
 } from "./intent-apply-audits.js";
 import type { MomentumDb } from "./db.js";
 import {
@@ -62,6 +66,10 @@ import {
   type LinearStatusMutationConfig
 } from "./linear-external-update-client.js";
 import {
+  buildLinearIssueRefreshClient,
+  type LinearIssueRefreshClient
+} from "./linear-issue-refresh.js";
+import {
   DEFAULT_INTENT_APPLY_POLICY,
   loadMomentumPolicy as loadMomentumPolicyFn,
   resolveIntentApplyPolicy,
@@ -70,6 +78,10 @@ import {
   type UpdateIntentApplyPolicy
 } from "./momentum-policy.js";
 import { getSourceItemById } from "./source-items.js";
+import {
+  reconcileAfterExternalApply,
+  type PostApplyReconcileOutcomeCode
+} from "./post-apply-reconcile.js";
 import {
   getUpdateIntentById,
   markUpdateIntentApplied as markUpdateIntentAppliedFn,
@@ -111,6 +123,9 @@ export type ExecuteExternalApplyDeps = {
   buildLinearClient?: (
     env: ExecuteExternalApplyEnv
   ) => LinearExternalUpdateClient;
+  buildLinearRefreshClient?: (
+    env: ExecuteExternalApplyEnv
+  ) => LinearIssueRefreshClient | null;
   claimIntentApply?: (
     db: MomentumDb,
     input: ClaimIntentApplyInput
@@ -119,6 +134,10 @@ export type ExecuteExternalApplyDeps = {
     db: MomentumDb,
     input: FinalizeIntentApplyInput
   ) => FinalizeIntentApplyResult;
+  updateIntentApplyAuditReconcile?: (
+    db: MomentumDb,
+    input: UpdateIntentApplyAuditReconcileInput
+  ) => UpdateIntentApplyAuditReconcileResult;
   previewExternalUpdate?: (
     input: ExternalUpdateAdapterInput,
     options: { adapters?: ReadonlyMap<string, ExternalUpdateAdapter> }
@@ -155,7 +174,7 @@ export type ExecuteExternalApplyTarget = {
 };
 
 export type ExecuteExternalApplyReconcile = {
-  status: "pending" | "deferred" | null;
+  status: "pending" | "deferred" | PostApplyReconcileOutcomeCode | null;
   warning: string | null;
 };
 
@@ -229,6 +248,9 @@ export async function executeExternalApply(
   const loadPolicyFn = deps.loadPolicy ?? loadMomentumPolicyFn;
   const buildLinearClient =
     deps.buildLinearClient ?? defaultBuildLinearClient;
+  const buildLinearRefreshClient = deps.buildLinearRefreshClient ?? null;
+  const updateReconcileFn =
+    deps.updateIntentApplyAuditReconcile ?? updateIntentApplyAuditReconcileFn;
 
   if (
     typeof input.intentId !== "string" ||
@@ -460,6 +482,9 @@ export async function executeExternalApply(
   const audit = claim.audit;
 
   const client = buildLinearClient(env);
+  const refreshClient = buildLinearRefreshClient
+    ? buildLinearRefreshClient(env)
+    : null;
   const applyInput: LinearExternalUpdateInput = {
     preview,
     statusMutation: input.statusMutation ?? null
@@ -580,10 +605,7 @@ export async function executeExternalApply(
         ? externalResult.status.nextStateId
         : null
     },
-    reconcile: {
-      status: "pending",
-      warning: null
-    },
+    reconcile: pendingReconcile(),
     now: now()
   });
 
@@ -650,6 +672,16 @@ export async function executeExternalApply(
       markApplied.currentStatus === "applied" &&
       currentIntent?.status === "applied"
     ) {
+      const reconciled = await reconcileSuccessfulExternalApply({
+        db: input.db,
+        audit: finalizeSucceeded.audit,
+        adapter,
+        target,
+        idempotencyMarker: preview.idempotencyMarker,
+        refreshClient,
+        updateReconcileFn,
+        now
+      });
       return buildExternalSuccess({
         intent: currentIntent,
         adapter,
@@ -657,8 +689,9 @@ export async function executeExternalApply(
         policyResolution,
         allowStatusMutation,
         preview,
-        audit: finalizeSucceeded.audit,
-        externalResult
+        audit: reconciled.audit,
+        externalResult,
+        reconcile: reconciled.reconcile
       });
     }
     const incomplete = markIntentApplyAuditIncompleteFn(input.db, {
@@ -699,6 +732,17 @@ export async function executeExternalApply(
     });
   }
 
+  const reconciled = await reconcileSuccessfulExternalApply({
+    db: input.db,
+    audit: finalizeSucceeded.audit,
+    adapter,
+    target,
+    idempotencyMarker: preview.idempotencyMarker,
+    refreshClient,
+    updateReconcileFn,
+    now
+  });
+
   const successContext: ExecuteExternalApplyContext = {
     intentId: intent.id,
     intentStatus: markApplied.intent.status,
@@ -714,11 +758,8 @@ export async function executeExternalApply(
     applyPolicy: policyResolution.applyPolicy,
     allowStatusMutation,
     mutationKind: preview.mutationKind,
-    auditId: finalizeSucceeded.audit.id,
-    reconcile: {
-      status: "pending",
-      warning: null
-    }
+    auditId: reconciled.audit.id,
+    reconcile: reconciled.reconcile
   };
 
   return {
@@ -726,7 +767,7 @@ export async function executeExternalApply(
     resultCode: "applied",
     context: successContext,
     intent: markApplied.intent,
-    audit: finalizeSucceeded.audit,
+    audit: reconciled.audit,
     external: externalSummary(externalResult)
   };
 }
@@ -740,6 +781,7 @@ function buildExternalSuccess(args: {
   preview: ExternalUpdateAdapterPreview;
   audit: IntentApplyAudit;
   externalResult: LinearExternalUpdateResult & { ok: true };
+  reconcile?: ExecuteExternalApplyReconcile;
 }): ExecuteExternalApplySuccess {
   const successContext: ExecuteExternalApplyContext = {
     intentId: args.intent.id,
@@ -757,10 +799,7 @@ function buildExternalSuccess(args: {
     allowStatusMutation: args.allowStatusMutation,
     mutationKind: args.preview.mutationKind,
     auditId: args.audit.id,
-    reconcile: {
-      status: "pending",
-      warning: null
-    }
+    reconcile: args.reconcile ?? pendingReconcile()
   };
 
   return {
@@ -773,10 +812,72 @@ function buildExternalSuccess(args: {
   };
 }
 
+async function reconcileSuccessfulExternalApply(args: {
+  db: MomentumDb;
+  audit: IntentApplyAudit;
+  adapter: ExternalUpdateAdapter;
+  target: ExternalUpdateAdapterTarget;
+  idempotencyMarker: string;
+  refreshClient: LinearIssueRefreshClient | null;
+  updateReconcileFn: (
+    db: MomentumDb,
+    input: UpdateIntentApplyAuditReconcileInput
+  ) => UpdateIntentApplyAuditReconcileResult;
+  now: () => number;
+}): Promise<{ audit: IntentApplyAudit; reconcile: ExecuteExternalApplyReconcile }> {
+  const outcome = await reconcileAfterExternalApply({
+    db: args.db,
+    adapterKind: args.adapter.kind,
+    externalId: args.target.externalId,
+    externalKey: args.target.externalKey,
+    url: args.target.url,
+    idempotencyMarker: args.idempotencyMarker,
+    client: args.refreshClient,
+    now: args.now
+  });
+  const reconcile: IntentApplyAuditReconcile = {
+    status: outcome.code,
+    warning: outcome.code === "success" ? null : outcome.detail
+  };
+  const updated = args.updateReconcileFn(args.db, {
+    auditId: args.audit.id,
+    reconcile,
+    now: args.now()
+  });
+  if (!updated.ok) {
+    return {
+      audit: args.audit,
+      reconcile: {
+        status: "post_apply_reconcile_failed",
+        warning: `Post-apply reconcile completed with ${outcome.code}, but audit reconcile update failed: ${updated.message}`
+      }
+    };
+  }
+  return {
+    audit: updated.audit,
+    reconcile: {
+      status: reconcile.status as ExecuteExternalApplyReconcile["status"],
+      warning: reconcile.warning
+    }
+  };
+}
+
+function pendingReconcile(): ExecuteExternalApplyReconcile {
+  return { status: "pending", warning: null };
+}
+
 function defaultBuildLinearClient(
   env: ExecuteExternalApplyEnv
 ): LinearExternalUpdateClient {
   return buildLinearExternalUpdateClient({
+    apiKey: env[LINEAR_API_KEY_ENV_VAR] ?? null
+  });
+}
+
+export function defaultBuildLinearRefreshClient(
+  env: ExecuteExternalApplyEnv
+): LinearIssueRefreshClient {
+  return buildLinearIssueRefreshClient({
     apiKey: env[LINEAR_API_KEY_ENV_VAR] ?? null
   });
 }

@@ -137,12 +137,14 @@ import {
   type IntentApplyStateCounts
 } from "./intent-apply-audits.js";
 import {
+  defaultBuildLinearRefreshClient,
   executeExternalApply,
   LINEAR_API_KEY_ENV_VAR,
   type ExecuteExternalApplyDeps,
   type ExecuteExternalApplyResult
 } from "./intent-apply-execute.js";
 import { type LinearExternalUpdateClient } from "./linear-external-update-client.js";
+import { type LinearIssueRefreshClient } from "./linear-issue-refresh.js";
 
 export const VERSION = "0.0.0";
 
@@ -168,6 +170,11 @@ export type LinearExternalUpdateClientFactoryInput = {
   env: NodeJS.ProcessEnv;
 };
 
+export type LinearIssueRefreshClientFactoryInput = {
+  apiKey: string | null;
+  env: NodeJS.ProcessEnv;
+};
+
 export type CliDeps = {
   buildLinearReconciliationClient?: (
     input: LinearReconciliationClientFactoryInput
@@ -175,6 +182,9 @@ export type CliDeps = {
   buildLinearExternalUpdateClient?: (
     input: LinearExternalUpdateClientFactoryInput
   ) => LinearExternalUpdateClient;
+  buildLinearIssueRefreshClient?: (
+    input: LinearIssueRefreshClientFactoryInput
+  ) => LinearIssueRefreshClient | null;
 };
 
 type JsonPayload = Record<string, unknown>;
@@ -2007,7 +2017,7 @@ type IntentExternalApplySummary = {
   mutationKind: string | null;
   auditId: string | null;
   reconcile: {
-    status: "pending" | "deferred" | null;
+    status: string | null;
     warning: string | null;
   };
   external: {
@@ -2586,6 +2596,18 @@ async function intentExternalApply(args: {
         return factory({ apiKey, env: env as NodeJS.ProcessEnv });
       };
     }
+    const refreshFactory =
+      deps.buildLinearIssueRefreshClient ??
+      ((input: LinearIssueRefreshClientFactoryInput) =>
+        defaultBuildLinearRefreshClient({ [LINEAR_API_KEY_ENV]: input.apiKey ?? undefined }));
+    executeDeps.buildLinearRefreshClient = (clientEnv) => {
+      const apiKeyRaw = clientEnv[LINEAR_API_KEY_ENV] ?? null;
+      const apiKey =
+        typeof apiKeyRaw === "string" && apiKeyRaw.trim().length > 0
+          ? apiKeyRaw
+          : null;
+      return refreshFactory({ apiKey, env: env as NodeJS.ProcessEnv });
+    };
     result = await executeExternalApply({
       db,
       intentId,

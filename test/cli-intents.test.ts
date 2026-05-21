@@ -1877,7 +1877,27 @@ describe("momentum intent apply policy gating", () => {
               };
             }
           };
-        }
+        },
+        buildLinearIssueRefreshClient: () => ({
+          refresh: async () => ({
+            ok: true as const,
+            issue: {
+              id: "linear_issue_ok",
+              identifier: "NGX-OK",
+              title: "External apply issue",
+              url: "https://linear.app/example/issue/NGX-OK",
+              updatedAt: "2026-05-21T00:00:00.000Z",
+              state: { id: "state-done", name: "Done" }
+            },
+            comments: [
+              {
+                id: "linear_comment_1",
+                body: `Applied ${applyCalls[0]?.idempotencyMarker ?? ""}`,
+                url: "https://linear.app/example/issue/NGX-OK#comment-1"
+              }
+            ]
+          })
+        })
       }
     );
     expect(result.code).toBe(0);
@@ -1933,7 +1953,7 @@ describe("momentum intent apply policy gating", () => {
     expect(payload.externalApply.external?.idempotencyMarker).toMatch(
       /^momentum-intent:linear:/
     );
-    expect(payload.externalApply.reconcile.status).toBe("pending");
+    expect(payload.externalApply.reconcile.status).toBe("success");
 
     const db = openDb(dataDir);
     try {

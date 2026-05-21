@@ -5485,6 +5485,169 @@ describe("momentum recovery clear", () => {
   });
 });
 
+describe("momentum CLI external apply post-apply reconciliation", () => {
+  async function seedExternalApplyFixture(dataDir: string): Promise<string> {
+    const { openDb } = await import("../src/db.js");
+    const db = openDb(dataDir);
+    try {
+      db.prepare(
+        `INSERT INTO source_items
+           (id, adapter_kind, external_id, external_key, url, title, status,
+            metadata_json, last_observed_at, goal_id, created_at, updated_at)
+         VALUES (?, 'linear', ?, 'NGX-CLI', ?, 'CLI issue', 'Todo', '{}',
+                 1, NULL, 1, 1)`
+      ).run(
+        "source_cli_external_apply",
+        "linear-issue-cli",
+        "https://linear.app/example/issue/NGX-CLI"
+      );
+      db.prepare(
+        `INSERT INTO update_intents
+           (id, adapter_kind, target_external_id, intent_type, payload_json,
+            reason, source_item_id, status, idempotency_key, created_at,
+            updated_at, applied_at, skipped_at, canceled_at, decision_reason)
+         VALUES (?, 'linear', ?, 'source_satisfied', '{"kind":"comment"}',
+                 'evidence says done', ?, 'pending', ?, 1, 1,
+                 NULL, NULL, NULL, NULL)`
+      ).run(
+        "intent_cli_external_apply",
+        "linear-issue-cli",
+        "source_cli_external_apply",
+        "idemp:intent_cli_external_apply"
+      );
+    } finally {
+      db.close();
+    }
+    return "intent_cli_external_apply";
+  }
+
+  function makeExternalApplyDeps(reconcileComment: () => string) {
+    let marker = "";
+    return {
+      buildLinearExternalUpdateClient: () => ({
+        async apply(input: { preview: { idempotencyMarker: string } }) {
+          marker = input.preview.idempotencyMarker;
+          return {
+            ok: true as const,
+            alreadyApplied: false,
+            issue: {
+              id: "linear-issue-cli",
+              key: "NGX-CLI",
+              url: "https://linear.app/example/issue/NGX-CLI"
+            },
+            comment: {
+              id: "comment-cli",
+              url: "https://linear.app/example/comment/cli"
+            },
+            status: {
+              transitioned: false as const,
+              previousStateId: "state-todo",
+              previousStateName: "Todo",
+              nextStateId: null,
+              nextStateName: null
+            },
+            idempotencyMarker: marker
+          };
+        }
+      }),
+      buildLinearIssueRefreshClient: () => ({
+        async refresh() {
+          return {
+            ok: true as const,
+            issue: {
+              id: "linear-issue-cli",
+              identifier: "NGX-CLI",
+              title: "CLI issue",
+              url: "https://linear.app/example/issue/NGX-CLI",
+              updatedAt: "2026-05-21T00:00:00.000Z",
+              state: { id: "state-done", name: "Done" }
+            },
+            comments: [
+              {
+                id: "comment-cli",
+                body: reconcileComment().replace("{marker}", marker),
+                url: "https://linear.app/example/comment/cli"
+              }
+            ]
+          };
+        }
+      })
+    };
+  }
+
+  it("intent apply --external-apply --json persists and returns reconcile success", async () => {
+    const dataDir = makeTempDir("momentum-cli-external-apply-json-");
+    const repo = makeTempDir("momentum-cli-external-apply-repo-");
+    fs.writeFileSync(
+      path.join(repo, "MOMENTUM.md"),
+      "---\nintent_apply_policy: external_apply_allowed\n---\n",
+      "utf-8"
+    );
+    const intentId = await seedExternalApplyFixture(dataDir);
+
+    const result = await runWithDeps(
+      [
+        "intent", "apply", intentId,
+        "--reason", "operator verified",
+        "--external-apply",
+        "--repo", repo,
+        "--data-dir", dataDir,
+        "--json"
+      ],
+      { LINEAR_API_KEY: "test-key" },
+      makeExternalApplyDeps(() => "Applied {marker}")
+    );
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    const externalApply = payload["externalApply"] as Record<string, unknown>;
+    expect(externalApply["reconcile"]).toEqual({
+      status: "success",
+      warning: null
+    });
+
+    const { getLatestIntentApplyAudit } = await import(
+      "../src/intent-apply-audits.js"
+    );
+    const { openDb } = await import("../src/db.js");
+    const db = openDb(dataDir);
+    try {
+      const audit = getLatestIntentApplyAudit(db, intentId);
+      expect(audit?.reconcile).toEqual({ status: "success", warning: null });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("intent apply --external-apply text output surfaces reconcile warnings", async () => {
+    const dataDir = makeTempDir("momentum-cli-external-apply-text-");
+    const repo = makeTempDir("momentum-cli-external-apply-repo-");
+    fs.writeFileSync(
+      path.join(repo, "MOMENTUM.md"),
+      "---\nintent_apply_policy: external_apply_allowed\n---\n",
+      "utf-8"
+    );
+    const intentId = await seedExternalApplyFixture(dataDir);
+
+    const result = await runWithDeps(
+      [
+        "intent", "apply", intentId,
+        "--reason", "operator verified",
+        "--external-apply",
+        "--repo", repo,
+        "--data-dir", dataDir
+      ],
+      { LINEAR_API_KEY: "test-key" },
+      makeExternalApplyDeps(() => "unrelated comment")
+    );
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("External apply: performed");
+    expect(result.stdout).toContain("Reconcile: mismatch_persists");
+    expect(result.stdout).toContain("did not surface idempotency marker");
+  });
+});
+
 describe("momentum project status", () => {
   it("returns a stable empty rollup JSON shape on a fresh data dir", async () => {
     const dataDir = makeTempDir("momentum-cli-project-");
