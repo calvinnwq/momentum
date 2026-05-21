@@ -5730,3 +5730,692 @@ describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () =>
     180_000
   );
 });
+
+type LinearExternalApplyMockServer = {
+  endpoint: string;
+  commentsCreated: Array<{ issueId: string; body: string }>;
+  issueUpdates: Array<{ issueId: string; stateId: string }>;
+  requestCounts: Record<string, number>;
+  setIssueState: (issueId: string, state: { id: string; name: string }) => void;
+  close: () => Promise<void>;
+};
+
+type LinearExternalApplyMockIssue = {
+  id: string;
+  identifier: string;
+  title: string;
+  description?: string;
+  url: string;
+  updatedAt: string;
+  priority?: number;
+  state: { id: string; name: string };
+  team?: { id: string };
+  project?: { id: string; name: string; url: string };
+  projectMilestone?: { id: string; name: string };
+  labels?: { nodes: Array<{ id: string; name: string }> };
+  assignee?: { id: string; name: string; email: string } | null;
+  comments?: Array<{ id: string; body: string; url: string | null }>;
+};
+
+async function startLinearExternalApplyMockServer(
+  issues: LinearExternalApplyMockIssue[]
+): Promise<LinearExternalApplyMockServer> {
+  type IssueRecord = LinearExternalApplyMockIssue & {
+    comments: Array<{ id: string; body: string; url: string | null }>;
+  };
+  const issueById = new Map<string, IssueRecord>();
+  for (const issue of issues) {
+    issueById.set(issue.id, {
+      ...issue,
+      comments: [...(issue.comments ?? [])]
+    });
+  }
+  const commentsCreated: Array<{ issueId: string; body: string }> = [];
+  const issueUpdates: Array<{ issueId: string; stateId: string }> = [];
+  const requestCounts: Record<string, number> = {};
+  let commentCounter = 0;
+
+  function tallyOperation(query: string): void {
+    const match = /(query|mutation)\s+(\w+)/.exec(query);
+    const name = match ? match[2]! : "Unknown";
+    requestCounts[name] = (requestCounts[name] ?? 0) + 1;
+  }
+
+  function serializeIssueForSourceListing(record: IssueRecord): unknown {
+    return {
+      id: record.id,
+      identifier: record.identifier,
+      title: record.title,
+      description: record.description ?? null,
+      url: record.url,
+      updatedAt: record.updatedAt,
+      priority: record.priority ?? 0,
+      state: record.state,
+      project: record.project ?? null,
+      projectMilestone: record.projectMilestone ?? null,
+      labels: record.labels ?? { nodes: [] },
+      assignee: record.assignee ?? null
+    };
+  }
+
+  function serializeIssueWithComments(record: IssueRecord): unknown {
+    return {
+      id: record.id,
+      identifier: record.identifier,
+      title: record.title,
+      description: record.description ?? null,
+      url: record.url,
+      updatedAt: record.updatedAt,
+      priority: record.priority ?? 0,
+      state: record.state,
+      team: record.team ?? { id: `team-${record.id}` },
+      project: record.project ?? null,
+      projectMilestone: record.projectMilestone ?? null,
+      labels: record.labels ?? { nodes: [] },
+      assignee: record.assignee ?? null,
+      comments: {
+        nodes: record.comments,
+        pageInfo: { hasNextPage: false, endCursor: null }
+      }
+    };
+  }
+
+  function handle(body: {
+    query?: string;
+    variables?: Record<string, unknown>;
+  }): { status: number; body: unknown } {
+    const query = typeof body.query === "string" ? body.query : "";
+    const variables = (body.variables ?? {}) as Record<string, unknown>;
+    tallyOperation(query);
+
+    if (query.includes("MomentumLinearIssues")) {
+      const nodes = Array.from(issueById.values()).map(
+        serializeIssueForSourceListing
+      );
+      return {
+        status: 200,
+        body: {
+          data: {
+            issues: {
+              pageInfo: { hasNextPage: false, endCursor: null },
+              nodes
+            }
+          }
+        }
+      };
+    }
+
+    if (
+      query.includes("MomentumExternalUpdateIssueLookup") ||
+      query.includes("MomentumIssueRefresh")
+    ) {
+      const id = typeof variables["id"] === "string" ? (variables["id"] as string) : "";
+      const record = issueById.get(id);
+      if (!record) {
+        return { status: 200, body: { data: { issue: null } } };
+      }
+      return {
+        status: 200,
+        body: { data: { issue: serializeIssueWithComments(record) } }
+      };
+    }
+
+    if (
+      query.includes("MomentumExternalUpdateIssueCommentsPage") ||
+      query.includes("MomentumIssueRefreshCommentsPage")
+    ) {
+      return {
+        status: 200,
+        body: {
+          data: {
+            issue: {
+              comments: {
+                nodes: [],
+                pageInfo: { hasNextPage: false, endCursor: null }
+              }
+            }
+          }
+        }
+      };
+    }
+
+    if (query.includes("MomentumExternalUpdateCommentCreate")) {
+      const input = (variables["input"] ?? {}) as {
+        issueId?: string;
+        body?: string;
+      };
+      const issueId = input.issueId ?? "";
+      const commentBody = input.body ?? "";
+      const record = issueById.get(issueId);
+      if (!record) {
+        return {
+          status: 200,
+          body: { data: { commentCreate: { success: false, comment: null } } }
+        };
+      }
+      commentCounter += 1;
+      const commentId = `mock-comment-${commentCounter}`;
+      const commentUrl = `${record.url}#comment-${commentCounter}`;
+      record.comments.push({ id: commentId, body: commentBody, url: commentUrl });
+      commentsCreated.push({ issueId, body: commentBody });
+      return {
+        status: 200,
+        body: {
+          data: {
+            commentCreate: {
+              success: true,
+              comment: { id: commentId, url: commentUrl }
+            }
+          }
+        }
+      };
+    }
+
+    if (query.includes("MomentumExternalUpdateIssueStateUpdate")) {
+      const id = typeof variables["id"] === "string" ? (variables["id"] as string) : "";
+      const input = (variables["input"] ?? {}) as { stateId?: string };
+      const stateId = input.stateId ?? "";
+      const record = issueById.get(id);
+      if (!record) {
+        return {
+          status: 200,
+          body: { data: { issueUpdate: { success: false, issue: null } } }
+        };
+      }
+      record.state = { id: stateId, name: record.state.name };
+      issueUpdates.push({ issueId: id, stateId });
+      return {
+        status: 200,
+        body: {
+          data: {
+            issueUpdate: {
+              success: true,
+              issue: { id: record.id, state: record.state }
+            }
+          }
+        }
+      };
+    }
+
+    if (query.includes("MomentumExternalUpdateWorkflowStateLookup")) {
+      return {
+        status: 200,
+        body: { data: { workflowStates: { nodes: [] } } }
+      };
+    }
+
+    return {
+      status: 200,
+      body: { errors: [{ message: `unknown query: ${query.slice(0, 80)}` }] }
+    };
+  }
+
+  const server = http.createServer((req, res) => {
+    const hostHeader = req.headers["host"] ?? "";
+    if (typeof hostHeader === "string" && /linear\.app/i.test(hostHeader)) {
+      res.statusCode = 599;
+      res.end(
+        JSON.stringify({
+          errors: [
+            {
+              message:
+                "smoke mock refused: real Linear host detected in Host header"
+            }
+          ]
+        })
+      );
+      return;
+    }
+    const chunks: Buffer[] = [];
+    req.on("data", (chunk: Buffer) => {
+      chunks.push(chunk);
+    });
+    req.on("end", () => {
+      const raw = Buffer.concat(chunks).toString("utf-8");
+      let parsed: { query?: string; variables?: Record<string, unknown> };
+      try {
+        parsed = JSON.parse(raw) as {
+          query?: string;
+          variables?: Record<string, unknown>;
+        };
+      } catch {
+        res.statusCode = 400;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify({ errors: [{ message: "invalid JSON body" }] }));
+        return;
+      }
+      const result = handle(parsed);
+      res.statusCode = result.status;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify(result.body));
+    });
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.removeListener("error", reject);
+      resolve();
+    });
+  });
+  const address = server.address() as AddressInfo;
+  const endpoint = `http://127.0.0.1:${address.port}/graphql`;
+  return {
+    endpoint,
+    commentsCreated,
+    issueUpdates,
+    requestCounts,
+    setIssueState(issueId, state) {
+      const record = issueById.get(issueId);
+      if (record) record.state = state;
+    },
+    close: () =>
+      new Promise<void>((resolve, reject) => {
+        server.close((err) => (err ? reject(err) : resolve()));
+      })
+  };
+}
+
+describe("Milestone 6 external apply end-to-end smoke (NGX-301)", () => {
+  it(
+    "applies a pending source_satisfied intent through the mock Linear endpoint with deterministic idempotency and successful post-apply reconcile",
+    async () => {
+      const dataDir = makeTempDir("momentum-smoke-m6-apply-data-");
+      const repo = initDisposableRepo();
+      fs.writeFileSync(
+        path.join(repo, "MOMENTUM.md"),
+        [
+          "---",
+          "intent_apply_policy: external_apply_allowed",
+          "---",
+          "",
+          "Smoke MOMENTUM.md for the M6 external apply path.",
+          ""
+        ].join("\n"),
+        "utf-8"
+      );
+      runGit(repo, ["add", "MOMENTUM.md"]);
+      runGit(repo, ["commit", "-m", "add MOMENTUM.md", "--quiet"]);
+
+      const goalFile = path.join(dataDir, "goal.md");
+      fs.writeFileSync(goalFile, SMOKE_GOAL_SPEC, "utf-8");
+
+      const issue: LinearExternalApplyMockIssue = {
+        id: "issue-smoke-ngx-301-apply",
+        identifier: "NGX-301",
+        title: "M6-06 External apply safety smoke and failure matrix",
+        description: "Smoke fixture for the M6 external apply happy path.",
+        url: "https://linear.app/ngxcalvin/issue/NGX-301",
+        updatedAt: "2026-05-21T08:00:00.000Z",
+        priority: 0,
+        state: { id: "state-in-progress", name: "In Progress" },
+        team: { id: "team-ngx" },
+        project: {
+          id: "project-momentum",
+          name: "Momentum",
+          url: "https://linear.app/ngxcalvin/project/momentum"
+        },
+        projectMilestone: {
+          id: "milestone-m6",
+          name: "Milestone 6: Policy-Gated External Apply"
+        },
+        labels: { nodes: [] },
+        assignee: null,
+        comments: []
+      };
+      const mock = await startLinearExternalApplyMockServer([issue]);
+      try {
+        const reconcile = await runCliBinaryAsync(
+          [
+            "source",
+            "reconcile",
+            "linear",
+            "--linear-endpoint",
+            mock.endpoint,
+            "--data-dir",
+            dataDir,
+            "--json"
+          ],
+          { env: { LINEAR_API_KEY: "lin_api_smoke_fixture_key" } }
+        );
+        expect(
+          reconcile.code,
+          `source reconcile linear stderr: ${reconcile.stderr}`
+        ).toBe(0);
+
+        const sourceList = runCliBinary([
+          "source",
+          "list",
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(sourceList.code, `source list stderr: ${sourceList.stderr}`).toBe(0);
+        const sourceItems = (
+          JSON.parse(sourceList.stdout) as { items: Array<{ id: string }> }
+        ).items;
+        expect(sourceItems).toHaveLength(1);
+        const sourceItemId = sourceItems[0]!.id;
+
+        const goalStart = runCliBinary([
+          "goal",
+          "start",
+          goalFile,
+          "--repo",
+          repo,
+          "--data-dir",
+          dataDir,
+          "--runner",
+          "fake",
+          "--json"
+        ]);
+        expect(goalStart.code, `goal start stderr: ${goalStart.stderr}`).toBe(0);
+        const goalId = (
+          JSON.parse(goalStart.stdout) as { goalId: string }
+        ).goalId;
+
+        const drain = runCliBinary(
+          [
+            "daemon",
+            "start",
+            "--max-idle-cycles",
+            "2",
+            "--poll-interval-ms",
+            "0",
+            "--data-dir",
+            dataDir,
+            "--json"
+          ],
+          { env: { [FAKE_RUNNER_GOAL_COMPLETE_ENV]: "1" } }
+        );
+        expect(drain.code, `daemon start stderr: ${drain.stderr}`).toBe(0);
+
+        const fixtureRoot = makeTempDir("momentum-smoke-m6-apply-fixture-");
+        const intentRunId = "smoke-m6-apply-run-1";
+        const runDir = path.join(fixtureRoot, ".agent-workflows", intentRunId);
+        fs.mkdirSync(runDir, { recursive: true });
+        fs.writeFileSync(
+          path.join(runDir, "plan.json"),
+          JSON.stringify(
+            {
+              runId: intentRunId,
+              schemaVersion: 1,
+              mode: "execute-ready",
+              profile: "momentum-m6-smoke",
+              objective: "NGX-301 smoke fixture for external apply",
+              resolvedScope: {
+                issues: ["NGX-301"],
+                source: "explicit",
+                status: "resolved"
+              }
+            },
+            null,
+            2
+          )
+        );
+        const ledger = [
+          {
+            runId: intentRunId,
+            step: "implementation",
+            status: "complete",
+            ts: "2026-05-21T08:20:00Z"
+          },
+          {
+            runId: intentRunId,
+            step: "no-mistakes",
+            status: "complete",
+            ts: "2026-05-21T08:25:00Z"
+          }
+        ];
+        fs.writeFileSync(
+          path.join(runDir, "ledger.jsonl"),
+          `${ledger.map((line) => JSON.stringify(line)).join("\n")}\n`
+        );
+
+        const ingest = runCliBinary([
+          "evidence",
+          "ingest",
+          "--path",
+          runDir,
+          "--goal",
+          goalId,
+          "--source-item",
+          sourceItemId,
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(ingest.code, `evidence ingest stderr: ${ingest.stderr}`).toBe(0);
+
+        const link = runCliBinary([
+          "source",
+          "link",
+          sourceItemId,
+          "--goal",
+          goalId,
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(link.code, `source link stderr: ${link.stderr}`).toBe(0);
+        const linkCounts = (
+          JSON.parse(link.stdout) as {
+            counts: { intentsCreated: number };
+          }
+        ).counts;
+        expect(linkCounts.intentsCreated).toBe(1);
+
+        const intentList = runCliBinary([
+          "intent",
+          "list",
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(intentList.code).toBe(0);
+        const intentListPayload = JSON.parse(intentList.stdout) as {
+          intents: Array<{ id: string; status: string }>;
+        };
+        expect(intentListPayload.intents).toHaveLength(1);
+        const intentId = intentListPayload.intents[0]!.id;
+        expect(intentListPayload.intents[0]!.status).toBe("pending");
+
+        const externalApply = await runCliBinaryAsync(
+          [
+            "intent",
+            "apply",
+            intentId,
+            "--reason",
+            "smoke happy-path external apply",
+            "--external-apply",
+            "--repo",
+            repo,
+            "--data-dir",
+            dataDir,
+            "--json"
+          ],
+          {
+            env: {
+              LINEAR_API_KEY: "lin_api_smoke_fixture_key",
+              MOMENTUM_LINEAR_EXTERNAL_UPDATE_ENDPOINT: mock.endpoint,
+              MOMENTUM_LINEAR_REFRESH_ENDPOINT: mock.endpoint
+            }
+          }
+        );
+        expect(
+          externalApply.code,
+          `external apply stderr: ${externalApply.stderr}`
+        ).toBe(0);
+        const externalApplyPayload = JSON.parse(externalApply.stdout) as {
+          ok: boolean;
+          intent: { id: string; status: string; decisionReason: string };
+          applyPolicy: {
+            effective: string;
+            source: string;
+            externalApplyRequested: boolean;
+            externalApplyPerformed: boolean;
+          };
+          externalApply: {
+            adapterKind: string;
+            target: { externalId: string; externalKey: string };
+            allowStatusMutation: boolean;
+            auditId: string | null;
+            mutationKind: string;
+            external: {
+              alreadyApplied: boolean;
+              commentId: string;
+              commentUrl: string;
+              idempotencyMarker: string;
+              statusTransitioned: boolean;
+            };
+            reconcile: { status: string; warning: string | null };
+          };
+        };
+        expect(externalApplyPayload.ok).toBe(true);
+        expect(externalApplyPayload.intent.status).toBe("applied");
+        expect(externalApplyPayload.intent.decisionReason).toBe(
+          "external_apply: smoke happy-path external apply"
+        );
+        expect(externalApplyPayload.applyPolicy).toMatchObject({
+          effective: "external_apply_allowed",
+          source: "momentum_policy",
+          externalApplyRequested: true,
+          externalApplyPerformed: true
+        });
+        const externalSummary = externalApplyPayload.externalApply;
+        expect(externalSummary.adapterKind).toBe("linear");
+        expect(externalSummary.allowStatusMutation).toBe(false);
+        expect(externalSummary.mutationKind).toBe("comment");
+        expect(externalSummary.target.externalId).toBe(
+          "issue-smoke-ngx-301-apply"
+        );
+        expect(externalSummary.target.externalKey).toBe("NGX-301");
+        expect(typeof externalSummary.auditId).toBe("string");
+        expect(externalSummary.external.alreadyApplied).toBe(false);
+        expect(externalSummary.external.statusTransitioned).toBe(false);
+        expect(externalSummary.external.commentId).toBe("mock-comment-1");
+        const marker = externalSummary.external.idempotencyMarker;
+        expect(marker).toMatch(
+          new RegExp(`^momentum-intent:linear:${intentId}:[0-9a-f]{16}$`)
+        );
+        expect(externalSummary.reconcile.status).toBe("success");
+        expect(externalSummary.reconcile.warning).toBeNull();
+
+        // The mock recorded exactly one commentCreate and zero issueUpdate
+        // calls (comment-only mode); request counts also include the
+        // post-apply refresh fetch on the same endpoint.
+        expect(mock.commentsCreated).toHaveLength(1);
+        expect(mock.commentsCreated[0]!.issueId).toBe(
+          "issue-smoke-ngx-301-apply"
+        );
+        expect(mock.commentsCreated[0]!.body).toContain(`idempotency: ${marker}`);
+        expect(mock.issueUpdates).toHaveLength(0);
+        expect(mock.requestCounts["MomentumExternalUpdateCommentCreate"]).toBe(1);
+        expect(
+          mock.requestCounts["MomentumExternalUpdateIssueStateUpdate"] ?? 0
+        ).toBe(0);
+        expect(mock.requestCounts["MomentumIssueRefresh"]).toBe(1);
+
+        // `intent get` surfaces the same audit summary with applyState=idle,
+        // totalAttempts=1, succeeded=1, and the audit's idempotencyMarker
+        // matches the value returned from the apply.
+        const intentGet = runCliBinary([
+          "intent",
+          "get",
+          intentId,
+          "--data-dir",
+          dataDir,
+          "--json"
+        ]);
+        expect(intentGet.code).toBe(0);
+        const intentGetPayload = JSON.parse(intentGet.stdout) as {
+          intent: { status: string };
+          externalApply: {
+            applyState: string;
+            totalAttempts: number;
+            counts: {
+              claimed: number;
+              succeeded: number;
+              failed: number;
+              blocked: number;
+              audit_incomplete: number;
+            };
+            latestAttempt: {
+              lifecycleState: string;
+              resultStatus: string;
+              resultCode: string;
+              idempotencyMarker: string;
+              externalRefs: {
+                commentId: string;
+                commentUrl: string;
+                stateTransitionId: string | null;
+              };
+              reconcile: { status: string; warning: string | null };
+            } | null;
+          };
+        };
+        expect(intentGetPayload.intent.status).toBe("applied");
+        expect(intentGetPayload.externalApply.applyState).toBe("idle");
+        expect(intentGetPayload.externalApply.totalAttempts).toBe(1);
+        expect(intentGetPayload.externalApply.counts).toMatchObject({
+          claimed: 0,
+          succeeded: 1,
+          failed: 0,
+          blocked: 0,
+          audit_incomplete: 0
+        });
+        const latest = intentGetPayload.externalApply.latestAttempt;
+        expect(latest).not.toBeNull();
+        expect(latest!.lifecycleState).toBe("succeeded");
+        expect(latest!.resultStatus).toBe("succeeded");
+        expect(latest!.resultCode).toBe("applied");
+        expect(latest!.idempotencyMarker).toBe(marker);
+        expect(latest!.externalRefs.commentId).toBe("mock-comment-1");
+        expect(latest!.externalRefs.stateTransitionId).toBeNull();
+        expect(latest!.reconcile.status).toBe("success");
+        expect(latest!.reconcile.warning).toBeNull();
+
+        // Replaying `intent apply --external-apply` against a now-applied
+        // intent refuses with intent_already_terminal and never opens a
+        // new commentCreate against the mock.
+        const replay = await runCliBinaryAsync(
+          [
+            "intent",
+            "apply",
+            intentId,
+            "--reason",
+            "smoke replay attempt",
+            "--external-apply",
+            "--repo",
+            repo,
+            "--data-dir",
+            dataDir,
+            "--json"
+          ],
+          {
+            env: {
+              LINEAR_API_KEY: "lin_api_smoke_fixture_key",
+              MOMENTUM_LINEAR_EXTERNAL_UPDATE_ENDPOINT: mock.endpoint,
+              MOMENTUM_LINEAR_REFRESH_ENDPOINT: mock.endpoint
+            }
+          }
+        );
+        expect(replay.code).toBe(1);
+        expect(replay.stdout).toBe("");
+        const replayPayload = JSON.parse(replay.stderr) as {
+          ok: boolean;
+          code: string;
+          currentStatus: string;
+        };
+        expect(replayPayload).toMatchObject({
+          ok: false,
+          code: "intent_already_terminal",
+          currentStatus: "applied"
+        });
+        expect(mock.commentsCreated).toHaveLength(1);
+      } finally {
+        await mock.close();
+      }
+    },
+    180_000
+  );
+});
