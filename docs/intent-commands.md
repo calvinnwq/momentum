@@ -134,7 +134,7 @@ When `--external-apply` is requested, JSON output also includes an `externalAppl
 - `intent_apply_in_progress` — a concurrent apply holds the CAS guard on this intent.
 - `intent_blocked` — a prior post-write audit failure left the intent in a non-replay `blocked` apply state.
 - `external_conflict` / `write_rejected` / `write_timeout` / `malformed_response` / `validation_failed` / `adapter_threw` / `preview_failed` — the external write client refused or could not complete the mutation; the audit row is finalized as `failed` and the intent returns to idle.
-- `audit_incomplete` — the external write succeeded but the audit finalize failed; the intent transitions to `blocked` apply state and must be cleared by operator recovery before another apply can run.
+- `audit_incomplete` — the audit finalize could not complete after an attempted external write; the intent transitions to `blocked` apply state and must be cleared by operator recovery before another apply can run.
 
 On terminal refusal, JSON output includes `currentStatus` and `applyPolicy`.
 

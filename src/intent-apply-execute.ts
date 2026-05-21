@@ -22,10 +22,10 @@
  *   8. Finalize the audit (`succeeded` releases the intent back to idle and
  *      then marks the intent applied; `failed` releases the intent and the
  *      caller surfaces the failure code).
- *   9. If an external write succeeds but the audit finalize cannot complete,
- *      the orchestrator finalizes as `audit_incomplete` so the intent moves to
- *      `blocked` apply_state and another mutation cannot run before operator
- *      recovery clears the block.
+ *   9. If audit finalize cannot complete, including after a refused write or
+ *      thrown client error, the orchestrator finalizes as `audit_incomplete`
+ *      so the intent moves to `blocked` apply_state and another mutation
+ *      cannot run before operator recovery clears the block.
  */
 
 import {
