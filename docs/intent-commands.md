@@ -78,7 +78,7 @@ The `latestAttempt` audit row (emitted by `intent list`, `intent get`, `momentum
 - `resultCode`
 - `resultMessage`
 - `externalRefs` — `{commentId, commentUrl, stateTransitionId}` for any external writes produced.
-- `reconcile` — `{status, warning}` from the post-apply reconcile step.
+- `reconcile` — `{status, warning}` from the post-apply reconcile step. `status` is one of `success`, `stale_source`, `mismatch_persists`, `refresh_failed`, `post_apply_reconcile_failed`, `targeted_refresh_unsupported`, `pending`, `deferred`, or `null`. `warning` is `null` on success; otherwise it carries a human-readable detail string.
 - `createdAt`
 - `updatedAt`
 
@@ -122,7 +122,7 @@ On success, JSON output includes `previousStatus` and the `intent` object. When 
 - `externalApplyPerformed` — `true` whenever the external write reached the tracker, including the partial-apply `audit_incomplete` refusal where the write succeeded but post-write finalization did not; `false` on refusals that never wrote to the tracker.
 - `note` — operator-facing explanation of the policy.
 
-When `--external-apply` is requested, JSON output also includes an `externalApply` block with the resolved adapter, target reference, audit id, reconcile status, and (on success) external refs (`issueId`, `issueKey`, `issueUrl`, `commentId`, `commentUrl`, `statusTransitioned`, `nextStateId`, `nextStateName`, `idempotencyMarker`, `alreadyApplied`).
+When `--external-apply` is requested, JSON output also includes an `externalApply` block with the resolved adapter, target reference, audit id, reconcile status, and (on success) external refs (`issueId`, `issueKey`, `issueUrl`, `commentId`, `commentUrl`, `statusTransitioned`, `nextStateId`, `nextStateName`, `idempotencyMarker`, `alreadyApplied`). The `reconcile.status` field is `success` when the post-apply single-issue refresh confirmed the idempotency marker on Linear and updated the local SourceItem snapshot; `mismatch_persists` when the marker was not found in Linear comments; `stale_source` when Linear no longer recognizes the target; `refresh_failed` on transient refresh errors; `post_apply_reconcile_failed` on unexpected reconcile failures; `targeted_refresh_unsupported` for adapters that do not support targeted refresh; `pending` or `deferred` when reconcile was not attempted (early refusal or audit-incomplete paths); or `null` when no reconcile context applies. Text output prints `Reconcile: <status>` when a reconcile status is present and appends the reconcile warning in parentheses when one exists.
 
 `--external-apply` refusal codes (intent stays pending unless otherwise noted):
 

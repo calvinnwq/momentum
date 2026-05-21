@@ -17,7 +17,7 @@
  * This boundary deliberately exposes only `preview`; no code path here can
  * perform an external mutation. The NGX-297 Linear write client consumes this
  * preview separately, audit/claim surfaces land in NGX-299 before CLI execution
- * in NGX-298, and reconciliation result codes are owned by NGX-300/NGX-301 and
+ * in NGX-298, and reconciliation result codes are owned by NGX-300 and
  * intentionally absent from this taxonomy.
  */
 
