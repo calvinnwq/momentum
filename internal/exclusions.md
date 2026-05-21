@@ -1,7 +1,8 @@
 # Current Exclusions
 
 This page lists features and behaviors that are intentionally **out of scope**
-through the active milestone. It exists so contributors and operators can see at
+as of the most recently shipped milestone (M6 closeout). It exists so
+contributors and operators can see at
 a glance what Momentum does *not* do today, and where the next durable surface
 is expected (or explicitly deferred indefinitely).
 
