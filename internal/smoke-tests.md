@@ -95,10 +95,13 @@ boundary that M6 inherits):
 
 The smoke exercises the M6 policy-gated external apply path end-to-end through
 the spawned binary against a stateful Linear mock dispatcher (no real
-`api.linear.app` calls). The mock supports injectable GraphQL errors on
-commentCreate and IssueRefresh, per-request commentCreate delay for concurrency
-testing, and tracks all comments, issue state updates, and operation request
-counts.
+`api.linear.app` calls). The spawned `intent apply --external-apply` commands
+set `MOMENTUM_LINEAR_EXTERNAL_UPDATE_ENDPOINT` for the external update client
+and `MOMENTUM_LINEAR_REFRESH_ENDPOINT` for post-apply single-issue refreshes so
+both clients stay pointed at the mock. The mock supports injectable GraphQL
+errors on commentCreate and IssueRefresh, per-request commentCreate delay for
+concurrency testing, and tracks all comments, issue state updates, and operation
+request counts.
 
 Coverage:
 
