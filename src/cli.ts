@@ -142,10 +142,7 @@ import {
   type ExecuteExternalApplyDeps,
   type ExecuteExternalApplyResult
 } from "./intent-apply-execute.js";
-import {
-  buildLinearExternalUpdateClient,
-  type LinearExternalUpdateClient
-} from "./linear-external-update-client.js";
+import { type LinearExternalUpdateClient } from "./linear-external-update-client.js";
 
 export const VERSION = "0.0.0";
 
@@ -2443,10 +2440,7 @@ function intentDecision(
     });
   }
 
-  const applyPolicyResolution = buildIntentApplyPolicySummary(
-    parsed.repo,
-    action === "apply" && parsed.externalApply
-  );
+  const applyPolicyResolution = buildIntentApplyPolicySummary(parsed.repo, false);
 
   if (!applyPolicyResolution.ok) {
     return emitIntentFailure(parsed, io, {
@@ -2582,16 +2576,16 @@ async function intentExternalApply(args: {
   try {
     const executeDeps: ExecuteExternalApplyDeps = {};
     const factory = deps.buildLinearExternalUpdateClient;
-    executeDeps.buildLinearClient = (clientEnv) => {
-      const apiKeyRaw = clientEnv[LINEAR_API_KEY_ENV] ?? null;
-      const apiKey =
-        typeof apiKeyRaw === "string" && apiKeyRaw.trim().length > 0
-          ? apiKeyRaw
-          : null;
-      return factory
-        ? factory({ apiKey, env: env as NodeJS.ProcessEnv })
-        : buildLinearExternalUpdateClient({ apiKey });
-    };
+    if (factory) {
+      executeDeps.buildLinearClient = (clientEnv) => {
+        const apiKeyRaw = clientEnv[LINEAR_API_KEY_ENV] ?? null;
+        const apiKey =
+          typeof apiKeyRaw === "string" && apiKeyRaw.trim().length > 0
+            ? apiKeyRaw
+            : null;
+        return factory({ apiKey, env: env as NodeJS.ProcessEnv });
+      };
+    }
     result = await executeExternalApply({
       db,
       intentId,
@@ -2702,11 +2696,15 @@ function buildExternalApplyPolicySummary(
   const resolved = result.context.applyPolicy;
   const source: PolicyEffectiveFieldSource =
     resolved.source === "missing_repo" ? "builtin_default" : resolved.source;
-  const note = result.ok
-    ? "External apply was performed through the configured tracker adapter."
-    : resolved.value !== "external_apply_allowed"
-      ? base.note
-    : "External apply was attempted and refused before marking the intent applied; inspect externalApply for audit and adapter details.";
+  let note: string;
+  if (result.ok) {
+    note = "External apply was performed through the configured tracker adapter.";
+  } else if (resolved.value !== "external_apply_allowed") {
+    note = base.note;
+  } else {
+    note =
+      "External apply was attempted and refused before marking the intent applied; inspect externalApply for audit and adapter details.";
+  }
   return {
     ...base,
     effective: resolved.value,
