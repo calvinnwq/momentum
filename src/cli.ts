@@ -2596,7 +2596,6 @@ async function intentExternalApply(args: {
       deps: executeDeps
     });
   } catch (err) {
-    db.close();
     return emitIntentFailure(parsed, io, {
       command,
       code: "adapter_threw",
@@ -2604,8 +2603,9 @@ async function intentExternalApply(args: {
       dataDir,
       intentId
     });
+  } finally {
+    db.close();
   }
-  db.close();
 
   const applyPolicy = buildExternalApplyPolicySummary(result, true);
   const externalApply = buildIntentExternalApplySummary(result);
@@ -2696,9 +2696,13 @@ function buildExternalApplyPolicySummary(
   const resolved = result.context.applyPolicy;
   const source: PolicyEffectiveFieldSource =
     resolved.source === "missing_repo" ? "builtin_default" : resolved.source;
+  const performed = externalApplyPerformed(result);
   let note: string;
   if (result.ok) {
     note = "External apply was performed through the configured tracker adapter.";
+  } else if (performed) {
+    note =
+      "External write was performed, but post-write finalization did not complete; inspect externalApply and run operator recovery before retrying.";
   } else if (resolved.value !== "external_apply_allowed") {
     note = base.note;
   } else {
@@ -2709,7 +2713,7 @@ function buildExternalApplyPolicySummary(
     ...base,
     effective: resolved.value,
     source,
-    externalApplyPerformed: externalApplyPerformed(result),
+    externalApplyPerformed: performed,
     note
   };
 }
