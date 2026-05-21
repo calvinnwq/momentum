@@ -2709,9 +2709,18 @@ function buildExternalApplyPolicySummary(
     ...base,
     effective: resolved.value,
     source,
-    externalApplyPerformed: result.ok,
+    externalApplyPerformed: externalApplyPerformed(result),
     note
   };
+}
+
+function externalApplyPerformed(result: ExecuteExternalApplyResult): boolean {
+  if (result.ok) return true;
+  return Boolean(
+    result.external?.commentId ||
+      result.external?.statusTransitioned ||
+      result.external?.alreadyApplied
+  );
 }
 
 function buildIntentExternalApplySummary(

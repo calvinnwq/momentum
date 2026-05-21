@@ -450,10 +450,10 @@ export function finalizeIntentApply(
 }
 
 /**
- * Recovery helper for the narrow case where the external write and initial
- * audit-finalize succeeded, but the local intent transition failed afterward.
- * The audit was already terminal, so this deliberately rewrites that audit to
- * `audit_incomplete` and blocks the intent from replaying the external write.
+ * Recovery helper for cases where normal audit finalization cannot leave a
+ * replay-safe terminal state. This deliberately rewrites the audit to
+ * `audit_incomplete` and blocks the intent from replaying the external write
+ * or re-entering an ambiguous apply attempt before operator recovery.
  */
 export function markIntentApplyAuditIncomplete(
   db: MomentumDb,
