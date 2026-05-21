@@ -17,9 +17,14 @@ Milestone status:
   read-only source reconciliation, local evidence ingestion, project rollups,
   and durable external-update intents. See
   [`internal/milestones/m5-source-adapters.md`](milestones/m5-source-adapters.md).
-- **Milestone 6 (Policy-Gated External Apply)** is the active milestone. See
+- **Milestone 6 (Policy-Gated External Apply)** is complete and added the
+  two-phase Linear external apply path: durable claim/audit/finalize lifecycle,
+  per-intent CAS guard with `intent_apply_in_progress`, comment-only default,
+  stable idempotency marker, blocked / audit-incomplete recovery surfaces, and
+  single-issue post-apply reconcile. See
   [`internal/milestones/m6-external-apply.md`](milestones/m6-external-apply.md) and
-  [`internal/contracts/intent-apply.md`](contracts/intent-apply.md).
+  [`internal/contracts/intent-apply.md`](contracts/intent-apply.md). There is no
+  active milestone after M6 closeout.
 
 The following surfaces remain deferred so the runner-boundary, policy-loading,
 and M5 read-first source surfaces stay scoped.
@@ -74,16 +79,16 @@ are all out of scope.
 
 ## Automatic external integrations
 
-Automatic PR / GitHub / Linear automation, external tracker writes,
-inbound webhooks, and other external integrations driven from inside Momentum are out
-of scope through M5. M5 may read configured sources and generate durable update
-intents, but it must not apply external writes automatically. M6 introduces
-policy-gated external apply through a two-phase claim / audit-before-write /
-external write / finalize flow (see
-[`internal/contracts/intent-apply.md`](contracts/intent-apply.md)), still scoped to
-the touched issue and still gated by `MOMENTUM.md` policy; autonomous /
-background external writes and non-Linear adapters remain explicit M6
-non-goals.
+Automatic PR / GitHub / Linear automation, autonomous tracker writes,
+inbound webhooks, and other automation-driven external integrations are out of
+scope. M6 shipped policy-gated external apply for Linear via a two-phase
+claim / audit-before-write / external write / finalize flow (see
+[`internal/contracts/intent-apply.md`](contracts/intent-apply.md)), but every
+external write stays operator-mediated through `intent apply --external-apply`,
+gated by `MOMENTUM.md` `intent_apply_policy`, scoped to the touched issue, and
+comment-only unless target status mutation is explicitly configured.
+Background / autonomous external writes, inbound webhooks, and non-Linear
+external write adapters remain deferred after M6 closeout.
 
 ## Dashboard or UI surface
 

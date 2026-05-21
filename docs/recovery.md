@@ -181,10 +181,10 @@ risk replaying the external write — and surfaces a stable `intent_blocked`
 refusal on subsequent attempts.
 
 The blocked state is independent of goal-side `needs_manual_recovery`; it is
-not cleared by `momentum recovery clear`. A dedicated operator surface for
-clearing intent-side `blocked` is not yet shipped — operators inspect the
-audit row, confirm the external write's actual effect on the tracker, and
-keep the intent blocked until that surface lands.
+not cleared by `momentum recovery clear`. No dedicated operator surface
+exists for clearing intent-side `blocked` — operators inspect the audit row,
+confirm the external write's actual effect on the tracker, and keep the intent
+blocked until an unblock command is introduced.
 
 Operators can detect blocked intents via:
 

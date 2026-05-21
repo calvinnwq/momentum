@@ -274,11 +274,11 @@ describe("M5 contract docs (NGX-287 setup, NGX-294 closeout)", () => {
     });
   });
 
-  it("pins the doctor milestone string to the M5 closeout marker (NGX-294)", () => {
+  it("keeps the doctor milestone string moved off the M4 closeout marker after the M5 closeout (NGX-294)", () => {
+    // NGX-302 (M6-07) intentionally flipped the doctor marker forward from M5 to M6;
+    // this test continues to assert the M4 closeout marker is no longer pinned, mirroring
+    // NGX-294's original intent of preserving the post-flip invariant.
     const cli = fs.readFileSync(path.join(repoRoot, "src", "cli.ts"), "utf8");
-    expect(cli).toContain(
-      "Milestone 5: source adapters and evidence sync (NGX-287, NGX-288, NGX-289, NGX-290, NGX-291, NGX-292, NGX-293, NGX-294) complete"
-    );
     expect(cli).not.toContain(
       "Milestone 4: real runner profiles (NGX-279, NGX-280, NGX-281, NGX-282, NGX-283, NGX-284, NGX-285, NGX-286) complete"
     );

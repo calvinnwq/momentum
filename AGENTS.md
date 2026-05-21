@@ -25,19 +25,17 @@ Quick map of `internal/`:
 - [`internal/smoke-tests.md`](internal/smoke-tests.md), [`internal/exclusions.md`](internal/exclusions.md).
 
 ## Current milestone
-Milestone 6 (Policy-Gated External Apply) is the active milestone. See [`internal/roadmap.md`](internal/roadmap.md) for the full timeline and [`internal/milestones/m6-external-apply.md`](internal/milestones/m6-external-apply.md) for scope and sequencing.
+Milestone 6 (Policy-Gated External Apply) is complete. See [`internal/roadmap.md`](internal/roadmap.md) for the full timeline and [`internal/milestones/m6-external-apply.md`](internal/milestones/m6-external-apply.md) for shipped scope, sequencing, and post-M6 deferrals. There is no active follow-up milestone yet.
 
-Headline rules (see internal docs for full detail):
+Shipped M6 capability (see internal docs for full detail):
 
-- Implementation order is NGX-295, NGX-296, NGX-297, NGX-299, NGX-298, NGX-300, NGX-301, NGX-302.
-- NGX-299 audit / operator surfaces must merge **before** NGX-298 external apply.
-- `intent apply --external-apply` is two-phase: claim, audit-before-write, external write, finalize.
-- External write success followed by audit-finalize failure transitions the intent to a `blocked` non-replay state.
-- The per-intent concurrency guard uses CAS and exposes a stable `intent_apply_in_progress` result.
-- Comment-only is the default unless target Linear status mutation is explicitly configured.
-- Every external write carries a stable idempotency marker; post-apply reconcile is single-issue.
-- Tests and smoke must not make real `api.linear.app` calls.
-- The `doctor --json` milestone string stays on the M5 closeout marker until NGX-302 flips it.
+- Linear-only external apply from durable `update_intents` rows via the `intent apply --external-apply` operator command, gated by `MOMENTUM.md` `intent_apply_policy: external_apply_allowed`.
+- Adapter-mediated two-phase write: claim → audit-before-write → external write → finalize, with a per-intent CAS guard exposing the stable `intent_apply_in_progress` result.
+- Durable audit ledger and blocked / audit-incomplete state surfaced through `intent get`, `intent list`, `status`, `handoff`, `project status`, and `doctor`.
+- Comment-only default unless target Linear status mutation is explicitly configured; every external write carries a stable `momentum-intent:<adapterKind>:<intentId>:<digest>` idempotency marker.
+- Single-issue post-apply reconcile with stable warning / result codes; no broad reconciliation side effect.
+- Built-CLI smoke covers happy path, `policy_denied`, `auth_unavailable`, `write_rejected`, `refresh_failed`, concurrency, audit visibility, and blocked / audit-finalize failure against a stateful Linear mock; tests and smoke never call real `api.linear.app`.
+- The `doctor --json` milestone string is the M6 closeout marker `Milestone 6: policy-gated external apply (NGX-295, NGX-296, NGX-297, NGX-298, NGX-299, NGX-300, NGX-301, NGX-302) complete`.
 
 All M3 daemon / recovery, M4 runner / policy, and M5 source / evidence / intent contracts remain wire-stable through M6.
 
