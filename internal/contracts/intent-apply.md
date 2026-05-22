@@ -76,7 +76,7 @@ Tests and smoke **must not** make real `api.linear.app` calls. The contract is:
 
 ## Operator surfaces and auditability
 
-NGX-299 (M6-03) lands operator surfaces **before** NGX-298 (M6-04) lands the real write path. The operator surfaces include:
+NGX-299 (M6-03) landed operator surfaces **before** NGX-298 (M6-04) landed the real write path. The operator surfaces include:
 
 - `intent get` surfaces the audit row, the resolved external target, the comment-vs-status decision, the idempotency marker the runtime would write, and the current apply state (including `pending` / `in-flight` / `applied` / `blocked` / `skipped` / `canceled`).
 - `intent list` surfaces a `blocked` filter so operators can see every intent that needs manual clearance.

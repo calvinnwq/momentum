@@ -2,7 +2,7 @@
 
 **Status:** Complete (NGX-287 through NGX-294).
 
-Milestone 5 made Momentum source-and-evidence aware while preserving the M4 runner contract and the M3 operational-safety surface. M5 is **durable intents and source adapters**, **not** external apply: source adapters read, the local SQLite store records durable update intents, and any external write stays operator-mediated. External apply lands in M6.
+Milestone 5 made Momentum source-and-evidence aware while preserving the M4 runner contract and the M3 operational-safety surface. M5 is **durable intents and source adapters**, **not** external apply: source adapters read, the local SQLite store records durable update intents, and any external write stays operator-mediated. External apply landed in M6.
 
 ## M5 vocabulary
 

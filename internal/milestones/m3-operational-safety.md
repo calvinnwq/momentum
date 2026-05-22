@@ -23,7 +23,7 @@ Momentum's product model is centered on these durable concepts; M3 did not break
 
 - Momentum's core product primitive is `Goal`, not `Issue`. A Goal may be seeded from one or more source items; Linear projects / issues are one source shape, not the source of truth.
 - Goal completion is decided by the Goal Markdown acceptance criteria plus runner, verification, and handoff evidence, not by source-item count or external tracker state alone.
-- Tracker writes are **adapter-mediated and policy-gated**. Momentum core records durable facts and emits external update intents; Linear / GitHub / Jira / etc. adapters or approved workflow steps perform the external writes. M6 lands the first concrete policy-gated external apply path on the Linear adapter.
+- Tracker writes are **adapter-mediated and policy-gated**. Momentum core records durable facts and emits external update intents; Linear / GitHub / Jira / etc. adapters or approved workflow steps perform the external writes. M6 landed the first concrete policy-gated external apply path on the Linear adapter.
 - Source adapters were scoped as **pull / reconcile first** in M3 alignment; active source-adapter implementation belongs to M5. No inbound webhook infrastructure in the operational-safety milestone.
 - A Goal uses **one shared repo / workspace lease** for now. Per-source-item worktrees or workspaces are deferred until daemon, stop, and recovery behavior are solid.
 - `MOMENTUM.md` is the canonical repo policy file. M3 documented it as a contract only and did not add a runtime loader, parser, or precedence rules; M4's NGX-284 later added the runtime loader once a milestone justified it.
@@ -53,7 +53,7 @@ The following remained **explicitly out of scope** for Milestone 3 and were defe
 - **Dashboard or UI surface** — CLI JSON / text remains the only interface.
 - **Strong sandboxing** (container / VM / seccomp isolation) — runners trust the local operator environment; later milestones may revisit isolation.
 - **Remote git operations** — no `fetch` / `pull` / `push` / `rebase` driven from Momentum.
-- **External tracker writes** — Linear / GitHub / Jira / etc. issue / PR creation, comments, status changes, label edits driven automatically from Momentum. Tracker writes stay adapter-mediated and policy-gated; M6 lands the first concrete external apply path on the Linear adapter.
+- **External tracker writes** — Linear / GitHub / Jira / etc. issue / PR creation, comments, status changes, label edits driven automatically from Momentum. Tracker writes stay adapter-mediated and policy-gated; M6 landed the first concrete external apply path on the Linear adapter.
 
 ## Symphony to Momentum mapping
 
