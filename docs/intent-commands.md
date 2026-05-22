@@ -132,10 +132,10 @@ When `--external-apply` is requested, JSON output also includes an `externalAppl
 - `unsupported_adapter` / `unsupported_intent_type` — the intent's adapter or intent type is not supported by any registered external update adapter.
 - `target_missing` — no resolved external target id on the intent or its linked source item.
 - `intent_apply_in_progress` — a concurrent apply holds the CAS guard on this intent.
-- `intent_blocked` — a prior post-write audit failure left the intent in a non-replay `blocked` apply state. See [docs/recovery.md](recovery.md#intent-apply-blocked-state) for how the blocked state surfaces and is cleared.
+- `intent_blocked` — a prior post-write audit failure left the intent in a non-replay `blocked` apply state. See [docs/recovery.md](recovery.md#intent-apply-blocked-state) for how the blocked state surfaces; no operator surface for clearing it exists yet.
 - `preview_failed` / `validation_failed` / `target_missing` — preview or target validation failed before the external write; no audit row is created unless the failure occurs after the audit claim.
 - `external_conflict` / `write_rejected` / `write_timeout` / `malformed_response` / `adapter_threw` — the external write client refused or could not complete the mutation; the audit row is finalized as `failed` when one exists, and the intent returns to idle.
-- `audit_incomplete` — the audit finalize could not complete after an attempted external write; the intent transitions to `blocked` apply state and must be cleared by operator recovery before another apply can run. See [docs/recovery.md](recovery.md#intent-apply-blocked-state) for the surfaces that expose the blocked state.
+- `audit_incomplete` — the audit finalize could not complete after an attempted external write; the intent transitions to `blocked` apply state, which has no clearing surface yet, so the intent stays blocked and operators inspect the audit row to confirm the write's effect. See [docs/recovery.md](recovery.md#intent-apply-blocked-state) for the surfaces that expose the blocked state.
 
 On terminal refusal, JSON output includes `currentStatus` and `applyPolicy`.
 
