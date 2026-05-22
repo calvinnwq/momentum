@@ -1425,10 +1425,12 @@ describe("public docs envelope shapes", () => {
     });
   });
 
-  it("doctor is NOT prematurely marked M6 complete", () => {
+  it("pins the doctor milestone string to the M6 closeout marker (NGX-302)", () => {
     const cli = fs.readFileSync(path.join(repoRoot, "src", "cli.ts"), "utf8");
-    expect(cli).not.toMatch(/Milestone 6:.*complete/);
     expect(cli).toContain(
+      "Milestone 6: policy-gated external apply (NGX-295, NGX-296, NGX-297, NGX-298, NGX-299, NGX-300, NGX-301, NGX-302) complete"
+    );
+    expect(cli).not.toContain(
       "Milestone 5: source adapters and evidence sync (NGX-287, NGX-288, NGX-289, NGX-290, NGX-291, NGX-292, NGX-293, NGX-294) complete"
     );
   });

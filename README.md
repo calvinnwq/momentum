@@ -4,12 +4,12 @@
 ![TypeScript](https://img.shields.io/badge/typescript-5.9-3178C6?logo=typescript&logoColor=white)
 ![Status](https://img.shields.io/badge/status-pre--release-orange)
 
-Momentum is a TypeScript CLI for durable autonomous repo-work orchestration. It turns a Markdown Goal into verified iterations, local artifacts, handoff state, and policy-gated tracker reconciliation.
+Momentum is a TypeScript CLI for durable autonomous repo-work orchestration. It turns a Markdown Goal into verified iterations, local artifacts, handoff state, policy-gated tracker reconciliation, and an operator-mediated Linear apply path.
 
 - **Durable by default** - state lives in SQLite plus per-goal artifact directories.
 - **Runner-flexible** - use the fake runner for tests, trusted shell for local automation, or ACP-backed agents for real work.
 - **Operator-first** - status, logs, handoff, doctor, daemon, and recovery commands are all inspectable.
-- **External writes stay gated** - tracker updates are intent-based and policy-gated rather than silent mutations.
+- **External writes stay gated** - tracker updates are durable intents first; the optional Linear apply path runs only on an explicit operator command, is gated by `MOMENTUM.md` policy, goes through an adapter-mediated two-phase claim/audit/write/finalize lifecycle with a CAS race guard, defaults to comment-only, carries a stable idempotency marker, and reconciles the single touched issue afterwards.
 
 Full documentation: <https://calvinnwq.github.io/momentum/>
 

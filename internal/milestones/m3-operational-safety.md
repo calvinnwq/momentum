@@ -23,7 +23,7 @@ Momentum's product model is centered on these durable concepts; M3 did not break
 
 - Momentum's core product primitive is `Goal`, not `Issue`. A Goal may be seeded from one or more source items; Linear projects / issues are one source shape, not the source of truth.
 - Goal completion is decided by the Goal Markdown acceptance criteria plus runner, verification, and handoff evidence, not by source-item count or external tracker state alone.
-- Tracker writes are **adapter-mediated and policy-gated**. Momentum core records durable facts and emits external update intents; Linear / GitHub / Jira / etc. adapters or approved workflow steps perform the external writes. M6 lands the first concrete policy-gated external apply path on the Linear adapter.
+- Tracker writes are **adapter-mediated and policy-gated**. Momentum core records durable facts and emits external update intents; Linear / GitHub / Jira / etc. adapters or approved workflow steps perform the external writes. M6 landed the first concrete policy-gated external apply path on the Linear adapter.
 - Source adapters were scoped as **pull / reconcile first** in M3 alignment; active source-adapter implementation belongs to M5. No inbound webhook infrastructure in the operational-safety milestone.
 - A Goal uses **one shared repo / workspace lease** for now. Per-source-item worktrees or workspaces are deferred until daemon, stop, and recovery behavior are solid.
 - `MOMENTUM.md` is the canonical repo policy file. M3 documented it as a contract only and did not add a runtime loader, parser, or precedence rules; M4's NGX-284 later added the runtime loader once a milestone justified it.
@@ -40,7 +40,7 @@ The Linear milestone "Milestone 3: Operational Safety" sequenced the work as (al
 6. **NGX-277 — M3-06 Manual recovery artifacts, durable goal-level needs_manual_recovery flag, blocked-claim guard, recovery clear CLI, and cross-CLI visibility** *(done)*: `recovery-artifact.ts` renders and writes a goal-scoped `recovery.md` with schema version, reason code / message, commit pointers, iteration artifact paths, and safe next steps; `maybeWriteRecoveryArtifact` writes the artifact and marks the durable flag for `repo_dirty` / `repo_unknown_commit` / `repo_unavailable` / `job_running` skip reasons when `dataDir` is provided; `markGoalNeedsManualRecovery` / `clearGoalManualRecovery` / `getGoalManualRecoveryState` manage `needs_manual_recovery` / `manual_recovery_reason` / `manual_recovery_at` columns on `goals`; `claimPendingGoalIterationJob` filters out flagged rows; `clearGoalManualRecoveryGuarded` refuses when the goal is missing, not flagged, or still has active claimed / running jobs, then clears the flag, releases repo locks in `needs_manual_recovery` state, and appends a `goal.recovery_cleared` event; `momentum recovery clear <goal-id>` wires the guarded clear into the CLI.
 7. **NGX-278 — M3-07 Milestone closeout** *(done)*: built-CLI smoke coverage for daemon drain, graceful stop, stop-now cancellation, safe stale recovery, and manual recovery artifact visibility paths; `doctor`, README, and AGENTS marker alignment naming M3 complete; explicit list of cross-milestone deferrals so the operational-safety surface is pinned.
 
-NGX-278 introduced the M3 closeout marker on `doctor --json` / text. NGX-286 later flipped it to the M4 closeout marker, and NGX-294 flipped it again to the M5 closeout marker.
+NGX-278 introduced the M3 closeout marker on `doctor --json` / text. NGX-286 later flipped it to the M4 closeout marker, NGX-294 flipped it again to the M5 closeout marker, and NGX-302 flipped it again to the M6 closeout marker.
 
 ## M3 non-goals (explicit)
 
@@ -53,7 +53,7 @@ The following remained **explicitly out of scope** for Milestone 3 and were defe
 - **Dashboard or UI surface** — CLI JSON / text remains the only interface.
 - **Strong sandboxing** (container / VM / seccomp isolation) — runners trust the local operator environment; later milestones may revisit isolation.
 - **Remote git operations** — no `fetch` / `pull` / `push` / `rebase` driven from Momentum.
-- **External tracker writes** — Linear / GitHub / Jira / etc. issue / PR creation, comments, status changes, label edits driven automatically from Momentum. Tracker writes stay adapter-mediated and policy-gated; M6 lands the first concrete external apply path on the Linear adapter.
+- **External tracker writes** — Linear / GitHub / Jira / etc. issue / PR creation, comments, status changes, label edits driven automatically from Momentum. Tracker writes stay adapter-mediated and policy-gated; M6 landed the first concrete external apply path on the Linear adapter.
 
 ## Symphony to Momentum mapping
 

@@ -1,8 +1,8 @@
 # Contract: Intent Apply (Two-Phase External Apply)
 
-**Status:** M6 contract. This document captures the safety invariants for the two-phase external apply path that lands in Milestone 6 ([internal/milestones/m6-external-apply.md](../milestones/m6-external-apply.md)). The runtime implementation lands across NGX-296..NGX-302. NGX-295 (M6-00) pins the contract.
+**Status:** M6 contract (complete). This document captures the safety invariants for the two-phase external apply path shipped in Milestone 6 ([internal/milestones/m6-external-apply.md](../milestones/m6-external-apply.md)). The runtime implementation shipped across NGX-296..NGX-302; NGX-295 (M6-00) pinned the contract. These invariants remain wire-stable.
 
-Milestone 5 introduced durable intents while refusing external writes by default. Milestone 6 introduces the gated external apply path described below. Every constraint here is a safety invariant — runtime code, tests, and operator surfaces all must respect it.
+Milestone 5 introduced durable intents while refusing external writes by default. Milestone 6 added the gated external apply path described below. Every constraint here is a safety invariant — runtime code, tests, and operator surfaces all must respect it.
 
 ## Scope
 
@@ -76,7 +76,7 @@ Tests and smoke **must not** make real `api.linear.app` calls. The contract is:
 
 ## Operator surfaces and auditability
 
-NGX-299 (M6-03) lands operator surfaces **before** NGX-298 (M6-04) lands the real write path. The operator surfaces include:
+NGX-299 (M6-03) landed operator surfaces **before** NGX-298 (M6-04) landed the real write path. The operator surfaces include:
 
 - `intent get` surfaces the audit row, the resolved external target, the comment-vs-status decision, the idempotency marker the runtime would write, and the current apply state (including `pending` / `in-flight` / `applied` / `blocked` / `skipped` / `canceled`).
 - `intent list` surfaces a `blocked` filter so operators can see every intent that needs manual clearance.

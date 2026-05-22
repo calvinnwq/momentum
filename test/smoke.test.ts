@@ -4349,13 +4349,13 @@ async function startLinearMockServer(
 
 describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () => {
   it(
-    "doctor --json reports the M5 closeout milestone marker",
+    "doctor --json reports the M6 closeout milestone marker",
     () => {
       const result = runCliBinary(["doctor", "--json"]);
       expect(result.code, `doctor stderr: ${result.stderr}`).toBe(0);
       const payload = JSON.parse(result.stdout) as Record<string, unknown>;
       expect(payload["milestone"]).toBe(
-        "Milestone 5: source adapters and evidence sync (NGX-287, NGX-288, NGX-289, NGX-290, NGX-291, NGX-292, NGX-293, NGX-294) complete"
+        "Milestone 6: policy-gated external apply (NGX-295, NGX-296, NGX-297, NGX-298, NGX-299, NGX-300, NGX-301, NGX-302) complete"
       );
     },
     60_000
