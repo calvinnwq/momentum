@@ -139,6 +139,14 @@ const APPROVAL_BOUNDARY_SET: ReadonlySet<string> = new Set(
   WORKFLOW_APPROVAL_BOUNDARIES
 );
 
+const APPROVAL_BOUNDARY_INDEX: ReadonlyMap<string, number> = new Map(
+  WORKFLOW_APPROVAL_BOUNDARIES.map((boundary, index) => [boundary, index])
+);
+
+function approvalBoundaryOrder(boundary: string): number {
+  return APPROVAL_BOUNDARY_INDEX.get(boundary) ?? WORKFLOW_APPROVAL_BOUNDARIES.length;
+}
+
 const STEP_KIND_BY_BARE_NAME: ReadonlyMap<string, WorkflowStepKind> = new Map(
   WORKFLOW_STEP_KINDS.map((kind) => [kind, kind])
 );
@@ -227,23 +235,33 @@ export function parseWorkflowRunImport(
 
   const approvalsRequired = plan ? extractApprovalsRequired(plan) : new Set<string>();
   const stepsFromPlan = plan ? extractStepsFromPlan(plan, approvalsRequired) : [];
-  const steps = mergeLedgerIntoSteps(stepsFromPlan, ledgerEvents, approvalsRequired);
+  const steps = mergeLedgerIntoSteps(
+    stepsFromPlan,
+    ledgerEvents,
+    approvalsRequired,
+    diagnostics
+  );
 
   const approvals = approvalEntries
     .map((entry) =>
       readApprovalFile(path.join(artifactPath, entry.name), runId, diagnostics)
     )
     .filter((row): row is WorkflowRunImportApproval => row !== null)
-    .sort((a, b) => a.boundary.localeCompare(b.boundary));
+    .sort((a, b) => {
+      if (a.recordedAt !== b.recordedAt) return a.recordedAt - b.recordedAt;
+      const orderDelta =
+        approvalBoundaryOrder(a.boundary) - approvalBoundaryOrder(b.boundary);
+      if (orderDelta !== 0) return orderDelta;
+      return a.boundary.localeCompare(b.boundary);
+    });
 
   const leases: WorkflowRunImportLease[] = [];
 
   const issueScope = plan ? extractIssueScope(plan) : {};
   const route = plan ? extractRoute(plan) : {};
   const skillRevision = plan ? extractSkillRevisionDigest(plan) : null;
-  const approvalBoundary = approvals.length > 0
-    ? approvals[approvals.length - 1]!.boundary
-    : null;
+  const approvalBoundary =
+    approvals.length > 0 ? approvals[approvals.length - 1]!.boundary : null;
 
   const run: WorkflowRunImportRun = {
     runId,
@@ -369,6 +387,7 @@ type LedgerEvent = {
   ledgerOffset: number;
   errorCode: string | null;
   errorMessage: string | null;
+  sourcePath: string;
 };
 
 function readLedgerFile(
@@ -465,7 +484,8 @@ function readLedgerFile(
       ts: occurredAt,
       ledgerOffset: lineNumber,
       errorCode,
-      errorMessage
+      errorMessage,
+      sourcePath: `${filePath}:${lineNumber}`
     });
   }
   return events;
@@ -639,7 +659,8 @@ function classifyStepKind(stepId: string): WorkflowStepKind | null {
 function mergeLedgerIntoSteps(
   planSteps: WorkflowRunImportStep[],
   events: LedgerEvent[],
-  approvalsRequired: Set<string>
+  approvalsRequired: Set<string>,
+  diagnostics: WorkflowRunImportDiagnostic[]
 ): WorkflowRunImportStep[] {
   const byStepId = new Map<string, WorkflowRunImportStep>();
   for (const step of planSteps) byStepId.set(step.stepId, { ...step });
@@ -649,7 +670,15 @@ function mergeLedgerIntoSteps(
     let step = byStepId.get(event.step);
     if (!step) {
       const kind = classifyStepKind(event.step);
-      if (!kind) continue;
+      if (!kind) {
+        diagnostics.push({
+          code: "evidence_format_unknown",
+          path: event.sourcePath,
+          reason: "unknown_step_or_status",
+          detail: `step=${event.step} status=${event.status}`
+        });
+        continue;
+      }
       step = {
         stepId: event.step,
         kind,

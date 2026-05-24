@@ -2136,11 +2136,10 @@ function emitWorkflowImportFailure(
   };
   if (failure.dataDir !== undefined) payload["dataDir"] = failure.dataDir;
   if (failure.path !== undefined) payload["path"] = failure.path;
-  if (failure.diagnostics !== undefined && failure.diagnostics.length > 0) {
-    payload["diagnostics"] = failure.diagnostics.map((diagnostic) => ({
-      ...diagnostic
-    }));
-  }
+  payload["diagnostics"] =
+    failure.diagnostics === undefined
+      ? []
+      : failure.diagnostics.map((diagnostic) => ({ ...diagnostic }));
 
   if (parsed.json) {
     writeJson(io.stderr, payload);

@@ -369,6 +369,57 @@ describe("parseWorkflowRunImport", () => {
     ).toBe(true);
   });
 
+  it("derives run.approvalBoundary from the most recently recorded approval, not alphabetical order", () => {
+    const root = makeTempDir();
+    const runDir = path.join(root, "cwfp-multiapprov0");
+    writeJsonFile(path.join(runDir, "plan.json"), basePlan("cwfp-multiapprov0"));
+    // through-merge-cleanup sorts alphabetically before through-no-mistakes,
+    // but here it is recorded later, so it should win as the run-level boundary.
+    writeJsonFile(path.join(runDir, "approval-through-no-mistakes.json"), {
+      runId: "cwfp-multiapprov0",
+      boundary: "through-no-mistakes",
+      approvedAt: "2026-05-17T09:00:00Z"
+    });
+    writeJsonFile(path.join(runDir, "approval-through-merge-cleanup.json"), {
+      runId: "cwfp-multiapprov0",
+      boundary: "through-merge-cleanup",
+      approvedAt: "2026-05-17T11:00:00Z"
+    });
+
+    const result = parseWorkflowRunImport(runDir);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected ok");
+
+    expect(result.import.approvals.map((a) => a.boundary)).toEqual([
+      "through-no-mistakes",
+      "through-merge-cleanup"
+    ]);
+    expect(result.import.run.approvalBoundary).toBe("through-merge-cleanup");
+  });
+
+  it("emits an unknown-step diagnostic when ledger references a step kind not in the vocabulary", () => {
+    const root = makeTempDir();
+    const runDir = path.join(root, "cwfp-unknownstp0");
+    writeJsonFile(path.join(runDir, "plan.json"), basePlan("cwfp-unknownstp0"));
+    writeLedger(path.join(runDir, "ledger.jsonl"), [
+      { runId: "cwfp-unknownstp0", step: "preflight", status: "complete", ts: "2026-05-17T10:00:00Z" },
+      { runId: "cwfp-unknownstp0", step: "mystery-step", status: "complete", ts: "2026-05-17T10:05:00Z" }
+    ]);
+
+    const result = parseWorkflowRunImport(runDir);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected ok");
+
+    expect(result.import.steps.some((s) => s.stepId === "mystery-step")).toBe(false);
+    const unknownDiagnostic = result.import.diagnostics.find(
+      (d) =>
+        d.code === "evidence_format_unknown" &&
+        d.reason === "unknown_step_or_status" &&
+        d.detail?.includes("step=mystery-step")
+    );
+    expect(unknownDiagnostic).toBeDefined();
+  });
+
   it("is deterministic: two calls on the same directory return equal records", () => {
     const root = makeTempDir();
     const runDir = path.join(root, "cwfp-deterministc");

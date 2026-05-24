@@ -158,7 +158,8 @@ describe("momentum workflow import", () => {
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow import",
-      code: "path_required"
+      code: "path_required",
+      diagnostics: []
     });
   });
 
@@ -195,7 +196,8 @@ describe("momentum workflow import", () => {
     expect(payload).toMatchObject({
       ok: false,
       command: "workflow import",
-      code: "import_path_unreadable"
+      code: "import_path_unreadable",
+      diagnostics: []
     });
   });
 
