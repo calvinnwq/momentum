@@ -58,7 +58,7 @@ A single `momentum.db` per data directory backs durable state across all goals:
 - `workflow_runs` — durable coding-workflow run rows keyed by `runId`, carrying `state`, identity columns (`repo_path`, `objective`, `issue_scope_json`, `route_json`, `approval_boundary`, `skill_revision`), the run `source` plus optional `source_artifact_path`, the captured `plan_json` body, optional batch grouping, the per-run `needs_manual_recovery` flag, and lifecycle timestamps.
 - `workflow_steps` — durable step rows keyed by `(run_id, step_id)` with `kind` (`preflight` / `implementation` / `postflight` / `no-mistakes` / `merge-cleanup` / `linear-refresh`), `state`, ordering, a `ledger_offset` pointer into the run's `ledger.jsonl`, and stable `error_code` / `error_message` fields.
 - `workflow_approvals` — durable approval rows keyed by `(run_id, boundary)` mirroring the per-run `approval-<boundary>.json` artifacts; stores actor, phrase, artifact path and digest, recorded / discharged timestamps.
-- `workflow_leases` — durable monitor / managed-step / dispatch leases keyed by `(run_id, lease_kind)`; stores holder, acquired / expires / heartbeat timestamps, and a `stale_policy` of `auto-release` or `manual-recovery-required`.
+- `workflow_leases` — durable monitor / managed-step / dispatch leases keyed by `(run_id, lease_kind)`; stores holder, acquired / expires / heartbeat / released timestamps (a non-null `released_at` marks the lease as cleanly released), and a `stale_policy` of `auto-release` or `manual-recovery-required`.
 
 ## Per-goal artifact files
 
