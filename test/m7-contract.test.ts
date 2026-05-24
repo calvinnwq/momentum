@@ -15,8 +15,8 @@ describe("M7 active-marker contract (NGX-312)", () => {
     const milestonePath = "internal/milestones/m7-openclaw-coding-workflow-backend.md";
     const m7 = readDoc(milestonePath);
 
-    it("pins M7 as active / planned without claiming complete", () => {
-      expect(m7).toMatch(/Status:[^\n]*Active\s*\/\s*planned/i);
+    it("pins M7 as active / in flight without claiming complete", () => {
+      expect(m7).toMatch(/Status:[^\n]*Active\s*\/\s*in flight/i);
       const forbiddenClaims = [
         /Milestone 7[^.\n]*\bis complete\b/i,
         /\bM7\b[^.\n]*\bis complete\b/i,
@@ -128,8 +128,8 @@ describe("M7 active-marker contract (NGX-312)", () => {
   describe("internal/contracts/workflow-runs.md", () => {
     const contract = readDoc("internal/contracts/workflow-runs.md");
 
-    it("pins the contract as planned, not complete", () => {
-      expect(contract).toMatch(/Status:[^\n]*M7 contract[^\n]*\(planned\)/i);
+    it("pins the contract as active, not complete", () => {
+      expect(contract).toMatch(/Status:[^\n]*M7 contract[^\n]*\(active\)/i);
       expect(contract).not.toMatch(/Status:[^.\n]*\bComplete\b/i);
       expect(contract).not.toMatch(/Milestone 7[^.\n]*\bis complete\b/i);
     });
