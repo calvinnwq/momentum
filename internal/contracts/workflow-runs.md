@@ -29,7 +29,7 @@ The lifecycle states are:
 - `pending` — durable row exists, plan + scope captured, no boundary approved yet.
 - `approved` — at least one approval boundary recorded; the highest cumulative boundary is the current approval.
 - `running` — at least one `workflow_steps` row is in `running` state.
-- `succeeded` — every required step in the approved boundary chain finalized in `succeeded` / `skipped`, and the run has no outstanding leases.
+- `succeeded` — every required step in the approved boundary chain finalized in `succeeded` / `skipped`, at least one required step finalized in `succeeded`, and the run has no outstanding leases. A required chain that finalizes entirely in `skipped` (no `succeeded`) resolves to `canceled` instead.
 - `failed` — at least one required step finalized in `failed` and no recovery is in flight.
 - `blocked` — manual recovery required (see "Recovery" below). A `blocked` run is non-replayable until cleared.
 - `canceled` — explicit operator cancellation; mirrors the M3 `daemon stop --now` `canceled` shape but scoped to a run, not the daemon.
