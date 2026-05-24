@@ -999,5 +999,163 @@ describe("applyQueueMigrations", () => {
         db.close();
       }
     });
+
+    it("exposes WorkflowRun identity columns enumerated by the M7 milestone doc", () => {
+      const dataDir = makeTempDir();
+      const db = openDb(dataDir);
+      try {
+        const cols = getColumns(db, "workflow_runs");
+        const byName = new Map(cols.map((row) => [row.name, row]));
+        for (const col of [
+          "repo_path",
+          "objective",
+          "issue_scope_json",
+          "route_json",
+          "approval_boundary",
+          "skill_revision"
+        ]) {
+          expect(byName.has(col), `missing workflow_runs column: ${col}`).toBe(
+            true
+          );
+        }
+        expect(byName.get("issue_scope_json")?.notnull).toBe(1);
+        expect(byName.get("route_json")?.notnull).toBe(1);
+        expect(byName.get("repo_path")?.notnull).toBe(0);
+        expect(byName.get("objective")?.notnull).toBe(0);
+        expect(byName.get("approval_boundary")?.notnull).toBe(0);
+        expect(byName.get("skill_revision")?.notnull).toBe(0);
+
+        const indexes = (
+          db
+            .prepare(
+              "SELECT name FROM sqlite_master WHERE type='index' ORDER BY name"
+            )
+            .all() as Array<{ name: string }>
+        ).map((row) => row.name);
+        expect(indexes).toContain("idx_workflow_runs_repo_path");
+      } finally {
+        db.close();
+      }
+    });
+
+    it("defaults issue_scope_json and route_json to empty objects on fresh inserts", () => {
+      const dataDir = makeTempDir();
+      const db = openDb(dataDir);
+      try {
+        db.prepare(
+          `INSERT INTO workflow_runs
+             (id, state, source, plan_json, needs_manual_recovery,
+              created_at, updated_at)
+           VALUES ('cwfp-defaults', 'pending', 'agent-workflows', '{}', 0, 1, 1)`
+        ).run();
+        const row = db
+          .prepare(
+            `SELECT repo_path, objective, issue_scope_json, route_json,
+                    approval_boundary, skill_revision
+               FROM workflow_runs WHERE id = 'cwfp-defaults'`
+          )
+          .get() as Record<string, unknown>;
+        expect(row["repo_path"]).toBeNull();
+        expect(row["objective"]).toBeNull();
+        expect(row["issue_scope_json"]).toBe("{}");
+        expect(row["route_json"]).toBe("{}");
+        expect(row["approval_boundary"]).toBeNull();
+        expect(row["skill_revision"]).toBeNull();
+      } finally {
+        db.close();
+      }
+    });
+
+    it("upgrades a pre-identity workflow_runs schema additively and preserves rows", () => {
+      const dataDir = makeTempDir();
+      const dbPath = path.join(dataDir, "momentum.db");
+      const pre = new DatabaseSync(dbPath);
+      try {
+        // Mirror the iteration-2 shape of workflow_runs (no identity columns).
+        pre.exec(`
+          CREATE TABLE goals (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            branch TEXT NOT NULL,
+            artifact_dir TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+          ) STRICT;
+          CREATE TABLE workflow_runs (
+            id TEXT PRIMARY KEY,
+            state TEXT NOT NULL DEFAULT 'pending',
+            goal_id TEXT,
+            source TEXT NOT NULL,
+            source_artifact_path TEXT,
+            plan_json TEXT NOT NULL DEFAULT '{}',
+            batch_group TEXT,
+            batch_role TEXT,
+            needs_manual_recovery INTEGER NOT NULL DEFAULT 0,
+            manual_recovery_reason TEXT,
+            manual_recovery_at INTEGER,
+            started_at INTEGER,
+            finished_at INTEGER,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+          ) STRICT;
+        `);
+        pre.prepare(
+          `INSERT INTO workflow_runs
+             (id, state, source, plan_json, needs_manual_recovery,
+              created_at, updated_at)
+           VALUES ('cwfp-legacy', 'pending', 'agent-workflows', '{"legacy":true}',
+                   0, 7, 8)`
+        ).run();
+      } finally {
+        pre.close();
+      }
+
+      const upgraded = openDb(dataDir);
+      try {
+        const cols = getColumns(upgraded, "workflow_runs").map(
+          (row) => row.name
+        );
+        for (const col of [
+          "repo_path",
+          "objective",
+          "issue_scope_json",
+          "route_json",
+          "approval_boundary",
+          "skill_revision"
+        ]) {
+          expect(cols).toContain(col);
+        }
+        const preserved = upgraded
+          .prepare(
+            `SELECT id, state, plan_json, issue_scope_json, route_json,
+                    repo_path, approval_boundary
+               FROM workflow_runs WHERE id = 'cwfp-legacy'`
+          )
+          .get() as Record<string, unknown>;
+        expect(preserved["id"]).toBe("cwfp-legacy");
+        expect(preserved["state"]).toBe("pending");
+        expect(preserved["plan_json"]).toBe('{"legacy":true}');
+        expect(preserved["issue_scope_json"]).toBe("{}");
+        expect(preserved["route_json"]).toBe("{}");
+        expect(preserved["repo_path"]).toBeNull();
+        expect(preserved["approval_boundary"]).toBeNull();
+      } finally {
+        upgraded.close();
+      }
+    });
+
+    it("identity-column upgrade is idempotent across repeated openDb invocations", () => {
+      const dataDir = makeTempDir();
+      const a = openDb(dataDir);
+      const beforeCols = getColumns(a, "workflow_runs").length;
+      a.close();
+
+      const b = openDb(dataDir);
+      try {
+        expect(getColumns(b, "workflow_runs")).toHaveLength(beforeCols);
+      } finally {
+        b.close();
+      }
+    });
   });
 });

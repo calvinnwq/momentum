@@ -32,6 +32,15 @@ const DAEMON_RUN_COLUMNS: ColumnSpec[] = [
   { name: "recovery_status", type: "TEXT" }
 ];
 
+const WORKFLOW_RUN_IDENTITY_COLUMNS: ColumnSpec[] = [
+  { name: "repo_path", type: "TEXT" },
+  { name: "objective", type: "TEXT" },
+  { name: "issue_scope_json", type: "TEXT NOT NULL DEFAULT '{}'" },
+  { name: "route_json", type: "TEXT NOT NULL DEFAULT '{}'" },
+  { name: "approval_boundary", type: "TEXT" },
+  { name: "skill_revision", type: "TEXT" }
+];
+
 const REPO_LOCKS_DDL = `
 CREATE TABLE IF NOT EXISTS repo_locks (
   id TEXT PRIMARY KEY,
@@ -286,6 +295,12 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
   source TEXT NOT NULL,
   source_artifact_path TEXT,
   plan_json TEXT NOT NULL DEFAULT '{}',
+  repo_path TEXT,
+  objective TEXT,
+  issue_scope_json TEXT NOT NULL DEFAULT '{}',
+  route_json TEXT NOT NULL DEFAULT '{}',
+  approval_boundary TEXT,
+  skill_revision TEXT,
   batch_group TEXT,
   batch_role TEXT,
   needs_manual_recovery INTEGER NOT NULL DEFAULT 0,
@@ -372,6 +387,11 @@ CREATE INDEX IF NOT EXISTS idx_workflow_leases_expires_at
   ON workflow_leases(expires_at);
 `;
 
+const WORKFLOW_RUNS_IDENTITY_INDEX_DDL = `
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_repo_path
+  ON workflow_runs(repo_path) WHERE repo_path IS NOT NULL;
+`;
+
 const JOB_IDEMPOTENCY_INDEX_DDL = `
 CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_idempotency_key
   ON jobs(idempotency_key) WHERE idempotency_key IS NOT NULL;
@@ -411,6 +431,12 @@ export function applyQueueMigrations(db: MomentumDb): void {
       }
     }
     db.exec(WORKFLOW_RUNS_DDL);
+    if (tableExists(db, "workflow_runs")) {
+      for (const column of WORKFLOW_RUN_IDENTITY_COLUMNS) {
+        ensureColumn(db, "workflow_runs", column);
+      }
+    }
+    db.exec(WORKFLOW_RUNS_IDENTITY_INDEX_DDL);
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
