@@ -24,7 +24,7 @@ Momentum never modifies the data directory outside the resolved path. Each goal 
 
 ```text
 <data-dir>/
-  momentum.db                  # SQLite (goals, jobs, events, repo_locks, daemon_runs, source_items, source_snapshots, source_reconciliation_runs, evidence_records, update_intents, intent_apply_audits tables)
+  momentum.db                  # SQLite (goals, jobs, events, repo_locks, daemon_runs, source_items, source_snapshots, source_reconciliation_runs, evidence_records, update_intents, intent_apply_audits, workflow_runs, workflow_steps, workflow_approvals, workflow_leases tables)
   goals/
     <goal-id>/
       goal.md                  # Canonical copy of the goal spec
@@ -55,6 +55,10 @@ A single `momentum.db` per data directory backs durable state across all goals:
 - `evidence_records` — normalized agent-workflow rows ingested via `evidence ingest`.
 - `update_intents` — durable external-tracker update intents in `pending` / `applied` / `skipped` / `canceled` states, plus an `apply_state` column tracking the per-intent external-apply CAS state (`idle` / `in_flight` / `blocked`).
 - `intent_apply_audits` — append-only audit ledger for external-apply attempts on `update_intents`; one row per claim with lifecycle (`claimed` / `succeeded` / `failed` / `blocked` / `audit_incomplete`), idempotency marker, preview/result fields, and reconcile metadata.
+- `workflow_runs` — durable coding-workflow run rows keyed by `runId`, carrying `state`, identity columns (`repo_path`, `objective`, `issue_scope_json`, `route_json`, `approval_boundary`, `skill_revision`), the run `source` plus optional `source_artifact_path`, the captured `plan_json` body, optional batch grouping, the per-run `needs_manual_recovery` flag, and lifecycle timestamps.
+- `workflow_steps` — durable step rows keyed by `(run_id, step_id)` with `kind` (`preflight` / `implementation` / `postflight` / `no-mistakes` / `merge-cleanup` / `linear-refresh`), `state`, ordering, a `ledger_offset` pointer into the run's `ledger.jsonl`, and stable `error_code` / `error_message` fields.
+- `workflow_approvals` — durable approval rows keyed by `(run_id, boundary)` mirroring the per-run `approval-<boundary>.json` artifacts; stores actor, phrase, artifact path and digest, recorded / discharged timestamps.
+- `workflow_leases` — durable monitor / managed-step / dispatch leases keyed by `(run_id, lease_kind)`; stores holder, acquired / expires / heartbeat / released timestamps (a non-null `released_at` marks the lease as cleanly released), and a `stale_policy` of `auto-release` or `manual-recovery-required`.
 
 ## Per-goal artifact files
 

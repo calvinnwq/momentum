@@ -2,7 +2,7 @@
 
 This page lists features and behaviors that are intentionally **out of scope**
 as of the most recently shipped milestone (M6 closeout) and through the
-currently active milestone (M7, planned). It exists so contributors and
+currently active milestone (M7, active / in flight). It exists so contributors and
 operators can see at a glance what Momentum does *not* do today, and where
 the next durable surface is expected (or explicitly deferred indefinitely).
 
@@ -25,12 +25,19 @@ Milestone status:
   single-issue post-apply reconcile. See
   [`internal/milestones/m6-external-apply.md`](milestones/m6-external-apply.md) and
   [`internal/contracts/intent-apply.md`](contracts/intent-apply.md).
-- **Milestone 7 (OpenClaw Coding Workflow Backend)** is planned. M7 turns
-  Momentum into the durable run substrate (`WorkflowRun`, step state,
-  approvals, leases, evidence pointers) for OpenClaw coding workflows without
-  replacing the `coding-workflow-pipeline` skill's executors, Discord delivery,
-  or monitor cron. M7 is not complete; the `doctor --json` milestone marker
-  stays at the M6 closeout string until M7 closeout flips it forward. See
+- **Milestone 7 (OpenClaw Coding Workflow Backend)** is active / in flight.
+  The first substrate slices have shipped (the `workflow_runs` /
+  `workflow_steps` / `workflow_approvals` / `workflow_leases` schema migration,
+  the `WorkflowRun` identity columns, the run / step state vocabulary plus
+  transition reducer, the lease-aware `deriveWorkflowRunState`, and the
+  `classifyWorkflowLease` lease-freshness classifier). M7 turns Momentum into
+  the durable run substrate (`WorkflowRun`, step state, approvals, leases,
+  evidence pointers) for OpenClaw coding workflows without replacing the
+  `coding-workflow-pipeline` skill's executors, Discord delivery, or monitor
+  cron. M7 is not complete; the M7 CLI envelopes, built-CLI smoke coverage,
+  and the `doctor --json` milestone marker flip remain pending, so the
+  `doctor --json` milestone marker stays at the M6 closeout string until M7
+  closeout flips it forward. See
   [`internal/milestones/m7-openclaw-coding-workflow-backend.md`](milestones/m7-openclaw-coding-workflow-backend.md)
   and [`internal/contracts/workflow-runs.md`](contracts/workflow-runs.md).
 

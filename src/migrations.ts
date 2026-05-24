@@ -32,6 +32,15 @@ const DAEMON_RUN_COLUMNS: ColumnSpec[] = [
   { name: "recovery_status", type: "TEXT" }
 ];
 
+const WORKFLOW_RUN_IDENTITY_COLUMNS: ColumnSpec[] = [
+  { name: "repo_path", type: "TEXT" },
+  { name: "objective", type: "TEXT" },
+  { name: "issue_scope_json", type: "TEXT NOT NULL DEFAULT '{}'" },
+  { name: "route_json", type: "TEXT NOT NULL DEFAULT '{}'" },
+  { name: "approval_boundary", type: "TEXT" },
+  { name: "skill_revision", type: "TEXT" }
+];
+
 const REPO_LOCKS_DDL = `
 CREATE TABLE IF NOT EXISTS repo_locks (
   id TEXT PRIMARY KEY,
@@ -278,6 +287,111 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_intent_apply_audits_active
   ON intent_apply_audits(intent_id) WHERE lifecycle_state = 'claimed';
 `;
 
+const WORKFLOW_RUNS_DDL = `
+CREATE TABLE IF NOT EXISTS workflow_runs (
+  id TEXT PRIMARY KEY,
+  state TEXT NOT NULL DEFAULT 'pending',
+  goal_id TEXT REFERENCES goals(id),
+  source TEXT NOT NULL,
+  source_artifact_path TEXT,
+  plan_json TEXT NOT NULL DEFAULT '{}',
+  repo_path TEXT,
+  objective TEXT,
+  issue_scope_json TEXT NOT NULL DEFAULT '{}',
+  route_json TEXT NOT NULL DEFAULT '{}',
+  approval_boundary TEXT,
+  skill_revision TEXT,
+  batch_group TEXT,
+  batch_role TEXT,
+  needs_manual_recovery INTEGER NOT NULL DEFAULT 0,
+  manual_recovery_reason TEXT,
+  manual_recovery_at INTEGER,
+  started_at INTEGER,
+  finished_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_state
+  ON workflow_runs(state);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_goal
+  ON workflow_runs(goal_id) WHERE goal_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_batch_group
+  ON workflow_runs(batch_group) WHERE batch_group IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_needs_manual_recovery
+  ON workflow_runs(needs_manual_recovery)
+  WHERE needs_manual_recovery = 1;
+
+CREATE TABLE IF NOT EXISTS workflow_steps (
+  run_id TEXT NOT NULL REFERENCES workflow_runs(id),
+  step_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'pending',
+  step_order INTEGER NOT NULL,
+  required INTEGER NOT NULL DEFAULT 1,
+  ledger_offset INTEGER,
+  result_digest TEXT,
+  error_code TEXT,
+  error_message TEXT,
+  started_at INTEGER,
+  finished_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (run_id, step_id)
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS idx_workflow_steps_run
+  ON workflow_steps(run_id);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_steps_state
+  ON workflow_steps(state);
+
+CREATE TABLE IF NOT EXISTS workflow_approvals (
+  run_id TEXT NOT NULL REFERENCES workflow_runs(id),
+  boundary TEXT NOT NULL,
+  actor TEXT,
+  phrase TEXT NOT NULL,
+  artifact_path TEXT NOT NULL,
+  artifact_digest TEXT NOT NULL,
+  recorded_at INTEGER NOT NULL,
+  discharged_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (run_id, boundary)
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS idx_workflow_approvals_run
+  ON workflow_approvals(run_id);
+
+CREATE TABLE IF NOT EXISTS workflow_leases (
+  run_id TEXT NOT NULL REFERENCES workflow_runs(id),
+  lease_kind TEXT NOT NULL,
+  holder TEXT NOT NULL,
+  acquired_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  heartbeat_at INTEGER NOT NULL,
+  released_at INTEGER,
+  stale_policy TEXT NOT NULL DEFAULT 'auto-release',
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (run_id, lease_kind)
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS idx_workflow_leases_run
+  ON workflow_leases(run_id);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_leases_expires_at
+  ON workflow_leases(expires_at);
+`;
+
+const WORKFLOW_RUNS_IDENTITY_INDEX_DDL = `
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_repo_path
+  ON workflow_runs(repo_path) WHERE repo_path IS NOT NULL;
+`;
+
 const JOB_IDEMPOTENCY_INDEX_DDL = `
 CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_idempotency_key
   ON jobs(idempotency_key) WHERE idempotency_key IS NOT NULL;
@@ -316,6 +430,13 @@ export function applyQueueMigrations(db: MomentumDb): void {
         ensureColumn(db, "daemon_runs", column);
       }
     }
+    db.exec(WORKFLOW_RUNS_DDL);
+    if (tableExists(db, "workflow_runs")) {
+      for (const column of WORKFLOW_RUN_IDENTITY_COLUMNS) {
+        ensureColumn(db, "workflow_runs", column);
+      }
+    }
+    db.exec(WORKFLOW_RUNS_IDENTITY_INDEX_DDL);
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");

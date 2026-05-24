@@ -1,6 +1,6 @@
 # Contract: WorkflowRun (OpenClaw Coding Workflow Backend)
 
-**Status:** M7 contract (planned). Pinned by NGX-312 (M7-00). No runtime implementation has shipped against this contract yet; the runtime / schema / CLI live in follow-up M7 implementation slices that will land after NGX-312 closes. The M3 / M4 / M5 / M6 surfaces this contract composes with remain wire-stable.
+**Status:** M7 contract (active). Pinned by NGX-312 (M7-00). The durable substrate primitives have begun shipping against this contract: the `workflow_runs` / `workflow_steps` / `workflow_approvals` / `workflow_leases` schema migration, the `WorkflowRun` identity columns (`repo_path`, `objective`, `issue_scope_json`, `route_json`, `approval_boundary`, `skill_revision`), the pure run / step state vocabulary and transition reducer, the lease-aware `deriveWorkflowRunState`, and the `classifyWorkflowLease` lease-freshness classifier. The M7 CLI envelopes, built-CLI smoke coverage, and the `doctor --json` closeout marker flip remain pending in follow-up slices. The M3 / M4 / M5 / M6 surfaces this contract composes with remain wire-stable.
 
 This contract is the cross-milestone source of truth for the durable substrate Momentum will provide for OpenClaw coding workflows. It is the long-lived companion to [internal/milestones/m7-openclaw-coding-workflow-backend.md](../milestones/m7-openclaw-coding-workflow-backend.md); the milestone doc owns the *scope* of M7, this contract owns the *invariants* that survive after M7 closeout.
 
@@ -24,15 +24,23 @@ It does **not** cover:
 
 A `WorkflowRun` is identified by `runId`, which matches the existing skill convention `cwfp-<hex>` (the directory id under `.agent-workflows/<runId>/`). The runtime never re-derives `runId` from the plan body; it is taken verbatim from the skill's `workflow_plan.py plan` output and stored as the immutable durable identity.
 
+Alongside identity, the durable row captures the run `source` (origin label for the plan), an optional `sourceArtifactPath` pointing back to the on-disk plan artifact, and the `planJson` body itself, so the substrate can reconstruct what was approved without re-reading `.agent-workflows/<runId>/plan.json`.
+
 The lifecycle states are:
 
 - `pending` — durable row exists, plan + scope captured, no boundary approved yet.
 - `approved` — at least one approval boundary recorded; the highest cumulative boundary is the current approval.
 - `running` — at least one `workflow_steps` row is in `running` state.
-- `succeeded` — every required step in the approved boundary chain finalized in `succeeded` / `skipped`, and the run has no outstanding leases.
+- `succeeded` — every required step in the approved boundary chain finalized in `succeeded` / `skipped`, at least one required step finalized in `succeeded`, and the run has no outstanding leases. A required chain that finalizes entirely in `skipped` (no `succeeded`) resolves to `canceled` instead.
 - `failed` — at least one required step finalized in `failed` and no recovery is in flight.
 - `blocked` — manual recovery required (see "Recovery" below). A `blocked` run is non-replayable until cleared.
 - `canceled` — explicit operator cancellation; mirrors the M3 `daemon stop --now` `canceled` shape but scoped to a run, not the daemon.
+
+Lease-aware promotion / demotion rules layer on top of the step-derived state above:
+
+- Any outstanding lease classified as `stale-manual-recovery-required` forces the run state to `blocked`, even when steps alone would have allowed a different non-terminal state. The exception is when the step-derived state is already a terminal non-success (`failed` / `canceled`) — those terminal states are not "rescued" back into `blocked` by an orphaned recovery lease, though the lease still blocks new claims on the run until an operator clears it.
+- A step-derived `succeeded` is demoted to `running` whenever any non-released lease (`fresh`, `stale-auto-release`, or `stale-manual-recovery-required` when steps would otherwise have allowed `succeeded`) is still outstanding. The `succeeded` lifecycle bullet's "no outstanding leases" requirement is enforced through this demotion.
+- Released leases (`releasedAt !== null`) never affect the derived state.
 
 Transitions are append-only at the event level (M3 event-log conventions are reused): every state change writes a `workflow_run.<transition>` event to the durable event log. The state machine is intentionally sparse so the skill can drive transitions deterministically from `workflow_plan.py update-step` / `approve` / `status` calls.
 
@@ -47,7 +55,7 @@ Transitions are append-only at the event level (M3 event-log conventions are reu
 - `merge-cleanup`
 - `linear-refresh`
 
-Step state values mirror the run state vocabulary at a finer grain: `pending`, `approved`, `running`, `succeeded`, `failed`, `skipped`, `blocked`, `canceled`. A `workflow_steps` row carries `startedAt`, `finishedAt`, the durable `ledgerOffset` pointer into `.agent-workflows/<runId>/ledger.jsonl`, an optional `resultDigest`, and stable `errorCode` / `errorMessage` fields. The taxonomy for `errorCode` is owned by `failure_patterns.yaml` in the skill; Momentum stores the code as-is so the classifier remains the source of truth.
+Step state values mirror the run state vocabulary at a finer grain: `pending`, `approved`, `running`, `succeeded`, `failed`, `skipped`, `blocked`, `canceled`. A `workflow_steps` row carries an `order` (plan-position ordinal), a `required` flag (whether the step participates in the required-chain closure that gates `succeeded` vs `canceled`), `startedAt`, `finishedAt`, the durable `ledgerOffset` pointer into `.agent-workflows/<runId>/ledger.jsonl`, an optional `resultDigest`, and stable `errorCode` / `errorMessage` fields. The taxonomy for `errorCode` is owned by `failure_patterns.yaml` in the skill; Momentum stores the code as-is so the classifier remains the source of truth.
 
 A required ordering invariant is that the `workflow_steps` `running` transition is written **before** any managed-step child is dispatched. This is the substrate-level mirror of the M6 "audit-before-write" invariant: Momentum records the intent to run a step durably before the executor mutates anything observable.
 
@@ -70,7 +78,16 @@ Casual approval phrasing (`"go ahead"`, `"sure"`, etc.) never produces a `workfl
 - `managed-step` — held by `node_managed_dispatch.py` (or the trusted runtime binding) while a managed step's detached child is running. The lease is acquired **before** the child is spawned and released on finalize.
 - `dispatch` — short-lived lease held while a CLI subcommand acquires the run row for a non-idempotent mutation.
 
-Each row stores `holder`, `acquiredAt`, `expiresAt`, `heartbeatAt`, and `stalePolicy` (`auto-release` or `manual-recovery-required`). The stale-lease semantics mirror M3's `daemon_runs` / `repo_locks` taxonomy: an `auto-release` lease whose holder is terminal can be auto-released by a future startup-recovery pass; a `manual-recovery-required` lease must surface in `recovery.md` and block further claims on the run until an operator clears it.
+Each row stores `holder`, `acquiredAt`, `expiresAt`, `heartbeatAt`, `releasedAt` (nullable), and `stalePolicy` (`auto-release` or `manual-recovery-required`). A non-null `releasedAt` marks the lease as cleanly released and exempts it from any stale-policy promotion regardless of expiry. The stale-lease semantics mirror M3's `daemon_runs` / `repo_locks` taxonomy: an `auto-release` lease whose holder is terminal can be auto-released by a future startup-recovery pass; a `manual-recovery-required` lease must surface in `recovery.md` and block further claims on the run until an operator clears it.
+
+Lease freshness is classified by a pure function over the durable row plus the current clock and an optional grace window. The four classifications are:
+
+- `released` — `releasedAt !== null`. Terminal; recovery never re-touches a released row regardless of expiry or stale policy.
+- `fresh` — `releasedAt === null` and `now <= expiresAt + graceMs`. The holder still owns the lease.
+- `stale-auto-release` — `releasedAt === null`, `now > expiresAt + graceMs`, and `stalePolicy === 'auto-release'`. Safe for a future startup-recovery pass to release without operator involvement.
+- `stale-manual-recovery-required` — `releasedAt === null`, `now > expiresAt + graceMs`, and `stalePolicy === 'manual-recovery-required'`. Must surface in `recovery.md` and block further claims on the run until an operator clears it.
+
+Precedence is strictly `released` > `fresh` > stale (with the row's `stalePolicy` deciding between `stale-auto-release` and `stale-manual-recovery-required`). `heartbeatAt` is informational only: `expiresAt` is the sole owner-of-record for freshness, mirroring M3 `repo_locks` stale-lease semantics. A holder extends the lease by writing both `heartbeatAt` and `expiresAt`; a stalled heartbeat that failed to advance `expiresAt` is correctly classified stale.
 
 The lease body never contains credentials or chat content. Like M5 source adapters, all credential material stays in operator-controlled environment variables and never enters durable state.
 
