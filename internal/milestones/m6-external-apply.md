@@ -60,7 +60,7 @@ NGX-302 flipped the `doctor --json` milestone string to the M6 closeout marker `
 
 ## Post-M6 deferrals
 
-The following remain explicitly deferred after M6 closeout; no follow-up milestone is scheduled yet:
+The following remain explicitly deferred after M6 closeout and stay deferred through Milestone 7 ([`m7-openclaw-coding-workflow-backend.md`](m7-openclaw-coding-workflow-backend.md), the scheduled follow-up):
 
 - **Inbound webhooks** — source adapters stay pull / reconcile first; Momentum still does not expose an HTTP listener.
 - **Dashboard or UI surface** — CLI JSON / text remains the only interface.
