@@ -98,6 +98,16 @@ import {
   type WorkflowEvidenceDiagnostic
 } from "./evidence-workflow.js";
 import {
+  parseWorkflowRunImport,
+  type WorkflowRunImport,
+  type WorkflowRunImportDiagnostic,
+  type WorkflowRunImportErrorCode
+} from "./workflow-run-import.js";
+import {
+  persistWorkflowRunImport,
+  type PersistWorkflowRunImportSummary
+} from "./workflow-run-import-persist.js";
+import {
   DEFAULT_RECONCILIATION_STALE_THRESHOLD_MS,
   PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT,
   buildProjectRollup,
@@ -243,6 +253,7 @@ const COMMANDS = [
   "momentum recovery clear <goal-id> [--reason <text>] [--data-dir <path>] [--json]",
   "momentum evidence ingest --path <file-or-dir> [--goal <id>] [--source-item <id>] [--data-dir <path>] [--json]",
   "momentum evidence list [--goal <id>] [--source-item <id>] [--source <source>] [--type <type>] [--limit <n>] [--data-dir <path>] [--json]",
+  "momentum workflow import --path <run-dir> [--data-dir <path>] [--json]",
   "momentum intent list [--status <status>] [--adapter <kind>] [--type <intent-type>] [--goal <goal-id>] [--source-item <id>] [--evidence-record <id>] [--limit <n>] [--data-dir <path>] [--json]",
   "momentum intent get <intent-id> [--data-dir <path>] [--json]",
   "momentum intent apply <intent-id> --reason <text> [--repo <path>] [--external-apply] [--data-dir <path>] [--json]",
@@ -330,6 +341,10 @@ export async function runCli(
 
   if (command === "evidence") {
     return evidence(parsed, io);
+  }
+
+  if (command === "workflow") {
+    return workflow(parsed, io);
   }
 
   if (command === "intent") {
@@ -1960,6 +1975,171 @@ function emitEvidenceListFailure(
   if (failure.goalId !== undefined) payload["goalId"] = failure.goalId;
   if (failure.sourceItemId !== undefined) {
     payload["sourceItemId"] = failure.sourceItemId;
+  }
+
+  if (parsed.json) {
+    writeJson(io.stderr, payload);
+    return 1;
+  }
+  write(io.stderr, `${failure.message}\n`);
+  return 1;
+}
+
+type WorkflowImportFailureCode =
+  | "path_required"
+  | "data_dir_failed"
+  | WorkflowRunImportErrorCode;
+
+type WorkflowImportFailure = {
+  code: WorkflowImportFailureCode;
+  message: string;
+  dataDir?: string;
+  path?: string;
+  diagnostics?: WorkflowRunImportDiagnostic[];
+};
+
+function workflow(parsed: ParsedFlags, io: CliIo): number {
+  const subcommand = parsed.args[1];
+  if (!subcommand) {
+    return usageError(
+      "Missing required subcommand for workflow. Expected: import.",
+      parsed,
+      io
+    );
+  }
+  if (subcommand === "import") {
+    return workflowImport(parsed, io);
+  }
+  return usageError(`Unknown workflow subcommand: ${subcommand}`, parsed, io);
+}
+
+function workflowImport(parsed: ParsedFlags, io: CliIo): number {
+  if (parsed.args.length > 2) {
+    return usageError(
+      `Unexpected argument for workflow import: ${parsed.args[2]}`,
+      parsed,
+      io
+    );
+  }
+  if (parsed.path === undefined || parsed.path.length === 0) {
+    return emitWorkflowImportFailure(parsed, io, {
+      code: "path_required",
+      message: "Missing required --path <run-dir> for workflow import."
+    });
+  }
+  const artifactPath = parsed.path;
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return emitWorkflowImportFailure(parsed, io, {
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err),
+      path: artifactPath
+    });
+  }
+
+  const parseResult = parseWorkflowRunImport(artifactPath);
+  if (!parseResult.ok) {
+    return emitWorkflowImportFailure(parsed, io, {
+      code: parseResult.errorCode,
+      message: parseResult.message,
+      dataDir,
+      path: artifactPath,
+      diagnostics: parseResult.diagnostics
+    });
+  }
+
+  const db = openDb(dataDir);
+  let summary: PersistWorkflowRunImportSummary;
+  try {
+    summary = persistWorkflowRunImport(db, parseResult.import);
+  } finally {
+    db.close();
+  }
+
+  return emitWorkflowImportSuccess(parsed, io, {
+    dataDir,
+    artifactPath,
+    summary,
+    importResult: parseResult.import
+  });
+}
+
+function emitWorkflowImportSuccess(
+  parsed: ParsedFlags,
+  io: CliIo,
+  result: {
+    dataDir: string;
+    artifactPath: string;
+    summary: PersistWorkflowRunImportSummary;
+    importResult: WorkflowRunImport;
+  }
+): number {
+  const { summary, importResult } = result;
+  const payload = {
+    ok: true,
+    command: "workflow import",
+    dataDir: result.dataDir,
+    path: result.artifactPath,
+    runId: summary.runId,
+    source: summary.source,
+    state: summary.state,
+    inserted: summary.inserted,
+    approvalBoundary: importResult.run.approvalBoundary,
+    counts: {
+      steps: summary.stepCount,
+      approvals: summary.approvalCount,
+      diagnostics: importResult.diagnostics.length
+    },
+    diagnostics: importResult.diagnostics.map((diagnostic) => ({
+      ...diagnostic
+    })),
+    monitor: importResult.monitor === null ? null : { ...importResult.monitor }
+  };
+
+  if (parsed.json) {
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  const lines = [
+    `Workflow import: ${result.artifactPath}`,
+    `Run: ${summary.runId} (${summary.source})`,
+    `State: ${summary.state}`,
+    `Inserted: ${summary.inserted ? "yes" : "no (upsert)"}`,
+    `Steps: ${summary.stepCount}`,
+    `Approvals: ${summary.approvalCount}`,
+    `Diagnostics: ${importResult.diagnostics.length}`,
+    `Data dir: ${result.dataDir}`,
+    ""
+  ];
+  write(io.stdout, lines.join("\n"));
+  return 0;
+}
+
+function emitWorkflowImportFailure(
+  parsed: ParsedFlags,
+  io: CliIo,
+  failure: WorkflowImportFailure
+): number {
+  const payload: Record<string, unknown> = {
+    ok: false,
+    command: "workflow import",
+    code: failure.code,
+    message: failure.message
+  };
+  if (failure.dataDir !== undefined) payload["dataDir"] = failure.dataDir;
+  if (failure.path !== undefined) payload["path"] = failure.path;
+  if (failure.diagnostics !== undefined && failure.diagnostics.length > 0) {
+    payload["diagnostics"] = failure.diagnostics.map((diagnostic) => ({
+      ...diagnostic
+    }));
   }
 
   if (parsed.json) {
