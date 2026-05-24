@@ -1,6 +1,6 @@
 # Contract: WorkflowRun (OpenClaw Coding Workflow Backend)
 
-**Status:** M7 contract (planned). Pinned by NGX-312 (M7-00). No runtime implementation has shipped against this contract yet; the runtime / schema / CLI live in follow-up M7 implementation slices that will land after NGX-312 closes. The M3 / M4 / M5 / M6 surfaces this contract composes with remain wire-stable.
+**Status:** M7 contract (active). Pinned by NGX-312 (M7-00). The durable substrate primitives have begun shipping against this contract: the `workflow_runs` / `workflow_steps` / `workflow_approvals` / `workflow_leases` schema migration, the `WorkflowRun` identity columns (`repo_path`, `objective`, `issue_scope_json`, `route_json`, `approval_boundary`, `skill_revision`), the pure run / step state vocabulary and transition reducer, the lease-aware `deriveWorkflowRunState`, and the `classifyWorkflowLease` lease-freshness classifier. The M7 CLI envelopes, built-CLI smoke coverage, and the `doctor --json` closeout marker flip remain pending in follow-up slices. The M3 / M4 / M5 / M6 surfaces this contract composes with remain wire-stable.
 
 This contract is the cross-milestone source of truth for the durable substrate Momentum will provide for OpenClaw coding workflows. It is the long-lived companion to [internal/milestones/m7-openclaw-coding-workflow-backend.md](../milestones/m7-openclaw-coding-workflow-backend.md); the milestone doc owns the *scope* of M7, this contract owns the *invariants* that survive after M7 closeout.
 

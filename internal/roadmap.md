@@ -24,7 +24,7 @@ M7 is **not** a replacement for `gnhf-runner`, `gnhf-postflight`, `harness-deleg
 
 ### Planned M7 implementation order
 
-The Linear milestone "Milestone 7: OpenClaw Coding Workflow Backend" currently contains NGX-312 (M7-00 contract setup, in progress). Implementation slices for the `WorkflowRun` / `workflow_steps` / `workflow_approvals` / `workflow_leases` schema, the evidence pointer extension, the run-scoped recovery flag, the M7 CLI surface, the built-CLI smoke coverage, and M7 closeout will be opened in Linear and listed in the milestone doc as they are scoped. M7 is not complete and this roadmap does not claim otherwise.
+The Linear milestone "Milestone 7: OpenClaw Coding Workflow Backend" started with NGX-312 (M7-00 contract setup) and has since opened NGX-313 (M7-01 WorkflowRun substrate schema and state model, in flight) which ships the `workflow_runs` / `workflow_steps` / `workflow_approvals` / `workflow_leases` schema migration, the `WorkflowRun` identity columns, the pure state vocabulary plus transition reducer, the lease-aware `deriveWorkflowRunState`, and the `classifyWorkflowLease` lease-freshness classifier. Further implementation slices for the evidence pointer extension, the run-scoped recovery flag, the M7 CLI surface, the built-CLI smoke coverage, and M7 closeout will be opened in Linear and listed in the milestone doc as they are scoped. M7 is not complete and this roadmap does not claim otherwise.
 
 ## Most recently closed milestone: M6
 

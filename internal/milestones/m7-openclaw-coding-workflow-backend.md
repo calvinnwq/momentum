@@ -1,6 +1,6 @@
 # Milestone 7: OpenClaw Coding Workflow Backend
 
-**Status:** Active / planned. M7 is the next milestone after M6 closeout. No M7 runtime has shipped yet, and this document does not mark M7 as shipped. The `doctor --json` milestone marker keeps the M6 closeout string `Milestone 6: policy-gated external apply (NGX-295, NGX-296, NGX-297, NGX-298, NGX-299, NGX-300, NGX-301, NGX-302) complete` until M7 closeout flips it forward.
+**Status:** Active / in flight. M7 is the next milestone after M6 closeout. The first runtime substrate slices have landed (the `workflow_runs` / `workflow_steps` / `workflow_approvals` / `workflow_leases` schema migration, the `WorkflowRun` identity columns, the pure state vocabulary plus transition reducer, the lease-aware `deriveWorkflowRunState`, and the `classifyWorkflowLease` freshness classifier). The M7 CLI envelopes, built-CLI smoke coverage, and the `doctor --json` closeout marker flip are still pending; the `doctor --json` milestone marker therefore keeps the M6 closeout string `Milestone 6: policy-gated external apply (NGX-295, NGX-296, NGX-297, NGX-298, NGX-299, NGX-300, NGX-301, NGX-302) complete` until the M7 closeout slice flips it forward. This document does not mark M7 as shipped.
 
 Milestone 7 turns Momentum into the **durable run substrate for OpenClaw coding workflows**. The OpenClaw `coding-workflow-pipeline` skill (preflight → GNHF implementation → postflight → no-mistakes → merge cleanup → Linear refresh, plus Discord approval delivery and monitor cron) already composes the executors. M7 does **not** replace those engines. M7 owns the durable run record, step-state transitions, lease coordination, approval persistence, and evidence pointers that those engines currently keep in ad-hoc files plus in-memory shell sessions.
 
@@ -84,12 +84,13 @@ The following are explicitly out of scope for M7 and remain deferred regardless 
 
 ## Planned M7 issue order
 
-M7 is currently scoped as a docs / contract slice (NGX-312, this issue) followed by implementation slices that will be opened in Linear under the "Milestone 7: OpenClaw Coding Workflow Backend" project milestone. The implementation issues are listed for sequencing context; they are **not** complete and this document does not claim otherwise.
+M7 began as a docs / contract slice (NGX-312) and is now extending into runtime substrate slices under the "Milestone 7: OpenClaw Coding Workflow Backend" project milestone. The implementation issues are listed for sequencing context; M7 as a whole is **not** complete and this document does not claim otherwise.
 
-1. **NGX-312 — M7-00 Contract, roadmap, and docs setup** *(this issue; in progress)*: pins the M7 contract, ownership boundary, old monitor failure modes, compatibility list, and non-goals. No runtime schema or CLI implementation in this slice.
-2. **Future M7 implementation slices** *(not yet sequenced in this document)*: `WorkflowRun` + `workflow_steps` schema, `workflow_approvals` schema, `workflow_leases` schema, evidence pointer extension, the run-scoped recovery flag, the M7 CLI surface (`workflow run start|status|list|approve|update-step|monitor`), built-CLI smoke coverage against the skill scripts, and the M7 closeout that flips the `doctor --json` milestone marker forward.
+1. **NGX-312 — M7-00 Contract, roadmap, and docs setup** *(complete)*: pinned the M7 contract, ownership boundary, old monitor failure modes, compatibility list, and non-goals. No runtime schema or CLI implementation in this slice.
+2. **NGX-313 — M7-01 WorkflowRun substrate schema and state model** *(in flight)*: ships the `workflow_runs` / `workflow_steps` / `workflow_approvals` / `workflow_leases` schema migration, the `WorkflowRun` identity columns (`repo_path`, `objective`, `issue_scope_json`, `route_json`, `approval_boundary`, `skill_revision`), the pure run / step state vocabulary and transition reducer, the lease-aware `deriveWorkflowRunState`, and the `classifyWorkflowLease` lease-freshness classifier. No CLI surface in this slice.
+3. **Future M7 implementation slices** *(not yet sequenced in this document)*: evidence pointer extension, the run-scoped recovery flag, the M7 CLI surface (`workflow run start|status|list|approve|update-step|monitor`), built-CLI smoke coverage against the skill scripts, and the M7 closeout that flips the `doctor --json` milestone marker forward.
 
-Concrete issue identifiers and sequencing for the implementation slices will be added to this document as those issues are opened in Linear. Until then, the only NGX issue claimed by M7 is NGX-312 (M7-00).
+Concrete issue identifiers and sequencing for the remaining implementation slices will be added to this document as those issues are opened in Linear.
 
 ## M3 / M4 / M5 / M6 contracts preserved through M7
 
