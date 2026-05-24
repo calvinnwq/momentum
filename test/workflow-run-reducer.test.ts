@@ -285,6 +285,14 @@ describe("deriveWorkflowRunState", () => {
     expect(deriveWorkflowRunState(steps)).toBe("canceled");
   });
 
+  it("returns canceled when every required step is skipped and none succeeded", () => {
+    const steps = [
+      step("s-1", "preflight", "skipped", 0),
+      step("s-2", "implementation", "skipped", 1)
+    ];
+    expect(deriveWorkflowRunState(steps)).toBe("canceled");
+  });
+
   it("returns succeeded only when every required step is succeeded or skipped and at least one succeeded", () => {
     const steps = [
       step("s-1", "preflight", "succeeded", 0),

@@ -315,7 +315,6 @@ function deriveStepOnlyRunState(
   let allRequiredFinalSuccessOrSkip = true;
   let hasRequired = false;
   let allCanceledOrSkipped = true;
-  let anyFailure = false;
 
   for (const step of steps) {
     if (step.required) hasRequired = true;
@@ -331,7 +330,6 @@ function deriveStepOnlyRunState(
         allCanceledOrSkipped = false;
         break;
       case "failed":
-        anyFailure = true;
         if (step.required) {
           anyRequiredFailed = true;
           allRequiredFinalSuccessOrSkip = false;
@@ -363,26 +361,12 @@ function deriveStepOnlyRunState(
   if (anyRunning) return "running";
   if (anyBlocked) return "blocked";
   if (anyRequiredFailed) return "failed";
-  if (
-    hasRequired &&
-    allRequiredFinalSuccessOrSkip &&
-    (anySucceeded || !anyFailure)
-  ) {
-    if (anySucceeded || stepsAllSkippedOrSucceeded(steps)) return "succeeded";
+  if (hasRequired && allRequiredFinalSuccessOrSkip && anySucceeded) {
+    return "succeeded";
   }
   if (allCanceledOrSkipped) return "canceled";
   if (anyApproved) return "approved";
   return "pending";
-}
-
-function stepsAllSkippedOrSucceeded(
-  steps: readonly WorkflowStepRecord[]
-): boolean {
-  for (const step of steps) {
-    if (!step.required) continue;
-    if (step.state !== "succeeded" && step.state !== "skipped") return false;
-  }
-  return true;
 }
 
 /**
