@@ -75,6 +75,7 @@ momentum source list|get|link|unlink|reconcile linear [options]
 momentum project status [options]
 momentum evidence ingest|list [options]
 momentum intent list|get|apply|skip|cancel [options]
+momentum workflow import --path <run-dir> [--data-dir <path>] [--json]
 momentum doctor [--repo <path>] [--data-dir <path>] [--json]
 ```
 

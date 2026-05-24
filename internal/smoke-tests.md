@@ -145,6 +145,45 @@ Coverage:
   incomplete and blocks the intent, and a retry is refused with
   `intent_blocked` without a second external mutation.
 
+## Milestone 7 workflow-import smoke coverage
+
+The smoke exercises the M7 `workflow import` CLI envelope (NGX-314) end-to-end
+through the spawned binary against fixture `.agent-workflows/<run-id>/`
+directories built in a temp dir (see
+[docs/workflow-commands.md](../docs/workflow-commands.md) for the envelope and
+diagnostic taxonomy):
+
+- happy-path import: a fresh `.agent-workflows/cwfp-<hex>/` fixture with
+  `plan.json`, `ledger.jsonl`, and `approval-*.json` siblings is imported into
+  the `workflow_runs`, `workflow_steps`, and `workflow_approvals` tables; the
+  success envelope reports `inserted: true`, the run / step counts, and an
+  empty diagnostics array.
+- idempotent re-import: running `workflow import` against the same directory a
+  second time produces no duplicate rows, surfaces `inserted: false` (upsert),
+  and preserves `created_at` while bumping `updated_at`.
+- terminal ledger wins over stale monitor: a stale `monitor.json` does not
+  override completed ledger evidence; the imported step / run state is derived
+  from `ledger.jsonl` and `plan.json`, and the advisory monitor snapshot is
+  surfaced separately.
+- lost managed-task markers: `managed-*.pid`, `managed-*.log`, and `locks/`
+  sibling entries are ignored without diagnostics and do not force a failed
+  step state.
+- discharged and pending approvals: durable `workflow_approvals` rows are
+  written with the artifact digest and discharge timestamp where applicable;
+  pending approvals remain pending.
+- malformed plan / ledger / approval tolerance: invalid artifacts surface
+  stable `evidence_format_invalid` diagnostics (with the per-entry
+  `code` / `path` / `reason` / `detail` shape) without dropping valid siblings.
+- `runId` fallback: when the directory basename does not match the `cwfp-` /
+  `cwfb-` / `overnight-` convention, `plan.json`'s `runId` is used; when
+  neither source is present, the CLI refuses with `import_run_id_missing`.
+- JSON envelopes: the success and failure envelopes match the shape pinned in
+  [docs/workflow-commands.md](../docs/workflow-commands.md), including the
+  conditional `dataDir` / `path` fields on failure payloads.
+- refusal codes: `path_required` (missing `--path`) and
+  `import_path_unreadable` (unreadable `--path` target) exit with code 1 and
+  carry the documented refusal codes through both JSON and text outputs.
+
 ## Test boundary
 
 The smoke must not make real `api.linear.app` calls — see
