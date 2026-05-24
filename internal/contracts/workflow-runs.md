@@ -24,6 +24,8 @@ It does **not** cover:
 
 A `WorkflowRun` is identified by `runId`, which matches the existing skill convention `cwfp-<hex>` (the directory id under `.agent-workflows/<runId>/`). The runtime never re-derives `runId` from the plan body; it is taken verbatim from the skill's `workflow_plan.py plan` output and stored as the immutable durable identity.
 
+Alongside identity, the durable row captures the run `source` (origin label for the plan), an optional `sourceArtifactPath` pointing back to the on-disk plan artifact, and the `planJson` body itself, so the substrate can reconstruct what was approved without re-reading `.agent-workflows/<runId>/plan.json`.
+
 The lifecycle states are:
 
 - `pending` — durable row exists, plan + scope captured, no boundary approved yet.
