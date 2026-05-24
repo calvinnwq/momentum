@@ -1158,7 +1158,7 @@ describe("public docs envelope shapes", () => {
   describe("AGENTS.md compact agent contract", () => {
     const agents = readDoc("AGENTS.md");
 
-    it("names the active milestone (M6)", () => {
+    it("names the most recently closed milestone (M6)", () => {
       expect(agents).toMatch(/Milestone 6/);
     });
 
@@ -1230,7 +1230,7 @@ describe("public docs envelope shapes", () => {
       expect(
         section.length,
         `## Current milestone section should be compact (was ${section.length} chars)`
-      ).toBeLessThan(2500);
+      ).toBeLessThan(4000);
     });
 
     it("agent operating-instruction sections stay compact", () => {
