@@ -309,6 +309,165 @@ describe("deriveWorkflowRunState", () => {
   });
 });
 
+describe("deriveWorkflowRunState with lease context (M7 contract)", () => {
+  const succeededSteps = [
+    step("s-1", "preflight", "succeeded", 0),
+    step("s-2", "implementation", "succeeded", 1)
+  ];
+
+  it("is backward compatible: no leaseContext behaves like the old single-arg form", () => {
+    expect(deriveWorkflowRunState(succeededSteps)).toBe("succeeded");
+    expect(
+      deriveWorkflowRunState(succeededSteps, {
+        leases: [],
+        now: 1_000
+      })
+    ).toBe("succeeded");
+  });
+
+  it("treats released-only leases as 'no outstanding leases' and allows succeeded", () => {
+    const leases = [
+      lease({ leaseKind: "monitor", releasedAt: 9_000 }),
+      lease({ leaseKind: "managed-step", releasedAt: 9_500 })
+    ];
+    expect(
+      deriveWorkflowRunState(succeededSteps, { leases, now: 10_000 })
+    ).toBe("succeeded");
+  });
+
+  it("demotes succeeded to running when any fresh lease is still outstanding", () => {
+    const leases = [
+      lease({ leaseKind: "monitor", expiresAt: 20_000, releasedAt: null })
+    ];
+    expect(
+      deriveWorkflowRunState(succeededSteps, { leases, now: 10_000 })
+    ).toBe("running");
+  });
+
+  it("demotes succeeded to running when a stale auto-release lease is still outstanding", () => {
+    // Strict reading of the contract: succeeded requires no outstanding leases.
+    // An auto-release stale lease still occupies the row until a future startup
+    // recovery pass clears it, so the run is not yet terminally succeeded.
+    const leases = [
+      lease({
+        leaseKind: "monitor",
+        expiresAt: 5_000,
+        stalePolicy: "auto-release",
+        releasedAt: null
+      })
+    ];
+    expect(
+      deriveWorkflowRunState(succeededSteps, { leases, now: 10_000 })
+    ).toBe("running");
+  });
+
+  it("forces blocked when any stale-manual-recovery-required lease is outstanding, even if steps are still running", () => {
+    const steps = [
+      step("s-1", "preflight", "succeeded", 0),
+      step("s-2", "implementation", "running", 1)
+    ];
+    const leases = [
+      lease({
+        leaseKind: "managed-step",
+        expiresAt: 5_000,
+        stalePolicy: "manual-recovery-required",
+        releasedAt: null
+      })
+    ];
+    expect(deriveWorkflowRunState(steps, { leases, now: 10_000 })).toBe(
+      "blocked"
+    );
+  });
+
+  it("forces blocked when stale-manual-recovery-required lease coexists with otherwise-succeeded steps", () => {
+    const leases = [
+      lease({
+        leaseKind: "monitor",
+        expiresAt: 5_000,
+        stalePolicy: "manual-recovery-required",
+        releasedAt: null
+      })
+    ];
+    expect(
+      deriveWorkflowRunState(succeededSteps, { leases, now: 10_000 })
+    ).toBe("blocked");
+  });
+
+  it("does not promote terminal failed/canceled to blocked when a manual-recovery lease lingers", () => {
+    // A terminal-failure run with an orphaned manual-recovery lease should not
+    // pretend to be recoverable; the run is already failed/canceled.
+    const failedSteps = [
+      step("s-1", "preflight", "failed", 0),
+      step("s-2", "implementation", "succeeded", 1)
+    ];
+    const canceledSteps = [
+      step("s-1", "preflight", "canceled", 0),
+      step("s-2", "implementation", "skipped", 1)
+    ];
+    const leases = [
+      lease({
+        leaseKind: "managed-step",
+        expiresAt: 5_000,
+        stalePolicy: "manual-recovery-required",
+        releasedAt: null
+      })
+    ];
+    expect(
+      deriveWorkflowRunState(failedSteps, { leases, now: 10_000 })
+    ).toBe("failed");
+    expect(
+      deriveWorkflowRunState(canceledSteps, { leases, now: 10_000 })
+    ).toBe("canceled");
+  });
+
+  it("honours graceMs when classifying lease freshness for demotion", () => {
+    const leases = [
+      lease({
+        leaseKind: "monitor",
+        expiresAt: 5_000,
+        stalePolicy: "auto-release",
+        releasedAt: null
+      })
+    ];
+    // Within grace window: still fresh, so succeeded demotes to running.
+    expect(
+      deriveWorkflowRunState(succeededSteps, {
+        leases,
+        now: 5_500,
+        graceMs: 1_000
+      })
+    ).toBe("running");
+    // Past grace window: stale-auto-release; still demotes to running per
+    // strict "no outstanding leases" reading.
+    expect(
+      deriveWorkflowRunState(succeededSteps, {
+        leases,
+        now: 7_000,
+        graceMs: 1_000
+      })
+    ).toBe("running");
+  });
+
+  it("leaves pending/approved/running step-derived states untouched when only released leases exist", () => {
+    const pending = [step("s-1", "preflight", "pending", 0)];
+    const approved = [step("s-1", "preflight", "approved", 0)];
+    const running = [step("s-1", "preflight", "running", 0)];
+    const leases = [
+      lease({ leaseKind: "monitor", releasedAt: 100 }),
+      lease({ leaseKind: "dispatch", releasedAt: 200 })
+    ];
+    expect(deriveWorkflowRunState(pending, { leases, now: 1_000 })).toBe(
+      "pending"
+    );
+    expect(deriveWorkflowRunState(approved, { leases, now: 1_000 })).toBe(
+      "approved"
+    );
+    expect(deriveWorkflowRunState(running, { leases, now: 1_000 })).toBe(
+      "running"
+    );
+  });
+});
+
 function lease(overrides: Partial<WorkflowLeaseRecord> = {}): WorkflowLeaseRecord {
   return {
     runId: "cwfp-deadbeef",

@@ -239,7 +239,8 @@ export function transitionWorkflowRun(
 }
 
 /**
- * Derive a run state from the durable step rows alone. Precedence:
+ * Derive a run state from the durable step rows (and optionally the durable
+ * `workflow_leases` rows). Step-only precedence:
  *   1. any step `running`  → `running`
  *   2. any step `blocked`  → `blocked`
  *   3. any required step `failed` → `failed`
@@ -249,11 +250,59 @@ export function transitionWorkflowRun(
  *   7. otherwise → `pending`
  *
  * Non-required steps cannot trip a run into `failed`. Empty step lists are
- * treated as `pending`. This mirrors the M7 contract's terminal-derivation
- * rule that the run state is a deterministic function of step states (plus
- * leases, which a follow-up slice will fold in once the lease table lands).
+ * treated as `pending`.
+ *
+ * When `leaseContext` is supplied the result is additionally constrained by
+ * `workflow_leases` per the M7 contract:
+ *   - Any outstanding `stale-manual-recovery-required` lease forces `blocked`,
+ *     except when the step-derived state is already terminal-non-success
+ *     (`failed` / `canceled`); a terminal-non-success run is not "rescued"
+ *     back into `blocked` by an orphaned recovery lease, but the lease still
+ *     needs operator cleanup before any new claims succeed.
+ *   - A step-derived `succeeded` is demoted to `running` whenever any
+ *     non-released lease (fresh, stale-auto-release, or stale-manual-recovery
+ *     when steps would otherwise have allowed succeeded) is still outstanding,
+ *     since the contract requires "no outstanding leases" for terminal success.
+ *
+ * Released leases (`releasedAt !== null`) never affect the derived state.
  */
 export function deriveWorkflowRunState(
+  steps: readonly WorkflowStepRecord[],
+  leaseContext?: {
+    leases: readonly WorkflowLeaseRecord[];
+    now: number;
+    graceMs?: number;
+  }
+): WorkflowRunState {
+  const stepState = deriveStepOnlyRunState(steps);
+  if (!leaseContext) return stepState;
+
+  let anyManualRecovery = false;
+  let anyOutstanding = false;
+  for (const lease of leaseContext.leases) {
+    const classification = classifyWorkflowLease(lease, {
+      now: leaseContext.now,
+      ...(leaseContext.graceMs !== undefined
+        ? { graceMs: leaseContext.graceMs }
+        : {})
+    });
+    if (classification === "released") continue;
+    anyOutstanding = true;
+    if (classification === "stale-manual-recovery-required") {
+      anyManualRecovery = true;
+    }
+  }
+
+  if (anyManualRecovery && stepState !== "failed" && stepState !== "canceled") {
+    return "blocked";
+  }
+  if (stepState === "succeeded" && anyOutstanding) {
+    return "running";
+  }
+  return stepState;
+}
+
+function deriveStepOnlyRunState(
   steps: readonly WorkflowStepRecord[]
 ): WorkflowRunState {
   if (steps.length === 0) return "pending";
