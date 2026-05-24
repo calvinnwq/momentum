@@ -30,14 +30,16 @@ Milestone status:
   `workflow_steps` / `workflow_approvals` / `workflow_leases` schema migration,
   the `WorkflowRun` identity columns, the run / step state vocabulary plus
   transition reducer, the lease-aware `deriveWorkflowRunState`, and the
-  `classifyWorkflowLease` lease-freshness classifier). M7 turns Momentum into
-  the durable run substrate (`WorkflowRun`, step state, approvals, leases,
-  evidence pointers) for OpenClaw coding workflows without replacing the
-  `coding-workflow-pipeline` skill's executors, Discord delivery, or monitor
-  cron. M7 is not complete; the M7 CLI envelopes, built-CLI smoke coverage,
-  and the `doctor --json` milestone marker flip remain pending, so the
-  `doctor --json` milestone marker stays at the M6 closeout string until M7
-  closeout flips it forward. See
+  `classifyWorkflowLease` lease-freshness classifier), and the first M7 CLI
+  envelope `workflow import` (NGX-314) plus its built-CLI smoke coverage have
+  landed. M7 turns Momentum into the durable run substrate (`WorkflowRun`,
+  step state, approvals, leases, evidence pointers) for OpenClaw coding
+  workflows without replacing the `coding-workflow-pipeline` skill's
+  executors, Discord delivery, or monitor cron. M7 is not complete; the
+  remaining M7 CLI envelopes (`workflow run start|status|list|approve|update-step|monitor`),
+  additional built-CLI smoke coverage, and the `doctor --json` milestone
+  marker flip remain pending, so the `doctor --json` milestone marker stays
+  at the M6 closeout string until M7 closeout flips it forward. See
   [`internal/milestones/m7-openclaw-coding-workflow-backend.md`](milestones/m7-openclaw-coding-workflow-backend.md)
   and [`internal/contracts/workflow-runs.md`](contracts/workflow-runs.md).
 
