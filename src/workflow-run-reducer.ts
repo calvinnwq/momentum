@@ -86,6 +86,26 @@ export const WORKFLOW_LEASE_STALE_POLICIES = [
 export type WorkflowLeaseStalePolicy =
   (typeof WORKFLOW_LEASE_STALE_POLICIES)[number];
 
+export const WORKFLOW_LEASE_FRESHNESS_CLASSIFICATIONS = [
+  "released",
+  "fresh",
+  "stale-auto-release",
+  "stale-manual-recovery-required"
+] as const;
+export type WorkflowLeaseFreshnessClassification =
+  (typeof WORKFLOW_LEASE_FRESHNESS_CLASSIFICATIONS)[number];
+
+export type WorkflowLeaseRecord = {
+  runId: string;
+  leaseKind: WorkflowLeaseKind;
+  holder: string;
+  acquiredAt: number;
+  expiresAt: number;
+  heartbeatAt: number;
+  releasedAt: number | null;
+  stalePolicy: WorkflowLeaseStalePolicy;
+};
+
 export type WorkflowStepRecord = {
   stepId: string;
   kind: WorkflowStepKind;
@@ -314,4 +334,47 @@ function stepsAllSkippedOrSucceeded(
     if (step.state !== "succeeded" && step.state !== "skipped") return false;
   }
   return true;
+}
+
+/**
+ * Classify the freshness of a `workflow_leases` row without touching the file
+ * system, cron platform, or `monitor.json`. A lease is the durable bookkeeping
+ * the M7 contract uses to detect a missing / stuck monitor or managed-step
+ * dispatcher independent of the cron tick that maintains it.
+ *
+ * Precedence:
+ *   1. `releasedAt !== null`  → `released` (terminal; recovery never re-touches
+ *       a released row regardless of expiry or stale policy).
+ *   2. `now <= expiresAt + graceMs`  → `fresh` (holder still owns the lease).
+ *   3. otherwise, the lease is stale and the row's `stalePolicy` decides:
+ *      `auto-release`  → `stale-auto-release` (safe for a future startup
+ *      recovery pass to release without operator involvement).
+ *      `manual-recovery-required`  → `stale-manual-recovery-required` (must
+ *      surface in `recovery.md` and block further claims on the run until an
+ *      operator clears it).
+ *
+ * `heartbeatAt` is informational only: the contract treats `expiresAt` as the
+ * sole owner-of-record for freshness, mirroring M3 `repo_locks` stale-lease
+ * semantics (`listStaleRepoLocks` uses `lease_expires_at < cutoff`). A holder
+ * extends the lease by writing both `heartbeatAt` and `expiresAt`; a stalled
+ * heartbeat that failed to advance `expiresAt` is correctly classified stale.
+ */
+export function classifyWorkflowLease(
+  lease: WorkflowLeaseRecord,
+  input: { now: number; graceMs?: number }
+): WorkflowLeaseFreshnessClassification {
+  if (!Number.isFinite(input.now)) {
+    throw new Error("classifyWorkflowLease: now must be a finite number");
+  }
+  const graceMs = input.graceMs ?? 0;
+  if (!Number.isFinite(graceMs) || graceMs < 0) {
+    throw new Error(
+      "classifyWorkflowLease: graceMs must be a non-negative finite number"
+    );
+  }
+  if (lease.releasedAt !== null) return "released";
+  if (input.now <= lease.expiresAt + graceMs) return "fresh";
+  return lease.stalePolicy === "auto-release"
+    ? "stale-auto-release"
+    : "stale-manual-recovery-required";
 }
