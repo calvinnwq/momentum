@@ -1,10 +1,10 @@
 # Current Exclusions
 
 This page lists features and behaviors that are intentionally **out of scope**
-as of the most recently shipped milestone (M6 closeout). It exists so
-contributors and operators can see at
-a glance what Momentum does *not* do today, and where the next durable surface
-is expected (or explicitly deferred indefinitely).
+as of the most recently shipped milestone (M6 closeout) and through the
+currently active milestone (M7, planned). It exists so contributors and
+operators can see at a glance what Momentum does *not* do today, and where
+the next durable surface is expected (or explicitly deferred indefinitely).
 
 Milestone status:
 
@@ -24,8 +24,15 @@ Milestone status:
   stable idempotency marker, blocked / audit-incomplete recovery surfaces, and
   single-issue post-apply reconcile. See
   [`internal/milestones/m6-external-apply.md`](milestones/m6-external-apply.md) and
-  [`internal/contracts/intent-apply.md`](contracts/intent-apply.md). There is no
-  active milestone after M6 closeout.
+  [`internal/contracts/intent-apply.md`](contracts/intent-apply.md).
+- **Milestone 7 (OpenClaw Coding Workflow Backend)** is planned. M7 turns
+  Momentum into the durable run substrate (`WorkflowRun`, step state,
+  approvals, leases, evidence pointers) for OpenClaw coding workflows without
+  replacing the `coding-workflow-pipeline` skill's executors, Discord delivery,
+  or monitor cron. M7 is not complete; the `doctor --json` milestone marker
+  stays at the M6 closeout string until M7 closeout flips it forward. See
+  [`internal/milestones/m7-openclaw-coding-workflow-backend.md`](milestones/m7-openclaw-coding-workflow-backend.md)
+  and [`internal/contracts/workflow-runs.md`](contracts/workflow-runs.md).
 
 The following surfaces remain deferred so the runner-boundary, policy-loading,
 and M5 read-first source surfaces stay scoped.
