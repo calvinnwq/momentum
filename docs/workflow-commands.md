@@ -1,6 +1,12 @@
 # Workflow commands
 
-Operator-facing CLI envelopes for the `workflow import` command. This command reads local `.agent-workflows/<run-id>/` directories and persists normalized rows into the `workflow_runs`, `workflow_steps`, and `workflow_approvals` tables.
+Operator-facing CLI envelopes for the `workflow import`, `workflow status`, and `workflow handoff` commands.
+
+- `workflow import` reads local `.agent-workflows/<run-id>/` directories and persists normalized rows into the `workflow_runs`, `workflow_steps`, and `workflow_approvals` tables.
+- `workflow status` is a read-only surface that lists workflow runs (with state / filter selectors) or returns the full detail of a single run.
+- `workflow handoff` is a read-only surface that emits a machine-readable next-action envelope for one run.
+
+`workflow status` and `workflow handoff` are read-only: they never write SQLite or files.
 
 See also:
 
@@ -120,3 +126,297 @@ Cannot read import path: ...
 ```
 
 Exit code 1 is returned on failure; exit code 0 on success.
+
+## `workflow status`
+
+```text
+momentum workflow status [<run-id>] [--state <state>] [--filter <active|blocked|completed|imported>] [--limit <n>] [--data-dir <path>] [--json]
+```
+
+Two modes share one envelope shape:
+
+- **List mode** (no `<run-id>`): returns workflow runs filtered by state or by a named grouping. Ordered by `updated_at DESC`.
+- **Detail mode** (with `<run-id>`): returns the full detail for one run — steps, approvals, leases, monitor reducer view, and best-effort evidence linkage.
+
+### Selectors (list mode)
+
+- `--state <state>` filters by literal `workflow_runs.state` value. Allowed: `pending`, `approved`, `running`, `succeeded`, `failed`, `blocked`, `canceled`.
+- `--filter <key>` groups runs into operator-friendly buckets:
+  - `active` → `pending`, `approved`, `running`
+  - `blocked` → `blocked`
+  - `completed` → `succeeded`, `failed`, `canceled`
+  - `imported` → only runs whose `source == "agent-workflow"`
+- `--limit <n>` caps the number of returned runs (after filtering).
+
+State and filter are independent: passing both narrows runs by literal state first, then re-applies the bucket filter (the `imported` bucket additionally filters on source).
+
+### JSON envelope — list mode
+
+```json
+{
+  "ok": true,
+  "command": "workflow status",
+  "dataDir": "/path/to/data",
+  "state": null,
+  "filter": "active",
+  "count": 1,
+  "runs": [
+    {
+      "run": {
+        "runId": "cwfp-abc123",
+        "state": "running",
+        "source": "agent-workflow",
+        "approvalBoundary": "through-merge-cleanup",
+        "objective": "land workflow status CLI",
+        "issueScope": {},
+        "route": {},
+        "needsManualRecovery": false,
+        "startedAt": 1730000000000,
+        "finishedAt": null,
+        "createdAt": 1730000000000,
+        "updatedAt": 1730000600000
+      },
+      "counts": {
+        "steps": 5,
+        "stepsByState": {
+          "pending": 1,
+          "approved": 0,
+          "running": 1,
+          "succeeded": 3,
+          "failed": 0,
+          "skipped": 0,
+          "blocked": 0,
+          "canceled": 0
+        },
+        "approvals": 1,
+        "leases": 1
+      },
+      "monitor": { "...": "see Monitor envelope below" }
+    }
+  ]
+}
+```
+
+### JSON envelope — detail mode
+
+The detail envelope flattens the per-run view at the top level (`run`, `steps`, `approvals`, `leases`, `monitor`, `evidence`):
+
+```json
+{
+  "ok": true,
+  "command": "workflow status",
+  "dataDir": "/path/to/data",
+  "run": { "runId": "cwfp-abc123", "state": "running", "...": "..." },
+  "steps": [
+    {
+      "runId": "cwfp-abc123",
+      "stepId": "implementation",
+      "kind": "implementation",
+      "state": "running",
+      "order": 1,
+      "required": true,
+      "ledgerOffset": 2,
+      "resultDigest": null,
+      "errorCode": null,
+      "errorMessage": null,
+      "startedAt": 1730000100000,
+      "finishedAt": null,
+      "createdAt": 1730000000000,
+      "updatedAt": 1730000100000
+    }
+  ],
+  "approvals": [
+    {
+      "runId": "cwfp-abc123",
+      "boundary": "through-merge-cleanup",
+      "actor": "calvinnwq",
+      "phrase": "approve",
+      "artifactPath": "/path/to/cwfp-abc123/approval-merge.json",
+      "artifactDigest": "...",
+      "recordedAt": 1730000050000,
+      "dischargedAt": null,
+      "createdAt": 1730000050000,
+      "updatedAt": 1730000050000
+    }
+  ],
+  "leases": [
+    {
+      "runId": "cwfp-abc123",
+      "leaseKind": "managed-step",
+      "holder": "openclaw-coding-workflow-pipeline",
+      "acquiredAt": 1730000100000,
+      "expiresAt": 1730000400000,
+      "heartbeatAt": 1730000200000,
+      "releasedAt": null,
+      "stalePolicy": "auto-release",
+      "createdAt": 1730000100000,
+      "updatedAt": 1730000200000
+    }
+  ],
+  "monitor": {
+    "runId": "cwfp-abc123",
+    "runState": "running",
+    "terminal": false,
+    "blocked": false,
+    "activeStep": {
+      "stepId": "implementation",
+      "kind": "implementation",
+      "state": "running",
+      "order": 1,
+      "required": true
+    },
+    "leases": [
+      {
+        "leaseKind": "managed-step",
+        "holder": "openclaw-coding-workflow-pipeline",
+        "classification": "fresh",
+        "expiresAt": 1730000400000,
+        "heartbeatAt": 1730000200000,
+        "releasedAt": null
+      }
+    ],
+    "lastCheckpoint": {
+      "stepId": "implementation",
+      "at": 1730000100000,
+      "source": "ledger",
+      "digest": null
+    },
+    "monitorDrift": null,
+    "nextAction": {
+      "code": "resume_running",
+      "stepId": "implementation",
+      "leaseKind": "managed-step",
+      "detail": "Step is running with fresh lease / checkpoint evidence. Allow it to continue."
+    },
+    "needsRecoveryArtifact": false,
+    "recovery": null
+  },
+  "evidence": []
+}
+```
+
+### State / next-action vocabulary
+
+`run.state` and `steps[].state` use the canonical workflow vocabulary:
+
+- Run states: `pending`, `approved`, `running`, `succeeded`, `failed`, `blocked`, `canceled`.
+- Step states: `pending`, `approved`, `running`, `succeeded`, `failed`, `skipped`, `blocked`, `canceled`.
+
+`monitor.nextAction.code` is one of:
+
+- `no_action` — terminal run (succeeded / canceled); no follow-up needed.
+- `advance_to_step` — an approved step is ready to dispatch.
+- `await_approval` — a pending step needs approval before it can run.
+- `resume_running` — a running step has fresh evidence; let it continue.
+- `investigate_stale` — a running step is stale (no fresh lease, no recent checkpoint) or an orphan lease is holding a finalized run open.
+- `clear_recovery` — the run is blocked (manual-recovery-required lease or blocked step); clear the recovery once the cause is resolved.
+- `rerun_failed_step` — a required step failed; decide whether to retry or mark for manual recovery.
+
+`monitor.recovery.code`, when present, is one of: `stale_running_step`, `ghost_active_no_lease`, `manual_recovery_lease`, `monitor_drift_stale`, `failed_required_step`.
+
+Lease classifications surfaced under `monitor.leases[].classification`: `released`, `fresh`, `stale-auto-release`, `stale-manual-recovery-required`.
+
+### Evidence linkage
+
+`detail.evidence` is best-effort: it returns `evidence_records` rows whose `artifact_path` falls under the run's artifact directory. The durable `evidence_records.run_id` / `step_id` extension is deferred to a follow-up slice; entries here surface so OpenClaw tooling can find related evidence without an additional join.
+
+### Error codes
+
+| Code | Meaning |
+|------|---------|
+| `data_dir_failed` | Data directory resolution failed. |
+| `invalid_state` | `--state` is not one of the canonical workflow run states. |
+| `invalid_filter` | `--filter` is not one of `active`, `blocked`, `completed`, `imported`. |
+| `run_not_found` | `<run-id>` does not exist in `workflow_runs`. |
+
+### Text output (list mode)
+
+```text
+Workflow runs: 1
+State: (any)
+Filter: active
+Data dir: /path/to/data
+- cwfp-abc123 [running] steps=5 approvals=1 leases=1 next=resume_running
+```
+
+### Text output (detail mode)
+
+```text
+Workflow run: cwfp-abc123
+State: running
+Source: agent-workflow
+Objective: land workflow status CLI
+Repo: /path/to/repo
+Approval boundary: through-merge-cleanup
+Data dir: /path/to/data
+
+Steps: 5
+- preflight [succeeded] kind=preflight order=0 required=yes
+- implementation [running] kind=implementation order=1 required=yes
+...
+
+Monitor
+- Run state: running
+- Terminal: no
+- Blocked: no
+- Active step: implementation (running)
+- Last checkpoint: implementation at 1730000100000 (source=ledger)
+- Next action: resume_running - Step is running with fresh lease / checkpoint evidence. Allow it to continue.
+
+Evidence: 0
+```
+
+Exit code 0 on success, 1 on failure, 2 on usage error.
+
+## `workflow handoff`
+
+```text
+momentum workflow handoff <run-id> [--data-dir <path>] [--json]
+```
+
+Emits a machine-readable next-action envelope for one workflow run. Wraps the same detail loader as `workflow status <run-id>`, adds `schemaVersion` and `generatedAt`, and surfaces `nextAction` at the top level (mirroring `monitor.nextAction`) so OpenClaw tooling can dispatch without re-reading the monitor block.
+
+### JSON envelope
+
+```json
+{
+  "ok": true,
+  "command": "workflow handoff",
+  "dataDir": "/path/to/data",
+  "schemaVersion": 1,
+  "generatedAt": 1730000600000,
+  "run": { "...": "same shape as workflow status detail" },
+  "steps": [ "..." ],
+  "approvals": [ "..." ],
+  "leases": [ "..." ],
+  "monitor": { "...": "same shape as workflow status detail" },
+  "evidence": [ "..." ],
+  "nextAction": {
+    "code": "resume_running",
+    "stepId": "implementation",
+    "leaseKind": "managed-step",
+    "detail": "Step is running with fresh lease / checkpoint evidence. Allow it to continue."
+  }
+}
+```
+
+### Error codes
+
+| Code | Meaning |
+|------|---------|
+| `run_id_required` | `<run-id>` was not supplied. |
+| `data_dir_failed` | Data directory resolution failed. |
+| `run_not_found` | `<run-id>` does not exist in `workflow_runs`. |
+
+### Text output
+
+```text
+Workflow handoff: cwfp-abc123
+Schema version: 1
+Generated at (epoch ms): 1730000600000
+
+Workflow run: cwfp-abc123
+... (same shape as workflow status detail)
+```
+
+Exit code 0 on success, 1 on failure, 2 on usage error.

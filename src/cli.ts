@@ -108,6 +108,29 @@ import {
   type PersistWorkflowRunImportSummary
 } from "./workflow-run-import-persist.js";
 import {
+  WORKFLOW_STATUS_FILTER_KEYS,
+  listWorkflowRunSummaries,
+  loadWorkflowRunDetail,
+  type WorkflowApprovalRow,
+  type WorkflowEvidenceLink,
+  type WorkflowLeaseRow,
+  type WorkflowRunDetail,
+  type WorkflowRunRow,
+  type WorkflowRunSummary,
+  type WorkflowStatusFilterKey,
+  type WorkflowStepRow
+} from "./workflow-status.js";
+import {
+  WORKFLOW_HANDOFF_SCHEMA_VERSION,
+  loadWorkflowHandoff,
+  type WorkflowHandoffEnvelope
+} from "./workflow-handoff.js";
+import {
+  WORKFLOW_RUN_STATES,
+  type WorkflowRunState
+} from "./workflow-run-reducer.js";
+import type { WorkflowMonitorState } from "./workflow-monitor-state.js";
+import {
   DEFAULT_RECONCILIATION_STALE_THRESHOLD_MS,
   PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT,
   buildProjectRollup,
@@ -232,6 +255,8 @@ type ParsedFlags = {
   intentStaleThresholdDays?: number;
   status?: string;
   evidenceRecord?: string;
+  state?: string;
+  filter?: string;
   error?: string;
 };
 
@@ -254,6 +279,8 @@ const COMMANDS = [
   "momentum evidence ingest --path <file-or-dir> [--goal <id>] [--source-item <id>] [--data-dir <path>] [--json]",
   "momentum evidence list [--goal <id>] [--source-item <id>] [--source <source>] [--type <type>] [--limit <n>] [--data-dir <path>] [--json]",
   "momentum workflow import --path <run-dir> [--data-dir <path>] [--json]",
+  "momentum workflow status [<run-id>] [--state <state>] [--filter <active|blocked|completed|imported>] [--limit <n>] [--data-dir <path>] [--json]",
+  "momentum workflow handoff <run-id> [--data-dir <path>] [--json]",
   "momentum intent list [--status <status>] [--adapter <kind>] [--type <intent-type>] [--goal <goal-id>] [--source-item <id>] [--evidence-record <id>] [--limit <n>] [--data-dir <path>] [--json]",
   "momentum intent get <intent-id> [--data-dir <path>] [--json]",
   "momentum intent apply <intent-id> --reason <text> [--repo <path>] [--external-apply] [--data-dir <path>] [--json]",
@@ -2002,13 +2029,19 @@ function workflow(parsed: ParsedFlags, io: CliIo): number {
   const subcommand = parsed.args[1];
   if (!subcommand) {
     return usageError(
-      "Missing required subcommand for workflow. Expected: import.",
+      "Missing required subcommand for workflow. Expected: import, status, handoff.",
       parsed,
       io
     );
   }
   if (subcommand === "import") {
     return workflowImport(parsed, io);
+  }
+  if (subcommand === "status") {
+    return workflowStatus(parsed, io);
+  }
+  if (subcommand === "handoff") {
+    return workflowHandoff(parsed, io);
   }
   return usageError(`Unknown workflow subcommand: ${subcommand}`, parsed, io);
 }
@@ -2147,6 +2180,595 @@ function emitWorkflowImportFailure(
   }
   write(io.stderr, `${failure.message}\n`);
   return 1;
+}
+
+type WorkflowStatusFailureCode =
+  | "data_dir_failed"
+  | "invalid_state"
+  | "invalid_filter"
+  | "run_not_found";
+
+type WorkflowStatusFailure = {
+  command: "workflow status";
+  code: WorkflowStatusFailureCode;
+  message: string;
+  dataDir?: string;
+  runId?: string;
+};
+
+function workflowStatus(parsed: ParsedFlags, io: CliIo): number {
+  const positional = parsed.args.slice(2);
+  if (positional.length > 1) {
+    return usageError(
+      `Unexpected argument for workflow status: ${positional[1]}`,
+      parsed,
+      io
+    );
+  }
+  const runId = positional[0];
+
+  if (
+    parsed.state !== undefined &&
+    !(WORKFLOW_RUN_STATES as readonly string[]).includes(parsed.state)
+  ) {
+    return emitWorkflowStatusFailure(parsed, io, {
+      command: "workflow status",
+      code: "invalid_state",
+      message: `Invalid --state: ${parsed.state}. Expected one of: ${WORKFLOW_RUN_STATES.join(", ")}.`
+    });
+  }
+  if (
+    parsed.filter !== undefined &&
+    !(WORKFLOW_STATUS_FILTER_KEYS as readonly string[]).includes(parsed.filter)
+  ) {
+    return emitWorkflowStatusFailure(parsed, io, {
+      command: "workflow status",
+      code: "invalid_filter",
+      message: `Invalid --filter: ${parsed.filter}. Expected one of: ${WORKFLOW_STATUS_FILTER_KEYS.join(", ")}.`
+    });
+  }
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return emitWorkflowStatusFailure(parsed, io, {
+      command: "workflow status",
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err)
+    });
+  }
+
+  if (runId !== undefined) {
+    const db = openDb(dataDir);
+    let detail: WorkflowRunDetail | null;
+    try {
+      detail = loadWorkflowRunDetail(db, runId);
+    } finally {
+      db.close();
+    }
+    if (detail === null) {
+      return emitWorkflowStatusFailure(parsed, io, {
+        command: "workflow status",
+        code: "run_not_found",
+        message: `Workflow run not found: ${runId}`,
+        dataDir,
+        runId
+      });
+    }
+    return emitWorkflowStatusDetail(parsed, io, dataDir, detail);
+  }
+
+  const db = openDb(dataDir);
+  let summaries: WorkflowRunSummary[];
+  try {
+    const options: Parameters<typeof listWorkflowRunSummaries>[1] = {};
+    if (parsed.state !== undefined) {
+      options.state = parsed.state as WorkflowRunState;
+    }
+    if (parsed.filter !== undefined) {
+      options.filter = parsed.filter as WorkflowStatusFilterKey;
+    }
+    if (parsed.limit !== undefined) {
+      options.limit = parsed.limit;
+    }
+    summaries = listWorkflowRunSummaries(db, options);
+  } finally {
+    db.close();
+  }
+
+  return emitWorkflowStatusList(parsed, io, dataDir, summaries);
+}
+
+function emitWorkflowStatusList(
+  parsed: ParsedFlags,
+  io: CliIo,
+  dataDir: string,
+  summaries: WorkflowRunSummary[]
+): number {
+  const payload = {
+    ok: true,
+    command: "workflow status",
+    dataDir,
+    state: parsed.state ?? null,
+    filter: parsed.filter ?? null,
+    count: summaries.length,
+    runs: summaries.map(summaryToJsonShape)
+  };
+
+  if (parsed.json) {
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  const lines: string[] = [];
+  lines.push(`Workflow runs: ${summaries.length}`);
+  lines.push(`State: ${parsed.state ?? "(any)"}`);
+  lines.push(`Filter: ${parsed.filter ?? "(none)"}`);
+  lines.push(`Data dir: ${dataDir}`);
+  if (summaries.length === 0) {
+    lines.push("- (no matching runs)");
+  } else {
+    for (const summary of summaries) {
+      lines.push(
+        `- ${summary.run.runId} [${summary.run.state}] steps=${summary.counts.steps}` +
+          ` approvals=${summary.counts.approvals} leases=${summary.counts.leases}` +
+          ` next=${summary.monitor.nextAction.code}` +
+          (summary.monitor.recovery
+            ? ` recovery=${summary.monitor.recovery.code}`
+            : "")
+      );
+    }
+  }
+  lines.push("");
+  write(io.stdout, lines.join("\n"));
+  return 0;
+}
+
+function emitWorkflowStatusDetail(
+  parsed: ParsedFlags,
+  io: CliIo,
+  dataDir: string,
+  detail: WorkflowRunDetail
+): number {
+  const payload = {
+    ok: true,
+    command: "workflow status",
+    dataDir,
+    run: workflowRunToJsonShape(detail.run),
+    steps: detail.steps.map(workflowStepToJsonShape),
+    approvals: detail.approvals.map(workflowApprovalToJsonShape),
+    leases: detail.leases.map(workflowLeaseToJsonShape),
+    monitor: workflowMonitorToJsonShape(detail.monitor),
+    evidence: detail.evidence.map(workflowEvidenceToJsonShape)
+  };
+
+  if (parsed.json) {
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  write(io.stdout, renderWorkflowDetailText(dataDir, detail));
+  return 0;
+}
+
+function emitWorkflowStatusFailure(
+  parsed: ParsedFlags,
+  io: CliIo,
+  failure: WorkflowStatusFailure
+): number {
+  const payload: Record<string, unknown> = {
+    ok: false,
+    command: failure.command,
+    code: failure.code,
+    message: failure.message
+  };
+  if (failure.dataDir !== undefined) payload["dataDir"] = failure.dataDir;
+  if (failure.runId !== undefined) payload["runId"] = failure.runId;
+
+  if (parsed.json) {
+    writeJson(io.stderr, payload);
+    return 1;
+  }
+  write(io.stderr, `${failure.message}\n`);
+  return 1;
+}
+
+type WorkflowHandoffFailureCode = "data_dir_failed" | "run_not_found" | "run_id_required";
+
+type WorkflowHandoffFailure = {
+  command: "workflow handoff";
+  code: WorkflowHandoffFailureCode;
+  message: string;
+  dataDir?: string;
+  runId?: string;
+};
+
+function workflowHandoff(parsed: ParsedFlags, io: CliIo): number {
+  const positional = parsed.args.slice(2);
+  if (positional.length > 1) {
+    return usageError(
+      `Unexpected argument for workflow handoff: ${positional[1]}`,
+      parsed,
+      io
+    );
+  }
+  const runId = positional[0];
+  if (runId === undefined) {
+    return emitWorkflowHandoffFailure(parsed, io, {
+      command: "workflow handoff",
+      code: "run_id_required",
+      message: "Missing required <run-id> for workflow handoff."
+    });
+  }
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return emitWorkflowHandoffFailure(parsed, io, {
+      command: "workflow handoff",
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err),
+      runId
+    });
+  }
+
+  const db = openDb(dataDir);
+  let envelope: WorkflowHandoffEnvelope | null;
+  try {
+    envelope = loadWorkflowHandoff(db, runId);
+  } finally {
+    db.close();
+  }
+
+  if (envelope === null) {
+    return emitWorkflowHandoffFailure(parsed, io, {
+      command: "workflow handoff",
+      code: "run_not_found",
+      message: `Workflow run not found: ${runId}`,
+      dataDir,
+      runId
+    });
+  }
+
+  const payload = {
+    ok: true,
+    command: "workflow handoff",
+    dataDir,
+    schemaVersion: envelope.schemaVersion,
+    generatedAt: envelope.generatedAt,
+    run: workflowRunToJsonShape(envelope.detail.run),
+    steps: envelope.detail.steps.map(workflowStepToJsonShape),
+    approvals: envelope.detail.approvals.map(workflowApprovalToJsonShape),
+    leases: envelope.detail.leases.map(workflowLeaseToJsonShape),
+    monitor: workflowMonitorToJsonShape(envelope.detail.monitor),
+    evidence: envelope.detail.evidence.map(workflowEvidenceToJsonShape),
+    nextAction: nextActionToJsonShape(envelope.detail.monitor)
+  };
+
+  if (parsed.json) {
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  write(io.stdout, renderWorkflowHandoffText(dataDir, envelope));
+  return 0;
+}
+
+function emitWorkflowHandoffFailure(
+  parsed: ParsedFlags,
+  io: CliIo,
+  failure: WorkflowHandoffFailure
+): number {
+  const payload: Record<string, unknown> = {
+    ok: false,
+    command: failure.command,
+    code: failure.code,
+    message: failure.message
+  };
+  if (failure.dataDir !== undefined) payload["dataDir"] = failure.dataDir;
+  if (failure.runId !== undefined) payload["runId"] = failure.runId;
+
+  if (parsed.json) {
+    writeJson(io.stderr, payload);
+    return 1;
+  }
+  write(io.stderr, `${failure.message}\n`);
+  return 1;
+}
+
+function summaryToJsonShape(
+  summary: WorkflowRunSummary
+): Record<string, unknown> {
+  return {
+    run: workflowRunToJsonShape(summary.run),
+    counts: {
+      steps: summary.counts.steps,
+      stepsByState: summary.counts.stepsByState,
+      approvals: summary.counts.approvals,
+      leases: summary.counts.leases
+    },
+    monitor: workflowMonitorToJsonShape(summary.monitor)
+  };
+}
+
+function workflowRunToJsonShape(run: WorkflowRunRow): Record<string, unknown> {
+  return {
+    runId: run.runId,
+    state: run.state,
+    source: run.source,
+    sourceArtifactPath: run.sourceArtifactPath,
+    repoPath: run.repoPath,
+    objective: run.objective,
+    issueScope: run.issueScope,
+    route: run.route,
+    approvalBoundary: run.approvalBoundary,
+    skillRevision: run.skillRevision,
+    goalId: run.goalId,
+    batchGroup: run.batchGroup,
+    batchRole: run.batchRole,
+    needsManualRecovery: run.needsManualRecovery,
+    manualRecoveryReason: run.manualRecoveryReason,
+    manualRecoveryAt: run.manualRecoveryAt,
+    startedAt: run.startedAt,
+    finishedAt: run.finishedAt,
+    createdAt: run.createdAt,
+    updatedAt: run.updatedAt
+  };
+}
+
+function workflowStepToJsonShape(
+  step: WorkflowStepRow
+): Record<string, unknown> {
+  return {
+    runId: step.runId,
+    stepId: step.stepId,
+    kind: step.kind,
+    state: step.state,
+    order: step.order,
+    required: step.required,
+    ledgerOffset: step.ledgerOffset,
+    resultDigest: step.resultDigest,
+    errorCode: step.errorCode,
+    errorMessage: step.errorMessage,
+    startedAt: step.startedAt,
+    finishedAt: step.finishedAt,
+    createdAt: step.createdAt,
+    updatedAt: step.updatedAt
+  };
+}
+
+function workflowApprovalToJsonShape(
+  approval: WorkflowApprovalRow
+): Record<string, unknown> {
+  return {
+    runId: approval.runId,
+    boundary: approval.boundary,
+    actor: approval.actor,
+    phrase: approval.phrase,
+    artifactPath: approval.artifactPath,
+    artifactDigest: approval.artifactDigest,
+    recordedAt: approval.recordedAt,
+    dischargedAt: approval.dischargedAt,
+    createdAt: approval.createdAt,
+    updatedAt: approval.updatedAt
+  };
+}
+
+function workflowLeaseToJsonShape(
+  lease: WorkflowLeaseRow
+): Record<string, unknown> {
+  return {
+    runId: lease.runId,
+    leaseKind: lease.leaseKind,
+    holder: lease.holder,
+    acquiredAt: lease.acquiredAt,
+    expiresAt: lease.expiresAt,
+    heartbeatAt: lease.heartbeatAt,
+    releasedAt: lease.releasedAt,
+    stalePolicy: lease.stalePolicy,
+    createdAt: lease.createdAt,
+    updatedAt: lease.updatedAt
+  };
+}
+
+function workflowMonitorToJsonShape(
+  monitor: WorkflowMonitorState
+): Record<string, unknown> {
+  return {
+    runId: monitor.runId,
+    runState: monitor.runState,
+    terminal: monitor.terminal,
+    blocked: monitor.blocked,
+    activeStep: monitor.activeStep
+      ? {
+          stepId: monitor.activeStep.stepId,
+          kind: monitor.activeStep.kind,
+          state: monitor.activeStep.state,
+          order: monitor.activeStep.order,
+          required: monitor.activeStep.required
+        }
+      : null,
+    leases: monitor.leases.map((lease) => ({
+      leaseKind: lease.leaseKind,
+      holder: lease.holder,
+      classification: lease.classification,
+      expiresAt: lease.expiresAt,
+      heartbeatAt: lease.heartbeatAt,
+      releasedAt: lease.releasedAt
+    })),
+    lastCheckpoint: monitor.lastCheckpoint
+      ? {
+          stepId: monitor.lastCheckpoint.stepId,
+          at: monitor.lastCheckpoint.at,
+          source: monitor.lastCheckpoint.source,
+          digest: monitor.lastCheckpoint.digest
+        }
+      : null,
+    monitorDrift: monitor.monitorDrift
+      ? {
+          advisoryState: monitor.monitorDrift.advisoryState,
+          advisoryTerminal: monitor.monitorDrift.advisoryTerminal,
+          actualState: monitor.monitorDrift.actualState,
+          drifted: monitor.monitorDrift.drifted,
+          reason: monitor.monitorDrift.reason
+        }
+      : null,
+    nextAction: nextActionToJsonShape(monitor),
+    needsRecoveryArtifact: monitor.needsRecoveryArtifact,
+    recovery: monitor.recovery
+      ? {
+          code: monitor.recovery.code,
+          message: monitor.recovery.message,
+          stepId: monitor.recovery.stepId
+        }
+      : null
+  };
+}
+
+function nextActionToJsonShape(
+  monitor: WorkflowMonitorState
+): Record<string, unknown> {
+  return {
+    code: monitor.nextAction.code,
+    stepId: monitor.nextAction.stepId,
+    leaseKind: monitor.nextAction.leaseKind,
+    detail: monitor.nextAction.detail
+  };
+}
+
+function workflowEvidenceToJsonShape(
+  evidence: WorkflowEvidenceLink
+): Record<string, unknown> {
+  return {
+    evidenceRecordId: evidence.evidenceRecordId,
+    source: evidence.source,
+    type: evidence.type,
+    artifactPath: evidence.artifactPath,
+    occurredAt: evidence.occurredAt,
+    summary: evidence.summary
+  };
+}
+
+function renderWorkflowDetailText(
+  dataDir: string,
+  detail: WorkflowRunDetail
+): string {
+  const lines: string[] = [];
+  lines.push(`Workflow run: ${detail.run.runId}`);
+  lines.push(`State: ${detail.run.state}`);
+  lines.push(`Source: ${detail.run.source}`);
+  if (detail.run.objective !== null) {
+    lines.push(`Objective: ${detail.run.objective}`);
+  }
+  if (detail.run.repoPath !== null) {
+    lines.push(`Repo: ${detail.run.repoPath}`);
+  }
+  if (detail.run.approvalBoundary !== null) {
+    lines.push(`Approval boundary: ${detail.run.approvalBoundary}`);
+  }
+  if (detail.run.sourceArtifactPath !== null) {
+    lines.push(`Artifact dir: ${detail.run.sourceArtifactPath}`);
+  }
+  lines.push(`Data dir: ${dataDir}`);
+  lines.push("");
+
+  lines.push(`Steps: ${detail.steps.length}`);
+  for (const step of detail.steps) {
+    lines.push(
+      `- ${step.stepId} [${step.state}] kind=${step.kind} ` +
+        `order=${step.order} required=${step.required ? "yes" : "no"}` +
+        (step.errorCode ? ` error=${step.errorCode}` : "")
+    );
+  }
+  lines.push("");
+
+  lines.push(`Approvals: ${detail.approvals.length}`);
+  for (const approval of detail.approvals) {
+    lines.push(
+      `- ${approval.boundary} actor=${approval.actor ?? "(unknown)"} ` +
+        `recorded=${approval.recordedAt}` +
+        (approval.dischargedAt !== null
+          ? ` discharged=${approval.dischargedAt}`
+          : "")
+    );
+  }
+  lines.push("");
+
+  lines.push(`Leases: ${detail.leases.length}`);
+  for (const lease of detail.leases) {
+    lines.push(
+      `- ${lease.leaseKind} holder=${lease.holder} stale_policy=${lease.stalePolicy} ` +
+        `expires=${lease.expiresAt} heartbeat=${lease.heartbeatAt}` +
+        (lease.releasedAt !== null ? ` released=${lease.releasedAt}` : "")
+    );
+  }
+  lines.push("");
+
+  lines.push("Monitor");
+  lines.push(`- Run state: ${detail.monitor.runState}`);
+  lines.push(`- Terminal: ${detail.monitor.terminal ? "yes" : "no"}`);
+  lines.push(`- Blocked: ${detail.monitor.blocked ? "yes" : "no"}`);
+  if (detail.monitor.activeStep) {
+    lines.push(
+      `- Active step: ${detail.monitor.activeStep.stepId} (${detail.monitor.activeStep.state})`
+    );
+  } else {
+    lines.push("- Active step: (none)");
+  }
+  if (detail.monitor.lastCheckpoint) {
+    lines.push(
+      `- Last checkpoint: ${detail.monitor.lastCheckpoint.stepId} ` +
+        `at ${detail.monitor.lastCheckpoint.at} (source=${detail.monitor.lastCheckpoint.source})`
+    );
+  } else {
+    lines.push("- Last checkpoint: (none)");
+  }
+  lines.push(
+    `- Next action: ${detail.monitor.nextAction.code} - ${detail.monitor.nextAction.detail}`
+  );
+  if (detail.monitor.recovery) {
+    lines.push(
+      `- Recovery: ${detail.monitor.recovery.code} - ${detail.monitor.recovery.message}`
+    );
+  }
+  if (detail.monitor.monitorDrift?.drifted) {
+    lines.push(
+      `- Monitor drift: ${detail.monitor.monitorDrift.reason ?? "(unspecified)"}`
+    );
+  }
+  lines.push("");
+
+  lines.push(`Evidence: ${detail.evidence.length}`);
+  for (const record of detail.evidence) {
+    lines.push(
+      `- ${record.evidenceRecordId} [${record.source}/${record.type}] ${record.summary}`
+    );
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+function renderWorkflowHandoffText(
+  dataDir: string,
+  envelope: WorkflowHandoffEnvelope
+): string {
+  const lines: string[] = [];
+  lines.push(`Workflow handoff: ${envelope.detail.run.runId}`);
+  lines.push(`Schema version: ${envelope.schemaVersion}`);
+  lines.push(`Generated at (epoch ms): ${envelope.generatedAt}`);
+  lines.push("");
+  lines.push(renderWorkflowDetailText(dataDir, envelope.detail));
+  return lines.join("\n");
 }
 
 type IntentFailureCode =
@@ -5426,6 +6048,8 @@ function parseFlags(argv: string[]): ParsedFlags {
   let intentStaleThresholdDays: number | undefined;
   let status: string | undefined;
   let evidenceRecord: string | undefined;
+  let stateFlag: string | undefined;
+  let filterFlag: string | undefined;
   let error: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -5700,6 +6324,28 @@ function parseFlags(argv: string[]): ParsedFlags {
       continue;
     }
 
+    if (arg === "--state") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --state.";
+      } else {
+        stateFlag = value;
+        index += 1;
+      }
+      continue;
+    }
+
+    if (arg === "--filter") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --filter.";
+      } else {
+        filterFlag = value;
+        index += 1;
+      }
+      continue;
+    }
+
     if (arg === "--stale-threshold-hours") {
       const value = readFlagValue(argv, index);
       if (value === undefined) {
@@ -5842,6 +6488,8 @@ function parseFlags(argv: string[]): ParsedFlags {
   }
   if (status !== undefined) parsed.status = status;
   if (evidenceRecord !== undefined) parsed.evidenceRecord = evidenceRecord;
+  if (stateFlag !== undefined) parsed.state = stateFlag;
+  if (filterFlag !== undefined) parsed.filter = filterFlag;
   if (error !== undefined) parsed.error = error;
 
   return parsed;
