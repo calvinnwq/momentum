@@ -76,6 +76,8 @@ momentum project status [options]
 momentum evidence ingest|list [options]
 momentum intent list|get|apply|skip|cancel [options]
 momentum workflow import --path <run-dir> [--data-dir <path>] [--json]
+momentum workflow status [<run-id>] [--state <state>] [--filter <active|blocked|completed|imported>] [--limit <n>] [--data-dir <path>] [--json]
+momentum workflow handoff <run-id> [--data-dir <path>] [--json]
 momentum doctor [--repo <path>] [--data-dir <path>] [--json]
 ```
 

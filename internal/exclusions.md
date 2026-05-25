@@ -43,14 +43,18 @@ Milestone status:
   deterministic machine-readable `nextAction` codes, the recovery taxonomy
   (`stale_running_step` / `ghost_active_no_lease` / `manual_recovery_lease` /
   `monitor_drift_stale` / `failed_required_step`), and the contract invariant
-  that terminal ledger evidence beats stale monitor snapshots. M7 turns
-  Momentum into the durable run substrate (`WorkflowRun`, step state,
-  approvals, leases, evidence pointers) for OpenClaw coding workflows
-  without replacing the `coding-workflow-pipeline` skill's executors,
-  Discord delivery, or monitor cron. M7 is not complete; the per-run
-  `recovery.md` renderer, the `WorkflowRun.needs_manual_recovery` durable
-  flag persistence, the remaining M7 CLI envelopes
-  (`workflow run start|status|list|approve|update-step|monitor`),
+  that terminal ledger evidence beats stale monitor snapshots. The first
+  read-only NGX-317 (M7-05) slice has landed the `workflow status` and
+  `workflow handoff` CLI envelopes (`src/workflow-status.ts`,
+  `src/workflow-handoff.ts`) — list / detail / machine-readable next-action
+  output with stable JSON field names — composed on top of the monitor
+  reducer; no SQLite mutations or external writes. M7 turns Momentum into
+  the durable run substrate (`WorkflowRun`, step state, approvals, leases,
+  evidence pointers) for OpenClaw coding workflows without replacing the
+  `coding-workflow-pipeline` skill's executors, Discord delivery, or
+  monitor cron. M7 is not complete; the per-run `recovery.md` renderer,
+  the `WorkflowRun.needs_manual_recovery` durable flag persistence, the
+  remaining M7 CLI envelopes (`workflow run start|list|approve|update-step|monitor`),
   additional built-CLI smoke coverage, and the `doctor --json` milestone
   marker flip remain pending, so the `doctor --json` milestone marker stays
   at the M6 closeout string until M7 closeout flips it forward. See
