@@ -475,3 +475,146 @@ describe("deriveWorkflowMonitorState: monitor advisory says terminal but ledger 
     expect(result.monitorDrift?.reason).toBe("monitor_says_terminal_but_running");
   });
 });
+
+describe("deriveWorkflowMonitorState: monitor_step_mismatch drift", () => {
+  it("flags monitor_step_mismatch when advisory runState differs from actual but terminal flags agree", () => {
+    const steps: WorkflowStepRecord[] = [
+      step("preflight", "preflight", "succeeded", 0),
+      step("implementation", "implementation", "approved", 1)
+    ];
+    const advisory: WorkflowMonitorAdvisory = {
+      runState: "pending",
+      terminal: null,
+      step: "implementation",
+      lastSeenDigest: null,
+      lastEmittedDigest: null
+    };
+    const leases: WorkflowLeaseRecord[] = [
+      lease({
+        leaseKind: "monitor",
+        expiresAt: 200_000,
+        releasedAt: null
+      })
+    ];
+    const result = deriveWorkflowMonitorState(
+      buildInput({
+        steps,
+        leases,
+        monitor: advisory,
+        lastCheckpoint: checkpoint("preflight", 5_000, "ledger"),
+        now: 10_000
+      })
+    );
+    expect(result.runState).toBe("approved");
+    expect(result.monitorDrift).not.toBeNull();
+    expect(result.monitorDrift?.drifted).toBe(true);
+    expect(result.monitorDrift?.reason).toBe("monitor_step_mismatch");
+    expect(result.monitorDrift?.advisoryState).toBe("pending");
+    expect(result.monitorDrift?.actualState).toBe("approved");
+  });
+});
+
+describe("deriveWorkflowMonitorState: monitor_drift_stale recovery", () => {
+  it("emits monitor_drift_stale when a running step has fresh evidence but monitor advisory drifts", () => {
+    const steps: WorkflowStepRecord[] = [
+      step("preflight", "preflight", "succeeded", 0),
+      step("implementation", "implementation", "running", 1)
+    ];
+    const leases: WorkflowLeaseRecord[] = [
+      lease({
+        leaseKind: "managed-step",
+        expiresAt: 200_000,
+        releasedAt: null
+      })
+    ];
+    const advisory: WorkflowMonitorAdvisory = {
+      runState: "succeeded",
+      terminal: true,
+      step: "implementation",
+      lastSeenDigest: null,
+      lastEmittedDigest: null
+    };
+    const result = deriveWorkflowMonitorState(
+      buildInput({
+        steps,
+        leases,
+        monitor: advisory,
+        lastCheckpoint: checkpoint("implementation", 9_000, "ledger"),
+        now: 10_000
+      })
+    );
+    expect(result.runState).toBe("running");
+    expect(result.needsRecoveryArtifact).toBe(true);
+    expect(result.recovery?.code).toBe("monitor_drift_stale");
+    expect(result.nextAction.code).toBe("resume_running");
+    expect(result.monitorDrift?.drifted).toBe(true);
+  });
+
+  it("emits monitor_drift_stale when no running step and monitor drifts", () => {
+    const steps: WorkflowStepRecord[] = [
+      step("preflight", "preflight", "succeeded", 0),
+      step("implementation", "implementation", "approved", 1)
+    ];
+    const advisory: WorkflowMonitorAdvisory = {
+      runState: "succeeded",
+      terminal: true,
+      step: "implementation",
+      lastSeenDigest: null,
+      lastEmittedDigest: null
+    };
+    const result = deriveWorkflowMonitorState(
+      buildInput({
+        steps,
+        leases: [
+          lease({ leaseKind: "monitor", expiresAt: 200_000, releasedAt: null })
+        ],
+        monitor: advisory,
+        lastCheckpoint: checkpoint("preflight", 5_000, "ledger"),
+        now: 10_000
+      })
+    );
+    expect(result.needsRecoveryArtifact).toBe(true);
+    expect(result.recovery?.code).toBe("monitor_drift_stale");
+    expect(result.nextAction.code).toBe("advance_to_step");
+    expect(result.nextAction.stepId).toBe("implementation");
+  });
+});
+
+describe("deriveWorkflowMonitorState: checkpointStaleMs default", () => {
+  it("uses the default 30-minute window when checkpointStaleMs is not specified", () => {
+    const steps: WorkflowStepRecord[] = [
+      step("preflight", "preflight", "succeeded", 0),
+      step("implementation", "implementation", "running", 1)
+    ];
+    const leases: WorkflowLeaseRecord[] = [
+      lease({
+        leaseKind: "managed-step",
+        expiresAt: 5_000,
+        releasedAt: null,
+        stalePolicy: "auto-release"
+      })
+    ];
+    const now = 10_000;
+    const resultFresh = deriveWorkflowMonitorState(
+      buildInput({
+        steps,
+        leases,
+        lastCheckpoint: checkpoint("implementation", now - 29 * 60 * 1000, "ledger"),
+        now
+      })
+    );
+    expect(resultFresh.nextAction.code).toBe("resume_running");
+    expect(resultFresh.needsRecoveryArtifact).toBe(false);
+
+    const resultStale = deriveWorkflowMonitorState(
+      buildInput({
+        steps,
+        leases,
+        lastCheckpoint: checkpoint("implementation", now - 31 * 60 * 1000, "ledger"),
+        now
+      })
+    );
+    expect(resultStale.needsRecoveryArtifact).toBe(true);
+    expect(resultStale.recovery?.code).toBe("stale_running_step");
+  });
+});

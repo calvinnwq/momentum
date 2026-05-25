@@ -9,6 +9,15 @@
  * and a workflow may not be reported as active without a live lease or
  * checkpoint.
  *
+ * Recovery codes: `stale_running_step`, `ghost_active_no_lease`,
+ * `manual_recovery_lease`, `monitor_drift_stale`, `failed_required_step`.
+ * `monitor_drift_stale` is emitted when the monitor advisory disagrees with
+ * the substrate state and no other primary recovery condition applies; it
+ * surfaces through `needsRecoveryArtifact = true` without changing the
+ * `nextAction` away from the step's natural progression. Terminal runs
+ * (succeeded / canceled) never produce a recovery code even when monitor
+ * drift is present — the drift is captured in `monitorDrift` instead.
+ *
  * Recovery generation (rendering the per-run `recovery.md` artifact) lives in a
  * follow-up M7 slice. This module owns the classification only.
  */
@@ -184,7 +193,7 @@ export function deriveWorkflowMonitorState(
   const runState = deriveWorkflowRunState(input.steps, {
     leases: input.leases,
     now: input.now,
-    ...(input.graceMs !== undefined ? { graceMs } : {})
+    graceMs
   });
   const terminal = isTerminalRunState(runState);
   const blocked = runState === "blocked";
@@ -203,6 +212,7 @@ export function deriveWorkflowMonitorState(
 
   const recovery = classifyRecovery({
     runState,
+    terminal,
     activeStep,
     leases: leaseViews,
     checkpointFresh,
@@ -321,6 +331,7 @@ function hasFreshDispatchEvidence(
 
 type RecoveryInput = {
   runState: WorkflowRunState;
+  terminal: boolean;
   activeStep: WorkflowMonitorActiveStep | null;
   leases: readonly WorkflowMonitorLeaseView[];
   checkpointFresh: boolean;
@@ -354,6 +365,13 @@ function classifyRecovery(input: RecoveryInput): WorkflowMonitorRecovery | null 
   }
   if (input.activeStep?.state === "running") {
     if (input.checkpointFresh || input.hasFreshDispatchLease) {
+      if (input.monitorDrift?.drifted) {
+        return {
+          code: "monitor_drift_stale",
+          message: "Step is running with fresh evidence, but the monitor advisory disagrees with the substrate state. The monitor snapshot may be stale.",
+          stepId: input.activeStep.stepId
+        };
+      }
       return null;
     }
     return {
@@ -366,6 +384,13 @@ function classifyRecovery(input: RecoveryInput): WorkflowMonitorRecovery | null 
           ? "Step is running but no lease has ever been recorded and no recent checkpoint exists. The step may be a ghost: a managed child died before any durable progress was recorded."
           : "Step is running but the dispatch lease is stale and no recent checkpoint has been observed. The managed child may have died silently.",
       stepId: input.activeStep.stepId
+    };
+  }
+  if (!input.terminal && input.monitorDrift?.drifted) {
+    return {
+      code: "monitor_drift_stale",
+      message: "Monitor advisory disagrees with the substrate state. No other recovery condition applies, but the monitor snapshot may be stale.",
+      stepId: input.activeStep?.stepId ?? null
     };
   }
   return null;
@@ -433,7 +458,7 @@ function decideNextAction(input: NextActionInput): WorkflowMonitorNextAction {
     };
   }
   if (active.state === "running") {
-    if (input.recovery !== null) {
+    if (input.recovery !== null && input.recovery.code !== "monitor_drift_stale") {
       return {
         code: "investigate_stale",
         stepId: active.stepId,
@@ -449,7 +474,9 @@ function decideNextAction(input: NextActionInput): WorkflowMonitorNextAction {
       stepId: active.stepId,
       leaseKind: leaseKindForStep(active),
       detail:
-        "Step is running with fresh lease / checkpoint evidence. Allow it to continue."
+        input.recovery?.code === "monitor_drift_stale"
+          ? "Step is running with fresh evidence, but monitor advisory disagrees with substrate state. Allow it to continue while flagging the drift."
+          : "Step is running with fresh lease / checkpoint evidence. Allow it to continue."
     };
   }
   if (active.state === "approved") {
