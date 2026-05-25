@@ -170,6 +170,7 @@ export function listWorkflowRunSummaries(
   options: LoadWorkflowRunSummariesOptions = {}
 ): WorkflowRunSummary[] {
   const states = resolveStateFilter(options);
+  if (states !== null && states.length === 0) return [];
   const params: string[] = [];
   let query =
     "SELECT * FROM workflow_runs" +
@@ -232,7 +233,7 @@ export function loadWorkflowRunDetail(
   const run = parseRunRow(runRow);
   const steps = listStepsByRunId(db, runId);
   const approvals = listApprovalsByRunId(db, runId);
-  const leases = listLeasesByRunId(db, runId).map(toLeaseRowWithTimestamps);
+  const leases = listLeasesByRunId(db, runId);
   const now = options.now ?? Date.now();
   const monitor = deriveWorkflowMonitorState({
     runId,
@@ -327,8 +328,19 @@ function artifactRunDir(artifactPath: string): string | null {
 function resolveStateFilter(
   options: LoadWorkflowRunSummariesOptions
 ): WorkflowRunState[] | null {
-  if (options.state !== undefined) return [options.state];
-  switch (options.filter) {
+  const stateStates =
+    options.state !== undefined ? [options.state] : null;
+  const filterStates = filterToStates(options.filter);
+  if (stateStates !== null && filterStates !== null) {
+    return stateStates.filter((state) => filterStates.includes(state));
+  }
+  return stateStates ?? filterStates;
+}
+
+function filterToStates(
+  filter: WorkflowStatusFilterKey | undefined
+): WorkflowRunState[] | null {
+  switch (filter) {
     case "active":
       return [...ACTIVE_RUN_STATES];
     case "blocked":
@@ -336,9 +348,7 @@ function resolveStateFilter(
     case "completed":
       return [...COMPLETED_RUN_STATES];
     case "imported":
-      return null;
     case undefined:
-      return null;
     default:
       return null;
   }
@@ -484,10 +494,6 @@ function parseLeaseRow(row: LeaseRow): WorkflowLeaseRow {
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
-}
-
-function toLeaseRowWithTimestamps(row: WorkflowLeaseRow): WorkflowLeaseRow {
-  return row;
 }
 
 function stripTimestamps(row: WorkflowLeaseRow): WorkflowLeaseRecord {

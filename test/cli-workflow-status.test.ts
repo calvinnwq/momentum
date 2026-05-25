@@ -467,6 +467,46 @@ describe("momentum workflow status", () => {
     expect(limited.code).toBe(0);
     const limitedPayload = JSON.parse(limited.stdout) as { count: number };
     expect(limitedPayload.count).toBe(1);
+
+    const stateInsideFilter = await run([
+      "workflow",
+      "status",
+      "--state",
+      "running",
+      "--filter",
+      "active",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(stateInsideFilter.code).toBe(0);
+    const insidePayload = JSON.parse(stateInsideFilter.stdout) as {
+      count: number;
+      runs: Array<{ run: { runId: string } }>;
+    };
+    expect(insidePayload.count).toBe(1);
+    expect(insidePayload.runs.map((r) => r.run.runId)).toEqual([
+      "cwfp-active001"
+    ]);
+
+    const stateOutsideFilter = await run([
+      "workflow",
+      "status",
+      "--state",
+      "succeeded",
+      "--filter",
+      "active",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(stateOutsideFilter.code).toBe(0);
+    const outsidePayload = JSON.parse(stateOutsideFilter.stdout) as {
+      count: number;
+      runs: unknown[];
+    };
+    expect(outsidePayload.count).toBe(0);
+    expect(outsidePayload.runs).toEqual([]);
   });
 
   it("returns run_not_found for an unknown run-id in detail mode", async () => {

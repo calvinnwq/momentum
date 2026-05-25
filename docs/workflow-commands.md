@@ -148,7 +148,7 @@ Two modes share one envelope shape:
   - `imported` → only runs whose `source == "agent-workflow"`
 - `--limit <n>` caps the number of returned runs (after filtering).
 
-State and filter are independent: passing both narrows runs by literal state first, then re-applies the bucket filter (the `imported` bucket additionally filters on source).
+State and filter compose: passing both returns runs whose literal state matches `--state` and falls inside the `--filter` bucket. An empty intersection (e.g., `--state succeeded --filter active`) returns zero runs. The `imported` bucket only constrains `source`, so it composes with `--state` without narrowing states further.
 
 ### JSON envelope — list mode
 
