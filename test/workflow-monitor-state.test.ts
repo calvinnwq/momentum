@@ -343,6 +343,97 @@ describe("deriveWorkflowMonitorState: ghost-run guard (no lease, no checkpoint, 
   });
 });
 
+describe("deriveWorkflowMonitorState: ghost-run guard treats monitor-only leases as no dispatch evidence", () => {
+  it("flags ghost_active_no_lease when only a monitor lease has been recorded (no managed-step / dispatch lease ever)", () => {
+    const steps: WorkflowStepRecord[] = [
+      step("preflight", "preflight", "succeeded", 0),
+      step("implementation", "implementation", "running", 1)
+    ];
+    const leases: WorkflowLeaseRecord[] = [
+      lease({
+        leaseKind: "monitor",
+        expiresAt: 200_000,
+        releasedAt: null
+      })
+    ];
+    const result = deriveWorkflowMonitorState(
+      buildInput({
+        steps,
+        leases,
+        lastCheckpoint: null,
+        now: 100_000
+      })
+    );
+    expect(result.runState).toBe("running");
+    expect(result.needsRecoveryArtifact).toBe(true);
+    expect(result.recovery?.code).toBe("ghost_active_no_lease");
+    expect(result.nextAction.code).toBe("investigate_stale");
+  });
+});
+
+describe("deriveWorkflowMonitorState: orphan non-monitor lease after every step terminal", () => {
+  it("flags stale_running_step + investigate_stale when all steps succeeded but a non-monitor lease still holds the run in running", () => {
+    const steps: WorkflowStepRecord[] = [
+      step("preflight", "preflight", "succeeded", 0),
+      step("implementation", "implementation", "succeeded", 1),
+      step("postflight", "postflight", "succeeded", 2)
+    ];
+    const leases: WorkflowLeaseRecord[] = [
+      lease({
+        leaseKind: "managed-step",
+        holder: "node_managed_dispatch.py:pid=9001",
+        acquiredAt: 1_000,
+        expiresAt: 5_000,
+        heartbeatAt: 5_000,
+        releasedAt: null,
+        stalePolicy: "auto-release"
+      })
+    ];
+    const result = deriveWorkflowMonitorState(
+      buildInput({
+        steps,
+        leases,
+        now: 100_000
+      })
+    );
+    expect(result.runState).toBe("running");
+    expect(result.activeStep).toBeNull();
+    expect(result.needsRecoveryArtifact).toBe(true);
+    expect(result.recovery?.code).toBe("stale_running_step");
+    expect(result.recovery?.stepId).toBeNull();
+    expect(result.nextAction.code).toBe("investigate_stale");
+    expect(result.nextAction.leaseKind).toBe("managed-step");
+    expect(result.nextAction.stepId).toBeNull();
+  });
+
+  it("does not flag recovery when the only outstanding lease is a fresh monitor lease (transient pre-tick state)", () => {
+    const steps: WorkflowStepRecord[] = [
+      step("preflight", "preflight", "succeeded", 0),
+      step("implementation", "implementation", "succeeded", 1),
+      step("postflight", "postflight", "succeeded", 2)
+    ];
+    const leases: WorkflowLeaseRecord[] = [
+      lease({
+        leaseKind: "monitor",
+        expiresAt: 200_000,
+        releasedAt: null
+      })
+    ];
+    const result = deriveWorkflowMonitorState(
+      buildInput({
+        steps,
+        leases,
+        now: 100_000
+      })
+    );
+    expect(result.runState).toBe("running");
+    expect(result.activeStep).toBeNull();
+    expect(result.needsRecoveryArtifact).toBe(false);
+    expect(result.recovery).toBeNull();
+    expect(result.nextAction.code).toBe("await_approval");
+  });
+});
+
 describe("deriveWorkflowMonitorState: failed required step suggests rerun_failed_step", () => {
   it("returns failed with rerun_failed_step nextAction and a failed_required_step recovery code", () => {
     const steps: WorkflowStepRecord[] = [

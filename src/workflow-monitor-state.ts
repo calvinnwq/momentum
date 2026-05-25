@@ -11,6 +11,13 @@
  *
  * Recovery codes: `stale_running_step`, `ghost_active_no_lease`,
  * `manual_recovery_lease`, `monitor_drift_stale`, `failed_required_step`.
+ * `ghost_active_no_lease` vs `stale_running_step` is discriminated on whether
+ * any non-monitor (`managed-step` / `dispatch`) lease has ever been recorded
+ * for the run — a workflow that only has a monitor lease has never dispatched
+ * a managed child and is a ghost. `stale_running_step` is also emitted when
+ * all steps have finalized but an outstanding non-monitor lease keeps the run
+ * in `running` (the lease-aware demotion path); the nextAction in that case
+ * is `investigate_stale` keyed off the orphan lease, not `await_approval`.
  * `monitor_drift_stale` is emitted when the monitor advisory disagrees with
  * the substrate state and no other primary recovery condition applies; it
  * surfaces through `needsRecoveryArtifact = true` without changing the
@@ -228,7 +235,8 @@ export function deriveWorkflowMonitorState(
     recovery,
     checkpointFresh,
     hasFreshDispatchLease,
-    steps: input.steps
+    steps: input.steps,
+    leases: leaseViews
   });
 
   return {
@@ -372,17 +380,31 @@ function classifyRecovery(input: RecoveryInput): WorkflowMonitorRecovery | null 
       }
       return null;
     }
+    const hasDispatchLeaseRecorded = input.leases.some(
+      (l) => l.leaseKind !== "monitor"
+    );
     return {
-      code:
-        input.leases.length === 0
-          ? "ghost_active_no_lease"
-          : "stale_running_step",
-      message:
-        input.leases.length === 0
-          ? "Step is running but no lease has ever been recorded and no recent checkpoint exists. The step may be a ghost: a managed child died before any durable progress was recorded."
-          : "Step is running but the dispatch lease is stale and no recent checkpoint has been observed. The managed child may have died silently.",
+      code: hasDispatchLeaseRecorded
+        ? "stale_running_step"
+        : "ghost_active_no_lease",
+      message: hasDispatchLeaseRecorded
+        ? "Step is running but the dispatch lease is stale and no recent checkpoint has been observed. The managed child may have died silently."
+        : "Step is running but no dispatch lease has ever been recorded and no recent checkpoint exists. The step may be a ghost: a managed child died before any durable progress was recorded.",
       stepId: input.activeStep.stepId
     };
+  }
+  if (input.runState === "running" && input.activeStep === null) {
+    const orphan = input.leases.find(
+      (l) => l.classification !== "released" && l.leaseKind !== "monitor"
+    );
+    if (orphan) {
+      return {
+        code: "stale_running_step",
+        message:
+          "All steps have finalized, but a non-monitor lease is still outstanding and is holding the run in running. Investigate the orphaned lease before clearing recovery.",
+        stepId: null
+      };
+    }
   }
   if (!input.terminal && input.monitorDrift?.drifted) {
     return {
@@ -411,6 +433,7 @@ type NextActionInput = {
   checkpointFresh: boolean;
   hasFreshDispatchLease: boolean;
   steps: readonly WorkflowStepRecord[];
+  leases: readonly WorkflowMonitorLeaseView[];
 };
 
 function decideNextAction(input: NextActionInput): WorkflowMonitorNextAction {
@@ -447,6 +470,19 @@ function decideNextAction(input: NextActionInput): WorkflowMonitorNextAction {
   }
   const active = input.activeStep;
   if (active === null) {
+    if (input.runState === "running") {
+      const orphan = input.leases.find(
+        (l) => l.classification !== "released" && l.leaseKind !== "monitor"
+      );
+      if (orphan) {
+        return {
+          code: "investigate_stale",
+          stepId: null,
+          leaseKind: orphan.leaseKind,
+          detail: `All steps have finalized but a ${orphan.leaseKind} lease held by ${orphan.holder} is still outstanding. Investigate the orphaned lease before clearing recovery.`
+        };
+      }
+    }
     return {
       code: "await_approval",
       stepId: null,
@@ -463,7 +499,7 @@ function decideNextAction(input: NextActionInput): WorkflowMonitorNextAction {
         leaseKind: leaseKindForStep(active),
         detail:
           input.recovery.code === "ghost_active_no_lease"
-            ? "Running step has no lease and no recent checkpoint. Inspect the run directory and decide whether to recover or cancel."
+            ? "Running step has no dispatch lease and no recent checkpoint. Inspect the run directory and decide whether to recover or cancel."
             : "Running step's dispatch lease is stale and no recent checkpoint has been observed. Inspect the run directory before forcing progress."
       };
     }
