@@ -294,9 +294,7 @@ function classifyMonitorDrift(
     // Only flag a state-name drift when it is not redundant with the terminal-
     // booleans above. The blocked-during-running case is already handled by
     // lease classification (manual recovery), so do not double-report.
-    if (reason === null) {
-      reason = "monitor_step_mismatch";
-    }
+    reason = "monitor_step_mismatch";
   }
   return {
     advisoryState: monitor.runState,
