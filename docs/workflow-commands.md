@@ -327,6 +327,7 @@ Lease classifications surfaced under `monitor.leases[].classification`: `release
 | `data_dir_failed` | Data directory resolution failed. |
 | `invalid_state` | `--state` is not one of the canonical workflow run states. |
 | `invalid_filter` | `--filter` is not one of `active`, `blocked`, `completed`, `imported`. |
+| `invalid_limit` | `--limit` is not a non-negative integer. (Note: the flag parser validates `--limit` before the command runs, so invalid limits produce a usage error / exit code 2 rather than this structured refusal.) |
 | `run_not_found` | `<run-id>` does not exist in `workflow_runs`. |
 
 ### Text output (list mode)

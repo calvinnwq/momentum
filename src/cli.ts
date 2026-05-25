@@ -2186,6 +2186,7 @@ type WorkflowStatusFailureCode =
   | "data_dir_failed"
   | "invalid_state"
   | "invalid_filter"
+  | "invalid_limit"
   | "run_not_found";
 
 type WorkflowStatusFailure = {
@@ -2225,6 +2226,16 @@ function workflowStatus(parsed: ParsedFlags, io: CliIo): number {
       command: "workflow status",
       code: "invalid_filter",
       message: `Invalid --filter: ${parsed.filter}. Expected one of: ${WORKFLOW_STATUS_FILTER_KEYS.join(", ")}.`
+    });
+  }
+  if (
+    parsed.limit !== undefined &&
+    (parsed.limit < 0 || !Number.isInteger(parsed.limit))
+  ) {
+    return emitWorkflowStatusFailure(parsed, io, {
+      command: "workflow status",
+      code: "invalid_limit",
+      message: `Invalid --limit: ${parsed.limit}. Must be a non-negative integer.`
     });
   }
 

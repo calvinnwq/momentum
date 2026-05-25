@@ -284,6 +284,21 @@ describe("momentum workflow status", () => {
     });
   });
 
+  it("rejects a negative --limit at the flag-parsing layer", async () => {
+    const dataDir = makeTempDir();
+    const result = await run([
+      "workflow",
+      "status",
+      "--limit",
+      "-1",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("Invalid value for --limit");
+  });
+
   it("lists runs and filters active vs blocked vs completed", async () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);
