@@ -184,6 +184,49 @@ diagnostic taxonomy):
   `import_path_unreadable` (unreadable `--path` target) exit with code 1 and
   carry the documented refusal codes through both JSON and text outputs.
 
+## Milestone 7 end-to-end coding workflow smoke coverage (NGX-318)
+
+The smoke exercises a real end-to-end coding workflow against the M7
+Momentum-owned substrate without invoking the live OpenClaw pipeline,
+Discord, GitHub, Linear, or any external tracker writes. Steps are driven
+through the deterministic fake executors exposed by
+`dispatchWorkflowStepExecutor` (see [src/workflow-step-executor.ts](../src/workflow-step-executor.ts))
+and the resulting outcomes are appended to `ledger.jsonl` and re-imported
+through the spawned `workflow import` CLI between steps so the durable
+`workflow_runs` / `workflow_steps` / `workflow_approvals` / `workflow_leases`
+rows are populated exclusively via the public M7 surface.
+
+Coverage:
+
+- happy-path end-to-end run: a fresh `.agent-workflows/cwfp-<hex>/` fixture
+  with `plan.json`, `ledger.jsonl`, and an `approval-through-merge-cleanup.json`
+  sibling is driven through the current imported workflow artifact chain
+  (preflight → implementation → postflight:1 → no-mistakes → merge-cleanup)
+  with `outcome: success`; after the final
+  re-import the run terminates with `state: succeeded`, zero leases, the
+  approval row persisted, no entries in either the active or blocked buckets,
+  `workflow handoff` reports `nextAction.code: no_action`, and `monitor.recovery`
+  is `null`.
+- evidence linkage through handoff: after a `momentum evidence ingest --path`
+  pass over the run directory, the `workflow handoff` envelope's
+  `detail.evidence` array surfaces the workflow evidence types
+  (`plan_created`, `merge_complete`) discovered by the existing artifact-path
+  prefix LIKE matcher (no schema extension required).
+- failure path with no ghost active run: preflight succeeds, implementation is
+  driven through `outcome: fail_retry` (default `errorCode: command_failed`);
+  after re-import the run terminates with `state: failed`, the
+  `workflow status --filter active` and `--filter blocked` filters both report
+  zero matches (the failed run only shows up under `--state completed`),
+  zero leases remain, `workflow handoff` reports
+  `nextAction.code: rerun_failed_step` with `stepId: implementation`, and
+  `monitor.recovery` is `{ code: "failed_required_step", stepId: "implementation" }`.
+
+Run locally via the targeted vitest filter:
+
+```
+pnpm vitest run test/smoke.test.ts -t "end-to-end coding workflow"
+```
+
 ## Test boundary
 
 The smoke must not make real `api.linear.app` calls — see
