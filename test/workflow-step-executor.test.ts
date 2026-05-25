@@ -221,19 +221,12 @@ describe("dispatchWorkflowStepExecutor", () => {
     expect(out.error).toContain("linear cli not installed");
   });
 
-  it("surfaces unsupported_step for unregistered kinds", () => {
-    const input = makeInput({ kind: "preflight" });
-    const out = dispatchWorkflowStepExecutor("gnhf", {
-      ...input,
-      kind: "preflight"
-    });
+  it("surfaces invalid_input for dispatch kind when input.kind does not match", () => {
+    const base = makeInput({ kind: "preflight" });
+    const out = dispatchWorkflowStepExecutor("gnhf", base);
     expect(out.ok).toBe(false);
     if (out.ok) return;
-    // dispatch with bad kind takes the kind mismatch path first; verify
-    // unregistered kinds also surface unsupported_step when input.kind aligns.
-    expect(out.code === "unsupported_step" || out.code === "invalid_input").toBe(
-      true
-    );
+    expect(out.code).toBe("invalid_input");
   });
 
   it("returns invalid_input when input.kind does not match dispatch kind", () => {
@@ -285,6 +278,120 @@ describe("dispatchWorkflowStepExecutor", () => {
     if (out.ok) return;
     expect(out.code).toBe("invalid_input");
     expect(out.error).toContain("outcome");
+  });
+
+  it("rejects config as array with invalid_input", () => {
+    const input = makeInput({
+      kind: "preflight",
+      config: [] as unknown as Record<string, unknown>
+    });
+    const out = dispatchWorkflowStepExecutor("preflight", input);
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.code).toBe("invalid_input");
+    expect(out.error).toContain("plain object");
+  });
+
+  it("rejects non-string errorCode in config", () => {
+    const input = makeInput({
+      kind: "preflight",
+      config: { errorCode: 42 } as unknown as Record<string, unknown>
+    });
+    const out = dispatchWorkflowStepExecutor("preflight", input);
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.code).toBe("invalid_input");
+    expect(out.error).toContain("errorCode");
+  });
+
+  it("rejects non-string errorMessage in config", () => {
+    const input = makeInput({
+      kind: "preflight",
+      config: { errorMessage: false } as unknown as Record<string, unknown>
+    });
+    const out = dispatchWorkflowStepExecutor("preflight", input);
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.code).toBe("invalid_input");
+    expect(out.error).toContain("errorMessage");
+  });
+
+  it("rejects non-string resultDigest in config", () => {
+    const input = makeInput({
+      kind: "preflight",
+      config: { resultDigest: 99 } as unknown as Record<string, unknown>
+    });
+    const out = dispatchWorkflowStepExecutor("preflight", input);
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.code).toBe("invalid_input");
+    expect(out.error).toContain("resultDigest");
+  });
+
+  it("rejects config.artifacts entries missing kind or path", () => {
+    const input = makeInput({
+      kind: "preflight",
+      config: {
+        artifacts: [{ kind: 5, path: "x" }] as unknown as Record<string, unknown>[]
+      }
+    });
+    const out = dispatchWorkflowStepExecutor("preflight", input);
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.code).toBe("invalid_input");
+    expect(out.error).toContain("kind");
+  });
+
+  it("rejects non-string digest in config.artifacts entries", () => {
+    const input = makeInput({
+      kind: "preflight",
+      config: {
+        artifacts: [{ kind: "plan", path: "p.json", digest: 3 } as unknown as Record<string, unknown>]
+      }
+    });
+    const out = dispatchWorkflowStepExecutor("preflight", input);
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.code).toBe("invalid_input");
+    expect(out.error).toContain("digest");
+  });
+
+  it("rejects non-string checkpointMessages entries in config", () => {
+    const input = makeInput({
+      kind: "preflight",
+      config: {
+        checkpointMessages: [1, 2] as unknown as string[]
+      }
+    });
+    const out = dispatchWorkflowStepExecutor("preflight", input);
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.code).toBe("invalid_input");
+    expect(out.error).toContain("strings");
+  });
+
+  it("rejects non-array config.artifacts", () => {
+    const input = makeInput({
+      kind: "preflight",
+      config: { artifacts: "not-array" } as unknown as Record<string, unknown>
+    });
+    const out = dispatchWorkflowStepExecutor("preflight", input);
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.code).toBe("invalid_input");
+    expect(out.error).toContain("array");
+  });
+
+  it("rejects non-array config.checkpointMessages", () => {
+    const input = makeInput({
+      kind: "preflight",
+      config: { checkpointMessages: "not-array" } as unknown as Record<string, unknown>
+    });
+    const out = dispatchWorkflowStepExecutor("preflight", input);
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.code).toBe("invalid_input");
+    expect(out.error).toContain("strings");
   });
 });
 

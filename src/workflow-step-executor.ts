@@ -124,7 +124,7 @@ export type WorkflowStepExecutorResult = {
   checkpoints: WorkflowStepExecutorCheckpoint[];
   artifacts: WorkflowStepExecutorArtifact[];
   resultDigest: string | null;
-  errorCode: string | null;
+  errorCode: WorkflowStepExecutorErrorCode | null;
   errorMessage: string | null;
   retryHint: WorkflowStepExecutorRetryHint | null;
   recoveryHint: WorkflowStepExecutorRecoveryHint | null;
@@ -308,7 +308,7 @@ function runFakeWorkflowStepExecutor(
         input,
         config: config.value,
         checkpoints,
-        errorCode: config.value.errorCode ?? "command_failed",
+        errorCode: (config.value.errorCode as WorkflowStepExecutorErrorCode ?? "command_failed"),
         retryHint: "retry_after_delay",
         recoveryHint: "resume"
       });
@@ -318,7 +318,7 @@ function runFakeWorkflowStepExecutor(
         input,
         config: config.value,
         checkpoints,
-        errorCode: config.value.errorCode ?? "manual_recovery_required",
+        errorCode: (config.value.errorCode as WorkflowStepExecutorErrorCode ?? "manual_recovery_required"),
         retryHint: "do_not_retry",
         recoveryHint: "manual_recovery_required"
       });
@@ -500,7 +500,7 @@ function success(
 
 function failure(
   args: FakeOutcomeInput & {
-    errorCode: string;
+    errorCode: WorkflowStepExecutorErrorCode;
     retryHint: WorkflowStepExecutorRetryHint;
     recoveryHint: WorkflowStepExecutorRecoveryHint;
   }
