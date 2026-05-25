@@ -178,7 +178,7 @@ export type FakeWorkflowStepExecutorOutcome =
 
 export type FakeWorkflowStepExecutorConfig = {
   outcome?: FakeWorkflowStepExecutorOutcome;
-  errorCode?: string;
+  errorCode?: WorkflowStepExecutorErrorCode;
   errorMessage?: string;
   resultDigest?: string;
   artifacts?: WorkflowStepExecutorArtifact[];
@@ -193,6 +193,10 @@ const FAKE_OUTCOMES: ReadonlySet<FakeWorkflowStepExecutorOutcome> = new Set([
   "throw",
   "runtime_unavailable"
 ]);
+
+const EXECUTOR_ERROR_CODE_SET: ReadonlySet<string> = new Set(
+  WORKFLOW_STEP_EXECUTOR_ERROR_CODES
+);
 
 const ADAPTERS: ReadonlyMap<WorkflowStepExecutorKind, WorkflowStepExecutor> =
   new Map(
@@ -308,7 +312,7 @@ function runFakeWorkflowStepExecutor(
         input,
         config: config.value,
         checkpoints,
-        errorCode: (config.value.errorCode as WorkflowStepExecutorErrorCode ?? "command_failed"),
+        errorCode: config.value.errorCode ?? "command_failed",
         retryHint: "retry_after_delay",
         recoveryHint: "resume"
       });
@@ -318,7 +322,7 @@ function runFakeWorkflowStepExecutor(
         input,
         config: config.value,
         checkpoints,
-        errorCode: (config.value.errorCode as WorkflowStepExecutorErrorCode ?? "manual_recovery_required"),
+        errorCode: config.value.errorCode ?? "manual_recovery_required",
         retryHint: "do_not_retry",
         recoveryHint: "manual_recovery_required"
       });
@@ -377,7 +381,13 @@ function readFakeConfig(raw: unknown): FakeConfigParse {
         error: "WorkflowStepExecutorInput.config.errorCode must be a string."
       };
     }
-    value.errorCode = record["errorCode"];
+    if (!EXECUTOR_ERROR_CODE_SET.has(record["errorCode"])) {
+      return {
+        ok: false,
+        error: `WorkflowStepExecutorInput.config.errorCode must be one of: ${WORKFLOW_STEP_EXECUTOR_ERROR_CODES.join(", ")}.`
+      };
+    }
+    value.errorCode = record["errorCode"] as WorkflowStepExecutorErrorCode;
   }
   if (record["errorMessage"] !== undefined) {
     if (typeof record["errorMessage"] !== "string") {

@@ -304,6 +304,37 @@ describe("dispatchWorkflowStepExecutor", () => {
     expect(out.error).toContain("errorCode");
   });
 
+  it("rejects errorCode strings outside the stable taxonomy", () => {
+    const input = makeInput({
+      kind: "preflight",
+      config: {
+        outcome: "fail_retry",
+        errorCode: "gnhf_prompt_rejected"
+      } as unknown as Record<string, unknown>
+    });
+    const out = dispatchWorkflowStepExecutor("preflight", input);
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.code).toBe("invalid_input");
+    expect(out.error).toContain("errorCode");
+    expect(out.error).toContain("command_failed");
+  });
+
+  it("propagates a taxonomy errorCode override on fail_retry results", () => {
+    const input = makeInput({
+      kind: "preflight",
+      config: {
+        outcome: "fail_retry",
+        errorCode: "command_timed_out"
+      }
+    });
+    const out = dispatchWorkflowStepExecutor("preflight", input);
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.result.state).toBe("failed");
+    expect(out.result.errorCode).toBe("command_timed_out");
+  });
+
   it("rejects non-string errorMessage in config", () => {
     const input = makeInput({
       kind: "preflight",
