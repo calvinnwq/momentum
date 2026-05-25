@@ -32,15 +32,24 @@ Milestone status:
   transition reducer, the lease-aware `deriveWorkflowRunState`, and the
   `classifyWorkflowLease` lease-freshness classifier), the first M7 CLI
   envelope `workflow import` (NGX-314) plus its built-CLI smoke coverage have
-  landed, and the pure `WorkflowStepExecutor` boundary (NGX-315) — typed
+  landed, the pure `WorkflowStepExecutor` boundary (NGX-315) — typed
   input / result / checkpoint / artifact shapes, registry keyed by
   `WorkflowStepKind`, stable error code taxonomy, and deterministic fake
   executors per kind — has landed, with thin wrappers around live local
-  command paths deferred to a follow-up slice. M7 turns Momentum into the
-  durable run substrate (`WorkflowRun`, step state, approvals, leases,
-  evidence pointers) for OpenClaw coding workflows without replacing the
-  `coding-workflow-pipeline` skill's executors, Discord delivery, or monitor
-  cron. M7 is not complete; the remaining M7 CLI envelopes
+  command paths deferred to a follow-up slice, and the first NGX-316 (M7-04)
+  slice has landed the pure `deriveWorkflowMonitorState` reducer
+  (`src/workflow-monitor-state.ts`): active-step pick, per-lease freshness
+  view, last-checkpoint visibility, monitor-advisory drift classification,
+  deterministic machine-readable `nextAction` codes, the recovery taxonomy
+  (`stale_running_step` / `ghost_active_no_lease` / `manual_recovery_lease` /
+  `monitor_drift_stale` / `failed_required_step`), and the contract invariant
+  that terminal ledger evidence beats stale monitor snapshots. M7 turns
+  Momentum into the durable run substrate (`WorkflowRun`, step state,
+  approvals, leases, evidence pointers) for OpenClaw coding workflows
+  without replacing the `coding-workflow-pipeline` skill's executors,
+  Discord delivery, or monitor cron. M7 is not complete; the per-run
+  `recovery.md` renderer, the `WorkflowRun.needs_manual_recovery` durable
+  flag persistence, the remaining M7 CLI envelopes
   (`workflow run start|status|list|approve|update-step|monitor`),
   additional built-CLI smoke coverage, and the `doctor --json` milestone
   marker flip remain pending, so the `doctor --json` milestone marker stays
