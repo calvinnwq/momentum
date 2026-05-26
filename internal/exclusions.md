@@ -48,15 +48,21 @@ Milestone status:
   `workflow handoff` CLI envelopes (`src/workflow-status.ts`,
   `src/workflow-handoff.ts`) — list / detail / machine-readable next-action
   output with stable JSON field names — composed on top of the monitor
-  reducer; no SQLite mutations or external writes. M7 turns Momentum into
+  reducer; no SQLite mutations or external writes. The first end-to-end
+  coding-workflow smoke (NGX-318) has landed (`test/smoke.test.ts`):
+  a fresh `.agent-workflows/<runId>/` fixture driven through the
+  deterministic fake executors and re-imported between steps via
+  `workflow import`, covering happy-path completion, evidence linkage
+  through `workflow handoff` after `evidence ingest`, and a failure path
+  that proves no ghost active / blocked run. M7 turns Momentum into
   the durable run substrate (`WorkflowRun`, step state, approvals, leases,
   evidence pointers) for OpenClaw coding workflows without replacing the
   `coding-workflow-pipeline` skill's executors, Discord delivery, or
   monitor cron. M7 is not complete; the per-run `recovery.md` renderer,
   the `WorkflowRun.needs_manual_recovery` durable flag persistence, the
   remaining M7 CLI envelopes (`workflow run start|list|approve|update-step|monitor`),
-  additional built-CLI smoke coverage, and the `doctor --json` milestone
-  marker flip remain pending, so the `doctor --json` milestone marker stays
+  additional built-CLI smoke coverage against the live skill scripts,
+  and the `doctor --json` milestone marker flip remain pending, so the `doctor --json` milestone marker stays
   at the M6 closeout string until M7 closeout flips it forward. See
   [`internal/milestones/m7-openclaw-coding-workflow-backend.md`](milestones/m7-openclaw-coding-workflow-backend.md)
   and [`internal/contracts/workflow-runs.md`](contracts/workflow-runs.md).
