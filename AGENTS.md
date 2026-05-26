@@ -22,7 +22,7 @@ Quick map of `internal/`:
 - [`internal/roadmap.md`](internal/roadmap.md) — milestone timeline and current ordering.
 - [`internal/milestones/`](internal/milestones/) — `m3-operational-safety.md`, `m4-real-runners.md`, `m5-source-adapters.md`, `m6-external-apply.md`, `m7-openclaw-coding-workflow-backend.md`.
 - [`internal/contracts/`](internal/contracts/) — `intent-apply.md` (M6 two-phase external apply), `source-adapters.md`, `workflow-runs.md` (M7 OpenClaw coding workflow backend substrate).
-- [`internal/smoke-tests.md`](internal/smoke-tests.md), [`internal/exclusions.md`](internal/exclusions.md).
+- [`internal/smoke-tests.md`](internal/smoke-tests.md), [`internal/exclusions.md`](internal/exclusions.md), [`internal/regression-matrix.md`](internal/regression-matrix.md) (M7 closeout regression matrix).
 
 ## Current milestone
 Milestone 7 (OpenClaw Coding Workflow Backend) is the most recently closed milestone. See [`internal/roadmap.md`](internal/roadmap.md) for the full timeline. M7 made Momentum the durable run substrate for OpenClaw coding workflows; the `coding-workflow-pipeline` skill keeps composing executors (preflight → GNHF → postflight → no-mistakes → merge cleanup → Linear refresh) and the Discord / monitor cron UX.
