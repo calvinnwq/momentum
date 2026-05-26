@@ -1,9 +1,10 @@
 # Current Exclusions
 
 This page lists features and behaviors that are intentionally **out of scope**
-as of the most recently shipped milestone (M7 closeout). It exists so contributors and
-operators can see at a glance what Momentum does *not* do today, and where
-the next durable surface is expected (or explicitly deferred indefinitely).
+as of the most recently shipped milestone (M7 closeout) and the active in-flight
+milestone (M8). It exists so contributors and operators can see at a glance
+what Momentum does *not* do today, and where the next durable surface is
+expected (or explicitly deferred indefinitely).
 
 Milestone status:
 
@@ -56,14 +57,28 @@ Milestone status:
   run (NGX-318). NGX-319 closed the milestone, added the regression matrix
   at [`internal/regression-matrix.md`](regression-matrix.md), aligned the
   contract tests, and flipped the `doctor --json` milestone marker forward
-  from the M6 closeout string to the M7 closeout string. Thin wrappers
-  around live local command paths, per-run `recovery.md` rendering, the
-  `WorkflowRun.needs_manual_recovery` durable flag persistence, the
-  remaining `workflow run start|list|approve|update-step|monitor` CLI
-  envelopes, and additional built-CLI smoke coverage against the live
-  skill scripts remain deferred past M7 closeout. See
+  from the M6 closeout string to the M7 closeout string. See
   [`internal/milestones/m7-openclaw-coding-workflow-backend.md`](milestones/m7-openclaw-coding-workflow-backend.md)
   and [`internal/contracts/workflow-runs.md`](contracts/workflow-runs.md).
+- **Milestone 8 (Workflow Run Operator Controls)** is active / in flight
+  (NGX-323 pinned the M8 contract slice). M8 layers operator-control CLI
+  envelopes — `workflow run list` (NGX-324), `workflow run approve` (NGX-325),
+  `workflow run update-step` (NGX-326), and `workflow run monitor` (NGX-328) —
+  on top of the M7 substrate, adds per-run `.agent-workflows/<runId>/recovery.md`
+  rendering plus the `WorkflowRun.needs_manual_recovery` durable flag
+  (NGX-327), and adds typed `runId` / `stepId` evidence linkage to
+  `evidence_records` (NGX-329) without reshaping any M3–M7 contract. The
+  `doctor --json` milestone marker stays pinned to the M7 closeout string
+  through every M8 implementation slice; NGX-330 (M8-07) is the only slice
+  authorized to flip it. Thin Momentum-side wrappers around the live
+  OpenClaw executor scripts (`gnhf-runner`, `gnhf-postflight`,
+  `harness-delegate`, `no-mistakes-pipeline`, `model-evidence`,
+  `project-progress-refresh`), a `workflow run start` envelope, and
+  additional built-CLI smoke coverage against the live skill scripts
+  remain deferred past M8 closeout unless a future explicit decision gate
+  changes that boundary. See
+  [`internal/milestones/m8-workflow-run-operator-controls.md`](milestones/m8-workflow-run-operator-controls.md)
+  and [`internal/contracts/workflow-operator-controls.md`](contracts/workflow-operator-controls.md).
 
 The following surfaces remain deferred so the runner-boundary, policy-loading,
 and M5 read-first source surfaces stay scoped.
