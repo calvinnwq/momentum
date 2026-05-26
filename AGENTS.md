@@ -20,12 +20,12 @@ Two trees:
 Quick map of `internal/`:
 
 - [`internal/roadmap.md`](internal/roadmap.md) — milestone timeline and current ordering.
-- [`internal/milestones/`](internal/milestones/) — `m3-operational-safety.md`, `m4-real-runners.md`, `m5-source-adapters.md`, `m6-external-apply.md`, `m7-openclaw-coding-workflow-backend.md`.
-- [`internal/contracts/`](internal/contracts/) — `intent-apply.md` (M6 two-phase external apply), `source-adapters.md`, `workflow-runs.md` (M7 OpenClaw coding workflow backend substrate).
+- [`internal/milestones/`](internal/milestones/) — `m3-operational-safety.md`, `m4-real-runners.md`, `m5-source-adapters.md`, `m6-external-apply.md`, `m7-openclaw-coding-workflow-backend.md`, `m8-workflow-run-operator-controls.md`.
+- [`internal/contracts/`](internal/contracts/) — `intent-apply.md` (M6 two-phase external apply), `source-adapters.md`, `workflow-runs.md` (M7 OpenClaw coding workflow backend substrate), `workflow-operator-controls.md` (M8 workflow run operator controls).
 - [`internal/smoke-tests.md`](internal/smoke-tests.md), [`internal/exclusions.md`](internal/exclusions.md), [`internal/regression-matrix.md`](internal/regression-matrix.md) (M7 closeout regression matrix).
 
 ## Current milestone
-Milestone 7 (OpenClaw Coding Workflow Backend) is the most recently closed milestone. See [`internal/roadmap.md`](internal/roadmap.md) for the full timeline. M7 made Momentum the durable run substrate for OpenClaw coding workflows; the `coding-workflow-pipeline` skill keeps composing executors (preflight → GNHF → postflight → no-mistakes → merge cleanup → Linear refresh) and the Discord / monitor cron UX.
+Milestone 8 (Workflow Run Operator Controls) is the active in-flight milestone (pinned by NGX-323). Milestone 7 (OpenClaw Coding Workflow Backend) remains the most recently closed milestone; the `doctor --json` marker still reports the M7 closeout string through every M8 implementation slice. See [`internal/roadmap.md`](internal/roadmap.md) for the full timeline. M7 made Momentum the durable run substrate for OpenClaw coding workflows; the `coding-workflow-pipeline` skill keeps composing executors (preflight → GNHF → postflight → no-mistakes → merge cleanup → Linear refresh) and the Discord / monitor cron UX. M8 layers operator-control CLI envelopes (`workflow run list`, `workflow run approve`, `workflow run update-step`, `workflow run monitor`), a per-run `recovery.md` plus `needs_manual_recovery` flag, and typed `runId` / `stepId` evidence linkage on top of that substrate without reshaping it. See [`internal/milestones/m8-workflow-run-operator-controls.md`](internal/milestones/m8-workflow-run-operator-controls.md) and [`internal/contracts/workflow-operator-controls.md`](internal/contracts/workflow-operator-controls.md). Live executor wrappers stay deferred past M8 closeout unless a future explicit decision gate changes that boundary.
 
 Shipped M7 capability (still in force, see [`internal/milestones/m7-openclaw-coding-workflow-backend.md`](internal/milestones/m7-openclaw-coding-workflow-backend.md) and [`internal/contracts/workflow-runs.md`](internal/contracts/workflow-runs.md)):
 

@@ -18,8 +18,12 @@ const REQUIRED_FILES = [
   "internal/milestones/m4-real-runners.md",
   "internal/milestones/m5-source-adapters.md",
   "internal/milestones/m6-external-apply.md",
+  "internal/milestones/m7-openclaw-coding-workflow-backend.md",
+  "internal/milestones/m8-workflow-run-operator-controls.md",
   "internal/contracts/intent-apply.md",
   "internal/contracts/source-adapters.md",
+  "internal/contracts/workflow-runs.md",
+  "internal/contracts/workflow-operator-controls.md",
 ] as const;
 
 describe("internal planning docs shape", () => {
