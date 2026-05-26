@@ -1425,9 +1425,9 @@ describe("public docs envelope shapes", () => {
     });
   });
 
-  it("pins the doctor milestone string to the M6 closeout marker (NGX-302)", () => {
+  it("no longer pins the doctor milestone string to the M6 closeout marker after M7 closeout (NGX-319)", () => {
     const cli = fs.readFileSync(path.join(repoRoot, "src", "cli.ts"), "utf8");
-    expect(cli).toContain(
+    expect(cli).not.toContain(
       "Milestone 6: policy-gated external apply (NGX-295, NGX-296, NGX-297, NGX-298, NGX-299, NGX-300, NGX-301, NGX-302) complete"
     );
     expect(cli).not.toContain(

@@ -10,21 +10,17 @@ function readDoc(relative: string): string {
   return fs.readFileSync(path.join(repoRoot, relative), "utf8");
 }
 
-describe("M7 active-marker contract (NGX-312)", () => {
+describe("M7 closeout contract (NGX-312, NGX-319)", () => {
   describe("internal/milestones/m7-openclaw-coding-workflow-backend.md", () => {
     const milestonePath = "internal/milestones/m7-openclaw-coding-workflow-backend.md";
     const m7 = readDoc(milestonePath);
 
-    it("pins M7 as active / in flight without claiming complete", () => {
-      expect(m7).toMatch(/Status:[^\n]*Active\s*\/\s*in flight/i);
-      const forbiddenClaims = [
-        /Milestone 7[^.\n]*\bis complete\b/i,
-        /\bM7\b[^.\n]*\bis complete\b/i,
-        /Status:[^.\n]*\bComplete\b/i,
-      ];
-      for (const re of forbiddenClaims) {
-        expect(m7, `M7 milestone doc should not claim complete via ${re}`).not.toMatch(re);
-      }
+    it("pins M7 as closed out at NGX-319 without leaving an in-flight status", () => {
+      expect(m7).toMatch(/Status:[^\n]*(Closed out|Complete)/i);
+      expect(m7).toMatch(/NGX-319/);
+      expect(m7, "M7 milestone doc should not still claim active / in flight").not.toMatch(
+        /Status:[^\n]*Active\s*\/\s*in flight/i
+      );
     });
 
     it("states Momentum is the durable run substrate for OpenClaw coding workflows, not a replacement for the executors", () => {
@@ -114,24 +110,36 @@ describe("M7 active-marker contract (NGX-312)", () => {
       }
     });
 
-    it("lists NGX-312 as M7-00 and does not claim later M7 implementation slices as done", () => {
-      expect(m7).toContain("NGX-312");
+    it("lists every M7 implementation issue (NGX-312 through NGX-319) as done", () => {
+      for (const issue of [
+        "NGX-312",
+        "NGX-313",
+        "NGX-314",
+        "NGX-315",
+        "NGX-316",
+        "NGX-317",
+        "NGX-318",
+        "NGX-319",
+      ]) {
+        expect(m7, `M7 milestone doc should list ${issue}`).toContain(issue);
+      }
       expect(m7).toMatch(/M7-00/);
-      expect(m7).not.toMatch(/NGX-3\d{2}[^\n]*\*\(done\)\*/);
+      expect(m7).toMatch(/M7-07/);
     });
 
-    it("documents the closeout marker policy (doctor string stays at M6 until M7 closeout)", () => {
-      expect(m7).toMatch(/doctor[^\n]*M6 closeout marker|M6 closeout marker|stays at the M6 closeout/i);
+    it("documents the closeout marker policy (doctor string is the M7 closeout marker)", () => {
+      expect(m7).toMatch(
+        /Milestone 7: openclaw coding workflow backend \(NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319\) complete/
+      );
     });
   });
 
   describe("internal/contracts/workflow-runs.md", () => {
     const contract = readDoc("internal/contracts/workflow-runs.md");
 
-    it("pins the contract as active, not complete", () => {
-      expect(contract).toMatch(/Status:[^\n]*M7 contract[^\n]*\(active\)/i);
-      expect(contract).not.toMatch(/Status:[^.\n]*\bComplete\b/i);
-      expect(contract).not.toMatch(/Milestone 7[^.\n]*\bis complete\b/i);
+    it("pins the contract as complete at NGX-319", () => {
+      expect(contract).toMatch(/Status:[^\n]*M7 contract[^\n]*complete/i);
+      expect(contract).toContain("NGX-319");
     });
 
     it("enumerates the durable substrate primitives", () => {
@@ -170,8 +178,10 @@ describe("M7 active-marker contract (NGX-312)", () => {
   describe("internal/roadmap.md", () => {
     const roadmap = readDoc("internal/roadmap.md");
 
-    it("lists M7 as active / planned in the timeline table", () => {
-      expect(roadmap).toMatch(/Milestone 7[^\n]*OpenClaw Coding Workflow Backend[^\n]*Active\s*\/\s*planned/i);
+    it("lists M7 as complete in the timeline table", () => {
+      expect(roadmap).toMatch(
+        /\|\s*Milestone 7\s*\|\s*OpenClaw Coding Workflow Backend\s*\|\s*Complete\s*\|/
+      );
     });
 
     it("links the M7 milestone and contract docs", () => {
@@ -179,22 +189,23 @@ describe("M7 active-marker contract (NGX-312)", () => {
       expect(roadmap).toContain("contracts/workflow-runs.md");
     });
 
-    it("keeps the doctor marker at the M6 closeout string while M7 is active", () => {
+    it("advances the doctor marker to the M7 closeout string", () => {
       expect(roadmap).toContain(
-        "Milestone 6: policy-gated external apply (NGX-295, NGX-296, NGX-297, NGX-298, NGX-299, NGX-300, NGX-301, NGX-302) complete"
+        "Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete"
       );
-      expect(roadmap).not.toMatch(/\| Milestone 7 \|[^|]*\|\s*Complete\s*\|/i);
-      expect(roadmap).not.toMatch(/Milestone 7[^\n]* is complete\b/i);
+      expect(roadmap, "roadmap should not still claim M6 is the doctor marker").not.toMatch(
+        /currently reads `Milestone 6: policy-gated external apply/
+      );
     });
   });
 
   describe("AGENTS.md", () => {
     const agents = readDoc("AGENTS.md");
 
-    it("names M7 as the active planning milestone", () => {
+    it("names M7 as the most recently closed milestone", () => {
       expect(agents).toMatch(/Milestone 7\b/);
       expect(agents).toMatch(/M7\b/);
-      expect(agents).toMatch(/active planning milestone/i);
+      expect(agents).toMatch(/most recently closed milestone/i);
     });
 
     it("points to the M7 internal milestone and contract docs", () => {
@@ -202,26 +213,22 @@ describe("M7 active-marker contract (NGX-312)", () => {
       expect(agents).toContain("internal/contracts/workflow-runs.md");
     });
 
-    it("does not claim M7 is complete", () => {
-      const forbiddenClaims = [
-        /Milestone 7[^.\n]*\bis complete\b/i,
-        /\bM7\b[^.\n]*\bis complete\b/i,
-        /Milestone 7 closeout marker/i,
-        /M7 closeout marker is/i,
-      ];
-      for (const re of forbiddenClaims) {
-        expect(agents, `AGENTS.md should not claim complete via ${re}`).not.toMatch(re);
-      }
+    it("records the M7 closeout marker as the doctor milestone string", () => {
+      expect(agents).toContain(
+        "Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete"
+      );
     });
   });
 
-  describe("doctor milestone marker (still M6 until M7 closeout)", () => {
-    it("the cli still reports the M6 closeout marker, not an M7 marker", () => {
+  describe("doctor milestone marker (M7 closeout)", () => {
+    it("the cli reports the M7 closeout marker, not the M6 marker", () => {
       const cli = fs.readFileSync(path.join(repoRoot, "src", "cli.ts"), "utf8");
       expect(cli).toContain(
-        "Milestone 6: policy-gated external apply (NGX-295, NGX-296, NGX-297, NGX-298, NGX-299, NGX-300, NGX-301, NGX-302) complete"
+        "Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete"
       );
-      expect(cli).not.toMatch(/Milestone 7[^\n]*complete/i);
+      expect(cli).not.toMatch(
+        /Milestone 6: policy-gated external apply \(NGX-295, NGX-296, NGX-297, NGX-298, NGX-299, NGX-300, NGX-301, NGX-302\) complete/
+      );
     });
   });
 

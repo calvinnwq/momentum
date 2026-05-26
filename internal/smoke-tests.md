@@ -71,9 +71,10 @@ mock Linear endpoints (no real `api.linear.app` calls — see
 [internal/contracts/intent-apply.md](contracts/intent-apply.md) for the test
 boundary that M6 inherits):
 
-- the `doctor --json` milestone marker reads the M6 closeout string
-  (NGX-302 flipped the marker forward from M5 — see
-  [internal/milestones/m6-external-apply.md](milestones/m6-external-apply.md)).
+- the `doctor --json` milestone marker reads the M7 closeout string
+  (NGX-302 flipped the marker forward from M5 to M6 and NGX-319 flipped it
+  again from M6 to M7 — see
+  [internal/milestones/m7-openclaw-coding-workflow-backend.md](milestones/m7-openclaw-coding-workflow-backend.md)).
 - workflow evidence ingestion through `momentum evidence ingest` and
   `evidence list` (see [docs/evidence-commands.md](../docs/evidence-commands.md)).
 - empty intent and project-status surfaces (`pendingUpdateIntents: []`,
@@ -105,8 +106,9 @@ request counts.
 
 Coverage:
 
-- the `doctor --json` milestone marker reads the M6 closeout string
-  (NGX-302 flipped the marker forward from M5).
+- the `doctor --json` milestone marker reads the M7 closeout string
+  (NGX-302 flipped the marker forward from M5 to M6, then NGX-319 flipped it
+  again from M6 to M7).
 - happy-path external apply: a pending `source_satisfied` intent is applied
   through `intent apply --external-apply` against the mock, producing an
   `applied` intent, a deterministic idempotency marker matching

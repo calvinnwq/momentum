@@ -1,6 +1,6 @@
 # Milestone 6: Policy-Gated External Apply
 
-**Status:** Complete (NGX-295 through NGX-302). The `doctor --json` milestone marker now reads the M6 closeout string `Milestone 6: policy-gated external apply (NGX-295, NGX-296, NGX-297, NGX-298, NGX-299, NGX-300, NGX-301, NGX-302) complete`.
+**Status:** Complete (NGX-295 through NGX-302). NGX-302 flipped the `doctor --json` milestone marker to the M6 closeout string `Milestone 6: policy-gated external apply (NGX-295, NGX-296, NGX-297, NGX-298, NGX-299, NGX-300, NGX-301, NGX-302) complete`; NGX-319 (M7-07) later flipped it forward to the M7 closeout marker. The M6 contract surfaces themselves remain wire-stable.
 
 Milestone 6 turns the durable `update_intents` rows from M5 into **policy-gated external writes against Linear**. M6 adds a real external write path through a single, explicitly-trusted adapter without weakening any M3/M4/M5 safety contract. External apply remains operator-mediated: nothing in M6 makes Momentum write to an external tracker automatically.
 
@@ -56,7 +56,7 @@ The following are explicitly out of scope for Milestone 6 and remain deferred re
 
 M6 did not break or rename any M3 / M4 / M5 surface. Specifically: the `daemon start` / `daemon stop` / `daemon status` / `recovery clear` CLI shapes, the `daemon_runs` / `repo_locks` / `goals.needs_manual_recovery` schema, stale-lease detection and startup-recovery, the manual-recovery `recovery.md` artifact + flag, the `RunnerAdapter` boundary and the `fake` / `trusted-shell` / `acp` runner profiles, the runtime `MOMENTUM.md` policy loader and its precedence rules, the SourceItem / source snapshot / reconciliation run / evidence record / update intent schemas from M5, and the `status` / `handoff` / `doctor` daemon, recovery, runner, policy, source, evidence, and intent fields all remain wire-stable.
 
-NGX-302 flipped the `doctor --json` milestone string to the M6 closeout marker `Milestone 6: policy-gated external apply (NGX-295, NGX-296, NGX-297, NGX-298, NGX-299, NGX-300, NGX-301, NGX-302) complete`. NGX-295..NGX-301 left the M5 closeout marker in place.
+NGX-302 flipped the `doctor --json` milestone string to the M6 closeout marker `Milestone 6: policy-gated external apply (NGX-295, NGX-296, NGX-297, NGX-298, NGX-299, NGX-300, NGX-301, NGX-302) complete`. NGX-295..NGX-301 left the M5 closeout marker in place. NGX-319 (M7-07) later flipped the doctor marker forward to the M7 closeout string.
 
 ## Post-M6 deferrals
 
