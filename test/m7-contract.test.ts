@@ -240,4 +240,79 @@ describe("M7 active-marker contract (NGX-312)", () => {
       expect(docsIndex).not.toMatch(/workflow-runs\.md/);
     });
   });
+
+  describe("internal/regression-matrix.md (M7 closeout, NGX-319)", () => {
+    const matrixPath = "internal/regression-matrix.md";
+
+    it("exists as an internal-only regression matrix doc", () => {
+      const full = path.join(repoRoot, matrixPath);
+      expect(fs.existsSync(full), `${matrixPath} should exist`).toBe(true);
+      const body = fs.readFileSync(full, "utf8");
+      expect(body.trim().length, `${matrixPath} should not be empty`).toBeGreaterThan(0);
+    });
+
+    it("covers all five old monitor failure modes mandated by NGX-319", () => {
+      const matrix = readDoc(matrixPath);
+      for (const heading of [
+        "Stale monitor state",
+        "Lost managed task with completed ledger",
+        "Terminal external evidence winning over local drift",
+        "Blocked stale step",
+        "No ghost active run",
+      ]) {
+        expect(
+          matrix,
+          `${matrixPath} should include a row for failure mode "${heading}"`
+        ).toContain(heading);
+      }
+    });
+
+    it("names every monitor-reducer recovery code so each row pins a substrate guard", () => {
+      const matrix = readDoc(matrixPath);
+      for (const recoveryCode of [
+        "stale_running_step",
+        "ghost_active_no_lease",
+        "manual_recovery_lease",
+        "monitor_drift_stale",
+        "failed_required_step",
+      ]) {
+        expect(
+          matrix,
+          `${matrixPath} should reference the ${recoveryCode} recovery code`
+        ).toContain(recoveryCode);
+      }
+    });
+
+    it("points at the M7 milestone doc, the workflow-runs contract, and the smoke coverage map", () => {
+      const matrix = readDoc(matrixPath);
+      for (const link of [
+        "milestones/m7-openclaw-coding-workflow-backend.md",
+        "contracts/workflow-runs.md",
+        "smoke-tests.md",
+      ]) {
+        expect(matrix, `${matrixPath} should link to ${link}`).toContain(link);
+      }
+    });
+
+    it("references the substrate modules and tests that own each invariant", () => {
+      const matrix = readDoc(matrixPath);
+      for (const owner of [
+        "src/workflow-monitor-state.ts",
+        "src/workflow-run-reducer.ts",
+        "src/workflow-run-import.ts",
+        "src/workflow-status.ts",
+        "src/workflow-handoff.ts",
+        "test/workflow-monitor-state.test.ts",
+        "test/smoke.test.ts",
+      ]) {
+        expect(matrix, `${matrixPath} should cite ${owner} as evidence`).toContain(owner);
+      }
+    });
+
+    it("names the NGX-318 end-to-end smoke as evidence for the no-ghost-active-run row", () => {
+      const matrix = readDoc(matrixPath);
+      expect(matrix).toContain("NGX-318");
+      expect(matrix).toMatch(/no ghost active run/i);
+    });
+  });
 });
