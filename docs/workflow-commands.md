@@ -443,7 +443,7 @@ All filters are optional and compose: passing multiple filters narrows the resul
   - `imported` → runs whose `source == "agent-workflow"` (composes with `--state` without narrowing states further)
 - `--approval-boundary <boundary>` filters by the exact `approval_boundary` value on the run row.
 - `--repo <path>` filters by exact `repo_path` match.
-- `--issue-scope <identifier>` filters by substring match against `issue_scope_json` (LIKE, case-sensitive).
+- `--issue-scope <identifier>` filters by substring match against `issue_scope_json` (LIKE, case-insensitive for ASCII letters per SQLite default).
 - `--updated-since <ms>` filters to runs with `updated_at >= <ms>` (epoch milliseconds).
 - `--updated-until <ms>` filters to runs with `updated_at <= <ms>` (epoch milliseconds).
 - `--limit <n>` caps the number of returned runs (after filtering). `0` returns all matching runs.

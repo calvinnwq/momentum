@@ -2549,7 +2549,7 @@ function emitWorkflowRunList(
   const lines: string[] = [];
   lines.push(`Workflow runs: ${summaries.length}`);
   lines.push(`State: ${parsed.state ?? "(any)"}`);
-  lines.push(`Filter: ${parsed.filter ?? "(none)"}`);
+  lines.push(`Filter: ${parsed.filter ?? "(any)"}`);
   lines.push(`Approval boundary: ${parsed.approvalBoundary ?? "(any)"}`);
   lines.push(`Repo: ${parsed.repo ?? "(any)"}`);
   lines.push(`Issue scope: ${parsed.issueScope ?? "(any)"}`);
