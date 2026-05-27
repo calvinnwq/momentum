@@ -20,8 +20,8 @@ Two trees:
 Quick map of `internal/`:
 
 - [`internal/roadmap.md`](internal/roadmap.md) — milestone timeline and current ordering.
-- [`internal/milestones/`](internal/milestones/) — `m3-operational-safety.md`, `m4-real-runners.md`, `m5-source-adapters.md`, `m6-external-apply.md`, `m7-openclaw-coding-workflow-backend.md`, `m8-workflow-run-operator-controls.md`.
-- [`internal/contracts/`](internal/contracts/) — `intent-apply.md` (M6 two-phase external apply), `source-adapters.md`, `workflow-runs.md` (M7 OpenClaw coding workflow backend substrate), `workflow-operator-controls.md` (M8 workflow run operator controls).
+- [`internal/milestones/`](internal/milestones/) — `m3-operational-safety.md`, `m4-real-runners.md`, `m5-source-adapters.md`, `m6-external-apply.md`, `m7-openclaw-coding-workflow-backend.md`, `m8-workflow-run-operator-controls.md`, `m9-live-workflow-execution.md` (draft / candidate).
+- [`internal/contracts/`](internal/contracts/) — `intent-apply.md` (M6 two-phase external apply), `source-adapters.md`, `workflow-runs.md` (M7 OpenClaw coding workflow backend substrate), `workflow-operator-controls.md` (M8 workflow run operator controls), `live-workflow-execution.md` (M9 draft live execution contract).
 - [`internal/smoke-tests.md`](internal/smoke-tests.md), [`internal/exclusions.md`](internal/exclusions.md), [`internal/regression-matrix.md`](internal/regression-matrix.md) (M7 closeout regression matrix).
 
 ## Current milestone
