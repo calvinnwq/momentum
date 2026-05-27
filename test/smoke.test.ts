@@ -292,6 +292,7 @@ describe("Milestone 1 end-to-end smoke", () => {
         "momentum workflow import --path <run-dir> [--data-dir <path>] [--json]",
         "momentum workflow status [<run-id>] [--state <state>] [--filter <active|blocked|completed|imported>] [--limit <n>] [--data-dir <path>] [--json]",
         "momentum workflow handoff <run-id> [--data-dir <path>] [--json]",
+        "momentum workflow run list [--state <state>] [--filter <active|blocked|completed|imported>] [--approval-boundary <boundary>] [--repo <path>] [--issue-scope <identifier>] [--updated-since <ms>] [--updated-until <ms>] [--limit <n>] [--data-dir <path>] [--json]",
         "momentum intent list [--status <status>] [--adapter <kind>] [--type <intent-type>] [--goal <goal-id>] [--source-item <id>] [--evidence-record <id>] [--limit <n>] [--data-dir <path>] [--json]",
         "momentum intent get <intent-id> [--data-dir <path>] [--json]",
         "momentum intent apply <intent-id> --reason <text> [--repo <path>] [--external-apply] [--data-dir <path>] [--json]",

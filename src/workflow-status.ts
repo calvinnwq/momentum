@@ -112,6 +112,11 @@ export type LoadWorkflowRunSummariesOptions = {
   filter?: WorkflowStatusFilterKey;
   state?: WorkflowRunState;
   limit?: number;
+  approvalBoundary?: string;
+  repoPath?: string;
+  issueScope?: string;
+  updatedSince?: number;
+  updatedUntil?: number;
   now?: number;
   graceMs?: number;
   checkpointStaleMs?: number;
@@ -171,11 +176,36 @@ export function listWorkflowRunSummaries(
 ): WorkflowRunSummary[] {
   const states = resolveStateFilter(options);
   if (states !== null && states.length === 0) return [];
-  const params: string[] = [];
-  let query =
-    "SELECT * FROM workflow_runs" +
-    (states === null ? "" : ` WHERE state IN (${states.map(() => "?").join(", ")})`);
-  if (states !== null) params.push(...states);
+  const whereClauses: string[] = [];
+  const params: Array<string | number> = [];
+  if (states !== null) {
+    whereClauses.push(`state IN (${states.map(() => "?").join(", ")})`);
+    params.push(...states);
+  }
+  if (options.approvalBoundary !== undefined) {
+    whereClauses.push("approval_boundary = ?");
+    params.push(options.approvalBoundary);
+  }
+  if (options.repoPath !== undefined) {
+    whereClauses.push("repo_path = ?");
+    params.push(options.repoPath);
+  }
+  if (options.issueScope !== undefined) {
+    whereClauses.push("issue_scope_json LIKE ? ESCAPE '\\'");
+    params.push(`%${escapeLike(options.issueScope)}%`);
+  }
+  if (options.updatedSince !== undefined) {
+    whereClauses.push("updated_at >= ?");
+    params.push(options.updatedSince);
+  }
+  if (options.updatedUntil !== undefined) {
+    whereClauses.push("updated_at <= ?");
+    params.push(options.updatedUntil);
+  }
+  let query = "SELECT * FROM workflow_runs";
+  if (whereClauses.length > 0) {
+    query += ` WHERE ${whereClauses.join(" AND ")}`;
+  }
   query += " ORDER BY updated_at DESC, id ASC";
   if (options.limit !== undefined && options.limit >= 0) {
     query += ` LIMIT ${Math.floor(options.limit)}`;
@@ -317,6 +347,10 @@ function listEvidenceLinksForRun(
     occurredAt: row.occurred_at,
     summary: row.summary
   }));
+}
+
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, (ch) => `\\${ch}`);
 }
 
 function artifactRunDir(artifactPath: string): string | null {

@@ -1,12 +1,13 @@
 # Workflow commands
 
-Operator-facing CLI envelopes for the `workflow import`, `workflow status`, and `workflow handoff` commands.
+Operator-facing CLI envelopes for the `workflow import`, `workflow status`, `workflow handoff`, and `workflow run list` commands.
 
 - `workflow import` reads local `.agent-workflows/<run-id>/` directories and persists normalized rows into the `workflow_runs`, `workflow_steps`, and `workflow_approvals` tables.
 - `workflow status` is a read-only surface that lists workflow runs (with state / filter selectors) or returns the full detail of a single run.
 - `workflow handoff` is a read-only surface that emits a machine-readable next-action envelope for one run.
+- `workflow run list` is a read-only filterable query surface over the durable `workflow_runs` table, with additional filter dimensions not available in `workflow status` list mode.
 
-`workflow status` and `workflow handoff` are read-only: they never write SQLite or files.
+`workflow status`, `workflow handoff`, and `workflow run list` are read-only: they never write SQLite or files.
 
 See also:
 
@@ -418,6 +419,116 @@ Generated at (epoch ms): 1730000600000
 
 Workflow run: cwfp-abc123
 ... (same shape as workflow status detail)
+```
+
+Exit code 0 on success, 1 on failure, 2 on usage error.
+
+## `workflow run list`
+
+```text
+momentum workflow run list [--state <state>] [--filter <active|blocked|completed|imported>] [--approval-boundary <boundary>] [--repo <path>] [--issue-scope <identifier>] [--updated-since <ms>] [--updated-until <ms>] [--limit <n>] [--data-dir <path>] [--json]
+```
+
+Read-only filterable query over the durable `workflow_runs` table. Returns run summaries ordered by `updated_at DESC`. The identifiers in each summary row are sufficient to pass directly into `workflow status <run-id>` or `workflow handoff <run-id>` without re-derivation.
+
+All filters are optional and compose: passing multiple filters narrows the result set by AND. An empty result set (no matching runs) is a successful response, not a refusal.
+
+### Selectors
+
+- `--state <state>` filters by literal `workflow_runs.state`. Allowed values: `pending`, `approved`, `running`, `succeeded`, `failed`, `blocked`, `canceled`.
+- `--filter <key>` groups runs into operator-friendly buckets (same buckets as `workflow status`):
+  - `active` → `pending`, `approved`, `running`
+  - `blocked` → `blocked`
+  - `completed` → `succeeded`, `failed`, `canceled`
+  - `imported` → runs whose `source == "agent-workflow"` (composes with `--state` without narrowing states further)
+- `--approval-boundary <boundary>` filters by the exact `approval_boundary` value on the run row.
+- `--repo <path>` filters by exact `repo_path` match.
+- `--issue-scope <identifier>` filters by substring match against `issue_scope_json` (LIKE, case-insensitive for ASCII letters per SQLite default).
+- `--updated-since <ms>` filters to runs with `updated_at >= <ms>` (epoch milliseconds).
+- `--updated-until <ms>` filters to runs with `updated_at <= <ms>` (epoch milliseconds).
+- `--limit <n>` caps the number of returned runs (after filtering).
+
+### JSON envelope
+
+```json
+{
+  "ok": true,
+  "command": "workflow run list",
+  "dataDir": "/path/to/data",
+  "state": null,
+  "filter": "active",
+  "approvalBoundary": null,
+  "repoPath": null,
+  "issueScope": null,
+  "updatedSince": null,
+  "updatedUntil": null,
+  "count": 1,
+  "runs": [
+    {
+      "run": {
+        "runId": "cwfp-abc123",
+        "state": "running",
+        "source": "agent-workflow",
+        "approvalBoundary": "through-merge-cleanup",
+        "repoPath": "/path/to/repo",
+        "objective": "land workflow status CLI",
+        "issueScope": {},
+        "needsManualRecovery": false,
+        "startedAt": 1730000000000,
+        "finishedAt": null,
+        "createdAt": 1730000000000,
+        "updatedAt": 1730000600000
+      },
+      "counts": {
+        "steps": 5,
+        "stepsByState": {
+          "pending": 1,
+          "approved": 0,
+          "running": 1,
+          "succeeded": 3,
+          "failed": 0,
+          "skipped": 0,
+          "blocked": 0,
+          "canceled": 0
+        },
+        "approvals": 1,
+        "leases": 1
+      },
+      "monitor": {
+        "runState": "running",
+        "terminal": false,
+        "blocked": false,
+        "nextAction": { "code": "resume_running" }
+      }
+    }
+  ]
+}
+```
+
+Top-level filter fields (`state`, `filter`, `approvalBoundary`, `repoPath`, `issueScope`, `updatedSince`, `updatedUntil`) echo the active filters, or `null` when not supplied. `count` is the number of matched runs. Each entry in `runs` uses the same `{ run, counts, monitor }` shape as `workflow status` list mode.
+
+### Error codes
+
+| Code | Meaning |
+|------|---------|
+| `data_dir_failed` | Data directory resolution failed. |
+| `invalid_state` | `--state` is not one of the canonical workflow run states. |
+| `invalid_filter` | `--filter` is not one of `active`, `blocked`, `completed`, `imported`. |
+| `invalid_limit` | `--limit` is not a non-negative integer. (Note: the flag parser validates `--limit` before the command runs, so invalid limits produce a usage error / exit code 2 rather than this structured refusal.) |
+
+### Text output
+
+```text
+Workflow runs: 1
+State: (any)
+Filter: active
+Approval boundary: (any)
+Repo: (any)
+Issue scope: (any)
+Updated since: (any)
+Updated until: (any)
+Data dir: /path/to/data
+- cwfp-abc123 [running] repo=/path/to/repo steps=5 approvals=1 leases=1 next=resume_running
 ```
 
 Exit code 0 on success, 1 on failure, 2 on usage error.
