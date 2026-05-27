@@ -257,6 +257,10 @@ type ParsedFlags = {
   evidenceRecord?: string;
   state?: string;
   filter?: string;
+  approvalBoundary?: string;
+  issueScope?: string;
+  updatedSince?: number;
+  updatedUntil?: number;
   error?: string;
 };
 
@@ -281,6 +285,7 @@ const COMMANDS = [
   "momentum workflow import --path <run-dir> [--data-dir <path>] [--json]",
   "momentum workflow status [<run-id>] [--state <state>] [--filter <active|blocked|completed|imported>] [--limit <n>] [--data-dir <path>] [--json]",
   "momentum workflow handoff <run-id> [--data-dir <path>] [--json]",
+  "momentum workflow run list [--state <state>] [--filter <active|blocked|completed|imported>] [--approval-boundary <boundary>] [--repo <path>] [--issue-scope <identifier>] [--updated-since <ms>] [--updated-until <ms>] [--limit <n>] [--data-dir <path>] [--json]",
   "momentum intent list [--status <status>] [--adapter <kind>] [--type <intent-type>] [--goal <goal-id>] [--source-item <id>] [--evidence-record <id>] [--limit <n>] [--data-dir <path>] [--json]",
   "momentum intent get <intent-id> [--data-dir <path>] [--json]",
   "momentum intent apply <intent-id> --reason <text> [--repo <path>] [--external-apply] [--data-dir <path>] [--json]",
@@ -2029,7 +2034,7 @@ function workflow(parsed: ParsedFlags, io: CliIo): number {
   const subcommand = parsed.args[1];
   if (!subcommand) {
     return usageError(
-      "Missing required subcommand for workflow. Expected: import, status, handoff.",
+      "Missing required subcommand for workflow. Expected: import, status, handoff, run.",
       parsed,
       io
     );
@@ -2043,7 +2048,29 @@ function workflow(parsed: ParsedFlags, io: CliIo): number {
   if (subcommand === "handoff") {
     return workflowHandoff(parsed, io);
   }
+  if (subcommand === "run") {
+    return workflowRun(parsed, io);
+  }
   return usageError(`Unknown workflow subcommand: ${subcommand}`, parsed, io);
+}
+
+function workflowRun(parsed: ParsedFlags, io: CliIo): number {
+  const subcommand = parsed.args[2];
+  if (!subcommand) {
+    return usageError(
+      "Missing required subcommand for workflow run. Expected: list.",
+      parsed,
+      io
+    );
+  }
+  if (subcommand === "list") {
+    return workflowRunList(parsed, io);
+  }
+  return usageError(
+    `Unknown workflow run subcommand: ${subcommand}`,
+    parsed,
+    io
+  );
 }
 
 function workflowImport(parsed: ParsedFlags, io: CliIo): number {
@@ -2380,6 +2407,192 @@ function emitWorkflowStatusFailure(
   };
   if (failure.dataDir !== undefined) payload["dataDir"] = failure.dataDir;
   if (failure.runId !== undefined) payload["runId"] = failure.runId;
+
+  if (parsed.json) {
+    writeJson(io.stderr, payload);
+    return 1;
+  }
+  write(io.stderr, `${failure.message}\n`);
+  return 1;
+}
+
+type WorkflowRunListFailureCode =
+  | "data_dir_failed"
+  | "invalid_state"
+  | "invalid_filter"
+  | "invalid_limit";
+
+type WorkflowRunListFailure = {
+  command: "workflow run list";
+  code: WorkflowRunListFailureCode;
+  message: string;
+  dataDir?: string;
+};
+
+function workflowRunList(parsed: ParsedFlags, io: CliIo): number {
+  if (parsed.args.length > 3) {
+    return usageError(
+      `Unexpected argument for workflow run list: ${parsed.args[3]}`,
+      parsed,
+      io
+    );
+  }
+
+  if (
+    parsed.state !== undefined &&
+    !(WORKFLOW_RUN_STATES as readonly string[]).includes(parsed.state)
+  ) {
+    return emitWorkflowRunListFailure(parsed, io, {
+      command: "workflow run list",
+      code: "invalid_state",
+      message: `Invalid --state: ${parsed.state}. Expected one of: ${WORKFLOW_RUN_STATES.join(", ")}.`
+    });
+  }
+  if (
+    parsed.filter !== undefined &&
+    !(WORKFLOW_STATUS_FILTER_KEYS as readonly string[]).includes(parsed.filter)
+  ) {
+    return emitWorkflowRunListFailure(parsed, io, {
+      command: "workflow run list",
+      code: "invalid_filter",
+      message: `Invalid --filter: ${parsed.filter}. Expected one of: ${WORKFLOW_STATUS_FILTER_KEYS.join(", ")}.`
+    });
+  }
+  if (
+    parsed.limit !== undefined &&
+    (parsed.limit < 0 || !Number.isInteger(parsed.limit))
+  ) {
+    return emitWorkflowRunListFailure(parsed, io, {
+      command: "workflow run list",
+      code: "invalid_limit",
+      message: `Invalid --limit: ${parsed.limit}. Must be a non-negative integer.`
+    });
+  }
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return emitWorkflowRunListFailure(parsed, io, {
+      command: "workflow run list",
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err)
+    });
+  }
+
+  const db = openDb(dataDir);
+  let summaries: WorkflowRunSummary[];
+  try {
+    const options: Parameters<typeof listWorkflowRunSummaries>[1] = {};
+    if (parsed.state !== undefined) {
+      options.state = parsed.state as WorkflowRunState;
+    }
+    if (parsed.filter !== undefined) {
+      options.filter = parsed.filter as WorkflowStatusFilterKey;
+    }
+    if (parsed.limit !== undefined) {
+      options.limit = parsed.limit;
+    }
+    if (parsed.approvalBoundary !== undefined) {
+      options.approvalBoundary = parsed.approvalBoundary;
+    }
+    if (parsed.repo !== undefined) {
+      options.repoPath = parsed.repo;
+    }
+    if (parsed.issueScope !== undefined) {
+      options.issueScope = parsed.issueScope;
+    }
+    if (parsed.updatedSince !== undefined) {
+      options.updatedSince = parsed.updatedSince;
+    }
+    if (parsed.updatedUntil !== undefined) {
+      options.updatedUntil = parsed.updatedUntil;
+    }
+    summaries = listWorkflowRunSummaries(db, options);
+  } finally {
+    db.close();
+  }
+
+  return emitWorkflowRunList(parsed, io, dataDir, summaries);
+}
+
+function emitWorkflowRunList(
+  parsed: ParsedFlags,
+  io: CliIo,
+  dataDir: string,
+  summaries: WorkflowRunSummary[]
+): number {
+  const payload = {
+    ok: true,
+    command: "workflow run list",
+    dataDir,
+    state: parsed.state ?? null,
+    filter: parsed.filter ?? null,
+    approvalBoundary: parsed.approvalBoundary ?? null,
+    repoPath: parsed.repo ?? null,
+    issueScope: parsed.issueScope ?? null,
+    updatedSince: parsed.updatedSince ?? null,
+    updatedUntil: parsed.updatedUntil ?? null,
+    count: summaries.length,
+    runs: summaries.map(summaryToJsonShape)
+  };
+
+  if (parsed.json) {
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  const lines: string[] = [];
+  lines.push(`Workflow runs: ${summaries.length}`);
+  lines.push(`State: ${parsed.state ?? "(any)"}`);
+  lines.push(`Filter: ${parsed.filter ?? "(none)"}`);
+  lines.push(`Approval boundary: ${parsed.approvalBoundary ?? "(any)"}`);
+  lines.push(`Repo: ${parsed.repo ?? "(any)"}`);
+  lines.push(`Issue scope: ${parsed.issueScope ?? "(any)"}`);
+  lines.push(
+    `Updated since: ${parsed.updatedSince === undefined ? "(any)" : String(parsed.updatedSince)}`
+  );
+  lines.push(
+    `Updated until: ${parsed.updatedUntil === undefined ? "(any)" : String(parsed.updatedUntil)}`
+  );
+  lines.push(`Data dir: ${dataDir}`);
+  if (summaries.length === 0) {
+    lines.push("- (no matching runs)");
+  } else {
+    for (const summary of summaries) {
+      const repoSegment = `repo=${summary.run.repoPath ?? "(none)"}`;
+      lines.push(
+        `- ${summary.run.runId} [${summary.run.state}] ${repoSegment}` +
+          ` steps=${summary.counts.steps}` +
+          ` approvals=${summary.counts.approvals} leases=${summary.counts.leases}` +
+          ` next=${summary.monitor.nextAction.code}` +
+          (summary.monitor.recovery
+            ? ` recovery=${summary.monitor.recovery.code}`
+            : "")
+      );
+    }
+  }
+  lines.push("");
+  write(io.stdout, lines.join("\n"));
+  return 0;
+}
+
+function emitWorkflowRunListFailure(
+  parsed: ParsedFlags,
+  io: CliIo,
+  failure: WorkflowRunListFailure
+): number {
+  const payload: Record<string, unknown> = {
+    ok: false,
+    command: failure.command,
+    code: failure.code,
+    message: failure.message
+  };
+  if (failure.dataDir !== undefined) payload["dataDir"] = failure.dataDir;
 
   if (parsed.json) {
     writeJson(io.stderr, payload);
@@ -6061,6 +6274,10 @@ function parseFlags(argv: string[]): ParsedFlags {
   let evidenceRecord: string | undefined;
   let stateFlag: string | undefined;
   let filterFlag: string | undefined;
+  let approvalBoundaryFlag: string | undefined;
+  let issueScopeFlag: string | undefined;
+  let updatedSinceFlag: number | undefined;
+  let updatedUntilFlag: number | undefined;
   let error: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -6357,6 +6574,64 @@ function parseFlags(argv: string[]): ParsedFlags {
       continue;
     }
 
+    if (arg === "--approval-boundary") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --approval-boundary.";
+      } else {
+        approvalBoundaryFlag = value;
+        index += 1;
+      }
+      continue;
+    }
+
+    if (arg === "--issue-scope") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --issue-scope.";
+      } else {
+        issueScopeFlag = value;
+        index += 1;
+      }
+      continue;
+    }
+
+    if (arg === "--updated-since") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --updated-since.";
+      } else {
+        const parsedValue = /^\d+$/.test(value)
+          ? Number.parseInt(value, 10)
+          : NaN;
+        if (!Number.isInteger(parsedValue) || parsedValue < 0) {
+          error ??= `Invalid value for --updated-since: ${value}`;
+        } else {
+          updatedSinceFlag = parsedValue;
+        }
+        index += 1;
+      }
+      continue;
+    }
+
+    if (arg === "--updated-until") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --updated-until.";
+      } else {
+        const parsedValue = /^\d+$/.test(value)
+          ? Number.parseInt(value, 10)
+          : NaN;
+        if (!Number.isInteger(parsedValue) || parsedValue < 0) {
+          error ??= `Invalid value for --updated-until: ${value}`;
+        } else {
+          updatedUntilFlag = parsedValue;
+        }
+        index += 1;
+      }
+      continue;
+    }
+
     if (arg === "--stale-threshold-hours") {
       const value = readFlagValue(argv, index);
       if (value === undefined) {
@@ -6501,6 +6776,12 @@ function parseFlags(argv: string[]): ParsedFlags {
   if (evidenceRecord !== undefined) parsed.evidenceRecord = evidenceRecord;
   if (stateFlag !== undefined) parsed.state = stateFlag;
   if (filterFlag !== undefined) parsed.filter = filterFlag;
+  if (approvalBoundaryFlag !== undefined) {
+    parsed.approvalBoundary = approvalBoundaryFlag;
+  }
+  if (issueScopeFlag !== undefined) parsed.issueScope = issueScopeFlag;
+  if (updatedSinceFlag !== undefined) parsed.updatedSince = updatedSinceFlag;
+  if (updatedUntilFlag !== undefined) parsed.updatedUntil = updatedUntilFlag;
   if (error !== undefined) parsed.error = error;
 
   return parsed;
