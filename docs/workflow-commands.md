@@ -446,7 +446,7 @@ All filters are optional and compose: passing multiple filters narrows the resul
 - `--issue-scope <identifier>` filters by substring match against `issue_scope_json` (LIKE, case-insensitive for ASCII letters per SQLite default).
 - `--updated-since <ms>` filters to runs with `updated_at >= <ms>` (epoch milliseconds).
 - `--updated-until <ms>` filters to runs with `updated_at <= <ms>` (epoch milliseconds).
-- `--limit <n>` caps the number of returned runs (after filtering). `0` returns all matching runs.
+- `--limit <n>` caps the number of returned runs (after filtering).
 
 ### JSON envelope
 
@@ -496,8 +496,8 @@ All filters are optional and compose: passing multiple filters narrows the resul
       },
       "monitor": {
         "runState": "running",
-        "isTerminal": false,
-        "isBlocked": false,
+        "terminal": false,
+        "blocked": false,
         "nextAction": { "code": "resume_running" }
       }
     }
