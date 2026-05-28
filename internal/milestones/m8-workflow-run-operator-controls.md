@@ -68,13 +68,13 @@ The M3 goal-scoped recovery surfaces (`recovery clear <goal-id>`, `goals.needs_m
 
 ## Typed evidence linkage (NGX-329)
 
-M8 adds optional, additive `runId` / `stepId` linkage to the existing M5 `evidence_records` table (either as nullable typed columns or a sibling join row). The M5 evidence ingest CLI (`evidence ingest --path <file-or-dir>`), the `evidence_format_unknown` / `evidence_format_invalid` diagnostic codes, the `ingestKey` idempotency semantics, the `goal_not_found` / `source_item_not_found` pre-checks, and every existing evidence row stay wire-stable. M8 only:
+M8 adds optional, additive `runId` / `stepId` linkage to the existing M5 `evidence_records` table through nullable `run_id` / `step_id` columns and the `idx_evidence_records_run_step` lookup index. The M5 evidence ingest CLI (`evidence ingest --path <file-or-dir>`), the `evidence_format_unknown` / `evidence_format_invalid` diagnostic codes, the `ingestKey` idempotency semantics, the `goal_not_found` / `source_item_not_found` pre-checks, and every existing evidence row stay wire-stable. M8 only:
 
-- Attaches workflow artifacts to owning `runId` / `stepId` when ingest runs against `.agent-workflows/<runId>/`.
-- Surfaces typed evidence pointers through `workflow status` / `workflow handoff` / `workflow run list` / `workflow run monitor` without requiring path-only inference.
-- Refuses or remains unlinked with a stable diagnostic when a referenced `runId` / `stepId` is unknown, per the existing ingest contract.
+- Attaches workflow artifacts to the owning `runId` when ingest runs against `.agent-workflows/<runId>/`; ledger step events also attach `stepId`, while plan / approval artifacts remain run-scoped with null `stepId`.
+- Surfaces typed evidence pointers through `workflow status` / `workflow handoff` / `workflow run list` / `workflow run monitor` without requiring path-only inference for newly ingested workflow evidence.
+- Preserves idempotent replay: existing rows can gain missing `runId` / `stepId` linkage but never have non-null linkage overwritten.
 
-The migration is additive and backwards-compatible. Non-workflow evidence rows continue to carry null linkage.
+The migration is additive and backwards-compatible. Existing and non-workflow evidence rows continue to carry null linkage, and legacy run evidence can still surface through artifact-path fallback where supported.
 
 ## Compatibility with existing artifacts and substrates
 
