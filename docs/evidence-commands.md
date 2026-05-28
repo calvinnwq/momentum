@@ -32,7 +32,7 @@ Success output includes:
 - `goalId`
 - `sourceItemId`
 - `counts` — sub-object with `observed`, `created`, `skipped`, `diagnostics`, and `errors`
-- `created` — array of newly inserted record summaries
+- `created` — array of newly inserted record summaries (each entry includes `runId` and `stepId` when the ingested artifact came from a workflow directory)
 - `skipped` — array of skipped (already-present) record summaries
 - `diagnostics` — array of non-fatal format diagnostics
 - `errors` — array of fatal per-file errors
@@ -88,13 +88,15 @@ Each `records` element exposes the full durable shape:
 - `metadata`
 - `goalId`
 - `sourceItemId`
+- `runId` — owning workflow run ID when ingested from a `.agent-workflows/<runId>/` directory; `null` for non-workflow evidence.
+- `stepId` — owning step ID for ledger step events; `null` for run-scoped artifacts (plan, approval) and non-workflow evidence.
 - `ingestKey`
 - `createdAt`
 - `updatedAt`
 
 ### Text output
 
-When `--json` is omitted, list prints the active filters and one summary line per record (source, type, `occurredAt`, summary preview, and the linked goal / source-item when present).
+When `--json` is omitted, list prints the active filters and one summary line per record (source, type, `occurredAt`, summary preview, the linked goal / source-item when present, and `run=<runId>` / `step=<stepId>` annotations when the record carries typed workflow linkage).
 
 ## Operator notes
 
