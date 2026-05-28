@@ -292,6 +292,7 @@ describe("Milestone 1 end-to-end smoke", () => {
         "momentum workflow import --path <run-dir> [--data-dir <path>] [--json]",
         "momentum workflow status [<run-id>] [--state <state>] [--filter <active|blocked|completed|imported>] [--limit <n>] [--data-dir <path>] [--json]",
         "momentum workflow handoff <run-id> [--data-dir <path>] [--json]",
+        "momentum workflow run approve <run-id> --approval-boundary <boundary> --phrase <text> [--actor <name>] [--artifact-path <path>] [--artifact-digest <sha256>] [--data-dir <path>] [--json]",
         "momentum workflow run list [--state <state>] [--filter <active|blocked|completed|imported>] [--approval-boundary <boundary>] [--repo <path>] [--issue-scope <identifier>] [--updated-since <ms>] [--updated-until <ms>] [--limit <n>] [--data-dir <path>] [--json]",
         "momentum intent list [--status <status>] [--adapter <kind>] [--type <intent-type>] [--goal <goal-id>] [--source-item <id>] [--evidence-record <id>] [--limit <n>] [--data-dir <path>] [--json]",
         "momentum intent get <intent-id> [--data-dir <path>] [--json]",
@@ -8831,7 +8832,7 @@ describe("Milestone 7 end-to-end coding workflow smoke (NGX-318)", () => {
       expect(initialImport).toMatchObject({
         ok: true,
         runId,
-        state: "pending",
+        state: "approved",
         approvalBoundary: "through-merge-cleanup"
       });
       expect(

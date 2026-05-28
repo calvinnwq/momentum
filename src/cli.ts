@@ -1,3 +1,5 @@
+import crypto from "node:crypto";
+import fs from "node:fs";
 import os from "node:os";
 import process from "node:process";
 import { isUniqueViolation, openDb, type MomentumDb } from "./db.js";
@@ -121,14 +123,19 @@ import {
   type WorkflowStepRow
 } from "./workflow-status.js";
 import {
+  highestWorkflowApprovalBoundary,
+  isWorkflowApprovalBoundary,
+  isTerminalRunState,
+  WORKFLOW_RUN_STATES,
+  workflowStepKindsForApprovalBoundary,
+  type WorkflowRunState,
+  type WorkflowApprovalBoundary
+} from "./workflow-run-reducer.js";
+import {
   WORKFLOW_HANDOFF_SCHEMA_VERSION,
   loadWorkflowHandoff,
   type WorkflowHandoffEnvelope
 } from "./workflow-handoff.js";
-import {
-  WORKFLOW_RUN_STATES,
-  type WorkflowRunState
-} from "./workflow-run-reducer.js";
 import type { WorkflowMonitorState } from "./workflow-monitor-state.js";
 import {
   DEFAULT_RECONCILIATION_STALE_THRESHOLD_MS,
@@ -261,6 +268,10 @@ type ParsedFlags = {
   issueScope?: string;
   updatedSince?: number;
   updatedUntil?: number;
+  phrase?: string;
+  actor?: string;
+  approvalPath?: string;
+  approvalDigest?: string;
   error?: string;
 };
 
@@ -285,6 +296,7 @@ const COMMANDS = [
   "momentum workflow import --path <run-dir> [--data-dir <path>] [--json]",
   "momentum workflow status [<run-id>] [--state <state>] [--filter <active|blocked|completed|imported>] [--limit <n>] [--data-dir <path>] [--json]",
   "momentum workflow handoff <run-id> [--data-dir <path>] [--json]",
+  "momentum workflow run approve <run-id> --approval-boundary <boundary> --phrase <text> [--actor <name>] [--artifact-path <path>] [--artifact-digest <sha256>] [--data-dir <path>] [--json]",
   "momentum workflow run list [--state <state>] [--filter <active|blocked|completed|imported>] [--approval-boundary <boundary>] [--repo <path>] [--issue-scope <identifier>] [--updated-since <ms>] [--updated-until <ms>] [--limit <n>] [--data-dir <path>] [--json]",
   "momentum intent list [--status <status>] [--adapter <kind>] [--type <intent-type>] [--goal <goal-id>] [--source-item <id>] [--evidence-record <id>] [--limit <n>] [--data-dir <path>] [--json]",
   "momentum intent get <intent-id> [--data-dir <path>] [--json]",
@@ -2058,13 +2070,16 @@ function workflowRun(parsed: ParsedFlags, io: CliIo): number {
   const subcommand = parsed.args[2];
   if (!subcommand) {
     return usageError(
-      "Missing required subcommand for workflow run. Expected: list.",
+      "Missing required subcommand for workflow run. Expected: list, approve.",
       parsed,
       io
     );
   }
   if (subcommand === "list") {
     return workflowRunList(parsed, io);
+  }
+  if (subcommand === "approve") {
+    return workflowRunApprove(parsed, io);
   }
   return usageError(
     `Unknown workflow run subcommand: ${subcommand}`,
@@ -2151,7 +2166,7 @@ function emitWorkflowImportSuccess(
     source: summary.source,
     state: summary.state,
     inserted: summary.inserted,
-    approvalBoundary: importResult.run.approvalBoundary,
+    approvalBoundary: summary.approvalBoundary,
     counts: {
       steps: summary.stepCount,
       approvals: summary.approvalCount,
@@ -2600,6 +2615,466 @@ function emitWorkflowRunListFailure(
   }
   write(io.stderr, `${failure.message}\n`);
   return 1;
+}
+
+type WorkflowRunApproveFailureCode =
+  | "data_dir_failed"
+  | "run_id_required"
+  | "run_not_found"
+  | "manual_recovery_required"
+  | "invalid_state"
+  | "invalid_boundary"
+  | "approval_digest_mismatch"
+  | "duplicate_approval";
+
+type WorkflowRunApproveFailure = {
+  command: "workflow run approve";
+  code: WorkflowRunApproveFailureCode;
+  message: string;
+  dataDir?: string;
+  runId?: string;
+  boundary?: string;
+};
+
+function workflowRunApprove(parsed: ParsedFlags, io: CliIo): number {
+  const positional = parsed.args.slice(3);
+  if (positional.length === 0) {
+    return emitWorkflowRunApproveFailure(parsed, io, {
+      command: "workflow run approve",
+      code: "run_id_required",
+      message: "Missing required <run-id> for workflow run approve."
+    });
+  }
+  if (positional[0] === undefined) {
+    return emitWorkflowRunApproveFailure(parsed, io, {
+      command: "workflow run approve",
+      code: "run_id_required",
+      message: "Missing required <run-id> for workflow run approve."
+    });
+  }
+  if (positional.length > 1) {
+    return usageError(
+      `Unexpected argument for workflow run approve: ${positional[1]}`,
+      parsed,
+      io
+    );
+  }
+  const runId = positional[0];
+  if (!runId) {
+    return emitWorkflowRunApproveFailure(parsed, io, {
+      command: "workflow run approve",
+      code: "run_id_required",
+      message: "Missing required <run-id> for workflow run approve."
+    });
+  }
+  if (!parsed.approvalBoundary) {
+    return emitWorkflowRunApproveFailure(parsed, io, {
+      command: "workflow run approve",
+      code: "invalid_boundary",
+      message: "Missing required --approval-boundary for workflow run approve.",
+      runId
+    });
+  }
+  if (!isWorkflowApprovalBoundary(parsed.approvalBoundary)) {
+    return emitWorkflowRunApproveFailure(parsed, io, {
+      command: "workflow run approve",
+      code: "invalid_boundary",
+      message: `Invalid --approval-boundary: ${parsed.approvalBoundary}.`,
+      runId
+    });
+  }
+  const boundary = parsed.approvalBoundary;
+  if (!parsed.phrase || parsed.phrase.trim().length === 0) {
+    return emitWorkflowRunApproveFailure(parsed, io, {
+      command: "workflow run approve",
+      code: "invalid_boundary",
+      message: "Missing required --phrase for workflow run approve.",
+      runId,
+      boundary
+    });
+  }
+  const phrase = parsed.phrase.trim();
+  if (!isExplicitBoundaryPhraseForApproval(phrase, boundary)) {
+    return emitWorkflowRunApproveFailure(parsed, io, {
+      command: "workflow run approve",
+      code: "invalid_boundary",
+      message: `Invalid phrase for boundary ${boundary}: ${phrase}.`,
+      runId,
+      boundary
+    });
+  }
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return emitWorkflowRunApproveFailure(parsed, io, {
+      command: "workflow run approve",
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err),
+      runId,
+      boundary
+    });
+  }
+
+  const artifactPath = parsed.approvalPath;
+  let approvalArtifactDigest = "";
+  let recordedAt = 0;
+
+  const db = openDb(dataDir);
+  try {
+    const existingRun = db
+      .prepare(
+        "SELECT id FROM workflow_runs WHERE id = ?"
+      )
+      .get(runId) as
+      | {
+          id: string;
+        }
+      | undefined;
+    if (!existingRun) {
+      return emitWorkflowRunApproveFailure(parsed, io, {
+        command: "workflow run approve",
+        code: "run_not_found",
+        message: `Workflow run not found: ${runId}`,
+        dataDir,
+        runId,
+        boundary
+      });
+    }
+
+    const duplicate = db
+      .prepare(
+        "SELECT 1 FROM workflow_approvals WHERE run_id = ? AND boundary = ?"
+      )
+      .get(runId, boundary);
+    if (duplicate) {
+      return emitWorkflowRunApproveFailure(parsed, io, {
+        command: "workflow run approve",
+        code: "duplicate_approval",
+        message: `Duplicate approval for runId=${runId}, boundary=${boundary}.`,
+        dataDir,
+        runId,
+        boundary
+      });
+    }
+
+    const resolvedDigest = resolveApprovalArtifactDigest(
+      artifactPath,
+      parsed.approvalDigest,
+      `approve:${runId}:${boundary}:${phrase}`
+    );
+    if (resolvedDigest === null) {
+      return emitWorkflowRunApproveFailure(parsed, io, {
+        command: "workflow run approve",
+        code: "approval_digest_mismatch",
+        message: artifactPath
+          ? `Approval artifact digest mismatch for path: ${artifactPath}.`
+          : "Missing approval artifact digest compatibility for durable approval entry.",
+        dataDir,
+        runId,
+        boundary
+      });
+    }
+
+    approvalArtifactDigest = resolvedDigest.value;
+    recordedAt = Date.now();
+    const storedPath =
+      artifactPath ?? `workflow-run-approve://${runId}/${boundary}`;
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const runRow = db
+        .prepare(
+          "SELECT id, state, approval_boundary, needs_manual_recovery, manual_recovery_reason FROM workflow_runs WHERE id = ?"
+        )
+        .get(runId) as
+        | {
+            id: string;
+            state: WorkflowRunState;
+            approval_boundary: string | null;
+            needs_manual_recovery: number;
+            manual_recovery_reason: string | null;
+          }
+        | undefined;
+      if (!runRow) {
+        db.exec("ROLLBACK");
+        return emitWorkflowRunApproveFailure(parsed, io, {
+          command: "workflow run approve",
+          code: "run_not_found",
+          message: `Workflow run not found: ${runId}`,
+          dataDir,
+          runId,
+          boundary
+        });
+      }
+
+      const duplicateInTransaction = db
+        .prepare(
+          "SELECT 1 FROM workflow_approvals WHERE run_id = ? AND boundary = ?"
+        )
+        .get(runId, boundary);
+      if (duplicateInTransaction) {
+        db.exec("ROLLBACK");
+        return emitWorkflowRunApproveFailure(parsed, io, {
+          command: "workflow run approve",
+          code: "duplicate_approval",
+          message: `Duplicate approval for runId=${runId}, boundary=${boundary}.`,
+          dataDir,
+          runId,
+          boundary
+        });
+      }
+
+      if (isTerminalRunState(runRow.state)) {
+        db.exec("ROLLBACK");
+        return emitWorkflowRunApproveFailure(parsed, io, {
+          command: "workflow run approve",
+          code: "invalid_state",
+          message: `Workflow run is terminal and cannot be approved: ${runId} (${runRow.state})`,
+          dataDir,
+          runId,
+          boundary
+        });
+      }
+      if (runRow.needs_manual_recovery === 1) {
+        db.exec("ROLLBACK");
+        return emitWorkflowRunApproveFailure(parsed, io, {
+          command: "workflow run approve",
+          code: "manual_recovery_required",
+          message:
+            runRow.manual_recovery_reason ??
+            `Workflow run requires manual recovery before approval: ${runId}`,
+          dataDir,
+          runId,
+          boundary
+        });
+      }
+
+      db.prepare(
+        `INSERT INTO workflow_approvals (
+           run_id, boundary, actor, phrase, artifact_path,
+           artifact_digest, recorded_at, discharged_at, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        runId,
+        boundary,
+        parsed.actor ?? null,
+        phrase,
+        storedPath,
+        resolvedDigest.value,
+        recordedAt,
+        null,
+        recordedAt,
+        recordedAt
+      );
+
+      const nextApprovalBoundary = highestWorkflowApprovalBoundary(
+        runRow.approval_boundary,
+        boundary
+      );
+      db.prepare(
+        "UPDATE workflow_runs SET approval_boundary = ?, updated_at = ? WHERE id = ?"
+      ).run(nextApprovalBoundary, recordedAt, runId);
+
+      const approvedKinds = workflowStepKindsForApprovalBoundary(boundary);
+      if (approvedKinds.length > 0) {
+        db.prepare(
+          `UPDATE workflow_steps
+             SET state = 'approved', updated_at = ?
+           WHERE run_id = ?
+             AND state = 'pending'
+             AND kind IN (${approvedKinds.map(() => "?").join(", ")})`
+        ).run(recordedAt, runId, ...approvedKinds);
+      }
+
+      db.prepare(
+        "UPDATE workflow_runs SET state = 'approved', updated_at = ? WHERE id = ? AND state = 'pending'"
+      ).run(recordedAt, runId);
+
+      db.exec("COMMIT");
+    } catch (error) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        // no-op
+      }
+      if (isUniqueViolation(error)) {
+        return emitWorkflowRunApproveFailure(parsed, io, {
+          command: "workflow run approve",
+          code: "duplicate_approval",
+          message: `Duplicate approval for runId=${runId}, boundary=${boundary}.`,
+          dataDir,
+          runId,
+          boundary
+        });
+      }
+      throw error;
+    }
+  } finally {
+    db.close();
+  }
+
+  const payload = {
+    ok: true,
+    command: "workflow run approve",
+    dataDir,
+    runId,
+    boundary,
+    phrase,
+    actor: parsed.actor ?? null,
+    artifactPath: artifactPath ?? `workflow-run-approve://${runId}/${boundary}`,
+    artifactDigest: approvalArtifactDigest,
+    recordedAt
+  };
+  if (parsed.json) {
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  const lines = [
+    `Workflow run approval recorded for ${runId}`,
+    `Boundary: ${boundary}`,
+    `Phrase: ${phrase}`,
+    `Actor: ${parsed.actor ?? "(unset)"}`,
+    `Artifact: ${artifactPath ?? "(inline/implicit)"}`,
+    `Data dir: ${dataDir}`,
+    ""
+  ];
+  write(io.stdout, lines.join("\n"));
+  return 0;
+}
+
+function emitWorkflowRunApproveFailure(
+  parsed: ParsedFlags,
+  io: CliIo,
+  failure: WorkflowRunApproveFailure
+): number {
+  const payload: Record<string, unknown> = {
+    ok: false,
+    command: failure.command,
+    code: failure.code,
+    message: failure.message
+  };
+  if (failure.dataDir !== undefined) payload["dataDir"] = failure.dataDir;
+  if (failure.runId !== undefined) payload["runId"] = failure.runId;
+  if (failure.boundary !== undefined) payload["boundary"] = failure.boundary;
+
+  if (parsed.json) {
+    writeJson(io.stderr, payload);
+    return 1;
+  }
+  write(io.stderr, `${failure.message}\n`);
+  return 1;
+}
+
+function isExplicitBoundaryPhraseForApproval(
+  phrase: string,
+  boundary: string
+): boolean {
+  const normalizedPhrase = phrase.trim().toLowerCase();
+  const normalizedBoundary = boundary.trim().toLowerCase();
+
+  const casualPhrases = new Set([
+    "go ahead",
+    "go-ahead",
+    "go ahead!",
+    "sure",
+    "yes",
+    "yep",
+    "yeah",
+    "ok",
+    "okay",
+    "k"
+  ]);
+  if (casualPhrases.has(normalizedPhrase)) {
+    return false;
+  }
+  if (normalizedPhrase.length === 0) return false;
+  const phraseWords = normalizedPhrase
+    .replace(/-/gu, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .split(/\s+/u)
+    .map((word) => word.trim())
+    .filter((word) => word.length > 0);
+  const boundaryWords = normalizedBoundary.split("-").filter((word) => word.length > 0);
+  if (!phraseWords.includes("approve")) return false;
+  if (hasApprovalNegation(phraseWords, boundaryWords)) return false;
+  return boundaryWords.every((word) => phraseWords.includes(word));
+}
+
+function hasApprovalNegation(
+  words: readonly string[],
+  boundaryWords: readonly string[]
+): boolean {
+  const negationWords = new Set(["not", "never", "cannot", "cant", "wont"]);
+  if (words.some((word) => negationWords.has(word))) return true;
+  if (
+    words.some(
+      (word, index) =>
+        word === "no" &&
+        !isWordIndexCoveredByBoundaryPhrase(words, boundaryWords, index)
+    )
+  ) {
+    return true;
+  }
+  for (let index = 0; index < words.length - 1; index += 1) {
+    const word = words[index];
+    const next = words[index + 1];
+    if (word === "do" && next === "not") return true;
+    if (word === "don" && next === "t") return true;
+    if (word === "can" && next === "t") return true;
+    if (word === "will" && next === "not") return true;
+    if (word === "won" && next === "t") return true;
+  }
+  return false;
+}
+
+function isWordIndexCoveredByBoundaryPhrase(
+  words: readonly string[],
+  boundaryWords: readonly string[],
+  wordIndex: number
+): boolean {
+  if (!boundaryWords.includes("no")) return false;
+  for (let start = 0; start <= words.length - boundaryWords.length; start += 1) {
+    const end = start + boundaryWords.length;
+    if (wordIndex < start || wordIndex >= end) continue;
+    if (boundaryWords.every((word, offset) => words[start + offset] === word)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function resolveApprovalArtifactDigest(
+  artifactPath: string | undefined,
+  providedDigest: string | undefined,
+  fallbackInput: string
+): { value: string } | null {
+  if (!artifactPath) {
+    const fallbackDigest = crypto
+      .createHash("sha256")
+      .update(fallbackInput)
+      .digest("hex");
+    if (providedDigest !== undefined) {
+      return providedDigest === fallbackDigest ? { value: fallbackDigest } : null;
+    }
+    return { value: fallbackDigest };
+  }
+  let body: Buffer;
+  try {
+    body = fs.readFileSync(artifactPath);
+  } catch {
+    return null;
+  }
+  const actualDigest = crypto.createHash("sha256").update(body).digest("hex");
+  if (providedDigest !== undefined && providedDigest !== actualDigest) {
+    return null;
+  }
+  return { value: actualDigest };
 }
 
 type WorkflowHandoffFailureCode = "data_dir_failed" | "run_not_found" | "run_id_required";
@@ -6278,6 +6753,10 @@ function parseFlags(argv: string[]): ParsedFlags {
   let issueScopeFlag: string | undefined;
   let updatedSinceFlag: number | undefined;
   let updatedUntilFlag: number | undefined;
+  let actorFlag: string | undefined;
+  let approvalPathFlag: string | undefined;
+  let approvalDigestFlag: string | undefined;
+  let phraseFlag: string | undefined;
   let error: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -6585,6 +7064,50 @@ function parseFlags(argv: string[]): ParsedFlags {
       continue;
     }
 
+    if (arg === "--actor") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --actor.";
+      } else {
+        actorFlag = value;
+        index += 1;
+      }
+      continue;
+    }
+
+    if (arg === "--phrase") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --phrase.";
+      } else {
+        phraseFlag = value;
+        index += 1;
+      }
+      continue;
+    }
+
+    if (arg === "--artifact-path") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --artifact-path.";
+      } else {
+        approvalPathFlag = value;
+        index += 1;
+      }
+      continue;
+    }
+
+    if (arg === "--artifact-digest") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --artifact-digest.";
+      } else {
+        approvalDigestFlag = value;
+        index += 1;
+      }
+      continue;
+    }
+
     if (arg === "--issue-scope") {
       const value = readFlagValue(argv, index);
       if (value === undefined) {
@@ -6782,6 +7305,10 @@ function parseFlags(argv: string[]): ParsedFlags {
   if (issueScopeFlag !== undefined) parsed.issueScope = issueScopeFlag;
   if (updatedSinceFlag !== undefined) parsed.updatedSince = updatedSinceFlag;
   if (updatedUntilFlag !== undefined) parsed.updatedUntil = updatedUntilFlag;
+  if (actorFlag !== undefined) parsed.actor = actorFlag;
+  if (approvalPathFlag !== undefined) parsed.approvalPath = approvalPathFlag;
+  if (approvalDigestFlag !== undefined) parsed.approvalDigest = approvalDigestFlag;
+  if (phraseFlag !== undefined) parsed.phrase = phraseFlag;
   if (error !== undefined) parsed.error = error;
 
   return parsed;

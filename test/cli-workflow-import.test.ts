@@ -136,6 +136,35 @@ function buildCompletedRunFixture(rootDir: string, runId: string): string {
   return runDir;
 }
 
+function buildPendingApprovalRunFixture(rootDir: string, runId: string): string {
+  const runDir = path.join(rootDir, runId);
+  writeJsonFile(path.join(runDir, "plan.json"), {
+    runId,
+    schemaVersion: 1,
+    mode: "execute-ready",
+    profile: "momentum-m7",
+    objective: "NGX-325 import approved workflow plans",
+    repo: "/Users/test/repos/momentum",
+    resolvedScope: {
+      issues: [],
+      source: "explicit",
+      status: "resolved"
+    },
+    approvalsRequired: ["implementation"],
+    taskFlow: {
+      childTasks: [
+        { stepId: "preflight" },
+        { stepId: "implementation" },
+        { stepId: "postflight:1" }
+      ]
+    }
+  });
+  writeLedger(path.join(runDir, "ledger.jsonl"), [
+    { runId, step: "preflight", status: "complete", ts: "2026-05-17T10:00:00Z" }
+  ]);
+  return runDir;
+}
+
 describe("momentum workflow import", () => {
   it("rejects unknown workflow subcommand", async () => {
     const dataDir = makeTempDir();
@@ -354,5 +383,55 @@ describe("momentum workflow import", () => {
     expect(payload.diagnostics[0]?.code).toBe("evidence_format_unknown");
     expect(payload.diagnostics[0]?.reason).toBe("unrecognized_filename");
     expect(payload.diagnostics[0]?.path).toContain("stray-artifact.txt");
+  });
+
+  it("reports the persisted approval boundary after re-import", async () => {
+    const dataDir = makeTempDir();
+    const workflowRoot = makeTempDir("momentum-cli-workflow-import-runs-");
+    const runId = "cwfp-cli0012approved";
+    const runDir = buildPendingApprovalRunFixture(workflowRoot, runId);
+
+    const firstImport = await run([
+      "workflow",
+      "import",
+      "--path",
+      runDir,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(firstImport.code).toBe(0);
+
+    const approval = await run([
+      "workflow",
+      "run",
+      "approve",
+      runId,
+      "--approval-boundary",
+      "implementation",
+      "--phrase",
+      "approve implementation",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(approval.code).toBe(0);
+
+    const secondImport = await run([
+      "workflow",
+      "import",
+      "--path",
+      runDir,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(secondImport.code).toBe(0);
+    const payload = JSON.parse(secondImport.stdout) as {
+      state: string;
+      approvalBoundary: string | null;
+    };
+    expect(payload.state).toBe("approved");
+    expect(payload.approvalBoundary).toBe("implementation");
   });
 });

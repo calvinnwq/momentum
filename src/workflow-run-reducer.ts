@@ -72,6 +72,74 @@ export const WORKFLOW_APPROVAL_BOUNDARIES = [
 export type WorkflowApprovalBoundary =
   (typeof WORKFLOW_APPROVAL_BOUNDARIES)[number];
 
+export function isWorkflowApprovalBoundary(
+  value: string
+): value is WorkflowApprovalBoundary {
+  return (WORKFLOW_APPROVAL_BOUNDARIES as readonly string[]).includes(value);
+}
+
+export function highestWorkflowApprovalBoundary(
+  current: string | null,
+  next: WorkflowApprovalBoundary | null
+): WorkflowApprovalBoundary | null {
+  if (next === null) {
+    return current !== null && isWorkflowApprovalBoundary(current)
+      ? current
+      : null;
+  }
+  if (current !== null && isWorkflowApprovalBoundary(current)) {
+    const currentOrder = workflowApprovalBoundaryRank(current);
+    const nextOrder = workflowApprovalBoundaryRank(next);
+    if (currentOrder > nextOrder) return current;
+  }
+  return next;
+}
+
+export function workflowApprovalBoundaryRank(
+  boundary: WorkflowApprovalBoundary
+): number {
+  return workflowStepKindsForApprovalBoundary(boundary).length;
+}
+
+export function workflowStepKindsForApprovalBoundary(
+  boundary: WorkflowApprovalBoundary
+): WorkflowStepKind[] {
+  switch (boundary) {
+    case "implementation":
+    case "through-implementation":
+      return ["preflight", "implementation"];
+    case "no-mistakes":
+    case "through-no-mistakes":
+    case "overnight-safe":
+    case "through-merge-gates":
+      return ["preflight", "implementation", "postflight", "no-mistakes"];
+    case "merge-cleanup":
+    case "through-merge-cleanup":
+      return [
+        "preflight",
+        "implementation",
+        "postflight",
+        "no-mistakes",
+        "merge-cleanup"
+      ];
+    case "full":
+    case "final-cleanup":
+    case "full-batch":
+      return [
+        "preflight",
+        "implementation",
+        "postflight",
+        "no-mistakes",
+        "merge-cleanup",
+        "linear-refresh"
+      ];
+    case "through-postflight":
+      return ["preflight", "implementation", "postflight"];
+    case "plan-only":
+      return [];
+  }
+}
+
 export const WORKFLOW_LEASE_KINDS = [
   "monitor",
   "managed-step",

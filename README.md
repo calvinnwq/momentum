@@ -78,11 +78,12 @@ momentum intent list|get|apply|skip|cancel [options]
 momentum workflow import --path <run-dir> [--data-dir <path>] [--json]
 momentum workflow status [<run-id>] [--state <state>] [--filter <active|blocked|completed|imported>] [--limit <n>] [--data-dir <path>] [--json]
 momentum workflow handoff <run-id> [--data-dir <path>] [--json]
+momentum workflow run approve <run-id> --approval-boundary <boundary> --phrase <text> [--actor <name>] [--artifact-path <path>] [--artifact-digest <sha256>] [--data-dir <path>] [--json]
 momentum workflow run list [--state <state>] [--filter <active|blocked|completed|imported>] [--approval-boundary <boundary>] [--repo <path>] [--issue-scope <identifier>] [--updated-since <ms>] [--updated-until <ms>] [--limit <n>] [--data-dir <path>] [--json]
 momentum doctor [--repo <path>] [--data-dir <path>] [--json]
 ```
 
-See the [docs site](docs/index.md) for command envelopes, runner policy, data layout, and recovery details.
+See the [docs site](docs/index.md) for full command envelopes.
 
 ## Development
 

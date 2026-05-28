@@ -54,7 +54,9 @@ Durable approval CLI for the existing stable boundary phrase set:
 - Single-run boundaries: `implementation`, `through-implementation`, `no-mistakes`, `through-no-mistakes`, `merge-cleanup`, `through-merge-cleanup`, `full`.
 - Batch boundaries (mapped to per-item runs through the optional batch grouping fields on `WorkflowRun`): `plan-only`, `overnight-safe`, `through-postflight`, `through-merge-gates`, `final-cleanup`, `full-batch`.
 
-Persists a `workflow_approvals` row keyed by `(runId, boundary)` with `actor`, `phrase`, `boundary`, optional `approvalFilePath`, optional `artifactDigest`, and `recordedAt`. When an `approvalFilePath` is provided, the digest must match the file body; a mismatch refuses with `approval_digest_mismatch` and writes no row. A duplicate approval for the same `(runId, boundary)` either refuses with `duplicate_approval` or is treated as idempotent per the contract that lands at NGX-325 — either way it must not produce confusing duplicate state.
+Persists a `workflow_approvals` row keyed by `(runId, boundary)` with `actor`, `phrase`, `boundary`, `artifactPath`, `artifactDigest`, and `recordedAt`. When `--artifact-path` is provided, the path must be readable and the digest must match the file body; an unreadable / missing path or digest mismatch refuses with `approval_digest_mismatch` and writes no row. When `--artifact-path` is omitted, the stored `artifactPath` is `workflow-run-approve://<runId>/<boundary>` with a deterministic synthetic digest; a supplied `--artifact-digest` must match that synthetic digest or refuse with `approval_digest_mismatch`. A duplicate approval for the same `(runId, boundary)` refuses with `duplicate_approval` and must not produce confusing duplicate state.
+
+On success, `workflow run approve` also updates `workflow_runs.approval_boundary` unless the stored boundary has a strictly higher rank, promotes a pending run to `approved`, and marks pending steps covered by the approved boundary as `approved`. Boundary coverage follows the M7 reducer mapping: `implementation` / `through-implementation` cover through implementation; `through-postflight` covers through postflight; `no-mistakes`, `through-no-mistakes`, `overnight-safe`, and `through-merge-gates` cover through no-mistakes; `merge-cleanup` / `through-merge-cleanup` cover through merge-cleanup; `full`, `final-cleanup`, and `full-batch` cover the full required chain; `plan-only` covers no steps. Equal-rank approvals replace the stored `approval_boundary`; lower-rank approvals preserve the higher stored boundary while still persisting their own approval row.
 
 Casual approval phrasing (`"go ahead"`, `"sure"`, etc.) never produces a `workflow_approvals` row. That refusal stays at the boundary edge: the CLI refuses with `invalid_boundary` (the M7-contract refusal that casual phrasing never produces a durable row stays in force).
 
@@ -86,7 +88,7 @@ Unknown or malformed run ids refuse with `run_not_found` (or `run_id_required` w
 The M8 envelopes reuse the M7 refusal taxonomy verbatim and extend it only with stable, prefix-style additions:
 
 - Shared (from M7, wire-stable): `unknown_workflow_subcommand`, `invalid_filter`, `invalid_state`, `invalid_limit`, `run_id_required`, `run_not_found`.
-- `workflow run approve` (NGX-325 additions): `invalid_boundary`, `approval_digest_mismatch`, `duplicate_approval`.
+- `workflow run approve` (NGX-325 additions): `invalid_boundary`, `approval_digest_mismatch`, `duplicate_approval`; it also consumes `manual_recovery_required` when the run-scoped recovery flag blocks approval.
 - `workflow run update-step` (NGX-326 additions): `invalid_transition`, `step_not_found`.
 - Run-scoped recovery (NGX-327 additions): `manual_recovery_required`, `recovery_clear_refused`.
 - `workflow run monitor` (NGX-328): no new codes beyond the shared set; malformed input refuses with `run_id_required` / `run_not_found` exactly like the M7 read-only envelopes.
@@ -122,7 +124,7 @@ Every M8 envelope emits stable JSON field names. The fields land progressively a
 
 A non-exhaustive seed list of fields the M8 envelopes pin:
 
-- `runId`, `repoPath`, `runState`, `stepState`, `boundary`, `approvalPhrase`, `recordedAt`, `actor`.
+- `runId`, `repoPath`, `runState`, `stepState`, `boundary`, `phrase`, `artifactPath`, `artifactDigest`, `recordedAt`, `actor`.
 - `nextAction` (object with `code` plus optional `stepId`, `boundary`, or `runId`), `monitor.recovery` (object with `code` plus optional `stepId`).
 - `evidence` (array of typed evidence pointers with `path`, optional `digest`, optional `runId`, optional `stepId`).
 - `needsManualRecovery` (boolean), `recovery` (object surfacing the classification, recommended next action, and link to `recovery.md`).
