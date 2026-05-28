@@ -35,13 +35,16 @@ import type {
 } from "./workflow-run-import.js";
 import {
   deriveWorkflowRunState,
+  classifyWorkflowLease,
   isTerminalRunState,
   isWorkflowApprovalBoundary,
   workflowApprovalBoundaryRank,
   workflowStepKindsForApprovalBoundary,
   type WorkflowApprovalBoundary,
+  type WorkflowLeaseRecord,
   type WorkflowRunState,
-  type WorkflowStepKind
+  type WorkflowStepKind,
+  type WorkflowStepRecord
 } from "./workflow-run-reducer.js";
 
 export type PersistWorkflowRunImportOptions = {
@@ -109,7 +112,7 @@ export function persistWorkflowRunImport(
     const persistedSteps = steps.map((step) =>
       approvalAdjustedStep(step, approvedStepKinds)
     );
-    const state = hasPersistedApprovals
+    const provisionalState = hasPersistedApprovals
       ? approvalAdjustedRunState(run.state, persistedSteps)
       : run.state;
 
@@ -134,7 +137,7 @@ export function persistWorkflowRunImport(
          updated_at = excluded.updated_at`
     ).run(
       run.runId,
-      state,
+      provisionalState,
       run.source,
       run.sourceArtifactPath,
       JSON.stringify(run.planJson ?? {}),
@@ -157,14 +160,32 @@ export function persistWorkflowRunImport(
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(run_id, step_id) DO UPDATE SET
          kind = excluded.kind,
-         state = excluded.state,
+         state = CASE
+           WHEN workflow_steps.operator_transition_at IS NOT NULL THEN workflow_steps.state
+           ELSE excluded.state
+         END,
          step_order = excluded.step_order,
          required = excluded.required,
-         ledger_offset = excluded.ledger_offset,
-         error_code = excluded.error_code,
-         error_message = excluded.error_message,
-         started_at = excluded.started_at,
-         finished_at = excluded.finished_at,
+         ledger_offset = CASE
+           WHEN workflow_steps.operator_transition_at IS NOT NULL THEN workflow_steps.ledger_offset
+           ELSE excluded.ledger_offset
+         END,
+         error_code = CASE
+           WHEN workflow_steps.operator_transition_at IS NOT NULL THEN workflow_steps.error_code
+           ELSE excluded.error_code
+         END,
+         error_message = CASE
+           WHEN workflow_steps.operator_transition_at IS NOT NULL THEN workflow_steps.error_message
+           ELSE excluded.error_message
+         END,
+         started_at = CASE
+           WHEN workflow_steps.operator_transition_at IS NOT NULL THEN workflow_steps.started_at
+           ELSE excluded.started_at
+         END,
+         finished_at = CASE
+           WHEN workflow_steps.operator_transition_at IS NOT NULL THEN workflow_steps.finished_at
+           ELSE excluded.finished_at
+         END,
          updated_at = excluded.updated_at`
     );
     for (const step of persistedSteps) {
@@ -191,6 +212,18 @@ export function persistWorkflowRunImport(
       runApprovalUpsert(approvalStmt, run.runId, approval, now);
     }
 
+    const state = resolvePersistedRunState(
+      run.state,
+      loadWorkflowStepRecords(db, run.runId),
+      loadWorkflowLeaseRecords(db, run.runId),
+      hasPersistedApprovals,
+      now
+    );
+    if (state !== provisionalState) {
+      db.prepare("UPDATE workflow_runs SET state = ?, updated_at = ? WHERE id = ?")
+        .run(state, now, run.runId);
+    }
+
     db.exec("COMMIT");
     return {
       runId: run.runId,
@@ -205,6 +238,104 @@ export function persistWorkflowRunImport(
     safeRollback(db);
     throw error;
   }
+}
+
+function loadWorkflowStepRecords(
+  db: MomentumDb,
+  runId: string
+): WorkflowStepRecord[] {
+  const rows = db
+    .prepare(
+      "SELECT step_id, kind, state, step_order, required FROM workflow_steps WHERE run_id = ? ORDER BY step_order, step_id"
+    )
+    .all(runId) as Array<{
+    step_id: string;
+    kind: string;
+    state: string;
+    step_order: number;
+    required: number;
+  }>;
+  return rows.map((row) => ({
+    stepId: row.step_id,
+    kind: row.kind as WorkflowStepKind,
+    state: row.state as WorkflowStepRecord["state"],
+    order: row.step_order,
+    required: row.required === 1
+  }));
+}
+
+function resolvePersistedRunState(
+  importedState: WorkflowRunState,
+  steps: readonly WorkflowStepRecord[],
+  leases: readonly WorkflowLeaseRecord[],
+  hasPersistedApprovals: boolean,
+  now: number
+): WorkflowRunState {
+  const stepState = deriveWorkflowRunState(steps, { leases, now });
+  if (stepState !== "pending") return stepState;
+  if (isTerminalRunState(importedState)) {
+    return constrainRunStateByLeases(importedState, leases, now);
+  }
+  const state = hasPersistedApprovals
+    ? approvalAdjustedRunState(importedState, steps)
+    : importedState;
+  return constrainRunStateByLeases(state, leases, now);
+}
+
+function constrainRunStateByLeases(
+  state: WorkflowRunState,
+  leases: readonly WorkflowLeaseRecord[],
+  now: number
+): WorkflowRunState {
+  let anyManualRecovery = false;
+  let anyOutstanding = false;
+  for (const lease of leases) {
+    const classification = classifyWorkflowLease(lease, { now });
+    if (classification === "released") continue;
+    anyOutstanding = true;
+    if (classification === "stale-manual-recovery-required") {
+      anyManualRecovery = true;
+    }
+  }
+  if (anyManualRecovery && state !== "failed" && state !== "canceled") {
+    return "blocked";
+  }
+  if (state === "succeeded" && anyOutstanding) {
+    return "running";
+  }
+  return state;
+}
+
+function loadWorkflowLeaseRecords(
+  db: MomentumDb,
+  runId: string
+): WorkflowLeaseRecord[] {
+  const rows = db
+    .prepare(
+      `SELECT run_id, lease_kind, holder, acquired_at, expires_at,
+              heartbeat_at, released_at, stale_policy
+         FROM workflow_leases WHERE run_id = ? ORDER BY lease_kind`
+    )
+    .all(runId) as Array<{
+    run_id: string;
+    lease_kind: string;
+    holder: string;
+    acquired_at: number;
+    expires_at: number;
+    heartbeat_at: number;
+    released_at: number | null;
+    stale_policy: string;
+  }>;
+  return rows.map((row) => ({
+    runId: row.run_id,
+    leaseKind: row.lease_kind as WorkflowLeaseRecord["leaseKind"],
+    holder: row.holder,
+    acquiredAt: row.acquired_at,
+    expiresAt: row.expires_at,
+    heartbeatAt: row.heartbeat_at,
+    releasedAt: row.released_at,
+    stalePolicy: row.stale_policy as WorkflowLeaseRecord["stalePolicy"]
+  }));
 }
 
 type PreparedStatement = ReturnType<MomentumDb["prepare"]>;
@@ -270,7 +401,7 @@ function approvalAdjustedStep(
 
 function approvalAdjustedRunState(
   importedState: WorkflowRunState,
-  steps: readonly WorkflowRunImportStep[]
+  steps: readonly WorkflowStepRecord[]
 ): WorkflowRunState {
   if (isTerminalRunState(importedState)) return importedState;
   const state = deriveWorkflowRunState(steps);

@@ -127,6 +127,38 @@ function seedStep(
   );
 }
 
+function seedLease(
+  db: MomentumDb,
+  input: {
+    runId: string;
+    leaseKind: string;
+    holder: string;
+    acquiredAt: number;
+    expiresAt: number;
+    heartbeatAt?: number;
+    releasedAt?: number | null;
+    stalePolicy?: string;
+  }
+): void {
+  db.prepare(
+    `INSERT INTO workflow_leases
+       (run_id, lease_kind, holder, acquired_at, expires_at, heartbeat_at,
+        released_at, stale_policy, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    input.runId,
+    input.leaseKind,
+    input.holder,
+    input.acquiredAt,
+    input.expiresAt,
+    input.heartbeatAt ?? input.acquiredAt,
+    input.releasedAt ?? null,
+    input.stalePolicy ?? "auto-release",
+    input.acquiredAt,
+    input.acquiredAt
+  );
+}
+
 function readStep(
   dataDir: string,
   runId: string,
@@ -767,6 +799,57 @@ describe("momentum workflow run update-step (NGX-326)", () => {
     ]);
     expect(result.code).toBe(0);
     expect(readRunState(dataDir, runId)).toBe("succeeded");
+  });
+
+  it("keeps a run active when finalizing the last step under an outstanding lease", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-fresh-lease";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "running" });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "running",
+        order: 1
+      });
+      const now = Date.now();
+      seedLease(db, {
+        runId,
+        leaseKind: "managed-step",
+        holder: "child-executor",
+        acquiredAt: now - 1_000,
+        expiresAt: now + 60_000
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "update-step",
+      runId,
+      "--step",
+      "implementation",
+      "--state",
+      "succeeded",
+      "--reason",
+      "operator finalized while child lease cleanup is still pending",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      command: "workflow run update-step",
+      runState: "running"
+    });
+    expect(readStep(dataDir, runId, "implementation").state).toBe("succeeded");
+    expect(readRunState(dataDir, runId)).toBe("running");
   });
 
   it("refuses transitions while the run needs manual recovery", async () => {

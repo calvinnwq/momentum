@@ -132,6 +132,7 @@ import {
   WORKFLOW_RUN_STATES,
   workflowStepKindsForApprovalBoundary,
   type WorkflowRunState,
+  type WorkflowLeaseRecord,
   type WorkflowStepKind,
   type WorkflowStepRecord,
   type WorkflowStepState,
@@ -3231,7 +3232,11 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
       }
 
       const stepRecords = loadWorkflowStepRecords(db, runId);
-      const runState = deriveWorkflowRunState(stepRecords);
+      const leaseRecords = loadWorkflowLeaseRecords(db, runId);
+      const runState = deriveWorkflowRunState(stepRecords, {
+        leases: leaseRecords,
+        now
+      });
       if (runState !== runRow.state) {
         const runFinishedAt = isTerminalRunState(runState) ? now : null;
         db.prepare(
@@ -3316,6 +3321,38 @@ function loadWorkflowStepRecords(
     state: row.state as WorkflowStepState,
     order: row.step_order,
     required: row.required === 1
+  }));
+}
+
+function loadWorkflowLeaseRecords(
+  db: MomentumDb,
+  runId: string
+): WorkflowLeaseRecord[] {
+  const rows = db
+    .prepare(
+      `SELECT run_id, lease_kind, holder, acquired_at, expires_at,
+              heartbeat_at, released_at, stale_policy
+         FROM workflow_leases WHERE run_id = ? ORDER BY lease_kind`
+    )
+    .all(runId) as Array<{
+    run_id: string;
+    lease_kind: string;
+    holder: string;
+    acquired_at: number;
+    expires_at: number;
+    heartbeat_at: number;
+    released_at: number | null;
+    stale_policy: string;
+  }>;
+  return rows.map((row) => ({
+    runId: row.run_id,
+    leaseKind: row.lease_kind as WorkflowLeaseRecord["leaseKind"],
+    holder: row.holder,
+    acquiredAt: row.acquired_at,
+    expiresAt: row.expires_at,
+    heartbeatAt: row.heartbeat_at,
+    releasedAt: row.released_at,
+    stalePolicy: row.stale_policy as WorkflowLeaseRecord["stalePolicy"]
   }));
 }
 
