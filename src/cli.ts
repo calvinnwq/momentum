@@ -123,12 +123,18 @@ import {
   type WorkflowStepRow
 } from "./workflow-status.js";
 import {
+  deriveWorkflowRunState,
   highestWorkflowApprovalBoundary,
+  isTerminalStepState,
   isWorkflowApprovalBoundary,
   isTerminalRunState,
+  transitionWorkflowStep,
   WORKFLOW_RUN_STATES,
   workflowStepKindsForApprovalBoundary,
   type WorkflowRunState,
+  type WorkflowStepKind,
+  type WorkflowStepRecord,
+  type WorkflowStepState,
   type WorkflowApprovalBoundary
 } from "./workflow-run-reducer.js";
 import {
@@ -272,6 +278,9 @@ type ParsedFlags = {
   actor?: string;
   approvalPath?: string;
   approvalDigest?: string;
+  step?: string;
+  evidencePointer?: string;
+  ledgerPointer?: string;
   error?: string;
 };
 
@@ -298,6 +307,7 @@ const COMMANDS = [
   "momentum workflow handoff <run-id> [--data-dir <path>] [--json]",
   "momentum workflow run approve <run-id> --approval-boundary <boundary> --phrase <text> [--actor <name>] [--artifact-path <path>] [--artifact-digest <sha256>] [--data-dir <path>] [--json]",
   "momentum workflow run list [--state <state>] [--filter <active|blocked|completed|imported>] [--approval-boundary <boundary>] [--repo <path>] [--issue-scope <identifier>] [--updated-since <ms>] [--updated-until <ms>] [--limit <n>] [--data-dir <path>] [--json]",
+  "momentum workflow run update-step <run-id> --step <step-id> --state <succeeded|skipped|failed|blocked> --reason <text> [--actor <name>] [--evidence-pointer <ref>] [--ledger-pointer <ref>] [--data-dir <path>] [--json]",
   "momentum intent list [--status <status>] [--adapter <kind>] [--type <intent-type>] [--goal <goal-id>] [--source-item <id>] [--evidence-record <id>] [--limit <n>] [--data-dir <path>] [--json]",
   "momentum intent get <intent-id> [--data-dir <path>] [--json]",
   "momentum intent apply <intent-id> --reason <text> [--repo <path>] [--external-apply] [--data-dir <path>] [--json]",
@@ -2070,7 +2080,7 @@ function workflowRun(parsed: ParsedFlags, io: CliIo): number {
   const subcommand = parsed.args[2];
   if (!subcommand) {
     return usageError(
-      "Missing required subcommand for workflow run. Expected: list, approve.",
+      "Missing required subcommand for workflow run. Expected: list, approve, update-step.",
       parsed,
       io
     );
@@ -2080,6 +2090,9 @@ function workflowRun(parsed: ParsedFlags, io: CliIo): number {
   }
   if (subcommand === "approve") {
     return workflowRunApprove(parsed, io);
+  }
+  if (subcommand === "update-step") {
+    return workflowRunUpdateStep(parsed, io);
   }
   return usageError(
     `Unknown workflow run subcommand: ${subcommand}`,
@@ -2962,6 +2975,364 @@ function emitWorkflowRunApproveFailure(
   if (failure.dataDir !== undefined) payload["dataDir"] = failure.dataDir;
   if (failure.runId !== undefined) payload["runId"] = failure.runId;
   if (failure.boundary !== undefined) payload["boundary"] = failure.boundary;
+
+  if (parsed.json) {
+    writeJson(io.stderr, payload);
+    return 1;
+  }
+  write(io.stderr, `${failure.message}\n`);
+  return 1;
+}
+
+const WORKFLOW_RUN_UPDATE_STEP_TARGET_STATES = [
+  "succeeded",
+  "skipped",
+  "failed",
+  "blocked"
+] as const satisfies readonly WorkflowStepState[];
+
+type WorkflowRunUpdateStepTargetState =
+  (typeof WORKFLOW_RUN_UPDATE_STEP_TARGET_STATES)[number];
+
+function isWorkflowRunUpdateStepTargetState(
+  value: string
+): value is WorkflowRunUpdateStepTargetState {
+  return (WORKFLOW_RUN_UPDATE_STEP_TARGET_STATES as readonly string[]).includes(
+    value
+  );
+}
+
+type WorkflowRunUpdateStepFailureCode =
+  | "data_dir_failed"
+  | "run_id_required"
+  | "run_not_found"
+  | "manual_recovery_required"
+  | "step_not_found"
+  | "invalid_state"
+  | "invalid_transition";
+
+type WorkflowRunUpdateStepFailure = {
+  command: "workflow run update-step";
+  code: WorkflowRunUpdateStepFailureCode;
+  message: string;
+  dataDir?: string;
+  runId?: string;
+  stepId?: string;
+};
+
+function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
+  const positional = parsed.args.slice(3);
+  if (positional.length === 0 || !positional[0]) {
+    return emitWorkflowRunUpdateStepFailure(parsed, io, {
+      command: "workflow run update-step",
+      code: "run_id_required",
+      message: "Missing required <run-id> for workflow run update-step."
+    });
+  }
+  if (positional.length > 1) {
+    return usageError(
+      `Unexpected argument for workflow run update-step: ${positional[1]}`,
+      parsed,
+      io
+    );
+  }
+  const runId = positional[0];
+
+  const stepId = parsed.step?.trim();
+  if (!stepId) {
+    return emitWorkflowRunUpdateStepFailure(parsed, io, {
+      command: "workflow run update-step",
+      code: "step_not_found",
+      message:
+        "Missing required --step <step-id> for workflow run update-step.",
+      runId
+    });
+  }
+
+  if (!parsed.state || !isWorkflowRunUpdateStepTargetState(parsed.state)) {
+    return emitWorkflowRunUpdateStepFailure(parsed, io, {
+      command: "workflow run update-step",
+      code: "invalid_state",
+      message:
+        `Invalid --state target for workflow run update-step: ${parsed.state ?? "(unset)"}. ` +
+        `Expected one of ${WORKFLOW_RUN_UPDATE_STEP_TARGET_STATES.join(", ")}.`,
+      runId,
+      stepId
+    });
+  }
+  const targetState = parsed.state;
+
+  const reason = parsed.reason?.trim();
+  if (!reason) {
+    return emitWorkflowRunUpdateStepFailure(parsed, io, {
+      command: "workflow run update-step",
+      code: "invalid_transition",
+      message: "Missing required --reason <text> for workflow run update-step.",
+      runId,
+      stepId
+    });
+  }
+
+  const actor = parsed.actor ?? null;
+  const evidencePointer = parsed.evidencePointer ?? null;
+  const ledgerPointer = parsed.ledgerPointer ?? null;
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return emitWorkflowRunUpdateStepFailure(parsed, io, {
+      command: "workflow run update-step",
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err),
+      runId,
+      stepId
+    });
+  }
+
+  let resultPayload: Record<string, unknown> | null = null;
+
+  const db = openDb(dataDir);
+  try {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const runRow = db
+        .prepare(
+          "SELECT id, state, needs_manual_recovery, manual_recovery_reason FROM workflow_runs WHERE id = ?"
+        )
+        .get(runId) as
+        | {
+            id: string;
+            state: WorkflowRunState;
+            needs_manual_recovery: number;
+            manual_recovery_reason: string | null;
+          }
+        | undefined;
+      if (!runRow) {
+        db.exec("ROLLBACK");
+        return emitWorkflowRunUpdateStepFailure(parsed, io, {
+          command: "workflow run update-step",
+          code: "run_not_found",
+          message: `Workflow run not found: ${runId}`,
+          dataDir,
+          runId,
+          stepId
+        });
+      }
+      if (runRow.needs_manual_recovery === 1) {
+        db.exec("ROLLBACK");
+        return emitWorkflowRunUpdateStepFailure(parsed, io, {
+          command: "workflow run update-step",
+          code: "manual_recovery_required",
+          message:
+            runRow.manual_recovery_reason ??
+            `Workflow run requires manual recovery before step updates: ${runId}`,
+          dataDir,
+          runId,
+          stepId
+        });
+      }
+
+      const stepRow = db
+        .prepare(
+          `SELECT state, operator_reason, operator_actor,
+                  operator_evidence_pointer, operator_ledger_pointer,
+                  operator_transition_at
+             FROM workflow_steps WHERE run_id = ? AND step_id = ?`
+        )
+        .get(runId, stepId) as
+        | {
+            state: WorkflowStepState;
+            operator_reason: string | null;
+            operator_actor: string | null;
+            operator_evidence_pointer: string | null;
+            operator_ledger_pointer: string | null;
+            operator_transition_at: number | null;
+          }
+        | undefined;
+      if (!stepRow) {
+        db.exec("ROLLBACK");
+        return emitWorkflowRunUpdateStepFailure(parsed, io, {
+          command: "workflow run update-step",
+          code: "step_not_found",
+          message: `Workflow step not found: runId=${runId}, stepId=${stepId}`,
+          dataDir,
+          runId,
+          stepId
+        });
+      }
+
+      const previousState = stepRow.state;
+      const transition = transitionWorkflowStep(previousState, targetState);
+      if (!transition.ok) {
+        db.exec("ROLLBACK");
+        return emitWorkflowRunUpdateStepFailure(parsed, io, {
+          command: "workflow run update-step",
+          code: "invalid_transition",
+          message: transition.errorMessage,
+          dataDir,
+          runId,
+          stepId
+        });
+      }
+
+      const now = Date.now();
+      let idempotent = false;
+      if (previousState === targetState) {
+        // Step already in the target state: only a byte-equal re-finalize is a
+        // safe idempotent no-op; any change to the audit context is refused so
+        // a stale repeat cannot silently rewrite the durable operator record.
+        const sameAuditContext =
+          stepRow.operator_reason === reason &&
+          stepRow.operator_actor === actor &&
+          stepRow.operator_evidence_pointer === evidencePointer &&
+          stepRow.operator_ledger_pointer === ledgerPointer;
+        if (!sameAuditContext) {
+          db.exec("ROLLBACK");
+          return emitWorkflowRunUpdateStepFailure(parsed, io, {
+            command: "workflow run update-step",
+            code: "invalid_transition",
+            message: `Workflow step ${stepId} is already ${targetState}; refusing to rewrite operator audit context.`,
+            dataDir,
+            runId,
+            stepId
+          });
+        }
+        idempotent = true;
+      } else {
+        const finishedAt = isTerminalStepState(targetState) ? now : null;
+        db.prepare(
+          `UPDATE workflow_steps
+             SET state = ?,
+                 operator_reason = ?,
+                 operator_actor = ?,
+                 operator_evidence_pointer = ?,
+                 operator_ledger_pointer = ?,
+                 operator_transition_at = ?,
+                 finished_at = COALESCE(?, finished_at),
+                 updated_at = ?
+           WHERE run_id = ? AND step_id = ?`
+        ).run(
+          targetState,
+          reason,
+          actor,
+          evidencePointer,
+          ledgerPointer,
+          now,
+          finishedAt,
+          now,
+          runId,
+          stepId
+        );
+      }
+
+      const stepRecords = loadWorkflowStepRecords(db, runId);
+      const runState = deriveWorkflowRunState(stepRecords);
+      if (runState !== runRow.state) {
+        const runFinishedAt = isTerminalRunState(runState) ? now : null;
+        db.prepare(
+          `UPDATE workflow_runs
+             SET state = ?,
+                 finished_at = COALESCE(?, finished_at),
+                 updated_at = ?
+           WHERE id = ?`
+        ).run(runState, runFinishedAt, now, runId);
+      }
+
+      db.exec("COMMIT");
+
+      resultPayload = {
+        ok: true,
+        command: "workflow run update-step",
+        dataDir,
+        runId,
+        stepId,
+        state: targetState,
+        previousState,
+        runState,
+        reason,
+        actor,
+        evidencePointer,
+        ledgerPointer,
+        idempotent
+      };
+    } catch (error) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        // no-op
+      }
+      throw error;
+    }
+  } finally {
+    db.close();
+  }
+
+  if (resultPayload === null) {
+    return 1;
+  }
+
+  if (parsed.json) {
+    writeJson(io.stdout, resultPayload);
+    return 0;
+  }
+
+  const lines = [
+    `Workflow step updated for ${runId}`,
+    `Step: ${stepId}`,
+    `State: ${String(resultPayload["previousState"])} -> ${targetState}`,
+    `Run state: ${String(resultPayload["runState"])}`,
+    `Reason: ${reason}`,
+    `Actor: ${actor ?? "(unset)"}`,
+    `Data dir: ${dataDir}`,
+    ""
+  ];
+  write(io.stdout, lines.join("\n"));
+  return 0;
+}
+
+function loadWorkflowStepRecords(
+  db: MomentumDb,
+  runId: string
+): WorkflowStepRecord[] {
+  const rows = db
+    .prepare(
+      "SELECT step_id, kind, state, step_order, required FROM workflow_steps WHERE run_id = ? ORDER BY step_order"
+    )
+    .all(runId) as Array<{
+    step_id: string;
+    kind: string;
+    state: string;
+    step_order: number;
+    required: number;
+  }>;
+  return rows.map((row) => ({
+    stepId: row.step_id,
+    kind: row.kind as WorkflowStepKind,
+    state: row.state as WorkflowStepState,
+    order: row.step_order,
+    required: row.required === 1
+  }));
+}
+
+function emitWorkflowRunUpdateStepFailure(
+  parsed: ParsedFlags,
+  io: CliIo,
+  failure: WorkflowRunUpdateStepFailure
+): number {
+  const payload: Record<string, unknown> = {
+    ok: false,
+    command: failure.command,
+    code: failure.code,
+    message: failure.message
+  };
+  if (failure.dataDir !== undefined) payload["dataDir"] = failure.dataDir;
+  if (failure.runId !== undefined) payload["runId"] = failure.runId;
+  if (failure.stepId !== undefined) payload["stepId"] = failure.stepId;
 
   if (parsed.json) {
     writeJson(io.stderr, payload);
@@ -6757,6 +7128,9 @@ function parseFlags(argv: string[]): ParsedFlags {
   let approvalPathFlag: string | undefined;
   let approvalDigestFlag: string | undefined;
   let phraseFlag: string | undefined;
+  let stepFlag: string | undefined;
+  let evidencePointerFlag: string | undefined;
+  let ledgerPointerFlag: string | undefined;
   let error: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -7108,6 +7482,39 @@ function parseFlags(argv: string[]): ParsedFlags {
       continue;
     }
 
+    if (arg === "--step") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --step.";
+      } else {
+        stepFlag = value;
+        index += 1;
+      }
+      continue;
+    }
+
+    if (arg === "--evidence-pointer") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --evidence-pointer.";
+      } else {
+        evidencePointerFlag = value;
+        index += 1;
+      }
+      continue;
+    }
+
+    if (arg === "--ledger-pointer") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --ledger-pointer.";
+      } else {
+        ledgerPointerFlag = value;
+        index += 1;
+      }
+      continue;
+    }
+
     if (arg === "--issue-scope") {
       const value = readFlagValue(argv, index);
       if (value === undefined) {
@@ -7309,6 +7716,11 @@ function parseFlags(argv: string[]): ParsedFlags {
   if (approvalPathFlag !== undefined) parsed.approvalPath = approvalPathFlag;
   if (approvalDigestFlag !== undefined) parsed.approvalDigest = approvalDigestFlag;
   if (phraseFlag !== undefined) parsed.phrase = phraseFlag;
+  if (stepFlag !== undefined) parsed.step = stepFlag;
+  if (evidencePointerFlag !== undefined) {
+    parsed.evidencePointer = evidencePointerFlag;
+  }
+  if (ledgerPointerFlag !== undefined) parsed.ledgerPointer = ledgerPointerFlag;
   if (error !== undefined) parsed.error = error;
 
   return parsed;

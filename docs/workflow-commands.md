@@ -1,12 +1,13 @@
 # Workflow commands
 
-Operator-facing CLI envelopes for the `workflow import`, `workflow status`, `workflow handoff`, `workflow run list`, and `workflow run approve` commands.
+Operator-facing CLI envelopes for the `workflow import`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run approve`, and `workflow run update-step` commands.
 
 - `workflow import` reads local `.agent-workflows/<run-id>/` directories and persists normalized rows into the `workflow_runs`, `workflow_steps`, and `workflow_approvals` tables.
 - `workflow status` is a read-only surface that lists workflow runs (with state / filter selectors) or returns the full detail of a single run.
 - `workflow handoff` is a read-only surface that emits a machine-readable next-action envelope for one run.
 - `workflow run list` is a read-only filterable query surface over the durable `workflow_runs` table, with additional filter dimensions not available in `workflow status` list mode.
 - `workflow run approve` records durable explicit approvals for workflow boundaries and persists operator-visible metadata (actor, phrase, artifact provenance) into `workflow_approvals`.
+- `workflow run update-step` drives operator-initiated step transitions (`succeeded` / `skipped` / `failed` / `blocked`) through the existing state machine, persisting an audit record with operator reason and optional evidence or ledger pointers.
 
 `workflow status`, `workflow handoff`, and `workflow run list` are read-only: they never write SQLite or files.
 
@@ -210,6 +211,84 @@ After the run, boundary, and phrase resolve, duplicate approvals short-circuit m
 | `invalid_boundary` | Missing or unsupported boundary value, or phrase is casual, missing, negated, non-affirmative, or insufficient for the requested boundary. |
 | `approval_digest_mismatch` | `--artifact-path` is unreadable/missing, or `--artifact-digest` was supplied and does not match the resolved digest. |
 | `duplicate_approval` | A durable approval already exists for the same run and boundary. |
+
+Exit code 0 on success, 1 on structured refusal, 2 on usage error.
+
+## `workflow run update-step`
+
+```text
+momentum workflow run update-step <run-id> --step <step-id> --state <succeeded|skipped|failed|blocked> --reason <text> [--actor <name>] [--evidence-pointer <ref>] [--ledger-pointer <ref>] [--data-dir <path>] [--json]
+```
+
+Drives an operator-initiated step transition through the existing state machine and persists a durable audit record.
+
+Required arguments:
+
+- `<run-id>` — the run to update.
+- `--step <step-id>` — the step to transition (e.g. `preflight`, `implementation`, `postflight`, `no-mistakes`, `merge-cleanup`, `linear-refresh`).
+- `--state <target>` — one of `succeeded`, `skipped`, `failed`, `blocked`.
+- `--reason <text>` — operator-supplied rationale, stored in the durable audit record.
+
+Optional arguments:
+
+- `--actor <name>` — operator identity; stored alongside the audit record; defaults to null when omitted.
+- `--evidence-pointer <ref>` — free-form reference to an evidence artifact (e.g. `.agent-workflows/<run-id>/ledger.jsonl#offset=42`).
+- `--ledger-pointer <ref>` — free-form reference to a ledger entry.
+
+Behaviour:
+
+- Illegal transitions (e.g. finalizing a `pending` step, transitioning from a terminal state to a different terminal state) refuse with `invalid_transition` and write no durable state.
+- A byte-equal repeat of an existing finalize (same `--state`, `--reason`, `--actor`, `--evidence-pointer`, and `--ledger-pointer`) returns successfully with `idempotent: true` and does not update the stored audit record.
+- A repeat with a different reason, actor, or pointers refuses with `invalid_transition`; the existing audit record is preserved.
+- After a successful step transition the run state is re-derived from the full step chain; if the derived state differs from the stored one, `workflow_runs.state` is updated in the same transaction.
+- The command is local-only: it never spawns an executor, schedules cron, or issues an external write.
+- If the run has `needs_manual_recovery` set, the command refuses with `manual_recovery_required` until the flag is cleared.
+
+### JSON envelope
+
+```json
+{
+  "ok": true,
+  "command": "workflow run update-step",
+  "dataDir": "/path/to/data",
+  "runId": "cwfp-abc123",
+  "stepId": "implementation",
+  "state": "succeeded",
+  "previousState": "running",
+  "runState": "succeeded",
+  "reason": "managed child finished but durable terminal evidence never landed",
+  "actor": "calvinnwq",
+  "evidencePointer": ".agent-workflows/cwfp-abc123/ledger.jsonl#offset=42",
+  "ledgerPointer": null,
+  "idempotent": false
+}
+```
+
+`actor`, `evidencePointer`, and `ledgerPointer` are always present in JSON output (null when not supplied).
+
+### Text output
+
+```text
+Workflow step updated for cwfp-abc123
+Step: implementation
+State: running -> succeeded
+Run state: succeeded
+Reason: managed child finished but durable terminal evidence never landed
+Actor: calvinnwq
+Data dir: /path/to/data
+```
+
+### Error codes
+
+| Code | Meaning |
+|------|---------|
+| `data_dir_failed` | Data directory resolution failed. |
+| `run_id_required` | `<run-id>` was not supplied. |
+| `run_not_found` | `<run-id>` does not exist in `workflow_runs`. |
+| `manual_recovery_required` | The run is blocked by its durable manual-recovery flag and must be cleared before step updates. |
+| `step_not_found` | `--step` was not supplied or does not match any step row for this run. |
+| `invalid_state` | `--state` is not one of the allowed target states. |
+| `invalid_transition` | The requested transition is not legal from the current step state, `--reason` was omitted, or an existing finalize would be overwritten with a different audit context. |
 
 Exit code 0 on success, 1 on structured refusal, 2 on usage error.
 
