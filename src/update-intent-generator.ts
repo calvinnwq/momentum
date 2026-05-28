@@ -96,6 +96,8 @@ type EvidenceRow = {
   metadata_json: string;
   goal_id: string | null;
   source_item_id: string | null;
+  run_id: string | null;
+  step_id: string | null;
   ingest_key: string;
   created_at: number;
   updated_at: number;
@@ -312,6 +314,8 @@ function evidenceRecordFromRow(row: EvidenceRow): EvidenceRecord {
     metadata: parseJsonObject(row.metadata_json),
     goalId: row.goal_id,
     sourceItemId: row.source_item_id,
+    runId: row.run_id,
+    stepId: row.step_id,
     ingestKey: row.ingest_key,
     createdAt: row.created_at,
     updatedAt: row.updated_at

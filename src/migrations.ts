@@ -18,6 +18,11 @@ const UPDATE_INTENT_M6_COLUMNS: ColumnSpec[] = [
   { name: "apply_state", type: "TEXT NOT NULL DEFAULT 'idle'" }
 ];
 
+const EVIDENCE_RECORD_LINKAGE_COLUMNS: ColumnSpec[] = [
+  { name: "run_id", type: "TEXT" },
+  { name: "step_id", type: "TEXT" }
+];
+
 const GOAL_REDUCER_COLUMNS: ColumnSpec[] = [
   { name: "current_iteration", type: "INTEGER NOT NULL DEFAULT 0" },
   { name: "completion_reason", type: "TEXT" },
@@ -125,6 +130,8 @@ CREATE TABLE IF NOT EXISTS evidence_records (
   metadata_json TEXT NOT NULL DEFAULT '{}',
   goal_id TEXT REFERENCES goals(id),
   source_item_id TEXT REFERENCES source_items(id),
+  run_id TEXT,
+  step_id TEXT,
   ingest_key TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
@@ -144,6 +151,14 @@ CREATE INDEX IF NOT EXISTS idx_evidence_records_source_type
 
 CREATE INDEX IF NOT EXISTS idx_evidence_records_occurred_at
   ON evidence_records(occurred_at);
+`;
+
+// Created after the additive linkage columns exist so the index works on both
+// fresh and upgraded data dirs. The composite (run_id, step_id) index serves
+// run-scoped and run+step-scoped evidence lookups via its leftmost prefix.
+const EVIDENCE_RECORDS_LINKAGE_INDEX_DDL = `
+CREATE INDEX IF NOT EXISTS idx_evidence_records_run_step
+  ON evidence_records(run_id, step_id) WHERE run_id IS NOT NULL;
 `;
 
 const SOURCE_ITEMS_DDL = `
@@ -431,6 +446,12 @@ export function applyQueueMigrations(db: MomentumDb): void {
     db.exec(DAEMON_RUNS_DDL);
     db.exec(SOURCE_ITEMS_DDL);
     db.exec(EVIDENCE_RECORDS_DDL);
+    if (tableExists(db, "evidence_records")) {
+      for (const column of EVIDENCE_RECORD_LINKAGE_COLUMNS) {
+        ensureColumn(db, "evidence_records", column);
+      }
+    }
+    db.exec(EVIDENCE_RECORDS_LINKAGE_INDEX_DDL);
     db.exec(UPDATE_INTENTS_DDL);
     if (tableExists(db, "update_intents")) {
       for (const column of UPDATE_INTENT_M6_COLUMNS) {

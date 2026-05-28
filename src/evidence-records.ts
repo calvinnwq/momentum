@@ -14,6 +14,8 @@ export type EvidenceRecord = {
   metadata: Record<string, unknown>;
   goalId: string | null;
   sourceItemId: string | null;
+  runId: string | null;
+  stepId: string | null;
   ingestKey: string;
   createdAt: number;
   updatedAt: number;
@@ -30,6 +32,8 @@ export type EvidenceRecordIngestInput = {
   metadata?: Record<string, unknown>;
   goalId?: string | null;
   sourceItemId?: string | null;
+  runId?: string | null;
+  stepId?: string | null;
   ingestKey: string;
 };
 
@@ -62,6 +66,8 @@ type EvidenceRecordRow = {
   metadata_json: string;
   goal_id: string | null;
   source_item_id: string | null;
+  run_id: string | null;
+  step_id: string | null;
   ingest_key: string;
   created_at: number;
   updated_at: number;
@@ -87,8 +93,8 @@ export function ingestEvidenceRecord(
       `INSERT INTO evidence_records
          (id, source, type, format_version, artifact_path, external_id,
           occurred_at, summary, metadata_json, goal_id, source_item_id,
-          ingest_key, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          run_id, step_id, ingest_key, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(ingest_key) DO NOTHING
        RETURNING *`
     )
@@ -104,6 +110,8 @@ export function ingestEvidenceRecord(
       metadataJson,
       input.goalId ?? null,
       input.sourceItemId ?? null,
+      input.runId ?? null,
+      input.stepId ?? null,
       input.ingestKey,
       now,
       now
@@ -122,18 +130,36 @@ export function ingestEvidenceRecord(
 
   const requestedGoalId = input.goalId ?? null;
   const requestedSourceItemId = input.sourceItemId ?? null;
+  const requestedRunId = input.runId ?? null;
+  const requestedStepId = input.stepId ?? null;
   const shouldAttachGoal = existing.goal_id === null && requestedGoalId !== null;
   const shouldAttachSourceItem =
     existing.source_item_id === null && requestedSourceItemId !== null;
+  const shouldAttachRun = existing.run_id === null && requestedRunId !== null;
+  const shouldAttachStep = existing.step_id === null && requestedStepId !== null;
 
-  if (shouldAttachGoal || shouldAttachSourceItem) {
+  if (
+    shouldAttachGoal ||
+    shouldAttachSourceItem ||
+    shouldAttachRun ||
+    shouldAttachStep
+  ) {
     db.prepare(
       `UPDATE evidence_records
           SET goal_id = CASE WHEN goal_id IS NULL THEN ? ELSE goal_id END,
               source_item_id = CASE WHEN source_item_id IS NULL THEN ? ELSE source_item_id END,
+              run_id = CASE WHEN run_id IS NULL THEN ? ELSE run_id END,
+              step_id = CASE WHEN step_id IS NULL THEN ? ELSE step_id END,
               updated_at = ?
         WHERE ingest_key = ?`
-    ).run(requestedGoalId, requestedSourceItemId, now, input.ingestKey);
+    ).run(
+      requestedGoalId,
+      requestedSourceItemId,
+      requestedRunId,
+      requestedStepId,
+      now,
+      input.ingestKey
+    );
     const updated = getEvidenceRecordRowByIngestKey(db, input.ingestKey);
     if (!updated) {
       throw new Error(
@@ -308,6 +334,8 @@ function evidenceRecordFromRow(row: EvidenceRecordRow): EvidenceRecord {
     metadata: parseMetadata(row.metadata_json),
     goalId: row.goal_id,
     sourceItemId: row.source_item_id,
+    runId: row.run_id,
+    stepId: row.step_id,
     ingestKey: row.ingest_key,
     createdAt: row.created_at,
     updatedAt: row.updated_at
