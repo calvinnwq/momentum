@@ -308,7 +308,7 @@ const COMMANDS = [
   "momentum workflow handoff <run-id> [--data-dir <path>] [--json]",
   "momentum workflow run approve <run-id> --approval-boundary <boundary> --phrase <text> [--actor <name>] [--artifact-path <path>] [--artifact-digest <sha256>] [--data-dir <path>] [--json]",
   "momentum workflow run list [--state <state>] [--filter <active|blocked|completed|imported>] [--approval-boundary <boundary>] [--repo <path>] [--issue-scope <identifier>] [--updated-since <ms>] [--updated-until <ms>] [--limit <n>] [--data-dir <path>] [--json]",
-  "momentum workflow run update-step <run-id> --step <step-id> --state <succeeded|skipped|failed|blocked> --reason <text> [--actor <name>] [--evidence-pointer <ref>] [--ledger-pointer <ref>] [--data-dir <path>] [--json]",
+  "momentum workflow run update-step <run-id> --step <step-id> --state <approved|succeeded|skipped|failed|blocked|canceled> --reason <text> [--actor <name>] [--evidence-pointer <ref>] [--ledger-pointer <ref>] [--data-dir <path>] [--json]",
   "momentum intent list [--status <status>] [--adapter <kind>] [--type <intent-type>] [--goal <goal-id>] [--source-item <id>] [--evidence-record <id>] [--limit <n>] [--data-dir <path>] [--json]",
   "momentum intent get <intent-id> [--data-dir <path>] [--json]",
   "momentum intent apply <intent-id> --reason <text> [--repo <path>] [--external-apply] [--data-dir <path>] [--json]",
@@ -2986,10 +2986,12 @@ function emitWorkflowRunApproveFailure(
 }
 
 const WORKFLOW_RUN_UPDATE_STEP_TARGET_STATES = [
+  "approved",
   "succeeded",
   "skipped",
   "failed",
-  "blocked"
+  "blocked",
+  "canceled"
 ] as const satisfies readonly WorkflowStepState[];
 
 type WorkflowRunUpdateStepTargetState =
@@ -3137,7 +3139,6 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
           stepId
         });
       }
-
       const stepRow = db
         .prepare(
           `SELECT state, operator_reason, operator_actor,
@@ -3168,6 +3169,25 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
       }
 
       const previousState = stepRow.state;
+      const sameAuditContext =
+        stepRow.operator_reason === reason &&
+        stepRow.operator_actor === actor &&
+        stepRow.operator_evidence_pointer === evidencePointer &&
+        stepRow.operator_ledger_pointer === ledgerPointer;
+      if (
+        isTerminalRunState(runRow.state) &&
+        !(previousState === targetState && sameAuditContext)
+      ) {
+        db.exec("ROLLBACK");
+        return emitWorkflowRunUpdateStepFailure(parsed, io, {
+          command: "workflow run update-step",
+          code: "invalid_transition",
+          message: `Workflow run is terminal and cannot be updated: ${runId} (${runRow.state})`,
+          dataDir,
+          runId,
+          stepId
+        });
+      }
       const transition = transitionWorkflowStep(previousState, targetState);
       if (!transition.ok) {
         db.exec("ROLLBACK");
@@ -3187,11 +3207,6 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
         // Step already in the target state: only a byte-equal re-finalize is a
         // safe idempotent no-op; any change to the audit context is refused so
         // a stale repeat cannot silently rewrite the durable operator record.
-        const sameAuditContext =
-          stepRow.operator_reason === reason &&
-          stepRow.operator_actor === actor &&
-          stepRow.operator_evidence_pointer === evidencePointer &&
-          stepRow.operator_ledger_pointer === ledgerPointer;
         if (!sameAuditContext) {
           db.exec("ROLLBACK");
           return emitWorkflowRunUpdateStepFailure(parsed, io, {

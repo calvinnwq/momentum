@@ -599,6 +599,80 @@ describe("momentum workflow run update-step (NGX-326)", () => {
     expect(readRunState(dataDir, runId)).toBe("blocked");
   });
 
+  it("approves a blocked step to give operators an unblock path", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-unblock";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "blocked" });
+      seedStep(db, {
+        runId,
+        stepId: "postflight",
+        kind: "postflight",
+        state: "blocked",
+        order: 1
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "update-step",
+      runId,
+      "--step",
+      "postflight",
+      "--state",
+      "approved",
+      "--reason",
+      "operator cleared the block",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    expect(readStep(dataDir, runId, "postflight").state).toBe("approved");
+    expect(readRunState(dataDir, runId)).toBe("approved");
+  });
+
+  it("cancels a blocked step to give operators a terminal escape hatch", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-cancel-blocked";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "blocked" });
+      seedStep(db, {
+        runId,
+        stepId: "postflight",
+        kind: "postflight",
+        state: "blocked",
+        order: 1
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "update-step",
+      runId,
+      "--step",
+      "postflight",
+      "--state",
+      "canceled",
+      "--reason",
+      "operator canceled the blocked step",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    expect(readStep(dataDir, runId, "postflight").state).toBe("canceled");
+    expect(readRunState(dataDir, runId)).toBe("canceled");
+  });
+
   it("refuses an illegal transition without durable mutation", async () => {
     const dataDir = makeTempDir();
     const runId = "cwfp-illegal";
@@ -850,6 +924,51 @@ describe("momentum workflow run update-step (NGX-326)", () => {
     });
     expect(readStep(dataDir, runId, "implementation").state).toBe("succeeded");
     expect(readRunState(dataDir, runId)).toBe("running");
+  });
+
+  it("refuses to mutate steps on terminal runs", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-terminal";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "succeeded" });
+      seedStep(db, {
+        runId,
+        stepId: "postflight",
+        kind: "postflight",
+        state: "running",
+        order: 1
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "update-step",
+      runId,
+      "--step",
+      "postflight",
+      "--state",
+      "blocked",
+      "--reason",
+      "stale operator action",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "workflow run update-step",
+      code: "invalid_transition",
+      runId,
+      stepId: "postflight"
+    });
+    expect(readStep(dataDir, runId, "postflight").state).toBe("running");
+    expect(readRunState(dataDir, runId)).toBe("succeeded");
   });
 
   it("refuses transitions while the run needs manual recovery", async () => {

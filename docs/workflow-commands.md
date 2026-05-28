@@ -7,7 +7,7 @@ Operator-facing CLI envelopes for the `workflow import`, `workflow status`, `wor
 - `workflow handoff` is a read-only surface that emits a machine-readable next-action envelope for one run.
 - `workflow run list` is a read-only filterable query surface over the durable `workflow_runs` table, with additional filter dimensions not available in `workflow status` list mode.
 - `workflow run approve` records durable explicit approvals for workflow boundaries and persists operator-visible metadata (actor, phrase, artifact provenance) into `workflow_approvals`.
-- `workflow run update-step` drives operator-initiated step transitions (`succeeded` / `skipped` / `failed` / `blocked`) through the existing state machine, persisting an audit record with operator reason and optional evidence or ledger pointers.
+- `workflow run update-step` drives operator-initiated step transitions (`approved` / `succeeded` / `skipped` / `failed` / `blocked` / `canceled`) through the existing state machine, persisting an audit record with operator reason and optional evidence or ledger pointers.
 
 `workflow status`, `workflow handoff`, and `workflow run list` are read-only: they never write SQLite or files.
 
@@ -217,7 +217,7 @@ Exit code 0 on success, 1 on structured refusal, 2 on usage error.
 ## `workflow run update-step`
 
 ```text
-momentum workflow run update-step <run-id> --step <step-id> --state <succeeded|skipped|failed|blocked> --reason <text> [--actor <name>] [--evidence-pointer <ref>] [--ledger-pointer <ref>] [--data-dir <path>] [--json]
+momentum workflow run update-step <run-id> --step <step-id> --state <approved|succeeded|skipped|failed|blocked|canceled> --reason <text> [--actor <name>] [--evidence-pointer <ref>] [--ledger-pointer <ref>] [--data-dir <path>] [--json]
 ```
 
 Drives an operator-initiated step transition through the existing state machine and persists a durable audit record.
