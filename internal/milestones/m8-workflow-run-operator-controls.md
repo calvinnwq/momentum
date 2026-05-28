@@ -71,7 +71,7 @@ The M3 goal-scoped recovery surfaces (`recovery clear <goal-id>`, `goals.needs_m
 M8 adds optional, additive `runId` / `stepId` linkage to the existing M5 `evidence_records` table through nullable `run_id` / `step_id` columns and the `idx_evidence_records_run_step` lookup index. The M5 evidence ingest CLI (`evidence ingest --path <file-or-dir>`), the `evidence_format_unknown` / `evidence_format_invalid` diagnostic codes, the `ingestKey` idempotency semantics, the `goal_not_found` / `source_item_not_found` pre-checks, and every existing evidence row stay wire-stable. M8 only:
 
 - Attaches workflow artifacts to the owning `runId` when ingest runs against `.agent-workflows/<runId>/`; ledger step events also attach `stepId`, while plan / approval artifacts remain run-scoped with null `stepId`.
-- Surfaces typed evidence pointers through `workflow status` / `workflow handoff` / `workflow run list` / `workflow run monitor` without requiring path-only inference for newly ingested workflow evidence.
+- Surfaces typed evidence pointers through `evidence ingest` / `evidence list` record JSON and through `workflow status` / `workflow handoff` detail evidence without requiring path-only inference for newly ingested workflow evidence; `workflow run list` and `workflow run monitor` can adopt the same typed-linkage query in their own slices.
 - Preserves idempotent replay: existing rows can gain missing `runId` / `stepId` linkage but never have non-null linkage overwritten.
 
 The migration is additive and backwards-compatible. Existing and non-workflow evidence rows continue to carry null linkage, and legacy run evidence can still surface through artifact-path fallback where supported.

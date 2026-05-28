@@ -531,8 +531,11 @@ Monitor
 - Last checkpoint: implementation at 1730000100000 (source=ledger)
 - Next action: resume_running - Step is running with fresh lease / checkpoint evidence. Allow it to continue.
 
-Evidence: 0
+Evidence: 1
+- evidence_record_impl [agent-workflow/implementation_complete] implementation finished step=implementation
 ```
+
+Evidence rows include a trailing `step=<stepId>` annotation when the record carries typed step linkage.
 
 Exit code 0 on success, 1 on failure, 2 on usage error.
 
