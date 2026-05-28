@@ -12,6 +12,7 @@ import {
   WORKFLOW_STEP_TERMINAL_STATES,
   classifyWorkflowLease,
   deriveWorkflowRunState,
+  highestWorkflowApprovalBoundary,
   isTerminalRunState,
   isTerminalStepState,
   transitionWorkflowRun,
@@ -102,6 +103,24 @@ describe("workflow-run-reducer constants", () => {
     expect(isTerminalStepState("blocked")).toBe(false);
     expect(isTerminalRunState("canceled")).toBe(true);
     expect(isTerminalRunState("blocked")).toBe(false);
+  });
+});
+
+describe("highestWorkflowApprovalBoundary", () => {
+  it("surfaces the newly recorded boundary when coverage is equal", () => {
+    expect(
+      highestWorkflowApprovalBoundary("implementation", "through-implementation")
+    ).toBe("through-implementation");
+    expect(
+      highestWorkflowApprovalBoundary("no-mistakes", "overnight-safe")
+    ).toBe("overnight-safe");
+  });
+
+  it("keeps the higher-coverage boundary when the new one is lower", () => {
+    expect(highestWorkflowApprovalBoundary("full", "plan-only")).toBe("full");
+    expect(
+      highestWorkflowApprovalBoundary("through-merge-cleanup", "implementation")
+    ).toBe("through-merge-cleanup");
   });
 });
 

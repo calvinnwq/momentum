@@ -1,11 +1,12 @@
 # Workflow commands
 
-Operator-facing CLI envelopes for the `workflow import`, `workflow status`, `workflow handoff`, and `workflow run list` commands.
+Operator-facing CLI envelopes for the `workflow import`, `workflow status`, `workflow handoff`, `workflow run list`, and `workflow run approve` commands.
 
 - `workflow import` reads local `.agent-workflows/<run-id>/` directories and persists normalized rows into the `workflow_runs`, `workflow_steps`, and `workflow_approvals` tables.
 - `workflow status` is a read-only surface that lists workflow runs (with state / filter selectors) or returns the full detail of a single run.
 - `workflow handoff` is a read-only surface that emits a machine-readable next-action envelope for one run.
 - `workflow run list` is a read-only filterable query surface over the durable `workflow_runs` table, with additional filter dimensions not available in `workflow status` list mode.
+- `workflow run approve` records durable explicit approvals for workflow boundaries and persists operator-visible metadata (actor, phrase, artifact provenance) into `workflow_approvals`.
 
 `workflow status`, `workflow handoff`, and `workflow run list` are read-only: they never write SQLite or files.
 
@@ -31,6 +32,7 @@ Reads the `.agent-workflows/<run-id>/` directory at `<run-dir>` and normalizes t
 - **Lost managed-task markers**: `managed-*.pid`, `managed-*.log`, and `locks/` sibling entries are ignored without diagnostics. They do not force a failed step state.
 - **Unknown siblings**: unrecognized files produce `evidence_format_unknown` diagnostics but do not drop the valid records around them.
 - **Malformed artifacts**: invalid `plan.json`, `ledger.jsonl` lines, or `approval-*.json` files produce `evidence_format_invalid` diagnostics. Valid siblings are still imported.
+- **Durable approvals merge forward**: existing database approvals, the current `approval_boundary`, and imported `approval-*.json` artifacts are merged. The highest boundary is preserved; same-rank boundaries prefer the newer recorded approval. Stale same-boundary artifacts do not overwrite newer durable approval rows. On fresh imports and re-imports, pending steps covered by any preserved approval are persisted as `approved`, and a non-terminal pending run can be persisted as `approved`.
 
 ### JSON envelope (success)
 
@@ -55,7 +57,7 @@ Reads the `.agent-workflows/<run-id>/` directory at `<run-dir>` and normalizes t
 }
 ```
 
-`inserted` is `true` on first import and `false` on re-import (upsert). `monitor` carries the advisory monitor snapshot (always `advisory: true`) or `null` when no `monitor.json` is present.
+`inserted` is `true` on first import and `false` on re-import (upsert). `counts.approvals` counts only `approval-*.json` artifacts present in the current import; preserved durable approvals are reflected in `state` and `approvalBoundary` but do not increase that count. `monitor` carries the advisory monitor snapshot (always `advisory: true`) or `null` when no `monitor.json` is present.
 
 #### Diagnostic entries
 
@@ -127,6 +129,89 @@ Cannot read import path: ...
 ```
 
 Exit code 1 is returned on failure; exit code 0 on success.
+
+## `workflow run approve`
+
+```text
+momentum workflow run approve <run-id> --approval-boundary <boundary> --phrase <text> [--actor <name>] [--artifact-path <path>] [--artifact-digest <sha256>] [--data-dir <path>] [--json]
+```
+
+Records an explicit durable approval for one workflow run boundary and emits a stable JSON/text envelope.
+
+Validation rules:
+
+- `--approval-boundary` must be one of: `implementation`, `through-implementation`, `no-mistakes`, `through-no-mistakes`, `merge-cleanup`, `through-merge-cleanup`, `full`, `plan-only`, `overnight-safe`, `through-postflight`, `through-merge-gates`, `final-cleanup`, `full-batch`.
+- `--phrase` must be non-empty, affirmative, include `approve`, and include the requested boundary.
+- `--artifact-path`, when supplied, must be readable.
+- If `--artifact-digest` is supplied with `--artifact-path`, it must match the SHA-256 digest of that file (or the command refuses).
+
+If `--artifact-path` is omitted, Momentum stores the synthetic provenance URI `workflow-run-approve://<run-id>/<boundary>` in `artifactPath` and synthesizes a deterministic provenance digest from `approve:<run-id>:<boundary>:<phrase>`. A supplied `--artifact-digest` without `--artifact-path` must match that synthesized digest.
+
+On success, the command inserts a `workflow_approvals` row, updates `workflow_runs.approval_boundary` to the new boundary unless the stored boundary has a strictly higher rank (same-rank approvals replace the stored boundary), promotes a pending run to `approved`, and marks pending steps covered by the boundary as `approved`.
+
+Boundary coverage:
+
+| Boundary | Pending steps approved |
+|----------|------------------------|
+| `plan-only` | none |
+| `implementation`, `through-implementation` | `preflight`, `implementation` |
+| `through-postflight` | `preflight`, `implementation`, `postflight` |
+| `no-mistakes`, `through-no-mistakes`, `overnight-safe`, `through-merge-gates` | `preflight`, `implementation`, `postflight`, `no-mistakes` |
+| `merge-cleanup`, `through-merge-cleanup` | `preflight`, `implementation`, `postflight`, `no-mistakes`, `merge-cleanup` |
+| `full`, `final-cleanup`, `full-batch` | `preflight`, `implementation`, `postflight`, `no-mistakes`, `merge-cleanup`, `linear-refresh` |
+
+The command is idempotent by `(run-id, boundary)`; approving the same pair twice returns a stable duplicate refusal instead of creating duplicate rows.
+
+### JSON envelope
+
+```json
+{
+  "ok": true,
+  "command": "workflow run approve",
+  "dataDir": "/path/to/data",
+  "runId": "cwfp-abc123",
+  "boundary": "through-implementation",
+  "phrase": "approve pipeline cwfp-abc123 through implementation",
+  "actor": "calvinnwq",
+  "artifactPath": "/path/to/approval-implementation.json",
+  "artifactDigest": "f2f...a4",
+  "recordedAt": 1730000000000
+}
+```
+
+When `--artifact-path` is omitted, `artifactPath` is `workflow-run-approve://<run-id>/<boundary>` and `artifactDigest` is the synthetic digest described above. When `--actor` is omitted, JSON still emits `"actor": null`.
+
+### Text output
+
+Text output prints a stable human-readable confirmation and omits JSON-only fields such as `artifactDigest` and `recordedAt`:
+
+```text
+Workflow run approval recorded for cwfp-abc123
+Boundary: through-implementation
+Phrase: approve pipeline cwfp-abc123 through implementation
+Actor: calvinnwq
+Artifact: /path/to/approval-implementation.json
+Data dir: /path/to/data
+```
+
+When `--actor` is omitted, the `Actor:` line prints `(unset)`. When `--artifact-path` is omitted, the `Artifact:` line prints `(inline/implicit)`.
+
+### Error codes
+
+After the run, boundary, and phrase resolve, duplicate approvals short-circuit mutable validations: an existing `(run-id, boundary)` row returns `duplicate_approval` before terminal-state, manual-recovery, or artifact-digest checks.
+
+| Code | Meaning |
+|------|---------|
+| `data_dir_failed` | Data directory resolution failed. |
+| `run_id_required` | `<run-id>` was not supplied. |
+| `run_not_found` | `<run-id>` does not exist in `workflow_runs`. |
+| `manual_recovery_required` | The run is blocked by its durable manual-recovery flag and must be cleared before approval. |
+| `invalid_state` | The run is already terminal and cannot accept new approvals. |
+| `invalid_boundary` | Missing or unsupported boundary value, or phrase is casual, missing, negated, non-affirmative, or insufficient for the requested boundary. |
+| `approval_digest_mismatch` | `--artifact-path` is unreadable/missing, or `--artifact-digest` was supplied and does not match the resolved digest. |
+| `duplicate_approval` | A durable approval already exists for the same run and boundary. |
+
+Exit code 0 on success, 1 on structured refusal, 2 on usage error.
 
 ## `workflow status`
 

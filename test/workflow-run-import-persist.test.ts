@@ -245,6 +245,7 @@ describe("persistWorkflowRunImport", () => {
         runId: "cwfp-persist01",
         source: "agent-workflow",
         state: "succeeded",
+        approvalBoundary: "through-merge-cleanup",
         inserted: true,
         stepCount: 5,
         approvalCount: 1
@@ -492,6 +493,515 @@ describe("persistWorkflowRunImport", () => {
       );
       expect(secondApproval.created_at).toBe(firstApproval.created_at);
       expect(secondApproval.updated_at).toBe(1_700_000_500);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("preserves the highest durable approval boundary across re-imports", () => {
+    const dataDir = makeTempDir("momentum-data-");
+    const artifactRoot = makeTempDir();
+    const runId = "cwfp-preserve-import-boundary";
+    const runDir = path.join(artifactRoot, runId);
+
+    writeJsonFile(path.join(runDir, "plan.json"), basePlan(runId));
+    writeLedger(path.join(runDir, "ledger.jsonl"), [
+      { runId, step: "preflight", status: "complete", ts: "2026-05-17T10:00:00Z" }
+    ]);
+
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunImport(db, parseOrThrow(runDir), {
+        now: 1_700_000_000
+      });
+      db.prepare(
+        "UPDATE workflow_runs SET approval_boundary = ?, updated_at = ? WHERE id = ?"
+      ).run("through-merge-cleanup", 1_700_000_100, runId);
+      db.prepare(
+        `INSERT INTO workflow_approvals (
+           run_id, boundary, actor, phrase, artifact_path, artifact_digest,
+           recorded_at, discharged_at, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        runId,
+        "through-merge-cleanup",
+        "operator@example.com",
+        "approve through merge cleanup",
+        `workflow-run-approve://${runId}/through-merge-cleanup`,
+        "durable-digest",
+        1_700_000_050,
+        null,
+        1_700_000_050,
+        1_700_000_050
+      );
+
+      persistWorkflowRunImport(db, parseOrThrow(runDir), {
+        now: 1_700_000_500
+      });
+
+      const runRow = readWorkflowRun(db, runId);
+      expect(runRow.approval_boundary).toBe("through-merge-cleanup");
+      const approvalRows = readWorkflowApprovals(db, runId);
+      expect(approvalRows.map((row) => row.boundary)).toEqual([
+        "through-merge-cleanup"
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("preserves durable approval-unblocked pending steps across re-imports", () => {
+    const dataDir = makeTempDir("momentum-data-");
+    const artifactRoot = makeTempDir();
+    const runId = "cwfp-preserve-approved-steps";
+    const runDir = path.join(artifactRoot, runId);
+
+    writeJsonFile(path.join(runDir, "plan.json"), basePlan(runId));
+    writeLedger(path.join(runDir, "ledger.jsonl"), []);
+
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunImport(db, parseOrThrow(runDir), {
+        now: 1_700_000_000
+      });
+      db.prepare(
+        `INSERT INTO workflow_approvals (
+           run_id, boundary, actor, phrase, artifact_path, artifact_digest,
+           recorded_at, discharged_at, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        runId,
+        "through-implementation",
+        "operator@example.com",
+        "approve through implementation",
+        `workflow-run-approve://${runId}/through-implementation`,
+        "durable-digest",
+        1_700_000_050,
+        null,
+        1_700_000_050,
+        1_700_000_050
+      );
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'approved', updated_at = ? WHERE run_id = ? AND kind IN ('preflight', 'implementation')"
+      ).run(1_700_000_050, runId);
+
+      persistWorkflowRunImport(db, parseOrThrow(runDir), {
+        now: 1_700_000_500
+      });
+
+      const stepRows = readWorkflowSteps(db, runId);
+      expect(
+        stepRows.map((row) => [row.kind, row.state])
+      ).toEqual([
+        ["preflight", "approved"],
+        ["implementation", "approved"],
+        ["postflight", "pending"],
+        ["no-mistakes", "pending"],
+        ["merge-cleanup", "pending"]
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("preserves durable approval-unblocked run state across re-imports", () => {
+    const dataDir = makeTempDir("momentum-data-");
+    const artifactRoot = makeTempDir();
+    const runId = "cwfp-preserve-approved-run";
+    const runDir = path.join(artifactRoot, runId);
+
+    writeJsonFile(path.join(runDir, "plan.json"), basePlan(runId));
+    writeLedger(path.join(runDir, "ledger.jsonl"), []);
+
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunImport(db, parseOrThrow(runDir), {
+        now: 1_700_000_000
+      });
+      db.prepare(
+        `INSERT INTO workflow_approvals (
+           run_id, boundary, actor, phrase, artifact_path, artifact_digest,
+           recorded_at, discharged_at, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        runId,
+        "through-implementation",
+        "operator@example.com",
+        "approve through implementation",
+        `workflow-run-approve://${runId}/through-implementation`,
+        "durable-digest",
+        1_700_000_050,
+        null,
+        1_700_000_050,
+        1_700_000_050
+      );
+      db.prepare(
+        "UPDATE workflow_runs SET state = 'approved', approval_boundary = ?, updated_at = ? WHERE id = ?"
+      ).run("through-implementation", 1_700_000_050, runId);
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'approved', updated_at = ? WHERE run_id = ? AND kind IN ('preflight', 'implementation')"
+      ).run(1_700_000_050, runId);
+
+      const summary = persistWorkflowRunImport(db, parseOrThrow(runDir), {
+        now: 1_700_000_500
+      });
+
+      const runRow = readWorkflowRun(db, runId);
+      expect(summary.state).toBe("approved");
+      expect(runRow.state).toBe("approved");
+      expect(runRow.approval_boundary).toBe("through-implementation");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("persists approval-unblocked run state on fresh imports", () => {
+    const dataDir = makeTempDir("momentum-data-");
+    const artifactRoot = makeTempDir();
+    const runId = "cwfp-fresh-approved-run";
+    const runDir = path.join(artifactRoot, runId);
+    const approvalPath = path.join(
+      runDir,
+      "approval-through-implementation.json"
+    );
+
+    writeJsonFile(path.join(runDir, "plan.json"), basePlan(runId));
+    writeLedger(path.join(runDir, "ledger.jsonl"), []);
+    writeJsonFile(approvalPath, {
+      runId,
+      schemaVersion: 1,
+      boundary: "through-implementation",
+      actor: "ops@example.com",
+      phrase: "approve through implementation",
+      approvedAt: "2026-05-17T10:05:00Z"
+    });
+
+    const db = openDb(dataDir);
+    try {
+      const summary = persistWorkflowRunImport(db, parseOrThrow(runDir), {
+        now: 1_700_000_500
+      });
+
+      const runRow = readWorkflowRun(db, runId);
+      expect(summary.state).toBe("approved");
+      expect(runRow.state).toBe("approved");
+      expect(runRow.approval_boundary).toBe("through-implementation");
+      expect(
+        readWorkflowSteps(db, runId).map((row) => [row.kind, row.state])
+      ).toEqual([
+        ["preflight", "approved"],
+        ["implementation", "approved"],
+        ["postflight", "pending"],
+        ["no-mistakes", "pending"],
+        ["merge-cleanup", "pending"]
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("preserves approval-only run state across re-imports", () => {
+    const dataDir = makeTempDir("momentum-data-");
+    const artifactRoot = makeTempDir();
+    const runId = "cwfp-preserve-plan-only-approval";
+    const runDir = path.join(artifactRoot, runId);
+
+    writeJsonFile(path.join(runDir, "plan.json"), basePlan(runId));
+    writeLedger(path.join(runDir, "ledger.jsonl"), []);
+
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunImport(db, parseOrThrow(runDir), {
+        now: 1_700_000_000
+      });
+      db.prepare(
+        `INSERT INTO workflow_approvals (
+           run_id, boundary, actor, phrase, artifact_path, artifact_digest,
+           recorded_at, discharged_at, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        runId,
+        "plan-only",
+        "operator@example.com",
+        "approve plan only",
+        `workflow-run-approve://${runId}/plan-only`,
+        "durable-digest",
+        1_700_000_050,
+        null,
+        1_700_000_050,
+        1_700_000_050
+      );
+      db.prepare(
+        "UPDATE workflow_runs SET state = 'approved', approval_boundary = ?, updated_at = ? WHERE id = ?"
+      ).run("plan-only", 1_700_000_050, runId);
+
+      const summary = persistWorkflowRunImport(db, parseOrThrow(runDir), {
+        now: 1_700_000_500
+      });
+
+      const runRow = readWorkflowRun(db, runId);
+      expect(summary.state).toBe("approved");
+      expect(runRow.state).toBe("approved");
+      expect(runRow.approval_boundary).toBe("plan-only");
+      expect(readWorkflowSteps(db, runId).map((row) => row.state)).toEqual([
+        "pending",
+        "pending",
+        "pending",
+        "pending",
+        "pending"
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("preserves terminal success for approved imports without required steps", () => {
+    const dataDir = makeTempDir("momentum-data-");
+    const artifactRoot = makeTempDir();
+    const runId = "cwfp-approved-complete-no-required";
+    const runDir = path.join(artifactRoot, runId);
+    const approvalPath = path.join(
+      runDir,
+      "approval-through-merge-cleanup.json"
+    );
+
+    writeJsonFile(
+      path.join(runDir, "plan.json"),
+      basePlan(runId, { approvalsRequired: [] })
+    );
+    writeLedger(path.join(runDir, "ledger.jsonl"), [
+      { runId, step: "preflight", status: "complete", ts: "2026-05-17T10:00:00Z" },
+      {
+        runId,
+        step: "implementation",
+        status: "complete",
+        ts: "2026-05-17T10:30:00Z"
+      },
+      {
+        runId,
+        step: "postflight:1",
+        status: "complete",
+        ts: "2026-05-17T10:35:00Z"
+      },
+      {
+        runId,
+        step: "no-mistakes",
+        status: "complete",
+        ts: "2026-05-17T10:40:00Z"
+      },
+      {
+        runId,
+        step: "merge-cleanup",
+        status: "complete",
+        ts: "2026-05-17T10:45:00Z"
+      }
+    ]);
+    writeJsonFile(approvalPath, {
+      runId,
+      schemaVersion: 1,
+      boundary: "through-merge-cleanup",
+      actor: "ops@example.com",
+      phrase: "approve through merge cleanup",
+      approvedAt: "2026-05-17T09:00:00Z"
+    });
+
+    const db = openDb(dataDir);
+    try {
+      const parsed = parseOrThrow(runDir);
+      expect(parsed.run.state).toBe("succeeded");
+
+      const summary = persistWorkflowRunImport(db, parsed, {
+        now: 1_700_000_500
+      });
+
+      const runRow = readWorkflowRun(db, runId);
+      expect(summary.state).toBe("succeeded");
+      expect(runRow.state).toBe("succeeded");
+      expect(runRow.approval_boundary).toBe("through-merge-cleanup");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("surfaces current import approval when equal-rank durable approvals exist", () => {
+    const dataDir = makeTempDir("momentum-data-");
+    const artifactRoot = makeTempDir();
+    const runId = "cwfp-equal-rank-import-boundary";
+    const runDir = path.join(artifactRoot, runId);
+    const approvalPath = path.join(runDir, "approval-through-implementation.json");
+
+    writeJsonFile(path.join(runDir, "plan.json"), basePlan(runId));
+    writeLedger(path.join(runDir, "ledger.jsonl"), []);
+
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunImport(db, parseOrThrow(runDir), {
+        now: 1_700_000_000
+      });
+      db.prepare(
+        `INSERT INTO workflow_approvals (
+           run_id, boundary, actor, phrase, artifact_path, artifact_digest,
+           recorded_at, discharged_at, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        runId,
+        "implementation",
+        "operator@example.com",
+        "approve implementation",
+        `workflow-run-approve://${runId}/implementation`,
+        "durable-digest",
+        1_700_000_050,
+        null,
+        1_700_000_050,
+        1_700_000_050
+      );
+      db.prepare(
+        "UPDATE workflow_runs SET approval_boundary = ?, updated_at = ? WHERE id = ?"
+      ).run("implementation", 1_700_000_050, runId);
+
+      writeJsonFile(approvalPath, {
+        runId,
+        schemaVersion: 1,
+        boundary: "through-implementation",
+        actor: "ops@example.com",
+        phrase: "approve through implementation",
+        approvedAt: "2026-05-17T10:05:00Z"
+      });
+
+      persistWorkflowRunImport(db, parseOrThrow(runDir), {
+        now: 1_700_000_500
+      });
+
+      const runRow = readWorkflowRun(db, runId);
+      expect(runRow.approval_boundary).toBe("through-implementation");
+      expect(readWorkflowApprovals(db, runId).map((row) => row.boundary)).toEqual([
+        "implementation",
+        "through-implementation"
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("preserves newer equal-rank durable approval boundary across older imports", () => {
+    const dataDir = makeTempDir("momentum-data-");
+    const artifactRoot = makeTempDir();
+    const runId = "cwfp-newer-durable-equal-rank";
+    const runDir = path.join(artifactRoot, runId);
+    const approvalPath = path.join(runDir, "approval-implementation.json");
+
+    writeJsonFile(path.join(runDir, "plan.json"), basePlan(runId));
+    writeLedger(path.join(runDir, "ledger.jsonl"), []);
+
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunImport(db, parseOrThrow(runDir), {
+        now: 1_700_000_000
+      });
+      db.prepare(
+        `INSERT INTO workflow_approvals (
+           run_id, boundary, actor, phrase, artifact_path, artifact_digest,
+           recorded_at, discharged_at, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        runId,
+        "through-implementation",
+        "operator@example.com",
+        "approve through implementation",
+        `workflow-run-approve://${runId}/through-implementation`,
+        "durable-digest",
+        Date.parse("2026-05-17T10:05:00Z"),
+        null,
+        1_700_000_050,
+        1_700_000_050
+      );
+      db.prepare(
+        "UPDATE workflow_runs SET approval_boundary = ?, updated_at = ? WHERE id = ?"
+      ).run("through-implementation", 1_700_000_050, runId);
+
+      writeJsonFile(approvalPath, {
+        runId,
+        schemaVersion: 1,
+        boundary: "implementation",
+        actor: "ops@example.com",
+        phrase: "approve implementation",
+        approvedAt: "2026-05-17T09:00:00Z"
+      });
+
+      persistWorkflowRunImport(db, parseOrThrow(runDir), {
+        now: 1_700_000_500
+      });
+
+      const runRow = readWorkflowRun(db, runId);
+      expect(runRow.approval_boundary).toBe("through-implementation");
+      expect(readWorkflowApprovals(db, runId).map((row) => row.boundary)).toEqual([
+        "implementation",
+        "through-implementation"
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("preserves newer durable approval rows across stale same-boundary imports", () => {
+    const dataDir = makeTempDir("momentum-data-");
+    const artifactRoot = makeTempDir();
+    const runId = "cwfp-newer-durable-same-boundary";
+    const runDir = path.join(artifactRoot, runId);
+    const approvalPath = path.join(runDir, "approval-implementation.json");
+
+    writeJsonFile(path.join(runDir, "plan.json"), basePlan(runId));
+    writeLedger(path.join(runDir, "ledger.jsonl"), []);
+
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunImport(db, parseOrThrow(runDir), {
+        now: 1_700_000_000
+      });
+      db.prepare(
+        `INSERT INTO workflow_approvals (
+           run_id, boundary, actor, phrase, artifact_path, artifact_digest,
+           recorded_at, discharged_at, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        runId,
+        "implementation",
+        "operator@example.com",
+        "approve implementation",
+        `workflow-run-approve://${runId}/implementation`,
+        "durable-digest",
+        Date.parse("2026-05-17T10:05:00Z"),
+        null,
+        1_700_000_050,
+        1_700_000_050
+      );
+      db.prepare(
+        "UPDATE workflow_runs SET approval_boundary = ?, updated_at = ? WHERE id = ?"
+      ).run("implementation", 1_700_000_050, runId);
+
+      writeJsonFile(approvalPath, {
+        runId,
+        schemaVersion: 1,
+        boundary: "implementation",
+        actor: "stale@example.com",
+        phrase: "stale approve implementation",
+        approvedAt: "2026-05-17T09:00:00Z"
+      });
+
+      persistWorkflowRunImport(db, parseOrThrow(runDir), {
+        now: 1_700_000_500
+      });
+
+      const approvalRows = readWorkflowApprovals(db, runId);
+      expect(approvalRows).toHaveLength(1);
+      expect(approvalRows[0]).toMatchObject({
+        actor: "operator@example.com",
+        phrase: "approve implementation",
+        artifact_path: `workflow-run-approve://${runId}/implementation`,
+        artifact_digest: "durable-digest",
+        recorded_at: Date.parse("2026-05-17T10:05:00Z"),
+        updated_at: 1_700_000_050
+      });
     } finally {
       db.close();
     }
