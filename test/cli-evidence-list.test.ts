@@ -212,6 +212,62 @@ describe("momentum evidence list", () => {
     expect(payload.records.map((r) => r.occurredAt)).toEqual([1000, 2000, 3000]);
   });
 
+  it("surfaces typed runId/stepId linkage in list records and text", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      ingestEvidenceRecord(db, {
+        source: "agent-workflow",
+        type: "implementation_complete",
+        occurredAt: 2000,
+        summary: "wf impl complete",
+        ingestKey: "agent-workflow:cwfp-listlink001:implementation:complete",
+        runId: "cwfp-listlink001",
+        stepId: "implementation"
+      });
+      ingestEvidenceRecord(db, {
+        source: "linear",
+        type: "issue_observed",
+        occurredAt: 1000,
+        summary: "non-workflow evidence",
+        ingestKey: "linear:issue-1:observed"
+      });
+    } finally {
+      db.close();
+    }
+
+    const json = await run([
+      "evidence",
+      "list",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(json.code).toBe(0);
+    const payload = JSON.parse(json.stdout) as {
+      records: Array<{
+        type: string;
+        runId: string | null;
+        stepId: string | null;
+      }>;
+    };
+    const byType = new Map(payload.records.map((r) => [r.type, r]));
+    expect(byType.get("implementation_complete")).toMatchObject({
+      runId: "cwfp-listlink001",
+      stepId: "implementation"
+    });
+    // Non-workflow evidence keeps null typed linkage.
+    expect(byType.get("issue_observed")).toMatchObject({
+      runId: null,
+      stepId: null
+    });
+
+    const text = await run(["evidence", "list", "--data-dir", dataDir]);
+    expect(text.code).toBe(0);
+    expect(text.stdout).toContain("run=cwfp-listlink001");
+    expect(text.stdout).toContain("step=implementation");
+  });
+
   it("filters by --goal and surfaces the goal id in the payload", async () => {
     const dataDir = makeTempDir();
     seedGoal(dataDir, "goal-a");

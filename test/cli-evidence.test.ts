@@ -279,6 +279,24 @@ describe("momentum evidence ingest", () => {
     ]);
     expect(result.code).toBe(0);
 
+    // The ingest JSON output surfaces typed linkage on every created record.
+    const payload = JSON.parse(result.stdout) as {
+      created: Array<{
+        type: string;
+        runId: string | null;
+        stepId: string | null;
+      }>;
+    };
+    const createdByType = new Map(payload.created.map((r) => [r.type, r]));
+    expect(createdByType.get("plan_created")).toMatchObject({
+      runId: "cwfp-typedlink001",
+      stepId: null
+    });
+    expect(createdByType.get("implementation_complete")).toMatchObject({
+      runId: "cwfp-typedlink001",
+      stepId: "implementation"
+    });
+
     const db = openDb(dataDir);
     try {
       const records = listEvidenceRecords(db, {});
