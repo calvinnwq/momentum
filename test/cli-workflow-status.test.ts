@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { runCli } from "../src/cli.js";
 import { openDb, type MomentumDb } from "../src/db.js";
+import { ingestEvidenceRecord } from "../src/evidence-records.js";
 
 type RunResult = {
   code: number;
@@ -617,6 +618,73 @@ describe("momentum workflow status", () => {
     expect(payload.monitor.activeStep?.stepId).toBe("implementation");
     expect(payload.monitor.nextAction.code).toBe("resume_running");
     expect(payload.monitor.recovery).toBeNull();
+  });
+
+  it("surfaces typed runId/stepId evidence pointers without path inference", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, {
+        runId: "cwfp-evidence01",
+        state: "running",
+        startedAt: RECENT
+      });
+      seedStep(db, "cwfp-evidence01", {
+        stepId: "implementation",
+        kind: "implementation",
+        state: "succeeded",
+        order: 1,
+        finishedAt: RECENT
+      });
+      // Evidence linked to this run/step purely by durable typed columns.
+      // The run has no source_artifact_path, so path-only inference cannot
+      // surface this record — only the typed run_id linkage can.
+      ingestEvidenceRecord(db, {
+        source: "agent-workflow",
+        type: "implementation_complete",
+        occurredAt: RECENT,
+        summary: "implementation finished",
+        runId: "cwfp-evidence01",
+        stepId: "implementation",
+        ingestKey: "cwfp-evidence01/implementation"
+      });
+      // Evidence for a different run must not leak into this run's view.
+      ingestEvidenceRecord(db, {
+        source: "agent-workflow",
+        type: "plan_created",
+        occurredAt: RECENT,
+        summary: "other run plan",
+        runId: "cwfp-other99",
+        stepId: null,
+        ingestKey: "cwfp-other99/plan"
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "status",
+      "cwfp-evidence01",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      evidence: Array<{
+        evidenceRecordId: string;
+        source: string;
+        type: string;
+        runId: string | null;
+        stepId: string | null;
+        summary: string;
+      }>;
+    };
+    expect(payload.evidence.length).toBe(1);
+    expect(payload.evidence[0]?.type).toBe("implementation_complete");
+    expect(payload.evidence[0]?.runId).toBe("cwfp-evidence01");
+    expect(payload.evidence[0]?.stepId).toBe("implementation");
   });
 
   it("surfaces rerun_failed_step recovery code when a required step failed", async () => {

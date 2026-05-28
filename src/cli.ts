@@ -3777,7 +3777,9 @@ function workflowEvidenceToJsonShape(
     type: evidence.type,
     artifactPath: evidence.artifactPath,
     occurredAt: evidence.occurredAt,
-    summary: evidence.summary
+    summary: evidence.summary,
+    runId: evidence.runId,
+    stepId: evidence.stepId
   };
 }
 
@@ -3873,7 +3875,8 @@ function renderWorkflowDetailText(
   lines.push(`Evidence: ${detail.evidence.length}`);
   for (const record of detail.evidence) {
     lines.push(
-      `- ${record.evidenceRecordId} [${record.source}/${record.type}] ${record.summary}`
+      `- ${record.evidenceRecordId} [${record.source}/${record.type}] ${record.summary}` +
+        (record.stepId !== null ? ` step=${record.stepId}` : "")
     );
   }
   lines.push("");
