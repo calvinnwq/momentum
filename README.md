@@ -61,10 +61,10 @@ node dist/index.js daemon start --max-idle-cycles 1 --json
 
 ## Commands
 
-Common commands:
+Commands:
 
 ```text
-momentum goal start <goal.md> [--foreground] [--runner <profile>] [--from-source <id>] [--data-dir <path>] [--json]
+momentum goal start <goal.md> [options]
 momentum status [goal-id] [--data-dir <path>] [--json]
 momentum logs <goal-id> [--iteration <n>] [--data-dir <path>] [--json]
 momentum handoff <goal-id> [--data-dir <path>] [--json]
@@ -76,14 +76,15 @@ momentum project status [options]
 momentum evidence ingest|list [options]
 momentum intent list|get|apply|skip|cancel [options]
 momentum workflow import --path <run-dir> [--data-dir <path>] [--json]
-momentum workflow status [<run-id>] [--state <state>] [--filter <active|blocked|completed|imported>] [--limit <n>] [--data-dir <path>] [--json]
+momentum workflow status [<run-id>] [options]
 momentum workflow handoff <run-id> [--data-dir <path>] [--json]
 momentum workflow run approve <run-id> --approval-boundary <boundary> --phrase <text> [--actor <name>] [--artifact-path <path>] [--artifact-digest <sha256>] [--data-dir <path>] [--json]
 momentum workflow run list [--state <state>] [--filter <active|blocked|completed|imported>] [--approval-boundary <boundary>] [--repo <path>] [--issue-scope <identifier>] [--updated-since <ms>] [--updated-until <ms>] [--limit <n>] [--data-dir <path>] [--json]
+momentum workflow run update-step <run-id> --step <step-id> --state <approved|succeeded|skipped|failed|blocked|canceled> --reason <text> [--actor <name>] [--evidence-pointer <ref>] [--ledger-pointer <ref>] [--data-dir <path>] [--json]
 momentum doctor [--repo <path>] [--data-dir <path>] [--json]
 ```
 
-See the [docs site](docs/index.md) for full command envelopes.
+See [docs](docs/index.md).
 
 ## Development
 

@@ -41,6 +41,14 @@ const WORKFLOW_RUN_IDENTITY_COLUMNS: ColumnSpec[] = [
   { name: "skill_revision", type: "TEXT" }
 ];
 
+const WORKFLOW_STEP_OPERATOR_COLUMNS: ColumnSpec[] = [
+  { name: "operator_reason", type: "TEXT" },
+  { name: "operator_actor", type: "TEXT" },
+  { name: "operator_evidence_pointer", type: "TEXT" },
+  { name: "operator_ledger_pointer", type: "TEXT" },
+  { name: "operator_transition_at", type: "INTEGER" }
+];
+
 const REPO_LOCKS_DDL = `
 CREATE TABLE IF NOT EXISTS repo_locks (
   id TEXT PRIMARY KEY,
@@ -338,6 +346,11 @@ CREATE TABLE IF NOT EXISTS workflow_steps (
   error_message TEXT,
   started_at INTEGER,
   finished_at INTEGER,
+  operator_reason TEXT,
+  operator_actor TEXT,
+  operator_evidence_pointer TEXT,
+  operator_ledger_pointer TEXT,
+  operator_transition_at INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   PRIMARY KEY (run_id, step_id)
@@ -434,6 +447,11 @@ export function applyQueueMigrations(db: MomentumDb): void {
     if (tableExists(db, "workflow_runs")) {
       for (const column of WORKFLOW_RUN_IDENTITY_COLUMNS) {
         ensureColumn(db, "workflow_runs", column);
+      }
+    }
+    if (tableExists(db, "workflow_steps")) {
+      for (const column of WORKFLOW_STEP_OPERATOR_COLUMNS) {
+        ensureColumn(db, "workflow_steps", column);
       }
     }
     db.exec(WORKFLOW_RUNS_IDENTITY_INDEX_DDL);

@@ -1006,4 +1006,156 @@ describe("persistWorkflowRunImport", () => {
       db.close();
     }
   });
+
+  it("preserves operator-transitioned step state across stale re-imports", () => {
+    const dataDir = makeTempDir("momentum-data-");
+    const artifactRoot = makeTempDir();
+    const runId = "cwfp-operator-import";
+    const runDir = path.join(artifactRoot, runId);
+
+    writeJsonFile(
+      path.join(runDir, "plan.json"),
+      basePlan(runId, {
+        approvalsRequired: ["implementation"],
+        taskFlow: {
+          childTasks: [{ stepId: "implementation" }]
+        }
+      })
+    );
+    writeLedger(path.join(runDir, "ledger.jsonl"), [
+      {
+        runId,
+        step: "implementation",
+        status: "started",
+        ts: "2026-05-17T10:01:00Z"
+      }
+    ]);
+
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunImport(db, parseOrThrow(runDir), {
+        now: 1_700_000_000
+      });
+      expect(readWorkflowRun(db, runId).state).toBe("running");
+      expect(readWorkflowSteps(db, runId)[0]?.state).toBe("running");
+
+      db.prepare(
+        `UPDATE workflow_steps
+            SET state = ?,
+                operator_reason = ?,
+                operator_actor = ?,
+                operator_transition_at = ?,
+                finished_at = ?,
+                updated_at = ?
+          WHERE run_id = ? AND step_id = ?`
+      ).run(
+        "succeeded",
+        "operator verified child completion",
+        "calvinnwq",
+        1_700_000_250,
+        1_700_000_250,
+        1_700_000_250,
+        runId,
+        "implementation"
+      );
+      db.prepare("UPDATE workflow_runs SET state = ?, updated_at = ? WHERE id = ?")
+        .run("succeeded", 1_700_000_250, runId);
+
+      const summary = persistWorkflowRunImport(db, parseOrThrow(runDir), {
+        now: 1_700_000_500
+      });
+
+      const stepRows = readWorkflowSteps(db, runId);
+      expect(summary.state).toBe("succeeded");
+      expect(readWorkflowRun(db, runId).state).toBe("succeeded");
+      expect(stepRows[0]).toMatchObject({
+        step_id: "implementation",
+        state: "succeeded",
+        finished_at: 1_700_000_250
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps operator-transitioned imports active while a lease remains outstanding", () => {
+    const dataDir = makeTempDir("momentum-data-");
+    const artifactRoot = makeTempDir();
+    const runId = "cwfp-operator-import-lease";
+    const runDir = path.join(artifactRoot, runId);
+
+    writeJsonFile(
+      path.join(runDir, "plan.json"),
+      basePlan(runId, {
+        approvalsRequired: ["implementation"],
+        taskFlow: {
+          childTasks: [{ stepId: "implementation" }]
+        }
+      })
+    );
+    writeLedger(path.join(runDir, "ledger.jsonl"), [
+      {
+        runId,
+        step: "implementation",
+        status: "started",
+        ts: "2026-05-17T10:01:00Z"
+      }
+    ]);
+
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunImport(db, parseOrThrow(runDir), {
+        now: 1_700_000_000
+      });
+      db.prepare(
+        `UPDATE workflow_steps
+            SET state = ?,
+                operator_reason = ?,
+                operator_transition_at = ?,
+                finished_at = ?,
+                updated_at = ?
+          WHERE run_id = ? AND step_id = ?`
+      ).run(
+        "succeeded",
+        "operator verified child completion",
+        1_700_000_250,
+        1_700_000_250,
+        1_700_000_250,
+        runId,
+        "implementation"
+      );
+      db.prepare("UPDATE workflow_runs SET state = ?, updated_at = ? WHERE id = ?")
+        .run("running", 1_700_000_250, runId);
+      db.prepare(
+        `INSERT INTO workflow_leases
+           (run_id, lease_kind, holder, acquired_at, expires_at, heartbeat_at,
+            released_at, stale_policy, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        runId,
+        "managed-step",
+        "child-executor",
+        1_700_000_200,
+        1_700_100_000,
+        1_700_000_200,
+        null,
+        "auto-release",
+        1_700_000_200,
+        1_700_000_200
+      );
+
+      const summary = persistWorkflowRunImport(db, parseOrThrow(runDir), {
+        now: 1_700_000_500
+      });
+
+      expect(summary.state).toBe("running");
+      expect(readWorkflowRun(db, runId).state).toBe("running");
+      expect(readWorkflowSteps(db, runId)[0]).toMatchObject({
+        step_id: "implementation",
+        state: "succeeded"
+      });
+    } finally {
+      db.close();
+    }
+  });
 });
