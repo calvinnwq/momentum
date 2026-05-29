@@ -200,6 +200,126 @@ describe("momentum workflow import — run-scoped recovery auto-set (NGX-327)", 
     }
   });
 
+  it("does not warn about its generated recovery.md on re-import", async () => {
+    const dataDir = makeTempDir();
+    const workflowRoot = makeTempDir("momentum-cli-import-recovery-runs-");
+    const runId = "cwfp-recov0007reimport";
+    const runDir = buildFailedRequiredStepFixture(workflowRoot, runId);
+
+    const first = await run([
+      "workflow",
+      "import",
+      "--path",
+      runDir,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(first.code).toBe(0);
+
+    const second = await run([
+      "workflow",
+      "import",
+      "--path",
+      runDir,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(second.code).toBe(0);
+    const payload = JSON.parse(second.stdout) as {
+      counts: { diagnostics: number };
+      diagnostics: Array<{ path: string; code: string }>;
+    };
+    expect(payload.counts.diagnostics).toBe(0);
+    expect(payload.diagnostics).toEqual([]);
+  });
+
+  it("falls back to a safe directory run id when plan.json contains an unsafe run id", async () => {
+    const dataDir = makeTempDir();
+    const workflowRoot = makeTempDir("momentum-cli-import-recovery-runs-");
+    const runId = "cwfp-recov0008safe";
+    const runDir = buildFailedRequiredStepFixture(workflowRoot, runId);
+    writePlan(runDir, "../escape");
+
+    const result = await run([
+      "workflow",
+      "import",
+      "--path",
+      runDir,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+
+    const payload = JSON.parse(result.stdout) as {
+      runId: string;
+      diagnostics: Array<{ reason: string }>;
+      recovery: { artifactPath: string | null } | null;
+    };
+    expect(payload.runId).toBe(runId);
+    expect(
+      payload.diagnostics.some((d) => d.reason === "plan_run_id_invalid")
+    ).toBe(true);
+    expect(payload.recovery?.artifactPath).toBe(
+      path.join(runDir, WORKFLOW_RECOVERY_ARTIFACT_FILENAME)
+    );
+    expect(
+      fs.existsSync(
+        path.join(workflowRoot, "escape", WORKFLOW_RECOVERY_ARTIFACT_FILENAME)
+      )
+    ).toBe(false);
+  });
+
+  it("reports a structured partial success when recovery.md cannot be written", async () => {
+    const dataDir = makeTempDir();
+    const workflowRoot = makeTempDir("momentum-cli-import-recovery-runs-");
+    const runId = "cwfp-recov0009writefail";
+    const runDir = buildFailedRequiredStepFixture(workflowRoot, runId);
+    fs.mkdirSync(path.join(runDir, WORKFLOW_RECOVERY_ARTIFACT_FILENAME));
+
+    const result = await run([
+      "workflow",
+      "import",
+      "--path",
+      runDir,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+
+    const payload = JSON.parse(result.stdout) as {
+      ok: boolean;
+      needsManualRecovery: boolean;
+      recovery: {
+        code: string;
+        artifactPath: string | null;
+        artifactWriteError: { code: string; message: string } | null;
+      } | null;
+    };
+    expect(payload.ok).toBe(true);
+    expect(payload.needsManualRecovery).toBe(true);
+    expect(payload.recovery?.code).toBe("failed_required_step");
+    expect(payload.recovery?.artifactPath).toBeNull();
+    expect(payload.recovery?.artifactWriteError?.code).toBe(
+      "recovery_artifact_write_failed"
+    );
+
+    const db = openDb(dataDir);
+    try {
+      const row = db
+        .prepare(
+          "SELECT needs_manual_recovery FROM workflow_runs WHERE id = ?"
+        )
+        .get(runId) as { needs_manual_recovery: number };
+      expect(row.needs_manual_recovery).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
   it("does not set the flag or render recovery.md for a clean run", async () => {
     const dataDir = makeTempDir();
     const workflowRoot = makeTempDir("momentum-cli-import-recovery-runs-");

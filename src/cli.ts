@@ -2213,9 +2213,12 @@ function emitWorkflowImportSuccess(
   // import freshly auto-set, when it set one.
   const needsManualRecovery =
     result.recoveryState?.needsManualRecovery ?? false;
+  const recoveryOutcome = result.recovery.ok ? result.recovery : null;
   const marked =
-    result.recovery.ok && result.recovery.outcome === "marked"
-      ? result.recovery
+    recoveryOutcome !== null &&
+    (recoveryOutcome.outcome === "marked" ||
+      recoveryOutcome.outcome === "artifact_write_failed")
+      ? recoveryOutcome
       : null;
   const payload = {
     ok: true,
@@ -2244,7 +2247,11 @@ function emitWorkflowImportSuccess(
             code: marked.recoveryCode,
             stepId: marked.stepId,
             reason: marked.reason,
-            artifactPath: marked.artifactPath
+            artifactPath: marked.artifactPath,
+            artifactWriteError:
+              marked.outcome === "artifact_write_failed"
+                ? { ...marked.artifactWriteError }
+                : null
           }
   };
 
@@ -2262,7 +2269,9 @@ function emitWorkflowImportSuccess(
     `Approvals: ${summary.approvalCount}`,
     `Diagnostics: ${importResult.diagnostics.length}`,
     marked !== null
-      ? `Manual recovery: required (${marked.recoveryCode}) -> ${marked.artifactPath}`
+      ? marked.outcome === "artifact_write_failed"
+        ? `Manual recovery: required (${marked.recoveryCode}); recovery.md write failed: ${marked.artifactWriteError.message}`
+        : `Manual recovery: required (${marked.recoveryCode}) -> ${marked.artifactPath}`
       : needsManualRecovery
         ? "Manual recovery: flagged (clear explicitly once resolved)"
         : "Manual recovery: not required",

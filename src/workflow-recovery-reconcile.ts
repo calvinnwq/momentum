@@ -90,6 +90,21 @@ export type ReconcileWorkflowRunManualRecoveryResult =
       markedAt: number;
     }
   | {
+      ok: true;
+      outcome: "artifact_write_failed";
+      runId: string;
+      recoveryCode: WorkflowMonitorRecoveryCode;
+      stepId: string | null;
+      reason: string;
+      previouslyMarked: boolean;
+      artifactPath: string | null;
+      artifactWriteError: {
+        code: "recovery_artifact_write_failed";
+        message: string;
+      };
+      markedAt: number;
+    }
+  | {
       ok: false;
       reason: "run_not_found";
       message: string;
@@ -171,10 +186,29 @@ export function reconcileWorkflowRunManualRecovery(
     evidencePointers: evidencePointersFromDetail(detail),
     classifiedAt: now
   });
-  const written = writeWorkflowRecoveryArtifact({
-    agentWorkflowsDir: input.agentWorkflowsDir,
-    input: artifactInput
-  });
+  let written: { path: string };
+  try {
+    written = writeWorkflowRecoveryArtifact({
+      agentWorkflowsDir: input.agentWorkflowsDir,
+      input: artifactInput
+    });
+  } catch (err) {
+    return {
+      ok: true,
+      outcome: "artifact_write_failed",
+      runId: input.runId,
+      recoveryCode: recovery.code,
+      stepId: recovery.stepId,
+      reason: recovery.message,
+      previouslyMarked: marked.previouslyMarked,
+      artifactPath: null,
+      artifactWriteError: {
+        code: "recovery_artifact_write_failed",
+        message: describeError(err)
+      },
+      markedAt: now
+    };
+  }
 
   return {
     ok: true,
@@ -202,4 +236,8 @@ function evidencePointersFromDetail(
     label: `${link.source}/${link.type}`,
     ref: link.artifactPath ?? link.evidenceRecordId
   }));
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

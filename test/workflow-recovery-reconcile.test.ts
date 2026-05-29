@@ -175,6 +175,40 @@ describe("reconcileWorkflowRunManualRecovery", () => {
     }
   });
 
+  it("returns artifact_write_failed after setting the durable flag when recovery.md cannot be written", () => {
+    const dataDir = makeTempDir();
+    const agentWorkflowsFile = path.join(makeTempDir(), "agent-workflows");
+    fs.writeFileSync(agentWorkflowsFile, "not a directory");
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, "run-writefail");
+      seedStep(db, "run-writefail", "implementation", "failed");
+
+      const out = reconcileWorkflowRunManualRecovery(db, {
+        runId: "run-writefail",
+        agentWorkflowsDir: agentWorkflowsFile,
+        now: 1_730_000_500_000
+      });
+
+      expect(out.ok).toBe(true);
+      if (!out.ok) throw new Error("expected success");
+      expect(out.outcome).toBe("artifact_write_failed");
+      if (out.outcome !== "artifact_write_failed") {
+        throw new Error("expected artifact_write_failed outcome");
+      }
+      expect(out.artifactWriteError.code).toBe(
+        "recovery_artifact_write_failed"
+      );
+      expect(out.recoveryCode).toBe("failed_required_step");
+
+      const row = readRunRow(db, "run-writefail");
+      expect(row.needs_manual_recovery).toBe(1);
+      expect(row.manual_recovery_reason).toMatch(/required step/i);
+    } finally {
+      db.close();
+    }
+  });
+
   it("does nothing for a clean run with no blocking recovery condition", () => {
     const dataDir = makeTempDir();
     const agentWorkflowsDir = makeTempDir();

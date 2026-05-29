@@ -75,6 +75,14 @@ describe("resolveWorkflowRecoveryArtifactPath", () => {
       /runId is required/
     );
   });
+
+  it("rejects run ids that are not safe path segments", () => {
+    for (const runId of ["../escape", "nested/run", "nested\\run", "."]) {
+      expect(() => resolveWorkflowRecoveryArtifactPath("/tmp/x", runId)).toThrow(
+        /safe path segment/
+      );
+    }
+  });
 });
 
 describe("buildWorkflowRecoveryMarkdown", () => {

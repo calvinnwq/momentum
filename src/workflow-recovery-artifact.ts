@@ -39,6 +39,17 @@ export const WORKFLOW_RECOVERY_ARTIFACT_FILENAME = "recovery.md";
  */
 export const WORKFLOW_RECOVERY_ARTIFACT_SCHEMA_VERSION = 1;
 
+export function isSafeWorkflowRunPathSegment(runId: string): boolean {
+  return (
+    runId.length > 0 &&
+    runId !== "." &&
+    runId !== ".." &&
+    !runId.includes("/") &&
+    !runId.includes("\\") &&
+    !runId.includes("\0")
+  );
+}
+
 /**
  * Shared safety / rollback guidance rendered for every recovery classification.
  * Encodes the NGX-327 safety contract: prefer blocking over guessing, never
@@ -185,6 +196,11 @@ export function resolveWorkflowRecoveryArtifactPath(
   }
   if (typeof runId !== "string" || runId.length === 0) {
     throw new Error("resolveWorkflowRecoveryArtifactPath: runId is required");
+  }
+  if (!isSafeWorkflowRunPathSegment(runId)) {
+    throw new Error(
+      "resolveWorkflowRecoveryArtifactPath: runId must be a safe path segment"
+    );
   }
   return path.join(agentWorkflowsDir, runId, WORKFLOW_RECOVERY_ARTIFACT_FILENAME);
 }

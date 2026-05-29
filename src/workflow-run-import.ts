@@ -30,6 +30,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
+import { isSafeWorkflowRunPathSegment } from "./workflow-recovery-artifact.js";
 import {
   WORKFLOW_APPROVAL_BOUNDARIES,
   WORKFLOW_STEP_KINDS,
@@ -156,7 +157,8 @@ const RUN_ID_PATTERN = /^(cwfp|cwfb|overnight)-[A-Za-z0-9]+$/;
 const KNOWN_SIBLING_FILES: ReadonlySet<string> = new Set([
   "plan.json",
   "ledger.jsonl",
-  "monitor.json"
+  "monitor.json",
+  "recovery.md"
 ]);
 
 const KNOWN_SIBLING_DIRECTORIES: ReadonlySet<string> = new Set(["locks"]);
@@ -208,8 +210,13 @@ export function parseWorkflowRunImport(
     ? readPlanFile(path.join(artifactPath, planEntry.name), diagnostics)
     : null;
 
-  const runIdFromPlan =
-    planResult?.plan && stringField(planResult.plan, "runId");
+  const runIdFromPlan = planResult?.plan
+    ? runIdFromPlanValue(
+        planResult.plan,
+        planEntry ? path.join(artifactPath, planEntry.name) : artifactPath,
+        diagnostics
+      )
+    : null;
   const runIdFromBasename = runIdFromBasenameValue(path.basename(artifactPath));
   const runId = runIdFromPlan ?? runIdFromBasename;
   if (!runId) {
@@ -361,6 +368,23 @@ function isAdvisorySibling(name: string): boolean {
 }
 
 type ReadPlanResult = { plan: Record<string, unknown> | null };
+
+function runIdFromPlanValue(
+  plan: Record<string, unknown>,
+  filePath: string,
+  diagnostics: WorkflowRunImportDiagnostic[]
+): string | null {
+  const runId = stringField(plan, "runId");
+  if (!runId) return null;
+  if (isSafeWorkflowRunPathSegment(runId)) return runId;
+  diagnostics.push({
+    code: "evidence_format_invalid",
+    path: filePath,
+    reason: "plan_run_id_invalid",
+    detail: "runId must be a safe path segment"
+  });
+  return null;
+}
 
 function readPlanFile(
   filePath: string,
