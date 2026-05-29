@@ -119,6 +119,32 @@ which:
 On successful clear, the goal immediately becomes eligible for queue claims
 again.
 
+## Run-scoped workflow recovery
+
+Workflow runs have a sibling manual-recovery surface scoped to
+`.agent-workflows/<run-id>/`. `workflow import` re-derives the run's monitor
+view after persisting rows; when the durable substrate still has a blocking
+condition (`manual_recovery_lease`, `ghost_active_no_lease`,
+`stale_running_step`, or `failed_required_step`), Momentum sets
+`workflow_runs.needs_manual_recovery` and renders
+`<run-dir>/recovery.md`.
+
+The run-scoped flag blocks `workflow run approve` and any
+`workflow run update-step` transition that would leave the blocking recovery
+condition in place. A resolving `workflow run update-step` transition can land
+while the flag remains set so the operator has a safe path to resolve the run
+and then clear the flag explicitly.
+
+Operators clear run-scoped recovery with
+`momentum workflow run clear-recovery <run-id> [--data-dir <path>] [--json]`.
+The clear re-checks the durable monitor view in the same transaction and
+refuses with `recovery_clear_refused` while a blocking condition remains, or
+`not_flagged` when the run is not currently flagged. The command leaves the
+run's `recovery.md` artifact on disk as audit evidence.
+
+See [docs/workflow-commands.md](workflow-commands.md) for the full
+`workflow import` and `workflow run clear-recovery` envelopes.
+
 ## `recovery clear` JSON envelopes
 
 The `recovery clear` command emits a stable JSON shape under `--json`. On

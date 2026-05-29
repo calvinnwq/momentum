@@ -8,6 +8,7 @@ Operator-facing CLI envelopes for the `workflow import`, `workflow status`, `wor
 - `workflow run list` is a read-only filterable query surface over the durable `workflow_runs` table, with additional filter dimensions not available in `workflow status` list mode.
 - `workflow run approve` records durable explicit approvals for workflow boundaries and persists operator-visible metadata (actor, phrase, artifact provenance) into `workflow_approvals`.
 - `workflow run update-step` drives operator-initiated step transitions (`approved` / `succeeded` / `skipped` / `failed` / `blocked` / `canceled`) through the existing state machine, persisting an audit record with operator reason and optional evidence or ledger pointers.
+- `workflow run clear-recovery` explicitly clears a run's durable manual-recovery flag after the blocking condition is resolved.
 
 `workflow status`, `workflow handoff`, and `workflow run list` are read-only: they never write SQLite or files.
 
@@ -24,7 +25,7 @@ momentum workflow import --path <run-dir> [--data-dir <path>] [--json]
 
 Reads the `.agent-workflows/<run-id>/` directory at `<run-dir>` and normalizes the `plan.json`, `ledger.jsonl`, `approval-*.json`, and advisory `monitor.json` artifacts into durable `workflow_runs`, `workflow_steps`, and `workflow_approvals` rows.
 
-`--path <run-dir>` is required. The directory basename should match the `cwfp-` / `cwfb-` / `overnight-` run ID convention; alternatively, `plan.json` may supply `runId`.
+`--path <run-dir>` is required. The directory basename should match the `cwfp-` / `cwfb-` / `overnight-` run ID convention; alternatively, `plan.json` may supply `runId` when it is a safe path segment. An unsafe `plan.json.runId` emits `evidence_format_invalid` with reason `plan_run_id_invalid` and import falls back to the directory basename.
 
 ### Processing rules
 
@@ -107,7 +108,7 @@ Each `diagnostics` entry has the shape:
 
 `evidence_format_unknown` reasons: `unsupported_subdirectory`, `unsupported_entry_kind`, `unrecognized_filename`.
 
-`evidence_format_invalid` reasons: `directory_unreadable`, `plan_not_object`, `ledger_unreadable`, `ledger_line_not_json`, `ledger_line_not_object`, `ledger_line_missing_required_fields`, `ledger_run_id_mismatch`, `unknown_step_or_status`, `ledger_line_invalid_timestamp`, `monitor_not_object`, `file_unreadable`, `file_not_json`, `approval_not_object`, `approval_run_id_mismatch`, `approval_missing_boundary`, `approval_invalid_boundary`, `approval_invalid_timestamp`.
+`evidence_format_invalid` reasons: `directory_unreadable`, `plan_not_object`, `plan_run_id_invalid`, `ledger_unreadable`, `ledger_line_not_json`, `ledger_line_not_object`, `ledger_line_missing_required_fields`, `ledger_run_id_mismatch`, `unknown_step_or_status`, `ledger_line_invalid_timestamp`, `monitor_not_object`, `file_unreadable`, `file_not_json`, `approval_not_object`, `approval_run_id_mismatch`, `approval_missing_boundary`, `approval_invalid_boundary`, `approval_invalid_timestamp`.
 
 ### JSON envelope (failure)
 
@@ -313,7 +314,7 @@ Data dir: /path/to/data
 | `data_dir_failed` | Data directory resolution failed. |
 | `run_id_required` | `<run-id>` was not supplied. |
 | `run_not_found` | `<run-id>` does not exist in `workflow_runs`. |
-| `manual_recovery_required` | The run is blocked by its durable manual-recovery flag and must be cleared before step updates. |
+| `manual_recovery_required` | The run is blocked by its durable manual-recovery flag and the requested transition would leave a blocking recovery condition in place. |
 | `step_not_found` | `--step` was not supplied or does not match any step row for this run. |
 | `invalid_state` | `--state` is not one of the allowed target states. |
 | `invalid_transition` | The requested transition is not legal from the current step state, `--reason` was omitted, or an existing finalize would be overwritten with a different audit context. |
