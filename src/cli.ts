@@ -145,6 +145,10 @@ import {
 } from "./workflow-handoff.js";
 import type { WorkflowMonitorState } from "./workflow-monitor-state.js";
 import {
+  clearWorkflowRunManualRecoveryGuarded,
+  type ClearWorkflowRunManualRecoveryGuardedResult
+} from "./workflow-run-recovery.js";
+import {
   DEFAULT_RECONCILIATION_STALE_THRESHOLD_MS,
   PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT,
   buildProjectRollup,
@@ -309,6 +313,7 @@ const COMMANDS = [
   "momentum workflow run approve <run-id> --approval-boundary <boundary> --phrase <text> [--actor <name>] [--artifact-path <path>] [--artifact-digest <sha256>] [--data-dir <path>] [--json]",
   "momentum workflow run list [--state <state>] [--filter <active|blocked|completed|imported>] [--approval-boundary <boundary>] [--repo <path>] [--issue-scope <identifier>] [--updated-since <ms>] [--updated-until <ms>] [--limit <n>] [--data-dir <path>] [--json]",
   "momentum workflow run update-step <run-id> --step <step-id> --state <approved|succeeded|skipped|failed|blocked|canceled> --reason <text> [--actor <name>] [--evidence-pointer <ref>] [--ledger-pointer <ref>] [--data-dir <path>] [--json]",
+  "momentum workflow run clear-recovery <run-id> [--data-dir <path>] [--json]",
   "momentum intent list [--status <status>] [--adapter <kind>] [--type <intent-type>] [--goal <goal-id>] [--source-item <id>] [--evidence-record <id>] [--limit <n>] [--data-dir <path>] [--json]",
   "momentum intent get <intent-id> [--data-dir <path>] [--json]",
   "momentum intent apply <intent-id> --reason <text> [--repo <path>] [--external-apply] [--data-dir <path>] [--json]",
@@ -2085,7 +2090,7 @@ function workflowRun(parsed: ParsedFlags, io: CliIo): number {
   const subcommand = parsed.args[2];
   if (!subcommand) {
     return usageError(
-      "Missing required subcommand for workflow run. Expected: list, approve, update-step.",
+      "Missing required subcommand for workflow run. Expected: list, approve, update-step, clear-recovery.",
       parsed,
       io
     );
@@ -2098,6 +2103,9 @@ function workflowRun(parsed: ParsedFlags, io: CliIo): number {
   }
   if (subcommand === "update-step") {
     return workflowRunUpdateStep(parsed, io);
+  }
+  if (subcommand === "clear-recovery") {
+    return workflowRunClearRecovery(parsed, io);
   }
   return usageError(
     `Unknown workflow run subcommand: ${subcommand}`,
@@ -3389,6 +3397,135 @@ function emitWorkflowRunUpdateStepFailure(
   if (failure.dataDir !== undefined) payload["dataDir"] = failure.dataDir;
   if (failure.runId !== undefined) payload["runId"] = failure.runId;
   if (failure.stepId !== undefined) payload["stepId"] = failure.stepId;
+
+  if (parsed.json) {
+    writeJson(io.stderr, payload);
+    return 1;
+  }
+  write(io.stderr, `${failure.message}\n`);
+  return 1;
+}
+
+function workflowRunClearRecovery(parsed: ParsedFlags, io: CliIo): number {
+  const positional = parsed.args.slice(3);
+  if (positional.length === 0 || !positional[0]) {
+    return emitWorkflowRunClearRecoveryFailure(parsed, io, {
+      code: "run_id_required",
+      message: "Missing required <run-id> for workflow run clear-recovery."
+    });
+  }
+  if (positional.length > 1) {
+    return usageError(
+      `Unexpected argument for workflow run clear-recovery: ${positional[1]}`,
+      parsed,
+      io
+    );
+  }
+  const runId = positional[0];
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return emitWorkflowRunClearRecoveryFailure(parsed, io, {
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err),
+      runId
+    });
+  }
+
+  const db = openDb(dataDir);
+  let result: ClearWorkflowRunManualRecoveryGuardedResult;
+  try {
+    result = clearWorkflowRunManualRecoveryGuarded(db, { runId });
+  } finally {
+    db.close();
+  }
+
+  return emitWorkflowRunClearRecovery(parsed, io, dataDir, runId, result);
+}
+
+function emitWorkflowRunClearRecovery(
+  parsed: ParsedFlags,
+  io: CliIo,
+  dataDir: string,
+  runId: string,
+  result: ClearWorkflowRunManualRecoveryGuardedResult
+): number {
+  if (!result.ok) {
+    const payload: Record<string, unknown> = {
+      ok: false,
+      command: "workflow run clear-recovery",
+      code: result.reason,
+      message: result.message,
+      runId,
+      dataDir
+    };
+    if (result.recoveryCode !== undefined) {
+      payload["recoveryCode"] = result.recoveryCode;
+    }
+    if (result.blockingStepId !== undefined && result.blockingStepId !== null) {
+      payload["blockingStepId"] = result.blockingStepId;
+    }
+    if (parsed.json) {
+      writeJson(io.stderr, payload);
+      return 1;
+    }
+    write(io.stderr, `${result.message}\n`);
+    return 1;
+  }
+
+  const payload = {
+    ok: true,
+    command: "workflow run clear-recovery",
+    runId: result.runId,
+    dataDir,
+    previousReason: result.previousReason,
+    previousMarkedAt: result.previousMarkedAt,
+    clearedAt: result.clearedAt
+  };
+
+  if (parsed.json) {
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  const lines: string[] = [
+    `Manual recovery cleared for run: ${result.runId}`,
+    `Previous reason: ${result.previousReason ?? "(unset)"}`,
+    `Previous marked at: ${result.previousMarkedAt ?? "(unset)"}`,
+    `Cleared at: ${result.clearedAt}`,
+    `Data dir: ${dataDir}`,
+    ""
+  ];
+  write(io.stdout, lines.join("\n"));
+  return 0;
+}
+
+type WorkflowRunClearRecoveryFailureCode =
+  | "data_dir_failed"
+  | "run_id_required";
+
+function emitWorkflowRunClearRecoveryFailure(
+  parsed: ParsedFlags,
+  io: CliIo,
+  failure: {
+    code: WorkflowRunClearRecoveryFailureCode;
+    message: string;
+    runId?: string;
+  }
+): number {
+  const payload: Record<string, unknown> = {
+    ok: false,
+    command: "workflow run clear-recovery",
+    code: failure.code,
+    message: failure.message
+  };
+  if (failure.runId !== undefined) payload["runId"] = failure.runId;
 
   if (parsed.json) {
     writeJson(io.stderr, payload);

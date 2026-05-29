@@ -1,6 +1,6 @@
 # Workflow commands
 
-Operator-facing CLI envelopes for the `workflow import`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run approve`, and `workflow run update-step` commands.
+Operator-facing CLI envelopes for the `workflow import`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run approve`, `workflow run update-step`, and `workflow run clear-recovery` commands.
 
 - `workflow import` reads local `.agent-workflows/<run-id>/` directories and persists normalized rows into the `workflow_runs`, `workflow_steps`, and `workflow_approvals` tables.
 - `workflow status` is a read-only surface that lists workflow runs (with state / filter selectors) or returns the full detail of a single run.
@@ -289,6 +289,61 @@ Data dir: /path/to/data
 | `step_not_found` | `--step` was not supplied or does not match any step row for this run. |
 | `invalid_state` | `--state` is not one of the allowed target states. |
 | `invalid_transition` | The requested transition is not legal from the current step state, `--reason` was omitted, or an existing finalize would be overwritten with a different audit context. |
+
+Exit code 0 on success, 1 on structured refusal, 2 on usage error.
+
+## `workflow run clear-recovery`
+
+```text
+momentum workflow run clear-recovery <run-id> [--data-dir <path>] [--json]
+```
+
+Explicit, auditable clear for a run's durable manual-recovery flag. The flag blocks `workflow run approve` and `workflow run update-step` (both refuse with `manual_recovery_required`) until an operator clears it here.
+
+Required arguments:
+
+- `<run-id>` — the flagged run to clear.
+
+Behaviour:
+
+- Re-derives the monitor view from the durable substrate inside a single immediate transaction and clears the flag only when no blocking recovery condition remains. The check and the clear are atomic: the condition that is checked is the condition that is cleared.
+- Refuses with `recovery_clear_refused` while a blocking recovery classification (`manual_recovery_lease`, `ghost_active_no_lease`, `stale_running_step`, or `failed_required_step`) still applies; the refusal carries the `recoveryCode` and, when known, the `blockingStepId`, and the flag stays set.
+- Refuses with `not_flagged` when the run is not currently flagged, so a stale clear cannot mutate anything.
+- Never auto-clears from elapsed time alone, never repairs the underlying run, and never issues an external write. The `recovery.md` artifact is intentionally left on disk as durable audit; remove it after capturing the context elsewhere.
+
+### JSON envelope
+
+```json
+{
+  "ok": true,
+  "command": "workflow run clear-recovery",
+  "runId": "cwfp-abc123",
+  "dataDir": "/path/to/data",
+  "previousReason": "ghost active step recovered by operator",
+  "previousMarkedAt": 1730000000000,
+  "clearedAt": 1730000600000
+}
+```
+
+### Text output
+
+```text
+Manual recovery cleared for run: cwfp-abc123
+Previous reason: ghost active step recovered by operator
+Previous marked at: 1730000000000
+Cleared at: 1730000600000
+Data dir: /path/to/data
+```
+
+### Error codes
+
+| Code | Meaning |
+|------|---------|
+| `data_dir_failed` | Data directory resolution failed. |
+| `run_id_required` | `<run-id>` was not supplied. |
+| `run_not_found` | `<run-id>` does not exist in `workflow_runs`. |
+| `not_flagged` | The run is not currently flagged for manual recovery; nothing to clear. |
+| `recovery_clear_refused` | A blocking recovery condition still applies; resolve it before clearing. Carries `recoveryCode` and optional `blockingStepId`. |
 
 Exit code 0 on success, 1 on structured refusal, 2 on usage error.
 
