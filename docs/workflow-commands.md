@@ -81,8 +81,8 @@ Reads the `.agent-workflows/<run-id>/` directory at `<run-dir>` and normalizes t
 
 If the durable flag is set but rendering `recovery.md` fails, import still
 returns a structured success envelope with `needsManualRecovery: true`,
-`recovery.artifactPath: null`, and `recovery.artifactWriteError.code:
-"recovery_artifact_write_failed"`.
+`recovery.artifactPath: null`, and `recovery.artifactWriteError` set to
+`{ "code": "recovery_artifact_write_failed", "message": "<render error>" }`.
 
 A run that was already flagged on a prior import but whose blocking condition is now resolved reports `needsManualRecovery: true` with `recovery: null` — the durable flag persists until an operator clears it explicitly.
 
@@ -150,7 +150,7 @@ Manual recovery: not required
 Data dir: /path/to/data
 ```
 
-The `Manual recovery` line reads `required (<code>) -> <recovery.md path>` when this import auto-set the flag, `required (<code>); recovery.md write failed: <message>` when the durable flag was set but rendering the artifact failed, `flagged (clear explicitly once resolved)` when the run is still flagged from a prior import, and `not required` otherwise.
+The `Manual recovery` line reads `required (<code>) -> <recovery.md path>` when this import auto-set the flag, `required (<code>); recovery.md write failed: <message>` when the durable flag was set but rendering the artifact failed, `flagged (clear explicitly once resolved)` when the run has an existing durable flag but this import did not classify a blocking recovery condition, and `not required` otherwise.
 
 ### Text output (failure)
 
