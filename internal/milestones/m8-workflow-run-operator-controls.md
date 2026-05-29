@@ -61,7 +61,7 @@ Refusal taxonomy reuses the M7 codes verbatim: `unknown_workflow_subcommand`, `i
 
 M8 lifts the M7-deferred per-run recovery artifact and durable flag into the substrate:
 
-- A `WorkflowRun.needs_manual_recovery` durable flag (or equivalent typed column / sidecar row), set automatically when the M7 monitor reducer emits `manual_recovery_lease` or when a managed-step dispatch finalizes with a `manual_recovery_required` classification.
+- A `WorkflowRun.needs_manual_recovery` durable flag (or equivalent typed column / sidecar row), set automatically when import re-derives a blocking monitor classification: `manual_recovery_lease`, `ghost_active_no_lease`, `stale_running_step`, or `failed_required_step`.
 - A per-run `.agent-workflows/<runId>/recovery.md` artifact rendered from the monitor reducer's recovery view. The artifact carries run id, step id, recovery classification, evidence pointers, recommended next action, and rollback / safety notes. The artifact never embeds secrets, raw token values, or chat-transcript content.
 - The flag blocks future `workflow run approve` claims and `workflow run update-step` transitions that would make recovery worse or leave the blocking condition in place until an operator explicitly clears it.
 - The `workflow run clear-recovery` path is explicit and auditable; it refuses if the underlying blocking state still exists.

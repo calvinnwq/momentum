@@ -142,6 +142,14 @@ refuses with `recovery_clear_refused` while a blocking condition remains, or
 `not_flagged` when the run is not currently flagged. The command leaves the
 run's `recovery.md` artifact on disk as audit evidence.
 
+The generated run-scoped `recovery.md` artifact is schema-versioned and
+includes the run ID, step ID, recovery classification, repo path, classified-at
+timestamp, reason, recommended next action, evidence pointers,
+classification-specific safe next steps, and safety / rollback notes. Momentum
+overwrites the artifact with the latest recovery classification when import
+flags the run again, but does not delete it after
+`workflow run clear-recovery`.
+
 See [docs/workflow-commands.md](workflow-commands.md) for the full
 `workflow import` and `workflow run clear-recovery` envelopes.
 

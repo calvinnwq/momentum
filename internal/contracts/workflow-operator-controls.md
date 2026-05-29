@@ -107,7 +107,7 @@ Refusal codes are stable strings; existing codes never get renamed, narrowed, or
 
 The per-run recovery surface mirrors the M3 goal-scoped contract, scoped to `WorkflowRun` instead of `Goal`:
 
-- A durable `WorkflowRun.needs_manual_recovery` flag (or equivalent typed column / sidecar row) captures the manual-recovery reason. The flag is set automatically when the M7 monitor reducer emits `manual_recovery_lease`, when a managed-step dispatch finalizes with a `manual_recovery_required` classification from `failure_patterns.yaml`, or when a `workflow_steps` finalize observes an irreconcilable mismatch between the durable row and the ledger / artifact tree.
+- A durable `WorkflowRun.needs_manual_recovery` flag (or equivalent typed column / sidecar row) captures the manual-recovery reason. The flag is set automatically when import re-derives a blocking monitor classification: `manual_recovery_lease`, `ghost_active_no_lease`, `stale_running_step`, or `failed_required_step`.
 - A per-run `.agent-workflows/<runId>/recovery.md` artifact renders the manual-recovery reason and the safe next steps. The artifact carries run id, step id, recovery classification, evidence pointers, recommended next action, and rollback / safety notes. It never embeds secrets, raw token values, or chat-transcript content.
 - The flag blocks future `workflow run approve` claims and `workflow run update-step` transitions that would make recovery worse or leave the blocking condition in place, until an operator explicitly clears it.
 - The `workflow run clear-recovery` path is explicit and auditable. It refuses with `not_flagged` when the durable flag is absent and `recovery_clear_refused` if the underlying blocking state still exists.
