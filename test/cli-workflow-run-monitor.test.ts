@@ -496,6 +496,89 @@ describe("momentum workflow run monitor (NGX-328)", () => {
     );
   });
 
+  it("reports monitor drift when an imported advisory points at an old step", async () => {
+    const dataDir = makeTempDir();
+    const artifactRoot = makeTempDir(
+      "momentum-cli-workflow-run-monitor-artifacts-"
+    );
+    const runId = "cwfp-step-drift";
+    const runDir = path.join(artifactRoot, runId);
+    writeJsonFile(path.join(runDir, "plan.json"), {
+      runId,
+      schemaVersion: 1,
+      taskFlow: {
+        childTasks: [{ stepId: "preflight" }, { stepId: "implementation" }]
+      }
+    });
+    writeLedger(path.join(runDir, "ledger.jsonl"), [
+      {
+        runId,
+        step: "preflight",
+        status: "complete",
+        ts: "2026-05-29T00:00:00Z"
+      },
+      {
+        runId,
+        step: "implementation",
+        status: "started",
+        ts: "2026-05-29T00:01:00Z"
+      }
+    ]);
+    writeJsonFile(path.join(runDir, "monitor.json"), {
+      lastSeenState: "running",
+      terminal: false,
+      step: "preflight",
+      lastSeenDigest: "stale-digest",
+      lastEmittedDigest: "stale-digest"
+    });
+
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunImport(db, parseImportOrThrow(runDir), {
+        now: SEED_NOW
+      });
+      seedLease(db, {
+        runId,
+        leaseKind: "managed-step",
+        expiresAt: FRESH_EXPIRY
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      runState: "running",
+      disposition: "report",
+      reportable: true,
+      reportReason: "monitor_drift"
+    });
+    expect(payload["activeStep"]).toMatchObject({
+      stepId: "implementation"
+    });
+    expect(payload["monitorDrift"]).toMatchObject({
+      advisoryState: "running",
+      advisoryTerminal: false,
+      actualState: "running",
+      drifted: true,
+      reason: "monitor_step_mismatch"
+    });
+    expect((payload["recovery"] as Record<string, unknown>)["code"]).toBe(
+      "monitor_drift_stale"
+    );
+  });
+
   it("renders a text monitor summary", async () => {
     const dataDir = makeTempDir();
     const runId = "cwfp-text";
