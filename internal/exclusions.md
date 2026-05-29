@@ -63,7 +63,8 @@ Milestone status:
 - **Milestone 8 (Workflow Run Operator Controls)** is active / in flight
   (NGX-323 pinned the M8 contract slice). M8 layers operator-control CLI
   envelopes — `workflow run list` (NGX-324), `workflow run approve` (NGX-325),
-  `workflow run update-step` (NGX-326), and `workflow run monitor` (NGX-328) —
+  `workflow run update-step` (NGX-326), `workflow run clear-recovery`
+  (NGX-327), and `workflow run monitor` (NGX-328) —
   on top of the M7 substrate, adds per-run `.agent-workflows/<runId>/recovery.md`
   rendering plus the `WorkflowRun.needs_manual_recovery` durable flag
   (NGX-327), and adds typed `runId` / `stepId` evidence linkage to

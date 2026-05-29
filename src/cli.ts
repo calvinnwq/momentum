@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
+import path from "node:path";
 import process from "node:process";
 import { isUniqueViolation, openDb, type MomentumDb } from "./db.js";
 import { initGoal, type GoalInitOptions, type GoalInitSuccess } from "./goal-init.js";
@@ -143,7 +144,21 @@ import {
   loadWorkflowHandoff,
   type WorkflowHandoffEnvelope
 } from "./workflow-handoff.js";
-import type { WorkflowMonitorState } from "./workflow-monitor-state.js";
+import {
+  deriveWorkflowMonitorState,
+  type WorkflowMonitorState
+} from "./workflow-monitor-state.js";
+import {
+  clearWorkflowRunManualRecoveryGuarded,
+  getWorkflowRunManualRecoveryState,
+  isBlockingWorkflowRecoveryCode,
+  type ClearWorkflowRunManualRecoveryGuardedResult,
+  type WorkflowRunManualRecoveryState
+} from "./workflow-run-recovery.js";
+import {
+  reconcileWorkflowRunManualRecovery,
+  type ReconcileWorkflowRunManualRecoveryResult
+} from "./workflow-recovery-reconcile.js";
 import {
   DEFAULT_RECONCILIATION_STALE_THRESHOLD_MS,
   PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT,
@@ -309,6 +324,7 @@ const COMMANDS = [
   "momentum workflow run approve <run-id> --approval-boundary <boundary> --phrase <text> [--actor <name>] [--artifact-path <path>] [--artifact-digest <sha256>] [--data-dir <path>] [--json]",
   "momentum workflow run list [--state <state>] [--filter <active|blocked|completed|imported>] [--approval-boundary <boundary>] [--repo <path>] [--issue-scope <identifier>] [--updated-since <ms>] [--updated-until <ms>] [--limit <n>] [--data-dir <path>] [--json]",
   "momentum workflow run update-step <run-id> --step <step-id> --state <approved|succeeded|skipped|failed|blocked|canceled> --reason <text> [--actor <name>] [--evidence-pointer <ref>] [--ledger-pointer <ref>] [--data-dir <path>] [--json]",
+  "momentum workflow run clear-recovery <run-id> [--data-dir <path>] [--json]",
   "momentum intent list [--status <status>] [--adapter <kind>] [--type <intent-type>] [--goal <goal-id>] [--source-item <id>] [--evidence-record <id>] [--limit <n>] [--data-dir <path>] [--json]",
   "momentum intent get <intent-id> [--data-dir <path>] [--json]",
   "momentum intent apply <intent-id> --reason <text> [--repo <path>] [--external-apply] [--data-dir <path>] [--json]",
@@ -2085,7 +2101,7 @@ function workflowRun(parsed: ParsedFlags, io: CliIo): number {
   const subcommand = parsed.args[2];
   if (!subcommand) {
     return usageError(
-      "Missing required subcommand for workflow run. Expected: list, approve, update-step.",
+      "Missing required subcommand for workflow run. Expected: list, approve, update-step, clear-recovery.",
       parsed,
       io
     );
@@ -2098,6 +2114,9 @@ function workflowRun(parsed: ParsedFlags, io: CliIo): number {
   }
   if (subcommand === "update-step") {
     return workflowRunUpdateStep(parsed, io);
+  }
+  if (subcommand === "clear-recovery") {
+    return workflowRunClearRecovery(parsed, io);
   }
   return usageError(
     `Unknown workflow run subcommand: ${subcommand}`,
@@ -2150,8 +2169,16 @@ function workflowImport(parsed: ParsedFlags, io: CliIo): number {
 
   const db = openDb(dataDir);
   let summary: PersistWorkflowRunImportSummary;
+  let recovery: ReconcileWorkflowRunManualRecoveryResult;
+  let recoveryState: WorkflowRunManualRecoveryState | undefined;
   try {
     summary = persistWorkflowRunImport(db, parseResult.import);
+    recovery = reconcileWorkflowRunManualRecovery(db, {
+      runId: summary.runId,
+      agentWorkflowsDir: path.dirname(artifactPath),
+      artifactRunDir: artifactPath
+    });
+    recoveryState = getWorkflowRunManualRecoveryState(db, summary.runId);
   } finally {
     db.close();
   }
@@ -2160,7 +2187,9 @@ function workflowImport(parsed: ParsedFlags, io: CliIo): number {
     dataDir,
     artifactPath,
     summary,
-    importResult: parseResult.import
+    importResult: parseResult.import,
+    recovery,
+    recoveryState
   });
 }
 
@@ -2172,9 +2201,23 @@ function emitWorkflowImportSuccess(
     artifactPath: string;
     summary: PersistWorkflowRunImportSummary;
     importResult: WorkflowRunImport;
+    recovery: ReconcileWorkflowRunManualRecoveryResult;
+    recoveryState: WorkflowRunManualRecoveryState | undefined;
   }
 ): number {
   const { summary, importResult } = result;
+  // `needsManualRecovery` mirrors the durable flag (consistent with the
+  // status/handoff/list envelopes); `recovery` surfaces the classification this
+  // import freshly auto-set, when it set one.
+  const needsManualRecovery =
+    result.recoveryState?.needsManualRecovery ?? false;
+  const recoveryOutcome = result.recovery.ok ? result.recovery : null;
+  const marked =
+    recoveryOutcome !== null &&
+    (recoveryOutcome.outcome === "marked" ||
+      recoveryOutcome.outcome === "artifact_write_failed")
+      ? recoveryOutcome
+      : null;
   const payload = {
     ok: true,
     command: "workflow import",
@@ -2193,7 +2236,21 @@ function emitWorkflowImportSuccess(
     diagnostics: importResult.diagnostics.map((diagnostic) => ({
       ...diagnostic
     })),
-    monitor: importResult.monitor === null ? null : { ...importResult.monitor }
+    monitor: importResult.monitor === null ? null : { ...importResult.monitor },
+    needsManualRecovery,
+    recovery:
+      marked === null
+        ? null
+        : {
+            code: marked.recoveryCode,
+            stepId: marked.stepId,
+            reason: marked.reason,
+            artifactPath: marked.artifactPath,
+            artifactWriteError:
+              marked.outcome === "artifact_write_failed"
+                ? { ...marked.artifactWriteError }
+                : null
+          }
   };
 
   if (parsed.json) {
@@ -2209,6 +2266,13 @@ function emitWorkflowImportSuccess(
     `Steps: ${summary.stepCount}`,
     `Approvals: ${summary.approvalCount}`,
     `Diagnostics: ${importResult.diagnostics.length}`,
+    marked !== null
+      ? marked.outcome === "artifact_write_failed"
+        ? `Manual recovery: required (${marked.recoveryCode}); recovery.md write failed: ${marked.artifactWriteError.message}`
+        : `Manual recovery: required (${marked.recoveryCode}) -> ${marked.artifactPath}`
+      : needsManualRecovery
+        ? "Manual recovery: flagged (clear explicitly once resolved)"
+        : "Manual recovery: not required",
     `Data dir: ${result.dataDir}`,
     ""
   ];
@@ -3130,19 +3194,6 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
           stepId
         });
       }
-      if (runRow.needs_manual_recovery === 1) {
-        db.exec("ROLLBACK");
-        return emitWorkflowRunUpdateStepFailure(parsed, io, {
-          command: "workflow run update-step",
-          code: "manual_recovery_required",
-          message:
-            runRow.manual_recovery_reason ??
-            `Workflow run requires manual recovery before step updates: ${runId}`,
-          dataDir,
-          runId,
-          stepId
-        });
-      }
       const stepRow = db
         .prepare(
           `SELECT state, operator_reason, operator_actor,
@@ -3178,6 +3229,31 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
         stepRow.operator_actor === actor &&
         stepRow.operator_evidence_pointer === evidencePointer &&
         stepRow.operator_ledger_pointer === ledgerPointer;
+      const transition = transitionWorkflowStep(previousState, targetState);
+      const now = Date.now();
+      if (runRow.needs_manual_recovery === 1) {
+        const resolvesManualRecovery =
+          transition.ok &&
+          workflowRunStepUpdateResolvesManualRecovery(db, {
+            runId,
+            stepId,
+            targetState,
+            now
+          });
+        if (!resolvesManualRecovery) {
+          db.exec("ROLLBACK");
+          return emitWorkflowRunUpdateStepFailure(parsed, io, {
+            command: "workflow run update-step",
+            code: "manual_recovery_required",
+            message:
+              runRow.manual_recovery_reason ??
+              `Workflow run requires manual recovery before step updates: ${runId}`,
+            dataDir,
+            runId,
+            stepId
+          });
+        }
+      }
       if (
         isTerminalRunState(runRow.state) &&
         !(previousState === targetState && sameAuditContext)
@@ -3192,7 +3268,6 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
           stepId
         });
       }
-      const transition = transitionWorkflowStep(previousState, targetState);
       if (!transition.ok) {
         db.exec("ROLLBACK");
         return emitWorkflowRunUpdateStepFailure(parsed, io, {
@@ -3205,7 +3280,6 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
         });
       }
 
-      const now = Date.now();
       let idempotent = false;
       if (previousState === targetState) {
         // Step already in the target state: only a byte-equal re-finalize is a
@@ -3319,6 +3393,35 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
   return 0;
 }
 
+function workflowRunStepUpdateResolvesManualRecovery(
+  db: MomentumDb,
+  input: {
+    runId: string;
+    stepId: string;
+    targetState: WorkflowStepState;
+    now: number;
+  }
+): boolean {
+  const steps = loadWorkflowStepRecords(db, input.runId).map((step) =>
+    step.stepId === input.stepId
+      ? { ...step, state: input.targetState }
+      : step
+  );
+  const leases = loadWorkflowLeaseRecords(db, input.runId);
+  const monitor = deriveWorkflowMonitorState({
+    runId: input.runId,
+    steps,
+    leases,
+    monitor: null,
+    lastCheckpoint: null,
+    now: input.now
+  });
+  return (
+    monitor.recovery === null ||
+    !isBlockingWorkflowRecoveryCode(monitor.recovery.code)
+  );
+}
+
 function loadWorkflowStepRecords(
   db: MomentumDb,
   runId: string
@@ -3389,6 +3492,135 @@ function emitWorkflowRunUpdateStepFailure(
   if (failure.dataDir !== undefined) payload["dataDir"] = failure.dataDir;
   if (failure.runId !== undefined) payload["runId"] = failure.runId;
   if (failure.stepId !== undefined) payload["stepId"] = failure.stepId;
+
+  if (parsed.json) {
+    writeJson(io.stderr, payload);
+    return 1;
+  }
+  write(io.stderr, `${failure.message}\n`);
+  return 1;
+}
+
+function workflowRunClearRecovery(parsed: ParsedFlags, io: CliIo): number {
+  const positional = parsed.args.slice(3);
+  if (positional.length === 0 || !positional[0]) {
+    return emitWorkflowRunClearRecoveryFailure(parsed, io, {
+      code: "run_id_required",
+      message: "Missing required <run-id> for workflow run clear-recovery."
+    });
+  }
+  if (positional.length > 1) {
+    return usageError(
+      `Unexpected argument for workflow run clear-recovery: ${positional[1]}`,
+      parsed,
+      io
+    );
+  }
+  const runId = positional[0];
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return emitWorkflowRunClearRecoveryFailure(parsed, io, {
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err),
+      runId
+    });
+  }
+
+  const db = openDb(dataDir);
+  let result: ClearWorkflowRunManualRecoveryGuardedResult;
+  try {
+    result = clearWorkflowRunManualRecoveryGuarded(db, { runId });
+  } finally {
+    db.close();
+  }
+
+  return emitWorkflowRunClearRecovery(parsed, io, dataDir, runId, result);
+}
+
+function emitWorkflowRunClearRecovery(
+  parsed: ParsedFlags,
+  io: CliIo,
+  dataDir: string,
+  runId: string,
+  result: ClearWorkflowRunManualRecoveryGuardedResult
+): number {
+  if (!result.ok) {
+    const payload: Record<string, unknown> = {
+      ok: false,
+      command: "workflow run clear-recovery",
+      code: result.reason,
+      message: result.message,
+      runId,
+      dataDir
+    };
+    if (result.recoveryCode !== undefined) {
+      payload["recoveryCode"] = result.recoveryCode;
+    }
+    if (result.blockingStepId !== undefined && result.blockingStepId !== null) {
+      payload["blockingStepId"] = result.blockingStepId;
+    }
+    if (parsed.json) {
+      writeJson(io.stderr, payload);
+      return 1;
+    }
+    write(io.stderr, `${result.message}\n`);
+    return 1;
+  }
+
+  const payload = {
+    ok: true,
+    command: "workflow run clear-recovery",
+    runId: result.runId,
+    dataDir,
+    previousReason: result.previousReason,
+    previousMarkedAt: result.previousMarkedAt,
+    clearedAt: result.clearedAt
+  };
+
+  if (parsed.json) {
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  const lines: string[] = [
+    `Manual recovery cleared for run: ${result.runId}`,
+    `Previous reason: ${result.previousReason ?? "(unset)"}`,
+    `Previous marked at: ${result.previousMarkedAt ?? "(unset)"}`,
+    `Cleared at: ${result.clearedAt}`,
+    `Data dir: ${dataDir}`,
+    ""
+  ];
+  write(io.stdout, lines.join("\n"));
+  return 0;
+}
+
+type WorkflowRunClearRecoveryFailureCode =
+  | "data_dir_failed"
+  | "run_id_required";
+
+function emitWorkflowRunClearRecoveryFailure(
+  parsed: ParsedFlags,
+  io: CliIo,
+  failure: {
+    code: WorkflowRunClearRecoveryFailureCode;
+    message: string;
+    runId?: string;
+  }
+): number {
+  const payload: Record<string, unknown> = {
+    ok: false,
+    command: "workflow run clear-recovery",
+    code: failure.code,
+    message: failure.message
+  };
+  if (failure.runId !== undefined) payload["runId"] = failure.runId;
 
   if (parsed.json) {
     writeJson(io.stderr, payload);

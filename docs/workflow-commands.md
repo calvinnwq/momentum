@@ -1,6 +1,6 @@
 # Workflow commands
 
-Operator-facing CLI envelopes for the `workflow import`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run approve`, and `workflow run update-step` commands.
+Operator-facing CLI envelopes for the `workflow import`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run approve`, `workflow run update-step`, and `workflow run clear-recovery` commands.
 
 - `workflow import` reads local `.agent-workflows/<run-id>/` directories and persists normalized rows into the `workflow_runs`, `workflow_steps`, and `workflow_approvals` tables.
 - `workflow status` is a read-only surface that lists workflow runs (with state / filter selectors) or returns the full detail of a single run.
@@ -8,6 +8,7 @@ Operator-facing CLI envelopes for the `workflow import`, `workflow status`, `wor
 - `workflow run list` is a read-only filterable query surface over the durable `workflow_runs` table, with additional filter dimensions not available in `workflow status` list mode.
 - `workflow run approve` records durable explicit approvals for workflow boundaries and persists operator-visible metadata (actor, phrase, artifact provenance) into `workflow_approvals`.
 - `workflow run update-step` drives operator-initiated step transitions (`approved` / `succeeded` / `skipped` / `failed` / `blocked` / `canceled`) through the existing state machine, persisting an audit record with operator reason and optional evidence or ledger pointers.
+- `workflow run clear-recovery` explicitly clears a run's durable manual-recovery flag after the blocking condition is resolved.
 
 `workflow status`, `workflow handoff`, and `workflow run list` are read-only: they never write SQLite or files.
 
@@ -24,16 +25,17 @@ momentum workflow import --path <run-dir> [--data-dir <path>] [--json]
 
 Reads the `.agent-workflows/<run-id>/` directory at `<run-dir>` and normalizes the `plan.json`, `ledger.jsonl`, `approval-*.json`, and advisory `monitor.json` artifacts into durable `workflow_runs`, `workflow_steps`, and `workflow_approvals` rows.
 
-`--path <run-dir>` is required. The directory basename should match the `cwfp-` / `cwfb-` / `overnight-` run ID convention; alternatively, `plan.json` may supply `runId`.
+`--path <run-dir>` is required. The directory basename should match the `cwfp-` / `cwfb-` / `overnight-` run ID convention; alternatively, `plan.json` may supply `runId` when it is a safe path segment. An unsafe `plan.json.runId` emits `evidence_format_invalid` with reason `plan_run_id_invalid` and import falls back to the directory basename.
 
 ### Processing rules
 
 - **Idempotent re-import**: running `workflow import` on the same directory twice produces no duplicate rows. `created_at` is preserved on upsert; `updated_at` is bumped.
 - **Terminal ledger wins**: `monitor.json` is advisory. Step and run state are derived from `ledger.jsonl` and `plan.json`; a stale monitor does not override completed ledger evidence.
 - **Lost managed-task markers**: `managed-*.pid`, `managed-*.log`, and `locks/` sibling entries are ignored without diagnostics. They do not force a failed step state.
-- **Unknown siblings**: unrecognized files produce `evidence_format_unknown` diagnostics but do not drop the valid records around them.
+- **Unknown siblings**: unrecognized files produce `evidence_format_unknown` diagnostics but do not drop the valid records around them. The generated `recovery.md` artifact is a known sibling and is ignored by import.
 - **Malformed artifacts**: invalid `plan.json`, `ledger.jsonl` lines, or `approval-*.json` files produce `evidence_format_invalid` diagnostics. Valid siblings are still imported.
 - **Durable approvals merge forward**: existing database approvals, the current `approval_boundary`, and imported `approval-*.json` artifacts are merged. The highest boundary is preserved; same-rank boundaries prefer the newer recorded approval. Stale same-boundary artifacts do not overwrite newer durable approval rows. On fresh imports and re-imports, pending steps covered by any preserved approval are persisted as `approved`, and a non-terminal pending run can be persisted as `approved`.
+- **Manual-recovery auto-set**: after persisting the rows, import re-derives the run's monitor view. When it classifies a blocking recovery condition (`manual_recovery_lease`, `ghost_active_no_lease`, `stale_running_step`, or `failed_required_step`), import sets the durable `needs_manual_recovery` flag and renders `<run-dir>/recovery.md`. The flag blocks `workflow run approve` and any `workflow run update-step` transition that would leave a blocking recovery condition in place; a resolving update-step can land so the operator can then clear the flag with `workflow run clear-recovery`. The auto-set only ever sets the flag: re-importing a run whose blocking condition is now resolved leaves any existing flag in place, so clearing stays explicit and operator-driven.
 
 ### JSON envelope (success)
 
@@ -54,11 +56,35 @@ Reads the `.agent-workflows/<run-id>/` directory at `<run-dir>` and normalizes t
     "diagnostics": 0
   },
   "diagnostics": [],
-  "monitor": null
+  "monitor": null,
+  "needsManualRecovery": false,
+  "recovery": null
 }
 ```
 
 `inserted` is `true` on first import and `false` on re-import (upsert). `counts.approvals` counts only `approval-*.json` artifacts present in the current import; preserved durable approvals are reflected in `state` and `approvalBoundary` but do not increase that count. `monitor` carries the advisory monitor snapshot (always `advisory: true`) or `null` when no `monitor.json` is present.
+
+`needsManualRecovery` mirrors the run's durable manual-recovery flag after the import (matching the same field on `workflow status` / `workflow handoff` / `workflow run list`). `recovery` describes the blocking condition this import freshly flagged, or `null` when this import did not set the flag:
+
+```json
+{
+  "needsManualRecovery": true,
+  "recovery": {
+    "code": "failed_required_step",
+    "stepId": "implementation",
+    "reason": "A required step finalized in failed state. ...",
+    "artifactPath": "/path/to/cwfp-abc123/recovery.md",
+    "artifactWriteError": null
+  }
+}
+```
+
+If the durable flag is set but rendering `recovery.md` fails, import still
+returns a structured success envelope with `needsManualRecovery: true`,
+`recovery.artifactPath: null`, and `recovery.artifactWriteError` set to
+`{ "code": "recovery_artifact_write_failed", "message": "<render error>" }`.
+
+A run that was already flagged on a prior import but whose blocking condition is now resolved reports `needsManualRecovery: true` with `recovery: null` — the durable flag persists until an operator clears it explicitly.
 
 #### Diagnostic entries
 
@@ -82,7 +108,7 @@ Each `diagnostics` entry has the shape:
 
 `evidence_format_unknown` reasons: `unsupported_subdirectory`, `unsupported_entry_kind`, `unrecognized_filename`.
 
-`evidence_format_invalid` reasons: `directory_unreadable`, `plan_not_object`, `ledger_unreadable`, `ledger_line_not_json`, `ledger_line_not_object`, `ledger_line_missing_required_fields`, `ledger_run_id_mismatch`, `unknown_step_or_status`, `ledger_line_invalid_timestamp`, `monitor_not_object`, `file_unreadable`, `file_not_json`, `approval_not_object`, `approval_run_id_mismatch`, `approval_missing_boundary`, `approval_invalid_boundary`, `approval_invalid_timestamp`.
+`evidence_format_invalid` reasons: `directory_unreadable`, `plan_not_object`, `plan_run_id_invalid`, `ledger_unreadable`, `ledger_line_not_json`, `ledger_line_not_object`, `ledger_line_missing_required_fields`, `ledger_run_id_mismatch`, `unknown_step_or_status`, `ledger_line_invalid_timestamp`, `monitor_not_object`, `file_unreadable`, `file_not_json`, `approval_not_object`, `approval_run_id_mismatch`, `approval_missing_boundary`, `approval_invalid_boundary`, `approval_invalid_timestamp`.
 
 ### JSON envelope (failure)
 
@@ -120,8 +146,11 @@ Inserted: yes
 Steps: 5
 Approvals: 1
 Diagnostics: 0
+Manual recovery: not required
 Data dir: /path/to/data
 ```
+
+The `Manual recovery` line reads `required (<code>) -> <recovery.md path>` when this import auto-set the flag, `required (<code>); recovery.md write failed: <message>` when the durable flag was set but rendering the artifact failed, `flagged (clear explicitly once resolved)` when the run has an existing durable flag but this import did not classify a blocking recovery condition, and `not required` otherwise.
 
 ### Text output (failure)
 
@@ -242,7 +271,7 @@ Behaviour:
 - A repeat with a different reason, actor, or pointers refuses with `invalid_transition`; the existing audit record is preserved.
 - After a successful step transition the run state is re-derived from the full step chain; if the derived state differs from the stored one, `workflow_runs.state` is updated in the same transaction.
 - The command is local-only: it never spawns an executor, schedules cron, or issues an external write.
-- If the run has `needs_manual_recovery` set, the command refuses with `manual_recovery_required` until the flag is cleared.
+- If the run has `needs_manual_recovery` set, transitions that would leave a blocking recovery condition in place refuse with `manual_recovery_required`; transitions that resolve the blocking condition can land so the flag can be cleared explicitly afterward.
 
 ### JSON envelope
 
@@ -285,10 +314,65 @@ Data dir: /path/to/data
 | `data_dir_failed` | Data directory resolution failed. |
 | `run_id_required` | `<run-id>` was not supplied. |
 | `run_not_found` | `<run-id>` does not exist in `workflow_runs`. |
-| `manual_recovery_required` | The run is blocked by its durable manual-recovery flag and must be cleared before step updates. |
+| `manual_recovery_required` | The run is blocked by its durable manual-recovery flag and the requested transition would leave a blocking recovery condition in place. |
 | `step_not_found` | `--step` was not supplied or does not match any step row for this run. |
 | `invalid_state` | `--state` is not one of the allowed target states. |
 | `invalid_transition` | The requested transition is not legal from the current step state, `--reason` was omitted, or an existing finalize would be overwritten with a different audit context. |
+
+Exit code 0 on success, 1 on structured refusal, 2 on usage error.
+
+## `workflow run clear-recovery`
+
+```text
+momentum workflow run clear-recovery <run-id> [--data-dir <path>] [--json]
+```
+
+Explicit, auditable clear for a run's durable manual-recovery flag. The flag blocks `workflow run approve` and non-resolving `workflow run update-step` transitions until an operator clears it here.
+
+Required arguments:
+
+- `<run-id>` — the flagged run to clear.
+
+Behaviour:
+
+- Re-derives the monitor view from the durable substrate inside a single immediate transaction and clears the flag only when no blocking recovery condition remains. The check and the clear are atomic: the condition that is checked is the condition that is cleared.
+- Refuses with `recovery_clear_refused` while a blocking recovery classification (`manual_recovery_lease`, `ghost_active_no_lease`, `stale_running_step`, or `failed_required_step`) still applies; the refusal carries the `recoveryCode` and, when known, the `blockingStepId`, and the flag stays set.
+- Refuses with `not_flagged` when the run is not currently flagged, so a stale clear cannot mutate anything.
+- Never auto-clears from elapsed time alone, never repairs the underlying run, and never issues an external write. The `recovery.md` artifact is intentionally left on disk as durable audit; remove it after capturing the context elsewhere.
+
+### JSON envelope
+
+```json
+{
+  "ok": true,
+  "command": "workflow run clear-recovery",
+  "runId": "cwfp-abc123",
+  "dataDir": "/path/to/data",
+  "previousReason": "ghost active step recovered by operator",
+  "previousMarkedAt": 1730000000000,
+  "clearedAt": 1730000600000
+}
+```
+
+### Text output
+
+```text
+Manual recovery cleared for run: cwfp-abc123
+Previous reason: ghost active step recovered by operator
+Previous marked at: 1730000000000
+Cleared at: 1730000600000
+Data dir: /path/to/data
+```
+
+### Error codes
+
+| Code | Meaning |
+|------|---------|
+| `data_dir_failed` | Data directory resolution failed. |
+| `run_id_required` | `<run-id>` was not supplied. |
+| `run_not_found` | `<run-id>` does not exist in `workflow_runs`. |
+| `not_flagged` | The run is not currently flagged for manual recovery; nothing to clear. |
+| `recovery_clear_refused` | A blocking recovery condition still applies; resolve it before clearing. Carries `recoveryCode` and optional `blockingStepId`. |
 
 Exit code 0 on success, 1 on structured refusal, 2 on usage error.
 

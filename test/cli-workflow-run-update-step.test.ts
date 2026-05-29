@@ -206,6 +206,29 @@ function readRunState(dataDir: string, runId: string): string {
   }
 }
 
+function readRunRecoveryState(
+  dataDir: string,
+  runId: string
+): {
+  needs_manual_recovery: number;
+  manual_recovery_reason: string | null;
+} {
+  const db = openDb(dataDir);
+  try {
+    return db
+      .prepare(
+        `SELECT needs_manual_recovery, manual_recovery_reason
+           FROM workflow_runs WHERE id = ?`
+      )
+      .get(runId) as {
+      needs_manual_recovery: number;
+      manual_recovery_reason: string | null;
+    };
+  } finally {
+    db.close();
+  }
+}
+
 describe("momentum workflow run update-step (NGX-326)", () => {
   it("requires a <run-id>", async () => {
     const dataDir = makeTempDir();
@@ -971,16 +994,87 @@ describe("momentum workflow run update-step (NGX-326)", () => {
     expect(readRunState(dataDir, runId)).toBe("succeeded");
   });
 
-  it("refuses transitions while the run needs manual recovery", async () => {
+  it("allows a flagged running step transition that resolves manual recovery", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-recovery-resolve";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, {
+        runId,
+        state: "running",
+        needsManualRecovery: true,
+        manualRecoveryReason: "ghost active step requires operator recovery"
+      });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "running",
+        order: 1
+      });
+    } finally {
+      db.close();
+    }
+
+    const update = await run([
+      "workflow",
+      "run",
+      "update-step",
+      runId,
+      "--step",
+      "implementation",
+      "--state",
+      "canceled",
+      "--reason",
+      "operator canceled ghost step",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(update.code).toBe(0);
+    const updatePayload = JSON.parse(update.stdout) as Record<string, unknown>;
+    expect(updatePayload).toMatchObject({
+      ok: true,
+      command: "workflow run update-step",
+      runId,
+      stepId: "implementation",
+      state: "canceled",
+      previousState: "running",
+      runState: "canceled"
+    });
+    expect(readStep(dataDir, runId, "implementation").state).toBe("canceled");
+    expect(readRunState(dataDir, runId)).toBe("canceled");
+    expect(readRunRecoveryState(dataDir, runId).needs_manual_recovery).toBe(1);
+
+    const clear = await run([
+      "workflow",
+      "run",
+      "clear-recovery",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(clear.code).toBe(0);
+    const clearPayload = JSON.parse(clear.stdout) as Record<string, unknown>;
+    expect(clearPayload).toMatchObject({
+      ok: true,
+      command: "workflow run clear-recovery",
+      runId
+    });
+    expect(readRunRecoveryState(dataDir, runId).needs_manual_recovery).toBe(0);
+  });
+
+  it("refuses flagged transitions that leave manual recovery blocking", async () => {
     const dataDir = makeTempDir();
     const runId = "cwfp-recovery";
     const db = openDb(dataDir);
     try {
       seedRun(db, {
         runId,
-        state: "blocked",
+        state: "running",
         needsManualRecovery: true,
-        manualRecoveryReason: "dispatch lease requires operator recovery"
+        manualRecoveryReason: "ghost active step requires operator recovery"
       });
       seedStep(db, {
         runId,
@@ -1001,9 +1095,9 @@ describe("momentum workflow run update-step (NGX-326)", () => {
       "--step",
       "implementation",
       "--state",
-      "succeeded",
+      "blocked",
       "--reason",
-      "operator finalize",
+      "operator keeps step blocked",
       "--data-dir",
       dataDir,
       "--json"

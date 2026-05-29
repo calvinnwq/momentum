@@ -12,7 +12,7 @@ The `coding-workflow-pipeline` skill stays the orchestration UX (Discord deliver
 
 This contract covers:
 
-- The M8 operator-control CLI envelopes: `workflow run list`, `workflow run approve`, `workflow run update-step`, `workflow run monitor`.
+- The M8 operator-control CLI envelopes: `workflow run list`, `workflow run approve`, `workflow run update-step`, `workflow run clear-recovery`, `workflow run monitor`.
 - The per-run recovery artifact (`.agent-workflows/<runId>/recovery.md`) and the durable `WorkflowRun.needs_manual_recovery` flag wiring (NGX-327).
 - The additive, backwards-compatible `runId` / `stepId` linkage on the M5 `evidence_records` table (NGX-329).
 - The refusal taxonomy, JSON field stability, and compatibility rules that hold across every M8 envelope.
@@ -28,7 +28,7 @@ It does **not** cover:
 
 ## M8 envelope contract
 
-Every M8 envelope is read / approve / transition / render over the existing durable substrate. None of them ever:
+Every M8 envelope is read / approve / transition / clear / render over the existing durable substrate. None of them ever:
 
 - Spawn a managed child, executor, or shell.
 - Schedule, create, or clean up a cron job.
@@ -69,7 +69,15 @@ Operator-driven step transition surface. Drives the existing M7 reducer / state 
 - Legal step transitions are persisted with evidence or ledger pointers and the operator-supplied reason or context. The required-chain run-state derivation in `deriveWorkflowRunState` stays the authority on run-level state — `workflow run update-step` never bypasses it.
 - Illegal transitions refuse with `invalid_transition` and write no partial durable state. An unknown step refuses with `step_not_found`. A finalize-after-finalize refuses with `invalid_transition` (or returns idempotently if the transition is byte-equal to the existing finalize, per the rule that lands at NGX-326).
 - The command remains local-only. It never spawns or stops a managed child, never schedules cron, and never issues an external write. If a future caller needs to start or stop a live process, that work belongs in a separately approved milestone slice — the M8 contract refuses to grow this envelope into process management.
-- The `needs_manual_recovery` flag (NGX-327) blocks update-step transitions that would make recovery worse until an operator explicitly clears it.
+- The `needs_manual_recovery` flag (NGX-327) blocks update-step transitions that would leave a blocking recovery condition in place; resolving transitions can land so an operator has a CLI path to clear the flag explicitly afterward.
+
+### `workflow run clear-recovery` (NGX-327)
+
+Explicit, auditable clear path for the run-scoped manual-recovery flag. Re-derives the M7 monitor state from durable rows inside the same transaction that clears the flag.
+
+- Refuses with `not_flagged` when the run exists but is not currently flagged.
+- Refuses with `recovery_clear_refused` while a blocking recovery classification still applies, and includes the recovery code plus blocking step id when known.
+- Never auto-clears from elapsed time alone, never repairs the underlying run, never spawns or kills a process, and leaves `.agent-workflows/<runId>/recovery.md` on disk as audit evidence.
 
 ### `workflow run monitor` (NGX-328)
 
@@ -90,7 +98,7 @@ The M8 envelopes reuse the M7 refusal taxonomy verbatim and extend it only with 
 - Shared (from M7, wire-stable): `unknown_workflow_subcommand`, `invalid_filter`, `invalid_state`, `invalid_limit`, `run_id_required`, `run_not_found`.
 - `workflow run approve` (NGX-325 additions): `invalid_boundary`, `approval_digest_mismatch`, `duplicate_approval`; it also consumes `manual_recovery_required` when the run-scoped recovery flag blocks approval.
 - `workflow run update-step` (NGX-326 additions): `invalid_transition`, `step_not_found`.
-- Run-scoped recovery (NGX-327 additions): `manual_recovery_required`, `recovery_clear_refused`.
+- Run-scoped recovery (NGX-327 additions): `manual_recovery_required`, `not_flagged`, `recovery_clear_refused`.
 - `workflow run monitor` (NGX-328): no new codes beyond the shared set; malformed input refuses with `run_id_required` / `run_not_found` exactly like the M7 read-only envelopes.
 
 Refusal codes are stable strings; existing codes never get renamed, narrowed, or merged. Implementation slices that need a new code add it here first.
@@ -99,10 +107,10 @@ Refusal codes are stable strings; existing codes never get renamed, narrowed, or
 
 The per-run recovery surface mirrors the M3 goal-scoped contract, scoped to `WorkflowRun` instead of `Goal`:
 
-- A durable `WorkflowRun.needs_manual_recovery` flag (or equivalent typed column / sidecar row) captures the manual-recovery reason. The flag is set automatically when the M7 monitor reducer emits `manual_recovery_lease`, when a managed-step dispatch finalizes with a `manual_recovery_required` classification from `failure_patterns.yaml`, or when a `workflow_steps` finalize observes an irreconcilable mismatch between the durable row and the ledger / artifact tree.
+- A durable `WorkflowRun.needs_manual_recovery` flag (or equivalent typed column / sidecar row) captures the manual-recovery reason. The flag is set automatically when import re-derives a blocking monitor classification: `manual_recovery_lease`, `ghost_active_no_lease`, `stale_running_step`, or `failed_required_step`.
 - A per-run `.agent-workflows/<runId>/recovery.md` artifact renders the manual-recovery reason and the safe next steps. The artifact carries run id, step id, recovery classification, evidence pointers, recommended next action, and rollback / safety notes. It never embeds secrets, raw token values, or chat-transcript content.
-- The flag blocks future `workflow run update-step` and `workflow run approve` claims that would make recovery worse, until an operator explicitly clears it.
-- The clear path is explicit and auditable. It refuses with `recovery_clear_refused` if the underlying blocking state still exists.
+- The flag blocks future `workflow run approve` claims and `workflow run update-step` transitions that would make recovery worse or leave the blocking condition in place, until an operator explicitly clears it.
+- The `workflow run clear-recovery` path is explicit and auditable. It refuses with `not_flagged` when the durable flag is absent and `recovery_clear_refused` if the underlying blocking state still exists.
 
 The M3 `goals.needs_manual_recovery` flag, the `recovery.md` artifact for goals, and `recovery clear <goal-id>` stay unchanged. The M8 run-scoped flag is a sibling surface, not a replacement.
 
@@ -128,6 +136,7 @@ A non-exhaustive seed list of fields the M8 envelopes pin:
 - `nextAction` (object with `code` plus optional `stepId`, `boundary`, or `runId`), `monitor.recovery` (object with `code` plus optional `stepId`).
 - `evidence` (array of typed evidence pointers with `evidenceRecordId`, `source`, `type`, `artifactPath`, `occurredAt`, `summary`, nullable `runId`, and nullable `stepId`).
 - `needsManualRecovery` (boolean), `recovery` (object surfacing the classification, recommended next action, and link to `recovery.md`).
+- `previousReason`, `previousMarkedAt`, and `clearedAt` on the `workflow run clear-recovery` success envelope.
 - `schemaVersion` (on `workflow run monitor` only; M8 lands version 1).
 
 Field renames are not allowed during M8. Field additions are additive only.
