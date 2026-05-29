@@ -126,7 +126,7 @@ A non-exhaustive seed list of fields the M8 envelopes pin:
 
 - `runId`, `repoPath`, `runState`, `stepState`, `boundary`, `phrase`, `artifactPath`, `artifactDigest`, `recordedAt`, `actor`.
 - `nextAction` (object with `code` plus optional `stepId`, `boundary`, or `runId`), `monitor.recovery` (object with `code` plus optional `stepId`).
-- `evidence` (array of typed evidence pointers with `path`, optional `digest`, optional `runId`, optional `stepId`).
+- `evidence` (array of typed evidence pointers with `evidenceRecordId`, `source`, `type`, `artifactPath`, `occurredAt`, `summary`, nullable `runId`, and nullable `stepId`).
 - `needsManualRecovery` (boolean), `recovery` (object surfacing the classification, recommended next action, and link to `recovery.md`).
 - `schemaVersion` (on `workflow run monitor` only; M8 lands version 1).
 
@@ -148,7 +148,7 @@ The M3 daemon (`daemon start` / `daemon stop` / `daemon status` / `recovery clea
 
 - **M3 daemon / recovery.** Unchanged. M8 run-scoped recovery is a sibling surface to M3 goal-scoped recovery, not a replacement.
 - **M4 runners and policy.** Unchanged. M8 envelopes never spawn a managed child or a runner; live executor invocation stays inside the skill.
-- **M5 source / evidence / intent.** Unchanged at the schema and CLI shape level. M8 only adds optional `runId` / `stepId` linkage on `evidence_records`.
+- **M5 source / evidence / intent.** Source and intent schemas stay unchanged, and evidence CLI semantics stay wire-stable. M8 adds only the additive nullable `run_id` / `step_id` linkage columns and lookup index on `evidence_records`.
 - **M6 external apply.** Unchanged. `intent apply --external-apply`, `intent_apply_policy`, the `intent_apply_in_progress` CAS result, the comment-only default, the idempotency marker shape, and the `blocked` non-replay state stay wire-stable. M8 envelopes never issue an external write directly.
 - **M7 substrate.** Unchanged. `workflow_runs` / `workflow_steps` / `workflow_approvals` / `workflow_leases`, `deriveWorkflowRunState`, `deriveWorkflowMonitorState`, `classifyWorkflowLease`, the `WorkflowStepExecutor` boundary, the deterministic fake executors, and the read-only `workflow import` / `workflow status` / `workflow handoff` envelopes all stay wire-stable. M8 reuses them; it does not reshape them.
 
