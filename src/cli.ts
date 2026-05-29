@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
+import path from "node:path";
 import process from "node:process";
 import { isUniqueViolation, openDb, type MomentumDb } from "./db.js";
 import { initGoal, type GoalInitOptions, type GoalInitSuccess } from "./goal-init.js";
@@ -146,8 +147,14 @@ import {
 import type { WorkflowMonitorState } from "./workflow-monitor-state.js";
 import {
   clearWorkflowRunManualRecoveryGuarded,
-  type ClearWorkflowRunManualRecoveryGuardedResult
+  getWorkflowRunManualRecoveryState,
+  type ClearWorkflowRunManualRecoveryGuardedResult,
+  type WorkflowRunManualRecoveryState
 } from "./workflow-run-recovery.js";
+import {
+  reconcileWorkflowRunManualRecovery,
+  type ReconcileWorkflowRunManualRecoveryResult
+} from "./workflow-recovery-reconcile.js";
 import {
   DEFAULT_RECONCILIATION_STALE_THRESHOLD_MS,
   PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT,
@@ -2158,8 +2165,22 @@ function workflowImport(parsed: ParsedFlags, io: CliIo): number {
 
   const db = openDb(dataDir);
   let summary: PersistWorkflowRunImportSummary;
+  let recovery: ReconcileWorkflowRunManualRecoveryResult;
+  let recoveryState: WorkflowRunManualRecoveryState | undefined;
   try {
     summary = persistWorkflowRunImport(db, parseResult.import);
+    // Auto-set the durable manual-recovery flag + render recovery.md when the
+    // freshly-imported run re-derives a blocking M7 monitor recovery code
+    // (NGX-327). `workflow import` is the reachable re-derivation seam; the
+    // read-only status/handoff/list envelopes never mutate. Reconcile is
+    // setter-only, so a re-import of a now-resolved run never clears the flag.
+    // The run directory is `.agent-workflows/<runId>/`, so its parent is the
+    // `agentWorkflowsDir` the renderer joins `<runId>/recovery.md` onto.
+    recovery = reconcileWorkflowRunManualRecovery(db, {
+      runId: summary.runId,
+      agentWorkflowsDir: path.dirname(artifactPath)
+    });
+    recoveryState = getWorkflowRunManualRecoveryState(db, summary.runId);
   } finally {
     db.close();
   }
@@ -2168,7 +2189,9 @@ function workflowImport(parsed: ParsedFlags, io: CliIo): number {
     dataDir,
     artifactPath,
     summary,
-    importResult: parseResult.import
+    importResult: parseResult.import,
+    recovery,
+    recoveryState
   });
 }
 
@@ -2180,9 +2203,20 @@ function emitWorkflowImportSuccess(
     artifactPath: string;
     summary: PersistWorkflowRunImportSummary;
     importResult: WorkflowRunImport;
+    recovery: ReconcileWorkflowRunManualRecoveryResult;
+    recoveryState: WorkflowRunManualRecoveryState | undefined;
   }
 ): number {
   const { summary, importResult } = result;
+  // `needsManualRecovery` mirrors the durable flag (consistent with the
+  // status/handoff/list envelopes); `recovery` surfaces the classification this
+  // import freshly auto-set, when it set one.
+  const needsManualRecovery =
+    result.recoveryState?.needsManualRecovery ?? false;
+  const marked =
+    result.recovery.ok && result.recovery.outcome === "marked"
+      ? result.recovery
+      : null;
   const payload = {
     ok: true,
     command: "workflow import",
@@ -2201,7 +2235,17 @@ function emitWorkflowImportSuccess(
     diagnostics: importResult.diagnostics.map((diagnostic) => ({
       ...diagnostic
     })),
-    monitor: importResult.monitor === null ? null : { ...importResult.monitor }
+    monitor: importResult.monitor === null ? null : { ...importResult.monitor },
+    needsManualRecovery,
+    recovery:
+      marked === null
+        ? null
+        : {
+            code: marked.recoveryCode,
+            stepId: marked.stepId,
+            reason: marked.reason,
+            artifactPath: marked.artifactPath
+          }
   };
 
   if (parsed.json) {
@@ -2217,6 +2261,11 @@ function emitWorkflowImportSuccess(
     `Steps: ${summary.stepCount}`,
     `Approvals: ${summary.approvalCount}`,
     `Diagnostics: ${importResult.diagnostics.length}`,
+    marked !== null
+      ? `Manual recovery: required (${marked.recoveryCode}) -> ${marked.artifactPath}`
+      : needsManualRecovery
+        ? "Manual recovery: flagged (clear explicitly once resolved)"
+        : "Manual recovery: not required",
     `Data dir: ${result.dataDir}`,
     ""
   ];

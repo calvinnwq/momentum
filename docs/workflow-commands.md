@@ -34,6 +34,7 @@ Reads the `.agent-workflows/<run-id>/` directory at `<run-dir>` and normalizes t
 - **Unknown siblings**: unrecognized files produce `evidence_format_unknown` diagnostics but do not drop the valid records around them.
 - **Malformed artifacts**: invalid `plan.json`, `ledger.jsonl` lines, or `approval-*.json` files produce `evidence_format_invalid` diagnostics. Valid siblings are still imported.
 - **Durable approvals merge forward**: existing database approvals, the current `approval_boundary`, and imported `approval-*.json` artifacts are merged. The highest boundary is preserved; same-rank boundaries prefer the newer recorded approval. Stale same-boundary artifacts do not overwrite newer durable approval rows. On fresh imports and re-imports, pending steps covered by any preserved approval are persisted as `approved`, and a non-terminal pending run can be persisted as `approved`.
+- **Manual-recovery auto-set**: after persisting the rows, import re-derives the run's monitor view. When it classifies a blocking recovery condition (`manual_recovery_lease`, `ghost_active_no_lease`, `stale_running_step`, or `failed_required_step`), import sets the durable `needs_manual_recovery` flag and renders `<run-dir>/recovery.md`. The flag then blocks `workflow run approve` and `workflow run update-step` until an operator clears it with `workflow run clear-recovery`. The auto-set only ever sets the flag: re-importing a run whose blocking condition is now resolved leaves any existing flag in place, so clearing stays explicit and operator-driven.
 
 ### JSON envelope (success)
 
@@ -54,11 +55,29 @@ Reads the `.agent-workflows/<run-id>/` directory at `<run-dir>` and normalizes t
     "diagnostics": 0
   },
   "diagnostics": [],
-  "monitor": null
+  "monitor": null,
+  "needsManualRecovery": false,
+  "recovery": null
 }
 ```
 
 `inserted` is `true` on first import and `false` on re-import (upsert). `counts.approvals` counts only `approval-*.json` artifacts present in the current import; preserved durable approvals are reflected in `state` and `approvalBoundary` but do not increase that count. `monitor` carries the advisory monitor snapshot (always `advisory: true`) or `null` when no `monitor.json` is present.
+
+`needsManualRecovery` mirrors the run's durable manual-recovery flag after the import (matching the same field on `workflow status` / `workflow handoff` / `workflow run list`). `recovery` describes the blocking condition this import freshly flagged, or `null` when this import did not set the flag:
+
+```json
+{
+  "needsManualRecovery": true,
+  "recovery": {
+    "code": "failed_required_step",
+    "stepId": "implementation",
+    "reason": "A required step finalized in failed state. ...",
+    "artifactPath": "/path/to/cwfp-abc123/recovery.md"
+  }
+}
+```
+
+A run that was already flagged on a prior import but whose blocking condition is now resolved reports `needsManualRecovery: true` with `recovery: null` — the durable flag persists until an operator clears it explicitly.
 
 #### Diagnostic entries
 
@@ -120,8 +139,11 @@ Inserted: yes
 Steps: 5
 Approvals: 1
 Diagnostics: 0
+Manual recovery: not required
 Data dir: /path/to/data
 ```
+
+The `Manual recovery` line reads `required (<code>) -> <recovery.md path>` when this import auto-set the flag, `flagged (clear explicitly once resolved)` when the run is still flagged from a prior import, and `not required` otherwise.
 
 ### Text output (failure)
 
