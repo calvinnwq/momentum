@@ -272,6 +272,58 @@ describe("momentum workflow import — run-scoped recovery auto-set (NGX-327)", 
     ).toBe(false);
   });
 
+  it("renders recovery.md into the imported directory when plan runId differs from the basename", async () => {
+    const dataDir = makeTempDir();
+    const workflowRoot = makeTempDir("momentum-cli-import-recovery-runs-");
+    const planRunId = "cwfp-recov0010plan";
+    const runDir = path.join(workflowRoot, "renamed-import-dir");
+    writePlan(runDir, planRunId);
+    writeLedger(path.join(runDir, "ledger.jsonl"), [
+      {
+        runId: planRunId,
+        step: "implementation",
+        status: "started",
+        ts: "2026-05-17T10:01:00Z"
+      },
+      {
+        runId: planRunId,
+        step: "implementation",
+        status: "failed",
+        ts: "2026-05-17T10:10:00Z"
+      }
+    ]);
+
+    const result = await run([
+      "workflow",
+      "import",
+      "--path",
+      runDir,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+
+    const payload = JSON.parse(result.stdout) as {
+      runId: string;
+      needsManualRecovery: boolean;
+      recovery: { artifactPath: string | null } | null;
+    };
+    const importedArtifactPath = path.join(
+      runDir,
+      WORKFLOW_RECOVERY_ARTIFACT_FILENAME
+    );
+    expect(payload.runId).toBe(planRunId);
+    expect(payload.needsManualRecovery).toBe(true);
+    expect(payload.recovery?.artifactPath).toBe(importedArtifactPath);
+    expect(fs.existsSync(importedArtifactPath)).toBe(true);
+    expect(
+      fs.existsSync(
+        path.join(workflowRoot, planRunId, WORKFLOW_RECOVERY_ARTIFACT_FILENAME)
+      )
+    ).toBe(false);
+  });
+
   it("reports a structured partial success when recovery.md cannot be written", async () => {
     const dataDir = makeTempDir();
     const workflowRoot = makeTempDir("momentum-cli-import-recovery-runs-");

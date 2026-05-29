@@ -47,6 +47,7 @@ import {
 import {
   buildWorkflowRecoveryArtifactInput,
   writeWorkflowRecoveryArtifact,
+  writeWorkflowRecoveryArtifactInRunDir,
   type WorkflowRecoveryEvidencePointer
 } from "./workflow-recovery-artifact.js";
 import type { WorkflowMonitorRecoveryCode } from "./workflow-monitor-state.js";
@@ -60,6 +61,7 @@ export type ReconcileWorkflowRunManualRecoveryInput = {
    * leave a blocked run with no rendered explanation.
    */
   agentWorkflowsDir: string;
+  artifactRunDir?: string;
   now?: number;
   /** Lease-freshness grace window forwarded to the monitor re-derivation. */
   graceMs?: number;
@@ -188,10 +190,16 @@ export function reconcileWorkflowRunManualRecovery(
   });
   let written: { path: string };
   try {
-    written = writeWorkflowRecoveryArtifact({
-      agentWorkflowsDir: input.agentWorkflowsDir,
-      input: artifactInput
-    });
+    written =
+      input.artifactRunDir === undefined
+        ? writeWorkflowRecoveryArtifact({
+            agentWorkflowsDir: input.agentWorkflowsDir,
+            input: artifactInput
+          })
+        : writeWorkflowRecoveryArtifactInRunDir({
+            runDir: input.artifactRunDir,
+            input: artifactInput
+          });
   } catch (err) {
     return {
       ok: true,

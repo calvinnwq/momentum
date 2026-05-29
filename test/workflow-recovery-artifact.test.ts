@@ -301,4 +301,29 @@ describe("writeWorkflowRecoveryArtifact", () => {
       "- Recovery classification: stale_running_step"
     );
   });
+
+  it("replaces a recovery.md symlink without writing through it", () => {
+    const base = makeTempDir();
+    const outside = path.join(makeTempDir(), "outside.md");
+    fs.writeFileSync(outside, "outside must remain unchanged", "utf8");
+
+    const runDir = path.join(base, "run-symlink");
+    fs.mkdirSync(runDir, { recursive: true });
+    const symlinkPath = path.join(runDir, WORKFLOW_RECOVERY_ARTIFACT_FILENAME);
+    fs.symlinkSync(outside, symlinkPath);
+
+    const result = writeWorkflowRecoveryArtifact({
+      agentWorkflowsDir: base,
+      input: makeFullInput({ runId: "run-symlink" })
+    });
+
+    expect(result.path).toBe(symlinkPath);
+    expect(fs.readFileSync(outside, "utf8")).toBe(
+      "outside must remain unchanged"
+    );
+    expect(fs.lstatSync(symlinkPath).isSymbolicLink()).toBe(false);
+    expect(fs.readFileSync(symlinkPath, "utf8")).toContain(
+      "# Manual recovery required: workflow run run-symlink"
+    );
+  });
 });

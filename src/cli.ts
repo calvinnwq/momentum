@@ -2169,16 +2169,10 @@ function workflowImport(parsed: ParsedFlags, io: CliIo): number {
   let recoveryState: WorkflowRunManualRecoveryState | undefined;
   try {
     summary = persistWorkflowRunImport(db, parseResult.import);
-    // Auto-set the durable manual-recovery flag + render recovery.md when the
-    // freshly-imported run re-derives a blocking M7 monitor recovery code
-    // (NGX-327). `workflow import` is the reachable re-derivation seam; the
-    // read-only status/handoff/list envelopes never mutate. Reconcile is
-    // setter-only, so a re-import of a now-resolved run never clears the flag.
-    // The run directory is `.agent-workflows/<runId>/`, so its parent is the
-    // `agentWorkflowsDir` the renderer joins `<runId>/recovery.md` onto.
     recovery = reconcileWorkflowRunManualRecovery(db, {
       runId: summary.runId,
-      agentWorkflowsDir: path.dirname(artifactPath)
+      agentWorkflowsDir: path.dirname(artifactPath),
+      artifactRunDir: artifactPath
     });
     recoveryState = getWorkflowRunManualRecoveryState(db, summary.runId);
   } finally {

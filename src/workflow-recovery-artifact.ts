@@ -205,6 +205,17 @@ export function resolveWorkflowRecoveryArtifactPath(
   return path.join(agentWorkflowsDir, runId, WORKFLOW_RECOVERY_ARTIFACT_FILENAME);
 }
 
+export function resolveWorkflowRecoveryArtifactPathInRunDir(
+  runDir: string
+): string {
+  if (typeof runDir !== "string" || runDir.length === 0) {
+    throw new Error(
+      "resolveWorkflowRecoveryArtifactPathInRunDir: runDir is required"
+    );
+  }
+  return path.join(runDir, WORKFLOW_RECOVERY_ARTIFACT_FILENAME);
+}
+
 export function buildWorkflowRecoveryMarkdown(
   input: WorkflowRecoveryArtifactInput
 ): string {
@@ -272,6 +283,11 @@ export type WriteWorkflowRecoveryArtifactInput = {
   input: WorkflowRecoveryArtifactInput;
 };
 
+export type WriteWorkflowRecoveryArtifactInRunDirInput = {
+  runDir: string;
+  input: WorkflowRecoveryArtifactInput;
+};
+
 export type WriteWorkflowRecoveryArtifactResult = {
   path: string;
 };
@@ -290,9 +306,50 @@ export function writeWorkflowRecoveryArtifact(
     options.agentWorkflowsDir,
     options.input.runId
   );
-  fs.mkdirSync(path.dirname(target), { recursive: true });
-  fs.writeFileSync(target, body, "utf-8");
+  writeFileReplacingTarget(target, body);
   return { path: target };
+}
+
+export function writeWorkflowRecoveryArtifactInRunDir(
+  options: WriteWorkflowRecoveryArtifactInRunDirInput
+): WriteWorkflowRecoveryArtifactResult {
+  const body = buildWorkflowRecoveryMarkdown(options.input);
+  const target = resolveWorkflowRecoveryArtifactPathInRunDir(options.runDir);
+  writeFileReplacingTarget(target, body);
+  return { path: target };
+}
+
+function writeFileReplacingTarget(target: string, body: string): void {
+  const targetDir = path.dirname(target);
+  fs.mkdirSync(targetDir, { recursive: true });
+
+  const temp = path.join(
+    targetDir,
+    `.${path.basename(target)}.${process.pid}.${Date.now()}.${Math.random()
+      .toString(16)
+      .slice(2)}.tmp`
+  );
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(
+      temp,
+      fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY,
+      0o600
+    );
+    fs.writeFileSync(fd, body, "utf-8");
+    fs.closeSync(fd);
+    fd = undefined;
+    fs.renameSync(temp, target);
+  } catch (err) {
+    if (fd !== undefined) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+      }
+    }
+    fs.rmSync(temp, { force: true });
+    throw err;
+  }
 }
 
 function validateInput(input: WorkflowRecoveryArtifactInput): void {
