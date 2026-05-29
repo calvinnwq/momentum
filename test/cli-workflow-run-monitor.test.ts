@@ -5,6 +5,8 @@ import path from "node:path";
 
 import { runCli } from "../src/cli.js";
 import { openDb, type MomentumDb } from "../src/db.js";
+import { parseWorkflowRunImport } from "../src/workflow-run-import.js";
+import { persistWorkflowRunImport } from "../src/workflow-run-import-persist.js";
 
 type RunResult = {
   code: number;
@@ -27,6 +29,19 @@ function makeTempDir(prefix = "momentum-cli-workflow-run-monitor-"): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   tempRoots.push(dir);
   return fs.realpathSync(dir);
+}
+
+function writeJsonFile(filePath: string, value: unknown): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, JSON.stringify(value, null, 2));
+}
+
+function writeLedger(filePath: string, lines: unknown[]): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(
+    filePath,
+    `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`
+  );
 }
 
 async function run(argv: string[]): Promise<RunResult> {
@@ -176,6 +191,14 @@ function readStepState(
   } finally {
     db.close();
   }
+}
+
+function parseImportOrThrow(runDir: string) {
+  const parsed = parseWorkflowRunImport(runDir);
+  if (!parsed.ok) {
+    throw new Error(parsed.message);
+  }
+  return parsed.import;
 }
 
 describe("momentum workflow run monitor (NGX-328)", () => {
@@ -398,6 +421,78 @@ describe("momentum workflow run monitor (NGX-328)", () => {
     });
     expect((payload["recovery"] as Record<string, unknown>)["code"]).toBe(
       "stale_running_step"
+    );
+  });
+
+  it("reports monitor drift from an imported advisory snapshot", async () => {
+    const dataDir = makeTempDir();
+    const artifactRoot = makeTempDir(
+      "momentum-cli-workflow-run-monitor-artifacts-"
+    );
+    const runId = "cwfp-drift";
+    const runDir = path.join(artifactRoot, runId);
+    writeJsonFile(path.join(runDir, "plan.json"), {
+      runId,
+      schemaVersion: 1,
+      taskFlow: { childTasks: [{ stepId: "implementation" }] }
+    });
+    writeLedger(path.join(runDir, "ledger.jsonl"), [
+      {
+        runId,
+        step: "implementation",
+        status: "started",
+        ts: "2026-05-29T00:00:00Z"
+      }
+    ]);
+    writeJsonFile(path.join(runDir, "monitor.json"), {
+      lastSeenState: "succeeded",
+      terminal: true,
+      step: "implementation",
+      lastSeenDigest: "stale-digest",
+      lastEmittedDigest: "stale-digest"
+    });
+
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunImport(db, parseImportOrThrow(runDir), {
+        now: SEED_NOW
+      });
+      seedLease(db, {
+        runId,
+        leaseKind: "managed-step",
+        expiresAt: FRESH_EXPIRY
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      runState: "running",
+      disposition: "report",
+      reportable: true,
+      reportReason: "monitor_drift"
+    });
+    expect(payload["monitorDrift"]).toMatchObject({
+      advisoryState: "succeeded",
+      advisoryTerminal: true,
+      actualState: "running",
+      drifted: true,
+      reason: "monitor_says_terminal_but_running"
+    });
+    expect((payload["recovery"] as Record<string, unknown>)["code"]).toBe(
+      "monitor_drift_stale"
     );
   });
 
