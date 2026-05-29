@@ -146,7 +146,7 @@ Momentum never schedules cron jobs, never renders Discord, and never decides app
 
 - **M3 daemon / recovery.** `daemon start` / `stop` / `status` / `recovery clear`, the `daemon_runs` / `repo_locks` schema, the stale-lease taxonomy, and the goal-scoped `recovery.md` artifact stay wire-stable. M7 leases are a sibling table to `repo_locks`; they do not collide with the M3 lease model.
 - **M4 runners and policy.** `RunnerAdapter`, the `fake` / `trusted-shell` / `acp` profiles, and the `MOMENTUM.md` runtime policy loader stay wire-stable. A coding workflow's `implementation` step typically dispatches into a `trusted-shell` or `acp` runner; M7 does not introduce a new runner kind.
-- **M5 source / evidence / intent.** `source_items` / `source_snapshots` / `source_reconciliation_runs` / `evidence_records` / `update_intents` stay wire-stable. M7 extends `evidence_records` linkage; it does not rename or reshape the existing tables.
+- **M5 source / evidence / intent.** `source_items` / `source_snapshots` / `source_reconciliation_runs` / `evidence_records` / `update_intents` stay wire-stable. M7 uses existing evidence records plus path-based discovery; the M8 NGX-329 additive `run_id` / `step_id` linkage does not rename or reshape the existing evidence CLI semantics.
 - **M6 external apply.** `intent apply --external-apply`, the two-phase claim → audit → write → finalize lifecycle, the `intent_apply_policy` precedence, the comment-only default, the idempotency marker shape, the `intent_apply_in_progress` CAS result, and the `blocked` non-replay state stay wire-stable. M7 never bypasses the M6 apply path; if a coding workflow step needs an external write, it goes through `intent apply --external-apply` exactly as today.
 
 ## Test boundary
