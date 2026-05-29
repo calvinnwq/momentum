@@ -10,12 +10,16 @@
  * silently re-open transitions, and the in-memory monitor advisory is not the
  * authority.
  *
- * This module is the pure mark/clear/get foundation. The guarded clear that
- * re-derives monitor state before clearing, and the CLI wiring, are layered on
- * in follow-up M8-04 slices.
+ * This module owns the mark/clear/get primitives plus the guarded operator
+ * clear ({@link clearWorkflowRunManualRecoveryGuarded}) that re-derives the M7
+ * monitor state before clearing and refuses with `recovery_clear_refused` while
+ * the underlying blocking condition persists. The CLI wiring is layered on in a
+ * follow-up M8-04 slice.
  */
 
 import type { MomentumDb } from "./db.js";
+import { loadWorkflowRunDetail } from "./workflow-status.js";
+import type { WorkflowMonitorRecoveryCode } from "./workflow-monitor-state.js";
 
 export type MarkWorkflowRunNeedsManualRecoveryInput = {
   runId: string;
@@ -150,4 +154,161 @@ export function getWorkflowRunManualRecoveryState(
     reason: row.manual_recovery_reason,
     markedAt: row.manual_recovery_at
   };
+}
+
+/**
+ * The monitor-reducer recovery codes that represent a hard blocking condition:
+ * a manual-recovery lease holding the run blocked, a ghost / stale running step
+ * with no live evidence, or a failed required step. While any of these is still
+ * classified by `deriveWorkflowMonitorState`, clearing the durable flag would
+ * re-open transitions that make recovery worse, so the guarded clear refuses.
+ *
+ * `monitor_drift_stale` is deliberately excluded: it is an advisory drift
+ * between a (possibly stale) monitor snapshot and the substrate, not a hard
+ * block — the substrate itself shows the run progressing — so it never on its
+ * own keeps a run from being cleared once an operator has resolved the cause.
+ */
+export const BLOCKING_WORKFLOW_RECOVERY_CODES: ReadonlySet<WorkflowMonitorRecoveryCode> =
+  new Set<WorkflowMonitorRecoveryCode>([
+    "manual_recovery_lease",
+    "ghost_active_no_lease",
+    "stale_running_step",
+    "failed_required_step"
+  ]);
+
+export function isBlockingWorkflowRecoveryCode(
+  code: WorkflowMonitorRecoveryCode
+): boolean {
+  return BLOCKING_WORKFLOW_RECOVERY_CODES.has(code);
+}
+
+export type ClearWorkflowRunManualRecoveryGuardedInput = {
+  runId: string;
+  now?: number;
+  /** Lease-freshness grace window forwarded to the monitor re-derivation. */
+  graceMs?: number;
+  /** Running-step checkpoint staleness window forwarded to the re-derivation. */
+  checkpointStaleMs?: number;
+};
+
+export type ClearWorkflowRunManualRecoveryGuardedFailureReason =
+  | "run_not_found"
+  | "not_flagged"
+  | "recovery_clear_refused";
+
+export type ClearWorkflowRunManualRecoveryGuardedResult =
+  | {
+      ok: true;
+      runId: string;
+      previousReason: string | null;
+      previousMarkedAt: number | null;
+      clearedAt: number;
+    }
+  | {
+      ok: false;
+      reason: ClearWorkflowRunManualRecoveryGuardedFailureReason;
+      message: string;
+      recoveryCode?: WorkflowMonitorRecoveryCode;
+      blockingStepId?: string | null;
+    };
+
+/**
+ * Operator-facing guarded clear: the explicit, auditable path that re-derives
+ * the M7 monitor state and only clears the durable manual-recovery flag when
+ * the underlying blocking condition is gone. Refuses safely when the run is
+ * missing (`run_not_found`), not flagged (`not_flagged`), or still classified
+ * with a blocking recovery code (`recovery_clear_refused`). The check and the
+ * clear run inside a single immediate transaction so the condition that is
+ * checked is the condition that is cleared.
+ *
+ * recovery.md is intentionally left on disk as durable audit; operators delete
+ * it after capturing the context elsewhere, mirroring the M3 goal-scoped clear.
+ */
+export function clearWorkflowRunManualRecoveryGuarded(
+  db: MomentumDb,
+  input: ClearWorkflowRunManualRecoveryGuardedInput
+): ClearWorkflowRunManualRecoveryGuardedResult {
+  if (typeof input.runId !== "string" || input.runId.length === 0) {
+    throw new Error("clearWorkflowRunManualRecoveryGuarded: runId is required");
+  }
+  const now = input.now ?? Date.now();
+  if (!Number.isFinite(now)) {
+    throw new Error("clearWorkflowRunManualRecoveryGuarded: now must be finite");
+  }
+
+  const detailOptions: {
+    now: number;
+    graceMs?: number;
+    checkpointStaleMs?: number;
+  } = { now };
+  if (input.graceMs !== undefined) detailOptions.graceMs = input.graceMs;
+  if (input.checkpointStaleMs !== undefined) {
+    detailOptions.checkpointStaleMs = input.checkpointStaleMs;
+  }
+
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const detail = loadWorkflowRunDetail(db, input.runId, detailOptions);
+    if (!detail) {
+      db.exec("ROLLBACK");
+      return {
+        ok: false,
+        reason: "run_not_found",
+        message: `Workflow run ${input.runId} does not exist.`
+      };
+    }
+    if (!detail.run.needsManualRecovery) {
+      db.exec("ROLLBACK");
+      return {
+        ok: false,
+        reason: "not_flagged",
+        message: `Workflow run ${input.runId} is not flagged for manual recovery; nothing to clear.`
+      };
+    }
+
+    const recovery = detail.monitor.recovery;
+    if (recovery !== null && isBlockingWorkflowRecoveryCode(recovery.code)) {
+      db.exec("ROLLBACK");
+      return {
+        ok: false,
+        reason: "recovery_clear_refused",
+        message:
+          `Workflow run ${input.runId} still has a blocking recovery condition ` +
+          `(${recovery.code}); resolve it before clearing manual recovery.`,
+        recoveryCode: recovery.code,
+        blockingStepId: recovery.stepId
+      };
+    }
+
+    const previousReason = detail.run.manualRecoveryReason;
+    const previousMarkedAt = detail.run.manualRecoveryAt;
+    const cleared = clearWorkflowRunManualRecovery(db, {
+      runId: input.runId,
+      now
+    });
+    if (!cleared.ok) {
+      db.exec("ROLLBACK");
+      return {
+        ok: false,
+        reason: "run_not_found",
+        message: `Workflow run ${input.runId} disappeared during clear.`
+      };
+    }
+    db.exec("COMMIT");
+
+    return {
+      ok: true,
+      runId: input.runId,
+      previousReason,
+      previousMarkedAt,
+      clearedAt: now
+    };
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      // Ignore rollback errors so callers see the original write failure.
+    }
+    throw error;
+  }
 }
