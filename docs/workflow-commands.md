@@ -836,7 +836,7 @@ The hard recovery classifications (`recovery.code`) are the same taxonomy as `wo
     "order": 1,
     "required": true
   },
-  "leases": [ "...": "same shape as workflow status monitor.leases" ],
+  "leases": [{ "...": "same shape as workflow status monitor.leases" }],
   "lastCheckpoint": { "...": "same shape as workflow status monitor.lastCheckpoint" },
   "monitorDrift": null,
   "nextAction": {
@@ -846,7 +846,7 @@ The hard recovery classifications (`recovery.code`) are the same taxonomy as `wo
     "detail": "Step is running with fresh lease / checkpoint evidence. Allow it to continue."
   },
   "recovery": null,
-  "evidence": [ "...": "same typed evidence pointers as workflow status detail" ],
+  "evidence": [{ "...": "same typed evidence pointers as workflow status detail" }],
   "counts": {
     "steps": 5,
     "stepsByState": { "...": "per-state step counts" },
