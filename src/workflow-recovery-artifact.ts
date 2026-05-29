@@ -4,9 +4,9 @@
  * Renders the per-run `.agent-workflows/<runId>/recovery.md` artifact from the
  * M7 monitor reducer's recovery classification. The renderer is the run-scoped
  * sibling of the M3 goal-scoped `recovery-artifact.ts`: it owns artifact
- * *generation* only and never touches SQLite, executors, or the durable flag
- * (the durable `WorkflowRun.needs_manual_recovery` wiring and the explicit
- * clear path are layered on in follow-up M8-04 slices).
+ * *generation* only and never touches SQLite, executors, or the durable flag;
+ * the durable `WorkflowRun.needs_manual_recovery` wiring and the explicit
+ * clear path compose with this renderer through the M8 recovery slice.
  *
  * The renderer is intentionally pure and accepts only structured, bounded
  * fields (run id, step id, classification, evidence pointers, recommended next

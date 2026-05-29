@@ -13,8 +13,8 @@
  * This module owns the mark/clear/get primitives plus the guarded operator
  * clear ({@link clearWorkflowRunManualRecoveryGuarded}) that re-derives the M7
  * monitor state before clearing and refuses with `recovery_clear_refused` while
- * the underlying blocking condition persists. The CLI wiring is layered on in a
- * follow-up M8-04 slice.
+ * the underlying blocking condition persists. The CLI exposes that guarded
+ * clear through `workflow run clear-recovery`.
  */
 
 import type { MomentumDb } from "./db.js";

@@ -150,7 +150,7 @@ Manual recovery: not required
 Data dir: /path/to/data
 ```
 
-The `Manual recovery` line reads `required (<code>) -> <recovery.md path>` when this import auto-set the flag, `flagged (clear explicitly once resolved)` when the run is still flagged from a prior import, and `not required` otherwise.
+The `Manual recovery` line reads `required (<code>) -> <recovery.md path>` when this import auto-set the flag, `required (<code>); recovery.md write failed: <message>` when the durable flag was set but rendering the artifact failed, `flagged (clear explicitly once resolved)` when the run is still flagged from a prior import, and `not required` otherwise.
 
 ### Text output (failure)
 
