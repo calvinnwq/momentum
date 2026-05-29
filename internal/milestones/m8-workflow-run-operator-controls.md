@@ -68,13 +68,13 @@ The M3 goal-scoped recovery surfaces (`recovery clear <goal-id>`, `goals.needs_m
 
 ## Typed evidence linkage (NGX-329)
 
-M8 adds optional, additive `runId` / `stepId` linkage to the existing M5 `evidence_records` table (either as nullable typed columns or a sibling join row). The M5 evidence ingest CLI (`evidence ingest --path <file-or-dir>`), the `evidence_format_unknown` / `evidence_format_invalid` diagnostic codes, the `ingestKey` idempotency semantics, the `goal_not_found` / `source_item_not_found` pre-checks, and every existing evidence row stay wire-stable. M8 only:
+M8 adds optional, additive `runId` / `stepId` linkage to the existing M5 `evidence_records` table through nullable `run_id` / `step_id` columns and the `idx_evidence_records_run_step` lookup index. The M5 evidence ingest CLI (`evidence ingest --path <file-or-dir>`), the `evidence_format_unknown` / `evidence_format_invalid` diagnostic codes, the `ingestKey` idempotency semantics, the `goal_not_found` / `source_item_not_found` pre-checks, and every existing evidence row stay wire-stable. M8 only:
 
-- Attaches workflow artifacts to owning `runId` / `stepId` when ingest runs against `.agent-workflows/<runId>/`.
-- Surfaces typed evidence pointers through `workflow status` / `workflow handoff` / `workflow run list` / `workflow run monitor` without requiring path-only inference.
-- Refuses or remains unlinked with a stable diagnostic when a referenced `runId` / `stepId` is unknown, per the existing ingest contract.
+- Attaches workflow artifacts to the owning `runId` when ingest runs against `.agent-workflows/<runId>/`; ledger step events also attach `stepId`, while plan / approval artifacts remain run-scoped with null `stepId`.
+- Surfaces typed evidence pointers through `evidence ingest` / `evidence list` record JSON and through `workflow status` / `workflow handoff` detail evidence without requiring path-only inference for newly ingested workflow evidence; `workflow run list` and `workflow run monitor` can adopt the same typed-linkage query in their own slices.
+- Preserves idempotent replay: existing rows can gain missing `runId` / `stepId` linkage but never have non-null linkage overwritten.
 
-The migration is additive and backwards-compatible. Non-workflow evidence rows continue to carry null linkage.
+The migration is additive and backwards-compatible. Existing and non-workflow evidence rows continue to carry null linkage, and legacy run evidence can still surface through artifact-path fallback where supported.
 
 ## Compatibility with existing artifacts and substrates
 
@@ -130,7 +130,7 @@ M8 ships as a docs / contract slice (NGX-323) followed by seven implementation /
 4. **NGX-326 — M8-03 workflow run update-step transition surface**: ship the operator-driven `workflow run update-step` envelope. Drives the M7 reducer / state machine for `succeeded` / `skipped` / `failed` / `blocked` transitions with ledger / evidence pointers and an operator-supplied reason. Illegal transitions refuse without partial durable mutation. No live executor invocation.
 5. **NGX-327 — M8-04 run-scoped recovery artifact and durable flag**: persist the `WorkflowRun.needs_manual_recovery` flag, render `.agent-workflows/<runId>/recovery.md` from the M7 monitor reducer's recovery view, block future claims / transitions that would make recovery worse, and add an explicit clear path. No automatic repair, no live process killing.
 6. **NGX-328 — M8-05 workflow run monitor machine envelope**: ship the read-only `workflow run monitor` envelope emitting a stable JSON shape derived from `deriveWorkflowMonitorState`. Covers terminal / stale / drift / blocked / awaiting-approval / running / no-op cases. No cron creation, no Discord, no managed-child dispatch.
-7. **NGX-329 — M8-06 typed workflow evidence linkage**: add additive, backwards-compatible `runId` / `stepId` linkage to `evidence_records`. Attach workflow artifacts to owning runs / steps when ingest runs against `.agent-workflows/<runId>/`. Surface typed evidence pointers through the operator-control envelopes without breaking existing M5 evidence ingest shapes.
+7. **NGX-329 — M8-06 typed workflow evidence linkage**: add additive, backwards-compatible `runId` / `stepId` linkage to `evidence_records`. Attach workflow artifacts to owning runs / steps when ingest runs against `.agent-workflows/<runId>/`. Surface typed evidence pointers through `evidence ingest` / `evidence list` record JSON and `workflow status` / `workflow handoff` detail evidence without breaking existing M5 evidence ingest shapes; `workflow run list` / `workflow run monitor` adoption stays envelope-specific.
 8. **NGX-330 — M8-07 M8 closeout smoke, docs, and doctor marker**: close the milestone. Extend the end-to-end fake workflow smoke to cover list / approve / update-step / recovery / monitor / evidence linkage composing. Extend the regression matrix with the M8 operator-control failure modes. Flip the `doctor --json` milestone marker to the M8 closeout string only after M8-00..M8-06 are merged and verified. Live executor wrappers stay deferred unless a separate approved milestone changes that call.
 
 Each implementation slice writes failing tests first (TDD), keeps refusal codes stable, and refuses to broaden the milestone scope. If implementation requires changing runtime behavior outside the surfaces above, the slice stops and asks for an explicit decision gate.

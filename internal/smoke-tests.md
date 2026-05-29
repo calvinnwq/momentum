@@ -212,8 +212,9 @@ Coverage:
 - evidence linkage through handoff: after a `momentum evidence ingest --path`
   pass over the run directory, the `workflow handoff` envelope's
   `detail.evidence` array surfaces the workflow evidence types
-  (`plan_created`, `merge_complete`) discovered by the existing artifact-path
-  prefix LIKE matcher (no schema extension required).
+  (`plan_created`, `merge_complete`) through typed `runId` / `stepId` linkage,
+  with artifact-path prefix matching retained only as a legacy fallback for
+  older null-linked rows.
 - failure path with no ghost active run: preflight succeeds, implementation is
   driven through `outcome: fail_retry` (default `errorCode: command_failed`);
   after re-import the run terminates with `state: failed`, the

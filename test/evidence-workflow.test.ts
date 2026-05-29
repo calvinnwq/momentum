@@ -365,6 +365,54 @@ describe("parseWorkflowArtifact", () => {
     ]);
   });
 
+  it("attaches typed runId on every record and stepId on ledger step events", () => {
+    const root = makeTempDir();
+    const runDir = path.join(root, "cwfp-typedlink");
+    writeJsonFile(path.join(runDir, "plan.json"), basePlan("cwfp-typedlink"));
+    writeLedger(path.join(runDir, "ledger.jsonl"), [
+      {
+        runId: "cwfp-typedlink",
+        step: "preflight",
+        status: "complete",
+        ts: "2026-05-17T11:00:00Z"
+      },
+      {
+        runId: "cwfp-typedlink",
+        step: "implementation",
+        status: "started",
+        ts: "2026-05-17T11:05:00Z"
+      },
+      {
+        runId: "cwfp-typedlink",
+        step: "postflight:1",
+        status: "complete",
+        ts: "2026-05-17T11:10:00Z"
+      }
+    ]);
+    writeJsonFile(path.join(runDir, "approval-implementation.json"), {
+      runId: "cwfp-typedlink",
+      boundary: "implementation",
+      approvedAt: "2026-05-17T11:01:00Z"
+    });
+
+    const result = parseWorkflowArtifact(runDir);
+
+    // Every emitted record links to the owning run.
+    expect(new Set(result.records.map((r) => r.runId))).toEqual(
+      new Set(["cwfp-typedlink"])
+    );
+
+    const byType = new Map(result.records.map((r) => [r.type, r]));
+    // Run-scoped records (plan, approval) carry no step linkage.
+    expect(byType.get("plan_created")!.stepId).toBeNull();
+    expect(byType.get("step_approved")!.stepId).toBeNull();
+    // Ledger step events link to the durable step id (the bare step name,
+    // matching workflow_steps.step_id, including numbered postflight attempts).
+    expect(byType.get("preflight_complete")!.stepId).toBe("preflight");
+    expect(byType.get("implementation_started")!.stepId).toBe("implementation");
+    expect(byType.get("postflight_complete")!.stepId).toBe("postflight:1");
+  });
+
   it("propagates goalId and sourceItemId options onto every emitted record", () => {
     const root = makeTempDir();
     const runDir = path.join(root, "cwfp-link");

@@ -15,6 +15,10 @@
  *     so repeat ingestion of the same artifact is idempotent at the DB layer.
  *   - formatVersion = 1 on every record so a future artifact format bump
  *     can coexist with historical records.
+ *   - runId is set on every emitted record (the owning `.agent-workflows/<runId>/`
+ *     run). stepId is set on ledger step events to the durable step id (the bare
+ *     ledger step name, matching workflow_steps.step_id, including numbered
+ *     postflight attempts); run-scoped plan / approval records carry null stepId.
  *   - Unknown step / status combinations and unknown sibling files in a
  *     workflow directory are skipped with an `evidence_format_unknown`
  *     diagnostic; malformed JSON / corrupt ledger lines emit
@@ -286,6 +290,8 @@ function parsePlanFile(
     metadata,
     goalId: options.goalId ?? null,
     sourceItemId: options.sourceItemId ?? null,
+    runId,
+    stepId: null,
     ingestKey: `${WORKFLOW_EVIDENCE_SOURCE}:${runId}:plan_created`
   });
 }
@@ -389,6 +395,8 @@ function parseLedgerFile(
       metadata,
       goalId: options.goalId ?? null,
       sourceItemId: options.sourceItemId ?? null,
+      runId,
+      stepId: step,
       ingestKey: `${WORKFLOW_EVIDENCE_SOURCE}:${runId}:${normalized.ingestSuffix}`
     });
   }
@@ -471,6 +479,8 @@ function parseApprovalFile(
     metadata,
     goalId: options.goalId ?? null,
     sourceItemId: options.sourceItemId ?? null,
+    runId,
+    stepId: null,
     ingestKey: `${WORKFLOW_EVIDENCE_SOURCE}:${runId}:approval:${boundary}`
   });
 }

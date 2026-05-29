@@ -1856,6 +1856,8 @@ function evidenceRecordToJsonShape(record: EvidenceRecord): Record<string, unkno
     metadata: record.metadata,
     goalId: record.goalId,
     sourceItemId: record.sourceItemId,
+    runId: record.runId,
+    stepId: record.stepId,
     ingestKey: record.ingestKey,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt
@@ -2007,7 +2009,9 @@ function evidenceList(parsed: ParsedFlags, io: CliIo): number {
     `Data dir: ${dataDir}`,
     ...records.map(
       (record) =>
-        `- ${record.id} [${record.source}/${record.type}] @${record.occurredAt}: ${record.summary}`
+        `- ${record.id} [${record.source}/${record.type}] @${record.occurredAt}: ${record.summary}` +
+        (record.runId !== null ? ` run=${record.runId}` : "") +
+        (record.stepId !== null ? ` step=${record.stepId}` : "")
     ),
     ""
   ];
@@ -3777,7 +3781,9 @@ function workflowEvidenceToJsonShape(
     type: evidence.type,
     artifactPath: evidence.artifactPath,
     occurredAt: evidence.occurredAt,
-    summary: evidence.summary
+    summary: evidence.summary,
+    runId: evidence.runId,
+    stepId: evidence.stepId
   };
 }
 
@@ -3873,7 +3879,8 @@ function renderWorkflowDetailText(
   lines.push(`Evidence: ${detail.evidence.length}`);
   for (const record of detail.evidence) {
     lines.push(
-      `- ${record.evidenceRecordId} [${record.source}/${record.type}] ${record.summary}`
+      `- ${record.evidenceRecordId} [${record.source}/${record.type}] ${record.summary}` +
+        (record.stepId !== null ? ` step=${record.stepId}` : "")
     );
   }
   lines.push("");

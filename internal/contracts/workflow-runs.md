@@ -93,9 +93,9 @@ The lease body never contains credentials or chat content. Like M5 source adapte
 
 ## Evidence pointers
 
-M5's `evidence_records` table stays the canonical store for normalized artifacts produced by external runs (`plan.json`, `ledger.jsonl`, `approval-*.json`, see [docs/evidence-commands.md](../../docs/evidence-commands.md)). M7 adds optional `runId` / `stepId` linkage so each evidence row attaches to the owning `WorkflowRun` and `workflow_steps` row when ingest is run from a coding-workflow context.
+M5's `evidence_records` table stays the canonical store for normalized artifacts produced by external runs (`plan.json`, `ledger.jsonl`, `approval-*.json`, see [docs/evidence-commands.md](../../docs/evidence-commands.md)). The M8 NGX-329 follow-up adds nullable `run_id` / `step_id` columns plus the `idx_evidence_records_run_step` index so each evidence row can attach to the owning `WorkflowRun` and, for ledger step events, the originating `workflow_steps` row when ingest is run from a coding-workflow context.
 
-The exact schema for the `runId` / `stepId` extension lands in a follow-up M7 implementation slice. The contract here is only that the existing evidence ingest CLI shape (`evidence ingest --path <file-or-dir>`, the `evidence_format_unknown` / `evidence_format_invalid` diagnostic codes, the idempotent `ingestKey` semantics, the `goal_not_found` / `source_item_not_found` pre-checks) stays wire-stable. Adding a `--workflow-run` flag and/or auto-attaching the run/step from the artifact path is allowed; renaming or removing the existing flags is not.
+The existing evidence ingest CLI shape (`evidence ingest --path <file-or-dir>`, the `evidence_format_unknown` / `evidence_format_invalid` diagnostic codes, the idempotent `ingestKey` semantics, the `goal_not_found` / `source_item_not_found` pre-checks) stays wire-stable. Ingest auto-attaches the run from `.agent-workflows/<runId>/`; ledger step records carry `stepId`, while run-scoped plan / approval records and non-workflow evidence keep null `stepId`.
 
 ## Step execution adapter boundary
 
@@ -146,7 +146,7 @@ Momentum never schedules cron jobs, never renders Discord, and never decides app
 
 - **M3 daemon / recovery.** `daemon start` / `stop` / `status` / `recovery clear`, the `daemon_runs` / `repo_locks` schema, the stale-lease taxonomy, and the goal-scoped `recovery.md` artifact stay wire-stable. M7 leases are a sibling table to `repo_locks`; they do not collide with the M3 lease model.
 - **M4 runners and policy.** `RunnerAdapter`, the `fake` / `trusted-shell` / `acp` profiles, and the `MOMENTUM.md` runtime policy loader stay wire-stable. A coding workflow's `implementation` step typically dispatches into a `trusted-shell` or `acp` runner; M7 does not introduce a new runner kind.
-- **M5 source / evidence / intent.** `source_items` / `source_snapshots` / `source_reconciliation_runs` / `evidence_records` / `update_intents` stay wire-stable. M7 extends `evidence_records` linkage; it does not rename or reshape the existing tables.
+- **M5 source / evidence / intent.** `source_items` / `source_snapshots` / `source_reconciliation_runs` / `evidence_records` / `update_intents` stay wire-stable. M7 uses existing evidence records plus path-based discovery; the M8 NGX-329 additive `run_id` / `step_id` linkage does not rename or reshape the existing evidence CLI semantics.
 - **M6 external apply.** `intent apply --external-apply`, the two-phase claim → audit → write → finalize lifecycle, the `intent_apply_policy` precedence, the comment-only default, the idempotency marker shape, the `intent_apply_in_progress` CAS result, and the `blocked` non-replay state stay wire-stable. M7 never bypasses the M6 apply path; if a coding workflow step needs an external write, it goes through `intent apply --external-apply` exactly as today.
 
 ## Test boundary

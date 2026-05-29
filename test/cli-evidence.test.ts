@@ -263,6 +263,59 @@ describe("momentum evidence ingest", () => {
     }
   });
 
+  it("persists typed runId/stepId linkage when ingesting a workflow directory", async () => {
+    const dataDir = makeTempDir();
+    const workflowRoot = makeTempDir("momentum-cli-evidence-workflows-");
+    const runDir = buildWorkflowFixture(workflowRoot, "cwfp-typedlink001");
+
+    const result = await run([
+      "evidence",
+      "ingest",
+      "--path",
+      runDir,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+
+    // The ingest JSON output surfaces typed linkage on every created record.
+    const payload = JSON.parse(result.stdout) as {
+      created: Array<{
+        type: string;
+        runId: string | null;
+        stepId: string | null;
+      }>;
+    };
+    const createdByType = new Map(payload.created.map((r) => [r.type, r]));
+    expect(createdByType.get("plan_created")).toMatchObject({
+      runId: "cwfp-typedlink001",
+      stepId: null
+    });
+    expect(createdByType.get("implementation_complete")).toMatchObject({
+      runId: "cwfp-typedlink001",
+      stepId: "implementation"
+    });
+
+    const db = openDb(dataDir);
+    try {
+      const records = listEvidenceRecords(db, {});
+      // Every workflow-sourced row links to the owning run.
+      expect(records.every((r) => r.runId === "cwfp-typedlink001")).toBe(true);
+
+      const byType = new Map(records.map((r) => [r.type, r]));
+      // Run-scoped plan record carries no step linkage.
+      expect(byType.get("plan_created")!.stepId).toBeNull();
+      // Ledger step events carry the durable step id (the bare step name).
+      expect(byType.get("preflight_complete")!.stepId).toBe("preflight");
+      expect(byType.get("implementation_started")!.stepId).toBe("implementation");
+      expect(byType.get("implementation_complete")!.stepId).toBe("implementation");
+      expect(byType.get("merge_complete")!.stepId).toBe("merge-cleanup");
+    } finally {
+      db.close();
+    }
+  });
+
   it("is idempotent across repeated ingestions of the same artifact", async () => {
     const dataDir = makeTempDir();
     const workflowRoot = makeTempDir("momentum-cli-evidence-workflows-");

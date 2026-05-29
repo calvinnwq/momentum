@@ -301,7 +301,7 @@ momentum workflow status [<run-id>] [--state <state>] [--filter <active|blocked|
 Two modes share one envelope shape:
 
 - **List mode** (no `<run-id>`): returns workflow runs filtered by state or by a named grouping. Ordered by `updated_at DESC`.
-- **Detail mode** (with `<run-id>`): returns the full detail for one run — steps, approvals, leases, monitor reducer view, and best-effort evidence linkage.
+- **Detail mode** (with `<run-id>`): returns the full detail for one run — steps, approvals, leases, monitor reducer view, and evidence linkage.
 
 ### Selectors (list mode)
 
@@ -483,7 +483,9 @@ Lease classifications surfaced under `monitor.leases[].classification`: `release
 
 ### Evidence linkage
 
-`detail.evidence` is best-effort: it returns `evidence_records` rows whose `artifact_path` falls under the run's artifact directory. The durable `evidence_records.run_id` / `step_id` extension is deferred to a follow-up slice; entries here surface so OpenClaw tooling can find related evidence without an additional join.
+`detail.evidence` returns `evidence_records` rows linked to the run. Rows ingested via `evidence ingest` against a `.agent-workflows/<runId>/` directory carry a durable typed `runId` / `stepId` on each record; those are the primary join. For rows ingested before typed linkage existed (null `run_id`), the query falls back to `artifact_path` prefix matching under the run's source artifact directory so legacy evidence continues to surface.
+
+Each evidence item exposes: `evidenceRecordId`, `source`, `type`, `artifactPath`, `occurredAt`, `summary`, `runId`, and `stepId`.
 
 ### Error codes
 
@@ -529,8 +531,11 @@ Monitor
 - Last checkpoint: implementation at 1730000100000 (source=ledger)
 - Next action: resume_running - Step is running with fresh lease / checkpoint evidence. Allow it to continue.
 
-Evidence: 0
+Evidence: 1
+- evidence_record_impl [agent-workflow/implementation_complete] implementation finished step=implementation
 ```
+
+Evidence rows include a trailing `step=<stepId>` annotation when the record carries typed step linkage.
 
 Exit code 0 on success, 1 on failure, 2 on usage error.
 

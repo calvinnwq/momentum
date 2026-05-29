@@ -8,10 +8,11 @@
  * next-action code, recovery taxonomy) suitable for OpenClaw tooling to
  * consume.
  *
- * No SQLite mutation, no external writes. Evidence linkage is best-effort
- * artifact-path matching against `evidence_records.artifact_path`; the durable
- * `evidence_records.run_id` / `step_id` extension stays deferred per
- * internal/contracts/workflow-runs.md.
+ * No SQLite mutation, no external writes. Evidence linkage prefers the durable
+ * typed `evidence_records.run_id` / `step_id` columns (NGX-329); legacy rows
+ * with null linkage still fall back to best-effort artifact-path matching
+ * against `evidence_records.artifact_path` so pre-NGX-329 evidence keeps
+ * surfacing.
  */
 import type { MomentumDb } from "./db.js";
 import {
@@ -97,6 +98,8 @@ export type WorkflowEvidenceLink = {
   artifactPath: string | null;
   occurredAt: number;
   summary: string;
+  runId: string | null;
+  stepId: string | null;
 };
 
 export const WORKFLOW_STATUS_FILTER_KEYS = [
@@ -321,23 +324,34 @@ function listEvidenceLinksForRun(
   db: MomentumDb,
   run: WorkflowRunRow
 ): WorkflowEvidenceLink[] {
-  // Until the M7 evidence_records run_id / step_id linkage ships, best-effort
-  // match on artifact path: ingested artifacts under the run dir resolve to
-  // the same prefix as sourceArtifactPath.
-  if (!run.sourceArtifactPath) return [];
-  const runDir = artifactRunDir(run.sourceArtifactPath);
-  if (!runDir) return [];
-  const rows = db
-    .prepare(
-      "SELECT id, source, type, artifact_path, occurred_at, summary FROM evidence_records WHERE artifact_path LIKE ? ORDER BY occurred_at DESC, id ASC"
-    )
-    .all(`${runDir}%`) as Array<{
+  // Prefer the durable typed run_id linkage (NGX-329). Legacy rows ingested
+  // before the parser populated run_id keep their null linkage, so fall back
+  // to best-effort artifact-path matching under the run dir for those rows
+  // only when sourceArtifactPath is known.
+  const runDir = run.sourceArtifactPath
+    ? artifactRunDir(run.sourceArtifactPath)
+    : null;
+  const rows = (
+    runDir
+      ? db
+          .prepare(
+            "SELECT id, source, type, artifact_path, occurred_at, summary, run_id, step_id FROM evidence_records WHERE run_id = ? OR (run_id IS NULL AND artifact_path LIKE ?) ORDER BY occurred_at DESC, id ASC"
+          )
+          .all(run.runId, `${runDir}%`)
+      : db
+          .prepare(
+            "SELECT id, source, type, artifact_path, occurred_at, summary, run_id, step_id FROM evidence_records WHERE run_id = ? ORDER BY occurred_at DESC, id ASC"
+          )
+          .all(run.runId)
+  ) as Array<{
     id: string;
     source: string;
     type: string;
     artifact_path: string | null;
     occurred_at: number;
     summary: string;
+    run_id: string | null;
+    step_id: string | null;
   }>;
   return rows.map((row) => ({
     evidenceRecordId: row.id,
@@ -345,7 +359,9 @@ function listEvidenceLinksForRun(
     type: row.type,
     artifactPath: row.artifact_path,
     occurredAt: row.occurred_at,
-    summary: row.summary
+    summary: row.summary,
+    runId: row.run_id,
+    stepId: row.step_id
   }));
 }
 

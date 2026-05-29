@@ -142,6 +142,8 @@ describe("applyQueueMigrations", () => {
         "metadata_json",
         "goal_id",
         "source_item_id",
+        "run_id",
+        "step_id",
         "ingest_key",
         "created_at",
         "updated_at"
@@ -214,6 +216,7 @@ describe("applyQueueMigrations", () => {
       expect(indexes).toContain("idx_evidence_records_source_item");
       expect(indexes).toContain("idx_evidence_records_source_type");
       expect(indexes).toContain("idx_evidence_records_occurred_at");
+      expect(indexes).toContain("idx_evidence_records_run_step");
       expect(indexes).toContain("idx_update_intents_idempotency_key");
       expect(indexes).toContain("idx_update_intents_status");
       expect(indexes).toContain("idx_update_intents_goal");
@@ -413,6 +416,100 @@ describe("applyQueueMigrations", () => {
       expect(preserved.reason).toBe("preserved");
     } finally {
       upgraded.close();
+    }
+  });
+
+  it("adds typed run/step linkage columns to a pre-NGX-329 evidence_records schema without dropping rows", () => {
+    const dataDir = makeTempDir();
+    const dbPath = path.join(dataDir, "momentum.db");
+    const pre = new DatabaseSync(dbPath);
+    try {
+      // Mirror the M5 (pre-typed-linkage) evidence_records shape.
+      pre.exec(`
+        CREATE TABLE evidence_records (
+          id TEXT PRIMARY KEY,
+          source TEXT NOT NULL,
+          type TEXT NOT NULL,
+          format_version INTEGER NOT NULL DEFAULT 1,
+          artifact_path TEXT,
+          external_id TEXT,
+          occurred_at INTEGER NOT NULL,
+          summary TEXT NOT NULL,
+          metadata_json TEXT NOT NULL DEFAULT '{}',
+          goal_id TEXT,
+          source_item_id TEXT,
+          ingest_key TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        ) STRICT;
+      `);
+      pre.prepare(
+        `INSERT INTO evidence_records
+           (id, source, type, format_version, artifact_path, external_id,
+            occurred_at, summary, metadata_json, ingest_key,
+            created_at, updated_at)
+         VALUES ('evidence_record_legacy', 'agent-workflow', 'plan_created', 1,
+                 '/tmp/.agent-workflows/cwfp-legacy/plan.json', 'cwfp-legacy',
+                 1000, 'Legacy plan', '{}',
+                 'agent-workflow:cwfp-legacy:plan_created', 1, 2)`
+      ).run();
+    } finally {
+      pre.close();
+    }
+
+    const upgraded = openDb(dataDir);
+    try {
+      const cols = getColumns(upgraded, "evidence_records").map(
+        (row) => row.name
+      );
+      expect(cols).toContain("run_id");
+      expect(cols).toContain("step_id");
+
+      const byName = new Map(
+        getColumns(upgraded, "evidence_records").map((row) => [row.name, row])
+      );
+      // Typed linkage is additive and nullable.
+      expect(byName.get("run_id")?.notnull).toBe(0);
+      expect(byName.get("step_id")?.notnull).toBe(0);
+
+      const preserved = upgraded
+        .prepare(
+          `SELECT id, source, type, external_id, run_id, step_id
+             FROM evidence_records WHERE id = 'evidence_record_legacy'`
+        )
+        .get() as Record<string, unknown>;
+      expect(preserved["id"]).toBe("evidence_record_legacy");
+      expect(preserved["source"]).toBe("agent-workflow");
+      expect(preserved["type"]).toBe("plan_created");
+      expect(preserved["external_id"]).toBe("cwfp-legacy");
+      // Existing rows read with null typed linkage.
+      expect(preserved["run_id"]).toBeNull();
+      expect(preserved["step_id"]).toBeNull();
+
+      const indexes = (
+        upgraded
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type='index' ORDER BY name"
+          )
+          .all() as Array<{ name: string }>
+      ).map((row) => row.name);
+      expect(indexes).toContain("idx_evidence_records_run_step");
+    } finally {
+      upgraded.close();
+    }
+  });
+
+  it("typed-linkage column upgrade is idempotent across repeated openDb invocations", () => {
+    const dataDir = makeTempDir();
+    const a = openDb(dataDir);
+    const beforeCols = getColumns(a, "evidence_records").length;
+    a.close();
+
+    const b = openDb(dataDir);
+    try {
+      expect(getColumns(b, "evidence_records")).toHaveLength(beforeCols);
+    } finally {
+      b.close();
     }
   });
 

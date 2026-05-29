@@ -79,7 +79,7 @@ Read-only machine envelope the skill's `monitor_runner.py` consumes. Emits a sta
 - Run identity, current run state, current step state, lease summary.
 - Machine-readable `nextAction` code from the M7 reducer's stable taxonomy (`no_action` / `advance_to_step` / `await_approval` / `resume_running` / `investigate_stale` / `clear_recovery` / `rerun_failed_step`).
 - Recovery classification from the M7 reducer's stable taxonomy (`stale_running_step` / `ghost_active_no_lease` / `manual_recovery_lease` / `monitor_drift_stale` / `failed_required_step`, or null when no recovery applies).
-- Evidence pointers (typed through NGX-329 once that slice lands), terminal / reportability flags.
+- Evidence pointers once that envelope adopts the NGX-329 typed-linkage query, terminal / reportability flags.
 
 Unknown or malformed run ids refuse with `run_not_found` (or `run_id_required` when omitted). The command never mutates run / step / approval / lease state. It never schedules cron, never delivers to Discord, and never spawns a managed child.
 
@@ -108,13 +108,13 @@ The M3 `goals.needs_manual_recovery` flag, the `recovery.md` artifact for goals,
 
 ## Typed evidence linkage (NGX-329)
 
-M8 adds optional `runId` / `stepId` linkage to the existing M5 `evidence_records` table. The exact storage shape (nullable typed columns vs. sibling join row) lands at NGX-329. The contract here is only that:
+M8 adds optional `runId` / `stepId` linkage to the existing M5 `evidence_records` table using nullable `run_id` / `step_id` columns plus the partial composite index `idx_evidence_records_run_step` for run-scoped and run+step-scoped lookups.
 
 - The existing M5 evidence ingest CLI (`evidence ingest --path <file-or-dir>`), the `evidence_format_unknown` / `evidence_format_invalid` diagnostic codes, the `ingestKey` idempotency semantics, and the `goal_not_found` / `source_item_not_found` pre-checks all stay wire-stable.
 - Migration is additive. Existing evidence rows continue to read with null `runId` / `stepId` linkage. Non-workflow evidence rows continue to carry null linkage.
-- Ingest from `.agent-workflows/<runId>/` attaches each artifact to the owning `runId` and, when known, the originating `stepId`.
-- Unknown `runId` / `stepId` references either refuse with a stable diagnostic or remain unlinked, per the existing ingest contract — they never silently attach to the wrong run.
-- Typed pointers surface through `workflow status` / `workflow handoff` / `workflow run list` / `workflow run monitor` without breaking those envelopes' existing JSON field names.
+- Ingest from `.agent-workflows/<runId>/` attaches each artifact to the owning `runId`; ledger step events also attach the originating `stepId`, while run-scoped plan / approval artifacts carry null `stepId`.
+- Idempotent replay can attach missing `runId` / `stepId` linkage to an existing unlinked row, but never overwrites non-null linkage.
+- Typed pointers currently surface through `evidence ingest` / `evidence list` record JSON and through `workflow status` / `workflow handoff` detail evidence without breaking those envelopes' existing JSON field names. Legacy rows with null `run_id` continue to surface through the artifact-path fallback where those detail envelopes support it; `workflow run list` and `workflow run monitor` can adopt the same typed-linkage query in their own slices.
 
 The M5 source-adapter contract at [`source-adapters.md`](source-adapters.md) is unchanged by this extension. The M6 external apply contract at [`intent-apply.md`](intent-apply.md) is also unchanged — `evidence_records` does not influence the apply lifecycle.
 
@@ -126,7 +126,7 @@ A non-exhaustive seed list of fields the M8 envelopes pin:
 
 - `runId`, `repoPath`, `runState`, `stepState`, `boundary`, `phrase`, `artifactPath`, `artifactDigest`, `recordedAt`, `actor`.
 - `nextAction` (object with `code` plus optional `stepId`, `boundary`, or `runId`), `monitor.recovery` (object with `code` plus optional `stepId`).
-- `evidence` (array of typed evidence pointers with `path`, optional `digest`, optional `runId`, optional `stepId`).
+- `evidence` (array of typed evidence pointers with `evidenceRecordId`, `source`, `type`, `artifactPath`, `occurredAt`, `summary`, nullable `runId`, and nullable `stepId`).
 - `needsManualRecovery` (boolean), `recovery` (object surfacing the classification, recommended next action, and link to `recovery.md`).
 - `schemaVersion` (on `workflow run monitor` only; M8 lands version 1).
 
@@ -148,7 +148,7 @@ The M3 daemon (`daemon start` / `daemon stop` / `daemon status` / `recovery clea
 
 - **M3 daemon / recovery.** Unchanged. M8 run-scoped recovery is a sibling surface to M3 goal-scoped recovery, not a replacement.
 - **M4 runners and policy.** Unchanged. M8 envelopes never spawn a managed child or a runner; live executor invocation stays inside the skill.
-- **M5 source / evidence / intent.** Unchanged at the schema and CLI shape level. M8 only adds optional `runId` / `stepId` linkage on `evidence_records`.
+- **M5 source / evidence / intent.** Source and intent schemas stay unchanged, and evidence CLI semantics stay wire-stable. M8 adds only the additive nullable `run_id` / `step_id` linkage columns and lookup index on `evidence_records`.
 - **M6 external apply.** Unchanged. `intent apply --external-apply`, `intent_apply_policy`, the `intent_apply_in_progress` CAS result, the comment-only default, the idempotency marker shape, and the `blocked` non-replay state stay wire-stable. M8 envelopes never issue an external write directly.
 - **M7 substrate.** Unchanged. `workflow_runs` / `workflow_steps` / `workflow_approvals` / `workflow_leases`, `deriveWorkflowRunState`, `deriveWorkflowMonitorState`, `classifyWorkflowLease`, the `WorkflowStepExecutor` boundary, the deterministic fake executors, and the read-only `workflow import` / `workflow status` / `workflow handoff` envelopes all stay wire-stable. M8 reuses them; it does not reshape them.
 

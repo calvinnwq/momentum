@@ -105,12 +105,82 @@ describe("evidence record storage", () => {
       expect(result.record.updatedAt).toBe(2100);
       expect(result.record.goalId).toBeNull();
       expect(result.record.sourceItemId).toBeNull();
+      expect(result.record.runId).toBeNull();
+      expect(result.record.stepId).toBeNull();
       expect(result.record.id).toMatch(/^evidence_record_/);
 
       expect(getEvidenceRecordById(db, result.record.id)).toEqual(result.record);
       expect(
         getEvidenceRecordByIngestKey(db, result.record.ingestKey)
       ).toEqual(result.record);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("stores and reads back typed run/step linkage when provided", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const result = ingestEvidenceRecord(
+        db,
+        baseInput({ runId: "cwfp-test", stepId: "implementation" }),
+        { now: () => 2100 }
+      );
+
+      expect(result.created).toBe(true);
+      expect(result.record.runId).toBe("cwfp-test");
+      expect(result.record.stepId).toBe("implementation");
+      expect(getEvidenceRecordById(db, result.record.id)).toEqual(result.record);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("links a run without a step when only runId is known", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const result = ingestEvidenceRecord(
+        db,
+        baseInput({ runId: "cwfp-test" }),
+        { now: () => 2100 }
+      );
+
+      expect(result.record.runId).toBe("cwfp-test");
+      expect(result.record.stepId).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("attaches missing run/step linkage on idempotent replay without rebinding existing linkage", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const first = ingestEvidenceRecord(db, baseInput(), { now: () => 2100 });
+      expect(first.record.runId).toBeNull();
+      expect(first.record.stepId).toBeNull();
+
+      const linked = ingestEvidenceRecord(
+        db,
+        baseInput({ runId: "cwfp-test", stepId: "implementation" }),
+        { now: () => 2200 }
+      );
+
+      expect(linked.created).toBe(false);
+      expect(linked.record.id).toBe(first.record.id);
+      expect(linked.record.runId).toBe("cwfp-test");
+      expect(linked.record.stepId).toBe("implementation");
+      expect(linked.record.updatedAt).toBe(2200);
+
+      const rebound = ingestEvidenceRecord(
+        db,
+        baseInput({ runId: "cwfp-other", stepId: "no-mistakes" }),
+        { now: () => 2300 }
+      );
+
+      expect(rebound.created).toBe(false);
+      expect(rebound.record.runId).toBe("cwfp-test");
+      expect(rebound.record.stepId).toBe("implementation");
+      expect(rebound.record.updatedAt).toBe(2200);
     } finally {
       db.close();
     }
