@@ -69,7 +69,7 @@ Operator-driven step transition surface. Drives the existing M7 reducer / state 
 - Legal step transitions are persisted with evidence or ledger pointers and the operator-supplied reason or context. The required-chain run-state derivation in `deriveWorkflowRunState` stays the authority on run-level state — `workflow run update-step` never bypasses it.
 - Illegal transitions refuse with `invalid_transition` and write no partial durable state. An unknown step refuses with `step_not_found`. A finalize-after-finalize refuses with `invalid_transition` (or returns idempotently if the transition is byte-equal to the existing finalize, per the rule that lands at NGX-326).
 - The command remains local-only. It never spawns or stops a managed child, never schedules cron, and never issues an external write. If a future caller needs to start or stop a live process, that work belongs in a separately approved milestone slice — the M8 contract refuses to grow this envelope into process management.
-- The `needs_manual_recovery` flag (NGX-327) blocks update-step transitions that would make recovery worse until an operator explicitly clears it.
+- The `needs_manual_recovery` flag (NGX-327) blocks update-step transitions that would leave a blocking recovery condition in place; resolving transitions can land so an operator has a CLI path to clear the flag explicitly afterward.
 
 ### `workflow run monitor` (NGX-328)
 
@@ -101,7 +101,7 @@ The per-run recovery surface mirrors the M3 goal-scoped contract, scoped to `Wor
 
 - A durable `WorkflowRun.needs_manual_recovery` flag (or equivalent typed column / sidecar row) captures the manual-recovery reason. The flag is set automatically when the M7 monitor reducer emits `manual_recovery_lease`, when a managed-step dispatch finalizes with a `manual_recovery_required` classification from `failure_patterns.yaml`, or when a `workflow_steps` finalize observes an irreconcilable mismatch between the durable row and the ledger / artifact tree.
 - A per-run `.agent-workflows/<runId>/recovery.md` artifact renders the manual-recovery reason and the safe next steps. The artifact carries run id, step id, recovery classification, evidence pointers, recommended next action, and rollback / safety notes. It never embeds secrets, raw token values, or chat-transcript content.
-- The flag blocks future `workflow run update-step` and `workflow run approve` claims that would make recovery worse, until an operator explicitly clears it.
+- The flag blocks future `workflow run approve` claims and `workflow run update-step` transitions that would make recovery worse or leave the blocking condition in place, until an operator explicitly clears it.
 - The clear path is explicit and auditable. It refuses with `recovery_clear_refused` if the underlying blocking state still exists.
 
 The M3 `goals.needs_manual_recovery` flag, the `recovery.md` artifact for goals, and `recovery clear <goal-id>` stay unchanged. The M8 run-scoped flag is a sibling surface, not a replacement.

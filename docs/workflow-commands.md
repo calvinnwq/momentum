@@ -34,7 +34,7 @@ Reads the `.agent-workflows/<run-id>/` directory at `<run-dir>` and normalizes t
 - **Unknown siblings**: unrecognized files produce `evidence_format_unknown` diagnostics but do not drop the valid records around them. The generated `recovery.md` artifact is a known sibling and is ignored by import.
 - **Malformed artifacts**: invalid `plan.json`, `ledger.jsonl` lines, or `approval-*.json` files produce `evidence_format_invalid` diagnostics. Valid siblings are still imported.
 - **Durable approvals merge forward**: existing database approvals, the current `approval_boundary`, and imported `approval-*.json` artifacts are merged. The highest boundary is preserved; same-rank boundaries prefer the newer recorded approval. Stale same-boundary artifacts do not overwrite newer durable approval rows. On fresh imports and re-imports, pending steps covered by any preserved approval are persisted as `approved`, and a non-terminal pending run can be persisted as `approved`.
-- **Manual-recovery auto-set**: after persisting the rows, import re-derives the run's monitor view. When it classifies a blocking recovery condition (`manual_recovery_lease`, `ghost_active_no_lease`, `stale_running_step`, or `failed_required_step`), import sets the durable `needs_manual_recovery` flag and renders `<run-dir>/recovery.md`. The flag then blocks `workflow run approve` and `workflow run update-step` until an operator clears it with `workflow run clear-recovery`. The auto-set only ever sets the flag: re-importing a run whose blocking condition is now resolved leaves any existing flag in place, so clearing stays explicit and operator-driven.
+- **Manual-recovery auto-set**: after persisting the rows, import re-derives the run's monitor view. When it classifies a blocking recovery condition (`manual_recovery_lease`, `ghost_active_no_lease`, `stale_running_step`, or `failed_required_step`), import sets the durable `needs_manual_recovery` flag and renders `<run-dir>/recovery.md`. The flag blocks `workflow run approve` and any `workflow run update-step` transition that would leave a blocking recovery condition in place; a resolving update-step can land so the operator can then clear the flag with `workflow run clear-recovery`. The auto-set only ever sets the flag: re-importing a run whose blocking condition is now resolved leaves any existing flag in place, so clearing stays explicit and operator-driven.
 
 ### JSON envelope (success)
 
@@ -270,7 +270,7 @@ Behaviour:
 - A repeat with a different reason, actor, or pointers refuses with `invalid_transition`; the existing audit record is preserved.
 - After a successful step transition the run state is re-derived from the full step chain; if the derived state differs from the stored one, `workflow_runs.state` is updated in the same transaction.
 - The command is local-only: it never spawns an executor, schedules cron, or issues an external write.
-- If the run has `needs_manual_recovery` set, the command refuses with `manual_recovery_required` until the flag is cleared.
+- If the run has `needs_manual_recovery` set, transitions that would leave a blocking recovery condition in place refuse with `manual_recovery_required`; transitions that resolve the blocking condition can land so the flag can be cleared explicitly afterward.
 
 ### JSON envelope
 
@@ -326,7 +326,7 @@ Exit code 0 on success, 1 on structured refusal, 2 on usage error.
 momentum workflow run clear-recovery <run-id> [--data-dir <path>] [--json]
 ```
 
-Explicit, auditable clear for a run's durable manual-recovery flag. The flag blocks `workflow run approve` and `workflow run update-step` (both refuse with `manual_recovery_required`) until an operator clears it here.
+Explicit, auditable clear for a run's durable manual-recovery flag. The flag blocks `workflow run approve` and non-resolving `workflow run update-step` transitions until an operator clears it here.
 
 Required arguments:
 

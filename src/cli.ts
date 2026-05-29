@@ -144,10 +144,14 @@ import {
   loadWorkflowHandoff,
   type WorkflowHandoffEnvelope
 } from "./workflow-handoff.js";
-import type { WorkflowMonitorState } from "./workflow-monitor-state.js";
+import {
+  deriveWorkflowMonitorState,
+  type WorkflowMonitorState
+} from "./workflow-monitor-state.js";
 import {
   clearWorkflowRunManualRecoveryGuarded,
   getWorkflowRunManualRecoveryState,
+  isBlockingWorkflowRecoveryCode,
   type ClearWorkflowRunManualRecoveryGuardedResult,
   type WorkflowRunManualRecoveryState
 } from "./workflow-run-recovery.js";
@@ -3190,19 +3194,6 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
           stepId
         });
       }
-      if (runRow.needs_manual_recovery === 1) {
-        db.exec("ROLLBACK");
-        return emitWorkflowRunUpdateStepFailure(parsed, io, {
-          command: "workflow run update-step",
-          code: "manual_recovery_required",
-          message:
-            runRow.manual_recovery_reason ??
-            `Workflow run requires manual recovery before step updates: ${runId}`,
-          dataDir,
-          runId,
-          stepId
-        });
-      }
       const stepRow = db
         .prepare(
           `SELECT state, operator_reason, operator_actor,
@@ -3238,6 +3229,31 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
         stepRow.operator_actor === actor &&
         stepRow.operator_evidence_pointer === evidencePointer &&
         stepRow.operator_ledger_pointer === ledgerPointer;
+      const transition = transitionWorkflowStep(previousState, targetState);
+      const now = Date.now();
+      if (runRow.needs_manual_recovery === 1) {
+        const resolvesManualRecovery =
+          transition.ok &&
+          workflowRunStepUpdateResolvesManualRecovery(db, {
+            runId,
+            stepId,
+            targetState,
+            now
+          });
+        if (!resolvesManualRecovery) {
+          db.exec("ROLLBACK");
+          return emitWorkflowRunUpdateStepFailure(parsed, io, {
+            command: "workflow run update-step",
+            code: "manual_recovery_required",
+            message:
+              runRow.manual_recovery_reason ??
+              `Workflow run requires manual recovery before step updates: ${runId}`,
+            dataDir,
+            runId,
+            stepId
+          });
+        }
+      }
       if (
         isTerminalRunState(runRow.state) &&
         !(previousState === targetState && sameAuditContext)
@@ -3252,7 +3268,6 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
           stepId
         });
       }
-      const transition = transitionWorkflowStep(previousState, targetState);
       if (!transition.ok) {
         db.exec("ROLLBACK");
         return emitWorkflowRunUpdateStepFailure(parsed, io, {
@@ -3265,7 +3280,6 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
         });
       }
 
-      const now = Date.now();
       let idempotent = false;
       if (previousState === targetState) {
         // Step already in the target state: only a byte-equal re-finalize is a
@@ -3377,6 +3391,35 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
   ];
   write(io.stdout, lines.join("\n"));
   return 0;
+}
+
+function workflowRunStepUpdateResolvesManualRecovery(
+  db: MomentumDb,
+  input: {
+    runId: string;
+    stepId: string;
+    targetState: WorkflowStepState;
+    now: number;
+  }
+): boolean {
+  const steps = loadWorkflowStepRecords(db, input.runId).map((step) =>
+    step.stepId === input.stepId
+      ? { ...step, state: input.targetState }
+      : step
+  );
+  const leases = loadWorkflowLeaseRecords(db, input.runId);
+  const monitor = deriveWorkflowMonitorState({
+    runId: input.runId,
+    steps,
+    leases,
+    monitor: null,
+    lastCheckpoint: null,
+    now: input.now
+  });
+  return (
+    monitor.recovery === null ||
+    !isBlockingWorkflowRecoveryCode(monitor.recovery.code)
+  );
 }
 
 function loadWorkflowStepRecords(
