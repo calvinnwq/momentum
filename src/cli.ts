@@ -145,6 +145,10 @@ import {
   type WorkflowHandoffEnvelope
 } from "./workflow-handoff.js";
 import {
+  loadWorkflowMonitorEnvelope,
+  type WorkflowMonitorEnvelope
+} from "./workflow-monitor-envelope.js";
+import {
   deriveWorkflowMonitorState,
   type WorkflowMonitorState
 } from "./workflow-monitor-state.js";
@@ -325,6 +329,7 @@ const COMMANDS = [
   "momentum workflow run list [--state <state>] [--filter <active|blocked|completed|imported>] [--approval-boundary <boundary>] [--repo <path>] [--issue-scope <identifier>] [--updated-since <ms>] [--updated-until <ms>] [--limit <n>] [--data-dir <path>] [--json]",
   "momentum workflow run update-step <run-id> --step <step-id> --state <approved|succeeded|skipped|failed|blocked|canceled> --reason <text> [--actor <name>] [--evidence-pointer <ref>] [--ledger-pointer <ref>] [--data-dir <path>] [--json]",
   "momentum workflow run clear-recovery <run-id> [--data-dir <path>] [--json]",
+  "momentum workflow run monitor <run-id> [--data-dir <path>] [--json]",
   "momentum intent list [--status <status>] [--adapter <kind>] [--type <intent-type>] [--goal <goal-id>] [--source-item <id>] [--evidence-record <id>] [--limit <n>] [--data-dir <path>] [--json]",
   "momentum intent get <intent-id> [--data-dir <path>] [--json]",
   "momentum intent apply <intent-id> --reason <text> [--repo <path>] [--external-apply] [--data-dir <path>] [--json]",
@@ -2101,7 +2106,7 @@ function workflowRun(parsed: ParsedFlags, io: CliIo): number {
   const subcommand = parsed.args[2];
   if (!subcommand) {
     return usageError(
-      "Missing required subcommand for workflow run. Expected: list, approve, update-step, clear-recovery.",
+      "Missing required subcommand for workflow run. Expected: list, approve, update-step, clear-recovery, monitor.",
       parsed,
       io
     );
@@ -2117,6 +2122,9 @@ function workflowRun(parsed: ParsedFlags, io: CliIo): number {
   }
   if (subcommand === "clear-recovery") {
     return workflowRunClearRecovery(parsed, io);
+  }
+  if (subcommand === "monitor") {
+    return workflowRunMonitor(parsed, io);
   }
   return usageError(
     `Unknown workflow run subcommand: ${subcommand}`,
@@ -3620,6 +3628,211 @@ function emitWorkflowRunClearRecoveryFailure(
     code: failure.code,
     message: failure.message
   };
+  if (failure.runId !== undefined) payload["runId"] = failure.runId;
+
+  if (parsed.json) {
+    writeJson(io.stderr, payload);
+    return 1;
+  }
+  write(io.stderr, `${failure.message}\n`);
+  return 1;
+}
+
+type WorkflowRunMonitorFailureCode =
+  | "data_dir_failed"
+  | "run_id_required"
+  | "run_not_found";
+
+type WorkflowRunMonitorFailure = {
+  code: WorkflowRunMonitorFailureCode;
+  message: string;
+  dataDir?: string;
+  runId?: string;
+};
+
+function workflowRunMonitor(parsed: ParsedFlags, io: CliIo): number {
+  const positional = parsed.args.slice(3);
+  if (positional.length === 0 || !positional[0]) {
+    return emitWorkflowRunMonitorFailure(parsed, io, {
+      code: "run_id_required",
+      message: "Missing required <run-id> for workflow run monitor."
+    });
+  }
+  if (positional.length > 1) {
+    return usageError(
+      `Unexpected argument for workflow run monitor: ${positional[1]}`,
+      parsed,
+      io
+    );
+  }
+  const runId = positional[0];
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return emitWorkflowRunMonitorFailure(parsed, io, {
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err),
+      runId
+    });
+  }
+
+  const db = openDb(dataDir);
+  let envelope: WorkflowMonitorEnvelope | null;
+  try {
+    envelope = loadWorkflowMonitorEnvelope(db, runId);
+  } finally {
+    db.close();
+  }
+
+  if (envelope === null) {
+    return emitWorkflowRunMonitorFailure(parsed, io, {
+      code: "run_not_found",
+      message: `Workflow run not found: ${runId}`,
+      dataDir,
+      runId
+    });
+  }
+
+  return emitWorkflowRunMonitor(parsed, io, dataDir, envelope);
+}
+
+function emitWorkflowRunMonitor(
+  parsed: ParsedFlags,
+  io: CliIo,
+  dataDir: string,
+  envelope: WorkflowMonitorEnvelope
+): number {
+  const payload = {
+    ok: true,
+    command: "workflow run monitor",
+    dataDir,
+    schemaVersion: envelope.schemaVersion,
+    generatedAt: envelope.generatedAt,
+    runId: envelope.runId,
+    runState: envelope.runState,
+    stepState: envelope.stepState,
+    terminal: envelope.terminal,
+    blocked: envelope.blocked,
+    needsManualRecovery: envelope.needsManualRecovery,
+    disposition: envelope.disposition,
+    reportable: envelope.reportable,
+    reportReason: envelope.reportReason,
+    activeStep: envelope.activeStep
+      ? {
+          stepId: envelope.activeStep.stepId,
+          kind: envelope.activeStep.kind,
+          state: envelope.activeStep.state,
+          order: envelope.activeStep.order,
+          required: envelope.activeStep.required
+        }
+      : null,
+    leases: envelope.leases.map((lease) => ({
+      leaseKind: lease.leaseKind,
+      holder: lease.holder,
+      classification: lease.classification,
+      expiresAt: lease.expiresAt,
+      heartbeatAt: lease.heartbeatAt,
+      releasedAt: lease.releasedAt
+    })),
+    lastCheckpoint: envelope.lastCheckpoint
+      ? {
+          stepId: envelope.lastCheckpoint.stepId,
+          at: envelope.lastCheckpoint.at,
+          source: envelope.lastCheckpoint.source,
+          digest: envelope.lastCheckpoint.digest
+        }
+      : null,
+    monitorDrift: envelope.monitorDrift
+      ? {
+          advisoryState: envelope.monitorDrift.advisoryState,
+          advisoryTerminal: envelope.monitorDrift.advisoryTerminal,
+          actualState: envelope.monitorDrift.actualState,
+          drifted: envelope.monitorDrift.drifted,
+          reason: envelope.monitorDrift.reason
+        }
+      : null,
+    nextAction: {
+      code: envelope.nextAction.code,
+      stepId: envelope.nextAction.stepId,
+      leaseKind: envelope.nextAction.leaseKind,
+      detail: envelope.nextAction.detail
+    },
+    recovery: envelope.recovery
+      ? {
+          code: envelope.recovery.code,
+          message: envelope.recovery.message,
+          stepId: envelope.recovery.stepId
+        }
+      : null,
+    evidence: envelope.evidence.map(workflowEvidenceToJsonShape),
+    counts: {
+      steps: envelope.counts.steps,
+      stepsByState: envelope.counts.stepsByState,
+      approvals: envelope.counts.approvals,
+      leases: envelope.counts.leases
+    }
+  };
+
+  if (parsed.json) {
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  write(io.stdout, renderWorkflowMonitorText(dataDir, envelope));
+  return 0;
+}
+
+function renderWorkflowMonitorText(
+  dataDir: string,
+  envelope: WorkflowMonitorEnvelope
+): string {
+  const lines: string[] = [];
+  lines.push(`Workflow run monitor: ${envelope.runId}`);
+  lines.push(`Schema version: ${envelope.schemaVersion}`);
+  lines.push(`Run state: ${envelope.runState}`);
+  lines.push(`Step state: ${envelope.stepState ?? "(none)"}`);
+  lines.push(`Terminal: ${envelope.terminal}`);
+  lines.push(`Blocked: ${envelope.blocked}`);
+  lines.push(`Needs manual recovery: ${envelope.needsManualRecovery}`);
+  lines.push(`Disposition: ${envelope.disposition}`);
+  lines.push(`Reportable: ${envelope.reportable}`);
+  lines.push(`Report reason: ${envelope.reportReason}`);
+  lines.push(`Next action: ${envelope.nextAction.code}`);
+  if (envelope.recovery) {
+    lines.push(`Recovery: ${envelope.recovery.code}`);
+  }
+  if (envelope.activeStep) {
+    lines.push(
+      `Active step: ${envelope.activeStep.stepId} [${envelope.activeStep.state}]`
+    );
+  }
+  lines.push(
+    `Steps: ${envelope.counts.steps}` +
+      ` approvals=${envelope.counts.approvals} leases=${envelope.counts.leases}`
+  );
+  lines.push(`Data dir: ${dataDir}`);
+  lines.push("");
+  return lines.join("\n");
+}
+
+function emitWorkflowRunMonitorFailure(
+  parsed: ParsedFlags,
+  io: CliIo,
+  failure: WorkflowRunMonitorFailure
+): number {
+  const payload: Record<string, unknown> = {
+    ok: false,
+    command: "workflow run monitor",
+    code: failure.code,
+    message: failure.message
+  };
+  if (failure.dataDir !== undefined) payload["dataDir"] = failure.dataDir;
   if (failure.runId !== undefined) payload["runId"] = failure.runId;
 
   if (parsed.json) {

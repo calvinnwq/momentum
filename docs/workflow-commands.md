@@ -1,6 +1,6 @@
 # Workflow commands
 
-Operator-facing CLI envelopes for the `workflow import`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run approve`, `workflow run update-step`, and `workflow run clear-recovery` commands.
+Operator-facing CLI envelopes for the `workflow import`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run approve`, `workflow run update-step`, `workflow run clear-recovery`, and `workflow run monitor` commands.
 
 - `workflow import` reads local `.agent-workflows/<run-id>/` directories and persists normalized rows into the `workflow_runs`, `workflow_steps`, and `workflow_approvals` tables.
 - `workflow status` is a read-only surface that lists workflow runs (with state / filter selectors) or returns the full detail of a single run.
@@ -9,8 +9,9 @@ Operator-facing CLI envelopes for the `workflow import`, `workflow status`, `wor
 - `workflow run approve` records durable explicit approvals for workflow boundaries and persists operator-visible metadata (actor, phrase, artifact provenance) into `workflow_approvals`.
 - `workflow run update-step` drives operator-initiated step transitions (`approved` / `succeeded` / `skipped` / `failed` / `blocked` / `canceled`) through the existing state machine, persisting an audit record with operator reason and optional evidence or ledger pointers.
 - `workflow run clear-recovery` explicitly clears a run's durable manual-recovery flag after the blocking condition is resolved.
+- `workflow run monitor` is a read-only machine envelope that emits one stable JSON shape per run — derived from durable rows and the monitor reducer — so a monitor runner can decide whether to report, wait, or ask an operator to recover without parsing prose or scraping artifacts.
 
-`workflow status`, `workflow handoff`, and `workflow run list` are read-only: they never write SQLite or files.
+`workflow status`, `workflow handoff`, `workflow run list`, and `workflow run monitor` are read-only: they never write SQLite or files.
 
 See also:
 
@@ -783,5 +784,107 @@ Updated until: (any)
 Data dir: /path/to/data
 - cwfp-abc123 [running] repo=/path/to/repo steps=5 approvals=1 leases=1 next=resume_running
 ```
+
+Exit code 0 on success, 1 on failure, 2 on usage error.
+
+## `workflow run monitor`
+
+```text
+momentum workflow run monitor <run-id> [--data-dir <path>] [--json]
+```
+
+Read-only machine envelope for a monitor runner. Wraps the same durable detail loader as `workflow status <run-id>`, runs the monitor reducer, and adds a `disposition` decision view so a caller can act on one stable JSON shape per tick instead of parsing prose or scraping `.agent-workflows/<run-id>/`. It never writes SQLite or files, never schedules cron, and never delivers notifications.
+
+Required arguments:
+
+- `<run-id>` — the run to inspect.
+
+### Disposition and report reason
+
+`disposition` is the single field a monitor runner branches on:
+
+- `wait` — nothing actionable; the run is progressing (`in_progress`) or has no actionable steps yet (`idle`). `reportable` is `false`.
+- `report` — surface the run to the operator, but no recovery action is needed: a terminal outcome (`terminal_succeeded` / `terminal_canceled`), a step `awaiting_approval`, or `monitor_drift` (the run keeps progressing while the advisory snapshot is stale). `reportable` is `true`.
+- `recover` — an operator must intervene: the run is `blocked`, carries a durable manual-recovery flag, or the monitor reducer classified a hard recovery condition. `reportReason` is `recovery_required` and `reportable` is `true`.
+
+`reportReason` is one of `terminal_succeeded`, `terminal_canceled`, `recovery_required`, `monitor_drift`, `awaiting_approval`, `in_progress`, `idle`. `reportable` is always `disposition != "wait"`.
+
+The hard recovery classifications (`recovery.code`) are the same taxonomy as `workflow status`: `stale_running_step`, `ghost_active_no_lease`, `manual_recovery_lease`, `monitor_drift_stale`, `failed_required_step`. A failed required step and a blocked run both resolve to `disposition: "recover"`; `monitor_drift_stale` on an otherwise-progressing run resolves to `disposition: "report"`.
+
+### JSON envelope
+
+```json
+{
+  "ok": true,
+  "command": "workflow run monitor",
+  "dataDir": "/path/to/data",
+  "schemaVersion": 1,
+  "generatedAt": 1730000600000,
+  "runId": "cwfp-abc123",
+  "runState": "running",
+  "stepState": "running",
+  "terminal": false,
+  "blocked": false,
+  "needsManualRecovery": false,
+  "disposition": "wait",
+  "reportable": false,
+  "reportReason": "in_progress",
+  "activeStep": {
+    "stepId": "implementation",
+    "kind": "implementation",
+    "state": "running",
+    "order": 1,
+    "required": true
+  },
+  "leases": [ "...": "same shape as workflow status monitor.leases" ],
+  "lastCheckpoint": { "...": "same shape as workflow status monitor.lastCheckpoint" },
+  "monitorDrift": null,
+  "nextAction": {
+    "code": "resume_running",
+    "stepId": "implementation",
+    "leaseKind": "managed-step",
+    "detail": "Step is running with fresh lease / checkpoint evidence. Allow it to continue."
+  },
+  "recovery": null,
+  "evidence": [ "...": "same typed evidence pointers as workflow status detail" ],
+  "counts": {
+    "steps": 5,
+    "stepsByState": { "...": "per-state step counts" },
+    "approvals": 1,
+    "leases": 1
+  }
+}
+```
+
+`schemaVersion` is `1`. `nextAction`, `recovery`, `monitorDrift`, `leases`, `lastCheckpoint`, and `evidence` reuse the same field shapes as `workflow status`. `stepState` is the active step's state (or `null` when there is no active step).
+
+### Error codes
+
+| Code | Meaning |
+|------|---------|
+| `run_id_required` | `<run-id>` was not supplied. |
+| `data_dir_failed` | Data directory resolution failed. |
+| `run_not_found` | `<run-id>` does not exist in `workflow_runs`. |
+
+### Text output
+
+```text
+Workflow run monitor: cwfp-abc123
+Schema version: 1
+Run state: running
+Step state: running
+Terminal: false
+Blocked: false
+Needs manual recovery: false
+Disposition: wait
+Reportable: false
+Report reason: in_progress
+Next action: resume_running
+Active step: implementation [running]
+Steps: 5 approvals=1 leases=1
+Data dir: /path/to/data
+```
+
+A `Recovery: <code>` line is added when a recovery classification is present.
 
 Exit code 0 on success, 1 on failure, 2 on usage error.

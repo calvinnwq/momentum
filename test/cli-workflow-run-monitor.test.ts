@@ -1,0 +1,493 @@
+import { afterEach, describe, expect, it } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+import { runCli } from "../src/cli.js";
+import { openDb, type MomentumDb } from "../src/db.js";
+
+type RunResult = {
+  code: number;
+  stdout: string;
+  stderr: string;
+};
+
+const tempRoots: string[] = [];
+
+afterEach(() => {
+  while (tempRoots.length > 0) {
+    const dir = tempRoots.pop();
+    if (dir) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+function makeTempDir(prefix = "momentum-cli-workflow-run-monitor-"): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempRoots.push(dir);
+  return fs.realpathSync(dir);
+}
+
+async function run(argv: string[]): Promise<RunResult> {
+  let stdout = "";
+  let stderr = "";
+  const code = await runCli(argv, {
+    stdout: {
+      write(chunk: string) {
+        stdout += chunk;
+        return true;
+      }
+    },
+    stderr: {
+      write(chunk: string) {
+        stderr += chunk;
+        return true;
+      }
+    },
+    env: {}
+  });
+  return { code, stdout, stderr };
+}
+
+const SEED_NOW = 1_730_000_000_000;
+// Far-future expiry so classifyWorkflowLease treats the lease as fresh against
+// the CLI's real Date.now(); a past expiry (5_000) is always stale.
+const FRESH_EXPIRY = 9_999_999_999_999;
+const STALE_EXPIRY = 5_000;
+
+function seedRun(
+  db: MomentumDb,
+  input: {
+    runId: string;
+    state: string;
+    needsManualRecovery?: boolean;
+    manualRecoveryReason?: string | null;
+  }
+): void {
+  db.prepare(
+    `INSERT INTO workflow_runs
+       (id, state, source, source_artifact_path, plan_json,
+        repo_path, objective, issue_scope_json, route_json,
+        approval_boundary, skill_revision,
+        needs_manual_recovery, manual_recovery_reason, manual_recovery_at,
+        started_at, finished_at,
+        created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    input.runId,
+    input.state,
+    "agent-workflow",
+    null,
+    "{}",
+    null,
+    null,
+    "{}",
+    "{}",
+    null,
+    null,
+    input.needsManualRecovery ? 1 : 0,
+    input.manualRecoveryReason ?? null,
+    input.needsManualRecovery ? SEED_NOW : null,
+    null,
+    null,
+    SEED_NOW,
+    SEED_NOW
+  );
+}
+
+function seedStep(
+  db: MomentumDb,
+  input: {
+    runId: string;
+    stepId: string;
+    kind: string;
+    state?: string;
+    order: number;
+    required?: boolean;
+  }
+): void {
+  db.prepare(
+    `INSERT INTO workflow_steps
+       (run_id, step_id, kind, state, step_order, required,
+        ledger_offset, result_digest, error_code, error_message,
+        started_at, finished_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    input.runId,
+    input.stepId,
+    input.kind,
+    input.state ?? "pending",
+    input.order,
+    input.required === false ? 0 : 1,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    SEED_NOW,
+    SEED_NOW
+  );
+}
+
+function seedLease(
+  db: MomentumDb,
+  input: {
+    runId: string;
+    leaseKind: string;
+    expiresAt: number;
+    stalePolicy?: string;
+    releasedAt?: number | null;
+  }
+): void {
+  db.prepare(
+    `INSERT INTO workflow_leases
+       (run_id, lease_kind, holder, acquired_at, expires_at, heartbeat_at,
+        released_at, stale_policy, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    input.runId,
+    input.leaseKind,
+    `holder:${input.runId}`,
+    1_000,
+    input.expiresAt,
+    1_000,
+    input.releasedAt ?? null,
+    input.stalePolicy ?? "auto-release",
+    SEED_NOW,
+    SEED_NOW
+  );
+}
+
+function readStepState(
+  dataDir: string,
+  runId: string,
+  stepId: string
+): string | undefined {
+  const db = openDb(dataDir);
+  try {
+    const row = db
+      .prepare(
+        "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?"
+      )
+      .get(runId, stepId) as { state: string } | undefined;
+    return row?.state;
+  } finally {
+    db.close();
+  }
+}
+
+describe("momentum workflow run monitor (NGX-328)", () => {
+  it("requires a <run-id>", async () => {
+    const dataDir = makeTempDir();
+    const result = await run([
+      "workflow",
+      "run",
+      "monitor",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "workflow run monitor",
+      code: "run_id_required"
+    });
+  });
+
+  it("refuses an unknown run", async () => {
+    const dataDir = makeTempDir();
+    const result = await run([
+      "workflow",
+      "run",
+      "monitor",
+      "cwfp-missing",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "workflow run monitor",
+      code: "run_not_found",
+      runId: "cwfp-missing"
+    });
+  });
+
+  it("emits a stable JSON envelope for a healthy running step", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-running";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "running" });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "running",
+        order: 1
+      });
+      seedLease(db, {
+        runId,
+        leaseKind: "managed-step",
+        expiresAt: FRESH_EXPIRY
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      command: "workflow run monitor",
+      schemaVersion: 1,
+      runId,
+      runState: "running",
+      stepState: "running",
+      terminal: false,
+      blocked: false,
+      needsManualRecovery: false,
+      disposition: "wait",
+      reportable: false,
+      reportReason: "in_progress",
+      recovery: null
+    });
+    expect((payload["nextAction"] as Record<string, unknown>)["code"]).toBe(
+      "resume_running"
+    );
+    expect(typeof payload["generatedAt"]).toBe("number");
+  });
+
+  it("reports a terminally succeeded run", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-done";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "succeeded" });
+      seedStep(db, {
+        runId,
+        stepId: "preflight",
+        kind: "preflight",
+        state: "succeeded",
+        order: 0
+      });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "succeeded",
+        order: 1
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      runState: "succeeded",
+      terminal: true,
+      disposition: "report",
+      reportable: true,
+      reportReason: "terminal_succeeded"
+    });
+  });
+
+  it("asks for operator recovery when a required step failed", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-failed";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "failed" });
+      seedStep(db, {
+        runId,
+        stepId: "no-mistakes",
+        kind: "no-mistakes",
+        state: "failed",
+        order: 1
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      runState: "failed",
+      disposition: "recover",
+      reportable: true,
+      reportReason: "recovery_required"
+    });
+    expect((payload["recovery"] as Record<string, unknown>)["code"]).toBe(
+      "failed_required_step"
+    );
+  });
+
+  it("escalates to recovery on a stale running step that lost its lease", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-stale";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "running" });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "running",
+        order: 1
+      });
+      seedLease(db, {
+        runId,
+        leaseKind: "managed-step",
+        expiresAt: STALE_EXPIRY
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      disposition: "recover",
+      reportReason: "recovery_required"
+    });
+    expect((payload["recovery"] as Record<string, unknown>)["code"]).toBe(
+      "stale_running_step"
+    );
+  });
+
+  it("renders a text monitor summary", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-text";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "running" });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "running",
+        order: 1
+      });
+      seedLease(db, {
+        runId,
+        leaseKind: "managed-step",
+        expiresAt: FRESH_EXPIRY
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--data-dir",
+      dataDir
+    ]);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(`Workflow run monitor: ${runId}`);
+    expect(result.stdout).toContain("Disposition: wait");
+    expect(result.stdout).toContain("Next action: resume_running");
+  });
+
+  it("never mutates durable state (read-only)", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-readonly";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "running" });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "running",
+        order: 1
+      });
+      seedLease(db, {
+        runId,
+        leaseKind: "managed-step",
+        expiresAt: STALE_EXPIRY
+      });
+    } finally {
+      db.close();
+    }
+
+    const before = readStepState(dataDir, runId, "implementation");
+    const result = await run([
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    expect(readStepState(dataDir, runId, "implementation")).toBe(before);
+  });
+
+  it("rejects an unexpected extra positional argument", async () => {
+    const dataDir = makeTempDir();
+    const result = await run([
+      "workflow",
+      "run",
+      "monitor",
+      "cwfp-extra",
+      "surprise",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(2);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({ ok: false, code: "usage_error" });
+    expect(String(payload["message"])).toContain("Unexpected argument");
+  });
+});
