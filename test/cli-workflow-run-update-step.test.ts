@@ -206,6 +206,35 @@ function readRunState(dataDir: string, runId: string): string {
   }
 }
 
+function readRunFinishedAt(dataDir: string, runId: string): number | null {
+  const db = openDb(dataDir);
+  try {
+    return (
+      db
+        .prepare("SELECT finished_at FROM workflow_runs WHERE id = ?")
+        .get(runId) as { finished_at: number | null }
+    ).finished_at;
+  } finally {
+    db.close();
+  }
+}
+
+function setRunFinishedAt(
+  dataDir: string,
+  runId: string,
+  finishedAt: number
+): void {
+  const db = openDb(dataDir);
+  try {
+    db.prepare("UPDATE workflow_runs SET finished_at = ? WHERE id = ?").run(
+      finishedAt,
+      runId
+    );
+  } finally {
+    db.close();
+  }
+}
+
 function readRunMonitor(dataDir: string, runId: string): {
   monitor_last_seen_state: string | null;
   monitor_terminal: number | null;
@@ -900,6 +929,58 @@ describe("momentum workflow run update-step (NGX-326)", () => {
     expect(
       readStep(dataDir, runId, "implementation").operator_transition_at
     ).toBe(firstAt);
+  });
+
+  it("preserves the original run finished_at across an idempotent re-finalize", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-finished-at";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "running" });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "running",
+        order: 1
+      });
+    } finally {
+      db.close();
+    }
+
+    const args = [
+      "workflow",
+      "run",
+      "update-step",
+      runId,
+      "--step",
+      "implementation",
+      "--state",
+      "succeeded",
+      "--reason",
+      "operator finalize",
+      "--actor",
+      "calvinnwq",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ];
+    const first = await run(args);
+    expect(first.code).toBe(0);
+    expect(readRunState(dataDir, runId)).toBe("succeeded");
+
+    const originalFinishedAt = 1_700_000_000_000;
+    setRunFinishedAt(dataDir, runId, originalFinishedAt);
+
+    const second = await run(args);
+    expect(second.code).toBe(0);
+    const secondPayload = JSON.parse(second.stdout) as Record<string, unknown>;
+    expect(secondPayload).toMatchObject({
+      ok: true,
+      idempotent: true,
+      runState: "succeeded"
+    });
+    expect(readRunFinishedAt(dataDir, runId)).toBe(originalFinishedAt);
   });
 
   it("refuses a duplicate finalize that changes audit context", async () => {

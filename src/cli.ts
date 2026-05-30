@@ -3350,7 +3350,7 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
       db.prepare(
         `UPDATE workflow_runs
            SET state = ?,
-               finished_at = COALESCE(?, finished_at),
+               finished_at = COALESCE(finished_at, ?),
                updated_at = ?,
                monitor_last_seen_state = ?,
                monitor_terminal = ?,
