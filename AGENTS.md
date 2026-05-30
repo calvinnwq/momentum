@@ -37,7 +37,7 @@ Shipped M7 capability (still in force, see [`internal/milestones/m7-openclaw-cod
 - End-to-end built-CLI smoke that drives a fresh `.agent-workflows/<runId>/` fixture through the fake executors and re-imports between steps via `workflow import`, covering happy-path completion, evidence linkage through `workflow handoff` after `evidence ingest`, and a failure path proving no ghost active / blocked run.
 - Closeout regression matrix at [`internal/regression-matrix.md`](internal/regression-matrix.md) pinning each old monitor failure mode to its substrate owner module and named test evidence.
 - M7 is explicitly **not** a replacement for `gnhf-runner`, `gnhf-postflight`, `harness-delegate`, `no-mistakes-pipeline`, `model-evidence`, or `project-progress-refresh`; those executors stay owned by the OpenClaw skills.
-- M3 daemon / recovery, M4 runner / policy, M5 source / evidence / intent, and M6 external apply contracts remain wire-stable through M7.
+- M3 daemon / recovery, M4 runner / policy, M5 source / evidence / intent, and M6 external apply contracts remain wire-stable through M8.
 - M7's `doctor --json` closeout marker was `Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete`; the M8 closeout slice (NGX-330) advanced the current marker forward to the M8 string above.
 
 Previously closed milestone: Milestone 6 (Policy-Gated External Apply). Shipped M6 capability remains in force; see [`internal/milestones/m6-external-apply.md`](internal/milestones/m6-external-apply.md) for the M6 narrative.
