@@ -1,6 +1,6 @@
 # Contract: Workflow Run Operator Controls (M8)
 
-**Status:** M8 contract, in flight (pinned by NGX-323). The M8 implementation slices NGX-324..NGX-329 land against this contract; NGX-330 closes M8 out and is the only slice authorized to flip the `doctor --json` milestone marker forward from the M7 closeout string. The M3 / M4 / M5 / M6 / M7 surfaces this contract composes with remain wire-stable through M8.
+**Status:** M8 contract, complete (closed out at NGX-330; pinned by NGX-323). The M8 implementation slices NGX-324..NGX-329 landed against this contract; NGX-330 closed M8 out and flipped the `doctor --json` milestone marker forward from the M7 closeout string to the M8 closeout string. The M3 / M4 / M5 / M6 / M7 surfaces this contract composes with remain wire-stable through M8.
 
 This contract is the cross-milestone source of truth for the operator-control CLI envelopes Momentum layers on top of the M7 OpenClaw coding workflow backend substrate. It is the long-lived companion to [`../milestones/m8-workflow-run-operator-controls.md`](../milestones/m8-workflow-run-operator-controls.md); the milestone doc owns the *scope* of M8, this contract owns the *invariants* that survive after M8 closeout.
 
@@ -171,7 +171,7 @@ If an M8 implementation slice discovers that its acceptance criteria require liv
 
 ## Closeout marker policy
 
-The `doctor --json` milestone string remains the M7 closeout marker through every M8 implementation slice (NGX-324..NGX-329). NGX-330 (M8-07) is the only slice authorized to flip the marker; until then, `doctor --json` continues to report `Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete`.
+The `doctor --json` milestone string stayed pinned to the M7 closeout marker through every M8 implementation slice (NGX-324..NGX-329). NGX-330 (M8-07) flipped the marker to the M8 closeout string; `doctor --json` now reports `Milestone 8: workflow run operator controls (NGX-323, NGX-324, NGX-325, NGX-326, NGX-327, NGX-328, NGX-329, NGX-330) complete`.
 
 ## Test boundary
 

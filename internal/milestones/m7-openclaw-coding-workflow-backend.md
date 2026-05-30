@@ -111,4 +111,4 @@ M7 must not break or rename any M3 / M4 / M5 / M6 surface. Specifically, the `da
 
 ## Closeout marker policy
 
-The `doctor --json` milestone string is the M7 closeout marker `Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete`. The marker advanced from the M6 closeout string at NGX-319; any future milestone closeout slice will own the next marker flip.
+The M7 closeout marker is `Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete`, which the `doctor --json` milestone string advanced to from the M6 closeout string at NGX-319. The M8 closeout slice (NGX-330) later advanced the marker forward to the M8 closeout string; the M7 string above is retained here as the historical record of M7's closeout.

@@ -202,10 +202,9 @@ describe("M7 closeout contract (NGX-312, NGX-319)", () => {
   describe("AGENTS.md", () => {
     const agents = readDoc("AGENTS.md");
 
-    it("names M7 as the most recently closed milestone", () => {
+    it("keeps M7 in the narrative as a prior closed milestone", () => {
       expect(agents).toMatch(/Milestone 7\b/);
       expect(agents).toMatch(/M7\b/);
-      expect(agents).toMatch(/most recently closed milestone/i);
     });
 
     it("points to the M7 internal milestone and contract docs", () => {
@@ -220,10 +219,10 @@ describe("M7 closeout contract (NGX-312, NGX-319)", () => {
     });
   });
 
-  describe("doctor milestone marker (M7 closeout)", () => {
-    it("the cli reports the M7 closeout marker, not the M6 marker", () => {
+  describe("doctor milestone marker (M7 closeout superseded by M8)", () => {
+    it("the cli no longer pins the M7 closeout marker after the M8 closeout (NGX-330)", () => {
       const cli = fs.readFileSync(path.join(repoRoot, "src", "cli.ts"), "utf8");
-      expect(cli).toContain(
+      expect(cli).not.toContain(
         "Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete"
       );
       expect(cli).not.toMatch(

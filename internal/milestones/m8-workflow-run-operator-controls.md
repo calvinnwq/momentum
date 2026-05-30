@@ -1,8 +1,8 @@
 # Milestone 8: Workflow Run Operator Controls
 
-**Status:** Active / in flight (NGX-323 contract slice).
+**Status:** Closed out at NGX-330 (M8-07). All operator-control slices (NGX-323 through NGX-329) shipped, and the closeout slice (NGX-330) flipped the `doctor --json` milestone marker forward to the M8 closeout string (see "Closeout marker policy" below for the exact text).
 
-M8 has not been closed out yet. NGX-330 (M8-07) is the only slice authorized to flip the `doctor --json` milestone marker forward. Until then the marker stays pinned to the M7 closeout string (see "Closeout marker policy" below for the exact pinned text).
+M8 is closed out. NGX-330 (M8-07) flipped the `doctor --json` milestone marker forward to the M8 closeout string after the M8-00 through M8-06 implementation slices (NGX-323 through NGX-329) landed and the end-to-end operator-control smoke passed. Through every prior M8 slice the marker stayed pinned to the M7 closeout string (see "Closeout marker policy" below for the exact text).
 
 Milestone 8 layers operator-control CLI envelopes on top of the M7 OpenClaw coding-workflow backend substrate. M7 made the run state durable (`workflow_runs` / `workflow_steps` / `workflow_approvals` / `workflow_leases`); M8 makes the operator-visible run controls durable. M8 keeps the substrate wire-stable, adding only nullable monitor-advisory columns on `workflow_runs` so imports and operator mutations can persist the snapshot consumed by status / handoff / monitor views; it does not rename the M7 envelopes or take ownership of executor invocation away from the OpenClaw `coding-workflow-pipeline` skill. In particular, M8 defers live executor wrappers (around `gnhf-runner`, `gnhf-postflight`, `harness-delegate`, `no-mistakes-pipeline`, `model-evidence`, `project-progress-refresh`) to a later milestone unless a future explicit decision gate changes that boundary.
 
@@ -140,7 +140,7 @@ Each implementation slice writes failing tests first (TDD), keeps refusal codes 
 
 ## Closeout marker policy
 
-The `doctor --json` milestone string remains the M7 closeout marker `Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete` through the entirety of M8-00 (NGX-323) and every implementation slice through M8-06 (NGX-329). NGX-330 (M8-07) is the only slice authorized to flip the marker; until then, `doctor --json` continues to report M7 complete.
+The `doctor --json` milestone string stayed pinned to the M7 closeout marker `Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete` through the entirety of M8-00 (NGX-323) and every implementation slice through M8-06 (NGX-329). NGX-330 (M8-07) flipped the marker to the M8 closeout string `Milestone 8: workflow run operator controls (NGX-323, NGX-324, NGX-325, NGX-326, NGX-327, NGX-328, NGX-329, NGX-330) complete`; `doctor --json` now reports M8 complete.
 
 ## Composition with M3 / M4 / M5 / M6 / M7
 
