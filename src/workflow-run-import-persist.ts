@@ -11,9 +11,11 @@
  *     `(run_id, step_id)` for steps, `(run_id, boundary)` for approvals.
  *     Re-importing the same artifact directory is idempotent — running twice
  *     never produces duplicate rows and never corrupts existing state.
- *   - `monitor.json` stays advisory: the persistence layer never writes a
- *     `workflow_leases` row from monitor snapshots. Durable leases come from
- *     live executors / managed-step dispatch, not from static import.
+ *   - `monitor.json` stays advisory: the persistence layer stores its snapshot
+ *     in `workflow_runs` monitor advisory columns, but never writes a
+ *     `workflow_leases` row from monitor snapshots or lets them override
+ *     ledger-derived state. Durable leases come from live executors /
+ *     managed-step dispatch, not from static import.
  *   - Upserts are additive: a step / approval previously persisted from a
  *     different artifact tree is left alone if the current import doesn't
  *     reference it. This avoids destructive overwrites when a follow-up import

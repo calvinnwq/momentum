@@ -1,10 +1,12 @@
 /**
- * Read-only loaders for `workflow status` and `workflow handoff` (NGX-317).
+ * Read-only loaders for `workflow status`, `workflow handoff`, and
+ * `workflow run monitor` (NGX-317 / NGX-328).
  *
  * Reads durable substrate rows from `workflow_runs` / `workflow_steps` /
  * `workflow_approvals` / `workflow_leases` and composes them with the pure
  * `deriveWorkflowMonitorState` reducer from `src/workflow-monitor-state.ts`,
- * yielding a normalized monitor view (active step pick, lease freshness,
+ * including the durable `workflow_runs` monitor advisory snapshot, yielding a
+ * normalized monitor view (active step pick, lease freshness, drift,
  * next-action code, recovery taxonomy) suitable for OpenClaw tooling to
  * consume.
  *
