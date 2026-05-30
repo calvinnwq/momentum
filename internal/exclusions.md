@@ -67,8 +67,10 @@ Milestone status:
   (NGX-327), and `workflow run monitor` (NGX-328) —
   on top of the M7 substrate, adds per-run `.agent-workflows/<runId>/recovery.md`
   rendering plus the `WorkflowRun.needs_manual_recovery` durable flag
-  (NGX-327), and adds typed `runId` / `stepId` evidence linkage to
-  `evidence_records` (NGX-329) without reshaping any M3–M7 contract. The
+  (NGX-327), adds additive `workflow_runs` monitor-advisory columns for
+  import / operator-control snapshots (NGX-328), and adds typed `runId` /
+  `stepId` evidence linkage to `evidence_records` (NGX-329) without
+  renaming or replacing any M3–M7 contract. The
   `doctor --json` milestone marker stays pinned to the M7 closeout string
   through every M8 implementation slice; NGX-330 (M8-07) is the only slice
   authorized to flip it. Thin Momentum-side wrappers around the live

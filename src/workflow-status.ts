@@ -1,10 +1,12 @@
 /**
- * Read-only loaders for `workflow status` and `workflow handoff` (NGX-317).
+ * Read-only loaders for `workflow status`, `workflow handoff`, and
+ * `workflow run monitor` (NGX-317 / NGX-328).
  *
  * Reads durable substrate rows from `workflow_runs` / `workflow_steps` /
  * `workflow_approvals` / `workflow_leases` and composes them with the pure
  * `deriveWorkflowMonitorState` reducer from `src/workflow-monitor-state.ts`,
- * yielding a normalized monitor view (active step pick, lease freshness,
+ * including the durable `workflow_runs` monitor advisory snapshot, yielding a
+ * normalized monitor view (active step pick, lease freshness, drift,
  * next-action code, recovery taxonomy) suitable for OpenClaw tooling to
  * consume.
  *
@@ -44,6 +46,11 @@ export type WorkflowRunRow = {
   route: Record<string, unknown>;
   approvalBoundary: WorkflowApprovalBoundary | null;
   skillRevision: string | null;
+  monitorLastSeenState: string | null;
+  monitorTerminal: boolean | null;
+  monitorStep: string | null;
+  monitorLastSeenDigest: string | null;
+  monitorLastEmittedDigest: string | null;
   goalId: string | null;
   batchGroup: string | null;
   batchRole: string | null;
@@ -416,6 +423,11 @@ type RunRow = {
   route_json: string;
   approval_boundary: string | null;
   skill_revision: string | null;
+  monitor_last_seen_state: string | null;
+  monitor_terminal: number | null;
+  monitor_step: string | null;
+  monitor_last_seen_digest: string | null;
+  monitor_last_emitted_digest: string | null;
   goal_id: string | null;
   batch_group: string | null;
   batch_role: string | null;
@@ -484,6 +496,12 @@ function parseRunRow(row: RunRow): WorkflowRunRow {
     route: parseJsonRecord(row.route_json) ?? {},
     approvalBoundary: row.approval_boundary as WorkflowApprovalBoundary | null,
     skillRevision: row.skill_revision,
+    monitorLastSeenState: row.monitor_last_seen_state,
+    monitorTerminal:
+      row.monitor_terminal === null ? null : row.monitor_terminal === 1,
+    monitorStep: row.monitor_step,
+    monitorLastSeenDigest: row.monitor_last_seen_digest,
+    monitorLastEmittedDigest: row.monitor_last_emitted_digest,
     goalId: row.goal_id,
     batchGroup: row.batch_group,
     batchRole: row.batch_role,
@@ -589,13 +607,22 @@ function countStepsByState(
 }
 
 function monitorAdvisoryFromRun(run: WorkflowRunRow): WorkflowMonitorAdvisory | null {
-  // Until durable monitor advisory persistence ships, the monitor snapshot
-  // lives in `.agent-workflows/<runId>/monitor.json` and is not duplicated
-  // into SQLite. The CLI surface omits monitor drift comparison here; the
-  // import path still surfaces monitor advisories during ingest. Returning
-  // null keeps the reducer focused on substrate state.
-  void run;
-  return null;
+  if (
+    run.monitorLastSeenState === null &&
+    run.monitorTerminal === null &&
+    run.monitorStep === null &&
+    run.monitorLastSeenDigest === null &&
+    run.monitorLastEmittedDigest === null
+  ) {
+    return null;
+  }
+  return {
+    runState: run.monitorLastSeenState,
+    terminal: run.monitorTerminal,
+    step: run.monitorStep,
+    lastSeenDigest: run.monitorLastSeenDigest,
+    lastEmittedDigest: run.monitorLastEmittedDigest
+  };
 }
 
 function lastCheckpointFromSteps(

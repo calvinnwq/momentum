@@ -46,6 +46,14 @@ const WORKFLOW_RUN_IDENTITY_COLUMNS: ColumnSpec[] = [
   { name: "skill_revision", type: "TEXT" }
 ];
 
+const WORKFLOW_RUN_MONITOR_ADVISORY_COLUMNS: ColumnSpec[] = [
+  { name: "monitor_last_seen_state", type: "TEXT" },
+  { name: "monitor_terminal", type: "INTEGER" },
+  { name: "monitor_step", type: "TEXT" },
+  { name: "monitor_last_seen_digest", type: "TEXT" },
+  { name: "monitor_last_emitted_digest", type: "TEXT" }
+];
+
 const WORKFLOW_STEP_OPERATOR_COLUMNS: ColumnSpec[] = [
   { name: "operator_reason", type: "TEXT" },
   { name: "operator_actor", type: "TEXT" },
@@ -324,6 +332,11 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
   route_json TEXT NOT NULL DEFAULT '{}',
   approval_boundary TEXT,
   skill_revision TEXT,
+  monitor_last_seen_state TEXT,
+  monitor_terminal INTEGER,
+  monitor_step TEXT,
+  monitor_last_seen_digest TEXT,
+  monitor_last_emitted_digest TEXT,
   batch_group TEXT,
   batch_role TEXT,
   needs_manual_recovery INTEGER NOT NULL DEFAULT 0,
@@ -467,6 +480,9 @@ export function applyQueueMigrations(db: MomentumDb): void {
     db.exec(WORKFLOW_RUNS_DDL);
     if (tableExists(db, "workflow_runs")) {
       for (const column of WORKFLOW_RUN_IDENTITY_COLUMNS) {
+        ensureColumn(db, "workflow_runs", column);
+      }
+      for (const column of WORKFLOW_RUN_MONITOR_ADVISORY_COLUMNS) {
         ensureColumn(db, "workflow_runs", column);
       }
     }

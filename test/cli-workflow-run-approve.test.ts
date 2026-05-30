@@ -130,6 +130,33 @@ function seedStep(
   );
 }
 
+function readRunMonitor(dataDir: string, runId: string): {
+  monitor_last_seen_state: string | null;
+  monitor_terminal: number | null;
+  monitor_step: string | null;
+  monitor_last_seen_digest: string | null;
+  monitor_last_emitted_digest: string | null;
+} {
+  const db = openDb(dataDir);
+  try {
+    return db
+      .prepare(
+        `SELECT monitor_last_seen_state, monitor_terminal, monitor_step,
+                monitor_last_seen_digest, monitor_last_emitted_digest
+           FROM workflow_runs WHERE id = ?`
+      )
+      .get(runId) as {
+      monitor_last_seen_state: string | null;
+      monitor_terminal: number | null;
+      monitor_step: string | null;
+      monitor_last_seen_digest: string | null;
+      monitor_last_emitted_digest: string | null;
+    };
+  } finally {
+    db.close();
+  }
+}
+
 function seedApproval(
   db: MomentumDb,
   input: {
@@ -554,6 +581,15 @@ describe("momentum workflow run approve (NGX-325)", () => {
         kind: "postflight",
         order: 3
       });
+      db.prepare(
+        `UPDATE workflow_runs
+            SET monitor_last_seen_state = 'pending',
+                monitor_terminal = 0,
+                monitor_step = 'postflight',
+                monitor_last_seen_digest = 'stale-digest',
+                monitor_last_emitted_digest = 'stale-digest'
+          WHERE id = ?`
+      ).run(runId);
     } finally {
       db.close();
     }
@@ -595,6 +631,13 @@ describe("momentum workflow run approve (NGX-325)", () => {
     } finally {
       dbCheck.close();
     }
+    expect(readRunMonitor(dataDir, runId)).toMatchObject({
+      monitor_last_seen_state: "approved",
+      monitor_terminal: 0,
+      monitor_step: "preflight",
+      monitor_last_seen_digest: null,
+      monitor_last_emitted_digest: null
+    });
 
     const statusResult = await run([
       "workflow",

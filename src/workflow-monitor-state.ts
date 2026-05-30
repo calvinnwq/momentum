@@ -206,7 +206,11 @@ export function deriveWorkflowMonitorState(
   const blocked = runState === "blocked";
 
   const activeStep = pickActiveStep(input.steps);
-  const monitorDrift = classifyMonitorDrift(input.monitor ?? null, runState);
+  const monitorDrift = classifyMonitorDrift(
+    input.monitor ?? null,
+    runState,
+    activeStep
+  );
   const lastCheckpoint = input.lastCheckpoint ?? null;
 
   const checkpointFresh = isCheckpointFresh(
@@ -284,7 +288,8 @@ function toActive(step: WorkflowStepRecord): WorkflowMonitorActiveStep {
 
 function classifyMonitorDrift(
   monitor: WorkflowMonitorAdvisory | null,
-  actualState: WorkflowRunState
+  actualState: WorkflowRunState,
+  activeStep: WorkflowMonitorActiveStep | null
 ): WorkflowMonitorDrift | null {
   if (monitor === null) return null;
   const advisoryTerminal = monitor.terminal;
@@ -302,6 +307,12 @@ function classifyMonitorDrift(
     // Only flag a state-name drift when it is not redundant with the terminal-
     // booleans above. The blocked-during-running case is already handled by
     // lease classification (manual recovery), so do not double-report.
+    reason = "monitor_step_mismatch";
+  } else if (
+    monitor.step !== null &&
+    activeStep !== null &&
+    monitor.step !== activeStep.stepId
+  ) {
     reason = "monitor_step_mismatch";
   }
   return {

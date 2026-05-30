@@ -603,6 +603,44 @@ describe("deriveWorkflowMonitorState: monitor_step_mismatch drift", () => {
     expect(result.monitorDrift?.advisoryState).toBe("pending");
     expect(result.monitorDrift?.actualState).toBe("approved");
   });
+
+  it("flags monitor_step_mismatch when advisory step differs from active step", () => {
+    const steps: WorkflowStepRecord[] = [
+      step("preflight", "preflight", "succeeded", 0),
+      step("implementation", "implementation", "running", 1)
+    ];
+    const advisory: WorkflowMonitorAdvisory = {
+      runState: "running",
+      terminal: false,
+      step: "preflight",
+      lastSeenDigest: null,
+      lastEmittedDigest: null
+    };
+    const leases: WorkflowLeaseRecord[] = [
+      lease({
+        leaseKind: "managed-step",
+        expiresAt: 200_000,
+        releasedAt: null
+      })
+    ];
+    const result = deriveWorkflowMonitorState(
+      buildInput({
+        steps,
+        leases,
+        monitor: advisory,
+        lastCheckpoint: checkpoint("implementation", 9_000, "ledger"),
+        now: 10_000
+      })
+    );
+    expect(result.runState).toBe("running");
+    expect(result.activeStep?.stepId).toBe("implementation");
+    expect(result.needsRecoveryArtifact).toBe(true);
+    expect(result.recovery?.code).toBe("monitor_drift_stale");
+    expect(result.monitorDrift?.drifted).toBe(true);
+    expect(result.monitorDrift?.reason).toBe("monitor_step_mismatch");
+    expect(result.monitorDrift?.advisoryState).toBe("running");
+    expect(result.monitorDrift?.actualState).toBe("running");
+  });
 });
 
 describe("deriveWorkflowMonitorState: monitor_drift_stale recovery", () => {

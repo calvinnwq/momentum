@@ -87,7 +87,7 @@ Read-only machine envelope the skill's `monitor_runner.py` consumes. Emits a sta
 - Run identity, current run state, current step state, lease summary.
 - Machine-readable `nextAction` code from the M7 reducer's stable taxonomy (`no_action` / `advance_to_step` / `await_approval` / `resume_running` / `investigate_stale` / `clear_recovery` / `rerun_failed_step`).
 - Recovery classification from the M7 reducer's stable taxonomy (`stale_running_step` / `ghost_active_no_lease` / `manual_recovery_lease` / `monitor_drift_stale` / `failed_required_step`, or null when no recovery applies).
-- Evidence pointers once that envelope adopts the NGX-329 typed-linkage query, terminal / reportability flags.
+- Evidence pointers from the workflow detail loader's typed-linkage query, plus terminal / reportability flags.
 
 Unknown or malformed run ids refuse with `run_not_found` (or `run_id_required` when omitted). The command never mutates run / step / approval / lease state. It never schedules cron, never delivers to Discord, and never spawns a managed child.
 
@@ -99,7 +99,7 @@ The M8 envelopes reuse the M7 refusal taxonomy verbatim and extend it only with 
 - `workflow run approve` (NGX-325 additions): `invalid_boundary`, `approval_digest_mismatch`, `duplicate_approval`; it also consumes `manual_recovery_required` when the run-scoped recovery flag blocks approval.
 - `workflow run update-step` (NGX-326 additions): `invalid_transition`, `step_not_found`.
 - Run-scoped recovery (NGX-327 additions): `manual_recovery_required`, `not_flagged`, `recovery_clear_refused`.
-- `workflow run monitor` (NGX-328): no new codes beyond the shared set; malformed input refuses with `run_id_required` / `run_not_found` exactly like the M7 read-only envelopes.
+- `workflow run monitor` (NGX-328): adds `data_dir_failed`; malformed input refuses with `run_id_required` / `run_not_found` exactly like the M7 read-only envelopes.
 
 Refusal codes are stable strings; existing codes never get renamed, narrowed, or merged. Implementation slices that need a new code add it here first.
 
@@ -122,7 +122,7 @@ M8 adds optional `runId` / `stepId` linkage to the existing M5 `evidence_records
 - Migration is additive. Existing evidence rows continue to read with null `runId` / `stepId` linkage. Non-workflow evidence rows continue to carry null linkage.
 - Ingest from `.agent-workflows/<runId>/` attaches each artifact to the owning `runId`; ledger step events also attach the originating `stepId`, while run-scoped plan / approval artifacts carry null `stepId`.
 - Idempotent replay can attach missing `runId` / `stepId` linkage to an existing unlinked row, but never overwrites non-null linkage.
-- Typed pointers currently surface through `evidence ingest` / `evidence list` record JSON and through `workflow status` / `workflow handoff` detail evidence without breaking those envelopes' existing JSON field names. Legacy rows with null `run_id` continue to surface through the artifact-path fallback where those detail envelopes support it; `workflow run list` and `workflow run monitor` can adopt the same typed-linkage query in their own slices.
+- Typed pointers currently surface through `evidence ingest` / `evidence list` record JSON, through `workflow status` / `workflow handoff` detail evidence, and through `workflow run monitor` evidence without breaking those envelopes' existing JSON field names. Legacy rows with null `run_id` continue to surface through the artifact-path fallback where those detail envelopes support it; `workflow run list` can adopt the same typed-linkage query in its own slice.
 
 The M5 source-adapter contract at [`source-adapters.md`](source-adapters.md) is unchanged by this extension. The M6 external apply contract at [`intent-apply.md`](intent-apply.md) is also unchanged — `evidence_records` does not influence the apply lifecycle.
 
@@ -159,7 +159,7 @@ The M3 daemon (`daemon start` / `daemon stop` / `daemon status` / `recovery clea
 - **M4 runners and policy.** Unchanged. M8 envelopes never spawn a managed child or a runner; live executor invocation stays inside the skill.
 - **M5 source / evidence / intent.** Source and intent schemas stay unchanged, and evidence CLI semantics stay wire-stable. M8 adds only the additive nullable `run_id` / `step_id` linkage columns and lookup index on `evidence_records`.
 - **M6 external apply.** Unchanged. `intent apply --external-apply`, `intent_apply_policy`, the `intent_apply_in_progress` CAS result, the comment-only default, the idempotency marker shape, and the `blocked` non-replay state stay wire-stable. M8 envelopes never issue an external write directly.
-- **M7 substrate.** Unchanged. `workflow_runs` / `workflow_steps` / `workflow_approvals` / `workflow_leases`, `deriveWorkflowRunState`, `deriveWorkflowMonitorState`, `classifyWorkflowLease`, the `WorkflowStepExecutor` boundary, the deterministic fake executors, and the read-only `workflow import` / `workflow status` / `workflow handoff` envelopes all stay wire-stable. M8 reuses them; it does not reshape them.
+- **M7 substrate.** Wire-stable. `workflow_runs` / `workflow_steps` / `workflow_approvals` / `workflow_leases`, `deriveWorkflowRunState`, `deriveWorkflowMonitorState`, `classifyWorkflowLease`, the `WorkflowStepExecutor` boundary, the deterministic fake executors, and the read-only `workflow import` / `workflow status` / `workflow handoff` envelopes all stay compatible. M8 reuses them and adds only nullable monitor-advisory columns on `workflow_runs` so imports and operator mutations can persist the snapshot consumed by status / handoff / monitor views; it does not rename or replace the substrate.
 
 The M7 closeout regression matrix at [`../regression-matrix.md`](../regression-matrix.md) and the M7 milestone narrative at [`../milestones/m7-openclaw-coding-workflow-backend.md`](../milestones/m7-openclaw-coding-workflow-backend.md) stay the source of truth for the substrate guard. NGX-330 (M8-07) extends the matrix with the new operator-control failure modes M8 closes.
 

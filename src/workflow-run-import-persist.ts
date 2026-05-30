@@ -11,9 +11,11 @@
  *     `(run_id, step_id)` for steps, `(run_id, boundary)` for approvals.
  *     Re-importing the same artifact directory is idempotent — running twice
  *     never produces duplicate rows and never corrupts existing state.
- *   - `monitor.json` stays advisory: the persistence layer never writes a
- *     `workflow_leases` row from monitor snapshots. Durable leases come from
- *     live executors / managed-step dispatch, not from static import.
+ *   - `monitor.json` stays advisory: the persistence layer stores its snapshot
+ *     in `workflow_runs` monitor advisory columns, but never writes a
+ *     `workflow_leases` row from monitor snapshots or lets them override
+ *     ledger-derived state. Durable leases come from live executors /
+ *     managed-step dispatch, not from static import.
  *   - Upserts are additive: a step / approval previously persisted from a
  *     different artifact tree is left alone if the current import doesn't
  *     reference it. This avoids destructive overwrites when a follow-up import
@@ -67,7 +69,9 @@ export function persistWorkflowRunImport(
   options: PersistWorkflowRunImportOptions = {}
 ): PersistWorkflowRunImportSummary {
   const now = options.now ?? Date.now();
-  const { run, steps, approvals } = result;
+  const { run, steps, approvals, monitor } = result;
+  const monitorTerminal =
+    monitor?.terminal == null ? null : monitor.terminal ? 1 : 0;
 
   db.exec("BEGIN");
   try {
@@ -121,8 +125,10 @@ export function persistWorkflowRunImport(
          id, state, source, source_artifact_path, plan_json,
          repo_path, objective, issue_scope_json, route_json,
          approval_boundary, skill_revision,
+         monitor_last_seen_state, monitor_terminal, monitor_step,
+         monitor_last_seen_digest, monitor_last_emitted_digest,
          created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          state = excluded.state,
          source = excluded.source,
@@ -134,6 +140,11 @@ export function persistWorkflowRunImport(
          route_json = excluded.route_json,
          approval_boundary = excluded.approval_boundary,
          skill_revision = excluded.skill_revision,
+         monitor_last_seen_state = excluded.monitor_last_seen_state,
+         monitor_terminal = excluded.monitor_terminal,
+         monitor_step = excluded.monitor_step,
+         monitor_last_seen_digest = excluded.monitor_last_seen_digest,
+         monitor_last_emitted_digest = excluded.monitor_last_emitted_digest,
          updated_at = excluded.updated_at`
     ).run(
       run.runId,
@@ -147,6 +158,11 @@ export function persistWorkflowRunImport(
       JSON.stringify(run.route),
       approvalBoundary,
       run.skillRevision,
+      monitor?.runState ?? null,
+      monitorTerminal,
+      monitor?.step ?? null,
+      monitor?.lastSeenDigest ?? null,
+      monitor?.lastEmittedDigest ?? null,
       now,
       now
     );

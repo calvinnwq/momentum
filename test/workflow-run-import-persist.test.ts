@@ -155,6 +155,11 @@ type WorkflowRunRow = {
   route_json: string;
   approval_boundary: string | null;
   skill_revision: string | null;
+  monitor_last_seen_state: string | null;
+  monitor_terminal: number | null;
+  monitor_step: string | null;
+  monitor_last_seen_digest: string | null;
+  monitor_last_emitted_digest: string | null;
   needs_manual_recovery: number;
   created_at: number;
   updated_at: number;
@@ -263,6 +268,11 @@ describe("persistWorkflowRunImport", () => {
       expect(runRow.skill_revision).toBe(
         "abc123def4560000000000000000000000000000000000000000000000000000"
       );
+      expect(runRow.monitor_last_seen_state).toBeNull();
+      expect(runRow.monitor_terminal).toBeNull();
+      expect(runRow.monitor_step).toBeNull();
+      expect(runRow.monitor_last_seen_digest).toBeNull();
+      expect(runRow.monitor_last_emitted_digest).toBeNull();
       expect(runRow.needs_manual_recovery).toBe(0);
       expect(runRow.created_at).toBe(1_700_000_000);
       expect(runRow.updated_at).toBe(1_700_000_000);
@@ -316,6 +326,46 @@ describe("persistWorkflowRunImport", () => {
       expect(approval.artifact_digest).toBe(expectedDigest);
       expect(approval.recorded_at).toBe(Date.parse("2026-05-17T09:00:00Z"));
       expect(approval.discharged_at).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("persists monitor advisory fields for durable status loaders", () => {
+    const dataDir = makeTempDir("momentum-data-");
+    const artifactRoot = makeTempDir();
+    const runId = "cwfp-monitor-advisory";
+    const runDir = path.join(artifactRoot, runId);
+
+    writeJsonFile(path.join(runDir, "plan.json"), basePlan(runId));
+    writeLedger(path.join(runDir, "ledger.jsonl"), [
+      {
+        runId,
+        step: "implementation",
+        status: "started",
+        ts: "2026-05-29T00:00:00Z"
+      }
+    ]);
+    writeJsonFile(path.join(runDir, "monitor.json"), {
+      lastSeenState: "succeeded",
+      terminal: true,
+      step: "implementation",
+      lastSeenDigest: "stale-digest",
+      lastEmittedDigest: "emitted-digest"
+    });
+
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunImport(db, parseOrThrow(runDir), {
+        now: 1_700_000_000
+      });
+
+      const runRow = readWorkflowRun(db, runId);
+      expect(runRow.monitor_last_seen_state).toBe("succeeded");
+      expect(runRow.monitor_terminal).toBe(1);
+      expect(runRow.monitor_step).toBe("implementation");
+      expect(runRow.monitor_last_seen_digest).toBe("stale-digest");
+      expect(runRow.monitor_last_emitted_digest).toBe("emitted-digest");
     } finally {
       db.close();
     }

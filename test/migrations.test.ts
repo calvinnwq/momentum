@@ -754,6 +754,11 @@ describe("applyQueueMigrations", () => {
           "source",
           "source_artifact_path",
           "plan_json",
+          "monitor_last_seen_state",
+          "monitor_terminal",
+          "monitor_step",
+          "monitor_last_seen_digest",
+          "monitor_last_emitted_digest",
           "batch_group",
           "batch_role",
           "needs_manual_recovery",
@@ -1148,7 +1153,9 @@ describe("applyQueueMigrations", () => {
         const row = db
           .prepare(
             `SELECT repo_path, objective, issue_scope_json, route_json,
-                    approval_boundary, skill_revision
+                    approval_boundary, skill_revision,
+                    monitor_last_seen_state, monitor_terminal, monitor_step,
+                    monitor_last_seen_digest, monitor_last_emitted_digest
                FROM workflow_runs WHERE id = 'cwfp-defaults'`
           )
           .get() as Record<string, unknown>;
@@ -1158,6 +1165,11 @@ describe("applyQueueMigrations", () => {
         expect(row["route_json"]).toBe("{}");
         expect(row["approval_boundary"]).toBeNull();
         expect(row["skill_revision"]).toBeNull();
+        expect(row["monitor_last_seen_state"]).toBeNull();
+        expect(row["monitor_terminal"]).toBeNull();
+        expect(row["monitor_step"]).toBeNull();
+        expect(row["monitor_last_seen_digest"]).toBeNull();
+        expect(row["monitor_last_emitted_digest"]).toBeNull();
       } finally {
         db.close();
       }
@@ -1218,7 +1230,12 @@ describe("applyQueueMigrations", () => {
           "issue_scope_json",
           "route_json",
           "approval_boundary",
-          "skill_revision"
+          "skill_revision",
+          "monitor_last_seen_state",
+          "monitor_terminal",
+          "monitor_step",
+          "monitor_last_seen_digest",
+          "monitor_last_emitted_digest"
         ]) {
           expect(cols).toContain(col);
         }
