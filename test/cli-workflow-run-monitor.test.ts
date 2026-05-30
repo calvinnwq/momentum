@@ -242,6 +242,31 @@ describe("momentum workflow run monitor (NGX-328)", () => {
     });
   });
 
+  it("returns data_dir_failed when the database cannot be opened", async () => {
+    const dataDir = path.join(makeTempDir(), "not-a-directory");
+    fs.writeFileSync(dataDir, "not a directory");
+
+    const result = await run([
+      "workflow",
+      "run",
+      "monitor",
+      "cwfp-db-failed",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "workflow run monitor",
+      code: "data_dir_failed",
+      dataDir,
+      runId: "cwfp-db-failed"
+    });
+  });
+
   it("emits a stable JSON envelope for a healthy running step", async () => {
     const dataDir = makeTempDir();
     const runId = "cwfp-running";

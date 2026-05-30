@@ -3682,12 +3682,20 @@ function workflowRunMonitor(parsed: ParsedFlags, io: CliIo): number {
     });
   }
 
-  const db = openDb(dataDir);
   let envelope: WorkflowMonitorEnvelope | null;
+  let db: MomentumDb | undefined;
   try {
+    db = openDb(dataDir);
     envelope = loadWorkflowMonitorEnvelope(db, runId);
+  } catch (err) {
+    return emitWorkflowRunMonitorFailure(parsed, io, {
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err),
+      dataDir,
+      runId
+    });
   } finally {
-    db.close();
+    db?.close();
   }
 
   if (envelope === null) {
