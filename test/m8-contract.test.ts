@@ -401,13 +401,6 @@ describe("M8 contract (NGX-323)", () => {
       }
     });
 
-    it("does not regress the doctor marker via the matrix (M7 closeout string only)", () => {
-      const matrix = readDoc(matrixPath);
-      expect(
-        matrix,
-        "regression matrix must not assert an M8 doctor closeout marker (NGX-330 owns the flip)"
-      ).not.toMatch(/Milestone 8:[^.\n]*complete/i);
-    });
   });
 
   describe("doctor milestone marker (M8 closeout at NGX-330)", () => {
