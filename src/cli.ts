@@ -2985,6 +2985,8 @@ function workflowRunApprove(parsed: ParsedFlags, io: CliIo): number {
         "UPDATE workflow_runs SET state = 'approved', updated_at = ? WHERE id = ? AND state = 'pending'"
       ).run(recordedAt, runId);
 
+      refreshWorkflowRunMonitorAdvisory(db, runId, recordedAt);
+
       db.exec("COMMIT");
     } catch (error) {
       try {
@@ -3338,33 +3340,18 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
         leases: leaseRecords,
         now
       });
-      const monitorState = deriveWorkflowMonitorState({
-        runId,
-        steps: stepRecords,
-        leases: leaseRecords,
-        monitor: null,
-        lastCheckpoint: null,
-        now
-      });
+      refreshWorkflowRunMonitorAdvisory(db, runId, now);
       const runFinishedAt = isTerminalRunState(runState) ? now : null;
       db.prepare(
         `UPDATE workflow_runs
            SET state = ?,
                finished_at = COALESCE(finished_at, ?),
-               updated_at = ?,
-               monitor_last_seen_state = ?,
-               monitor_terminal = ?,
-               monitor_step = ?,
-               monitor_last_seen_digest = NULL,
-               monitor_last_emitted_digest = NULL
+               updated_at = ?
          WHERE id = ?`
       ).run(
         runState,
         runFinishedAt,
         now,
-        monitorState.runState,
-        monitorState.terminal ? 1 : 0,
-        monitorState.activeStep?.stepId ?? null,
         runId
       );
 
@@ -3505,6 +3492,40 @@ function loadWorkflowLeaseRecords(
   }));
 }
 
+function refreshWorkflowRunMonitorAdvisory(
+  db: MomentumDb,
+  runId: string,
+  now: number
+): WorkflowMonitorState {
+  const stepRecords = loadWorkflowStepRecords(db, runId);
+  const leaseRecords = loadWorkflowLeaseRecords(db, runId);
+  const monitorState = deriveWorkflowMonitorState({
+    runId,
+    steps: stepRecords,
+    leases: leaseRecords,
+    monitor: null,
+    lastCheckpoint: null,
+    now
+  });
+  db.prepare(
+    `UPDATE workflow_runs
+       SET updated_at = ?,
+           monitor_last_seen_state = ?,
+           monitor_terminal = ?,
+           monitor_step = ?,
+           monitor_last_seen_digest = NULL,
+           monitor_last_emitted_digest = NULL
+     WHERE id = ?`
+  ).run(
+    now,
+    monitorState.runState,
+    monitorState.terminal ? 1 : 0,
+    monitorState.activeStep?.stepId ?? null,
+    runId
+  );
+  return monitorState;
+}
+
 function emitWorkflowRunUpdateStepFailure(
   parsed: ParsedFlags,
   io: CliIo,
@@ -3564,6 +3585,9 @@ function workflowRunClearRecovery(parsed: ParsedFlags, io: CliIo): number {
   let result: ClearWorkflowRunManualRecoveryGuardedResult;
   try {
     result = clearWorkflowRunManualRecoveryGuarded(db, { runId });
+    if (result.ok) {
+      refreshWorkflowRunMonitorAdvisory(db, runId, result.clearedAt);
+    }
   } finally {
     db.close();
   }

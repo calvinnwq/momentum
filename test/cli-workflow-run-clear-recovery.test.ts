@@ -151,6 +151,33 @@ function readRecoveryState(
   }
 }
 
+function readRunMonitor(dataDir: string, runId: string): {
+  monitor_last_seen_state: string | null;
+  monitor_terminal: number | null;
+  monitor_step: string | null;
+  monitor_last_seen_digest: string | null;
+  monitor_last_emitted_digest: string | null;
+} {
+  const db = openDb(dataDir);
+  try {
+    return db
+      .prepare(
+        `SELECT monitor_last_seen_state, monitor_terminal, monitor_step,
+                monitor_last_seen_digest, monitor_last_emitted_digest
+           FROM workflow_runs WHERE id = ?`
+      )
+      .get(runId) as {
+      monitor_last_seen_state: string | null;
+      monitor_terminal: number | null;
+      monitor_step: string | null;
+      monitor_last_seen_digest: string | null;
+      monitor_last_emitted_digest: string | null;
+    };
+  } finally {
+    db.close();
+  }
+}
+
 describe("momentum workflow run clear-recovery (NGX-327)", () => {
   it("requires a <run-id>", async () => {
     const dataDir = makeTempDir();
@@ -294,6 +321,15 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
         state: "succeeded",
         order: 1
       });
+      db.prepare(
+        `UPDATE workflow_runs
+            SET monitor_last_seen_state = 'running',
+                monitor_terminal = 0,
+                monitor_step = 'stale-step',
+                monitor_last_seen_digest = 'stale-digest',
+                monitor_last_emitted_digest = 'stale-digest'
+          WHERE id = ?`
+      ).run(runId);
     } finally {
       db.close();
     }
@@ -321,6 +357,33 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
     expect(state.needs_manual_recovery).toBe(0);
     expect(state.manual_recovery_reason).toBeNull();
     expect(state.manual_recovery_at).toBeNull();
+    expect(readRunMonitor(dataDir, runId)).toMatchObject({
+      monitor_last_seen_state: "succeeded",
+      monitor_terminal: 1,
+      monitor_step: null,
+      monitor_last_seen_digest: null,
+      monitor_last_emitted_digest: null
+    });
+
+    const monitorResult = await run([
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(monitorResult.code).toBe(0);
+    const monitorPayload = JSON.parse(monitorResult.stdout) as Record<
+      string,
+      unknown
+    >;
+    expect(monitorPayload).toMatchObject({
+      ok: true,
+      disposition: "report",
+      reportReason: "terminal_succeeded"
+    });
   });
 
   it("clears in text mode and reports the previous reason", async () => {
