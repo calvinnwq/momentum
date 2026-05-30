@@ -2215,8 +2215,8 @@ function emitWorkflowImportSuccess(
 ): number {
   const { summary, importResult } = result;
   // `needsManualRecovery` mirrors the durable flag (consistent with the
-  // status/handoff/list envelopes); `recovery` surfaces the classification this
-  // import freshly auto-set, when it set one.
+  // status/handoff/list/monitor envelopes); `recovery` surfaces the classification
+  // this import freshly auto-set, when it set one.
   const needsManualRecovery =
     result.recoveryState?.needsManualRecovery ?? false;
   const recoveryOutcome = result.recovery.ok ? result.recovery : null;

@@ -121,7 +121,7 @@ The M3 `goals.needs_manual_recovery` flag, the `recovery.md` artifact for goals,
 
 ### Monitor / recovery reducer (NGX-316, M7-04)
 
-The pure `deriveWorkflowMonitorState` reducer (`src/workflow-monitor-state.ts`) is the substrate-level classifier the M7 CLI envelopes and the per-run `recovery.md` renderer compose with. It takes the durable `workflow_steps` / `workflow_leases` rows, an optional `monitor.json` advisory snapshot, an optional last-checkpoint pointer, and the current clock, and returns:
+The pure `deriveWorkflowMonitorState` reducer (`src/workflow-monitor-state.ts`) is the substrate-level classifier the M7 CLI envelopes, the M8 `workflow run monitor` machine envelope, and the per-run `recovery.md` renderer compose with. It takes the durable `workflow_steps` / `workflow_leases` rows, an optional `monitor.json` advisory snapshot, an optional last-checkpoint pointer, and the current clock, and returns:
 
 - The lease-aware run state (re-exported from `deriveWorkflowRunState`), the `terminal` / `blocked` booleans, and the picked active step (running > blocked > required-failed > approved > pending).
 - A per-lease `WorkflowMonitorLeaseView` carrying the freshness classification, holder, and expiry.
