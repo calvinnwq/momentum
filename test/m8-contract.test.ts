@@ -327,6 +327,101 @@ describe("M8 contract (NGX-323)", () => {
     });
   });
 
+  describe("internal/regression-matrix.md M8 operator-control extension (NGX-330)", () => {
+    const matrixPath = "internal/regression-matrix.md";
+
+    it("preserves the five M7 monitor failure-mode rows", () => {
+      const matrix = readDoc(matrixPath);
+      for (const heading of [
+        "Stale monitor state",
+        "Lost managed task with completed ledger",
+        "Terminal external evidence winning over local drift",
+        "Blocked stale step",
+        "No ghost active run",
+      ]) {
+        expect(
+          matrix,
+          `regression matrix should preserve the M7 row "${heading}"`
+        ).toContain(heading);
+      }
+    });
+
+    it("covers the six M8 operator-control failure modes the milestone eliminates", () => {
+      const matrix = readDoc(matrixPath);
+      for (const heading of [
+        "Run inventory by directory scan",
+        "Approval reconstruction from prose",
+        "Ledger hand-edits to finalize a step",
+        "Monitor-tick prose parsing",
+        "Recovery state invisible to operators",
+        "Path-only evidence inference",
+      ]) {
+        expect(
+          matrix,
+          `regression matrix should include an M8 row for "${heading}"`
+        ).toContain(heading);
+      }
+    });
+
+    it("names every M8 operator-control envelope that owns an invariant", () => {
+      const matrix = readDoc(matrixPath);
+      for (const envelope of [
+        "workflow run list",
+        "workflow run approve",
+        "workflow run update-step",
+        "workflow run clear-recovery",
+        "workflow run monitor",
+      ]) {
+        expect(
+          matrix,
+          `regression matrix should reference the "${envelope}" envelope`
+        ).toContain(envelope);
+      }
+    });
+
+    it("cites the M8 substrate owners plus the durable recovery flag and per-run artifact", () => {
+      const matrix = readDoc(matrixPath);
+      for (const owner of [
+        "src/cli.ts",
+        "src/workflow-run-recovery.ts",
+        "src/workflow-monitor-envelope.ts",
+        "src/workflow-recovery-artifact.ts",
+        "src/evidence-workflow.ts",
+      ]) {
+        expect(matrix, `regression matrix should cite ${owner} as an M8 owner`).toContain(
+          owner
+        );
+      }
+      expect(matrix).toContain("needs_manual_recovery");
+      expect(matrix).toContain("recovery.md");
+    });
+
+    it("names the NGX-330 end-to-end operator-control smoke as M8 evidence", () => {
+      const matrix = readDoc(matrixPath);
+      expect(matrix).toContain("NGX-330");
+      expect(matrix).toContain("Milestone 8 operator-control end-to-end smoke");
+      expect(matrix).toMatch(/ghost-active run/i);
+    });
+
+    it("links the M8 milestone narrative and the operator-controls contract", () => {
+      const matrix = readDoc(matrixPath);
+      for (const link of [
+        "milestones/m8-workflow-run-operator-controls.md",
+        "contracts/workflow-operator-controls.md",
+      ]) {
+        expect(matrix, `regression matrix should link to ${link}`).toContain(link);
+      }
+    });
+
+    it("does not regress the doctor marker via the matrix (M7 closeout string only)", () => {
+      const matrix = readDoc(matrixPath);
+      expect(
+        matrix,
+        "regression matrix must not assert an M8 doctor closeout marker (NGX-330 owns the flip)"
+      ).not.toMatch(/Milestone 8:[^.\n]*complete/i);
+    });
+  });
+
   describe("doctor milestone marker (M7 closeout preserved through M8-00)", () => {
     it("the cli still reports the M7 closeout marker (the M8 marker flip is deferred to NGX-330)", () => {
       const cli = fs.readFileSync(path.join(repoRoot, "src", "cli.ts"), "utf8");
