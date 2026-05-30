@@ -206,6 +206,33 @@ function readRunState(dataDir: string, runId: string): string {
   }
 }
 
+function readRunMonitor(dataDir: string, runId: string): {
+  monitor_last_seen_state: string | null;
+  monitor_terminal: number | null;
+  monitor_step: string | null;
+  monitor_last_seen_digest: string | null;
+  monitor_last_emitted_digest: string | null;
+} {
+  const db = openDb(dataDir);
+  try {
+    return db
+      .prepare(
+        `SELECT monitor_last_seen_state, monitor_terminal, monitor_step,
+                monitor_last_seen_digest, monitor_last_emitted_digest
+           FROM workflow_runs WHERE id = ?`
+      )
+      .get(runId) as {
+      monitor_last_seen_state: string | null;
+      monitor_terminal: number | null;
+      monitor_step: string | null;
+      monitor_last_seen_digest: string | null;
+      monitor_last_emitted_digest: string | null;
+    };
+  } finally {
+    db.close();
+  }
+}
+
 function readRunRecoveryState(
   dataDir: string,
   runId: string
@@ -583,6 +610,87 @@ describe("momentum workflow run update-step (NGX-326)", () => {
     });
     expect(readStep(dataDir, runId, "no-mistakes").state).toBe("failed");
     expect(readRunState(dataDir, runId)).toBe("failed");
+  });
+
+  it("refreshes monitor advisory state after an operator step update", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-refresh-monitor";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "running" });
+      seedStep(db, {
+        runId,
+        stepId: "preflight",
+        kind: "preflight",
+        state: "running",
+        order: 0
+      });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "approved",
+        order: 1
+      });
+      db.prepare(
+        `UPDATE workflow_runs
+            SET monitor_last_seen_state = 'approved',
+                monitor_terminal = 0,
+                monitor_step = 'preflight',
+                monitor_last_seen_digest = 'stale-digest',
+                monitor_last_emitted_digest = 'stale-digest'
+          WHERE id = ?`
+      ).run(runId);
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "update-step",
+      runId,
+      "--step",
+      "preflight",
+      "--state",
+      "succeeded",
+      "--reason",
+      "operator advanced preflight",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    expect(readRunState(dataDir, runId)).toBe("approved");
+    expect(readRunMonitor(dataDir, runId)).toMatchObject({
+      monitor_last_seen_state: "approved",
+      monitor_terminal: 0,
+      monitor_step: "implementation",
+      monitor_last_seen_digest: null,
+      monitor_last_emitted_digest: null
+    });
+
+    const monitorResult = await run([
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(monitorResult.code).toBe(0);
+    const payload = JSON.parse(monitorResult.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      disposition: "wait",
+      reportable: false,
+      reportReason: "in_progress"
+    });
+    expect(payload["monitorDrift"]).toMatchObject({
+      drifted: false,
+      reason: null
+    });
   });
 
   it("blocks a running step and derives a blocked run", async () => {

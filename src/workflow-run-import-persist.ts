@@ -69,11 +69,7 @@ export function persistWorkflowRunImport(
   const now = options.now ?? Date.now();
   const { run, steps, approvals, monitor } = result;
   const monitorTerminal =
-    monitor?.terminal === null || monitor?.terminal === undefined
-      ? null
-      : monitor.terminal
-        ? 1
-        : 0;
+    monitor?.terminal == null ? null : monitor.terminal ? 1 : 0;
 
   db.exec("BEGIN");
   try {

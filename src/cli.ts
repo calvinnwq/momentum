@@ -3338,16 +3338,35 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
         leases: leaseRecords,
         now
       });
-      if (runState !== runRow.state) {
-        const runFinishedAt = isTerminalRunState(runState) ? now : null;
-        db.prepare(
-          `UPDATE workflow_runs
-             SET state = ?,
-                 finished_at = COALESCE(?, finished_at),
-                 updated_at = ?
-           WHERE id = ?`
-        ).run(runState, runFinishedAt, now, runId);
-      }
+      const monitorState = deriveWorkflowMonitorState({
+        runId,
+        steps: stepRecords,
+        leases: leaseRecords,
+        monitor: null,
+        lastCheckpoint: null,
+        now
+      });
+      const runFinishedAt = isTerminalRunState(runState) ? now : null;
+      db.prepare(
+        `UPDATE workflow_runs
+           SET state = ?,
+               finished_at = COALESCE(?, finished_at),
+               updated_at = ?,
+               monitor_last_seen_state = ?,
+               monitor_terminal = ?,
+               monitor_step = ?,
+               monitor_last_seen_digest = NULL,
+               monitor_last_emitted_digest = NULL
+         WHERE id = ?`
+      ).run(
+        runState,
+        runFinishedAt,
+        now,
+        monitorState.runState,
+        monitorState.terminal ? 1 : 0,
+        monitorState.activeStep?.stepId ?? null,
+        runId
+      );
 
       db.exec("COMMIT");
 
