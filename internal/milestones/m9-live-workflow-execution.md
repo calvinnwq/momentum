@@ -1,6 +1,6 @@
 # Milestone 9: Live Workflow Execution
 
-**Status:** Draft / candidate. M9 is not active while M8 is in flight. It becomes active only after M8 closeout and an explicit decision to promote this contract.
+**Status:** Draft / candidate. M9 is not active after M8 closeout; it becomes active only after an explicit decision to promote this contract.
 
 Milestone 9 is the proposed point where Momentum starts dogfooding real repo work through Momentum-owned live execution rather than using the OpenClaw `coding-workflow-pipeline` skill as the live run loop.
 

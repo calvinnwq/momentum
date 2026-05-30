@@ -71,9 +71,9 @@ mock Linear endpoints (no real `api.linear.app` calls — see
 [internal/contracts/intent-apply.md](contracts/intent-apply.md) for the test
 boundary that M6 inherits):
 
-- the `doctor --json` milestone marker reads the M7 closeout string
-  (NGX-302 flipped the marker forward from M5 to M6 and NGX-319 flipped it
-  again from M6 to M7 — see
+- the `doctor --json` milestone marker reads the M8 closeout string
+  (NGX-302 flipped the marker from M5 to M6, NGX-319 from M6 to M7, and
+  NGX-330 from M7 to M8 — see
   [internal/milestones/m7-openclaw-coding-workflow-backend.md](milestones/m7-openclaw-coding-workflow-backend.md)).
 - workflow evidence ingestion through `momentum evidence ingest` and
   `evidence list` (see [docs/evidence-commands.md](../docs/evidence-commands.md)).
@@ -106,9 +106,9 @@ request counts.
 
 Coverage:
 
-- the `doctor --json` milestone marker reads the M7 closeout string
-  (NGX-302 flipped the marker forward from M5 to M6, then NGX-319 flipped it
-  again from M6 to M7).
+- the `doctor --json` milestone marker reads the M8 closeout string
+  (NGX-302 flipped the marker from M5 to M6, NGX-319 from M6 to M7, then
+  NGX-330 from M7 to M8).
 - happy-path external apply: a pending `source_satisfied` intent is applied
   through `intent apply --external-apply` against the mock, producing an
   `applied` intent, a deterministic idempotency marker matching
@@ -228,6 +228,34 @@ Run locally via the targeted vitest filter:
 
 ```
 pnpm vitest run test/smoke.test.ts -t "end-to-end coding workflow"
+```
+
+## Milestone 8 operator-control end-to-end smoke coverage (NGX-330)
+
+The smoke extends the built-CLI workflow fixture coverage across the M8
+operator-control envelopes without invoking live executors, Discord, GitHub,
+Linear, or external tracker writes. It reuses the M7 fake-executor fixture and
+imports through the public `workflow import` CLI between durable state changes.
+
+Coverage:
+
+- operator-control happy path: a fresh `.agent-workflows/cwfp-<hex>/` fixture is
+  imported, discovered through `workflow run list`, approved through
+  `workflow run approve`, driven to terminal success through the fake executors,
+  and inspected through `workflow run monitor`; after `evidence ingest`, both
+  monitor and status detail evidence carry typed `runId` linkage, with ledger
+  entries also carrying `stepId` linkage.
+- ghost-active recovery path: a started implementation step with no terminal
+  ledger evidence or lease imports as `needsManualRecovery: true`, renders
+  per-run `recovery.md`, reports `ghost_active_no_lease` through
+  `workflow run monitor`, refuses `workflow run clear-recovery` while the
+  blocking condition persists, resolves via `workflow run update-step`, and then
+  clears recovery explicitly while preserving the audit artifact.
+
+Run locally via the targeted vitest filter:
+
+```
+pnpm vitest run test/smoke.test.ts -t "operator-control end-to-end smoke"
 ```
 
 ## Test boundary

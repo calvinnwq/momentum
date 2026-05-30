@@ -13,29 +13,29 @@ Momentum is built milestone by milestone. Each milestone has a single durable sh
 | Milestone 5 | Source Adapters and Evidence Sync | Complete | [m5-source-adapters.md](milestones/m5-source-adapters.md) |
 | Milestone 6 | Policy-Gated External Apply | Complete | [m6-external-apply.md](milestones/m6-external-apply.md) |
 | Milestone 7 | OpenClaw Coding Workflow Backend | Complete | [m7-openclaw-coding-workflow-backend.md](milestones/m7-openclaw-coding-workflow-backend.md) |
-| Milestone 8 | Workflow Run Operator Controls | Active / in flight | [m8-workflow-run-operator-controls.md](milestones/m8-workflow-run-operator-controls.md) |
+| Milestone 8 | Workflow Run Operator Controls | Complete | [m8-workflow-run-operator-controls.md](milestones/m8-workflow-run-operator-controls.md) |
 | Milestone 9 | Live Workflow Execution | Draft / candidate | [m9-live-workflow-execution.md](milestones/m9-live-workflow-execution.md) |
 
-The `doctor` readiness marker tracks the **most recently closed** milestone. It currently reads `Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete`. The marker advanced from the M6 closeout string at the M7 closeout slice (NGX-319) and stays pinned to the M7 string through every M8 implementation slice; NGX-330 (M8-07) is the only slice authorized to flip it forward.
+The `doctor` readiness marker tracks the **most recently closed** milestone. It currently reads `Milestone 8: workflow run operator controls (NGX-323, NGX-324, NGX-325, NGX-326, NGX-327, NGX-328, NGX-329, NGX-330) complete`. The marker advanced from the M6 closeout string to `Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete` at the M7 closeout slice (NGX-319), stayed pinned to the M7 string through every M8 implementation slice, and advanced to the M8 string at the M8 closeout slice (NGX-330).
 
-## Active milestone: M8
+## Most recently closed milestone: M8
 
 Milestone 8 layers operator-control CLI envelopes (`workflow run list`, `workflow run approve`, `workflow run update-step`, `workflow run clear-recovery`, `workflow run monitor`) plus the per-run `recovery.md` / `needs_manual_recovery` artifact, additive `workflow_runs` monitor-advisory columns, and typed `runId` / `stepId` evidence linkage on top of the M7 OpenClaw coding-workflow backend substrate. The M7 substrate stays wire-stable; M8 does not rename the M7 `workflow import` / `workflow status` / `workflow handoff` envelopes, and does not move executor invocation, Discord delivery, or monitor cron scheduling out of the `coding-workflow-pipeline` skill.
 
 The M8 milestone narrative and the issue order live in [internal/milestones/m8-workflow-run-operator-controls.md](milestones/m8-workflow-run-operator-controls.md); the cross-milestone operator-control invariants live in [internal/contracts/workflow-operator-controls.md](contracts/workflow-operator-controls.md). The underlying substrate contract stays [internal/contracts/workflow-runs.md](contracts/workflow-runs.md), wire-stable through M8.
 
-### Planned M8 implementation order
+### Shipped M8 implementation order
 
-The Linear milestone "Milestone 8: Workflow Run Operator Controls" sequences the work as follows. Each ticket leaves `main` valid:
+The Linear milestone "Milestone 8: Workflow Run Operator Controls" shipped the work in the following order (all closed). Each ticket left `main` valid:
 
-1. **NGX-323 — M8-00 Contract, roadmap, and docs setup**: pin the M8 milestone narrative, the operator-control contract, the CLI envelope names, the refusal taxonomy, the compatibility rules, and the M8 non-goals. No runtime behavior change; the doctor marker stays on the M7 closeout string.
-2. **NGX-324 — M8-01 workflow run list and query surface**: ship the read-only filterable `workflow run list` envelope. Reuses the M7 storage / query helpers; no mutation, no external refresh, no filesystem directory scan as the source of truth when durable rows are available.
-3. **NGX-325 — M8-02 workflow run approve durable approval CLI**: ship the explicit-approval `workflow run approve` envelope. Validates against the stable boundary phrase set, persists the durable `workflow_approvals` row, verifies the on-disk approval artifact digest where provided, and surfaces through `workflow status` / `workflow handoff` / `workflow run list`.
-4. **NGX-326 — M8-03 workflow run update-step transition surface**: ship the operator-driven `workflow run update-step` envelope. Drives the M7 reducer / state machine for `succeeded` / `skipped` / `failed` / `blocked` transitions with ledger / evidence pointers and an operator-supplied reason. Illegal transitions refuse without partial durable mutation.
-5. **NGX-327 — M8-04 run-scoped recovery artifact and durable flag**: persist `WorkflowRun.needs_manual_recovery`, render `.agent-workflows/<runId>/recovery.md` from the M7 monitor reducer's recovery view, block claims / non-resolving transitions that would make recovery worse, and add the explicit `workflow run clear-recovery` path.
-6. **NGX-328 — M8-05 workflow run monitor machine envelope**: ship the read-only `workflow run monitor` envelope emitting a stable JSON shape (`schemaVersion`, run identity, current state, next-action code, recovery classification, evidence pointers, reportability / terminal flags).
-7. **NGX-329 — M8-06 typed workflow evidence linkage**: add additive, backwards-compatible `runId` / `stepId` linkage on `evidence_records`. Existing M5 evidence ingest semantics stay wire-stable.
-8. **NGX-330 — M8-07 M8 closeout smoke, docs, and doctor marker**: close the milestone. Extend the fake workflow smoke to cover list / approve / update-step / recovery / monitor / evidence linkage composing. Extend the regression matrix with M8 operator-control failure modes. Flip the `doctor --json` milestone marker forward to the M8 closeout string only after M8-00..M8-06 are merged and verified.
+1. **NGX-323 — M8-00 Contract, roadmap, and docs setup**: pinned the M8 milestone narrative, the operator-control contract, the CLI envelope names, the refusal taxonomy, the compatibility rules, and the M8 non-goals. No runtime behavior changed; the doctor marker stayed on the M7 closeout string.
+2. **NGX-324 — M8-01 workflow run list and query surface**: shipped the read-only filterable `workflow run list` envelope. Reuses the M7 storage / query helpers; no mutation, no external refresh, no filesystem directory scan as the source of truth when durable rows are available.
+3. **NGX-325 — M8-02 workflow run approve durable approval CLI**: shipped the explicit-approval `workflow run approve` envelope. Validates against the stable boundary phrase set, persists the durable `workflow_approvals` row, verifies the on-disk approval artifact digest where provided, and surfaces through `workflow status` / `workflow handoff` / `workflow run list`.
+4. **NGX-326 — M8-03 workflow run update-step transition surface**: shipped the operator-driven `workflow run update-step` envelope. Drives the M7 reducer / state machine for `succeeded` / `skipped` / `failed` / `blocked` transitions with ledger / evidence pointers and an operator-supplied reason. Illegal transitions refuse without partial durable mutation.
+5. **NGX-327 — M8-04 run-scoped recovery artifact and durable flag**: persisted `WorkflowRun.needs_manual_recovery`, rendered `.agent-workflows/<runId>/recovery.md` from the M7 monitor reducer's recovery view, blocked claims / non-resolving transitions that would make recovery worse, and added the explicit `workflow run clear-recovery` path.
+6. **NGX-328 — M8-05 workflow run monitor machine envelope**: shipped the read-only `workflow run monitor` envelope emitting a stable JSON shape (`schemaVersion`, run identity, current state, next-action code, recovery classification, evidence pointers, reportability / terminal flags).
+7. **NGX-329 — M8-06 typed workflow evidence linkage**: added additive, backwards-compatible `runId` / `stepId` linkage on `evidence_records`. Existing M5 evidence ingest semantics stay wire-stable.
+8. **NGX-330 — M8-07 M8 closeout smoke, docs, and doctor marker**: closed the milestone. Extended the fake workflow smoke to cover list / approve / update-step / recovery / monitor / evidence linkage composing. Extended the regression matrix with M8 operator-control failure modes. Flipped the `doctor --json` milestone marker forward to the M8 closeout string after M8-00..M8-06 merged and verified.
 
 Live executor wrappers (around `gnhf-runner`, `gnhf-postflight`, `harness-delegate`, `no-mistakes-pipeline`, `model-evidence`, `project-progress-refresh`) stay deferred past M8 closeout unless a future explicit decision gate changes that boundary.
 
@@ -43,9 +43,9 @@ Live executor wrappers (around `gnhf-runner`, `gnhf-postflight`, `harness-delega
 
 Milestone 9 is the proposed decision gate for live workflow execution. Its draft milestone narrative lives in [internal/milestones/m9-live-workflow-execution.md](milestones/m9-live-workflow-execution.md); its draft contract lives in [internal/contracts/live-workflow-execution.md](contracts/live-workflow-execution.md).
 
-M9 is not active while M8 is in flight. If promoted after M8 closeout, it owns the first Momentum-side live executor wrappers around the existing OpenClaw engines, the live step lease / heartbeat / result-file contract, verification and commit transaction wiring, recovery behavior for live failures, and a real dogfood run. M9 wraps the existing engines; it does not rewrite GNHF, postflight, no-mistakes, model-evidence, or project-refresh internals.
+M9 is not active; it stays a candidate following M8 closeout. If promoted, it owns the first Momentum-side live executor wrappers around the existing OpenClaw engines, the live step lease / heartbeat / result-file contract, verification and commit transaction wiring, recovery behavior for live failures, and a real dogfood run. M9 wraps the existing engines; it does not rewrite GNHF, postflight, no-mistakes, model-evidence, or project-refresh internals.
 
-## Most recently closed milestone: M7
+## Previously closed milestone: M7
 
 Milestone 7 shipped the **durable run substrate for OpenClaw coding workflows**. The `coding-workflow-pipeline` skill keeps composing the executors (preflight → GNHF → postflight → no-mistakes → merge cleanup → Linear refresh) and the Discord / monitor cron UX; M7 owns the durable `WorkflowRun` record, step-state lifecycle, approval persistence, lease coordination, and path-based evidence pointer substrate that those engines previously kept in ad-hoc artifacts plus in-memory shell sessions. M8 adds the typed `runId` / `stepId` evidence linkage on top of that substrate.
 
@@ -85,18 +85,19 @@ The Linear milestone "Milestone 6: Policy-Gated External Apply" shipped the work
 
 NGX-299 landed before NGX-298 — audit surfaces shipped first so operators could see what an external apply would write before any real write could happen.
 
-## Post-M7 deferred work
+## Post-M8 deferred work
 
-The following remain explicitly deferred after M7 closeout and until a later milestone justifies them. M7 shipped the OpenClaw coding workflow backend substrate; it does not change any of the deferrals below:
+The following remain explicitly deferred after M8 closeout and until a later milestone justifies them. M7 shipped the OpenClaw coding workflow backend substrate, and M8 shipped the operator-control surfaces for durable run list / approval / step update / recovery / monitor / evidence linkage; neither milestone moves live execution into Momentum:
 
 - Inbound webhooks; source adapters stay pull / reconcile first.
 - Dashboards or any UI surface; the CLI remains the only interface. Discord delivery for approvals stays inside the `coding-workflow-pipeline` skill, not Momentum.
-- Autonomous or background external writes; M6 external apply stays operator-mediated and M7 does not introduce a new external-write path.
+- Autonomous or background external writes; M6 external apply stays operator-mediated and M8 does not introduce a new external-write path.
 - Non-Linear external write adapters (GitHub / Jira / etc.).
 - Per-source-item worktrees / parallel same-repo Goals; a `WorkflowRun` continues to use one shared repo lease.
 - Background runner supervision (forking, daemonization, restart-on-crash).
 - Strong sandboxing (container / VM / seccomp) for runner adapters; `trusted-shell` and `acp` remain explicitly trusted.
 - Cooperative mid-job cancellation / signal handling beyond the existing `daemon stop` / `daemon stop --now` semantics.
 - Remote git operations (`fetch` / `pull` / `push` / `rebase`) driven from Momentum.
-- Replacing the GNHF / postflight / no-mistakes / merge-cleanup engines themselves; M7 is the substrate, not the executor.
+- `workflow run start` and Momentum-side live executor wrappers around `gnhf-runner`, `gnhf-postflight`, `harness-delegate`, `no-mistakes-pipeline`, `model-evidence`, and `project-progress-refresh`.
+- Replacing the GNHF / postflight / no-mistakes / merge-cleanup engines themselves; M7 is the substrate and M8 is the operator-control surface, not the executor.
 - Generalizing the `WorkflowRun` substrate beyond OpenClaw coding workflows.

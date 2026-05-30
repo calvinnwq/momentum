@@ -57,16 +57,12 @@ describe("M8 contract (NGX-323)", () => {
       expect(body.trim().length, `${milestonePath} should not be empty`).toBeGreaterThan(0);
     });
 
-    it("names M8 as Workflow Run Operator Controls and marks it active / in flight (NGX-323 contract slice, not yet complete)", () => {
+    it("names M8 as Workflow Run Operator Controls and marks it closed out at NGX-330 (M8-07 closeout slice)", () => {
       const m8 = readDoc(milestonePath);
       expect(m8).toMatch(/Milestone 8/);
       expect(m8).toMatch(/Workflow Run Operator Controls/i);
-      expect(m8).toMatch(/Status:[^\n]*(Active|In flight|in flight)/i);
-      expect(
-        m8,
-        "M8 milestone doc must not yet claim Complete / Closed out (NGX-330 owns the closeout slice)"
-      ).not.toMatch(/Status:[^\n]*Complete\b/i);
-      expect(m8).not.toMatch(/Status:[^\n]*Closed out\b/i);
+      expect(m8).toMatch(/Status:[^\n]*(Complete|Closed out)/i);
+      expect(m8).toContain("NGX-330");
     });
 
     it("lists every M8 issue (NGX-323 through NGX-330) and the M8-00 through M8-07 sequencing labels", () => {
@@ -140,15 +136,11 @@ describe("M8 contract (NGX-323)", () => {
       expect(m8).toMatch(/(decision gate|future milestone|later milestone|future explicit decision)/i);
     });
 
-    it("does not yet flip the doctor marker to M8 (M7 closeout marker is still the active doctor string)", () => {
+    it("flips the doctor marker to the M8 closeout string (NGX-330 closeout slice)", () => {
       const m8 = readDoc(milestonePath);
       expect(m8).toContain(
-        "Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete"
+        "Milestone 8: workflow run operator controls (NGX-323, NGX-324, NGX-325, NGX-326, NGX-327, NGX-328, NGX-329, NGX-330) complete"
       );
-      expect(
-        m8,
-        "M8 milestone doc must not yet pin an M8 closeout marker (NGX-330 owns the flip)"
-      ).not.toMatch(/Milestone 8:[^.\n]*complete/i);
     });
   });
 
@@ -162,11 +154,11 @@ describe("M8 contract (NGX-323)", () => {
       expect(body.trim().length, `${contractPath} should not be empty`).toBeGreaterThan(0);
     });
 
-    it("pins NGX-323 as the contract setup slice and is not yet marked complete", () => {
+    it("pins NGX-323 as the contract setup slice and is marked complete at M8 closeout (NGX-330)", () => {
       const c = readDoc(contractPath);
       expect(c).toContain("NGX-323");
-      expect(c).toMatch(/Status:[^\n]*(M8|Milestone 8)[^\n]*(in flight|active|contract)/i);
-      expect(c).not.toMatch(/Status:[^\n]*M8 contract[^\n]*complete/i);
+      expect(c).toContain("NGX-330");
+      expect(c).toMatch(/Status:[^\n]*(M8|Milestone 8)[^\n]*complete/i);
     });
 
     it("enumerates the M8 operator-control CLI envelopes and the M7 read-only surfaces they compose with", () => {
@@ -253,10 +245,10 @@ describe("M8 contract (NGX-323)", () => {
   describe("internal/roadmap.md", () => {
     const roadmap = "internal/roadmap.md";
 
-    it("lists M8 as the active in-flight milestone in the timeline table", () => {
+    it("lists M8 as complete in the timeline table", () => {
       const r = readDoc(roadmap);
       expect(r).toMatch(
-        /\|\s*Milestone 8\s*\|\s*Workflow Run Operator Controls\s*\|\s*(Active|In flight|in flight)[^|]*\|/i
+        /\|\s*Milestone 8\s*\|\s*Workflow Run Operator Controls\s*\|\s*Complete\s*\|/
       );
       expect(r).toContain("milestones/m8-workflow-run-operator-controls.md");
     });
@@ -268,13 +260,10 @@ describe("M8 contract (NGX-323)", () => {
       );
     });
 
-    it("preserves the M7 closeout doctor marker (NGX-330 owns the M8 flip)", () => {
+    it("advances the doctor marker to the M8 closeout string (NGX-330 owns the flip)", () => {
       const r = readDoc(roadmap);
       expect(r).toContain(
-        "Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete"
-      );
-      expect(r, "roadmap must not yet claim an M8 doctor marker").not.toMatch(
-        /Milestone 8:[^.\n]*complete/i
+        "Milestone 8: workflow run operator controls (NGX-323, NGX-324, NGX-325, NGX-326, NGX-327, NGX-328, NGX-329, NGX-330) complete"
       );
     });
 
@@ -289,7 +278,7 @@ describe("M8 contract (NGX-323)", () => {
   describe("AGENTS.md", () => {
     const agentsPath = "AGENTS.md";
 
-    it("names M8 as the active in-flight milestone while keeping M7 as the most recently closed milestone", () => {
+    it("names M8 as the most recently closed milestone while keeping the M7 narrative", () => {
       const a = readDoc(agentsPath);
       expect(a).toMatch(/Milestone 8/);
       expect(a).toMatch(/Workflow Run Operator Controls/i);
@@ -303,12 +292,11 @@ describe("M8 contract (NGX-323)", () => {
       expect(a).toContain("internal/contracts/workflow-operator-controls.md");
     });
 
-    it("does not yet flip the doctor milestone marker to M8", () => {
+    it("records the M8 closeout marker as the doctor milestone string", () => {
       const a = readDoc(agentsPath);
       expect(a).toContain(
-        "Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete"
+        "Milestone 8: workflow run operator controls (NGX-323, NGX-324, NGX-325, NGX-326, NGX-327, NGX-328, NGX-329, NGX-330) complete"
       );
-      expect(a).not.toMatch(/Milestone 8:[^.\n]*complete/i);
     });
   });
 
@@ -327,16 +315,103 @@ describe("M8 contract (NGX-323)", () => {
     });
   });
 
-  describe("doctor milestone marker (M7 closeout preserved through M8-00)", () => {
-    it("the cli still reports the M7 closeout marker (the M8 marker flip is deferred to NGX-330)", () => {
+  describe("internal/regression-matrix.md M8 operator-control extension (NGX-330)", () => {
+    const matrixPath = "internal/regression-matrix.md";
+
+    it("preserves the five M7 monitor failure-mode rows", () => {
+      const matrix = readDoc(matrixPath);
+      for (const heading of [
+        "Stale monitor state",
+        "Lost managed task with completed ledger",
+        "Terminal external evidence winning over local drift",
+        "Blocked stale step",
+        "No ghost active run",
+      ]) {
+        expect(
+          matrix,
+          `regression matrix should preserve the M7 row "${heading}"`
+        ).toContain(heading);
+      }
+    });
+
+    it("covers the six M8 operator-control failure modes the milestone eliminates", () => {
+      const matrix = readDoc(matrixPath);
+      for (const heading of [
+        "Run inventory by directory scan",
+        "Approval reconstruction from prose",
+        "Ledger hand-edits to finalize a step",
+        "Monitor-tick prose parsing",
+        "Recovery state invisible to operators",
+        "Path-only evidence inference",
+      ]) {
+        expect(
+          matrix,
+          `regression matrix should include an M8 row for "${heading}"`
+        ).toContain(heading);
+      }
+    });
+
+    it("names every M8 operator-control envelope that owns an invariant", () => {
+      const matrix = readDoc(matrixPath);
+      for (const envelope of [
+        "workflow run list",
+        "workflow run approve",
+        "workflow run update-step",
+        "workflow run clear-recovery",
+        "workflow run monitor",
+      ]) {
+        expect(
+          matrix,
+          `regression matrix should reference the "${envelope}" envelope`
+        ).toContain(envelope);
+      }
+    });
+
+    it("cites the M8 substrate owners plus the durable recovery flag and per-run artifact", () => {
+      const matrix = readDoc(matrixPath);
+      for (const owner of [
+        "src/cli.ts",
+        "src/workflow-run-recovery.ts",
+        "src/workflow-monitor-envelope.ts",
+        "src/workflow-recovery-artifact.ts",
+        "src/evidence-workflow.ts",
+      ]) {
+        expect(matrix, `regression matrix should cite ${owner} as an M8 owner`).toContain(
+          owner
+        );
+      }
+      expect(matrix).toContain("needs_manual_recovery");
+      expect(matrix).toContain("recovery.md");
+    });
+
+    it("names the NGX-330 end-to-end operator-control smoke as M8 evidence", () => {
+      const matrix = readDoc(matrixPath);
+      expect(matrix).toContain("NGX-330");
+      expect(matrix).toContain("Milestone 8 operator-control end-to-end smoke");
+      expect(matrix).toMatch(/ghost-active run/i);
+    });
+
+    it("links the M8 milestone narrative and the operator-controls contract", () => {
+      const matrix = readDoc(matrixPath);
+      for (const link of [
+        "milestones/m8-workflow-run-operator-controls.md",
+        "contracts/workflow-operator-controls.md",
+      ]) {
+        expect(matrix, `regression matrix should link to ${link}`).toContain(link);
+      }
+    });
+
+  });
+
+  describe("doctor milestone marker (M8 closeout at NGX-330)", () => {
+    it("the cli reports the M8 closeout marker, not the M7 marker", () => {
       const cli = fs.readFileSync(path.join(repoRoot, "src", "cli.ts"), "utf8");
       expect(cli).toContain(
+        "Milestone 8: workflow run operator controls (NGX-323, NGX-324, NGX-325, NGX-326, NGX-327, NGX-328, NGX-329, NGX-330) complete"
+      );
+      expect(cli).not.toContain(
         "Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete"
       );
-      expect(
-        cli,
-        "src/cli.ts must not yet hard-code an M8 closeout marker (NGX-330 owns the flip)"
-      ).not.toMatch(/Milestone 8[^"`'\n]*complete/i);
     });
   });
 });

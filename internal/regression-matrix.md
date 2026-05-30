@@ -1,11 +1,12 @@
-# M7 regression matrix: old monitor failure modes
+# M7 / M8 regression matrix: monitor + operator-control failure modes
 
 This matrix pins the failure modes that motivated **Milestone 7: OpenClaw
-Coding Workflow Backend** and the durable substrate invariants that make each
-one unreachable. Each row names the failure mode, the substrate invariant that
-eliminates it, the code module that owns the invariant, and the test(s) that
-exercise it. It is the closeout gate for NGX-319: if any row's invariant
-regresses, M7 has regressed.
+Coding Workflow Backend** and **Milestone 8: Workflow Run Operator Controls**,
+plus the durable invariants that make each one unreachable. Each row names the
+failure mode, the invariant that eliminates it, the code module that owns the
+invariant, and the test(s) that exercise it. The M7 rows are the closeout gate
+for NGX-319; the M8 rows are the closeout gate for NGX-330. If any row's
+invariant regresses, the owning milestone has regressed.
 
 The full M7 contract lives in
 [`internal/contracts/workflow-runs.md`](contracts/workflow-runs.md); the M7
@@ -15,7 +16,17 @@ live in
 the smoke coverage referenced below is documented in
 [`internal/smoke-tests.md`](smoke-tests.md).
 
-## Matrix
+The M8 operator-control invariants live in
+[`internal/contracts/workflow-operator-controls.md`](contracts/workflow-operator-controls.md);
+the M8 milestone scope and the enumeration of operator-control failure modes M8
+eliminates live in
+[`internal/milestones/m8-workflow-run-operator-controls.md`](milestones/m8-workflow-run-operator-controls.md).
+M8 keeps the M7 substrate wire-stable; the M8 rows below pin the *operator-facing*
+control surfaces (`workflow run list` / `approve` / `update-step` /
+`clear-recovery` / `monitor` plus typed evidence linkage), not new substrate
+behavior.
+
+## M7 matrix: durable substrate invariants
 
 ### 1. Stale monitor state
 
@@ -140,14 +151,165 @@ the smoke coverage referenced below is documented in
     leases, empty active / blocked filters, `handoff.nextAction.code:
     rerun_failed_step`, and `monitor.recovery.code: failed_required_step`.
 
+## M8 operator-control matrix: durable run-control invariants
+
+The M7 substrate made run state durable, but operators still had to parse
+prose, scrape `.agent-workflows/` directories, or hand-edit `ledger.jsonl` for
+common control flows. M8 closes those gaps with durable operator-control
+envelopes over the same substrate. Each row pins one operator-control failure
+mode to the envelope / module that eliminates it and the test that exercises
+it. The end-to-end evidence is the built-CLI smoke under
+`test/smoke.test.ts` › "Milestone 8 operator-control end-to-end smoke
+(NGX-330)".
+
+### 6. Run inventory by directory scan
+
+- **Old failure mode.** An operator listing in-flight runs had to walk
+  `.agent-workflows/` and re-derive run identity from directory names; there
+  was no durable, filterable inventory surface.
+- **M8 invariant.** `workflow run list` reads the durable `workflow_runs` rows
+  directly and supports the same buckets the M7 reducer already classifies
+  (`active` / `blocked` / `completed` / `imported`) plus state, approval
+  boundary, repo, issue scope, and updated-time filters. The durable rows — not
+  a directory scan — are the source of truth whenever they exist, and the
+  emitted identifiers feed straight into `workflow status` / `workflow handoff`
+  without re-derivation.
+- **Owner.** [`src/cli.ts`](../src/cli.ts) (`workflowRunList`), reusing the M7
+  [`src/workflow-status.ts`](../src/workflow-status.ts) filter buckets and the
+  [`src/workflow-run-reducer.ts`](../src/workflow-run-reducer.ts) run state.
+- **Evidence.**
+  - Built-CLI smoke: `test/smoke.test.ts` — "composes list / approve / monitor
+    / typed evidence linkage through the built CLI" asserts the imported run is
+    discoverable through `workflow run list` (and `--filter active`) without an
+    `.agent-workflows/` directory scan.
+
+### 7. Approval reconstruction from prose
+
+- **Old failure mode.** M7 already refused casual `"go ahead"` phrasing, but an
+  explicit operator approval phrase had no first-class CLI; status / handoff /
+  monitor could only reflect an approval by re-reading the on-disk approval
+  JSON.
+- **M8 invariant.** `workflow run approve` persists a durable
+  `workflow_approvals` row (actor, phrase, boundary, `artifactPath`,
+  `artifactDigest`, `recordedAt`) at a validated boundary; an omitted
+  `--artifact-path` stores `workflow-run-approve://<runId>/<boundary>`
+  provenance with a deterministic synthetic digest. Casual phrasing
+  (`"go ahead"`, `"sure"`) still refuses — the M7 contract that casual phrases
+  never produce a durable row stays in force. The durable approval survives
+  subsequent `workflow import` (upsert `ON CONFLICT(run_id, boundary)`, never
+  deleted) and composes into status / handoff / monitor.
+- **Owner.** [`src/cli.ts`](../src/cli.ts) (`workflowRunApprove`) plus
+  [`src/workflow-run-import.ts`](../src/workflow-run-import.ts) (idempotent
+  approval upsert).
+- **Evidence.**
+  - Built-CLI smoke: `test/smoke.test.ts` — "composes list / approve / monitor
+    / typed evidence linkage through the built CLI" persists an operator
+    approval at a distinct boundary and asserts it survives a re-import and
+    surfaces through `workflow status`.
+
+### 8. Ledger hand-edits to finalize a step
+
+- **Old failure mode.** When a managed child died after the executor finished
+  its work but before durable terminal evidence landed, recovery required
+  hand-appending to `ledger.jsonl` or re-importing a doctored fixture.
+- **M8 invariant.** `workflow run update-step` drives the same M7 reducer
+  transition (`succeeded` / `skipped` / `failed` / `blocked`) with an
+  operator-supplied reason and evidence pointer, without touching the on-disk
+  ledger. Illegal transitions refuse (`invalid_transition`) with no partial
+  durable mutation, and a terminal run refuses re-finalize except a byte-equal
+  idempotent replay. The required-chain derivation in `deriveWorkflowRunState`
+  stays the authority on run-level state; M8 never bypasses it.
+- **Owner.** [`src/cli.ts`](../src/cli.ts) (`workflowRunUpdateStep`) plus
+  [`src/workflow-run-reducer.ts`](../src/workflow-run-reducer.ts)
+  (`deriveWorkflowRunState`).
+- **Evidence.**
+  - Built-CLI smoke: `test/smoke.test.ts` — "recovers a ghost-active run: flag,
+    monitor recover, clear-recovery refusal, update-step resolution, then a
+    clean clear" resolves the ghost step through `workflow run update-step`
+    without editing `ledger.jsonl`.
+
+### 9. Monitor-tick prose parsing
+
+- **Old failure mode.** The skill's monitor runner constructed its decision
+  view from prose plus best-effort artifact reads, so two monitor clients could
+  disagree on run health.
+- **M8 invariant.** `workflow run monitor` emits a stable JSON envelope
+  (`schemaVersion`, run identity, current state, next-action code, recovery
+  classification, evidence pointers, reportability / terminal flags) derived
+  from `deriveWorkflowMonitorState`. It is read-only by construction. Terminal
+  ledger evidence still beats a stale monitor advisory, and whenever
+  `needs_manual_recovery` is set the envelope forces disposition `recover` even
+  over a terminally-succeeded substrate.
+- **Owner.** [`src/workflow-monitor-envelope.ts`](../src/workflow-monitor-envelope.ts)
+  (`buildWorkflowMonitorEnvelope`) over
+  [`src/workflow-monitor-state.ts`](../src/workflow-monitor-state.ts).
+- **Evidence.**
+  - Built-CLI smoke: `test/smoke.test.ts` — the happy path ("composes list /
+    approve / monitor / typed evidence linkage through the built CLI") asserts a
+    terminal monitor report; the recovery path ("recovers a ghost-active
+    run: …") asserts `workflow run monitor` returns disposition `recover` while
+    the run is flagged.
+
+### 10. Recovery state invisible to operators
+
+- **Old failure mode.** M7 classified the recovery state but the durable flag
+  and the per-run artifact were deferred, so an operator could not see or clear
+  a blocking recovery condition from the substrate.
+- **M8 invariant.** Import sets the durable `WorkflowRun.needs_manual_recovery`
+  flag on a blocking monitor classification (`manual_recovery_lease` /
+  `ghost_active_no_lease` / `stale_running_step` / `failed_required_step`) and
+  renders `.agent-workflows/<runId>/recovery.md` (run id, step id,
+  classification, evidence pointers, recommended next action, and safety notes;
+  never secrets or transcript content). The flag blocks future
+  `workflow run approve` claims and non-resolving `workflow run update-step`
+  transitions until an explicit `workflow run clear-recovery`, which refuses
+  while the blocking condition persists and leaves `recovery.md` on disk as
+  audit evidence. The run-scoped surface is a sibling of the M3 goal-scoped
+  recovery contract, not a replacement.
+- **Owner.** [`src/workflow-run-recovery.ts`](../src/workflow-run-recovery.ts)
+  (`markWorkflowRunNeedsManualRecovery`,
+  `clearWorkflowRunManualRecoveryGuarded`),
+  [`src/workflow-recovery-artifact.ts`](../src/workflow-recovery-artifact.ts)
+  (the `recovery.md` renderer), and
+  [`src/cli.ts`](../src/cli.ts) (`workflowRunClearRecovery`).
+- **Evidence.**
+  - Built-CLI smoke: `test/smoke.test.ts` — "recovers a ghost-active run: …"
+    asserts import sets `needs_manual_recovery` + `ghost_active_no_lease` and
+    renders `recovery.md`; `workflow run clear-recovery` refuses while blocked,
+    then succeeds only after `workflow run update-step` resolves the ghost step,
+    and the flag persists until that explicit clear.
+
+### 11. Path-only evidence inference
+
+- **Old failure mode.** M7 attached evidence by best-effort artifact-path
+  prefix, so workflow evidence only surfaced in run / step views when the
+  brittle prefix matched.
+- **M8 invariant.** Typed `runId` / `stepId` linkage on `evidence_records`
+  (nullable `run_id` / `step_id` columns plus the
+  `idx_evidence_records_run_step` index). Ingest against
+  `.agent-workflows/<runId>/` attaches the owning `runId`; ledger step events
+  also attach `stepId`, while plan / approval artifacts stay run-scoped with
+  null `stepId`. Idempotent replay can fill missing linkage but never
+  overwrites non-null linkage, and the existing M5 ingest shape, diagnostic
+  codes, and idempotency stay wire-stable. Typed pointers surface identically
+  through `workflow status` / `workflow handoff` / `workflow run monitor`.
+- **Owner.** [`src/evidence-workflow.ts`](../src/evidence-workflow.ts)
+  (workflow artifact parsing and typed `runId` / `stepId` linkage).
+- **Evidence.**
+  - Built-CLI smoke: `test/smoke.test.ts` — "composes list / approve / monitor
+    / typed evidence linkage through the built CLI" runs `evidence ingest`
+    against the run directory and asserts the typed `runId` / `stepId` linkage
+    surfaces through `workflow run monitor` and `workflow status`.
+
 ## How to use this matrix
 
 - Treat each row as a closeout gate. A code change that breaks any listed
   invariant must either restore the invariant or open a follow-up milestone
-  that explicitly re-scopes it; M7 cannot be re-closed until every row's
-  evidence is green.
+  that explicitly re-scopes it; the owning milestone (M7 for rows 1–5, M8 for
+  rows 6–11) cannot be re-closed until every row's evidence is green.
 - The owner module and tests are intentionally specific. When refactoring,
   move the listed test names atomically with the module they pin so this
   matrix stays accurate.
-- Adding a new failure mode that motivates a future milestone belongs in that
-  milestone's own regression matrix, not here. This document is scoped to M7.
+- Adding a new failure mode that motivates a future milestone (M9+) belongs in
+  that milestone's own section or matrix. This document is scoped to the M7
+  durable substrate and the M8 operator-control surfaces built on top of it.

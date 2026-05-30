@@ -1,8 +1,8 @@
 # Current Exclusions
 
 This page lists features and behaviors that are intentionally **out of scope**
-as of the most recently shipped milestone (M7 closeout) and the active in-flight
-milestone (M8). It exists so contributors and operators can see at a glance
+as of the most recently shipped milestone (M8 closeout). It exists so
+contributors and operators can see at a glance
 what Momentum does *not* do today, and where the next durable surface is
 expected (or explicitly deferred indefinitely).
 
@@ -60,8 +60,8 @@ Milestone status:
   from the M6 closeout string to the M7 closeout string. See
   [`internal/milestones/m7-openclaw-coding-workflow-backend.md`](milestones/m7-openclaw-coding-workflow-backend.md)
   and [`internal/contracts/workflow-runs.md`](contracts/workflow-runs.md).
-- **Milestone 8 (Workflow Run Operator Controls)** is active / in flight
-  (NGX-323 pinned the M8 contract slice). M8 layers operator-control CLI
+- **Milestone 8 (Workflow Run Operator Controls)** is complete (closed out
+  at NGX-330; NGX-323 pinned the M8 contract slice). M8 layers operator-control CLI
   envelopes — `workflow run list` (NGX-324), `workflow run approve` (NGX-325),
   `workflow run update-step` (NGX-326), `workflow run clear-recovery`
   (NGX-327), and `workflow run monitor` (NGX-328) —
@@ -71,9 +71,9 @@ Milestone status:
   import / operator-control snapshots (NGX-328), and adds typed `runId` /
   `stepId` evidence linkage to `evidence_records` (NGX-329) without
   renaming or replacing any M3–M7 contract. The
-  `doctor --json` milestone marker stays pinned to the M7 closeout string
-  through every M8 implementation slice; NGX-330 (M8-07) is the only slice
-  authorized to flip it. Thin Momentum-side wrappers around the live
+  `doctor --json` milestone marker stayed pinned to the M7 closeout string
+  through every M8 implementation slice; NGX-330 (M8-07) flipped it forward
+  to the M8 closeout string. Thin Momentum-side wrappers around the live
   OpenClaw executor scripts (`gnhf-runner`, `gnhf-postflight`,
   `harness-delegate`, `no-mistakes-pipeline`, `model-evidence`,
   `project-progress-refresh`), a `workflow run start` envelope, and
