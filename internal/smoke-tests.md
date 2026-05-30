@@ -230,6 +230,34 @@ Run locally via the targeted vitest filter:
 pnpm vitest run test/smoke.test.ts -t "end-to-end coding workflow"
 ```
 
+## Milestone 8 operator-control end-to-end smoke coverage (NGX-330)
+
+The smoke extends the built-CLI workflow fixture coverage across the M8
+operator-control envelopes without invoking live executors, Discord, GitHub,
+Linear, or external tracker writes. It reuses the M7 fake-executor fixture and
+imports through the public `workflow import` CLI between durable state changes.
+
+Coverage:
+
+- operator-control happy path: a fresh `.agent-workflows/cwfp-<hex>/` fixture is
+  imported, discovered through `workflow run list`, approved through
+  `workflow run approve`, driven to terminal success through the fake executors,
+  and inspected through `workflow run monitor`; after `evidence ingest`, both
+  monitor and status detail evidence carry typed `runId` linkage, with ledger
+  entries also carrying `stepId` linkage.
+- ghost-active recovery path: a started implementation step with no terminal
+  ledger evidence or lease imports as `needsManualRecovery: true`, renders
+  per-run `recovery.md`, reports `ghost_active_no_lease` through
+  `workflow run monitor`, refuses `workflow run clear-recovery` while the
+  blocking condition persists, resolves via `workflow run update-step`, and then
+  clears recovery explicitly while preserving the audit artifact.
+
+Run locally via the targeted vitest filter:
+
+```
+pnpm vitest run test/smoke.test.ts -t "operator-control end-to-end smoke"
+```
+
 ## Test boundary
 
 The smoke must not make real `api.linear.app` calls — see
