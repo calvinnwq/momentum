@@ -14,7 +14,7 @@ Momentum is built milestone by milestone. Each milestone has a single durable sh
 | Milestone 6 | Policy-Gated External Apply | Complete | [m6-external-apply.md](milestones/m6-external-apply.md) |
 | Milestone 7 | OpenClaw Coding Workflow Backend | Complete | [m7-openclaw-coding-workflow-backend.md](milestones/m7-openclaw-coding-workflow-backend.md) |
 | Milestone 8 | Workflow Run Operator Controls | Complete | [m8-workflow-run-operator-controls.md](milestones/m8-workflow-run-operator-controls.md) |
-| Milestone 9 | Live Workflow Execution | Draft / candidate | [m9-live-workflow-execution.md](milestones/m9-live-workflow-execution.md) |
+| Milestone 9 | Live Workflow Execution | Active / in flight | [m9-live-workflow-execution.md](milestones/m9-live-workflow-execution.md) |
 
 The `doctor` readiness marker tracks the **most recently closed** milestone. It currently reads `Milestone 8: workflow run operator controls (NGX-323, NGX-324, NGX-325, NGX-326, NGX-327, NGX-328, NGX-329, NGX-330) complete`. The marker advanced from the M6 closeout string to `Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete` at the M7 closeout slice (NGX-319), stayed pinned to the M7 string through every M8 implementation slice, and advanced to the M8 string at the M8 closeout slice (NGX-330).
 
@@ -37,13 +37,28 @@ The Linear milestone "Milestone 8: Workflow Run Operator Controls" shipped the w
 7. **NGX-329 — M8-06 typed workflow evidence linkage**: added additive, backwards-compatible `runId` / `stepId` linkage on `evidence_records`. Existing M5 evidence ingest semantics stay wire-stable.
 8. **NGX-330 — M8-07 M8 closeout smoke, docs, and doctor marker**: closed the milestone. Extended the fake workflow smoke to cover list / approve / update-step / recovery / monitor / evidence linkage composing. Extended the regression matrix with M8 operator-control failure modes. Flipped the `doctor --json` milestone marker forward to the M8 closeout string after M8-00..M8-06 merged and verified.
 
-Live executor wrappers (around `gnhf-runner`, `gnhf-postflight`, `harness-delegate`, `no-mistakes-pipeline`, `model-evidence`, `project-progress-refresh`) stay deferred past M8 closeout unless a future explicit decision gate changes that boundary.
+Live executor wrappers (around `gnhf-runner`, `gnhf-postflight`, `harness-delegate`, `no-mistakes-pipeline`, `model-evidence`, `project-progress-refresh`) stayed deferred past M8 closeout until the M9-00 decision gate (NGX-331) promoted Milestone 9, which now owns them; M9 wraps those engines without rewriting them.
 
-## Candidate next milestone: M9
+## Active milestone: M9
 
-Milestone 9 is the proposed decision gate for live workflow execution. Its draft milestone narrative lives in [internal/milestones/m9-live-workflow-execution.md](milestones/m9-live-workflow-execution.md); its draft contract lives in [internal/contracts/live-workflow-execution.md](contracts/live-workflow-execution.md).
+Milestone 9 is the active milestone, promoted from draft at the M9-00 decision gate (NGX-331) after M8 closeout. Its milestone narrative lives in [internal/milestones/m9-live-workflow-execution.md](milestones/m9-live-workflow-execution.md); its now-active contract lives in [internal/contracts/live-workflow-execution.md](contracts/live-workflow-execution.md).
 
-M9 is not active; it stays a candidate following M8 closeout. If promoted, it owns the first Momentum-side live executor wrappers around the existing OpenClaw engines, the live step lease / heartbeat / result-file contract, verification and commit transaction wiring, recovery behavior for live failures, and a real dogfood run. M9 wraps the existing engines; it does not rewrite GNHF, postflight, no-mistakes, model-evidence, or project-refresh internals.
+M9 owns the first Momentum-side live executor wrappers around the existing OpenClaw engines, the live step lease / heartbeat / result-file contract, verification and commit transaction wiring, recovery behavior for live failures, and a real dogfood run. M9 wraps the existing engines; it does not rewrite GNHF, postflight, no-mistakes, model-evidence, or project-refresh internals.
+
+### Pinned M9 implementation sequence
+
+The M9-00 decision gate (NGX-331) pins the slice order; each slice is a concrete Linear issue that must leave `main` valid:
+
+1. **NGX-331 — M9-00 Contract and decision gate** — promote the draft; pin the architecture, non-goals, and this sequence; update this roadmap and the doctor-marker policy. No runtime change.
+2. **NGX-332 — M9-01 Live wrapper config and registry.**
+3. **NGX-333 — M9-02 Live implementation step wrapper.**
+4. **NGX-334 — M9-03 Verification and commit transaction.**
+5. **NGX-335 — M9-04 Postflight and no-mistakes wrappers.**
+6. **NGX-336 — M9-05 Merge cleanup and Linear refresh boundaries.**
+7. **NGX-337 — M9-06 Live recovery and resume smoke.**
+8. **NGX-338 — M9-07 Dogfood run and closeout** — flips the `doctor --json` marker to the M9 closeout string only after the dogfood gate and regression updates pass.
+
+The `doctor --json` marker stays pinned to the M8 closeout string above through every M9 implementation slice; the M9-00 decision gate does not flip it.
 
 ## Previously closed milestone: M7
 
@@ -87,7 +102,7 @@ NGX-299 landed before NGX-298 — audit surfaces shipped first so operators coul
 
 ## Post-M8 deferred work
 
-The following remain explicitly deferred after M8 closeout and until a later milestone justifies them. M7 shipped the OpenClaw coding workflow backend substrate, and M8 shipped the operator-control surfaces for durable run list / approval / step update / recovery / monitor / evidence linkage; neither milestone moves live execution into Momentum:
+The following remain explicitly deferred until a later milestone justifies them. Live execution itself is no longer deferred: Milestone 9 (active, promoted at NGX-331) owns the Momentum-side live executor wrappers, the live step lease / heartbeat / result-file contract, verification / commit transaction wiring, and the dogfood run. M7 shipped the OpenClaw coding workflow backend substrate and M8 shipped the operator-control surfaces; the items below stay out of scope:
 
 - Inbound webhooks; source adapters stay pull / reconcile first.
 - Dashboards or any UI surface; the CLI remains the only interface. Discord delivery for approvals stays inside the `coding-workflow-pipeline` skill, not Momentum.
@@ -98,6 +113,5 @@ The following remain explicitly deferred after M8 closeout and until a later mil
 - Strong sandboxing (container / VM / seccomp) for runner adapters; `trusted-shell` and `acp` remain explicitly trusted.
 - Cooperative mid-job cancellation / signal handling beyond the existing `daemon stop` / `daemon stop --now` semantics.
 - Remote git operations (`fetch` / `pull` / `push` / `rebase`) driven from Momentum.
-- `workflow run start` and Momentum-side live executor wrappers around `gnhf-runner`, `gnhf-postflight`, `harness-delegate`, `no-mistakes-pipeline`, `model-evidence`, and `project-progress-refresh`.
-- Replacing the GNHF / postflight / no-mistakes / merge-cleanup engines themselves; M7 is the substrate and M8 is the operator-control surface, not the executor.
+- Replacing the GNHF / postflight / no-mistakes / merge-cleanup engines themselves; M7 is the substrate, M8 is the operator-control surface, and M9 wraps the executors — none of them reimplement the engines.
 - Generalizing the `WorkflowRun` substrate beyond OpenClaw coding workflows.

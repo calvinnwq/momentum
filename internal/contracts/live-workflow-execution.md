@@ -1,6 +1,6 @@
-# Contract: Live Workflow Execution (M9 Candidate)
+# Contract: Live Workflow Execution (M9)
 
-**Status:** Draft contract for the next post-M8 decision gate. This contract is not active after M8 closeout unless the roadmap explicitly promotes Milestone 9. The M8 contract remains authoritative for operator-control invariants until a later promoted milestone changes that boundary.
+**Status:** Active. Promoted at the M9-00 decision gate (NGX-331) after M8 closeout. This contract is now authoritative for live workflow execution while Milestone 9 is in flight; the M8 operator-control contract remains in force for its own invariants.
 
 This contract defines the boundary for moving Momentum from a durable coding-workflow substrate plus operator-control surface into a live dogfooding orchestrator for OpenClaw coding workflows.
 
