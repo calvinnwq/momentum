@@ -6,7 +6,7 @@ This contract is the cross-milestone source of truth for the operator-control CL
 
 The underlying substrate contract is [`workflow-runs.md`](workflow-runs.md). That contract is unchanged by M8: the `WorkflowRun` record, the `workflow_steps` / `workflow_approvals` / `workflow_leases` schema, the run / step / lease state vocabulary, the transition reducer, the lease classifier, the executor boundary, and the monitor reducer all stay as M7 shipped them. The M7 closeout regression matrix at [`../regression-matrix.md`](../regression-matrix.md) also stays in force through M8.
 
-The `coding-workflow-pipeline` skill stays the orchestration UX (Discord delivery, monitor cron scheduling, plan composition, batch UX, approval-button rendering, failure classification, recovery procedures, live executor invocation). This contract is the boundary Momentum exposes to that skill for **durable operator control**, nothing more.
+For M8, the `coding-workflow-pipeline` skill stayed the orchestration UX (Discord delivery, monitor cron scheduling, plan composition, batch UX, approval-button rendering, failure classification, recovery procedures, live executor invocation). The M9 live-execution contract now owns the later Momentum-side live-wrapper boundary. This contract is the boundary Momentum exposes for **durable operator control**, nothing more.
 
 ## Scope
 
@@ -156,7 +156,7 @@ The M3 daemon (`daemon start` / `daemon stop` / `daemon status` / `recovery clea
 ## Composition with prior contracts
 
 - **M3 daemon / recovery.** Unchanged. M8 run-scoped recovery is a sibling surface to M3 goal-scoped recovery, not a replacement.
-- **M4 runners and policy.** Unchanged. M8 envelopes never spawn a managed child or a runner; live executor invocation stays inside the skill.
+- **M4 runners and policy.** Unchanged. M8 envelopes never spawn a managed child or a runner; live executor invocation stayed inside the skill for M8, with later Momentum-side wrappers governed by the M9 live-execution contract.
 - **M5 source / evidence / intent.** Source and intent schemas stay unchanged, and evidence CLI semantics stay wire-stable. M8 adds only the additive nullable `run_id` / `step_id` linkage columns and lookup index on `evidence_records`.
 - **M6 external apply.** Unchanged. `intent apply --external-apply`, `intent_apply_policy`, the `intent_apply_in_progress` CAS result, the comment-only default, the idempotency marker shape, and the `blocked` non-replay state stay wire-stable. M8 envelopes never issue an external write directly.
 - **M7 substrate.** Wire-stable. `workflow_runs` / `workflow_steps` / `workflow_approvals` / `workflow_leases`, `deriveWorkflowRunState`, `deriveWorkflowMonitorState`, `classifyWorkflowLease`, the `WorkflowStepExecutor` boundary, the deterministic fake executors, and the read-only `workflow import` / `workflow status` / `workflow handoff` envelopes all stay compatible. M8 reuses them and adds only nullable monitor-advisory columns on `workflow_runs` so imports and operator mutations can persist the snapshot consumed by status / handoff / monitor views; it does not rename or replace the substrate.
