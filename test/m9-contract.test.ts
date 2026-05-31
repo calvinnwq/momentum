@@ -270,6 +270,21 @@ describe("M9 contract decision gate (NGX-331)", () => {
     });
   });
 
+  describe("internal/exclusions.md", () => {
+    const exclusions = "internal/exclusions.md";
+
+    it("marks M9 live execution as active scope rather than a post-M8 deferral", () => {
+      const e = readDoc(exclusions);
+      expect(e).toMatch(/Milestone 9 \(Live Workflow Execution\)[\s\S]*active \/ in flight/);
+      expect(e).toContain("NGX-331");
+      expect(e).toContain("internal/milestones/m9-live-workflow-execution.md");
+      expect(e).toContain("internal/contracts/live-workflow-execution.md");
+      expect(e).toMatch(/M9 owns[\s\S]*live executor\s+wrappers/);
+      expect(e).not.toMatch(/remain deferred past M8 closeout/i);
+      expect(e).not.toMatch(/future explicit decision gate/i);
+    });
+  });
+
   describe("AGENTS.md", () => {
     const agentsPath = "AGENTS.md";
 

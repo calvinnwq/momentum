@@ -1,10 +1,10 @@
 # Current Exclusions
 
 This page lists features and behaviors that are intentionally **out of scope**
-as of the most recently shipped milestone (M8 closeout). It exists so
-contributors and operators can see at a glance
-what Momentum does *not* do today, and where the next durable surface is
-expected (or explicitly deferred indefinitely).
+after the M9-00 decision gate. The most recently shipped milestone is M8
+closeout, while Milestone 9 is active / in flight. It exists so contributors
+and operators can see at a glance what Momentum does *not* do today, what the
+active milestone now owns, and what remains explicitly deferred.
 
 Milestone status:
 
@@ -73,18 +73,26 @@ Milestone status:
   renaming or replacing any M3–M7 contract. The
   `doctor --json` milestone marker stayed pinned to the M7 closeout string
   through every M8 implementation slice; NGX-330 (M8-07) flipped it forward
-  to the M8 closeout string. Thin Momentum-side wrappers around the live
-  OpenClaw executor scripts (`gnhf-runner`, `gnhf-postflight`,
-  `harness-delegate`, `no-mistakes-pipeline`, `model-evidence`,
-  `project-progress-refresh`), a `workflow run start` envelope, and
-  additional built-CLI smoke coverage against the live skill scripts
-  remain deferred past M8 closeout unless a future explicit decision gate
-  changes that boundary. See
+  to the M8 closeout string. See
   [`internal/milestones/m8-workflow-run-operator-controls.md`](milestones/m8-workflow-run-operator-controls.md)
   and [`internal/contracts/workflow-operator-controls.md`](contracts/workflow-operator-controls.md).
+- **Milestone 9 (Live Workflow Execution)** is active / in flight after the
+  M9-00 decision gate (NGX-331). M9 owns the Momentum-side live executor
+  wrappers around the existing OpenClaw engines, the live step lease /
+  heartbeat / result-file contract, verification and commit transaction wiring,
+  live recovery / resume smoke coverage, and the dogfood run. M9 wraps the
+  existing engines and does not rewrite them. The start surface is part of the
+  M9 design decision: M9 prefers reusing `goal start` plus a `WorkflowRun` link
+  over adding `workflow run start`, adding a dedicated verb only if a later
+  slice proves the simpler path cannot preserve the M7 / M8 invariants. The
+  `doctor --json` marker remains on the M8 closeout string until the M9-07
+  closeout slice (NGX-338). See
+  [`internal/milestones/m9-live-workflow-execution.md`](milestones/m9-live-workflow-execution.md)
+  and [`internal/contracts/live-workflow-execution.md`](contracts/live-workflow-execution.md).
 
-The following surfaces remain deferred so the runner-boundary, policy-loading,
-and M5 read-first source surfaces stay scoped.
+The following surfaces remain deferred outside the active M9 live-execution
+scope so the runner-boundary, policy-loading, and M5 read-first source surfaces
+stay scoped.
 
 ## Background runner supervision
 
