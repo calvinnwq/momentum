@@ -58,7 +58,16 @@ Each durable wrapper config uses the same snake_case field style as the existing
 
 The typed in-memory config may expose camelCase properties such as `timeoutSec`, `envAllow`, and `resultFile`, but the durable config keys stay snake_case for consistency with `trusted_shell` and `acp`.
 
-Missing or malformed config refuses before mutating workflow state.
+Durable live-wrapper profiles must be mappings with a non-empty `name` and a non-empty `wrappers` object. `wrappers` keys must be canonical `WorkflowStepKind` values; each value is one wrapper config. A profile may configure only the step kinds it supports. Resolving a known but unconfigured kind refuses separately from an unknown kind instead of guessing.
+
+Missing or malformed config refuses before mutating workflow state. The live-wrapper config and registry layer uses these stable refusal codes:
+
+- `live_wrapper_config_missing`: a wrapper config value is absent.
+- `live_wrapper_config_invalid`: a wrapper config is malformed.
+- `live_wrapper_profile_missing`: a live-wrapper profile value is absent.
+- `live_wrapper_profile_invalid`: the profile name, wrappers mapping, wrapper key, or nested wrapper config is malformed.
+- `live_wrapper_unsupported_kind`: resolution requested a non-`WorkflowStepKind` value.
+- `live_wrapper_not_configured`: resolution requested a supported step kind that the profile does not configure.
 
 ### Workflow Run Start
 
@@ -183,4 +192,3 @@ M9 can close only when:
 - A live dogfood run is recorded in internal docs with command evidence, artifacts, and rollback notes.
 - The regression matrix is extended with live-wrapper failure modes.
 - `doctor --json` flips to an M9 closeout marker only after the above gates pass.
-
