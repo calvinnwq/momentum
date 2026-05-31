@@ -310,6 +310,6 @@ it. The end-to-end evidence is the built-CLI smoke under
 - The owner module and tests are intentionally specific. When refactoring,
   move the listed test names atomically with the module they pin so this
   matrix stays accurate.
-- Adding a new failure mode that motivates a future milestone (M9+) belongs in
-  that milestone's own section or matrix. This document is scoped to the M7
-  durable substrate and the M8 operator-control surfaces built on top of it.
+- Adding a new failure mode that belongs to a later milestone belongs in that
+  milestone's own section or matrix. This document is scoped to the M7 durable
+  substrate and the M8 operator-control surfaces built on top of it.

@@ -60,7 +60,7 @@ Missing or malformed config refuses before mutating workflow state.
 
 ### Workflow Run Start
 
-M9 may introduce a Momentum-owned start surface for live workflow runs, for example `workflow run start`, but only if it preserves the M7 / M8 state model:
+M9 prefers reusing the existing `goal start` path plus a `WorkflowRun` link for live workflow runs. A dedicated `workflow run start` verb is added only if a later M9 slice proves the simpler path cannot preserve the M7 / M8 state model. Either start path must satisfy the same invariants:
 
 - It creates or imports a `WorkflowRun`.
 - It records the planned step chain.
@@ -68,8 +68,6 @@ M9 may introduce a Momentum-owned start surface for live workflow runs, for exam
 - It refuses unless the repo lease can be acquired.
 - It refuses unless required approvals already exist or the first unapproved boundary is explicit.
 - It never infers approval from casual prose.
-
-If implementation can reuse `goal start` plus a WorkflowRun link instead of a new CLI verb, that simpler path should win.
 
 ### Step Execution
 

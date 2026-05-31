@@ -22,7 +22,7 @@ It does **not** cover:
 
 - The M7 substrate primitives themselves. Those stay pinned by [`workflow-runs.md`](workflow-runs.md).
 - The M3 daemon / recovery, M4 runner / policy, M5 source / evidence / intent, or M6 external apply contracts. Those remain wire-stable.
-- Live executor invocation. Live wrappers around `gnhf-runner`, `gnhf-postflight`, `harness-delegate`, `no-mistakes-pipeline`, `model-evidence`, or `project-progress-refresh` are explicitly **deferred** to a future milestone. Until a future explicit decision gate changes the boundary, M8 envelopes never spawn an executor process.
+- Live executor invocation. Live wrappers around `gnhf-runner`, `gnhf-postflight`, `harness-delegate`, `no-mistakes-pipeline`, `model-evidence`, or `project-progress-refresh` stayed outside M8 and are now owned by the active M9 live-execution contract after the NGX-331 decision gate. M8 envelopes themselves never spawn an executor process.
 - Discord-side approval UX, monitor cron scheduling, or managed-step dispatch. Those stay owned by the skill.
 - Plan composition, batch policy, no-mistakes harness/model routing, or failure classification. Those stay owned by the skill.
 
@@ -163,9 +163,9 @@ The M3 daemon (`daemon start` / `daemon stop` / `daemon status` / `recovery clea
 
 The M7 closeout regression matrix at [`../regression-matrix.md`](../regression-matrix.md) and the M7 milestone narrative at [`../milestones/m7-openclaw-coding-workflow-backend.md`](../milestones/m7-openclaw-coding-workflow-backend.md) stay the source of truth for the substrate guard. NGX-330 (M8-07) extends the matrix with the new operator-control failure modes M8 closes.
 
-## Live wrapper deferral
+## Live wrapper boundary
 
-Live executor wrappers around `gnhf-runner`, `gnhf-postflight`, `harness-delegate`, `no-mistakes-pipeline`, `model-evidence`, or `project-progress-refresh` are explicitly **deferred** past M8 closeout. The deterministic M7 fake executors continue to satisfy the substrate boundary through M8. Momentum never schedules cron, never renders Discord, never spawns a managed child, and never invokes a live executor as part of an M8 envelope. Any future milestone that wants to change that boundary must land an explicit decision gate first.
+M8 explicitly deferred live executor wrappers around `gnhf-runner`, `gnhf-postflight`, `harness-delegate`, `no-mistakes-pipeline`, `model-evidence`, or `project-progress-refresh` to a later milestone; the M9-00 decision gate (NGX-331) then promoted Milestone 9 to own them. The deterministic M7 fake executors continue to satisfy the substrate boundary through M8. Momentum never schedules cron, never renders Discord, never spawns a managed child, and never invokes a live executor as part of an M8 envelope.
 
 If an M8 implementation slice discovers that its acceptance criteria require live process management, the slice stops and asks for a separately approved decision gate. M8 will not be re-scoped silently.
 
