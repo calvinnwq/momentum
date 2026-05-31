@@ -16,9 +16,10 @@
  * state machine without leaking GNHF / postflight / no-mistakes /
  * merge-cleanup implementation details into Momentum core.
  *
- * This slice intentionally ships only the contract and a deterministic fake
- * executor. Thin wrappers around live local command paths are deferred to a
- * later M7 slice that proves state recovery end-to-end.
+ * This M7 module still ships the dispatch boundary and deterministic fake
+ * executor. M9 owns the live-wrapper registry / command configuration in
+ * `live-wrapper-registry.ts`; live local command execution is layered around
+ * this boundary rather than owned by the fake dispatcher.
  */
 
 import {
