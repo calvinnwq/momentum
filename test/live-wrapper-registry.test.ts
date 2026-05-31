@@ -61,6 +61,37 @@ describe("parseLiveWrapperConfig shape", () => {
     });
   });
 
+  it("accepts camelCase aliases during the durable-config transition", () => {
+    const raw = clone(validWrapper) as Record<string, unknown>;
+    raw["timeoutSec"] = raw["timeout_sec"];
+    raw["envAllow"] = raw["env_allow"];
+    raw["resultFile"] = raw["result_file"];
+    delete raw["timeout_sec"];
+    delete raw["env_allow"];
+    delete raw["result_file"];
+
+    const result = parseLiveWrapperConfig(raw);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.config.timeoutSec).toBe(1800);
+    expect(result.config.envAllow).toEqual(["PATH", "HOME"]);
+    expect(result.config.resultFile).toBe("result.json");
+  });
+
+  it("prefers canonical snake_case keys when aliases are also present", () => {
+    const result = parseLiveWrapperConfig({
+      ...clone(validWrapper),
+      timeoutSec: 1,
+      envAllow: ["IGNORED"],
+      resultFile: "ignored.json"
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.config.timeoutSec).toBe(1800);
+    expect(result.config.envAllow).toEqual(["PATH", "HOME"]);
+    expect(result.config.resultFile).toBe("result.json");
+  });
+
   it("rejects a non-mapping value", () => {
     const result = parseLiveWrapperConfig("nope");
     expect(result.ok).toBe(false);
@@ -272,6 +303,19 @@ describe("parseLiveWrapperConfig result_file", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.code).toBe("live_wrapper_config_invalid");
+  });
+
+  it("rejects a result_file that resolves to the iteration directory", () => {
+    for (const resultFile of [".", "./", "nested/..", "nested\\.."]) {
+      const result = parseLiveWrapperConfig({
+        ...clone(validWrapper),
+        result_file: resultFile
+      });
+      expect(result.ok, `expected invalid for ${resultFile}`).toBe(false);
+      if (result.ok) continue;
+      expect(result.code).toBe("live_wrapper_config_invalid");
+      expect(result.error).toContain("result_file");
+    }
   });
 
   it("accepts a nested relative result_file", () => {

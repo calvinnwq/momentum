@@ -18,8 +18,10 @@ import {
  * This module owns only the typed-config + registry-resolution layer:
  *
  *   - `parseLiveWrapperConfig` validates a single wrapper spec (explicit
- *     absolute `command`, argv `args`, `cwd`, `timeoutSec`, `envAllow`,
- *     relative `resultFile`, and an optional pre-flight `probe`).
+ *     absolute `command`, argv `args`, `cwd`, raw `timeout_sec`,
+ *     `env_allow`, `result_file`, and an optional pre-flight `probe`).
+ *     Durable snake_case keys are canonical; camelCase aliases are accepted
+ *     as transitional input while M9 wrappers settle.
  *   - `parseLiveWrapperProfile` validates a named profile whose `wrappers`
  *     mapping is keyed by `WorkflowStepKind`.
  *   - `resolveLiveWrapper` resolves the wrapper config for a requested step
@@ -165,15 +167,22 @@ export function parseLiveWrapperConfig(value: unknown): LiveWrapperConfigParse {
   if (!cwdResult.ok) return cwdResult;
   const cwd = cwdResult.value;
 
-  const timeoutResult = parseRequiredTimeoutSec(value["timeout_sec"], "timeout_sec");
+  const timeoutResult = parseRequiredTimeoutSec(
+    readAlias(value, "timeout_sec", "timeoutSec"),
+    "timeout_sec"
+  );
   if (!timeoutResult.ok) return timeoutResult;
   const timeoutSec = timeoutResult.value;
 
-  const envAllowResult = parseEnvAllow(value["env_allow"]);
+  const envAllowResult = parseEnvAllow(
+    readAlias(value, "env_allow", "envAllow")
+  );
   if (!envAllowResult.ok) return envAllowResult;
   const envAllow = envAllowResult.value;
 
-  const resultFileResult = parseResultFile(value["result_file"]);
+  const resultFileResult = parseResultFile(
+    readAlias(value, "result_file", "resultFile")
+  );
   if (!resultFileResult.ok) return resultFileResult;
   const resultFile = resultFileResult.value;
 
@@ -324,6 +333,14 @@ function parseStringArray(
   return { ok: true, value: out };
 }
 
+function readAlias(
+  record: Record<string, unknown>,
+  canonicalKey: string,
+  aliasKey: string
+): unknown {
+  return record[canonicalKey] ?? record[aliasKey];
+}
+
 function parseEnvAllow(
   raw: unknown
 ): { ok: true; value: string[] } | LiveWrapperConfigError {
@@ -408,10 +425,13 @@ function parseResultFile(
     );
   }
   const value = raw.trim();
+  const normalized = path.posix.normalize(value.replace(/\\/g, "/"));
   if (
     path.isAbsolute(value) ||
     path.win32.isAbsolute(value) ||
-    hasParentTraversalSegment(value)
+    hasParentTraversalSegment(value) ||
+    normalized === "." ||
+    normalized === "./"
   ) {
     return configInvalid(
       "Live wrapper `result_file` must be a relative path inside the iteration artifact directory."

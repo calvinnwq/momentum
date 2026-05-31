@@ -46,15 +46,17 @@ M9 wraps existing executors. It does not rewrite them.
 
 Momentum adds a registry of live wrappers keyed by the existing `WorkflowStepKind` values. Each wrapper resolves from durable configuration, not hard-coded local paths.
 
-Each wrapper config must include:
+Each durable wrapper config uses the same snake_case field style as the existing runner frontmatter and must include:
 
 - `command`: absolute executable path.
 - `args`: explicit argv array, with no shell interpolation.
 - `cwd`: `repo` or `iteration`.
-- `timeoutSec`: positive integer.
-- `envAllow`: allowlist of environment variable names.
-- `resultFile`: path relative to the iteration artifact directory.
-- Optional `probe`: command / args / timeout used to detect missing runtime or auth before the main command.
+- `timeout_sec`: positive integer.
+- `env_allow`: allowlist of environment variable names.
+- `result_file`: path relative to the iteration artifact directory.
+- Optional `probe`: `command` / `args` / `timeout_sec` used to detect missing runtime or auth before the main command.
+
+The typed in-memory config may expose camelCase properties such as `timeoutSec`, `envAllow`, and `resultFile`, but the durable config keys stay snake_case for consistency with `trusted_shell` and `acp`.
 
 Missing or malformed config refuses before mutating workflow state.
 
