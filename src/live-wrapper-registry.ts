@@ -159,7 +159,7 @@ export function parseLiveWrapperConfig(value: unknown): LiveWrapperConfigParse {
   if (!commandResult.ok) return commandResult;
   const command = commandResult.value;
 
-  const argsResult = parseStringArray(value["args"], "args");
+  const argsResult = parseRequiredStringArray(value["args"], "args");
   if (!argsResult.ok) return argsResult;
   const args = argsResult.value;
 
@@ -333,6 +333,18 @@ function parseStringArray(
   return { ok: true, value: out };
 }
 
+function parseRequiredStringArray(
+  raw: unknown,
+  field: "args"
+): { ok: true; value: string[] } | LiveWrapperConfigError {
+  if (raw === undefined || raw === null) {
+    return configInvalid(
+      `Live wrapper \`${field}\` is required and must be an array of strings or numbers.`
+    );
+  }
+  return parseStringArray(raw, field);
+}
+
 function readAlias(
   record: Record<string, unknown>,
   canonicalKey: string,
@@ -345,7 +357,9 @@ function parseEnvAllow(
   raw: unknown
 ): { ok: true; value: string[] } | LiveWrapperConfigError {
   if (raw === undefined || raw === null) {
-    return { ok: true, value: [] };
+    return configInvalid(
+      "Live wrapper `env_allow` is required and must be an array of environment variable names."
+    );
   }
   if (!Array.isArray(raw)) {
     return configInvalid(
@@ -459,7 +473,7 @@ function parseProbe(
   if (!argsResult.ok) return argsResult;
 
   const timeoutResult = parseOptionalTimeoutSec(
-    raw["timeout_sec"],
+    readAlias(raw, "timeout_sec", "timeoutSec"),
     "probe.timeout_sec"
   );
   if (!timeoutResult.ok) return timeoutResult;

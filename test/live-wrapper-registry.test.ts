@@ -148,13 +148,14 @@ describe("parseLiveWrapperConfig command", () => {
 });
 
 describe("parseLiveWrapperConfig args", () => {
-  it("defaults args to an empty array when omitted", () => {
+  it("rejects a missing args array", () => {
     const raw = clone(validWrapper) as Record<string, unknown>;
     delete raw["args"];
     const result = parseLiveWrapperConfig(raw);
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.config.args).toEqual([]);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.error).toContain("args");
   });
 
   it("coerces numeric argv entries to strings", () => {
@@ -244,13 +245,14 @@ describe("parseLiveWrapperConfig timeout_sec", () => {
 });
 
 describe("parseLiveWrapperConfig env_allow", () => {
-  it("defaults env_allow to an empty array when omitted", () => {
+  it("rejects a missing env_allow array", () => {
     const raw = clone(validWrapper) as Record<string, unknown>;
     delete raw["env_allow"];
     const result = parseLiveWrapperConfig(raw);
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.config.envAllow).toEqual([]);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe("live_wrapper_config_invalid");
+    expect(result.error).toContain("env_allow");
   });
 
   it("rejects a non-array env_allow", () => {
@@ -349,6 +351,16 @@ describe("parseLiveWrapperConfig probe", () => {
     expect(result.config.probe?.timeoutSec).toBe(
       DEFAULT_LIVE_WRAPPER_PROBE_TIMEOUT_SEC
     );
+  });
+
+  it("accepts a probe timeoutSec alias during the durable-config transition", () => {
+    const result = parseLiveWrapperConfig({
+      ...clone(validWrapper),
+      probe: { command: "/usr/bin/gnhf-probe", timeoutSec: 20 }
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.config.probe?.timeoutSec).toBe(20);
   });
 
   it("rejects a probe without a command", () => {
