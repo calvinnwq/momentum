@@ -6,7 +6,7 @@ This contract is the cross-milestone source of truth for the operator-control CL
 
 The underlying substrate contract is [`workflow-runs.md`](workflow-runs.md). That contract is unchanged by M8: the `WorkflowRun` record, the `workflow_steps` / `workflow_approvals` / `workflow_leases` schema, the run / step / lease state vocabulary, the transition reducer, the lease classifier, the executor boundary, and the monitor reducer all stay as M7 shipped them. The M7 closeout regression matrix at [`../regression-matrix.md`](../regression-matrix.md) also stays in force through M8.
 
-The `coding-workflow-pipeline` skill stays the orchestration UX (Discord delivery, monitor cron scheduling, plan composition, batch UX, approval-button rendering, failure classification, recovery procedures, live executor invocation). This contract is the boundary Momentum exposes to that skill for **durable operator control**, nothing more.
+For M8, the `coding-workflow-pipeline` skill stayed the orchestration UX (Discord delivery, monitor cron scheduling, plan composition, batch UX, approval-button rendering, failure classification, recovery procedures, live executor invocation). The M9 live-execution contract now owns the later Momentum-side live-wrapper boundary. This contract is the boundary Momentum exposes for **durable operator control**, nothing more.
 
 ## Scope
 
@@ -22,7 +22,7 @@ It does **not** cover:
 
 - The M7 substrate primitives themselves. Those stay pinned by [`workflow-runs.md`](workflow-runs.md).
 - The M3 daemon / recovery, M4 runner / policy, M5 source / evidence / intent, or M6 external apply contracts. Those remain wire-stable.
-- Live executor invocation. Live wrappers around `gnhf-runner`, `gnhf-postflight`, `harness-delegate`, `no-mistakes-pipeline`, `model-evidence`, or `project-progress-refresh` are explicitly **deferred** to a future milestone. Until a future explicit decision gate changes the boundary, M8 envelopes never spawn an executor process.
+- Live executor invocation. Live wrappers around `gnhf-runner`, `gnhf-postflight`, `harness-delegate`, `no-mistakes-pipeline`, `model-evidence`, or `project-progress-refresh` stayed outside M8 and are now owned by the active M9 live-execution contract after the NGX-331 decision gate. M8 envelopes themselves never spawn an executor process.
 - Discord-side approval UX, monitor cron scheduling, or managed-step dispatch. Those stay owned by the skill.
 - Plan composition, batch policy, no-mistakes harness/model routing, or failure classification. Those stay owned by the skill.
 
@@ -156,16 +156,16 @@ The M3 daemon (`daemon start` / `daemon stop` / `daemon status` / `recovery clea
 ## Composition with prior contracts
 
 - **M3 daemon / recovery.** Unchanged. M8 run-scoped recovery is a sibling surface to M3 goal-scoped recovery, not a replacement.
-- **M4 runners and policy.** Unchanged. M8 envelopes never spawn a managed child or a runner; live executor invocation stays inside the skill.
+- **M4 runners and policy.** Unchanged. M8 envelopes never spawn a managed child or a runner; live executor invocation stayed inside the skill for M8, with later Momentum-side wrappers governed by the M9 live-execution contract.
 - **M5 source / evidence / intent.** Source and intent schemas stay unchanged, and evidence CLI semantics stay wire-stable. M8 adds only the additive nullable `run_id` / `step_id` linkage columns and lookup index on `evidence_records`.
 - **M6 external apply.** Unchanged. `intent apply --external-apply`, `intent_apply_policy`, the `intent_apply_in_progress` CAS result, the comment-only default, the idempotency marker shape, and the `blocked` non-replay state stay wire-stable. M8 envelopes never issue an external write directly.
 - **M7 substrate.** Wire-stable. `workflow_runs` / `workflow_steps` / `workflow_approvals` / `workflow_leases`, `deriveWorkflowRunState`, `deriveWorkflowMonitorState`, `classifyWorkflowLease`, the `WorkflowStepExecutor` boundary, the deterministic fake executors, and the read-only `workflow import` / `workflow status` / `workflow handoff` envelopes all stay compatible. M8 reuses them and adds only nullable monitor-advisory columns on `workflow_runs` so imports and operator mutations can persist the snapshot consumed by status / handoff / monitor views; it does not rename or replace the substrate.
 
 The M7 closeout regression matrix at [`../regression-matrix.md`](../regression-matrix.md) and the M7 milestone narrative at [`../milestones/m7-openclaw-coding-workflow-backend.md`](../milestones/m7-openclaw-coding-workflow-backend.md) stay the source of truth for the substrate guard. NGX-330 (M8-07) extends the matrix with the new operator-control failure modes M8 closes.
 
-## Live wrapper deferral
+## Live wrapper boundary
 
-Live executor wrappers around `gnhf-runner`, `gnhf-postflight`, `harness-delegate`, `no-mistakes-pipeline`, `model-evidence`, or `project-progress-refresh` are explicitly **deferred** past M8 closeout. The deterministic M7 fake executors continue to satisfy the substrate boundary through M8. Momentum never schedules cron, never renders Discord, never spawns a managed child, and never invokes a live executor as part of an M8 envelope. Any future milestone that wants to change that boundary must land an explicit decision gate first.
+M8 explicitly deferred live executor wrappers around `gnhf-runner`, `gnhf-postflight`, `harness-delegate`, `no-mistakes-pipeline`, `model-evidence`, or `project-progress-refresh` to a later milestone; the M9-00 decision gate (NGX-331) then promoted Milestone 9 to own them. The deterministic M7 fake executors continue to satisfy the substrate boundary through M8. Momentum never schedules cron, never renders Discord, never spawns a managed child, and never invokes a live executor as part of an M8 envelope.
 
 If an M8 implementation slice discovers that its acceptance criteria require live process management, the slice stops and asks for a separately approved decision gate. M8 will not be re-scoped silently.
 
