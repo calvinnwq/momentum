@@ -54,7 +54,7 @@ Each durable wrapper config uses the same snake_case field style as the existing
 - `timeout_sec`: positive integer.
 - `env_allow`: allowlist of environment variable names.
 - `result_file`: path relative to the iteration artifact directory.
-- Optional `probe`: `command` / `args` / `timeout_sec` used to detect missing runtime or auth before the main command.
+- Optional `probe`: `command` / `args` / `timeout_sec` used to detect missing runtime or auth before the main command; when omitted inside `probe`, `args` defaults to `[]` and `timeout_sec` defaults to `30`.
 
 The typed in-memory config may expose camelCase properties such as `timeoutSec`, `envAllow`, and `resultFile`, but the durable config keys stay snake_case for consistency with `trusted_shell` and `acp`.
 
