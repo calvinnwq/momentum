@@ -87,6 +87,7 @@ import {
 } from "./workflow-leases.js";
 import {
   finishWorkflowStep,
+  getWorkflowStep,
   type WorkflowStepTransitionOutcome
 } from "./workflow-step-transitions.js";
 import type {
@@ -269,6 +270,7 @@ export function advanceLiveWorkflowStep(
   }
 
   let finalize: FinalizeLiveWorkflowStepFromResultFileResult;
+  let heartbeatStop: { ok: boolean; error?: string } = { ok: true };
   try {
     finalize = finalizeLiveWorkflowStepFromResultFile({
       repoPath: input.executorInput.repoPath,
@@ -279,8 +281,23 @@ export function advanceLiveWorkflowStep(
       verificationLogPath: input.verificationLogPath,
       beforeGitMutation: repoLockHeartbeat.heartbeat.assertFresh
     });
+    const finalOwnership = repoLockHeartbeat.heartbeat.assertFresh();
+    if (!finalOwnership.ok) {
+      finalize = {
+        outcome: "repo_lock_lost",
+        error: finalOwnership.error
+      };
+    }
   } finally {
-    repoLockHeartbeat.heartbeat.stop();
+    heartbeatStop = repoLockHeartbeat.heartbeat.stop();
+  }
+  if (!heartbeatStop.ok) {
+    finalize = {
+      outcome: "repo_lock_lost",
+      error:
+        heartbeatStop.error ??
+        `advanceLiveWorkflowStep: repo lock heartbeat failed for "${input.executorInput.repoPath}"`
+    };
   }
 
   const recovery = persistLiveWorkflowFinalizeRecovery(input.db, {
@@ -754,32 +771,36 @@ function completeDeferredStep(
       run.deferredTerminalState === "failed";
     const useDispatchError =
       failure.outcome === "dispatch_error" && run.dispatch?.ok === false;
-    const finish: WorkflowStepTransitionOutcome = finishWorkflowStep(input.db, {
-      runId: input.runId,
-      stepId: input.stepId,
-      state,
-      errorCode:
-        state === "succeeded"
-          ? null
-          : useDispatchFailure && run.dispatch?.ok === true
-            ? run.dispatch.result.errorCode
-            : useDispatchError && run.dispatch?.ok === false
-              ? run.dispatch.code
-              : `live_finalize_${failure.outcome}`,
-      errorMessage:
-        state === "succeeded"
-          ? null
-          : useDispatchFailure && run.dispatch?.ok === true
-            ? run.dispatch.result.errorMessage
-            : useDispatchError && run.dispatch?.ok === false
-              ? run.dispatch.error
-              : failure.message,
-      resultDigest:
-        (state === "succeeded" || useDispatchFailure) && run.dispatch?.ok === true
-          ? run.dispatch.result.resultDigest
-          : null,
-      ...(input.now !== undefined ? { now: input.now } : {})
-    });
+    const finish: WorkflowStepTransitionOutcome = finishDeferredLiveWorkflowStep(
+      input.db,
+      {
+        runId: input.runId,
+        stepId: input.stepId,
+        state,
+        errorCode:
+          state === "succeeded"
+            ? null
+            : useDispatchFailure && run.dispatch?.ok === true
+              ? run.dispatch.result.errorCode
+              : useDispatchError && run.dispatch?.ok === false
+                ? run.dispatch.code
+                : `live_finalize_${failure.outcome}`,
+        errorMessage:
+          state === "succeeded"
+            ? null
+            : useDispatchFailure && run.dispatch?.ok === true
+              ? run.dispatch.result.errorMessage
+              : useDispatchError && run.dispatch?.ok === false
+                ? run.dispatch.error
+                : failure.message,
+        resultDigest:
+          (state === "succeeded" || useDispatchFailure) &&
+          run.dispatch?.ok === true
+            ? run.dispatch.result.resultDigest
+            : null,
+        ...(input.now !== undefined ? { now: input.now } : {})
+      }
+    );
 
     const lease = run.deferredLease;
     const released =
@@ -810,6 +831,38 @@ function completeDeferredStep(
       terminalState: state
     };
   });
+}
+
+function finishDeferredLiveWorkflowStep(
+  db: MomentumDb,
+  input: Parameters<typeof finishWorkflowStep>[1]
+): WorkflowStepTransitionOutcome {
+  const finish = finishWorkflowStep(db, input);
+  if (!finish.ok || !finish.idempotent) return finish;
+
+  const row = getWorkflowStep(db, input.runId, input.stepId);
+  if (row === undefined) return { ok: false, reason: "step_not_found" };
+
+  const errorCode = input.errorCode ?? null;
+  const errorMessage = input.errorMessage ?? null;
+  const resultDigest = input.resultDigest ?? null;
+  if (
+    row.state === input.state &&
+    row.errorCode === errorCode &&
+    row.errorMessage === errorMessage &&
+    row.resultDigest === resultDigest
+  ) {
+    return finish;
+  }
+
+  return {
+    ok: false,
+    reason: "invalid_transition",
+    from: row.state,
+    to: input.state,
+    errorCode: "workflow_step_invalid_transition",
+    errorMessage: `workflow step ${input.runId}/${input.stepId} was already terminalized into ${row.state} with different live result metadata; refusing ambiguous ${input.state} transition`
+  };
 }
 
 function reconcileFinalizeStepState(

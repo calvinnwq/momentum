@@ -1008,6 +1008,141 @@ describe("advanceLiveWorkflowStep", () => {
     }
   });
 
+  it("rejects a committed finalize outcome when the repo lock is lost before git returns", () => {
+    const repoPath = initRepo();
+    const baseHead = commitInitial(repoPath);
+    const runDir = makeTempDir("momentum-live-advance-run-");
+    const db = openDb(makeTempDir());
+    try {
+      seedRepoBackedRun(db, repoPath);
+      const dbPath = db.location();
+      if (typeof dbPath !== "string" || dbPath.length === 0) {
+        throw new Error("expected file-backed db for repo lock loss test");
+      }
+      const hookPath = path.join(repoPath, ".git", "hooks", "post-commit");
+      fs.writeFileSync(
+        hookPath,
+        [
+          "#!/bin/sh",
+          "node <<'NODE'",
+          "const { DatabaseSync } = require('node:sqlite');",
+          `const db = new DatabaseSync(${JSON.stringify(dbPath)});`,
+          `db.prepare(${JSON.stringify("UPDATE repo_locks SET state = 'released', updated_at = ? WHERE id = ?")}).run(Date.now(), ${JSON.stringify(`lock-${HOLDER}`)});`,
+          "db.close();",
+          "NODE"
+        ].join("\n"),
+        { mode: 0o755 }
+      );
+
+      const out = runAdvance(
+        db,
+        repoPath,
+        baseHead,
+        runDir,
+        fakeExecutor((input) => {
+          fs.writeFileSync(
+            path.join(input.repoPath, "step-edit.txt"),
+            "from-live-step\n",
+            "utf-8"
+          );
+          fs.writeFileSync(
+            input.resultJsonPath,
+            JSON.stringify(runnerResult()),
+            "utf-8"
+          );
+          return succeededDispatch(input);
+        })
+      );
+
+      expect(out.committed).toBe(false);
+      expect(out.finalized).toBe(true);
+      expect(out.finalize?.outcome).toBe("repo_lock_lost");
+      expect(headOf(repoPath)).not.toBe(baseHead);
+      expect(expectRecoveryOk(out.recovery).outcome).toBe("recovered");
+      const step = getWorkflowStep(db, RUN_ID, STEP_ID);
+      expect(step?.state).toBe("failed");
+      expect(step?.errorCode).toBe("live_finalize_repo_lock_lost");
+      expect(
+        getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      ).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses to release a deferred lease after conflicting terminal metadata is written", () => {
+    const repoPath = initRepo();
+    const baseHead = commitInitial(repoPath);
+    const runDir = makeTempDir("momentum-live-advance-run-");
+    const db = openDb(makeTempDir());
+    try {
+      seedRepoBackedRun(db, repoPath);
+      const dbPath = db.location();
+      if (typeof dbPath !== "string" || dbPath.length === 0) {
+        throw new Error("expected file-backed db for terminal conflict test");
+      }
+      const hookPath = path.join(repoPath, ".git", "hooks", "post-commit");
+      fs.writeFileSync(
+        hookPath,
+        [
+          "#!/bin/sh",
+          "node <<'NODE'",
+          "const { DatabaseSync } = require('node:sqlite');",
+          `const db = new DatabaseSync(${JSON.stringify(dbPath)});`,
+          `db.prepare(${JSON.stringify("UPDATE workflow_steps SET state = 'succeeded', finished_at = ?, result_digest = ?, error_code = NULL, error_message = NULL, updated_at = ? WHERE run_id = ? AND step_id = ?")}).run(Date.now(), 'sha256:external', Date.now(), ${JSON.stringify(RUN_ID)}, ${JSON.stringify(STEP_ID)});`,
+          "db.close();",
+          "NODE"
+        ].join("\n"),
+        { mode: 0o755 }
+      );
+
+      const out = runAdvance(
+        db,
+        repoPath,
+        baseHead,
+        runDir,
+        fakeExecutor((input) => {
+          fs.writeFileSync(
+            path.join(input.repoPath, "step-edit.txt"),
+            "from-live-step\n",
+            "utf-8"
+          );
+          fs.writeFileSync(
+            input.resultJsonPath,
+            JSON.stringify(runnerResult()),
+            "utf-8"
+          );
+          return succeededDispatch(input, "sha256:ok");
+        })
+      );
+
+      expect(out.finalize?.outcome).toBe("committed");
+      expect(out.run.ok).toBe(false);
+      expect(out.run.finish?.ok).toBe(false);
+      if (
+        out.run.finish?.ok === false &&
+        out.run.finish.reason === "invalid_transition"
+      ) {
+        expect(out.run.finish.reason).toBe("invalid_transition");
+        expect(out.run.finish.errorCode).toBe("workflow_step_invalid_transition");
+      }
+      expect(out.run.lease.released).toBe(false);
+      const step = getWorkflowStep(db, RUN_ID, STEP_ID);
+      expect(step?.state).toBe("succeeded");
+      expect(step?.resultDigest).toBe("sha256:external");
+      const lease = db
+        .prepare(
+          `SELECT released_at AS releasedAt
+             FROM workflow_leases
+            WHERE run_id = ? AND lease_kind = 'managed-step'`
+        )
+        .get(RUN_ID) as { releasedAt: number | null };
+      expect(lease.releasedAt).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
   it("resets the worktree without recovery when the runner reports success=false", () => {
     const repoPath = initRepo();
     const baseHead = commitInitial(repoPath);
