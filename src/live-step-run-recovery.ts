@@ -2,7 +2,7 @@
  * Run-level durable recovery for the live verification / commit transaction
  * (NGX-334, M9-03).
  *
- * `finalize-live-step.ts` is a pure transaction over git + verification: it
+ * `live-step-finalize.ts` is a pure transaction over git + verification: it
  * returns a rich in-memory outcome but owns no durable state. This module is the
  * run-level seam the M9 contract's "Recovery" section requires — it takes a
  * {@link FinalizeLiveWorkflowStepFromResultFileResult} and, when that outcome is
