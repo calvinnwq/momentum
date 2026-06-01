@@ -287,9 +287,58 @@ function classifyFinalizeRecovery(
           stepId
         }
       };
+    case "git_failed":
+      return {
+        code: "git_failed",
+        reason: finalize.error,
+        evidencePointers: [],
+        nextAction: {
+          code: "investigate_git_failed",
+          detail:
+            "The live step finalization could not inspect or mutate git reliably. Inspect the repository and worktree manually before clearing recovery.",
+          stepId
+        }
+      };
+    case "commit_failed":
+      return classifyCommitFailedRecovery(finalize, stepId);
     default:
       return null;
   }
+}
+
+function classifyCommitFailedRecovery(
+  finalize: Extract<
+    FinalizeLiveWorkflowStepFromResultFileResult,
+    { outcome: "commit_failed" }
+  >,
+  stepId: string | null
+): LiveFinalizeRecovery | null {
+  if (finalize.reset !== undefined) {
+    if (finalize.reset.ok) return null;
+    return {
+      code: "reset_failed",
+      reason: finalize.reset.error,
+      evidencePointers: [],
+      nextAction: {
+        code: "investigate_reset_failed",
+        detail:
+          "The live step finalization could not clean up after a commit failure. Inspect and clean up the worktree manually before clearing recovery.",
+        stepId
+      }
+    };
+  }
+  if (finalize.commit.code === "nothing_to_commit") return null;
+  return {
+    code: "commit_failed",
+    reason: finalize.commit.error,
+    evidencePointers: [],
+    nextAction: {
+      code: "investigate_commit_failed",
+      detail:
+        "The live step finalization could not create the accepted Momentum commit and did not prove cleanup. Inspect the worktree manually before clearing recovery.",
+      stepId
+    }
+  };
 }
 
 function describeError(error: unknown): string {

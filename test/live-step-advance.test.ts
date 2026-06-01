@@ -783,11 +783,15 @@ describe("advanceLiveWorkflowStep", () => {
 
       expect(out.committed).toBe(false);
       expect(out.finalized).toBe(false);
+      expect(expectRecoveryOk(out.recovery).outcome).toBe("recovered");
       expect(headOf(repoPath)).toBe(baseHead);
       expect(fs.existsSync(path.join(repoPath, "step-edit.txt"))).toBe(true);
       const step = getWorkflowStep(db, RUN_ID, STEP_ID);
       expect(step?.state).toBe("failed");
       expect(step?.errorCode).toBe("live_finalize_repo_lock_lost");
+      expect(
+        getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      ).toBe(true);
     } finally {
       db.close();
     }

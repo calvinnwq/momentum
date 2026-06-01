@@ -58,7 +58,9 @@ export const WORKFLOW_LIVE_RUN_RECOVERY_CODES = [
   "result_missing",
   "result_invalid",
   "reset_failed",
-  "repo_lock_lost"
+  "repo_lock_lost",
+  "git_failed",
+  "commit_failed"
 ] as const;
 export type WorkflowLiveRunRecoveryCode =
   (typeof WORKFLOW_LIVE_RUN_RECOVERY_CODES)[number];
@@ -152,6 +154,16 @@ const SAFE_NEXT_STEPS: Record<
     "Inspect the active repo lock owner and the worktree before approving any later step.",
     "Confirm no other Momentum process is still mutating the repository.",
     "Re-establish repo ownership or clean up manually before clearing recovery."
+  ],
+  git_failed: [
+    "Inspect the git error and current worktree state before approving any later step.",
+    "Confirm whether live-step edits are still present; Momentum could not prove the repository state.",
+    "Restore or preserve the worktree manually before clearing recovery."
+  ],
+  commit_failed: [
+    "Inspect the commit failure and current worktree state before approving any later step.",
+    "Confirm whether live-step edits are still staged or unstaged; Momentum did not prove cleanup.",
+    "Commit, reset, or preserve the worktree manually before clearing recovery."
   ]
 };
 

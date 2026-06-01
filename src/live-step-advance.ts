@@ -130,7 +130,7 @@ export type AdvanceLiveWorkflowStepResult = {
   run: RunLiveWorkflowStepOutcome;
   /** The git + verification transaction outcome; present iff `finalized`. */
   finalize?: FinalizeLiveWorkflowStepFromResultFileResult;
-  /** The durable recovery reconciliation outcome; present iff `finalized`. */
+  /** The durable recovery reconciliation outcome when finalization enters recovery. */
   recovery?: PersistLiveWorkflowFinalizeRecoveryResult;
 };
 
@@ -177,6 +177,21 @@ export function advanceLiveWorkflowStep(
     run.deferredLease
   );
   if (!repoLockHeartbeat.ok) {
+    const finalize: FinalizeLiveWorkflowStepFromResultFileResult = {
+      outcome: "repo_lock_lost",
+      error: repoLockHeartbeat.error
+    };
+    const recovery = persistLiveWorkflowFinalizeRecovery(input.db, {
+      runId: input.runId,
+      stepId: input.stepId,
+      finalize,
+      agentWorkflowsDir: input.agentWorkflowsDir,
+      ...(input.artifactRunDir !== undefined
+        ? { artifactRunDir: input.artifactRunDir }
+        : {}),
+      repoPath: input.executorInput.repoPath,
+      ...(input.now !== undefined ? { now: input.now } : {})
+    });
     const failedRun = completeDeferredStep(input, run, {
       outcome: "repo_lock_lost",
       message: repoLockHeartbeat.error
@@ -188,7 +203,7 @@ export function advanceLiveWorkflowStep(
       message: repoLockHeartbeat.error,
       ...(input.now !== undefined ? { now: input.now } : {})
     });
-    return { committed: false, finalized: false, run: failedRun };
+    return { committed: false, finalized: false, run: failedRun, recovery };
   }
 
   let finalize: FinalizeLiveWorkflowStepFromResultFileResult;

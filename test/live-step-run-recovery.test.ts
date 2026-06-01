@@ -111,6 +111,48 @@ function repoLockLostResult(): FinalizeLiveWorkflowStepFromResultFileResult {
   };
 }
 
+function gitFailedResult(): FinalizeLiveWorkflowStepFromResultFileResult {
+  return {
+    outcome: "git_failed",
+    error: "git rev-parse HEAD failed"
+  };
+}
+
+function commitFailedWithoutCleanupResult(): FinalizeLiveWorkflowStepFromResultFileResult {
+  return {
+    outcome: "commit_failed",
+    verification: {
+      ok: true,
+      results: []
+    },
+    commit: {
+      ok: false,
+      code: "git_failed",
+      error: "git commit failed"
+    }
+  };
+}
+
+function commitFailedWithResetFailureResult(): FinalizeLiveWorkflowStepFromResultFileResult {
+  return {
+    outcome: "commit_failed",
+    verification: {
+      ok: true,
+      results: []
+    },
+    commit: {
+      ok: false,
+      code: "git_failed",
+      error: "git commit failed"
+    },
+    reset: {
+      ok: false,
+      code: "git_failed",
+      error: "git reset failed after commit failure"
+    }
+  };
+}
+
 describe("persistLiveWorkflowFinalizeRecovery", () => {
   it("sets the durable flag and writes recovery.md for a head_mismatch finalize outcome", () => {
     const dataDir = makeTempDir();
@@ -300,7 +342,18 @@ describe("persistLiveWorkflowFinalizeRecovery", () => {
     try {
       for (const [runId, finalize, code] of [
         ["run-reset-failed", resetFailedResult(), "reset_failed"],
-        ["run-lock-lost", repoLockLostResult(), "repo_lock_lost"]
+        ["run-lock-lost", repoLockLostResult(), "repo_lock_lost"],
+        ["run-git-failed", gitFailedResult(), "git_failed"],
+        [
+          "run-commit-failed",
+          commitFailedWithoutCleanupResult(),
+          "commit_failed"
+        ],
+        [
+          "run-commit-reset-failed",
+          commitFailedWithResetFailureResult(),
+          "reset_failed"
+        ]
       ] as const) {
         seedRun(db, runId);
 
@@ -326,6 +379,63 @@ describe("persistLiveWorkflowFinalizeRecovery", () => {
         );
         expect(body).toContain(`- Recovery classification: ${code}`);
       }
+    } finally {
+      db.close();
+    }
+  });
+
+  it("does not enter recovery when commit failure cleanup is proven safe", () => {
+    const dataDir = makeTempDir();
+    const agentWorkflowsDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, "run-clean-commit-failed");
+
+      const cleanFinalizeResults: FinalizeLiveWorkflowStepFromResultFileResult[] = [
+        {
+          outcome: "commit_failed",
+          verification: {
+            ok: true,
+            results: []
+          },
+          commit: {
+            ok: false,
+            code: "nothing_to_commit",
+            error: "No staged changes after runner; nothing to commit."
+          }
+        },
+        {
+          outcome: "commit_failed",
+          verification: {
+            ok: true,
+            results: []
+          },
+          commit: {
+            ok: false,
+            code: "git_failed",
+            error: "git commit failed"
+          },
+          reset: { ok: true, head: EXPECTED_HEAD }
+        }
+      ];
+
+      for (const finalize of cleanFinalizeResults) {
+        const out = persistLiveWorkflowFinalizeRecovery(db, {
+          runId: "run-clean-commit-failed",
+          stepId: "implementation",
+          finalize,
+          agentWorkflowsDir,
+          now: 1_730_000_500_000
+        });
+
+        expect(out.ok).toBe(true);
+        if (!out.ok) throw new Error("expected success");
+        expect(out.outcome).toBe("no_recovery_required");
+      }
+
+      expect(
+        readRunRow(db, "run-clean-commit-failed").needs_manual_recovery
+      ).toBe(0);
     } finally {
       db.close();
     }

@@ -211,7 +211,9 @@ describe("live run-level recovery classifications (M9)", () => {
       "result_missing",
       "result_invalid",
       "reset_failed",
-      "repo_lock_lost"
+      "repo_lock_lost",
+      "git_failed",
+      "commit_failed"
     ]);
     // The full recovery.md render vocabulary is the M7 monitor codes plus the
     // M9 live run-level codes; neither set drops out.
