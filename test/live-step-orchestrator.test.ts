@@ -577,6 +577,96 @@ describe("runLiveWorkflowStep", () => {
     }
   });
 
+  it("refuses a running target step before mutating leases or repo locks", () => {
+    const db = openSeededDb("run-1", "running");
+    try {
+      seedStep(db, "run-1", "step-impl", "running");
+
+      let called = false;
+      const out = runLiveWorkflowStep({
+        db,
+        runId: "run-1",
+        stepId: "step-impl",
+        holder: "worker-1",
+        leaseExpiresAt: SEED_AT + 60_000,
+        executor: fakeExecutor(() => {
+          called = true;
+          return successDispatch("sha256:ok");
+        }),
+        executorInput: EXEC_INPUT,
+        now: SEED_AT + 1_710
+      });
+
+      expect(out.ok).toBe(false);
+      expect(out.stage).toBe("input");
+      expect(out.lease.acquired).toBe(false);
+      expect(out.inputError).toContain("state running");
+      expect(out.inputError).toContain("expected approved");
+      expect(called).toBe(false);
+      expect(getWorkflowStep(db, "run-1", "step-impl")?.state).toBe(
+        "running"
+      );
+      expect(getWorkflowLease(db, "run-1", "managed-step")).toBeUndefined();
+
+      const row = db
+        .prepare(
+          `SELECT heartbeat_at AS heartbeatAt, lease_expires_at AS leaseExpiresAt
+             FROM repo_locks
+            WHERE repo_root = ? AND state = 'active'`
+        )
+        .get("/repo") as { heartbeatAt: number; leaseExpiresAt: number };
+      expect(row.heartbeatAt).toBe(SEED_AT);
+      expect(row.leaseExpiresAt).toBe(SEED_AT + 60_000);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses a pending target step before mutating leases or repo locks", () => {
+    const db = openSeededDb();
+    try {
+      seedStep(db, "run-1", "step-impl", "pending");
+
+      let called = false;
+      const out = runLiveWorkflowStep({
+        db,
+        runId: "run-1",
+        stepId: "step-impl",
+        holder: "worker-1",
+        leaseExpiresAt: SEED_AT + 60_000,
+        executor: fakeExecutor(() => {
+          called = true;
+          return successDispatch("sha256:ok");
+        }),
+        executorInput: EXEC_INPUT,
+        now: SEED_AT + 1_715
+      });
+
+      expect(out.ok).toBe(false);
+      expect(out.stage).toBe("input");
+      expect(out.lease.acquired).toBe(false);
+      expect(out.inputError).toContain("state pending");
+      expect(out.inputError).toContain("expected approved");
+      expect(called).toBe(false);
+      expect(getWorkflowStep(db, "run-1", "step-impl")?.state).toBe(
+        "pending"
+      );
+      expect(getWorkflowLease(db, "run-1", "managed-step")).toBeUndefined();
+
+      const row = db
+        .prepare(
+          `SELECT heartbeat_at AS heartbeatAt, lease_expires_at AS leaseExpiresAt
+             FROM repo_locks
+            WHERE repo_root = ? AND state = 'active'`
+        )
+        .get("/repo") as { heartbeatAt: number; leaseExpiresAt: number };
+      expect(row.heartbeatAt).toBe(SEED_AT);
+      expect(row.leaseExpiresAt).toBe(SEED_AT + 60_000);
+    } finally {
+      db.close();
+    }
+  });
+
   it("refuses a mismatched executor repo path before acquiring the lease", () => {
     const db = openSeededDb("run-1", "approved", "/repo-a");
     try {
@@ -881,7 +971,7 @@ describe("runLiveWorkflowStep", () => {
     try {
       seedStep(db, "run-1", "step-impl", "approved");
       seedRepoLock(db, "/repo", "worker-1", {
-        leaseExpiresAt: SEED_AT + 1_850
+        leaseExpiresAt: SEED_AT + 2_750
       });
 
       let repoHeartbeatDuringExecute: number | null = null;
@@ -890,7 +980,7 @@ describe("runLiveWorkflowStep", () => {
         runId: "run-1",
         stepId: "step-impl",
         holder: "worker-1",
-        leaseExpiresAt: SEED_AT + 1_850,
+        leaseExpiresAt: SEED_AT + 2_750,
         executor: fakeExecutor(() => {
           repoHeartbeatDuringExecute = waitForRepoLockHeartbeatAfter(
             db,
@@ -1815,10 +1905,23 @@ describe("runLiveWorkflowStep", () => {
     }
   });
 
-  it("releases the lease and refuses with stage 'start' when the step cannot start", () => {
+  it("releases the lease and refuses with stage 'start' when the step changes before start", () => {
     const db = openSeededDb();
     try {
-      seedStep(db, "run-1", "step-impl", "pending");
+      seedStep(db, "run-1", "step-impl", "approved");
+      db.exec(
+        `CREATE TRIGGER force_live_step_start_conflict
+           AFTER INSERT ON workflow_leases
+           WHEN NEW.run_id = 'run-1'
+            AND NEW.lease_kind = 'managed-step'
+         BEGIN
+           UPDATE workflow_steps
+              SET state = 'pending',
+                  updated_at = ${SEED_AT + 6_000}
+            WHERE run_id = 'run-1'
+              AND step_id = 'step-impl';
+         END`
+      );
 
       let called = false;
       const out = runLiveWorkflowStep({

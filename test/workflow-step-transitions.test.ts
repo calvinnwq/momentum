@@ -144,7 +144,7 @@ describe("startWorkflowStep", () => {
     }
   });
 
-  it("is idempotent when the step is already running and preserves the original started_at", () => {
+  it("refuses to start a step that is already running", () => {
     const { db } = openSeededDb();
     try {
       seedStep(db, "run-1", "step-impl", "running", { startedAt: 4_000 });
@@ -155,15 +155,16 @@ describe("startWorkflowStep", () => {
         now: 9_000
       });
 
-      expect(out.ok).toBe(true);
-      if (!out.ok) return;
-      expect(out.state).toBe("running");
-      expect(out.startedAt).toBe(4_000);
-      expect(out.idempotent).toBe(true);
+      expect(out.ok).toBe(false);
+      if (out.ok) return;
+      expect(out.reason).toBe("invalid_transition");
+      if (out.reason !== "invalid_transition") return;
+      expect(out.from).toBe("running");
+      expect(out.to).toBe("running");
+      expect(out.errorMessage).toContain("expected approved");
 
       const raw = readRawStep(db, "run-1", "step-impl");
       expect(raw?.started_at).toBe(4_000);
-      // No write happened, so updated_at is unchanged.
       expect(raw?.updated_at).toBe(SEED_AT);
     } finally {
       db.close();

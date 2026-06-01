@@ -123,7 +123,7 @@ M9 consumes the M8 durable approval rows. It does not introduce a second approva
 Starting, advancing, or retrying a live step must check:
 
 - The run state; live execution may start only when the durable run state is `approved` or `running`.
-- The current step state.
+- The current step state; normal live execution only starts from `approved`.
 - That no other step in the same run is already `running`.
 - That all lower-order required predecessor steps are `succeeded` or `skipped`.
 - The approval boundary required for that step.
@@ -131,7 +131,8 @@ Starting, advancing, or retrying a live step must check:
 - Active leases.
 - Repo path and repo lock availability; live execution requires `workflow_runs.repo_path` to be present and equal `executorInput.repoPath`. Repo-backed runs must also have a durable `workflow_runs.goal_id` plus an active, unexpired `repo_locks` row for `workflow_runs.repo_path` held by the same holder and matching goal id. Live execution heartbeats that repo lock while the managed step runs.
 
-Illegal advance attempts refuse without partial mutation.
+Illegal advance attempts refuse without partial mutation. A step already marked
+`running` is a recovery/reattach concern, not an implicit idempotent start.
 
 ### Recovery
 

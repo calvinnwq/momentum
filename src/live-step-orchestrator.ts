@@ -401,6 +401,15 @@ function claimLiveWorkflowStepStart(
         `runLiveWorkflowStep: workflow_steps.kind "${durableStep.kind}" must match executorInput.kind "${input.executorInput.kind}"`
       );
     }
+    const stepStateError = validateWorkflowStepStartState(
+      input.runId,
+      input.stepId,
+      durableStep.state
+    );
+    if (stepStateError !== null) {
+      db.exec("ROLLBACK");
+      return inputRefusal(stepStateError);
+    }
     const predecessorError = validateWorkflowStepPredecessors(
       db,
       input.runId,
@@ -641,6 +650,15 @@ function validateNoOtherRunningWorkflowStep(
     .get(runId, stepId) as { step_id: string } | undefined;
   if (row === undefined) return null;
   return `runLiveWorkflowStep: workflow run "${runId}" already has running step "${row.step_id}"`;
+}
+
+function validateWorkflowStepStartState(
+  runId: string,
+  stepId: string,
+  state: WorkflowStepState
+): string | null {
+  if (state === "approved") return null;
+  return `runLiveWorkflowStep: workflow step "${runId}/${stepId}" cannot start from state ${state}; expected approved`;
 }
 
 function validateWorkflowStepPredecessors(

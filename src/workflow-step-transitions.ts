@@ -96,10 +96,9 @@ export type StartWorkflowStepInput = {
 };
 
 /**
- * Transition a step `approved -> running` and stamp `started_at`. Idempotent
- * when the step is already `running` (the original `started_at` is preserved and
- * no write occurs). Refuses with `invalid_transition` for any other source state
- * and `step_not_found` when the row is absent. Never touches operator columns.
+ * Transition a step `approved -> running` and stamp `started_at`. Refuses with
+ * `invalid_transition` for any other source state and `step_not_found` when the
+ * row is absent. Never touches operator columns.
  */
 export function startWorkflowStep(
   db: MomentumDb,
@@ -109,18 +108,34 @@ export function startWorkflowStep(
   const row = getWorkflowStep(db, input.runId, input.stepId);
   if (!row) return { ok: false, reason: "step_not_found" };
 
+  if (row.state !== "approved") {
+    if (isTerminalStepState(row.state)) {
+      const terminalTransition = transitionWorkflowStep(row.state, "running");
+      if (!terminalTransition.ok) {
+        return invalidTransition(
+          row.state,
+          "running",
+          terminalTransition.errorCode,
+          terminalTransition.errorMessage
+        );
+      }
+    }
+    return invalidTransition(
+      row.state,
+      "running",
+      "workflow_step_invalid_transition",
+      `workflow step cannot start from ${row.state}; expected approved`
+    );
+  }
+
   const transition = transitionWorkflowStep(row.state, "running");
   if (!transition.ok) {
-    return invalidTransition(row.state, "running", transition.errorCode, transition.errorMessage);
-  }
-  if (row.state === "running") {
-    return {
-      ok: true,
-      state: "running",
-      startedAt: row.startedAt,
-      finishedAt: row.finishedAt,
-      idempotent: true
-    };
+    return invalidTransition(
+      row.state,
+      "running",
+      transition.errorCode,
+      transition.errorMessage
+    );
   }
 
   // Guard the write on the from-state we validated so a cross-process writer
