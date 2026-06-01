@@ -69,6 +69,11 @@ import {
   type PersistLiveWorkflowFinalizeRecoveryResult
 } from "./live-step-run-recovery.js";
 import type { WorkflowLeaseStalePolicy } from "./workflow-run-reducer.js";
+import { releaseWorkflowLease } from "./workflow-leases.js";
+import {
+  finishWorkflowStep,
+  type WorkflowStepTransitionOutcome
+} from "./workflow-step-transitions.js";
 import type {
   WorkflowStepExecutor,
   WorkflowStepExecutorInput
@@ -144,7 +149,8 @@ export function advanceLiveWorkflowStep(
     ...(input.stalePolicy !== undefined
       ? { stalePolicy: input.stalePolicy }
       : {}),
-    ...(input.now !== undefined ? { now: input.now } : {})
+    ...(input.now !== undefined ? { now: input.now } : {}),
+    deferSuccessfulTerminalState: true
   });
 
   // The git + verification transaction runs only for a step that settled into a
@@ -152,12 +158,20 @@ export function advanceLiveWorkflowStep(
   // dispatch error already carries a precise live recovery code, and an
   // unsettled finish leaves an ambiguous repo lock — neither is safe to mutate.
   const dispatch = run.dispatch;
-  if (dispatch === undefined || !dispatch.ok || run.finish?.ok !== true) {
+  const canFinalize =
+    dispatch !== undefined &&
+    dispatch.ok &&
+    (run.finish?.ok === true || run.deferredTerminalState === "succeeded");
+  if (!canFinalize) {
     return { committed: false, finalized: false, run };
   }
 
   const repoLockHeartbeat = startAdvanceRepoLockHeartbeat(input);
   if (!repoLockHeartbeat.ok) {
+    const failedRun = completeDeferredSuccessfulStep(input, run, {
+      outcome: "repo_lock_lost",
+      message: repoLockHeartbeat.error
+    });
     reconcileFinalizeStepFailure(input.db, {
       runId: input.runId,
       stepId: input.stepId,
@@ -165,7 +179,7 @@ export function advanceLiveWorkflowStep(
       message: repoLockHeartbeat.error,
       ...(input.now !== undefined ? { now: input.now } : {})
     });
-    return { committed: false, finalized: false, run };
+    return { committed: false, finalized: false, run: failedRun };
   }
 
   let finalize: FinalizeLiveWorkflowStepFromResultFileResult;
@@ -176,11 +190,17 @@ export function advanceLiveWorkflowStep(
       resultFilePath: dispatch.resultJsonPath,
       verificationCommands: input.verificationCommands,
       verificationTimeoutSec: input.verificationTimeoutSec,
-      verificationLogPath: input.verificationLogPath
+      verificationLogPath: input.verificationLogPath,
+      beforeGitMutation: repoLockHeartbeat.heartbeat.assertFresh
     });
   } finally {
     repoLockHeartbeat.heartbeat.stop();
   }
+
+  const completedRun = completeDeferredSuccessfulStep(input, run, {
+    outcome: finalize.outcome,
+    message: describeFinalizeFailure(finalize)
+  });
 
   reconcileFinalizeStepState(input.db, {
     runId: input.runId,
@@ -204,14 +224,20 @@ export function advanceLiveWorkflowStep(
   return {
     committed: finalize.outcome === "committed",
     finalized: true,
-    run,
+    run: completedRun,
     finalize,
     recovery
   };
 }
 
 type AdvanceRepoLockHeartbeat =
-  | { ok: true; heartbeat: { stop: () => void } }
+  | {
+      ok: true;
+      heartbeat: {
+        stop: () => { ok: boolean; error?: string };
+        assertFresh: () => { ok: true } | { ok: false; error: string };
+      };
+    }
   | { ok: false; error: string };
 
 type AdvanceRepoLock = {
@@ -255,14 +281,38 @@ function startAdvanceRepoLockHeartbeat(
     };
   }
 
+  const wallClockStartedAt = Date.now();
+  const workerHeartbeat = startAdvanceRepoLockHeartbeatWorker({
+    dbPath,
+    repoLock: repoLock.lock,
+    startNow,
+    wallClockStartedAt,
+    leaseDurationMs
+  });
+  const assertFresh = (): { ok: true } | { ok: false; error: string } => {
+    const heartbeatAt =
+      startNow + Math.max(0, Date.now() - wallClockStartedAt);
+    if (
+      !refreshAdvanceRepoLockWithRetry(input.db, {
+        repoLock: repoLock.lock,
+        heartbeatAt,
+        leaseExpiresAt: heartbeatAt + leaseDurationMs
+      }).ok
+    ) {
+      return {
+        ok: false,
+        error: `advanceLiveWorkflowStep: repo lock for "${input.executorInput.repoPath}" was lost during finalization`
+      };
+    }
+    return { ok: true };
+  };
+
   return {
     ok: true,
-    heartbeat: startAdvanceRepoLockHeartbeatWorker({
-      dbPath,
-      repoLock: repoLock.lock,
-      startNow,
-      leaseDurationMs
-    })
+    heartbeat: {
+      stop: workerHeartbeat.stop,
+      assertFresh
+    }
   };
 }
 
@@ -345,13 +395,48 @@ function refreshAdvanceRepoLock(
   return { ok: Number(result.changes) > 0 };
 }
 
+function refreshAdvanceRepoLockWithRetry(
+  db: MomentumDb,
+  input: {
+    repoLock: AdvanceRepoLock;
+    heartbeatAt: number;
+    leaseExpiresAt: number;
+  }
+): { ok: boolean } {
+  const retryUntil = Date.now() + 1_000;
+  for (;;) {
+    try {
+      return refreshAdvanceRepoLock(db, input);
+    } catch (error) {
+      if (!isSqliteBusy(error) || Date.now() >= retryUntil) return { ok: false };
+      sleepMs(10);
+    }
+  }
+}
+
+function isSqliteBusy(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (code === "SQLITE_BUSY" || code === "SQLITE_LOCKED") return true;
+  return error instanceof Error && /database is locked/i.test(error.message);
+}
+
+function sleepMs(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 function startAdvanceRepoLockHeartbeatWorker(input: {
   dbPath: string;
   repoLock: AdvanceRepoLock;
   startNow: number;
+  wallClockStartedAt: number;
   leaseDurationMs: number;
-}): { stop: () => void } {
-  const heartbeatIntervalMs = Math.max(1, Math.floor(input.leaseDurationMs / 2));
+}): {
+  stop: () => { ok: boolean; error?: string };
+} {
+  const heartbeatIntervalMs = Math.max(
+    1,
+    Math.floor(input.leaseDurationMs / 2)
+  );
   const control = new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT);
   const controlView = new Int32Array(control);
   const worker = new Worker(ADVANCE_REPO_LOCK_HEARTBEAT_WORKER_SOURCE, {
@@ -360,26 +445,80 @@ function startAdvanceRepoLockHeartbeatWorker(input: {
       dbPath: input.dbPath,
       repoLock: input.repoLock,
       startNow: input.startNow,
-      wallClockStartedAt: Date.now(),
+      wallClockStartedAt: input.wallClockStartedAt,
       leaseDurationMs: input.leaseDurationMs,
       heartbeatIntervalMs,
       control
     }
   });
   worker.on("error", () => {
-    Atomics.store(controlView, 0, 2);
+    Atomics.store(controlView, 0, 3);
     Atomics.notify(controlView, 0);
   });
   worker.unref();
+  const failed = (): { ok: false; error: string } => ({
+    ok: false,
+    error: `advanceLiveWorkflowStep: repo lock heartbeat failed for "${input.repoLock.repoPath}"`
+  });
 
   return {
     stop: () => {
+      if (Atomics.load(controlView, 0) === 3) return failed();
       if (Atomics.load(controlView, 0) !== 2) {
         Atomics.store(controlView, 0, 1);
         Atomics.notify(controlView, 0);
         Atomics.wait(controlView, 0, 1, 1_000);
       }
+      if (Atomics.load(controlView, 0) === 3) return failed();
+      return { ok: true };
     }
+  };
+}
+
+function completeDeferredSuccessfulStep(
+  input: AdvanceLiveWorkflowStepInput,
+  run: RunLiveWorkflowStepOutcome,
+  failure: { outcome: string; message: string }
+): RunLiveWorkflowStepOutcome {
+  if (run.deferredTerminalState !== "succeeded") return run;
+
+  const state = failure.outcome === "committed" ? "succeeded" : "failed";
+  const finish: WorkflowStepTransitionOutcome = finishWorkflowStep(input.db, {
+    runId: input.runId,
+    stepId: input.stepId,
+    state,
+    errorCode: state === "succeeded" ? null : `live_finalize_${failure.outcome}`,
+    errorMessage: state === "succeeded" ? null : failure.message,
+    resultDigest:
+      state === "succeeded" && run.dispatch?.ok === true
+        ? run.dispatch.result.resultDigest
+        : null,
+    ...(input.now !== undefined ? { now: input.now } : {})
+  });
+
+  const lease = run.deferredLease;
+  const released =
+    finish.ok && lease !== undefined && lease.releasedAt === null
+      ? releaseWorkflowLease(input.db, {
+          runId: input.runId,
+          leaseKind: lease.leaseKind,
+          holder: lease.holder,
+          acquiredAt: lease.acquiredAt,
+          ...(input.now !== undefined ? { now: input.now } : {})
+        })
+      : { ok: false };
+  const {
+    deferredTerminalState: _deferred,
+    deferredLease: _deferredLease,
+    ...settledRun
+  } = run;
+
+  return {
+    ...settledRun,
+    ok: state === "succeeded" && finish.ok && released.ok,
+    lease: { ...run.lease, released: released.ok },
+    finish,
+    terminalState: state
   };
 }
 
@@ -448,6 +587,8 @@ function describeFinalizeFailure(
     case "commit_failed":
       return finalize.commit.error;
     case "git_failed":
+      return finalize.error;
+    case "repo_lock_lost":
       return finalize.error;
     case "invalid_input":
       return finalize.error;
@@ -537,7 +678,9 @@ try {
     closeDb();
   }
 } finally {
-  Atomics.store(control, 0, 2);
+  if (Atomics.load(control, 0) !== 3) {
+    Atomics.store(control, 0, 2);
+  }
   Atomics.notify(control, 0);
 }
 `;

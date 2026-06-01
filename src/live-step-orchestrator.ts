@@ -110,6 +110,7 @@ export type RunLiveWorkflowStepInput = {
   stalePolicy?: WorkflowLeaseStalePolicy;
   /** Deterministic clock for stamping; defaults to `Date.now()`. */
   now?: number;
+  deferSuccessfulTerminalState?: boolean;
 };
 
 export type RunLiveWorkflowStepOutcome = {
@@ -131,6 +132,8 @@ export type RunLiveWorkflowStepOutcome = {
   finish?: WorkflowStepTransitionOutcome;
   /** The terminal state the step was finalized into. */
   terminalState?: WorkflowStepTerminalState;
+  deferredTerminalState?: WorkflowStepTerminalState;
+  deferredLease?: WorkflowLeaseRecord;
   inputError?: string;
   /**
    * The precise live-wrapper recovery code, when the dispatch error carried one
@@ -294,6 +297,21 @@ export function runLiveWorkflowStep(
   const terminalState: WorkflowStepTerminalState = dispatch.ok
     ? mapStartedStepTerminalState(dispatch.result.state)
     : "failed";
+  if (
+    input.deferSuccessfulTerminalState === true &&
+    terminalState === "succeeded"
+  ) {
+    return {
+      ok: false,
+      stage: "execute",
+      lease: { acquired: true, released: false },
+      start,
+      dispatch,
+      terminalState,
+      deferredTerminalState: terminalState,
+      deferredLease: acquired.lease
+    };
+  }
   const finish = finishLiveWorkflowStep(db, {
     runId,
     stepId,

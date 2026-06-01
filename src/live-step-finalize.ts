@@ -81,6 +81,7 @@ export type FinalizeLiveWorkflowStepInput = {
   verificationCommands: string[];
   verificationTimeoutSec: number;
   verificationLogPath: string;
+  beforeGitMutation?: () => { ok: true } | { ok: false; error: string };
 };
 
 /**
@@ -140,6 +141,10 @@ export type FinalizeLiveWorkflowStepResult =
       error: string;
     }
   | {
+      outcome: "repo_lock_lost";
+      error: string;
+    }
+  | {
       outcome: "invalid_input";
       error: string;
     };
@@ -157,6 +162,7 @@ export type FinalizeLiveWorkflowStepFromResultFileInput = {
   verificationCommands: string[];
   verificationTimeoutSec: number;
   verificationLogPath: string;
+  beforeGitMutation?: () => { ok: true } | { ok: false; error: string };
 };
 
 /**
@@ -198,7 +204,8 @@ export function finalizeLiveWorkflowStep(
     commitIntent,
     verificationCommands,
     verificationTimeoutSec,
-    verificationLogPath
+    verificationLogPath,
+    beforeGitMutation
   } = input;
 
   // 1. Refuse to touch the worktree if the live step moved HEAD off the base.
@@ -218,7 +225,8 @@ export function finalizeLiveWorkflowStep(
     commitIntent,
     verificationCommands,
     verificationTimeoutSec,
-    verificationLogPath
+    verificationLogPath,
+    ...(beforeGitMutation !== undefined ? { beforeGitMutation } : {})
   });
 
   // 3. Translate the finalize outcome, routing any moved-HEAD finding to manual
@@ -264,6 +272,8 @@ export function finalizeLiveWorkflowStep(
         commit: finalize.commit,
         ...(finalize.reset !== undefined ? { reset: finalize.reset } : {})
       };
+    case "ownership_lost":
+      return { outcome: "repo_lock_lost", error: finalize.error };
     case "invalid_input":
       return { outcome: "invalid_input", error: finalize.error };
   }
@@ -317,7 +327,10 @@ export function finalizeLiveWorkflowStepFromResultFile(
     commitIntent: read.result.commit,
     verificationCommands: input.verificationCommands,
     verificationTimeoutSec: input.verificationTimeoutSec,
-    verificationLogPath: input.verificationLogPath
+    verificationLogPath: input.verificationLogPath,
+    ...(input.beforeGitMutation !== undefined
+      ? { beforeGitMutation: input.beforeGitMutation }
+      : {})
   });
 }
 

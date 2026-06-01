@@ -538,6 +538,123 @@ describe("advanceLiveWorkflowStep", () => {
     }
   });
 
+  it("keeps a successful step running and leased until finalization completes", () => {
+    const repoPath = initRepo();
+    const baseHead = commitInitial(repoPath);
+    const runDir = makeTempDir("momentum-live-advance-run-");
+    const db = openDb(makeTempDir());
+    const probePath = path.join(runDir, "workflow-step-finalize-gate.json");
+    try {
+      seedRepoBackedRun(db, repoPath);
+
+      const dbPath = db.location();
+      if (typeof dbPath !== "string" || dbPath.length === 0) {
+        throw new Error("expected file-backed db for step finalize gate test");
+      }
+      const probeScript = [
+        "const { DatabaseSync } = require('node:sqlite');",
+        "const fs = require('node:fs');",
+        `const db = new DatabaseSync(${JSON.stringify(dbPath)});`,
+        `const step = db.prepare(${JSON.stringify("SELECT state, finished_at AS finishedAt FROM workflow_steps WHERE run_id = ? AND step_id = ?")}).get(${JSON.stringify(RUN_ID)}, ${JSON.stringify(STEP_ID)});`,
+        `const lease = db.prepare(${JSON.stringify("SELECT released_at AS releasedAt FROM workflow_leases WHERE run_id = ? AND lease_kind = 'managed-step'")}).get(${JSON.stringify(RUN_ID)});`,
+        `fs.writeFileSync(${JSON.stringify(probePath)}, JSON.stringify({ step, lease }));`,
+        "db.close();",
+        "process.exit(step && step.state === 'running' && step.finishedAt === null && lease && lease.releasedAt === null ? 0 : 7);"
+      ].join(" ");
+
+      const out = runAdvance(
+        db,
+        repoPath,
+        baseHead,
+        runDir,
+        fakeExecutor((input) => {
+          fs.writeFileSync(
+            path.join(input.repoPath, "step-edit.txt"),
+            "from-live-step\n",
+            "utf-8"
+          );
+          fs.writeFileSync(
+            input.resultJsonPath,
+            JSON.stringify(runnerResult()),
+            "utf-8"
+          );
+          return succeededDispatch(input);
+        }),
+        { verificationCommands: [`node -e ${JSON.stringify(probeScript)}`] }
+      );
+
+      expect(out.committed).toBe(true);
+      expect(out.finalize?.outcome).toBe("committed");
+      const probe = JSON.parse(fs.readFileSync(probePath, "utf-8")) as {
+        step: { state: string; finishedAt: number | null };
+        lease: { releasedAt: number | null };
+      };
+      expect(probe.step.state).toBe("running");
+      expect(probe.step.finishedAt).toBeNull();
+      expect(probe.lease.releasedAt).toBeNull();
+      expect(getWorkflowStep(db, RUN_ID, STEP_ID)?.state).toBe("succeeded");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses to commit when the repo lock is lost during finalization", () => {
+    const repoPath = initRepo();
+    const baseHead = commitInitial(repoPath);
+    const runDir = makeTempDir("momentum-live-advance-run-");
+    const db = openDb(makeTempDir());
+    try {
+      seedRepoBackedRun(db, repoPath);
+
+      const dbPath = db.location();
+      if (typeof dbPath !== "string" || dbPath.length === 0) {
+        throw new Error("expected file-backed db for repo lock loss test");
+      }
+      const releaseLockScript = [
+        "const { DatabaseSync } = require('node:sqlite');",
+        `const db = new DatabaseSync(${JSON.stringify(dbPath)});`,
+        `db.prepare(${JSON.stringify("UPDATE repo_locks SET state = 'released', updated_at = ? WHERE id = ?")}).run(${NOW + 5}, ${JSON.stringify(`lock-${HOLDER}`)});`,
+        "db.close();",
+        "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 120);"
+      ].join(" ");
+
+      const out = runAdvance(
+        db,
+        repoPath,
+        baseHead,
+        runDir,
+        fakeExecutor((input) => {
+          fs.writeFileSync(
+            path.join(input.repoPath, "step-edit.txt"),
+            "from-live-step\n",
+            "utf-8"
+          );
+          fs.writeFileSync(
+            input.resultJsonPath,
+            JSON.stringify(runnerResult()),
+            "utf-8"
+          );
+          return succeededDispatch(input);
+        }),
+        {
+          leaseExpiresAt: NOW + 50,
+          verificationCommands: [`node -e ${JSON.stringify(releaseLockScript)}`]
+        }
+      );
+
+      expect(out.committed).toBe(false);
+      expect(out.finalized).toBe(true);
+      expect(out.finalize?.outcome).toBe("repo_lock_lost");
+      expect(headOf(repoPath)).toBe(baseHead);
+      expect(fs.existsSync(path.join(repoPath, "step-edit.txt"))).toBe(true);
+      const step = getWorkflowStep(db, RUN_ID, STEP_ID);
+      expect(step?.state).toBe("failed");
+      expect(step?.errorCode).toBe("live_finalize_repo_lock_lost");
+    } finally {
+      db.close();
+    }
+  });
+
   it("resets the worktree without recovery when the runner reports success=false", () => {
     const repoPath = initRepo();
     const baseHead = commitInitial(repoPath);

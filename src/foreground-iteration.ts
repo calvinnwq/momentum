@@ -387,6 +387,13 @@ export function runForegroundIteration(
         error: finalize.error,
         finalize
       };
+    case "ownership_lost":
+      return {
+        ok: false,
+        code: "git_failed",
+        error: finalize.error,
+        finalize
+      };
   }
 }
 
