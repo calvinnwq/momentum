@@ -1,0 +1,680 @@
+import { afterEach, describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+import { openDb, type MomentumDb } from "../src/db.js";
+import { advanceLiveWorkflowStep } from "../src/live-step-advance.js";
+import { getWorkflowStep } from "../src/workflow-step-transitions.js";
+import { getWorkflowRunManualRecoveryState } from "../src/workflow-run-recovery.js";
+import { resolveWorkflowRecoveryArtifactPath } from "../src/workflow-recovery-artifact.js";
+import type { PersistLiveWorkflowFinalizeRecoveryResult } from "../src/live-step-run-recovery.js";
+import type {
+  WorkflowStepExecutor,
+  WorkflowStepExecutorDispatchResult,
+  WorkflowStepExecutorInput,
+  WorkflowStepExecutorKind
+} from "../src/workflow-step-executor.js";
+import type { CommitIntent, RunnerResult } from "../src/runner-result.js";
+import type {
+  WorkflowApprovalBoundary,
+  WorkflowStepState
+} from "../src/workflow-run-reducer.js";
+
+const SEED_AT = 1_730_000_000_000;
+const NOW = SEED_AT + 1_000;
+const LEASE_EXPIRES_AT = SEED_AT + 60_000;
+const RUN_ID = "run-1";
+const STEP_ID = "step-impl";
+const HOLDER = "worker-1";
+
+const tempRoots: string[] = [];
+
+afterEach(() => {
+  while (tempRoots.length > 0) {
+    const dir = tempRoots.pop();
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+function makeTempDir(prefix = "momentum-live-advance-"): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempRoots.push(dir);
+  return fs.realpathSync(dir);
+}
+
+function runGit(cwd: string, args: string[]): string {
+  return execFileSync("git", ["-C", cwd, ...args], {
+    encoding: "utf-8",
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+}
+
+function initRepo(): string {
+  const dir = makeTempDir("momentum-live-advance-repo-");
+  runGit(dir, ["init", "--initial-branch=main", "--quiet"]);
+  runGit(dir, ["config", "user.email", "test@example.com"]);
+  runGit(dir, ["config", "user.name", "Test User"]);
+  runGit(dir, ["config", "commit.gpgsign", "false"]);
+  return dir;
+}
+
+function commitInitial(dir: string): string {
+  fs.writeFileSync(path.join(dir, "README.md"), "init\n", "utf-8");
+  runGit(dir, ["add", "README.md"]);
+  runGit(dir, ["commit", "-m", "init", "--quiet"]);
+  return runGit(dir, ["rev-parse", "HEAD"]).trim();
+}
+
+function headOf(repoPath: string): string {
+  return runGit(repoPath, ["rev-parse", "HEAD"]).trim();
+}
+
+function baseIntent(overrides: Partial<CommitIntent> = {}): CommitIntent {
+  return {
+    type: "feat",
+    scope: "live",
+    subject: "advance live workflow step",
+    body: "",
+    breaking: false,
+    ...overrides
+  };
+}
+
+function runnerResult(overrides: Partial<RunnerResult> = {}): RunnerResult {
+  return {
+    success: true,
+    summary: "live step finished",
+    key_changes_made: ["wrote step-edit.txt"],
+    key_learnings: [],
+    remaining_work: [],
+    goal_complete: false,
+    commit: baseIntent(),
+    ...overrides
+  };
+}
+
+/**
+ * Seed a repo-backed, approved workflow run with one approved implementation
+ * step, a matching active repo lock held by `HOLDER`, and approval coverage —
+ * exactly the durable state the M9-02 orchestrator's start gate requires.
+ */
+function seedRepoBackedRun(
+  db: MomentumDb,
+  repoPath: string,
+  opts: {
+    runState?: "pending" | "approved" | "running";
+    stepState?: WorkflowStepState;
+    boundary?: WorkflowApprovalBoundary;
+    goalId?: string;
+  } = {}
+): void {
+  const runState = opts.runState ?? "approved";
+  const stepState = opts.stepState ?? "approved";
+  const boundary = opts.boundary ?? "implementation";
+  const goalId = opts.goalId ?? "goal-1";
+
+  db.prepare(
+    `INSERT OR IGNORE INTO goals (
+       id, title, repo, runner, branch, max_iterations, verification,
+       verification_timeout_sec, state, artifact_dir, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    goalId,
+    goalId,
+    repoPath,
+    "fake",
+    "main",
+    1,
+    "[]",
+    900,
+    "initialized",
+    `/tmp/${goalId}`,
+    SEED_AT,
+    SEED_AT
+  );
+
+  db.prepare(
+    `INSERT INTO workflow_runs (
+       id, source, state, repo_path, goal_id, approval_boundary, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    RUN_ID,
+    "agent-workflow",
+    runState,
+    repoPath,
+    goalId,
+    boundary,
+    SEED_AT,
+    SEED_AT
+  );
+
+  db.prepare(
+    `INSERT INTO workflow_approvals (
+       run_id, boundary, actor, phrase, artifact_path, artifact_digest,
+       recorded_at, discharged_at, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    RUN_ID,
+    boundary,
+    "operator",
+    "APPROVE",
+    `workflow-run-approve://${RUN_ID}/${boundary}`,
+    `sha256:${RUN_ID}:${boundary}`,
+    SEED_AT,
+    null,
+    SEED_AT,
+    SEED_AT
+  );
+
+  db.prepare(
+    `INSERT INTO workflow_steps (
+       run_id, step_id, kind, state, step_order, required,
+       result_digest, error_code, error_message, started_at, finished_at,
+       operator_transition_at, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    RUN_ID,
+    STEP_ID,
+    "implementation",
+    stepState,
+    1,
+    1,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    SEED_AT,
+    SEED_AT
+  );
+
+  db.prepare(
+    `INSERT INTO repo_locks (
+       id, repo_root, holder, goal_id, iteration, job_id, state,
+       acquired_at, heartbeat_at, lease_expires_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    `lock-${HOLDER}`,
+    repoPath,
+    HOLDER,
+    goalId,
+    1,
+    "job-1",
+    "active",
+    SEED_AT,
+    SEED_AT,
+    LEASE_EXPIRES_AT,
+    SEED_AT
+  );
+}
+
+function buildExecutorInput(
+  repoPath: string,
+  runDir: string
+): WorkflowStepExecutorInput {
+  return {
+    runId: RUN_ID,
+    stepId: STEP_ID,
+    kind: "implementation",
+    attempt: 1,
+    repoPath,
+    runDir,
+    resultJsonPath: path.join(runDir, "runner-result.json"),
+    executorLogPath: path.join(runDir, "executor.log")
+  };
+}
+
+function fakeExecutor(
+  execute: (input: WorkflowStepExecutorInput) => WorkflowStepExecutorDispatchResult,
+  kind: WorkflowStepExecutorKind = "implementation"
+): WorkflowStepExecutor {
+  return { kind, executes: true, execute };
+}
+
+function succeededDispatch(
+  input: WorkflowStepExecutorInput,
+  resultDigest: string | null = "sha256:ok"
+): WorkflowStepExecutorDispatchResult {
+  return {
+    ok: true,
+    result: {
+      state: "succeeded",
+      summary: "did the work",
+      checkpoints: [],
+      artifacts: [],
+      resultDigest,
+      errorCode: null,
+      errorMessage: null,
+      retryHint: null,
+      recoveryHint: null
+    },
+    executorLogPath: input.executorLogPath,
+    resultJsonPath: input.resultJsonPath
+  };
+}
+
+function runnerFailedDispatch(
+  input: WorkflowStepExecutorInput
+): WorkflowStepExecutorDispatchResult {
+  return {
+    ok: true,
+    result: {
+      state: "failed",
+      summary: "runner reported success=false",
+      checkpoints: [],
+      artifacts: [],
+      resultDigest: "sha256:failed",
+      errorCode: "command_failed",
+      errorMessage: "live step runner reported success=false",
+      retryHint: null,
+      recoveryHint: null
+    },
+    executorLogPath: input.executorLogPath,
+    resultJsonPath: input.resultJsonPath
+  };
+}
+
+type AdvanceOverrides = {
+  verificationCommands?: string[];
+  agentWorkflowsDir?: string;
+  runState?: "pending" | "approved" | "running";
+  stepState?: WorkflowStepState;
+};
+
+function runAdvance(
+  db: MomentumDb,
+  repoPath: string,
+  baseHead: string,
+  runDir: string,
+  executor: WorkflowStepExecutor,
+  overrides: AdvanceOverrides = {}
+): ReturnType<typeof advanceLiveWorkflowStep> {
+  const agentWorkflowsDir = overrides.agentWorkflowsDir ?? makeTempDir();
+  return advanceLiveWorkflowStep({
+    db,
+    runId: RUN_ID,
+    stepId: STEP_ID,
+    holder: HOLDER,
+    leaseExpiresAt: LEASE_EXPIRES_AT,
+    executor,
+    executorInput: buildExecutorInput(repoPath, runDir),
+    baseHead,
+    verificationCommands: overrides.verificationCommands ?? ["echo verify-ok"],
+    verificationTimeoutSec: 30,
+    verificationLogPath: path.join(runDir, "verification.log"),
+    agentWorkflowsDir,
+    now: NOW
+  });
+}
+
+function expectRecoveryOk(
+  recovery: PersistLiveWorkflowFinalizeRecoveryResult | undefined
+): Extract<PersistLiveWorkflowFinalizeRecoveryResult, { ok: true }> {
+  expect(recovery).toBeDefined();
+  if (!recovery || !recovery.ok) {
+    throw new Error("expected an ok recovery result");
+  }
+  return recovery;
+}
+
+describe("advanceLiveWorkflowStep", () => {
+  it("runs the step, verifies, and commits the diff when the step succeeds", () => {
+    const repoPath = initRepo();
+    const baseHead = commitInitial(repoPath);
+    const runDir = makeTempDir("momentum-live-advance-run-");
+    const db = openDb(makeTempDir());
+    try {
+      seedRepoBackedRun(db, repoPath);
+
+      const out = runAdvance(
+        db,
+        repoPath,
+        baseHead,
+        runDir,
+        fakeExecutor((input) => {
+          fs.writeFileSync(
+            path.join(input.repoPath, "step-edit.txt"),
+            "from-live-step\n",
+            "utf-8"
+          );
+          fs.writeFileSync(
+            input.resultJsonPath,
+            JSON.stringify(runnerResult()),
+            "utf-8"
+          );
+          return succeededDispatch(input);
+        })
+      );
+
+      expect(out.committed).toBe(true);
+      expect(out.finalized).toBe(true);
+      expect(out.run.ok).toBe(true);
+      expect(out.finalize?.outcome).toBe("committed");
+      expect(expectRecoveryOk(out.recovery).outcome).toBe(
+        "no_recovery_required"
+      );
+
+      // The step's diff is committed on top of the base.
+      const head = headOf(repoPath);
+      expect(head).not.toBe(baseHead);
+      if (out.finalize?.outcome === "committed") {
+        expect(out.finalize.commit.parentSha).toBe(baseHead);
+        expect(out.finalize.head).toBe(head);
+        expect(out.finalize.commit.message).toBe(
+          "feat(live): advance live workflow step"
+        );
+      }
+
+      // Durable step state settled to succeeded and the run is not in recovery.
+      expect(getWorkflowStep(db, RUN_ID, STEP_ID)?.state).toBe("succeeded");
+      expect(
+        getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      ).toBe(false);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("resets the worktree without recovery when verification fails", () => {
+    const repoPath = initRepo();
+    const baseHead = commitInitial(repoPath);
+    const runDir = makeTempDir("momentum-live-advance-run-");
+    const db = openDb(makeTempDir());
+    try {
+      seedRepoBackedRun(db, repoPath);
+
+      const out = runAdvance(
+        db,
+        repoPath,
+        baseHead,
+        runDir,
+        fakeExecutor((input) => {
+          fs.writeFileSync(
+            path.join(input.repoPath, "step-edit.txt"),
+            "from-live-step\n",
+            "utf-8"
+          );
+          fs.writeFileSync(
+            input.resultJsonPath,
+            JSON.stringify(runnerResult()),
+            "utf-8"
+          );
+          return succeededDispatch(input);
+        }),
+        { verificationCommands: ["false"] }
+      );
+
+      expect(out.committed).toBe(false);
+      expect(out.finalized).toBe(true);
+      expect(out.finalize?.outcome).toBe("reset_verification_failure");
+      expect(expectRecoveryOk(out.recovery).outcome).toBe(
+        "no_recovery_required"
+      );
+
+      // The worktree was reset back to base; the step edit is gone.
+      expect(headOf(repoPath)).toBe(baseHead);
+      expect(fs.existsSync(path.join(repoPath, "step-edit.txt"))).toBe(false);
+      expect(
+        getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      ).toBe(false);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("resets the worktree without recovery when the runner reports success=false", () => {
+    const repoPath = initRepo();
+    const baseHead = commitInitial(repoPath);
+    const runDir = makeTempDir("momentum-live-advance-run-");
+    const db = openDb(makeTempDir());
+    try {
+      seedRepoBackedRun(db, repoPath);
+
+      const out = runAdvance(
+        db,
+        repoPath,
+        baseHead,
+        runDir,
+        fakeExecutor((input) => {
+          fs.writeFileSync(
+            path.join(input.repoPath, "step-edit.txt"),
+            "from-live-step\n",
+            "utf-8"
+          );
+          fs.writeFileSync(
+            input.resultJsonPath,
+            JSON.stringify(runnerResult({ success: false })),
+            "utf-8"
+          );
+          return runnerFailedDispatch(input);
+        }),
+        { verificationCommands: ["echo should-not-run"] }
+      );
+
+      expect(out.committed).toBe(false);
+      expect(out.finalized).toBe(true);
+      expect(out.finalize?.outcome).toBe("reset_step_failure");
+      expect(expectRecoveryOk(out.recovery).outcome).toBe(
+        "no_recovery_required"
+      );
+
+      // The orchestrator persisted the failed terminal state; the diff is reset.
+      expect(getWorkflowStep(db, RUN_ID, STEP_ID)?.state).toBe("failed");
+      expect(headOf(repoPath)).toBe(baseHead);
+      expect(fs.existsSync(path.join(repoPath, "step-edit.txt"))).toBe(false);
+
+      const log = fs.readFileSync(path.join(runDir, "verification.log"), "utf-8");
+      expect(log).not.toContain("should-not-run");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("enters durable recovery without a destructive reset when HEAD moved during the step", () => {
+    const repoPath = initRepo();
+    const baseHead = commitInitial(repoPath);
+    const runDir = makeTempDir("momentum-live-advance-run-");
+    const agentWorkflowsDir = makeTempDir();
+    const db = openDb(makeTempDir());
+    try {
+      seedRepoBackedRun(db, repoPath);
+
+      const out = runAdvance(
+        db,
+        repoPath,
+        baseHead,
+        runDir,
+        fakeExecutor((input) => {
+          // Simulate a live step that itself committed: HEAD advances past base.
+          fs.writeFileSync(
+            path.join(input.repoPath, "rogue.txt"),
+            "rogue\n",
+            "utf-8"
+          );
+          runGit(input.repoPath, ["add", "rogue.txt"]);
+          runGit(input.repoPath, ["commit", "-m", "rogue live-step commit", "--quiet"]);
+          fs.writeFileSync(
+            input.resultJsonPath,
+            JSON.stringify(runnerResult()),
+            "utf-8"
+          );
+          return succeededDispatch(input);
+        }),
+        { agentWorkflowsDir, verificationCommands: ["echo should-not-run"] }
+      );
+      const movedHead = headOf(repoPath);
+
+      expect(out.committed).toBe(false);
+      expect(out.finalized).toBe(true);
+      expect(out.finalize?.outcome).toBe("manual_recovery_required");
+      if (out.finalize?.outcome === "manual_recovery_required") {
+        expect(out.finalize.recoveryCode).toBe("head_mismatch");
+      }
+      const recovery = expectRecoveryOk(out.recovery);
+      expect(recovery.outcome).toBe("recovered");
+      if (recovery.outcome === "recovered") {
+        expect(recovery.recoveryCode).toBe("head_mismatch");
+      }
+
+      // The rogue commit is preserved, not reset.
+      expect(movedHead).not.toBe(baseHead);
+      expect(fs.existsSync(path.join(repoPath, "rogue.txt"))).toBe(true);
+
+      // Durable recovery is entered and recovery.md is rendered for the operator.
+      expect(
+        getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      ).toBe(true);
+      const body = fs.readFileSync(
+        resolveWorkflowRecoveryArtifactPath(agentWorkflowsDir, RUN_ID),
+        "utf-8"
+      );
+      expect(body).toContain("- Recovery classification: head_mismatch");
+      expect(body).toContain(movedHead);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("enters durable recovery when the result document is missing after a clean dispatch", () => {
+    const repoPath = initRepo();
+    const baseHead = commitInitial(repoPath);
+    const runDir = makeTempDir("momentum-live-advance-run-");
+    const agentWorkflowsDir = makeTempDir();
+    const db = openDb(makeTempDir());
+    try {
+      seedRepoBackedRun(db, repoPath);
+
+      const out = runAdvance(
+        db,
+        repoPath,
+        baseHead,
+        runDir,
+        fakeExecutor((input) => {
+          // The step edits the worktree and claims success, but the durable
+          // result document is never written (e.g. truncated/lost after dispatch).
+          fs.writeFileSync(
+            path.join(input.repoPath, "step-edit.txt"),
+            "from-live-step\n",
+            "utf-8"
+          );
+          return succeededDispatch(input);
+        }),
+        { agentWorkflowsDir }
+      );
+
+      expect(out.committed).toBe(false);
+      expect(out.finalized).toBe(true);
+      expect(out.finalize?.outcome).toBe("result_missing");
+      const recovery = expectRecoveryOk(out.recovery);
+      expect(recovery.outcome).toBe("recovered");
+      if (recovery.outcome === "recovered") {
+        expect(recovery.recoveryCode).toBe("result_missing");
+      }
+
+      // An ambiguous outcome must not destroy the step's work.
+      expect(headOf(repoPath)).toBe(baseHead);
+      expect(fs.existsSync(path.join(repoPath, "step-edit.txt"))).toBe(true);
+      expect(
+        getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      ).toBe(true);
+      const body = fs.readFileSync(
+        resolveWorkflowRecoveryArtifactPath(agentWorkflowsDir, RUN_ID),
+        "utf-8"
+      );
+      expect(body).toContain("- Recovery classification: result_missing");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("does not run the git transaction when the orchestrator refuses to start the step", () => {
+    const repoPath = initRepo();
+    const baseHead = commitInitial(repoPath);
+    const runDir = makeTempDir("momentum-live-advance-run-");
+    const db = openDb(makeTempDir());
+    try {
+      // A pending run is not executable: the orchestrator refuses at the input stage.
+      seedRepoBackedRun(db, repoPath, { runState: "pending" });
+
+      let executed = false;
+      const out = runAdvance(
+        db,
+        repoPath,
+        baseHead,
+        runDir,
+        fakeExecutor((input) => {
+          executed = true;
+          return succeededDispatch(input);
+        })
+      );
+
+      expect(executed).toBe(false);
+      expect(out.committed).toBe(false);
+      expect(out.finalized).toBe(false);
+      expect(out.finalize).toBeUndefined();
+      expect(out.recovery).toBeUndefined();
+      expect(out.run.ok).toBe(false);
+      expect(out.run.stage).toBe("input");
+
+      // No git mutation and no durable recovery from a pure start refusal.
+      expect(headOf(repoPath)).toBe(baseHead);
+      expect(getWorkflowStep(db, RUN_ID, STEP_ID)?.state).toBe("approved");
+      expect(
+        getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      ).toBe(false);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("does not run the git transaction on a process-level dispatch error and preserves the live recovery code", () => {
+    const repoPath = initRepo();
+    const baseHead = commitInitial(repoPath);
+    const runDir = makeTempDir("momentum-live-advance-run-");
+    const db = openDb(makeTempDir());
+    try {
+      seedRepoBackedRun(db, repoPath);
+
+      const out = runAdvance(
+        db,
+        repoPath,
+        baseHead,
+        runDir,
+        fakeExecutor((input) => {
+          // A partial worktree edit followed by a process-level failure.
+          fs.writeFileSync(
+            path.join(input.repoPath, "step-edit.txt"),
+            "from-live-step\n",
+            "utf-8"
+          );
+          return {
+            ok: false,
+            code: "runtime_unavailable",
+            error: "auth/credentials unavailable",
+            executorLogPath: input.executorLogPath,
+            resultJsonPath: input.resultJsonPath,
+            liveRecoveryCode: "auth_unavailable"
+          } as WorkflowStepExecutorDispatchResult;
+        })
+      );
+
+      expect(out.committed).toBe(false);
+      expect(out.finalized).toBe(false);
+      expect(out.finalize).toBeUndefined();
+      expect(out.recovery).toBeUndefined();
+      expect(out.run.ok).toBe(false);
+      expect(out.run.liveRecoveryCode).toBe("auth_unavailable");
+
+      // The step is failed, but the git transaction did not run: the worktree
+      // edit is left intact for the run loop, and no destructive reset occurred.
+      expect(getWorkflowStep(db, RUN_ID, STEP_ID)?.state).toBe("failed");
+      expect(headOf(repoPath)).toBe(baseHead);
+      expect(fs.existsSync(path.join(repoPath, "step-edit.txt"))).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+});
