@@ -389,6 +389,77 @@ describe("advanceLiveWorkflowStep", () => {
     }
   });
 
+  it("updates terminal run state and releases the step lease atomically", () => {
+    const repoPath = initRepo();
+    const baseHead = commitInitial(repoPath);
+    const runDir = makeTempDir("momentum-live-advance-run-");
+    const db = openDb(makeTempDir());
+    try {
+      seedRepoBackedRun(db, repoPath);
+      db.function("momentum_test_in_transaction", () =>
+        db.isTransaction ? 1 : 0
+      );
+      db.exec(`
+        CREATE TABLE terminal_state_atomicity_probe (
+          event TEXT PRIMARY KEY,
+          in_transaction INTEGER NOT NULL
+        ) STRICT;
+        CREATE TRIGGER capture_terminal_release_transaction
+          AFTER UPDATE OF released_at ON workflow_leases
+          WHEN NEW.run_id = '${RUN_ID}'
+            AND NEW.lease_kind = 'managed-step'
+            AND NEW.released_at IS NOT NULL
+        BEGIN
+          INSERT INTO terminal_state_atomicity_probe (event, in_transaction)
+          VALUES ('lease_release', momentum_test_in_transaction());
+        END;
+        CREATE TRIGGER capture_terminal_run_state_transaction
+          AFTER UPDATE OF state ON workflow_runs
+          WHEN NEW.id = '${RUN_ID}'
+            AND NEW.state = 'succeeded'
+        BEGIN
+          INSERT INTO terminal_state_atomicity_probe (event, in_transaction)
+          VALUES ('run_state', momentum_test_in_transaction());
+        END;
+      `);
+
+      const out = runAdvance(
+        db,
+        repoPath,
+        baseHead,
+        runDir,
+        fakeExecutor((input) => {
+          fs.writeFileSync(
+            path.join(input.repoPath, "step-edit.txt"),
+            "from-live-step\n",
+            "utf-8"
+          );
+          fs.writeFileSync(
+            input.resultJsonPath,
+            JSON.stringify(runnerResult()),
+            "utf-8"
+          );
+          return succeededDispatch(input);
+        })
+      );
+
+      expect(out.committed).toBe(true);
+      const probeRows = db
+        .prepare(
+          `SELECT event, in_transaction AS inTransaction
+             FROM terminal_state_atomicity_probe
+            ORDER BY event`
+        )
+        .all() as Array<{ event: string; inTransaction: number }>;
+      expect(probeRows).toEqual([
+        { event: "lease_release", inTransaction: 1 },
+        { event: "run_state", inTransaction: 1 }
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("resets the worktree without recovery when verification fails", () => {
     const repoPath = initRepo();
     const baseHead = commitInitial(repoPath);

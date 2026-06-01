@@ -203,17 +203,18 @@ export function advanceLiveWorkflowStep(
             ...(input.now !== undefined ? { now: input.now } : {})
           })
         : undefined;
-    const settledRun =
+    const completedDeferredDispatchError =
       dispatch !== undefined &&
       !dispatch.ok &&
       recovery?.ok === true &&
-      run.deferredTerminalState !== undefined
-        ? completeDeferredStep(input, run, {
-            outcome: "dispatch_error",
-            message: dispatch.error
-          })
-        : run;
-    if (dispatch !== undefined) {
+      run.deferredTerminalState !== undefined;
+    const settledRun = completedDeferredDispatchError
+      ? completeDeferredStep(input, run, {
+          outcome: "dispatch_error",
+          message: dispatch.error
+        })
+      : run;
+    if (dispatch !== undefined && !completedDeferredDispatchError) {
       refreshWorkflowRunStateAfterLiveStep(input.db, {
         runId: input.runId,
         ...(input.now !== undefined ? { now: input.now } : {})
@@ -258,10 +259,12 @@ export function advanceLiveWorkflowStep(
       message: repoLockHeartbeat.error,
       ...(input.now !== undefined ? { now: input.now } : {})
     });
-    refreshWorkflowRunStateAfterLiveStep(input.db, {
-      runId: input.runId,
-      ...(input.now !== undefined ? { now: input.now } : {})
-    });
+    if (run.deferredTerminalState === undefined) {
+      refreshWorkflowRunStateAfterLiveStep(input.db, {
+        runId: input.runId,
+        ...(input.now !== undefined ? { now: input.now } : {})
+      });
+    }
     return { committed: false, finalized: false, run: failedRun, recovery };
   }
 
@@ -303,10 +306,12 @@ export function advanceLiveWorkflowStep(
     finalize,
     ...(input.now !== undefined ? { now: input.now } : {})
   });
-  refreshWorkflowRunStateAfterLiveStep(input.db, {
-    runId: input.runId,
-    ...(input.now !== undefined ? { now: input.now } : {})
-  });
+  if (run.deferredTerminalState === undefined) {
+    refreshWorkflowRunStateAfterLiveStep(input.db, {
+      runId: input.runId,
+      ...(input.now !== undefined ? { now: input.now } : {})
+    });
+  }
 
   return {
     committed: finalize.outcome === "committed",
@@ -738,67 +743,73 @@ function completeDeferredStep(
 ): RunLiveWorkflowStepOutcome {
   if (run.deferredTerminalState === undefined) return run;
 
-  const state =
-    run.deferredTerminalState === "succeeded" && failure.outcome === "committed"
-      ? "succeeded"
-      : "failed";
-  const useDispatchFailure =
-    failure.outcome === "reset_step_failure" &&
-    run.dispatch?.ok === true &&
-    run.deferredTerminalState === "failed";
-  const useDispatchError =
-    failure.outcome === "dispatch_error" && run.dispatch?.ok === false;
-  const finish: WorkflowStepTransitionOutcome = finishWorkflowStep(input.db, {
-    runId: input.runId,
-    stepId: input.stepId,
-    state,
-    errorCode:
-      state === "succeeded"
-        ? null
-        : useDispatchFailure && run.dispatch?.ok === true
-          ? run.dispatch.result.errorCode
-          : useDispatchError && run.dispatch?.ok === false
-            ? run.dispatch.code
-          : `live_finalize_${failure.outcome}`,
-    errorMessage:
-      state === "succeeded"
-        ? null
-        : useDispatchFailure && run.dispatch?.ok === true
-          ? run.dispatch.result.errorMessage
-          : useDispatchError && run.dispatch?.ok === false
-            ? run.dispatch.error
-          : failure.message,
-    resultDigest:
-      (state === "succeeded" || useDispatchFailure) && run.dispatch?.ok === true
-        ? run.dispatch.result.resultDigest
-        : null,
-    ...(input.now !== undefined ? { now: input.now } : {})
+  return runInImmediateTransaction(input.db, () => {
+    const state =
+      run.deferredTerminalState === "succeeded" && failure.outcome === "committed"
+        ? "succeeded"
+        : "failed";
+    const useDispatchFailure =
+      failure.outcome === "reset_step_failure" &&
+      run.dispatch?.ok === true &&
+      run.deferredTerminalState === "failed";
+    const useDispatchError =
+      failure.outcome === "dispatch_error" && run.dispatch?.ok === false;
+    const finish: WorkflowStepTransitionOutcome = finishWorkflowStep(input.db, {
+      runId: input.runId,
+      stepId: input.stepId,
+      state,
+      errorCode:
+        state === "succeeded"
+          ? null
+          : useDispatchFailure && run.dispatch?.ok === true
+            ? run.dispatch.result.errorCode
+            : useDispatchError && run.dispatch?.ok === false
+              ? run.dispatch.code
+              : `live_finalize_${failure.outcome}`,
+      errorMessage:
+        state === "succeeded"
+          ? null
+          : useDispatchFailure && run.dispatch?.ok === true
+            ? run.dispatch.result.errorMessage
+            : useDispatchError && run.dispatch?.ok === false
+              ? run.dispatch.error
+              : failure.message,
+      resultDigest:
+        (state === "succeeded" || useDispatchFailure) && run.dispatch?.ok === true
+          ? run.dispatch.result.resultDigest
+          : null,
+      ...(input.now !== undefined ? { now: input.now } : {})
+    });
+
+    const lease = run.deferredLease;
+    const released =
+      finish.ok && lease !== undefined && lease.releasedAt === null
+        ? releaseWorkflowLease(input.db, {
+            runId: input.runId,
+            leaseKind: lease.leaseKind,
+            holder: lease.holder,
+            acquiredAt: lease.acquiredAt,
+            ...(input.now !== undefined ? { now: input.now } : {})
+          })
+        : { ok: false };
+    refreshWorkflowRunStateAfterLiveStep(input.db, {
+      runId: input.runId,
+      ...(input.now !== undefined ? { now: input.now } : {})
+    });
+    const {
+      deferredTerminalState: _deferred,
+      deferredLease: _deferredLease,
+      ...settledRun
+    } = run;
+
+    return {
+      ...settledRun,
+      ok: state === "succeeded" && finish.ok && released.ok,
+      lease: { ...run.lease, released: released.ok },
+      finish,
+      terminalState: state
+    };
   });
-
-  const lease = run.deferredLease;
-  const released =
-    finish.ok && lease !== undefined && lease.releasedAt === null
-      ? releaseWorkflowLease(input.db, {
-          runId: input.runId,
-          leaseKind: lease.leaseKind,
-          holder: lease.holder,
-          acquiredAt: lease.acquiredAt,
-          ...(input.now !== undefined ? { now: input.now } : {})
-        })
-      : { ok: false };
-  const {
-    deferredTerminalState: _deferred,
-    deferredLease: _deferredLease,
-    ...settledRun
-  } = run;
-
-  return {
-    ...settledRun,
-    ok: state === "succeeded" && finish.ok && released.ok,
-    lease: { ...run.lease, released: released.ok },
-    finish,
-    terminalState: state
-  };
 }
 
 function reconcileFinalizeStepState(
@@ -849,6 +860,19 @@ function reconcileFinalizeStepFailure(
     input.runId,
     input.stepId
   );
+}
+
+function runInImmediateTransaction<T>(db: MomentumDb, fn: () => T): T {
+  if (db.isTransaction) return fn();
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const result = fn();
+    db.exec("COMMIT");
+    return result;
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
 }
 
 function refreshWorkflowRunStateAfterLiveStep(
