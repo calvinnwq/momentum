@@ -112,6 +112,7 @@ export type RunLiveWorkflowStepInput = {
   now?: number;
   deferSuccessfulTerminalState?: boolean;
   deferNormalizedTerminalState?: boolean;
+  deferDispatchErrorTerminalState?: boolean;
 };
 
 export type RunLiveWorkflowStepOutcome = {
@@ -298,8 +299,13 @@ export function runLiveWorkflowStep(
   const terminalState: WorkflowStepTerminalState = dispatch.ok
     ? mapStartedStepTerminalState(dispatch.result.state)
     : "failed";
+  const liveRecoveryCode =
+    !dispatch.ok && "liveRecoveryCode" in dispatch
+      ? (dispatch as { liveRecoveryCode?: unknown }).liveRecoveryCode
+      : undefined;
   if (
     (input.deferNormalizedTerminalState === true && dispatch.ok) ||
+    (input.deferDispatchErrorTerminalState === true && !dispatch.ok) ||
     (input.deferSuccessfulTerminalState === true && terminalState === "succeeded")
   ) {
     return {
@@ -310,7 +316,8 @@ export function runLiveWorkflowStep(
       dispatch,
       terminalState,
       deferredTerminalState: terminalState,
-      deferredLease: acquired.lease
+      deferredLease: acquired.lease,
+      ...(typeof liveRecoveryCode === "string" ? { liveRecoveryCode } : {})
     };
   }
   const finish = finishLiveWorkflowStep(db, {
@@ -336,11 +343,6 @@ export function runLiveWorkflowStep(
         now: finishNow
       })
     : { ok: false };
-
-  const liveRecoveryCode =
-    !dispatch.ok && "liveRecoveryCode" in dispatch
-      ? (dispatch as { liveRecoveryCode?: unknown }).liveRecoveryCode
-      : undefined;
 
   return {
     ok:

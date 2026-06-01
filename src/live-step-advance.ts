@@ -165,7 +165,8 @@ export function advanceLiveWorkflowStep(
       ? { stalePolicy: input.stalePolicy }
       : {}),
     ...(input.now !== undefined ? { now: input.now } : {}),
-    deferNormalizedTerminalState: true
+    deferNormalizedTerminalState: true,
+    deferDispatchErrorTerminalState: true
   });
 
   // The git + verification transaction runs only for a step that settled into a
@@ -202,6 +203,16 @@ export function advanceLiveWorkflowStep(
             ...(input.now !== undefined ? { now: input.now } : {})
           })
         : undefined;
+    const settledRun =
+      dispatch !== undefined &&
+      !dispatch.ok &&
+      recovery?.ok === true &&
+      run.deferredTerminalState !== undefined
+        ? completeDeferredStep(input, run, {
+            outcome: "dispatch_error",
+            message: dispatch.error
+          })
+        : run;
     if (dispatch !== undefined) {
       refreshWorkflowRunStateAfterLiveStep(input.db, {
         runId: input.runId,
@@ -211,7 +222,7 @@ export function advanceLiveWorkflowStep(
     return {
       committed: false,
       finalized: false,
-      run,
+      run: settledRun,
       ...(recovery !== undefined ? { recovery } : {})
     };
   }
@@ -735,6 +746,8 @@ function completeDeferredStep(
     failure.outcome === "reset_step_failure" &&
     run.dispatch?.ok === true &&
     run.deferredTerminalState === "failed";
+  const useDispatchError =
+    failure.outcome === "dispatch_error" && run.dispatch?.ok === false;
   const finish: WorkflowStepTransitionOutcome = finishWorkflowStep(input.db, {
     runId: input.runId,
     stepId: input.stepId,
@@ -744,12 +757,16 @@ function completeDeferredStep(
         ? null
         : useDispatchFailure && run.dispatch?.ok === true
           ? run.dispatch.result.errorCode
+          : useDispatchError && run.dispatch?.ok === false
+            ? run.dispatch.code
           : `live_finalize_${failure.outcome}`,
     errorMessage:
       state === "succeeded"
         ? null
         : useDispatchFailure && run.dispatch?.ok === true
           ? run.dispatch.result.errorMessage
+          : useDispatchError && run.dispatch?.ok === false
+            ? run.dispatch.error
           : failure.message,
     resultDigest:
       (state === "succeeded" || useDispatchFailure) && run.dispatch?.ok === true

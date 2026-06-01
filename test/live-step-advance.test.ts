@@ -1270,4 +1270,70 @@ describe("advanceLiveWorkflowStep", () => {
       db.close();
     }
   });
+
+  it("sets dispatch recovery before releasing a failed dispatch lease", () => {
+    const repoPath = initRepo();
+    const baseHead = commitInitial(repoPath);
+    const runDir = makeTempDir("momentum-live-advance-run-");
+    const agentWorkflowsDir = makeTempDir();
+    const db = openDb(makeTempDir());
+    try {
+      seedRepoBackedRun(db, repoPath);
+      db.exec(`
+        CREATE TABLE dispatch_release_recovery_probe (
+          id INTEGER PRIMARY KEY,
+          needs_manual_recovery INTEGER NOT NULL
+        );
+        CREATE TRIGGER capture_dispatch_recovery_before_lease_release
+          AFTER UPDATE OF released_at ON workflow_leases
+          WHEN NEW.run_id = '${RUN_ID}'
+            AND NEW.lease_kind = 'managed-step'
+            AND NEW.released_at IS NOT NULL
+        BEGIN
+          DELETE FROM dispatch_release_recovery_probe;
+          INSERT INTO dispatch_release_recovery_probe (id, needs_manual_recovery)
+          SELECT 1, needs_manual_recovery
+            FROM workflow_runs
+           WHERE id = '${RUN_ID}';
+        END;
+      `);
+
+      const out = runAdvance(
+        db,
+        repoPath,
+        baseHead,
+        runDir,
+        fakeExecutor((input) => {
+          fs.writeFileSync(
+            path.join(input.repoPath, "step-edit.txt"),
+            "from-live-step\n",
+            "utf-8"
+          );
+          return {
+            ok: false,
+            code: "command_failed",
+            error: "wrapper failed after editing",
+            executorLogPath: input.executorLogPath,
+            resultJsonPath: input.resultJsonPath
+          };
+        }),
+        { agentWorkflowsDir }
+      );
+
+      expect(out.finalized).toBe(false);
+      expect(expectRecoveryOk(out.recovery).outcome).toBe("recovered");
+      const probe = db
+        .prepare(
+          `SELECT needs_manual_recovery AS needsManualRecovery
+             FROM dispatch_release_recovery_probe WHERE id = 1`
+        )
+        .get() as { needsManualRecovery: number };
+      expect(probe.needsManualRecovery).toBe(1);
+      expect(
+        getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      ).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
 });

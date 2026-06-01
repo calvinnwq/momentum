@@ -357,6 +357,18 @@ function classifyFinalizeRecovery(
           stepId
         }
       };
+    case "invalid_input":
+      return {
+        code: "invalid_input",
+        reason: finalize.error,
+        evidencePointers: [],
+        nextAction: {
+          code: "investigate_invalid_input",
+          detail:
+            "The live step finalization refused to commit or reset because its inputs were invalid. Inspect the run directory and worktree manually before clearing recovery.",
+          stepId
+        }
+      };
     case "commit_failed":
       return classifyCommitFailedRecovery(finalize, stepId);
     default:

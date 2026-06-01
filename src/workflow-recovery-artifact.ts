@@ -61,12 +61,14 @@ export const WORKFLOW_LIVE_RUN_RECOVERY_CODES = [
   "repo_lock_lost",
   "git_failed",
   "commit_failed",
+  "invalid_input",
   "runtime_unavailable",
   "auth_unavailable",
   "command_failed",
   "command_timed_out",
   "output_overflow",
-  "executor_threw"
+  "executor_threw",
+  "manual_recovery_required"
 ] as const;
 export type WorkflowLiveRunRecoveryCode =
   (typeof WORKFLOW_LIVE_RUN_RECOVERY_CODES)[number];
@@ -171,6 +173,11 @@ const SAFE_NEXT_STEPS: Record<
     "Confirm whether live-step edits are still staged or unstaged; Momentum did not prove cleanup.",
     "Commit, reset, or preserve the worktree manually before clearing recovery."
   ],
+  invalid_input: [
+    "Inspect the live-step finalization inputs and run directory before approving any later step.",
+    "Confirm whether live-step edits are present; Momentum refused to commit or reset with invalid inputs.",
+    "Correct the invalid inputs and clean up or preserve the worktree manually before clearing recovery."
+  ],
   runtime_unavailable: [
     "Inspect the live step executor log and runtime configuration.",
     "Confirm whether the wrapper made worktree edits before the runtime failure.",
@@ -200,6 +207,11 @@ const SAFE_NEXT_STEPS: Record<
     "Inspect the executor error and run directory.",
     "Confirm whether the executor left partial worktree edits before throwing.",
     "Clean up or preserve any partial worktree changes before clearing recovery."
+  ],
+  manual_recovery_required: [
+    "Inspect the live step executor log and run directory for the manual recovery request.",
+    "Confirm whether partial worktree edits should be kept, reset, or retried.",
+    "Resolve the worktree state manually before clearing recovery."
   ]
 };
 

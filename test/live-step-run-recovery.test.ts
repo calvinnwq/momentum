@@ -6,7 +6,10 @@ import path from "node:path";
 import { openDb, type MomentumDb } from "../src/db.js";
 import { getWorkflowRunManualRecoveryState } from "../src/workflow-run-recovery.js";
 import { resolveWorkflowRecoveryArtifactPath } from "../src/workflow-recovery-artifact.js";
-import { persistLiveWorkflowFinalizeRecovery } from "../src/live-step-run-recovery.js";
+import {
+  persistLiveWorkflowDispatchRecovery,
+  persistLiveWorkflowFinalizeRecovery
+} from "../src/live-step-run-recovery.js";
 import type {
   FinalizeLiveWorkflowStepFromResultFileResult,
   FinalizeLiveWorkflowStepResult
@@ -115,6 +118,13 @@ function gitFailedResult(): FinalizeLiveWorkflowStepFromResultFileResult {
   return {
     outcome: "git_failed",
     error: "git rev-parse HEAD failed"
+  };
+}
+
+function invalidInputResult(): FinalizeLiveWorkflowStepFromResultFileResult {
+  return {
+    outcome: "invalid_input",
+    error: "resultFilePath is required."
   };
 }
 
@@ -353,6 +363,11 @@ describe("persistLiveWorkflowFinalizeRecovery", () => {
           "run-commit-reset-failed",
           commitFailedWithResetFailureResult(),
           "reset_failed"
+        ],
+        [
+          "run-invalid-input",
+          invalidInputResult(),
+          "invalid_input"
         ]
       ] as const) {
         seedRun(db, runId);
@@ -572,6 +587,46 @@ describe("persistLiveWorkflowFinalizeRecovery", () => {
         "utf8"
       );
       expect(body).toContain("- Step ID: (none)");
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("persistLiveWorkflowDispatchRecovery", () => {
+  it("preserves manual_recovery_required dispatch recovery codes", () => {
+    const dataDir = makeTempDir();
+    const agentWorkflowsDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, "run-dispatch-manual");
+
+      const out = persistLiveWorkflowDispatchRecovery(db, {
+        runId: "run-dispatch-manual",
+        stepId: "implementation",
+        dispatchCode: "manual_recovery_required",
+        error: "executor requested manual recovery",
+        executorLogPath: "/tmp/executor.log",
+        agentWorkflowsDir,
+        now: 1_730_000_500_000
+      });
+
+      expect(out.ok).toBe(true);
+      if (!out.ok || out.outcome !== "recovered") {
+        throw new Error("expected recovered");
+      }
+      expect(out.recoveryCode).toBe("manual_recovery_required");
+
+      const body = fs.readFileSync(
+        resolveWorkflowRecoveryArtifactPath(
+          agentWorkflowsDir,
+          "run-dispatch-manual"
+        ),
+        "utf8"
+      );
+      expect(body).toContain(
+        "- Recovery classification: manual_recovery_required"
+      );
     } finally {
       db.close();
     }
