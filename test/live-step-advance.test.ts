@@ -373,6 +373,14 @@ describe("advanceLiveWorkflowStep", () => {
 
       // Durable step state settled to succeeded and the run is not in recovery.
       expect(getWorkflowStep(db, RUN_ID, STEP_ID)?.state).toBe("succeeded");
+      const workflowRun = db
+        .prepare(
+          `SELECT state, finished_at AS finishedAt
+             FROM workflow_runs WHERE id = ?`
+        )
+        .get(RUN_ID) as { state: string; finishedAt: number | null };
+      expect(workflowRun.state).toBe("succeeded");
+      expect(workflowRun.finishedAt).toBe(NOW);
       expect(
         getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
       ).toBe(false);
@@ -533,6 +541,81 @@ describe("advanceLiveWorkflowStep", () => {
       expect(getRepoLock(db, `lock-${HOLDER}`)?.lease_expires_at).toBeGreaterThan(
         probe.before.leaseExpiresAt
       );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps the finalization heartbeat duration after execution passes the original lease deadline", () => {
+    const repoPath = initRepo();
+    const baseHead = commitInitial(repoPath);
+    const runDir = makeTempDir("momentum-live-advance-run-");
+    const db = openDb(makeTempDir());
+    const probePath = path.join(runDir, "finalize-lease-duration.json");
+    try {
+      seedRepoBackedRun(db, repoPath);
+      const leaseExpiresAt = Date.now() + 120;
+      db.prepare(
+        `UPDATE repo_locks
+            SET acquired_at = ?,
+                heartbeat_at = ?,
+                lease_expires_at = ?,
+                updated_at = ?
+          WHERE id = ?`
+      ).run(
+        Date.now(),
+        Date.now(),
+        leaseExpiresAt,
+        Date.now(),
+        `lock-${HOLDER}`
+      );
+
+      const probeScript = [
+        "const { DatabaseSync } = require('node:sqlite');",
+        "const fs = require('node:fs');",
+        `const db = new DatabaseSync(${JSON.stringify(db.location())});`,
+        "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 30);",
+        `const row = db.prepare(${JSON.stringify("SELECT lease_expires_at AS leaseExpiresAt FROM repo_locks WHERE id = ?")}).get(${JSON.stringify(`lock-${HOLDER}`)});`,
+        "const remainingMs = row.leaseExpiresAt - Date.now();",
+        `fs.writeFileSync(${JSON.stringify(probePath)}, JSON.stringify({ remainingMs }));`,
+        "db.close();",
+        "process.exit(remainingMs > 20 ? 0 : 2);"
+      ].join(" ");
+
+      const out = advanceLiveWorkflowStep({
+        db,
+        runId: RUN_ID,
+        stepId: STEP_ID,
+        holder: HOLDER,
+        leaseExpiresAt,
+        executor: fakeExecutor((input) => {
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 260);
+          fs.writeFileSync(
+            path.join(input.repoPath, "step-edit.txt"),
+            "from-live-step\n",
+            "utf-8"
+          );
+          fs.writeFileSync(
+            input.resultJsonPath,
+            JSON.stringify(runnerResult()),
+            "utf-8"
+          );
+          return succeededDispatch(input);
+        }),
+        executorInput: buildExecutorInput(repoPath, runDir),
+        baseHead,
+        verificationCommands: [`node -e ${JSON.stringify(probeScript)}`],
+        verificationTimeoutSec: 5,
+        verificationLogPath: path.join(runDir, "verification.log"),
+        agentWorkflowsDir: makeTempDir()
+      });
+
+      expect(out.committed).toBe(true);
+      expect(out.finalize?.outcome).toBe("committed");
+      const probe = JSON.parse(fs.readFileSync(probePath, "utf-8")) as {
+        remainingMs: number;
+      };
+      expect(probe.remainingMs).toBeGreaterThan(20);
     } finally {
       db.close();
     }
@@ -1114,6 +1197,13 @@ describe("advanceLiveWorkflowStep", () => {
       expect(headOf(repoPath)).toBe(baseHead);
       expect(getWorkflowStep(db, RUN_ID, STEP_ID)?.state).toBe("approved");
       expect(
+        (
+          db
+            .prepare("SELECT state FROM workflow_runs WHERE id = ?")
+            .get(RUN_ID) as { state: string }
+        ).state
+      ).toBe("pending");
+      expect(
         getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
       ).toBe(false);
     } finally {
@@ -1121,10 +1211,11 @@ describe("advanceLiveWorkflowStep", () => {
     }
   });
 
-  it("does not run the git transaction on a process-level dispatch error and preserves the live recovery code", () => {
+  it("enters recovery on a process-level dispatch error after worktree edits", () => {
     const repoPath = initRepo();
     const baseHead = commitInitial(repoPath);
     const runDir = makeTempDir("momentum-live-advance-run-");
+    const agentWorkflowsDir = makeTempDir();
     const db = openDb(makeTempDir());
     try {
       seedRepoBackedRun(db, repoPath);
@@ -1149,21 +1240,32 @@ describe("advanceLiveWorkflowStep", () => {
             resultJsonPath: input.resultJsonPath,
             liveRecoveryCode: "auth_unavailable"
           } as WorkflowStepExecutorDispatchResult;
-        })
+        }),
+        { agentWorkflowsDir }
       );
 
       expect(out.committed).toBe(false);
       expect(out.finalized).toBe(false);
       expect(out.finalize).toBeUndefined();
-      expect(out.recovery).toBeUndefined();
+      const recovery = expectRecoveryOk(out.recovery);
+      expect(recovery.outcome).toBe("recovered");
+      if (recovery.outcome === "recovered") {
+        expect(recovery.recoveryCode).toBe("auth_unavailable");
+      }
       expect(out.run.ok).toBe(false);
       expect(out.run.liveRecoveryCode).toBe("auth_unavailable");
 
-      // The step is failed, but the git transaction did not run: the worktree
-      // edit is left intact for the run loop, and no destructive reset occurred.
       expect(getWorkflowStep(db, RUN_ID, STEP_ID)?.state).toBe("failed");
       expect(headOf(repoPath)).toBe(baseHead);
       expect(fs.existsSync(path.join(repoPath, "step-edit.txt"))).toBe(true);
+      expect(
+        getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      ).toBe(true);
+      const body = fs.readFileSync(
+        resolveWorkflowRecoveryArtifactPath(agentWorkflowsDir, RUN_ID),
+        "utf-8"
+      );
+      expect(body).toContain("- Recovery classification: auth_unavailable");
     } finally {
       db.close();
     }

@@ -13,7 +13,7 @@
  * promise that a moved HEAD or an untrustworthy result document refuses a
  * destructive reset.
  *
- * Five finalize outcomes map to durable recovery, each carrying a distinct,
+ * Finalize and dispatch outcomes map to durable recovery, each carrying a distinct,
  * non-collapsed live recovery code (the contract forbids generic failure text):
  *
  *   - `manual_recovery_required` -> `head_mismatch`: the live step left HEAD off
@@ -26,11 +26,12 @@
  *     base, so worktree cleanup is not proven.
  *   - `repo_lock_lost` -> `repo_lock_lost`: Momentum no longer owns the repo
  *     lock required to mutate or clean the worktree.
+ *   - `git_failed` / unsafe `commit_failed` / process-level dispatch failures
+ *     preserve their specific live recovery classifications.
  *
  * Every other finalize outcome is a clean terminal transaction result —
  * `committed`, or a `reset_step_failure` / `reset_verification_failure` where
- * the worktree was already safely reset — or a caller-owned terminal error such
- * as `invalid_input`, `git_failed`, or `commit_failed`.
+ * the worktree was already safely reset.
  *
  * Mirroring {@link ./workflow-recovery-reconcile.ts}, the durable flag is
  * written *first*: it is the authority that blocks unsafe progression, so it
@@ -43,6 +44,7 @@ import type { MomentumDb } from "./db.js";
 import type { FinalizeLiveWorkflowStepFromResultFileResult } from "./live-step-finalize.js";
 import { markWorkflowRunNeedsManualRecovery } from "./workflow-run-recovery.js";
 import {
+  WORKFLOW_LIVE_RUN_RECOVERY_CODES,
   writeWorkflowRecoveryArtifact,
   writeWorkflowRecoveryArtifactInRunDir,
   type WorkflowLiveRunRecoveryCode,
@@ -66,6 +68,20 @@ export type PersistLiveWorkflowFinalizeRecoveryInput = {
   /** Override the artifact directory; when set, recovery.md is written here. */
   artifactRunDir?: string;
   /** Repo path stamped into recovery.md; defaults to unset. */
+  repoPath?: string | null;
+  now?: number;
+};
+
+export type PersistLiveWorkflowDispatchRecoveryInput = {
+  runId: string;
+  stepId: string | null;
+  dispatchCode: string;
+  liveRecoveryCode?: string;
+  error: string;
+  executorLogPath?: string;
+  resultJsonPath?: string;
+  agentWorkflowsDir: string;
+  artifactRunDir?: string;
   repoPath?: string | null;
   now?: number;
 };
@@ -140,11 +156,53 @@ export function persistLiveWorkflowFinalizeRecovery(
     return { ok: true, outcome: "no_recovery_required", runId: input.runId };
   }
 
-  // Durable flag first: it is the authority that blocks unsafe progression, so
-  // it must land even if the best-effort artifact write below fails.
+  return persistLiveWorkflowRecovery(db, {
+    runId: input.runId,
+    stepId: input.stepId,
+    recovery,
+    agentWorkflowsDir: input.agentWorkflowsDir,
+    ...(input.artifactRunDir !== undefined
+      ? { artifactRunDir: input.artifactRunDir }
+      : {}),
+    ...(input.repoPath !== undefined ? { repoPath: input.repoPath } : {}),
+    now
+  });
+}
+
+export function persistLiveWorkflowDispatchRecovery(
+  db: MomentumDb,
+  input: PersistLiveWorkflowDispatchRecoveryInput
+): PersistLiveWorkflowFinalizeRecoveryResult {
+  return persistLiveWorkflowRecovery(db, {
+    runId: input.runId,
+    stepId: input.stepId,
+    recovery: classifyDispatchRecovery(input),
+    agentWorkflowsDir: input.agentWorkflowsDir,
+    ...(input.artifactRunDir !== undefined
+      ? { artifactRunDir: input.artifactRunDir }
+      : {}),
+    ...(input.repoPath !== undefined ? { repoPath: input.repoPath } : {}),
+    ...(input.now !== undefined ? { now: input.now } : {})
+  });
+}
+
+function persistLiveWorkflowRecovery(
+  db: MomentumDb,
+  input: {
+    runId: string;
+    stepId: string | null;
+    recovery: LiveFinalizeRecovery;
+    agentWorkflowsDir: string;
+    artifactRunDir?: string;
+    repoPath?: string | null;
+    now?: number;
+  }
+): PersistLiveWorkflowFinalizeRecoveryResult {
+  const now = input.now ?? Date.now();
+
   const marked = markWorkflowRunNeedsManualRecovery(db, {
     runId: input.runId,
-    reason: recovery.reason,
+    reason: input.recovery.reason,
     now
   });
   if (!marked.ok) {
@@ -158,10 +216,10 @@ export function persistLiveWorkflowFinalizeRecovery(
   const artifactInput: WorkflowRecoveryArtifactInput = {
     runId: input.runId,
     stepId: input.stepId,
-    classification: recovery.code,
-    reason: recovery.reason,
-    recommendedNextAction: recovery.nextAction,
-    evidencePointers: recovery.evidencePointers,
+    classification: input.recovery.code,
+    reason: input.recovery.reason,
+    recommendedNextAction: input.recovery.nextAction,
+    evidencePointers: input.recovery.evidencePointers,
     repoPath: input.repoPath !== undefined ? input.repoPath : null,
     classifiedAt: now
   };
@@ -183,8 +241,8 @@ export function persistLiveWorkflowFinalizeRecovery(
       ok: true,
       outcome: "artifact_write_failed",
       runId: input.runId,
-      recoveryCode: recovery.code,
-      reason: recovery.reason,
+      recoveryCode: input.recovery.code,
+      reason: input.recovery.reason,
       stepId: input.stepId,
       previouslyMarked: marked.previouslyMarked,
       artifactPath: null,
@@ -200,8 +258,8 @@ export function persistLiveWorkflowFinalizeRecovery(
     ok: true,
     outcome: "recovered",
     runId: input.runId,
-    recoveryCode: recovery.code,
-    reason: recovery.reason,
+    recoveryCode: input.recovery.code,
+    reason: input.recovery.reason,
     stepId: input.stepId,
     previouslyMarked: marked.previouslyMarked,
     artifactPath: written.path,
@@ -339,6 +397,52 @@ function classifyCommitFailedRecovery(
       stepId
     }
   };
+}
+
+const LIVE_RUN_RECOVERY_CODE_SET: ReadonlySet<string> = new Set(
+  WORKFLOW_LIVE_RUN_RECOVERY_CODES
+);
+
+function classifyDispatchRecovery(
+  input: PersistLiveWorkflowDispatchRecoveryInput
+): LiveFinalizeRecovery {
+  const code = selectDispatchRecoveryCode(input);
+  const evidencePointers: WorkflowRecoveryEvidencePointer[] = [];
+  if (input.executorLogPath !== undefined) {
+    evidencePointers.push({ label: "executor-log", ref: input.executorLogPath });
+  }
+  if (input.resultJsonPath !== undefined) {
+    evidencePointers.push({ label: "result-file", ref: input.resultJsonPath });
+  }
+  return {
+    code,
+    reason: input.error,
+    evidencePointers,
+    nextAction: {
+      code: `investigate_${code}`,
+      detail:
+        "The live step reported a process-level dispatch failure after execution started. Inspect the executor log and worktree before retrying, canceling, or clearing recovery.",
+      stepId: input.stepId
+    }
+  };
+}
+
+function selectDispatchRecoveryCode(
+  input: PersistLiveWorkflowDispatchRecoveryInput
+): WorkflowLiveRunRecoveryCode {
+  if (isLiveRunRecoveryCode(input.liveRecoveryCode)) {
+    return input.liveRecoveryCode;
+  }
+  if (isLiveRunRecoveryCode(input.dispatchCode)) {
+    return input.dispatchCode;
+  }
+  return "command_failed";
+}
+
+function isLiveRunRecoveryCode(
+  value: string | undefined
+): value is WorkflowLiveRunRecoveryCode {
+  return value !== undefined && LIVE_RUN_RECOVERY_CODE_SET.has(value);
 }
 
 function describeError(error: unknown): string {

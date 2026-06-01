@@ -60,7 +60,13 @@ export const WORKFLOW_LIVE_RUN_RECOVERY_CODES = [
   "reset_failed",
   "repo_lock_lost",
   "git_failed",
-  "commit_failed"
+  "commit_failed",
+  "runtime_unavailable",
+  "auth_unavailable",
+  "command_failed",
+  "command_timed_out",
+  "output_overflow",
+  "executor_threw"
 ] as const;
 export type WorkflowLiveRunRecoveryCode =
   (typeof WORKFLOW_LIVE_RUN_RECOVERY_CODES)[number];
@@ -164,6 +170,36 @@ const SAFE_NEXT_STEPS: Record<
     "Inspect the commit failure and current worktree state before approving any later step.",
     "Confirm whether live-step edits are still staged or unstaged; Momentum did not prove cleanup.",
     "Commit, reset, or preserve the worktree manually before clearing recovery."
+  ],
+  runtime_unavailable: [
+    "Inspect the live step executor log and runtime configuration.",
+    "Confirm whether the wrapper made worktree edits before the runtime failure.",
+    "Clean up or preserve any partial worktree changes before clearing recovery."
+  ],
+  auth_unavailable: [
+    "Inspect the live step executor log and authentication setup.",
+    "Confirm whether the wrapper made worktree edits before authentication failed.",
+    "Clean up or preserve any partial worktree changes before clearing recovery."
+  ],
+  command_failed: [
+    "Inspect the live step executor log for the failed command.",
+    "Confirm whether partial worktree edits should be kept, reset, or retried.",
+    "Resolve the worktree state manually before clearing recovery."
+  ],
+  command_timed_out: [
+    "Inspect the live step executor log and confirm the command is no longer running.",
+    "Confirm whether the timeout left partial worktree edits behind.",
+    "Clean up or preserve any partial worktree changes before clearing recovery."
+  ],
+  output_overflow: [
+    "Inspect the live step executor log size and truncation boundary.",
+    "Confirm whether the wrapper left partial worktree edits before output capture stopped.",
+    "Clean up or preserve any partial worktree changes before clearing recovery."
+  ],
+  executor_threw: [
+    "Inspect the executor error and run directory.",
+    "Confirm whether the executor left partial worktree edits before throwing.",
+    "Clean up or preserve any partial worktree changes before clearing recovery."
   ]
 };
 

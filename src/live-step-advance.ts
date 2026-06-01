@@ -39,8 +39,8 @@
  *     `command_failed`, `command_timed_out`, `output_overflow`, ...) on
  *     {@link RunLiveWorkflowStepOutcome.liveRecoveryCode}. Running the git
  *     transaction there would only re-classify it as a generic
- *     `result_missing`, masking the precise cause, so this seam leaves it to the
- *     run loop and never touches the worktree.
+ *     `result_missing`, masking the precise cause, so this seam persists live
+ *     dispatch recovery without touching the worktree.
  *
  * Likewise, a step that never settled (a start refusal, or an ambiguous
  * in-flight finish where the lease was intentionally left outstanding) is not
@@ -65,12 +65,21 @@ import {
   type RunLiveWorkflowStepOutcome
 } from "./live-step-orchestrator.js";
 import {
+  persistLiveWorkflowDispatchRecovery,
   persistLiveWorkflowFinalizeRecovery,
   type PersistLiveWorkflowFinalizeRecoveryResult
 } from "./live-step-run-recovery.js";
 import type {
+  WorkflowLeaseRecord,
   WorkflowLeaseKind,
-  WorkflowLeaseStalePolicy
+  WorkflowLeaseStalePolicy,
+  WorkflowStepKind,
+  WorkflowStepRecord,
+  WorkflowStepState
+} from "./workflow-run-reducer.js";
+import {
+  deriveWorkflowRunState,
+  isTerminalRunState
 } from "./workflow-run-reducer.js";
 import {
   heartbeatWorkflowLease,
@@ -169,7 +178,42 @@ export function advanceLiveWorkflowStep(
     dispatch.ok &&
     (run.finish?.ok === true || run.deferredTerminalState !== undefined);
   if (!canFinalize) {
-    return { committed: false, finalized: false, run };
+    const recovery =
+      dispatch !== undefined && !dispatch.ok && run.stage === "execute"
+        ? persistLiveWorkflowDispatchRecovery(input.db, {
+            runId: input.runId,
+            stepId: input.stepId,
+            dispatchCode: dispatch.code,
+            ...(run.liveRecoveryCode !== undefined
+              ? { liveRecoveryCode: run.liveRecoveryCode }
+              : {}),
+            error: dispatch.error,
+            ...(dispatch.executorLogPath !== undefined
+              ? { executorLogPath: dispatch.executorLogPath }
+              : {}),
+            ...(dispatch.resultJsonPath !== undefined
+              ? { resultJsonPath: dispatch.resultJsonPath }
+              : {}),
+            agentWorkflowsDir: input.agentWorkflowsDir,
+            ...(input.artifactRunDir !== undefined
+              ? { artifactRunDir: input.artifactRunDir }
+              : {}),
+            repoPath: input.executorInput.repoPath,
+            ...(input.now !== undefined ? { now: input.now } : {})
+          })
+        : undefined;
+    if (dispatch !== undefined) {
+      refreshWorkflowRunStateAfterLiveStep(input.db, {
+        runId: input.runId,
+        ...(input.now !== undefined ? { now: input.now } : {})
+      });
+    }
+    return {
+      committed: false,
+      finalized: false,
+      run,
+      ...(recovery !== undefined ? { recovery } : {})
+    };
   }
 
   const repoLockHeartbeat = startAdvanceRepoLockHeartbeat(
@@ -201,6 +245,10 @@ export function advanceLiveWorkflowStep(
       stepId: input.stepId,
       outcome: "repo_lock_lost",
       message: repoLockHeartbeat.error,
+      ...(input.now !== undefined ? { now: input.now } : {})
+    });
+    refreshWorkflowRunStateAfterLiveStep(input.db, {
+      runId: input.runId,
       ...(input.now !== undefined ? { now: input.now } : {})
     });
     return { committed: false, finalized: false, run: failedRun, recovery };
@@ -244,6 +292,10 @@ export function advanceLiveWorkflowStep(
     finalize,
     ...(input.now !== undefined ? { now: input.now } : {})
   });
+  refreshWorkflowRunStateAfterLiveStep(input.db, {
+    runId: input.runId,
+    ...(input.now !== undefined ? { now: input.now } : {})
+  });
 
   return {
     committed: finalize.outcome === "committed",
@@ -269,6 +321,7 @@ type AdvanceRepoLock = {
   repoPath: string;
   holder: string;
   goalId: string;
+  leaseExpiresAt: number;
 };
 
 function startAdvanceRepoLockHeartbeat(
@@ -289,7 +342,12 @@ function startAdvanceRepoLockHeartbeat(
   });
   if (!repoLock.ok) return repoLock;
 
-  const leaseDurationMs = Math.max(1, input.leaseExpiresAt - startNow);
+  const leaseDurationMs = resolveAdvanceLeaseDurationMs(input.db, {
+    workflowLease,
+    repoLock: repoLock.lock,
+    fallbackLeaseExpiresAt: input.leaseExpiresAt,
+    now: startNow
+  });
   if (
     !refreshAdvanceRepoLock(input.db, {
       repoLock: repoLock.lock,
@@ -445,9 +503,55 @@ function getAdvanceRepoLock(
       id: row.id,
       repoPath: input.repoPath,
       holder: row.holder,
-      goalId: row.goalId
+      goalId: row.goalId,
+      leaseExpiresAt: row.leaseExpiresAt
     }
   };
+}
+
+function resolveAdvanceLeaseDurationMs(
+  db: MomentumDb,
+  input: {
+    workflowLease:
+      | {
+          runId: string;
+          leaseKind: WorkflowLeaseKind;
+          holder: string;
+          acquiredAt: number;
+        }
+      | undefined;
+    repoLock: AdvanceRepoLock;
+    fallbackLeaseExpiresAt: number;
+    now: number;
+  }
+): number {
+  const expiresAtCandidates = [
+    input.fallbackLeaseExpiresAt,
+    input.repoLock.leaseExpiresAt
+  ];
+  if (input.workflowLease !== undefined) {
+    const row = db
+      .prepare(
+        `SELECT expires_at AS expiresAt
+           FROM workflow_leases
+          WHERE run_id = ?
+            AND lease_kind = ?
+            AND holder = ?
+            AND acquired_at = ?
+            AND released_at IS NULL`
+      )
+      .get(
+        input.workflowLease.runId,
+        input.workflowLease.leaseKind,
+        input.workflowLease.holder,
+        input.workflowLease.acquiredAt
+      ) as { expiresAt: number } | undefined;
+    if (row !== undefined) expiresAtCandidates.push(row.expiresAt);
+  }
+  return Math.max(
+    1,
+    Math.max(...expiresAtCandidates) - input.now
+  );
 }
 
 function refreshAdvanceWorkflowLease(
@@ -728,6 +832,88 @@ function reconcileFinalizeStepFailure(
     input.runId,
     input.stepId
   );
+}
+
+function refreshWorkflowRunStateAfterLiveStep(
+  db: MomentumDb,
+  input: { runId: string; now?: number }
+): void {
+  const now = input.now ?? Date.now();
+  const stepRecords = loadWorkflowStepRecords(db, input.runId);
+  const leaseRecords = loadWorkflowLeaseRecords(db, input.runId);
+  const runState = deriveWorkflowRunState(stepRecords, {
+    leases: leaseRecords,
+    now
+  });
+  const finishedAt = isTerminalRunState(runState) ? now : null;
+  db.prepare(
+    `UPDATE workflow_runs
+       SET state = ?,
+           finished_at = COALESCE(finished_at, ?),
+           updated_at = ?
+     WHERE id = ?`
+  ).run(runState, finishedAt, now, input.runId);
+}
+
+function loadWorkflowStepRecords(
+  db: MomentumDb,
+  runId: string
+): WorkflowStepRecord[] {
+  const rows = db
+    .prepare(
+      `SELECT step_id, kind, state, step_order, required
+         FROM workflow_steps
+        WHERE run_id = ?
+        ORDER BY step_order, step_id`
+    )
+    .all(runId) as Array<{
+    step_id: string;
+    kind: string;
+    state: string;
+    step_order: number;
+    required: number;
+  }>;
+  return rows.map((row) => ({
+    stepId: row.step_id,
+    kind: row.kind as WorkflowStepKind,
+    state: row.state as WorkflowStepState,
+    order: row.step_order,
+    required: row.required === 1
+  }));
+}
+
+function loadWorkflowLeaseRecords(
+  db: MomentumDb,
+  runId: string
+): WorkflowLeaseRecord[] {
+  const rows = db
+    .prepare(
+      `SELECT run_id, lease_kind, holder, acquired_at, expires_at,
+              heartbeat_at, released_at, stale_policy
+         FROM workflow_leases
+        WHERE run_id = ?
+        ORDER BY lease_kind`
+    )
+    .all(runId) as Array<{
+    run_id: string;
+    lease_kind: string;
+    holder: string;
+    acquired_at: number;
+    expires_at: number;
+    heartbeat_at: number;
+    released_at: number | null;
+    stale_policy: string;
+  }>;
+  return rows.map((row) => ({
+    runId: row.run_id,
+    leaseKind: row.lease_kind as WorkflowLeaseRecord["leaseKind"],
+    holder: row.holder,
+    acquiredAt: row.acquired_at,
+    expiresAt: row.expires_at,
+    heartbeatAt: row.heartbeat_at,
+    releasedAt: row.released_at,
+    stalePolicy: row.stale_policy as WorkflowLeaseRecord["stalePolicy"]
+  }));
 }
 
 function describeFinalizeFailure(
