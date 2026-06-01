@@ -490,7 +490,7 @@ describe("advanceLiveWorkflowStep", () => {
         `const db = new DatabaseSync(${JSON.stringify(dbPath)});`,
         `const row = () => db.prepare(${JSON.stringify("SELECT heartbeat_at AS heartbeatAt, lease_expires_at AS leaseExpiresAt FROM repo_locks WHERE id = ?")}).get(${JSON.stringify(`lock-${HOLDER}`)});`,
         "const before = row();",
-        "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 120);",
+        "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1200);",
         "const after = row();",
         `fs.writeFileSync(${JSON.stringify(probePath)}, JSON.stringify({ before, after }));`,
         "db.close();",
@@ -516,7 +516,7 @@ describe("advanceLiveWorkflowStep", () => {
           return succeededDispatch(input);
         }),
         {
-          leaseExpiresAt: NOW + 50,
+          leaseExpiresAt: NOW + 1_000,
           verificationCommands: [`node -e ${JSON.stringify(probeScript)}`],
           verificationTimeoutSec: 5
         }
@@ -593,6 +593,133 @@ describe("advanceLiveWorkflowStep", () => {
       expect(probe.step.finishedAt).toBeNull();
       expect(probe.lease.releasedAt).toBeNull();
       expect(getWorkflowStep(db, RUN_ID, STEP_ID)?.state).toBe("succeeded");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps the managed-step lease fresh while verification runs during finalization", () => {
+    const repoPath = initRepo();
+    const baseHead = commitInitial(repoPath);
+    const runDir = makeTempDir("momentum-live-advance-run-");
+    const db = openDb(makeTempDir());
+    const probePath = path.join(runDir, "workflow-lease-heartbeat.json");
+    try {
+      seedRepoBackedRun(db, repoPath);
+
+      const dbPath = db.location();
+      if (typeof dbPath !== "string" || dbPath.length === 0) {
+        throw new Error("expected file-backed db for workflow lease heartbeat test");
+      }
+      const probeScript = [
+        "const { DatabaseSync } = require('node:sqlite');",
+        "const fs = require('node:fs');",
+        `const db = new DatabaseSync(${JSON.stringify(dbPath)});`,
+        `const row = () => db.prepare(${JSON.stringify("SELECT heartbeat_at AS heartbeatAt, expires_at AS expiresAt FROM workflow_leases WHERE run_id = ? AND lease_kind = 'managed-step'")}).get(${JSON.stringify(RUN_ID)});`,
+        "const before = row();",
+        "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1200);",
+        "const after = row();",
+        `fs.writeFileSync(${JSON.stringify(probePath)}, JSON.stringify({ before, after }));`,
+        "db.close();",
+        "process.exit(after.expiresAt > before.expiresAt ? 0 : 2);"
+      ].join(" ");
+
+      const out = runAdvance(
+        db,
+        repoPath,
+        baseHead,
+        runDir,
+        fakeExecutor((input) => {
+          fs.writeFileSync(
+            path.join(input.repoPath, "step-edit.txt"),
+            "from-live-step\n",
+            "utf-8"
+          );
+          fs.writeFileSync(
+            input.resultJsonPath,
+            JSON.stringify(runnerResult()),
+            "utf-8"
+          );
+          return succeededDispatch(input);
+        }),
+        {
+          leaseExpiresAt: NOW + 1_000,
+          verificationCommands: [`node -e ${JSON.stringify(probeScript)}`],
+          verificationTimeoutSec: 5
+        }
+      );
+
+      expect(out.committed).toBe(true);
+      const probe = JSON.parse(fs.readFileSync(probePath, "utf-8")) as {
+        before: { heartbeatAt: number; expiresAt: number };
+        after: { heartbeatAt: number; expiresAt: number };
+      };
+      expect(probe.after.expiresAt).toBeGreaterThan(probe.before.expiresAt);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses finalization when the active repo lock belongs to another goal", () => {
+    const repoPath = initRepo();
+    const baseHead = commitInitial(repoPath);
+    const runDir = makeTempDir("momentum-live-advance-run-");
+    const db = openDb(makeTempDir());
+    try {
+      seedRepoBackedRun(db, repoPath);
+      db.exec(
+        `CREATE TABLE replace_repo_lock_after_final_heartbeat (
+           enabled INTEGER NOT NULL
+         ) STRICT`
+      );
+      db.exec(
+        `CREATE TRIGGER replace_repo_lock_after_live_final_heartbeat
+           AFTER UPDATE OF heartbeat_at ON workflow_leases
+           WHEN NEW.run_id = '${RUN_ID}'
+             AND NEW.lease_kind = 'managed-step'
+             AND EXISTS (SELECT 1 FROM replace_repo_lock_after_final_heartbeat)
+         BEGIN
+           DELETE FROM replace_repo_lock_after_final_heartbeat;
+           UPDATE repo_locks
+              SET goal_id = 'goal-2',
+                  job_id = 'job-2',
+                  updated_at = NEW.updated_at
+            WHERE id = 'lock-${HOLDER}';
+         END`
+      );
+
+      const out = runAdvance(
+        db,
+        repoPath,
+        baseHead,
+        runDir,
+        fakeExecutor((input) => {
+          fs.writeFileSync(
+            path.join(input.repoPath, "step-edit.txt"),
+            "from-live-step\n",
+            "utf-8"
+          );
+          fs.writeFileSync(
+            input.resultJsonPath,
+            JSON.stringify(runnerResult()),
+            "utf-8"
+          );
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+          db.prepare(
+            `INSERT INTO replace_repo_lock_after_final_heartbeat (enabled)
+             VALUES (1)`
+          ).run();
+          return succeededDispatch(input);
+        })
+      );
+
+      expect(out.committed).toBe(false);
+      expect(out.finalized).toBe(false);
+      expect(headOf(repoPath)).toBe(baseHead);
+      expect(fs.existsSync(path.join(repoPath, "step-edit.txt"))).toBe(true);
+      const step = getWorkflowStep(db, RUN_ID, STEP_ID);
+      expect(step?.state).toBe("failed");
+      expect(step?.errorCode).toBe("live_finalize_repo_lock_lost");
     } finally {
       db.close();
     }

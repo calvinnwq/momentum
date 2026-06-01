@@ -68,8 +68,14 @@ import {
   persistLiveWorkflowFinalizeRecovery,
   type PersistLiveWorkflowFinalizeRecoveryResult
 } from "./live-step-run-recovery.js";
-import type { WorkflowLeaseStalePolicy } from "./workflow-run-reducer.js";
-import { releaseWorkflowLease } from "./workflow-leases.js";
+import type {
+  WorkflowLeaseKind,
+  WorkflowLeaseStalePolicy
+} from "./workflow-run-reducer.js";
+import {
+  heartbeatWorkflowLease,
+  releaseWorkflowLease
+} from "./workflow-leases.js";
 import {
   finishWorkflowStep,
   type WorkflowStepTransitionOutcome
@@ -166,7 +172,10 @@ export function advanceLiveWorkflowStep(
     return { committed: false, finalized: false, run };
   }
 
-  const repoLockHeartbeat = startAdvanceRepoLockHeartbeat(input);
+  const repoLockHeartbeat = startAdvanceRepoLockHeartbeat(
+    input,
+    run.deferredLease
+  );
   if (!repoLockHeartbeat.ok) {
     const failedRun = completeDeferredSuccessfulStep(input, run, {
       outcome: "repo_lock_lost",
@@ -248,10 +257,17 @@ type AdvanceRepoLock = {
 };
 
 function startAdvanceRepoLockHeartbeat(
-  input: AdvanceLiveWorkflowStepInput
+  input: AdvanceLiveWorkflowStepInput,
+  workflowLease: {
+    runId: string;
+    leaseKind: WorkflowLeaseKind;
+    holder: string;
+    acquiredAt: number;
+  } | undefined
 ): AdvanceRepoLockHeartbeat {
   const startNow = input.now ?? Date.now();
   const repoLock = getAdvanceRepoLock(input.db, {
+    runId: input.runId,
     repoPath: input.executorInput.repoPath,
     holder: input.holder,
     now: startNow
@@ -271,6 +287,19 @@ function startAdvanceRepoLockHeartbeat(
       error: `advanceLiveWorkflowStep: repo lock for "${input.executorInput.repoPath}" was lost before finalization`
     };
   }
+  if (
+    workflowLease !== undefined &&
+    !refreshAdvanceWorkflowLease(input.db, {
+      workflowLease,
+      heartbeatAt: startNow,
+      expiresAt: startNow + leaseDurationMs
+    }).ok
+  ) {
+    return {
+      ok: false,
+      error: `advanceLiveWorkflowStep: managed-step lease for "${input.runId}" was lost before finalization`
+    };
+  }
 
   const dbPath = input.db.location();
   if (typeof dbPath !== "string" || dbPath.length === 0) {
@@ -285,6 +314,7 @@ function startAdvanceRepoLockHeartbeat(
   const workerHeartbeat = startAdvanceRepoLockHeartbeatWorker({
     dbPath,
     repoLock: repoLock.lock,
+    workflowLease,
     startNow,
     wallClockStartedAt,
     leaseDurationMs
@@ -304,6 +334,19 @@ function startAdvanceRepoLockHeartbeat(
         error: `advanceLiveWorkflowStep: repo lock for "${input.executorInput.repoPath}" was lost during finalization`
       };
     }
+    if (
+      workflowLease !== undefined &&
+      !refreshAdvanceWorkflowLeaseWithRetry(input.db, {
+        workflowLease,
+        heartbeatAt,
+        expiresAt: heartbeatAt + leaseDurationMs
+      }).ok
+    ) {
+      return {
+        ok: false,
+        error: `advanceLiveWorkflowStep: managed-step lease for "${input.runId}" was lost during finalization`
+      };
+    }
     return { ok: true };
   };
 
@@ -318,26 +361,55 @@ function startAdvanceRepoLockHeartbeat(
 
 function getAdvanceRepoLock(
   db: MomentumDb,
-  input: { repoPath: string; holder: string; now: number }
+  input: { runId: string; repoPath: string; holder: string; now: number }
 ):
   | { ok: true; lock: AdvanceRepoLock }
   | { ok: false; error: string } {
+  const run = db
+    .prepare(
+      `SELECT repo_path AS repoPath,
+              goal_id AS goalId
+         FROM workflow_runs
+        WHERE id = ?`
+    )
+    .get(input.runId) as
+    | { repoPath: string | null; goalId: string | null }
+    | undefined;
+  if (run === undefined) {
+    return {
+      ok: false,
+      error: `advanceLiveWorkflowStep: workflow run not found "${input.runId}"`
+    };
+  }
+  if (run.repoPath !== input.repoPath) {
+    return {
+      ok: false,
+      error: `advanceLiveWorkflowStep: executor repo "${input.repoPath}" does not match workflow run repo "${run.repoPath ?? ""}"`
+    };
+  }
+  if (run.goalId === null) {
+    return {
+      ok: false,
+      error: `advanceLiveWorkflowStep: workflow_runs.goal_id is required for finalization of run "${input.runId}"`
+    };
+  }
   const row = db
     .prepare(
       `SELECT id, holder, goal_id AS goalId, lease_expires_at AS leaseExpiresAt
          FROM repo_locks
         WHERE repo_root = ?
+          AND goal_id = ?
           AND state = 'active'
         ORDER BY acquired_at DESC, id DESC
         LIMIT 1`
     )
-    .get(input.repoPath) as
+    .get(input.repoPath, run.goalId) as
     | { id: string; holder: string; goalId: string; leaseExpiresAt: number }
     | undefined;
   if (row === undefined) {
     return {
       ok: false,
-      error: `advanceLiveWorkflowStep: workflow finalization requires an active repo lock for "${input.repoPath}"`
+      error: `advanceLiveWorkflowStep: workflow finalization requires an active repo lock for "${input.repoPath}" and goal "${run.goalId}"`
     };
   }
   if (row.leaseExpiresAt <= input.now) {
@@ -361,6 +433,53 @@ function getAdvanceRepoLock(
       goalId: row.goalId
     }
   };
+}
+
+function refreshAdvanceWorkflowLease(
+  db: MomentumDb,
+  input: {
+    workflowLease: {
+      runId: string;
+      leaseKind: WorkflowLeaseKind;
+      holder: string;
+      acquiredAt: number;
+    };
+    heartbeatAt: number;
+    expiresAt: number;
+  }
+): { ok: boolean } {
+  return heartbeatWorkflowLease(db, {
+    runId: input.workflowLease.runId,
+    leaseKind: input.workflowLease.leaseKind,
+    holder: input.workflowLease.holder,
+    acquiredAt: input.workflowLease.acquiredAt,
+    heartbeatAt: input.heartbeatAt,
+    expiresAt: input.expiresAt
+  });
+}
+
+function refreshAdvanceWorkflowLeaseWithRetry(
+  db: MomentumDb,
+  input: {
+    workflowLease: {
+      runId: string;
+      leaseKind: WorkflowLeaseKind;
+      holder: string;
+      acquiredAt: number;
+    };
+    heartbeatAt: number;
+    expiresAt: number;
+  }
+): { ok: boolean } {
+  const retryUntil = Date.now() + 1_000;
+  for (;;) {
+    try {
+      return refreshAdvanceWorkflowLease(db, input);
+    } catch (error) {
+      if (!isSqliteBusy(error) || Date.now() >= retryUntil) return { ok: false };
+      sleepMs(10);
+    }
+  }
 }
 
 function refreshAdvanceRepoLock(
@@ -427,6 +546,12 @@ function sleepMs(ms: number): void {
 function startAdvanceRepoLockHeartbeatWorker(input: {
   dbPath: string;
   repoLock: AdvanceRepoLock;
+  workflowLease: {
+    runId: string;
+    leaseKind: WorkflowLeaseKind;
+    holder: string;
+    acquiredAt: number;
+  } | undefined;
   startNow: number;
   wallClockStartedAt: number;
   leaseDurationMs: number;
@@ -444,6 +569,7 @@ function startAdvanceRepoLockHeartbeatWorker(input: {
     workerData: {
       dbPath: input.dbPath,
       repoLock: input.repoLock,
+      workflowLease: input.workflowLease ?? null,
       startNow: input.startNow,
       wallClockStartedAt: input.wallClockStartedAt,
       leaseDurationMs: input.leaseDurationMs,
@@ -609,7 +735,8 @@ const control = new Int32Array(workerData.control);
 
 try {
   let db;
-  let statement;
+  let repoLockStatement;
+  let workflowLeaseStatement;
 
   function closeDb() {
     if (db !== undefined) {
@@ -618,14 +745,15 @@ try {
       } catch {
       }
       db = undefined;
-      statement = undefined;
+      repoLockStatement = undefined;
+      workflowLeaseStatement = undefined;
     }
   }
 
-  function getStatement() {
-    if (statement !== undefined) return statement;
+  function getRepoLockStatement() {
+    if (repoLockStatement !== undefined) return repoLockStatement;
     if (db === undefined) db = new DatabaseSync(workerData.dbPath);
-    statement = db.prepare(
+    repoLockStatement = db.prepare(
       \`UPDATE repo_locks
          SET heartbeat_at = ?, lease_expires_at = ?, updated_at = ?
        WHERE id = ?
@@ -635,7 +763,23 @@ try {
          AND state = 'active'
          AND lease_expires_at >= ?\`
     );
-    return statement;
+    return repoLockStatement;
+  }
+
+  function getWorkflowLeaseStatement() {
+    if (workflowLeaseStatement !== undefined) return workflowLeaseStatement;
+    if (db === undefined) db = new DatabaseSync(workerData.dbPath);
+    workflowLeaseStatement = db.prepare(
+      \`UPDATE workflow_leases
+         SET heartbeat_at = ?, expires_at = ?, updated_at = ?
+       WHERE run_id = ?
+         AND lease_kind = ?
+         AND holder = ?
+         AND acquired_at = ?
+         AND released_at IS NULL
+         AND expires_at >= ?\`
+    );
+    return workflowLeaseStatement;
   }
 
   try {
@@ -645,7 +789,7 @@ try {
         Math.max(0, Date.now() - workerData.wallClockStartedAt);
       try {
         const leaseExpiresAt = now + workerData.leaseDurationMs;
-        const result = getStatement().run(
+        const repoResult = getRepoLockStatement().run(
           now,
           leaseExpiresAt,
           now,
@@ -655,7 +799,21 @@ try {
           workerData.repoLock.goalId,
           now
         );
-        return Number(result.changes) > 0;
+        if (Number(repoResult.changes) === 0) return false;
+        if (workerData.workflowLease !== null) {
+          const workflowResult = getWorkflowLeaseStatement().run(
+            now,
+            leaseExpiresAt,
+            now,
+            workerData.workflowLease.runId,
+            workerData.workflowLease.leaseKind,
+            workerData.workflowLease.holder,
+            workerData.workflowLease.acquiredAt,
+            now
+          );
+          if (Number(workflowResult.changes) === 0) return false;
+        }
+        return true;
       } catch {
         closeDb();
         return false;
