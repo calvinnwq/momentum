@@ -25,6 +25,15 @@
  *      where HEAD moved after the pre-check) is also routed to manual recovery
  *      instead of a destructive reset.
  *
+ * {@link finalizeLiveWorkflowStep} takes the already-parsed `success` flag and
+ * `commit` intent. Because the orchestrator's dispatch result and the M7
+ * executor boundary only carry the runner-result *path* (not the parsed
+ * `RunnerResult`), {@link finalizeLiveWorkflowStepFromResultFile} is the
+ * companion seam the run-level composition actually calls: it re-reads the
+ * durable result document, extracts `success` + `commit`, and then runs the
+ * transaction — surfacing `result_missing` / `result_invalid` without touching
+ * git when that document cannot be trusted.
+ *
  * This module owns no durable state. It is a pure transaction over git +
  * verification, mirroring how `iteration-finalize.ts` stays a pure transaction
  * the foreground caller composes. The run-level caller (a later M9 slice) takes
@@ -34,6 +43,7 @@
  */
 
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
 
 import type {
   CommitFailure,
@@ -45,7 +55,12 @@ import {
   finalizeIteration,
   type FinalizeResetTrigger
 } from "./iteration-finalize.js";
-import type { CommitIntent } from "./runner-result.js";
+import { LIVE_STEP_WRAPPER_RESULT_MAX_BYTES } from "./live-step-wrapper.js";
+import {
+  parseRunnerResult,
+  type CommitIntent,
+  type RunnerResult
+} from "./runner-result.js";
 import type {
   VerificationFailure,
   VerificationSuccess
@@ -124,6 +139,43 @@ export type FinalizeLiveWorkflowStepResult =
     }
   | {
       outcome: "invalid_input";
+      error: string;
+    };
+
+export type FinalizeLiveWorkflowStepFromResultFileInput = {
+  repoPath: string;
+  /** The HEAD the live step started from; finalize commits onto / resets to it. */
+  baseHead: string;
+  /**
+   * Absolute path to the normalized runner-result document the live step wrote
+   * (the orchestrator's `dispatch.resultJsonPath`). Both the `success` flag and
+   * the `commit` intent are read from this durable artifact.
+   */
+  resultFilePath: string;
+  verificationCommands: string[];
+  verificationTimeoutSec: number;
+  verificationLogPath: string;
+};
+
+/**
+ * The result of {@link finalizeLiveWorkflowStepFromResultFile}: every
+ * {@link FinalizeLiveWorkflowStepResult} outcome, plus the two result-document
+ * recovery codes this seam introduces. A missing or unreadable / malformed
+ * result document is ambiguous — the step's true outcome is unknown — so the
+ * seam refuses to mutate git and surfaces the recovery code for the run-level
+ * recovery layer, mirroring how a moved HEAD routes to manual recovery rather
+ * than a destructive reset.
+ */
+export type FinalizeLiveWorkflowStepFromResultFileResult =
+  | FinalizeLiveWorkflowStepResult
+  | {
+      outcome: "result_missing";
+      resultFilePath: string;
+      error: string;
+    }
+  | {
+      outcome: "result_invalid";
+      resultFilePath: string;
       error: string;
     };
 
@@ -213,6 +265,135 @@ export function finalizeLiveWorkflowStep(
     case "invalid_input":
       return { outcome: "invalid_input", error: finalize.error };
   }
+}
+
+/**
+ * Read the normalized runner-result document a finished live step wrote and run
+ * {@link finalizeLiveWorkflowStep} from it.
+ *
+ * The M9-02 orchestrator (`live-step-orchestrator.ts`) is git-agnostic and its
+ * dispatch result carries the runner-result file *path* rather than the parsed
+ * `RunnerResult`; the M7 executor boundary deliberately drops the domain-shaped
+ * commit intent. This seam is therefore where the run-level composition re-reads
+ * the durable result to obtain the `success` flag and the explicit, normalized
+ * `commit` intent the contract's "Git And Verification Transaction" section
+ * requires before any commit:
+ *
+ *   - A present, valid result drives {@link finalizeLiveWorkflowStep} with its
+ *     `success` + `commit`: `success: true` commits (verification-gated);
+ *     `success: false` is the executed-but-failed path and resets the worktree.
+ *   - A missing result returns `result_missing`; an unreadable, non-regular,
+ *     oversized (> 1 MiB), or unparseable document returns `result_invalid`.
+ *     Neither mutates git: an ambiguous outcome must not trigger a destructive
+ *     reset, so the recovery layer classifies it instead.
+ *   - A moved HEAD still routes to `manual_recovery_required` via the inner
+ *     transaction's pre-finalize check.
+ */
+export function finalizeLiveWorkflowStepFromResultFile(
+  input: FinalizeLiveWorkflowStepFromResultFileInput
+): FinalizeLiveWorkflowStepFromResultFileResult {
+  if (
+    typeof input.resultFilePath !== "string" ||
+    input.resultFilePath.trim().length === 0
+  ) {
+    return { outcome: "invalid_input", error: "resultFilePath is required." };
+  }
+
+  const read = readNormalizedResultFile(input.resultFilePath);
+  if (!read.ok) {
+    return {
+      outcome: read.code,
+      resultFilePath: input.resultFilePath,
+      error: read.error
+    };
+  }
+
+  return finalizeLiveWorkflowStep({
+    repoPath: input.repoPath,
+    baseHead: input.baseHead,
+    stepSuccess: read.result.success,
+    commitIntent: read.result.commit,
+    verificationCommands: input.verificationCommands,
+    verificationTimeoutSec: input.verificationTimeoutSec,
+    verificationLogPath: input.verificationLogPath
+  });
+}
+
+type ReadNormalizedResultFile =
+  | { ok: true; result: RunnerResult }
+  | { ok: false; code: "result_missing" | "result_invalid"; error: string };
+
+/**
+ * Read + parse the live step's normalized result document. Applies the same
+ * regular-file / symlink / 1 MiB-ceiling guards the live wrapper enforces when
+ * it first writes the result, so a re-read at finalize time cannot be tricked
+ * into ingesting an oversized or non-regular artifact.
+ */
+function readNormalizedResultFile(
+  resultFilePath: string
+): ReadNormalizedResultFile {
+  let stat: fs.Stats;
+  try {
+    stat = fs.lstatSync(resultFilePath);
+  } catch (error) {
+    if (errnoCode(error) === "ENOENT") {
+      return {
+        ok: false,
+        code: "result_missing",
+        error: `live step result file was not written at ${resultFilePath}.`
+      };
+    }
+    const detail = error instanceof Error ? error.message : "unknown error";
+    return {
+      ok: false,
+      code: "result_invalid",
+      error: `live step result file at ${resultFilePath} is unreadable: ${detail}`
+    };
+  }
+
+  if (stat.isSymbolicLink() || !stat.isFile()) {
+    return {
+      ok: false,
+      code: "result_invalid",
+      error: `live step result file at ${resultFilePath} is not a regular file.`
+    };
+  }
+
+  if (stat.size > LIVE_STEP_WRAPPER_RESULT_MAX_BYTES) {
+    return {
+      ok: false,
+      code: "result_invalid",
+      error: `live step result file at ${resultFilePath} exceeds ${LIVE_STEP_WRAPPER_RESULT_MAX_BYTES} bytes.`
+    };
+  }
+
+  let raw: string;
+  try {
+    raw = fs.readFileSync(resultFilePath, "utf-8");
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "unknown error";
+    return {
+      ok: false,
+      code: "result_invalid",
+      error: `live step result file at ${resultFilePath} is unreadable: ${detail}`
+    };
+  }
+
+  const parsed = parseRunnerResult(raw);
+  if (!parsed.ok) {
+    return {
+      ok: false,
+      code: "result_invalid",
+      error: `live step result JSON is invalid: ${parsed.error}`
+    };
+  }
+
+  return { ok: true, result: parsed.value };
+}
+
+function errnoCode(error: unknown): string | undefined {
+  if (error === undefined || error === null) return undefined;
+  return (error as NodeJS.ErrnoException).code;
 }
 
 function manualRecovery(

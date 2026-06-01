@@ -4,8 +4,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { finalizeLiveWorkflowStep } from "../src/live-step-finalize.js";
-import type { CommitIntent } from "../src/runner-result.js";
+import {
+  finalizeLiveWorkflowStep,
+  finalizeLiveWorkflowStepFromResultFile
+} from "../src/live-step-finalize.js";
+import type { CommitIntent, RunnerResult } from "../src/runner-result.js";
 
 const ZERO_SHA = "0".repeat(40);
 const tempRoots: string[] = [];
@@ -77,6 +80,30 @@ function baseIntent(overrides: Partial<CommitIntent> = {}): CommitIntent {
     breaking: false,
     ...overrides
   };
+}
+
+function baseRunnerResult(overrides: Partial<RunnerResult> = {}): RunnerResult {
+  return {
+    success: true,
+    summary: "live step finished",
+    key_changes_made: ["wrote step-edit.txt"],
+    key_learnings: [],
+    remaining_work: [],
+    goal_complete: false,
+    commit: baseIntent(),
+    ...overrides
+  };
+}
+
+function writeResultFile(content: string): string {
+  const dir = makeTempDir("momentum-live-finalize-result-");
+  const resultPath = path.join(dir, "runner-result.json");
+  fs.writeFileSync(resultPath, content, "utf-8");
+  return resultPath;
+}
+
+function writeRunnerResultFile(overrides: Partial<RunnerResult> = {}): string {
+  return writeResultFile(JSON.stringify(baseRunnerResult(overrides)));
 }
 
 describe("finalizeLiveWorkflowStep", () => {
@@ -267,5 +294,201 @@ describe("finalizeLiveWorkflowStep", () => {
     });
 
     expect(result.outcome).toBe("git_failed");
+  });
+});
+
+describe("finalizeLiveWorkflowStepFromResultFile", () => {
+  it("commits using the result file's commit intent when it reports success", () => {
+    const { repoPath, baseHead, logPath } = setupRepoWithStepEdits();
+    const resultFilePath = writeRunnerResultFile({
+      commit: baseIntent({ type: "fix", scope: "wf", subject: "live wire-up" })
+    });
+
+    const result = finalizeLiveWorkflowStepFromResultFile({
+      repoPath,
+      baseHead,
+      resultFilePath,
+      verificationCommands: ["echo verify-ok"],
+      verificationTimeoutSec: 30,
+      verificationLogPath: logPath
+    });
+
+    expect(result.outcome).toBe("committed");
+    if (result.outcome !== "committed") return;
+    expect(result.commit.parentSha).toBe(baseHead);
+    expect(result.commit.message).toBe("fix(wf): live wire-up");
+    expect(result.head).toBe(result.commit.commitSha);
+
+    const head = runGit(repoPath, ["rev-parse", "HEAD"]).trim();
+    expect(head).toBe(result.commit.commitSha);
+  });
+
+  it("resets the worktree when the result file reports success=false", () => {
+    const { repoPath, baseHead, logPath } = setupRepoWithStepEdits();
+    const resultFilePath = writeRunnerResultFile({ success: false });
+
+    const result = finalizeLiveWorkflowStepFromResultFile({
+      repoPath,
+      baseHead,
+      resultFilePath,
+      verificationCommands: ["echo should-not-run"],
+      verificationTimeoutSec: 30,
+      verificationLogPath: logPath
+    });
+
+    expect(result.outcome).toBe("reset_step_failure");
+    if (result.outcome !== "reset_step_failure") return;
+    expect(result.reset.head).toBe(baseHead);
+
+    const head = runGit(repoPath, ["rev-parse", "HEAD"]).trim();
+    expect(head).toBe(baseHead);
+    expect(fs.existsSync(path.join(repoPath, "step-edit.txt"))).toBe(false);
+
+    const log = fs.readFileSync(logPath, "utf-8");
+    expect(log).not.toContain("should-not-run");
+  });
+
+  it("returns result_missing without mutating the worktree when the result file is absent", () => {
+    const { repoPath, baseHead, logPath } = setupRepoWithStepEdits();
+    const missingDir = makeTempDir("momentum-live-finalize-missing-");
+    const resultFilePath = path.join(missingDir, "runner-result.json");
+
+    const result = finalizeLiveWorkflowStepFromResultFile({
+      repoPath,
+      baseHead,
+      resultFilePath,
+      verificationCommands: ["echo should-not-run"],
+      verificationTimeoutSec: 30,
+      verificationLogPath: logPath
+    });
+
+    expect(result.outcome).toBe("result_missing");
+    if (result.outcome !== "result_missing") return;
+    expect(result.resultFilePath).toBe(resultFilePath);
+
+    // The step's uncommitted edits are left intact: a missing durable result is
+    // ambiguous, so the transaction refuses to destructively reset.
+    const head = runGit(repoPath, ["rev-parse", "HEAD"]).trim();
+    expect(head).toBe(baseHead);
+    expect(fs.existsSync(path.join(repoPath, "step-edit.txt"))).toBe(true);
+    expect(fs.existsSync(logPath)).toBe(false);
+  });
+
+  it("returns result_invalid without mutating the worktree when the result file is not valid JSON", () => {
+    const { repoPath, baseHead, logPath } = setupRepoWithStepEdits();
+    const resultFilePath = writeResultFile("{ this is not json");
+
+    const result = finalizeLiveWorkflowStepFromResultFile({
+      repoPath,
+      baseHead,
+      resultFilePath,
+      verificationCommands: [],
+      verificationTimeoutSec: 30,
+      verificationLogPath: logPath
+    });
+
+    expect(result.outcome).toBe("result_invalid");
+    if (result.outcome !== "result_invalid") return;
+    expect(result.resultFilePath).toBe(resultFilePath);
+
+    const head = runGit(repoPath, ["rev-parse", "HEAD"]).trim();
+    expect(head).toBe(baseHead);
+    expect(fs.existsSync(path.join(repoPath, "step-edit.txt"))).toBe(true);
+  });
+
+  it("returns result_invalid when the result document is a well-formed JSON but not a RunnerResult", () => {
+    const { repoPath, baseHead, logPath } = setupRepoWithStepEdits();
+    const resultFilePath = writeResultFile(JSON.stringify({ hello: "world" }));
+
+    const result = finalizeLiveWorkflowStepFromResultFile({
+      repoPath,
+      baseHead,
+      resultFilePath,
+      verificationCommands: [],
+      verificationTimeoutSec: 30,
+      verificationLogPath: logPath
+    });
+
+    expect(result.outcome).toBe("result_invalid");
+  });
+
+  it("returns result_invalid when the result file exceeds the 1 MiB ceiling", () => {
+    const { repoPath, baseHead, logPath } = setupRepoWithStepEdits();
+    const resultFilePath = writeResultFile("x".repeat(1024 * 1024 + 1));
+
+    const result = finalizeLiveWorkflowStepFromResultFile({
+      repoPath,
+      baseHead,
+      resultFilePath,
+      verificationCommands: [],
+      verificationTimeoutSec: 30,
+      verificationLogPath: logPath
+    });
+
+    expect(result.outcome).toBe("result_invalid");
+    if (result.outcome !== "result_invalid") return;
+    expect(result.error).toMatch(/exceeds|1 ?MiB|byte/i);
+  });
+
+  it("returns result_invalid when the result path is a symlink rather than a regular file", () => {
+    const { repoPath, baseHead, logPath } = setupRepoWithStepEdits();
+    const target = writeRunnerResultFile();
+    const linkDir = makeTempDir("momentum-live-finalize-link-");
+    const linkPath = path.join(linkDir, "runner-result.json");
+    fs.symlinkSync(target, linkPath);
+
+    const result = finalizeLiveWorkflowStepFromResultFile({
+      repoPath,
+      baseHead,
+      resultFilePath: linkPath,
+      verificationCommands: [],
+      verificationTimeoutSec: 30,
+      verificationLogPath: logPath
+    });
+
+    expect(result.outcome).toBe("result_invalid");
+  });
+
+  it("enters manual recovery without reset when HEAD moved during the live step", () => {
+    const repoPath = initRepo();
+    const baseHead = commitInitial(repoPath);
+    fs.writeFileSync(path.join(repoPath, "rogue.txt"), "rogue\n", "utf-8");
+    runGit(repoPath, ["add", "rogue.txt"]);
+    runGit(repoPath, ["commit", "-m", "rogue live-step commit", "--quiet"]);
+    const movedHead = runGit(repoPath, ["rev-parse", "HEAD"]).trim();
+
+    const resultFilePath = writeRunnerResultFile();
+    const result = finalizeLiveWorkflowStepFromResultFile({
+      repoPath,
+      baseHead,
+      resultFilePath,
+      verificationCommands: ["echo should-not-run"],
+      verificationTimeoutSec: 30,
+      verificationLogPath: makeLogPath()
+    });
+
+    expect(result.outcome).toBe("manual_recovery_required");
+    if (result.outcome !== "manual_recovery_required") return;
+    expect(result.recoveryCode).toBe("head_mismatch");
+    expect(result.trigger).toBe("pre_finalize");
+    expect(result.currentHead).toBe(movedHead);
+
+    expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(movedHead);
+    expect(fs.existsSync(path.join(repoPath, "rogue.txt"))).toBe(true);
+  });
+
+  it("rejects an empty resultFilePath as invalid_input", () => {
+    const result = finalizeLiveWorkflowStepFromResultFile({
+      repoPath: "/tmp",
+      baseHead: ZERO_SHA,
+      resultFilePath: "",
+      verificationCommands: [],
+      verificationTimeoutSec: 30,
+      verificationLogPath: "/tmp/verification.log"
+    });
+
+    expect(result.outcome).toBe("invalid_input");
+    if (result.outcome !== "invalid_input") return;
+    expect(result.error).toMatch(/resultFilePath/);
   });
 });
