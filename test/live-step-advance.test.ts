@@ -9,6 +9,7 @@ import { advanceLiveWorkflowStep } from "../src/live-step-advance.js";
 import { getWorkflowStep } from "../src/workflow-step-transitions.js";
 import { getWorkflowRunManualRecoveryState } from "../src/workflow-run-recovery.js";
 import { resolveWorkflowRecoveryArtifactPath } from "../src/workflow-recovery-artifact.js";
+import { getRepoLock } from "../src/repo-locks.js";
 import type { PersistLiveWorkflowFinalizeRecoveryResult } from "../src/live-step-run-recovery.js";
 import type {
   WorkflowStepExecutor,
@@ -280,6 +281,8 @@ function runnerFailedDispatch(
 type AdvanceOverrides = {
   verificationCommands?: string[];
   agentWorkflowsDir?: string;
+  leaseExpiresAt?: number;
+  verificationTimeoutSec?: number;
   runState?: "pending" | "approved" | "running";
   stepState?: WorkflowStepState;
 };
@@ -298,12 +301,12 @@ function runAdvance(
     runId: RUN_ID,
     stepId: STEP_ID,
     holder: HOLDER,
-    leaseExpiresAt: LEASE_EXPIRES_AT,
+    leaseExpiresAt: overrides.leaseExpiresAt ?? LEASE_EXPIRES_AT,
     executor,
     executorInput: buildExecutorInput(repoPath, runDir),
     baseHead,
     verificationCommands: overrides.verificationCommands ?? ["echo verify-ok"],
-    verificationTimeoutSec: 30,
+    verificationTimeoutSec: overrides.verificationTimeoutSec ?? 30,
     verificationLogPath: path.join(runDir, "verification.log"),
     agentWorkflowsDir,
     now: NOW
@@ -417,9 +420,119 @@ describe("advanceLiveWorkflowStep", () => {
       // The worktree was reset back to base; the step edit is gone.
       expect(headOf(repoPath)).toBe(baseHead);
       expect(fs.existsSync(path.join(repoPath, "step-edit.txt"))).toBe(false);
+      const step = getWorkflowStep(db, RUN_ID, STEP_ID);
+      expect(step?.state).toBe("failed");
+      expect(step?.errorCode).toBe("live_finalize_reset_verification_failure");
       expect(
         getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
       ).toBe(false);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("marks the durable step failed when commit finalization cannot produce a Momentum commit", () => {
+    const repoPath = initRepo();
+    const baseHead = commitInitial(repoPath);
+    const runDir = makeTempDir("momentum-live-advance-run-");
+    const db = openDb(makeTempDir());
+    try {
+      seedRepoBackedRun(db, repoPath);
+
+      const out = runAdvance(
+        db,
+        repoPath,
+        baseHead,
+        runDir,
+        fakeExecutor((input) => {
+          fs.writeFileSync(
+            input.resultJsonPath,
+            JSON.stringify(runnerResult()),
+            "utf-8"
+          );
+          return succeededDispatch(input);
+        })
+      );
+
+      expect(out.committed).toBe(false);
+      expect(out.finalized).toBe(true);
+      expect(out.finalize?.outcome).toBe("commit_failed");
+      if (out.finalize?.outcome === "commit_failed") {
+        expect(out.finalize.commit.code).toBe("nothing_to_commit");
+      }
+      const step = getWorkflowStep(db, RUN_ID, STEP_ID);
+      expect(step?.state).toBe("failed");
+      expect(step?.errorCode).toBe("live_finalize_commit_failed");
+      expect(
+        getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      ).toBe(false);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps the repo lock fresh while verification runs during finalization", () => {
+    const repoPath = initRepo();
+    const baseHead = commitInitial(repoPath);
+    const runDir = makeTempDir("momentum-live-advance-run-");
+    const db = openDb(makeTempDir());
+    const probePath = path.join(runDir, "repo-lock-heartbeat.json");
+    try {
+      seedRepoBackedRun(db, repoPath);
+
+      const dbPath = db.location();
+      if (typeof dbPath !== "string" || dbPath.length === 0) {
+        throw new Error("expected file-backed db for repo lock heartbeat test");
+      }
+      const probeScript = [
+        "const { DatabaseSync } = require('node:sqlite');",
+        "const fs = require('node:fs');",
+        `const db = new DatabaseSync(${JSON.stringify(dbPath)});`,
+        `const row = () => db.prepare(${JSON.stringify("SELECT heartbeat_at AS heartbeatAt, lease_expires_at AS leaseExpiresAt FROM repo_locks WHERE id = ?")}).get(${JSON.stringify(`lock-${HOLDER}`)});`,
+        "const before = row();",
+        "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 120);",
+        "const after = row();",
+        `fs.writeFileSync(${JSON.stringify(probePath)}, JSON.stringify({ before, after }));`,
+        "db.close();",
+        "process.exit(after.leaseExpiresAt > before.leaseExpiresAt ? 0 : 2);"
+      ].join(" ");
+
+      const out = runAdvance(
+        db,
+        repoPath,
+        baseHead,
+        runDir,
+        fakeExecutor((input) => {
+          fs.writeFileSync(
+            path.join(input.repoPath, "step-edit.txt"),
+            "from-live-step\n",
+            "utf-8"
+          );
+          fs.writeFileSync(
+            input.resultJsonPath,
+            JSON.stringify(runnerResult()),
+            "utf-8"
+          );
+          return succeededDispatch(input);
+        }),
+        {
+          leaseExpiresAt: NOW + 50,
+          verificationCommands: [`node -e ${JSON.stringify(probeScript)}`],
+          verificationTimeoutSec: 5
+        }
+      );
+
+      expect(out.committed).toBe(true);
+      const probe = JSON.parse(fs.readFileSync(probePath, "utf-8")) as {
+        before: { heartbeatAt: number; leaseExpiresAt: number };
+        after: { heartbeatAt: number; leaseExpiresAt: number };
+      };
+      expect(probe.after.leaseExpiresAt).toBeGreaterThan(
+        probe.before.leaseExpiresAt
+      );
+      expect(getRepoLock(db, `lock-${HOLDER}`)?.lease_expires_at).toBeGreaterThan(
+        probe.before.leaseExpiresAt
+      );
     } finally {
       db.close();
     }
