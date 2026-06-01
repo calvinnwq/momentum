@@ -1,0 +1,58 @@
+# Changelog
+
+## 1.0.0 (2026-06-01)
+
+
+### Features
+
+* add run-scoped workflow recovery controls ([f398588](https://github.com/calvinnwq/momentum/commit/f398588a2be212ac35811a1946cb0a3aacb64664))
+* **evidence:** add run_id/step_id typed linkage columns and additive migration to evidence_records ([9c59cc2](https://github.com/calvinnwq/momentum/commit/9c59cc2645a8ae2ee426943f2ff60f2d76b646a7))
+* **evidence:** Implemented the parser-attach slice of NGX-329: the workflow evidence parser now populates typed runId on every record and stepId on ledger step events, so typed linkage flows end-to-end through evidence ingest into stored rows. ([fcf9910](https://github.com/calvinnwq/momentum/commit/fcf9910173615e57f985e200b1499e8f74484c4e))
+* **evidence:** persist typed workflow evidence linkage ([4e39e62](https://github.com/calvinnwq/momentum/commit/4e39e62a2e8405fdd866049c7217109a07a9ccaf))
+* **evidence:** Surfaced typed runId/stepId evidence linkage through the evidence list and evidence ingest CLI output, completing the "list" surface of NGX-329's status/handoff/list scope. ([049de35](https://github.com/calvinnwq/momentum/commit/049de35e84cf8b6fe51ac95025751849978fdf90))
+* **evidence:** Surfaced typed runId/stepId evidence pointers through workflow status and workflow handoff by querying the durable evidence_records.run_id linkage (with a path fallback for legacy null-linkage rows) instead of path-only inference. ([58e4337](https://github.com/calvinnwq/momentum/commit/58e4337cafe302c25ad12ef347d5158fb4828c01))
+* **workflow run list:** Landed NGX-324 (M8-01 workflow run list and query surface). Extended the M7 listWorkflowRunSummaries helper with --approval-boundary, --repo, --issue-scope (LIKE with escape), --updated-since, and --updated-until filters; added the workflow run subcommand dispatcher and the read-only workflow run list CLI envelope with stable JSON ({ ok, command: "workflow run list", count, runs[] }) and bounded text output. Refusal codes (invalid_filter, invalid_state, invalid_limit) reuse the M7 taxonomy verbatim; empty result is a successful empty list, not a refusal. Verification: pnpm test 1813/1813, pnpm typecheck clean, pnpm build clean. (pnpm lint and pnpm format:check are not defined in this repo; only test/typecheck/build are gates per CLAUDE.md.) Doctor M7 closeout marker untouched per the M8 closeout policy. Issue moved to In Progress in Linear; not marked Done. ([d00cdb8](https://github.com/calvinnwq/momentum/commit/d00cdb8da6abf61e68b4d15d4f6f09a0f0c857be))
+* **workflow-monitor-state:** pure deriveWorkflowMonitorState reducer with active-step, lease-freshness, monitor-drift, nextAction, and recovery taxonomy (NGX-316) ([10fc99c](https://github.com/calvinnwq/momentum/commit/10fc99c0f9e05e5e84f44c37edb4059b98937cb2))
+* **workflow-run-import:** parse, persist, and import .agent-workflows run directories ([9183750](https://github.com/calvinnwq/momentum/commit/918375028acb5d6be656b3380be5b9c3448b8627))
+* **workflow-run:** add classifyWorkflowLease lease-freshness classifier ([d815637](https://github.com/calvinnwq/momentum/commit/d8156371a380321e16710122d91a5527660c5a45))
+* **workflow-run:** add workflow_runs/steps/approvals/leases schema migration ([097a059](https://github.com/calvinnwq/momentum/commit/097a0591b4262774ed0fe4b0efe3a78bdb7bb5f9))
+* **workflow-run:** add WorkflowRun identity columns to schema ([1ee0d8b](https://github.com/calvinnwq/momentum/commit/1ee0d8bea90af872ea07ac6c304723db01c8a1b6))
+* **workflow-run:** add WorkflowRun substrate schema and state reducer ([90ee9f0](https://github.com/calvinnwq/momentum/commit/90ee9f0fa0dc125ea54668b4510732f2172a91e3))
+* **workflow-run:** add WorkflowRun/WorkflowStep state model and transition reducer ([8bf3130](https://github.com/calvinnwq/momentum/commit/8bf31305314994913381415c30e8e5d068bc6543))
+* **workflow-run:** integrate workflow_leases into deriveWorkflowRunState ([5e76fdf](https://github.com/calvinnwq/momentum/commit/5e76fdf67f5ac1224a16ec4a70e54cc9eeac771b))
+* **workflow-step-executor:** Landed the WorkflowStepExecutor boundary (NGX-315): typed input/result/checkpoint/artifact shapes, registry keyed by WorkflowStepKind, stable error code taxonomy, deterministic fake executors per kind, focused tests pumping a full required-step chain through the M7 state machine, and matching internal M7 docs. ([ce4d958](https://github.com/calvinnwq/momentum/commit/ce4d9588eace0c8a1b8f309c00439135c8ec34b2))
+* **workflow:** add durable workflow run approvals ([5e4a89b](https://github.com/calvinnwq/momentum/commit/5e4a89bfe195ac8bb014f79167a434134978a8c5))
+* **workflow:** add durable workflow run approvals ([9b2365f](https://github.com/calvinnwq/momentum/commit/9b2365fafb350a30472b7d1d0ad22c338ae92bb9))
+* **workflow:** add live step execution orchestration ([bd7a93e](https://github.com/calvinnwq/momentum/commit/bd7a93e4542825bec1f7290b7d07b9ca17f141ab))
+* **workflow:** add live step execution orchestration ([f2b79f1](https://github.com/calvinnwq/momentum/commit/f2b79f178f35b036bdd67f22e460ca94737576e2))
+* **workflow:** add live wrapper registry ([0cbdda6](https://github.com/calvinnwq/momentum/commit/0cbdda6ad75f40083c5fd9ac321cb0a547fc2a87))
+* **workflow:** add read-only status and handoff CLI envelopes ([a14a67a](https://github.com/calvinnwq/momentum/commit/a14a67acf1de96fce3748adfaf9e38537a976f12))
+* **workflow:** add read-only workflow status and handoff CLI envelopes (NGX-317) ([477235c](https://github.com/calvinnwq/momentum/commit/477235c544d53a55a0c144900027c9db51b62db5))
+* **workflow:** add workflow run list command with query filters ([016eaa4](https://github.com/calvinnwq/momentum/commit/016eaa409d8f97e8bd04f0edb2bf85a3bc163143))
+* **workflow:** add workflow run monitor envelope ([9b40e3d](https://github.com/calvinnwq/momentum/commit/9b40e3dbc238f9f720726e0942c33da9f28321eb))
+* **workflow:** add workflow run update-step operator transition surface ([8296e66](https://github.com/calvinnwq/momentum/commit/8296e661e6db65a684f4a04966c247b2224b7bbf))
+* **workflow:** add workflow run update-step operator transition surface ([c406148](https://github.com/calvinnwq/momentum/commit/c4061486c3bf5188eb0d71694e2d5915ddcbf1ea))
+* **workflow:** Added the auto-set reconciliation (reconcileWorkflowRunManualRecovery) for NGX-327 — the monitor→setter trigger that durably flags a run and renders recovery.md when the M7 monitor reducer classifies a blocking recovery code — with 10 TDD tests and all runnable verification gates green. ([861b0e2](https://github.com/calvinnwq/momentum/commit/861b0e283929fc03f79561be12c3be9b82861b9b))
+* **workflow:** Added the durable run-scoped manual-recovery flag DB module (mark/clear/get-state) for NGX-327, mirroring the M3 goal-recovery pattern, with 11 focused TDD tests and all available verification gates green. ([59af489](https://github.com/calvinnwq/momentum/commit/59af48922007b7fa36ecc75e3e46269ed5e4182b))
+* **workflow:** Added the guarded operator clear for NGX-327 that re-derives the M7 monitor state and refuses with recovery_clear_refused while a blocking recovery condition persists, with 8 TDD tests and all runnable verification gates green. ([8452c55](https://github.com/calvinnwq/momentum/commit/8452c55e057537441634d547390c888ba9edc40b))
+* **workflow:** Added the operator-facing `workflow run clear-recovery` CLI subcommand for NGX-327, wiring the guarded manual-recovery clear into the dispatcher with full refusal taxonomy, docs, and 7 TDD tests; all runnable verification gates green. ([4fea5a2](https://github.com/calvinnwq/momentum/commit/4fea5a2d0a5001495a6212447a5c23201eabd693))
+* **workflow:** close out M8 operator controls ([18318b8](https://github.com/calvinnwq/momentum/commit/18318b8a9e81ab8d84eb2508b734956972ffc4ed))
+* **workflow:** Implemented NGX-328 (M8-05): the read-only `workflow run monitor` CLI machine envelope deriving a stable report/wait/recover decision view from durable rows and the M7 monitor reducer, with focused unit + built-CLI tests. ([9283021](https://github.com/calvinnwq/momentum/commit/92830211f766d978ba1d65f37dad500549fec03c))
+* **workflow:** Implemented NGX-332 (M9-01): a typed live-wrapper config parser plus a WorkflowStepKind-keyed registry with resolution, probe support, and stable refusal codes, covered by 45 deterministic fixture tests. ([a9a5550](https://github.com/calvinnwq/momentum/commit/a9a55508e3e5efa46b256c6b6f5c73a35081269a))
+* **workflow:** Implemented the foundational run-scoped recovery.md renderer for NGX-327 (M8-04) — a pure, fully-tested module that renders the per-run recovery artifact from the M7 monitor reducer's recovery taxonomy — with all available verification gates green. ([1c6d12c](https://github.com/calvinnwq/momentum/commit/1c6d12ced6c4d6f36f232410f5dc981ccca1c8c7))
+* **workflow:** import .agent-workflows run directories ([39b779a](https://github.com/calvinnwq/momentum/commit/39b779a0612820ddc155b1f75ee5dd3bfd055095))
+* **workflow:** Wired the run-scoped manual-recovery auto-set into the reachable `workflow import` path for NGX-327 — import now durably flags a run and renders recovery.md when a blocking M7 monitor recovery code is re-derived — and added CLI smoke for blocked/cleared states; all runnable verification gates green. ([7f7b735](https://github.com/calvinnwq/momentum/commit/7f7b735efadebe765247cd8a58060d5001322939))
+
+
+### Bug Fixes
+
+* **workflow-monitor-state:** emit monitor_drift_stale recovery code, add drift/stale/checkpoint-default tests, simplify graceMs pass-through (NGX-316) ([c011c09](https://github.com/calvinnwq/momentum/commit/c011c09edb649c68f17648fcb1703bc40cf78fae))
+* **workflow-step-executor:** tighten errorCode type to stable taxonomy, add config validation tests, update contract doc for env field (NGX-315) ([63cb2b4](https://github.com/calvinnwq/momentum/commit/63cb2b43fb4b3c005b62695469c0fb825b13ee33))
+* **workflow:** add invalid_limit refusal code, update README with status/handoff commands (NGX-317) ([3c33793](https://github.com/calvinnwq/momentum/commit/3c337930750d3688dc2c0fa40d0fd842a45032cf))
+* **workflow:** align live wrapper config parsing ([835b80d](https://github.com/calvinnwq/momentum/commit/835b80dba2fd7b93906a95cc5fd9f7a9273273e4))
+* **workflow:** handle monitor database failures ([d84a479](https://github.com/calvinnwq/momentum/commit/d84a479e918cec69d6214c2c0260be8f42bf704b))
+* **workflow:** harden operator step transitions ([8668502](https://github.com/calvinnwq/momentum/commit/86685024f46665168ae3bed29b3e6a1e41fe5c5f))
+* **workflow:** refresh monitor advisory on recovery controls ([4d505ef](https://github.com/calvinnwq/momentum/commit/4d505ef7ef06c83041076170635712caa597206c))
+* **workflow:** refresh monitor advisory on step update ([8c98ef1](https://github.com/calvinnwq/momentum/commit/8c98ef16747fc124ea647b898cd3c4c38887dbf1))
+* **workflow:** refuse non-approved live step starts ([57215b2](https://github.com/calvinnwq/momentum/commit/57215b218816758cf0c86ea4b6536789d7922326))
+* **workflow:** require explicit live wrapper fields ([6e0a2b7](https://github.com/calvinnwq/momentum/commit/6e0a2b7298a4fb43f7d987adf1eee951103a9d4a))
