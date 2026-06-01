@@ -111,6 +111,7 @@ export type RunLiveWorkflowStepInput = {
   /** Deterministic clock for stamping; defaults to `Date.now()`. */
   now?: number;
   deferSuccessfulTerminalState?: boolean;
+  deferNormalizedTerminalState?: boolean;
 };
 
 export type RunLiveWorkflowStepOutcome = {
@@ -298,8 +299,8 @@ export function runLiveWorkflowStep(
     ? mapStartedStepTerminalState(dispatch.result.state)
     : "failed";
   if (
-    input.deferSuccessfulTerminalState === true &&
-    terminalState === "succeeded"
+    (input.deferNormalizedTerminalState === true && dispatch.ok) ||
+    (input.deferSuccessfulTerminalState === true && terminalState === "succeeded")
   ) {
     return {
       ok: false,

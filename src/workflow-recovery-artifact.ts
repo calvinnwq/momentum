@@ -43,8 +43,10 @@ export const WORKFLOW_RECOVERY_ARTIFACT_SCHEMA_VERSION = 1;
  * Live run-level recovery classifications that M9 layers on top of the M7
  * monitor recovery codes. These are NOT emitted by `deriveWorkflowMonitorState`
  * — they are raised by the M9 live verification / commit transaction
- * (`head_mismatch`) and its result-document re-read (`result_missing` /
- * `result_invalid`) and rendered into the same per-run `recovery.md`. Extending
+ * (`head_mismatch`), its result-document re-read (`result_missing` /
+ * `result_invalid`), and unsafe finalization cleanup outcomes
+ * (`reset_failed` / `repo_lock_lost`) rendered into the same per-run
+ * `recovery.md`. Extending
  * the recovery taxonomy here is explicitly sanctioned by
  * internal/contracts/live-workflow-execution.md ("M9 can extend the M8
  * taxonomy, but it cannot collapse distinct failure causes into generic failure
@@ -54,7 +56,9 @@ export const WORKFLOW_RECOVERY_ARTIFACT_SCHEMA_VERSION = 1;
 export const WORKFLOW_LIVE_RUN_RECOVERY_CODES = [
   "head_mismatch",
   "result_missing",
-  "result_invalid"
+  "result_invalid",
+  "reset_failed",
+  "repo_lock_lost"
 ] as const;
 export type WorkflowLiveRunRecoveryCode =
   (typeof WORKFLOW_LIVE_RUN_RECOVERY_CODES)[number];
@@ -138,6 +142,16 @@ const SAFE_NEXT_STEPS: Record<
     "Inspect the malformed live step result document; it is not a valid normalized runner result.",
     "Confirm the step's true outcome from its executor log before retrying — the result cannot be trusted, so Momentum did not commit or reset.",
     "Re-dispatch the step or cancel the run once the invalid result is understood."
+  ],
+  reset_failed: [
+    "Inspect the worktree and reset error before approving any later step.",
+    "Confirm whether live-step edits are still present; Momentum could not restore the recorded base automatically.",
+    "Clean up or preserve the worktree manually before clearing recovery."
+  ],
+  repo_lock_lost: [
+    "Inspect the active repo lock owner and the worktree before approving any later step.",
+    "Confirm no other Momentum process is still mutating the repository.",
+    "Re-establish repo ownership or clean up manually before clearing recovery."
   ]
 };
 

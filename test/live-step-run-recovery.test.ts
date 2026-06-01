@@ -91,6 +91,26 @@ function resultInvalidResult(
   };
 }
 
+function resetFailedResult(): FinalizeLiveWorkflowStepFromResultFileResult {
+  return {
+    outcome: "reset_failed",
+    trigger: "verification_failure",
+    verification: null,
+    reset: {
+      ok: false,
+      code: "git_failed",
+      error: "git reset failed"
+    }
+  };
+}
+
+function repoLockLostResult(): FinalizeLiveWorkflowStepFromResultFileResult {
+  return {
+    outcome: "repo_lock_lost",
+    error: "repo lock was lost during finalization"
+  };
+}
+
 describe("persistLiveWorkflowFinalizeRecovery", () => {
   it("sets the durable flag and writes recovery.md for a head_mismatch finalize outcome", () => {
     const dataDir = makeTempDir();
@@ -268,6 +288,44 @@ describe("persistLiveWorkflowFinalizeRecovery", () => {
 
       const row = readRunRow(db, "run-reset");
       expect(row.needs_manual_recovery).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("sets durable recovery for unsafe finalize outcomes without cleanup", () => {
+    const dataDir = makeTempDir();
+    const agentWorkflowsDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      for (const [runId, finalize, code] of [
+        ["run-reset-failed", resetFailedResult(), "reset_failed"],
+        ["run-lock-lost", repoLockLostResult(), "repo_lock_lost"]
+      ] as const) {
+        seedRun(db, runId);
+
+        const out = persistLiveWorkflowFinalizeRecovery(db, {
+          runId,
+          stepId: "implementation",
+          finalize,
+          agentWorkflowsDir,
+          now: 1_730_000_500_000
+        });
+
+        expect(out.ok).toBe(true);
+        if (!out.ok) throw new Error("expected success");
+        expect(out.outcome).toBe("recovered");
+        if (out.outcome !== "recovered") {
+          throw new Error("expected recovered outcome");
+        }
+        expect(out.recoveryCode).toBe(code);
+        expect(readRunRow(db, runId).needs_manual_recovery).toBe(1);
+        const body = fs.readFileSync(
+          resolveWorkflowRecoveryArtifactPath(agentWorkflowsDir, runId),
+          "utf8"
+        );
+        expect(body).toContain(`- Recovery classification: ${code}`);
+      }
     } finally {
       db.close();
     }

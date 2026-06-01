@@ -13,7 +13,7 @@
  * promise that a moved HEAD or an untrustworthy result document refuses a
  * destructive reset.
  *
- * Three finalize outcomes map to durable recovery, each carrying a distinct,
+ * Five finalize outcomes map to durable recovery, each carrying a distinct,
  * non-collapsed live recovery code (the contract forbids generic failure text):
  *
  *   - `manual_recovery_required` -> `head_mismatch`: the live step left HEAD off
@@ -22,15 +22,15 @@
  *     document was never written; the true outcome is unknown.
  *   - `result_invalid` -> `result_invalid`: the result document is malformed;
  *     the outcome cannot be trusted.
+ *   - `reset_failed` -> `reset_failed`: reset did not restore the recorded
+ *     base, so worktree cleanup is not proven.
+ *   - `repo_lock_lost` -> `repo_lock_lost`: Momentum no longer owns the repo
+ *     lock required to mutate or clean the worktree.
  *
  * Every other finalize outcome is a clean terminal transaction result —
  * `committed`, or a `reset_step_failure` / `reset_verification_failure` where
- * the worktree was already safely reset — and needs no run-level recovery, so
- * this seam reports `no_recovery_required` without touching the durable flag.
- * (Finalize's own programmer-error / git-error outcomes such as `invalid_input`,
- * `git_failed`, `reset_failed`, and `commit_failed` are surfaced to the caller
- * by the finalize layer and are out of scope for this M9-03 recovery seam; they
- * are handled by the broader run loop in a later slice.)
+ * the worktree was already safely reset — or a caller-owned terminal error such
+ * as `invalid_input`, `git_failed`, or `commit_failed`.
  *
  * Mirroring {@link ./workflow-recovery-reconcile.ts}, the durable flag is
  * written *first*: it is the authority that blocks unsafe progression, so it
@@ -260,6 +260,30 @@ function classifyFinalizeRecovery(
           code: "investigate_result_invalid",
           detail:
             "The live step's result document is malformed and cannot be trusted. Momentum did not commit or reset; inspect the executor log before retrying or canceling.",
+          stepId
+        }
+      };
+    case "reset_failed":
+      return {
+        code: "reset_failed",
+        reason: finalize.reset.error,
+        evidencePointers: [],
+        nextAction: {
+          code: "investigate_reset_failed",
+          detail:
+            "The live step finalization could not restore the recorded base. Inspect and clean up the worktree manually before clearing recovery.",
+          stepId
+        }
+      };
+    case "repo_lock_lost":
+      return {
+        code: "repo_lock_lost",
+        reason: finalize.error,
+        evidencePointers: [],
+        nextAction: {
+          code: "investigate_repo_lock_lost",
+          detail:
+            "Momentum lost the active repo lock during live step finalization. Confirm repository ownership and worktree state before clearing recovery.",
           stepId
         }
       };

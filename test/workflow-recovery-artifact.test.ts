@@ -209,7 +209,9 @@ describe("live run-level recovery classifications (M9)", () => {
     expect([...WORKFLOW_LIVE_RUN_RECOVERY_CODES]).toEqual([
       "head_mismatch",
       "result_missing",
-      "result_invalid"
+      "result_invalid",
+      "reset_failed",
+      "repo_lock_lost"
     ]);
     // The full recovery.md render vocabulary is the M7 monitor codes plus the
     // M9 live run-level codes; neither set drops out.

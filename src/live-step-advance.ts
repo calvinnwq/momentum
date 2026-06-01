@@ -23,9 +23,9 @@
  *   -> persistLiveWorkflowFinalizeRecovery     (durable recovery on head/result)
  *
  * The git + verification transaction runs only when the managed step settled
- * into a clean terminal state from a *normalized* dispatch result —
- * `dispatch.ok === true` and the terminal step state was durably persisted
- * (`finish.ok === true`). That gate is the boundary between the two recovery
+ * into a terminal state from a *normalized* dispatch result —
+ * `dispatch.ok === true`, either deferred while still leased or already durably
+ * persisted. That gate is the boundary between the two recovery
  * worlds M9 keeps distinct:
  *
  *   - A normalized dispatch (`ok: true`) means the runner produced a trustworthy
@@ -49,8 +49,8 @@
  * verbatim for the monitor / recovery layer.
  *
  * Durable mutations stay in the composed primitives, except for the final
- * reconciliation that marks a previously successful step failed when the git
- * transaction did not produce an accepted Momentum commit.
+ * reconciliation that marks a deferred normalized step terminal after the git
+ * transaction produces a committed, reset, or recovery outcome.
  */
 
 import type { MomentumDb } from "./db.js";
@@ -156,7 +156,7 @@ export function advanceLiveWorkflowStep(
       ? { stalePolicy: input.stalePolicy }
       : {}),
     ...(input.now !== undefined ? { now: input.now } : {}),
-    deferSuccessfulTerminalState: true
+    deferNormalizedTerminalState: true
   });
 
   // The git + verification transaction runs only for a step that settled into a
@@ -167,7 +167,7 @@ export function advanceLiveWorkflowStep(
   const canFinalize =
     dispatch !== undefined &&
     dispatch.ok &&
-    (run.finish?.ok === true || run.deferredTerminalState === "succeeded");
+    (run.finish?.ok === true || run.deferredTerminalState !== undefined);
   if (!canFinalize) {
     return { committed: false, finalized: false, run };
   }
@@ -177,7 +177,7 @@ export function advanceLiveWorkflowStep(
     run.deferredLease
   );
   if (!repoLockHeartbeat.ok) {
-    const failedRun = completeDeferredSuccessfulStep(input, run, {
+    const failedRun = completeDeferredStep(input, run, {
       outcome: "repo_lock_lost",
       message: repoLockHeartbeat.error
     });
@@ -206,18 +206,6 @@ export function advanceLiveWorkflowStep(
     repoLockHeartbeat.heartbeat.stop();
   }
 
-  const completedRun = completeDeferredSuccessfulStep(input, run, {
-    outcome: finalize.outcome,
-    message: describeFinalizeFailure(finalize)
-  });
-
-  reconcileFinalizeStepState(input.db, {
-    runId: input.runId,
-    stepId: input.stepId,
-    finalize,
-    ...(input.now !== undefined ? { now: input.now } : {})
-  });
-
   const recovery = persistLiveWorkflowFinalizeRecovery(input.db, {
     runId: input.runId,
     stepId: input.stepId,
@@ -227,6 +215,18 @@ export function advanceLiveWorkflowStep(
       ? { artifactRunDir: input.artifactRunDir }
       : {}),
     repoPath: input.executorInput.repoPath,
+    ...(input.now !== undefined ? { now: input.now } : {})
+  });
+
+  const completedRun = completeDeferredStep(input, run, {
+    outcome: finalize.outcome,
+    message: describeFinalizeFailure(finalize)
+  });
+
+  reconcileFinalizeStepState(input.db, {
+    runId: input.runId,
+    stepId: input.stepId,
+    finalize,
     ...(input.now !== undefined ? { now: input.now } : {})
   });
 
@@ -601,22 +601,39 @@ function startAdvanceRepoLockHeartbeatWorker(input: {
   };
 }
 
-function completeDeferredSuccessfulStep(
+function completeDeferredStep(
   input: AdvanceLiveWorkflowStepInput,
   run: RunLiveWorkflowStepOutcome,
   failure: { outcome: string; message: string }
 ): RunLiveWorkflowStepOutcome {
-  if (run.deferredTerminalState !== "succeeded") return run;
+  if (run.deferredTerminalState === undefined) return run;
 
-  const state = failure.outcome === "committed" ? "succeeded" : "failed";
+  const state =
+    run.deferredTerminalState === "succeeded" && failure.outcome === "committed"
+      ? "succeeded"
+      : "failed";
+  const useDispatchFailure =
+    failure.outcome === "reset_step_failure" &&
+    run.dispatch?.ok === true &&
+    run.deferredTerminalState === "failed";
   const finish: WorkflowStepTransitionOutcome = finishWorkflowStep(input.db, {
     runId: input.runId,
     stepId: input.stepId,
     state,
-    errorCode: state === "succeeded" ? null : `live_finalize_${failure.outcome}`,
-    errorMessage: state === "succeeded" ? null : failure.message,
+    errorCode:
+      state === "succeeded"
+        ? null
+        : useDispatchFailure && run.dispatch?.ok === true
+          ? run.dispatch.result.errorCode
+          : `live_finalize_${failure.outcome}`,
+    errorMessage:
+      state === "succeeded"
+        ? null
+        : useDispatchFailure && run.dispatch?.ok === true
+          ? run.dispatch.result.errorMessage
+          : failure.message,
     resultDigest:
-      state === "succeeded" && run.dispatch?.ok === true
+      (state === "succeeded" || useDispatchFailure) && run.dispatch?.ok === true
         ? run.dispatch.result.resultDigest
         : null,
     ...(input.now !== undefined ? { now: input.now } : {})

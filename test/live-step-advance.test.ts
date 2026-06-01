@@ -598,6 +598,74 @@ describe("advanceLiveWorkflowStep", () => {
     }
   });
 
+  it("keeps a failed normalized step running and leased until reset finalization completes", () => {
+    const repoPath = initRepo();
+    const baseHead = commitInitial(repoPath);
+    const runDir = makeTempDir("momentum-live-advance-run-");
+    const db = openDb(makeTempDir());
+    try {
+      seedRepoBackedRun(db, repoPath);
+      db.exec(
+        `CREATE TABLE reset_finalize_probe (
+           id INTEGER PRIMARY KEY CHECK (id = 1),
+           step_state TEXT NOT NULL,
+           lease_released_at INTEGER
+         ) STRICT`
+      );
+      db.exec(
+        `CREATE TRIGGER capture_reset_finalize_gate
+           AFTER UPDATE OF heartbeat_at ON repo_locks
+           WHEN NEW.id = 'lock-${HOLDER}'
+         BEGIN
+           DELETE FROM reset_finalize_probe;
+           INSERT INTO reset_finalize_probe (id, step_state, lease_released_at)
+           SELECT 1, workflow_steps.state, workflow_leases.released_at
+             FROM workflow_steps
+             LEFT JOIN workflow_leases
+                    ON workflow_leases.run_id = workflow_steps.run_id
+                   AND workflow_leases.lease_kind = 'managed-step'
+            WHERE workflow_steps.run_id = '${RUN_ID}'
+              AND workflow_steps.step_id = '${STEP_ID}';
+         END`
+      );
+
+      const out = runAdvance(
+        db,
+        repoPath,
+        baseHead,
+        runDir,
+        fakeExecutor((input) => {
+          fs.writeFileSync(
+            path.join(input.repoPath, "step-edit.txt"),
+            "from-live-step\n",
+            "utf-8"
+          );
+          fs.writeFileSync(
+            input.resultJsonPath,
+            JSON.stringify(runnerResult({ success: false })),
+            "utf-8"
+          );
+          return runnerFailedDispatch(input);
+        })
+      );
+
+      expect(out.finalize?.outcome).toBe("reset_step_failure");
+      const probe = db
+        .prepare(
+          `SELECT step_state AS stepState, lease_released_at AS leaseReleasedAt
+             FROM reset_finalize_probe WHERE id = 1`
+        )
+        .get() as { stepState: string; leaseReleasedAt: number | null };
+      expect(probe.stepState).toBe("running");
+      expect(probe.leaseReleasedAt).toBeNull();
+      expect(getWorkflowStep(db, RUN_ID, STEP_ID)?.state).toBe("failed");
+      expect(headOf(repoPath)).toBe(baseHead);
+      expect(fs.existsSync(path.join(repoPath, "step-edit.txt"))).toBe(false);
+    } finally {
+      db.close();
+    }
+  });
+
   it("keeps the managed-step lease fresh while verification runs during finalization", () => {
     const repoPath = initRepo();
     const baseHead = commitInitial(repoPath);
@@ -942,6 +1010,68 @@ describe("advanceLiveWorkflowStep", () => {
         "utf-8"
       );
       expect(body).toContain("- Recovery classification: result_missing");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("sets manual recovery before releasing a deferred finalized lease", () => {
+    const repoPath = initRepo();
+    const baseHead = commitInitial(repoPath);
+    const runDir = makeTempDir("momentum-live-advance-run-");
+    const agentWorkflowsDir = makeTempDir();
+    const db = openDb(makeTempDir());
+    try {
+      seedRepoBackedRun(db, repoPath);
+      db.exec(
+        `CREATE TABLE release_recovery_probe (
+           id INTEGER PRIMARY KEY CHECK (id = 1),
+           needs_manual_recovery INTEGER NOT NULL
+         ) STRICT`
+      );
+      db.exec(
+        `CREATE TRIGGER capture_recovery_before_lease_release
+           AFTER UPDATE OF released_at ON workflow_leases
+           WHEN NEW.run_id = '${RUN_ID}'
+             AND NEW.lease_kind = 'managed-step'
+             AND NEW.released_at IS NOT NULL
+         BEGIN
+           DELETE FROM release_recovery_probe;
+           INSERT INTO release_recovery_probe (id, needs_manual_recovery)
+           SELECT 1, needs_manual_recovery
+             FROM workflow_runs
+            WHERE id = '${RUN_ID}';
+         END`
+      );
+
+      const out = runAdvance(
+        db,
+        repoPath,
+        baseHead,
+        runDir,
+        fakeExecutor((input) => {
+          fs.writeFileSync(
+            path.join(input.repoPath, "step-edit.txt"),
+            "from-live-step\n",
+            "utf-8"
+          );
+          return succeededDispatch(input);
+        }),
+        { agentWorkflowsDir }
+      );
+
+      expect(out.finalize?.outcome).toBe("result_missing");
+      expect(expectRecoveryOk(out.recovery).outcome).toBe("recovered");
+      const probe = db
+        .prepare(
+          `SELECT needs_manual_recovery AS needsManualRecovery
+             FROM release_recovery_probe WHERE id = 1`
+        )
+        .get() as { needsManualRecovery: number };
+      expect(probe.needsManualRecovery).toBe(1);
+      expect(
+        getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+      ).toBe(true);
     } finally {
       db.close();
     }
