@@ -39,6 +39,38 @@ export const WORKFLOW_RECOVERY_ARTIFACT_FILENAME = "recovery.md";
  */
 export const WORKFLOW_RECOVERY_ARTIFACT_SCHEMA_VERSION = 1;
 
+/**
+ * Live run-level recovery classifications that M9 layers on top of the M7
+ * monitor recovery codes. These are NOT emitted by `deriveWorkflowMonitorState`
+ * — they are raised by the M9 live verification / commit transaction
+ * (`head_mismatch`) and its result-document re-read (`result_missing` /
+ * `result_invalid`) and rendered into the same per-run `recovery.md`. Extending
+ * the recovery taxonomy here is explicitly sanctioned by
+ * internal/contracts/live-workflow-execution.md ("M9 can extend the M8
+ * taxonomy, but it cannot collapse distinct failure causes into generic failure
+ * text"). The monitor reducer's emitted-code type stays untouched so the
+ * substrate never claims to produce a code it cannot.
+ */
+export const WORKFLOW_LIVE_RUN_RECOVERY_CODES = [
+  "head_mismatch",
+  "result_missing",
+  "result_invalid"
+] as const;
+export type WorkflowLiveRunRecoveryCode =
+  (typeof WORKFLOW_LIVE_RUN_RECOVERY_CODES)[number];
+
+/**
+ * Every classification `recovery.md` can render: the M7 monitor recovery codes
+ * plus the M9 live run-level recovery codes. This is the single source of truth
+ * the renderer validates against.
+ */
+export type WorkflowRecoveryClassification =
+  | WorkflowMonitorRecoveryCode
+  | WorkflowLiveRunRecoveryCode;
+
+export const WORKFLOW_RECOVERY_CLASSIFICATIONS: readonly WorkflowRecoveryClassification[] =
+  [...WORKFLOW_MONITOR_RECOVERY_CODES, ...WORKFLOW_LIVE_RUN_RECOVERY_CODES];
+
 export function isSafeWorkflowRunPathSegment(runId: string): boolean {
   return (
     runId.length > 0 &&
@@ -64,7 +96,7 @@ export const WORKFLOW_RECOVERY_SAFETY_NOTES: readonly string[] = [
 ];
 
 const SAFE_NEXT_STEPS: Record<
-  WorkflowMonitorRecoveryCode,
+  WorkflowRecoveryClassification,
   readonly string[]
 > = {
   manual_recovery_lease: [
@@ -91,6 +123,21 @@ const SAFE_NEXT_STEPS: Record<
     "Inspect the failed required step's executor log and artifact tree.",
     "Decide whether to retry the step or keep the run blocked for manual handling.",
     "Do not approve past the failed step until the failure is understood."
+  ],
+  head_mismatch: [
+    "Inspect the unexpected HEAD against the recorded base SHA with `git -C <repo> log`.",
+    "Momentum refused a destructive reset: a non-Momentum commit on HEAD must be preserved, not discarded.",
+    "Decide manually whether to keep, amend, or roll back the unexpected commit before clearing recovery."
+  ],
+  result_missing: [
+    "Inspect the live step's normalized result file path; the runner exited without writing it.",
+    "Confirm the step's true outcome from its executor log before retrying — the result is unknown, so Momentum did not commit or reset.",
+    "Re-dispatch the step or cancel the run once the missing result is understood."
+  ],
+  result_invalid: [
+    "Inspect the malformed live step result document; it is not a valid normalized runner result.",
+    "Confirm the step's true outcome from its executor log before retrying — the result cannot be trusted, so Momentum did not commit or reset.",
+    "Re-dispatch the step or cancel the run once the invalid result is understood."
   ]
 };
 
@@ -99,7 +146,7 @@ const SAFE_NEXT_STEPS: Record<
  * path and future surfaces can reuse the same guidance the artifact renders.
  */
 export function workflowRecoverySafeNextSteps(
-  code: WorkflowMonitorRecoveryCode
+  code: WorkflowRecoveryClassification
 ): readonly string[] {
   return SAFE_NEXT_STEPS[code] ?? [];
 }
@@ -129,7 +176,7 @@ export type WorkflowRecoveryNextAction = {
 export type WorkflowRecoveryArtifactInput = {
   runId: string;
   stepId: string | null;
-  classification: WorkflowMonitorRecoveryCode;
+  classification: WorkflowRecoveryClassification;
   reason: string;
   recommendedNextAction: WorkflowRecoveryNextAction;
   evidencePointers: readonly WorkflowRecoveryEvidencePointer[];
@@ -357,7 +404,7 @@ function validateInput(input: WorkflowRecoveryArtifactInput): void {
     throw new Error("buildWorkflowRecoveryMarkdown: runId is required");
   }
   if (
-    !(WORKFLOW_MONITOR_RECOVERY_CODES as readonly string[]).includes(
+    !(WORKFLOW_RECOVERY_CLASSIFICATIONS as readonly string[]).includes(
       input.classification
     )
   ) {

@@ -36,10 +36,12 @@
  *
  * This module owns no durable state. It is a pure transaction over git +
  * verification, mirroring how `iteration-finalize.ts` stays a pure transaction
- * the foreground caller composes. The run-level caller (a later M9 slice) takes
- * a `manual_recovery_required` result and sets the durable
- * `needs_manual_recovery` flag plus the per-run `recovery.md` artifact, exactly
- * as the M8 recovery reconcile already does for other blocking codes.
+ * the foreground caller composes. The run-level caller
+ * ({@link ./live-step-run-recovery.ts}'s `persistLiveWorkflowFinalizeRecovery`)
+ * takes a `manual_recovery_required` / `result_missing` / `result_invalid`
+ * result and sets the durable `needs_manual_recovery` flag plus the per-run
+ * `recovery.md` artifact, exactly as the M8 recovery reconcile already does for
+ * other blocking codes.
  */
 
 import { execFileSync } from "node:child_process";
