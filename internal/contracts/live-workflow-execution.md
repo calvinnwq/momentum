@@ -52,7 +52,7 @@ Each durable wrapper config uses the same snake_case field style as the existing
 - `args`: explicit argv array, with no shell interpolation.
 - `cwd`: `repo` or `iteration`.
 - `timeout_sec`: positive integer.
-- `env_allow`: allowlist of environment variable names.
+- `env_allow`: allowlist of environment variable names. Only listed names are inherited from the source environment; even `PATH` is forwarded only when explicitly allowed.
 - `result_file`: path relative to the iteration artifact directory.
 - Optional `probe`: `command` / `args` / `timeout_sec` used to detect missing runtime or auth before the main command; when omitted inside `probe`, `args` defaults to `[]` and `timeout_sec` defaults to `30`.
 
@@ -86,13 +86,23 @@ Each live step execution must:
 
 - Acquire a workflow lease before spawning the process.
 - Write a start event before spawning.
-- Heartbeat while the process is active or mark the lease stale if heartbeat cannot be maintained.
+- Heartbeat while the process is active; if heartbeat cannot be maintained, leave the outstanding lease to become stale by expiry and stale-policy classification.
 - Capture stdout / stderr to bounded artifact logs.
 - Require a normalized result file for success.
 - Persist terminal state before releasing the lease.
 - Preserve enough evidence for `workflow status`, `workflow handoff`, `workflow run monitor`, and `evidence ingest`.
 
 If the process exits successfully but the result file is missing or invalid, the step fails with `result_missing` or `result_invalid`. Success without a durable result is not success.
+
+Live wrappers inject workflow-context environment variables outside `env_allow`: `MOMENTUM_RUN_ID`, `MOMENTUM_STEP_ID`, `MOMENTUM_STEP_KIND`, `MOMENTUM_ATTEMPT`, `MOMENTUM_REPO_PATH`, `MOMENTUM_ITERATION_DIR`, optional `MOMENTUM_PROMPT_PATH`, and `MOMENTUM_RESULT_PATH`. The result path is resolved from the wrapper's `result_file` under the iteration artifact directory; runners must write the normalized result document to `MOMENTUM_RESULT_PATH` rather than deriving their own path.
+
+`result_file` is rejected when absolute or escaping the iteration directory. Execution also rejects symlink or non-directory parent escapes, clears any stale result before spawning, and refuses result documents over 1 MiB instead of reading them.
+
+Live wrapper commands run as Momentum-supervised foreground processes. Stdout and stderr are each capped by the 256 MiB default output ceiling. On timeout, output overflow, or after the main command exits, Momentum kills the process group / child process; wrappers must not depend on daemonized or background child work surviving the step command.
+
+A valid normalized runner result with `success: false` is treated as an executed-but-failed step with `command_failed`, not as a missing or invalid result document.
+
+After a live step has started, an executor result of `skipped` is persisted as `succeeded` because the durable live transition path does not allow `running -> skipped`.
 
 ### Git And Verification Transaction
 
@@ -112,12 +122,14 @@ M9 consumes the M8 durable approval rows. It does not introduce a second approva
 
 Starting, advancing, or retrying a live step must check:
 
-- The run state.
+- The run state; live execution may start only when the durable run state is `approved` or `running`.
 - The current step state.
+- That no other step in the same run is already `running`.
+- That all lower-order required predecessor steps are `succeeded` or `skipped`.
 - The approval boundary required for that step.
 - The manual-recovery flag.
 - Active leases.
-- Repo lock availability.
+- Repo path and repo lock availability; live execution requires `workflow_runs.repo_path` to be present and equal `executorInput.repoPath`. Repo-backed runs must also have a durable `workflow_runs.goal_id` plus an active, unexpired `repo_locks` row for `workflow_runs.repo_path` held by the same holder and matching goal id. Live execution heartbeats that repo lock while the managed step runs.
 
 Illegal advance attempts refuse without partial mutation.
 
@@ -137,6 +149,8 @@ At minimum:
 - `stale_live_step`
 - `head_mismatch`
 - `manual_recovery_required`
+
+The live wrapper preserves `auth_unavailable` and `output_overflow` as precise live recovery codes. The M7 executor dispatch taxonomy maps them to `runtime_unavailable` and `command_failed` respectively while retaining the precise live code for recovery handling.
 
 When recovery is required, Momentum writes the per-run `recovery.md` artifact and sets the durable recovery flag before returning control to the operator.
 

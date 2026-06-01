@@ -244,6 +244,38 @@ describe("acquireRepoLock", () => {
     }
   });
 
+  it("updateRepoLockHeartbeat does not revive expired active locks", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const acquired = acquireRepoLock(db, {
+        repoRoot: REPO_ROOT,
+        holder: "worker-a",
+        goalId: "g1",
+        iteration: 1,
+        jobId: "j1",
+        leaseExpiresAt: 1_000,
+        now: 100
+      });
+      expect(acquired.ok).toBe(true);
+      if (!acquired.ok) return;
+
+      expect(
+        updateRepoLockHeartbeat(db, {
+          lockId: acquired.lockId,
+          heartbeatAt: 1_001,
+          leaseExpiresAt: 2_000
+        }).ok
+      ).toBe(false);
+
+      const after = getRepoLock(db, acquired.lockId);
+      expect(after?.heartbeat_at).toBe(100);
+      expect(after?.lease_expires_at).toBe(1_000);
+    } finally {
+      db.close();
+    }
+  });
+
   it("validates required acquire input", () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);

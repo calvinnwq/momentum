@@ -97,6 +97,11 @@ export type UpdateRepoLockHeartbeatInput = {
   leaseExpiresAt: number;
 };
 
+/**
+ * Refresh an active repo lock only while its current lease is still fresh. A
+ * heartbeat after the stored deadline returns `ok: false` instead of
+ * reviving a stale active lock.
+ */
 export function updateRepoLockHeartbeat(
   db: MomentumDb,
   input: UpdateRepoLockHeartbeatInput
@@ -105,9 +110,15 @@ export function updateRepoLockHeartbeat(
     .prepare(
       `UPDATE repo_locks
          SET heartbeat_at = ?, lease_expires_at = ?, updated_at = ?
-       WHERE id = ? AND state = 'active'`
+       WHERE id = ? AND state = 'active' AND lease_expires_at >= ?`
     )
-    .run(input.heartbeatAt, input.leaseExpiresAt, input.heartbeatAt, input.lockId);
+    .run(
+      input.heartbeatAt,
+      input.leaseExpiresAt,
+      input.heartbeatAt,
+      input.lockId,
+      input.heartbeatAt
+    );
   return { ok: Number(result.changes) > 0 };
 }
 
