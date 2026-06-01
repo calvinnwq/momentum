@@ -29,9 +29,9 @@ import {
  *
  * It does NOT execute anything: spawning the live engines, lease/heartbeat
  * persistence, result-file capture, and verification/commit transactions are
- * owned by later M9 slices (NGX-333+). Missing or malformed configuration
- * refuses here, before any workflow state is mutated, per
- * internal/contracts/live-workflow-execution.md.
+ * composed by the live step wrapper / executor / orchestrator layers. Missing
+ * or malformed configuration refuses here, before any workflow state is
+ * mutated, per internal/contracts/live-workflow-execution.md.
  */
 
 export type LiveWrapperCwd = "repo" | "iteration";
@@ -60,8 +60,8 @@ export type LiveWrapperProfile = {
 /**
  * Stable refusal vocabulary for the live wrapper config + registry layer.
  * These are configuration-time refusals, distinct from the execution-time
- * recovery taxonomy (`runtime_unavailable`, `command_failed`, ...) that later
- * M9 slices map from live process failures.
+ * recovery taxonomy (`runtime_unavailable`, `command_failed`, ...) mapped by
+ * the live process execution layers.
  */
 export const LIVE_WRAPPER_REFUSAL_CODES = [
   "live_wrapper_config_missing",
