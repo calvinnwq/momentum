@@ -271,6 +271,27 @@ describe("momentum workflow run start (NGX-346)", () => {
     });
   });
 
+  it("refuses unexpected positional or unknown arguments", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const result = await run(
+      startArgs({
+        dataDir,
+        repoDir,
+        runId: "run-extra",
+        objective: "bad args",
+        extra: ["--definiton", "custom-flow"]
+      })
+    );
+    expect(result.code).toBe(2);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      code: "usage_error",
+      message: "Unexpected argument for workflow run start: --definiton"
+    });
+  });
+
   it("refuses an unknown --definition with definition_not_found", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();

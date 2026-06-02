@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -309,5 +309,37 @@ describe("persistWorkflowRunStart", () => {
     } finally {
       db.close();
     }
+  });
+
+  it("maps run insert uniqueness races to the run-start conflict error", () => {
+    const uniqueError = new Error(
+      "UNIQUE constraint failed: workflow_runs.id"
+    );
+    const fakeDb = {
+      exec: vi.fn(),
+      prepare: vi.fn((sql: string) => {
+        if (sql.includes("SELECT id FROM workflow_runs")) {
+          return { get: vi.fn(() => undefined) };
+        }
+        if (sql.includes("INSERT INTO workflow_runs")) {
+          return {
+            run: vi.fn(() => {
+              throw uniqueError;
+            })
+          };
+        }
+        return { run: vi.fn() };
+      })
+    } as unknown as MomentumDb;
+
+    let thrown: unknown;
+    try {
+      persistWorkflowRunStart(fakeDb, baseInput());
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(WorkflowRunStartConflictError);
+    expect((thrown as WorkflowRunStartConflictError).runId).toBe("run-001");
   });
 });

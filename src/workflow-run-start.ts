@@ -223,11 +223,15 @@ export function materializeWorkflowRunStart(
       order: step.order,
       required: step.required
     }));
+  const derivedRunState = deriveWorkflowRunState(steps);
 
   const run: WorkflowRunStartRun = {
     runId: input.runId,
     source: input.source ?? WORKFLOW_RUN_START_SOURCE,
-    state: deriveWorkflowRunState(steps),
+    state:
+      resolvedBoundary !== null && derivedRunState === "pending"
+        ? "approved"
+        : derivedRunState,
     repoPath: input.repoPath,
     objective: input.objective,
     issueScope: input.issueScope ?? {},

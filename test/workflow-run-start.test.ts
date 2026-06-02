@@ -136,6 +136,23 @@ describe("materializeWorkflowRunStart", () => {
     expect(result.plan.run.approvalBoundary).toBe("implementation");
   });
 
+  it("opens approved when a supplied boundary covers no steps", () => {
+    const result = materializeWorkflowRunStart(
+      baseInput({
+        definition: CODING_WORKFLOW_DEFINITION,
+        approvalBoundary: "plan-only"
+      })
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.plan.steps.every((step) => step.state === "pending")).toBe(
+      true
+    );
+    expect(result.plan.run.state).toBe("approved");
+    expect(result.plan.run.approvalBoundary).toBe("plan-only");
+  });
+
   it("keeps every step pending when no approval boundary is supplied", () => {
     const result = materializeWorkflowRunStart(
       baseInput({ definition: CODING_WORKFLOW_DEFINITION })

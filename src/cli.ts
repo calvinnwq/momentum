@@ -2185,6 +2185,15 @@ type WorkflowRunStartFailure = {
  * the old Goal loop and is untouched by this command.
  */
 function workflowRunStart(parsed: ParsedFlags, io: CliIo): number {
+  const positional = parsed.args.slice(3);
+  if (positional.length > 0) {
+    return usageError(
+      `Unexpected argument for workflow run start: ${positional[0]}`,
+      parsed,
+      io
+    );
+  }
+
   const runId = parsed.runId;
   if (runId === undefined || runId.length === 0) {
     return emitWorkflowRunStartFailure(parsed, io, {

@@ -27,7 +27,7 @@
  *     not an idempotent re-ingest like `workflow import`.)
  */
 
-import type { MomentumDb } from "./db.js";
+import { isUniqueViolation, type MomentumDb } from "./db.js";
 import {
   materializeWorkflowRunStart,
   type WorkflowRunStartError,
@@ -99,7 +99,7 @@ export function persistWorkflowRunStart(
   }
   const { run, steps } = result.plan;
 
-  db.exec("BEGIN");
+  db.exec("BEGIN IMMEDIATE");
   try {
     const existing = db
       .prepare("SELECT id FROM workflow_runs WHERE id = ?")
@@ -156,6 +156,9 @@ export function persistWorkflowRunStart(
     db.exec("COMMIT");
   } catch (error) {
     safeRollback(db);
+    if (isUniqueViolation(error)) {
+      throw new WorkflowRunStartConflictError(run.runId);
+    }
     throw error;
   }
 
