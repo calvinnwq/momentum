@@ -565,6 +565,8 @@ The detail envelope flattens the per-run view at the top level (`run`, `steps`, 
 
 `monitor.recovery.code`, when present, is one of: `stale_running_step`, `ghost_active_no_lease`, `manual_recovery_lease`, `monitor_drift_stale`, `failed_required_step`.
 
+`run.needsManualRecovery`, `run.manualRecoveryReason`, and `run.manualRecoveryAt` mirror the durable run-scoped recovery flag. Monitor-derived blockers populate `monitor.recovery`; live dispatch or finalization recovery can set the durable run fields and `.agent-workflows/<run-id>/recovery.md` while `monitor.recovery` remains `null`, so consumers should inspect the stored reason and artifact for those live classifications.
+
 Lease classifications surfaced under `monitor.leases[].classification`: `released`, `fresh`, `stale-auto-release`, `stale-manual-recovery-required`.
 
 ### Evidence linkage

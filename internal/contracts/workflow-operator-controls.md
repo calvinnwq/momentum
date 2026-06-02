@@ -135,7 +135,7 @@ A non-exhaustive seed list of fields the M8 envelopes pin:
 - `runId`, `repoPath`, `runState`, `stepState`, `boundary`, `phrase`, `artifactPath`, `artifactDigest`, `recordedAt`, `actor`.
 - `nextAction` (object with `code` plus optional `stepId`, `boundary`, or `runId`), `monitor.recovery` (object with `code` plus optional `stepId`).
 - `evidence` (array of typed evidence pointers with `evidenceRecordId`, `source`, `type`, `artifactPath`, `occurredAt`, `summary`, nullable `runId`, and nullable `stepId`).
-- `needsManualRecovery` (boolean), `recovery` (object surfacing the classification, recommended next action, and link to `recovery.md`).
+- `needsManualRecovery` (boolean), plus `manualRecoveryReason` / `manualRecoveryAt` on run-bearing envelopes, mirror the durable run-scoped recovery flag. Command-specific `recovery` objects surface the classification only when that command derives one (for example import / clear / monitor); live dispatch / finalization recovery may set the durable fields and render `recovery.md` while those command-specific objects remain null.
 - `previousReason`, `previousMarkedAt`, and `clearedAt` on the `workflow run clear-recovery` success envelope.
 - `schemaVersion` (on `workflow run monitor` only; M8 lands version 1).
 
