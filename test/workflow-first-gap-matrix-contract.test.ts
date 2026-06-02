@@ -13,12 +13,12 @@ function readDoc(relative: string): string {
 describe("workflow-first gap matrix planning contract", () => {
   const contractPath = "internal/contracts/workflow-first-gap-matrix.md";
 
-  it("keeps M9 as foundation and names M10 as the likely workflow-first milestone", () => {
+  it("keeps M9 as foundation and names M10 as the active workflow-first bridge", () => {
     const contract = readDoc(contractPath);
 
     expect(contract).toMatch(/M9 remains foundation work/i);
     expect(contract).toMatch(/M10: Workflow-First Runtime/i);
-    expect(contract).toMatch(/does not authorize implementation, Linear remapping, or milestone renumbering/i);
+    expect(contract).toMatch(/active implementation bridge/i);
   });
 
   it("captures current Momentum inventory before target design", () => {

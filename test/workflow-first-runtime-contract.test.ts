@@ -98,19 +98,19 @@ describe("workflow-first runtime pivot contract", () => {
     expect(contract).toMatch(/Autonomy is allowed only inside the approved envelope/);
   });
 
-  it("links the pivot from the roadmap while keeping M9 active", () => {
+  it("links the pivot from the roadmap while keeping M9 as foundation", () => {
     const roadmap = readDoc("internal/roadmap.md");
 
     expect(roadmap).toContain("internal/contracts/workflow-first-runtime.md");
-    expect(roadmap).toMatch(/Milestone 9\s*\|\s*Live Workflow Execution\s*\|\s*Active \/ in flight/);
+    expect(roadmap).toMatch(/Milestone 9\s*\|\s*Live Workflow Execution\s*\|\s*Foundation in force/);
     expect(roadmap).toMatch(/workflow-first runtime pivot/i);
   });
 
-  it("keeps current exclusions honest until the workflow-first implementation slices land", () => {
+  it("keeps current exclusions honest while workflow-first implementation slices land", () => {
     const exclusions = readDoc("internal/exclusions.md");
 
     expect(exclusions).toContain("internal/contracts/workflow-first-runtime.md");
     expect(exclusions).toMatch(/accepted planning contract/i);
-    expect(exclusions).toMatch(/deferred until the relevant M10 implementation slices land/i);
+    expect(exclusions).toMatch(/first-class start \/ execution behavior[\s\S]*deferred until the relevant M10 implementation\s+slices land/i);
   });
 });
