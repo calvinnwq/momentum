@@ -1,0 +1,355 @@
+# Contract: Workflow-First Runtime Pivot
+
+**Status:** Accepted planning contract. This is the target runtime shape for the next workflow-first milestone. It does not flip the active M9 closeout marker, does not replace the M9 live-wrapper work already landed, and does not authorize runtime behavior changes by itself.
+
+This contract records the product pivot from Goal-first execution to Workflow-first execution.
+The bounded executor loop details are pinned separately in
+[`internal/contracts/executor-loop.md`](executor-loop.md).
+
+The core decision is:
+
+- `WorkflowDefinition` is the reusable recipe.
+- `WorkflowRun` is one execution of a workflow definition.
+- `StepDefinition` is one configured step inside the recipe.
+- `StepRun` is the durable execution state for one step in one run.
+- `Executor` is the mechanism a step uses to do work.
+
+The old Goal model becomes one executor family: `goal-loop`. A goal loop can power an implementation step, but it is not the top-level product concept.
+
+## Relationship To M9
+
+M9 remains valid foundation work. It proved live wrapper configuration, managed-step leases, live result capture, verification / commit finalization, and run-scoped recovery against the existing OpenClaw coding workflow shape.
+
+This pivot changes the future product model:
+
+- M9 wraps existing OpenClaw coding workflow engines by fixed step kinds.
+- The workflow-first runtime generalizes those ideas into configurable workflow definitions and pluggable step executors.
+- M9 primitives should be reused where possible: workflow run state, approvals, leases, live wrapper execution, result-file validation, verification / commit finalization, and recovery taxonomy.
+- M9 should not be stretched into a generic workflow product retroactively. Remaining M9 slices can either close out the foundation work or be remapped once the workflow-first milestone is explicitly created.
+
+The earlier M9 run-start preference of `goal start` plus a `WorkflowRun` link is superseded for future workflow-first work. The future top-level start surface is a workflow run start surface, not a goal start surface. `goal start` remains a compatibility path for the old Goal loop until it is migrated or deprecated.
+
+## What Momentum Should Copy
+
+Momentum should copy the durable loop discipline from GNHF and no-mistakes, not their product boundaries.
+
+### From GNHF
+
+GNHF is an in-process iteration runner, not a resident daemon. Its useful pattern is a bounded implementation loop:
+
+- Build an iteration prompt.
+- Run an agent / harness.
+- Write `iteration-<n>.jsonl`.
+- Append `notes.md`.
+- Commit successful output.
+- Stop on max iterations, max tokens, or max consecutive failures.
+
+Momentum should copy this as the behavior of a `goal-loop` executor round. It should not copy `.gnhf/runs` as the primary state store, and it should not let GNHF become the permanent top-level runtime.
+
+### From no-mistakes
+
+no-mistakes is the daemon model to copy. It has a resident daemon, a Unix socket, SQLite as the proof of run state, per-run logs, gate repos, and fixed pipeline step rows.
+
+Useful concepts to reuse:
+
+- Daemon / supervisor owns active work.
+- SQLite is the source of truth.
+- A push or external event is not proof of run start; a durable run row is proof.
+- Step results and internal rounds are separate.
+- Findings, selected finding IDs, fix decisions, and manual gates are durable.
+- TUI / attach is an interface over durable state, not the source of truth.
+- Delegated policy may auto-apply safe decisions, but ambiguous or risky findings pause for an operator.
+
+Momentum should not copy no-mistakes' fixed pipeline, Git-push trigger, or disposable worktrees as the default product boundary.
+
+## Target Runtime Model
+
+The workflow-first runtime stores top-level workflow state separately from executor-loop state.
+
+Workflow-level state:
+
+```text
+workflow_definitions
+step_definitions
+workflow_runs
+step_runs
+workflow_approvals
+workflow_leases
+workflow_recovery
+```
+
+Executor-level state:
+
+```text
+executor_definitions
+executor_invocations
+executor_rounds
+executor_artifacts
+executor_findings
+executor_decisions
+executor_checkpoints
+```
+
+The distinction is intentional:
+
+```text
+StepRun says: implementation is running.
+ExecutorRound says: implementation round 3 used Claude Opus, produced commit abc123, verification passed, and remaining work is empty.
+```
+
+Workflow UX should stay readable:
+
+```text
+implementation
+postflight
+no-mistakes
+merge-cleanup
+```
+
+Inspection should still show the deep loop state under each step:
+
+```text
+implementation
+  round 1
+  round 2
+  round 3
+
+no-mistakes
+  review round 1
+  fix round 1
+  review round 2
+```
+
+Loops live inside executors, but their rounds belong in Momentum's database.
+
+## Executor Families
+
+Initial executor families:
+
+- `goal-loop` — bounded autonomous implementation rounds.
+- `one-shot` — one command / agent / script invocation with normalized result output.
+- `no-mistakes` — specialist review gate mirroring no-mistakes daemon state.
+- `script` — deterministic local command execution.
+- `external-apply` — operator-mediated external write using the M6 external apply contract.
+- `subworkflow` — future nested workflow execution.
+
+The current OpenClaw coding workflow maps naturally:
+
+```text
+implementation -> goal-loop
+postflight -> one-shot or goal-loop
+no-mistakes -> no-mistakes
+merge-cleanup -> external-apply or script
+linear-refresh -> external-apply
+```
+
+## Daemon Contract
+
+The daemon owns scheduling, leases, durable state transitions, round classification, and whether a step may advance.
+
+The daemon loop should:
+
+```text
+scan runnable workflow_runs / step_runs
+for each active step:
+  acquire or refresh daemon / step lease
+  inspect executor state
+  mirror new artifacts, rounds, findings, and checkpoints
+  classify outcome
+  if continue: enqueue the next round or check
+  if human gate: persist gate, notify, and pause
+  if terminal: finalize step and maybe start the next approved step
+```
+
+State checking is hybrid:
+
+- Fast path: child process exit, executor event, socket message, or file watcher indicates state changed.
+- Safe path: interval polling of SQLite plus executor artifacts, logs, git state, PR state, and CI state proves the durable state.
+- Watchdog path: heartbeat and lease TTLs detect lost or stale work.
+
+The safe path is authoritative. A process handle is an optimization. Reattach after daemon restart must work from SQLite, artifacts, logs, and repo state.
+
+Suggested polling cadence:
+
+```text
+local running process: 5-15s heartbeat/check
+external long-running executor: 30-60s check
+quiet monitor/cron-like step: 2-5m check
+stale detection: based on missed heartbeats / expired leases
+```
+
+## Goal-Loop Executor Interface
+
+The common executor-loop lifecycle, state vocabulary, round schema, artifact
+requirements, reattach rules, human-gate taxonomy, and agent/model precedence
+live in [`internal/contracts/executor-loop.md`](executor-loop.md). This section
+keeps the workflow-first pivot readable by showing how `goal-loop` fits that
+common contract.
+
+The `goal-loop` executor owns one bounded round of work at a time. It does not own workflow scheduling.
+
+Proposed executor interface:
+
+```ts
+type Executor = {
+  prepare(invocation: ExecutorInvocation): PreparedInvocation;
+  startRound(input: ExecutorRoundInput): RunningHandle;
+  inspect(target: RunningHandle | ExecutorInvocationId): ExecutorSnapshot;
+  cancel(invocationId: ExecutorInvocationId, reason: string): CancelResult;
+  recover(invocationId: ExecutorInvocationId): ExecutorSnapshot;
+};
+```
+
+A goal-loop round input includes:
+
+- Objective.
+- Step scope.
+- Repo path.
+- Step run id.
+- Prior round summaries.
+- Workflow policy.
+- Executor policy.
+- Agent / model config.
+- Verification config.
+- Daemon-provided artifact directory.
+- Required result path.
+
+A goal-loop round output includes:
+
+- Normalized result JSON.
+- Summary.
+- Key changes.
+- Remaining work.
+- Changed files.
+- Optional commit SHA.
+- Verification status.
+- Recovery hint.
+- Logs and artifacts.
+- Human-gate recommendation, if any.
+
+The daemon persists the output as `executor_rounds` and classifies it.
+
+The executor may recommend `continue`, but the daemon decides whether another round is allowed based on:
+
+- Max rounds.
+- Quota.
+- Wall-time budget.
+- Verification status.
+- Scope boundary.
+- Human-gate classes.
+- Repo lease.
+- Step approval.
+- Workflow approval boundary.
+- Manual-recovery state.
+
+## Goal-Loop Round Lifecycle
+
+A `goal-loop` step behaves like:
+
+```text
+StepRun: implementation / running
+  ExecutorInvocation: goal-loop / running
+    round 1: plan -> execute -> verify -> commit -> continue
+    round 2: execute -> verify -> commit -> continue
+    round 3: execute -> verify -> commit -> complete
+StepRun: implementation / succeeded
+```
+
+Each round should:
+
+1. Load workflow input, step definition, repo policy, prior round summaries, and current repo state.
+2. Resolve agent / model from step executor config.
+3. Acquire or reuse daemon-approved repo and step ownership.
+4. Run the agent / harness with explicit argv / env / result path.
+5. Require normalized result JSON.
+6. Verify and commit through Momentum's finalization path.
+7. Persist artifacts, checkpoints, and round state.
+8. Return a classification recommendation: complete, continue, blocked, failed, or manual recovery.
+
+The daemon then performs the authoritative classification and transition.
+
+## Human Gates
+
+Human intervention is first-class durable state. It is not an exception thrown by the daemon and it is not a hidden TUI prompt.
+
+Step or executor state may pause as:
+
+```text
+approval_required
+operator_decision_required
+manual_recovery_required
+blocked
+failed
+```
+
+When a human gate appears, the daemon must:
+
+- Stop advancing that step.
+- Persist the gate, allowed actions, evidence, and reason.
+- Keep the workflow run inspectable.
+- Emit a notification or monitor event.
+- Resume only after an explicit operator command / API update.
+
+Examples:
+
+- GNHF max failures maps to executor retry policy ending in `blocked` or `failed`.
+- no-mistakes review findings map to `operator_decision_required` with finding IDs and allowed actions such as `fix`, `skip`, `approve_as_is`, `reject`, or `abort`.
+- `agent-recommended-important` maps to an auto-decision policy. If every finding is inside the approved envelope, the daemon may apply it and continue. If any finding is outside the envelope, the daemon pauses with a precise decision request.
+
+Autonomy is allowed only inside the approved envelope. Product decisions, destructive actions, dependency installs, secrets / auth uncertainty, privacy uncertainty, public API breaks, irreversible migrations, remote writes, and exhausted retries all pause for the operator unless a workflow definition explicitly grants a narrower safe policy.
+
+## External Executor Mirroring
+
+External executors may keep their own state, but Momentum mirrors enough state to be authoritative for workflow orchestration.
+
+For GNHF-like execution:
+
+- Mirror run id, repo, branch, current round, result artifact paths, logs, commit SHA, and completion classification.
+- Treat `.gnhf/runs` artifacts as evidence, not the primary state store.
+
+For no-mistakes:
+
+- Mirror run id, branch, head SHA, active step, step status, findings, selected finding IDs, PR URL, CI status, and gate decisions.
+- Treat no-mistakes SQLite as the external executor's state, but Momentum `step_runs` / `executor_rounds` / `executor_findings` decide whether the workflow step can advance.
+
+Momentum must not blindly trust a single external status string. It should reconcile external state with artifacts, logs, repo state, and configured completion requirements.
+
+## Gap Matrix
+
+Current Momentum state:
+
+- Has SQLite-backed goals, jobs, daemon runs, repo locks, and goal iteration queue draining.
+- Has `WorkflowRun` / `workflow_steps` / approvals / leases for OpenClaw coding workflow substrate.
+- Has M8 operator controls over imported workflow runs.
+- Has M9 live wrapper and finalization primitives for fixed canonical step kinds.
+- Has `goal start`, `daemon`, and workflow import / status / run controls.
+
+Required workflow-first gaps:
+
+| Area | Current Shape | Target Shape |
+|---|---|---|
+| Top-level entity | Goal-first; WorkflowRun mostly coding-workflow substrate | WorkflowDefinition / WorkflowRun as product core |
+| Step configuration | Fixed canonical step kinds | Configurable StepDefinition list |
+| Executor selection | Runner profile or fixed workflow step kind | Per-step executor definition and agent / model config |
+| Daemon scheduling | Drains `goal_iteration` jobs | Schedules workflow runs, step runs, executor invocations, and rounds |
+| Loop state | Goal iteration artifacts and job rows | ExecutorInvocation / ExecutorRound / checkpoints / artifacts |
+| Goal loop | Product-level Goal | `goal-loop` executor inside a workflow step |
+| no-mistakes | External fixed pipeline | Specialist executor mirrored into Momentum |
+| Human gates | Split between approvals, recovery flags, external TUI state | Durable gate records with allowed actions and evidence |
+| Run start | `goal start` plus imported workflow controls | First-class workflow run start |
+| Recovery | Goal-scoped and WorkflowRun-scoped surfaces | Unified workflow / step / executor recovery taxonomy |
+
+## Non-Goals For This Planning Contract
+
+This planning contract does not implement:
+
+- Schema migrations.
+- CLI commands.
+- Daemon behavior changes.
+- Linear issue remapping.
+- External writes.
+- Remote git operations.
+- Public UI.
+- Replacement of GNHF or no-mistakes internals.
+
+Those belong to a follow-up implementation milestone after this contract is reviewed and mapped into concrete slices.

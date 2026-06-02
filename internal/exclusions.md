@@ -89,6 +89,14 @@ Milestone status:
   closeout slice (NGX-338). See
   [`internal/milestones/m9-live-workflow-execution.md`](milestones/m9-live-workflow-execution.md)
   and [`internal/contracts/live-workflow-execution.md`](contracts/live-workflow-execution.md).
+- **Workflow-first runtime pivot** is an accepted planning contract, not an
+  implementation milestone yet. It reframes the future product model around
+  `WorkflowDefinition`, `WorkflowRun`, `StepDefinition`, `StepRun`, and
+  pluggable executors such as `goal-loop` and `no-mistakes`. M9 remains
+  foundation work; general-purpose configurable workflows stay deferred until
+  a workflow-first implementation milestone explicitly lands. See
+  [`internal/contracts/workflow-first-runtime.md`](contracts/workflow-first-runtime.md)
+  and [`internal/contracts/executor-loop.md`](contracts/executor-loop.md).
 
 The following surfaces remain deferred outside the active M9 live-execution
 scope so the runner-boundary, policy-loading, and M5 read-first source surfaces
@@ -135,6 +143,16 @@ for blocked stale claims, and M4 also uses it for iteration-time HEAD movement:
 `worker run` remains a single-shot consumer that processes one claimed job per
 invocation and then exits; the NGX-273 managed loop is the bounded
 continuous-draining path on `daemon start`.
+
+## Configurable workflow definitions beyond OpenClaw coding workflows
+
+The workflow-first runtime pivot is accepted in
+[`internal/contracts/workflow-first-runtime.md`](contracts/workflow-first-runtime.md),
+with executor-loop details pinned in
+[`internal/contracts/executor-loop.md`](contracts/executor-loop.md), but
+implementation is deferred until a workflow-first implementation milestone
+exists. Until then, the shipped `WorkflowRun` substrate remains scoped to the
+OpenClaw coding-workflow backend and the M9 live-wrapper foundation.
 
 ## Worktree management and remote git operations
 
