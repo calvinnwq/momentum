@@ -16,6 +16,23 @@ Momentum is built milestone by milestone. Each milestone has a single durable sh
 | Milestone 8 | Workflow Run Operator Controls | Complete | [m8-workflow-run-operator-controls.md](milestones/m8-workflow-run-operator-controls.md) |
 | Milestone 9 | Live Workflow Execution | Active / in flight | [m9-live-workflow-execution.md](milestones/m9-live-workflow-execution.md) |
 
+Accepted planning for the next runtime direction lives in
+[internal/contracts/workflow-first-runtime.md](contracts/workflow-first-runtime.md).
+It records the workflow-first runtime pivot: `WorkflowDefinition` is the
+top-level product recipe, `WorkflowRun` is one execution, `StepDefinition` /
+`StepRun` own per-step configuration and state, and executors such as
+`goal-loop`, `one-shot`, `no-mistakes`, `script`, `external-apply`, and
+`subworkflow` perform the work inside steps. This planning contract keeps M9
+as foundation work and does not flip the active milestone or doctor marker.
+The executor-loop layer for that pivot is pinned in
+[internal/contracts/executor-loop.md](contracts/executor-loop.md), covering
+executor states, round schema, artifacts, reattach / heartbeat rules,
+completion classification, human gates, and agent / model selection precedence.
+The current-to-target planning bridge is pinned in
+[internal/contracts/workflow-first-gap-matrix.md](contracts/workflow-first-gap-matrix.md),
+including what survives from M7/M8/M9, what changes, and a likely M10 slice
+order.
+
 The `doctor` readiness marker tracks the **most recently closed** milestone. It currently reads `Milestone 8: workflow run operator controls (NGX-323, NGX-324, NGX-325, NGX-326, NGX-327, NGX-328, NGX-329, NGX-330) complete`. The marker advanced from the M6 closeout string to `Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete` at the M7 closeout slice (NGX-319), stayed pinned to the M7 string through every M8 implementation slice, and advanced to the M8 string at the M8 closeout slice (NGX-330).
 
 ## Most recently closed milestone: M8
@@ -44,6 +61,13 @@ Live executor wrappers (around `gnhf-runner`, `gnhf-postflight`, `harness-delega
 Milestone 9 is the active milestone, promoted from draft at the M9-00 decision gate (NGX-331) after M8 closeout. Its milestone narrative lives in [internal/milestones/m9-live-workflow-execution.md](milestones/m9-live-workflow-execution.md); its now-active contract lives in [internal/contracts/live-workflow-execution.md](contracts/live-workflow-execution.md).
 
 M9 owns the first Momentum-side live executor wrappers around the existing OpenClaw engines, the live step lease / heartbeat / result-file contract, verification and commit transaction wiring, recovery behavior for live failures, and a real dogfood run. M9 wraps the existing engines; it does not rewrite GNHF, postflight, no-mistakes, model-evidence, or project-refresh internals.
+
+The accepted workflow-first runtime pivot does not invalidate this work. It
+reframes M9 as foundation: the live wrappers, leases, finalization, and
+recovery primitives become building blocks for a future configurable workflow
+runtime. The future top-level start surface is expected to be workflow-first;
+`goal start` remains the current compatibility path until a workflow-first
+implementation milestone lands.
 
 ### Pinned M9 implementation sequence
 
@@ -114,4 +138,4 @@ The following remain explicitly deferred until a later milestone justifies them.
 - Cooperative mid-job cancellation / signal handling beyond the existing `daemon stop` / `daemon stop --now` semantics.
 - Remote git operations (`fetch` / `pull` / `push` / `rebase`) driven from Momentum.
 - Replacing the GNHF / postflight / no-mistakes / merge-cleanup engines themselves; M7 is the substrate, M8 is the operator-control surface, and M9 wraps the executors — none of them reimplement the engines.
-- Generalizing the `WorkflowRun` substrate beyond OpenClaw coding workflows.
+- Generalizing the `WorkflowRun` substrate beyond OpenClaw coding workflows remains deferred until a workflow-first implementation milestone lands. The accepted planning contract for that pivot is [internal/contracts/workflow-first-runtime.md](contracts/workflow-first-runtime.md).
