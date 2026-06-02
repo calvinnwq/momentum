@@ -16,7 +16,8 @@
  * `recovery_clear_refused` while one persists. M9 live dispatch / finalization
  * can also mark the same flag with non-monitor classifications, so guarded clear
  * cannot independently prove that live recovery work is complete; operators must
- * resolve the stored reason and `recovery.md` artifact before clearing.
+ * resolve the stored reason and any rendered artifact or context before
+ * clearing.
  */
 
 import type { MomentumDb } from "./db.js";
@@ -86,8 +87,9 @@ export type ClearWorkflowRunManualRecoveryResult =
  * Clear the durable manual-recovery flag so operator transitions are eligible
  * again. This is the low-level primitive: it does NOT re-derive monitor state
  * or guard against a persisting blocking condition — the guarded operator clear
- * layered on top owns that check. recovery.md is intentionally left on disk as
- * durable audit; operators remove it after capturing the context elsewhere.
+ * layered on top owns that check. Any rendered recovery.md is intentionally
+ * left on disk as durable audit; operators remove it after capturing the
+ * context elsewhere.
  */
 export function clearWorkflowRunManualRecovery(
   db: MomentumDb,
@@ -222,12 +224,13 @@ export type ClearWorkflowRunManualRecoveryGuardedResult =
  * with a blocking monitor recovery code (`recovery_clear_refused`). Live
  * dispatch / finalization recovery uses the same flag but has no monitor
  * blocker to re-derive here, so clearing those entries is an operator assertion
- * that the captured reason and artifact have been resolved. The check and the
- * clear run inside a single immediate transaction so the condition that is
- * checked is the condition that is cleared.
+ * that the captured reason and any rendered artifact or context have been
+ * resolved. The check and the clear run inside a single immediate transaction
+ * so the condition that is checked is the condition that is cleared.
  *
- * recovery.md is intentionally left on disk as durable audit; operators delete
- * it after capturing the context elsewhere, mirroring the M3 goal-scoped clear.
+ * Any rendered recovery.md is intentionally left on disk as durable audit;
+ * operators delete it after capturing the context elsewhere, mirroring the M3
+ * goal-scoped clear.
  */
 export function clearWorkflowRunManualRecoveryGuarded(
   db: MomentumDb,
