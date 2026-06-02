@@ -368,11 +368,12 @@ M9 dogfood and live-resume slices add built-CLI smoke coverage.
   released before recovery was durable.
 - **M9 invariant.** `advanceLiveWorkflowStep` heartbeats and re-checks the repo
   lock plus managed-step lease through verification, commit, reset, and
-  recovery finalization. Lost ownership routes to `repo_lock_lost` recovery
-  before further git mutation; if ownership is lost after git commits but before
-  Momentum accepts the result, the terminal success is rejected and recovery is
-  flagged for operator inspection. The deferred managed-step lease is released
-  only after terminal or recovery reconciliation has been persisted.
+  post-finalization acceptance. Lost ownership routes to `repo_lock_lost`
+  recovery before further git mutation; if ownership is lost after git commits
+  but before Momentum accepts the result, the terminal success is rejected and
+  recovery is flagged for operator inspection. Heartbeating stops before the
+  recovery flag / artifact write, but the deferred managed-step lease is
+  released only after terminal or recovery reconciliation has been persisted.
 - **Owner.** [`src/live-step-advance.ts`](../src/live-step-advance.ts).
 - **Evidence.**
   - Unit: `test/live-step-advance.test.ts` — keeps repo-lock and managed-step
