@@ -136,15 +136,18 @@ export type AdvanceLiveWorkflowStepInput = {
 
 export type AdvanceLiveWorkflowStepResult = {
   /**
-   * True only when Momentum accepted the step as successfully committed. A
-   * false value does not prove git never advanced: post-commit ownership loss
-   * can reject an otherwise committed transaction and route it to recovery.
+   * True when the finalize transaction produced a `committed` outcome. Callers
+   * must still inspect `run.ok`, `run.lease.released`, and `recovery`: deferred
+   * terminal reconciliation or lease release can fail after the commit, and a
+   * false value does not prove git never advanced because post-commit ownership
+   * loss can reject the transaction and route it to recovery.
    */
   committed: boolean;
   /**
-   * True when the git + verification transaction ran (the step settled into a
-   * clean terminal state from a normalized dispatch result). When false, the
-   * orchestrator outcome alone explains why no transaction ran.
+   * True when the git + verification transaction ran after a clean normalized
+   * dispatch result. When false, no transaction ran; inspect the orchestrator
+   * outcome and `recovery`, because pre-finalization repo-lock heartbeat loss
+   * and process-level dispatch failures can both persist durable recovery.
    */
   finalized: boolean;
   /** The managed-step orchestration outcome (always present). */

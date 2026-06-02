@@ -163,7 +163,7 @@ The live wrapper preserves `auth_unavailable` and `output_overflow` as precise l
 
 Live finalization maps unsafe git / result outcomes into the same run-level taxonomy: moved HEAD becomes `head_mismatch`; missing or untrusted result documents become `result_missing` / `result_invalid`; failed cleanup becomes `reset_failed`; lost ownership becomes `repo_lock_lost`; git and input failures retain `git_failed` and `invalid_input`. Commit failures enter `commit_failed` recovery only when Momentum cannot prove cleanup; `nothing_to_commit` and commit failures followed by a successful reset remain clean step-failure outcomes without the run-scoped recovery flag. Process-level dispatch failures choose the first valid live run-level recovery code from the wrapper's precise `liveRecoveryCode`, then the executor dispatch code, and otherwise fall back to `command_failed`.
 
-When recovery is required, Momentum writes the per-run `recovery.md` artifact and sets the durable recovery flag before returning control to the operator.
+When recovery is required, Momentum sets the durable recovery flag before returning control to the operator. Rendering the per-run `recovery.md` artifact is best-effort after the flag is set; if artifact rendering fails, the flag and stored manual-recovery reason remain authoritative and the recovery result reports `artifact_write_failed`.
 
 ## Dogfood Gate
 
