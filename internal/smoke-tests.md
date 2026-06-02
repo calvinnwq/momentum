@@ -278,12 +278,14 @@ Coverage:
 - missing, invalid, oversized, or symlinked result documents return
   `result_missing` / `result_invalid` without committing or resetting
   ambiguous work.
-- run-level recovery sets `needs_manual_recovery` and writes the run-scoped
-  `recovery.md` artifact for live `head_mismatch`, `result_missing`,
+- run-level recovery sets `needs_manual_recovery` first and renders the
+  run-scoped `recovery.md` artifact as best-effort guidance for live
+  `head_mismatch`, `result_missing`,
   `result_invalid`, `reset_failed`, `repo_lock_lost`, `git_failed`,
   `invalid_input`, and unsafe `commit_failed` outcomes; clean
   `nothing_to_commit` or successfully reset commit failures stay normal step
-  failures without the recovery flag.
+  failures without the recovery flag, and artifact write failures return
+  `artifact_write_failed` while leaving the durable flag authoritative.
 - repo-lock and managed-step leases stay fresh through finalization; ownership
   loss before mutation prevents commit/reset, while ownership loss after a git
   commit rejects the terminal success and enters `repo_lock_lost` recovery for

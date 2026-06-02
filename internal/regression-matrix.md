@@ -346,9 +346,9 @@ M9 dogfood and live-resume slices add built-CLI smoke coverage.
   could guess the live step outcome and reset or commit untrusted work.
 - **M9 invariant.** The finalize seam treats a missing result as
   `result_missing` and an untrusted result as `result_invalid`; neither outcome
-  mutates git. The run-level recovery seam sets `needs_manual_recovery` and
-  writes the per-run `recovery.md` artifact with the precise live recovery code
-  before returning control to the operator.
+  mutates git. The run-level recovery seam sets `needs_manual_recovery` before
+  attempting the per-run `recovery.md` artifact, so the durable flag and reason
+  remain authoritative even if best-effort artifact rendering fails.
 - **Owner.** [`src/live-step-finalize.ts`](../src/live-step-finalize.ts),
   [`src/live-step-run-recovery.ts`](../src/live-step-run-recovery.ts), and
   [`src/workflow-recovery-artifact.ts`](../src/workflow-recovery-artifact.ts).
@@ -358,7 +358,9 @@ M9 dogfood and live-resume slices add built-CLI smoke coverage.
     `result_missing` / `result_invalid` without mutating the worktree.
   - Unit: `test/live-step-run-recovery.test.ts` and
     `test/workflow-recovery-artifact.test.ts` — live recovery codes render into
-    `recovery.md` with bounded evidence and set the durable recovery flag.
+    `recovery.md` with bounded evidence, set the durable recovery flag, and
+    return `artifact_write_failed` without clearing the flag when rendering
+    fails.
 
 ### 14. Live finalization mutates after ownership is lost
 

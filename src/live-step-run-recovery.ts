@@ -10,16 +10,17 @@
  * {@link FinalizeLiveWorkflowStepFromResultFileResult} or dispatch failure
  * metadata and, when the outcome is one of the live run-level recovery
  * conditions M9-03 introduces, durably **enters manual recovery**: it sets the
- * run-scoped `needs_manual_recovery` flag and writes the per-run `recovery.md`
- * artifact "before returning control to the operator". This is the durable
+ * run-scoped `needs_manual_recovery` flag first, then attempts the per-run
+ * `recovery.md` artifact as best-effort operator guidance. This is the durable
  * counterpart to the finalize module's promise that a moved HEAD or an
  * untrustworthy result document refuses a destructive reset.
  *
  * Finalize and dispatch outcomes map to durable recovery, each carrying a distinct,
  * non-collapsed live recovery code (the contract forbids generic failure text):
  *
- *   - `manual_recovery_required` -> `head_mismatch`: the live step left HEAD off
- *     the recorded base. A non-Momentum commit must be preserved, not reset.
+ *   - Finalize `manual_recovery_required` -> `head_mismatch`: the live step
+ *     left HEAD off the recorded base. A non-Momentum commit must be preserved,
+ *     not reset.
  *   - `result_missing` -> `result_missing`: the step's normalized result
  *     document was never written; the true outcome is unknown.
  *   - `result_invalid` -> `result_invalid`: the result document is malformed;
@@ -35,7 +36,8 @@
  *     reset stay ordinary step failures, while failed cleanup maps to
  *     `reset_failed`.
  *   - Process-level dispatch failures preserve their specific live recovery
- *     classifications when one is available.
+ *     classifications when one is available, including
+ *     `manual_recovery_required` from wrapper dispatch.
  *
  * Every other finalize outcome is a clean terminal transaction result:
  * `committed`, a `reset_step_failure` / `reset_verification_failure` where the

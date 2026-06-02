@@ -157,7 +157,9 @@ timestamp, reason, recommended next action, evidence pointers,
 classification-specific safe next steps, and safety / rollback notes. Momentum
 overwrites the artifact with the latest recovery classification when import or
 live execution flags the run again, but does not delete it after
-`workflow run clear-recovery`.
+`workflow run clear-recovery`. For live recovery, the durable flag and stored
+manual-recovery reason are authoritative; `recovery.md` rendering is
+best-effort and may fail while the run remains blocked.
 
 See [docs/workflow-commands.md](workflow-commands.md) for the full
 `workflow import` and `workflow run clear-recovery` envelopes.
