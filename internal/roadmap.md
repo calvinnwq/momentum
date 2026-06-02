@@ -107,15 +107,15 @@ becomes an executor family inside a workflow step.
 ### Planned M10 implementation sequence
 
 1. **NGX-344 — M10-00 Workflow-first contract and milestone setup.**
-2. **M10-01 WorkflowDefinition and StepDefinition schema.**
-3. **M10-02 Workflow run start.**
-4. **M10-03 ExecutorDefinition / Invocation / Round schema.**
-5. **M10-04 Daemon workflow scheduler lane.**
-6. **M10-05 Goal-loop executor adapter.**
-7. **M10-06 One-shot and script executor adapters.**
-8. **M10-07 no-mistakes executor mirror.**
-9. **M10-08 Workflow gates and decisions CLI.**
-10. **M10-09 Workflow-first dogfood and closeout.**
+2. **NGX-345 — M10-01 WorkflowDefinition and StepDefinition schema.**
+3. **NGX-346 — M10-02 Workflow run start.**
+4. **NGX-347 — M10-03 ExecutorDefinition / Invocation / Round schema.**
+5. **NGX-348 — M10-04 Daemon workflow scheduler lane.**
+6. **NGX-349 — M10-05 Goal-loop executor adapter.**
+7. **NGX-350 — M10-06 One-shot and script executor adapters.**
+8. **NGX-351 — M10-07 no-mistakes executor mirror.**
+9. **NGX-352 — M10-08 Workflow gates and decisions CLI.**
+10. **NGX-353 — M10-09 Workflow-first dogfood and closeout.**
 
 The `doctor --json` marker stays pinned to the M8 closeout string until a real
 milestone closeout slice flips it. M10 planning does not flip it.
