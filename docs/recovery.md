@@ -1,6 +1,6 @@
 # Recovery surfaces
 
-Momentum's operational-safety surfaces ship three operator-facing recovery
+Momentum's operational-safety surfaces ship four operator-facing recovery
 contracts that are intentionally separate but composed by the same CLI surfaces:
 
 - **Stale-lease detection and auto-recovery** — what Momentum can prove is
@@ -9,11 +9,14 @@ contracts that are intentionally separate but composed by the same CLI surfaces:
 - **Manual recovery artifacts and the durable `needs_manual_recovery` flag** —
   what Momentum writes to disk and blocks at the queue when an auto-recovery
   refusal would lose audit context or risk a non-Momentum commit.
+- **Run-scoped workflow recovery** — what Momentum writes under
+  `.agent-workflows/<run-id>/` when monitor-derived blockers or live workflow
+  dispatch / finalization failures require operator action.
 - **Intent apply blocked state** — the durable per-intent `apply_state =
   'blocked'` flag set when `intent apply --external-apply` lands a partial
   external write but cannot finalize its audit row.
 
-This page is the canonical reference for all three.
+This page is the canonical reference for all four.
 
 ## Stale-lease detection and auto-recovery
 

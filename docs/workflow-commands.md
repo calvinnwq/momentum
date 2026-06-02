@@ -553,6 +553,10 @@ The detail envelope flattens the per-run view at the top level (`run`, `steps`, 
 - Run states: `pending`, `approved`, `running`, `succeeded`, `failed`, `blocked`, `canceled`.
 - Step states: `pending`, `approved`, `running`, `succeeded`, `failed`, `skipped`, `blocked`, `canceled`.
 
+`steps[].errorCode` is nullable. When present, it can be an executor result code
+or a Momentum-owned live finalization code with the `live_finalize_*` prefix for
+verification / git finalization failures reconciled after the executor result.
+
 `monitor.nextAction.code` is one of:
 
 - `no_action` — terminal run (succeeded / canceled); no follow-up needed.
