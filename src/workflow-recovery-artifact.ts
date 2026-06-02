@@ -235,9 +235,11 @@ export type WorkflowRecoveryEvidencePointer = {
 };
 
 /**
- * The recommended next action surfaced from the M7 monitor reducer's
- * `nextAction`. Only the stable code and operator-facing detail are carried;
- * lease internals stay in the substrate.
+ * The recommended next action surfaced from either the M7 monitor reducer's
+ * `nextAction` or an M9 live run-level recovery seam. Monitor-derived inputs
+ * carry the reducer's stable code/detail, while live recovery inputs carry
+ * live-specific `investigate_*` codes and operator-facing detail; lease
+ * internals stay in the substrate.
  */
 export type WorkflowRecoveryNextAction = {
   code: string;
