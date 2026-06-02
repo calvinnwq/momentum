@@ -2,11 +2,18 @@ import { afterEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { runCli } from "../src/cli.js";
 import { openDb, type MomentumDb } from "../src/db.js";
 import { persistWorkflowDefinition } from "../src/workflow-definition-persist.js";
 import type { WorkflowDefinition } from "../src/workflow-definition.js";
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+function readDoc(relative: string): string {
+  return fs.readFileSync(path.join(repoRoot, relative), "utf8");
+}
 
 type RunResult = {
   code: number;
@@ -398,5 +405,50 @@ describe("momentum workflow run start (NGX-346)", () => {
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("run-text");
     expect(result.stdout).toContain("coding-workflow");
+  });
+});
+
+describe("workflow run start public docs (NGX-346)", () => {
+  const doc = readDoc("docs/workflow-commands.md");
+
+  it("names workflow run start in the command overview", () => {
+    expect(doc).toContain("`workflow run start`");
+  });
+
+  it("documents a dedicated workflow run start section", () => {
+    expect(doc).toMatch(/^## `workflow run start`$/m);
+  });
+
+  it("documents every workflow run start CLI refusal code", () => {
+    for (const code of [
+      "run_id_required",
+      "repo_required",
+      "objective_required",
+      "data_dir_failed",
+      "definition_not_found",
+      "policy_invalid",
+      "invalid_run_start",
+      "run_exists"
+    ]) {
+      expect(doc, `docs/workflow-commands.md is missing refusal code ${code}`).toContain(
+        code
+      );
+    }
+  });
+
+  it("documents the invalid_run_start materialization taxonomy", () => {
+    for (const code of [
+      "definition_invalid",
+      "run_id_invalid",
+      "repo_path_invalid",
+      "objective_invalid",
+      "approval_boundary_invalid",
+      "issue_scope_invalid",
+      "route_invalid"
+    ]) {
+      expect(doc, `docs/workflow-commands.md is missing taxonomy code ${code}`).toContain(
+        code
+      );
+    }
   });
 });
