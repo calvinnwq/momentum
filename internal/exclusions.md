@@ -1,11 +1,12 @@
 # Current Exclusions
 
 This page lists features and behaviors that are intentionally **out of scope**
-after the M9-00 decision gate and the M10 workflow-first planning pass. The
-most recently shipped milestone is M8 closeout, Milestone 9 is active / in
-flight, and Milestone 10 is planned / next. It exists so contributors and
+after the M9-00 decision gate and the M10 workflow-first implementation start.
+The most recently shipped milestone is M8 closeout, Milestone 9 remains
+foundation work, and Milestone 10 has started landing implementation slices. It
+exists so contributors and
 operators can see at a glance what Momentum does *not* do today, what the
-active milestone now owns, and what remains explicitly deferred.
+current milestone now owns, and what remains explicitly deferred.
 
 Milestone status:
 
@@ -77,32 +78,33 @@ Milestone status:
   to the M8 closeout string. See
   [`internal/milestones/m8-workflow-run-operator-controls.md`](milestones/m8-workflow-run-operator-controls.md)
   and [`internal/contracts/workflow-operator-controls.md`](contracts/workflow-operator-controls.md).
-- **Milestone 9 (Live Workflow Execution)** is active / in flight after the
-  M9-00 decision gate (NGX-331). M9 owns the Momentum-side live executor
+- **Milestone 9 (Live Workflow Execution)** remains valid foundation work after
+  the M9-00 decision gate (NGX-331). M9 owns the Momentum-side live executor
   wrappers around the existing OpenClaw engines, the live step lease /
   heartbeat / result-file contract, verification and commit transaction wiring,
   live recovery / resume smoke coverage, and the dogfood run. M9 wraps the
   existing engines and does not rewrite them. The start surface is part of the
-  M9 design decision: M9 prefers reusing `goal start` plus a `WorkflowRun` link
-  over adding `workflow run start`, adding a dedicated verb only if a later
-  slice proves the simpler path cannot preserve the M7 / M8 invariants. The
-  `doctor --json` marker remains on the M8 closeout string until the M9-07
-  closeout slice (NGX-338). See
+  M9 design decision, superseded for future workflow-first work by M10: `goal
+  start` remains a compatibility path, while first-class workflow run start is a
+  later M10 slice. The `doctor --json` marker remains on the M8 closeout string
+  until a real milestone closeout slice flips it. See
   [`internal/milestones/m9-live-workflow-execution.md`](milestones/m9-live-workflow-execution.md)
   and [`internal/contracts/live-workflow-execution.md`](contracts/live-workflow-execution.md).
-- **Workflow-first runtime pivot** is an accepted planning contract, not an
-  implemented runtime yet. It reframes the future product model around
+- **Workflow-first runtime pivot** is an accepted planning contract. It
+  reframes the future product model around
   `WorkflowDefinition`, `WorkflowRun`, `StepDefinition`, `StepRun`, and
   pluggable executors such as `goal-loop` and `no-mistakes`. M9 remains
-  foundation work; general-purpose configurable workflows are planned under
-  M10 but stay deferred until the relevant M10 implementation slices land. See
+  foundation work; M10 has started landing definition schema and persistence
+  primitives, while first-class start / execution behavior for general-purpose
+  configurable workflows stays deferred until the relevant M10 implementation
+  slices land. See
   [`internal/milestones/m10-workflow-first-runtime.md`](milestones/m10-workflow-first-runtime.md),
   [`internal/contracts/workflow-first-runtime.md`](contracts/workflow-first-runtime.md),
   [`internal/contracts/executor-loop.md`](contracts/executor-loop.md), and
   [`internal/contracts/workflow-first-gap-matrix.md`](contracts/workflow-first-gap-matrix.md).
 
-The following surfaces remain deferred outside the active M9 live-execution
-scope so the runner-boundary, policy-loading, and M5 read-first source surfaces
+The following surfaces remain deferred outside the M10 definition / persistence
+slice so the runner-boundary, policy-loading, and M5 read-first source surfaces
 stay scoped.
 
 ## Background runner supervision
@@ -147,7 +149,7 @@ for blocked stale claims, and M4 also uses it for iteration-time HEAD movement:
 invocation and then exits; the NGX-273 managed loop is the bounded
 continuous-draining path on `daemon start`.
 
-## Configurable workflow definitions beyond OpenClaw coding workflows
+## Configurable workflow execution beyond OpenClaw coding workflows
 
 The workflow-first runtime pivot is accepted in
 [`internal/contracts/workflow-first-runtime.md`](contracts/workflow-first-runtime.md),
@@ -157,9 +159,11 @@ current-to-target planning pinned in
 [`internal/contracts/workflow-first-gap-matrix.md`](contracts/workflow-first-gap-matrix.md),
 with M10 planning pinned in
 [`internal/milestones/m10-workflow-first-runtime.md`](milestones/m10-workflow-first-runtime.md),
-but implementation is deferred until the relevant M10 slices land. Until then,
-the shipped `WorkflowRun` substrate remains scoped to the OpenClaw
-coding-workflow backend and the M9 live-wrapper foundation.
+and M10 has begun landing reusable workflow / step definition schema and
+persistence. First-class start, execution, and generalized `WorkflowRun`
+behavior remain deferred until the relevant M10 implementation slices land.
+Until then, the shipped executable `WorkflowRun` substrate remains scoped to the
+OpenClaw coding-workflow backend and the M9 live-wrapper foundation.
 
 ## Worktree management and remote git operations
 

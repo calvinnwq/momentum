@@ -1,8 +1,10 @@
 # Milestone 10: Workflow-First Runtime
 
-**Status:** Planned / next. M10 is the first implementation milestone for the
-workflow-first runtime model accepted in PR #70. It is not active until M10-00
-lands, and it does not close or rewrite M9 by itself.
+**Status:** Implementation started. M10 is the first implementation milestone
+for the workflow-first runtime model accepted in PR #70. M10-00 promoted the
+planning contracts into this executable sequence, and M10-01 has begun landing
+the workflow / step definition primitives without closing or rewriting M9 by
+itself.
 
 M10 promotes Momentum from a Goal-first product surface plus imported
 OpenClaw-coding-workflow substrate into a configurable workflow runtime:
@@ -22,8 +24,10 @@ M10 is governed by these planning contracts:
 - [`internal/contracts/workflow-first-gap-matrix.md`](../contracts/workflow-first-gap-matrix.md)
 
 Those contracts pin the product pivot, executor-loop semantics, and
-current-to-target migration shape. M10-00 promotes them into an executable
-milestone narrative and issue sequence; later M10 slices implement the runtime.
+current-to-target migration shape. M10-00 promoted them into an executable
+milestone narrative and issue sequence; M10-01 adds the first durable definition
+schema, validation, and persistence primitives while later M10 slices implement
+start, executor, and scheduler behavior.
 
 ## Relationship To M9
 
@@ -104,8 +108,8 @@ The M10 slice order is:
    and exclusions, add contract tests, and pin the executable sequence. No
    runtime behavior change.
 2. **NGX-345 — M10-01 WorkflowDefinition and StepDefinition schema.** Add durable
-   definitions, validation, and a built-in coding workflow definition while
-   keeping existing workflow import and goal surfaces stable.
+   definitions, validation, persistence, and a built-in coding workflow
+   definition while keeping existing workflow import and goal surfaces stable.
 3. **NGX-346 — M10-02 Workflow run start.** Add first-class workflow run start from a
    validated definition with approval boundaries, repo policy, and refusal
    taxonomy.
@@ -136,7 +140,8 @@ through M10-09. The M10 slice labels remain the stable ordering contract.
 ## Doctor Marker Policy
 
 The `doctor --json` readiness marker tracks the most recently closed
-milestone, not the next planned milestone. M10 planning does not flip it.
+milestone, not in-flight implementation slices. M10 implementation work does not
+flip it before closeout.
 
 The marker remains:
 
@@ -150,8 +155,9 @@ updated.
 
 ## Non-Goals
 
-M10-00 is docs/spec/tests only. It does not implement schema, CLI, daemon, or
-runtime changes.
+M10-00 was docs/spec/tests only. M10-01 adds definition schema, validation, and
+persistence only; CLI start, daemon, executor-loop, and generalized runtime
+behavior remain later slices.
 
 Across the milestone, these remain outside scope unless a later contract
 explicitly changes them:

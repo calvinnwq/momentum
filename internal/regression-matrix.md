@@ -6,8 +6,8 @@ plus the live-execution failure modes introduced during **Milestone 9: Live
 Workflow Execution**. Each row names the failure mode, the invariant that
 eliminates it, the code module that owns the invariant, and the test(s) that
 exercise it. The M7 rows are the closeout gate for NGX-319; the M8 rows are the
-closeout gate for NGX-330; M9 rows are in-flight slice evidence until the M9
-closeout gate promotes them into the final dogfood matrix. If any row's
+closeout gate for NGX-330; M9 rows are foundation / opt-in evidence that
+M10 can build on while the doctor marker stays pinned until M10 closeout. If any row's
 invariant regresses, the owning milestone has regressed.
 
 The full M7 contract lives in
@@ -32,8 +32,8 @@ The M9 live-execution contract lives in
 [`internal/contracts/live-workflow-execution.md`](contracts/live-workflow-execution.md);
 the M9 milestone sequence lives in
 [`internal/milestones/m9-live-workflow-execution.md`](milestones/m9-live-workflow-execution.md).
-The M9 rows below are intentionally internal-only while live execution remains
-opt-in and before the dogfood closeout.
+The M9 rows below remain internal-only foundation evidence while live execution
+remains opt-in and M10 owns the next closeout marker advance.
 
 ## M7 matrix: durable substrate invariants
 

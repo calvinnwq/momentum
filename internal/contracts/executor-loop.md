@@ -333,4 +333,4 @@ This contract does not implement:
 - Replacement of GNHF or no-mistakes internals.
 - Remote git operations.
 
-Those belong to a workflow-first implementation milestone after the pivot contract, executor-loop contract, and gap matrix are reviewed.
+M10 now carries these as implementation slices: M10-01 lands definition migrations, while workflow run start, executor-loop records, daemon scheduling, and CLI surfaces remain later slices.

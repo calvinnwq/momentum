@@ -1,6 +1,6 @@
 # Contract: Workflow-First Runtime Pivot
 
-**Status:** Accepted planning contract. This is the target runtime shape for the next workflow-first milestone. It does not flip the active M9 closeout marker, does not replace the M9 live-wrapper work already landed, and does not authorize runtime behavior changes by itself.
+**Status:** Accepted planning contract. This is the target runtime shape for the workflow-first milestone. It does not flip the doctor marker, does not replace the M9 live-wrapper work already landed, and does not authorize runtime behavior changes by itself.
 
 This contract records the product pivot from Goal-first execution to Workflow-first execution.
 The bounded executor loop details are pinned separately in
@@ -27,7 +27,7 @@ This pivot changes the future product model:
 - M9 wraps existing OpenClaw coding workflow engines by fixed step kinds.
 - The workflow-first runtime generalizes those ideas into configurable workflow definitions and pluggable step executors.
 - M9 primitives should be reused where possible: workflow run state, approvals, leases, live wrapper execution, result-file validation, verification / commit finalization, and recovery taxonomy.
-- M9 should not be stretched into a generic workflow product retroactively. Remaining M9 slices can either close out the foundation work or be remapped once the workflow-first milestone is explicitly created.
+- M9 should not be stretched into a generic workflow product retroactively. M10 owns the workflow-first implementation sequence, starting with workflow / step definition primitives.
 
 The earlier M9 run-start preference of `goal start` plus a `WorkflowRun` link is superseded for future workflow-first work. The future top-level start surface is a workflow run start surface, not a goal start surface. `goal start` remains a compatibility path for the old Goal loop until it is migrated or deprecated.
 
@@ -138,6 +138,7 @@ Initial executor families:
 The current OpenClaw coding workflow maps naturally:
 
 ```text
+preflight -> one-shot
 implementation -> goal-loop
 postflight -> one-shot or goal-loop
 no-mistakes -> no-mistakes
@@ -318,7 +319,7 @@ Momentum must not blindly trust a single external status string. It should recon
 
 ## Gap Matrix
 
-The detailed current-to-target migration matrix and likely implementation slice
+The detailed current-to-target migration matrix and M10 implementation slice
 order live in
 [`internal/contracts/workflow-first-gap-matrix.md`](workflow-first-gap-matrix.md).
 The compact table below preserves the core shape inside this pivot contract.
@@ -329,14 +330,15 @@ Current Momentum state:
 - Has `WorkflowRun` / `workflow_steps` / approvals / leases for OpenClaw coding workflow substrate.
 - Has M8 operator controls over imported workflow runs.
 - Has M9 live wrapper and finalization primitives for fixed canonical step kinds.
+- Has M10-01 `WorkflowDefinition` / `StepDefinition` validation, built-in coding workflow definition, and `workflow_definitions` / `step_definitions` persistence.
 - Has `goal start`, `daemon`, and workflow import / status / run controls.
 
 Required workflow-first gaps:
 
 | Area | Current Shape | Target Shape |
 |---|---|---|
-| Top-level entity | Goal-first; WorkflowRun mostly coding-workflow substrate | WorkflowDefinition / WorkflowRun as product core |
-| Step configuration | Fixed canonical step kinds | Configurable StepDefinition list |
+| Top-level entity | Goal-first; persisted WorkflowDefinition primitives; WorkflowRun mostly coding-workflow substrate | WorkflowDefinition / WorkflowRun as product core |
+| Step configuration | Persisted StepDefinition list for definitions; run execution still fixed canonical step kinds | Configurable StepDefinition list |
 | Executor selection | Runner profile or fixed workflow step kind | Per-step executor definition and agent / model config |
 | Daemon scheduling | Drains `goal_iteration` jobs | Schedules workflow runs, step runs, executor invocations, and rounds |
 | Loop state | Goal iteration artifacts and job rows | ExecutorInvocation / ExecutorRound / checkpoints / artifacts |
@@ -359,4 +361,4 @@ This planning contract does not implement:
 - Public UI.
 - Replacement of GNHF or no-mistakes internals.
 
-Those belong to a follow-up implementation milestone after this contract is reviewed and mapped into concrete slices.
+M10 is now implementing these as concrete slices: M10-01 lands definition schema / validation / persistence, while CLI start, executor state, daemon scheduling, and external runtime behavior remain later slices.

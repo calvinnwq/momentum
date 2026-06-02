@@ -1,6 +1,6 @@
 # Contract: Live Workflow Execution (M9)
 
-**Status:** Active. Promoted at the M9-00 decision gate (NGX-331) after M8 closeout. This contract is now authoritative for live workflow execution while Milestone 9 is in flight; the M8 operator-control contract remains in force for its own invariants.
+**Status:** Accepted foundation. Promoted at the M9-00 decision gate (NGX-331) after M8 closeout. This contract remains authoritative for live workflow execution primitives that M10 builds on; the M8 operator-control contract remains in force for its own invariants.
 
 This contract defines the boundary for moving Momentum from a durable coding-workflow substrate plus operator-control surface into a live dogfooding orchestrator for OpenClaw coding workflows.
 
@@ -71,7 +71,7 @@ Missing or malformed config refuses before mutating workflow state. The live-wra
 
 ### Workflow Run Start
 
-M9 prefers reusing the existing `goal start` path plus a `WorkflowRun` link for live workflow runs. A dedicated `workflow run start` verb is added only if a later M9 slice proves the simpler path cannot preserve the M7 / M8 state model. Either start path must satisfy the same invariants:
+At the M9-00 decision gate, this contract preferred reusing the existing `goal start` path plus a `WorkflowRun` link for live workflow runs. M10 now supersedes that future-facing start-surface preference: first-class workflow run start belongs to a later workflow-first runtime slice on top of persisted workflow definitions. Any M9-compatible start path that uses these live wrappers must still satisfy the same invariants:
 
 - It creates or imports a `WorkflowRun`.
 - It records the planned step chain.
@@ -216,4 +216,4 @@ M9 can close only when:
 - Postflight / no-mistakes / merge-cleanup / linear-refresh wrappers are either implemented or explicitly split into follow-up slices with a documented dogfood limitation.
 - A live dogfood run is recorded in internal docs with command evidence, artifacts, and rollback notes.
 - The regression matrix is extended with live-wrapper failure modes.
-- `doctor --json` flips to an M9 closeout marker only after the above gates pass.
+- Closeout evidence is recorded without flipping `doctor --json`; the marker stays pinned to the M8 closeout string through M9 foundation work, and M10 closeout owns the next possible marker advance.

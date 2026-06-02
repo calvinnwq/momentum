@@ -1272,4 +1272,235 @@ describe("applyQueueMigrations", () => {
       }
     });
   });
+
+  describe("M10 workflow definition schema (NGX-345)", () => {
+    it("creates workflow_definitions keyed on (key, version)", () => {
+      const dataDir = makeTempDir();
+      const db = openDb(dataDir);
+      try {
+        expect(tableNames(db)).toContain("workflow_definitions");
+        const cols = getColumns(db, "workflow_definitions").map(
+          (row) => row.name
+        );
+        for (const col of [
+          "key",
+          "version",
+          "title",
+          "created_at",
+          "updated_at"
+        ]) {
+          expect(
+            cols,
+            `missing workflow_definitions column: ${col}`
+          ).toContain(col);
+        }
+
+        const insert = db.prepare(
+          `INSERT INTO workflow_definitions
+             (key, version, title, created_at, updated_at)
+           VALUES (?, ?, ?, 1, 1)`
+        );
+        insert.run("coding-workflow", 1, "OpenClaw Coding Workflow");
+        // composite primary key rejects duplicates on (key, version)
+        expect(() =>
+          insert.run("coding-workflow", 1, "duplicate")
+        ).toThrow(/UNIQUE|PRIMARY KEY/i);
+        // a distinct version of the same key is allowed
+        insert.run("coding-workflow", 2, "OpenClaw Coding Workflow v2");
+      } finally {
+        db.close();
+      }
+    });
+
+    it("creates step_definitions keyed on (definition_key, definition_version, step_key)", () => {
+      const dataDir = makeTempDir();
+      const db = openDb(dataDir);
+      try {
+        expect(tableNames(db)).toContain("step_definitions");
+        const cols = getColumns(db, "step_definitions").map((row) => row.name);
+        for (const col of [
+          "definition_key",
+          "definition_version",
+          "step_key",
+          "kind",
+          "executor",
+          "step_order",
+          "required",
+          "created_at",
+          "updated_at"
+        ]) {
+          expect(cols, `missing step_definitions column: ${col}`).toContain(
+            col
+          );
+        }
+
+        db.prepare(
+          `INSERT INTO workflow_definitions
+             (key, version, title, created_at, updated_at)
+           VALUES ('coding-workflow', 1, 'OpenClaw Coding Workflow', 1, 1)`
+        ).run();
+        const insert = db.prepare(
+          `INSERT INTO step_definitions
+             (definition_key, definition_version, step_key, kind, executor,
+              step_order, required, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, 1, 1, 1)`
+        );
+        insert.run(
+          "coding-workflow",
+          1,
+          "preflight",
+          "preflight",
+          "one-shot",
+          0
+        );
+        // composite primary key rejects duplicate step_key within a version
+        expect(() =>
+          insert.run(
+            "coding-workflow",
+            1,
+            "preflight",
+            "preflight",
+            "goal-loop",
+            9
+          )
+        ).toThrow(/UNIQUE|PRIMARY KEY/i);
+        // distinct step_key under the same definition version is fine
+        insert.run(
+          "coding-workflow",
+          1,
+          "implementation",
+          "implementation",
+          "goal-loop",
+          1
+        );
+      } finally {
+        db.close();
+      }
+    });
+
+    it("rejects step_definitions rows whose definition has no matching workflow_definitions row", () => {
+      const dataDir = makeTempDir();
+      const db = openDb(dataDir);
+      try {
+        db.exec("PRAGMA foreign_keys = ON");
+        expect(() =>
+          db
+            .prepare(
+              `INSERT INTO step_definitions
+                 (definition_key, definition_version, step_key, kind, executor,
+                  step_order, required, created_at, updated_at)
+               VALUES ('missing-workflow', 1, 'preflight', 'preflight',
+                       'one-shot', 0, 1, 1, 1)`
+            )
+            .run()
+        ).toThrow(/FOREIGN KEY/i);
+      } finally {
+        db.close();
+      }
+    });
+
+    it("creates the step_definitions definition lookup index", () => {
+      const dataDir = makeTempDir();
+      const db = openDb(dataDir);
+      try {
+        const indexes = (
+          db
+            .prepare(
+              "SELECT name FROM sqlite_master WHERE type='index' ORDER BY name"
+            )
+            .all() as Array<{ name: string }>
+        ).map((row) => row.name);
+        expect(indexes).toContain("idx_step_definitions_definition");
+      } finally {
+        db.close();
+      }
+    });
+
+    it("is idempotent across repeated openDb invocations for definition tables", () => {
+      const dataDir = makeTempDir();
+      const a = openDb(dataDir);
+      const defCols = getColumns(a, "workflow_definitions").length;
+      const stepCols = getColumns(a, "step_definitions").length;
+      a.close();
+
+      const b = openDb(dataDir);
+      try {
+        expect(getColumns(b, "workflow_definitions")).toHaveLength(defCols);
+        expect(getColumns(b, "step_definitions")).toHaveLength(stepCols);
+      } finally {
+        b.close();
+      }
+    });
+
+    it("adds definition tables to a pre-M10 data dir without dropping existing rows", () => {
+      const dataDir = makeTempDir();
+      const dbPath = path.join(dataDir, "momentum.db");
+      const pre = new DatabaseSync(dbPath);
+      try {
+        pre.exec(`
+          CREATE TABLE goals (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            branch TEXT NOT NULL,
+            artifact_dir TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+          ) STRICT;
+        `);
+        pre.prepare(
+          `INSERT INTO goals (id, title, branch, artifact_dir, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?)`
+        ).run("g-pre-m10", "pre-m10 goal", "main", "/tmp/pre-m10", 1, 2);
+      } finally {
+        pre.close();
+      }
+
+      const upgraded = openDb(dataDir);
+      try {
+        expect(tableNames(upgraded)).toContain("workflow_definitions");
+        expect(tableNames(upgraded)).toContain("step_definitions");
+        const goal = upgraded
+          .prepare("SELECT id, title FROM goals WHERE id = 'g-pre-m10'")
+          .get() as { id: string; title: string };
+        expect(goal.title).toBe("pre-m10 goal");
+      } finally {
+        upgraded.close();
+      }
+    });
+
+    it("does not persist credential or chat columns on definition tables", () => {
+      const dataDir = makeTempDir();
+      const db = openDb(dataDir);
+      try {
+        const forbidden = [
+          "credential",
+          "credentials",
+          "token",
+          "secret",
+          "api_key",
+          "apikey",
+          "authorization",
+          "auth_header",
+          "request_headers",
+          "headers",
+          "chat_body"
+        ];
+        for (const table of ["workflow_definitions", "step_definitions"]) {
+          const cols = getColumns(db, table).map((row) =>
+            row.name.toLowerCase()
+          );
+          for (const col of cols) {
+            for (const banned of forbidden) {
+              expect(
+                col,
+                `${table} should not include credential/chat column "${col}"`
+              ).not.toContain(banned);
+            }
+          }
+        }
+      } finally {
+        db.close();
+      }
+    });
+  });
 });

@@ -1,8 +1,8 @@
 # Milestone 9: Live Workflow Execution
 
-**Status:** Active / in flight. Promoted from draft into the active milestone at the M9-00 decision gate (NGX-331) after M8 closeout. The companion contract in [`internal/contracts/live-workflow-execution.md`](../contracts/live-workflow-execution.md) is now authoritative for live workflow execution; the M8 operator-control contract stays in force for its own invariants.
+**Status:** Foundation in force. Promoted from draft at the M9-00 decision gate (NGX-331) after M8 closeout; M10 now owns the active workflow-first implementation. The companion contract in [`internal/contracts/live-workflow-execution.md`](../contracts/live-workflow-execution.md) remains the accepted foundation for live workflow execution; the M8 operator-control contract stays in force for its own invariants.
 
-Milestone 9 is the point where Momentum starts dogfooding real repo work through Momentum-owned live execution rather than using the OpenClaw `coding-workflow-pipeline` skill as the live run loop.
+Milestone 9 defines the point where Momentum starts dogfooding real repo work through Momentum-owned live execution rather than using the OpenClaw `coding-workflow-pipeline` skill as the live run loop.
 
 The contract for this milestone lives in [`internal/contracts/live-workflow-execution.md`](../contracts/live-workflow-execution.md). The M7 substrate contract and M8 operator-control contract remain prerequisites.
 
@@ -60,11 +60,11 @@ The M9-00 decision gate pins the following architecture so later slices implemen
 
 ### Run-start surface decision
 
-M9 prefers reusing the existing `goal start` path plus a `WorkflowRun` link over introducing a new `workflow run start` CLI verb. The simpler reuse path wins unless a later slice proves it cannot preserve the M7 / M8 run, lease, approval, and recovery invariants; only then is a dedicated `workflow run start` verb added. Either path must refuse unless the repo lease can be acquired and required approvals already exist, and never infers approval from prose.
+The M9-00 decision gate originally preferred reusing the existing `goal start` path plus a `WorkflowRun` link over introducing a new `workflow run start` CLI verb. M10 now supersedes that future-facing preference: first-class workflow run start belongs to a later workflow-first runtime slice on top of persisted workflow definitions. Any M9-compatible start path that uses these live wrappers must still refuse unless the repo lease can be acquired and required approvals already exist, and never infer approval from prose.
 
 ## M9 Implementation Sequence
 
-The M9-00 decision gate (NGX-331) pins the slice order below. Each slice is a concrete Linear issue under the "Milestone 9: Live Workflow Execution" Linear milestone and must leave `main` valid:
+The M9-00 decision gate (NGX-331) pinned the slice order below. These slices remain the source context for the live-wrapper foundation that M10 builds on:
 
 1. **NGX-331 — M9-00 Contract and decision gate:** promote this draft into the active milestone, choose the live-wrapper architecture, pin non-goals, pin this implementation sequence, and update roadmap / doctor-marker policy. No runtime behavior change.
 2. **NGX-332 — M9-01 Live wrapper config and registry:** add typed config parsing, refusal codes, wrapper resolution, probe support, and deterministic fixture tests.
@@ -73,7 +73,7 @@ The M9-00 decision gate (NGX-331) pins the slice order below. Each slice is a co
 5. **NGX-335 — M9-04 Postflight and no-mistakes wrappers:** add live wrappers for postflight and no-mistakes with result normalization and recovery taxonomy.
 6. **NGX-336 — M9-05 Merge cleanup and Linear refresh boundaries:** add wrappers or explicit handoff gates for merge cleanup and Linear refresh without bypassing M6 external apply.
 7. **NGX-337 — M9-06 Live recovery and resume smoke:** prove stale lease, timeout, failed verification, recovery clear / resume behavior, and the NGX-334 result / head / finalization recovery paths in smoke form.
-8. **NGX-338 — M9-07 Dogfood run and closeout:** run a real Momentum issue through Momentum-owned live execution, record evidence, extend regression matrix, and flip the doctor marker only after the dogfood gate passes.
+8. **NGX-338 — M9-07 Dogfood run and closeout:** run a real Momentum issue through Momentum-owned live execution, record evidence, and extend the regression matrix.
 
 ## Dogfood Policy
 
@@ -102,5 +102,4 @@ M9 does not include:
 
 ## Closeout Marker Policy
 
-The `doctor --json` marker stays pinned to the most recently closed milestone — currently `Milestone 8: workflow run operator controls (NGX-323, NGX-324, NGX-325, NGX-326, NGX-327, NGX-328, NGX-329, NGX-330) complete` — through every M9 implementation slice. The M9-00 decision gate (NGX-331) does not flip it. M9 may flip the marker forward to an M9 closeout string only at the M9-07 closeout slice (NGX-338), and only after the live dogfood gate and regression-matrix updates are complete.
-
+The `doctor --json` marker stays pinned to the most recently closed milestone — currently `Milestone 8: workflow run operator controls (NGX-323, NGX-324, NGX-325, NGX-326, NGX-327, NGX-328, NGX-329, NGX-330) complete` — through M9 foundation work. The M9-00 decision gate (NGX-331) did not flip it; M10 closeout now owns the next possible marker advance.

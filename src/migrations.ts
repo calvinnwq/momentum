@@ -433,6 +433,41 @@ CREATE INDEX IF NOT EXISTS idx_workflow_runs_repo_path
   ON workflow_runs(repo_path) WHERE repo_path IS NOT NULL;
 `;
 
+// M10-01 (NGX-345): durable WorkflowDefinition / StepDefinition primitives.
+// A definition is identified by (key, version) so recipes can evolve without
+// losing prior versions; its steps hang off that composite identity. Both
+// tables mirror the pure `WorkflowDefinition` / `StepDefinition` domain shape in
+// src/workflow-definition.ts (no rich ExecutorDefinition config beyond the
+// executor-family field, no run state — those arrive in later M10 slices).
+const WORKFLOW_DEFINITIONS_DDL = `
+CREATE TABLE IF NOT EXISTS workflow_definitions (
+  key TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (key, version)
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS step_definitions (
+  definition_key TEXT NOT NULL,
+  definition_version INTEGER NOT NULL,
+  step_key TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  executor TEXT NOT NULL,
+  step_order INTEGER NOT NULL,
+  required INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (definition_key, definition_version, step_key),
+  FOREIGN KEY (definition_key, definition_version)
+    REFERENCES workflow_definitions(key, version)
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS idx_step_definitions_definition
+  ON step_definitions(definition_key, definition_version);
+`;
+
 const JOB_IDEMPOTENCY_INDEX_DDL = `
 CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_idempotency_key
   ON jobs(idempotency_key) WHERE idempotency_key IS NOT NULL;
@@ -492,6 +527,7 @@ export function applyQueueMigrations(db: MomentumDb): void {
       }
     }
     db.exec(WORKFLOW_RUNS_IDENTITY_INDEX_DDL);
+    db.exec(WORKFLOW_DEFINITIONS_DDL);
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
