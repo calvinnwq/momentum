@@ -283,9 +283,10 @@ Coverage:
   `invalid_input`, and unsafe `commit_failed` outcomes; clean
   `nothing_to_commit` or successfully reset commit failures stay normal step
   failures without the recovery flag.
-- repo-lock and managed-step leases stay fresh through finalization; lost
-  finalization ownership enters `repo_lock_lost` recovery instead of committing
-  or resetting.
+- repo-lock and managed-step leases stay fresh through finalization; ownership
+  loss before mutation prevents commit/reset, while ownership loss after a git
+  commit rejects the terminal success and enters `repo_lock_lost` recovery for
+  operator inspection.
 - normalized live steps stay running and leased until commit, reset, dispatch
   failure, or recovery reconciliation is durable.
 - process-level live dispatch failures preserve their precise live recovery code

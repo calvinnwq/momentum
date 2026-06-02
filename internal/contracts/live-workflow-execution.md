@@ -115,6 +115,7 @@ Momentum must keep its existing safety posture:
 - If verification fails and HEAD is still at the expected base, Momentum resets the worktree using the existing failure-reset path.
 - If HEAD changed unexpectedly, Momentum enters manual recovery instead of destructive reset.
 - The repo lock and managed-step lease stay heartbeated through verification, commit, reset, and recovery finalization. A lost repo lock or workflow lease before any further git mutation routes to `repo_lock_lost` recovery.
+- Momentum also re-checks repo / workflow ownership after the finalization transaction returns, before accepting terminal success. If ownership is lost after git already advanced HEAD, Momentum rejects the terminal success, enters `repo_lock_lost` recovery, and leaves the operator to inspect the committed state.
 - Terminal step state for a cleanly dispatched live step is deferred until the finalization transaction reconciles the commit, reset, or recovery outcome.
 - Remote git operations (`fetch`, `pull`, `push`, `rebase`) remain out of scope unless a later contract adds them explicitly.
 

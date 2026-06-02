@@ -130,7 +130,11 @@ export type AdvanceLiveWorkflowStepInput = {
 };
 
 export type AdvanceLiveWorkflowStepResult = {
-  /** True only when the step ran, verified, and the diff was committed. */
+  /**
+   * True only when Momentum accepted the step as successfully committed. A
+   * false value does not prove git never advanced: post-commit ownership loss
+   * can reject an otherwise committed transaction and route it to recovery.
+   */
   committed: boolean;
   /**
    * True when the git + verification transaction ran (the step settled into a
