@@ -818,7 +818,7 @@ Required arguments:
 
 The hard recovery classifications (`recovery.code`) are the same monitor-derived taxonomy as `workflow status`: `stale_running_step`, `ghost_active_no_lease`, `manual_recovery_lease`, `monitor_drift_stale`, `failed_required_step`. A failed required step and a blocked run both resolve to `disposition: "recover"`; `monitor_drift_stale` on an otherwise-progressing run resolves to `disposition: "report"`.
 
-Live dispatch or finalization recovery can also set the durable manual-recovery flag and drive `needsManualRecovery: true`, `disposition: "recover"`, and `reportReason: "recovery_required"` even when `recovery` is null, because `recovery` only carries monitor-derived classifications. In that case, `run.manualRecoveryReason` and `run.manualRecoveryAt` are authoritative for the live classification; `.agent-workflows/<run-id>/recovery.md` is best-effort operator guidance and may be absent if artifact rendering failed.
+Live dispatch or finalization recovery can also set the durable manual-recovery flag and drive `needsManualRecovery: true`, `disposition: "recover"`, and `reportReason: "recovery_required"` even when `recovery` is null, because `recovery` only carries monitor-derived classifications. The monitor envelope does not include a nested `run` object or the stored reason fields; consumers that need the live classification should call `workflow status` / `workflow handoff` or inspect the durable run record. `.agent-workflows/<run-id>/recovery.md` is best-effort operator guidance and may be absent if artifact rendering failed.
 
 ### JSON envelope
 
