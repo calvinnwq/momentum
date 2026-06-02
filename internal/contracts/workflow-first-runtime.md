@@ -319,7 +319,7 @@ Momentum must not blindly trust a single external status string. It should recon
 
 ## Gap Matrix
 
-The detailed current-to-target migration matrix and likely implementation slice
+The detailed current-to-target migration matrix and M10 implementation slice
 order live in
 [`internal/contracts/workflow-first-gap-matrix.md`](workflow-first-gap-matrix.md).
 The compact table below preserves the core shape inside this pivot contract.
@@ -330,14 +330,15 @@ Current Momentum state:
 - Has `WorkflowRun` / `workflow_steps` / approvals / leases for OpenClaw coding workflow substrate.
 - Has M8 operator controls over imported workflow runs.
 - Has M9 live wrapper and finalization primitives for fixed canonical step kinds.
+- Has M10-01 `WorkflowDefinition` / `StepDefinition` validation, built-in coding workflow definition, and `workflow_definitions` / `step_definitions` persistence.
 - Has `goal start`, `daemon`, and workflow import / status / run controls.
 
 Required workflow-first gaps:
 
 | Area | Current Shape | Target Shape |
 |---|---|---|
-| Top-level entity | Goal-first; WorkflowRun mostly coding-workflow substrate | WorkflowDefinition / WorkflowRun as product core |
-| Step configuration | Fixed canonical step kinds | Configurable StepDefinition list |
+| Top-level entity | Goal-first; persisted WorkflowDefinition primitives; WorkflowRun mostly coding-workflow substrate | WorkflowDefinition / WorkflowRun as product core |
+| Step configuration | Persisted StepDefinition list for definitions; run execution still fixed canonical step kinds | Configurable StepDefinition list |
 | Executor selection | Runner profile or fixed workflow step kind | Per-step executor definition and agent / model config |
 | Daemon scheduling | Drains `goal_iteration` jobs | Schedules workflow runs, step runs, executor invocations, and rounds |
 | Loop state | Goal iteration artifacts and job rows | ExecutorInvocation / ExecutorRound / checkpoints / artifacts |

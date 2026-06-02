@@ -34,6 +34,7 @@ Current durable runtime surfaces:
 - M7 `WorkflowRun`, workflow step, approval, and lease substrate for imported OpenClaw coding workflows.
 - M8 operator controls for workflow run list, approve, update-step, clear-recovery, and monitor.
 - M9 live wrapper config, registry, execution, result capture, finalization, and recovery primitives for fixed canonical coding workflow step kinds.
+- M10-01 `WorkflowDefinition` / `StepDefinition` validation, built-in coding workflow definition, and `workflow_definitions` / `step_definitions` persistence helpers.
 - Evidence records with typed workflow linkage.
 - Source-item and external-apply contracts.
 
@@ -97,7 +98,7 @@ Future product surface:
 | Area | Current Shape | Target Shape | Migration Direction |
 |---|---|---|---|
 | Product root | Goal-first execution plus imported workflow runs | WorkflowDefinition / WorkflowRun | Introduce workflow definitions before deprecating goal-first UX |
-| Run start | `goal start`; `workflow import` for external plans | `workflow run start` | Add a first-class workflow start command once definition validation exists |
+| Run start | `goal start`; `workflow import` for external plans; persisted workflow definitions | `workflow run start` | Add the later M10 first-class workflow start command on top of persisted definitions |
 | Step model | Fixed coding workflow step kinds | Configurable StepDefinition list | Keep canonical coding workflow as one built-in definition |
 | Executor model | Runner profiles and M9 wrapper registry keyed by fixed step kind | Per-step ExecutorDefinition and executor config | Reuse wrapper config as executor config input |
 | Loop state | Goal iteration jobs/artifacts; external GNHF/no-mistakes state | ExecutorInvocation / ExecutorRound records | Persist common loop state in Momentum SQLite |
