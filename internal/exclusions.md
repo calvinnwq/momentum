@@ -1,9 +1,10 @@
 # Current Exclusions
 
 This page lists features and behaviors that are intentionally **out of scope**
-after the M9-00 decision gate. The most recently shipped milestone is M8
-closeout, while Milestone 9 is active / in flight. It exists so contributors
-and operators can see at a glance what Momentum does *not* do today, what the
+after the M9-00 decision gate and the M10 workflow-first planning pass. The
+most recently shipped milestone is M8 closeout, Milestone 9 is active / in
+flight, and Milestone 10 is planned / next. It exists so contributors and
+operators can see at a glance what Momentum does *not* do today, what the
 active milestone now owns, and what remains explicitly deferred.
 
 Milestone status:
@@ -90,12 +91,13 @@ Milestone status:
   [`internal/milestones/m9-live-workflow-execution.md`](milestones/m9-live-workflow-execution.md)
   and [`internal/contracts/live-workflow-execution.md`](contracts/live-workflow-execution.md).
 - **Workflow-first runtime pivot** is an accepted planning contract, not an
-  implementation milestone yet. It reframes the future product model around
+  implemented runtime yet. It reframes the future product model around
   `WorkflowDefinition`, `WorkflowRun`, `StepDefinition`, `StepRun`, and
   pluggable executors such as `goal-loop` and `no-mistakes`. M9 remains
-  foundation work; general-purpose configurable workflows stay deferred until
-  a workflow-first implementation milestone explicitly lands. See
-  [`internal/contracts/workflow-first-runtime.md`](contracts/workflow-first-runtime.md)
+  foundation work; general-purpose configurable workflows are planned under
+  M10 but stay deferred until the relevant M10 implementation slices land. See
+  [`internal/milestones/m10-workflow-first-runtime.md`](milestones/m10-workflow-first-runtime.md),
+  [`internal/contracts/workflow-first-runtime.md`](contracts/workflow-first-runtime.md),
   [`internal/contracts/executor-loop.md`](contracts/executor-loop.md), and
   [`internal/contracts/workflow-first-gap-matrix.md`](contracts/workflow-first-gap-matrix.md).
 
@@ -153,9 +155,11 @@ with executor-loop details pinned in
 [`internal/contracts/executor-loop.md`](contracts/executor-loop.md) and
 current-to-target planning pinned in
 [`internal/contracts/workflow-first-gap-matrix.md`](contracts/workflow-first-gap-matrix.md),
-but implementation is deferred until a workflow-first implementation milestone
-exists. Until then, the shipped `WorkflowRun` substrate remains scoped to the
-OpenClaw coding-workflow backend and the M9 live-wrapper foundation.
+with M10 planning pinned in
+[`internal/milestones/m10-workflow-first-runtime.md`](milestones/m10-workflow-first-runtime.md),
+but implementation is deferred until the relevant M10 slices land. Until then,
+the shipped `WorkflowRun` substrate remains scoped to the OpenClaw
+coding-workflow backend and the M9 live-wrapper foundation.
 
 ## Worktree management and remote git operations
 
