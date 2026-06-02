@@ -45,15 +45,17 @@ export const WORKFLOW_RECOVERY_ARTIFACT_SCHEMA_VERSION = 1;
  * Live run-level recovery classifications that M9 layers on top of the M7
  * monitor recovery codes. These are NOT emitted by `deriveWorkflowMonitorState`
  * — they are raised by the M9 live verification / commit transaction
- * (`head_mismatch`), its result-document re-read (`result_missing` /
- * `result_invalid`), and unsafe finalization cleanup outcomes
- * (`reset_failed` / `repo_lock_lost`) rendered into the same per-run
- * `recovery.md`. Extending
- * the recovery taxonomy here is explicitly sanctioned by
- * internal/contracts/live-workflow-execution.md ("M9 can extend the M8
- * taxonomy, but it cannot collapse distinct failure causes into generic failure
- * text"). The monitor reducer's emitted-code type stays untouched so the
- * substrate never claims to produce a code it cannot.
+ * (`head_mismatch`, `reset_failed`, `repo_lock_lost`, `git_failed`,
+ * `commit_failed`, `invalid_input`), its result-document re-read
+ * (`result_missing` / `result_invalid`), live wrapper process dispatch failures
+ * (`runtime_unavailable`, `auth_unavailable`, `command_failed`,
+ * `command_timed_out`, `output_overflow`), trapped executor throws
+ * (`executor_threw`), and wrapper-reported `manual_recovery_required` outcomes
+ * rendered into the same per-run `recovery.md`. Extending the recovery taxonomy
+ * here is explicitly sanctioned by internal/contracts/live-workflow-execution.md
+ * ("M9 can extend the M8 taxonomy, but it cannot collapse distinct failure
+ * causes into generic failure text"). The monitor reducer's emitted-code type
+ * stays untouched so the substrate never claims to produce a code it cannot.
  */
 export const WORKFLOW_LIVE_RUN_RECOVERY_CODES = [
   "head_mismatch",

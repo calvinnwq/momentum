@@ -14,14 +14,18 @@
  *   -> start the step               (approved -> running, the start event)
  *   -> executor.execute(input)      (run the live wrapper / executor)
  *   -> finish the step              (-> succeeded / failed, terminal state
- *                                    persisted BEFORE the lease is released)
- *   -> release the managed-step lease
+ *                                    persisted BEFORE the lease is released,
+ *                                    unless the caller explicitly defers it)
+ *   -> release the managed-step lease (or return the still-held lease to the
+ *                                      caller for finalization/recovery)
  *
  * The lease is released only after the terminal write and final ownership
- * checks succeed. Start refusals and trapped executor throws are finalized and
- * released when possible; terminal-persistence, final-heartbeat, repo-lock, or
- * release ownership failures intentionally leave the lease outstanding so
- * monitor/recovery can see the ambiguous in-flight step.
+ * checks succeed, unless a run-level caller opts into a deferral flag so it can
+ * perform verification / commit / reset finalization before marking the step
+ * terminal. Start refusals and trapped executor throws are finalized and
+ * released when possible; terminal-persistence, final-heartbeat, repo-lock,
+ * release ownership failures, and explicit deferrals intentionally leave the
+ * lease outstanding so monitor/recovery can see the ambiguous in-flight step.
  *
  * The orchestrator stays single-step focused. Run-level concerns are composed by
  * the caller from the returned outcome: run-state re-derivation
@@ -110,8 +114,25 @@ export type RunLiveWorkflowStepInput = {
   stalePolicy?: WorkflowLeaseStalePolicy;
   /** Deterministic clock for stamping; defaults to `Date.now()`. */
   now?: number;
+  /**
+   * When true, a successful executor result is returned as
+   * `deferredTerminalState: "succeeded"` with the managed-step lease still
+   * held. Run-level callers use this to verify and commit before making success
+   * durable.
+   */
   deferSuccessfulTerminalState?: boolean;
+  /**
+   * When true, any normalized executor result (`succeeded`, `failed`, or
+   * normalized `skipped`) is returned as a deferred terminal state instead of
+   * being persisted. Used by callers that must reconcile terminal state with a
+   * later finalize / recovery transaction.
+   */
   deferNormalizedTerminalState?: boolean;
+  /**
+   * When true, dispatch errors are returned with `deferredTerminalState:
+   * "failed"` and the lease still held so run-level recovery can persist the
+   * manual-recovery flag / artifact before terminalizing or releasing.
+   */
   deferDispatchErrorTerminalState?: boolean;
 };
 
@@ -132,9 +153,17 @@ export type RunLiveWorkflowStepOutcome = {
   dispatch?: WorkflowStepExecutorDispatchResult;
   /** The finish transition outcome (present once the step started). */
   finish?: WorkflowStepTransitionOutcome;
-  /** The terminal state the step was finalized into. */
+  /** The terminal state the step was finalized into, or would use if deferred. */
   terminalState?: WorkflowStepTerminalState;
+  /**
+   * Terminal state intentionally not written yet because a deferral flag asked
+   * the caller to complete finalization / recovery reconciliation first.
+   */
   deferredTerminalState?: WorkflowStepTerminalState;
+  /**
+   * The still-held managed-step lease returned with a deferred terminal state;
+   * callers remain responsible for the later terminal write and lease release.
+   */
   deferredLease?: WorkflowLeaseRecord;
   inputError?: string;
   /**

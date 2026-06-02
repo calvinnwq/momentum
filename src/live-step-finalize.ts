@@ -20,10 +20,15 @@
  *      worktree (verification skipped); a successful step runs the configured
  *      verification commands, resets on failure, and commits the normalized
  *      intent on success.
- *   3. Map the finalize outcome into a workflow-oriented result. Any
+ *   3. Before every commit/reset mutation, call the optional ownership hook so
+ *      a caller can prove it still owns the repo/workflow lease. Lost ownership
+ *      returns `repo_lock_lost` before further git mutation.
+ *   4. Map the finalize outcome into a workflow-oriented result. Any
  *      `head_mismatch` the commit / reset primitives surface (a TOCTOU race
  *      where HEAD moved after the pre-check) is also routed to manual recovery
- *      instead of a destructive reset.
+ *      instead of a destructive reset; unsafe finalization failures preserve
+ *      their specific `reset_failed`, `commit_failed`, `git_failed`,
+ *      `repo_lock_lost`, or `invalid_input` outcomes.
  *
  * {@link finalizeLiveWorkflowStep} takes the already-parsed `success` flag and
  * `commit` intent. Because the orchestrator's dispatch result and the M7
@@ -38,10 +43,12 @@
  * verification, mirroring how `iteration-finalize.ts` stays a pure transaction
  * the foreground caller composes. The run-level caller
  * ({@link ./live-step-run-recovery.ts}'s `persistLiveWorkflowFinalizeRecovery`)
- * takes a `manual_recovery_required` / `result_missing` / `result_invalid`
- * result and sets the durable `needs_manual_recovery` flag plus the per-run
- * `recovery.md` artifact, exactly as the M8 recovery reconcile already does for
- * other blocking codes.
+ * takes any live run-level recovery outcome (`manual_recovery_required`,
+ * `result_missing`, `result_invalid`, unsafe finalization failures such as
+ * `reset_failed`, `repo_lock_lost`, `git_failed`, `commit_failed`, or
+ * `invalid_input`) and sets the durable `needs_manual_recovery` flag plus the
+ * per-run `recovery.md` artifact, exactly as the M8 recovery reconcile already
+ * does for other blocking codes.
  */
 
 import { execFileSync } from "node:child_process";
@@ -81,13 +88,20 @@ export type FinalizeLiveWorkflowStepInput = {
   verificationCommands: string[];
   verificationTimeoutSec: number;
   verificationLogPath: string;
+  /**
+   * Ownership proof called immediately before each commit/reset mutation. A
+   * failed check returns `repo_lock_lost` so callers can enter recovery instead
+   * of mutating after losing the repo/workflow lease.
+   */
   beforeGitMutation?: () => { ok: true } | { ok: false; error: string };
 };
 
 /**
- * The single recovery code this transaction can raise. A live wrapper failure is
- * classified upstream by the orchestrator / live wrapper; the only new git-level
- * recovery boundary M9-03 introduces is an unexpectedly moved HEAD.
+ * Recovery code for the manual-recovery branch this transaction raises when
+ * HEAD moved off the expected base. Other unsafe finalization outcomes are
+ * represented by their distinct result variants (`reset_failed`,
+ * `repo_lock_lost`, `git_failed`, `commit_failed`, `invalid_input`) and mapped
+ * to live run-level recovery by `live-step-run-recovery.ts`.
  */
 export type LiveWorkflowFinalizeRecoveryCode = "head_mismatch";
 
@@ -162,6 +176,10 @@ export type FinalizeLiveWorkflowStepFromResultFileInput = {
   verificationCommands: string[];
   verificationTimeoutSec: number;
   verificationLogPath: string;
+  /**
+   * Forwarded to {@link finalizeLiveWorkflowStep} to prove ownership before
+   * every commit/reset mutation and surface `repo_lock_lost` on failure.
+   */
   beforeGitMutation?: () => { ok: true } | { ok: false; error: string };
 };
 
@@ -299,7 +317,9 @@ export function finalizeLiveWorkflowStep(
  *     Neither mutates git: an ambiguous outcome must not trigger a destructive
  *     reset, so the recovery layer classifies it instead.
  *   - A moved HEAD still routes to `manual_recovery_required` via the inner
- *     transaction's pre-finalize check.
+ *     transaction's pre-finalize check; ownership loss and unsafe git /
+ *     commit / reset / input failures preserve their distinct recovery
+ *     outcomes for the run-level recovery layer.
  */
 export function finalizeLiveWorkflowStepFromResultFile(
   input: FinalizeLiveWorkflowStepFromResultFileInput
