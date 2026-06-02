@@ -164,6 +164,22 @@ import {
   type ReconcileWorkflowRunManualRecoveryResult
 } from "./workflow-recovery-reconcile.js";
 import {
+  CODING_WORKFLOW_DEFINITION_KEY,
+  getBuiltInWorkflowDefinition,
+  type WorkflowDefinition
+} from "./workflow-definition.js";
+import { loadWorkflowDefinition } from "./workflow-definition-persist.js";
+import type {
+  WorkflowRunStartError,
+  WorkflowRunStartInput
+} from "./workflow-run-start.js";
+import {
+  InvalidWorkflowRunStartError,
+  WorkflowRunStartConflictError,
+  persistWorkflowRunStart,
+  type PersistWorkflowRunStartSummary
+} from "./workflow-run-start-persist.js";
+import {
   DEFAULT_RECONCILIATION_STALE_THRESHOLD_MS,
   PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT,
   buildProjectRollup,
@@ -301,6 +317,11 @@ type ParsedFlags = {
   step?: string;
   evidencePointer?: string;
   ledgerPointer?: string;
+  definition?: string;
+  definitionVersion?: number;
+  objective?: string;
+  runId?: string;
+  skillRevision?: string;
   error?: string;
 };
 
@@ -330,6 +351,7 @@ const COMMANDS = [
   "momentum workflow run update-step <run-id> --step <step-id> --state <approved|succeeded|skipped|failed|blocked|canceled> --reason <text> [--actor <name>] [--evidence-pointer <ref>] [--ledger-pointer <ref>] [--data-dir <path>] [--json]",
   "momentum workflow run clear-recovery <run-id> [--data-dir <path>] [--json]",
   "momentum workflow run monitor <run-id> [--data-dir <path>] [--json]",
+  "momentum workflow run start --run-id <id> --repo <path> --objective <text> [--definition <key>] [--definition-version <n>] [--approval-boundary <boundary>] [--skill-revision <text>] [--issue-scope <identifier>] [--data-dir <path>] [--json]",
   "momentum intent list [--status <status>] [--adapter <kind>] [--type <intent-type>] [--goal <goal-id>] [--source-item <id>] [--evidence-record <id>] [--limit <n>] [--data-dir <path>] [--json]",
   "momentum intent get <intent-id> [--data-dir <path>] [--json]",
   "momentum intent apply <intent-id> --reason <text> [--repo <path>] [--external-apply] [--data-dir <path>] [--json]",
@@ -2106,10 +2128,13 @@ function workflowRun(parsed: ParsedFlags, io: CliIo): number {
   const subcommand = parsed.args[2];
   if (!subcommand) {
     return usageError(
-      "Missing required subcommand for workflow run. Expected: list, approve, update-step, clear-recovery, monitor.",
+      "Missing required subcommand for workflow run. Expected: start, list, approve, update-step, clear-recovery, monitor.",
       parsed,
       io
     );
+  }
+  if (subcommand === "start") {
+    return workflowRunStart(parsed, io);
   }
   if (subcommand === "list") {
     return workflowRunList(parsed, io);
@@ -2131,6 +2156,257 @@ function workflowRun(parsed: ParsedFlags, io: CliIo): number {
     parsed,
     io
   );
+}
+
+type WorkflowRunStartFailureCode =
+  | "run_id_required"
+  | "repo_required"
+  | "objective_required"
+  | "data_dir_failed"
+  | "definition_not_found"
+  | "policy_invalid"
+  | "invalid_run_start"
+  | "run_exists";
+
+type WorkflowRunStartFailure = {
+  code: WorkflowRunStartFailureCode;
+  message: string;
+  dataDir?: string;
+  runId?: string;
+  errors?: readonly WorkflowRunStartError[];
+};
+
+/**
+ * `momentum workflow run start` — the first-class workflow-first start surface
+ * (M10-02, NGX-346). Resolves a validated {@link WorkflowDefinition} (persisted
+ * first, then the built-in coding workflow fallback), loads repo policy, and
+ * durably materializes a `WorkflowRun` + `StepRun` plan via
+ * {@link persistWorkflowRunStart}. `goal start` stays the compatibility path for
+ * the old Goal loop and is untouched by this command.
+ */
+function workflowRunStart(parsed: ParsedFlags, io: CliIo): number {
+  const runId = parsed.runId;
+  if (runId === undefined || runId.length === 0) {
+    return emitWorkflowRunStartFailure(parsed, io, {
+      code: "run_id_required",
+      message: "Missing required --run-id <id> for workflow run start."
+    });
+  }
+  if (parsed.repo === undefined || parsed.repo.length === 0) {
+    return emitWorkflowRunStartFailure(parsed, io, {
+      code: "repo_required",
+      message: "Missing required --repo <path> for workflow run start.",
+      runId
+    });
+  }
+  if (parsed.objective === undefined || parsed.objective.length === 0) {
+    return emitWorkflowRunStartFailure(parsed, io, {
+      code: "objective_required",
+      message: "Missing required --objective <text> for workflow run start.",
+      runId
+    });
+  }
+  const repoPath = parsed.repo;
+  const objective = parsed.objective;
+  const definitionKey = parsed.definition ?? CODING_WORKFLOW_DEFINITION_KEY;
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return emitWorkflowRunStartFailure(parsed, io, {
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err),
+      runId
+    });
+  }
+
+  // Preserve repo policy loading: a present-but-malformed MOMENTUM.md refuses
+  // the start (consistent with goal start) rather than being silently ignored.
+  const policy = loadMomentumPolicy(repoPath);
+  if (!policy.ok) {
+    return emitWorkflowRunStartFailure(parsed, io, {
+      code: "policy_invalid",
+      message: `Repo policy is invalid (${policy.code}): ${policy.error}`,
+      dataDir,
+      runId
+    });
+  }
+
+  const db = openDb(dataDir);
+  try {
+    const definition = resolveWorkflowRunStartDefinition(
+      db,
+      definitionKey,
+      parsed.definitionVersion
+    );
+    if (definition === undefined) {
+      return emitWorkflowRunStartFailure(parsed, io, {
+        code: "definition_not_found",
+        message:
+          parsed.definitionVersion === undefined
+            ? `No workflow definition found for key: ${definitionKey}.`
+            : `No workflow definition found for key ${definitionKey} version ${parsed.definitionVersion}.`,
+        dataDir,
+        runId
+      });
+    }
+
+    const input: WorkflowRunStartInput = {
+      definition,
+      runId,
+      repoPath,
+      objective,
+      now: Date.now()
+    };
+    if (parsed.approvalBoundary !== undefined) {
+      input.approvalBoundary = parsed.approvalBoundary;
+    }
+    if (parsed.skillRevision !== undefined) {
+      input.skillRevision = parsed.skillRevision;
+    }
+    if (parsed.issueScope !== undefined) {
+      input.issueScope = { identifier: parsed.issueScope };
+    }
+
+    let summary: PersistWorkflowRunStartSummary;
+    try {
+      summary = persistWorkflowRunStart(db, input);
+    } catch (error) {
+      if (error instanceof InvalidWorkflowRunStartError) {
+        return emitWorkflowRunStartFailure(parsed, io, {
+          code: "invalid_run_start",
+          message: error.message,
+          dataDir,
+          runId,
+          errors: error.errors
+        });
+      }
+      if (error instanceof WorkflowRunStartConflictError) {
+        return emitWorkflowRunStartFailure(parsed, io, {
+          code: "run_exists",
+          message: `Workflow run already exists: ${runId}.`,
+          dataDir,
+          runId
+        });
+      }
+      throw error;
+    }
+
+    return emitWorkflowRunStartSuccess(parsed, io, {
+      dataDir,
+      repoPath,
+      objective,
+      summary,
+      policyPresent: policy.present === true,
+      policyPath: policy.path
+    });
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Resolve the {@link WorkflowDefinition} a run start should materialize from.
+ * Persisted definitions win; the built-in coding workflow is the fallback so a
+ * fresh database (no seeded definitions) can still start the canonical recipe.
+ */
+function resolveWorkflowRunStartDefinition(
+  db: MomentumDb,
+  key: string,
+  version: number | undefined
+): WorkflowDefinition | undefined {
+  const persisted = loadWorkflowDefinition(db, key, version);
+  if (persisted !== undefined) {
+    return persisted;
+  }
+  const builtIn = getBuiltInWorkflowDefinition(key);
+  if (builtIn === undefined) {
+    return undefined;
+  }
+  if (version !== undefined && builtIn.version !== version) {
+    return undefined;
+  }
+  return builtIn;
+}
+
+function emitWorkflowRunStartSuccess(
+  parsed: ParsedFlags,
+  io: CliIo,
+  result: {
+    dataDir: string;
+    repoPath: string;
+    objective: string;
+    summary: PersistWorkflowRunStartSummary;
+    policyPresent: boolean;
+    policyPath: string;
+  }
+): number {
+  const { summary } = result;
+  const payload = {
+    ok: true,
+    command: "workflow run start",
+    dataDir: result.dataDir,
+    runId: summary.runId,
+    source: summary.source,
+    state: summary.state,
+    approvalBoundary: summary.approvalBoundary,
+    definitionKey: summary.definitionKey,
+    definitionVersion: summary.definitionVersion,
+    repoPath: result.repoPath,
+    objective: result.objective,
+    counts: { steps: summary.stepCount },
+    policy: { present: result.policyPresent, path: result.policyPath }
+  };
+
+  if (parsed.json) {
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  const lines = [
+    `Workflow run started: ${summary.runId}`,
+    `Definition: ${summary.definitionKey} v${summary.definitionVersion}`,
+    `State: ${summary.state}`,
+    `Approval boundary: ${summary.approvalBoundary ?? "(none)"}`,
+    `Steps: ${summary.stepCount}`,
+    `Repo: ${result.repoPath}`,
+    `Objective: ${result.objective}`,
+    `Policy: ${result.policyPresent ? result.policyPath : "(none)"}`,
+    `Data dir: ${result.dataDir}`,
+    ""
+  ];
+  write(io.stdout, lines.join("\n"));
+  return 0;
+}
+
+function emitWorkflowRunStartFailure(
+  parsed: ParsedFlags,
+  io: CliIo,
+  failure: WorkflowRunStartFailure
+): number {
+  const payload: Record<string, unknown> = {
+    ok: false,
+    command: "workflow run start",
+    code: failure.code,
+    message: failure.message
+  };
+  if (failure.dataDir !== undefined) payload["dataDir"] = failure.dataDir;
+  if (failure.runId !== undefined) payload["runId"] = failure.runId;
+  if (failure.errors !== undefined) {
+    payload["errors"] = failure.errors.map((error) => ({ ...error }));
+  }
+
+  if (parsed.json) {
+    writeJson(io.stderr, payload);
+    return 1;
+  }
+  write(io.stderr, `${failure.message}\n`);
+  return 1;
 }
 
 function workflowImport(parsed: ParsedFlags, io: CliIo): number {
@@ -7686,6 +7962,11 @@ function parseFlags(argv: string[]): ParsedFlags {
   let stepFlag: string | undefined;
   let evidencePointerFlag: string | undefined;
   let ledgerPointerFlag: string | undefined;
+  let definitionFlag: string | undefined;
+  let definitionVersionFlag: number | undefined;
+  let objectiveFlag: string | undefined;
+  let runIdFlag: string | undefined;
+  let skillRevisionFlag: string | undefined;
   let error: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -8081,6 +8362,68 @@ function parseFlags(argv: string[]): ParsedFlags {
       continue;
     }
 
+    if (arg === "--definition") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --definition.";
+      } else {
+        definitionFlag = value;
+        index += 1;
+      }
+      continue;
+    }
+
+    if (arg === "--definition-version") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --definition-version.";
+      } else {
+        const parsedValue = /^\d+$/.test(value)
+          ? Number.parseInt(value, 10)
+          : NaN;
+        if (!Number.isInteger(parsedValue) || parsedValue < 1) {
+          error ??= `Invalid value for --definition-version: ${value}`;
+        } else {
+          definitionVersionFlag = parsedValue;
+        }
+        index += 1;
+      }
+      continue;
+    }
+
+    if (arg === "--objective") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --objective.";
+      } else {
+        objectiveFlag = value;
+        index += 1;
+      }
+      continue;
+    }
+
+    if (arg === "--run-id") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --run-id.";
+      } else {
+        runIdFlag = value;
+        index += 1;
+      }
+      continue;
+    }
+
+    if (arg === "--skill-revision") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --skill-revision.";
+      } else {
+        skillRevisionFlag = value;
+        index += 1;
+      }
+      continue;
+    }
+
     if (arg === "--updated-since") {
       const value = readFlagValue(argv, index);
       if (value === undefined) {
@@ -8276,6 +8619,13 @@ function parseFlags(argv: string[]): ParsedFlags {
     parsed.evidencePointer = evidencePointerFlag;
   }
   if (ledgerPointerFlag !== undefined) parsed.ledgerPointer = ledgerPointerFlag;
+  if (definitionFlag !== undefined) parsed.definition = definitionFlag;
+  if (definitionVersionFlag !== undefined) {
+    parsed.definitionVersion = definitionVersionFlag;
+  }
+  if (objectiveFlag !== undefined) parsed.objective = objectiveFlag;
+  if (runIdFlag !== undefined) parsed.runId = runIdFlag;
+  if (skillRevisionFlag !== undefined) parsed.skillRevision = skillRevisionFlag;
   if (error !== undefined) parsed.error = error;
 
   return parsed;
