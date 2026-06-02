@@ -6,7 +6,10 @@ import { fileURLToPath } from "node:url";
 
 import { runCli } from "../src/cli.js";
 import { openDb, type MomentumDb } from "../src/db.js";
-import { persistWorkflowDefinition } from "../src/workflow-definition-persist.js";
+import {
+  loadWorkflowDefinition,
+  persistWorkflowDefinition
+} from "../src/workflow-definition-persist.js";
 import type { WorkflowDefinition } from "../src/workflow-definition.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -134,6 +137,34 @@ describe("momentum workflow run start (NGX-346)", () => {
         "linear-refresh"
       ]);
       expect(steps.every((s) => s.state === "pending")).toBe(true);
+      expect(loadWorkflowDefinition(db, "coding-workflow", 1)).toBeDefined();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("persists an absolute repo path when --repo is relative", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const relativeRepo = path.relative(process.cwd(), repoDir);
+    const result = await run(
+      startArgs({
+        dataDir,
+        repoDir: relativeRepo,
+        runId: "run-relative-repo",
+        objective: "Resolve repo path"
+      })
+    );
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload["repoPath"]).toBe(path.resolve(relativeRepo));
+
+    const db = openDb(dataDir);
+    try {
+      const runRow = db
+        .prepare("SELECT repo_path FROM workflow_runs WHERE id = ?")
+        .get("run-relative-repo") as { repo_path: string };
+      expect(runRow.repo_path).toBe(path.resolve(relativeRepo));
     } finally {
       db.close();
     }

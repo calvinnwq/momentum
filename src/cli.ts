@@ -168,7 +168,10 @@ import {
   getBuiltInWorkflowDefinition,
   type WorkflowDefinition
 } from "./workflow-definition.js";
-import { loadWorkflowDefinition } from "./workflow-definition-persist.js";
+import {
+  loadWorkflowDefinition,
+  persistWorkflowDefinition
+} from "./workflow-definition-persist.js";
 import type {
   WorkflowRunStartError,
   WorkflowRunStartInput
@@ -2215,9 +2218,10 @@ function workflowRunStart(parsed: ParsedFlags, io: CliIo): number {
       runId
     });
   }
-  const repoPath = parsed.repo;
+  const repoPath = path.resolve(parsed.repo);
   const objective = parsed.objective;
   const definitionKey = parsed.definition ?? CODING_WORKFLOW_DEFINITION_KEY;
+  const now = Date.now();
 
   const dataDirOptions: DataDirOptions = {};
   if (io.env !== undefined) dataDirOptions.env = io.env;
@@ -2251,7 +2255,8 @@ function workflowRunStart(parsed: ParsedFlags, io: CliIo): number {
     const definition = resolveWorkflowRunStartDefinition(
       db,
       definitionKey,
-      parsed.definitionVersion
+      parsed.definitionVersion,
+      now
     );
     if (definition === undefined) {
       return emitWorkflowRunStartFailure(parsed, io, {
@@ -2270,7 +2275,7 @@ function workflowRunStart(parsed: ParsedFlags, io: CliIo): number {
       runId,
       repoPath,
       objective,
-      now: Date.now()
+      now
     };
     if (parsed.approvalBoundary !== undefined) {
       input.approvalBoundary = parsed.approvalBoundary;
@@ -2327,7 +2332,8 @@ function workflowRunStart(parsed: ParsedFlags, io: CliIo): number {
 function resolveWorkflowRunStartDefinition(
   db: MomentumDb,
   key: string,
-  version: number | undefined
+  version: number | undefined,
+  now: number
 ): WorkflowDefinition | undefined {
   const persisted = loadWorkflowDefinition(db, key, version);
   if (persisted !== undefined) {
@@ -2340,6 +2346,7 @@ function resolveWorkflowRunStartDefinition(
   if (version !== undefined && builtIn.version !== version) {
     return undefined;
   }
+  persistWorkflowDefinition(db, builtIn, { now });
   return builtIn;
 }
 
