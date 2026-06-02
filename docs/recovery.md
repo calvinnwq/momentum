@@ -141,9 +141,15 @@ and then clear the flag explicitly.
 Operators clear run-scoped recovery with
 `momentum workflow run clear-recovery <run-id> [--data-dir <path>] [--json]`.
 The clear re-checks the durable monitor view in the same transaction and
-refuses with `recovery_clear_refused` while a blocking condition remains, or
-`not_flagged` when the run is not currently flagged. The command leaves the
-run's `recovery.md` artifact on disk as audit evidence.
+refuses with `recovery_clear_refused` while a monitor-derived blocking condition
+remains, or `not_flagged` when the run is not currently flagged. The command
+leaves the run's `recovery.md` artifact on disk as audit evidence.
+
+For live dispatch or finalization recovery, the same flag and artifact may hold
+non-monitor classifications. `workflow run clear-recovery` still rechecks and
+refuses monitor-derived blockers atomically, but clearing live recovery is the
+operator's assertion that the stored reason and `recovery.md` guidance have been
+resolved.
 
 The generated run-scoped `recovery.md` artifact is schema-versioned and
 includes the run ID, step ID, recovery classification, repo path, classified-at

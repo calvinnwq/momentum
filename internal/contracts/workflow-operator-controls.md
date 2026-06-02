@@ -86,7 +86,7 @@ Read-only machine envelope the skill's `monitor_runner.py` consumes. Emits a sta
 - `schemaVersion` (integer, monotonically incremented; M8 lands version 1 of this envelope).
 - Run identity, current run state, current step state, lease summary.
 - Machine-readable `nextAction` code from the M7 reducer's stable taxonomy (`no_action` / `advance_to_step` / `await_approval` / `resume_running` / `investigate_stale` / `clear_recovery` / `rerun_failed_step`).
-- Recovery classification from the M7 reducer's stable taxonomy (`stale_running_step` / `ghost_active_no_lease` / `manual_recovery_lease` / `monitor_drift_stale` / `failed_required_step`, or null when no recovery applies).
+- Monitor-derived recovery classification from the M7 reducer's stable taxonomy (`stale_running_step` / `ghost_active_no_lease` / `manual_recovery_lease` / `monitor_drift_stale` / `failed_required_step`, or null when no monitor recovery applies). M9 live dispatch / finalization recovery can still drive `needsManualRecovery: true` and `disposition: recover` through the durable flag and `recovery.md` artifact while this monitor-derived field remains null.
 - Evidence pointers from the workflow detail loader's typed-linkage query, plus terminal / reportability flags.
 
 Unknown or malformed run ids refuse with `run_not_found` (or `run_id_required` when omitted). The command never mutates run / step / approval / lease state. It never schedules cron, never delivers to Discord, and never spawns a managed child.

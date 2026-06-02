@@ -12,9 +12,12 @@
  * The envelope is derived entirely from durable rows — never from the on-disk
  * `monitor.json` prose. It never mutates run / step / approval / lease state,
  * never schedules cron, never delivers to Discord, and never spawns a managed
- * child. Recovery / next-action taxonomies are reused verbatim from the M7
- * reducer; this slice only adds the `disposition` / `reportable` / `reportReason`
- * decision view and the `schemaVersion` envelope wrapper.
+ * child. Monitor recovery / next-action taxonomies are reused verbatim from the
+ * M7 reducer; the `recovery` field stays monitor-derived. The durable
+ * `needsManualRecovery` flag may also be set by M9 live dispatch / finalization
+ * recovery, so it can independently drive `disposition: "recover"` while
+ * `recovery` remains null and the stored reason / `recovery.md` carries the
+ * live classification.
  */
 import type { MomentumDb } from "./db.js";
 import {

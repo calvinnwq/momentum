@@ -374,7 +374,7 @@ Data dir: /path/to/data
 | `run_id_required` | `<run-id>` was not supplied. |
 | `run_not_found` | `<run-id>` does not exist in `workflow_runs`. |
 | `not_flagged` | The run is not currently flagged for manual recovery; nothing to clear. |
-| `recovery_clear_refused` | A blocking recovery condition still applies; resolve it before clearing. Carries `recoveryCode` and optional `blockingStepId`. |
+| `recovery_clear_refused` | A monitor-derived blocking recovery condition still applies; resolve it before clearing. Carries `recoveryCode` and optional `blockingStepId`. |
 
 Exit code 0 on success, 1 on structured refusal, 2 on usage error.
 
@@ -810,7 +810,9 @@ Required arguments:
 
 `reportReason` is one of `terminal_succeeded`, `terminal_canceled`, `recovery_required`, `monitor_drift`, `awaiting_approval`, `in_progress`, `idle`. `reportable` is always `disposition != "wait"`.
 
-The hard recovery classifications (`recovery.code`) are the same taxonomy as `workflow status`: `stale_running_step`, `ghost_active_no_lease`, `manual_recovery_lease`, `monitor_drift_stale`, `failed_required_step`. A failed required step and a blocked run both resolve to `disposition: "recover"`; `monitor_drift_stale` on an otherwise-progressing run resolves to `disposition: "report"`.
+The hard recovery classifications (`recovery.code`) are the same monitor-derived taxonomy as `workflow status`: `stale_running_step`, `ghost_active_no_lease`, `manual_recovery_lease`, `monitor_drift_stale`, `failed_required_step`. A failed required step and a blocked run both resolve to `disposition: "recover"`; `monitor_drift_stale` on an otherwise-progressing run resolves to `disposition: "report"`.
+
+Live dispatch or finalization recovery can also set the durable manual-recovery flag and drive `needsManualRecovery: true`, `disposition: "recover"`, and `reportReason: "recovery_required"` even when `recovery` is null, because `recovery` only carries monitor-derived classifications. In that case, consult the stored manual-recovery reason and `.agent-workflows/<run-id>/recovery.md` for the live classification and safe next steps.
 
 ### JSON envelope
 
