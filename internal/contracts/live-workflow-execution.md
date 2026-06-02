@@ -27,7 +27,7 @@ The dogfood target is a real Momentum issue implemented through Momentum-owned l
 - Process invocation through explicit local command specs, never implicit shells.
 - Runner result normalization into the M7 `WorkflowStepExecutor` result shape.
 - Verification capture through existing Momentum verification logs and result artifacts.
-- Recovery classification for wrapper-level failures: runtime missing, auth unavailable, command failed, timeout, result missing, result invalid, output overflow, stale lease, and head mismatch.
+- Recovery classification for live dispatch and run-level finalization failures, including process/runtime/auth/result failures, unsafe git / lock / reset / commit outcomes, executor throws, manual recovery requests, and moved HEADs; see the current run-level taxonomy in [Recovery](#recovery).
 - A dogfood smoke path that runs at least one real repo task with live wrappers enabled behind an explicit opt-in flag or profile.
 
 **OpenClaw skills continue to own until a later milestone explicitly moves them:**

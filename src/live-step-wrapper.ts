@@ -54,11 +54,11 @@ import type { WorkflowStepKind } from "./workflow-run-reducer.js";
 
 /**
  * Stable recovery vocabulary for live-wrapper *execution* failures. This is the
- * execution-time subset of the M9 recovery taxonomy in
- * internal/contracts/live-workflow-execution.md. The run-level codes
- * (`stale_live_step`, `head_mismatch`, `manual_recovery_required`) are derived
- * by the lease/verification caller layers, not by a single process run, and
- * are introduced in later M9 slices.
+ * process-execution subset of the M9 run-level recovery taxonomy in
+ * internal/contracts/live-workflow-execution.md. Caller layers add durable
+ * run-level classifications for lease, dispatch, verification, git, reset,
+ * repo-lock, commit, invalid-input, executor-throw, and manual-recovery
+ * outcomes; a single process run only emits the codes below.
  */
 export const LIVE_STEP_WRAPPER_RECOVERY_CODES = [
   "runtime_unavailable",

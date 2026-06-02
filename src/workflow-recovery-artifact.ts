@@ -1,12 +1,14 @@
 /**
  * Run-scoped recovery artifact renderer (NGX-327, M8-04).
  *
- * Renders the per-run `.agent-workflows/<runId>/recovery.md` artifact from the
- * M7 monitor reducer's recovery classification. The renderer is the run-scoped
+ * Renders the per-run `.agent-workflows/<runId>/recovery.md` artifact from
+ * either the M7 monitor reducer's recovery classification or the M9 live
+ * run-level recovery classifications. The renderer is the run-scoped
  * sibling of the M3 goal-scoped `recovery-artifact.ts`: it owns artifact
  * *generation* only and never touches SQLite, executors, or the durable flag;
  * the durable `WorkflowRun.needs_manual_recovery` wiring and the explicit
- * clear path compose with this renderer through the M8 recovery slice.
+ * clear path compose with this renderer through the M8 recovery slice and M9
+ * live recovery seams.
  *
  * The renderer is intentionally pure and accepts only structured, bounded
  * fields (run id, step id, classification, evidence pointers, recommended next
@@ -101,12 +103,12 @@ export function isSafeWorkflowRunPathSegment(runId: string): boolean {
  * Encodes the NGX-327 safety contract: prefer blocking over guessing, never
  * auto-clear from elapsed time, no automatic repair or live process killing,
  * and the rollback is reverting the flag/artifact wiring without disturbing the
- * M7 monitor reducer classification.
+ * upstream monitor-derived or live-run recovery source.
  */
 export const WORKFLOW_RECOVERY_SAFETY_NOTES: readonly string[] = [
   "Recovery never auto-clears from elapsed time alone; an operator must explicitly clear it once the blocking state is resolved.",
   "Momentum does not kill processes or perform automatic repair; resolve the underlying cause manually before clearing recovery.",
-  "Rollback: revert the run-scoped recovery flag and artifact wiring. The M7 monitor reducer classification is unchanged by this artifact."
+  "Rollback: revert the run-scoped recovery flag and artifact wiring. The upstream monitor-derived or live-run recovery source is unchanged by this artifact."
 ];
 
 const SAFE_NEXT_STEPS: Record<
@@ -243,9 +245,10 @@ export type WorkflowRecoveryNextAction = {
 
 /**
  * Self-contained input for rendering / writing a run-scoped `recovery.md`.
- * Built from a monitor reducer classification (see
- * {@link buildWorkflowRecoveryArtifactInput}) so the renderer never needs a
- * live db handle or the file system to assemble its body.
+ * Built from either a monitor reducer classification (see
+ * {@link buildWorkflowRecoveryArtifactInput}) or a live run-level recovery seam,
+ * so the renderer never needs a live db handle or the file system to assemble
+ * its body.
  */
 export type WorkflowRecoveryArtifactInput = {
   runId: string;
