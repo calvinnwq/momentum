@@ -25,6 +25,11 @@ export type FinalizeIterationInput = {
   verificationCommands: string[];
   verificationTimeoutSec: number;
   verificationLogPath: string;
+  /**
+   * Optional ownership proof for callers that hold an external repo/workflow
+   * lease. It is called immediately before each commit/reset mutation; failure
+   * aborts the transaction with `ownership_lost` before mutating git.
+   */
   beforeGitMutation?: () => { ok: true } | { ok: false; error: string };
 };
 
@@ -58,6 +63,11 @@ export type FinalizeIterationResult =
       reset?: ResetSuccess | ResetFailure;
     }
   | {
+      /**
+       * The optional ownership hook failed before a commit/reset mutation.
+       * Callers should preserve the worktree and route this through their
+       * recovery path rather than retrying the mutation blindly.
+       */
       outcome: "ownership_lost";
       error: string;
     }
