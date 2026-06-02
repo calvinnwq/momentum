@@ -29,12 +29,13 @@
  *
  * The orchestrator stays single-step focused. Run-level concerns are composed by
  * the caller from the returned outcome: run-state re-derivation
- * (`deriveWorkflowRunState` over all of the run's steps) and run-scoped recovery
- * reconciliation (`reconcileWorkflowRunManualRecovery` / the `recovery.md`
- * artifact + `needs_manual_recovery` flag) are driven from `terminalState` and
- * the preserved `liveRecoveryCode`. This mirrors how the M7 substrate keeps
- * executors free of durable mutation: the executor performs the work; the
- * orchestrator owns the durable lease + step lifecycle around it.
+ * (`deriveWorkflowRunState` over all of the run's steps), optional terminal
+ * deferral via `deferredTerminalState` / `deferredLease`, and run-scoped
+ * recovery reconciliation through the live finalize or dispatch recovery seams
+ * that write `recovery.md` plus the `needs_manual_recovery` flag. This mirrors
+ * how the M7 substrate keeps executors free of durable mutation: the executor
+ * performs the work; the orchestrator owns the durable lease + step lifecycle
+ * around it and surfaces terminal / live recovery metadata for its caller.
  *
  * A managed live step that started running is finalized from the executor's
  * reported terminal state: successful runner output becomes `succeeded`,

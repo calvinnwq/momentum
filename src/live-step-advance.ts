@@ -117,8 +117,9 @@ export type AdvanceLiveWorkflowStepInput = {
   verificationTimeoutSec: number;
   verificationLogPath: string;
   /**
-   * Directory under which the run-scoped `recovery.md` is rendered when the
-   * finalize transaction enters durable recovery.
+   * Directory under which the run-scoped `recovery.md` is rendered when
+   * finalize or process-level dispatch recovery enters the shared durable
+   * recovery path (`needs_manual_recovery` flag + artifact).
    */
   agentWorkflowsDir: string;
   /** Override the recovery artifact directory; forwarded to the recovery seam. */
@@ -140,7 +141,11 @@ export type AdvanceLiveWorkflowStepResult = {
   run: RunLiveWorkflowStepOutcome;
   /** The git + verification transaction outcome; present iff `finalized`. */
   finalize?: FinalizeLiveWorkflowStepFromResultFileResult;
-  /** The durable recovery reconciliation outcome when finalization enters recovery. */
+  /**
+   * Durable recovery reconciliation outcome for either finalize recovery or a
+   * process-level dispatch failure; dispatch recovery is returned while
+   * `finalized` remains false because no git transaction ran.
+   */
   recovery?: PersistLiveWorkflowFinalizeRecoveryResult;
 };
 
