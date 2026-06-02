@@ -14,8 +14,8 @@ Momentum is built milestone by milestone. Each milestone has a single durable sh
 | Milestone 6 | Policy-Gated External Apply | Complete | [m6-external-apply.md](milestones/m6-external-apply.md) |
 | Milestone 7 | OpenClaw Coding Workflow Backend | Complete | [m7-openclaw-coding-workflow-backend.md](milestones/m7-openclaw-coding-workflow-backend.md) |
 | Milestone 8 | Workflow Run Operator Controls | Complete | [m8-workflow-run-operator-controls.md](milestones/m8-workflow-run-operator-controls.md) |
-| Milestone 9 | Live Workflow Execution | Active / in flight | [m9-live-workflow-execution.md](milestones/m9-live-workflow-execution.md) |
-| Milestone 10 | Workflow-First Runtime | Planned / next | [m10-workflow-first-runtime.md](milestones/m10-workflow-first-runtime.md) |
+| Milestone 9 | Live Workflow Execution | Foundation in force | [m9-live-workflow-execution.md](milestones/m9-live-workflow-execution.md) |
+| Milestone 10 | Workflow-First Runtime | Implementation started | [m10-workflow-first-runtime.md](milestones/m10-workflow-first-runtime.md) |
 
 Accepted planning for the next runtime direction lives in
 [internal/contracts/workflow-first-runtime.md](contracts/workflow-first-runtime.md).
@@ -23,16 +23,18 @@ It records the workflow-first runtime pivot: `WorkflowDefinition` is the
 top-level product recipe, `WorkflowRun` is one execution, `StepDefinition` /
 `StepRun` own per-step configuration and state, and executors such as
 `goal-loop`, `one-shot`, `no-mistakes`, `script`, `external-apply`, and
-`subworkflow` perform the work inside steps. This planning contract keeps M9
-as foundation work and does not flip the active milestone or doctor marker.
+`subworkflow` perform the work inside steps. This contract keeps M9 as
+foundation work and does not flip the doctor marker by itself.
 The executor-loop layer for that pivot is pinned in
 [internal/contracts/executor-loop.md](contracts/executor-loop.md), covering
 executor states, round schema, artifacts, reattach / heartbeat rules,
 completion classification, human gates, and agent / model selection precedence.
 The current-to-target planning bridge is pinned in
 [internal/contracts/workflow-first-gap-matrix.md](contracts/workflow-first-gap-matrix.md),
-including what survives from M7/M8/M9, what changes, and a likely M10 slice
-order. The M10 milestone narrative is
+including what survives from M7/M8/M9, what changes, and the M10 slice order.
+M10 implementation has begun: M10-00 promoted those planning contracts into the
+milestone narrative, and M10-01 lands workflow / step definition schema,
+validation, and persistence primitives. The M10 milestone narrative is
 [internal/milestones/m10-workflow-first-runtime.md](milestones/m10-workflow-first-runtime.md).
 
 The `doctor` readiness marker tracks the **most recently closed** milestone. It currently reads `Milestone 8: workflow run operator controls (NGX-323, NGX-324, NGX-325, NGX-326, NGX-327, NGX-328, NGX-329, NGX-330) complete`. The marker advanced from the M6 closeout string to `Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete` at the M7 closeout slice (NGX-319), stayed pinned to the M7 string through every M8 implementation slice, and advanced to the M8 string at the M8 closeout slice (NGX-330).
@@ -58,9 +60,9 @@ The Linear milestone "Milestone 8: Workflow Run Operator Controls" shipped the w
 
 Live executor wrappers (around `gnhf-runner`, `gnhf-postflight`, `harness-delegate`, `no-mistakes-pipeline`, `model-evidence`, `project-progress-refresh`) stayed deferred past M8 closeout until the M9-00 decision gate (NGX-331) promoted Milestone 9, which now owns them; M9 wraps those engines without rewriting them.
 
-## Active milestone: M9
+## M9 foundation work
 
-Milestone 9 is the active milestone, promoted from draft at the M9-00 decision gate (NGX-331) after M8 closeout. Its milestone narrative lives in [internal/milestones/m9-live-workflow-execution.md](milestones/m9-live-workflow-execution.md); its now-active contract lives in [internal/contracts/live-workflow-execution.md](contracts/live-workflow-execution.md).
+Milestone 9 remains valid foundation work after the M9-00 decision gate (NGX-331). Its milestone narrative lives in [internal/milestones/m9-live-workflow-execution.md](milestones/m9-live-workflow-execution.md); its contract lives in [internal/contracts/live-workflow-execution.md](contracts/live-workflow-execution.md).
 
 M9 owns the first Momentum-side live executor wrappers around the existing OpenClaw engines, the live step lease / heartbeat / result-file contract, verification and commit transaction wiring, recovery behavior for live failures, and a real dogfood run. M9 wraps the existing engines; it does not rewrite GNHF, postflight, no-mistakes, model-evidence, or project-refresh internals.
 
@@ -69,7 +71,7 @@ reframes M9 as foundation: the live wrappers, leases, finalization, and
 recovery primitives become building blocks for a future configurable workflow
 runtime. The future top-level start surface is expected to be workflow-first;
 `goal start` remains the current compatibility path until a workflow-first
-implementation milestone lands.
+start slice lands.
 
 ### Pinned M9 implementation sequence
 
@@ -84,11 +86,13 @@ The M9-00 decision gate (NGX-331) pins the slice order; each slice is a concrete
 7. **NGX-337 — M9-06 Live recovery and resume smoke.**
 8. **NGX-338 — M9-07 Dogfood run and closeout** — flips the `doctor --json` marker to the M9 closeout string only after the dogfood gate and regression updates pass.
 
-The `doctor --json` marker stays pinned to the M8 closeout string above through every M9 implementation slice; the M9-00 decision gate does not flip it.
+The `doctor --json` marker stayed pinned to the M8 closeout string above
+through M9 foundation work; M9 did not flip it.
 
-## Planned milestone: M10
+## M10 implementation progress
 
-Milestone 10 is the next planned milestone. Its narrative lives in
+Milestone 10 is the workflow-first runtime implementation milestone. Its
+narrative lives in
 [internal/milestones/m10-workflow-first-runtime.md](milestones/m10-workflow-first-runtime.md).
 M10 promotes the workflow-first runtime planning contracts into an executable
 milestone while keeping M9 as foundation work.
@@ -104,10 +108,10 @@ StepRun -> ExecutorInvocation -> ExecutorRound[]
 M10 makes workflow definitions and workflow runs the product root; `goal-loop`
 becomes an executor family inside a workflow step.
 
-### Planned M10 implementation sequence
+### M10 implementation sequence
 
-1. **NGX-344 — M10-00 Workflow-first contract and milestone setup.**
-2. **NGX-345 — M10-01 WorkflowDefinition and StepDefinition schema.**
+1. **NGX-344 — M10-00 Workflow-first contract and milestone setup.** *(done)*
+2. **NGX-345 — M10-01 WorkflowDefinition and StepDefinition schema.** *(landed in this slice)*
 3. **NGX-346 — M10-02 Workflow run start.**
 4. **NGX-347 — M10-03 ExecutorDefinition / Invocation / Round schema.**
 5. **NGX-348 — M10-04 Daemon workflow scheduler lane.**
@@ -118,7 +122,8 @@ becomes an executor family inside a workflow step.
 10. **NGX-353 — M10-09 Workflow-first dogfood and closeout.**
 
 The `doctor --json` marker stays pinned to the M8 closeout string until a real
-milestone closeout slice flips it. M10 planning does not flip it.
+milestone closeout slice flips it. M10 implementation slices before closeout do
+not flip it.
 
 ## Previously closed milestone: M7
 
@@ -162,7 +167,7 @@ NGX-299 landed before NGX-298 — audit surfaces shipped first so operators coul
 
 ## Post-M8 deferred work
 
-The following remain explicitly deferred until a later milestone justifies them. Live execution itself is no longer deferred: Milestone 9 (active, promoted at NGX-331) owns the Momentum-side live executor wrappers, the live step lease / heartbeat / result-file contract, verification / commit transaction wiring, and the dogfood run. M7 shipped the OpenClaw coding workflow backend substrate and M8 shipped the operator-control surfaces; the items below stay out of scope:
+The following remain explicitly deferred until a later milestone justifies them. Live execution itself is no longer deferred: Milestone 9 foundation work owns the Momentum-side live executor wrappers, the live step lease / heartbeat / result-file contract, verification / commit transaction wiring, and the dogfood run. M7 shipped the OpenClaw coding workflow backend substrate and M8 shipped the operator-control surfaces; the items below stay out of scope:
 
 - Inbound webhooks; source adapters stay pull / reconcile first.
 - Dashboards or any UI surface; the CLI remains the only interface. Discord delivery for approvals stays inside the `coding-workflow-pipeline` skill, not Momentum.
