@@ -103,36 +103,35 @@ The M10 slice order is:
    the merged planning contracts into this milestone narrative, update roadmap
    and exclusions, add contract tests, and pin the executable sequence. No
    runtime behavior change.
-2. **M10-01 WorkflowDefinition and StepDefinition schema.** Add durable
+2. **NGX-345 — M10-01 WorkflowDefinition and StepDefinition schema.** Add durable
    definitions, validation, and a built-in coding workflow definition while
    keeping existing workflow import and goal surfaces stable.
-3. **M10-02 Workflow run start.** Add first-class workflow run start from a
+3. **NGX-346 — M10-02 Workflow run start.** Add first-class workflow run start from a
    validated definition with approval boundaries, repo policy, and refusal
    taxonomy.
-4. **M10-03 ExecutorDefinition / Invocation / Round schema.** Persist executor
+4. **NGX-347 — M10-03 ExecutorDefinition / Invocation / Round schema.** Persist executor
    loop state below step runs, including artifacts, checkpoints, findings, and
    decisions.
-5. **M10-04 Daemon workflow scheduler lane.** Schedule runnable workflow runs
+5. **NGX-348 — M10-04 Daemon workflow scheduler lane.** Schedule runnable workflow runs
    and step runs without breaking existing goal iteration draining.
-6. **M10-05 Goal-loop executor adapter.** Move implementation-like autonomous
+6. **NGX-349 — M10-05 Goal-loop executor adapter.** Move implementation-like autonomous
    rounds into the executor-loop model while preserving repo safety and
    finalization behavior.
-7. **M10-06 One-shot and script executor adapters.** Support deterministic
+7. **NGX-350 — M10-06 One-shot and script executor adapters.** Support deterministic
    commands and bounded one-shot agent/script invocations with normalized
    results.
-8. **M10-07 no-mistakes executor mirror.** Mirror no-mistakes runs, findings,
+8. **NGX-351 — M10-07 no-mistakes executor mirror.** Mirror no-mistakes runs, findings,
    selected finding IDs, decisions, PR / CI state, and completion into Momentum
    executor records.
-9. **M10-08 Workflow gates and decisions CLI.** Add durable operator decision
+9. **NGX-352 — M10-08 Workflow gates and decisions CLI.** Add durable operator decision
    commands and delegated-policy application for workflow / step / executor
    gates.
-10. **M10-09 Workflow-first dogfood and closeout.** Run a real Momentum task
+10. **NGX-353 — M10-09 Workflow-first dogfood and closeout.** Run a real Momentum task
     through the workflow-first start surface, update regression coverage, and
     close M10.
 
-M10-01 through M10-09 issue identifiers are assigned by the M10-00 planning
-slice after this sequence is reviewed. Until then, their slice labels are the
-stable ordering contract.
+NGX-345 through NGX-353 are the assigned Linear issue identifiers for M10-01
+through M10-09. The M10 slice labels remain the stable ordering contract.
 
 ## Doctor Marker Policy
 

@@ -23,6 +23,19 @@ const M10_SLICES = [
   "M10-09",
 ] as const;
 
+const M10_LINEAR_IDS = [
+  "NGX-344",
+  "NGX-345",
+  "NGX-346",
+  "NGX-347",
+  "NGX-348",
+  "NGX-349",
+  "NGX-350",
+  "NGX-351",
+  "NGX-352",
+  "NGX-353",
+] as const;
+
 const M8_MARKER =
   "Milestone 8: workflow run operator controls (NGX-323, NGX-324, NGX-325, NGX-326, NGX-327, NGX-328, NGX-329, NGX-330) complete";
 
@@ -77,14 +90,16 @@ describe("M10 workflow-first runtime planning contract", () => {
       expect(m10).toMatch(/M10 reuses those primitives/i);
     });
 
-    it("pins the M10-00..M10-09 sequence and NGX-344 as M10-00", () => {
+    it("pins the M10-00..M10-09 sequence and assigned NGX issue map", () => {
       const m10 = readDoc(milestonePath);
 
-      expect(m10).toContain("NGX-344");
       for (const slice of M10_SLICES) {
         expect(m10, `M10 milestone should list ${slice}`).toContain(slice);
       }
-      expect(m10).toMatch(/M10-01 through M10-09 issue identifiers are assigned by the M10-00 planning\s+slice/i);
+      for (const issueId of M10_LINEAR_IDS) {
+        expect(m10, `M10 milestone should list ${issueId}`).toContain(issueId);
+      }
+      expect(m10).toMatch(/NGX-345 through NGX-353 are the assigned Linear issue identifiers/i);
     });
 
     it("keeps the doctor marker pinned to the most recently closed milestone", () => {
@@ -131,7 +146,9 @@ describe("M10 workflow-first runtime planning contract", () => {
       for (const slice of M10_SLICES) {
         expect(r, `roadmap should list ${slice}`).toContain(slice);
       }
-      expect(r).toContain("NGX-344");
+      for (const issueId of M10_LINEAR_IDS) {
+        expect(r, `roadmap should list ${issueId}`).toContain(issueId);
+      }
     });
 
     it("keeps the doctor marker on the M8 closeout string", () => {
