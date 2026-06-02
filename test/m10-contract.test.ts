@@ -49,12 +49,13 @@ describe("M10 workflow-first runtime planning contract", () => {
       expect(readDoc(milestonePath).trim().length).toBeGreaterThan(0);
     });
 
-    it("marks M10 as planned / next, not accidentally active or complete", () => {
+    it("marks M10 as implementation started, not accidentally complete", () => {
       const m10 = readDoc(milestonePath);
 
-      expect(m10).toMatch(/Status:[^\n]*Planned\s*\/\s*next/i);
-      expect(m10).not.toMatch(/Status:[^\n]*(Active|Complete)/i);
-      expect(m10).toMatch(/not active until M10-00\s+lands/i);
+      expect(m10).toMatch(/Status:[^\n]*Implementation started/i);
+      expect(m10).not.toMatch(/Status:[^\n]*Complete/i);
+      expect(m10).toMatch(/M10-00 promoted/i);
+      expect(m10).toMatch(/M10-01 has begun landing/i);
     });
 
     it("pins the workflow-first runtime product shape", () => {
@@ -106,7 +107,7 @@ describe("M10 workflow-first runtime planning contract", () => {
       const m10 = readDoc(milestonePath);
 
       expect(m10).toContain(M8_MARKER);
-      expect(m10).toMatch(/M10 planning does not flip it/i);
+      expect(m10).toMatch(/M10 implementation work does not\s+flip it before closeout/i);
       expect(m10).toMatch(/M10 may only flip the marker at M10 closeout/i);
     });
 
@@ -130,19 +131,19 @@ describe("M10 workflow-first runtime planning contract", () => {
   describe("internal/roadmap.md", () => {
     const roadmap = "internal/roadmap.md";
 
-    it("marks M10 as planned / next in the timeline", () => {
+    it("marks M10 as implementation started in the timeline", () => {
       const r = readDoc(roadmap);
 
       expect(r).toMatch(
-        /\|\s*Milestone 10\s*\|\s*Workflow-First Runtime\s*\|\s*Planned\s*\/\s*next\s*\|/
+        /\|\s*Milestone 10\s*\|\s*Workflow-First Runtime\s*\|\s*Implementation started\s*\|/
       );
       expect(r).toContain("milestones/m10-workflow-first-runtime.md");
     });
 
-    it("pins the planned M10 sequence while keeping M9 active", () => {
+    it("pins the M10 sequence while keeping M9 as foundation", () => {
       const r = readDoc(roadmap);
 
-      expect(r).toMatch(/Milestone 9\s*\|\s*Live Workflow Execution\s*\|\s*Active \/ in flight/);
+      expect(r).toMatch(/Milestone 9\s*\|\s*Live Workflow Execution\s*\|\s*Foundation in force/);
       for (const slice of M10_SLICES) {
         expect(r, `roadmap should list ${slice}`).toContain(slice);
       }
@@ -157,12 +158,12 @@ describe("M10 workflow-first runtime planning contract", () => {
   });
 
   describe("internal/exclusions.md", () => {
-    it("states that M10 is planned but workflow-first runtime implementation remains deferred until slices land", () => {
+    it("states that M10 implementation has begun while later runtime behavior remains deferred", () => {
       const e = readDoc("internal/exclusions.md");
 
-      expect(e).toMatch(/Milestone 10 is planned \/ next/i);
+      expect(e).toMatch(/M10 planning pinned/i);
       expect(e).toContain("internal/milestones/m10-workflow-first-runtime.md");
-      expect(e).toMatch(/deferred until the relevant M10 implementation slices land/i);
+      expect(e).toMatch(/first-class start \/ execution behavior[\s\S]*deferred until the relevant M10 implementation\s+slices land/i);
     });
   });
 

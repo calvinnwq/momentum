@@ -237,10 +237,10 @@ describe("M9 contract decision gate (NGX-331)", () => {
   describe("internal/roadmap.md", () => {
     const roadmap = "internal/roadmap.md";
 
-    it("marks M9 as active / in flight in the timeline table", () => {
+    it("marks M9 as foundation in force in the timeline table", () => {
       const r = readDoc(roadmap);
       expect(r).toMatch(
-        /\|\s*Milestone 9\s*\|\s*Live Workflow Execution\s*\|\s*(Active[^|]*|In flight|In progress)\s*\|/
+        /\|\s*Milestone 9\s*\|\s*Live Workflow Execution\s*\|\s*Foundation in force\s*\|/
       );
     });
 
@@ -273,13 +273,13 @@ describe("M9 contract decision gate (NGX-331)", () => {
   describe("internal/exclusions.md", () => {
     const exclusions = "internal/exclusions.md";
 
-    it("marks M9 live execution as active scope rather than a post-M8 deferral", () => {
+    it("marks M9 live execution as foundation work rather than a post-M8 deferral", () => {
       const e = readDoc(exclusions);
-      expect(e).toMatch(/Milestone 9 \(Live Workflow Execution\)[\s\S]*active \/ in flight/);
+      expect(e).toMatch(/Milestone 9 \(Live Workflow Execution\)[\s\S]*foundation work/i);
+      expect(e).toMatch(/M9 owns[\s\S]*live executor\s+wrappers/);
       expect(e).toContain("NGX-331");
       expect(e).toContain("internal/milestones/m9-live-workflow-execution.md");
       expect(e).toContain("internal/contracts/live-workflow-execution.md");
-      expect(e).toMatch(/M9 owns[\s\S]*live executor\s+wrappers/);
       expect(e).not.toMatch(/remain deferred past M8 closeout/i);
       expect(e).not.toMatch(/future explicit decision gate/i);
     });

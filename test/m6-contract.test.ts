@@ -1226,11 +1226,12 @@ describe("public docs envelope shapes", () => {
       const end = agents.indexOf("\n## ", start + 1);
       const section = agents.slice(start, end > start ? end : undefined);
       expect(section).toMatch(/internal\/roadmap\.md/);
-      expect(section).toMatch(/internal\/milestones\/m6-external-apply\.md/);
+      expect(section).toMatch(/internal\/milestones\/m9-live-workflow-execution\.md/);
+      expect(section).toMatch(/internal\/milestones\/m10-workflow-first-runtime\.md/);
       expect(
         section.length,
         `## Current milestone section should be compact (was ${section.length} chars)`
-      ).toBeLessThan(4000);
+      ).toBeLessThan(4500);
     });
 
     it("agent operating-instruction sections stay compact", () => {
