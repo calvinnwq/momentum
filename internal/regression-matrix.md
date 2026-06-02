@@ -1,11 +1,13 @@
-# M7 / M8 regression matrix: monitor + operator-control failure modes
+# M7 / M8 / M9 regression matrix: workflow failure modes
 
 This matrix pins the failure modes that motivated **Milestone 7: OpenClaw
 Coding Workflow Backend** and **Milestone 8: Workflow Run Operator Controls**,
-plus the durable invariants that make each one unreachable. Each row names the
-failure mode, the invariant that eliminates it, the code module that owns the
-invariant, and the test(s) that exercise it. The M7 rows are the closeout gate
-for NGX-319; the M8 rows are the closeout gate for NGX-330. If any row's
+plus the live-execution failure modes introduced during **Milestone 9: Live
+Workflow Execution**. Each row names the failure mode, the invariant that
+eliminates it, the code module that owns the invariant, and the test(s) that
+exercise it. The M7 rows are the closeout gate for NGX-319; the M8 rows are the
+closeout gate for NGX-330; M9 rows are in-flight slice evidence until the M9
+closeout gate promotes them into the final dogfood matrix. If any row's
 invariant regresses, the owning milestone has regressed.
 
 The full M7 contract lives in
@@ -25,6 +27,13 @@ M8 keeps the M7 substrate wire-stable; the M8 rows below pin the *operator-facin
 control surfaces (`workflow run list` / `approve` / `update-step` /
 `clear-recovery` / `monitor` plus typed evidence linkage), not new substrate
 behavior.
+
+The M9 live-execution contract lives in
+[`internal/contracts/live-workflow-execution.md`](contracts/live-workflow-execution.md);
+the M9 milestone sequence lives in
+[`internal/milestones/m9-live-workflow-execution.md`](milestones/m9-live-workflow-execution.md).
+The M9 rows below are intentionally internal-only while live execution remains
+opt-in and before the dogfood closeout.
 
 ## M7 matrix: durable substrate invariants
 
@@ -301,15 +310,91 @@ it. The end-to-end evidence is the built-CLI smoke under
     against the run directory and asserts the typed `runId` / `stepId` linkage
     surfaces through `workflow run monitor` and `workflow status`.
 
+## M9 live-execution matrix: verification / commit transaction invariants
+
+The M9-03 slice (NGX-334) wires a cleanly dispatched live implementation step
+into Momentum's existing verification, commit, failure-reset, and manual
+recovery transaction. These rows pin the slice-level behavior before the later
+M9 dogfood and live-resume slices add built-CLI smoke coverage.
+
+### 12. Live step commits without verification ownership
+
+- **Failure mode.** A live wrapper could modify the worktree and report success,
+  but Momentum could either trust that result without running verification or
+  let the wrapper's own commit become the durable outcome.
+- **M9 invariant.** `advanceLiveWorkflowStep` finalizes only a normalized,
+  durably-finished dispatch. `finalizeLiveWorkflowStepFromResultFile` re-reads
+  the runner-result document for the explicit commit intent, runs the configured
+  verification commands, and creates the Momentum commit only while HEAD still
+  equals the recorded base. A live wrapper-created commit is classified as
+  `head_mismatch` and routed to manual recovery instead of being reset or
+  accepted silently.
+- **Owner.** [`src/live-step-advance.ts`](../src/live-step-advance.ts) and
+  [`src/live-step-finalize.ts`](../src/live-step-finalize.ts).
+- **Evidence.**
+  - Unit: `test/live-step-finalize.test.ts` — commits the live-step diff only
+    after verification passes; resets when verification fails; preserves a
+    wrapper-created commit as `manual_recovery_required` / `head_mismatch`.
+  - Unit: `test/live-step-advance.test.ts` — composes live-step execution,
+    finalization, and durable recovery for the success, verification-failure,
+    runner-failure, and moved-HEAD paths.
+
+### 13. Ambiguous live result document causes destructive reset
+
+- **Failure mode.** If the normalized result document is lost, malformed,
+  oversized, unreadable, or replaced with a symlink after dispatch, Momentum
+  could guess the live step outcome and reset or commit untrusted work.
+- **M9 invariant.** The finalize seam treats a missing result as
+  `result_missing` and an untrusted result as `result_invalid`; neither outcome
+  mutates git. The run-level recovery seam sets `needs_manual_recovery` before
+  attempting the per-run `recovery.md` artifact, so the durable flag and reason
+  remain authoritative even if best-effort artifact rendering fails.
+- **Owner.** [`src/live-step-finalize.ts`](../src/live-step-finalize.ts),
+  [`src/live-step-run-recovery.ts`](../src/live-step-run-recovery.ts), and
+  [`src/workflow-recovery-artifact.ts`](../src/workflow-recovery-artifact.ts).
+- **Evidence.**
+  - Unit: `test/live-step-finalize.test.ts` — missing, invalid JSON,
+    non-RunnerResult, oversized, and symlink result documents return
+    `result_missing` / `result_invalid` without mutating the worktree.
+  - Unit: `test/live-step-run-recovery.test.ts` and
+    `test/workflow-recovery-artifact.test.ts` — live recovery codes render into
+    `recovery.md` with bounded evidence, set the durable recovery flag, and
+    return `artifact_write_failed` without clearing the flag when rendering
+    fails.
+
+### 14. Live finalization mutates after ownership is lost
+
+- **Failure mode.** A live step could finish execution, then verification /
+  commit / reset finalization could continue after the repo lock or
+  managed-step lease was no longer owned, or the managed-step lease could be
+  released before recovery was durable.
+- **M9 invariant.** `advanceLiveWorkflowStep` heartbeats and re-checks the repo
+  lock plus managed-step lease through verification, commit, reset, and
+  post-finalization acceptance. Lost ownership routes to `repo_lock_lost`
+  recovery before further git mutation; if ownership is lost after git commits
+  but before Momentum accepts the result, the terminal success is rejected and
+  recovery is flagged for operator inspection. Heartbeating stops before the
+  recovery flag / artifact write, but the deferred managed-step lease is
+  released only after terminal or recovery reconciliation has been persisted.
+- **Owner.** [`src/live-step-advance.ts`](../src/live-step-advance.ts).
+- **Evidence.**
+  - Unit: `test/live-step-advance.test.ts` — keeps repo-lock and managed-step
+    leases fresh during finalization; rejects lost repo-lock ownership before
+    commit and after git has advanced HEAD; leaves conflicting deferred leases
+    outstanding; and sets finalize or dispatch recovery before releasing the
+    deferred managed-step lease.
+
 ## How to use this matrix
 
 - Treat each row as a closeout gate. A code change that breaks any listed
   invariant must either restore the invariant or open a follow-up milestone
   that explicitly re-scopes it; the owning milestone (M7 for rows 1–5, M8 for
-  rows 6–11) cannot be re-closed until every row's evidence is green.
+  rows 6–11, M9 for rows 12+) cannot be re-closed until every row's evidence is
+  green.
 - The owner module and tests are intentionally specific. When refactoring,
   move the listed test names atomically with the module they pin so this
   matrix stays accurate.
 - Adding a new failure mode that belongs to a later milestone belongs in that
   milestone's own section or matrix. This document is scoped to the M7 durable
-  substrate and the M8 operator-control surfaces built on top of it.
+  substrate, the M8 operator-control surfaces built on top of it, and the M9
+  live-execution slices that have landed.

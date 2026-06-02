@@ -11,10 +11,13 @@
  * authority.
  *
  * This module owns the mark/clear/get primitives plus the guarded operator
- * clear ({@link clearWorkflowRunManualRecoveryGuarded}) that re-derives the M7
- * monitor state before clearing and refuses with `recovery_clear_refused` while
- * the underlying blocking condition persists. The CLI exposes that guarded
- * clear through `workflow run clear-recovery`.
+ * clear ({@link clearWorkflowRunManualRecoveryGuarded}). The guarded clear
+ * re-derives M7 monitor blockers before clearing and refuses with
+ * `recovery_clear_refused` while one persists. M9 live dispatch / finalization
+ * can also mark the same flag with non-monitor classifications, so guarded clear
+ * cannot independently prove that live recovery work is complete; operators must
+ * resolve the stored reason and any rendered artifact or context before
+ * clearing.
  */
 
 import type { MomentumDb } from "./db.js";
@@ -84,8 +87,9 @@ export type ClearWorkflowRunManualRecoveryResult =
  * Clear the durable manual-recovery flag so operator transitions are eligible
  * again. This is the low-level primitive: it does NOT re-derive monitor state
  * or guard against a persisting blocking condition — the guarded operator clear
- * layered on top owns that check. recovery.md is intentionally left on disk as
- * durable audit; operators remove it after capturing the context elsewhere.
+ * layered on top owns that check. Any rendered recovery.md is intentionally
+ * left on disk as durable audit; operators remove it after capturing the
+ * context elsewhere.
  */
 export function clearWorkflowRunManualRecovery(
   db: MomentumDb,
@@ -214,15 +218,19 @@ export type ClearWorkflowRunManualRecoveryGuardedResult =
 
 /**
  * Operator-facing guarded clear: the explicit, auditable path that re-derives
- * the M7 monitor state and only clears the durable manual-recovery flag when
- * the underlying blocking condition is gone. Refuses safely when the run is
+ * the M7 monitor state and only clears the durable manual-recovery flag when no
+ * monitor-derived blocking condition remains. Refuses safely when the run is
  * missing (`run_not_found`), not flagged (`not_flagged`), or still classified
- * with a blocking recovery code (`recovery_clear_refused`). The check and the
- * clear run inside a single immediate transaction so the condition that is
- * checked is the condition that is cleared.
+ * with a blocking monitor recovery code (`recovery_clear_refused`). Live
+ * dispatch / finalization recovery uses the same flag but has no monitor
+ * blocker to re-derive here, so clearing those entries is an operator assertion
+ * that the captured reason and any rendered artifact or context have been
+ * resolved. The check and the clear run inside a single immediate transaction
+ * so the condition that is checked is the condition that is cleared.
  *
- * recovery.md is intentionally left on disk as durable audit; operators delete
- * it after capturing the context elsewhere, mirroring the M3 goal-scoped clear.
+ * Any rendered recovery.md is intentionally left on disk as durable audit;
+ * operators delete it after capturing the context elsewhere, mirroring the M3
+ * goal-scoped clear.
  */
 export function clearWorkflowRunManualRecoveryGuarded(
   db: MomentumDb,

@@ -258,6 +258,49 @@ Run locally via the targeted vitest filter:
 pnpm vitest run test/smoke.test.ts -t "operator-control end-to-end smoke"
 ```
 
+## Milestone 9 live-execution unit coverage (NGX-334)
+
+The M9-03 verification / commit transaction slice is covered by deterministic
+unit tests rather than a built-binary smoke because live workflow execution is
+still opt-in and the M9 dogfood smoke is deferred to the closeout slice. The
+tests use disposable git repositories and file-backed workflow DB fixtures so
+finalization can verify the second-connection repo-lock heartbeat behavior, with
+fake live executors standing in for OpenClaw wrappers.
+
+Coverage:
+
+- live-step finalization commits only after configured verification passes and
+  the repo HEAD still matches the recorded base.
+- runner-reported failure and verification failure reset the worktree back to
+  base HEAD through the existing failure-reset path.
+- live wrapper-created commits / moved HEADs enter `head_mismatch` manual
+  recovery and are preserved rather than reset.
+- missing, invalid, oversized, or symlinked result documents return
+  `result_missing` / `result_invalid` without committing or resetting
+  ambiguous work.
+- run-level recovery sets `needs_manual_recovery` first and renders the
+  run-scoped `recovery.md` artifact as best-effort guidance for live
+  `head_mismatch`, `result_missing`,
+  `result_invalid`, `reset_failed`, `repo_lock_lost`, `git_failed`,
+  `invalid_input`, and unsafe `commit_failed` outcomes; clean
+  `nothing_to_commit` or successfully reset commit failures stay normal step
+  failures without the recovery flag, and artifact write failures return
+  `artifact_write_failed` while leaving the durable flag authoritative.
+- repo-lock and managed-step leases stay fresh through finalization; ownership
+  loss before mutation prevents commit/reset, while ownership loss after a git
+  commit rejects the terminal success and enters `repo_lock_lost` recovery for
+  operator inspection.
+- normalized live steps stay running and leased until commit, reset, dispatch
+  failure, or recovery reconciliation is durable.
+- process-level live dispatch failures preserve their precise live recovery code
+  including `executor_threw`, and do not run the git transaction.
+
+Run locally via the targeted vitest command:
+
+```
+pnpm vitest run test/live-step-finalize.test.ts test/live-step-run-recovery.test.ts test/live-step-advance.test.ts test/workflow-recovery-artifact.test.ts
+```
+
 ## Test boundary
 
 The smoke must not make real `api.linear.app` calls — see

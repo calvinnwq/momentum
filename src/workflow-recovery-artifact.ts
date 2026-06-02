@@ -1,12 +1,14 @@
 /**
  * Run-scoped recovery artifact renderer (NGX-327, M8-04).
  *
- * Renders the per-run `.agent-workflows/<runId>/recovery.md` artifact from the
- * M7 monitor reducer's recovery classification. The renderer is the run-scoped
+ * Renders the per-run `.agent-workflows/<runId>/recovery.md` artifact from
+ * either the M7 monitor reducer's recovery classification or the M9 live
+ * run-level recovery classifications. The renderer is the run-scoped
  * sibling of the M3 goal-scoped `recovery-artifact.ts`: it owns artifact
  * *generation* only and never touches SQLite, executors, or the durable flag;
  * the durable `WorkflowRun.needs_manual_recovery` wiring and the explicit
- * clear path compose with this renderer through the M8 recovery slice.
+ * clear path compose with this renderer through the M8 recovery slice and M9
+ * live recovery seams.
  *
  * The renderer is intentionally pure and accepts only structured, bounded
  * fields (run id, step id, classification, evidence pointers, recommended next
@@ -39,6 +41,54 @@ export const WORKFLOW_RECOVERY_ARTIFACT_FILENAME = "recovery.md";
  */
 export const WORKFLOW_RECOVERY_ARTIFACT_SCHEMA_VERSION = 1;
 
+/**
+ * Live run-level recovery classifications that M9 layers on top of the M7
+ * monitor recovery codes. These are NOT emitted by `deriveWorkflowMonitorState`
+ * — they are raised by the M9 live finalization transaction
+ * (`head_mismatch`, `reset_failed`, `repo_lock_lost`, `git_failed`,
+ * unsafe `commit_failed`, `invalid_input`), result-document checks during
+ * finalization or process dispatch (`result_missing` / `result_invalid`), live
+ * wrapper process dispatch failures (`runtime_unavailable`, `auth_unavailable`,
+ * `command_failed`, `command_timed_out`, `output_overflow`), trapped executor
+ * throws (`executor_threw`), and wrapper-reported `manual_recovery_required` outcomes
+ * rendered into the same per-run `recovery.md`. Extending the recovery taxonomy
+ * here is explicitly sanctioned by internal/contracts/live-workflow-execution.md
+ * ("M9 can extend the M8 taxonomy, but it cannot collapse distinct failure
+ * causes into generic failure text"). The monitor reducer's emitted-code type
+ * stays untouched so the substrate never claims to produce a code it cannot.
+ */
+export const WORKFLOW_LIVE_RUN_RECOVERY_CODES = [
+  "head_mismatch",
+  "result_missing",
+  "result_invalid",
+  "reset_failed",
+  "repo_lock_lost",
+  "git_failed",
+  "commit_failed",
+  "invalid_input",
+  "runtime_unavailable",
+  "auth_unavailable",
+  "command_failed",
+  "command_timed_out",
+  "output_overflow",
+  "executor_threw",
+  "manual_recovery_required"
+] as const;
+export type WorkflowLiveRunRecoveryCode =
+  (typeof WORKFLOW_LIVE_RUN_RECOVERY_CODES)[number];
+
+/**
+ * Every classification `recovery.md` can render: the M7 monitor recovery codes
+ * plus the M9 live run-level recovery codes. This is the single source of truth
+ * the renderer validates against.
+ */
+export type WorkflowRecoveryClassification =
+  | WorkflowMonitorRecoveryCode
+  | WorkflowLiveRunRecoveryCode;
+
+export const WORKFLOW_RECOVERY_CLASSIFICATIONS: readonly WorkflowRecoveryClassification[] =
+  [...WORKFLOW_MONITOR_RECOVERY_CODES, ...WORKFLOW_LIVE_RUN_RECOVERY_CODES];
+
 export function isSafeWorkflowRunPathSegment(runId: string): boolean {
   return (
     runId.length > 0 &&
@@ -55,16 +105,16 @@ export function isSafeWorkflowRunPathSegment(runId: string): boolean {
  * Encodes the NGX-327 safety contract: prefer blocking over guessing, never
  * auto-clear from elapsed time, no automatic repair or live process killing,
  * and the rollback is reverting the flag/artifact wiring without disturbing the
- * M7 monitor reducer classification.
+ * upstream monitor-derived or live-run recovery source.
  */
 export const WORKFLOW_RECOVERY_SAFETY_NOTES: readonly string[] = [
   "Recovery never auto-clears from elapsed time alone; an operator must explicitly clear it once the blocking state is resolved.",
   "Momentum does not kill processes or perform automatic repair; resolve the underlying cause manually before clearing recovery.",
-  "Rollback: revert the run-scoped recovery flag and artifact wiring. The M7 monitor reducer classification is unchanged by this artifact."
+  "Rollback: revert the run-scoped recovery flag and artifact wiring. The upstream monitor-derived or live-run recovery source is unchanged by this artifact."
 ];
 
 const SAFE_NEXT_STEPS: Record<
-  WorkflowMonitorRecoveryCode,
+  WorkflowRecoveryClassification,
   readonly string[]
 > = {
   manual_recovery_lease: [
@@ -91,6 +141,81 @@ const SAFE_NEXT_STEPS: Record<
     "Inspect the failed required step's executor log and artifact tree.",
     "Decide whether to retry the step or keep the run blocked for manual handling.",
     "Do not approve past the failed step until the failure is understood."
+  ],
+  head_mismatch: [
+    "Inspect the unexpected HEAD against the recorded base SHA with `git -C <repo> log`.",
+    "Momentum refused a destructive reset: a non-Momentum commit on HEAD must be preserved, not discarded.",
+    "Decide manually whether to keep, amend, or roll back the unexpected commit before clearing recovery."
+  ],
+  result_missing: [
+    "Inspect the live step's normalized result file path; the runner exited without writing it.",
+    "Confirm the step's true outcome from its executor log before retrying — the result is unknown, so Momentum did not commit or reset.",
+    "Re-dispatch the step or cancel the run once the missing result is understood."
+  ],
+  result_invalid: [
+    "Inspect the malformed live step result document; it is not a valid normalized runner result.",
+    "Confirm the step's true outcome from its executor log before retrying — the result cannot be trusted, so Momentum did not commit or reset.",
+    "Re-dispatch the step or cancel the run once the invalid result is understood."
+  ],
+  reset_failed: [
+    "Inspect the worktree and reset error before approving any later step.",
+    "Confirm whether live-step edits are still present; Momentum could not restore the recorded base automatically.",
+    "Clean up or preserve the worktree manually before clearing recovery."
+  ],
+  repo_lock_lost: [
+    "Inspect the active repo lock owner and the worktree before approving any later step.",
+    "Confirm no other Momentum process is still mutating the repository.",
+    "Re-establish repo ownership or clean up manually before clearing recovery."
+  ],
+  git_failed: [
+    "Inspect the git error and current worktree state before approving any later step.",
+    "Confirm whether live-step edits are still present; Momentum could not prove the repository state.",
+    "Restore or preserve the worktree manually before clearing recovery."
+  ],
+  commit_failed: [
+    "Inspect the commit failure and current worktree state before approving any later step.",
+    "Confirm whether live-step edits are still staged or unstaged; Momentum did not prove cleanup.",
+    "Commit, reset, or preserve the worktree manually before clearing recovery."
+  ],
+  invalid_input: [
+    "Inspect the live-step finalization inputs and run directory before approving any later step.",
+    "Confirm whether live-step edits are present; Momentum refused to commit or reset with invalid inputs.",
+    "Correct the invalid inputs and clean up or preserve the worktree manually before clearing recovery."
+  ],
+  runtime_unavailable: [
+    "Inspect the live step executor log and runtime configuration.",
+    "Confirm whether the wrapper made worktree edits before the runtime failure.",
+    "Clean up or preserve any partial worktree changes before clearing recovery."
+  ],
+  auth_unavailable: [
+    "Inspect the live step executor log and authentication setup.",
+    "Confirm whether the wrapper made worktree edits before authentication failed.",
+    "Clean up or preserve any partial worktree changes before clearing recovery."
+  ],
+  command_failed: [
+    "Inspect the live step executor log for the failed command.",
+    "Confirm whether partial worktree edits should be kept, reset, or retried.",
+    "Resolve the worktree state manually before clearing recovery."
+  ],
+  command_timed_out: [
+    "Inspect the live step executor log and confirm the command is no longer running.",
+    "Confirm whether the timeout left partial worktree edits behind.",
+    "Clean up or preserve any partial worktree changes before clearing recovery."
+  ],
+  output_overflow: [
+    "Inspect the live step executor log size and truncation boundary.",
+    "Confirm whether the wrapper left partial worktree edits before output capture stopped.",
+    "Clean up or preserve any partial worktree changes before clearing recovery."
+  ],
+  executor_threw: [
+    "Inspect the executor error and run directory.",
+    "Confirm whether the executor left partial worktree edits before throwing.",
+    "Clean up or preserve any partial worktree changes before clearing recovery."
+  ],
+  manual_recovery_required: [
+    "Inspect the live step executor log and run directory for the manual recovery request.",
+    "Confirm whether partial worktree edits should be kept, reset, or retried.",
+    "Resolve the worktree state manually before clearing recovery."
   ]
 };
 
@@ -99,7 +224,7 @@ const SAFE_NEXT_STEPS: Record<
  * path and future surfaces can reuse the same guidance the artifact renders.
  */
 export function workflowRecoverySafeNextSteps(
-  code: WorkflowMonitorRecoveryCode
+  code: WorkflowRecoveryClassification
 ): readonly string[] {
   return SAFE_NEXT_STEPS[code] ?? [];
 }
@@ -110,9 +235,11 @@ export type WorkflowRecoveryEvidencePointer = {
 };
 
 /**
- * The recommended next action surfaced from the M7 monitor reducer's
- * `nextAction`. Only the stable code and operator-facing detail are carried;
- * lease internals stay in the substrate.
+ * The recommended next action surfaced from either the M7 monitor reducer's
+ * `nextAction` or an M9 live run-level recovery seam. Monitor-derived inputs
+ * carry the reducer's stable code/detail, while live recovery inputs carry
+ * live-specific `investigate_*` codes and operator-facing detail; lease
+ * internals stay in the substrate.
  */
 export type WorkflowRecoveryNextAction = {
   code: string;
@@ -122,14 +249,15 @@ export type WorkflowRecoveryNextAction = {
 
 /**
  * Self-contained input for rendering / writing a run-scoped `recovery.md`.
- * Built from a monitor reducer classification (see
- * {@link buildWorkflowRecoveryArtifactInput}) so the renderer never needs a
- * live db handle or the file system to assemble its body.
+ * Built from either a monitor reducer classification (see
+ * {@link buildWorkflowRecoveryArtifactInput}) or a live run-level recovery seam,
+ * so the renderer never needs a live db handle or the file system to assemble
+ * its body.
  */
 export type WorkflowRecoveryArtifactInput = {
   runId: string;
   stepId: string | null;
-  classification: WorkflowMonitorRecoveryCode;
+  classification: WorkflowRecoveryClassification;
   reason: string;
   recommendedNextAction: WorkflowRecoveryNextAction;
   evidencePointers: readonly WorkflowRecoveryEvidencePointer[];
@@ -357,7 +485,7 @@ function validateInput(input: WorkflowRecoveryArtifactInput): void {
     throw new Error("buildWorkflowRecoveryMarkdown: runId is required");
   }
   if (
-    !(WORKFLOW_MONITOR_RECOVERY_CODES as readonly string[]).includes(
+    !(WORKFLOW_RECOVERY_CLASSIFICATIONS as readonly string[]).includes(
       input.classification
     )
   ) {

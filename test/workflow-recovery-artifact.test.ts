@@ -4,8 +4,10 @@ import os from "node:os";
 import path from "node:path";
 
 import {
+  WORKFLOW_LIVE_RUN_RECOVERY_CODES,
   WORKFLOW_RECOVERY_ARTIFACT_FILENAME,
   WORKFLOW_RECOVERY_ARTIFACT_SCHEMA_VERSION,
+  WORKFLOW_RECOVERY_CLASSIFICATIONS,
   WORKFLOW_RECOVERY_SAFETY_NOTES,
   buildWorkflowRecoveryArtifactInput,
   buildWorkflowRecoveryMarkdown,
@@ -197,6 +199,58 @@ describe("buildWorkflowRecoveryMarkdown", () => {
         makeFullInput({
           classification: "not_a_real_code" as never
         })
+      )
+    ).toThrow(/classification/);
+  });
+});
+
+describe("live run-level recovery classifications (M9)", () => {
+  it("layers the live run-level recovery codes on top of the monitor taxonomy", () => {
+    expect([...WORKFLOW_LIVE_RUN_RECOVERY_CODES]).toEqual([
+      "head_mismatch",
+      "result_missing",
+      "result_invalid",
+      "reset_failed",
+      "repo_lock_lost",
+      "git_failed",
+      "commit_failed",
+      "invalid_input",
+      "runtime_unavailable",
+      "auth_unavailable",
+      "command_failed",
+      "command_timed_out",
+      "output_overflow",
+      "executor_threw",
+      "manual_recovery_required"
+    ]);
+    // The full recovery.md render vocabulary is the M7 monitor codes plus the
+    // M9 live run-level codes; neither set drops out.
+    for (const code of WORKFLOW_MONITOR_RECOVERY_CODES) {
+      expect(WORKFLOW_RECOVERY_CLASSIFICATIONS).toContain(code);
+    }
+    for (const code of WORKFLOW_LIVE_RUN_RECOVERY_CODES) {
+      expect(WORKFLOW_RECOVERY_CLASSIFICATIONS).toContain(code);
+    }
+  });
+
+  it("renders recovery.md for each live run-level code with classification-specific safe next steps", () => {
+    for (const code of WORKFLOW_LIVE_RUN_RECOVERY_CODES) {
+      const body = buildWorkflowRecoveryMarkdown(
+        makeFullInput({ classification: code })
+      );
+      expect(body).toContain(`- Recovery classification: ${code}`);
+      const steps = workflowRecoverySafeNextSteps(code);
+      expect(steps.length).toBeGreaterThan(0);
+      for (const step of steps) {
+        expect(body).toContain(step);
+      }
+    }
+  });
+
+  it("still rejects a classification outside the monitor + live taxonomy", () => {
+    expect(() =>
+      buildWorkflowRecoveryMarkdown(
+        makeFullInput({ classification: "totally_made_up" as never })
       )
     ).toThrow(/classification/);
   });

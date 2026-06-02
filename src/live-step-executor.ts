@@ -18,8 +18,11 @@
  *     resolves against); the wrapper owns the result path via `config`, so the
  *     advisory `input.resultJsonPath` is not forwarded.
  *   - `mapLiveStepWrapperResult` translates a `LiveStepWrapperResult` into the
- *     normalized M7 `WorkflowStepExecutorDispatchResult`. Distinct live failure
- *     causes are never collapsed into generic failure text: the precise
+ *     normalized M7 `WorkflowStepExecutorDispatchResult`. Runner-reported
+ *     `success: false` is still a normalized `ok: true` step failure that later
+ *     finalization handles with a reset; process-level wrapper failures become
+ *     `ok: false` dispatch errors. Distinct live failure causes are never
+ *     collapsed into generic failure text: the precise
  *     `LiveStepWrapperRecoveryCode` is preserved on `liveRecoveryCode` even when
  *     two live codes map onto one coarser M7 dispatch `errorCode`.
  *   - `createLiveWorkflowStepExecutor` / `createLiveWorkflowStepExecutorsFromProfile`
@@ -30,8 +33,10 @@
  * acquire/heartbeat/release durable `workflow_leases`, persist `workflow_steps`
  * start/terminal state, re-derive run state, render run-scoped recovery, or own
  * verification/commit transactions. `live-step-orchestrator.ts` composes this
- * adapter with those caller-side primitives so the M7 state machine can drive a
- * live wrapper exactly as it already drives the fake executor.
+ * adapter with the lease / step lifecycle; `live-step-advance.ts` composes that
+ * orchestration with verification, commit / reset finalization, and live
+ * run-scoped recovery so the M7 state machine can drive a live wrapper exactly
+ * as it already drives the fake executor.
  */
 
 import {
@@ -129,10 +134,12 @@ export function buildLiveStepWrapperInput(
 
 /**
  * Translate a `LiveStepWrapperResult` into the normalized M7 dispatch result.
- * Success becomes a `succeeded` executor result whose artifacts point at the
- * bounded executor log and the normalized runner-result file; any failure
- * becomes an `ok: false` dispatch error carrying the mapped M7 code plus the
- * precise `liveRecoveryCode`.
+ * A successful wrapper process always becomes an `ok: true` executor result: a
+ * runner document with `success: true` maps to `succeeded`, while `success:
+ * false` maps to a normalized `failed` step with `command_failed` so finalization
+ * can reset the worktree. Only process-level wrapper failures become `ok: false`
+ * dispatch errors carrying the mapped M7 code plus the precise
+ * `liveRecoveryCode`.
  */
 export function mapLiveStepWrapperResult(
   result: LiveStepWrapperResult

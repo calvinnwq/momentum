@@ -1,6 +1,6 @@
 # Recovery surfaces
 
-Momentum's operational-safety surfaces ship three operator-facing recovery
+Momentum's operational-safety surfaces ship four operator-facing recovery
 contracts that are intentionally separate but composed by the same CLI surfaces:
 
 - **Stale-lease detection and auto-recovery** — what Momentum can prove is
@@ -9,11 +9,14 @@ contracts that are intentionally separate but composed by the same CLI surfaces:
 - **Manual recovery artifacts and the durable `needs_manual_recovery` flag** —
   what Momentum writes to disk and blocks at the queue when an auto-recovery
   refusal would lose audit context or risk a non-Momentum commit.
+- **Run-scoped workflow recovery** — what Momentum writes under
+  `.agent-workflows/<run-id>/` when monitor-derived blockers or live workflow
+  dispatch / finalization failures require operator action.
 - **Intent apply blocked state** — the durable per-intent `apply_state =
   'blocked'` flag set when `intent apply --external-apply` lands a partial
   external write but cannot finalize its audit row.
 
-This page is the canonical reference for all three.
+This page is the canonical reference for all four.
 
 ## Stale-lease detection and auto-recovery
 
@@ -127,7 +130,10 @@ view after persisting rows; when the durable substrate still has a blocking
 condition (`manual_recovery_lease`, `ghost_active_no_lease`,
 `stale_running_step`, or `failed_required_step`), Momentum sets
 `workflow_runs.needs_manual_recovery` and renders
-`<run-dir>/recovery.md`.
+`<run-dir>/recovery.md`. Live workflow execution uses the same durable flag and
+artifact when dispatch or finalization cannot safely continue, preserving stable
+classifications such as `head_mismatch`, `result_missing`, `repo_lock_lost`,
+`auth_unavailable`, and `executor_threw`.
 
 The run-scoped flag blocks `workflow run approve` and any
 `workflow run update-step` transition that would leave the blocking recovery
@@ -138,17 +144,25 @@ and then clear the flag explicitly.
 Operators clear run-scoped recovery with
 `momentum workflow run clear-recovery <run-id> [--data-dir <path>] [--json]`.
 The clear re-checks the durable monitor view in the same transaction and
-refuses with `recovery_clear_refused` while a blocking condition remains, or
-`not_flagged` when the run is not currently flagged. The command leaves the
-run's `recovery.md` artifact on disk as audit evidence.
+refuses with `recovery_clear_refused` while a monitor-derived blocking condition
+remains, or `not_flagged` when the run is not currently flagged. The command
+leaves the run's `recovery.md` artifact on disk as audit evidence.
+
+For live dispatch or finalization recovery, the same flag and artifact may hold
+non-monitor classifications. `workflow run clear-recovery` still rechecks and
+refuses monitor-derived blockers atomically, but clearing live recovery is the
+operator's assertion that the stored reason and `recovery.md` guidance have been
+resolved.
 
 The generated run-scoped `recovery.md` artifact is schema-versioned and
 includes the run ID, step ID, recovery classification, repo path, classified-at
 timestamp, reason, recommended next action, evidence pointers,
 classification-specific safe next steps, and safety / rollback notes. Momentum
-overwrites the artifact with the latest recovery classification when import
-flags the run again, but does not delete it after
-`workflow run clear-recovery`.
+overwrites the artifact with the latest recovery classification when import or
+live execution flags the run again, but does not delete it after
+`workflow run clear-recovery`. For live recovery, the durable flag and stored
+manual-recovery reason are authoritative; `recovery.md` rendering is
+best-effort and may fail while the run remains blocked.
 
 See [docs/workflow-commands.md](workflow-commands.md) for the full
 `workflow import` and `workflow run clear-recovery` envelopes.

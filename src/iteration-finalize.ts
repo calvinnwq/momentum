@@ -25,6 +25,12 @@ export type FinalizeIterationInput = {
   verificationCommands: string[];
   verificationTimeoutSec: number;
   verificationLogPath: string;
+  /**
+   * Optional ownership proof for callers that hold an external repo/workflow
+   * lease. It is called immediately before each commit/reset mutation; failure
+   * aborts the transaction with `ownership_lost` before mutating git.
+   */
+  beforeGitMutation?: () => { ok: true } | { ok: false; error: string };
 };
 
 export type FinalizeResetTrigger = "runner_failure" | "verification_failure";
@@ -57,6 +63,15 @@ export type FinalizeIterationResult =
       reset?: ResetSuccess | ResetFailure;
     }
   | {
+      /**
+       * The optional ownership hook failed before a commit/reset mutation.
+       * Callers should preserve the worktree and route this through their
+       * recovery path rather than retrying the mutation blindly.
+       */
+      outcome: "ownership_lost";
+      error: string;
+    }
+  | {
       outcome: "invalid_input";
       error: string;
     };
@@ -79,6 +94,8 @@ export function finalizeIteration(
 
   if (!runnerSuccess) {
     writeVerificationSkipNote(verificationLogPath, "runner reported failure");
+    const ownership = checkOwnership(input);
+    if (ownership !== null) return ownership;
     const reset = resetToBase({ repoPath, baseHead });
     if (!reset.ok) {
       return {
@@ -99,6 +116,8 @@ export function finalizeIteration(
   });
 
   if (!verification.ok) {
+    const ownership = checkOwnership(input);
+    if (ownership !== null) return ownership;
     const reset = resetToBase({ repoPath, baseHead });
     if (!reset.ok) {
       return {
@@ -111,6 +130,9 @@ export function finalizeIteration(
     return { outcome: "reset_verification_failure", verification, reset };
   }
 
+  const ownership = checkOwnership(input);
+  if (ownership !== null) return ownership;
+
   const commit = commitVerifiedChanges({
     repoPath,
     baseHead,
@@ -119,6 +141,8 @@ export function finalizeIteration(
 
   if (!commit.ok) {
     if (shouldResetAfterCommitFailure(commit.code)) {
+      const resetOwnership = checkOwnership(input);
+      if (resetOwnership !== null) return resetOwnership;
       const reset = resetToBase({ repoPath, baseHead });
       return { outcome: "commit_failed", verification, commit, reset };
     }
@@ -126,6 +150,15 @@ export function finalizeIteration(
   }
 
   return { outcome: "committed", verification, commit };
+}
+
+function checkOwnership(
+  input: FinalizeIterationInput
+): Extract<FinalizeIterationResult, { outcome: "ownership_lost" }> | null {
+  if (input.beforeGitMutation === undefined) return null;
+  const check = input.beforeGitMutation();
+  if (check.ok) return null;
+  return { outcome: "ownership_lost", error: check.error };
 }
 
 function shouldResetAfterCommitFailure(code: CommitFailure["code"]): boolean {

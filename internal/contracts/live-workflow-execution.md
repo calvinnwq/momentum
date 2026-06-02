@@ -27,7 +27,7 @@ The dogfood target is a real Momentum issue implemented through Momentum-owned l
 - Process invocation through explicit local command specs, never implicit shells.
 - Runner result normalization into the M7 `WorkflowStepExecutor` result shape.
 - Verification capture through existing Momentum verification logs and result artifacts.
-- Recovery classification for wrapper-level failures: runtime missing, auth unavailable, command failed, timeout, result missing, result invalid, output overflow, stale lease, and head mismatch.
+- Recovery classification for live dispatch and run-level finalization failures, including process/runtime/auth/result failures, unsafe git / lock / reset / commit outcomes, executor throws, manual recovery requests, and moved HEADs; see the current run-level taxonomy in [Recovery](#recovery).
 - A dogfood smoke path that runs at least one real repo task with live wrappers enabled behind an explicit opt-in flag or profile.
 
 **OpenClaw skills continue to own until a later milestone explicitly moves them:**
@@ -114,6 +114,9 @@ Momentum must keep its existing safety posture:
 - Commit intent is explicit and normalized.
 - If verification fails and HEAD is still at the expected base, Momentum resets the worktree using the existing failure-reset path.
 - If HEAD changed unexpectedly, Momentum enters manual recovery instead of destructive reset.
+- The repo lock and managed-step lease stay heartbeated through verification, commit, reset, and post-finalization acceptance; a lost repo lock or workflow lease before any further git mutation routes to `repo_lock_lost` recovery. Heartbeating stops before the shared recovery flag / `recovery.md` write, but the deferred managed-step lease is released only after terminal or recovery reconciliation is durable.
+- Momentum also re-checks repo / workflow ownership after the finalization transaction returns, before accepting terminal success. If ownership is lost after git already advanced HEAD, Momentum rejects the terminal success, enters `repo_lock_lost` recovery, and leaves the operator to inspect the committed state.
+- Terminal step state for a cleanly dispatched live step is deferred until the finalization transaction reconciles the commit, reset, or recovery outcome.
 - Remote git operations (`fetch`, `pull`, `push`, `rebase`) remain out of scope unless a later contract adds them explicitly.
 
 ### Approvals
@@ -129,31 +132,38 @@ Starting, advancing, or retrying a live step must check:
 - The approval boundary required for that step.
 - The manual-recovery flag.
 - Active leases.
-- Repo path and repo lock availability; live execution requires `workflow_runs.repo_path` to be present and equal `executorInput.repoPath`. Repo-backed runs must also have a durable `workflow_runs.goal_id` plus an active, unexpired `repo_locks` row for `workflow_runs.repo_path` held by the same holder and matching goal id. Live execution heartbeats that repo lock while the managed step runs.
+- Repo path and repo lock availability; live execution requires `workflow_runs.repo_path` to be present and equal `executorInput.repoPath`. Repo-backed runs must also have a durable `workflow_runs.goal_id` plus an active, unexpired `repo_locks` row for `workflow_runs.repo_path` held by the same holder and matching goal id. Live execution heartbeats that repo lock while the managed step runs and while finalization owns verification / git mutation.
 
 Illegal advance attempts refuse without partial mutation. A step already marked
 `running` is a recovery/reattach concern, not an implicit idempotent start.
 
 ### Recovery
 
-Live wrapper failures must map to stable recovery codes. M9 can extend the M8 taxonomy, but it cannot collapse distinct failure causes into generic failure text.
+Live wrapper failures must map to stable recovery codes. M9 can extend the M8 taxonomy, but it cannot collapse distinct failure causes into generic failure text. The M9 live run-level recovery classifications are:
 
-At minimum:
-
+- `head_mismatch`
+- `result_missing`
+- `result_invalid`
+- `reset_failed`
+- `repo_lock_lost`
+- `git_failed`
+- `commit_failed`
+- `invalid_input`
 - `runtime_unavailable`
 - `auth_unavailable`
 - `command_failed`
 - `command_timed_out`
-- `result_missing`
-- `result_invalid`
 - `output_overflow`
-- `stale_live_step`
-- `head_mismatch`
+- `executor_threw`
 - `manual_recovery_required`
+
+`stale_live_step` remains reserved for stale live-execution lease recovery; the M9-03 finalization path does not emit it directly.
 
 The live wrapper preserves `auth_unavailable` and `output_overflow` as precise live recovery codes. The M7 executor dispatch taxonomy maps them to `runtime_unavailable` and `command_failed` respectively while retaining the precise live code for recovery handling.
 
-When recovery is required, Momentum writes the per-run `recovery.md` artifact and sets the durable recovery flag before returning control to the operator.
+Live finalization maps unsafe git / result outcomes into the same run-level taxonomy: moved HEAD becomes `head_mismatch`; missing or untrusted result documents become `result_missing` / `result_invalid`; failed cleanup becomes `reset_failed`; lost ownership becomes `repo_lock_lost`; git and input failures retain `git_failed` and `invalid_input`. Commit failures enter `commit_failed` recovery only when Momentum cannot prove cleanup; `nothing_to_commit` and commit failures followed by a successful reset remain clean step-failure outcomes without the run-scoped recovery flag. Process-level dispatch failures choose the first valid live run-level recovery code from the wrapper's precise `liveRecoveryCode`, then the executor dispatch code, and otherwise fall back to `command_failed`.
+
+When recovery is required, Momentum sets the durable recovery flag before returning control to the operator. Rendering the per-run `recovery.md` artifact is best-effort after the flag is set; if artifact rendering fails, the flag and stored manual-recovery reason remain authoritative and the recovery result reports `artifact_write_failed`.
 
 ## Dogfood Gate
 
