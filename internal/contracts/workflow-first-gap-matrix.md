@@ -1,28 +1,28 @@
 # Contract: Workflow-First Gap Matrix
 
-**Status:** Accepted planning contract. This matrix translates current Momentum surfaces into the workflow-first runtime target. It does not authorize implementation, Linear remapping, or milestone renumbering by itself.
+**Status:** Accepted implementation bridge. M10-00 promoted this matrix into the workflow-first runtime milestone sequence; M10-01 has begun landing the definition schema and persistence slice. It still does not authorize Linear remapping or milestone renumbering by itself.
 
 This contract follows:
 
 - [`internal/contracts/workflow-first-runtime.md`](workflow-first-runtime.md)
 - [`internal/contracts/executor-loop.md`](executor-loop.md)
 
-The purpose is to make the next implementation milestone concrete without pretending M9 already owns the generic workflow product.
+The purpose is to keep the active M10 implementation concrete without pretending M9 already owns the generic workflow product.
 
 ## Decision
 
-Momentum should progress from the current Goal-first / imported-coding-workflow substrate into a Workflow-first runtime in a new implementation milestone after M9 planning is reviewed.
+Momentum is progressing from the current Goal-first / imported-coding-workflow substrate into a Workflow-first runtime in Milestone 10 after M9 planning was reviewed.
 
 M9 remains foundation work. It should not be renamed into the generic workflow runtime and it should not be forced to carry a changed product definition mid-stream.
 
-The likely milestone split is:
+The milestone split is:
 
 ```text
 M9: Live Workflow Execution foundation
 M10: Workflow-First Runtime
 ```
 
-M10 is the first likely place for `WorkflowDefinition`, configurable `StepDefinition`, first-class workflow start, executor invocations, executor rounds, and daemon scheduling over workflow runs.
+M10 is the first place for `WorkflowDefinition`, configurable `StepDefinition`, first-class workflow start, executor invocations, executor rounds, and daemon scheduling over workflow runs.
 
 ## Current Inventory
 
@@ -139,7 +139,7 @@ The following current shapes should change:
 
 ## Recommended Implementation Slices
 
-The likely M10 slice order:
+The M10 slice order:
 
 1. **M10-00 Workflow-first contract and milestone setup**: promote these planning contracts into an implementation milestone and pin issue order.
 2. **M10-01 WorkflowDefinition and StepDefinition schema**: add definitions, validation, durable `workflow_definitions` / `step_definitions` persistence, and the built-in coding workflow definition.

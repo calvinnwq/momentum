@@ -60,7 +60,7 @@ The M9-00 decision gate pins the following architecture so later slices implemen
 
 ### Run-start surface decision
 
-M9 prefers reusing the existing `goal start` path plus a `WorkflowRun` link over introducing a new `workflow run start` CLI verb. The simpler reuse path wins unless a later slice proves it cannot preserve the M7 / M8 run, lease, approval, and recovery invariants; only then is a dedicated `workflow run start` verb added. Either path must refuse unless the repo lease can be acquired and required approvals already exist, and never infers approval from prose.
+The M9-00 decision gate originally preferred reusing the existing `goal start` path plus a `WorkflowRun` link over introducing a new `workflow run start` CLI verb. M10 now supersedes that future-facing preference: first-class workflow run start belongs to the workflow-first runtime after definition validation exists. Any M9-compatible start path that uses these live wrappers must still refuse unless the repo lease can be acquired and required approvals already exist, and never infer approval from prose.
 
 ## M9 Implementation Sequence
 

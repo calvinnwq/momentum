@@ -22,7 +22,7 @@ It does **not** cover:
 
 - The M7 substrate primitives themselves. Those stay pinned by [`workflow-runs.md`](workflow-runs.md).
 - The M3 daemon / recovery, M4 runner / policy, M5 source / evidence / intent, or M6 external apply contracts. Those remain wire-stable.
-- Live executor invocation. Live wrappers around `gnhf-runner`, `gnhf-postflight`, `harness-delegate`, `no-mistakes-pipeline`, `model-evidence`, or `project-progress-refresh` stayed outside M8 and are now owned by the active M9 live-execution contract after the NGX-331 decision gate. M8 envelopes themselves never spawn an executor process.
+- Live executor invocation. Live wrappers around `gnhf-runner`, `gnhf-postflight`, `harness-delegate`, `no-mistakes-pipeline`, `model-evidence`, or `project-progress-refresh` stayed outside M8 and are owned by the accepted M9 live-execution foundation after the NGX-331 decision gate. M8 envelopes themselves never spawn an executor process.
 - Discord-side approval UX, monitor cron scheduling, or managed-step dispatch. Those stay owned by the skill.
 - Plan composition, batch policy, no-mistakes harness/model routing, or failure classification. Those stay owned by the skill.
 

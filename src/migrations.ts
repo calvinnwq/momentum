@@ -437,8 +437,8 @@ CREATE INDEX IF NOT EXISTS idx_workflow_runs_repo_path
 // A definition is identified by (key, version) so recipes can evolve without
 // losing prior versions; its steps hang off that composite identity. Both
 // tables mirror the pure `WorkflowDefinition` / `StepDefinition` domain shape in
-// src/workflow-definition.ts (no executor config, no run state — that arrives in
-// later M10 slices).
+// src/workflow-definition.ts (no rich ExecutorDefinition config beyond the
+// executor-family field, no run state — those arrive in later M10 slices).
 const WORKFLOW_DEFINITIONS_DDL = `
 CREATE TABLE IF NOT EXISTS workflow_definitions (
   key TEXT NOT NULL,
