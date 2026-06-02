@@ -6,9 +6,9 @@
  * a deterministic validator, and the built-in coding workflow definition. It
  * follows the same discipline as `workflow-run-reducer.ts`: no SQLite, no file
  * system, no executor invocation. Durable persistence (`workflow_definitions`
- * / `step_definitions`) is layered on top of these primitives in a follow-up
- * M10-01 slice; first-class workflow run start, executor invocation/round
- * schema, and daemon scheduling are later M10 slices.
+ * / `step_definitions`) is layered on top of these primitives in
+ * `workflow-definition-persist.ts`; first-class workflow run start, executor
+ * invocation/round schema, and daemon scheduling are later M10 slices.
  *
  * Scope decisions pinned here, grounded in the accepted planning contracts
  * (internal/contracts/workflow-first-runtime.md and
