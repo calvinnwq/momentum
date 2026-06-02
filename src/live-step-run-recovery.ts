@@ -4,8 +4,10 @@
  *
  * `live-step-finalize.ts` is a pure transaction over git + verification: it
  * returns a rich in-memory outcome but owns no durable state. Process-level
- * dispatch failures also return precise live recovery classifications before
- * any git transaction runs. This module is the run-level seam the M9 contract's
+ * dispatch failures also return recovery evidence before any git transaction
+ * runs: a precise wrapper `liveRecoveryCode` when the executor provides one,
+ * otherwise the dispatch `code` itself may still be a live run-level
+ * classification. This module is the run-level seam the M9 contract's
  * "Recovery" section requires — it takes either a
  * {@link FinalizeLiveWorkflowStepFromResultFileResult} or dispatch failure
  * metadata and, when the outcome is one of the live run-level recovery
@@ -35,9 +37,10 @@
  *     `nothing_to_commit` failures and commit failures with a proven cleanup
  *     reset stay ordinary step failures, while failed cleanup maps to
  *     `reset_failed`.
- *   - Process-level dispatch failures preserve their specific live recovery
- *     classifications when one is available, including
- *     `manual_recovery_required` from wrapper dispatch.
+ *   - Process-level dispatch failures prefer a wrapper `liveRecoveryCode` when
+ *     it is available, otherwise preserve a live-taxonomy dispatch `code` such
+ *     as `executor_threw` or `manual_recovery_required`, and finally fall back
+ *     to `command_failed`.
  *
  * Every other finalize outcome is a clean terminal transaction result:
  * `committed`, a `reset_step_failure` / `reset_verification_failure` where the
@@ -93,8 +96,10 @@ export type PersistLiveWorkflowDispatchRecoveryInput = {
   dispatchCode: string;
   /**
    * Precise wrapper recovery classification. When it is in the live run
-   * taxonomy, it wins over `dispatchCode` so callers keep executor-specific
-   * causes such as `auth_unavailable` or `executor_threw`.
+   * taxonomy, it wins over `dispatchCode` so callers keep wrapper-specific
+   * causes such as `auth_unavailable` or `output_overflow`. Orchestrator-owned
+   * classifications such as `executor_threw` / `manual_recovery_required`
+   * should be carried on `dispatchCode` and are preserved by the fallback above.
    */
   liveRecoveryCode?: string;
   error: string;

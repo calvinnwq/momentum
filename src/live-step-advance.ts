@@ -35,13 +35,15 @@
  *     document at finalize time can still surface `result_missing` /
  *     `result_invalid` (a result lost or corrupted after dispatch) or a moved
  *     HEAD, which route to durable recovery instead of a destructive reset.
- *   - A process-level dispatch error (`ok: false`) already carries a precise
- *     live recovery code (`runtime_unavailable`, `auth_unavailable`,
- *     `command_failed`, `command_timed_out`, `output_overflow`, ...) on
- *     {@link RunLiveWorkflowStepOutcome.liveRecoveryCode}. Running the git
+ *   - A process-level dispatch error (`ok: false`) carries its recovery source
+ *     on either {@link RunLiveWorkflowStepOutcome.liveRecoveryCode} (the precise
+ *     wrapper code, when present) or the dispatch `code` itself (for precise
+ *     orchestrator classifications such as `executor_threw`). Running the git
  *     transaction there would only re-classify it as a generic
  *     `result_missing`, masking the precise cause, so this seam persists live
- *     dispatch recovery without touching the worktree or running finalization.
+ *     dispatch recovery without touching the worktree or running finalization;
+ *     the recovery seam prefers `liveRecoveryCode`, then a live-taxonomy
+ *     dispatch `code`, then `command_failed`.
  *
  * Likewise, a step that never settled (a start refusal, or an ambiguous
  * in-flight finish where the lease was intentionally left outstanding) is not
@@ -190,8 +192,9 @@ export function advanceLiveWorkflowStep(
 
   // The git + verification transaction runs only for a step that settled into a
   // clean terminal state from a normalized dispatch result. A process-level
-  // dispatch error already carries a precise live recovery code, and an
-  // unsettled finish leaves an ambiguous repo lock — neither is safe to mutate.
+  // dispatch error already carries recovery evidence via liveRecoveryCode or
+  // its dispatch code, and an unsettled finish leaves an ambiguous repo lock —
+  // neither is safe to mutate.
   const dispatch = run.dispatch;
   const canFinalize =
     dispatch !== undefined &&
