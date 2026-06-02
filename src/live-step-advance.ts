@@ -97,6 +97,11 @@ import type {
 } from "./workflow-step-executor.js";
 
 export type AdvanceLiveWorkflowStepInput = {
+  /**
+   * File-backed workflow database. Finalization starts a second connection to
+   * keep the repo lock fresh; in-memory databases cannot drive that heartbeat
+   * path and enter `repo_lock_lost` recovery instead.
+   */
   db: MomentumDb;
   runId: string;
   stepId: string;

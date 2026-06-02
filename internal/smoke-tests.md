@@ -263,7 +263,8 @@ pnpm vitest run test/smoke.test.ts -t "operator-control end-to-end smoke"
 The M9-03 verification / commit transaction slice is covered by deterministic
 unit tests rather than a built-binary smoke because live workflow execution is
 still opt-in and the M9 dogfood smoke is deferred to the closeout slice. The
-tests use disposable git repositories and in-memory workflow DB fixtures, with
+tests use disposable git repositories and file-backed workflow DB fixtures so
+finalization can verify the second-connection repo-lock heartbeat behavior, with
 fake live executors standing in for OpenClaw wrappers.
 
 Coverage:

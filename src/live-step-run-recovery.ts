@@ -28,12 +28,18 @@
  *     base, so worktree cleanup is not proven.
  *   - `repo_lock_lost` -> `repo_lock_lost`: Momentum no longer owns the repo
  *     lock required to mutate or clean the worktree.
- *   - `git_failed` / unsafe `commit_failed` / process-level dispatch failures
- *     preserve their specific live recovery classifications.
+ *   - `git_failed` / `invalid_input` preserve their specific finalize
+ *     classifications.
+ *   - Unsafe `commit_failed` outcomes preserve `commit_failed`; clean
+ *     `nothing_to_commit` failures and commit failures with a proven cleanup
+ *     reset stay ordinary step failures, while failed cleanup maps to
+ *     `reset_failed`.
+ *   - Process-level dispatch failures preserve their specific live recovery
+ *     classifications when one is available.
  *
- * Every other finalize outcome is a clean terminal transaction result —
- * `committed`, or a `reset_step_failure` / `reset_verification_failure` where
- * the worktree was already safely reset.
+ * Every other finalize outcome is a clean terminal transaction result:
+ * `committed`, a `reset_step_failure` / `reset_verification_failure` where the
+ * worktree was already safely reset, or a clean commit-failure step failure.
  *
  * Mirroring {@link ./workflow-recovery-reconcile.ts}, the durable flag is
  * written *first*: it is the authority that blocks unsafe progression, so it
@@ -77,7 +83,17 @@ export type PersistLiveWorkflowFinalizeRecoveryInput = {
 export type PersistLiveWorkflowDispatchRecoveryInput = {
   runId: string;
   stepId: string | null;
+  /**
+   * Coarse process-level dispatch code. Used as the recovery code only when it
+   * is in the live run taxonomy and no more precise `liveRecoveryCode` is set;
+   * otherwise dispatch recovery falls back to `command_failed`.
+   */
   dispatchCode: string;
+  /**
+   * Precise wrapper recovery classification. When it is in the live run
+   * taxonomy, it wins over `dispatchCode` so callers keep executor-specific
+   * causes such as `auth_unavailable` or `executor_threw`.
+   */
   liveRecoveryCode?: string;
   error: string;
   executorLogPath?: string;
