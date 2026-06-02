@@ -338,7 +338,7 @@ Behaviour:
 
 - Re-derives the monitor view from the durable substrate inside a single immediate transaction and clears the flag only when no monitor-derived blocking recovery condition remains. The check and the clear are atomic: the monitor condition that is checked is the condition that is cleared.
 - Refuses with `recovery_clear_refused` while a monitor-derived blocking recovery classification (`manual_recovery_lease`, `ghost_active_no_lease`, `stale_running_step`, or `failed_required_step`) still applies; the refusal carries the `recoveryCode` and, when known, the `blockingStepId`, and the flag stays set.
-- For live dispatch or finalization recovery, the same durable flag and `recovery.md` artifact may record a non-monitor classification such as `head_mismatch`, `result_missing`, `repo_lock_lost`, or `auth_unavailable`. Resolve the captured reason and artifact context before clearing; the command still performs the atomic monitor recheck above, but it cannot independently prove that external live-recovery work was completed.
+- For live dispatch or finalization recovery, the durable flag and `run.manualRecoveryReason` / `run.manualRecoveryAt` fields are authoritative for non-monitor classifications such as `head_mismatch`, `result_missing`, `repo_lock_lost`, or `auth_unavailable`. The `recovery.md` artifact is best-effort and may be absent after an artifact write failure; resolve the captured reason and any artifact context before clearing. The command still performs the atomic monitor recheck above, but it cannot independently prove that external live-recovery work was completed.
 - Refuses with `not_flagged` when the run is not currently flagged, so a stale clear cannot mutate anything.
 - Never auto-clears from elapsed time alone, never repairs the underlying run, and never issues an external write. The `recovery.md` artifact is intentionally left on disk as durable audit; remove it after capturing the context elsewhere.
 
@@ -569,7 +569,7 @@ verification / git finalization failures reconciled after the executor result.
 
 `monitor.recovery.code`, when present, is one of: `stale_running_step`, `ghost_active_no_lease`, `manual_recovery_lease`, `monitor_drift_stale`, `failed_required_step`.
 
-`run.needsManualRecovery`, `run.manualRecoveryReason`, and `run.manualRecoveryAt` mirror the durable run-scoped recovery flag. Monitor-derived blockers populate `monitor.recovery`; live dispatch or finalization recovery can set the durable run fields and `.agent-workflows/<run-id>/recovery.md` while `monitor.recovery` remains `null`, so consumers should inspect the stored reason and artifact for those live classifications.
+`run.needsManualRecovery`, `run.manualRecoveryReason`, and `run.manualRecoveryAt` mirror the durable run-scoped recovery flag. Monitor-derived blockers populate `monitor.recovery`; live dispatch or finalization recovery can set the durable run fields while `monitor.recovery` remains `null`. The stored reason and timestamp are authoritative for those live classifications; `.agent-workflows/<run-id>/recovery.md` is best-effort operator guidance and may be absent if artifact rendering failed.
 
 Lease classifications surfaced under `monitor.leases[].classification`: `released`, `fresh`, `stale-auto-release`, `stale-manual-recovery-required`.
 
@@ -818,7 +818,7 @@ Required arguments:
 
 The hard recovery classifications (`recovery.code`) are the same monitor-derived taxonomy as `workflow status`: `stale_running_step`, `ghost_active_no_lease`, `manual_recovery_lease`, `monitor_drift_stale`, `failed_required_step`. A failed required step and a blocked run both resolve to `disposition: "recover"`; `monitor_drift_stale` on an otherwise-progressing run resolves to `disposition: "report"`.
 
-Live dispatch or finalization recovery can also set the durable manual-recovery flag and drive `needsManualRecovery: true`, `disposition: "recover"`, and `reportReason: "recovery_required"` even when `recovery` is null, because `recovery` only carries monitor-derived classifications. In that case, consult the stored manual-recovery reason and `.agent-workflows/<run-id>/recovery.md` for the live classification and safe next steps.
+Live dispatch or finalization recovery can also set the durable manual-recovery flag and drive `needsManualRecovery: true`, `disposition: "recover"`, and `reportReason: "recovery_required"` even when `recovery` is null, because `recovery` only carries monitor-derived classifications. In that case, `run.manualRecoveryReason` and `run.manualRecoveryAt` are authoritative for the live classification; `.agent-workflows/<run-id>/recovery.md` is best-effort operator guidance and may be absent if artifact rendering failed.
 
 ### JSON envelope
 
