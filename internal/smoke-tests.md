@@ -280,7 +280,9 @@ Coverage:
 - run-level recovery sets `needs_manual_recovery` and writes the run-scoped
   `recovery.md` artifact for live `head_mismatch`, `result_missing`,
   `result_invalid`, `reset_failed`, `repo_lock_lost`, `git_failed`,
-  `commit_failed`, and `invalid_input` outcomes.
+  `invalid_input`, and unsafe `commit_failed` outcomes; clean
+  `nothing_to_commit` or successfully reset commit failures stay normal step
+  failures without the recovery flag.
 - repo-lock and managed-step leases stay fresh through finalization; lost
   finalization ownership enters `repo_lock_lost` recovery instead of committing
   or resetting.

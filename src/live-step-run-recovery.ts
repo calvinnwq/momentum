@@ -1,17 +1,19 @@
 /**
- * Run-level durable recovery for the live verification / commit transaction
+ * Run-level durable recovery for live finalization and dispatch failures
  * (NGX-334, M9-03).
  *
  * `live-step-finalize.ts` is a pure transaction over git + verification: it
- * returns a rich in-memory outcome but owns no durable state. This module is the
- * run-level seam the M9 contract's "Recovery" section requires — it takes a
- * {@link FinalizeLiveWorkflowStepFromResultFileResult} and, when that outcome is
- * one of the live run-level recovery conditions M9-03 introduces, durably
- * **enters manual recovery**: it sets the run-scoped `needs_manual_recovery`
- * flag and writes the per-run `recovery.md` artifact "before returning control
- * to the operator". This is the durable counterpart to the finalize module's
- * promise that a moved HEAD or an untrustworthy result document refuses a
- * destructive reset.
+ * returns a rich in-memory outcome but owns no durable state. Process-level
+ * dispatch failures also return precise live recovery classifications before
+ * any git transaction runs. This module is the run-level seam the M9 contract's
+ * "Recovery" section requires — it takes either a
+ * {@link FinalizeLiveWorkflowStepFromResultFileResult} or dispatch failure
+ * metadata and, when the outcome is one of the live run-level recovery
+ * conditions M9-03 introduces, durably **enters manual recovery**: it sets the
+ * run-scoped `needs_manual_recovery` flag and writes the per-run `recovery.md`
+ * artifact "before returning control to the operator". This is the durable
+ * counterpart to the finalize module's promise that a moved HEAD or an
+ * untrustworthy result document refuses a destructive reset.
  *
  * Finalize and dispatch outcomes map to durable recovery, each carrying a distinct,
  * non-collapsed live recovery code (the contract forbids generic failure text):
@@ -169,6 +171,10 @@ export function persistLiveWorkflowFinalizeRecovery(
   });
 }
 
+/**
+ * Durably enter manual recovery from a process-level live dispatch failure
+ * without running the git finalization transaction.
+ */
 export function persistLiveWorkflowDispatchRecovery(
   db: MomentumDb,
   input: PersistLiveWorkflowDispatchRecoveryInput

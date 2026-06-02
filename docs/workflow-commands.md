@@ -336,8 +336,9 @@ Required arguments:
 
 Behaviour:
 
-- Re-derives the monitor view from the durable substrate inside a single immediate transaction and clears the flag only when no blocking recovery condition remains. The check and the clear are atomic: the condition that is checked is the condition that is cleared.
-- Refuses with `recovery_clear_refused` while a blocking recovery classification (`manual_recovery_lease`, `ghost_active_no_lease`, `stale_running_step`, or `failed_required_step`) still applies; the refusal carries the `recoveryCode` and, when known, the `blockingStepId`, and the flag stays set.
+- Re-derives the monitor view from the durable substrate inside a single immediate transaction and clears the flag only when no monitor-derived blocking recovery condition remains. The check and the clear are atomic: the monitor condition that is checked is the condition that is cleared.
+- Refuses with `recovery_clear_refused` while a monitor-derived blocking recovery classification (`manual_recovery_lease`, `ghost_active_no_lease`, `stale_running_step`, or `failed_required_step`) still applies; the refusal carries the `recoveryCode` and, when known, the `blockingStepId`, and the flag stays set.
+- For live dispatch or finalization recovery, the same durable flag and `recovery.md` artifact may record a non-monitor classification such as `head_mismatch`, `result_missing`, `repo_lock_lost`, or `auth_unavailable`. Resolve the captured reason and artifact context before clearing; the command still performs the atomic monitor recheck above, but it cannot independently prove that external live-recovery work was completed.
 - Refuses with `not_flagged` when the run is not currently flagged, so a stale clear cannot mutate anything.
 - Never auto-clears from elapsed time alone, never repairs the underlying run, and never issues an external write. The `recovery.md` artifact is intentionally left on disk as durable audit; remove it after capturing the context elsewhere.
 

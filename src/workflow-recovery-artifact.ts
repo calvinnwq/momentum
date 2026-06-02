@@ -44,9 +44,9 @@ export const WORKFLOW_RECOVERY_ARTIFACT_SCHEMA_VERSION = 1;
 /**
  * Live run-level recovery classifications that M9 layers on top of the M7
  * monitor recovery codes. These are NOT emitted by `deriveWorkflowMonitorState`
- * — they are raised by the M9 live verification / commit transaction
+ * — they are raised by the M9 live finalization transaction
  * (`head_mismatch`, `reset_failed`, `repo_lock_lost`, `git_failed`,
- * `commit_failed`, `invalid_input`), its result-document re-read
+ * unsafe `commit_failed`, `invalid_input`), its result-document re-read
  * (`result_missing` / `result_invalid`), live wrapper process dispatch failures
  * (`runtime_unavailable`, `auth_unavailable`, `command_failed`,
  * `command_timed_out`, `output_overflow`), trapped executor throws

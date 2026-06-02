@@ -10,17 +10,18 @@
  *   - {@link finalizeLiveWorkflowStepFromResultFile} (`live-step-finalize.ts`) is
  *     a pure git + verification transaction over the step's normalized result
  *     document. It owns no durable state.
- *   - {@link persistLiveWorkflowFinalizeRecovery} (`live-step-run-recovery.ts`)
- *     durably enters manual recovery (the `needs_manual_recovery` flag + per-run
- *     `recovery.md`) when the finalize transaction surfaces a recovery condition.
+ *   - `live-step-run-recovery.ts` durably enters manual recovery (the
+ *     `needs_manual_recovery` flag + per-run `recovery.md`) when the finalize
+ *     transaction or process-level dispatch surfaces a live recovery condition.
  *
  * This module is the seam that wires those three into the single managed-step
  * "advance" the M9 contract's "Git And Verification Transaction" section
  * describes, holding the caller's repo lock across the verification transaction:
  *
- *   runLiveWorkflowStep            (lease + approved->running->terminal lifecycle)
- *   -> finalizeLiveWorkflowStepFromResultFile  (verify -> commit / reset)
- *   -> persistLiveWorkflowFinalizeRecovery     (durable recovery on head/result)
+ *   runLiveWorkflowStep             (lease + approved->running lifecycle)
+ *   -> dispatch recovery             (for process-level executor failures)
+ *   -> finalizeLiveWorkflowStepFromResultFile   (verify -> commit / reset)
+ *   -> finalize recovery / step reconciliation  (durable recovery or terminal state)
  *
  * The git + verification transaction runs only when the managed step settled
  * into a terminal state from a *normalized* dispatch result —
@@ -40,7 +41,7 @@
  *     {@link RunLiveWorkflowStepOutcome.liveRecoveryCode}. Running the git
  *     transaction there would only re-classify it as a generic
  *     `result_missing`, masking the precise cause, so this seam persists live
- *     dispatch recovery without touching the worktree.
+ *     dispatch recovery without touching the worktree or running finalization.
  *
  * Likewise, a step that never settled (a start refusal, or an ambiguous
  * in-flight finish where the lease was intentionally left outstanding) is not

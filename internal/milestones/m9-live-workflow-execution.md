@@ -69,10 +69,10 @@ The M9-00 decision gate (NGX-331) pins the slice order below. Each slice is a co
 1. **NGX-331 — M9-00 Contract and decision gate:** promote this draft into the active milestone, choose the live-wrapper architecture, pin non-goals, pin this implementation sequence, and update roadmap / doctor-marker policy. No runtime behavior change.
 2. **NGX-332 — M9-01 Live wrapper config and registry:** add typed config parsing, refusal codes, wrapper resolution, probe support, and deterministic fixture tests.
 3. **NGX-333 — M9-02 Live implementation step wrapper:** run the `implementation` step through an explicit live wrapper with lease / heartbeat / result-file capture.
-4. **NGX-334 — M9-03 Verification and commit transaction:** wire live step output into Momentum verification, commit intent, failure reset, and head-mismatch recovery.
+4. **NGX-334 — M9-03 Verification and commit transaction:** wire live step output into Momentum verification, commit intent, failure reset, result-document recovery, unsafe finalization recovery, dispatch recovery, and finalization lock / lease reconciliation.
 5. **NGX-335 — M9-04 Postflight and no-mistakes wrappers:** add live wrappers for postflight and no-mistakes with result normalization and recovery taxonomy.
 6. **NGX-336 — M9-05 Merge cleanup and Linear refresh boundaries:** add wrappers or explicit handoff gates for merge cleanup and Linear refresh without bypassing M6 external apply.
-7. **NGX-337 — M9-06 Live recovery and resume smoke:** prove stale lease, timeout, missing result, invalid result, failed verification, and head-mismatch recovery.
+7. **NGX-337 — M9-06 Live recovery and resume smoke:** prove stale lease, timeout, failed verification, recovery clear / resume behavior, and the NGX-334 result / head / finalization recovery paths in smoke form.
 8. **NGX-338 — M9-07 Dogfood run and closeout:** run a real Momentum issue through Momentum-owned live execution, record evidence, extend regression matrix, and flip the doctor marker only after the dogfood gate passes.
 
 ## Dogfood Policy

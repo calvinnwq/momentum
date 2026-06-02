@@ -30,8 +30,10 @@
  * acquire/heartbeat/release durable `workflow_leases`, persist `workflow_steps`
  * start/terminal state, re-derive run state, render run-scoped recovery, or own
  * verification/commit transactions. `live-step-orchestrator.ts` composes this
- * adapter with those caller-side primitives so the M7 state machine can drive a
- * live wrapper exactly as it already drives the fake executor.
+ * adapter with the lease / step lifecycle; `live-step-advance.ts` composes that
+ * orchestration with verification, commit / reset finalization, and live
+ * run-scoped recovery so the M7 state machine can drive a live wrapper exactly
+ * as it already drives the fake executor.
  */
 
 import {
