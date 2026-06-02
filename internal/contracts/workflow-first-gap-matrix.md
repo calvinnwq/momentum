@@ -178,4 +178,4 @@ This gap matrix does not implement:
 - Public UI.
 - Replacement of external engine internals.
 
-It is the planning bridge between the accepted workflow-first pivot and the first workflow-first implementation milestone.
+It is the active implementation bridge between the accepted workflow-first pivot, the landed M10-01 definition persistence slice, and the remaining workflow-first runtime slices.

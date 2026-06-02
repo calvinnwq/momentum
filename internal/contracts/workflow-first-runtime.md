@@ -361,4 +361,4 @@ This planning contract does not implement:
 - Public UI.
 - Replacement of GNHF or no-mistakes internals.
 
-Those belong to a follow-up implementation milestone after this contract is reviewed and mapped into concrete slices.
+M10 is now implementing these as concrete slices: M10-01 lands definition schema / validation / persistence, while CLI start, executor state, daemon scheduling, and external runtime behavior remain later slices.
