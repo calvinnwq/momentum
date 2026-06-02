@@ -90,12 +90,14 @@ Milestone status:
   closeout slice (NGX-338). See
   [`internal/milestones/m9-live-workflow-execution.md`](milestones/m9-live-workflow-execution.md)
   and [`internal/contracts/live-workflow-execution.md`](contracts/live-workflow-execution.md).
-- **Workflow-first runtime pivot** is an accepted planning contract, not an
-  implemented runtime yet. It reframes the future product model around
+- **Workflow-first runtime pivot** is an accepted planning contract. It
+  reframes the future product model around
   `WorkflowDefinition`, `WorkflowRun`, `StepDefinition`, `StepRun`, and
   pluggable executors such as `goal-loop` and `no-mistakes`. M9 remains
-  foundation work; general-purpose configurable workflows are planned under
-  M10 but stay deferred until the relevant M10 implementation slices land. See
+  foundation work; M10 has started landing definition schema and persistence
+  primitives, while first-class start / execution behavior for general-purpose
+  configurable workflows stays deferred until the relevant M10 implementation
+  slices land. See
   [`internal/milestones/m10-workflow-first-runtime.md`](milestones/m10-workflow-first-runtime.md),
   [`internal/contracts/workflow-first-runtime.md`](contracts/workflow-first-runtime.md),
   [`internal/contracts/executor-loop.md`](contracts/executor-loop.md), and
@@ -147,7 +149,7 @@ for blocked stale claims, and M4 also uses it for iteration-time HEAD movement:
 invocation and then exits; the NGX-273 managed loop is the bounded
 continuous-draining path on `daemon start`.
 
-## Configurable workflow definitions beyond OpenClaw coding workflows
+## Configurable workflow execution beyond OpenClaw coding workflows
 
 The workflow-first runtime pivot is accepted in
 [`internal/contracts/workflow-first-runtime.md`](contracts/workflow-first-runtime.md),
@@ -157,9 +159,11 @@ current-to-target planning pinned in
 [`internal/contracts/workflow-first-gap-matrix.md`](contracts/workflow-first-gap-matrix.md),
 with M10 planning pinned in
 [`internal/milestones/m10-workflow-first-runtime.md`](milestones/m10-workflow-first-runtime.md),
-but implementation is deferred until the relevant M10 slices land. Until then,
-the shipped `WorkflowRun` substrate remains scoped to the OpenClaw
-coding-workflow backend and the M9 live-wrapper foundation.
+and M10 has begun landing reusable workflow / step definition schema and
+persistence. First-class start, execution, and generalized `WorkflowRun`
+behavior remain deferred until the relevant M10 implementation slices land.
+Until then, the shipped executable `WorkflowRun` substrate remains scoped to the
+OpenClaw coding-workflow backend and the M9 live-wrapper foundation.
 
 ## Worktree management and remote git operations
 

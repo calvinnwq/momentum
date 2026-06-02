@@ -138,6 +138,7 @@ Initial executor families:
 The current OpenClaw coding workflow maps naturally:
 
 ```text
+preflight -> one-shot
 implementation -> goal-loop
 postflight -> one-shot or goal-loop
 no-mistakes -> no-mistakes

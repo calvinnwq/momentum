@@ -24,7 +24,7 @@ Momentum never modifies the data directory outside the resolved path. Each goal 
 
 ```text
 <data-dir>/
-  momentum.db                  # SQLite (goals, jobs, events, repo_locks, daemon_runs, source_items, source_snapshots, source_reconciliation_runs, evidence_records, update_intents, intent_apply_audits, workflow_runs, workflow_steps, workflow_approvals, workflow_leases tables)
+  momentum.db                  # SQLite (goals, jobs, events, repo_locks, daemon_runs, source_items, source_snapshots, source_reconciliation_runs, evidence_records, update_intents, intent_apply_audits, workflow_runs, workflow_steps, workflow_approvals, workflow_leases, workflow_definitions, step_definitions tables)
   goals/
     <goal-id>/
       goal.md                  # Canonical copy of the goal spec

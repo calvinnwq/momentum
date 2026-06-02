@@ -121,7 +121,7 @@ export type WorkflowDefinitionValidationResult =
   | { ok: false; errors: WorkflowDefinitionValidationError[] };
 
 // Lowercase slug: alphanumeric segments joined by single hyphens. Keeps
-// definition / step keys filesystem-safe for the future persistence slice.
+// definition / step keys safe as durable identities and future artifact paths.
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 function isSlug(value: unknown): value is string {
