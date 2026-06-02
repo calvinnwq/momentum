@@ -73,10 +73,10 @@ Operator-driven step transition surface. Drives the existing M7 reducer / state 
 
 ### `workflow run clear-recovery` (NGX-327)
 
-Explicit, auditable clear path for the run-scoped manual-recovery flag. Re-derives the M7 monitor state from durable rows inside the same transaction that clears the flag.
+Explicit, auditable clear path for the run-scoped manual-recovery flag. For monitor-derived recovery, re-derives the M7 monitor state from durable rows inside the same transaction that clears the flag. M9 live dispatch / finalization recovery can also set the same flag with non-monitor classifications; clearing those entries is the operator's assertion that the captured reason and `recovery.md` artifact have been resolved.
 
 - Refuses with `not_flagged` when the run exists but is not currently flagged.
-- Refuses with `recovery_clear_refused` while a blocking recovery classification still applies, and includes the recovery code plus blocking step id when known.
+- Refuses with `recovery_clear_refused` while a blocking monitor-derived recovery classification still applies, and includes the recovery code plus blocking step id when known.
 - Never auto-clears from elapsed time alone, never repairs the underlying run, never spawns or kills a process, and leaves `.agent-workflows/<runId>/recovery.md` on disk as audit evidence.
 
 ### `workflow run monitor` (NGX-328)
@@ -107,10 +107,10 @@ Refusal codes are stable strings; existing codes never get renamed, narrowed, or
 
 The per-run recovery surface mirrors the M3 goal-scoped contract, scoped to `WorkflowRun` instead of `Goal`:
 
-- A durable `WorkflowRun.needs_manual_recovery` flag (or equivalent typed column / sidecar row) captures the manual-recovery reason. The flag is set automatically when import re-derives a blocking monitor classification: `manual_recovery_lease`, `ghost_active_no_lease`, `stale_running_step`, or `failed_required_step`.
+- A durable `WorkflowRun.needs_manual_recovery` flag (or equivalent typed column / sidecar row) captures the manual-recovery reason. The flag is set automatically when import re-derives a blocking monitor classification: `manual_recovery_lease`, `ghost_active_no_lease`, `stale_running_step`, or `failed_required_step`. M9 live dispatch / finalization recovery can set the same flag and artifact with live classifications through the shared recovery path.
 - A per-run `.agent-workflows/<runId>/recovery.md` artifact renders the manual-recovery reason and the safe next steps. The artifact carries run id, step id, recovery classification, evidence pointers, recommended next action, and rollback / safety notes. It never embeds secrets, raw token values, or chat-transcript content.
 - The flag blocks future `workflow run approve` claims and `workflow run update-step` transitions that would make recovery worse or leave the blocking condition in place, until an operator explicitly clears it.
-- The `workflow run clear-recovery` path is explicit and auditable. It refuses with `not_flagged` when the durable flag is absent and `recovery_clear_refused` if the underlying blocking state still exists.
+- The `workflow run clear-recovery` path is explicit and auditable. It refuses with `not_flagged` when the durable flag is absent and `recovery_clear_refused` if an underlying monitor-derived blocking state still exists; live recovery classifications rely on operator resolution of the stored reason and artifact before clearing.
 
 The M3 `goals.needs_manual_recovery` flag, the `recovery.md` artifact for goals, and `recovery clear <goal-id>` stay unchanged. The M8 run-scoped flag is a sibling surface, not a replacement.
 

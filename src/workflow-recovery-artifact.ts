@@ -46,11 +46,11 @@ export const WORKFLOW_RECOVERY_ARTIFACT_SCHEMA_VERSION = 1;
  * monitor recovery codes. These are NOT emitted by `deriveWorkflowMonitorState`
  * — they are raised by the M9 live finalization transaction
  * (`head_mismatch`, `reset_failed`, `repo_lock_lost`, `git_failed`,
- * unsafe `commit_failed`, `invalid_input`), its result-document re-read
- * (`result_missing` / `result_invalid`), live wrapper process dispatch failures
- * (`runtime_unavailable`, `auth_unavailable`, `command_failed`,
- * `command_timed_out`, `output_overflow`), trapped executor throws
- * (`executor_threw`), and wrapper-reported `manual_recovery_required` outcomes
+ * unsafe `commit_failed`, `invalid_input`), result-document checks during
+ * finalization or process dispatch (`result_missing` / `result_invalid`), live
+ * wrapper process dispatch failures (`runtime_unavailable`, `auth_unavailable`,
+ * `command_failed`, `command_timed_out`, `output_overflow`), trapped executor
+ * throws (`executor_threw`), and wrapper-reported `manual_recovery_required` outcomes
  * rendered into the same per-run `recovery.md`. Extending the recovery taxonomy
  * here is explicitly sanctioned by internal/contracts/live-workflow-execution.md
  * ("M9 can extend the M8 taxonomy, but it cannot collapse distinct failure
