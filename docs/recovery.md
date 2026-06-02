@@ -127,7 +127,10 @@ view after persisting rows; when the durable substrate still has a blocking
 condition (`manual_recovery_lease`, `ghost_active_no_lease`,
 `stale_running_step`, or `failed_required_step`), Momentum sets
 `workflow_runs.needs_manual_recovery` and renders
-`<run-dir>/recovery.md`.
+`<run-dir>/recovery.md`. Live workflow execution uses the same durable flag and
+artifact when dispatch or finalization cannot safely continue, preserving stable
+classifications such as `head_mismatch`, `result_missing`, `repo_lock_lost`,
+`auth_unavailable`, and `executor_threw`.
 
 The run-scoped flag blocks `workflow run approve` and any
 `workflow run update-step` transition that would leave the blocking recovery
@@ -146,8 +149,8 @@ The generated run-scoped `recovery.md` artifact is schema-versioned and
 includes the run ID, step ID, recovery classification, repo path, classified-at
 timestamp, reason, recommended next action, evidence pointers,
 classification-specific safe next steps, and safety / rollback notes. Momentum
-overwrites the artifact with the latest recovery classification when import
-flags the run again, but does not delete it after
+overwrites the artifact with the latest recovery classification when import or
+live execution flags the run again, but does not delete it after
 `workflow run clear-recovery`.
 
 See [docs/workflow-commands.md](workflow-commands.md) for the full
