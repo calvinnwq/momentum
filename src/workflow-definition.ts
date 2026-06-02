@@ -62,10 +62,10 @@ export function isWorkflowExecutorFamily(
 /**
  * One configured step inside a workflow recipe.
  *
- *   - `key` is the stable, unique-within-definition identifier (slug). It maps
- *     onto the durable `step_id` used by `workflow_steps`, and lets a recipe
- *     carry more than one step of the same `kind` (e.g. multiple postflight
- *     passes) without colliding.
+ *   - `key` is the stable, unique-within-definition identifier (slug). It is
+ *     persisted as `step_definitions.step_key` and can seed future run-level
+ *     `workflow_steps.step_id` values, letting a recipe carry more than one step
+ *     of the same `kind` (e.g. multiple postflight passes) without colliding.
  *   - `kind` is the canonical routing classification (`WorkflowStepKind`).
  *   - `executor` is the executor family that powers the step.
  *   - `order` is the step's position; orders must be unique within a

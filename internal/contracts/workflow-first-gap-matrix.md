@@ -142,7 +142,7 @@ The following current shapes should change:
 The likely M10 slice order:
 
 1. **M10-00 Workflow-first contract and milestone setup**: promote these planning contracts into an implementation milestone and pin issue order.
-2. **M10-01 WorkflowDefinition and StepDefinition schema**: add definitions, validation, and built-in coding workflow definition.
+2. **M10-01 WorkflowDefinition and StepDefinition schema**: add definitions, validation, durable `workflow_definitions` / `step_definitions` persistence, and the built-in coding workflow definition.
 3. **M10-02 Workflow run start**: create runs from definitions with approval boundaries and repo policy.
 4. **M10-03 ExecutorDefinition / Invocation / Round schema**: persist executor loop state under step runs.
 5. **M10-04 Daemon workflow scheduler lane**: schedule runnable workflow runs and step runs without breaking goal iteration draining.
