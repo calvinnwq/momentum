@@ -136,22 +136,29 @@ Illegal advance attempts refuse without partial mutation. A step already marked
 
 ### Recovery
 
-Live wrapper failures must map to stable recovery codes. M9 can extend the M8 taxonomy, but it cannot collapse distinct failure causes into generic failure text.
+Live wrapper failures must map to stable recovery codes. M9 can extend the M8 taxonomy, but it cannot collapse distinct failure causes into generic failure text. The M9 live run-level recovery classifications are:
 
-At minimum:
-
+- `head_mismatch`
+- `result_missing`
+- `result_invalid`
+- `reset_failed`
+- `repo_lock_lost`
+- `git_failed`
+- `commit_failed`
+- `invalid_input`
 - `runtime_unavailable`
 - `auth_unavailable`
 - `command_failed`
 - `command_timed_out`
-- `result_missing`
-- `result_invalid`
 - `output_overflow`
-- `stale_live_step`
-- `head_mismatch`
+- `executor_threw`
 - `manual_recovery_required`
 
+`stale_live_step` remains reserved for stale live-execution lease recovery; the M9-03 finalization path does not emit it directly.
+
 The live wrapper preserves `auth_unavailable` and `output_overflow` as precise live recovery codes. The M7 executor dispatch taxonomy maps them to `runtime_unavailable` and `command_failed` respectively while retaining the precise live code for recovery handling.
+
+Live finalization maps unsafe git / result outcomes into the same run-level taxonomy: moved HEAD becomes `head_mismatch`; missing or untrusted result documents become `result_missing` / `result_invalid`; failed cleanup becomes `reset_failed`; lost ownership becomes `repo_lock_lost`; git, commit, and input failures retain `git_failed`, `commit_failed`, and `invalid_input`. Process-level dispatch failures prefer the precise live code when present, otherwise they fall back to `command_failed`.
 
 When recovery is required, Momentum writes the per-run `recovery.md` artifact and sets the durable recovery flag before returning control to the operator.
 
