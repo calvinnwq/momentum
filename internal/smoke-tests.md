@@ -301,6 +301,27 @@ Run locally via the targeted vitest command:
 pnpm vitest run test/live-step-finalize.test.ts test/live-step-run-recovery.test.ts test/live-step-advance.test.ts test/workflow-recovery-artifact.test.ts
 ```
 
+## Milestone 10 definition primitive unit coverage (NGX-345)
+
+M10-01 is covered by focused unit and migration tests rather than a built-binary
+CLI smoke because workflow definition commands and workflow run start remain
+later M10 slices.
+
+Coverage:
+
+- `WorkflowDefinition` / `StepDefinition` validation and the built-in coding
+  workflow definition in `test/workflow-definition.test.ts`.
+- durable `workflow_definitions` / `step_definitions` upsert, re-persist,
+  pruning, loading, and built-in seeding in
+  `test/workflow-definition-persist.test.ts`.
+- migration coverage for the new definition tables in `test/migrations.test.ts`.
+
+Run locally via the targeted vitest command:
+
+```
+pnpm vitest run test/workflow-definition.test.ts test/workflow-definition-persist.test.ts test/migrations.test.ts
+```
+
 ## Test boundary
 
 The smoke must not make real `api.linear.app` calls — see

@@ -71,7 +71,7 @@ Missing or malformed config refuses before mutating workflow state. The live-wra
 
 ### Workflow Run Start
 
-At the M9-00 decision gate, this contract preferred reusing the existing `goal start` path plus a `WorkflowRun` link for live workflow runs. M10 now supersedes that future-facing start-surface preference: first-class workflow run start belongs to the workflow-first runtime after definition validation exists. Any M9-compatible start path that uses these live wrappers must still satisfy the same invariants:
+At the M9-00 decision gate, this contract preferred reusing the existing `goal start` path plus a `WorkflowRun` link for live workflow runs. M10 now supersedes that future-facing start-surface preference: first-class workflow run start belongs to a later workflow-first runtime slice on top of persisted workflow definitions. Any M9-compatible start path that uses these live wrappers must still satisfy the same invariants:
 
 - It creates or imports a `WorkflowRun`.
 - It records the planned step chain.

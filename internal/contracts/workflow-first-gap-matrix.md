@@ -164,7 +164,7 @@ The main risks:
 - Letting executor recommendations become authoritative instead of daemon-classified.
 - Flattening every loop iteration into top-level workflow steps and making workflows unreadable.
 - Losing repo safety while moving finalization from goal iterations into executor rounds.
-- Creating a workflow start command before definition validation is deterministic.
+- Creating a workflow start command before persisted definitions, approval / repo policy, and start semantics are wired.
 
 ## Non-Goals
 
