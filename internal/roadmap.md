@@ -28,6 +28,10 @@ The executor-loop layer for that pivot is pinned in
 [internal/contracts/executor-loop.md](contracts/executor-loop.md), covering
 executor states, round schema, artifacts, reattach / heartbeat rules,
 completion classification, human gates, and agent / model selection precedence.
+The current-to-target planning bridge is pinned in
+[internal/contracts/workflow-first-gap-matrix.md](contracts/workflow-first-gap-matrix.md),
+including what survives from M7/M8/M9, what changes, and a likely M10 slice
+order.
 
 The `doctor` readiness marker tracks the **most recently closed** milestone. It currently reads `Milestone 8: workflow run operator controls (NGX-323, NGX-324, NGX-325, NGX-326, NGX-327, NGX-328, NGX-329, NGX-330) complete`. The marker advanced from the M6 closeout string to `Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete` at the M7 closeout slice (NGX-319), stayed pinned to the M7 string through every M8 implementation slice, and advanced to the M8 string at the M8 closeout slice (NGX-330).
 

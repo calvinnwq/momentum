@@ -5,6 +5,8 @@
 This contract records the product pivot from Goal-first execution to Workflow-first execution.
 The bounded executor loop details are pinned separately in
 [`internal/contracts/executor-loop.md`](executor-loop.md).
+The current-to-target implementation bridge is pinned in
+[`internal/contracts/workflow-first-gap-matrix.md`](workflow-first-gap-matrix.md).
 
 The core decision is:
 
@@ -315,6 +317,11 @@ For no-mistakes:
 Momentum must not blindly trust a single external status string. It should reconcile external state with artifacts, logs, repo state, and configured completion requirements.
 
 ## Gap Matrix
+
+The detailed current-to-target migration matrix and likely implementation slice
+order live in
+[`internal/contracts/workflow-first-gap-matrix.md`](workflow-first-gap-matrix.md).
+The compact table below preserves the core shape inside this pivot contract.
 
 Current Momentum state:
 

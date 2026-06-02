@@ -96,7 +96,8 @@ Milestone status:
   foundation work; general-purpose configurable workflows stay deferred until
   a workflow-first implementation milestone explicitly lands. See
   [`internal/contracts/workflow-first-runtime.md`](contracts/workflow-first-runtime.md)
-  and [`internal/contracts/executor-loop.md`](contracts/executor-loop.md).
+  [`internal/contracts/executor-loop.md`](contracts/executor-loop.md), and
+  [`internal/contracts/workflow-first-gap-matrix.md`](contracts/workflow-first-gap-matrix.md).
 
 The following surfaces remain deferred outside the active M9 live-execution
 scope so the runner-boundary, policy-loading, and M5 read-first source surfaces
@@ -149,8 +150,10 @@ continuous-draining path on `daemon start`.
 The workflow-first runtime pivot is accepted in
 [`internal/contracts/workflow-first-runtime.md`](contracts/workflow-first-runtime.md),
 with executor-loop details pinned in
-[`internal/contracts/executor-loop.md`](contracts/executor-loop.md), but
-implementation is deferred until a workflow-first implementation milestone
+[`internal/contracts/executor-loop.md`](contracts/executor-loop.md) and
+current-to-target planning pinned in
+[`internal/contracts/workflow-first-gap-matrix.md`](contracts/workflow-first-gap-matrix.md),
+but implementation is deferred until a workflow-first implementation milestone
 exists. Until then, the shipped `WorkflowRun` substrate remains scoped to the
 OpenClaw coding-workflow backend and the M9 live-wrapper foundation.
 
