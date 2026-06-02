@@ -360,6 +360,24 @@ M9 dogfood and live-resume slices add built-CLI smoke coverage.
     `test/workflow-recovery-artifact.test.ts` — live recovery codes render into
     `recovery.md` with bounded evidence and set the durable recovery flag.
 
+### 14. Live finalization mutates after ownership is lost
+
+- **Failure mode.** A live step could finish execution, then verification /
+  commit / reset finalization could continue after the repo lock or
+  managed-step lease was no longer owned, or the managed-step lease could be
+  released before recovery was durable.
+- **M9 invariant.** `advanceLiveWorkflowStep` heartbeats and re-checks the repo
+  lock plus managed-step lease through verification, commit, reset, and
+  recovery finalization. Lost ownership routes to `repo_lock_lost` recovery
+  before further git mutation, and the deferred managed-step lease is released
+  only after terminal or recovery reconciliation has been persisted.
+- **Owner.** [`src/live-step-advance.ts`](../src/live-step-advance.ts).
+- **Evidence.**
+  - Unit: `test/live-step-advance.test.ts` — keeps repo-lock and managed-step
+    leases fresh during finalization; rejects lost repo-lock ownership before
+    commit; leaves conflicting deferred leases outstanding; and sets finalize or
+    dispatch recovery before releasing the deferred managed-step lease.
+
 ## How to use this matrix
 
 - Treat each row as a closeout gate. A code change that breaks any listed

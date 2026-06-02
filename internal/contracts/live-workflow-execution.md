@@ -114,6 +114,8 @@ Momentum must keep its existing safety posture:
 - Commit intent is explicit and normalized.
 - If verification fails and HEAD is still at the expected base, Momentum resets the worktree using the existing failure-reset path.
 - If HEAD changed unexpectedly, Momentum enters manual recovery instead of destructive reset.
+- The repo lock and managed-step lease stay heartbeated through verification, commit, reset, and recovery finalization. A lost repo lock or workflow lease before any further git mutation routes to `repo_lock_lost` recovery.
+- Terminal step state for a cleanly dispatched live step is deferred until the finalization transaction reconciles the commit, reset, or recovery outcome.
 - Remote git operations (`fetch`, `pull`, `push`, `rebase`) remain out of scope unless a later contract adds them explicitly.
 
 ### Approvals
@@ -129,7 +131,7 @@ Starting, advancing, or retrying a live step must check:
 - The approval boundary required for that step.
 - The manual-recovery flag.
 - Active leases.
-- Repo path and repo lock availability; live execution requires `workflow_runs.repo_path` to be present and equal `executorInput.repoPath`. Repo-backed runs must also have a durable `workflow_runs.goal_id` plus an active, unexpired `repo_locks` row for `workflow_runs.repo_path` held by the same holder and matching goal id. Live execution heartbeats that repo lock while the managed step runs.
+- Repo path and repo lock availability; live execution requires `workflow_runs.repo_path` to be present and equal `executorInput.repoPath`. Repo-backed runs must also have a durable `workflow_runs.goal_id` plus an active, unexpired `repo_locks` row for `workflow_runs.repo_path` held by the same holder and matching goal id. Live execution heartbeats that repo lock while the managed step runs and while finalization owns verification / git mutation.
 
 Illegal advance attempts refuse without partial mutation. A step already marked
 `running` is a recovery/reattach concern, not an implicit idempotent start.
