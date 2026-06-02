@@ -292,6 +292,27 @@ describe("momentum workflow run start (NGX-346)", () => {
     });
   });
 
+  it("refuses a --definition-version that matches no persisted or built-in version", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const result = await run(
+      startArgs({
+        dataDir,
+        repoDir,
+        runId: "run-ver",
+        objective: "pin a missing version",
+        extra: ["--definition-version", "99"]
+      })
+    );
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "workflow run start",
+      code: "definition_not_found"
+    });
+  });
+
   it("refuses a duplicate run id with run_exists and leaves the first run intact", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
