@@ -1,7 +1,8 @@
 # Workflow commands
 
-Operator-facing CLI envelopes for the `workflow import`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run approve`, `workflow run update-step`, `workflow run clear-recovery`, and `workflow run monitor` commands.
+Operator-facing CLI envelopes for the `workflow run start`, `workflow import`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run approve`, `workflow run update-step`, `workflow run clear-recovery`, and `workflow run monitor` commands.
 
+- `workflow run start` starts a first-class workflow run from a validated workflow definition: it resolves the definition (a persisted definition, or the built-in `coding-workflow` recipe), loads repo policy, and durably materializes a `workflow_runs` row plus one ordered `workflow_steps` row per definition step, with an approval row when an approval boundary is supplied. `goal start` remains the compatibility path for the older Goal loop.
 - `workflow import` reads local `.agent-workflows/<run-id>/` directories and persists normalized rows into the `workflow_runs`, `workflow_steps`, and `workflow_approvals` tables.
 - `workflow status` is a read-only surface that lists workflow runs (with state / filter selectors) or returns the full detail of a single run.
 - `workflow handoff` is a read-only surface that emits a machine-readable next-action envelope for one run.
@@ -17,6 +18,130 @@ See also:
 
 - [docs/data-directory.md](data-directory.md) — the `workflow_runs` / `workflow_steps` / `workflow_approvals` / `workflow_leases` table schemas.
 - [docs/evidence-commands.md](evidence-commands.md) — `evidence ingest` and `evidence list` envelopes for the `evidence_records` table.
+
+## `workflow run start`
+
+```text
+momentum workflow run start --run-id <id> --repo <path> --objective <text> [--definition <key>] [--definition-version <n>] [--approval-boundary <boundary>] [--skill-revision <text>] [--issue-scope <identifier>] [--data-dir <path>] [--json]
+```
+
+Starts a first-class workflow run from a validated workflow definition and emits a stable JSON/text envelope. This is the definition-sourced start surface; `goal start` is left intact as the compatibility path for the older Goal loop.
+
+Required arguments:
+
+- `--run-id <id>` — the new run's identifier. Must be unique; a duplicate refuses with `run_exists` and leaves the existing run untouched.
+- `--repo <path>` — the repository the run operates on.
+- `--objective <text>` — the run objective recorded on the `workflow_runs` row.
+
+Optional arguments:
+
+- `--definition <key>` — the workflow definition key to start from. Defaults to `coding-workflow`.
+- `--definition-version <n>` — pin a specific definition version. When omitted, the latest persisted version (or the built-in version) is used.
+- `--approval-boundary <boundary>` — promote the steps the boundary covers to `approved` and open the run in `approved` rather than `pending` (same boundary coverage as [`workflow run approve`](#workflow-run-approve)).
+- `--skill-revision <text>` — record the skill revision that started the run.
+- `--issue-scope <identifier>` — record an issue-scope identifier on the run.
+
+Behaviour:
+
+- **Definition resolution**: a persisted definition for `--definition` (optionally pinned by `--definition-version`) wins. When no matching definition is persisted, the built-in `coding-workflow` recipe is the fallback, so a fresh database can still start the canonical workflow. The fallback is persisted into `workflow_definitions` / `step_definitions` before the run is written. An unresolved key/version refuses with `definition_not_found`.
+- **Repo policy loading**: `<repo>/MOMENTUM.md` is loaded and validated. A present-but-malformed policy refuses the start with `policy_invalid` and writes nothing; an absent policy is allowed and reported as `policy.present: false`.
+- **Materialization**: on success the command durably writes one `workflow_runs` row plus one ordered `workflow_steps` row per definition step, linking the run to the definition it started from (`workflow_definition_key` / `workflow_definition_version`). The run `source` is `workflow-definition`.
+- **Approval boundary**: when `--approval-boundary` is supplied, the pending steps the boundary covers are persisted as `approved`, a `workflow_approvals` row is recorded with synthetic `workflow-run-start://<run-id>/<boundary>` provenance, and the run state is derived as `approved`; otherwise every step is `pending` and the run state is `pending`.
+- **No clobber**: a duplicate `--run-id` refuses with `run_exists` and never overwrites the existing run.
+
+### JSON envelope (success)
+
+```json
+{
+  "ok": true,
+  "command": "workflow run start",
+  "dataDir": "/path/to/data",
+  "runId": "run-1",
+  "source": "workflow-definition",
+  "state": "pending",
+  "approvalBoundary": null,
+  "definitionKey": "coding-workflow",
+  "definitionVersion": 1,
+  "repoPath": "/path/to/repo",
+  "objective": "Ship the feature",
+  "counts": { "steps": 6 },
+  "policy": { "present": false, "path": "/path/to/repo/MOMENTUM.md" }
+}
+```
+
+`state` is `approved` and `approvalBoundary` echoes the supplied boundary when `--approval-boundary` is used; otherwise `state` is `pending` and `approvalBoundary` is `null`. `counts.steps` is the number of materialized step rows. `policy.present` is `true` only when a valid `MOMENTUM.md` was loaded; `policy.path` is always the resolved `MOMENTUM.md` path.
+
+### JSON envelope (failure)
+
+```json
+{
+  "ok": false,
+  "command": "workflow run start",
+  "code": "run_exists",
+  "message": "Workflow run already exists: run-1.",
+  "dataDir": "/path/to/data",
+  "runId": "run-1"
+}
+```
+
+`dataDir` and `runId` are included whenever they are known at the point of failure. The `invalid_run_start` refusal additionally carries an `errors` array of `{ code, message, path? }` entries from the run-start materialization taxonomy:
+
+```json
+{
+  "ok": false,
+  "command": "workflow run start",
+  "code": "invalid_run_start",
+  "message": "Invalid workflow run start: approval_boundary_invalid",
+  "dataDir": "/path/to/data",
+  "runId": "run-bad",
+  "errors": [
+    {
+      "code": "approval_boundary_invalid",
+      "message": "Approval boundary is not a known workflow approval boundary.",
+      "path": "approvalBoundary"
+    }
+  ]
+}
+```
+
+### Error codes
+
+| Code | Meaning |
+|------|---------|
+| `run_id_required` | `--run-id` was not supplied. |
+| `repo_required` | `--repo` was not supplied. |
+| `objective_required` | `--objective` was not supplied. |
+| `data_dir_failed` | Data directory resolution failed. |
+| `definition_not_found` | No workflow definition matches `--definition` (and `--definition-version`, when supplied), and the built-in fallback did not match either. |
+| `policy_invalid` | `<repo>/MOMENTUM.md` is present but malformed; the start is refused and nothing is written. |
+| `invalid_run_start` | Run-start materialization rejected the inputs; carries an `errors` array. |
+| `run_exists` | A workflow run with `--run-id` already exists; the existing run is left untouched. |
+
+The `invalid_run_start` `errors[]` use the run-start materialization taxonomy: `definition_invalid`, `run_id_invalid`, `repo_path_invalid`, `objective_invalid`, `approval_boundary_invalid`, `issue_scope_invalid`, `route_invalid`.
+
+### Text output (success)
+
+```text
+Workflow run started: run-1
+Definition: coding-workflow v1
+State: pending
+Approval boundary: (none)
+Steps: 6
+Repo: /path/to/repo
+Objective: Ship the feature
+Policy: (none)
+Data dir: /path/to/data
+```
+
+The `Approval boundary` line prints the boundary when one was supplied. The `Policy` line prints the `MOMENTUM.md` path when a valid policy was loaded and `(none)` otherwise.
+
+### Text output (failure)
+
+```text
+Workflow run already exists: run-1.
+```
+
+Exit code 0 on success, 1 on structured refusal, 2 on usage error.
 
 ## `workflow import`
 

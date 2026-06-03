@@ -54,6 +54,15 @@ const WORKFLOW_RUN_MONITOR_ADVISORY_COLUMNS: ColumnSpec[] = [
   { name: "monitor_last_emitted_digest", type: "TEXT" }
 ];
 
+// M10-02 (NGX-346): link a workflow run back to the WorkflowDefinition recipe it
+// was started from, so a workflow-first run start records its (key, version)
+// provenance. Nullable because pre-M10 runs (e.g. imported coding-workflow
+// artifacts) have no persisted definition link.
+const WORKFLOW_RUN_DEFINITION_COLUMNS: ColumnSpec[] = [
+  { name: "workflow_definition_key", type: "TEXT" },
+  { name: "workflow_definition_version", type: "INTEGER" }
+];
+
 const WORKFLOW_STEP_OPERATOR_COLUMNS: ColumnSpec[] = [
   { name: "operator_reason", type: "TEXT" },
   { name: "operator_actor", type: "TEXT" },
@@ -332,6 +341,8 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
   route_json TEXT NOT NULL DEFAULT '{}',
   approval_boundary TEXT,
   skill_revision TEXT,
+  workflow_definition_key TEXT,
+  workflow_definition_version INTEGER,
   monitor_last_seen_state TEXT,
   monitor_terminal INTEGER,
   monitor_step TEXT,
@@ -518,6 +529,9 @@ export function applyQueueMigrations(db: MomentumDb): void {
         ensureColumn(db, "workflow_runs", column);
       }
       for (const column of WORKFLOW_RUN_MONITOR_ADVISORY_COLUMNS) {
+        ensureColumn(db, "workflow_runs", column);
+      }
+      for (const column of WORKFLOW_RUN_DEFINITION_COLUMNS) {
         ensureColumn(db, "workflow_runs", column);
       }
     }

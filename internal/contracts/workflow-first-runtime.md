@@ -29,7 +29,7 @@ This pivot changes the future product model:
 - M9 primitives should be reused where possible: workflow run state, approvals, leases, live wrapper execution, result-file validation, verification / commit finalization, and recovery taxonomy.
 - M9 should not be stretched into a generic workflow product retroactively. M10 owns the workflow-first implementation sequence, starting with workflow / step definition primitives.
 
-The earlier M9 run-start preference of `goal start` plus a `WorkflowRun` link is superseded for future workflow-first work. The future top-level start surface is a workflow run start surface, not a goal start surface. `goal start` remains a compatibility path for the old Goal loop until it is migrated or deprecated.
+The earlier M9 run-start preference of `goal start` plus a `WorkflowRun` link is superseded for future workflow-first work. M10-02 has landed the top-level workflow run start surface; it starts `WorkflowRun` rows from definitions rather than from the Goal loop. `goal start` remains a compatibility path for the old Goal loop until it is migrated or deprecated.
 
 ## What Momentum Should Copy
 
@@ -331,6 +331,7 @@ Current Momentum state:
 - Has M8 operator controls over imported workflow runs.
 - Has M9 live wrapper and finalization primitives for fixed canonical step kinds.
 - Has M10-01 `WorkflowDefinition` / `StepDefinition` validation, built-in coding workflow definition, and `workflow_definitions` / `step_definitions` persistence.
+- Has M10-02 `workflow run start` materialization from persisted or built-in definitions, including definition provenance on `workflow_runs`.
 - Has `goal start`, `daemon`, and workflow import / status / run controls.
 
 Required workflow-first gaps:
@@ -345,7 +346,7 @@ Required workflow-first gaps:
 | Goal loop | Product-level Goal | `goal-loop` executor inside a workflow step |
 | no-mistakes | External fixed pipeline | Specialist executor mirrored into Momentum |
 | Human gates | Split between approvals, recovery flags, external TUI state | Durable gate records with allowed actions and evidence |
-| Run start | `goal start` plus imported workflow controls | First-class workflow run start |
+| Run start | `goal start` plus imported workflow controls plus `workflow run start` from definitions | Workflow-first run start connected to executor scheduling |
 | Recovery | Goal-scoped and WorkflowRun-scoped surfaces | Unified workflow / step / executor recovery taxonomy |
 
 ## Non-Goals For This Planning Contract
@@ -361,4 +362,4 @@ This planning contract does not implement:
 - Public UI.
 - Replacement of GNHF or no-mistakes internals.
 
-M10 is now implementing these as concrete slices: M10-01 lands definition schema / validation / persistence, while CLI start, executor state, daemon scheduling, and external runtime behavior remain later slices.
+M10 is now implementing these as concrete slices: M10-01 lands definition schema / validation / persistence and M10-02 lands CLI run start, while executor state, daemon scheduling, and external runtime behavior remain later slices.

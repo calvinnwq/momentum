@@ -2,9 +2,9 @@
 
 **Status:** Implementation started. M10 is the first implementation milestone
 for the workflow-first runtime model accepted in PR #70. M10-00 promoted the
-planning contracts into this executable sequence, and M10-01 has begun landing
-the workflow / step definition primitives without closing or rewriting M9 by
-itself.
+planning contracts into this executable sequence. M10-01 has begun landing the
+workflow / step definition primitives and is now complete, and M10-02 adds
+workflow run start without closing or rewriting M9 by itself.
 
 M10 promotes Momentum from a Goal-first product surface plus imported
 OpenClaw-coding-workflow substrate into a configurable workflow runtime:
@@ -26,8 +26,8 @@ M10 is governed by these planning contracts:
 Those contracts pin the product pivot, executor-loop semantics, and
 current-to-target migration shape. M10-00 promoted them into an executable
 milestone narrative and issue sequence; M10-01 adds the first durable definition
-schema, validation, and persistence primitives while later M10 slices implement
-start, executor, and scheduler behavior.
+schema, validation, and persistence primitives, M10-02 adds workflow run start,
+and later M10 slices implement executor and scheduler behavior.
 
 ## Relationship To M9
 
@@ -156,8 +156,8 @@ updated.
 ## Non-Goals
 
 M10-00 was docs/spec/tests only. M10-01 adds definition schema, validation, and
-persistence only; CLI start, daemon, executor-loop, and generalized runtime
-behavior remain later slices.
+persistence only; M10-02 adds first-class workflow run start. Daemon,
+executor-loop, and generalized runtime behavior remain later slices.
 
 Across the milestone, these remain outside scope unless a later contract
 explicitly changes them:

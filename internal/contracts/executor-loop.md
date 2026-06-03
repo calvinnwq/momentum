@@ -326,11 +326,11 @@ This contract does not implement:
 
 - New migrations.
 - New CLI commands.
-- A workflow run start surface.
+- Additional workflow run start behavior beyond the M10-02 materialization surface.
 - Daemon scheduling changes.
 - Linear issue remapping.
 - A public UI.
 - Replacement of GNHF or no-mistakes internals.
 - Remote git operations.
 
-M10 now carries these as implementation slices: M10-01 lands definition migrations, while workflow run start, executor-loop records, daemon scheduling, and CLI surfaces remain later slices.
+M10 now carries these as implementation slices: M10-01 lands definition migrations and M10-02 lands workflow run start, while executor-loop records, daemon scheduling, and executor-control CLI surfaces remain later slices.

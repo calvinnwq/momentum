@@ -301,11 +301,10 @@ Run locally via the targeted vitest command:
 pnpm vitest run test/live-step-finalize.test.ts test/live-step-run-recovery.test.ts test/live-step-advance.test.ts test/workflow-recovery-artifact.test.ts
 ```
 
-## Milestone 10 definition primitive unit coverage (NGX-345)
+## Milestone 10 definition and run-start coverage (NGX-345, NGX-346)
 
-M10-01 is covered by focused unit and migration tests rather than a built-binary
-CLI smoke because workflow definition commands and workflow run start remain
-later M10 slices.
+M10-01 and M10-02 are covered by focused unit, migration, and CLI tests rather
+than a built-binary CLI smoke.
 
 Coverage:
 
@@ -315,11 +314,18 @@ Coverage:
   pruning, loading, and built-in seeding in
   `test/workflow-definition-persist.test.ts`.
 - migration coverage for the new definition tables in `test/migrations.test.ts`.
+- pure workflow run-start materialization in `test/workflow-run-start.test.ts`.
+- durable run-start persistence, definition provenance, approval-boundary
+  materialization, and duplicate-run refusal in
+  `test/workflow-run-start-persist.test.ts`.
+- `workflow run start` CLI coverage for built-in definition seeding, persisted
+  definitions, refusal envelopes, repo policy loading, and public docs in
+  `test/cli-workflow-run-start.test.ts`.
 
 Run locally via the targeted vitest command:
 
 ```
-pnpm vitest run test/workflow-definition.test.ts test/workflow-definition-persist.test.ts test/migrations.test.ts
+pnpm vitest run test/workflow-definition.test.ts test/workflow-definition-persist.test.ts test/migrations.test.ts test/workflow-run-start.test.ts test/workflow-run-start-persist.test.ts test/cli-workflow-run-start.test.ts
 ```
 
 ## Test boundary

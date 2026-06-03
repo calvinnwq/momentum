@@ -1,6 +1,6 @@
 # Contract: Workflow-First Gap Matrix
 
-**Status:** Accepted implementation bridge. M10-00 promoted this matrix into the workflow-first runtime milestone sequence; M10-01 has begun landing the definition schema and persistence slice. It still does not authorize Linear remapping or milestone renumbering by itself.
+**Status:** Accepted implementation bridge. M10-00 promoted this matrix into the workflow-first runtime milestone sequence; M10-01 has landed the definition schema and persistence slice, and M10-02 adds workflow run start. It still does not authorize Linear remapping or milestone renumbering by itself.
 
 This contract follows:
 
@@ -35,6 +35,7 @@ Current durable runtime surfaces:
 - M8 operator controls for workflow run list, approve, update-step, clear-recovery, and monitor.
 - M9 live wrapper config, registry, execution, result capture, finalization, and recovery primitives for fixed canonical coding workflow step kinds.
 - M10-01 `WorkflowDefinition` / `StepDefinition` validation, built-in coding workflow definition, and `workflow_definitions` / `step_definitions` persistence helpers.
+- M10-02 `workflow run start` materialization from persisted or built-in definitions.
 - Evidence records with typed workflow linkage.
 - Source-item and external-apply contracts.
 
@@ -50,6 +51,7 @@ Current product surface:
 - `workflow import`
 - `workflow status`
 - `workflow handoff`
+- `workflow run start`
 - `workflow run approve`
 - `workflow run list`
 - `workflow run update-step`
@@ -59,7 +61,7 @@ Current product surface:
 Current limitation:
 
 ```text
-WorkflowRun is durable, but not yet the top-level configurable product start surface.
+WorkflowRun is durable, but not yet the top-level configurable product start surface for scheduled execution: M10-02 starts rows from definitions, while later slices attach executor records and scheduling.
 ```
 
 ## Target Inventory
@@ -98,7 +100,7 @@ Future product surface:
 | Area | Current Shape | Target Shape | Migration Direction |
 |---|---|---|---|
 | Product root | Goal-first execution plus imported workflow runs | WorkflowDefinition / WorkflowRun | Introduce workflow definitions before deprecating goal-first UX |
-| Run start | `goal start`; `workflow import` for external plans; persisted workflow definitions | `workflow run start` | Add the later M10 first-class workflow start command on top of persisted definitions |
+| Run start | `goal start`; `workflow import` for external plans; persisted workflow definitions; `workflow run start` materialization | `workflow run start` connected to execution scheduling | Keep the first-class start command as the workflow-first entry point while later slices attach executor records and scheduling |
 | Step model | Fixed coding workflow step kinds | Configurable StepDefinition list | Keep canonical coding workflow as one built-in definition |
 | Executor model | Runner profiles and M9 wrapper registry keyed by fixed step kind | Per-step ExecutorDefinition and executor config | Reuse wrapper config as executor config input |
 | Loop state | Goal iteration jobs/artifacts; external GNHF/no-mistakes state | ExecutorInvocation / ExecutorRound records | Persist common loop state in Momentum SQLite |
@@ -164,7 +166,7 @@ The main risks:
 - Letting executor recommendations become authoritative instead of daemon-classified.
 - Flattening every loop iteration into top-level workflow steps and making workflows unreadable.
 - Losing repo safety while moving finalization from goal iterations into executor rounds.
-- Creating a workflow start command before persisted definitions, approval / repo policy, and start semantics are wired.
+- Attaching execution scheduling before executor records, approval / repo policy, and start semantics are wired together.
 
 ## Non-Goals
 
