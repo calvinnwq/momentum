@@ -27,6 +27,8 @@
  *     not an idempotent re-ingest like `workflow import`.)
  */
 
+import crypto from "node:crypto";
+
 import { isUniqueViolation, type MomentumDb } from "./db.js";
 import {
   materializeWorkflowRunStart,
@@ -148,6 +150,33 @@ export function persistWorkflowRunStart(
         step.state,
         step.order,
         step.required ? 1 : 0,
+        run.createdAt,
+        run.updatedAt
+      );
+    }
+
+    if (run.approvalBoundary !== null) {
+      const phrase = `workflow run start --approval-boundary ${run.approvalBoundary}`;
+      const artifactPath = `workflow-run-start://${run.runId}/${run.approvalBoundary}`;
+      const artifactDigest = crypto
+        .createHash("sha256")
+        .update(`start:${run.runId}:${run.approvalBoundary}:${phrase}`)
+        .digest("hex");
+
+      db.prepare(
+        `INSERT INTO workflow_approvals (
+           run_id, boundary, actor, phrase, artifact_path, artifact_digest,
+           recorded_at, discharged_at, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        run.runId,
+        run.approvalBoundary,
+        run.source,
+        phrase,
+        artifactPath,
+        artifactDigest,
+        run.createdAt,
+        null,
         run.createdAt,
         run.updatedAt
       );

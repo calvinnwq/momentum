@@ -120,6 +120,25 @@ function loadStepRows(db: MomentumDb, runId: string): StepRow[] {
     .all(runId) as StepRow[];
 }
 
+type ApprovalRow = {
+  run_id: string;
+  boundary: string;
+  actor: string | null;
+  phrase: string;
+  artifact_path: string;
+  artifact_digest: string;
+  recorded_at: number;
+  discharged_at: number | null;
+};
+
+function loadApprovalRows(db: MomentumDb, runId: string): ApprovalRow[] {
+  return db
+    .prepare(
+      "SELECT run_id, boundary, actor, phrase, artifact_path, artifact_digest, recorded_at, discharged_at FROM workflow_approvals WHERE run_id = ? ORDER BY boundary"
+    )
+    .all(runId) as ApprovalRow[];
+}
+
 describe("persistWorkflowRunStart", () => {
   it("persists the workflow run row linked back to its definition", () => {
     const db = openTempDb();
@@ -256,6 +275,35 @@ describe("persistWorkflowRunStart", () => {
       expect(byKind.get("implementation")).toBe("approved");
       expect(byKind.get("postflight")).toBe("pending");
       expect(byKind.get("no-mistakes")).toBe("pending");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("persists approval-boundary starts as durable approval coverage", () => {
+    const db = openTempDb();
+    try {
+      persistWorkflowRunStart(
+        db,
+        baseInput({
+          definition: CODING_WORKFLOW_DEFINITION,
+          approvalBoundary: "implementation",
+          source: "operator-cli"
+        })
+      );
+
+      const approvals = loadApprovalRows(db, "run-001");
+      expect(approvals).toHaveLength(1);
+      expect(approvals[0]).toMatchObject({
+        run_id: "run-001",
+        boundary: "implementation",
+        actor: "operator-cli",
+        phrase: "workflow run start --approval-boundary implementation",
+        artifact_path: "workflow-run-start://run-001/implementation",
+        recorded_at: NOW,
+        discharged_at: null
+      });
+      expect(approvals[0]?.artifact_digest).toMatch(/^[a-f0-9]{64}$/);
     } finally {
       db.close();
     }
