@@ -1,6 +1,6 @@
 # Contract: Workflow-First Gap Matrix
 
-**Status:** Accepted implementation bridge. M10-00 promoted this matrix into the workflow-first runtime milestone sequence; M10-01 has landed the definition schema and persistence slice, and M10-02 adds workflow run start. It still does not authorize Linear remapping or milestone renumbering by itself.
+**Status:** Accepted implementation bridge. M10-00 promoted this matrix into the workflow-first runtime milestone sequence; M10-01 has landed the definition schema and persistence slice, M10-02 adds workflow run start, and M10-03 adds executor-loop schema / persistence. It still does not authorize Linear remapping or milestone renumbering by itself.
 
 This contract follows:
 
@@ -36,6 +36,7 @@ Current durable runtime surfaces:
 - M9 live wrapper config, registry, execution, result capture, finalization, and recovery primitives for fixed canonical coding workflow step kinds.
 - M10-01 `WorkflowDefinition` / `StepDefinition` validation, built-in coding workflow definition, and `workflow_definitions` / `step_definitions` persistence helpers.
 - M10-02 `workflow run start` materialization from persisted or built-in definitions.
+- M10-03 `ExecutorDefinition` / `ExecutorInvocation` / `ExecutorRound` persistence, with executor artifacts, checkpoints, findings, and decisions below rounds.
 - Evidence records with typed workflow linkage.
 - Source-item and external-apply contracts.
 
@@ -61,7 +62,7 @@ Current product surface:
 Current limitation:
 
 ```text
-WorkflowRun is durable, but not yet the top-level configurable product start surface for scheduled execution: M10-02 starts rows from definitions, while later slices attach executor records and scheduling.
+WorkflowRun is durable and can start from definitions, and executor records now persist below step runs. Later slices still attach daemon scheduling and executable adapters to those records.
 ```
 
 ## Target Inventory
@@ -147,7 +148,7 @@ The M10 slice order:
 1. **M10-00 Workflow-first contract and milestone setup**: promote these planning contracts into an implementation milestone and pin issue order.
 2. **M10-01 WorkflowDefinition and StepDefinition schema**: add definitions, validation, durable `workflow_definitions` / `step_definitions` persistence, and the built-in coding workflow definition.
 3. **M10-02 Workflow run start**: create runs from definitions with approval boundaries and repo policy.
-4. **M10-03 ExecutorDefinition / Invocation / Round schema**: persist executor loop state under step runs.
+4. **M10-03 ExecutorDefinition / Invocation / Round schema**: persist executor loop state under step runs. *(landed in this slice)*
 5. **M10-04 Daemon workflow scheduler lane**: schedule runnable workflow runs and step runs without breaking goal iteration draining.
 6. **M10-05 Goal-loop executor adapter**: migrate existing goal iteration behavior into executor rounds.
 7. **M10-06 One-shot / script executor adapter**: support deterministic commands and bounded agent/script invocations.

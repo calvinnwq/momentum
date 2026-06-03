@@ -24,7 +24,7 @@ Momentum never modifies the data directory outside the resolved path. Each goal 
 
 ```text
 <data-dir>/
-  momentum.db                  # SQLite (goals, jobs, events, repo_locks, daemon_runs, source_items, source_snapshots, source_reconciliation_runs, evidence_records, update_intents, intent_apply_audits, workflow_runs, workflow_steps, workflow_approvals, workflow_leases, workflow_definitions, step_definitions tables)
+  momentum.db                  # SQLite (goals, jobs, events, repo_locks, daemon_runs, source_items, source_snapshots, source_reconciliation_runs, evidence_records, update_intents, intent_apply_audits, workflow_runs, workflow_steps, workflow_approvals, workflow_leases, workflow_definitions, step_definitions, executor_* tables)
   goals/
     <goal-id>/
       goal.md                  # Canonical copy of the goal spec
@@ -61,6 +61,10 @@ A single `momentum.db` per data directory backs durable state across all goals:
 - `workflow_leases` — durable monitor / managed-step / dispatch leases keyed by `(run_id, lease_kind)`; stores holder, acquired / expires / heartbeat / released timestamps (a non-null `released_at` marks the lease as cleanly released), and a `stale_policy` of `auto-release` or `manual-recovery-required`.
 - `workflow_definitions` — durable reusable workflow definition rows keyed by `(key, version)`, carrying the display `title` and lifecycle timestamps. Re-persisting a `(key, version)` upserts in place, preserves `created_at`, and bumps `updated_at`, so a definition can evolve across versions without losing prior history.
 - `step_definitions` — durable ordered step rows for a workflow definition keyed by `(definition_key, definition_version, step_key)` and referencing `workflow_definitions(key, version)`; each carries the step `kind` (`preflight` / `implementation` / `postflight` / `no-mistakes` / `merge-cleanup` / `linear-refresh`), the `executor` family that powers it (`goal-loop` / `one-shot` / `no-mistakes` / `script` / `external-apply` / `subworkflow`), a `step_order`, a `required` flag, and lifecycle timestamps. The persisted step set mirrors its definition exactly: re-persisting drops steps the definition no longer declares, preserves retained steps' `created_at`, and bumps `updated_at`.
+- `executor_definitions` — durable executor recipes keyed by `executor_key`, carrying the executor `family`, display name, optional agent / model / effort policy, and lifecycle timestamps.
+- `executor_invocations` — one configured executor session below a workflow step, keyed by `invocation_id` and referencing `(run_id, step_id)`; stores executor family, state, artifact root, model metadata, summary fields, verification / recovery result fields, and lifecycle timestamps.
+- `executor_rounds` — bounded executor-loop attempts keyed by `round_id` and referencing `executor_invocations`; stores attempt / round ordering, durable round state, execution metadata, result summaries, remaining work, verification status, commit / recovery fields, and lifecycle timestamps.
+- `executor_artifacts`, `executor_checkpoints`, `executor_findings`, `executor_decisions` — append-only evidence rows below executor rounds for artifacts, checkpoint events, review findings, and durable decisions. Each table references `executor_rounds` and keeps enough structured payload to reattach after process, daemon, or chat loss.
 
 ## Per-goal artifact files
 

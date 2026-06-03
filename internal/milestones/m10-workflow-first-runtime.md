@@ -3,8 +3,9 @@
 **Status:** Implementation started. M10 is the first implementation milestone
 for the workflow-first runtime model accepted in PR #70. M10-00 promoted the
 planning contracts into this executable sequence. M10-01 has begun landing the
-workflow / step definition primitives and is now complete, and M10-02 adds
-workflow run start without closing or rewriting M9 by itself.
+workflow / step definition primitives and is now complete, M10-02 adds workflow
+run start, and M10-03 adds the durable executor-loop schema without closing or
+rewriting M9 by itself.
 
 M10 promotes Momentum from a Goal-first product surface plus imported
 OpenClaw-coding-workflow substrate into a configurable workflow runtime:
@@ -27,7 +28,8 @@ Those contracts pin the product pivot, executor-loop semantics, and
 current-to-target migration shape. M10-00 promoted them into an executable
 milestone narrative and issue sequence; M10-01 adds the first durable definition
 schema, validation, and persistence primitives, M10-02 adds workflow run start,
-and later M10 slices implement executor and scheduler behavior.
+M10-03 adds executor definition / invocation / round persistence, and later M10
+slices implement scheduler and adapter behavior.
 
 ## Relationship To M9
 
@@ -115,7 +117,7 @@ The M10 slice order is:
    taxonomy.
 4. **NGX-347 — M10-03 ExecutorDefinition / Invocation / Round schema.** Persist executor
    loop state below step runs, including artifacts, checkpoints, findings, and
-   decisions.
+   decisions. *(landed in this slice)*
 5. **NGX-348 — M10-04 Daemon workflow scheduler lane.** Schedule runnable workflow runs
    and step runs without breaking existing goal iteration draining.
 6. **NGX-349 — M10-05 Goal-loop executor adapter.** Move implementation-like autonomous
@@ -156,8 +158,9 @@ updated.
 ## Non-Goals
 
 M10-00 was docs/spec/tests only. M10-01 adds definition schema, validation, and
-persistence only; M10-02 adds first-class workflow run start. Daemon,
-executor-loop, and generalized runtime behavior remain later slices.
+persistence only; M10-02 adds first-class workflow run start; M10-03 adds
+executor-loop schema and persistence only. Daemon scheduling, executor adapters,
+and generalized runtime behavior remain later slices.
 
 Across the milestone, these remain outside scope unless a later contract
 explicitly changes them:
