@@ -26,8 +26,8 @@ M10 is governed by these planning contracts:
 Those contracts pin the product pivot, executor-loop semantics, and
 current-to-target migration shape. M10-00 promoted them into an executable
 milestone narrative and issue sequence; M10-01 adds the first durable definition
-schema, validation, and persistence primitives while later M10 slices implement
-start, executor, and scheduler behavior.
+schema, validation, and persistence primitives, M10-02 adds workflow run start,
+and later M10 slices implement executor and scheduler behavior.
 
 ## Relationship To M9
 

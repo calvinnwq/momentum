@@ -331,6 +331,7 @@ Current Momentum state:
 - Has M8 operator controls over imported workflow runs.
 - Has M9 live wrapper and finalization primitives for fixed canonical step kinds.
 - Has M10-01 `WorkflowDefinition` / `StepDefinition` validation, built-in coding workflow definition, and `workflow_definitions` / `step_definitions` persistence.
+- Has M10-02 `workflow run start` materialization from persisted or built-in definitions, including definition provenance on `workflow_runs`.
 - Has `goal start`, `daemon`, and workflow import / status / run controls.
 
 Required workflow-first gaps:
@@ -345,7 +346,7 @@ Required workflow-first gaps:
 | Goal loop | Product-level Goal | `goal-loop` executor inside a workflow step |
 | no-mistakes | External fixed pipeline | Specialist executor mirrored into Momentum |
 | Human gates | Split between approvals, recovery flags, external TUI state | Durable gate records with allowed actions and evidence |
-| Run start | `goal start` plus imported workflow controls | First-class workflow run start |
+| Run start | `goal start` plus imported workflow controls plus `workflow run start` from definitions | Workflow-first run start connected to executor scheduling |
 | Recovery | Goal-scoped and WorkflowRun-scoped surfaces | Unified workflow / step / executor recovery taxonomy |
 
 ## Non-Goals For This Planning Contract
@@ -361,4 +362,4 @@ This planning contract does not implement:
 - Public UI.
 - Replacement of GNHF or no-mistakes internals.
 
-M10 is now implementing these as concrete slices: M10-01 lands definition schema / validation / persistence, while CLI start, executor state, daemon scheduling, and external runtime behavior remain later slices.
+M10 is now implementing these as concrete slices: M10-01 lands definition schema / validation / persistence and M10-02 lands CLI run start, while executor state, daemon scheduling, and external runtime behavior remain later slices.

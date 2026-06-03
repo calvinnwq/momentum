@@ -85,9 +85,9 @@ Milestone status:
   live recovery / resume smoke coverage, and the dogfood run. M9 wraps the
   existing engines and does not rewrite them. The start surface is part of the
   M9 design decision, superseded for future workflow-first work by M10: `goal
-  start` remains a compatibility path, while first-class workflow run start is a
-  later M10 slice. The `doctor --json` marker remains on the M8 closeout string
-  until a real milestone closeout slice flips it. See
+  start` remains a compatibility path, while first-class workflow run start has
+  landed in the M10 run-start slice. The `doctor --json` marker remains on the
+  M8 closeout string until a real milestone closeout slice flips it. See
   [`internal/milestones/m9-live-workflow-execution.md`](milestones/m9-live-workflow-execution.md)
   and [`internal/contracts/live-workflow-execution.md`](contracts/live-workflow-execution.md).
 - **Workflow-first runtime pivot** is an accepted planning contract. It

@@ -111,8 +111,8 @@ becomes an executor family inside a workflow step.
 ### M10 implementation sequence
 
 1. **NGX-344 — M10-00 Workflow-first contract and milestone setup.** *(done)*
-2. **NGX-345 — M10-01 WorkflowDefinition and StepDefinition schema.** *(landed in this slice)*
-3. **NGX-346 — M10-02 Workflow run start.**
+2. **NGX-345 — M10-01 WorkflowDefinition and StepDefinition schema.** *(done)*
+3. **NGX-346 — M10-02 Workflow run start.** *(landed in this slice)*
 4. **NGX-347 — M10-03 ExecutorDefinition / Invocation / Round schema.**
 5. **NGX-348 — M10-04 Daemon workflow scheduler lane.**
 6. **NGX-349 — M10-05 Goal-loop executor adapter.**
@@ -179,4 +179,4 @@ The following remain explicitly deferred until a later milestone justifies them.
 - Cooperative mid-job cancellation / signal handling beyond the existing `daemon stop` / `daemon stop --now` semantics.
 - Remote git operations (`fetch` / `pull` / `push` / `rebase`) driven from Momentum.
 - Replacing the GNHF / postflight / no-mistakes / merge-cleanup engines themselves; M7 is the substrate, M8 is the operator-control surface, and M9 wraps the executors — none of them reimplement the engines.
-- Generalizing the `WorkflowRun` substrate beyond OpenClaw coding workflows remains deferred to later M10 start / execution slices. M10-01 has landed reusable definition schema and persistence primitives, but first-class run start and generalized execution are still pending; the accepted planning contracts for that pivot are [internal/contracts/workflow-first-runtime.md](contracts/workflow-first-runtime.md), [internal/contracts/executor-loop.md](contracts/executor-loop.md), and [internal/contracts/workflow-first-gap-matrix.md](contracts/workflow-first-gap-matrix.md).
+- Generalizing the `WorkflowRun` substrate beyond OpenClaw coding workflows continues across M10 execution slices. M10-01 has landed reusable definition schema and persistence primitives, and M10-02 adds first-class run start; generalized execution remains pending. The accepted planning contracts for that pivot are [internal/contracts/workflow-first-runtime.md](contracts/workflow-first-runtime.md), [internal/contracts/executor-loop.md](contracts/executor-loop.md), and [internal/contracts/workflow-first-gap-matrix.md](contracts/workflow-first-gap-matrix.md).
