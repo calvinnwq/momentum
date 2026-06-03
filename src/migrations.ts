@@ -487,6 +487,175 @@ CREATE INDEX IF NOT EXISTS idx_jobs_state_type
   ON jobs(state, type);
 `;
 
+// M10-03 (NGX-347): durable executor-loop spine nested below a `StepRun` so
+// bounded autonomy never flattens into top-level workflow steps:
+//
+//   StepRun -> ExecutorInvocation -> ExecutorRound[]
+//                                       -> ExecutorArtifact[]
+//                                       -> ExecutorCheckpoint[]
+//                                       -> ExecutorFinding[]
+//                                       -> ExecutorDecision[]
+//
+// The spine tables mirror the pure `ExecutorDefinitionRecord` /
+// `ExecutorInvocationRecord` / `ExecutorRoundRecord` shapes in
+// src/executor-loop-reducer.ts (the round columns are exactly the contract
+// "Round Schema" identity / execution / result fields). The four child evidence
+// tables the contract names — `executor_artifacts` / `executor_findings` /
+// `executor_decisions` / `executor_checkpoints` — hang below a round by
+// `round_id`: artifacts pin the contract "Required Artifacts" classes as
+// evidence pointers, checkpoints stream major executor stages (ordered + unique
+// per round by `sequence`), findings carry review findings and their selected
+// flag, and decisions carry durable decision points with their allowed actions
+// and resolution. `string[]` fields (`log_paths`, `key_changes`,
+// `remaining_work`, `changed_files`, `allowed_actions`) are stored as JSON TEXT.
+// The FK references are *enforced* (node:sqlite defaults `PRAGMA foreign_keys =
+// ON`), so an invocation requires a real `(workflow_run_id, step_run_id)`, a
+// round requires a real invocation, and each evidence row requires a real
+// round — bounded autonomy can never orphan itself above its owning StepRun.
+const EXECUTOR_LOOP_DDL = `
+CREATE TABLE IF NOT EXISTS executor_definitions (
+  executor_key TEXT PRIMARY KEY,
+  family TEXT NOT NULL,
+  agent_provider TEXT,
+  model TEXT,
+  effort TEXT,
+  timeout_ms INTEGER,
+  max_rounds INTEGER,
+  policy_envelope TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS executor_invocations (
+  invocation_id TEXT PRIMARY KEY,
+  workflow_run_id TEXT NOT NULL REFERENCES workflow_runs(id),
+  step_run_id TEXT NOT NULL,
+  step_key TEXT NOT NULL,
+  executor_family TEXT NOT NULL,
+  state TEXT NOT NULL DEFAULT 'pending',
+  attempt INTEGER NOT NULL DEFAULT 1,
+  started_at INTEGER,
+  heartbeat_at INTEGER,
+  finished_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY (workflow_run_id, step_run_id)
+    REFERENCES workflow_steps(run_id, step_id)
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS idx_executor_invocations_run
+  ON executor_invocations(workflow_run_id);
+
+CREATE INDEX IF NOT EXISTS idx_executor_invocations_step
+  ON executor_invocations(workflow_run_id, step_run_id);
+
+CREATE INDEX IF NOT EXISTS idx_executor_invocations_state
+  ON executor_invocations(state);
+
+CREATE TABLE IF NOT EXISTS executor_rounds (
+  round_id TEXT PRIMARY KEY,
+  invocation_id TEXT NOT NULL REFERENCES executor_invocations(invocation_id),
+  workflow_run_id TEXT NOT NULL REFERENCES workflow_runs(id),
+  step_run_id TEXT NOT NULL,
+  step_key TEXT NOT NULL,
+  executor_family TEXT NOT NULL,
+  attempt INTEGER NOT NULL DEFAULT 1,
+  round_index INTEGER NOT NULL,
+  state TEXT NOT NULL DEFAULT 'pending',
+  classification TEXT,
+  started_at INTEGER,
+  heartbeat_at INTEGER,
+  finished_at INTEGER,
+  agent_provider TEXT,
+  model TEXT,
+  effort TEXT,
+  input_digest TEXT,
+  result_digest TEXT,
+  artifact_root TEXT,
+  log_paths TEXT NOT NULL DEFAULT '[]',
+  summary TEXT,
+  key_changes TEXT NOT NULL DEFAULT '[]',
+  remaining_work TEXT NOT NULL DEFAULT '[]',
+  changed_files TEXT NOT NULL DEFAULT '[]',
+  verification_status TEXT,
+  commit_sha TEXT,
+  recovery_code TEXT,
+  human_gate TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY (workflow_run_id, step_run_id)
+    REFERENCES workflow_steps(run_id, step_id)
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS idx_executor_rounds_invocation
+  ON executor_rounds(invocation_id);
+
+CREATE INDEX IF NOT EXISTS idx_executor_rounds_run
+  ON executor_rounds(workflow_run_id);
+
+CREATE INDEX IF NOT EXISTS idx_executor_rounds_step
+  ON executor_rounds(workflow_run_id, step_run_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_executor_rounds_invocation_index
+  ON executor_rounds(invocation_id, round_index);
+
+CREATE TABLE IF NOT EXISTS executor_artifacts (
+  artifact_id TEXT PRIMARY KEY,
+  round_id TEXT NOT NULL REFERENCES executor_rounds(round_id),
+  artifact_class TEXT NOT NULL,
+  path TEXT NOT NULL,
+  digest TEXT,
+  description TEXT,
+  created_at INTEGER NOT NULL
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS idx_executor_artifacts_round
+  ON executor_artifacts(round_id);
+
+CREATE TABLE IF NOT EXISTS executor_checkpoints (
+  checkpoint_id TEXT PRIMARY KEY,
+  round_id TEXT NOT NULL REFERENCES executor_rounds(round_id),
+  sequence INTEGER NOT NULL,
+  stage TEXT NOT NULL,
+  detail TEXT,
+  created_at INTEGER NOT NULL
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS idx_executor_checkpoints_round
+  ON executor_checkpoints(round_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_executor_checkpoints_round_sequence
+  ON executor_checkpoints(round_id, sequence);
+
+CREATE TABLE IF NOT EXISTS executor_findings (
+  finding_id TEXT PRIMARY KEY,
+  round_id TEXT NOT NULL REFERENCES executor_rounds(round_id),
+  severity TEXT,
+  title TEXT NOT NULL,
+  detail TEXT,
+  selected INTEGER NOT NULL DEFAULT 0,
+  external_ref TEXT,
+  created_at INTEGER NOT NULL
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS idx_executor_findings_round
+  ON executor_findings(round_id);
+
+CREATE TABLE IF NOT EXISTS executor_decisions (
+  decision_id TEXT PRIMARY KEY,
+  round_id TEXT NOT NULL REFERENCES executor_rounds(round_id),
+  summary TEXT NOT NULL,
+  allowed_actions TEXT NOT NULL DEFAULT '[]',
+  recommended_action TEXT,
+  chosen_action TEXT,
+  resolution TEXT,
+  created_at INTEGER NOT NULL
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS idx_executor_decisions_round
+  ON executor_decisions(round_id);
+`;
+
 export function applyQueueMigrations(db: MomentumDb): void {
   db.exec("BEGIN");
   try {
@@ -542,6 +711,7 @@ export function applyQueueMigrations(db: MomentumDb): void {
     }
     db.exec(WORKFLOW_RUNS_IDENTITY_INDEX_DDL);
     db.exec(WORKFLOW_DEFINITIONS_DDL);
+    db.exec(EXECUTOR_LOOP_DDL);
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");

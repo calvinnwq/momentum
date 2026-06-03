@@ -33,11 +33,13 @@ describe("workflow-first gap matrix planning contract", () => {
       "M7 `WorkflowRun`",
       "M8 operator controls",
       "M9 live wrapper",
+      "M10-03 `ExecutorDefinition`",
     ]) {
       expect(contract, `gap matrix should name current surface ${surface}`).toContain(surface);
     }
 
-    expect(contract).toMatch(/WorkflowRun is durable, but not yet the top-level configurable product start surface/);
+    expect(contract).toMatch(/WorkflowRun is durable and can start from definitions/);
+    expect(contract).toMatch(/executor records now persist below step runs/);
   });
 
   it("pins the workflow-first target inventory and future CLI shape", () => {
