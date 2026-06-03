@@ -18,10 +18,15 @@
  * respect to the database (read-only), so the daemon lane, startup recovery, and
  * status surfaces can all rely on the same deterministic answer.
  *
- * This slice deliberately does not acquire leases, dispatch executors, or touch
- * the daemon loop — those are later M10-04 follow-ups. It also leaves goal
- * iteration draining (`worker-run.ts`) untouched: workflow scheduling is a
- * separate lane over separate tables.
+ * The *scan* and *recovery* primitives are read-only / recovery-only. The
+ * *claim* primitive ({@link claimRunnableWorkflowStep}) takes the next step of
+ * the daemon loop — "acquire or refresh daemon / step lease" — by atomically
+ * re-verifying a scanned step is still runnable inside a `BEGIN IMMEDIATE`
+ * transaction and acquiring its `dispatch` lease (the lease kind the contract
+ * reserves for the dispatcher layer). It deliberately does not dispatch
+ * executors or touch the daemon loop — those are later M10-04 follow-ups. It
+ * also leaves goal iteration draining (`worker-run.ts`) untouched: workflow
+ * scheduling is a separate lane over separate tables.
  *
  * "Runnable" means, for a run that is neither terminal nor flagged for manual
  * recovery, the run's lease-aware derived state is `approved` (an approved step
@@ -35,6 +40,7 @@
 
 import type { MomentumDb } from "./db.js";
 import {
+  acquireWorkflowLeaseInTransaction,
   getWorkflowLease,
   releaseWorkflowLease
 } from "./workflow-leases.js";
@@ -42,6 +48,7 @@ import { markWorkflowRunNeedsManualRecovery } from "./workflow-run-recovery.js";
 import {
   classifyWorkflowLease,
   deriveWorkflowRunState,
+  WORKFLOW_RUN_TERMINAL_STATES,
   type WorkflowLeaseKind,
   type WorkflowLeaseRecord,
   type WorkflowLeaseStalePolicy,
@@ -50,6 +57,11 @@ import {
   type WorkflowStepRecord,
   type WorkflowStepState
 } from "./workflow-run-reducer.js";
+
+/** Run states that can never produce a runnable step or accept a new claim. */
+const RUN_TERMINAL_STATE_SET: ReadonlySet<string> = new Set(
+  WORKFLOW_RUN_TERMINAL_STATES
+);
 
 /**
  * Lease kinds that block step dispatch while outstanding. `monitor` leases are
@@ -142,35 +154,8 @@ export function selectRunnableWorkflowWork(
   for (const run of runs) {
     const steps = loadStepRecords(db, run.id);
     const leases = loadLeaseRecords(db, run.id);
-
-    let hasOutstandingNonMonitorLease = false;
-    let hasManualRecoveryLease = false;
-    for (const lease of leases) {
-      const classification = classifyWorkflowLease(lease, {
-        now: input.now,
-        graceMs
-      });
-      if (classification === "released") continue;
-      if (NON_MONITOR_LEASE_KINDS.has(lease.leaseKind)) {
-        hasOutstandingNonMonitorLease = true;
-      }
-      if (
-        classification === "stale-auto-release" ||
-        classification === "stale-manual-recovery-required"
-      ) {
-        staleLeases.push({
-          runId: lease.runId,
-          leaseKind: lease.leaseKind,
-          holder: lease.holder,
-          classification,
-          stalePolicy: lease.stalePolicy,
-          expiresAt: lease.expiresAt
-        });
-      }
-      if (classification === "stale-manual-recovery-required") {
-        hasManualRecoveryLease = true;
-      }
-    }
+    const signals = collectRunLeaseSignals(leases, input.now, graceMs);
+    staleLeases.push(...signals.staleLeases);
 
     const derivedRunState = deriveWorkflowRunState(steps, {
       leases,
@@ -183,7 +168,12 @@ export function selectRunnableWorkflowWork(
     // manual-recovery lease additionally forces the reducer to `blocked`; guard
     // explicitly so a future reducer change can't silently re-open it.
     if (derivedRunState !== "approved") continue;
-    if (hasOutstandingNonMonitorLease || hasManualRecoveryLease) continue;
+    if (
+      signals.outstandingNonMonitorLease !== undefined ||
+      signals.hasStaleManualRecoveryLease
+    ) {
+      continue;
+    }
 
     const step = nextRunnableStep(steps);
     if (step === undefined) continue;
@@ -200,6 +190,71 @@ export function selectRunnableWorkflowWork(
   }
 
   return { runnable, staleLeases };
+}
+
+/** Lease-derived signals for one run, shared by the scan and the claim path. */
+type RunLeaseSignals = {
+  /** Stale (`auto-release` or `manual-recovery-required`) leases for the run. */
+  staleLeases: StaleWorkflowLease[];
+  /** A non-released `managed-step`/`dispatch` lease (fresh or stale), if any. */
+  outstandingNonMonitorLease: WorkflowLeaseRecord | undefined;
+  /** A non-released, non-stale `managed-step`/`dispatch` lease, if any. */
+  freshNonMonitorLease: WorkflowLeaseRecord | undefined;
+  /** Whether a stale `manual-recovery-required` lease is outstanding. */
+  hasStaleManualRecoveryLease: boolean;
+};
+
+/**
+ * Classify a run's leases into the signals the scan and claim both need. Pure
+ * with respect to the database (it only reads the supplied records), so the
+ * claim path can call it inside its `BEGIN IMMEDIATE` transaction. The first
+ * matching lease wins for `outstandingNonMonitorLease` / `freshNonMonitorLease`
+ * (the rows arrive ordered by `lease_kind`), and every stale lease is collected
+ * in row order so the scan's aggregate list is deterministic.
+ */
+function collectRunLeaseSignals(
+  leases: readonly WorkflowLeaseRecord[],
+  now: number,
+  graceMs: number
+): RunLeaseSignals {
+  const staleLeases: StaleWorkflowLease[] = [];
+  let outstandingNonMonitorLease: WorkflowLeaseRecord | undefined;
+  let freshNonMonitorLease: WorkflowLeaseRecord | undefined;
+  let hasStaleManualRecoveryLease = false;
+
+  for (const lease of leases) {
+    const classification = classifyWorkflowLease(lease, { now, graceMs });
+    if (classification === "released") continue;
+    if (NON_MONITOR_LEASE_KINDS.has(lease.leaseKind)) {
+      outstandingNonMonitorLease ??= lease;
+      if (classification === "fresh") {
+        freshNonMonitorLease ??= lease;
+      }
+    }
+    if (
+      classification === "stale-auto-release" ||
+      classification === "stale-manual-recovery-required"
+    ) {
+      staleLeases.push({
+        runId: lease.runId,
+        leaseKind: lease.leaseKind,
+        holder: lease.holder,
+        classification,
+        stalePolicy: lease.stalePolicy,
+        expiresAt: lease.expiresAt
+      });
+    }
+    if (classification === "stale-manual-recovery-required") {
+      hasStaleManualRecoveryLease = true;
+    }
+  }
+
+  return {
+    staleLeases,
+    outstandingNonMonitorLease,
+    freshNonMonitorLease,
+    hasStaleManualRecoveryLease
+  };
 }
 
 /**
@@ -417,6 +472,210 @@ export function recoverStaleWorkflowLeases(
   }
 
   return { recovered, skipped };
+}
+
+/**
+ * The lease kind this lane takes when claiming a runnable step for dispatch. The
+ * executor-loop contract reserves `dispatch` for the cron / dispatcher layer
+ * (the live `managed-step` lease is taken later, around the executor's own
+ * execution); the scan treats an outstanding `dispatch` lease as "busy".
+ */
+export const WORKFLOW_DISPATCH_LEASE_KIND: WorkflowLeaseKind = "dispatch";
+
+export type ClaimRunnableWorkflowStepInput = {
+  runId: string;
+  stepId: string;
+  /** Lease holder identity (the worker / process id). */
+  holder: string;
+  /** Absolute ms timestamp at which the acquired `dispatch` lease expires. */
+  leaseExpiresAt: number;
+  /** Absolute ms timestamp used for re-evaluation and lease acquisition. */
+  now: number;
+  /** Clock-skew tolerance forwarded to lease classification. Defaults to 0. */
+  graceMs?: number;
+  /** Stale policy stamped on the `dispatch` lease. Defaults to `auto-release`. */
+  stalePolicy?: WorkflowLeaseStalePolicy;
+};
+
+/** A runnable step whose `dispatch` lease this lane has acquired. */
+export type ClaimedWorkflowStep = RunnableWorkflowStep & {
+  /** The freshly-acquired `dispatch` lease. */
+  lease: WorkflowLeaseRecord;
+};
+
+export type ClaimRunnableWorkflowStepResult =
+  | { ok: true; claim: ClaimedWorkflowStep }
+  /** The run row no longer exists. */
+  | { ok: false; reason: "run_not_found" }
+  /**
+   * The run is no longer offering a runnable step: it is terminal, flagged for
+   * manual recovery, blocked, busy with a running step, or withheld behind a
+   * stale lease the recovery pass must clear first.
+   */
+  | { ok: false; reason: "run_not_runnable" }
+  /**
+   * The run is runnable, but its next runnable step is a different step than the
+   * one requested — the run advanced between scan and claim.
+   */
+  | { ok: false; reason: "step_superseded"; runnableStepId: string }
+  /** Another holder took the dispatch / managed-step lease first. */
+  | { ok: false; reason: "lease_held"; existing: WorkflowLeaseRecord };
+
+/**
+ * Atomically claim the next runnable step of a run by acquiring its `dispatch`
+ * lease, taking the daemon loop's "acquire or refresh daemon / step lease" step
+ * after {@link selectRunnableWorkflowWork} surfaced the candidate.
+ *
+ * The scan snapshot is a hint, never proof: this re-reads and re-evaluates the
+ * run inside a `BEGIN IMMEDIATE` transaction before acquiring the lease, so a
+ * run that went terminal, got flagged for manual recovery, advanced to a
+ * different step, or was claimed by another worker between the scan and the
+ * claim is refused rather than double-dispatched. SQLite stays the source of
+ * truth: no process handle, socket, or event is consulted.
+ *
+ * A stale lease (auto-release or manual-recovery) withholds the run as
+ * `run_not_runnable` instead of being claimed over — the recovery pass
+ * ({@link recoverStaleWorkflowLeases}) owns clearing it. A `monitor` lease never
+ * blocks a claim. On success the run scans as busy until the lease is released.
+ */
+export function claimRunnableWorkflowStep(
+  db: MomentumDb,
+  input: ClaimRunnableWorkflowStepInput
+): ClaimRunnableWorkflowStepResult {
+  validateClaimInput(input);
+  const graceMs = input.graceMs ?? 0;
+  const stalePolicy = input.stalePolicy ?? "auto-release";
+
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const run = db
+      .prepare(
+        `SELECT id, state, repo_path, needs_manual_recovery
+           FROM workflow_runs
+          WHERE id = ?`
+      )
+      .get(input.runId) as
+      | (WorkflowRunScanRow & { needs_manual_recovery: number })
+      | undefined;
+
+    if (run === undefined) {
+      db.exec("ROLLBACK");
+      return { ok: false, reason: "run_not_found" };
+    }
+    if (
+      run.needs_manual_recovery !== 0 ||
+      RUN_TERMINAL_STATE_SET.has(run.state)
+    ) {
+      db.exec("ROLLBACK");
+      return { ok: false, reason: "run_not_runnable" };
+    }
+
+    const steps = loadStepRecords(db, run.id);
+    const leases = loadLeaseRecords(db, run.id);
+    const signals = collectRunLeaseSignals(leases, input.now, graceMs);
+
+    // A stale lease (or any manual-recovery lease) withholds the run until the
+    // recovery pass handles it; never bypass recovery by claiming over it. A
+    // *fresh* non-monitor lease is left to the acquisition below, which reports
+    // it as `lease_held`.
+    const hasStaleNonMonitorLease =
+      signals.outstandingNonMonitorLease !== undefined &&
+      signals.freshNonMonitorLease === undefined;
+    if (signals.hasStaleManualRecoveryLease || hasStaleNonMonitorLease) {
+      db.exec("ROLLBACK");
+      return { ok: false, reason: "run_not_runnable" };
+    }
+
+    const derivedRunState = deriveWorkflowRunState(steps, {
+      leases,
+      now: input.now,
+      graceMs
+    });
+    if (derivedRunState !== "approved") {
+      db.exec("ROLLBACK");
+      return { ok: false, reason: "run_not_runnable" };
+    }
+
+    const step = nextRunnableStep(steps);
+    if (step === undefined) {
+      db.exec("ROLLBACK");
+      return { ok: false, reason: "run_not_runnable" };
+    }
+    if (step.stepId !== input.stepId) {
+      db.exec("ROLLBACK");
+      return {
+        ok: false,
+        reason: "step_superseded",
+        runnableStepId: step.stepId
+      };
+    }
+
+    const acquired = acquireWorkflowLeaseInTransaction(
+      db,
+      {
+        runId: input.runId,
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: input.holder,
+        expiresAt: input.leaseExpiresAt,
+        stalePolicy,
+        now: input.now
+      },
+      input.now,
+      stalePolicy
+    );
+    if (!acquired.ok) {
+      db.exec("ROLLBACK");
+      return { ok: false, reason: "lease_held", existing: acquired.existing };
+    }
+
+    db.exec("COMMIT");
+    return {
+      ok: true,
+      claim: {
+        runId: run.id,
+        stepId: step.stepId,
+        kind: step.kind,
+        stepOrder: step.order,
+        required: step.required,
+        repoPath: run.repo_path,
+        runState: derivedRunState,
+        lease: acquired.lease
+      }
+    };
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+      // Ignore rollback errors so callers see the original failure.
+    }
+    throw error;
+  }
+}
+
+function validateClaimInput(input: ClaimRunnableWorkflowStepInput): void {
+  if (!Number.isFinite(input.now)) {
+    throw new Error("claimRunnableWorkflowStep: now must be a finite number");
+  }
+  const graceMs = input.graceMs ?? 0;
+  if (!Number.isFinite(graceMs) || graceMs < 0) {
+    throw new Error(
+      "claimRunnableWorkflowStep: graceMs must be a non-negative finite number"
+    );
+  }
+  if (typeof input.runId !== "string" || input.runId.length === 0) {
+    throw new Error("claimRunnableWorkflowStep: runId is required");
+  }
+  if (typeof input.stepId !== "string" || input.stepId.length === 0) {
+    throw new Error("claimRunnableWorkflowStep: stepId is required");
+  }
+  if (typeof input.holder !== "string" || input.holder.length === 0) {
+    throw new Error("claimRunnableWorkflowStep: holder is required");
+  }
+  if (!Number.isInteger(input.leaseExpiresAt) || input.leaseExpiresAt <= 0) {
+    throw new Error(
+      "claimRunnableWorkflowStep: leaseExpiresAt must be a positive integer ms timestamp"
+    );
+  }
 }
 
 function loadLeaseRecords(db: MomentumDb, runId: string): WorkflowLeaseRecord[] {

@@ -5,8 +5,10 @@ import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/db.js";
 import {
+  claimRunnableWorkflowStep,
   recoverStaleWorkflowLeases,
   selectRunnableWorkflowWork,
+  WORKFLOW_DISPATCH_LEASE_KIND,
   WORKFLOW_LEASE_AUTO_RELEASED_STATUS,
   WORKFLOW_LEASE_MANUAL_RECOVERY_STATUS
 } from "../src/workflow-scheduler.js";
@@ -823,6 +825,421 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
       expect(() =>
         recoverStaleWorkflowLeases(db, { now: NOW, graceMs: -1 })
       ).toThrow(/graceMs must be a non-negative finite number/);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("claimRunnableWorkflowStep: atomic dispatch-lease claim (NGX-348)", () => {
+  const LEASE_EXPIRES_AT = NOW + 30_000;
+
+  it("claims a runnable step by acquiring a fresh dispatch lease", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedRun(db, { runId: "run-a", state: "approved", repoPath: "/repos/a" });
+      seedStep(db, {
+        runId: "run-a",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "approved",
+        order: 0
+      });
+      seedStep(db, {
+        runId: "run-a",
+        stepId: "implementation",
+        kind: "implementation",
+        state: "pending",
+        order: 1
+      });
+
+      const result = claimRunnableWorkflowStep(db, {
+        runId: "run-a",
+        stepId: "preflight",
+        holder: "worker-1",
+        leaseExpiresAt: LEASE_EXPIRES_AT,
+        now: NOW
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error("expected claim to succeed");
+      expect(result.claim).toMatchObject({
+        runId: "run-a",
+        stepId: "preflight",
+        kind: "preflight",
+        stepOrder: 0,
+        required: true,
+        repoPath: "/repos/a",
+        runState: "approved"
+      });
+      expect(result.claim.lease).toMatchObject({
+        runId: "run-a",
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: "worker-1",
+        expiresAt: LEASE_EXPIRES_AT,
+        releasedAt: null,
+        stalePolicy: "auto-release"
+      });
+
+      // The dispatch lease is durable, and the run now scans as busy.
+      const lease = getWorkflowLease(db, "run-a", "dispatch");
+      expect(lease?.releasedAt).toBeNull();
+      expect(lease?.holder).toBe("worker-1");
+      expect(selectRunnableWorkflowWork(db, { now: NOW }).runnable).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses to claim a step that is not the next runnable step (superseded)", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedRun(db, { runId: "run-a", state: "approved" });
+      seedStep(db, {
+        runId: "run-a",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "approved",
+        order: 0
+      });
+      seedStep(db, {
+        runId: "run-a",
+        stepId: "implementation",
+        kind: "implementation",
+        state: "approved",
+        order: 1
+      });
+
+      const result = claimRunnableWorkflowStep(db, {
+        runId: "run-a",
+        stepId: "implementation",
+        holder: "worker-1",
+        leaseExpiresAt: LEASE_EXPIRES_AT,
+        now: NOW
+      });
+
+      expect(result).toEqual({
+        ok: false,
+        reason: "step_superseded",
+        runnableStepId: "preflight"
+      });
+      expect(getWorkflowLease(db, "run-a", "dispatch")).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("returns run_not_found for a missing run", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const result = claimRunnableWorkflowStep(db, {
+        runId: "ghost",
+        stepId: "preflight",
+        holder: "worker-1",
+        leaseExpiresAt: LEASE_EXPIRES_AT,
+        now: NOW
+      });
+
+      expect(result).toEqual({ ok: false, reason: "run_not_found" });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses to claim a step on a terminal run", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedRun(db, { runId: "run-done", state: "succeeded" });
+      seedStep(db, {
+        runId: "run-done",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "succeeded",
+        order: 0
+      });
+
+      const result = claimRunnableWorkflowStep(db, {
+        runId: "run-done",
+        stepId: "preflight",
+        holder: "worker-1",
+        leaseExpiresAt: LEASE_EXPIRES_AT,
+        now: NOW
+      });
+
+      expect(result).toEqual({ ok: false, reason: "run_not_runnable" });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses to claim a step on a run flagged for manual recovery", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedRun(db, {
+        runId: "run-a",
+        state: "approved",
+        needsManualRecovery: true
+      });
+      seedStep(db, {
+        runId: "run-a",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "approved",
+        order: 0
+      });
+
+      const result = claimRunnableWorkflowStep(db, {
+        runId: "run-a",
+        stepId: "preflight",
+        holder: "worker-1",
+        leaseExpiresAt: LEASE_EXPIRES_AT,
+        now: NOW
+      });
+
+      expect(result).toEqual({ ok: false, reason: "run_not_runnable" });
+      expect(getWorkflowLease(db, "run-a", "dispatch")).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses to claim while a running step keeps the run busy", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedRun(db, { runId: "run-a", state: "running" });
+      seedStep(db, {
+        runId: "run-a",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "running",
+        order: 0
+      });
+      seedStep(db, {
+        runId: "run-a",
+        stepId: "implementation",
+        kind: "implementation",
+        state: "approved",
+        order: 1
+      });
+
+      const result = claimRunnableWorkflowStep(db, {
+        runId: "run-a",
+        stepId: "implementation",
+        holder: "worker-1",
+        leaseExpiresAt: LEASE_EXPIRES_AT,
+        now: NOW
+      });
+
+      expect(result).toEqual({ ok: false, reason: "run_not_runnable" });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("reports lease_held when another worker holds a fresh managed-step lease", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedRun(db, { runId: "run-a", state: "approved" });
+      seedStep(db, {
+        runId: "run-a",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "approved",
+        order: 0
+      });
+      seedLease(db, {
+        runId: "run-a",
+        leaseKind: "managed-step",
+        holder: "worker-2",
+        expiresAt: NOW + 10_000
+      });
+
+      const result = claimRunnableWorkflowStep(db, {
+        runId: "run-a",
+        stepId: "preflight",
+        holder: "worker-1",
+        leaseExpiresAt: LEASE_EXPIRES_AT,
+        now: NOW
+      });
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("expected claim to fail");
+      expect(result.reason).toBe("lease_held");
+      if (result.reason !== "lease_held") throw new Error("unreachable");
+      expect(result.existing).toMatchObject({
+        leaseKind: "managed-step",
+        holder: "worker-2"
+      });
+      // No dispatch lease is created when the claim loses.
+      expect(getWorkflowLease(db, "run-a", "dispatch")).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses to claim while a stale lease still withholds the run pending recovery", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedRun(db, { runId: "run-a", state: "approved" });
+      seedStep(db, {
+        runId: "run-a",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "approved",
+        order: 0
+      });
+      seedLease(db, {
+        runId: "run-a",
+        leaseKind: "managed-step",
+        expiresAt: NOW - 10_000,
+        stalePolicy: "auto-release"
+      });
+
+      const result = claimRunnableWorkflowStep(db, {
+        runId: "run-a",
+        stepId: "preflight",
+        holder: "worker-1",
+        leaseExpiresAt: LEASE_EXPIRES_AT,
+        now: NOW
+      });
+
+      expect(result).toEqual({ ok: false, reason: "run_not_runnable" });
+      // The stale lease is left untouched for the recovery pass to handle.
+      expect(getWorkflowLease(db, "run-a", "managed-step")?.releasedAt).toBeNull();
+      expect(getWorkflowLease(db, "run-a", "dispatch")).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses to claim a run blocked by a stale manual-recovery lease", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedRun(db, { runId: "run-a", state: "running" });
+      seedStep(db, {
+        runId: "run-a",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "approved",
+        order: 0
+      });
+      seedLease(db, {
+        runId: "run-a",
+        leaseKind: "managed-step",
+        expiresAt: NOW - 10_000,
+        stalePolicy: "manual-recovery-required"
+      });
+
+      const result = claimRunnableWorkflowStep(db, {
+        runId: "run-a",
+        stepId: "preflight",
+        holder: "worker-1",
+        leaseExpiresAt: LEASE_EXPIRES_AT,
+        now: NOW
+      });
+
+      expect(result).toEqual({ ok: false, reason: "run_not_runnable" });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("does not let a monitor lease block a claim", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedRun(db, { runId: "run-a", state: "approved" });
+      seedStep(db, {
+        runId: "run-a",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "approved",
+        order: 0
+      });
+      seedLease(db, {
+        runId: "run-a",
+        leaseKind: "monitor",
+        expiresAt: NOW + 10_000
+      });
+
+      const result = claimRunnableWorkflowStep(db, {
+        runId: "run-a",
+        stepId: "preflight",
+        holder: "worker-1",
+        leaseExpiresAt: LEASE_EXPIRES_AT,
+        now: NOW
+      });
+
+      expect(result.ok).toBe(true);
+      expect(getWorkflowLease(db, "run-a", "dispatch")?.holder).toBe("worker-1");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("is exclusive: a second claim for the same step loses to the first", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedRun(db, { runId: "run-a", state: "approved" });
+      seedStep(db, {
+        runId: "run-a",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "approved",
+        order: 0
+      });
+
+      const first = claimRunnableWorkflowStep(db, {
+        runId: "run-a",
+        stepId: "preflight",
+        holder: "worker-1",
+        leaseExpiresAt: LEASE_EXPIRES_AT,
+        now: NOW
+      });
+      expect(first.ok).toBe(true);
+
+      const second = claimRunnableWorkflowStep(db, {
+        runId: "run-a",
+        stepId: "preflight",
+        holder: "worker-2",
+        leaseExpiresAt: LEASE_EXPIRES_AT + 5_000,
+        now: NOW + 1_000
+      });
+
+      expect(second.ok).toBe(false);
+      if (second.ok) throw new Error("expected the second claim to fail");
+      expect(second.reason).toBe("lease_held");
+      if (second.reason !== "lease_held") throw new Error("unreachable");
+      expect(second.existing.holder).toBe("worker-1");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("validates inputs", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const base = {
+        runId: "run-a",
+        stepId: "preflight",
+        holder: "worker-1",
+        leaseExpiresAt: LEASE_EXPIRES_AT,
+        now: NOW
+      };
+      expect(() =>
+        claimRunnableWorkflowStep(db, { ...base, now: Number.NaN })
+      ).toThrow(/now must be a finite number/);
+      expect(() =>
+        claimRunnableWorkflowStep(db, { ...base, graceMs: -1 })
+      ).toThrow(/graceMs must be a non-negative finite number/);
+      expect(() =>
+        claimRunnableWorkflowStep(db, { ...base, holder: "" })
+      ).toThrow(/holder is required/);
+      expect(() =>
+        claimRunnableWorkflowStep(db, { ...base, stepId: "" })
+      ).toThrow(/stepId is required/);
+      expect(() =>
+        claimRunnableWorkflowStep(db, { ...base, leaseExpiresAt: 0 })
+      ).toThrow(/leaseExpiresAt must be a positive integer/);
     } finally {
       db.close();
     }
