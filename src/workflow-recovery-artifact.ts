@@ -238,11 +238,13 @@ export type WorkflowRecoveryEvidencePointer = {
 };
 
 /**
- * The recommended next action surfaced from either the M7 monitor reducer's
- * `nextAction` or an M9 live run-level recovery seam. Monitor-derived inputs
- * carry the reducer's stable code/detail, while live recovery inputs carry
- * live-specific `investigate_*` codes and operator-facing detail; lease
- * internals stay in the substrate.
+ * The recommended next action surfaced from the M7 monitor reducer's
+ * `nextAction`, an M9 live run-level recovery seam, or the M10 scheduler lane's
+ * stale workflow-lease recovery. Monitor-derived inputs carry the reducer's
+ * stable code/detail, live recovery inputs carry live-specific `investigate_*`
+ * codes and operator-facing detail, and scheduler-lane lease recovery carries
+ * the guarded `clear_recovery` action after the underlying lease condition is
+ * resolved; lease internals stay in the substrate.
  */
 export type WorkflowRecoveryNextAction = {
   code: string;
@@ -252,10 +254,10 @@ export type WorkflowRecoveryNextAction = {
 
 /**
  * Self-contained input for rendering / writing a run-scoped `recovery.md`.
- * Built from either a monitor reducer classification (see
- * {@link buildWorkflowRecoveryArtifactInput}) or a live run-level recovery seam,
- * so the renderer never needs a live db handle or the file system to assemble
- * its body.
+ * Built from a monitor reducer classification (see
+ * {@link buildWorkflowRecoveryArtifactInput}), a live run-level recovery seam,
+ * or the scheduler lane's stale workflow-lease recovery path, so the renderer
+ * never needs a live db handle or the file system to assemble its body.
  */
 export type WorkflowRecoveryArtifactInput = {
   runId: string;

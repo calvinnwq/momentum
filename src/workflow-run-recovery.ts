@@ -227,8 +227,12 @@ export type ClearWorkflowRunManualRecoveryGuardedResult =
  * dispatch / finalization recovery uses the same flag but has no monitor
  * blocker to re-derive here, so clearing those entries is an operator assertion
  * that the captured reason and any rendered artifact or context have been
- * resolved. The check and the clear run inside a single immediate transaction
- * so the condition that is checked is the condition that is cleared.
+ * resolved. Scheduler-lane `manual-recovery-required` lease recovery also uses
+ * the same flag, but leaves the stale lease durable as evidence; that lease can
+ * still re-derive `manual_recovery_lease` and refuse guarded clear until the
+ * lease condition is resolved. The check and the clear run inside a single
+ * immediate transaction so the condition that is checked is the condition that
+ * is cleared.
  *
  * Any rendered recovery.md is intentionally left on disk as durable audit;
  * operators delete it after capturing the context elsewhere, mirroring the M3
