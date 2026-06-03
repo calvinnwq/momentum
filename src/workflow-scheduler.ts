@@ -57,6 +57,7 @@ import { markWorkflowRunNeedsManualRecovery } from "./workflow-run-recovery.js";
 import {
   classifyWorkflowLease,
   deriveWorkflowRunState,
+  isTerminalRunState,
   WORKFLOW_RUN_TERMINAL_STATES,
   type WorkflowLeaseKind,
   type WorkflowLeaseRecord,
@@ -414,6 +415,10 @@ export function recoverStaleWorkflowLeases(
           now
         });
         if (released.ok) {
+          refreshWorkflowRunStateAfterLeaseRecovery(db, {
+            runId: live.runId,
+            now
+          });
           db.exec("COMMIT");
           recovered.push({
             runId: live.runId,
@@ -491,6 +496,26 @@ export function recoverStaleWorkflowLeases(
   }
 
   return { recovered, skipped };
+}
+
+function refreshWorkflowRunStateAfterLeaseRecovery(
+  db: MomentumDb,
+  input: { runId: string; now: number }
+): void {
+  const steps = loadStepRecords(db, input.runId);
+  const leases = loadLeaseRecords(db, input.runId);
+  const runState = deriveWorkflowRunState(steps, {
+    leases,
+    now: input.now
+  });
+  const finishedAt = isTerminalRunState(runState) ? input.now : null;
+  db.prepare(
+    `UPDATE workflow_runs
+       SET state = ?,
+           finished_at = COALESCE(finished_at, ?),
+           updated_at = ?
+     WHERE id = ?`
+  ).run(runState, finishedAt, input.now, input.runId);
 }
 
 type WorkflowManualRecoveryArtifactContext = {

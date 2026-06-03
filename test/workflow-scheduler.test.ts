@@ -585,6 +585,59 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
     }
   });
 
+  it("refreshes run state after auto-releasing the last outstanding lease", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedRun(db, {
+        runId: "run-a",
+        state: "running",
+        createdAt: NOW - 60_000
+      });
+      seedStep(db, {
+        runId: "run-a",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "succeeded",
+        order: 0
+      });
+      seedStep(db, {
+        runId: "run-a",
+        stepId: "implementation",
+        kind: "implementation",
+        state: "succeeded",
+        order: 1
+      });
+      seedLease(db, {
+        runId: "run-a",
+        leaseKind: "managed-step",
+        expiresAt: NOW - 10_000,
+        stalePolicy: "auto-release"
+      });
+
+      const result = recoverStaleWorkflowLeases(db, { now: NOW });
+
+      expect(result.recovered).toHaveLength(1);
+      const row = db
+        .prepare(
+          "SELECT state, finished_at, updated_at FROM workflow_runs WHERE id = ?"
+        )
+        .get("run-a") as
+        | { state: string; finished_at: number | null; updated_at: number }
+        | undefined;
+      expect(row).toEqual({
+        state: "succeeded",
+        finished_at: NOW,
+        updated_at: NOW
+      });
+      expect(selectRunnableWorkflowWork(db, { now: NOW })).toEqual({
+        runnable: [],
+        staleLeases: []
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   it("flags the run for manual recovery on a stale manual-recovery lease and leaves the lease in place", () => {
     const db = openDb(makeTempDir());
     try {
