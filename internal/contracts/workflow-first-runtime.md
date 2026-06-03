@@ -343,7 +343,7 @@ Required workflow-first gaps:
 | Top-level entity | Goal-first; persisted WorkflowDefinition primitives; WorkflowRun mostly coding-workflow substrate | WorkflowDefinition / WorkflowRun as product core |
 | Step configuration | Persisted StepDefinition list for definitions; run execution still fixed canonical step kinds | Configurable StepDefinition list |
 | Executor selection | Executor definitions can be persisted, but step execution still uses runner profiles or fixed workflow step kinds | Per-step executor definition and agent / model config |
-| Daemon scheduling | Drains `goal_iteration` jobs | Schedules workflow runs, step runs, executor invocations, and rounds |
+| Daemon scheduling | Drains `goal_iteration` jobs; opt-in scheduler lane recovers, scans, claims, and dispatches runnable workflow steps | Schedules workflow runs, step runs, executor invocations, and rounds |
 | Loop state | Goal iteration artifacts / job rows, plus persisted executor invocations / rounds below workflow steps | ExecutorInvocation / ExecutorRound / checkpoints / artifacts driven by the workflow scheduler |
 | Goal loop | Product-level Goal | `goal-loop` executor inside a workflow step |
 | no-mistakes | External fixed pipeline | Specialist executor mirrored into Momentum |

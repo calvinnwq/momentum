@@ -6,8 +6,9 @@
  * resulting `WorkflowRun` + `StepRun` plan into the durable `workflow_runs` /
  * `workflow_steps` tables, with a `workflow_approvals` row when the start has an
  * approval boundary. This is the storage twin of the pure materializer:
- * nothing here runs executors, schedules work, or starts a Goal loop — those are
- * later M10 slices. `goal start` stays the compatibility path for old Goal-loop
+ * nothing here runs executors, schedules work, or starts a Goal loop. Scheduling
+ * is owned separately by `workflow-scheduler.ts`; real executor adapters remain
+ * later M10 work. `goal start` stays the compatibility path for old Goal-loop
  * usage and is untouched.
  *
  * Stable contracts this slice locks in:

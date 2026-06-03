@@ -9,8 +9,8 @@
  * system, no executor invocation, no wall-clock reads. Durable persistence into
  * `workflow_runs` / `workflow_steps` is layered on top in
  * `workflow-run-start-persist.ts`, and the CLI `workflow run start` surface
- * calls that persistence layer. Executor invocation and daemon scheduling remain
- * later M10 slices.
+ * calls that persistence layer. Executor records and the opt-in daemon scheduler
+ * lane are layered separately; real executor adapters remain later M10 work.
  *
  * Scope decisions pinned here, grounded in the accepted planning contracts
  * (internal/contracts/workflow-first-runtime.md "Run start" gap row and

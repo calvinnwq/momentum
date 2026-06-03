@@ -27,9 +27,10 @@
  * ({@link runWorkflowSchedulerOnce}) composes the three into one per-cycle pass
  * — recover stale leases, scan, claim one step, then hand it to an injected
  * executor-dispatch seam — as the workflow-first analogue of `runWorkerOnce`.
- * The real executor and the daemon-loop wiring are still later M10 follow-ups;
- * this lane leaves goal iteration draining (`worker-run.ts`) untouched, because
- * workflow scheduling is a separate lane over separate tables.
+ * Daemon-loop wiring is now opt-in via `workflowLane`; only the real executor
+ * adapter wiring remains a later M10 follow-up. This lane leaves goal iteration
+ * draining (`worker-run.ts`) untouched, because workflow scheduling is a
+ * separate lane over separate tables.
  *
  * "Runnable" means, for a run that is neither terminal nor flagged for manual
  * recovery, the run's lease-aware derived state is `approved` (an approved step
