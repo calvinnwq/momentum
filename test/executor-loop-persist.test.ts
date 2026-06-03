@@ -100,6 +100,45 @@ function openEvidenceDb(): MomentumDb {
   return db;
 }
 
+function interceptNextUpdate(
+  db: MomentumDb,
+  table: string,
+  beforeRun: () => void
+): MomentumDb {
+  let intercepted = false;
+  return new Proxy(db, {
+    get(target, prop, receiver) {
+      if (prop !== "prepare") {
+        return Reflect.get(target, prop, receiver);
+      }
+      return (sql: string) => {
+        const statement = target.prepare(sql);
+        if (!intercepted && sql.includes(`UPDATE ${table}`)) {
+          intercepted = true;
+          return new Proxy(statement, {
+            get(statementTarget, statementProp, statementReceiver) {
+              if (statementProp !== "run") {
+                return Reflect.get(
+                  statementTarget,
+                  statementProp,
+                  statementReceiver
+                );
+              }
+              return (...args: unknown[]) => {
+                beforeRun();
+                return (
+                  statementTarget.run as (...runArgs: unknown[]) => unknown
+                )(...args);
+              };
+            }
+          });
+        }
+        return statement;
+      };
+    }
+  }) as MomentumDb;
+}
+
 function makeDefinition(
   overrides: Partial<ExecutorDefinitionRecord> = {}
 ): ExecutorDefinitionRecord {
@@ -383,6 +422,33 @@ describe("executor invocations", () => {
     }
   });
 
+  it("does not clobber a concurrently changed invocation heartbeat", () => {
+    const db = openSeededDb();
+    try {
+      insertExecutorInvocation(db, makeInvocation({ state: "running" }), {
+        now: 1000
+      });
+      const guardedDb = interceptNextUpdate(
+        db,
+        "executor_invocations",
+        () => {
+          db.prepare(
+            "UPDATE executor_invocations SET heartbeat_at = 1099, updated_at = 1099 WHERE invocation_id = 'inv-1'"
+          ).run();
+        }
+      );
+      expect(() =>
+        updateExecutorInvocationState(guardedDb, "inv-1", "running", {
+          now: 1100,
+          heartbeatAt: 1100
+        })
+      ).toThrow(ExecutorInvocationTransitionError);
+      expect(loadExecutorInvocation(db, "inv-1")?.heartbeatAt).toBe(1099);
+    } finally {
+      db.close();
+    }
+  });
+
   it("refuses an invalid transition and leaves state unchanged", () => {
     const db = openSeededDb();
     try {
@@ -525,6 +591,65 @@ describe("executor rounds", () => {
       expect(loaded?.verificationStatus).toBe("passed");
       expect(loaded?.resultDigest).toBe("res-1");
       expect(loaded?.heartbeatAt).toBe(1200);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("does not clobber concurrently changed same-state round fields", () => {
+    const db = openRoundDb();
+    try {
+      insertExecutorRound(db, makeRound({ state: "running" }), { now: 1000 });
+      const guardedDb = interceptNextUpdate(db, "executor_rounds", () => {
+        db.prepare(
+          "UPDATE executor_rounds SET summary = 'fresh result', heartbeat_at = 1099, updated_at = 1099 WHERE round_id = 'round-1'"
+        ).run();
+      });
+      expect(() =>
+        updateExecutorRound(
+          guardedDb,
+          "round-1",
+          {
+            toState: "running",
+            summary: "stale result",
+            heartbeatAt: 1100
+          },
+          { now: 1100 }
+        )
+      ).toThrow(ExecutorRoundTransitionError);
+      const loaded = loadExecutorRound(db, "round-1");
+      expect(loaded?.summary).toBe("fresh result");
+      expect(loaded?.heartbeatAt).toBe(1099);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("does not drop a round result patch after a concurrent state match", () => {
+    const db = openRoundDb();
+    try {
+      insertExecutorRound(db, makeRound({ state: "running" }), { now: 1000 });
+      const guardedDb = interceptNextUpdate(db, "executor_rounds", () => {
+        db.prepare(
+          "UPDATE executor_rounds SET state = 'capturing_result', updated_at = 1099 WHERE round_id = 'round-1'"
+        ).run();
+      });
+      expect(() =>
+        updateExecutorRound(
+          guardedDb,
+          "round-1",
+          {
+            toState: "capturing_result",
+            summary: "wanted result",
+            resultDigest: "digest-1"
+          },
+          { now: 1100 }
+        )
+      ).toThrow(ExecutorRoundTransitionError);
+      const loaded = loadExecutorRound(db, "round-1");
+      expect(loaded?.state).toBe("capturing_result");
+      expect(loaded?.summary).toBeNull();
+      expect(loaded?.resultDigest).toBeNull();
     } finally {
       db.close();
     }

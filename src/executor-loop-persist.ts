@@ -372,16 +372,7 @@ export function loadExecutorInvocation(
   db: MomentumDb,
   invocationId: string
 ): ExecutorInvocationRecord | undefined {
-  const row = db
-    .prepare(
-      `SELECT invocation_id, workflow_run_id, step_run_id, step_key,
-              executor_family, state, attempt, started_at, heartbeat_at,
-              finished_at
-         FROM executor_invocations WHERE invocation_id = ?`
-    )
-    .get(invocationId) as ExecutorInvocationRow | undefined;
-  if (row === undefined) return undefined;
-  return rowToInvocation(row);
+  return loadExecutorInvocationSnapshot(db, invocationId)?.record;
 }
 
 export type UpdateExecutorInvocationOptions = {
@@ -406,10 +397,11 @@ export function updateExecutorInvocationState(
   toState: ExecutorInvocationState,
   options: UpdateExecutorInvocationOptions = {}
 ): ExecutorInvocationRecord {
-  const current = loadExecutorInvocation(db, invocationId);
-  if (current === undefined) {
+  const currentSnapshot = loadExecutorInvocationSnapshot(db, invocationId);
+  if (currentSnapshot === undefined) {
     throw new ExecutorInvocationNotFoundError(invocationId);
   }
+  const current = currentSnapshot.record;
   const result = transitionExecutorInvocation(current.state, toState);
   if (!result.ok) {
     throw new ExecutorInvocationTransitionError(
@@ -428,19 +420,24 @@ export function updateExecutorInvocationState(
     heartbeatAt: coalesce(options.heartbeatAt, current.heartbeatAt),
     finishedAt: coalesce(options.finishedAt, current.finishedAt)
   };
-  db.prepare(
+  const updateResult = db.prepare(
     `UPDATE executor_invocations
        SET state = ?, started_at = ?, heartbeat_at = ?, finished_at = ?,
            updated_at = ?
-     WHERE invocation_id = ?`
+     WHERE invocation_id = ? AND state = ? AND updated_at = ?`
   ).run(
     next.state,
     next.startedAt,
     next.heartbeatAt,
     next.finishedAt,
     now,
-    invocationId
+    invocationId,
+    current.state,
+    currentSnapshot.updatedAt
   );
+  if (Number(updateResult.changes) === 0) {
+    return handleInvocationPostWriteConflict(db, invocationId, toState, options);
+  }
   return next;
 }
 
@@ -529,11 +526,7 @@ export function loadExecutorRound(
   db: MomentumDb,
   roundId: string
 ): ExecutorRoundRecord | undefined {
-  const row = db
-    .prepare(`${ROUND_SELECT} WHERE round_id = ?`)
-    .get(roundId) as ExecutorRoundRow | undefined;
-  if (row === undefined) return undefined;
-  return rowToRound(row);
+  return loadExecutorRoundSnapshot(db, roundId)?.record;
 }
 
 /** List an invocation's rounds, ordered by `round_index`. */
@@ -596,10 +589,11 @@ export function updateExecutorRound(
   update: ExecutorRoundUpdate,
   options: UpdateExecutorRoundOptions = {}
 ): ExecutorRoundRecord {
-  const current = loadExecutorRound(db, roundId);
-  if (current === undefined) {
+  const currentSnapshot = loadExecutorRoundSnapshot(db, roundId);
+  if (currentSnapshot === undefined) {
     throw new ExecutorRoundNotFoundError(roundId);
   }
+  const current = currentSnapshot.record;
   const result = transitionExecutorRound(current.state, update.toState);
   if (!result.ok) {
     throw new ExecutorRoundTransitionError(
@@ -641,7 +635,7 @@ export function updateExecutorRound(
     throw new InvalidExecutorRecordError(errors);
   }
   const now = options.now ?? Date.now();
-  db.prepare(
+  const updateResult = db.prepare(
     `UPDATE executor_rounds SET
        state = ?, classification = ?, started_at = ?, heartbeat_at = ?,
        finished_at = ?, agent_provider = ?, model = ?, effort = ?,
@@ -649,7 +643,7 @@ export function updateExecutorRound(
        summary = ?, key_changes = ?, remaining_work = ?, changed_files = ?,
        verification_status = ?, commit_sha = ?, recovery_code = ?, human_gate = ?,
        updated_at = ?
-     WHERE round_id = ?`
+     WHERE round_id = ? AND state = ? AND updated_at = ?`
   ).run(
     next.state,
     next.classification,
@@ -672,8 +666,13 @@ export function updateExecutorRound(
     next.recoveryCode,
     next.humanGate,
     now,
-    roundId
+    roundId,
+    current.state,
+    currentSnapshot.updatedAt
   );
+  if (Number(updateResult.changes) === 0) {
+    return handleRoundPostWriteConflict(db, roundId, update);
+  }
   return next;
 }
 
@@ -926,6 +925,7 @@ type ExecutorInvocationRow = {
   started_at: number | null;
   heartbeat_at: number | null;
   finished_at: number | null;
+  updated_at: number;
 };
 
 type ExecutorRoundRow = {
@@ -957,6 +957,17 @@ type ExecutorRoundRow = {
   commit_sha: string | null;
   recovery_code: string | null;
   human_gate: string | null;
+  updated_at: number;
+};
+
+type ExecutorInvocationSnapshot = {
+  record: ExecutorInvocationRecord;
+  updatedAt: number;
+};
+
+type ExecutorRoundSnapshot = {
+  record: ExecutorRoundRecord;
+  updatedAt: number;
 };
 
 type ExecutorArtifactRow = {
@@ -1002,8 +1013,36 @@ const ROUND_SELECT = `
          started_at, heartbeat_at, finished_at, agent_provider, model, effort,
          input_digest, result_digest, artifact_root, log_paths,
          summary, key_changes, remaining_work, changed_files,
-         verification_status, commit_sha, recovery_code, human_gate
+         verification_status, commit_sha, recovery_code, human_gate,
+         updated_at
     FROM executor_rounds`;
+
+function loadExecutorInvocationSnapshot(
+  db: MomentumDb,
+  invocationId: string
+): ExecutorInvocationSnapshot | undefined {
+  const row = db
+    .prepare(
+      `SELECT invocation_id, workflow_run_id, step_run_id, step_key,
+              executor_family, state, attempt, started_at, heartbeat_at,
+              finished_at, updated_at
+         FROM executor_invocations WHERE invocation_id = ?`
+    )
+    .get(invocationId) as ExecutorInvocationRow | undefined;
+  if (row === undefined) return undefined;
+  return { record: rowToInvocation(row), updatedAt: row.updated_at };
+}
+
+function loadExecutorRoundSnapshot(
+  db: MomentumDb,
+  roundId: string
+): ExecutorRoundSnapshot | undefined {
+  const row = db
+    .prepare(`${ROUND_SELECT} WHERE round_id = ?`)
+    .get(roundId) as ExecutorRoundRow | undefined;
+  if (row === undefined) return undefined;
+  return { record: rowToRound(row), updatedAt: row.updated_at };
+}
 
 function rowToInvocation(row: ExecutorInvocationRow): ExecutorInvocationRecord {
   return {
@@ -1175,6 +1214,102 @@ function validateArtifactRecord(
     });
   }
   return errors;
+}
+
+function handleInvocationPostWriteConflict(
+  db: MomentumDb,
+  invocationId: string,
+  toState: ExecutorInvocationState,
+  options: UpdateExecutorInvocationOptions
+): ExecutorInvocationRecord {
+  const current = loadExecutorInvocation(db, invocationId);
+  if (current === undefined) {
+    throw new ExecutorInvocationNotFoundError(invocationId);
+  }
+  if (current.state === toState && invocationPatchMatches(current, options)) {
+    return current;
+  }
+  throw new ExecutorInvocationTransitionError(
+    invocationId,
+    current.state,
+    toState,
+    "executor_invocation_invalid_transition",
+    `executor invocation ${invocationId} changed concurrently; refusing ambiguous ${toState} update`
+  );
+}
+
+function handleRoundPostWriteConflict(
+  db: MomentumDb,
+  roundId: string,
+  update: ExecutorRoundUpdate
+): ExecutorRoundRecord {
+  const current = loadExecutorRound(db, roundId);
+  if (current === undefined) {
+    throw new ExecutorRoundNotFoundError(roundId);
+  }
+  if (current.state === update.toState && roundPatchMatches(current, update)) {
+    return current;
+  }
+  throw new ExecutorRoundTransitionError(
+    roundId,
+    current.state,
+    update.toState,
+    "executor_round_invalid_transition",
+    `executor round ${roundId} changed concurrently; refusing ambiguous ${update.toState} update`
+  );
+}
+
+function invocationPatchMatches(
+  current: ExecutorInvocationRecord,
+  options: UpdateExecutorInvocationOptions
+): boolean {
+  return (
+    fieldMatches(current.startedAt, options.startedAt) &&
+    fieldMatches(current.heartbeatAt, options.heartbeatAt) &&
+    fieldMatches(current.finishedAt, options.finishedAt)
+  );
+}
+
+function roundPatchMatches(
+  current: ExecutorRoundRecord,
+  update: ExecutorRoundUpdate
+): boolean {
+  return (
+    fieldMatches(current.classification, update.classification) &&
+    fieldMatches(current.startedAt, update.startedAt) &&
+    fieldMatches(current.heartbeatAt, update.heartbeatAt) &&
+    fieldMatches(current.finishedAt, update.finishedAt) &&
+    fieldMatches(current.agentProvider, update.agentProvider) &&
+    fieldMatches(current.model, update.model) &&
+    fieldMatches(current.effort, update.effort) &&
+    fieldMatches(current.inputDigest, update.inputDigest) &&
+    fieldMatches(current.resultDigest, update.resultDigest) &&
+    fieldMatches(current.artifactRoot, update.artifactRoot) &&
+    arrayFieldMatches(current.logPaths, update.logPaths) &&
+    fieldMatches(current.summary, update.summary) &&
+    arrayFieldMatches(current.keyChanges, update.keyChanges) &&
+    arrayFieldMatches(current.remainingWork, update.remainingWork) &&
+    arrayFieldMatches(current.changedFiles, update.changedFiles) &&
+    fieldMatches(current.verificationStatus, update.verificationStatus) &&
+    fieldMatches(current.commitSha, update.commitSha) &&
+    fieldMatches(current.recoveryCode, update.recoveryCode) &&
+    fieldMatches(current.humanGate, update.humanGate)
+  );
+}
+
+function fieldMatches<T>(current: T, update: T | undefined): boolean {
+  return update === undefined || current === update;
+}
+
+function arrayFieldMatches(
+  current: readonly string[],
+  update: readonly string[] | undefined
+): boolean {
+  return (
+    update === undefined ||
+    (current.length === update.length &&
+      current.every((value, index) => value === update[index]))
+  );
 }
 
 function parseStringArray(text: string): string[] {
