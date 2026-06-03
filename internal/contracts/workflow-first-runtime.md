@@ -333,6 +333,7 @@ Current Momentum state:
 - Has M10-01 `WorkflowDefinition` / `StepDefinition` validation, built-in coding workflow definition, and `workflow_definitions` / `step_definitions` persistence.
 - Has M10-02 `workflow run start` materialization from persisted or built-in definitions, including definition provenance on `workflow_runs`.
 - Has M10-03 `ExecutorDefinition` / `ExecutorInvocation` / `ExecutorRound` schema and persistence below workflow steps, including round artifacts, checkpoints, findings, and decisions.
+- Has M10-04 opt-in daemon workflow scheduler lane (recover → scan → claim → dispatch) that schedules runnable workflow steps alongside goal iteration draining, with the executor-dispatch seam left to later slices.
 - Has `goal start`, `daemon`, and workflow import / status / run controls.
 
 Required workflow-first gaps:
@@ -363,4 +364,4 @@ This planning contract does not implement:
 - Public UI.
 - Replacement of GNHF or no-mistakes internals.
 
-M10 is now implementing these as concrete slices: M10-01 lands definition schema / validation / persistence, M10-02 lands CLI run start, and M10-03 lands executor state schema / persistence, while daemon scheduling and external runtime behavior remain later slices.
+M10 is now implementing these as concrete slices: M10-01 lands definition schema / validation / persistence, M10-02 lands CLI run start, M10-03 lands executor state schema / persistence, and M10-04 lands the opt-in daemon workflow scheduler lane, while executor adapters and external runtime behavior remain later slices.
