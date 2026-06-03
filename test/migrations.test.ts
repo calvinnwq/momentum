@@ -1503,4 +1503,394 @@ describe("applyQueueMigrations", () => {
       }
     });
   });
+
+  describe("M10 executor-loop schema (NGX-347)", () => {
+    const EXECUTOR_TABLES = [
+      "executor_definitions",
+      "executor_invocations",
+      "executor_rounds",
+      "executor_artifacts",
+      "executor_checkpoints",
+      "executor_findings",
+      "executor_decisions"
+    ];
+
+    // Seed the minimal workflow_runs / workflow_steps parents the executor
+    // spine FKs hang below.
+    function seedRunAndStep(
+      db: DatabaseSync,
+      runId = "run-x",
+      stepId = "step-x"
+    ): void {
+      db.prepare(
+        `INSERT INTO workflow_runs
+           (id, state, source, plan_json, needs_manual_recovery,
+            created_at, updated_at)
+         VALUES (?, 'pending', 'agent-workflows', '{}', 0, 1, 1)`
+      ).run(runId);
+      db.prepare(
+        `INSERT INTO workflow_steps
+           (run_id, step_id, kind, state, step_order, required,
+            created_at, updated_at)
+         VALUES (?, ?, 'implementation', 'pending', 0, 1, 1, 1)`
+      ).run(runId, stepId);
+    }
+
+    function seedInvocation(db: DatabaseSync): void {
+      seedRunAndStep(db);
+      db.prepare(
+        `INSERT INTO executor_invocations
+           (invocation_id, workflow_run_id, step_run_id, step_key,
+            executor_family, state, attempt, created_at, updated_at)
+         VALUES ('inv-x', 'run-x', 'step-x', 'implementation',
+                 'goal-loop', 'pending', 1, 1, 1)`
+      ).run();
+    }
+
+    it("creates the seven executor-loop tables with the contract columns", () => {
+      const dataDir = makeTempDir();
+      const db = openDb(dataDir);
+      try {
+        for (const table of EXECUTOR_TABLES) {
+          expect(tableNames(db), `missing table: ${table}`).toContain(table);
+        }
+
+        const roundCols = getColumns(db, "executor_rounds").map(
+          (row) => row.name
+        );
+        // The full contract "Round Schema" identity / execution / result fields.
+        for (const col of [
+          "round_id",
+          "invocation_id",
+          "workflow_run_id",
+          "step_run_id",
+          "step_key",
+          "executor_family",
+          "attempt",
+          "round_index",
+          "state",
+          "classification",
+          "started_at",
+          "heartbeat_at",
+          "finished_at",
+          "agent_provider",
+          "model",
+          "effort",
+          "input_digest",
+          "result_digest",
+          "artifact_root",
+          "log_paths",
+          "summary",
+          "key_changes",
+          "remaining_work",
+          "changed_files",
+          "verification_status",
+          "commit_sha",
+          "recovery_code",
+          "human_gate",
+          "created_at",
+          "updated_at"
+        ]) {
+          expect(roundCols, `missing executor_rounds column: ${col}`).toContain(
+            col
+          );
+        }
+
+        const invocationCols = getColumns(db, "executor_invocations").map(
+          (row) => row.name
+        );
+        for (const col of [
+          "invocation_id",
+          "workflow_run_id",
+          "step_run_id",
+          "step_key",
+          "executor_family",
+          "state",
+          "attempt",
+          "started_at",
+          "heartbeat_at",
+          "finished_at",
+          "created_at",
+          "updated_at"
+        ]) {
+          expect(
+            invocationCols,
+            `missing executor_invocations column: ${col}`
+          ).toContain(col);
+        }
+
+        const definitionCols = getColumns(db, "executor_definitions").map(
+          (row) => row.name
+        );
+        for (const col of [
+          "executor_key",
+          "family",
+          "agent_provider",
+          "model",
+          "effort",
+          "timeout_ms",
+          "max_rounds",
+          "policy_envelope",
+          "created_at",
+          "updated_at"
+        ]) {
+          expect(
+            definitionCols,
+            `missing executor_definitions column: ${col}`
+          ).toContain(col);
+        }
+      } finally {
+        db.close();
+      }
+    });
+
+    it("creates the executor-loop lookup and uniqueness indexes", () => {
+      const dataDir = makeTempDir();
+      const db = openDb(dataDir);
+      try {
+        const indexes = (
+          db
+            .prepare(
+              "SELECT name FROM sqlite_master WHERE type='index' ORDER BY name"
+            )
+            .all() as Array<{ name: string }>
+        ).map((row) => row.name);
+        for (const idx of [
+          "idx_executor_invocations_run",
+          "idx_executor_invocations_step",
+          "idx_executor_invocations_state",
+          "idx_executor_rounds_invocation",
+          "idx_executor_rounds_run",
+          "idx_executor_rounds_step",
+          "idx_executor_rounds_invocation_index",
+          "idx_executor_artifacts_round",
+          "idx_executor_checkpoints_round",
+          "idx_executor_checkpoints_round_sequence",
+          "idx_executor_findings_round",
+          "idx_executor_decisions_round"
+        ]) {
+          expect(indexes, `missing index: ${idx}`).toContain(idx);
+        }
+      } finally {
+        db.close();
+      }
+    });
+
+    it("enforces the unique round ordering per (invocation_id, round_index)", () => {
+      const dataDir = makeTempDir();
+      const db = openDb(dataDir);
+      try {
+        db.exec("PRAGMA foreign_keys = ON");
+        seedInvocation(db);
+        const insertRound = db.prepare(
+          `INSERT INTO executor_rounds
+             (round_id, invocation_id, workflow_run_id, step_run_id, step_key,
+              executor_family, attempt, round_index, state,
+              created_at, updated_at)
+           VALUES (?, 'inv-x', 'run-x', 'step-x', 'implementation',
+                   'goal-loop', 1, ?, 'pending', 1, 1)`
+        );
+        insertRound.run("round-a", 0);
+        // the same round_index under one invocation collides
+        expect(() => insertRound.run("round-b", 0)).toThrow(/UNIQUE/i);
+        // a distinct index under the same invocation is fine
+        insertRound.run("round-c", 1);
+      } finally {
+        db.close();
+      }
+    });
+
+    it("enforces the unique checkpoint stream per (round_id, sequence)", () => {
+      const dataDir = makeTempDir();
+      const db = openDb(dataDir);
+      try {
+        db.exec("PRAGMA foreign_keys = ON");
+        seedInvocation(db);
+        db.prepare(
+          `INSERT INTO executor_rounds
+             (round_id, invocation_id, workflow_run_id, step_run_id, step_key,
+              executor_family, attempt, round_index, state,
+              created_at, updated_at)
+           VALUES ('round-x', 'inv-x', 'run-x', 'step-x', 'implementation',
+                   'goal-loop', 1, 0, 'pending', 1, 1)`
+        ).run();
+        const insertCheckpoint = db.prepare(
+          `INSERT INTO executor_checkpoints
+             (checkpoint_id, round_id, sequence, stage, created_at)
+           VALUES (?, 'round-x', ?, 'prepare', 1)`
+        );
+        insertCheckpoint.run("c-a", 0);
+        expect(() => insertCheckpoint.run("c-b", 0)).toThrow(/UNIQUE/i);
+        insertCheckpoint.run("c-c", 1);
+      } finally {
+        db.close();
+      }
+    });
+
+    it("rejects an invocation whose (workflow_run_id, step_run_id) has no workflow_steps row", () => {
+      const dataDir = makeTempDir();
+      const db = openDb(dataDir);
+      try {
+        db.exec("PRAGMA foreign_keys = ON");
+        expect(() =>
+          db
+            .prepare(
+              `INSERT INTO executor_invocations
+                 (invocation_id, workflow_run_id, step_run_id, step_key,
+                  executor_family, state, attempt, created_at, updated_at)
+               VALUES ('inv-orphan', 'run-missing', 'step-missing',
+                       'implementation', 'goal-loop', 'pending', 1, 1, 1)`
+            )
+            .run()
+        ).toThrow(/FOREIGN KEY/i);
+      } finally {
+        db.close();
+      }
+    });
+
+    it("rejects a round whose invocation_id has no executor_invocations row", () => {
+      const dataDir = makeTempDir();
+      const db = openDb(dataDir);
+      try {
+        db.exec("PRAGMA foreign_keys = ON");
+        seedRunAndStep(db);
+        expect(() =>
+          db
+            .prepare(
+              `INSERT INTO executor_rounds
+                 (round_id, invocation_id, workflow_run_id, step_run_id,
+                  step_key, executor_family, attempt, round_index, state,
+                  created_at, updated_at)
+               VALUES ('round-orphan', 'inv-missing', 'run-x', 'step-x',
+                       'implementation', 'goal-loop', 1, 0, 'pending', 1, 1)`
+            )
+            .run()
+        ).toThrow(/FOREIGN KEY/i);
+      } finally {
+        db.close();
+      }
+    });
+
+    it("rejects child evidence whose round_id has no executor_rounds row", () => {
+      const dataDir = makeTempDir();
+      const db = openDb(dataDir);
+      try {
+        db.exec("PRAGMA foreign_keys = ON");
+        expect(() =>
+          db
+            .prepare(
+              `INSERT INTO executor_artifacts
+                 (artifact_id, round_id, artifact_class, path, created_at)
+               VALUES ('a-orphan', 'round-missing', 'result_document',
+                       '/runs/x/result.json', 1)`
+            )
+            .run()
+        ).toThrow(/FOREIGN KEY/i);
+      } finally {
+        db.close();
+      }
+    });
+
+    it("is idempotent across repeated openDb invocations for executor tables", () => {
+      const dataDir = makeTempDir();
+      const a = openDb(dataDir);
+      const before = new Map(
+        EXECUTOR_TABLES.map((table) => [table, getColumns(a, table).length])
+      );
+      a.close();
+
+      const b = openDb(dataDir);
+      try {
+        for (const table of EXECUTOR_TABLES) {
+          expect(
+            getColumns(b, table),
+            `column count drifted for ${table}`
+          ).toHaveLength(before.get(table) ?? -1);
+        }
+      } finally {
+        b.close();
+      }
+    });
+
+    it("adds executor tables to a pre-M10-03 data dir without dropping existing rows", () => {
+      const dataDir = makeTempDir();
+      const dbPath = path.join(dataDir, "momentum.db");
+      const pre = new DatabaseSync(dbPath);
+      try {
+        pre.exec(`
+          CREATE TABLE goals (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            branch TEXT NOT NULL,
+            artifact_dir TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+          ) STRICT;
+        `);
+        pre.prepare(
+          `INSERT INTO goals (id, title, branch, artifact_dir, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?)`
+        ).run(
+          "g-pre-executor",
+          "pre-executor goal",
+          "main",
+          "/tmp/pre-exec",
+          1,
+          2
+        );
+      } finally {
+        pre.close();
+      }
+
+      const upgraded = openDb(dataDir);
+      try {
+        for (const table of EXECUTOR_TABLES) {
+          expect(tableNames(upgraded), `missing table: ${table}`).toContain(
+            table
+          );
+        }
+        const goal = upgraded
+          .prepare("SELECT id, title FROM goals WHERE id = 'g-pre-executor'")
+          .get() as { id: string; title: string };
+        expect(goal.title).toBe("pre-executor goal");
+      } finally {
+        upgraded.close();
+      }
+    });
+
+    it("does not persist credential, token, header, or chat columns on executor tables", () => {
+      const dataDir = makeTempDir();
+      const db = openDb(dataDir);
+      try {
+        const forbidden = [
+          "credential",
+          "credentials",
+          "token",
+          "secret",
+          "api_key",
+          "apikey",
+          "authorization",
+          "auth_header",
+          "request_headers",
+          "headers",
+          "chat_body"
+        ];
+        for (const table of EXECUTOR_TABLES) {
+          const cols = getColumns(db, table).map((row) =>
+            row.name.toLowerCase()
+          );
+          for (const col of cols) {
+            for (const banned of forbidden) {
+              expect(
+                col,
+                `${table} should not include credential/header/chat column "${col}"`
+              ).not.toContain(banned);
+            }
+          }
+        }
+      } finally {
+        db.close();
+      }
+    });
+  });
 });
