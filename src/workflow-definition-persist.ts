@@ -4,8 +4,9 @@
  * Takes the pure {@link WorkflowDefinition} shape owned by
  * `workflow-definition.ts` and writes it into the durable
  * `workflow_definitions` / `step_definitions` tables added by `migrations.ts`.
- * This is the storage twin of the pure validator: nothing here runs executors,
- * starts runs, or schedules work — those are later M10 slices.
+ * This is the storage twin of the pure validator: nothing here runs executors
+ * or schedules work. First-class run start is layered separately on these
+ * persisted definitions.
  *
  * Stable contracts this slice locks in:
  *   - A definition's durable identity is `(key, version)`; a step's is

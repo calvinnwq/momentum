@@ -2,7 +2,7 @@
 
 Operator-facing CLI envelopes for the `workflow run start`, `workflow import`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run approve`, `workflow run update-step`, `workflow run clear-recovery`, and `workflow run monitor` commands.
 
-- `workflow run start` starts a first-class workflow run from a validated workflow definition: it resolves the definition (a persisted definition, or the built-in `coding-workflow` recipe), loads repo policy, and durably materializes a `workflow_runs` row plus one ordered `workflow_steps` row per definition step. `goal start` remains the compatibility path for the older Goal loop.
+- `workflow run start` starts a first-class workflow run from a validated workflow definition: it resolves the definition (a persisted definition, or the built-in `coding-workflow` recipe), loads repo policy, and durably materializes a `workflow_runs` row plus one ordered `workflow_steps` row per definition step, with an approval row when an approval boundary is supplied. `goal start` remains the compatibility path for the older Goal loop.
 - `workflow import` reads local `.agent-workflows/<run-id>/` directories and persists normalized rows into the `workflow_runs`, `workflow_steps`, and `workflow_approvals` tables.
 - `workflow status` is a read-only surface that lists workflow runs (with state / filter selectors) or returns the full detail of a single run.
 - `workflow handoff` is a read-only surface that emits a machine-readable next-action envelope for one run.
@@ -46,7 +46,7 @@ Behaviour:
 - **Definition resolution**: a persisted definition for `--definition` (optionally pinned by `--definition-version`) wins. When no matching definition is persisted, the built-in `coding-workflow` recipe is the fallback, so a fresh database can still start the canonical workflow. The fallback is persisted into `workflow_definitions` / `step_definitions` before the run is written. An unresolved key/version refuses with `definition_not_found`.
 - **Repo policy loading**: `<repo>/MOMENTUM.md` is loaded and validated. A present-but-malformed policy refuses the start with `policy_invalid` and writes nothing; an absent policy is allowed and reported as `policy.present: false`.
 - **Materialization**: on success the command durably writes one `workflow_runs` row plus one ordered `workflow_steps` row per definition step, linking the run to the definition it started from (`workflow_definition_key` / `workflow_definition_version`). The run `source` is `workflow-definition`.
-- **Approval boundary**: when `--approval-boundary` is supplied, the pending steps the boundary covers are persisted as `approved` and the run state is derived as `approved`; otherwise every step is `pending` and the run state is `pending`.
+- **Approval boundary**: when `--approval-boundary` is supplied, the pending steps the boundary covers are persisted as `approved`, a `workflow_approvals` row is recorded with synthetic `workflow-run-start://<run-id>/<boundary>` provenance, and the run state is derived as `approved`; otherwise every step is `pending` and the run state is `pending`.
 - **No clobber**: a duplicate `--run-id` refuses with `run_exists` and never overwrites the existing run.
 
 ### JSON envelope (success)
@@ -141,7 +141,7 @@ The `Approval boundary` line prints the boundary when one was supplied. The `Pol
 Workflow run already exists: run-1.
 ```
 
-Exit code 0 on success, 1 on structured refusal.
+Exit code 0 on success, 1 on structured refusal, 2 on usage error.
 
 ## `workflow import`
 

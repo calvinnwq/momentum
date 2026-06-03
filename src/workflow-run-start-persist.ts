@@ -4,7 +4,8 @@
  * Takes the pure {@link WorkflowRunStartInput} owned by `workflow-run-start.ts`,
  * materializes it through {@link materializeWorkflowRunStart}, and writes the
  * resulting `WorkflowRun` + `StepRun` plan into the durable `workflow_runs` /
- * `workflow_steps` tables. This is the storage twin of the pure materializer:
+ * `workflow_steps` tables, with a `workflow_approvals` row when the start has an
+ * approval boundary. This is the storage twin of the pure materializer:
  * nothing here runs executors, schedules work, or starts a Goal loop — those are
  * later M10 slices. `goal start` stays the compatibility path for old Goal-loop
  * usage and is untouched.

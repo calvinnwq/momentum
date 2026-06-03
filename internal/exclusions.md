@@ -94,18 +94,19 @@ Milestone status:
   reframes the future product model around
   `WorkflowDefinition`, `WorkflowRun`, `StepDefinition`, `StepRun`, and
   pluggable executors such as `goal-loop` and `no-mistakes`. M9 remains
-  foundation work; M10 has started landing definition schema and persistence
-  primitives, while first-class start / execution behavior for general-purpose
-  configurable workflows stays deferred until the relevant M10 implementation
-  slices land. See
+  foundation work; M10 has landed definition schema, persistence primitives, and
+  first-class workflow run start. The earlier combined "first-class start / execution behavior"
+  deferral has narrowed: start has landed, while execution behavior for
+  general-purpose configurable workflows stays deferred until the relevant M10
+  implementation slices land. See
   [`internal/milestones/m10-workflow-first-runtime.md`](milestones/m10-workflow-first-runtime.md),
   [`internal/contracts/workflow-first-runtime.md`](contracts/workflow-first-runtime.md),
   [`internal/contracts/executor-loop.md`](contracts/executor-loop.md), and
   [`internal/contracts/workflow-first-gap-matrix.md`](contracts/workflow-first-gap-matrix.md).
 
-The following surfaces remain deferred outside the M10 definition / persistence
-slice so the runner-boundary, policy-loading, and M5 read-first source surfaces
-stay scoped.
+The following surfaces remain deferred outside the landed M10 definition /
+persistence and run-start slices so the runner-boundary, policy-loading, and M5
+read-first source surfaces stay scoped.
 
 ## Background runner supervision
 
@@ -159,11 +160,11 @@ current-to-target planning pinned in
 [`internal/contracts/workflow-first-gap-matrix.md`](contracts/workflow-first-gap-matrix.md),
 with M10 planning pinned in
 [`internal/milestones/m10-workflow-first-runtime.md`](milestones/m10-workflow-first-runtime.md),
-and M10 has begun landing reusable workflow / step definition schema and
-persistence. First-class start, execution, and generalized `WorkflowRun`
-behavior remain deferred until the relevant M10 implementation slices land.
-Until then, the shipped executable `WorkflowRun` substrate remains scoped to the
-OpenClaw coding-workflow backend and the M9 live-wrapper foundation.
+and M10 has landed reusable workflow / step definition schema plus first-class
+workflow run start. Execution and generalized `WorkflowRun` behavior remain
+deferred until the relevant M10 implementation slices land. Until then, the
+shipped executable `WorkflowRun` substrate remains scoped to the OpenClaw
+coding-workflow backend and the M9 live-wrapper foundation.
 
 ## Worktree management and remote git operations
 
