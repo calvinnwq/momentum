@@ -19,6 +19,7 @@ import {
   type WorkflowStepDispatchResult
 } from "../src/workflow-scheduler.js";
 import { getWorkflowLease } from "../src/workflow-leases.js";
+import { resolveWorkflowRecoveryArtifactPath } from "../src/workflow-recovery-artifact.js";
 import { getWorkflowRunManualRecoveryState } from "../src/workflow-run-recovery.js";
 import type {
   WorkflowLeaseKind,
@@ -625,6 +626,42 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
       // blocked, and the operator must resolve it before clearing recovery).
       const lease = getWorkflowLease(db, "run-a", "managed-step");
       expect(lease?.releasedAt).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("renders recovery.md when a stale manual-recovery lease parks a run", () => {
+    const repoPath = makeTempDir("momentum-workflow-scheduler-repo-");
+    const db = openDb(makeTempDir());
+    try {
+      seedRun(db, { runId: "run-a", state: "running", repoPath });
+      seedStep(db, {
+        runId: "run-a",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "running",
+        order: 0
+      });
+      seedLease(db, {
+        runId: "run-a",
+        leaseKind: "managed-step",
+        expiresAt: NOW - 10_000,
+        stalePolicy: "manual-recovery-required"
+      });
+
+      const result = recoverStaleWorkflowLeases(db, { now: NOW });
+
+      expect(result.recovered).toHaveLength(1);
+      const artifactPath = resolveWorkflowRecoveryArtifactPath(
+        path.join(repoPath, ".agent-workflows"),
+        "run-a"
+      );
+      expect(fs.existsSync(artifactPath)).toBe(true);
+      const body = fs.readFileSync(artifactPath, "utf-8");
+      expect(body).toContain("Recovery classification: manual_recovery_lease");
+      expect(body).toContain(`Classified at (epoch ms): ${NOW}`);
+      expect(body).toContain(WORKFLOW_LEASE_MANUAL_RECOVERY_STATUS);
     } finally {
       db.close();
     }

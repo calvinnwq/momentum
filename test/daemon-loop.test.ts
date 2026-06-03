@@ -1745,6 +1745,58 @@ describe("runDaemonLoop workflow scheduler lane (NGX-348)", () => {
     }
   });
 
+  it("does not dispatch workflow work after a stop request during goal work", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const runId = seedDaemonRun(db);
+      const wfRunId = seedRunnableWorkflow(db);
+      const recorder = recordingWorkflowDispatch();
+      const { calls, sleep } = makeRecordingSleep();
+      const observedCycles: Array<RunWorkflowSchedulerOnceResult | undefined> = [];
+
+      const result = await runDaemonLoop({
+        db,
+        dataDir,
+        runId,
+        workerId: "daemon-loop-wf-stop-after-goal",
+        pollIntervalMs: 7,
+        maxIdleCycles: 10,
+        now: makeMonotonicNow(),
+        sleep,
+        onCycleComplete: (cycle) => observedCycles.push(cycle.workflowResult),
+        runWorker: () => {
+          requestDaemonRunStop(db, {
+            runId,
+            reason: "operator stop",
+            now: 200_000
+          });
+          return {
+            code: "no_work",
+            workerId: "daemon-loop-wf-stop-after-goal",
+            dataDir,
+            outcome: "idle",
+            message: "no work"
+          };
+        },
+        workflowLane: { dispatch: recorder.dispatch }
+      });
+
+      expect(result.exitReason).toBe("stop_requested");
+      expect(result.workflowStepsDispatched).toBe(0);
+      expect(result.lastWorkflowCode).toBeNull();
+      expect(result.idleCycles).toBe(0);
+      expect(recorder.calls).toHaveLength(0);
+      expect(calls).toEqual([]);
+      expect(observedCycles).toEqual([undefined]);
+      expect(
+        getWorkflowLease(db, wfRunId, WORKFLOW_DISPATCH_LEASE_KIND)
+      ).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
   it("marks the daemon run errored and releases the lease when the dispatcher throws", async () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);

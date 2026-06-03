@@ -42,11 +42,17 @@
  */
 
 import type { MomentumDb } from "./db.js";
+import path from "node:path";
 import {
   acquireWorkflowLeaseInTransaction,
   getWorkflowLease,
   releaseWorkflowLease
 } from "./workflow-leases.js";
+import {
+  writeWorkflowRecoveryArtifact,
+  writeWorkflowRecoveryArtifactInRunDir,
+  type WorkflowRecoveryArtifactInput
+} from "./workflow-recovery-artifact.js";
 import { markWorkflowRunNeedsManualRecovery } from "./workflow-run-recovery.js";
 import {
   classifyWorkflowLease,
@@ -429,11 +435,16 @@ export function recoverStaleWorkflowLeases(
         live !== undefined &&
         classification === "stale-manual-recovery-required"
       ) {
+        const reason =
+          `${WORKFLOW_LEASE_MANUAL_RECOVERY_STATUS}: ${live.leaseKind} lease ` +
+          `held by ${live.holder} expired without a heartbeat`;
+        const artifactContext = loadWorkflowManualRecoveryArtifactContext(
+          db,
+          live.runId
+        );
         const marked = markWorkflowRunNeedsManualRecovery(db, {
           runId: live.runId,
-          reason:
-            `${WORKFLOW_LEASE_MANUAL_RECOVERY_STATUS}: ${live.leaseKind} lease ` +
-            `held by ${live.holder} expired without a heartbeat`,
+          reason,
           now
         });
         if (marked.ok) {
@@ -445,6 +456,11 @@ export function recoverStaleWorkflowLeases(
             stalePolicy: live.stalePolicy,
             action: "flagged_manual_recovery",
             recoveryStatus: WORKFLOW_LEASE_MANUAL_RECOVERY_STATUS
+          });
+          tryWriteWorkflowManualRecoveryArtifact({
+            context: artifactContext,
+            reason,
+            now
           });
         } else {
           db.exec("ROLLBACK");
@@ -475,6 +491,75 @@ export function recoverStaleWorkflowLeases(
   }
 
   return { recovered, skipped };
+}
+
+type WorkflowManualRecoveryArtifactContext = {
+  runId: string;
+  repoPath: string | null;
+  sourceArtifactPath: string | null;
+  stepId: string | null;
+};
+
+function loadWorkflowManualRecoveryArtifactContext(
+  db: MomentumDb,
+  runId: string
+): WorkflowManualRecoveryArtifactContext | null {
+  const run = db
+    .prepare("SELECT id, repo_path, source_artifact_path FROM workflow_runs WHERE id = ?")
+    .get(runId) as
+    | { id: string; repo_path: string | null; source_artifact_path: string | null }
+    | undefined;
+  if (run === undefined) return null;
+  const steps = loadStepRecords(db, runId);
+  const runningOrBlocked = steps.find(
+    (step) => step.state === "running" || step.state === "blocked"
+  );
+  return {
+    runId: run.id,
+    repoPath: run.repo_path,
+    sourceArtifactPath: run.source_artifact_path,
+    stepId: runningOrBlocked?.stepId ?? null
+  };
+}
+
+function tryWriteWorkflowManualRecoveryArtifact(input: {
+  context: WorkflowManualRecoveryArtifactContext | null;
+  reason: string;
+  now: number;
+}): void {
+  const context = input.context;
+  if (context === null) return;
+
+  const artifactInput: WorkflowRecoveryArtifactInput = {
+    runId: context.runId,
+    stepId: context.stepId,
+    classification: "manual_recovery_lease",
+    reason: input.reason,
+    recommendedNextAction: {
+      code: "clear_recovery",
+      detail:
+        "Run is blocked. Clear the manual recovery once the underlying cause has been resolved.",
+      stepId: context.stepId
+    },
+    evidencePointers: [],
+    repoPath: context.repoPath,
+    classifiedAt: input.now
+  };
+
+  try {
+    if (context.sourceArtifactPath !== null) {
+      writeWorkflowRecoveryArtifactInRunDir({
+        runDir: path.dirname(context.sourceArtifactPath),
+        input: artifactInput
+      });
+    } else if (context.repoPath !== null) {
+      writeWorkflowRecoveryArtifact({
+        agentWorkflowsDir: path.join(context.repoPath, ".agent-workflows"),
+        input: artifactInput
+      });
+    }
+  } catch {
+  }
 }
 
 /**

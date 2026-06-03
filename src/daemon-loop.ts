@@ -307,6 +307,45 @@ export async function runDaemonLoop(
         jobsNotExecuted += 1;
       }
 
+      if (workflowLane !== undefined) {
+        const postWorkerRun = getDaemonRun(input.db, input.runId);
+        if (postWorkerRun === undefined) {
+          exitReason = "run_missing";
+          if (
+            !completeCycle(
+              iterations - 1,
+              run.state,
+              workerResult,
+              cycleStart
+            )
+          ) {
+            break;
+          }
+          break;
+        }
+        lastObservedState = postWorkerRun.state;
+        if (isTerminalDaemonRunState(postWorkerRun.state)) {
+          exitReason = "run_terminated";
+        } else if (postWorkerRun.stop_now_requested_at !== null) {
+          exitReason = "stop_now_requested";
+        } else if (postWorkerRun.state === "stop_requested") {
+          exitReason = "stop_requested";
+        }
+        if (exitReason !== null) {
+          if (
+            !completeCycle(
+              iterations - 1,
+              postWorkerRun.state,
+              workerResult,
+              cycleStart
+            )
+          ) {
+            break;
+          }
+          break;
+        }
+      }
+
       // Workflow scheduler lane: a separate lane over separate tables, run each
       // cycle after — and independently of — goal iteration draining. Inert
       // unless enabled, so the goal-iteration accounting above is unchanged.
