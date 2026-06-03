@@ -2,13 +2,14 @@
  * Run-scoped recovery artifact renderer (NGX-327, M8-04).
  *
  * Renders the per-run `.agent-workflows/<runId>/recovery.md` artifact from
- * either the M7 monitor reducer's recovery classification or the M9 live
- * run-level recovery classifications. The renderer is the run-scoped
+ * either the M7 monitor reducer's recovery classification, the M9 live
+ * run-level recovery classifications, or the M10 scheduler lane's stale
+ * workflow-lease recovery classification. The renderer is the run-scoped
  * sibling of the M3 goal-scoped `recovery-artifact.ts`: it owns artifact
  * *generation* only and never touches SQLite, executors, or the durable flag;
  * the durable `WorkflowRun.needs_manual_recovery` wiring and the explicit
- * clear path compose with this renderer through the M8 recovery slice and M9
- * live recovery seams.
+ * clear path compose with this renderer through the M8 recovery slice, M9
+ * live recovery seams, and M10 scheduler-lane recovery.
  *
  * The renderer is intentionally pure and accepts only structured, bounded
  * fields (run id, step id, classification, evidence pointers, recommended next
@@ -43,7 +44,9 @@ export const WORKFLOW_RECOVERY_ARTIFACT_SCHEMA_VERSION = 1;
 
 /**
  * Live run-level recovery classifications that M9 layers on top of the M7
- * monitor recovery codes. These are NOT emitted by `deriveWorkflowMonitorState`
+ * monitor recovery codes. The M10 scheduler lane also reuses the M7
+ * `manual_recovery_lease` classification when a stale workflow lease requires
+ * operator action. These are NOT emitted by `deriveWorkflowMonitorState`
  * — they are raised by the M9 live finalization transaction
  * (`head_mismatch`, `reset_failed`, `repo_lock_lost`, `git_failed`,
  * unsafe `commit_failed`, `invalid_input`), result-document checks during
@@ -105,12 +108,12 @@ export function isSafeWorkflowRunPathSegment(runId: string): boolean {
  * Encodes the NGX-327 safety contract: prefer blocking over guessing, never
  * auto-clear from elapsed time, no automatic repair or live process killing,
  * and the rollback is reverting the flag/artifact wiring without disturbing the
- * upstream monitor-derived or live-run recovery source.
+ * upstream monitor-derived, live-run, or scheduler-lane recovery source.
  */
 export const WORKFLOW_RECOVERY_SAFETY_NOTES: readonly string[] = [
   "Recovery never auto-clears from elapsed time alone; an operator must explicitly clear it once the blocking state is resolved.",
   "Momentum does not kill processes or perform automatic repair; resolve the underlying cause manually before clearing recovery.",
-  "Rollback: revert the run-scoped recovery flag and artifact wiring. The upstream monitor-derived or live-run recovery source is unchanged by this artifact."
+  "Rollback: revert the run-scoped recovery flag and artifact wiring. The upstream monitor-derived, live-run, or scheduler-lane recovery source is unchanged by this artifact."
 ];
 
 const SAFE_NEXT_STEPS: Record<

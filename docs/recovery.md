@@ -10,8 +10,9 @@ contracts that are intentionally separate but composed by the same CLI surfaces:
   what Momentum writes to disk and blocks at the queue when an auto-recovery
   refusal would lose audit context or risk a non-Momentum commit.
 - **Run-scoped workflow recovery** — what Momentum writes under
-  `.agent-workflows/<run-id>/` when monitor-derived blockers or live workflow
-  dispatch / finalization failures require operator action.
+  `.agent-workflows/<run-id>/` when monitor-derived blockers, live workflow
+  dispatch / finalization failures, or stale workflow leases require operator
+  action.
 - **Intent apply blocked state** — the durable per-intent `apply_state =
   'blocked'` flag set when `intent apply --external-apply` lands a partial
   external write but cannot finalize its audit row.
@@ -20,20 +21,26 @@ This page is the canonical reference for all four.
 
 ## Stale-lease detection and auto-recovery
 
-Momentum detects stale leases on three durable surfaces and auto-recovers only
-those it can prove are safe; everything else is surfaced for explicit manual
-recovery.
+Momentum detects stale leases on the durable surfaces below and auto-recovers
+only those it can prove are safe; everything else is surfaced for explicit
+manual recovery. The daemon startup pass covers the first three surfaces; the
+workflow scheduler lane handles `workflow_leases` during enabled scheduler
+ticks.
 
 | Surface | Stale condition | Auto-recovery action | Skip reasons (manual recovery) |
 |---|---|---|---|
 | Repo lock (`repo_locks`) | `state = 'active'` AND `lease_expires_at < now - staleLeaseGraceMs` | Released when the owning job is terminal (`succeeded` / `failed`); emits `repo_lock.recovered` and stamps `recovery_status = 'auto_released_job_terminal'`. | `job_pending` / `job_claimed` / `job_running` / `job_missing`. |
 | Claimed/running `goal_iteration` job (`jobs`) | `state IN ('claimed', 'running')` AND `lease_expires_at < now - staleLeaseGraceMs` | Safe stale `claimed` jobs are re-pended without losing `attempt_count` or idempotency key; emits `job.recovered` with `recovery_status = 'auto_repended_stale_claim'`. `running` jobs are skipped. | `job_running` (in-flight repo writes), `daemon_active` (live owner), `lock_active` (held lock), `repo_dirty` / `repo_unknown_commit` / `repo_unavailable` (repo-state safety refusal), `job_state_changed` (concurrent update race). |
 | Daemon record (`daemon_runs`) | Active state (`starting` / `running` / `stop_requested`) AND `heartbeat_at` is older than `staleAfterMs` (90s idle / 930s with `active_job_id`) | Finalized to `error` terminal with `recovery_status = 'auto_recovered_idle_stale'` when `active_job_id` and `active_lock_id` are both `NULL`. | `self` (caller's own run), `active_job_present` (delegates to job-side recovery), `active_lock_present` (delegates to lock-side recovery), `run_state_changed` (concurrent update race). |
+| Workflow lease (`workflow_leases`) | Non-released `managed-step` or `dispatch` lease with `expires_at < now - graceMs` during an enabled workflow scheduler tick | `auto-release` leases are released in place and the run state is re-derived; emits `auto_released_stale_workflow_lease`. | `manual-recovery-required` leases leave the lease as evidence, set the run-scoped `needs_manual_recovery` flag with `stale_workflow_lease_manual_recovery_required`, and render run-scoped `recovery.md` best-effort. Concurrent row changes surface as `lease_changed` / `run_not_found`. |
 
 The managed `daemon start` loop runs a one-shot `runStartupRecovery` pass before
-its first cycle. All three primitives are independently idempotent, share one
-observed `now`, and emit structured recovery events (where the events schema's
-non-empty `goal_id` constraint allows). The CLI surfaces them at:
+its first cycle. Those three startup primitives are independently idempotent,
+share one observed `now`, and emit structured recovery events (where the events
+schema's non-empty `goal_id` constraint allows). Workflow lease recovery is a
+per-scheduler-tick lane over `workflow_leases`, also idempotent, and is surfaced
+through workflow run state and scheduler-lane telemetry rather than the startup
+recovery block. The CLI surfaces startup recovery at:
 
 - `daemon start --max-loop-iterations N` JSON response — `loop.startupRecovery`
   with `observedAt`, `graceMs`, recovered counts, and skipped arrays for repo
@@ -133,7 +140,9 @@ condition (`manual_recovery_lease`, `ghost_active_no_lease`,
 `<run-dir>/recovery.md`. Live workflow execution uses the same durable flag and
 artifact when dispatch or finalization cannot safely continue, preserving stable
 classifications such as `head_mismatch`, `result_missing`, `repo_lock_lost`,
-`auth_unavailable`, and `executor_threw`.
+`auth_unavailable`, and `executor_threw`. The workflow scheduler lane also uses
+this run-scoped surface when a stale `manual-recovery-required` workflow lease
+expires; stale `auto-release` workflow leases are released instead of flagged.
 
 The run-scoped flag blocks `workflow run approve` and any
 `workflow run update-step` transition that would leave the blocking recovery
@@ -148,21 +157,23 @@ refuses with `recovery_clear_refused` while a monitor-derived blocking condition
 remains, or `not_flagged` when the run is not currently flagged. The command
 leaves the run's `recovery.md` artifact on disk as audit evidence.
 
-For live dispatch or finalization recovery, the same flag and artifact may hold
-non-monitor classifications. `workflow run clear-recovery` still rechecks and
-refuses monitor-derived blockers atomically, but clearing live recovery is the
-operator's assertion that the stored reason and `recovery.md` guidance have been
-resolved.
+For live dispatch / finalization recovery or scheduler-lane stale workflow
+lease recovery, the same flag and artifact may hold non-monitor
+classifications. `workflow run clear-recovery` still rechecks and refuses
+monitor-derived blockers atomically, but clearing these recovery sources is the
+operator's assertion that the stored reason and `recovery.md` guidance have
+been resolved.
 
 The generated run-scoped `recovery.md` artifact is schema-versioned and
 includes the run ID, step ID, recovery classification, repo path, classified-at
 timestamp, reason, recommended next action, evidence pointers,
 classification-specific safe next steps, and safety / rollback notes. Momentum
-overwrites the artifact with the latest recovery classification when import or
-live execution flags the run again, but does not delete it after
-`workflow run clear-recovery`. For live recovery, the durable flag and stored
-manual-recovery reason are authoritative; `recovery.md` rendering is
-best-effort and may fail while the run remains blocked.
+overwrites the artifact with the latest recovery classification when import,
+live execution, or scheduler-lane stale workflow lease recovery flags the run
+again, but does not delete it after `workflow run clear-recovery`. For
+non-monitor recovery, the durable flag and stored manual-recovery reason are
+authoritative; `recovery.md` rendering is best-effort and may fail while the run
+remains blocked.
 
 See [docs/workflow-commands.md](workflow-commands.md) for the full
 `workflow import` and `workflow run clear-recovery` envelopes.
