@@ -44,9 +44,7 @@ export const WORKFLOW_RECOVERY_ARTIFACT_SCHEMA_VERSION = 1;
 
 /**
  * Live run-level recovery classifications that M9 layers on top of the M7
- * monitor recovery codes. The M10 scheduler lane also reuses the M7
- * `manual_recovery_lease` classification when a stale workflow lease requires
- * operator action. These are NOT emitted by `deriveWorkflowMonitorState`
+ * monitor recovery codes. These are NOT emitted by `deriveWorkflowMonitorState`
  * — they are raised by the M9 live finalization transaction
  * (`head_mismatch`, `reset_failed`, `repo_lock_lost`, `git_failed`,
  * unsafe `commit_failed`, `invalid_input`), result-document checks during
@@ -83,7 +81,9 @@ export type WorkflowLiveRunRecoveryCode =
 /**
  * Every classification `recovery.md` can render: the M7 monitor recovery codes
  * plus the M9 live run-level recovery codes. This is the single source of truth
- * the renderer validates against.
+ * the renderer validates against. The M10 scheduler lane reuses the
+ * monitor-owned `manual_recovery_lease` classification when a stale workflow
+ * lease requires operator action, so it needs no separate live-only code here.
  */
 export type WorkflowRecoveryClassification =
   | WorkflowMonitorRecoveryCode

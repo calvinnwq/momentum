@@ -32,7 +32,7 @@ ticks.
 | Repo lock (`repo_locks`) | `state = 'active'` AND `lease_expires_at < now - staleLeaseGraceMs` | Released when the owning job is terminal (`succeeded` / `failed`); emits `repo_lock.recovered` and stamps `recovery_status = 'auto_released_job_terminal'`. | `job_pending` / `job_claimed` / `job_running` / `job_missing`. |
 | Claimed/running `goal_iteration` job (`jobs`) | `state IN ('claimed', 'running')` AND `lease_expires_at < now - staleLeaseGraceMs` | Safe stale `claimed` jobs are re-pended without losing `attempt_count` or idempotency key; emits `job.recovered` with `recovery_status = 'auto_repended_stale_claim'`. `running` jobs are skipped. | `job_running` (in-flight repo writes), `daemon_active` (live owner), `lock_active` (held lock), `repo_dirty` / `repo_unknown_commit` / `repo_unavailable` (repo-state safety refusal), `job_state_changed` (concurrent update race). |
 | Daemon record (`daemon_runs`) | Active state (`starting` / `running` / `stop_requested`) AND `heartbeat_at` is older than `staleAfterMs` (90s idle / 930s with `active_job_id`) | Finalized to `error` terminal with `recovery_status = 'auto_recovered_idle_stale'` when `active_job_id` and `active_lock_id` are both `NULL`. | `self` (caller's own run), `active_job_present` (delegates to job-side recovery), `active_lock_present` (delegates to lock-side recovery), `run_state_changed` (concurrent update race). |
-| Workflow lease (`workflow_leases`) | Non-released `managed-step` or `dispatch` lease with `expires_at < now - graceMs` during an enabled workflow scheduler tick | `auto-release` leases are released in place and the run state is re-derived; emits `auto_released_stale_workflow_lease`. | `manual-recovery-required` leases leave the lease as evidence, set the run-scoped `needs_manual_recovery` flag with `stale_workflow_lease_manual_recovery_required`, and render run-scoped `recovery.md` best-effort. Concurrent row changes surface as `lease_changed` / `run_not_found`. |
+| Workflow lease (`workflow_leases`) | Non-released `monitor`, `managed-step`, or `dispatch` lease with `expires_at < now - graceMs` during an enabled workflow scheduler tick | `auto-release` leases are released in place and the run state is re-derived; emits `auto_released_stale_workflow_lease`. | `manual-recovery-required` leases leave the lease as evidence, set the run-scoped `needs_manual_recovery` flag with `stale_workflow_lease_manual_recovery_required`, and render run-scoped `recovery.md` best-effort. Concurrent row changes surface as `lease_changed` / `run_not_found`. |
 
 The managed `daemon start` loop runs a one-shot `runStartupRecovery` pass before
 its first cycle. Those three startup primitives are independently idempotent,
@@ -157,12 +157,14 @@ refuses with `recovery_clear_refused` while a monitor-derived blocking condition
 remains, or `not_flagged` when the run is not currently flagged. The command
 leaves the run's `recovery.md` artifact on disk as audit evidence.
 
-For live dispatch / finalization recovery or scheduler-lane stale workflow
-lease recovery, the same flag and artifact may hold non-monitor
-classifications. `workflow run clear-recovery` still rechecks and refuses
-monitor-derived blockers atomically, but clearing these recovery sources is the
-operator's assertion that the stored reason and `recovery.md` guidance have
-been resolved.
+For live dispatch / finalization recovery, the same flag and artifact may hold
+non-monitor classifications. `workflow run clear-recovery` still rechecks and
+refuses monitor-derived blockers atomically, but clearing these live recovery
+sources is the operator's assertion that the stored reason and `recovery.md`
+guidance have been resolved. Scheduler-lane stale `manual-recovery-required`
+workflow leases are left outstanding as durable evidence, so the monitor
+reducer can still surface `manual_recovery_lease` and guarded clear continues
+to refuse until that lease condition is resolved.
 
 The generated run-scoped `recovery.md` artifact is schema-versioned and
 includes the run ID, step ID, recovery classification, repo path, classified-at

@@ -448,7 +448,7 @@ function deriveStepOnlyRunState(
  *       a released row regardless of expiry or stale policy).
  *   2. `now <= expiresAt + graceMs`  → `fresh` (holder still owns the lease).
  *   3. otherwise, the lease is stale and the row's `stalePolicy` decides:
- *      `auto-release`  → `stale-auto-release` (safe for a future startup
+ *      `auto-release`  → `stale-auto-release` (safe for the scheduler-lane
  *      recovery pass to release without operator involvement).
  *      `manual-recovery-required`  → `stale-manual-recovery-required` (must
  *      surface in `recovery.md` and block further claims on the run until an

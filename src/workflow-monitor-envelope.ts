@@ -15,9 +15,12 @@
  * child. Monitor recovery / next-action taxonomies are reused verbatim from the
  * M7 reducer; the `recovery` field stays monitor-derived. The durable
  * `needsManualRecovery` flag may also be set by M9 live dispatch / finalization
- * recovery or the M10 scheduler lane's stale workflow-lease recovery, so it can
- * independently drive `disposition: "recover"` while `recovery` remains null
- * and the stored reason / `recovery.md` carries the non-monitor classification.
+ * recovery, which can independently drive `disposition: "recover"` while
+ * `recovery` remains null and the stored reason / `recovery.md` carries the
+ * non-monitor classification. The M10 scheduler lane also sets the flag for
+ * stale workflow-lease recovery, but stale `manual-recovery-required` leases
+ * remain outstanding and can still be re-derived here as
+ * `manual_recovery_lease`.
  */
 import type { MomentumDb } from "./db.js";
 import {

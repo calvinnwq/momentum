@@ -14,10 +14,12 @@
  * clear ({@link clearWorkflowRunManualRecoveryGuarded}). The guarded clear
  * re-derives M7 monitor blockers before clearing and refuses with
  * `recovery_clear_refused` while one persists. M9 live dispatch / finalization
- * and the M10 scheduler lane's stale workflow-lease recovery can also mark the
- * same flag with non-monitor classifications, so guarded clear cannot
- * independently prove that recovery work is complete; operators must resolve
- * the stored reason and any rendered artifact or context before clearing.
+ * can also mark the same flag with non-monitor classifications, so guarded
+ * clear cannot independently prove that recovery work is complete; operators
+ * must resolve the stored reason and any rendered artifact or context before
+ * clearing. The M10 scheduler lane also marks the flag for stale workflow-lease
+ * recovery, but stale `manual-recovery-required` leases remain durable and can
+ * still be re-derived as `manual_recovery_lease` blockers until resolved.
  */
 
 import type { MomentumDb } from "./db.js";
