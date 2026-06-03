@@ -29,7 +29,7 @@ This pivot changes the future product model:
 - M9 primitives should be reused where possible: workflow run state, approvals, leases, live wrapper execution, result-file validation, verification / commit finalization, and recovery taxonomy.
 - M9 should not be stretched into a generic workflow product retroactively. M10 owns the workflow-first implementation sequence, starting with workflow / step definition primitives.
 
-The earlier M9 run-start preference of `goal start` plus a `WorkflowRun` link is superseded for future workflow-first work. The future top-level start surface is a workflow run start surface, not a goal start surface. `goal start` remains a compatibility path for the old Goal loop until it is migrated or deprecated.
+The earlier M9 run-start preference of `goal start` plus a `WorkflowRun` link is superseded for future workflow-first work. M10-02 has landed the top-level workflow run start surface; it starts `WorkflowRun` rows from definitions rather than from the Goal loop. `goal start` remains a compatibility path for the old Goal loop until it is migrated or deprecated.
 
 ## What Momentum Should Copy
 

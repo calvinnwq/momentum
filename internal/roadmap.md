@@ -68,10 +68,10 @@ M9 owns the first Momentum-side live executor wrappers around the existing OpenC
 
 The accepted workflow-first runtime pivot does not invalidate this work. It
 reframes M9 as foundation: the live wrappers, leases, finalization, and
-recovery primitives become building blocks for a future configurable workflow
-runtime. The future top-level start surface is expected to be workflow-first;
-`goal start` remains the current compatibility path until a workflow-first
-start slice lands.
+recovery primitives become building blocks for a configurable workflow runtime.
+M10-02 has since landed the workflow-first `workflow run start` surface;
+executor scheduling on those runs remains future M10 work, and `goal start`
+remains the compatibility path for the older Goal loop.
 
 ### Pinned M9 implementation sequence
 
