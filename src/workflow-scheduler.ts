@@ -23,10 +23,13 @@
  * the daemon loop — "acquire or refresh daemon / step lease" — by atomically
  * re-verifying a scanned step is still runnable inside a `BEGIN IMMEDIATE`
  * transaction and acquiring its `dispatch` lease (the lease kind the contract
- * reserves for the dispatcher layer). It deliberately does not dispatch
- * executors or touch the daemon loop — those are later M10-04 follow-ups. It
- * also leaves goal iteration draining (`worker-run.ts`) untouched: workflow
- * scheduling is a separate lane over separate tables.
+ * reserves for the dispatcher layer). The *tick* primitive
+ * ({@link runWorkflowSchedulerOnce}) composes the three into one per-cycle pass
+ * — recover stale leases, scan, claim one step, then hand it to an injected
+ * executor-dispatch seam — as the workflow-first analogue of `runWorkerOnce`.
+ * The real executor and the daemon-loop wiring are still later M10 follow-ups;
+ * this lane leaves goal iteration draining (`worker-run.ts`) untouched, because
+ * workflow scheduling is a separate lane over separate tables.
  *
  * "Runnable" means, for a run that is neither terminal nor flagged for manual
  * recovery, the run's lease-aware derived state is `approved` (an approved step
@@ -676,6 +679,211 @@ function validateClaimInput(input: ClaimRunnableWorkflowStepInput): void {
       "claimRunnableWorkflowStep: leaseExpiresAt must be a positive integer ms timestamp"
     );
   }
+}
+
+/**
+ * Default `dispatch` lease TTL the scheduler lane stamps on a claimed step.
+ * Mirrors `DEFAULT_DAEMON_WORKER_LEASE_MS` from `daemon-loop` so the workflow
+ * lane and the goal-iteration lane age leases on the same cadence.
+ */
+export const DEFAULT_WORKFLOW_DISPATCH_LEASE_MS = 30_000;
+
+export type WorkflowSchedulerNow = () => number;
+
+/** Context handed to the executor-dispatch seam alongside a claimed step. */
+export type WorkflowStepDispatchContext = {
+  db: MomentumDb;
+  /** The lease holder / worker identity that claimed the step. */
+  workerId: string;
+  /** The single tick timestamp used for recovery, scan, and the claim. */
+  now: number;
+};
+
+/**
+ * What the dispatcher reports back to the lane. The lane does not classify this
+ * (daemon classification of executor output is a later M10 slice); it echoes
+ * the value into the tick result for callers, telemetry, and tests.
+ */
+export type WorkflowStepDispatchResult = {
+  status: string;
+  detail?: string;
+};
+
+/**
+ * The executor-dispatch seam. {@link runWorkflowSchedulerOnce} claims the next
+ * runnable step and hands the claim to this callback; a later M10 slice supplies
+ * the real executor dispatcher (start an `executor_invocation`, run a round,
+ * classify, advance). On a normal return the dispatcher owns the dispatch
+ * lease's lifecycle (refresh across rounds, release on terminal). If it throws,
+ * the lane releases the lease it just acquired so the claim is not stranded,
+ * then rethrows.
+ */
+export type WorkflowStepDispatch = (
+  claim: ClaimedWorkflowStep,
+  context: WorkflowStepDispatchContext
+) => WorkflowStepDispatchResult;
+
+/**
+ * The lane's durable primitives, overridable for tests (mirrors the dependency
+ * injection `runDaemonLoop` uses for `runWorker` / `now` / `sleep`). Production
+ * callers leave these unset and get the real, exported functions.
+ */
+type WorkflowSchedulerDeps = {
+  recoverStaleLeases: typeof recoverStaleWorkflowLeases;
+  selectRunnableWork: typeof selectRunnableWorkflowWork;
+  claimStep: typeof claimRunnableWorkflowStep;
+};
+
+export type RunWorkflowSchedulerOnceInput = {
+  db: MomentumDb;
+  /** Lease holder identity for any dispatch lease this tick acquires. */
+  workerId: string;
+  /** The executor-dispatch seam invoked with a successfully claimed step. */
+  dispatch: WorkflowStepDispatch;
+  /** Tick clock. Defaults to `Date.now`. */
+  now?: WorkflowSchedulerNow;
+  /** Clock-skew tolerance forwarded to recovery / scan / claim. Defaults to 0. */
+  graceMs?: number;
+  /** Dispatch-lease TTL. Defaults to {@link DEFAULT_WORKFLOW_DISPATCH_LEASE_MS}. */
+  leaseDurationMs?: number;
+  /** Stale policy stamped on the dispatch lease. Defaults to `auto-release`. */
+  stalePolicy?: WorkflowLeaseStalePolicy;
+  /** Overridable durable primitives (testing seam). */
+  deps?: Partial<WorkflowSchedulerDeps>;
+};
+
+export type RunWorkflowSchedulerOnceResult =
+  | {
+      /** No runnable workflow step after recovery; nothing was dispatched. */
+      code: "idle";
+      workerId: string;
+      recovery: RecoverStaleWorkflowLeasesResult;
+    }
+  | {
+      /**
+       * A runnable step was scanned, but the atomic claim lost a race (the run
+       * advanced, went terminal, was flagged, or another holder took the lease)
+       * between the scan and the claim. The daemon retries on the next tick.
+       */
+      code: "claim_contended";
+      workerId: string;
+      recovery: RecoverStaleWorkflowLeasesResult;
+      claimResult: Exclude<ClaimRunnableWorkflowStepResult, { ok: true }>;
+    }
+  | {
+      /** A step was claimed and handed to the dispatcher. */
+      code: "dispatched";
+      workerId: string;
+      recovery: RecoverStaleWorkflowLeasesResult;
+      claim: ClaimedWorkflowStep;
+      dispatch: WorkflowStepDispatchResult;
+    };
+
+/**
+ * Run one workflow scheduler-lane tick: recover stale leases, scan for the next
+ * runnable step, atomically claim it, and hand it to the executor-dispatch seam.
+ * This is the workflow-first analogue of `runWorkerOnce` (the goal-iteration
+ * drain) and is what the daemon loop will call each cycle alongside — never
+ * instead of — goal iteration draining. Goal-iteration tables are untouched here:
+ * workflow scheduling is a separate lane over separate tables.
+ *
+ * Ordering matters and is deliberate:
+ *
+ *   1. Recover stale leases first, so a dead worker's `auto-release` lease is
+ *      freed before the scan and its run becomes schedulable this same tick;
+ *      a stale `manual-recovery-required` lease parks its run instead.
+ *   2. Scan the post-recovery durable state for the next runnable step (one per
+ *      eligible run, oldest run first).
+ *   3. Claim the first candidate atomically. The scan is only a hint — the claim
+ *      re-verifies under `BEGIN IMMEDIATE`, so a run that advanced or was taken
+ *      by another worker between scan and claim yields `claim_contended` rather
+ *      than a double dispatch.
+ *   4. Dispatch the claimed step. On success the dispatcher owns the dispatch
+ *      lease; if it throws, the lane releases the lease and rethrows.
+ *
+ * Exactly one step is claimed per tick (mirroring `runWorkerOnce`); the daemon
+ * loop drives throughput across runs over successive ticks. SQLite stays the
+ * source of truth: no process handle, socket, or event is consulted.
+ */
+export function runWorkflowSchedulerOnce(
+  input: RunWorkflowSchedulerOnceInput
+): RunWorkflowSchedulerOnceResult {
+  const { db, workerId } = input;
+  if (typeof workerId !== "string" || workerId.length === 0) {
+    throw new Error("runWorkflowSchedulerOnce: workerId is required");
+  }
+  if (typeof input.dispatch !== "function") {
+    throw new Error("runWorkflowSchedulerOnce: dispatch is required");
+  }
+  const leaseDurationMs =
+    input.leaseDurationMs ?? DEFAULT_WORKFLOW_DISPATCH_LEASE_MS;
+  if (!Number.isFinite(leaseDurationMs) || leaseDurationMs <= 0) {
+    throw new Error(
+      "runWorkflowSchedulerOnce: leaseDurationMs must be a positive finite number"
+    );
+  }
+
+  const now = input.now ?? (() => Date.now());
+  const graceMs = input.graceMs ?? 0;
+  const stalePolicy = input.stalePolicy ?? "auto-release";
+  const recoverStaleLeases =
+    input.deps?.recoverStaleLeases ?? recoverStaleWorkflowLeases;
+  const selectRunnableWork =
+    input.deps?.selectRunnableWork ?? selectRunnableWorkflowWork;
+  const claimStep = input.deps?.claimStep ?? claimRunnableWorkflowStep;
+
+  // A single tick timestamp keeps recovery, scan, and claim classifying lease
+  // freshness against one consistent clock. (recover / scan validate now/graceMs.)
+  const tickNow = now();
+
+  const recovery = recoverStaleLeases(db, { now: tickNow, graceMs });
+
+  const scan = selectRunnableWork(db, { now: tickNow, graceMs });
+  const candidate = scan.runnable[0];
+  if (candidate === undefined) {
+    return { code: "idle", workerId, recovery };
+  }
+
+  const claimResult = claimStep(db, {
+    runId: candidate.runId,
+    stepId: candidate.stepId,
+    holder: workerId,
+    leaseExpiresAt: tickNow + leaseDurationMs,
+    now: tickNow,
+    graceMs,
+    stalePolicy
+  });
+  if (!claimResult.ok) {
+    return { code: "claim_contended", workerId, recovery, claimResult };
+  }
+
+  const claim = claimResult.claim;
+  let dispatchResult: WorkflowStepDispatchResult;
+  try {
+    dispatchResult = input.dispatch(claim, { db, workerId, now: tickNow });
+  } catch (error) {
+    try {
+      releaseWorkflowLease(db, {
+        runId: claim.lease.runId,
+        leaseKind: claim.lease.leaseKind,
+        holder: claim.lease.holder,
+        acquiredAt: claim.lease.acquiredAt,
+        now: tickNow
+      });
+    } catch {
+      // Best-effort release: surface the original dispatcher failure, not a
+      // secondary release error.
+    }
+    throw error;
+  }
+
+  return {
+    code: "dispatched",
+    workerId,
+    recovery,
+    claim,
+    dispatch: dispatchResult
+  };
 }
 
 function loadLeaseRecords(db: MomentumDb, runId: string): WorkflowLeaseRecord[] {
