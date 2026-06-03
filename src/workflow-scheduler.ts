@@ -35,6 +35,11 @@
 
 import type { MomentumDb } from "./db.js";
 import {
+  getWorkflowLease,
+  releaseWorkflowLease
+} from "./workflow-leases.js";
+import { markWorkflowRunNeedsManualRecovery } from "./workflow-run-recovery.js";
+import {
   classifyWorkflowLease,
   deriveWorkflowRunState,
   type WorkflowLeaseKind,
@@ -237,6 +242,181 @@ function loadStepRecords(db: MomentumDb, runId: string): WorkflowStepRecord[] {
     order: row.step_order,
     required: row.required === 1
   }));
+}
+
+/**
+ * `recoveryStatus` recorded when this lane auto-releases a stale lease whose
+ * `stale_policy` is `auto-release`. Stable string so daemon-lane telemetry and
+ * future status / handoff surfaces can recognise the cause.
+ */
+export const WORKFLOW_LEASE_AUTO_RELEASED_STATUS =
+  "auto_released_stale_workflow_lease";
+
+/**
+ * `recoveryStatus` recorded — and the durable `manual_recovery_reason` prefix
+ * stamped — when this lane routes a stale `manual-recovery-required` lease to
+ * the run's manual-recovery flag instead of releasing it.
+ */
+export const WORKFLOW_LEASE_MANUAL_RECOVERY_STATUS =
+  "stale_workflow_lease_manual_recovery_required";
+
+/** A stale workflow lease this lane recovered, with the action it took. */
+export type RecoveredStaleWorkflowLease = {
+  runId: string;
+  leaseKind: WorkflowLeaseKind;
+  holder: string;
+  stalePolicy: WorkflowLeaseStalePolicy;
+  action: "released" | "flagged_manual_recovery";
+  recoveryStatus:
+    | typeof WORKFLOW_LEASE_AUTO_RELEASED_STATUS
+    | typeof WORKFLOW_LEASE_MANUAL_RECOVERY_STATUS;
+};
+
+/**
+ * A stale lease candidate the recovery pass declined to act on because the
+ * durable row changed under it between the scan and the guarded write
+ * (`lease_changed`) or the owning run vanished (`run_not_found`). These are
+ * race classifications — the safe path simply re-scans on the next pass.
+ */
+export type SkippedStaleWorkflowLease = {
+  runId: string;
+  leaseKind: WorkflowLeaseKind;
+  reason: "lease_changed" | "run_not_found";
+};
+
+export type RecoverStaleWorkflowLeasesResult = {
+  recovered: RecoveredStaleWorkflowLease[];
+  skipped: SkippedStaleWorkflowLease[];
+};
+
+export type RecoverStaleWorkflowLeasesInput = {
+  /** Absolute ms timestamp used for lease freshness classification. */
+  now: number;
+  /** Clock-skew tolerance forwarded to `classifyWorkflowLease`. Defaults to 0. */
+  graceMs?: number;
+};
+
+/**
+ * Recover the stale leases surfaced by {@link selectRunnableWorkflowWork} so the
+ * daemon workflow scheduler lane does not strand a run behind a dead worker's
+ * lease. Mirrors the M3 `recoverStale*` family in `stale-recovery.ts`:
+ *
+ *   - `stale-auto-release` → release the lease so the run is schedulable again
+ *     on the next scan (the row is released in place, never deleted).
+ *   - `stale-manual-recovery-required` → set the run's durable
+ *     `needs_manual_recovery` flag and leave the lease outstanding as evidence;
+ *     the reducer keeps the run blocked and an operator must resolve it via the
+ *     guarded clear before the run is eligible again.
+ *
+ * Each lease is re-read and re-classified inside a `BEGIN IMMEDIATE`
+ * transaction before acting, so a lease another worker heartbeated (extending
+ * `expires_at`) or released between the scan and the write classifies as
+ * non-stale and is reported as `lease_changed` rather than wrongly recovered.
+ * SQLite is the source of truth: no process handle, socket, or event is
+ * consulted.
+ *
+ * Idempotent: a released lease is no longer surfaced as stale, and a
+ * manual-recovery-flagged run is excluded from the scan entirely, so a second
+ * pass over unchanged state returns `{ recovered: [], skipped: [] }`.
+ */
+export function recoverStaleWorkflowLeases(
+  db: MomentumDb,
+  input: RecoverStaleWorkflowLeasesInput
+): RecoverStaleWorkflowLeasesResult {
+  const now = input.now;
+  const graceMs = input.graceMs ?? 0;
+  // selectRunnableWorkflowWork validates now/graceMs identically; calling it
+  // first keeps a single validation + classification source for the lane.
+  const scan = selectRunnableWorkflowWork(db, input);
+
+  const recovered: RecoveredStaleWorkflowLease[] = [];
+  const skipped: SkippedStaleWorkflowLease[] = [];
+
+  for (const candidate of scan.staleLeases) {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const live = getWorkflowLease(db, candidate.runId, candidate.leaseKind);
+      const classification =
+        live === undefined
+          ? "released"
+          : classifyWorkflowLease(live, { now, graceMs });
+
+      if (live !== undefined && classification === "stale-auto-release") {
+        const released = releaseWorkflowLease(db, {
+          runId: live.runId,
+          leaseKind: live.leaseKind,
+          holder: live.holder,
+          acquiredAt: live.acquiredAt,
+          now
+        });
+        if (released.ok) {
+          db.exec("COMMIT");
+          recovered.push({
+            runId: live.runId,
+            leaseKind: live.leaseKind,
+            holder: live.holder,
+            stalePolicy: live.stalePolicy,
+            action: "released",
+            recoveryStatus: WORKFLOW_LEASE_AUTO_RELEASED_STATUS
+          });
+        } else {
+          db.exec("ROLLBACK");
+          skipped.push({
+            runId: candidate.runId,
+            leaseKind: candidate.leaseKind,
+            reason: "lease_changed"
+          });
+        }
+      } else if (
+        live !== undefined &&
+        classification === "stale-manual-recovery-required"
+      ) {
+        const marked = markWorkflowRunNeedsManualRecovery(db, {
+          runId: live.runId,
+          reason:
+            `${WORKFLOW_LEASE_MANUAL_RECOVERY_STATUS}: ${live.leaseKind} lease ` +
+            `held by ${live.holder} expired without a heartbeat`,
+          now
+        });
+        if (marked.ok) {
+          db.exec("COMMIT");
+          recovered.push({
+            runId: live.runId,
+            leaseKind: live.leaseKind,
+            holder: live.holder,
+            stalePolicy: live.stalePolicy,
+            action: "flagged_manual_recovery",
+            recoveryStatus: WORKFLOW_LEASE_MANUAL_RECOVERY_STATUS
+          });
+        } else {
+          db.exec("ROLLBACK");
+          skipped.push({
+            runId: candidate.runId,
+            leaseKind: candidate.leaseKind,
+            reason: "run_not_found"
+          });
+        }
+      } else {
+        // The row was released or re-freshed (heartbeated) between the scan and
+        // this transaction; leave it for the next pass.
+        db.exec("ROLLBACK");
+        skipped.push({
+          runId: candidate.runId,
+          leaseKind: candidate.leaseKind,
+          reason: "lease_changed"
+        });
+      }
+    } catch (error) {
+      try {
+        db.exec("ROLLBACK");
+      } catch {
+        // Ignore rollback errors so callers see the original write failure.
+      }
+      throw error;
+    }
+  }
+
+  return { recovered, skipped };
 }
 
 function loadLeaseRecords(db: MomentumDb, runId: string): WorkflowLeaseRecord[] {

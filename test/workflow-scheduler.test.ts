@@ -4,7 +4,14 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/db.js";
-import { selectRunnableWorkflowWork } from "../src/workflow-scheduler.js";
+import {
+  recoverStaleWorkflowLeases,
+  selectRunnableWorkflowWork,
+  WORKFLOW_LEASE_AUTO_RELEASED_STATUS,
+  WORKFLOW_LEASE_MANUAL_RECOVERY_STATUS
+} from "../src/workflow-scheduler.js";
+import { getWorkflowLease } from "../src/workflow-leases.js";
+import { getWorkflowRunManualRecoveryState } from "../src/workflow-run-recovery.js";
 import type {
   WorkflowLeaseKind,
   WorkflowLeaseStalePolicy,
@@ -512,6 +519,309 @@ describe("selectRunnableWorkflowWork: durable runnable-step scan (NGX-348)", () 
       ).toThrow(/now must be a finite number/);
       expect(() =>
         selectRunnableWorkflowWork(db, { now: NOW, graceMs: -1 })
+      ).toThrow(/graceMs must be a non-negative finite number/);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", () => {
+  it("releases a stale auto-release lease so the run becomes runnable again", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedRun(db, { runId: "run-a", state: "approved", repoPath: "/repos/a" });
+      seedStep(db, {
+        runId: "run-a",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "approved",
+        order: 0
+      });
+      seedLease(db, {
+        runId: "run-a",
+        leaseKind: "managed-step",
+        expiresAt: NOW - 10_000,
+        stalePolicy: "auto-release"
+      });
+
+      // Before recovery the fresh-but-stale lease withholds the run.
+      expect(selectRunnableWorkflowWork(db, { now: NOW }).runnable).toEqual([]);
+
+      const result = recoverStaleWorkflowLeases(db, { now: NOW });
+
+      expect(result.recovered).toEqual([
+        {
+          runId: "run-a",
+          leaseKind: "managed-step",
+          holder: "worker-1",
+          stalePolicy: "auto-release",
+          action: "released",
+          recoveryStatus: WORKFLOW_LEASE_AUTO_RELEASED_STATUS
+        }
+      ]);
+      expect(result.skipped).toEqual([]);
+
+      // The lease row is now released, not deleted.
+      const lease = getWorkflowLease(db, "run-a", "managed-step");
+      expect(lease?.releasedAt).toBe(NOW);
+
+      // And the run is once again schedulable.
+      const scan = selectRunnableWorkflowWork(db, { now: NOW });
+      expect(scan.runnable.map((s) => s.stepId)).toEqual(["preflight"]);
+      expect(scan.staleLeases).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("flags the run for manual recovery on a stale manual-recovery lease and leaves the lease in place", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedRun(db, { runId: "run-a", state: "running" });
+      seedStep(db, {
+        runId: "run-a",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "approved",
+        order: 0
+      });
+      seedLease(db, {
+        runId: "run-a",
+        leaseKind: "managed-step",
+        expiresAt: NOW - 10_000,
+        stalePolicy: "manual-recovery-required"
+      });
+
+      const result = recoverStaleWorkflowLeases(db, { now: NOW });
+
+      expect(result.recovered).toEqual([
+        {
+          runId: "run-a",
+          leaseKind: "managed-step",
+          holder: "worker-1",
+          stalePolicy: "manual-recovery-required",
+          action: "flagged_manual_recovery",
+          recoveryStatus: WORKFLOW_LEASE_MANUAL_RECOVERY_STATUS
+        }
+      ]);
+      expect(result.skipped).toEqual([]);
+
+      const recovery = getWorkflowRunManualRecoveryState(db, "run-a");
+      expect(recovery?.needsManualRecovery).toBe(true);
+      expect(recovery?.reason).toContain(WORKFLOW_LEASE_MANUAL_RECOVERY_STATUS);
+      expect(recovery?.markedAt).toBe(NOW);
+
+      // The lease is preserved as durable evidence (the reducer keeps the run
+      // blocked, and the operator must resolve it before clearing recovery).
+      const lease = getWorkflowLease(db, "run-a", "managed-step");
+      expect(lease?.releasedAt).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("leaves fresh leases untouched", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedRun(db, { runId: "run-a", state: "approved" });
+      seedStep(db, {
+        runId: "run-a",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "approved",
+        order: 0
+      });
+      seedLease(db, {
+        runId: "run-a",
+        leaseKind: "managed-step",
+        expiresAt: NOW + 10_000
+      });
+
+      const result = recoverStaleWorkflowLeases(db, { now: NOW });
+
+      expect(result).toEqual({ recovered: [], skipped: [] });
+      const lease = getWorkflowLease(db, "run-a", "managed-step");
+      expect(lease?.releasedAt).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("leaves released leases untouched", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedRun(db, { runId: "run-a", state: "approved" });
+      seedStep(db, {
+        runId: "run-a",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "approved",
+        order: 0
+      });
+      seedLease(db, {
+        runId: "run-a",
+        leaseKind: "managed-step",
+        expiresAt: NOW - 10_000,
+        releasedAt: NOW - 5_000,
+        stalePolicy: "manual-recovery-required"
+      });
+
+      const result = recoverStaleWorkflowLeases(db, { now: NOW });
+
+      expect(result).toEqual({ recovered: [], skipped: [] });
+      const recovery = getWorkflowRunManualRecoveryState(db, "run-a");
+      expect(recovery?.needsManualRecovery).toBe(false);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("is idempotent for an auto-released lease", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedRun(db, { runId: "run-a", state: "approved" });
+      seedStep(db, {
+        runId: "run-a",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "approved",
+        order: 0
+      });
+      seedLease(db, {
+        runId: "run-a",
+        leaseKind: "managed-step",
+        expiresAt: NOW - 10_000,
+        stalePolicy: "auto-release"
+      });
+
+      const first = recoverStaleWorkflowLeases(db, { now: NOW });
+      expect(first.recovered).toHaveLength(1);
+
+      const second = recoverStaleWorkflowLeases(db, { now: NOW });
+      expect(second).toEqual({ recovered: [], skipped: [] });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("is idempotent for a manual-recovery-flagged run", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedRun(db, { runId: "run-a", state: "running" });
+      seedStep(db, {
+        runId: "run-a",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "approved",
+        order: 0
+      });
+      seedLease(db, {
+        runId: "run-a",
+        leaseKind: "managed-step",
+        expiresAt: NOW - 10_000,
+        stalePolicy: "manual-recovery-required"
+      });
+
+      const first = recoverStaleWorkflowLeases(db, { now: NOW });
+      expect(first.recovered).toHaveLength(1);
+
+      // The run is now excluded from the scan, so a second pass is a no-op.
+      const second = recoverStaleWorkflowLeases(db, { now: NOW });
+      expect(second).toEqual({ recovered: [], skipped: [] });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("recovers stale leases across multiple runs in one pass", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedRun(db, { runId: "run-auto", state: "approved", createdAt: NOW });
+      seedStep(db, {
+        runId: "run-auto",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "approved",
+        order: 0
+      });
+      seedLease(db, {
+        runId: "run-auto",
+        leaseKind: "managed-step",
+        expiresAt: NOW - 10_000,
+        stalePolicy: "auto-release"
+      });
+
+      seedRun(db, { runId: "run-manual", state: "running", createdAt: NOW + 1 });
+      seedStep(db, {
+        runId: "run-manual",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "approved",
+        order: 0
+      });
+      seedLease(db, {
+        runId: "run-manual",
+        leaseKind: "dispatch",
+        expiresAt: NOW - 10_000,
+        stalePolicy: "manual-recovery-required"
+      });
+
+      const result = recoverStaleWorkflowLeases(db, { now: NOW });
+
+      expect(
+        result.recovered.map((r) => [r.runId, r.action])
+      ).toEqual([
+        ["run-auto", "released"],
+        ["run-manual", "flagged_manual_recovery"]
+      ]);
+      expect(result.skipped).toEqual([]);
+      expect(getWorkflowLease(db, "run-auto", "managed-step")?.releasedAt).toBe(
+        NOW
+      );
+      expect(
+        getWorkflowRunManualRecoveryState(db, "run-manual")?.needsManualRecovery
+      ).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("respects graceMs when a barely-expired lease is still within tolerance", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedRun(db, { runId: "run-a", state: "approved" });
+      seedStep(db, {
+        runId: "run-a",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "approved",
+        order: 0
+      });
+      seedLease(db, {
+        runId: "run-a",
+        leaseKind: "managed-step",
+        expiresAt: NOW - 1_000,
+        stalePolicy: "auto-release"
+      });
+
+      const result = recoverStaleWorkflowLeases(db, { now: NOW, graceMs: 5_000 });
+
+      expect(result).toEqual({ recovered: [], skipped: [] });
+      expect(getWorkflowLease(db, "run-a", "managed-step")?.releasedAt).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("validates the now and graceMs inputs", () => {
+    const db = openDb(makeTempDir());
+    try {
+      expect(() =>
+        recoverStaleWorkflowLeases(db, { now: Number.NaN })
+      ).toThrow(/now must be a finite number/);
+      expect(() =>
+        recoverStaleWorkflowLeases(db, { now: NOW, graceMs: -1 })
       ).toThrow(/graceMs must be a non-negative finite number/);
     } finally {
       db.close();
