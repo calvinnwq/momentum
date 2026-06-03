@@ -31,21 +31,34 @@
  *     (`summary`, `key_changes`, `remaining_work`, `changed_files`,
  *     `verification_status`, `commit_sha`, ...) so workflow status, handoff,
  *     monitor, and recovery surfaces can reattach without understanding executor
- *     internals. The `executor_artifacts` / `executor_findings` /
- *     `executor_decisions` / `executor_checkpoints` child evidence tables hang
- *     below a round in a later M10-03 slice.
+ *     internals.
+ *   - The `executor_artifacts` / `executor_checkpoints` / `executor_findings` /
+ *     `executor_decisions` child evidence tables hang below a round by
+ *     `round_id`. They are append-only: an evidence row is durable proof a round
+ *     emitted something, so a duplicate id (or a duplicate checkpoint
+ *     `(round_id, sequence)`) refuses with {@link ExecutorEvidenceConflictError}
+ *     and leaves the existing row untouched, and an artifact carrying an
+ *     out-of-contract `artifactClass` is rejected before any write. Their FK to
+ *     `executor_rounds` is enforced, so evidence can never orphan itself above a
+ *     round.
  */
 
 import { isUniqueViolation, type MomentumDb } from "./db.js";
 import {
+  EXECUTOR_ARTIFACT_CLASSES,
   EXECUTOR_COMPLETION_CLASSIFICATIONS,
   EXECUTOR_HUMAN_GATE_TYPES,
   EXECUTOR_INVOCATION_STATES,
   EXECUTOR_ROUND_STATES,
   transitionExecutorInvocation,
   transitionExecutorRound,
+  type ExecutorArtifactClass,
+  type ExecutorArtifactRecord,
+  type ExecutorCheckpointRecord,
   type ExecutorCompletionClassification,
+  type ExecutorDecisionRecord,
   type ExecutorDefinitionRecord,
+  type ExecutorFindingRecord,
   type ExecutorHumanGateType,
   type ExecutorInvocationRecord,
   type ExecutorInvocationState,
@@ -65,6 +78,9 @@ const CLASSIFICATION_SET: ReadonlySet<string> = new Set(
   EXECUTOR_COMPLETION_CLASSIFICATIONS
 );
 const GATE_TYPE_SET: ReadonlySet<string> = new Set(EXECUTOR_HUMAN_GATE_TYPES);
+const ARTIFACT_CLASS_SET: ReadonlySet<string> = new Set(
+  EXECUTOR_ARTIFACT_CLASSES
+);
 
 /** One typed validation problem with an enum field of an executor record. */
 export type ExecutorRecordValidationError = {
@@ -174,6 +190,32 @@ export class ExecutorRoundTransitionError extends Error {
     this.from = from;
     this.to = to;
     this.code = code;
+  }
+}
+
+/** The four append-only evidence classes that hang below an executor round. */
+export type ExecutorEvidenceEntity =
+  | "artifact"
+  | "checkpoint"
+  | "finding"
+  | "decision";
+
+/**
+ * Thrown when inserting a child evidence row whose id collides (or, for a
+ * checkpoint, whose `(round_id, sequence)` collides). Evidence rows are
+ * append-only proof a round emitted something, not an idempotent re-ingest, so a
+ * duplicate refuses and leaves the existing row untouched. Carries the entity so
+ * callers can tell which of the four evidence classes conflicted.
+ */
+export class ExecutorEvidenceConflictError extends Error {
+  readonly entity: ExecutorEvidenceEntity;
+  readonly id: string;
+
+  constructor(entity: ExecutorEvidenceEntity, id: string) {
+    super(`Executor ${entity} already exists: ${id}`);
+    this.name = "ExecutorEvidenceConflictError";
+    this.entity = entity;
+    this.id = id;
   }
 }
 
@@ -635,6 +677,229 @@ export function updateExecutorRound(
   return next;
 }
 
+/** Options shared by the append-only child-evidence inserts. */
+export type InsertExecutorEvidenceOptions = {
+  now?: number;
+};
+
+/**
+ * Append an evidence artifact below a round (contract "Required Artifacts"). The
+ * `path` is an evidence pointer; the durable row is the proof it exists.
+ *
+ * @throws {InvalidExecutorRecordError} if `artifactClass` is unknown; no row is
+ * written.
+ * @throws {ExecutorEvidenceConflictError} if `artifactId` already exists.
+ */
+export function insertExecutorArtifact(
+  db: MomentumDb,
+  record: ExecutorArtifactRecord,
+  options: InsertExecutorEvidenceOptions = {}
+): ExecutorArtifactRecord {
+  const errors = validateArtifactRecord(record);
+  if (errors.length > 0) {
+    throw new InvalidExecutorRecordError(errors);
+  }
+  const now = options.now ?? Date.now();
+  try {
+    db.prepare(
+      `INSERT INTO executor_artifacts (
+         artifact_id, round_id, artifact_class, path, digest, description,
+         created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      record.artifactId,
+      record.roundId,
+      record.artifactClass,
+      record.path,
+      record.digest,
+      record.description,
+      now
+    );
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      throw new ExecutorEvidenceConflictError("artifact", record.artifactId);
+    }
+    throw error;
+  }
+  return record;
+}
+
+/** List a round's artifacts, oldest first. */
+export function listExecutorArtifactsForRound(
+  db: MomentumDb,
+  roundId: string
+): ExecutorArtifactRecord[] {
+  const rows = db
+    .prepare(
+      `SELECT artifact_id, round_id, artifact_class, path, digest, description
+         FROM executor_artifacts
+        WHERE round_id = ?
+        ORDER BY created_at, artifact_id`
+    )
+    .all(roundId) as ExecutorArtifactRow[];
+  return rows.map(rowToArtifact);
+}
+
+/**
+ * Append a checkpoint to a round's stage stream (contract "Round Lifecycle").
+ *
+ * @throws {ExecutorEvidenceConflictError} if `checkpointId` already exists or the
+ * `(roundId, sequence)` pair collides.
+ */
+export function insertExecutorCheckpoint(
+  db: MomentumDb,
+  record: ExecutorCheckpointRecord,
+  options: InsertExecutorEvidenceOptions = {}
+): ExecutorCheckpointRecord {
+  const now = options.now ?? Date.now();
+  try {
+    db.prepare(
+      `INSERT INTO executor_checkpoints (
+         checkpoint_id, round_id, sequence, stage, detail, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(
+      record.checkpointId,
+      record.roundId,
+      record.sequence,
+      record.stage,
+      record.detail,
+      now
+    );
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      throw new ExecutorEvidenceConflictError(
+        "checkpoint",
+        record.checkpointId
+      );
+    }
+    throw error;
+  }
+  return record;
+}
+
+/** List a round's checkpoints in stage-stream (`sequence`) order. */
+export function listExecutorCheckpointsForRound(
+  db: MomentumDb,
+  roundId: string
+): ExecutorCheckpointRecord[] {
+  const rows = db
+    .prepare(
+      `SELECT checkpoint_id, round_id, sequence, stage, detail
+         FROM executor_checkpoints
+        WHERE round_id = ?
+        ORDER BY sequence`
+    )
+    .all(roundId) as ExecutorCheckpointRow[];
+  return rows.map(rowToCheckpoint);
+}
+
+/**
+ * Append a finding a round surfaced (no-mistakes mirror "Review findings").
+ *
+ * @throws {ExecutorEvidenceConflictError} if `findingId` already exists.
+ */
+export function insertExecutorFinding(
+  db: MomentumDb,
+  record: ExecutorFindingRecord,
+  options: InsertExecutorEvidenceOptions = {}
+): ExecutorFindingRecord {
+  const now = options.now ?? Date.now();
+  try {
+    db.prepare(
+      `INSERT INTO executor_findings (
+         finding_id, round_id, severity, title, detail, selected, external_ref,
+         created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      record.findingId,
+      record.roundId,
+      record.severity,
+      record.title,
+      record.detail,
+      record.selected ? 1 : 0,
+      record.externalRef,
+      now
+    );
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      throw new ExecutorEvidenceConflictError("finding", record.findingId);
+    }
+    throw error;
+  }
+  return record;
+}
+
+/** List a round's findings, oldest first. */
+export function listExecutorFindingsForRound(
+  db: MomentumDb,
+  roundId: string
+): ExecutorFindingRecord[] {
+  const rows = db
+    .prepare(
+      `SELECT finding_id, round_id, severity, title, detail, selected,
+              external_ref
+         FROM executor_findings
+        WHERE round_id = ?
+        ORDER BY created_at, finding_id`
+    )
+    .all(roundId) as ExecutorFindingRow[];
+  return rows.map(rowToFinding);
+}
+
+/**
+ * Append a durable decision point a round produced (no-mistakes mirror
+ * "Decisions and delegated-policy results").
+ *
+ * @throws {ExecutorEvidenceConflictError} if `decisionId` already exists.
+ */
+export function insertExecutorDecision(
+  db: MomentumDb,
+  record: ExecutorDecisionRecord,
+  options: InsertExecutorEvidenceOptions = {}
+): ExecutorDecisionRecord {
+  const now = options.now ?? Date.now();
+  try {
+    db.prepare(
+      `INSERT INTO executor_decisions (
+         decision_id, round_id, summary, allowed_actions, recommended_action,
+         chosen_action, resolution, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      record.decisionId,
+      record.roundId,
+      record.summary,
+      JSON.stringify(record.allowedActions),
+      record.recommendedAction,
+      record.chosenAction,
+      record.resolution,
+      now
+    );
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      throw new ExecutorEvidenceConflictError("decision", record.decisionId);
+    }
+    throw error;
+  }
+  return record;
+}
+
+/** List a round's decisions, oldest first. */
+export function listExecutorDecisionsForRound(
+  db: MomentumDb,
+  roundId: string
+): ExecutorDecisionRecord[] {
+  const rows = db
+    .prepare(
+      `SELECT decision_id, round_id, summary, allowed_actions, recommended_action,
+              chosen_action, resolution
+         FROM executor_decisions
+        WHERE round_id = ?
+        ORDER BY created_at, decision_id`
+    )
+    .all(roundId) as ExecutorDecisionRow[];
+  return rows.map(rowToDecision);
+}
+
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
@@ -694,6 +959,43 @@ type ExecutorRoundRow = {
   human_gate: string | null;
 };
 
+type ExecutorArtifactRow = {
+  artifact_id: string;
+  round_id: string;
+  artifact_class: string;
+  path: string;
+  digest: string | null;
+  description: string | null;
+};
+
+type ExecutorCheckpointRow = {
+  checkpoint_id: string;
+  round_id: string;
+  sequence: number;
+  stage: string;
+  detail: string | null;
+};
+
+type ExecutorFindingRow = {
+  finding_id: string;
+  round_id: string;
+  severity: string | null;
+  title: string;
+  detail: string | null;
+  selected: number;
+  external_ref: string | null;
+};
+
+type ExecutorDecisionRow = {
+  decision_id: string;
+  round_id: string;
+  summary: string;
+  allowed_actions: string;
+  recommended_action: string | null;
+  chosen_action: string | null;
+  resolution: string | null;
+};
+
 const ROUND_SELECT = `
   SELECT round_id, invocation_id, workflow_run_id, step_run_id, step_key,
          executor_family, attempt, round_index, state, classification,
@@ -749,6 +1051,53 @@ function rowToRound(row: ExecutorRoundRow): ExecutorRoundRecord {
     commitSha: row.commit_sha,
     recoveryCode: row.recovery_code,
     humanGate: row.human_gate as ExecutorHumanGateType | null
+  };
+}
+
+function rowToArtifact(row: ExecutorArtifactRow): ExecutorArtifactRecord {
+  return {
+    artifactId: row.artifact_id,
+    roundId: row.round_id,
+    artifactClass: row.artifact_class as ExecutorArtifactClass,
+    path: row.path,
+    digest: row.digest,
+    description: row.description
+  };
+}
+
+function rowToCheckpoint(
+  row: ExecutorCheckpointRow
+): ExecutorCheckpointRecord {
+  return {
+    checkpointId: row.checkpoint_id,
+    roundId: row.round_id,
+    sequence: row.sequence,
+    stage: row.stage,
+    detail: row.detail
+  };
+}
+
+function rowToFinding(row: ExecutorFindingRow): ExecutorFindingRecord {
+  return {
+    findingId: row.finding_id,
+    roundId: row.round_id,
+    severity: row.severity,
+    title: row.title,
+    detail: row.detail,
+    selected: row.selected !== 0,
+    externalRef: row.external_ref
+  };
+}
+
+function rowToDecision(row: ExecutorDecisionRow): ExecutorDecisionRecord {
+  return {
+    decisionId: row.decision_id,
+    roundId: row.round_id,
+    summary: row.summary,
+    allowedActions: parseStringArray(row.allowed_actions),
+    recommendedAction: row.recommended_action,
+    chosenAction: row.chosen_action,
+    resolution: row.resolution
   };
 }
 
@@ -810,6 +1159,19 @@ function validateRoundRecord(
     errors.push({
       code: "executor_round_unknown_human_gate",
       message: `unknown human gate type: ${String(record.humanGate)}`
+    });
+  }
+  return errors;
+}
+
+function validateArtifactRecord(
+  record: ExecutorArtifactRecord
+): ExecutorRecordValidationError[] {
+  const errors: ExecutorRecordValidationError[] = [];
+  if (!ARTIFACT_CLASS_SET.has(record.artifactClass)) {
+    errors.push({
+      code: "executor_artifact_unknown_class",
+      message: `unknown artifact class: ${String(record.artifactClass)}`
     });
   }
   return errors;

@@ -141,6 +141,25 @@ export const EXECUTOR_HUMAN_GATE_TYPES = [
 export type ExecutorHumanGateType =
   (typeof EXECUTOR_HUMAN_GATE_TYPES)[number];
 
+/**
+ * Artifact classes every round writes or mirrors (contract "Required
+ * Artifacts"). Artifact paths are evidence pointers; SQLite stays the source of
+ * truth for state and classification. One entry per contract bullet, in order:
+ * the normalized result document, bounded logs, the checkpoint stream,
+ * verification output, commit/reset evidence after repo finalization, and the
+ * recovery note when manual recovery is required.
+ */
+export const EXECUTOR_ARTIFACT_CLASSES = [
+  "result_document",
+  "logs",
+  "checkpoint_stream",
+  "verification_output",
+  "commit_or_reset_evidence",
+  "recovery_note"
+] as const;
+export type ExecutorArtifactClass =
+  (typeof EXECUTOR_ARTIFACT_CLASSES)[number];
+
 const INVOCATION_STATE_SET: ReadonlySet<ExecutorInvocationState> = new Set(
   EXECUTOR_INVOCATION_STATES
 );
@@ -360,9 +379,10 @@ export type ExecutorInvocationRecord = {
  * One bounded loop attempt under an invocation (contract "Round Schema"). The
  * common identity, execution, and result fields below are what workflow status,
  * handoff, monitor, and recovery surfaces rely on without understanding the
- * executor internals. Executor-specific payload is layered on durably as
- * separate `executor_artifacts` / `executor_findings` / `executor_decisions` /
- * `executor_checkpoints` child records in a later M10-03 slice.
+ * executor internals. Executor-specific evidence is layered on durably as
+ * separate {@link ExecutorArtifactRecord} / {@link ExecutorCheckpointRecord} /
+ * {@link ExecutorFindingRecord} / {@link ExecutorDecisionRecord} child records
+ * that hang below a round.
  */
 export type ExecutorRoundRecord = {
   // Identity and ordering.
@@ -396,4 +416,64 @@ export type ExecutorRoundRecord = {
   commitSha: string | null;
   recoveryCode: string | null;
   humanGate: ExecutorHumanGateType | null;
+};
+
+/**
+ * One evidence artifact a round wrote or mirrored (contract "Required
+ * Artifacts"). `path` is an evidence pointer; the durable row, not the file, is
+ * the source of truth that the artifact exists for this round.
+ */
+export type ExecutorArtifactRecord = {
+  artifactId: string;
+  roundId: string;
+  artifactClass: ExecutorArtifactClass;
+  path: string;
+  digest: string | null;
+  description: string | null;
+};
+
+/**
+ * One entry in a round's checkpoint stream for a major executor stage (contract
+ * "Round Lifecycle" / "Required Artifacts"). `sequence` orders the stream within
+ * a round and is unique per round.
+ */
+export type ExecutorCheckpointRecord = {
+  checkpointId: string;
+  roundId: string;
+  sequence: number;
+  stage: string;
+  detail: string | null;
+};
+
+/**
+ * One finding a round surfaced (contract "Round Lifecycle"; the no-mistakes
+ * mirror's "Review findings" / "Selected finding IDs"). `selected` marks a
+ * finding the daemon or operator chose to act on; `externalRef` mirrors an
+ * external reviewer's finding id when one exists.
+ */
+export type ExecutorFindingRecord = {
+  findingId: string;
+  roundId: string;
+  severity: string | null;
+  title: string;
+  detail: string | null;
+  selected: boolean;
+  externalRef: string | null;
+};
+
+/**
+ * One durable decision point a round produced (contract "Completion
+ * Classification" `operator_decision_required`; the no-mistakes mirror's
+ * "Decisions and delegated-policy results"). `allowedActions` is the action set
+ * the decision offers; `resolution` records the delegated-policy or operator
+ * outcome once the decision is settled.
+ */
+export type ExecutorDecisionRecord = {
+  decisionId: string;
+  roundId: string;
+  summary: string;
+  allowedActions: string[];
+  recommendedAction: string | null;
+  chosenAction: string | null;
+  resolution: string | null;
 };
