@@ -301,10 +301,10 @@ Run locally via the targeted vitest command:
 pnpm vitest run test/live-step-finalize.test.ts test/live-step-run-recovery.test.ts test/live-step-advance.test.ts test/workflow-recovery-artifact.test.ts
 ```
 
-## Milestone 10 definition and run-start coverage (NGX-345, NGX-346)
+## Milestone 10 workflow-first runtime coverage (NGX-345 through NGX-348)
 
-M10-01 and M10-02 are covered by focused unit, migration, and CLI tests rather
-than a built-binary CLI smoke.
+M10-01 through M10-04 are covered by focused unit, migration, CLI, and daemon
+loop tests rather than a built-binary CLI smoke.
 
 Coverage:
 
@@ -321,11 +321,17 @@ Coverage:
 - `workflow run start` CLI coverage for built-in definition seeding, persisted
   definitions, refusal envelopes, repo policy loading, and public docs in
   `test/cli-workflow-run-start.test.ts`.
+- executor-loop record validation and persistence in
+  `test/executor-loop-reducer.test.ts` and `test/executor-loop-persist.test.ts`.
+- scheduler-lane scan, stale-lease recovery, dispatch-lease claim, and one-tick
+  dispatch behavior in `test/workflow-scheduler.test.ts`.
+- daemon-loop opt-in scheduler-lane wiring and goal-iteration compatibility in
+  `test/daemon-loop.test.ts`.
 
 Run locally via the targeted vitest command:
 
 ```
-pnpm vitest run test/workflow-definition.test.ts test/workflow-definition-persist.test.ts test/migrations.test.ts test/workflow-run-start.test.ts test/workflow-run-start-persist.test.ts test/cli-workflow-run-start.test.ts
+pnpm vitest run test/workflow-definition.test.ts test/workflow-definition-persist.test.ts test/migrations.test.ts test/workflow-run-start.test.ts test/workflow-run-start-persist.test.ts test/cli-workflow-run-start.test.ts test/executor-loop-reducer.test.ts test/executor-loop-persist.test.ts test/workflow-scheduler.test.ts test/daemon-loop.test.ts
 ```
 
 ## Test boundary

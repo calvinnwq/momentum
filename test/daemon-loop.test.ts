@@ -37,6 +37,15 @@ import type {
   WorkerRunInput,
   WorkerRunResult
 } from "../src/worker-run.js";
+import {
+  WORKFLOW_DISPATCH_LEASE_KIND,
+  type ClaimedWorkflowStep,
+  type RunWorkflowSchedulerOnceResult,
+  type WorkflowStepDispatch,
+  type WorkflowStepDispatchContext,
+  type WorkflowStepDispatchResult
+} from "../src/workflow-scheduler.js";
+import { getWorkflowLease } from "../src/workflow-leases.js";
 
 const tempRoots: string[] = [];
 
@@ -1426,4 +1435,447 @@ describe("runDaemonLoop", () => {
     }
   });
 
+});
+
+const WF_NOW = 1_700_000_000_000;
+
+function seedWorkflowRun(
+  db: MomentumDb,
+  input: { runId: string; state?: string; repoPath?: string | null; createdAt?: number }
+): void {
+  db.prepare(
+    `INSERT INTO workflow_runs
+       (id, state, source, plan_json, repo_path, issue_scope_json, route_json,
+        needs_manual_recovery, created_at, updated_at)
+     VALUES (?, ?, 'workflow-run-start', '{}', ?, '{}', '{}', 0, ?, ?)`
+  ).run(
+    input.runId,
+    input.state ?? "approved",
+    input.repoPath ?? null,
+    input.createdAt ?? WF_NOW,
+    input.createdAt ?? WF_NOW
+  );
+}
+
+function seedWorkflowStep(
+  db: MomentumDb,
+  input: { runId: string; stepId: string; kind: string; state: string; order: number }
+): void {
+  db.prepare(
+    `INSERT INTO workflow_steps
+       (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 1, ?, ?)`
+  ).run(input.runId, input.stepId, input.kind, input.state, input.order, WF_NOW, WF_NOW);
+}
+
+/**
+ * Seed a workflow run whose first step is `approved` and ready to dispatch (no
+ * leases, predecessors clear), so the scheduler lane scans it as runnable.
+ */
+function seedRunnableWorkflow(db: MomentumDb, runId = "wf-run-a"): string {
+  seedWorkflowRun(db, { runId, state: "approved", repoPath: `/repos/${runId}` });
+  seedWorkflowStep(db, {
+    runId,
+    stepId: "preflight",
+    kind: "preflight",
+    state: "approved",
+    order: 0
+  });
+  seedWorkflowStep(db, {
+    runId,
+    stepId: "implementation",
+    kind: "implementation",
+    state: "pending",
+    order: 1
+  });
+  return runId;
+}
+
+type WorkflowDispatchRecorder = {
+  dispatch: WorkflowStepDispatch;
+  calls: Array<{ claim: ClaimedWorkflowStep; context: WorkflowStepDispatchContext }>;
+};
+
+function recordingWorkflowDispatch(
+  result: WorkflowStepDispatchResult = { status: "dispatched" }
+): WorkflowDispatchRecorder {
+  const calls: WorkflowDispatchRecorder["calls"] = [];
+  const dispatch: WorkflowStepDispatch = (claim, context) => {
+    calls.push({ claim, context });
+    return result;
+  };
+  return { dispatch, calls };
+}
+
+function mockRanJob(workerId: string, dataDir: string): WorkerRunResult {
+  return {
+    code: "ran_job",
+    ok: true,
+    workerId,
+    dataDir,
+    outcome: "ran_job",
+    goalId: "goal-x",
+    jobId: "job-x",
+    lockId: "lock-x",
+    goalState: "completed",
+    jobState: "succeeded",
+    iteration: 1,
+    repoRoot: "/repo/x",
+    leaseExpiresAt: 0,
+    heartbeatAt: 0,
+    jobIterationResult: { ok: true } as never,
+    reducer: null,
+    reducerError: null,
+    message: "mocked ran_job"
+  } as WorkerRunResult;
+}
+
+describe("runDaemonLoop workflow scheduler lane (NGX-348)", () => {
+  it("leaves the workflow lane inert when no workflowLane config is supplied", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const runId = seedDaemonRun(db);
+      const wfRunId = seedRunnableWorkflow(db);
+
+      const result = await runDaemonLoop({
+        db,
+        dataDir,
+        runId,
+        workerId: "daemon-loop-wf-inert",
+        pollIntervalMs: 0,
+        maxIdleCycles: 1,
+        now: makeMonotonicNow(),
+        sleep: async () => undefined,
+        runWorker: () => ({
+          code: "no_work",
+          workerId: "daemon-loop-wf-inert",
+          dataDir,
+          outcome: "idle",
+          message: "no work"
+        })
+      });
+
+      expect(result.workflowStepsDispatched).toBe(0);
+      expect(result.lastWorkflowCode).toBeNull();
+      // The runnable workflow run was never claimed: no dispatch lease exists.
+      expect(
+        getWorkflowLease(db, wfRunId, WORKFLOW_DISPATCH_LEASE_KIND)
+      ).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("dispatches a runnable workflow step and leaves its dispatch lease held", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const runId = seedDaemonRun(db);
+      const wfRunId = seedRunnableWorkflow(db);
+      const recorder = recordingWorkflowDispatch();
+      const observedCycles: Array<RunWorkflowSchedulerOnceResult | undefined> = [];
+
+      const result = await runDaemonLoop({
+        db,
+        dataDir,
+        runId,
+        workerId: "daemon-loop-wf-dispatch",
+        pollIntervalMs: 0,
+        maxLoopIterations: 1,
+        now: makeMonotonicNow(),
+        sleep: async () => undefined,
+        onCycleComplete: (cycle) => observedCycles.push(cycle.workflowResult),
+        runWorker: () => ({
+          code: "no_work",
+          workerId: "daemon-loop-wf-dispatch",
+          dataDir,
+          outcome: "idle",
+          message: "no work"
+        }),
+        workflowLane: { dispatch: recorder.dispatch }
+      });
+
+      expect(result.workflowStepsDispatched).toBe(1);
+      expect(result.lastWorkflowCode).toBe("dispatched");
+
+      expect(recorder.calls).toHaveLength(1);
+      expect(recorder.calls[0]?.claim.runId).toBe(wfRunId);
+      expect(recorder.calls[0]?.claim.stepId).toBe("preflight");
+      expect(recorder.calls[0]?.context.workerId).toBe("daemon-loop-wf-dispatch");
+
+      // The dispatch lease is durable and left held for the executor to own.
+      const lease = getWorkflowLease(db, wfRunId, WORKFLOW_DISPATCH_LEASE_KIND);
+      expect(lease?.holder).toBe("daemon-loop-wf-dispatch");
+      expect(lease?.releasedAt).toBeNull();
+
+      // The scheduler tick result is surfaced to onCycleComplete observers.
+      expect(observedCycles).toHaveLength(1);
+      expect(observedCycles[0]?.code).toBe("dispatched");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps draining goal iterations while the workflow lane dispatches", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const runId = seedDaemonRun(db);
+      seedRunnableWorkflow(db);
+      const recorder = recordingWorkflowDispatch();
+      let goalCycles = 0;
+
+      const result = await runDaemonLoop({
+        db,
+        dataDir,
+        runId,
+        workerId: "daemon-loop-wf-coexist",
+        pollIntervalMs: 0,
+        maxIdleCycles: 1,
+        now: makeMonotonicNow(),
+        sleep: async () => undefined,
+        runWorker: (input): WorkerRunResult => {
+          goalCycles += 1;
+          if (goalCycles === 1) {
+            return mockRanJob(input.workerId, dataDir);
+          }
+          return {
+            code: "no_work",
+            workerId: input.workerId,
+            dataDir,
+            outcome: "idle",
+            message: "no work"
+          };
+        },
+        workflowLane: { dispatch: recorder.dispatch }
+      });
+
+      // Both lanes advanced: the goal job drained AND a workflow step dispatched.
+      expect(result.jobsRun).toBe(1);
+      expect(result.workflowStepsDispatched).toBe(1);
+      expect(recorder.calls).toHaveLength(1);
+      expect(result.exitReason).toBe("max_idle_cycles");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("treats a workflow dispatch as an active, non-idle cycle", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const runId = seedDaemonRun(db);
+      seedRunnableWorkflow(db);
+      const recorder = recordingWorkflowDispatch();
+      const { calls: sleepCalls, sleep } = makeRecordingSleep();
+
+      const result = await runDaemonLoop({
+        db,
+        dataDir,
+        runId,
+        workerId: "daemon-loop-wf-active",
+        pollIntervalMs: 7,
+        maxIdleCycles: 2,
+        now: makeMonotonicNow(),
+        sleep,
+        runWorker: () => ({
+          code: "no_work",
+          workerId: "daemon-loop-wf-active",
+          dataDir,
+          outcome: "idle",
+          message: "no work"
+        }),
+        workflowLane: { dispatch: recorder.dispatch }
+      });
+
+      // Cycle 0 dispatched (active: no idle, no sleep); only the two later
+      // workflow-idle cycles counted as idle and slept.
+      expect(result.workflowStepsDispatched).toBe(1);
+      expect(result.iterations).toBe(3);
+      expect(result.idleCycles).toBe(2);
+      expect(sleepCalls).toEqual([7, 7]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refreshes the daemon heartbeat as it hands a claimed step to the dispatcher", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const runId = seedDaemonRun(db);
+      seedRunnableWorkflow(db);
+      let observed: { heartbeatAt: number | null | undefined; ctxNow: number } | null =
+        null;
+      const dispatch: WorkflowStepDispatch = (_claim, context) => {
+        observed = {
+          heartbeatAt: getDaemonRun(db, runId)?.heartbeat_at,
+          ctxNow: context.now
+        };
+        return { status: "dispatched" };
+      };
+
+      await runDaemonLoop({
+        db,
+        dataDir,
+        runId,
+        workerId: "daemon-loop-wf-heartbeat",
+        pollIntervalMs: 0,
+        maxLoopIterations: 1,
+        now: makeMonotonicNow(),
+        sleep: async () => undefined,
+        runWorker: () => ({
+          code: "no_work",
+          workerId: "daemon-loop-wf-heartbeat",
+          dataDir,
+          outcome: "idle",
+          message: "no work"
+        }),
+        workflowLane: { dispatch }
+      });
+
+      expect(observed).not.toBeNull();
+      // The daemon heartbeated to the tick clock right before dispatch ran, so
+      // the row the dispatcher observes is freshly stamped (not the older
+      // cycle-start heartbeat).
+      expect(observed!.heartbeatAt).toBe(observed!.ctxNow);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("does not dispatch workflow work after a stop request during goal work", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const runId = seedDaemonRun(db);
+      const wfRunId = seedRunnableWorkflow(db);
+      const recorder = recordingWorkflowDispatch();
+      const { calls, sleep } = makeRecordingSleep();
+      const observedCycles: Array<RunWorkflowSchedulerOnceResult | undefined> = [];
+
+      const result = await runDaemonLoop({
+        db,
+        dataDir,
+        runId,
+        workerId: "daemon-loop-wf-stop-after-goal",
+        pollIntervalMs: 7,
+        maxIdleCycles: 10,
+        now: makeMonotonicNow(),
+        sleep,
+        onCycleComplete: (cycle) => observedCycles.push(cycle.workflowResult),
+        runWorker: () => {
+          requestDaemonRunStop(db, {
+            runId,
+            reason: "operator stop",
+            now: 200_000
+          });
+          return {
+            code: "no_work",
+            workerId: "daemon-loop-wf-stop-after-goal",
+            dataDir,
+            outcome: "idle",
+            message: "no work"
+          };
+        },
+        workflowLane: { dispatch: recorder.dispatch }
+      });
+
+      expect(result.exitReason).toBe("stop_requested");
+      expect(result.workflowStepsDispatched).toBe(0);
+      expect(result.lastWorkflowCode).toBeNull();
+      expect(result.idleCycles).toBe(0);
+      expect(recorder.calls).toHaveLength(0);
+      expect(calls).toEqual([]);
+      expect(observedCycles).toEqual([undefined]);
+      expect(
+        getWorkflowLease(db, wfRunId, WORKFLOW_DISPATCH_LEASE_KIND)
+      ).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("marks the daemon run errored and releases the lease when the dispatcher throws", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const runId = seedDaemonRun(db);
+      const wfRunId = seedRunnableWorkflow(db);
+      const dispatch: WorkflowStepDispatch = () => {
+        throw new Error("dispatcher boom");
+      };
+
+      const result = await runDaemonLoop({
+        db,
+        dataDir,
+        runId,
+        workerId: "daemon-loop-wf-throw",
+        pollIntervalMs: 0,
+        maxLoopIterations: 3,
+        now: makeMonotonicNow(),
+        sleep: async () => undefined,
+        runWorker: () => ({
+          code: "no_work",
+          workerId: "daemon-loop-wf-throw",
+          dataDir,
+          outcome: "idle",
+          message: "no work"
+        }),
+        workflowLane: { dispatch }
+      });
+
+      expect(result.exitReason).toBe("internal_error");
+      expect(result.terminalState).toBe("error");
+      expect(result.error).toBe("dispatcher boom");
+      expect(getDaemonRun(db, runId)?.state).toBe("error");
+
+      // The dispatch lease the tick acquired was released, not stranded.
+      const lease = getWorkflowLease(db, wfRunId, WORKFLOW_DISPATCH_LEASE_KIND);
+      expect(lease?.releasedAt).not.toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("forwards the configured dispatch-lease duration and stale policy to the tick", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const runId = seedDaemonRun(db);
+      const wfRunId = seedRunnableWorkflow(db);
+      const recorder = recordingWorkflowDispatch();
+      const fixedNow = WF_NOW;
+
+      await runDaemonLoop({
+        db,
+        dataDir,
+        runId,
+        workerId: "daemon-loop-wf-config",
+        pollIntervalMs: 0,
+        maxLoopIterations: 1,
+        now: () => fixedNow,
+        sleep: async () => undefined,
+        runWorker: () => ({
+          code: "no_work",
+          workerId: "daemon-loop-wf-config",
+          dataDir,
+          outcome: "idle",
+          message: "no work"
+        }),
+        workflowLane: {
+          dispatch: recorder.dispatch,
+          leaseDurationMs: 12_345,
+          stalePolicy: "manual-recovery-required"
+        }
+      });
+
+      const lease = getWorkflowLease(db, wfRunId, WORKFLOW_DISPATCH_LEASE_KIND);
+      expect(lease?.expiresAt).toBe(fixedNow + 12_345);
+      expect(lease?.stalePolicy).toBe("manual-recovery-required");
+    } finally {
+      db.close();
+    }
+  });
 });

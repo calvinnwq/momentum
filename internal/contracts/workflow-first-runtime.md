@@ -333,6 +333,7 @@ Current Momentum state:
 - Has M10-01 `WorkflowDefinition` / `StepDefinition` validation, built-in coding workflow definition, and `workflow_definitions` / `step_definitions` persistence.
 - Has M10-02 `workflow run start` materialization from persisted or built-in definitions, including definition provenance on `workflow_runs`.
 - Has M10-03 `ExecutorDefinition` / `ExecutorInvocation` / `ExecutorRound` schema and persistence below workflow steps, including round artifacts, checkpoints, findings, and decisions.
+- Has M10-04 opt-in daemon workflow scheduler lane (recover → scan → claim → dispatch) that schedules runnable workflow steps alongside goal iteration draining, with the executor-dispatch seam left to later slices.
 - Has `goal start`, `daemon`, and workflow import / status / run controls.
 
 Required workflow-first gaps:
@@ -342,7 +343,7 @@ Required workflow-first gaps:
 | Top-level entity | Goal-first; persisted WorkflowDefinition primitives; WorkflowRun mostly coding-workflow substrate | WorkflowDefinition / WorkflowRun as product core |
 | Step configuration | Persisted StepDefinition list for definitions; run execution still fixed canonical step kinds | Configurable StepDefinition list |
 | Executor selection | Executor definitions can be persisted, but step execution still uses runner profiles or fixed workflow step kinds | Per-step executor definition and agent / model config |
-| Daemon scheduling | Drains `goal_iteration` jobs | Schedules workflow runs, step runs, executor invocations, and rounds |
+| Daemon scheduling | Drains `goal_iteration` jobs; opt-in scheduler lane recovers, scans, claims, and dispatches runnable workflow steps | Schedules workflow runs, step runs, executor invocations, and rounds |
 | Loop state | Goal iteration artifacts / job rows, plus persisted executor invocations / rounds below workflow steps | ExecutorInvocation / ExecutorRound / checkpoints / artifacts driven by the workflow scheduler |
 | Goal loop | Product-level Goal | `goal-loop` executor inside a workflow step |
 | no-mistakes | External fixed pipeline | Specialist executor mirrored into Momentum |
@@ -363,4 +364,4 @@ This planning contract does not implement:
 - Public UI.
 - Replacement of GNHF or no-mistakes internals.
 
-M10 is now implementing these as concrete slices: M10-01 lands definition schema / validation / persistence, M10-02 lands CLI run start, and M10-03 lands executor state schema / persistence, while daemon scheduling and external runtime behavior remain later slices.
+M10 is now implementing these as concrete slices: M10-01 lands definition schema / validation / persistence, M10-02 lands CLI run start, M10-03 lands executor state schema / persistence, and M10-04 lands the opt-in daemon workflow scheduler lane, while executor adapters and external runtime behavior remain later slices.

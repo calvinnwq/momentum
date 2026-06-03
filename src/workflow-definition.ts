@@ -7,9 +7,9 @@
  * follows the same discipline as `workflow-run-reducer.ts`: no SQLite, no file
  * system, no executor invocation. Durable persistence (`workflow_definitions`
  * / `step_definitions`) is layered on top of these primitives in
- * `workflow-definition-persist.ts`; first-class workflow run start is layered on
- * top of those persisted definitions, while executor invocation/round schema
- * and daemon scheduling remain later M10 slices.
+ * `workflow-definition-persist.ts`; first-class workflow run start, executor
+ * records, and the opt-in daemon scheduler lane are layered on later modules.
+ * Real executor adapters remain later M10 work.
  *
  * Scope decisions pinned here, grounded in the accepted planning contracts
  * (internal/contracts/workflow-first-runtime.md and

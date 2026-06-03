@@ -1,6 +1,6 @@
 # Contract: Workflow-First Gap Matrix
 
-**Status:** Accepted implementation bridge. M10-00 promoted this matrix into the workflow-first runtime milestone sequence; M10-01 has landed the definition schema and persistence slice, M10-02 adds workflow run start, and M10-03 adds executor-loop schema / persistence. It still does not authorize Linear remapping or milestone renumbering by itself.
+**Status:** Accepted implementation bridge. M10-00 promoted this matrix into the workflow-first runtime milestone sequence; M10-01 has landed the definition schema and persistence slice, M10-02 adds workflow run start, M10-03 adds executor-loop schema / persistence, and M10-04 adds the opt-in daemon workflow scheduler lane. It still does not authorize Linear remapping or milestone renumbering by itself.
 
 This contract follows:
 
@@ -37,6 +37,7 @@ Current durable runtime surfaces:
 - M10-01 `WorkflowDefinition` / `StepDefinition` validation, built-in coding workflow definition, and `workflow_definitions` / `step_definitions` persistence helpers.
 - M10-02 `workflow run start` materialization from persisted or built-in definitions.
 - M10-03 `ExecutorDefinition` / `ExecutorInvocation` / `ExecutorRound` persistence, with executor artifacts, checkpoints, findings, and decisions below rounds.
+- M10-04 opt-in daemon workflow scheduler lane (`runWorkflowSchedulerOnce`) composing stale-lease recovery, runnable-step scan, atomic dispatch-lease claim, and an executor-dispatch seam, run each daemon cycle alongside goal iteration draining.
 - Evidence records with typed workflow linkage.
 - Source-item and external-apply contracts.
 
@@ -62,7 +63,7 @@ Current product surface:
 Current limitation:
 
 ```text
-WorkflowRun is durable and can start from definitions, and executor records now persist below step runs. Later slices still attach daemon scheduling and executable adapters to those records.
+WorkflowRun is durable and can start from definitions, executor records now persist below step runs, and the daemon can recover, scan, and claim runnable workflow steps through an opt-in scheduler lane. Later slices still attach the executable adapters that fulfil the dispatch seam.
 ```
 
 ## Target Inventory
@@ -101,11 +102,11 @@ Future product surface:
 | Area | Current Shape | Target Shape | Migration Direction |
 |---|---|---|---|
 | Product root | Goal-first execution plus imported workflow runs | WorkflowDefinition / WorkflowRun | Introduce workflow definitions before deprecating goal-first UX |
-| Run start | `goal start`; `workflow import` for external plans; persisted workflow definitions; `workflow run start` materialization | `workflow run start` connected to execution scheduling | Keep the first-class start command as the workflow-first entry point while later slices attach executor records and scheduling |
+| Run start | `goal start`; `workflow import` for external plans; persisted workflow definitions; `workflow run start` materialization with executor records and scheduler-lane eligibility | `workflow run start` connected to execution scheduling | Keep the first-class start command as the workflow-first entry point; only executor adapter execution remains to be attached |
 | Step model | Fixed coding workflow step kinds | Configurable StepDefinition list | Keep canonical coding workflow as one built-in definition |
 | Executor model | Runner profiles and M9 wrapper registry keyed by fixed step kind | Per-step ExecutorDefinition and executor config | Reuse wrapper config as executor config input |
 | Loop state | Goal iteration jobs/artifacts; external GNHF/no-mistakes state | ExecutorInvocation / ExecutorRound records | Persist common loop state in Momentum SQLite |
-| Daemon scheduling | Drains goal iteration queue | Schedules workflow runs and step runs | Add scheduler lane without breaking existing daemon commands |
+| Daemon scheduling | Drains goal iteration queue; opt-in lane recovers/scans/claims runnable workflow steps | Schedules workflow runs and step runs | Scheduler lane landed (M10-04); later slices attach executor adapters to the dispatch seam |
 | Repo safety | Repo locks plus verification / commit transactions | Same safety around executor finalization | Reuse M9 finalization and repo-lock heartbeats |
 | Approvals | M8 workflow approvals for imported runs | Workflow / step / gate approvals | Keep M8 rows; generalize boundary vocabulary |
 | Human gates | Split across approval rows, recovery flag, external TUI/IPC | Durable gates with allowed actions and decisions | Add gate records and `workflow run decide` |
@@ -148,8 +149,8 @@ The M10 slice order:
 1. **M10-00 Workflow-first contract and milestone setup**: promote these planning contracts into an implementation milestone and pin issue order.
 2. **M10-01 WorkflowDefinition and StepDefinition schema**: add definitions, validation, durable `workflow_definitions` / `step_definitions` persistence, and the built-in coding workflow definition.
 3. **M10-02 Workflow run start**: create runs from definitions with approval boundaries and repo policy.
-4. **M10-03 ExecutorDefinition / Invocation / Round schema**: persist executor loop state under step runs. *(landed in this slice)*
-5. **M10-04 Daemon workflow scheduler lane**: schedule runnable workflow runs and step runs without breaking goal iteration draining.
+4. **M10-03 ExecutorDefinition / Invocation / Round schema**: persist executor loop state under step runs. *(done)*
+5. **M10-04 Daemon workflow scheduler lane**: schedule runnable workflow runs and step runs without breaking goal iteration draining. *(landed in this slice)*
 6. **M10-05 Goal-loop executor adapter**: migrate existing goal iteration behavior into executor rounds.
 7. **M10-06 One-shot / script executor adapter**: support deterministic commands and bounded agent/script invocations.
 8. **M10-07 no-mistakes executor mirror**: mirror no-mistakes runs, findings, decisions, PR/CI state, and completion into Momentum.
@@ -181,4 +182,4 @@ This gap matrix does not implement:
 - Public UI.
 - Replacement of external engine internals.
 
-It is the active implementation bridge between the accepted workflow-first pivot, the landed M10-01 definition persistence slice, and the remaining workflow-first runtime slices.
+It is the active implementation bridge between the accepted workflow-first pivot, the landed M10-01 definition persistence, M10-02 run start, M10-03 executor-record, and M10-04 scheduler-lane slices, and the remaining workflow-first runtime slices.

@@ -2,13 +2,14 @@
  * Run-scoped recovery artifact renderer (NGX-327, M8-04).
  *
  * Renders the per-run `.agent-workflows/<runId>/recovery.md` artifact from
- * either the M7 monitor reducer's recovery classification or the M9 live
- * run-level recovery classifications. The renderer is the run-scoped
+ * either the M7 monitor reducer's recovery classification, the M9 live
+ * run-level recovery classifications, or the M10 scheduler lane's stale
+ * workflow-lease recovery classification. The renderer is the run-scoped
  * sibling of the M3 goal-scoped `recovery-artifact.ts`: it owns artifact
  * *generation* only and never touches SQLite, executors, or the durable flag;
  * the durable `WorkflowRun.needs_manual_recovery` wiring and the explicit
- * clear path compose with this renderer through the M8 recovery slice and M9
- * live recovery seams.
+ * clear path compose with this renderer through the M8 recovery slice, M9
+ * live recovery seams, and M10 scheduler-lane recovery.
  *
  * The renderer is intentionally pure and accepts only structured, bounded
  * fields (run id, step id, classification, evidence pointers, recommended next
@@ -80,7 +81,9 @@ export type WorkflowLiveRunRecoveryCode =
 /**
  * Every classification `recovery.md` can render: the M7 monitor recovery codes
  * plus the M9 live run-level recovery codes. This is the single source of truth
- * the renderer validates against.
+ * the renderer validates against. The M10 scheduler lane reuses the
+ * monitor-owned `manual_recovery_lease` classification when a stale workflow
+ * lease requires operator action, so it needs no separate live-only code here.
  */
 export type WorkflowRecoveryClassification =
   | WorkflowMonitorRecoveryCode
@@ -105,12 +108,12 @@ export function isSafeWorkflowRunPathSegment(runId: string): boolean {
  * Encodes the NGX-327 safety contract: prefer blocking over guessing, never
  * auto-clear from elapsed time, no automatic repair or live process killing,
  * and the rollback is reverting the flag/artifact wiring without disturbing the
- * upstream monitor-derived or live-run recovery source.
+ * upstream monitor-derived, live-run, or scheduler-lane recovery source.
  */
 export const WORKFLOW_RECOVERY_SAFETY_NOTES: readonly string[] = [
   "Recovery never auto-clears from elapsed time alone; an operator must explicitly clear it once the blocking state is resolved.",
   "Momentum does not kill processes or perform automatic repair; resolve the underlying cause manually before clearing recovery.",
-  "Rollback: revert the run-scoped recovery flag and artifact wiring. The upstream monitor-derived or live-run recovery source is unchanged by this artifact."
+  "Rollback: revert the run-scoped recovery flag and artifact wiring. The upstream monitor-derived, live-run, or scheduler-lane recovery source is unchanged by this artifact."
 ];
 
 const SAFE_NEXT_STEPS: Record<
@@ -235,11 +238,13 @@ export type WorkflowRecoveryEvidencePointer = {
 };
 
 /**
- * The recommended next action surfaced from either the M7 monitor reducer's
- * `nextAction` or an M9 live run-level recovery seam. Monitor-derived inputs
- * carry the reducer's stable code/detail, while live recovery inputs carry
- * live-specific `investigate_*` codes and operator-facing detail; lease
- * internals stay in the substrate.
+ * The recommended next action surfaced from the M7 monitor reducer's
+ * `nextAction`, an M9 live run-level recovery seam, or the M10 scheduler lane's
+ * stale workflow-lease recovery. Monitor-derived inputs carry the reducer's
+ * stable code/detail, live recovery inputs carry live-specific `investigate_*`
+ * codes and operator-facing detail, and scheduler-lane lease recovery carries
+ * the guarded `clear_recovery` action after the underlying lease condition is
+ * resolved; lease internals stay in the substrate.
  */
 export type WorkflowRecoveryNextAction = {
   code: string;
@@ -249,10 +254,10 @@ export type WorkflowRecoveryNextAction = {
 
 /**
  * Self-contained input for rendering / writing a run-scoped `recovery.md`.
- * Built from either a monitor reducer classification (see
- * {@link buildWorkflowRecoveryArtifactInput}) or a live run-level recovery seam,
- * so the renderer never needs a live db handle or the file system to assemble
- * its body.
+ * Built from a monitor reducer classification (see
+ * {@link buildWorkflowRecoveryArtifactInput}), a live run-level recovery seam,
+ * or the scheduler lane's stale workflow-lease recovery path, so the renderer
+ * never needs a live db handle or the file system to assemble its body.
  */
 export type WorkflowRecoveryArtifactInput = {
   runId: string;
