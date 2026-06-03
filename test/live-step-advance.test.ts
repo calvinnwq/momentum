@@ -625,7 +625,7 @@ describe("advanceLiveWorkflowStep", () => {
     const probePath = path.join(runDir, "finalize-lease-duration.json");
     try {
       seedRepoBackedRun(db, repoPath);
-      const leaseExpiresAt = Date.now() + 120;
+      const leaseExpiresAt = Date.now() + 500;
       db.prepare(
         `UPDATE repo_locks
             SET acquired_at = ?,
@@ -660,7 +660,7 @@ describe("advanceLiveWorkflowStep", () => {
         holder: HOLDER,
         leaseExpiresAt,
         executor: fakeExecutor((input) => {
-          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 260);
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 800);
           fs.writeFileSync(
             path.join(input.repoPath, "step-edit.txt"),
             "from-live-step\n",
