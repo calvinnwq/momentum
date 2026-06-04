@@ -157,6 +157,114 @@ describe("single-shot concrete mechanisms", () => {
     expect(result.artifacts?.verificationOutput?.path).toBe(verificationLogPath);
   });
 
+  it("resets finalize one-shot command failures that dirty the repo", () => {
+    const { repoPath, baseHead } = initRepo();
+    const artifactRoot = makeTempDir();
+    const verificationLogPath = path.join(artifactRoot, "verify.log");
+    const config: LiveWrapperConfig = {
+      command: process.execPath,
+      args: [
+        "-e",
+        "const fs=require('node:fs');fs.writeFileSync(process.env.MOMENTUM_REPO_PATH+'/dirty-failure.txt', 'dirty\n');process.exit(7)"
+      ],
+      cwd: "iteration",
+      timeoutSec: 5,
+      envAllow: [],
+      resultFile: "result.json",
+      probe: undefined
+    };
+
+    const mechanism = createOneShotLiveWrapperRoundRunner(config, {
+      repoPath,
+      kind: "preflight",
+      repoSafety: {
+        mode: "finalize",
+        baseHead,
+        verificationCommands: [],
+        verificationTimeoutSec: 5,
+        verificationLogPath
+      }
+    });
+
+    const result = mechanism(round({ artifactRoot }));
+
+    expect(result.outcome).toEqual({
+      ok: false,
+      recoveryCode: "command_failed"
+    });
+    expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
+    expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toBe("");
+  });
+
+  it("rejects relative one-shot log paths before launching the wrapper", () => {
+    const { repoPath } = initRepo();
+    const artifactRoot = makeTempDir();
+    const config: LiveWrapperConfig = {
+      command: process.execPath,
+      args: [
+        "-e",
+        "const fs=require('node:fs');fs.writeFileSync(process.env.MOMENTUM_REPO_PATH+'/launched-one-shot.txt', 'launched\n')"
+      ],
+      cwd: "iteration",
+      timeoutSec: 5,
+      envAllow: [],
+      resultFile: "result.json",
+      probe: undefined
+    };
+
+    const mechanism = createOneShotLiveWrapperRoundRunner(config, {
+      repoPath,
+      kind: "preflight",
+      repoSafety: { mode: "read-only" }
+    });
+
+    const result = mechanism(
+      round({ artifactRoot, logPaths: ["relative-one-shot.log"] })
+    );
+
+    expect(result.outcome).toEqual({
+      ok: false,
+      recoveryCode: "invalid_input"
+    });
+    expect(fs.existsSync(path.join(repoPath, "launched-one-shot.txt"))).toBe(
+      false
+    );
+  });
+
+  it("returns runtime_unavailable when one-shot wrapper setup throws", () => {
+    const { repoPath } = initRepo();
+    const artifactRoot = makeTempDir();
+    const blockedParent = path.join(artifactRoot, "blocked-parent");
+    fs.writeFileSync(blockedParent, "not a directory\n");
+    const config: LiveWrapperConfig = {
+      command: process.execPath,
+      args: ["-e", "process.exit(0)"],
+      cwd: "iteration",
+      timeoutSec: 5,
+      envAllow: [],
+      resultFile: "result.json",
+      probe: undefined
+    };
+
+    const mechanism = createOneShotLiveWrapperRoundRunner(config, {
+      repoPath,
+      kind: "preflight",
+      repoSafety: { mode: "read-only" }
+    });
+
+    const result = mechanism(
+      round({
+        artifactRoot,
+        logPaths: [path.join(blockedParent, "executor.log")]
+      })
+    );
+
+    expect(result.outcome).toEqual({
+      ok: false,
+      recoveryCode: "runtime_unavailable"
+    });
+  });
+
   it("runs a script command, finalizes the repo, and records commit evidence", () => {
     const { repoPath, baseHead } = initRepo();
     const artifactRoot = makeTempDir();

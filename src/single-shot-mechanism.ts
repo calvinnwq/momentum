@@ -81,6 +81,11 @@ export function createOneShotLiveWrapperRoundRunner(
         "one-shot live wrapper rounds require artifactRoot and a log path"
       );
     }
+    if (!isUsableAbsolutePath(logPath)) {
+      return invalidInput(
+        "one-shot live wrapper rounds require an absolute log path"
+      );
+    }
     const readOnlySnapshot =
       options.repoSafety.mode === "read-only"
         ? captureReadOnlyRepoSnapshot(options.repoPath)
@@ -89,36 +94,46 @@ export function createOneShotLiveWrapperRoundRunner(
       return readOnlyRecovery(readOnlySnapshot.recoveryCode);
     }
 
-    const result = runLiveStepWrapper({
-      kind: options.kind,
-      config,
-      runId: round.workflowRunId,
-      stepId: round.stepRunId,
-      attempt: round.attempt,
-      repoPath: options.repoPath,
-      iterationDir: round.artifactRoot,
-      executorLogPath: logPath,
-      ...(options.promptPath !== undefined
-        ? { promptPath: options.promptPath }
-        : {}),
-      ...(options.env !== undefined ? { env: options.env } : {}),
-      ...(options.outputMaxBytes !== undefined
-        ? { outputMaxBytes: options.outputMaxBytes }
-        : {})
-    });
+    let result: ReturnType<typeof runLiveStepWrapper>;
+    try {
+      result = runLiveStepWrapper({
+        kind: options.kind,
+        config,
+        runId: round.workflowRunId,
+        stepId: round.stepRunId,
+        attempt: round.attempt,
+        repoPath: options.repoPath,
+        iterationDir: round.artifactRoot,
+        executorLogPath: logPath,
+        ...(options.promptPath !== undefined
+          ? { promptPath: options.promptPath }
+          : {}),
+        ...(options.env !== undefined ? { env: options.env } : {}),
+        ...(options.outputMaxBytes !== undefined
+          ? { outputMaxBytes: options.outputMaxBytes }
+          : {})
+      });
+    } catch {
+      return { outcome: { ok: false, recoveryCode: "runtime_unavailable" } };
+    }
 
     if (!result.ok) {
-      const recoveryCode =
-        options.repoSafety.mode === "read-only"
-          ? readOnlyRepoRecoveryCode(options.repoPath, readOnlySnapshot?.snapshot)
-          : null;
-      return {
-        outcome: {
-          ok: false,
-          recoveryCode: recoveryCode ?? liveRecoveryCode(result.code)
-        },
-        artifacts: artifactPointers(result.resultJsonPath, null)
-      };
+      const artifacts = artifactPointers(result.resultJsonPath, null);
+      const recoveryCode = liveRecoveryCode(result.code);
+      if (options.repoSafety.mode === "read-only") {
+        const repoRecoveryCode = readOnlyRepoRecoveryCode(
+          options.repoPath,
+          readOnlySnapshot?.snapshot
+        );
+        return {
+          outcome: {
+            ok: false,
+            recoveryCode: repoRecoveryCode ?? recoveryCode
+          },
+          artifacts
+        };
+      }
+      return finalizeOneShotProcessFailure(options, recoveryCode, artifacts);
     }
 
     const digest = digestFile(result.resultJsonPath);
@@ -177,7 +192,7 @@ export function createScriptCommandRoundRunner(
     if (logPath === null) {
       return invalidInput("script rounds require at least one log path");
     }
-    if (logPath.trim().length === 0 || !path.isAbsolute(logPath)) {
+    if (!isUsableAbsolutePath(logPath)) {
       return invalidInput("script rounds require an absolute log path");
     }
     const readOnlySnapshot =
@@ -292,6 +307,44 @@ function liveRecoveryCode(
   code: LiveStepWrapperRecoveryCode
 ): SingleShotRecoveryCode {
   return code;
+}
+
+function finalizeOneShotProcessFailure(
+  options: OneShotLiveWrapperRoundRunnerOptions,
+  failureCode: SingleShotRecoveryCode,
+  artifacts: SingleShotRoundArtifacts
+): SingleShotRoundMechanismResult {
+  if (options.repoSafety.mode === "read-only") {
+    return { outcome: { ok: false, recoveryCode: failureCode }, artifacts };
+  }
+  return projectFinalizeResult({
+    repoPath: options.repoPath,
+    finalize: finalizeLiveWorkflowStep({
+      repoPath: options.repoPath,
+      baseHead: options.repoSafety.baseHead,
+      stepSuccess: false,
+      commitIntent: fallbackOneShotFailureCommitIntent(),
+      verificationCommands: options.repoSafety.verificationCommands,
+      verificationTimeoutSec: options.repoSafety.verificationTimeoutSec,
+      verificationLogPath: options.repoSafety.verificationLogPath,
+      ...(options.repoSafety.beforeGitMutation !== undefined
+        ? { beforeGitMutation: options.repoSafety.beforeGitMutation }
+        : {})
+    }),
+    failureCode,
+    artifacts,
+    verificationLogPath: options.repoSafety.verificationLogPath
+  });
+}
+
+function fallbackOneShotFailureCommitIntent(): CommitIntent {
+  return {
+    type: "chore",
+    scope: "single-shot",
+    subject: "record one-shot failure",
+    body: "",
+    breaking: false
+  };
 }
 
 function finalizeOneShotResult(
@@ -594,6 +647,10 @@ function digestFile(filePath: string): string | null {
     return null;
   }
   return `sha256:${crypto.createHash("sha256").update(raw).digest("hex")}`;
+}
+
+function isUsableAbsolutePath(filePath: string): boolean {
+  return filePath.trim().length > 0 && path.isAbsolute(filePath);
 }
 
 function primaryLogPath(round: { logPaths: readonly string[] }): string | null {
