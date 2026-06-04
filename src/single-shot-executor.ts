@@ -57,6 +57,7 @@
 import type {
   ExecutorArtifactClass,
   ExecutorArtifactRecord,
+  ExecutorCheckpointRecord,
   ExecutorCompletionClassification,
   ExecutorHumanGateType,
   ExecutorInvocationRecord,
@@ -765,6 +766,84 @@ function singleShotArtifactRecord(
     digest: pointer.digest ?? null,
     description: pointer.description ?? null
   };
+}
+
+/**
+ * The inputs to {@link planSingleShotRoundCheckpoints}: the round id the checkpoints
+ * hang below, the {@link SingleShotInvocationOutcome} the bounded mechanism reported,
+ * whether a normalized result was captured, and the daemon classification the round
+ * settled into. These are the coarse round-lifecycle stages Momentum itself owns and
+ * needs no product decision to derive; the mechanism's own fine-grained checkpoint
+ * stream is the separate `checkpoint_stream` artifact *file* projected by
+ * {@link planSingleShotRoundArtifacts}.
+ */
+export type PlanSingleShotRoundCheckpointsInput = {
+  roundId: string;
+  outcome: SingleShotInvocationOutcome;
+  /**
+   * Whether the round captured a normalized result document (the `one-shot` family
+   * does on success; the exit-code-based `script` family never does), so the
+   * projection stays family-agnostic — the caller, not a family parameter, decides.
+   */
+  capturedResult: boolean;
+  classification: ExecutorCompletionClassification;
+};
+
+/**
+ * Project a finished single-shot round's major executor stages into the durable
+ * {@link ExecutorCheckpointRecord} stream the M10-03 persistence layer
+ * (`insertExecutorCheckpoint`) writes — the contract "Round Lifecycle" step 7
+ * "Capture ... checkpoints ..." for the single-shot families. These are the coarse
+ * stages Momentum itself drives around the bounded mechanism, so they are derived
+ * mechanically (no product decision, no invented vocabulary): the round started, the
+ * bounded mechanism finished (carrying its invocation outcome — `ok` or the precise
+ * recovery code), the normalized result was captured (only when one was produced —
+ * the `one-shot` family on success, never the exit-code-based `script` family), and
+ * the daemon classified the round (carrying its classification). The mechanism's own
+ * fine-grained checkpoint stream is the separate `checkpoint_stream` artifact file
+ * ({@link planSingleShotRoundArtifacts}); this stream is Momentum's queryable record
+ * of how far the round got, useful for reattach when the round fields alone do not
+ * say which stage was reached. Like {@link planSingleShotRoundArtifacts} this is
+ * family-agnostic — `capturedResult` (not a family parameter) decides whether the
+ * `result_captured` stage appears. Checkpoints are minted with deterministic ids
+ * (`<roundId>-checkpoint-<sequence>`) and sequenced from 0 so the `(round_id,
+ * sequence)` uniqueness the persistence layer enforces always holds. Pure: no SQLite,
+ * no file system.
+ */
+export function planSingleShotRoundCheckpoints(
+  input: PlanSingleShotRoundCheckpointsInput
+): ExecutorCheckpointRecord[] {
+  const { roundId } = input;
+  const records: ExecutorCheckpointRecord[] = [];
+  const checkpoint = (stage: string, detail: string | null): void => {
+    const sequence = records.length;
+    records.push({
+      checkpointId: `${roundId}-checkpoint-${sequence}`,
+      roundId,
+      sequence,
+      stage,
+      detail
+    });
+  };
+
+  // The single-shot mechanism reports either success or a precise recovery code;
+  // the mechanism stage carries that outcome the way the goal-loop stream carries
+  // its finalize outcome.
+  const outcomeDetail = input.outcome.ok
+    ? "invocation outcome: ok"
+    : `invocation outcome: ${input.outcome.recoveryCode}`;
+
+  // Contract Round Lifecycle stages, in order: round created before external work,
+  // bounded mechanism + normalized result, classification. A round that produced no
+  // result skips `result_captured` — the `script` family always, and any failed
+  // round that routed straight from running to its terminal state.
+  checkpoint("round_started", null);
+  checkpoint("mechanism_completed", outcomeDetail);
+  if (input.capturedResult) {
+    checkpoint("result_captured", null);
+  }
+  checkpoint("classified", `classification: ${input.classification}`);
+  return records;
 }
 
 /** One precedence level for {@link resolveSelectionField}. */

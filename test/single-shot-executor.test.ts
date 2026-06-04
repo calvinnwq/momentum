@@ -23,6 +23,7 @@ import {
   isSingleShotExecutorFamily,
   planSingleShotInvocation,
   planSingleShotRoundArtifacts,
+  planSingleShotRoundCheckpoints,
   planSingleShotRoundStart,
   planSingleShotRoundStartForInvocation,
   resolveSingleShotRoundSelection,
@@ -831,5 +832,101 @@ describe("planSingleShotRoundArtifacts", () => {
     expect(
       records.some((r) => r.artifactClass === "commit_or_reset_evidence")
     ).toBe(true);
+  });
+});
+
+describe("planSingleShotRoundCheckpoints", () => {
+  it("records the full lifecycle stage stream for a one-shot round that captured a result", () => {
+    const records = planSingleShotRoundCheckpoints({
+      roundId: "round-0",
+      outcome: { ok: true },
+      capturedResult: true,
+      classification: "complete"
+    });
+    expect(records).toEqual([
+      {
+        checkpointId: "round-0-checkpoint-0",
+        roundId: "round-0",
+        sequence: 0,
+        stage: "round_started",
+        detail: null
+      },
+      {
+        checkpointId: "round-0-checkpoint-1",
+        roundId: "round-0",
+        sequence: 1,
+        stage: "mechanism_completed",
+        detail: "invocation outcome: ok"
+      },
+      {
+        checkpointId: "round-0-checkpoint-2",
+        roundId: "round-0",
+        sequence: 2,
+        stage: "result_captured",
+        detail: null
+      },
+      {
+        checkpointId: "round-0-checkpoint-3",
+        roundId: "round-0",
+        sequence: 3,
+        stage: "classified",
+        detail: "classification: complete"
+      }
+    ]);
+  });
+
+  it("omits the result_captured stage for a script round (exit-code based, no result document)", () => {
+    // The script family is exit-code based and captures no result document, so a
+    // successful script round records no result_captured stage.
+    const records = planSingleShotRoundCheckpoints({
+      roundId: "round-0",
+      outcome: { ok: true },
+      capturedResult: false,
+      classification: "complete"
+    });
+    expect(records.map((c) => c.stage)).toEqual([
+      "round_started",
+      "mechanism_completed",
+      "classified"
+    ]);
+    expect(records[1]?.detail).toBe("invocation outcome: ok");
+    expect(records[2]?.detail).toBe("classification: complete");
+  });
+
+  it("carries the recovery code in the mechanism stage for a failed invocation", () => {
+    // A failed invocation captured no result, so result_captured is omitted; the
+    // mechanism stage names the precise recovery code and the terminal stage the
+    // daemon classification, so the coarse stream explains how far the round got.
+    const records = planSingleShotRoundCheckpoints({
+      roundId: "round-0",
+      outcome: { ok: false, recoveryCode: "command_failed" },
+      capturedResult: false,
+      classification: "failed"
+    });
+    expect(records.map((c) => c.stage)).toEqual([
+      "round_started",
+      "mechanism_completed",
+      "classified"
+    ]);
+    expect(records[1]?.detail).toBe("invocation outcome: command_failed");
+    expect(records[2]?.detail).toBe("classification: failed");
+  });
+
+  it("numbers sequences from 0 with deterministic, collision-free ids", () => {
+    const records = planSingleShotRoundCheckpoints({
+      roundId: "round-7",
+      outcome: { ok: false, recoveryCode: "head_mismatch" },
+      capturedResult: false,
+      classification: "manual_recovery_required"
+    });
+    expect(records.map((c) => c.sequence)).toEqual([0, 1, 2]);
+    // (round_id, sequence) is unique per the schema; the ids embed both so a
+    // re-projection of the same round yields the same checkpoint ids.
+    expect(new Set(records.map((c) => c.sequence)).size).toBe(records.length);
+    expect(records.map((c) => c.checkpointId)).toEqual([
+      "round-7-checkpoint-0",
+      "round-7-checkpoint-1",
+      "round-7-checkpoint-2"
+    ]);
   });
 });
