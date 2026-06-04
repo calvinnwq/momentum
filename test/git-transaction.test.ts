@@ -7,6 +7,7 @@ import path from "node:path";
 import {
   commitVerifiedChanges,
   formatCommitMessage,
+  listCommittedChangedFiles,
   resetToBase
 } from "../src/git-transaction.js";
 import type { CommitIntent } from "../src/runner-result.js";
@@ -306,5 +307,37 @@ describe("resetToBase", () => {
     const result = resetToBase({ repoPath: dir, baseHead: "abc" });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe("invalid_input");
+  });
+});
+
+describe("listCommittedChangedFiles", () => {
+  it("lists the files a commit changed relative to its parent", () => {
+    const dir = initRepo();
+    const parent = commitInitial(dir);
+    fs.writeFileSync(path.join(dir, "added.txt"), "new\n", "utf-8");
+    fs.writeFileSync(path.join(dir, "README.md"), "changed\n", "utf-8");
+    runGit(dir, ["add", "-A"]);
+    runGit(dir, ["commit", "-m", "round commit", "--quiet"]);
+    const commit = runGit(dir, ["rev-parse", "HEAD"]).trim();
+
+    expect(listCommittedChangedFiles(dir, parent, commit)).toEqual([
+      "README.md",
+      "added.txt"
+    ]);
+  });
+
+  it("returns paths in a deterministic sorted order", () => {
+    const dir = initRepo();
+    const parent = commitInitial(dir);
+    fs.writeFileSync(path.join(dir, "zeta.txt"), "z\n", "utf-8");
+    fs.writeFileSync(path.join(dir, "alpha.txt"), "a\n", "utf-8");
+    runGit(dir, ["add", "-A"]);
+    runGit(dir, ["commit", "-m", "round commit", "--quiet"]);
+    const commit = runGit(dir, ["rev-parse", "HEAD"]).trim();
+
+    expect(listCommittedChangedFiles(dir, parent, commit)).toEqual([
+      "alpha.txt",
+      "zeta.txt"
+    ]);
   });
 });

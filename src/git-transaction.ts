@@ -103,6 +103,24 @@ export function commitVerifiedChanges(input: CommitInput): CommitResult {
   return { ok: true, commitSha, parentSha: baseHead, message };
 }
 
+/**
+ * List the repository-relative paths a commit changed relative to its parent —
+ * the durable change set of a finalized round, derived from
+ * `git diff --name-only <parentSha> <commitSha>`. Paths come back in git's
+ * deterministic sorted order with blank lines dropped. Throws (like the rest of
+ * this module's git calls) if git fails; callers that must stay total wrap it.
+ */
+export function listCommittedChangedFiles(
+  repoPath: string,
+  parentSha: string,
+  commitSha: string
+): string[] {
+  return runGit(repoPath, ["diff", "--name-only", parentSha, commitSha])
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
 export function formatCommitMessage(intent: CommitIntent): string {
   const scopePart =
     intent.scope !== undefined && intent.scope.length > 0

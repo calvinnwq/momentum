@@ -301,9 +301,9 @@ Run locally via the targeted vitest command:
 pnpm vitest run test/live-step-finalize.test.ts test/live-step-run-recovery.test.ts test/live-step-advance.test.ts test/workflow-recovery-artifact.test.ts
 ```
 
-## Milestone 10 workflow-first runtime coverage (NGX-345 through NGX-348)
+## Milestone 10 workflow-first runtime coverage (NGX-345 through NGX-349)
 
-M10-01 through M10-04 are covered by focused unit, migration, CLI, and daemon
+M10-01 through M10-05 are covered by focused unit, migration, CLI, and daemon
 loop tests rather than a built-binary CLI smoke.
 
 Coverage:
@@ -327,11 +327,23 @@ Coverage:
   dispatch behavior in `test/workflow-scheduler.test.ts`.
 - daemon-loop opt-in scheduler-lane wiring and goal-iteration compatibility in
   `test/daemon-loop.test.ts`.
+- goal-loop executor adapter round decision, invocation-state classification,
+  recommendation, finalize-evidence derivation, and round-persistence planning
+  in `test/goal-loop-executor.test.ts`.
+- goal-loop orchestrator round execution, multi-round invocation, repo-safety
+  boundaries, and `runGoalLoopStep` invocation / round materialization in
+  `test/goal-loop-orchestrator.test.ts`.
+- goal-loop round mechanism derivation from result files in
+  `test/goal-loop-mechanism.test.ts`.
+- durable goal-loop round persistence round-trip and manual-recovery boundary in
+  `test/goal-loop-executor-persistence.test.ts`.
+- `listCommittedChangedFiles` committed change-set derivation and deterministic
+  ordering in `test/git-transaction.test.ts`.
 
 Run locally via the targeted vitest command:
 
 ```
-pnpm vitest run test/workflow-definition.test.ts test/workflow-definition-persist.test.ts test/migrations.test.ts test/workflow-run-start.test.ts test/workflow-run-start-persist.test.ts test/cli-workflow-run-start.test.ts test/executor-loop-reducer.test.ts test/executor-loop-persist.test.ts test/workflow-scheduler.test.ts test/daemon-loop.test.ts
+pnpm vitest run test/workflow-definition.test.ts test/workflow-definition-persist.test.ts test/migrations.test.ts test/workflow-run-start.test.ts test/workflow-run-start-persist.test.ts test/cli-workflow-run-start.test.ts test/executor-loop-reducer.test.ts test/executor-loop-persist.test.ts test/workflow-scheduler.test.ts test/daemon-loop.test.ts test/goal-loop-executor.test.ts test/goal-loop-orchestrator.test.ts test/goal-loop-mechanism.test.ts test/goal-loop-executor-persistence.test.ts test/git-transaction.test.ts
 ```
 
 ## Test boundary

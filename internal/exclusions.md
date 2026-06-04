@@ -95,9 +95,10 @@ Milestone status:
   `WorkflowDefinition`, `WorkflowRun`, `StepDefinition`, `StepRun`, and
   pluggable executors such as `goal-loop` and `no-mistakes`. M9 remains
   foundation work; M10 has landed definition schema, persistence primitives,
-  first-class workflow run start, executor-loop records, and the opt-in daemon
-  workflow scheduler lane. The earlier combined "first-class start / execution behavior"
-  deferral has narrowed: start and scheduling have landed, while
+  first-class workflow run start, executor-loop records, the opt-in daemon
+  workflow scheduler lane, and the goal-loop executor adapter. The earlier
+  combined "first-class start / execution behavior" deferral has narrowed:
+  start, scheduling, and the goal-loop adapter have landed, while the remaining
   executable adapters for general-purpose configurable workflows stay
   deferred until the relevant M10 implementation slices land. See
   [`internal/milestones/m10-workflow-first-runtime.md`](milestones/m10-workflow-first-runtime.md),
@@ -106,8 +107,9 @@ Milestone status:
   [`internal/contracts/workflow-first-gap-matrix.md`](contracts/workflow-first-gap-matrix.md).
 
 The following surfaces remain deferred outside the landed M10 definition,
-persistence, run-start, executor-record, and scheduler-lane slices so the
-runner-boundary, policy-loading, and M5 read-first source surfaces stay scoped.
+persistence, run-start, executor-record, scheduler-lane, and goal-loop-adapter
+slices so the runner-boundary, policy-loading, and M5 read-first source surfaces
+stay scoped.
 
 ## Background runner supervision
 
@@ -162,9 +164,10 @@ current-to-target planning pinned in
 with M10 planning pinned in
 [`internal/milestones/m10-workflow-first-runtime.md`](milestones/m10-workflow-first-runtime.md),
 and M10 has landed reusable workflow / step definition schema, first-class
-workflow run start, executor-loop records, and the opt-in daemon scheduler lane.
-Executable adapters and generalized `WorkflowRun` behavior remain deferred until
-the relevant M10 implementation slices land. Until then, the
+workflow run start, executor-loop records, the opt-in daemon scheduler lane, and
+the goal-loop executor adapter. The remaining executable adapters and generalized
+`WorkflowRun` behavior remain deferred until the relevant M10 implementation
+slices land. Until then, the
 shipped executable `WorkflowRun` substrate remains scoped to the OpenClaw
 coding-workflow backend and the M9 live-wrapper foundation.
 

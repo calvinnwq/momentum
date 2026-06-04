@@ -333,4 +333,4 @@ This contract does not implement:
 - Replacement of GNHF or no-mistakes internals.
 - Remote git operations.
 
-M10 now carries these as implementation slices: M10-01 lands definition migrations, M10-02 lands workflow run start, M10-03 lands executor-loop records, and M10-04 lands the opt-in daemon workflow scheduler lane, while executor-control CLI surfaces remain later slices.
+M10 now carries these as implementation slices: M10-01 lands definition migrations, M10-02 lands workflow run start, M10-03 lands executor-loop records, M10-04 lands the opt-in daemon workflow scheduler lane, and M10-05 lands the goal-loop executor adapter, while executor-control CLI surfaces remain later slices.
