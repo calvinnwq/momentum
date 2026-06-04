@@ -275,6 +275,28 @@ describe("runSingleShotRound — one-shot success", () => {
     );
   });
 
+  it("keeps log artifacts aligned with the inserted round when the runner mutates its input", () => {
+    const db = openRoundDb("one-shot");
+    runSingleShotRound({
+      db,
+      start: buildStart("one-shot"),
+      finishedAt: 3_000,
+      runRound: (round) => {
+        round.logPaths.push("/artifacts/round-1/mutated.log");
+        return { outcome: { ok: true }, result: runnerResult() };
+      }
+    });
+
+    expect(loadExecutorRound(db, "round-1")?.logPaths).toEqual([
+      "/artifacts/round-1/stdout.log"
+    ]);
+    expect(
+      listExecutorArtifactsForRound(db, "round-1")
+        .filter((a) => a.artifactClass === "logs")
+        .map((a) => a.path)
+    ).toEqual(["/artifacts/round-1/stdout.log"]);
+  });
+
   it("persists the one-shot lifecycle checkpoint stream including result_captured", () => {
     const db = openRoundDb("one-shot");
     runSingleShotRound({

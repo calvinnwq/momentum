@@ -224,11 +224,18 @@ export function runSingleShotRound(
 
   // 1. Insert the durable round-start row before any external work runs.
   const startRecord = planSingleShotRoundStart(start);
+  const frozenLogPaths = [...startRecord.logPaths];
   insertExecutorRound(db, startRecord, { now: start.startedAt });
 
   // 2. Run the bounded mechanism. It is total: failures come back as a recovery
   //    code in the outcome (and an absent result), never as a throw.
-  const mechanism = runRound(startRecord);
+  const mechanism = runRound({
+    ...startRecord,
+    logPaths: [...frozenLogPaths],
+    keyChanges: [...startRecord.keyChanges],
+    remainingWork: [...startRecord.remainingWork],
+    changedFiles: [...startRecord.changedFiles]
+  });
   validateSingleShotMechanismResult(start.family, mechanism);
 
   // 3. Persist the round's evidence artifacts (contract "Required Artifacts").
@@ -237,7 +244,7 @@ export function runSingleShotRound(
   //    reported.
   const artifacts = planSingleShotRoundArtifacts({
     roundId: start.roundId,
-    logPaths: startRecord.logPaths,
+    logPaths: frozenLogPaths,
     ...(mechanism.artifacts !== undefined
       ? { artifacts: mechanism.artifacts }
       : {})
