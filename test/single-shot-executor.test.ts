@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  EXECUTOR_ARTIFACT_CLASSES,
   EXECUTOR_COMPLETION_CLASSIFICATIONS,
   EXECUTOR_HUMAN_GATE_TYPES,
   EXECUTOR_INVOCATION_TERMINAL_STATES,
@@ -21,12 +22,14 @@ import {
   decideSingleShotInvocation,
   isSingleShotExecutorFamily,
   planSingleShotInvocation,
+  planSingleShotRoundArtifacts,
   planSingleShotRoundStart,
   planSingleShotRoundStartForInvocation,
   resolveSingleShotRoundSelection,
   singleShotInvocationId,
   singleShotRoundId,
   type SingleShotInvocationOutcome,
+  type SingleShotRoundArtifacts,
   type SingleShotRoundSelection
 } from "../src/single-shot-executor.js";
 
@@ -663,5 +666,170 @@ describe("resolveSingleShotRoundSelection — precedence", () => {
     expect(round.agentProvider).toBe("claude");
     expect(round.model).toBe("claude-opus-4-8");
     expect(round.effort).toBe("high");
+  });
+});
+
+describe("planSingleShotRoundArtifacts", () => {
+  const ARTIFACT_CLASS_SET = new Set<string>(EXECUTOR_ARTIFACT_CLASSES);
+
+  function fullArtifacts(): SingleShotRoundArtifacts {
+    return {
+      resultDocument: {
+        path: "/artifacts/round-0/result.json",
+        digest: "sha256:r"
+      },
+      checkpointStream: { path: "/artifacts/round-0/checkpoints.ndjson" },
+      verificationOutput: {
+        path: "/artifacts/round-0/verify.log",
+        description: "pnpm test"
+      },
+      commitOrResetEvidence: { path: "/artifacts/round-0/commit.txt" },
+      recoveryNote: { path: "/artifacts/round-0/recovery.md" }
+    };
+  }
+
+  it("derives one logs artifact per bounded log path, in order", () => {
+    const records = planSingleShotRoundArtifacts({
+      roundId: "round-0",
+      logPaths: ["/artifacts/round-0/stdout.log", "/artifacts/round-0/stderr.log"]
+    });
+    expect(records).toEqual([
+      {
+        artifactId: "round-0-logs-0",
+        roundId: "round-0",
+        artifactClass: "logs",
+        path: "/artifacts/round-0/stdout.log",
+        digest: null,
+        description: null
+      },
+      {
+        artifactId: "round-0-logs-1",
+        roundId: "round-0",
+        artifactClass: "logs",
+        path: "/artifacts/round-0/stderr.log",
+        digest: null,
+        description: null
+      }
+    ]);
+  });
+
+  it("maps each reported pointer to its contract artifact class with a deterministic id", () => {
+    const records = planSingleShotRoundArtifacts({
+      roundId: "round-0",
+      logPaths: [],
+      artifacts: fullArtifacts()
+    });
+    const byClass = new Map(records.map((r) => [r.artifactClass, r]));
+    expect(byClass.get("result_document")).toEqual({
+      artifactId: "round-0-result_document",
+      roundId: "round-0",
+      artifactClass: "result_document",
+      path: "/artifacts/round-0/result.json",
+      digest: "sha256:r",
+      description: null
+    });
+    expect(byClass.get("checkpoint_stream")?.artifactId).toBe(
+      "round-0-checkpoint_stream"
+    );
+    expect(byClass.get("verification_output")?.description).toBe("pnpm test");
+    expect(byClass.get("commit_or_reset_evidence")?.path).toBe(
+      "/artifacts/round-0/commit.txt"
+    );
+    expect(byClass.get("recovery_note")?.path).toBe(
+      "/artifacts/round-0/recovery.md"
+    );
+    for (const record of records) {
+      expect(ARTIFACT_CLASS_SET.has(record.artifactClass)).toBe(true);
+    }
+  });
+
+  it("orders artifacts in the contract artifact-class order", () => {
+    const records = planSingleShotRoundArtifacts({
+      roundId: "round-0",
+      logPaths: ["/artifacts/round-0/stdout.log"],
+      artifacts: fullArtifacts()
+    });
+    expect(records.map((r) => r.artifactClass)).toEqual([
+      "result_document",
+      "logs",
+      "checkpoint_stream",
+      "verification_output",
+      "commit_or_reset_evidence",
+      "recovery_note"
+    ]);
+  });
+
+  it("omits a class whose pointer is absent or explicitly null", () => {
+    const records = planSingleShotRoundArtifacts({
+      roundId: "round-0",
+      logPaths: [],
+      artifacts: {
+        resultDocument: { path: "/artifacts/round-0/result.json" },
+        recoveryNote: null
+      }
+    });
+    expect(records.map((r) => r.artifactClass)).toEqual(["result_document"]);
+  });
+
+  it("records no artifacts when no logs and no pointers are present", () => {
+    expect(
+      planSingleShotRoundArtifacts({ roundId: "round-0", logPaths: [] })
+    ).toEqual([]);
+  });
+
+  it("defaults digest and description to null when a pointer omits them", () => {
+    const [record] = planSingleShotRoundArtifacts({
+      roundId: "round-0",
+      logPaths: [],
+      artifacts: { resultDocument: { path: "/artifacts/round-0/result.json" } }
+    });
+    expect(record?.digest).toBeNull();
+    expect(record?.description).toBeNull();
+  });
+
+  it("projects a one-shot round's result-file document as a result_document artifact", () => {
+    // The one-shot family produces a normalized result document (a RunnerResult
+    // file); it is the durable result-file evidence the round captured.
+    const records = planSingleShotRoundArtifacts({
+      roundId: "round-0",
+      logPaths: ["/artifacts/round-0/exec.log"],
+      artifacts: {
+        resultDocument: {
+          path: "/artifacts/round-0/result.json",
+          digest: "sha256:result"
+        },
+        verificationOutput: { path: "/artifacts/round-0/verify.log" }
+      }
+    });
+    const result = records.find((r) => r.artifactClass === "result_document");
+    expect(result?.path).toBe("/artifacts/round-0/result.json");
+    expect(result?.digest).toBe("sha256:result");
+    // The bounded log rides alongside the result file.
+    expect(records.some((r) => r.artifactClass === "logs")).toBe(true);
+  });
+
+  it("projects a script round's bounded logs and commit evidence with no result document", () => {
+    // The script family is exit-code based with bounded logs and no required
+    // result file, so it records logs + commit/reset evidence and no
+    // result_document row.
+    const records = planSingleShotRoundArtifacts({
+      roundId: "round-0",
+      logPaths: ["/artifacts/round-0/stdout.log", "/artifacts/round-0/stderr.log"],
+      artifacts: {
+        commitOrResetEvidence: { path: "/artifacts/round-0/commit.txt" }
+      }
+    });
+    expect(records.some((r) => r.artifactClass === "result_document")).toBe(
+      false
+    );
+    expect(
+      records.filter((r) => r.artifactClass === "logs").map((r) => r.path)
+    ).toEqual([
+      "/artifacts/round-0/stdout.log",
+      "/artifacts/round-0/stderr.log"
+    ]);
+    expect(
+      records.some((r) => r.artifactClass === "commit_or_reset_evidence")
+    ).toBe(true);
   });
 });

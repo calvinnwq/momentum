@@ -55,6 +55,8 @@
  */
 
 import type {
+  ExecutorArtifactClass,
+  ExecutorArtifactRecord,
   ExecutorCompletionClassification,
   ExecutorHumanGateType,
   ExecutorInvocationRecord,
@@ -624,6 +626,144 @@ export function planSingleShotRoundStartForInvocation(
     artifactRoot: runtime.artifactRoot,
     ...(runtime.logPaths !== undefined ? { logPaths: runtime.logPaths } : {}),
     startedAt: input.startedAt
+  };
+}
+
+/**
+ * One evidence pointer a finished single-shot round produced: the `path` the round
+ * actually wrote (contract "Required Artifacts": "Artifact paths are evidence
+ * pointers"), plus an optional content `digest` and human `description`. The durable
+ * row — not the file — is the source of truth that the artifact exists for the round.
+ */
+export type SingleShotArtifactPointer = {
+  path: string;
+  digest?: string | null;
+  description?: string | null;
+};
+
+/**
+ * The evidence pointers a finished single-shot round produced, one optional slot per
+ * contract artifact class *except* `logs` — the orchestrator derives those from the
+ * round-start record's frozen `logPaths`, which it already owns. The two single-shot
+ * families differ in which slots they populate but share this one shape: the
+ * `one-shot` family captures a normalized result document (a {@link RunnerResult}
+ * file), so it fills `resultDocument`; the `script` family is exit-code based with
+ * bounded logs and no required result file, so it typically leaves `resultDocument`
+ * (and `checkpointStream`) absent and carries its evidence in `logs` and
+ * `commitOrResetEvidence`. A missing/`null` slot means the round wrote no such
+ * artifact; {@link planSingleShotRoundArtifacts} then records no row for that class
+ * rather than inventing a path, so the projection needs no family parameter.
+ */
+export type SingleShotRoundArtifacts = {
+  resultDocument?: SingleShotArtifactPointer | null;
+  checkpointStream?: SingleShotArtifactPointer | null;
+  verificationOutput?: SingleShotArtifactPointer | null;
+  commitOrResetEvidence?: SingleShotArtifactPointer | null;
+  recoveryNote?: SingleShotArtifactPointer | null;
+};
+
+/**
+ * The inputs to {@link planSingleShotRoundArtifacts}: the round id the artifacts hang
+ * below, the round-start record's frozen `logPaths` (projected into `logs`
+ * artifacts), and the evidence pointers the mechanism reported for the remaining
+ * classes.
+ */
+export type PlanSingleShotRoundArtifactsInput = {
+  roundId: string;
+  logPaths: readonly string[];
+  artifacts?: SingleShotRoundArtifacts;
+};
+
+/**
+ * Project a finished single-shot round's evidence into the durable
+ * {@link ExecutorArtifactRecord} rows the M10-03 persistence layer
+ * (`insertExecutorArtifact`) writes — the contract "Required Artifacts" / ticket
+ * "artifacts" + "bounded logs" half of the round's per-round evidence. `logs` rows
+ * are derived from the round-start record's frozen `logPaths` (the orchestrator owns
+ * those); every other class comes from the pointer the mechanism reported, and an
+ * absent/`null` pointer records no row rather than inventing a path — so a `script`
+ * round (no result file) and a `one-shot` round (a captured result document) flow
+ * through the same projection. Rows are minted with deterministic ids
+ * (`<roundId>-<class>`, and `<roundId>-logs-<index>` for each bounded log) and
+ * emitted in the contract {@link EXECUTOR_ARTIFACT_CLASSES} order so the durable
+ * evidence is stable and reattachable. Pure: no SQLite, no file system.
+ */
+export function planSingleShotRoundArtifacts(
+  input: PlanSingleShotRoundArtifactsInput
+): ExecutorArtifactRecord[] {
+  const { roundId, logPaths } = input;
+  const artifacts = input.artifacts ?? {};
+  const records: ExecutorArtifactRecord[] = [];
+
+  // Order matches EXECUTOR_ARTIFACT_CLASSES: result, logs, checkpoint,
+  // verification, commit/reset, recovery.
+  if (artifacts.resultDocument != null) {
+    records.push(
+      singleShotArtifactRecord(
+        roundId,
+        "result_document",
+        artifacts.resultDocument
+      )
+    );
+  }
+  logPaths.forEach((path, index) => {
+    records.push(singleShotArtifactRecord(roundId, "logs", { path }, index));
+  });
+  if (artifacts.checkpointStream != null) {
+    records.push(
+      singleShotArtifactRecord(
+        roundId,
+        "checkpoint_stream",
+        artifacts.checkpointStream
+      )
+    );
+  }
+  if (artifacts.verificationOutput != null) {
+    records.push(
+      singleShotArtifactRecord(
+        roundId,
+        "verification_output",
+        artifacts.verificationOutput
+      )
+    );
+  }
+  if (artifacts.commitOrResetEvidence != null) {
+    records.push(
+      singleShotArtifactRecord(
+        roundId,
+        "commit_or_reset_evidence",
+        artifacts.commitOrResetEvidence
+      )
+    );
+  }
+  if (artifacts.recoveryNote != null) {
+    records.push(
+      singleShotArtifactRecord(roundId, "recovery_note", artifacts.recoveryNote)
+    );
+  }
+  return records;
+}
+
+/**
+ * Build one durable artifact row for a single-shot round. The id is deterministic so
+ * a re-projection of the same round yields the same evidence ids; `logs` carry an
+ * `index` suffix because a round may write several bounded log files.
+ */
+function singleShotArtifactRecord(
+  roundId: string,
+  artifactClass: ExecutorArtifactClass,
+  pointer: SingleShotArtifactPointer,
+  index?: number
+): ExecutorArtifactRecord {
+  const suffix =
+    index !== undefined ? `${artifactClass}-${index}` : artifactClass;
+  return {
+    artifactId: `${roundId}-${suffix}`,
+    roundId,
+    artifactClass,
+    path: pointer.path,
+    digest: pointer.digest ?? null,
+    description: pointer.description ?? null
   };
 }
 
