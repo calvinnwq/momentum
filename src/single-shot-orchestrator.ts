@@ -164,10 +164,17 @@ function validateSingleShotMechanismResult(
     );
   }
   if (!mechanism.outcome.ok) return;
-  if (family === "one-shot" && mechanism.result == null) {
-    throw new Error(
-      "Invalid one-shot mechanism output: successful rounds require a result document."
-    );
+  if (family === "one-shot") {
+    if (mechanism.result == null) {
+      throw new Error(
+        "Invalid one-shot mechanism output: successful rounds require a result document."
+      );
+    }
+    if (mechanism.result.success !== true) {
+      throw new Error(
+        "Invalid one-shot mechanism output: successful one-shot rounds require a successful result document."
+      );
+    }
   }
   if (family === "script" && mechanism.result != null) {
     throw new Error(

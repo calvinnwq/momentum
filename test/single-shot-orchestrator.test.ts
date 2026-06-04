@@ -366,6 +366,26 @@ describe("runSingleShotRound — family output invariants", () => {
     expect(listExecutorArtifactsForRound(db, "round-1")).toEqual([]);
     expect(listExecutorCheckpointsForRound(db, "round-1")).toEqual([]);
   });
+
+  it("rejects a successful one-shot mechanism output with a failed runner result", () => {
+    const db = openRoundDb("one-shot");
+
+    expect(() =>
+      runSingleShotRound({
+        db,
+        start: buildStart("one-shot"),
+        finishedAt: 3_000,
+        runRound: () => ({
+          outcome: { ok: true },
+          result: runnerResult({ success: false })
+        })
+      })
+    ).toThrow("successful one-shot");
+
+    expect(loadExecutorRound(db, "round-1")?.state).toBe("running");
+    expect(listExecutorArtifactsForRound(db, "round-1")).toEqual([]);
+    expect(listExecutorCheckpointsForRound(db, "round-1")).toEqual([]);
+  });
 });
 
 describe("runSingleShotRound — failure / blocked / manual recovery", () => {

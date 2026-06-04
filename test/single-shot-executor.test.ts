@@ -997,6 +997,15 @@ describe("planSingleShotRoundPersistence", () => {
     });
   });
 
+  it("rejects a successful captured result marked failed", () => {
+    expect(() =>
+      planSingleShotRoundPersistence({
+        outcome: { ok: true },
+        result: { ...oneShotResult, success: false }
+      })
+    ).toThrow("successful result document");
+  });
+
   it("does not stamp a result digest when no result document was captured", () => {
     const plan = planSingleShotRoundPersistence({
       outcome: { ok: true },
@@ -1041,6 +1050,24 @@ describe("planSingleShotRoundPersistence", () => {
       classification: "manual_recovery_required",
       recoveryCode: "head_mismatch",
       humanGate: "manual_recovery_required"
+    });
+  });
+
+  it("does not stamp commit evidence on non-success outcomes", () => {
+    const plan = planSingleShotRoundPersistence({
+      outcome: { ok: false, recoveryCode: "head_mismatch" },
+      evidence: {
+        verificationStatus: "failed",
+        commitSha: "a".repeat(40),
+        changedFiles: ["src/x.ts"]
+      }
+    });
+    expect(plan.terminalUpdate).toEqual({
+      toState: "manual_recovery_required",
+      classification: "manual_recovery_required",
+      recoveryCode: "head_mismatch",
+      humanGate: "manual_recovery_required",
+      verificationStatus: "failed"
     });
   });
 

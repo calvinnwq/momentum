@@ -942,8 +942,20 @@ export function planSingleShotRoundPersistence(
   input: PlanSingleShotRoundPersistenceInput
 ): SingleShotRoundPersistencePlan {
   const decision = decideSingleShotInvocation(input.outcome);
+  if (
+    input.outcome.ok &&
+    input.result != null &&
+    input.result.success !== true
+  ) {
+    throw new Error(
+      "Invalid single-shot persistence input: successful outcomes require a successful result document."
+    );
+  }
   const evidence = input.evidence ?? {};
   const capturedResult = input.result != null;
+  const canStampCommitEvidence = input.outcome.ok;
+  const commitSha = canStampCommitEvidence ? evidence.commitSha : undefined;
+  const changedFiles = canStampCommitEvidence ? evidence.changedFiles : undefined;
 
   // A successful single shot must reach `succeeded`, and the round transition graph
   // forbids running -> succeeded directly: the result must be captured first. So a
@@ -973,17 +985,14 @@ export function planSingleShotRoundPersistence(
     classification: decision.classification,
     recoveryCode: decision.recoveryCode,
     humanGate: decision.humanGate,
-    // Stamp verification / commit / changed-file evidence only when the mechanism
-    // reported it; an absent field is left off so `coalesce` keeps the round-start
-    // record's null / empty rather than overwriting it. By construction a commit SHA
-    // and a non-empty change set only accompany a safe finalize.
+    // Stamp verification status when reported; commit / changed-file evidence only
+    // on success. An absent field is left off so `coalesce` keeps the round-start
+    // record's null / empty rather than overwriting it.
     ...(evidence.verificationStatus !== undefined
       ? { verificationStatus: evidence.verificationStatus }
       : {}),
-    ...(evidence.commitSha !== undefined ? { commitSha: evidence.commitSha } : {}),
-    ...(evidence.changedFiles != null && evidence.changedFiles.length > 0
-      ? { changedFiles: evidence.changedFiles }
-      : {})
+    ...(commitSha !== undefined ? { commitSha } : {}),
+    ...(changedFiles != null && changedFiles.length > 0 ? { changedFiles } : {})
   };
 
   return { decision, captureUpdate, terminalUpdate };
