@@ -24,6 +24,7 @@ import {
   planSingleShotInvocation,
   planSingleShotRoundArtifacts,
   planSingleShotRoundCheckpoints,
+  planSingleShotRoundPersistence,
   planSingleShotRoundStart,
   planSingleShotRoundStartForInvocation,
   resolveSingleShotRoundSelection,
@@ -33,6 +34,7 @@ import {
   type SingleShotRoundArtifacts,
   type SingleShotRoundSelection
 } from "../src/single-shot-executor.js";
+import type { RunnerResult } from "../src/runner-result.js";
 
 const COMPLETION_SET = new Set<string>(EXECUTOR_COMPLETION_CLASSIFICATIONS);
 const ROUND_TERMINAL_SET = new Set<string>(EXECUTOR_ROUND_TERMINAL_STATES);
@@ -928,5 +930,120 @@ describe("planSingleShotRoundCheckpoints", () => {
       "round-7-checkpoint-1",
       "round-7-checkpoint-2"
     ]);
+  });
+});
+
+describe("planSingleShotRoundPersistence", () => {
+  const oneShotResult: RunnerResult = {
+    success: true,
+    summary: "ran the one-shot review pass",
+    key_changes_made: ["approved the bounded change"],
+    key_learnings: [],
+    remaining_work: [],
+    goal_complete: true,
+    commit: {
+      type: "chore",
+      scope: "single-shot",
+      subject: "one-shot pass",
+      body: "",
+      breaking: false
+    }
+  };
+
+  it("captures the normalized result then settles a one-shot success", () => {
+    const plan = planSingleShotRoundPersistence({
+      outcome: { ok: true },
+      result: oneShotResult,
+      resultDigest: "sha256:result",
+      evidence: {
+        verificationStatus: "passed",
+        commitSha: "a".repeat(40),
+        changedFiles: ["src/x.ts"]
+      }
+    });
+    expect(plan.captureUpdate).toEqual({
+      toState: "capturing_result",
+      summary: "ran the one-shot review pass",
+      keyChanges: ["approved the bounded change"],
+      remainingWork: [],
+      resultDigest: "sha256:result"
+    });
+    expect(plan.terminalUpdate).toEqual({
+      toState: "succeeded",
+      classification: "complete",
+      recoveryCode: null,
+      humanGate: null,
+      verificationStatus: "passed",
+      commitSha: "a".repeat(40),
+      changedFiles: ["src/x.ts"]
+    });
+    // The plan composes decideSingleShotInvocation; the decision can never disagree
+    // with the patches because both derive from the one outcome.
+    expect(plan.decision).toEqual(decideSingleShotInvocation({ ok: true }));
+  });
+
+  it("emits a bare capture for a script success so it can still reach succeeded", () => {
+    // The script family is exit-code based and captures no result document, but the
+    // round transition graph forbids running -> succeeded directly, so a successful
+    // script round still emits a (bare) capturing_result patch — the structural
+    // difference from goal-loop, which keys the capture on a non-null result.
+    const plan = planSingleShotRoundPersistence({ outcome: { ok: true } });
+    expect(plan.captureUpdate).toEqual({ toState: "capturing_result" });
+    expect(plan.terminalUpdate).toEqual({
+      toState: "succeeded",
+      classification: "complete",
+      recoveryCode: null,
+      humanGate: null
+    });
+  });
+
+  it("routes an execution failure from running straight to failed with no capture", () => {
+    const plan = planSingleShotRoundPersistence({
+      outcome: { ok: false, recoveryCode: "command_failed" }
+    });
+    expect(plan.captureUpdate).toBeNull();
+    expect(plan.terminalUpdate).toEqual({
+      toState: "failed",
+      classification: "failed",
+      recoveryCode: "command_failed",
+      humanGate: null
+    });
+  });
+
+  it("blocks on a missing credential and raises the credential gate", () => {
+    const plan = planSingleShotRoundPersistence({
+      outcome: { ok: false, recoveryCode: "auth_unavailable" }
+    });
+    expect(plan.captureUpdate).toBeNull();
+    expect(plan.terminalUpdate).toEqual({
+      toState: "blocked",
+      classification: "blocked",
+      recoveryCode: "auth_unavailable",
+      humanGate: "credential_required"
+    });
+  });
+
+  it("routes an unsafe finalize outcome to manual recovery and preserves the code", () => {
+    const plan = planSingleShotRoundPersistence({
+      outcome: { ok: false, recoveryCode: "head_mismatch" }
+    });
+    expect(plan.captureUpdate).toBeNull();
+    expect(plan.terminalUpdate).toEqual({
+      toState: "manual_recovery_required",
+      classification: "manual_recovery_required",
+      recoveryCode: "head_mismatch",
+      humanGate: "manual_recovery_required"
+    });
+  });
+
+  it("stamps terminal evidence only when provided so a bare failure keeps round-start nulls", () => {
+    // No evidence: the terminal patch carries no verification / commit / changed-file
+    // keys, so `coalesce` keeps the round-start record's nulls / empties in place.
+    const plan = planSingleShotRoundPersistence({
+      outcome: { ok: false, recoveryCode: "command_timed_out" }
+    });
+    expect(plan.terminalUpdate).not.toHaveProperty("verificationStatus");
+    expect(plan.terminalUpdate).not.toHaveProperty("commitSha");
+    expect(plan.terminalUpdate).not.toHaveProperty("changedFiles");
   });
 });

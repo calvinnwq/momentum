@@ -66,7 +66,9 @@ import type {
   ExecutorRoundState,
   WorkflowExecutorFamily
 } from "./executor-loop-reducer.js";
+import type { ExecutorRoundUpdate } from "./executor-loop-persist.js";
 import { LIVE_STEP_WRAPPER_RECOVERY_CODES } from "./live-step-wrapper.js";
+import type { RunnerResult } from "./runner-result.js";
 
 /**
  * The executor families this adapter serves: the single-invocation families from
@@ -844,6 +846,148 @@ export function planSingleShotRoundCheckpoints(
   }
   checkpoint("classified", `classification: ${input.classification}`);
   return records;
+}
+
+/**
+ * The verification / commit evidence a finished single-shot round reports for its
+ * terminal patch (contract Round Schema: a round records its verification status,
+ * the commit SHA after a safe finalize, and the committed change set). Every field
+ * is optional: a blocked / failed round may have run no verification and committed
+ * nothing, so an absent field is left off the terminal patch and `coalesce` keeps
+ * the round-start record's null / empty in place rather than overwriting it.
+ */
+export type SingleShotRoundEvidence = {
+  verificationStatus?: string | null;
+  commitSha?: string | null;
+  changedFiles?: string[];
+};
+
+/**
+ * The inputs to {@link planSingleShotRoundPersistence}: the normalized
+ * {@link SingleShotInvocationOutcome} the bounded mechanism reported, the one-shot
+ * family's captured {@link RunnerResult} (omitted for the exit-code-based `script`
+ * family and for any non-success outcome), the captured result's content digest,
+ * and the verification / commit {@link SingleShotRoundEvidence} for the terminal
+ * patch.
+ */
+export type PlanSingleShotRoundPersistenceInput = {
+  outcome: SingleShotInvocationOutcome;
+  /**
+   * The normalized result document a one-shot success captured. The `script`
+   * family is exit-code based and captures no result document, so it omits this
+   * (or passes `null`); a non-success outcome captures nothing either way. Only
+   * meaningful on a successful outcome — a result alongside a failure is ignored,
+   * since a failed round records no capture.
+   */
+  result?: RunnerResult | null;
+  /**
+   * The content digest of the captured result document (the round-schema
+   * `result_digest` reattach fingerprint), or omitted / `null` when the round
+   * captured no result. Consistent with {@link result} by construction.
+   */
+  resultDigest?: string | null;
+  /** The verification / commit evidence the mechanism reported for the terminal patch. */
+  evidence?: SingleShotRoundEvidence;
+};
+
+/**
+ * A pure, durable persistence plan for one finished single-shot round. The
+ * orchestrator applies {@link captureUpdate} (when present) then
+ * {@link terminalUpdate} through `updateExecutorRound`, in that lifecycle order.
+ * The decision and both patches are derived from the single invocation outcome, so
+ * the classification, recovery code, verification status, and commit SHA can never
+ * disagree.
+ */
+export type SingleShotRoundPersistencePlan = {
+  decision: SingleShotDecision;
+  /**
+   * The `capturing_result` patch, present on every successful outcome and `null`
+   * otherwise. The `one-shot` family fills it with the captured result; the
+   * `script` family (no result document) leaves it a bare capture transition — but
+   * a capture is still emitted, because the round transition graph forbids
+   * `running -> succeeded` directly, so even a script success must pass through
+   * `capturing_result`. A non-success outcome captures nothing and transitions from
+   * `running` straight to its terminal abort state.
+   */
+  captureUpdate: ExecutorRoundUpdate | null;
+  /**
+   * The terminal patch carrying the daemon classification, the preserved recovery
+   * code, the human gate, and any verification / commit / changed-file evidence the
+   * mechanism reported.
+   */
+  terminalUpdate: ExecutorRoundUpdate;
+};
+
+/**
+ * Build the durable persistence plan for one finished single-shot round. Composes
+ * {@link decideSingleShotInvocation} into the two round patches the orchestrator
+ * applies, so the daemon decision and both patches derive from the same invocation
+ * outcome (contract "Round Lifecycle" steps 7-10 for the single-shot families).
+ *
+ * The structural difference from `planGoalLoopRoundPersistence` is the capture
+ * rule: goal-loop keys the capture on a non-null result, but a single shot keys it
+ * on *success* — the exit-code-based `script` family succeeds with no result
+ * document yet still needs the `capturing_result` transition to legally reach
+ * `succeeded`, so a successful round always emits a capture (bare for `script`,
+ * result-bearing for `one-shot`) while a non-success round emits none and
+ * transitions from `running` straight to its terminal abort state. Verification /
+ * commit / changed-file evidence is stamped only when the mechanism reported it, so
+ * a bare failure leaves the round-start record's null / empty fields in place. Pure:
+ * no SQLite, no file system; the same outcome + evidence always yields the same plan.
+ *
+ * @throws {Error} if the outcome carries an unknown recovery code (via
+ * {@link decideSingleShotInvocation}).
+ */
+export function planSingleShotRoundPersistence(
+  input: PlanSingleShotRoundPersistenceInput
+): SingleShotRoundPersistencePlan {
+  const decision = decideSingleShotInvocation(input.outcome);
+  const evidence = input.evidence ?? {};
+
+  // A successful single shot must reach `succeeded`, and the round transition graph
+  // forbids running -> succeeded directly: the result must be captured first. So a
+  // success always emits a capture patch — result-bearing for the one-shot family,
+  // a bare transition for the script family (no result document). A non-success
+  // outcome captures nothing and transitions from running straight to its terminal.
+  const captureUpdate: ExecutorRoundUpdate | null = input.outcome.ok
+    ? {
+        toState: "capturing_result",
+        // Stamp the normalized result fields only when a result was captured (the
+        // one-shot family); a script success stays a bare capture.
+        ...(input.result != null
+          ? {
+              summary: input.result.summary,
+              keyChanges: input.result.key_changes_made,
+              remainingWork: input.result.remaining_work
+            }
+          : {}),
+        // Stamp the result digest only when the mechanism reported one; an absent
+        // digest is left off so `coalesce` keeps the round-start record's null.
+        ...(input.resultDigest != null
+          ? { resultDigest: input.resultDigest }
+          : {})
+      }
+    : null;
+
+  const terminalUpdate: ExecutorRoundUpdate = {
+    toState: decision.roundState,
+    classification: decision.classification,
+    recoveryCode: decision.recoveryCode,
+    humanGate: decision.humanGate,
+    // Stamp verification / commit / changed-file evidence only when the mechanism
+    // reported it; an absent field is left off so `coalesce` keeps the round-start
+    // record's null / empty rather than overwriting it. By construction a commit SHA
+    // and a non-empty change set only accompany a safe finalize.
+    ...(evidence.verificationStatus !== undefined
+      ? { verificationStatus: evidence.verificationStatus }
+      : {}),
+    ...(evidence.commitSha !== undefined ? { commitSha: evidence.commitSha } : {}),
+    ...(evidence.changedFiles != null && evidence.changedFiles.length > 0
+      ? { changedFiles: evidence.changedFiles }
+      : {})
+  };
+
+  return { decision, captureUpdate, terminalUpdate };
 }
 
 /** One precedence level for {@link resolveSelectionField}. */
