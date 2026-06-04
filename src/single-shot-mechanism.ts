@@ -1,4 +1,4 @@
-import type { SpawnSyncReturns } from "node:child_process";
+import { execFileSync, type SpawnSyncReturns } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -81,6 +81,13 @@ export function createOneShotLiveWrapperRoundRunner(
         "one-shot live wrapper rounds require artifactRoot and a log path"
       );
     }
+    const readOnlySnapshot =
+      options.repoSafety.mode === "read-only"
+        ? captureReadOnlyRepoSnapshot(options.repoPath)
+        : null;
+    if (readOnlySnapshot !== null && !readOnlySnapshot.ok) {
+      return readOnlyRecovery(readOnlySnapshot.recoveryCode);
+    }
 
     const result = runLiveStepWrapper({
       kind: options.kind,
@@ -101,10 +108,14 @@ export function createOneShotLiveWrapperRoundRunner(
     });
 
     if (!result.ok) {
+      const recoveryCode =
+        options.repoSafety.mode === "read-only"
+          ? readOnlyRepoRecoveryCode(options.repoPath, readOnlySnapshot?.snapshot)
+          : null;
       return {
         outcome: {
           ok: false,
-          recoveryCode: liveRecoveryCode(result.code)
+          recoveryCode: recoveryCode ?? liveRecoveryCode(result.code)
         },
         artifacts: artifactPointers(result.resultJsonPath, null)
       };
@@ -117,7 +128,8 @@ export function createOneShotLiveWrapperRoundRunner(
         options,
         result.result,
         false,
-        artifacts
+        artifacts,
+        readOnlySnapshot?.snapshot
       );
       if (finalized !== null) return finalized;
       return {
@@ -131,6 +143,7 @@ export function createOneShotLiveWrapperRoundRunner(
       result.result,
       true,
       artifacts,
+      readOnlySnapshot?.snapshot,
       digest
     );
     if (finalized !== null) {
@@ -164,6 +177,16 @@ export function createScriptCommandRoundRunner(
     if (logPath === null) {
       return invalidInput("script rounds require at least one log path");
     }
+    if (logPath.trim().length === 0 || !path.isAbsolute(logPath)) {
+      return invalidInput("script rounds require an absolute log path");
+    }
+    const readOnlySnapshot =
+      config.repoSafety.mode === "read-only"
+        ? captureReadOnlyRepoSnapshot(config.cwd)
+        : null;
+    if (readOnlySnapshot !== null && !readOnlySnapshot.ok) {
+      return readOnlyRecovery(readOnlySnapshot.recoveryCode);
+    }
     const outputMaxBytes =
       config.outputMaxBytes ?? DEFAULT_SCRIPT_OUTPUT_MAX_BYTES;
     let logHandle: number;
@@ -181,7 +204,14 @@ export function createScriptCommandRoundRunner(
       writeLine(logHandle, `[single-shot-script] timeout_sec: ${config.timeoutSec}`);
 
       const start = Date.now();
-      const spawn = runScriptProcess(config, outputMaxBytes);
+      let spawn: SpawnSyncReturns<string>;
+      try {
+        spawn = runScriptProcess(config, outputMaxBytes);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "unknown error";
+        writeLine(logHandle, `[single-shot-script] spawn_error: ${detail}`);
+        return { outcome: { ok: false, recoveryCode: "runtime_unavailable" } };
+      }
       const durationMs = Date.now() - start;
 
       writeLog(logHandle, "stdout", spawn.stdout);
@@ -190,11 +220,21 @@ export function createScriptCommandRoundRunner(
 
       if (errnoCode(spawn.error) === "ENOBUFS") {
         writeLine(logHandle, "[single-shot-script] result: output_overflow");
-        return finalizeScriptResult(config, false, "output_overflow");
+        return finalizeScriptResult(
+          config,
+          false,
+          "output_overflow",
+          readOnlySnapshot?.snapshot
+        );
       }
       if (errnoCode(spawn.error) === "ETIMEDOUT") {
         writeLine(logHandle, "[single-shot-script] result: timed_out");
-        return finalizeScriptResult(config, false, "command_timed_out");
+        return finalizeScriptResult(
+          config,
+          false,
+          "command_timed_out",
+          readOnlySnapshot?.snapshot
+        );
       }
       if (spawn.error !== undefined) {
         writeLine(
@@ -216,11 +256,21 @@ export function createScriptCommandRoundRunner(
 
       if (exitCode === null || exitCode !== 0) {
         writeLine(logHandle, "[single-shot-script] result: nonzero_exit");
-        return finalizeScriptResult(config, false, "command_failed");
+        return finalizeScriptResult(
+          config,
+          false,
+          "command_failed",
+          readOnlySnapshot?.snapshot
+        );
       }
 
       writeLine(logHandle, "[single-shot-script] done");
-      return finalizeScriptResult(config, true, "command_failed");
+      return finalizeScriptResult(
+        config,
+        true,
+        "command_failed",
+        readOnlySnapshot?.snapshot
+      );
     } finally {
       fs.closeSync(logHandle);
     }
@@ -230,6 +280,12 @@ export function createScriptCommandRoundRunner(
 function invalidInput(error: string): SingleShotRoundMechanismResult {
   void error;
   return { outcome: { ok: false, recoveryCode: "invalid_input" } };
+}
+
+function readOnlyRecovery(
+  recoveryCode: SingleShotRecoveryCode
+): SingleShotRoundMechanismResult {
+  return { outcome: { ok: false, recoveryCode } };
 }
 
 function liveRecoveryCode(
@@ -243,9 +299,18 @@ function finalizeOneShotResult(
   result: { commit: CommitIntent },
   stepSuccess: boolean,
   artifacts: SingleShotRoundArtifacts,
+  readOnlySnapshot?: ReadOnlyRepoSnapshot,
   resultDigest?: string | null
 ): SingleShotRoundMechanismResult | null {
-  if (options.repoSafety.mode === "read-only") return null;
+  if (options.repoSafety.mode === "read-only") {
+    const recoveryCode = readOnlyRepoRecoveryCode(
+      options.repoPath,
+      readOnlySnapshot
+    );
+    return recoveryCode === null
+      ? null
+      : { outcome: { ok: false, recoveryCode }, artifacts };
+  }
   return projectFinalizeResult({
     repoPath: options.repoPath,
     finalize: finalizeLiveWorkflowStep({
@@ -270,9 +335,14 @@ function finalizeOneShotResult(
 function finalizeScriptResult(
   config: ScriptCommandRoundRunnerConfig,
   stepSuccess: boolean,
-  failureCode: SingleShotRecoveryCode
+  failureCode: SingleShotRecoveryCode,
+  readOnlySnapshot?: ReadOnlyRepoSnapshot
 ): SingleShotRoundMechanismResult {
   if (config.repoSafety.mode === "read-only") {
+    const recoveryCode = readOnlyRepoRecoveryCode(config.cwd, readOnlySnapshot);
+    if (recoveryCode !== null) {
+      return { outcome: { ok: false, recoveryCode } };
+    }
     return stepSuccess
       ? { outcome: { ok: true }, evidence: { verificationStatus: "skipped" } }
       : { outcome: { ok: false, recoveryCode: failureCode } };
@@ -295,6 +365,54 @@ function finalizeScriptResult(
     artifacts: {},
     verificationLogPath: config.repoSafety.verificationLogPath
   });
+}
+
+type ReadOnlyRepoSnapshot = {
+  head: string;
+};
+
+type ReadOnlyRepoSnapshotResult =
+  | { ok: true; snapshot: ReadOnlyRepoSnapshot }
+  | { ok: false; recoveryCode: Extract<SingleShotRecoveryCode, "git_failed"> };
+
+function captureReadOnlyRepoSnapshot(repoPath: string): ReadOnlyRepoSnapshotResult {
+  const head = readGit(repoPath, ["rev-parse", "HEAD"]);
+  if (!head.ok) return { ok: false, recoveryCode: "git_failed" };
+  const status = readGit(repoPath, ["status", "--porcelain"]);
+  if (!status.ok || status.value.trim().length > 0) {
+    return { ok: false, recoveryCode: "git_failed" };
+  }
+  return { ok: true, snapshot: { head: head.value.trim() } };
+}
+
+function readOnlyRepoRecoveryCode(
+  repoPath: string,
+  snapshot: ReadOnlyRepoSnapshot | undefined
+): SingleShotRecoveryCode | null {
+  if (snapshot === undefined) return "git_failed";
+  const head = readGit(repoPath, ["rev-parse", "HEAD"]);
+  if (!head.ok) return "git_failed";
+  if (head.value.trim() !== snapshot.head) return "head_mismatch";
+  const status = readGit(repoPath, ["status", "--porcelain"]);
+  if (!status.ok || status.value.trim().length > 0) return "git_failed";
+  return null;
+}
+
+function readGit(
+  repoPath: string,
+  args: string[]
+): { ok: true; value: string } | { ok: false } {
+  try {
+    return {
+      ok: true,
+      value: execFileSync("git", ["-C", repoPath, ...args], {
+        encoding: "utf-8",
+        stdio: ["ignore", "pipe", "pipe"]
+      })
+    };
+  } catch {
+    return { ok: false };
+  }
 }
 
 function projectFinalizeResult(input: {

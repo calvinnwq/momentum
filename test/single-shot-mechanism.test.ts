@@ -282,4 +282,121 @@ describe("single-shot concrete mechanisms", () => {
     await new Promise((resolve) => setTimeout(resolve, 2_500));
     expect(fs.existsSync(sentinelPath)).toBe(false);
   });
+
+  it("rejects relative script log paths before launching the command", () => {
+    const { repoPath } = initRepo();
+    const mechanism = createScriptCommandRoundRunner({
+      command: "/bin/sh",
+      args: ["-c", "printf 'should not run' > launched.txt"],
+      cwd: repoPath,
+      timeoutSec: 5,
+      repoSafety: { mode: "read-only" }
+    });
+
+    const result = mechanism(
+      round({
+        executorFamily: "script",
+        logPaths: ["relative-script.log"]
+      })
+    );
+
+    expect(result.outcome).toEqual({
+      ok: false,
+      recoveryCode: "invalid_input"
+    });
+    expect(fs.existsSync(path.join(repoPath, "launched.txt"))).toBe(false);
+  });
+
+  it("returns runtime_unavailable when script process setup throws", () => {
+    const { repoPath } = initRepo();
+    const artifactRoot = makeTempDir();
+    const logPath = path.join(artifactRoot, "script.log");
+    const mechanism = createScriptCommandRoundRunner({
+      command: "/bin/sh",
+      args: ["-c", "printf 'should not run'"],
+      cwd: repoPath,
+      timeoutSec: 5,
+      env: { BAD_ENV: 1n } as unknown as NodeJS.ProcessEnv,
+      repoSafety: { mode: "read-only" }
+    });
+
+    const result = mechanism(
+      round({
+        artifactRoot,
+        executorFamily: "script",
+        logPaths: [logPath]
+      })
+    );
+
+    expect(result.outcome).toEqual({
+      ok: false,
+      recoveryCode: "runtime_unavailable"
+    });
+    expect(fs.readFileSync(logPath, "utf-8")).toContain("spawn_error");
+  });
+
+  it("rejects read-only script success that dirties the repo", () => {
+    const { repoPath, baseHead } = initRepo();
+    const artifactRoot = makeTempDir();
+    const mechanism = createScriptCommandRoundRunner({
+      command: "/bin/sh",
+      args: ["-c", "printf 'dirty\n' > dirty.txt"],
+      cwd: repoPath,
+      timeoutSec: 5,
+      repoSafety: { mode: "read-only" }
+    });
+
+    const result = mechanism(
+      round({
+        artifactRoot,
+        executorFamily: "script",
+        logPaths: [path.join(artifactRoot, "script.log")]
+      })
+    );
+
+    expect(result.outcome).toEqual({
+      ok: false,
+      recoveryCode: "git_failed"
+    });
+    expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
+    expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toContain(
+      "dirty.txt"
+    );
+  });
+
+  it("rejects read-only one-shot success that dirties the repo", () => {
+    const { repoPath, baseHead } = initRepo();
+    const artifactRoot = makeTempDir();
+    const json = resultJson(runnerResult());
+    const config: LiveWrapperConfig = {
+      command: process.execPath,
+      args: [
+        "-e",
+        "const fs=require('node:fs');fs.writeFileSync(process.env.MOMENTUM_RESULT_PATH, process.env.RESULT_JSON);fs.writeFileSync(process.env.MOMENTUM_REPO_PATH+'/dirty-one-shot.txt', 'dirty\\n')"
+      ],
+      cwd: "iteration",
+      timeoutSec: 5,
+      envAllow: ["RESULT_JSON"],
+      resultFile: "result.json",
+      probe: undefined
+    };
+
+    const mechanism = createOneShotLiveWrapperRoundRunner(config, {
+      repoPath,
+      kind: "preflight",
+      env: { RESULT_JSON: json },
+      repoSafety: { mode: "read-only" }
+    });
+
+    const result = mechanism(round({ artifactRoot }));
+
+    expect(result.outcome).toEqual({
+      ok: false,
+      recoveryCode: "git_failed"
+    });
+    expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
+    expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toContain(
+      "dirty-one-shot.txt"
+    );
+  });
 });
