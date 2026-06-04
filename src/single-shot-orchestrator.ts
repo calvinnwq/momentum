@@ -163,6 +163,16 @@ function validateSingleShotMechanismResult(
       `Invalid ${family} mechanism output: resultDigest requires a result document.`
     );
   }
+  if (family === "script" && mechanism.result != null) {
+    throw new Error(
+      "Invalid script mechanism output: script rounds must not capture a result document."
+    );
+  }
+  if (family === "script" && mechanism.artifacts?.resultDocument != null) {
+    throw new Error(
+      "Invalid script mechanism output: script rounds must not report a result document artifact."
+    );
+  }
   if (!mechanism.outcome.ok) return;
   if (family === "one-shot") {
     if (mechanism.result == null) {
@@ -175,16 +185,6 @@ function validateSingleShotMechanismResult(
         "Invalid one-shot mechanism output: successful one-shot rounds require a successful result document."
       );
     }
-  }
-  if (family === "script" && mechanism.result != null) {
-    throw new Error(
-      "Invalid script mechanism output: script rounds must not capture a result document."
-    );
-  }
-  if (family === "script" && mechanism.artifacts?.resultDocument != null) {
-    throw new Error(
-      "Invalid script mechanism output: script rounds must not report a result document artifact."
-    );
   }
 }
 

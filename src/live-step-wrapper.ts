@@ -615,7 +615,7 @@ function validatePositiveTimeoutSec(
   return { ok: true };
 }
 
-type ProcessGroupOptions = {
+export type ProcessGroupOptions = {
   cwd: string;
   env: NodeJS.ProcessEnv;
   timeoutMs: number;
@@ -630,7 +630,7 @@ type ProcessGroupMeta = {
   errorMessage?: string;
 };
 
-function runProcessGroupSync(
+export function runProcessGroupSync(
   command: string,
   args: string[],
   options: ProcessGroupOptions

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -27,6 +28,25 @@ function makeTempDir(): string {
   );
   tempRoots.push(dir);
   return fs.realpathSync(dir);
+}
+
+function runGit(cwd: string, args: string[]): string {
+  return execFileSync("git", ["-C", cwd, ...args], {
+    encoding: "utf-8",
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+}
+
+function initRepo(): { repoPath: string; baseHead: string } {
+  const repoPath = makeTempDir();
+  runGit(repoPath, ["init", "--initial-branch=main", "--quiet"]);
+  runGit(repoPath, ["config", "user.email", "single-shot@example.com"]);
+  runGit(repoPath, ["config", "user.name", "Single Shot Tester"]);
+  runGit(repoPath, ["config", "commit.gpgsign", "false"]);
+  fs.writeFileSync(path.join(repoPath, "README.md"), "initial\n");
+  runGit(repoPath, ["add", "README.md"]);
+  runGit(repoPath, ["commit", "-m", "init", "--quiet"]);
+  return { repoPath, baseHead: runGit(repoPath, ["rev-parse", "HEAD"]).trim() };
 }
 
 function round(overrides: Partial<ExecutorRoundRecord> = {}): ExecutorRoundRecord {
@@ -87,15 +107,16 @@ function resultJson(value: RunnerResult): string {
 }
 
 describe("single-shot concrete mechanisms", () => {
-  it("runs a one-shot live wrapper and captures the normalized result document", () => {
-    const repoPath = makeTempDir();
+  it("runs a one-shot live wrapper, finalizes the repo, and captures the normalized result document", () => {
+    const { repoPath, baseHead } = initRepo();
     const artifactRoot = makeTempDir();
     const json = resultJson(runnerResult());
+    const verificationLogPath = path.join(artifactRoot, "verify.log");
     const config: LiveWrapperConfig = {
       command: process.execPath,
       args: [
         "-e",
-        "require('node:fs').writeFileSync(process.env.MOMENTUM_RESULT_PATH, process.env.RESULT_JSON)"
+        "const fs=require('node:fs');fs.writeFileSync(process.env.MOMENTUM_RESULT_PATH, process.env.RESULT_JSON);fs.writeFileSync(process.env.MOMENTUM_REPO_PATH+'/one-shot.txt', 'changed\\n')"
       ],
       cwd: "iteration",
       timeoutSec: 5,
@@ -107,7 +128,14 @@ describe("single-shot concrete mechanisms", () => {
     const mechanism = createOneShotLiveWrapperRoundRunner(config, {
       repoPath,
       kind: "preflight",
-      env: { RESULT_JSON: json }
+      env: { RESULT_JSON: json },
+      repoSafety: {
+        mode: "finalize",
+        baseHead,
+        verificationCommands: [],
+        verificationTimeoutSec: 5,
+        verificationLogPath
+      }
     });
     const result = mechanism(round({ artifactRoot }));
 
@@ -120,16 +148,39 @@ describe("single-shot concrete mechanisms", () => {
       path.join(artifactRoot, "result.json")
     );
     expect(result.artifacts?.resultDocument?.digest).toBe(result.resultDigest);
+    expect(result.evidence?.verificationStatus).toBe("skipped");
+    expect(result.evidence?.commitSha).toMatch(/^[0-9a-f]{40}$/);
+    expect(result.evidence?.changedFiles).toEqual(["one-shot.txt"]);
+    expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(
+      result.evidence?.commitSha
+    );
+    expect(result.artifacts?.verificationOutput?.path).toBe(verificationLogPath);
   });
 
-  it("runs a script command with bounded logs and no result document", () => {
+  it("runs a script command, finalizes the repo, and records commit evidence", () => {
+    const { repoPath, baseHead } = initRepo();
     const artifactRoot = makeTempDir();
     const logPath = path.join(artifactRoot, "script.log");
+    const verificationLogPath = path.join(artifactRoot, "verify.log");
     const mechanism = createScriptCommandRoundRunner({
       command: "/bin/sh",
-      args: ["-c", "printf 'script ok'"],
-      cwd: artifactRoot,
-      timeoutSec: 5
+      args: ["-c", "printf 'script ok'; printf 'changed\n' > script.txt"],
+      cwd: repoPath,
+      timeoutSec: 5,
+      repoSafety: {
+        mode: "finalize",
+        baseHead,
+        commitIntent: {
+          type: "chore",
+          scope: "script",
+          subject: "run script",
+          body: "",
+          breaking: false
+        },
+        verificationCommands: [],
+        verificationTimeoutSec: 5,
+        verificationLogPath
+      }
     });
 
     const result = mechanism(
@@ -142,25 +193,93 @@ describe("single-shot concrete mechanisms", () => {
       })
     );
 
-    expect(result).toEqual({
-      outcome: { ok: true },
-      evidence: { verificationStatus: "passed" }
-    });
+    expect(result.outcome).toEqual({ ok: true });
+    expect(result.result).toBeUndefined();
+    expect(result.evidence?.verificationStatus).toBe("skipped");
+    expect(result.evidence?.commitSha).toMatch(/^[0-9a-f]{40}$/);
+    expect(result.evidence?.changedFiles).toEqual(["script.txt"]);
+    expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(
+      result.evidence?.commitSha
+    );
+    expect(result.artifacts?.verificationOutput?.path).toBe(verificationLogPath);
     expect(fs.readFileSync(logPath, "utf-8")).toContain("script ok");
   });
 
-  it("maps non-zero script exits to command_failed", () => {
+  it("maps non-zero script exits to command_failed after reset", () => {
+    const { repoPath, baseHead } = initRepo();
     const artifactRoot = makeTempDir();
     const mechanism = createScriptCommandRoundRunner({
       command: "/bin/sh",
-      args: ["-c", "exit 7"],
-      cwd: artifactRoot,
-      timeoutSec: 5
+      args: ["-c", "printf 'dirty\n' > dirty.txt; exit 7"],
+      cwd: repoPath,
+      timeoutSec: 5,
+      repoSafety: {
+        mode: "finalize",
+        baseHead,
+        commitIntent: {
+          type: "chore",
+          scope: "script",
+          subject: "run script",
+          body: "",
+          breaking: false
+        },
+        verificationCommands: [],
+        verificationTimeoutSec: 5,
+        verificationLogPath: path.join(artifactRoot, "verify.log")
+      }
     });
 
-    expect(mechanism(round({ artifactRoot, executorFamily: "script" })).outcome).toEqual({
+    expect(
+      mechanism(round({ artifactRoot, executorFamily: "script" })).outcome
+    ).toEqual({
       ok: false,
       recoveryCode: "command_failed"
     });
+    expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
+    expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toBe("");
+  });
+
+  it("kills a timed-out script command process group", async () => {
+    const { repoPath, baseHead } = initRepo();
+    const artifactRoot = makeTempDir();
+    const sentinelPath = path.join(artifactRoot, "child-survived");
+    const mechanism = createScriptCommandRoundRunner({
+      command: "/bin/sh",
+      args: [
+        "-c",
+        `nohup /bin/sh -c 'sleep 2; touch ${sentinelPath}' >/dev/null 2>&1 & sleep 10`
+      ],
+      cwd: repoPath,
+      timeoutSec: 1,
+      repoSafety: {
+        mode: "finalize",
+        baseHead,
+        commitIntent: {
+          type: "chore",
+          scope: "script",
+          subject: "run script",
+          body: "",
+          breaking: false
+        },
+        verificationCommands: [],
+        verificationTimeoutSec: 5,
+        verificationLogPath: path.join(artifactRoot, "verify.log")
+      }
+    });
+
+    const result = mechanism(
+      round({
+        artifactRoot,
+        executorFamily: "script",
+        logPaths: [path.join(artifactRoot, "script.log")]
+      })
+    );
+    expect(result.outcome).toEqual({
+      ok: false,
+      recoveryCode: "command_timed_out"
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 2_500));
+    expect(fs.existsSync(sentinelPath)).toBe(false);
   });
 });

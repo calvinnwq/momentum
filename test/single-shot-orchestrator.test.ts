@@ -411,6 +411,29 @@ describe("runSingleShotRound — family output invariants", () => {
     expect(listExecutorCheckpointsForRound(db, "round-1")).toEqual([]);
   });
 
+  it("rejects a failed script mechanism output with result evidence", () => {
+    const db = openRoundDb("script");
+
+    expect(() =>
+      runSingleShotRound({
+        db,
+        start: buildStart("script"),
+        finishedAt: 3_000,
+        runRound: () => ({
+          outcome: { ok: false, recoveryCode: "command_failed" },
+          result: runnerResult(),
+          artifacts: {
+            resultDocument: { path: "/artifacts/round-1/result.json" }
+          }
+        })
+      })
+    ).toThrow("script");
+
+    expect(loadExecutorRound(db, "round-1")?.state).toBe("running");
+    expect(listExecutorArtifactsForRound(db, "round-1")).toEqual([]);
+    expect(listExecutorCheckpointsForRound(db, "round-1")).toEqual([]);
+  });
+
   it("rejects a successful one-shot mechanism output with a failed runner result", () => {
     const db = openRoundDb("one-shot");
 
