@@ -128,7 +128,7 @@ The M10 slice order is:
    finalization behavior. *(landed in this slice)*
 7. **NGX-350 — M10-06 One-shot and script executor adapters.** Support deterministic
    commands and bounded one-shot agent/script invocations with normalized
-   results.
+   results. *(landed in this slice)*
 8. **NGX-351 — M10-07 no-mistakes executor mirror.** Mirror no-mistakes runs, findings,
    selected finding IDs, decisions, PR / CI state, and completion into Momentum
    executor records.
