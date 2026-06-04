@@ -329,6 +329,45 @@ describe("runSingleShotRound — script success (bare capture)", () => {
   });
 });
 
+describe("runSingleShotRound — family output invariants", () => {
+  it("rejects a successful one-shot mechanism output without a result document", () => {
+    const db = openRoundDb("one-shot");
+
+    expect(() =>
+      runSingleShotRound({
+        db,
+        start: buildStart("one-shot"),
+        finishedAt: 3_000,
+        runRound: () => ({ outcome: { ok: true } })
+      })
+    ).toThrow("one-shot");
+
+    expect(loadExecutorRound(db, "round-1")?.state).toBe("running");
+    expect(listExecutorArtifactsForRound(db, "round-1")).toEqual([]);
+    expect(listExecutorCheckpointsForRound(db, "round-1")).toEqual([]);
+  });
+
+  it("rejects a successful script mechanism output with a result document", () => {
+    const db = openRoundDb("script");
+
+    expect(() =>
+      runSingleShotRound({
+        db,
+        start: buildStart("script"),
+        finishedAt: 3_000,
+        runRound: () => ({
+          outcome: { ok: true },
+          result: runnerResult()
+        })
+      })
+    ).toThrow("script");
+
+    expect(loadExecutorRound(db, "round-1")?.state).toBe("running");
+    expect(listExecutorArtifactsForRound(db, "round-1")).toEqual([]);
+    expect(listExecutorCheckpointsForRound(db, "round-1")).toEqual([]);
+  });
+});
+
 describe("runSingleShotRound — failure / blocked / manual recovery", () => {
   it("routes a command_failed outcome to a failed terminal with no capture", () => {
     const db = openRoundDb("script");

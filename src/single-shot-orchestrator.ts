@@ -154,6 +154,28 @@ export type SingleShotRoundRunner = (
   round: ExecutorRoundRecord
 ) => SingleShotRoundMechanismResult;
 
+function validateSingleShotMechanismResult(
+  family: SingleShotExecutorFamily,
+  mechanism: SingleShotRoundMechanismResult
+): void {
+  if (mechanism.resultDigest != null && mechanism.result == null) {
+    throw new Error(
+      `Invalid ${family} mechanism output: resultDigest requires a result document.`
+    );
+  }
+  if (!mechanism.outcome.ok) return;
+  if (family === "one-shot" && mechanism.result == null) {
+    throw new Error(
+      "Invalid one-shot mechanism output: successful rounds require a result document."
+    );
+  }
+  if (family === "script" && mechanism.result != null) {
+    throw new Error(
+      "Invalid script mechanism output: script rounds must not capture a result document."
+    );
+  }
+}
+
 export type RunSingleShotRoundInput = {
   db: MomentumDb;
   /** The round-start projection inputs (identity, resolved selection, input evidence, start clock). */
@@ -200,6 +222,7 @@ export function runSingleShotRound(
   // 2. Run the bounded mechanism. It is total: failures come back as a recovery
   //    code in the outcome (and an absent result), never as a throw.
   const mechanism = runRound(startRecord);
+  validateSingleShotMechanismResult(start.family, mechanism);
 
   // 3. Persist the round's evidence artifacts (contract "Required Artifacts").
   //    The round-start row already exists, so each artifact's FK to it holds;
