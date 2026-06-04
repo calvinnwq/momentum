@@ -956,6 +956,15 @@ export function planSingleShotRoundPersistence(
   const canStampCommitEvidence = input.outcome.ok;
   const commitSha = canStampCommitEvidence ? evidence.commitSha : undefined;
   const changedFiles = canStampCommitEvidence ? evidence.changedFiles : undefined;
+  if (
+    changedFiles != null &&
+    changedFiles.length > 0 &&
+    (commitSha == null || commitSha.trim() === "")
+  ) {
+    throw new Error(
+      "Invalid single-shot persistence input: changedFiles requires commitSha."
+    );
+  }
 
   // A successful single shot must reach `succeeded`, and the round transition graph
   // forbids running -> succeeded directly: the result must be captured first. So a

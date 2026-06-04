@@ -1071,6 +1071,15 @@ describe("planSingleShotRoundPersistence", () => {
     });
   });
 
+  it("rejects changed files without a commit sha", () => {
+    expect(() =>
+      planSingleShotRoundPersistence({
+        outcome: { ok: true },
+        evidence: { changedFiles: ["src/x.ts"] }
+      })
+    ).toThrow("changedFiles requires commitSha");
+  });
+
   it("stamps terminal evidence only when provided so a bare failure keeps round-start nulls", () => {
     // No evidence: the terminal patch carries no verification / commit / changed-file
     // keys, so `coalesce` keeps the round-start record's nulls / empties in place.
