@@ -408,6 +408,29 @@ describe("runSingleShotRound — family output invariants", () => {
     expect(listExecutorArtifactsForRound(db, "round-1")).toEqual([]);
     expect(listExecutorCheckpointsForRound(db, "round-1")).toEqual([]);
   });
+
+  it("validates terminal evidence before writing artifact rows", () => {
+    const db = openRoundDb("script");
+
+    expect(() =>
+      runSingleShotRound({
+        db,
+        start: buildStart("script"),
+        finishedAt: 3_000,
+        runRound: () => ({
+          outcome: { ok: true },
+          artifacts: {
+            verificationOutput: { path: "/artifacts/round-1/verify.log" }
+          },
+          evidence: { changedFiles: ["src/single-shot-orchestrator.ts"] }
+        })
+      })
+    ).toThrow("changedFiles requires commitSha");
+
+    expect(loadExecutorRound(db, "round-1")?.state).toBe("running");
+    expect(listExecutorArtifactsForRound(db, "round-1")).toEqual([]);
+    expect(listExecutorCheckpointsForRound(db, "round-1")).toEqual([]);
+  });
 });
 
 describe("runSingleShotRound — failure / blocked / manual recovery", () => {

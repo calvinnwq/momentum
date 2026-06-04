@@ -238,6 +238,15 @@ export function runSingleShotRound(
   });
   validateSingleShotMechanismResult(start.family, mechanism);
 
+  const plan = planSingleShotRoundPersistence({
+    outcome: mechanism.outcome,
+    ...(mechanism.result !== undefined ? { result: mechanism.result } : {}),
+    ...(mechanism.resultDigest !== undefined
+      ? { resultDigest: mechanism.resultDigest }
+      : {}),
+    ...(mechanism.evidence !== undefined ? { evidence: mechanism.evidence } : {})
+  });
+
   // 3. Persist the round's evidence artifacts (contract "Required Artifacts").
   //    The round-start row already exists, so each artifact's FK to it holds;
   //    `logs` come from the frozen logPaths, the rest from what the mechanism
@@ -253,19 +262,7 @@ export function runSingleShotRound(
     insertExecutorArtifact(db, artifact, { now: finishedAt });
   }
 
-  // 4. Project the finished round into its two-phase persistence plan, threading
-  //    the captured result + its digest onto the capture patch and the
-  //    verification / commit / changed-file evidence onto the terminal patch.
-  const plan = planSingleShotRoundPersistence({
-    outcome: mechanism.outcome,
-    ...(mechanism.result !== undefined ? { result: mechanism.result } : {}),
-    ...(mechanism.resultDigest !== undefined
-      ? { resultDigest: mechanism.resultDigest }
-      : {}),
-    ...(mechanism.evidence !== undefined ? { evidence: mechanism.evidence } : {})
-  });
-
-  // 5. Capture the normalized result (on every success, bare for the script
+  // 4. Capture the normalized result (on every success, bare for the script
   //    family) then persist the terminal decision, stamping the daemon clock the
   //    pure projection cannot supply.
   if (plan.captureUpdate !== null) {
@@ -280,7 +277,7 @@ export function runSingleShotRound(
     { now: finishedAt }
   );
 
-  // 6. Persist the round's coarse lifecycle checkpoint stream (contract Round
+  // 5. Persist the round's coarse lifecycle checkpoint stream (contract Round
   //    Lifecycle step 7). `capturedResult` is whether a *result document* was
   //    actually captured (one-shot on success) — not merely whether the capture
   //    transition ran — so a bare script success omits `result_captured`.
