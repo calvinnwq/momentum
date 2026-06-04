@@ -14,9 +14,9 @@
  * retry is a fresh `attempt`, never a `continue`). They differ only in their
  * *mechanism* — `one-shot` requires a normalized {@link RunnerResult} document
  * (an agent/review pass) while `script` is exit-code based (a deterministic local
- * command) — which is the later-slice concern of the mechanism / orchestrator
- * twins, the same way `goal-loop-mechanism.ts` / `goal-loop-orchestrator.ts`
- * layer on `goal-loop-executor.ts`. This module owns the *pure* half both
+ * command) — which the mechanism / orchestrator twins layer on top, the same way
+ * `goal-loop-mechanism.ts` / `goal-loop-orchestrator.ts` layer on
+ * `goal-loop-executor.ts`. This module owns the *pure* half both
  * families share: the recovery taxonomy, the daemon classification of a single
  * invocation, and the deterministic, reattachable invocation / round identity.
  *
@@ -857,10 +857,23 @@ export function planSingleShotRoundCheckpoints(
  * the round-start record's null / empty in place rather than overwriting it.
  */
 export type SingleShotRoundEvidence = {
-  verificationStatus?: string | null;
+  verificationStatus?: SingleShotVerificationStatus | null;
   commitSha?: string | null;
   changedFiles?: string[];
 };
+
+export const SINGLE_SHOT_VERIFICATION_STATUSES = [
+  "passed",
+  "failed",
+  "skipped"
+] as const;
+
+export type SingleShotVerificationStatus =
+  (typeof SINGLE_SHOT_VERIFICATION_STATUSES)[number];
+
+const SINGLE_SHOT_VERIFICATION_STATUS_SET: ReadonlySet<string> = new Set(
+  SINGLE_SHOT_VERIFICATION_STATUSES
+);
 
 /**
  * The inputs to {@link planSingleShotRoundPersistence}: the normalized
@@ -952,6 +965,20 @@ export function planSingleShotRoundPersistence(
     );
   }
   const evidence = input.evidence ?? {};
+  const verificationStatus = evidence.verificationStatus;
+  if (
+    verificationStatus != null &&
+    !SINGLE_SHOT_VERIFICATION_STATUS_SET.has(verificationStatus)
+  ) {
+    throw new Error(
+      `Invalid single-shot persistence input: verificationStatus must be one of ${SINGLE_SHOT_VERIFICATION_STATUSES.join(", ")}.`
+    );
+  }
+  if (input.outcome.ok && verificationStatus === "failed") {
+    throw new Error(
+      "Invalid single-shot persistence input: successful outcomes cannot carry failed verificationStatus."
+    );
+  }
   const capturedResult = input.result != null;
   const canStampCommitEvidence = input.outcome.ok;
   const commitSha = canStampCommitEvidence ? evidence.commitSha : undefined;

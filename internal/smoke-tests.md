@@ -351,11 +351,13 @@ Coverage:
   persistence layer with injected mechanism, covering `one-shot`, `script`,
   blocked, failed, and manual-recovery outcomes in
   `test/single-shot-orchestrator.test.ts`.
+- concrete single-shot mechanisms for live-wrapper `one-shot` execution and
+  deterministic `script` command execution in `test/single-shot-mechanism.test.ts`.
 
 Run locally via the targeted vitest command:
 
 ```
-pnpm vitest run test/workflow-definition.test.ts test/workflow-definition-persist.test.ts test/migrations.test.ts test/workflow-run-start.test.ts test/workflow-run-start-persist.test.ts test/cli-workflow-run-start.test.ts test/executor-loop-reducer.test.ts test/executor-loop-persist.test.ts test/workflow-scheduler.test.ts test/daemon-loop.test.ts test/goal-loop-executor.test.ts test/goal-loop-orchestrator.test.ts test/goal-loop-mechanism.test.ts test/goal-loop-executor-persistence.test.ts test/git-transaction.test.ts test/single-shot-executor.test.ts test/single-shot-executor-persistence.test.ts test/single-shot-orchestrator.test.ts
+pnpm vitest run test/workflow-definition.test.ts test/workflow-definition-persist.test.ts test/migrations.test.ts test/workflow-run-start.test.ts test/workflow-run-start-persist.test.ts test/cli-workflow-run-start.test.ts test/executor-loop-reducer.test.ts test/executor-loop-persist.test.ts test/workflow-scheduler.test.ts test/daemon-loop.test.ts test/goal-loop-executor.test.ts test/goal-loop-orchestrator.test.ts test/goal-loop-mechanism.test.ts test/goal-loop-executor-persistence.test.ts test/git-transaction.test.ts test/single-shot-executor.test.ts test/single-shot-executor-persistence.test.ts test/single-shot-orchestrator.test.ts test/single-shot-mechanism.test.ts
 ```
 
 ## Test boundary

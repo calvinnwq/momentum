@@ -146,9 +146,9 @@ export type SingleShotRoundMechanismResult = {
  * identity) and returns the round's normalized outcome + optional result /
  * evidence / artifacts. It must be total — encode failures as recovery codes in
  * the outcome rather than throwing — mirroring `decideSingleShotInvocation`. The
- * concrete one-shot and script mechanisms (later M10-06 slices) plug in here; the
- * daemon wiring that runs the agent / command then calls them inside this closure.
- * Tests inject a deterministic fake.
+ * concrete one-shot and script mechanisms plug in here; the daemon wiring that
+ * runs the agent / command then calls them inside this closure. Tests inject a
+ * deterministic fake.
  */
 export type SingleShotRoundRunner = (
   round: ExecutorRoundRecord
@@ -179,6 +179,11 @@ function validateSingleShotMechanismResult(
   if (family === "script" && mechanism.result != null) {
     throw new Error(
       "Invalid script mechanism output: script rounds must not capture a result document."
+    );
+  }
+  if (family === "script" && mechanism.artifacts?.resultDocument != null) {
+    throw new Error(
+      "Invalid script mechanism output: script rounds must not report a result document artifact."
     );
   }
 }

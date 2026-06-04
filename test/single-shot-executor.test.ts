@@ -1080,6 +1080,24 @@ describe("planSingleShotRoundPersistence", () => {
     ).toThrow("changedFiles requires commitSha");
   });
 
+  it("rejects unknown verification statuses", () => {
+    expect(() =>
+      planSingleShotRoundPersistence({
+        outcome: { ok: false, recoveryCode: "command_failed" },
+        evidence: { verificationStatus: "oops" as never }
+      })
+    ).toThrow("verificationStatus");
+  });
+
+  it("rejects failed verification evidence on successful outcomes", () => {
+    expect(() =>
+      planSingleShotRoundPersistence({
+        outcome: { ok: true },
+        evidence: { verificationStatus: "failed" }
+      })
+    ).toThrow("successful outcomes");
+  });
+
   it("stamps terminal evidence only when provided so a bare failure keeps round-start nulls", () => {
     // No evidence: the terminal patch carries no verification / commit / changed-file
     // keys, so `coalesce` keeps the round-start record's nulls / empties in place.
