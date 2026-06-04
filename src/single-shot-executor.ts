@@ -59,6 +59,7 @@ import type {
   ExecutorHumanGateType,
   ExecutorInvocationRecord,
   ExecutorInvocationState,
+  ExecutorRoundRecord,
   ExecutorRoundState,
   WorkflowExecutorFamily
 } from "./executor-loop-reducer.js";
@@ -332,5 +333,164 @@ export function planSingleShotInvocation(
     startedAt: input.startedAt,
     heartbeatAt: input.startedAt,
     finishedAt: null
+  };
+}
+
+/**
+ * The resolved agent / model / effort / timeout / policy a single-shot round runs
+ * under (contract "Agent And Model Selection"). A single shot owns no round budget,
+ * so — unlike {@link GoalLoopRoundSelection} — there is no `maxRounds`. For the
+ * `script` family every field is naturally `null` (a deterministic local command
+ * has no agent); for `one-shot` they carry the resolved agent invocation. The
+ * round-start record freezes `agentProvider` / `model` / `effort` before the shot
+ * runs; `timeoutMs` / `policyEnvelope` configure the owning invocation and its
+ * gates and are carried for the mechanism / orchestrator twins. The deterministic
+ * precedence resolver that *produces* this selection is a later slice; this
+ * projection consumes an already-resolved selection, exactly as
+ * `planGoalLoopRoundStart` consumes a resolved `GoalLoopRoundSelection`.
+ */
+export type SingleShotRoundSelection = {
+  agentProvider: string | null;
+  model: string | null;
+  effort: string | null;
+  timeoutMs: number | null;
+  policyEnvelope: string | null;
+};
+
+/**
+ * The inputs to {@link planSingleShotRoundStart}: the daemon-owned round identity,
+ * the single-shot `family`, the resolved {@link SingleShotRoundSelection}, the
+ * round's input digest / artifact root / optional log paths, and the start clock.
+ * The orchestrator owns the ids / clock; this module owns projecting them into a
+ * durable round record. There is no `roundIndex` — a single shot is always the one
+ * round at index 0.
+ */
+export type PlanSingleShotRoundStartInput = {
+  roundId: string;
+  invocationId: string;
+  workflowRunId: string;
+  stepRunId: string;
+  stepKey: string;
+  family: SingleShotExecutorFamily;
+  attempt: number;
+  selection: SingleShotRoundSelection;
+  inputDigest: string | null;
+  artifactRoot: string | null;
+  logPaths?: string[];
+  startedAt: number;
+};
+
+/**
+ * Project a resolved selection and the daemon-owned round identity into the durable
+ * round-start {@link ExecutorRoundRecord} the orchestrator inserts before invoking
+ * external work (contract Round Lifecycle steps 2 and 4). The round starts `running`
+ * at index 0 (a single shot has exactly one round) with its agent / model / effort,
+ * input digest, artifact root, and log paths copied in and empty result evidence;
+ * the terminal projection fills the rest. The `family` is carried from the input —
+ * unlike the goal-loop projection that hard-codes its one family — so a `one-shot`
+ * and a `script` round are stamped distinctly. Pure: no ids or clock are invented
+ * here — freezing the selection at start is the contract's "a later config edit must
+ * not rewrite the historical record for an already-started round."
+ */
+export function planSingleShotRoundStart(
+  input: PlanSingleShotRoundStartInput
+): ExecutorRoundRecord {
+  return {
+    roundId: input.roundId,
+    invocationId: input.invocationId,
+    workflowRunId: input.workflowRunId,
+    stepRunId: input.stepRunId,
+    stepKey: input.stepKey,
+    executorFamily: input.family,
+    attempt: input.attempt,
+    roundIndex: 0,
+    state: "running",
+    classification: null,
+    startedAt: input.startedAt,
+    heartbeatAt: input.startedAt,
+    finishedAt: null,
+    agentProvider: input.selection.agentProvider,
+    model: input.selection.model,
+    effort: input.selection.effort,
+    inputDigest: input.inputDigest,
+    resultDigest: null,
+    artifactRoot: input.artifactRoot,
+    logPaths: input.logPaths ?? [],
+    summary: null,
+    keyChanges: [],
+    remainingWork: [],
+    changedFiles: [],
+    verificationStatus: null,
+    commitSha: null,
+    recoveryCode: null,
+    humanGate: null
+  };
+}
+
+/**
+ * The per-round runtime inputs the daemon provides for the single shot: the round's
+ * input digest, its daemon-provided artifact directory, and its bounded log paths
+ * (contract "Round Lifecycle" steps 4-5). These are the filesystem / content
+ * concerns the pure adapter never invents — the caller resolves them and
+ * {@link planSingleShotRoundStartForInvocation} freezes them into the round-start
+ * record.
+ */
+export type SingleShotRoundRuntimeInputs = {
+  inputDigest: string | null;
+  artifactRoot: string | null;
+  logPaths?: string[];
+};
+
+/**
+ * The inputs to {@link planSingleShotRoundStartForInvocation}: the materialized
+ * single-shot invocation (whose identity and family the round inherits), the
+ * resolved selection frozen into the round, the per-round runtime inputs, and the
+ * round start clock. There is no round index — the single round is always index 0.
+ */
+export type PlanSingleShotRoundStartForInvocationInput = {
+  invocation: ExecutorInvocationRecord;
+  selection: SingleShotRoundSelection;
+  runtime: SingleShotRoundRuntimeInputs;
+  startedAt: number;
+};
+
+/**
+ * Project a materialized invocation + resolved selection + per-round runtime inputs
+ * into the {@link PlanSingleShotRoundStartInput} for the single round. The round
+ * inherits the invocation's `(workflowRunId, stepRunId, stepKey, attempt)` identity
+ * and its single-shot family, takes the deterministic {@link singleShotRoundId}
+ * (index 0), freezes the resolved selection, and copies in the round's input
+ * digest / artifact root / log paths. Feed the result to
+ * {@link planSingleShotRoundStart} to get the durable round-start record. Pure: the
+ * caller owns the clock and the runtime inputs; this only wires identity. This is
+ * the round-identity half of the adapter "below `StepRun`".
+ *
+ * @throws {Error} if the invocation's family is not a single-shot family — the round
+ * must inherit a concrete `one-shot` / `script` family, never a foreign one (the
+ * invariant {@link planSingleShotInvocation} establishes).
+ */
+export function planSingleShotRoundStartForInvocation(
+  input: PlanSingleShotRoundStartForInvocationInput
+): PlanSingleShotRoundStartInput {
+  const { invocation, runtime } = input;
+  const family = invocation.executorFamily;
+  if (!isSingleShotExecutorFamily(family)) {
+    throw new Error(
+      `planSingleShotRoundStartForInvocation: invocation ${invocation.invocationId} has non-single-shot family ${family}; the round must inherit a one-shot or script family`
+    );
+  }
+  return {
+    roundId: singleShotRoundId(invocation.invocationId),
+    invocationId: invocation.invocationId,
+    workflowRunId: invocation.workflowRunId,
+    stepRunId: invocation.stepRunId,
+    stepKey: invocation.stepKey,
+    family,
+    attempt: invocation.attempt,
+    selection: input.selection,
+    inputDigest: runtime.inputDigest,
+    artifactRoot: runtime.artifactRoot,
+    ...(runtime.logPaths !== undefined ? { logPaths: runtime.logPaths } : {}),
+    startedAt: input.startedAt
   };
 }

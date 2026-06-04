@@ -7,7 +7,8 @@ import {
   EXECUTOR_ROUND_TERMINAL_STATES,
   isTerminalExecutorInvocationState,
   isTerminalExecutorRoundState,
-  transitionExecutorInvocation
+  transitionExecutorInvocation,
+  type WorkflowExecutorFamily
 } from "../src/executor-loop-reducer.js";
 import { isWorkflowExecutorFamily } from "../src/workflow-definition.js";
 import {
@@ -19,9 +20,12 @@ import {
   decideSingleShotInvocation,
   isSingleShotExecutorFamily,
   planSingleShotInvocation,
+  planSingleShotRoundStart,
+  planSingleShotRoundStartForInvocation,
   singleShotInvocationId,
   singleShotRoundId,
-  type SingleShotInvocationOutcome
+  type SingleShotInvocationOutcome,
+  type SingleShotRoundSelection
 } from "../src/single-shot-executor.js";
 
 const COMPLETION_SET = new Set<string>(EXECUTOR_COMPLETION_CLASSIFICATIONS);
@@ -282,5 +286,208 @@ describe("planSingleShotInvocation", () => {
       true
     );
     expect(isTerminalExecutorRoundState(decision.roundState)).toBe(true);
+  });
+});
+
+const ONE_SHOT_SELECTION: SingleShotRoundSelection = {
+  agentProvider: "claude-code",
+  model: "opus",
+  effort: "high",
+  timeoutMs: 600_000,
+  policyEnvelope: "default"
+};
+
+const SCRIPT_SELECTION: SingleShotRoundSelection = {
+  agentProvider: null,
+  model: null,
+  effort: null,
+  timeoutMs: null,
+  policyEnvelope: null
+};
+
+describe("planSingleShotRoundStart", () => {
+  it("projects a running single round at index 0 carrying the chosen family", () => {
+    const round = planSingleShotRoundStart({
+      roundId: "r0",
+      invocationId: "inv0",
+      workflowRunId: "run1",
+      stepRunId: "step1",
+      stepKey: "preflight",
+      family: "one-shot",
+      attempt: 0,
+      selection: ONE_SHOT_SELECTION,
+      inputDigest: "sha256:abc",
+      artifactRoot: "/tmp/run1/step1",
+      logPaths: ["/tmp/run1/step1/exec.log"],
+      startedAt: 1000
+    });
+
+    expect(round.roundId).toBe("r0");
+    expect(round.invocationId).toBe("inv0");
+    expect(round.workflowRunId).toBe("run1");
+    expect(round.stepRunId).toBe("step1");
+    expect(round.stepKey).toBe("preflight");
+    expect(round.executorFamily).toBe("one-shot");
+    expect(round.attempt).toBe(0);
+    // A single shot has exactly one round.
+    expect(round.roundIndex).toBe(0);
+    expect(round.state).toBe("running");
+    expect(round.classification).toBeNull();
+    expect(round.startedAt).toBe(1000);
+    expect(round.heartbeatAt).toBe(1000);
+    expect(round.finishedAt).toBeNull();
+    // The resolved agent/model/effort are frozen in before the round starts.
+    expect(round.agentProvider).toBe("claude-code");
+    expect(round.model).toBe("opus");
+    expect(round.effort).toBe("high");
+    expect(round.inputDigest).toBe("sha256:abc");
+    expect(round.resultDigest).toBeNull();
+    expect(round.artifactRoot).toBe("/tmp/run1/step1");
+    expect(round.logPaths).toEqual(["/tmp/run1/step1/exec.log"]);
+    // Result evidence is empty at start; the terminal projection fills it.
+    expect(round.summary).toBeNull();
+    expect(round.keyChanges).toEqual([]);
+    expect(round.remainingWork).toEqual([]);
+    expect(round.changedFiles).toEqual([]);
+    expect(round.verificationStatus).toBeNull();
+    expect(round.commitSha).toBeNull();
+    expect(round.recoveryCode).toBeNull();
+    expect(round.humanGate).toBeNull();
+  });
+
+  it("carries the script family with its null agent selection and a later attempt", () => {
+    const round = planSingleShotRoundStart({
+      roundId: "r0",
+      invocationId: "inv0",
+      workflowRunId: "run9",
+      stepRunId: "step9",
+      stepKey: "merge-cleanup",
+      family: "script",
+      attempt: 3,
+      selection: SCRIPT_SELECTION,
+      inputDigest: null,
+      artifactRoot: null,
+      startedAt: 5
+    });
+
+    expect(round.executorFamily).toBe("script");
+    expect(round.attempt).toBe(3);
+    expect(round.roundIndex).toBe(0);
+    expect(round.agentProvider).toBeNull();
+    expect(round.model).toBeNull();
+    expect(round.effort).toBeNull();
+    expect(round.inputDigest).toBeNull();
+    expect(round.artifactRoot).toBeNull();
+    // logPaths omitted -> defaults to an empty array, never undefined.
+    expect(round.logPaths).toEqual([]);
+  });
+});
+
+describe("planSingleShotRoundStartForInvocation", () => {
+  it("mints the single round id and inherits the invocation identity", () => {
+    const invocation = planSingleShotInvocation({
+      family: "one-shot",
+      workflowRunId: "run1",
+      stepRunId: "step1",
+      stepKey: "preflight",
+      attempt: 0,
+      startedAt: 1000
+    });
+
+    const start = planSingleShotRoundStartForInvocation({
+      invocation,
+      selection: ONE_SHOT_SELECTION,
+      runtime: {
+        inputDigest: "sha256:abc",
+        artifactRoot: "/tmp/x",
+        logPaths: ["/tmp/x/exec.log"]
+      },
+      startedAt: 2000
+    });
+
+    expect(start.roundId).toBe(singleShotRoundId(invocation.invocationId));
+    expect(start.invocationId).toBe(invocation.invocationId);
+    expect(start.workflowRunId).toBe("run1");
+    expect(start.stepRunId).toBe("step1");
+    expect(start.stepKey).toBe("preflight");
+    expect(start.family).toBe("one-shot");
+    expect(start.attempt).toBe(0);
+    expect(start.selection).toEqual(ONE_SHOT_SELECTION);
+    expect(start.inputDigest).toBe("sha256:abc");
+    expect(start.artifactRoot).toBe("/tmp/x");
+    expect(start.logPaths).toEqual(["/tmp/x/exec.log"]);
+    expect(start.startedAt).toBe(2000);
+  });
+
+  it("feeds planSingleShotRoundStart to a coherent durable round-start record", () => {
+    const invocation = planSingleShotInvocation({
+      family: "script",
+      workflowRunId: "run9",
+      stepRunId: "step9",
+      stepKey: "merge-cleanup",
+      attempt: 1,
+      startedAt: 1
+    });
+
+    const start = planSingleShotRoundStartForInvocation({
+      invocation,
+      selection: SCRIPT_SELECTION,
+      runtime: { inputDigest: null, artifactRoot: null },
+      startedAt: 10
+    });
+    const round = planSingleShotRoundStart(start);
+
+    expect(round.roundId).toBe(singleShotRoundId(invocation.invocationId));
+    expect(round.invocationId).toBe(invocation.invocationId);
+    expect(round.executorFamily).toBe("script");
+    expect(round.attempt).toBe(1);
+    expect(round.roundIndex).toBe(0);
+    expect(round.state).toBe("running");
+    expect(round.startedAt).toBe(10);
+    // logPaths omitted by the runtime -> empty array in the durable record.
+    expect(round.logPaths).toEqual([]);
+  });
+
+  it("omits logPaths from the start input when the runtime omits them", () => {
+    const invocation = planSingleShotInvocation({
+      family: "one-shot",
+      workflowRunId: "r",
+      stepRunId: "s",
+      stepKey: "preflight",
+      attempt: 0,
+      startedAt: 1
+    });
+
+    const start = planSingleShotRoundStartForInvocation({
+      invocation,
+      selection: ONE_SHOT_SELECTION,
+      runtime: { inputDigest: null, artifactRoot: null },
+      startedAt: 2
+    });
+
+    expect("logPaths" in start).toBe(false);
+  });
+
+  it("refuses to start a round for an invocation that is not a single-shot family", () => {
+    const invocation = {
+      ...planSingleShotInvocation({
+        family: "one-shot",
+        workflowRunId: "run1",
+        stepRunId: "step1",
+        stepKey: "implementation",
+        attempt: 0,
+        startedAt: 1
+      }),
+      executorFamily: "goal-loop" as WorkflowExecutorFamily
+    };
+
+    expect(() =>
+      planSingleShotRoundStartForInvocation({
+        invocation,
+        selection: ONE_SHOT_SELECTION,
+        runtime: { inputDigest: null, artifactRoot: null },
+        startedAt: 2
+      })
+    ).toThrow(/single-shot/i);
   });
 });
