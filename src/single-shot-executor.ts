@@ -337,16 +337,54 @@ export function planSingleShotInvocation(
 }
 
 /**
+ * One precedence level's contribution to a single-shot round's resolved selection.
+ * Every field is optional with a three-way meaning: `undefined` defers to the next
+ * (lower) level, an explicit value (including `null`) is a deliberate choice at this
+ * level. Mirrors {@link GoalLoopSelectionConfig} but without `maxRounds` — a single
+ * shot owns no round budget — so the contract's "Agent And Model Selection"
+ * precedence resolves the agent / model / effort / timeout / policy knobs only.
+ */
+export type SingleShotSelectionConfig = {
+  agentProvider?: string | null;
+  model?: string | null;
+  effort?: string | null;
+  timeoutMs?: number | null;
+  policyEnvelope?: string | null;
+};
+
+/**
+ * Which precedence level won a resolved selection field, in contract order
+ * (highest first). Tracked per field so an already-started round's frozen selection
+ * stays explainable, the same way `resolveGoalLoopRoundSelection` reports a
+ * {@link GoalLoopSelectionSource}.
+ */
+export type SingleShotSelectionSource =
+  | "step_definition"
+  | "workflow_definition"
+  | "repository_policy"
+  | "executor_family_default"
+  | "momentum_global_default";
+
+/** The winning precedence source for each resolved single-shot selection field. */
+export type SingleShotSelectionFieldSources = {
+  agentProvider: SingleShotSelectionSource;
+  model: SingleShotSelectionSource;
+  effort: SingleShotSelectionSource;
+  timeoutMs: SingleShotSelectionSource;
+  policyEnvelope: SingleShotSelectionSource;
+};
+
+/**
  * The resolved agent / model / effort / timeout / policy a single-shot round runs
- * under (contract "Agent And Model Selection"). A single shot owns no round budget,
- * so — unlike {@link GoalLoopRoundSelection} — there is no `maxRounds`. For the
- * `script` family every field is naturally `null` (a deterministic local command
- * has no agent); for `one-shot` they carry the resolved agent invocation. The
- * round-start record freezes `agentProvider` / `model` / `effort` before the shot
- * runs; `timeoutMs` / `policyEnvelope` configure the owning invocation and its
- * gates and are carried for the mechanism / orchestrator twins. The deterministic
- * precedence resolver that *produces* this selection is a later slice; this
- * projection consumes an already-resolved selection, exactly as
+ * under (contract "Agent And Model Selection"), plus the precedence source that won
+ * each field. A single shot owns no round budget, so — unlike
+ * {@link GoalLoopRoundSelection} — there is no `maxRounds`. For the `script` family
+ * every field is naturally `null` (a deterministic local command has no agent); for
+ * `one-shot` they carry the resolved agent invocation. The round-start record
+ * freezes `agentProvider` / `model` / `effort` before the shot runs; `timeoutMs` /
+ * `policyEnvelope` configure the owning invocation and its gates and are carried for
+ * the mechanism / orchestrator twins. {@link resolveSingleShotRoundSelection}
+ * produces this selection; {@link planSingleShotRoundStart} consumes it, exactly as
  * `planGoalLoopRoundStart` consumes a resolved `GoalLoopRoundSelection`.
  */
 export type SingleShotRoundSelection = {
@@ -355,7 +393,101 @@ export type SingleShotRoundSelection = {
   effort: string | null;
   timeoutMs: number | null;
   policyEnvelope: string | null;
+  source: SingleShotSelectionFieldSources;
 };
+
+/**
+ * The single-shot executor family default selection (precedence level 4). The
+ * `one-shot` / `script` families hold no opinion of their own yet — agent / model /
+ * effort / timeout / policy come from the higher-precedence step / workflow / repo
+ * config or fall through to the global floor below — so this is empty. It is the
+ * documented hook for a future family-specific default without disturbing the
+ * resolver.
+ */
+export const SINGLE_SHOT_FAMILY_DEFAULT_SELECTION: SingleShotSelectionConfig = {};
+
+/**
+ * The Momentum global default selection (precedence level 5, the floor). Every
+ * field is an explicit `null` so resolution always terminates with a value and a
+ * source even when no higher level provides one — Momentum holds no built-in
+ * agent / model / effort opinion, leaving the actual provider to repo / run config.
+ */
+export const SINGLE_SHOT_GLOBAL_DEFAULT_SELECTION: Required<SingleShotSelectionConfig> =
+  {
+    agentProvider: null,
+    model: null,
+    effort: null,
+    timeoutMs: null,
+    policyEnvelope: null
+  };
+
+/**
+ * The layered configuration {@link resolveSingleShotRoundSelection} resolves, one
+ * optional config per contract precedence level. An omitted level is treated the
+ * same as an all-`undefined` config (it contributes nothing); `familyDefault` and
+ * `globalDefault` fall back to the built-in single-shot defaults when omitted.
+ */
+export type ResolveSingleShotRoundSelectionInput = {
+  stepConfig?: SingleShotSelectionConfig;
+  workflowConfig?: SingleShotSelectionConfig;
+  repositoryPolicy?: SingleShotSelectionConfig;
+  familyDefault?: SingleShotSelectionConfig;
+  globalDefault?: SingleShotSelectionConfig;
+};
+
+/**
+ * Resolve the deterministic selection a single-shot round runs under, per the
+ * contract's "Agent And Model Selection" precedence (highest first):
+ * step-definition > workflow-definition > repository-policy > executor-family
+ * default > momentum global default. Each field resolves independently to the first
+ * level that provides it, where "provides" means the field is present (an explicit
+ * value, including `null`); an omitted (`undefined`) field defers to the next level.
+ * The all-`null` global floor guarantees every field resolves with a source. There
+ * is no round budget to resolve — a single shot owns exactly one round. Pure: the
+ * same layered config always yields the same selection.
+ */
+export function resolveSingleShotRoundSelection(
+  input: ResolveSingleShotRoundSelectionInput
+): SingleShotRoundSelection {
+  // Highest precedence first. The caller's `globalDefault` overrides the built-in
+  // floor at the same source level; the built-in floor is always all-defined so
+  // resolution can never fall off the end.
+  const levels: readonly SelectionLevel[] = [
+    { config: input.stepConfig, source: "step_definition" },
+    { config: input.workflowConfig, source: "workflow_definition" },
+    { config: input.repositoryPolicy, source: "repository_policy" },
+    {
+      config: input.familyDefault ?? SINGLE_SHOT_FAMILY_DEFAULT_SELECTION,
+      source: "executor_family_default"
+    },
+    { config: input.globalDefault, source: "momentum_global_default" },
+    {
+      config: SINGLE_SHOT_GLOBAL_DEFAULT_SELECTION,
+      source: "momentum_global_default"
+    }
+  ];
+
+  const agentProvider = resolveSelectionField(levels, (c) => c.agentProvider);
+  const model = resolveSelectionField(levels, (c) => c.model);
+  const effort = resolveSelectionField(levels, (c) => c.effort);
+  const timeoutMs = resolveSelectionField(levels, (c) => c.timeoutMs);
+  const policyEnvelope = resolveSelectionField(levels, (c) => c.policyEnvelope);
+
+  return {
+    agentProvider: agentProvider.value,
+    model: model.value,
+    effort: effort.value,
+    timeoutMs: timeoutMs.value,
+    policyEnvelope: policyEnvelope.value,
+    source: {
+      agentProvider: agentProvider.source,
+      model: model.source,
+      effort: effort.source,
+      timeoutMs: timeoutMs.source,
+      policyEnvelope: policyEnvelope.source
+    }
+  };
+}
 
 /**
  * The inputs to {@link planSingleShotRoundStart}: the daemon-owned round identity,
@@ -493,4 +625,30 @@ export function planSingleShotRoundStartForInvocation(
     ...(runtime.logPaths !== undefined ? { logPaths: runtime.logPaths } : {}),
     startedAt: input.startedAt
   };
+}
+
+/** One precedence level for {@link resolveSelectionField}. */
+type SelectionLevel = {
+  config: SingleShotSelectionConfig | undefined;
+  source: SingleShotSelectionSource;
+};
+
+/**
+ * Resolve one selection field through the ordered precedence levels: the first
+ * level with a present (`!== undefined`) value wins, carrying its source. An absent
+ * level (undefined config) is skipped. The built-in global floor defines every
+ * field, so the trailing fallback is unreachable and exists only for totality.
+ */
+function resolveSelectionField<T extends string | number>(
+  levels: readonly SelectionLevel[],
+  pick: (config: SingleShotSelectionConfig) => T | null | undefined
+): { value: T | null; source: SingleShotSelectionSource } {
+  for (const level of levels) {
+    if (level.config === undefined) continue;
+    const value = pick(level.config);
+    if (value !== undefined) {
+      return { value, source: level.source };
+    }
+  }
+  return { value: null, source: "momentum_global_default" };
 }

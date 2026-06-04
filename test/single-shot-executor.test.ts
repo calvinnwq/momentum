@@ -15,6 +15,7 @@ import {
   SINGLE_SHOT_BLOCKED_RECOVERY_CODES,
   SINGLE_SHOT_EXECUTOR_FAMILIES,
   SINGLE_SHOT_FAILED_RECOVERY_CODES,
+  SINGLE_SHOT_GLOBAL_DEFAULT_SELECTION,
   SINGLE_SHOT_MANUAL_RECOVERY_CODES,
   SINGLE_SHOT_RECOVERY_CODES,
   decideSingleShotInvocation,
@@ -22,6 +23,7 @@ import {
   planSingleShotInvocation,
   planSingleShotRoundStart,
   planSingleShotRoundStartForInvocation,
+  resolveSingleShotRoundSelection,
   singleShotInvocationId,
   singleShotRoundId,
   type SingleShotInvocationOutcome,
@@ -294,7 +296,14 @@ const ONE_SHOT_SELECTION: SingleShotRoundSelection = {
   model: "opus",
   effort: "high",
   timeoutMs: 600_000,
-  policyEnvelope: "default"
+  policyEnvelope: "default",
+  source: {
+    agentProvider: "step_definition",
+    model: "step_definition",
+    effort: "step_definition",
+    timeoutMs: "step_definition",
+    policyEnvelope: "step_definition"
+  }
 };
 
 const SCRIPT_SELECTION: SingleShotRoundSelection = {
@@ -302,7 +311,14 @@ const SCRIPT_SELECTION: SingleShotRoundSelection = {
   model: null,
   effort: null,
   timeoutMs: null,
-  policyEnvelope: null
+  policyEnvelope: null,
+  source: {
+    agentProvider: "momentum_global_default",
+    model: "momentum_global_default",
+    effort: "momentum_global_default",
+    timeoutMs: "momentum_global_default",
+    policyEnvelope: "momentum_global_default"
+  }
 };
 
 describe("planSingleShotRoundStart", () => {
@@ -489,5 +505,163 @@ describe("planSingleShotRoundStartForInvocation", () => {
         startedAt: 2
       })
     ).toThrow(/single-shot/i);
+  });
+});
+
+describe("resolveSingleShotRoundSelection — precedence", () => {
+  it("resolves every field from the step config when it provides them", () => {
+    const selection = resolveSingleShotRoundSelection({
+      stepConfig: {
+        agentProvider: "claude",
+        model: "claude-opus-4-8",
+        effort: "high",
+        timeoutMs: 600_000,
+        policyEnvelope: "delegated:standard"
+      }
+    });
+    expect(selection.agentProvider).toBe("claude");
+    expect(selection.model).toBe("claude-opus-4-8");
+    expect(selection.effort).toBe("high");
+    expect(selection.timeoutMs).toBe(600_000);
+    expect(selection.policyEnvelope).toBe("delegated:standard");
+    expect(selection.source).toEqual({
+      agentProvider: "step_definition",
+      model: "step_definition",
+      effort: "step_definition",
+      timeoutMs: "step_definition",
+      policyEnvelope: "step_definition"
+    });
+  });
+
+  it("resolves no round budget — a single shot owns exactly one round", () => {
+    const selection = resolveSingleShotRoundSelection({
+      stepConfig: { agentProvider: "claude" }
+    });
+    // Unlike the goal-loop selection, there is no maxRounds field at all: a single
+    // shot has no loop budget to resolve.
+    expect("maxRounds" in selection).toBe(false);
+    expect("maxRounds" in selection.source).toBe(false);
+  });
+
+  it("falls back to workflow defaults for fields the step config omits", () => {
+    const selection = resolveSingleShotRoundSelection({
+      stepConfig: { agentProvider: "claude" },
+      workflowConfig: { model: "claude-sonnet-4-6", effort: "medium" }
+    });
+    expect(selection.agentProvider).toBe("claude");
+    expect(selection.source.agentProvider).toBe("step_definition");
+    expect(selection.model).toBe("claude-sonnet-4-6");
+    expect(selection.source.model).toBe("workflow_definition");
+    expect(selection.effort).toBe("medium");
+    expect(selection.source.effort).toBe("workflow_definition");
+  });
+
+  it("falls back to repository policy below the workflow defaults", () => {
+    const selection = resolveSingleShotRoundSelection({
+      workflowConfig: { agentProvider: "claude" },
+      repositoryPolicy: { effort: "medium", timeoutMs: 120_000 }
+    });
+    expect(selection.effort).toBe("medium");
+    expect(selection.source.effort).toBe("repository_policy");
+    expect(selection.timeoutMs).toBe(120_000);
+    expect(selection.source.timeoutMs).toBe("repository_policy");
+  });
+
+  it("falls back to the executor family default below repository policy", () => {
+    const selection = resolveSingleShotRoundSelection({
+      repositoryPolicy: { agentProvider: "claude" },
+      familyDefault: { effort: "high", policyEnvelope: "script:bounded" }
+    });
+    expect(selection.effort).toBe("high");
+    expect(selection.source.effort).toBe("executor_family_default");
+    expect(selection.policyEnvelope).toBe("script:bounded");
+    expect(selection.source.policyEnvelope).toBe("executor_family_default");
+  });
+
+  it("uses the momentum global default as the floor for unspecified fields", () => {
+    const selection = resolveSingleShotRoundSelection({});
+    expect(selection.agentProvider).toBeNull();
+    expect(selection.model).toBeNull();
+    expect(selection.effort).toBeNull();
+    expect(selection.timeoutMs).toBeNull();
+    expect(selection.policyEnvelope).toBeNull();
+    for (const source of Object.values(selection.source)) {
+      expect(source).toBe("momentum_global_default");
+    }
+  });
+
+  it("resolves each field independently from a different precedence level", () => {
+    const selection = resolveSingleShotRoundSelection({
+      stepConfig: { agentProvider: "claude" },
+      workflowConfig: { model: "claude-sonnet-4-6" },
+      repositoryPolicy: { effort: "medium" },
+      familyDefault: { timeoutMs: 300_000 },
+      globalDefault: { policyEnvelope: "default" }
+    });
+    expect(selection.source).toEqual({
+      agentProvider: "step_definition",
+      model: "workflow_definition",
+      effort: "repository_policy",
+      timeoutMs: "executor_family_default",
+      policyEnvelope: "momentum_global_default"
+    });
+    expect(selection.timeoutMs).toBe(300_000);
+    expect(selection.policyEnvelope).toBe("default");
+  });
+
+  it("treats an explicit null at a higher level as a deliberate override", () => {
+    const selection = resolveSingleShotRoundSelection({
+      stepConfig: { model: null },
+      workflowConfig: { model: "claude-sonnet-4-6" }
+    });
+    expect(selection.model).toBeNull();
+    expect(selection.source.model).toBe("step_definition");
+  });
+
+  it("lets an explicit global default override the built-in null floor", () => {
+    const selection = resolveSingleShotRoundSelection({
+      globalDefault: { agentProvider: "claude", timeoutMs: 90_000 }
+    });
+    expect(selection.agentProvider).toBe("claude");
+    expect(selection.source.agentProvider).toBe("momentum_global_default");
+    expect(selection.timeoutMs).toBe(90_000);
+  });
+
+  it("exposes an all-null built-in global default selection", () => {
+    expect(SINGLE_SHOT_GLOBAL_DEFAULT_SELECTION).toEqual({
+      agentProvider: null,
+      model: null,
+      effort: null,
+      timeoutMs: null,
+      policyEnvelope: null
+    });
+  });
+
+  it("feeds a resolved selection straight into planSingleShotRoundStart", () => {
+    const selection = resolveSingleShotRoundSelection({
+      stepConfig: {
+        agentProvider: "claude",
+        model: "claude-opus-4-8",
+        effort: "high"
+      }
+    });
+    const round = planSingleShotRoundStart({
+      roundId: "r0",
+      invocationId: "inv0",
+      workflowRunId: "run1",
+      stepRunId: "step1",
+      stepKey: "preflight",
+      family: "one-shot",
+      attempt: 0,
+      selection,
+      inputDigest: null,
+      artifactRoot: null,
+      startedAt: 1
+    });
+    // The resolver's agent/model/effort are the ones frozen into the round-start
+    // record; timeout/policy/source ride on the selection for the invocation.
+    expect(round.agentProvider).toBe("claude");
+    expect(round.model).toBe("claude-opus-4-8");
+    expect(round.effort).toBe("high");
   });
 });
