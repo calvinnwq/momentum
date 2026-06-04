@@ -352,6 +352,25 @@ describe("runSingleShotRound — failure / blocked / manual recovery", () => {
     ).toEqual(["round_started", "mechanism_completed", "classified"]);
   });
 
+  it("does not checkpoint result capture when a failed mechanism reports a result", () => {
+    const db = openRoundDb("one-shot");
+    const outcome = runSingleShotRound({
+      db,
+      start: buildStart("one-shot"),
+      finishedAt: 3_000,
+      runRound: () => ({
+        outcome: { ok: false, recoveryCode: "command_failed" },
+        result: runnerResult()
+      })
+    });
+
+    expect(outcome.round.state).toBe("failed");
+    expect(outcome.round.summary).toBeNull();
+    expect(
+      listExecutorCheckpointsForRound(db, "round-1").map((c) => c.stage)
+    ).toEqual(["round_started", "mechanism_completed", "classified"]);
+  });
+
   it("routes an auth_unavailable outcome to a blocked terminal with a credential gate", () => {
     const db = openRoundDb("one-shot");
     const outcome = runSingleShotRound({

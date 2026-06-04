@@ -250,7 +250,7 @@ export function runSingleShotRound(
   const checkpoints = planSingleShotRoundCheckpoints({
     roundId: start.roundId,
     outcome: mechanism.outcome,
-    capturedResult: mechanism.result != null,
+    capturedResult: mechanism.outcome.ok && mechanism.result != null,
     classification: plan.decision.classification
   });
   for (const checkpoint of checkpoints) {

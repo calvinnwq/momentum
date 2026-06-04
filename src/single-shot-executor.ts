@@ -943,6 +943,7 @@ export function planSingleShotRoundPersistence(
 ): SingleShotRoundPersistencePlan {
   const decision = decideSingleShotInvocation(input.outcome);
   const evidence = input.evidence ?? {};
+  const capturedResult = input.result != null;
 
   // A successful single shot must reach `succeeded`, and the round transition graph
   // forbids running -> succeeded directly: the result must be captured first. So a
@@ -961,9 +962,7 @@ export function planSingleShotRoundPersistence(
               remainingWork: input.result.remaining_work
             }
           : {}),
-        // Stamp the result digest only when the mechanism reported one; an absent
-        // digest is left off so `coalesce` keeps the round-start record's null.
-        ...(input.resultDigest != null
+        ...(capturedResult && input.resultDigest != null
           ? { resultDigest: input.resultDigest }
           : {})
       }

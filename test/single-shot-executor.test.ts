@@ -997,6 +997,14 @@ describe("planSingleShotRoundPersistence", () => {
     });
   });
 
+  it("does not stamp a result digest when no result document was captured", () => {
+    const plan = planSingleShotRoundPersistence({
+      outcome: { ok: true },
+      resultDigest: "sha256:result"
+    });
+    expect(plan.captureUpdate).toEqual({ toState: "capturing_result" });
+  });
+
   it("routes an execution failure from running straight to failed with no capture", () => {
     const plan = planSingleShotRoundPersistence({
       outcome: { ok: false, recoveryCode: "command_failed" }
