@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -16,6 +16,7 @@ import {
 const tempRoots: string[] = [];
 
 afterEach(() => {
+  vi.restoreAllMocks();
   while (tempRoots.length > 0) {
     const dir = tempRoots.pop();
     if (dir) fs.rmSync(dir, { recursive: true, force: true });
@@ -265,6 +266,62 @@ describe("single-shot concrete mechanisms", () => {
     });
   });
 
+  it("resets finalize one-shot wrapper exceptions after the child dirties the repo", () => {
+    const { repoPath, baseHead } = initRepo();
+    const artifactRoot = makeTempDir();
+    const marker = "THROW_AFTER_CHILD";
+    const json = resultJson(runnerResult());
+    const originalWriteSync = fs.writeSync;
+    let thrown = false;
+    vi.spyOn(fs, "writeSync").mockImplementation(
+      ((fd: number, data: string | NodeJS.ArrayBufferView, ...args: unknown[]) => {
+        if (!thrown && typeof data === "string" && data.includes(marker)) {
+          thrown = true;
+          throw new Error("log write failed after child mutation");
+        }
+        return (originalWriteSync as (...input: unknown[]) => number)(
+          fd,
+          data,
+          ...args
+        );
+      }) as typeof fs.writeSync
+    );
+    const config: LiveWrapperConfig = {
+      command: process.execPath,
+      args: [
+        "-e",
+        "const fs=require('node:fs');fs.writeFileSync(process.env.MOMENTUM_REPO_PATH+'/dirty-throw.txt', 'dirty\\n');fs.writeFileSync(process.env.MOMENTUM_RESULT_PATH, process.env.RESULT_JSON);process.stdout.write(process.env.THROW_MARKER)"
+      ],
+      cwd: "iteration",
+      timeoutSec: 5,
+      envAllow: ["RESULT_JSON", "THROW_MARKER"],
+      resultFile: "result.json",
+      probe: undefined
+    };
+
+    const mechanism = createOneShotLiveWrapperRoundRunner(config, {
+      repoPath,
+      kind: "preflight",
+      env: { RESULT_JSON: json, THROW_MARKER: marker },
+      repoSafety: {
+        mode: "finalize",
+        baseHead,
+        verificationCommands: [],
+        verificationTimeoutSec: 5,
+        verificationLogPath: path.join(artifactRoot, "verify.log")
+      }
+    });
+
+    const result = mechanism(round({ artifactRoot }));
+
+    expect(result.outcome).toEqual({
+      ok: false,
+      recoveryCode: "runtime_unavailable"
+    });
+    expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
+    expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toBe("");
+  });
+
   it("runs a script command, finalizes the repo, and records commit evidence", () => {
     const { repoPath, baseHead } = initRepo();
     const artifactRoot = makeTempDir();
@@ -441,6 +498,34 @@ describe("single-shot concrete mechanisms", () => {
       recoveryCode: "runtime_unavailable"
     });
     expect(fs.readFileSync(logPath, "utf-8")).toContain("spawn_error");
+  });
+
+  it("preserves the script outcome when closing the log fails", () => {
+    const { repoPath } = initRepo();
+    const artifactRoot = makeTempDir();
+    const originalCloseSync = fs.closeSync;
+    vi.spyOn(fs, "closeSync").mockImplementation(((fd: number) => {
+      originalCloseSync(fd);
+      throw new Error("close failed");
+    }) as typeof fs.closeSync);
+    const mechanism = createScriptCommandRoundRunner({
+      command: "/bin/sh",
+      args: ["-c", "printf 'script ok'"],
+      cwd: repoPath,
+      timeoutSec: 5,
+      repoSafety: { mode: "read-only" }
+    });
+
+    const result = mechanism(
+      round({
+        artifactRoot,
+        executorFamily: "script",
+        logPaths: [path.join(artifactRoot, "script.log")]
+      })
+    );
+
+    expect(result.outcome).toEqual({ ok: true });
+    expect(result.evidence?.verificationStatus).toBe("skipped");
   });
 
   it("rejects read-only script success that dirties the repo", () => {

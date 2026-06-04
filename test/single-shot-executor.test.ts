@@ -1080,6 +1080,17 @@ describe("planSingleShotRoundPersistence", () => {
     ).toThrow("changedFiles requires commitSha");
   });
 
+  it("rejects invalid commit shas on successful outcomes", () => {
+    for (const commitSha of ["", "not-a-sha", "a".repeat(39), "g".repeat(40)]) {
+      expect(() =>
+        planSingleShotRoundPersistence({
+          outcome: { ok: true },
+          evidence: { commitSha }
+        })
+      ).toThrow("commitSha must be a 40-character hex SHA");
+    }
+  });
+
   it("rejects unknown verification statuses", () => {
     expect(() =>
       planSingleShotRoundPersistence({

@@ -114,7 +114,25 @@ export function createOneShotLiveWrapperRoundRunner(
           : {})
       });
     } catch {
-      return { outcome: { ok: false, recoveryCode: "runtime_unavailable" } };
+      const artifacts: SingleShotRoundArtifacts = {};
+      if (options.repoSafety.mode === "read-only") {
+        const repoRecoveryCode = readOnlyRepoRecoveryCode(
+          options.repoPath,
+          readOnlySnapshot?.snapshot
+        );
+        return {
+          outcome: {
+            ok: false,
+            recoveryCode: repoRecoveryCode ?? "runtime_unavailable"
+          },
+          artifacts
+        };
+      }
+      return finalizeOneShotProcessFailure(
+        options,
+        "runtime_unavailable",
+        artifacts
+      );
     }
 
     if (!result.ok) {
@@ -287,7 +305,10 @@ export function createScriptCommandRoundRunner(
         readOnlySnapshot?.snapshot
       );
     } finally {
-      fs.closeSync(logHandle);
+      try {
+        fs.closeSync(logHandle);
+      } catch {
+      }
     }
   };
 }

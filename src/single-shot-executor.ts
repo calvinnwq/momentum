@@ -874,6 +874,7 @@ export type SingleShotVerificationStatus =
 const SINGLE_SHOT_VERIFICATION_STATUS_SET: ReadonlySet<string> = new Set(
   SINGLE_SHOT_VERIFICATION_STATUSES
 );
+const COMMIT_SHA_RE = /^[0-9a-f]{40}$/;
 
 /**
  * The inputs to {@link planSingleShotRoundPersistence}: the normalized
@@ -983,6 +984,11 @@ export function planSingleShotRoundPersistence(
   const canStampCommitEvidence = input.outcome.ok;
   const commitSha = canStampCommitEvidence ? evidence.commitSha : undefined;
   const changedFiles = canStampCommitEvidence ? evidence.changedFiles : undefined;
+  if (commitSha != null && !COMMIT_SHA_RE.test(commitSha)) {
+    throw new Error(
+      "Invalid single-shot persistence input: commitSha must be a 40-character hex SHA."
+    );
+  }
   if (
     changedFiles != null &&
     changedFiles.length > 0 &&
