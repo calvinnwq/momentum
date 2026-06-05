@@ -365,6 +365,42 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
     expect(seen!.artifactRoot).toBe("/artifacts/nm-0");
   });
 
+  it("refuses to poll a terminal mirror round before reading external state", () => {
+    const db = openMirrorRoundDb();
+    const first = runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      read: okReader({ stepStatus: "completed", ciState: "passed" }),
+      polledAt: 2_000
+    });
+    expect(first.round.state).toBe("succeeded");
+    const before = loadExecutorRound(db, ROUND_ID)!;
+    const checkpointsBefore = listExecutorCheckpointsForRound(db, ROUND_ID);
+    let readCalls = 0;
+
+    expect(() =>
+      runNoMistakesMirrorRound({
+        db,
+        roundId: ROUND_ID,
+        read: () => {
+          readCalls += 1;
+          return {
+            ok: true,
+            value: externalState({ stepStatus: "completed", ciState: "passed" }),
+            digest: "sha256:terminal-repoll"
+          };
+        },
+        polledAt: 3_000
+      })
+    ).toThrow(/terminal/i);
+
+    expect(readCalls).toBe(0);
+    expect(loadExecutorRound(db, ROUND_ID)).toEqual(before);
+    expect(listExecutorCheckpointsForRound(db, ROUND_ID)).toEqual(
+      checkpointsBefore
+    );
+  });
+
   it("refuses to poll a live round outside the no-mistakes family", () => {
     const db = openMirrorRoundDb();
     db.prepare("UPDATE executor_rounds SET executor_family = 'goal-loop' WHERE round_id = ?").run(
@@ -707,6 +743,41 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
     expect(resumed.round.state).toBe("mirroring_external_state");
     expect(resumed.round.finishedAt).toBeNull();
     expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe("running");
+  });
+
+  it("requires previously mirrored open decisions to resolve before completion", () => {
+    const db = openMirrorRoundDb();
+
+    runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      read: okReader({
+        stepStatus: "awaiting_decision",
+        decisions: [
+          { externalId: "D-1", summary: "decide", allowedActions: ["a", "b"] }
+        ]
+      }),
+      polledAt: 2_000
+    });
+
+    const completed = runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      read: okReader({
+        stepStatus: "completed",
+        ciState: "passed",
+        decisions: []
+      }),
+      polledAt: 3_000
+    });
+
+    expect(completed.decision.classification).toBe("manual_recovery_required");
+    expect(completed.decision.recoveryCode).toBe("external_state_inconsistent");
+    expect(completed.round.state).toBe("manual_recovery_required");
+    expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe(
+      "manual_recovery_required"
+    );
+    expect(listExecutorDecisionsForRound(db, ROUND_ID)[0]!.resolution).toBeNull();
   });
 
   it("settles a waiting_operator round when the next poll observes completion", () => {

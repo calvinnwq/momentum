@@ -106,6 +106,20 @@ class NoMistakesMirrorRoundFamilyError extends Error {
   }
 }
 
+class NoMistakesMirrorRoundTerminalError extends Error {
+  readonly roundId: string;
+  readonly state: string;
+
+  constructor(roundId: string, state: string) {
+    super(
+      `No-mistakes mirror cannot poll terminal round ${roundId} in state ${state}`
+    );
+    this.name = "NoMistakesMirrorRoundTerminalError";
+    this.roundId = roundId;
+    this.state = state;
+  }
+}
+
 /**
  * The injected reader one mirror poll runs: it sources and parses the untrusted
  * external no-mistakes state into a typed {@link NoMistakesExternalStateRead}
@@ -247,6 +261,60 @@ function updateInvocationForDecision(
   });
 }
 
+function isResolvedDecisionRecord(
+  decision: Pick<ExecutorDecisionRecord, "resolution">
+): boolean {
+  return (
+    typeof decision.resolution === "string" &&
+    decision.resolution.trim().length > 0
+  );
+}
+
+function unresolvedPriorDecisionCount(
+  db: MomentumDb,
+  roundId: string,
+  state: NoMistakesExternalState
+): number {
+  const currentlyResolved = new Set(
+    planNoMistakesRoundDecisions({ roundId, decisions: state.decisions })
+      .filter(isResolvedDecisionRecord)
+      .map((decision) => decision.decisionId)
+  );
+  return listExecutorDecisionsForRound(db, roundId).filter(
+    (decision) =>
+      !isResolvedDecisionRecord(decision) &&
+      !currentlyResolved.has(decision.decisionId)
+  ).length;
+}
+
+function reconcileNoMistakesCompletionDecision(
+  db: MomentumDb,
+  roundId: string,
+  stateRead: NoMistakesExternalStateRead,
+  decision: NoMistakesMirrorDecision
+): NoMistakesMirrorDecision {
+  if (!stateRead.ok || decision.classification !== "complete") {
+    return decision;
+  }
+  const unresolvedCount = unresolvedPriorDecisionCount(
+    db,
+    roundId,
+    stateRead.value
+  );
+  if (unresolvedCount === 0) {
+    return decision;
+  }
+  return {
+    classification: "manual_recovery_required",
+    roundState: "manual_recovery_required",
+    invocationState: "manual_recovery_required",
+    humanGate: "manual_recovery_required",
+    recoveryCode: "external_state_inconsistent",
+    reason:
+      `external no-mistakes run claims completed but ${unresolvedCount} previously mirrored decision(s) are unresolved`
+  };
+}
+
 export type RunNoMistakesMirrorRoundInput = {
   db: MomentumDb;
   /** The id of the durable, already-started mirror round to poll. */
@@ -306,13 +374,22 @@ export function runNoMistakesMirrorRound(
   if (!isNoMistakesExecutorFamily(current.executorFamily)) {
     throw new NoMistakesMirrorRoundFamilyError(roundId, current.executorFamily);
   }
+  if (isTerminalExecutorRoundState(current.state)) {
+    throw new NoMistakesMirrorRoundTerminalError(roundId, current.state);
+  }
 
   // 2. Read the untrusted external state (total) and classify it. A reader failure
   //    is untrusted evidence too — it settles like a semantically broken snapshot.
   const stateRead = read(current);
-  const decision = stateRead.ok
+  const classified = stateRead.ok
     ? decideNoMistakesMirror(stateRead.value)
     : decideNoMistakesUnreadable(stateRead.error);
+  const decision = reconcileNoMistakesCompletionDecision(
+    db,
+    roundId,
+    stateRead,
+    classified
+  );
 
   // 3. Patch the durable round, stamping the daemon clock and re-fingerprinting the
   //    round with the exact bytes this poll mirrored (only on a successful read —
