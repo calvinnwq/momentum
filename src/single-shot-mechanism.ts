@@ -243,7 +243,12 @@ export function createScriptCommandRoundRunner(
       } catch (error) {
         const detail = error instanceof Error ? error.message : "unknown error";
         writeLine(logHandle, `[single-shot-script] spawn_error: ${detail}`);
-        return { outcome: { ok: false, recoveryCode: "runtime_unavailable" } };
+        return finalizeScriptResult(
+          config,
+          false,
+          "runtime_unavailable",
+          readOnlySnapshot?.snapshot
+        );
       }
       const durationMs = Date.now() - start;
 
@@ -274,7 +279,12 @@ export function createScriptCommandRoundRunner(
           logHandle,
           `[single-shot-script] runtime_unavailable: ${spawn.error.message}`
         );
-        return { outcome: { ok: false, recoveryCode: "runtime_unavailable" } };
+        return finalizeScriptResult(
+          config,
+          false,
+          "runtime_unavailable",
+          readOnlySnapshot?.snapshot
+        );
       }
 
       const exitCode = spawn.status;
@@ -302,6 +312,13 @@ export function createScriptCommandRoundRunner(
         config,
         true,
         "command_failed",
+        readOnlySnapshot?.snapshot
+      );
+    } catch {
+      return finalizeScriptResult(
+        config,
+        false,
+        "runtime_unavailable",
         readOnlySnapshot?.snapshot
       );
     } finally {
@@ -545,13 +562,35 @@ function projectFinalizeResult(input: {
         };
       }
     case "commit_failed":
-      return {
-        outcome: { ok: false, recoveryCode: "commit_failed" },
-        artifacts,
-        evidence: {
+      {
+        const evidence = {
           verificationStatus: verificationStatusFromFinalize(input.finalize)
+        };
+        if (input.finalize.reset !== undefined) {
+          return {
+            outcome: {
+              ok: false,
+              recoveryCode: input.finalize.reset.ok
+                ? input.failureCode
+                : "reset_failed"
+            },
+            artifacts,
+            evidence
+          };
         }
-      };
+        if (input.finalize.commit.code === "nothing_to_commit") {
+          return {
+            outcome: { ok: false, recoveryCode: input.failureCode },
+            artifacts,
+            evidence
+          };
+        }
+        return {
+          outcome: { ok: false, recoveryCode: "commit_failed" },
+          artifacts,
+          evidence
+        };
+      }
     case "git_failed":
       return { outcome: { ok: false, recoveryCode: "git_failed" }, artifacts };
     case "repo_lock_lost":

@@ -17,6 +17,9 @@ const tempRoots: string[] = [];
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.doUnmock("../src/live-step-wrapper.js");
+  vi.doUnmock("../src/live-step-finalize.js");
+  vi.resetModules();
   while (tempRoots.length > 0) {
     const dir = tempRoots.pop();
     if (dir) fs.rmSync(dir, { recursive: true, force: true });
@@ -525,6 +528,277 @@ describe("single-shot concrete mechanisms", () => {
     );
 
     expect(result.outcome).toEqual({ ok: true });
+    expect(result.evidence?.verificationStatus).toBe("skipped");
+  });
+
+  it("finalizes script repo safety when post-process log writes fail", () => {
+    const { repoPath, baseHead } = initRepo();
+    const artifactRoot = makeTempDir();
+    const marker = "SCRIPT_LOG_WRITE_FAILURE";
+    const originalWriteSync = fs.writeSync;
+    let thrown = false;
+    vi.spyOn(fs, "writeSync").mockImplementation(
+      ((fd: number, data: string | NodeJS.ArrayBufferView, ...args: unknown[]) => {
+        if (!thrown && typeof data === "string" && data.includes(marker)) {
+          thrown = true;
+          throw new Error("script log write failed");
+        }
+        return (originalWriteSync as (...input: unknown[]) => number)(
+          fd,
+          data,
+          ...args
+        );
+      }) as typeof fs.writeSync
+    );
+    const mechanism = createScriptCommandRoundRunner({
+      command: "/bin/sh",
+      args: ["-c", "printf 'dirty\\n' > dirty-log.txt; printf \"$THROW_MARKER\""],
+      cwd: repoPath,
+      timeoutSec: 5,
+      env: { THROW_MARKER: marker },
+      repoSafety: {
+        mode: "finalize",
+        baseHead,
+        commitIntent: {
+          type: "chore",
+          scope: "script",
+          subject: "run script",
+          body: "",
+          breaking: false
+        },
+        verificationCommands: [],
+        verificationTimeoutSec: 5,
+        verificationLogPath: path.join(artifactRoot, "verify.log")
+      }
+    });
+
+    const result = mechanism(
+      round({
+        artifactRoot,
+        executorFamily: "script",
+        logPaths: [path.join(artifactRoot, "script.log")]
+      })
+    );
+
+    expect(result.outcome).toEqual({
+      ok: false,
+      recoveryCode: "runtime_unavailable"
+    });
+    expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
+    expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toBe("");
+  });
+
+  it("finalizes script repo safety for supervisor spawn errors", async () => {
+    const { repoPath, baseHead } = initRepo();
+    const artifactRoot = makeTempDir();
+    vi.resetModules();
+    vi.doMock("../src/live-step-wrapper.js", async (importOriginal) => {
+      const actual =
+        await importOriginal<typeof import("../src/live-step-wrapper.js")>();
+      return {
+        ...actual,
+        runProcessGroupSync: () => {
+          fs.writeFileSync(path.join(repoPath, "dirty-supervisor.txt"), "dirty\n");
+          const error = new Error("supervisor failed") as NodeJS.ErrnoException;
+          error.code = "SUPERVISOR_FAILED";
+          return {
+            pid: 123,
+            output: [null, "", ""],
+            stdout: "",
+            stderr: "",
+            status: null,
+            signal: null,
+            error
+          };
+        }
+      };
+    });
+    const { createScriptCommandRoundRunner: createMockedScriptCommandRoundRunner } =
+      await import("../src/single-shot-mechanism.js");
+    const mechanism = createMockedScriptCommandRoundRunner({
+      command: "/bin/sh",
+      args: ["-c", "printf 'unused'"],
+      cwd: repoPath,
+      timeoutSec: 5,
+      repoSafety: {
+        mode: "finalize",
+        baseHead,
+        commitIntent: {
+          type: "chore",
+          scope: "script",
+          subject: "run script",
+          body: "",
+          breaking: false
+        },
+        verificationCommands: [],
+        verificationTimeoutSec: 5,
+        verificationLogPath: path.join(artifactRoot, "verify.log")
+      }
+    });
+
+    const result = mechanism(
+      round({
+        artifactRoot,
+        executorFamily: "script",
+        logPaths: [path.join(artifactRoot, "script.log")]
+      })
+    );
+
+    expect(result.outcome).toEqual({
+      ok: false,
+      recoveryCode: "runtime_unavailable"
+    });
+    expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
+    expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toBe("");
+  });
+
+  it("treats finalize commit no-ops as safe script failures", () => {
+    const { repoPath, baseHead } = initRepo();
+    const artifactRoot = makeTempDir();
+    const mechanism = createScriptCommandRoundRunner({
+      command: "/bin/sh",
+      args: ["-c", "printf 'no changes'"],
+      cwd: repoPath,
+      timeoutSec: 5,
+      repoSafety: {
+        mode: "finalize",
+        baseHead,
+        commitIntent: {
+          type: "chore",
+          scope: "script",
+          subject: "run script",
+          body: "",
+          breaking: false
+        },
+        verificationCommands: [],
+        verificationTimeoutSec: 5,
+        verificationLogPath: path.join(artifactRoot, "verify.log")
+      }
+    });
+
+    const result = mechanism(
+      round({
+        artifactRoot,
+        executorFamily: "script",
+        logPaths: [path.join(artifactRoot, "script.log")]
+      })
+    );
+
+    expect(result.outcome).toEqual({
+      ok: false,
+      recoveryCode: "command_failed"
+    });
+    expect(result.evidence?.verificationStatus).toBe("skipped");
+    expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
+    expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toBe("");
+  });
+
+  it("treats commit failures with successful reset as safe script failures", () => {
+    const { repoPath, baseHead } = initRepo();
+    const artifactRoot = makeTempDir();
+    const hooksDir = path.join(repoPath, ".git", "test-hooks");
+    fs.mkdirSync(hooksDir, { recursive: true });
+    const preCommitHook = path.join(hooksDir, "pre-commit");
+    fs.writeFileSync(preCommitHook, "#!/bin/sh\nexit 1\n");
+    fs.chmodSync(preCommitHook, 0o755);
+    runGit(repoPath, ["config", "core.hooksPath", hooksDir]);
+    const mechanism = createScriptCommandRoundRunner({
+      command: "/bin/sh",
+      args: ["-c", "printf 'dirty\n' > hook-failure.txt"],
+      cwd: repoPath,
+      timeoutSec: 5,
+      repoSafety: {
+        mode: "finalize",
+        baseHead,
+        commitIntent: {
+          type: "chore",
+          scope: "script",
+          subject: "run script",
+          body: "",
+          breaking: false
+        },
+        verificationCommands: [],
+        verificationTimeoutSec: 5,
+        verificationLogPath: path.join(artifactRoot, "verify.log")
+      }
+    });
+
+    const result = mechanism(
+      round({
+        artifactRoot,
+        executorFamily: "script",
+        logPaths: [path.join(artifactRoot, "script.log")]
+      })
+    );
+
+    expect(result.outcome).toEqual({
+      ok: false,
+      recoveryCode: "command_failed"
+    });
+    expect(result.evidence?.verificationStatus).toBe("skipped");
+    expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
+    expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toBe("");
+  });
+
+  it("preserves reset_failed when commit-failure cleanup fails", async () => {
+    const artifactRoot = makeTempDir();
+    vi.resetModules();
+    vi.doMock("../src/live-step-finalize.js", async (importOriginal) => {
+      const actual =
+        await importOriginal<typeof import("../src/live-step-finalize.js")>();
+      return {
+        ...actual,
+        finalizeLiveWorkflowStep: () => ({
+          outcome: "commit_failed",
+          verification: { ok: true, results: [] },
+          commit: {
+            ok: false,
+            code: "git_failed",
+            error: "git commit failed"
+          },
+          reset: {
+            ok: false,
+            code: "git_failed",
+            error: "git reset failed after commit failure"
+          }
+        })
+      };
+    });
+    const { createScriptCommandRoundRunner: createMockedScriptCommandRoundRunner } =
+      await import("../src/single-shot-mechanism.js");
+    const mechanism = createMockedScriptCommandRoundRunner({
+      command: "/bin/sh",
+      args: ["-c", "printf 'dirty\n' > ignored.txt"],
+      cwd: makeTempDir(),
+      timeoutSec: 5,
+      repoSafety: {
+        mode: "finalize",
+        baseHead: "a".repeat(40),
+        commitIntent: {
+          type: "chore",
+          scope: "script",
+          subject: "run script",
+          body: "",
+          breaking: false
+        },
+        verificationCommands: [],
+        verificationTimeoutSec: 5,
+        verificationLogPath: path.join(artifactRoot, "verify.log")
+      }
+    });
+
+    const result = mechanism(
+      round({
+        artifactRoot,
+        executorFamily: "script",
+        logPaths: [path.join(artifactRoot, "script.log")]
+      })
+    );
+
+    expect(result.outcome).toEqual({
+      ok: false,
+      recoveryCode: "reset_failed"
+    });
     expect(result.evidence?.verificationStatus).toBe("skipped");
   });
 
