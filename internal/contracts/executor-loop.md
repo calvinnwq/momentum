@@ -29,7 +29,8 @@ An executor owns:
 
 - Preparing a bounded unit of work.
 - Running the configured mechanism for that unit.
-- Writing normalized result output.
+- Writing normalized result output or family-specific outcome evidence such as
+  `script` exit-code plus bounded-log evidence.
 - Emitting artifacts, checkpoints, findings, and decisions.
 - Reporting a recommendation such as `complete`, `continue`, `blocked`, `failed`, or `manual_recovery`.
 

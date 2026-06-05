@@ -616,9 +616,13 @@ function validatePositiveTimeoutSec(
 }
 
 export type ProcessGroupOptions = {
+  /** Absolute working directory for the supervised process. */
   cwd: string;
+  /** Complete environment passed to the child process. */
   env: NodeJS.ProcessEnv;
+  /** Child timeout in milliseconds before the whole process group is killed. */
   timeoutMs: number;
+  /** Per-stream stdout/stderr byte cap before the process group is killed. */
   maxBuffer: number;
 };
 
@@ -630,6 +634,12 @@ type ProcessGroupMeta = {
   errorMessage?: string;
 };
 
+/**
+ * Synchronously run a command under a tiny supervisor that owns process-group
+ * cleanup. The child receives explicit argv/env/cwd, stdout and stderr are
+ * bounded separately by `maxBuffer`, and timeout or overflow kills the whole
+ * process group before returning a `SpawnSyncReturns`-shaped result.
+ */
 export function runProcessGroupSync(
   command: string,
   args: string[],

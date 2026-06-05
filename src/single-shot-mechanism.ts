@@ -1,3 +1,18 @@
+/**
+ * Runtime mechanisms for the M10-06 single-shot executor families.
+ *
+ * `one-shot` delegates to the live-step wrapper and therefore requires a
+ * normalized `RunnerResult` document on success. `script` runs an absolute
+ * deterministic command with explicit argv/env/cwd, bounded stdout/stderr, and
+ * succeeds from exit code plus log evidence without writing a result document.
+ *
+ * Both mechanisms enforce repo-safety at the boundary. `read-only` snapshots
+ * require a clean repo before and after the command. `finalize` requires the
+ * caller's `baseHead` to match, then maps verification, commit, reset, lock,
+ * and git outcomes through the same recovery codes used by live workflow-step
+ * finalization. Callers must supply absolute artifact log paths on the round;
+ * `script` configs must also use an absolute executable path and absolute cwd.
+ */
 import { execFileSync, type SpawnSyncReturns } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -30,44 +45,79 @@ import type {
 import type { WorkflowStepKind } from "./workflow-run-reducer.js";
 
 export type OneShotLiveWrapperRoundRunnerOptions = {
+  /** Absolute repository root passed to the live wrapper and safety checks. */
   repoPath: string;
+  /** Workflow step kind forwarded to the live-wrapper registry entry. */
   kind: WorkflowStepKind;
+  /** Optional prompt artifact forwarded as MOMENTUM_PROMPT_PATH. */
   promptPath?: string;
+  /** Base environment filtered by the live-wrapper allowlist. */
   env?: NodeJS.ProcessEnv;
+  /** Per-stream output cap for the wrapped process. */
   outputMaxBytes?: number;
+  /** Whether the runner must preserve repo state or finalize mutations. */
   repoSafety: OneShotRepoSafetyConfig;
 };
 
 export type SingleShotFinalizationConfig = {
+  /** Expected HEAD before finalization may mutate git state. */
   baseHead: string;
+  /** Verification commands run by live-step finalization. */
   verificationCommands: string[];
+  /** Timeout applied to each verification command. */
   verificationTimeoutSec: number;
+  /** Absolute log path for verification output evidence. */
   verificationLogPath: string;
+  /** Optional repo-lock hook invoked immediately before git mutation. */
   beforeGitMutation?: () => { ok: true } | { ok: false; error: string };
 };
 
+/**
+ * Repo-safety policy for `one-shot` runners. `read-only` rejects any HEAD or
+ * worktree change; `finalize` allows mutations only through the shared
+ * verification / commit / reset finalizer.
+ */
 export type OneShotRepoSafetyConfig =
   | { mode: "read-only" }
   | ({ mode: "finalize" } & SingleShotFinalizationConfig);
 
+/**
+ * Repo-safety policy for deterministic scripts. Finalizing scripts need an
+ * explicit commit intent because they do not emit a normalized result document.
+ */
 export type ScriptRepoSafetyConfig =
   | { mode: "read-only" }
   | ({ mode: "finalize"; commitIntent: CommitIntent } &
       SingleShotFinalizationConfig);
 
 export type ScriptCommandRoundRunnerConfig = {
+  /** Absolute executable path; no shell lookup or interpolation is used. */
   command: string;
+  /** Explicit argv passed to the executable. */
   args?: readonly string[];
+  /** Absolute working directory and repo root for safety/finalization checks. */
   cwd: string;
+  /** Positive command timeout in seconds. */
   timeoutSec: number;
+  /** Complete child environment for the deterministic command. */
   env?: NodeJS.ProcessEnv;
+  /** Per-stream stdout/stderr output cap. */
   outputMaxBytes?: number;
+  /** Whether the runner must preserve repo state or finalize mutations. */
   repoSafety: ScriptRepoSafetyConfig;
 };
 
 const DEFAULT_SCRIPT_OUTPUT_MAX_BYTES = LIVE_STEP_WRAPPER_OUTPUT_MAX_BYTES;
 const SHA40_RE = /^[0-9a-f]{40}$/;
 
+/**
+ * Build a `one-shot` round runner around a live-wrapper registry entry.
+ *
+ * The returned runner accepts only `one-shot` rounds with an artifact root and
+ * absolute log path. Success requires the wrapped process to emit a valid
+ * `RunnerResult`; failures and unsafe repo-finalization outcomes are converted
+ * into stable single-shot recovery codes for the orchestrator.
+ */
 export function createOneShotLiveWrapperRoundRunner(
   config: LiveWrapperConfig,
   options: OneShotLiveWrapperRoundRunnerOptions
@@ -204,6 +254,14 @@ export function createOneShotLiveWrapperRoundRunner(
   };
 }
 
+/**
+ * Build a deterministic `script` round runner.
+ *
+ * The runner requires an absolute command, absolute cwd, positive timeout, and
+ * at least one absolute round log path. A zero exit code is the success signal;
+ * stdout/stderr plus the exit metadata are the evidence, so no normalized result
+ * document or result digest is produced for script success.
+ */
 export function createScriptCommandRoundRunner(
   config: ScriptCommandRoundRunnerConfig
 ): SingleShotRoundRunner {
