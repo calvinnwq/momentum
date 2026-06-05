@@ -4,8 +4,9 @@
  * The executor-loop contract (internal/contracts/executor-loop.md) pins two
  * single-invocation executor families that this module serves together:
  *
- *   - `one-shot` "runs a single command, agent call, or script-like invocation.
- *     It may retry under policy, but it does not own an open-ended loop."
+ *   - `one-shot` "runs a single result-bearing command or agent wrapper.
+ *     It may retry under policy, but it does not own an open-ended loop, and
+ *     success requires a normalized result document."
  *   - `script` "runs deterministic local commands with explicit argv/env/cwd and
  *     bounded logs."
  *
@@ -41,17 +42,21 @@
  *     `result_missing` / `result_invalid` are `failed`: "the step should fail
  *     under the current policy." These are genuine execution failures of the
  *     bounded unit itself.
- *   - The unsafe repo-finalization codes (`head_mismatch`, `repo_lock_lost`,
- *     `reset_failed`, `commit_failed`, `git_failed`, `invalid_input`) route to
- *     `manual_recovery_required` and preserve the precise code, mirroring how
- *     `decideGoalLoopRound` treats the same finalize ambiguity: Momentum cannot
- *     safely proceed without operator inspection.
+ *   - The unsafe repo-finalization / invalid-input codes (`head_mismatch`,
+ *     `repo_lock_lost`, `reset_failed`, `commit_failed`, `git_failed`,
+ *     `invalid_input`) route to `manual_recovery_required` and preserve the
+ *     precise code, mirroring how `decideGoalLoopRound` treats unsafe finalize
+ *     ambiguity: Momentum cannot safely proceed without operator inspection.
+ *     `invalid_input` also covers pre-launch mechanism/config precondition
+ *     failures such as a malformed `baseHead`, wrong executor family, or
+ *     non-absolute artifact / script paths.
  *
  * The recovery taxonomy reuses the existing vocabulary rather than inventing a
  * parallel one: the execution-time codes are exactly the M9
  * {@link LIVE_STEP_WRAPPER_RECOVERY_CODES}, and the unsafe-finalize codes are the
- * same strings `goal-loop-executor.ts` preserves for an unsafe finalize outcome
- * (`head_mismatch` is the moved-HEAD guard's code; the rest name themselves).
+ * same strings `goal-loop-executor.ts` preserves for an unsafe finalize outcome,
+ * plus `invalid_input` for rejected mechanism configuration or launch
+ * preconditions.
  */
 
 import type {
@@ -124,9 +129,11 @@ export const SINGLE_SHOT_FAILED_RECOVERY_CODES = [
 
 /**
  * Recovery codes that route to `manual_recovery_required`: an unsafe or
- * ambiguous repo-finalization outcome that Momentum must not retry away. These
- * are the same strings `goal-loop-executor.ts` preserves for an unsafe finalize
- * (`head_mismatch` is the moved-HEAD guard's code).
+ * ambiguous repo-finalization outcome, or an invalid mechanism/config input that
+ * Momentum must not retry away. Most are the same strings
+ * `goal-loop-executor.ts` preserves for an unsafe finalize; `invalid_input` also
+ * covers pre-launch guards such as bad family, malformed `baseHead`, or relative
+ * artifact / script paths.
  */
 export const SINGLE_SHOT_MANUAL_RECOVERY_CODES = [
   "head_mismatch",
@@ -142,7 +149,9 @@ export const SINGLE_SHOT_MANUAL_RECOVERY_CODES = [
  * record, partitioned by classification bucket. The execution-time codes
  * (`blocked` + `failed` buckets) are exactly the M9
  * {@link LIVE_STEP_WRAPPER_RECOVERY_CODES}; the manual-recovery codes are the
- * unsafe-finalize vocabulary shared with the goal-loop adapter.
+ * unsafe-finalize vocabulary shared with the goal-loop adapter, plus
+ * `invalid_input` for rejected single-shot mechanism configuration and launch
+ * preconditions.
  */
 export const SINGLE_SHOT_RECOVERY_CODES = [
   ...SINGLE_SHOT_BLOCKED_RECOVERY_CODES,
