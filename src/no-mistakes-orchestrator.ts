@@ -643,8 +643,12 @@ export type RunNoMistakesMirrorRoundResult = {
  * @throws {ExecutorRoundNotFoundError} if no round has `roundId` — the mirror round
  * must already exist (born at {@link runNoMistakesMirrorStep}); a poll reconciles a
  * started round, it never creates one.
- * @throws {ExecutorRoundTransitionError} if the round is already terminal — a poll
+ * @throws {NoMistakesMirrorRoundFamilyError} if `roundId` belongs to a
+ * non-no-mistakes executor family.
+ * @throws {NoMistakesMirrorRoundTerminalError} if the round is already terminal — a poll
  * must only tick a live (`mirroring_external_state` / `waiting_operator`) round.
+ * @throws {ExecutorRoundTransitionError} if persistence rejects the projected
+ * round transition.
  */
 export function runNoMistakesMirrorRound(
   input: RunNoMistakesMirrorRoundInput
