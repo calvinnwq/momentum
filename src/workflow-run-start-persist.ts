@@ -7,9 +7,10 @@
  * `workflow_steps` tables, with a `workflow_approvals` row when the start has an
  * approval boundary. This is the storage twin of the pure materializer:
  * nothing here runs executors, schedules work, or starts a Goal loop. Scheduling
- * is owned separately by `workflow-scheduler.ts`; real executor adapters remain
- * later M10 work. `goal start` stays the compatibility path for old Goal-loop
- * usage and is untouched.
+ * is owned separately by `workflow-scheduler.ts`; the landed goal-loop and
+ * one-shot / script adapters attach through executor-loop persistence rather
+ * than this start persistence layer. `goal start` stays the compatibility path
+ * for old Goal-loop usage and is untouched.
  *
  * Stable contracts this slice locks in:
  *   - A run's durable identity is its `id` (= `runId`); a step's is

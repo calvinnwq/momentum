@@ -6,9 +6,10 @@
  * writes them into the durable `executor_definitions` / `executor_invocations` /
  * `executor_rounds` tables added by `migrations.ts`. This is the storage twin of
  * the pure reducer: nothing here runs executors or starts a Goal loop. The
- * M10-04 scheduler lane is owned separately by `workflow-scheduler.ts`; Goal-loop
- * and real executor adapter execution remain later M10 work, exactly as
- * `workflow-definition-persist.ts` is the storage twin of `workflow-definition.ts`.
+ * M10-04 scheduler lane is owned separately by `workflow-scheduler.ts`; the
+ * landed goal-loop and one-shot / script adapters layer on top of this
+ * persistence spine, exactly as `workflow-definition-persist.ts` is the storage
+ * twin of `workflow-definition.ts`.
  *
  * Stable contracts this slice locks in:
  *   - An executor definition's durable identity is its `executorKey`; re-persisting
