@@ -50,6 +50,11 @@ const INVOCATION_ID = noMistakesInvocationId(
   ATTEMPT
 );
 const ROUND_ID = noMistakesRoundId(INVOCATION_ID);
+const EXPECTED_EXTERNAL_IDENTITY = {
+  externalRunId: "nm-run-9",
+  branch: "feat/x",
+  headSha: HEAD_SHA
+};
 
 const tempRoots: string[] = [];
 
@@ -173,6 +178,7 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
     const result = runNoMistakesMirrorRound({
       db,
       roundId: ROUND_ID,
+      expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       read: okReader({
         stepStatus: "completed",
         ciState: "passed",
@@ -278,6 +284,24 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
     expect(result.round.humanGate).toBe("manual_recovery_required");
   });
 
+  it("refuses first-poll terminal success without a pinned external identity", () => {
+    const db = openMirrorRoundDb();
+
+    const result = runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      read: okReader({ stepStatus: "completed", ciState: "passed" }),
+      polledAt: 3_000
+    });
+
+    expect(result.decision.classification).toBe("manual_recovery_required");
+    expect(result.decision.recoveryCode).toBe("external_state_inconsistent");
+    expect(result.round.state).toBe("manual_recovery_required");
+    expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe(
+      "manual_recovery_required"
+    );
+  });
+
   it("routes a structurally unreadable snapshot (bad head SHA) to manual_recovery_required", () => {
     const db = openMirrorRoundDb();
 
@@ -370,6 +394,7 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
     const first = runNoMistakesMirrorRound({
       db,
       roundId: ROUND_ID,
+      expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       read: okReader({ stepStatus: "completed", ciState: "passed" }),
       polledAt: 2_000
     });
@@ -875,6 +900,7 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
       stepKey: STEP_KEY,
       attempt: ATTEMPT,
       read,
+      expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       resolveRoundInputs,
       now
     });
@@ -1029,6 +1055,11 @@ describe("runNoMistakesMirrorStep — composes the real external-state reader en
       stepKey: STEP_KEY,
       attempt: ATTEMPT,
       read: () => readNoMistakesExternalState({ statePath }),
+      expectedExternalIdentity: {
+        externalRunId: "nm-run-42",
+        branch: "feat/x",
+        headSha: HEAD_SHA
+      },
       resolveRoundInputs: () => ({
         inputDigest: null,
         artifactRoot: dir,

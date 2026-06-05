@@ -140,6 +140,8 @@ type NoMistakesExternalIdentity = Pick<
   "externalRunId" | "branch" | "headSha"
 >;
 
+export type NoMistakesExpectedExternalIdentity = NoMistakesExternalIdentity;
+
 function externalIdentity(
   state: NoMistakesExternalState
 ): NoMistakesExternalIdentity {
@@ -202,15 +204,10 @@ function pinnedExternalIdentity(
   return null;
 }
 
-function externalIdentityMismatchReason(
-  db: MomentumDb,
-  roundId: string,
+function describeExternalIdentityMismatch(
+  expected: NoMistakesExternalIdentity,
   state: NoMistakesExternalState
 ): string | null {
-  const expected = pinnedExternalIdentity(db, roundId);
-  if (expected === null) {
-    return null;
-  }
   const actual = externalIdentity(state);
   const changed: string[] = [];
   for (const key of ["externalRunId", "branch", "headSha"] as const) {
@@ -221,6 +218,22 @@ function externalIdentityMismatchReason(
   return changed.length > 0
     ? `external no-mistakes identity changed: ${changed.join(", ")}`
     : null;
+}
+
+function externalIdentityMismatchReason(
+  db: MomentumDb,
+  roundId: string,
+  state: NoMistakesExternalState,
+  expected: NoMistakesExpectedExternalIdentity | null
+): string | null {
+  const pinned = pinnedExternalIdentity(db, roundId);
+  if (pinned !== null) {
+    return describeExternalIdentityMismatch(pinned, state);
+  }
+  if (expected !== null) {
+    return describeExternalIdentityMismatch(expected, state);
+  }
+  return null;
 }
 
 function noMistakesExternalStateInconsistent(
@@ -392,10 +405,19 @@ function reconcileNoMistakesCompletionDecision(
   db: MomentumDb,
   roundId: string,
   stateRead: NoMistakesExternalStateRead,
-  decision: NoMistakesMirrorDecision
+  decision: NoMistakesMirrorDecision,
+  expectedExternalIdentity: NoMistakesExpectedExternalIdentity | null
 ): NoMistakesMirrorDecision {
   if (!stateRead.ok || decision.classification !== "complete") {
     return decision;
+  }
+  if (
+    pinnedExternalIdentity(db, roundId) === null &&
+    expectedExternalIdentity === null
+  ) {
+    return noMistakesExternalStateInconsistent(
+      "external no-mistakes run claims completed before external identity was pinned"
+    );
   }
   const unresolvedCount = unresolvedPriorDecisionCount(
     db,
@@ -416,6 +438,8 @@ export type RunNoMistakesMirrorRoundInput = {
   roundId: string;
   /** The bounded reader that sources + parses the untrusted external state. */
   read: NoMistakesMirrorReader;
+  /** Optional caller-known identity used to corroborate terminal first-poll success. */
+  expectedExternalIdentity?: NoMistakesExpectedExternalIdentity;
   /** Daemon clock stamped as this poll's `heartbeat_at` and terminal `finished_at`. */
   polledAt: number;
 };
@@ -458,7 +482,13 @@ export type RunNoMistakesMirrorRoundResult = {
 export function runNoMistakesMirrorRound(
   input: RunNoMistakesMirrorRoundInput
 ): RunNoMistakesMirrorRoundResult {
-  const { db, roundId, read, polledAt } = input;
+  const {
+    db,
+    roundId,
+    read,
+    expectedExternalIdentity = null,
+    polledAt
+  } = input;
 
   // 1. Load the live round (it must already exist) so the reader can locate the
   //    external store from its frozen artifact root / identity.
@@ -480,7 +510,12 @@ export function runNoMistakesMirrorRound(
     ? decideNoMistakesMirror(stateRead.value)
     : decideNoMistakesUnreadable(stateRead.error);
   const identityMismatchReason = stateRead.ok
-    ? externalIdentityMismatchReason(db, roundId, stateRead.value)
+    ? externalIdentityMismatchReason(
+        db,
+        roundId,
+        stateRead.value,
+        expectedExternalIdentity
+      )
     : null;
   const identityMatchesPinnedState = identityMismatchReason === null;
   const identityReconciled =
@@ -492,7 +527,8 @@ export function runNoMistakesMirrorRound(
     db,
     roundId,
     stateRead,
-    identityReconciled
+    identityReconciled,
+    expectedExternalIdentity
   );
 
   // 3. Patch the durable round, stamping the daemon clock and re-fingerprinting the
@@ -574,6 +610,8 @@ export type RunNoMistakesMirrorStepInput = {
   attempt: number;
   /** The bounded reader the first poll runs (the real reader plugs in here). */
   read: NoMistakesMirrorReader;
+  /** Optional caller-known identity used to corroborate terminal first-poll success. */
+  expectedExternalIdentity?: NoMistakesExpectedExternalIdentity;
   /** Resolves the round's input digest / artifact root / log paths the daemon provides. */
   resolveRoundInputs: () => NoMistakesRoundRuntimeInputs;
   /** Clock for the invocation + round + poll timestamps; defaults to {@link Date.now}. */
@@ -650,12 +688,16 @@ export function runNoMistakesMirrorStep(
 
   // 3. Run the first poll against the freshly-born round.
   const polledAt = now();
-  const round = runNoMistakesMirrorRound({
+  const roundInput: RunNoMistakesMirrorRoundInput = {
     db,
     roundId: startRecord.roundId,
     read: input.read,
     polledAt
-  });
+  };
+  if (input.expectedExternalIdentity !== undefined) {
+    roundInput.expectedExternalIdentity = input.expectedExternalIdentity;
+  }
+  const round = runNoMistakesMirrorRound(roundInput);
 
   // 4. Settle the invocation into the state the first poll's decision maps to. The
   //    mirror's invocation states are the same as the round's, so a continue keeps
