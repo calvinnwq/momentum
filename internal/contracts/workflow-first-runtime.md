@@ -129,9 +129,9 @@ Loops live inside executors, but their rounds belong in Momentum's database.
 Initial executor families:
 
 - `goal-loop` — bounded autonomous implementation rounds.
-- `one-shot` — one command / agent / script invocation with normalized result output.
+- `one-shot` — one command or agent invocation with normalized result output.
 - `no-mistakes` — specialist review gate mirroring no-mistakes daemon state.
-- `script` — deterministic local command execution.
+- `script` — deterministic local command execution with exit-code/log result semantics.
 - `external-apply` — operator-mediated external write using the M6 external apply contract.
 - `subworkflow` — future nested workflow execution.
 

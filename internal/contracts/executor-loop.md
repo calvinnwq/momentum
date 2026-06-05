@@ -161,9 +161,11 @@ The schema may add executor-specific payload fields, but the common fields above
 
 ## Required Artifacts
 
-Every round writes or mirrors these artifact classes:
+Every round writes or mirrors the artifact classes that apply to its executor
+family:
 
-- Normalized result document.
+- Normalized result document for result-bearing families; the `script` family
+  omits this on success.
 - Bounded stdout/stderr or equivalent external logs.
 - Checkpoint stream for major executor stages.
 - Verification output when verification is configured.

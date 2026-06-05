@@ -27,8 +27,8 @@
  *   - State changes are transition-gated through the same
  *     {@link transitionExecutorInvocation} / {@link transitionExecutorRound}
  *     reducers used everywhere else: a round can never fast-path to `succeeded`
- *     without first capturing or mirroring a normalized result, and the refusal
- *     leaves the durable row unchanged.
+ *     without first entering the capture or mirror phase, and the refusal leaves
+ *     the durable row unchanged.
  *   - The round carries the contract "Round Schema" normalized result fields
  *     (`summary`, `key_changes`, `remaining_work`, `changed_files`,
  *     `verification_status`, `commit_sha`, ...) so workflow status, handoff,

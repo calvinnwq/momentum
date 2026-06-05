@@ -29,11 +29,13 @@
  *     explicit operator command / API decision / approved delegated policy
  *     before the daemon may continue, so it can always resume into an active
  *     processing state.
- *   - A round cannot silently skip the normalized result step (contract "Round
- *     Lifecycle"): `succeeded` is unreachable straight from `pending` / `running`
- *     and must pass through `capturing_result` / `mirroring_external_state`
- *     (with optional `finalizing`). The transition reducer encodes that as a
- *     refusal so callers cannot fast-path a success without a captured result.
+ *   - A round cannot silently skip the capture/state-mirror phase (contract
+ *     "Round Lifecycle"): `succeeded` is unreachable straight from `pending` /
+ *     `running` and must pass through `capturing_result` /
+ *     `mirroring_external_state` (with optional `finalizing`). Result-bearing
+ *     families capture a normalized result or mirrored external state there;
+ *     the `script` family may use `capturing_result` as a bare transition for
+ *     exit-code-plus-log success.
  *   - An invocation must `preparing` before it can `running` (resolve agent /
  *     model / leases first), mirroring the step reducer's
  *     pending -> approved -> running ordering.
@@ -142,12 +144,13 @@ export type ExecutorHumanGateType =
   (typeof EXECUTOR_HUMAN_GATE_TYPES)[number];
 
 /**
- * Artifact classes every round writes or mirrors (contract "Required
- * Artifacts"). Artifact paths are evidence pointers; SQLite stays the source of
- * truth for state and classification. One entry per contract bullet, in order:
- * the normalized result document, bounded logs, the checkpoint stream,
- * verification output, commit/reset evidence after repo finalization, and the
- * recovery note when manual recovery is required.
+ * Artifact classes a round can write or mirror (contract "Required Artifacts").
+ * Artifact paths are evidence pointers; SQLite stays the source of truth for
+ * state and classification. One entry per contract bullet, in order: the
+ * normalized result document when the family emits one (the `script` family does
+ * not on success), bounded logs, the checkpoint stream, verification output,
+ * commit/reset evidence after repo finalization, and the recovery note when
+ * manual recovery is required.
  */
 export const EXECUTOR_ARTIFACT_CLASSES = [
   "result_document",
@@ -210,8 +213,9 @@ const ROUND_ALLOWED: Readonly<
   Record<ExecutorRoundState, readonly ExecutorRoundState[]>
 > = {
   pending: ["running", "mirroring_external_state", "waiting_operator", ...ROUND_ABORTS],
-  // No direct `succeeded`: the normalized result must be captured (locally) or
-  // mirrored (externally) first.
+  // No direct `succeeded`: result-bearing families must capture a result or
+  // mirror external state first. The script family still passes through the
+  // capture state, but as a bare exit-code/log capture with no result document.
   running: [
     "capturing_result",
     "mirroring_external_state",
@@ -305,8 +309,8 @@ export function transitionExecutorInvocation(
 /**
  * Validate an executor round state transition. Refuses unknown states,
  * transitions out of a terminal state, and any transition not in the allowed
- * graph — including fast-pathing to `succeeded` without first capturing or
- * mirroring a normalized result. A same-state transition is a no-op success.
+ * graph — including fast-pathing to `succeeded` without first entering the
+ * capture or mirror phase. A same-state transition is a no-op success.
  */
 export function transitionExecutorRound(
   from: ExecutorRoundState,

@@ -15,7 +15,7 @@
  *   -> insert the round-start row (running, agent/model/input frozen in)
  *   -> run the bounded mechanism  (the one-shot agent pass / the script command)
  *   -> persist the round's evidence artifacts (contract "Required Artifacts")
- *   -> capture the normalized result  (running -> capturing_result)
+ *   -> run capture/result transition  (running -> capturing_result)
  *   -> persist the terminal decision  (-> succeeded / failed / blocked / manual)
  *   -> persist the round's lifecycle checkpoint stream (contract step 7)
  *   -> settle the invocation into the round decision's terminal state
@@ -267,9 +267,9 @@ export function runSingleShotRound(
     insertExecutorArtifact(db, artifact, { now: finishedAt });
   }
 
-  // 4. Capture the normalized result (on every success, bare for the script
-  //    family) then persist the terminal decision, stamping the daemon clock the
-  //    pure projection cannot supply.
+  // 4. Run the capture transition (normalized result for one-shot success, bare
+  //    transition for script success) then persist the terminal decision,
+  //    stamping the daemon clock the pure projection cannot supply.
   if (plan.captureUpdate !== null) {
     updateExecutorRound(db, start.roundId, plan.captureUpdate, {
       now: finishedAt
