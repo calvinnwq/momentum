@@ -128,7 +128,7 @@ The M10 slice order is:
    and step runs without breaking existing goal iteration draining.
 6. **NGX-349 — M10-05 Goal-loop executor adapter.** Move implementation-like autonomous
    rounds into the executor-loop model while preserving repo safety and
-   finalization behavior. *(landed in this slice)*
+   finalization behavior. *(done)*
 7. **NGX-350 — M10-06 One-shot and script executor adapters.** Support bounded
    one-shot invocations with normalized results and deterministic script
    commands that succeed from exit code plus bounded logs. *(landed in this

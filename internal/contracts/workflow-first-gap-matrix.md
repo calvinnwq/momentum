@@ -108,7 +108,7 @@ Future product surface:
 | Step model | Fixed coding workflow step kinds | Configurable StepDefinition list | Keep canonical coding workflow as one built-in definition |
 | Executor model | Runner profiles and M9 wrapper registry keyed by fixed step kind | Per-step ExecutorDefinition and executor config | Reuse wrapper config as executor config input |
 | Loop state | Goal iteration jobs/artifacts; external GNHF/no-mistakes state | ExecutorInvocation / ExecutorRound records | Goal-loop adapter landed (M10-05) and one-shot / script adapters landed (M10-06): bounded rounds persist common loop state in Momentum SQLite |
-| Daemon scheduling | Drains goal iteration queue; opt-in lane recovers/scans/claims runnable workflow steps | Schedules workflow runs and step runs | Scheduler lane landed (M10-04); goal-loop and one-shot / script adapters attach the first executor families to the dispatch seam |
+| Daemon scheduling | Drains goal iteration queue; opt-in lane recovers/scans/claims runnable workflow steps | Schedules workflow runs and step runs | Scheduler lane landed (M10-04); goal-loop and one-shot / script adapters now drive and persist bounded rounds below StepRun, while direct dispatcher wiring remains later runtime work |
 | Repo safety | Repo locks plus verification / commit transactions | Same safety around executor finalization | Reuse M9 finalization and repo-lock heartbeats |
 | Approvals | M8 workflow approvals for imported runs | Workflow / step / gate approvals | Keep M8 rows; generalize boundary vocabulary |
 | Human gates | Split across approval rows, recovery flag, external TUI/IPC | Durable gates with allowed actions and decisions | Add gate records and `workflow run decide` |
@@ -153,7 +153,7 @@ The M10 slice order:
 3. **M10-02 Workflow run start**: create runs from definitions with approval boundaries and repo policy.
 4. **M10-03 ExecutorDefinition / Invocation / Round schema**: persist executor loop state under step runs. *(done)*
 5. **M10-04 Daemon workflow scheduler lane**: schedule runnable workflow runs and step runs without breaking goal iteration draining. *(done)*
-6. **M10-05 Goal-loop executor adapter**: migrate existing goal iteration behavior into executor rounds. *(landed in this slice)*
+6. **M10-05 Goal-loop executor adapter**: migrate existing goal iteration behavior into executor rounds. *(done)*
 7. **M10-06 One-shot / script executor adapter**: support deterministic commands and bounded agent/script invocations. *(landed in this slice)*
 8. **M10-07 no-mistakes executor mirror**: mirror no-mistakes runs, findings, decisions, PR/CI state, and completion into Momentum.
 9. **M10-08 Workflow gates and decisions CLI**: add durable operator decisions and delegated policy application.

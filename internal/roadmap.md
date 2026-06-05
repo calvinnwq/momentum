@@ -120,7 +120,7 @@ becomes an executor family inside a workflow step.
 3. **NGX-346 — M10-02 Workflow run start.** *(done)*
 4. **NGX-347 — M10-03 ExecutorDefinition / Invocation / Round schema.** *(done)*
 5. **NGX-348 — M10-04 Daemon workflow scheduler lane.** *(done)*
-6. **NGX-349 — M10-05 Goal-loop executor adapter.** *(landed in this slice)*
+6. **NGX-349 — M10-05 Goal-loop executor adapter.** *(done)*
 7. **NGX-350 — M10-06 One-shot and script executor adapters.** *(landed in this slice)*
 8. **NGX-351 — M10-07 no-mistakes executor mirror.**
 9. **NGX-352 — M10-08 Workflow gates and decisions CLI.**
