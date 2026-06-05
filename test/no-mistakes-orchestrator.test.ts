@@ -827,6 +827,48 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
     expect(loadExecutorInvocation(db, INVOCATION_ID)!.finishedAt).toBe(4_000);
   });
 
+  it("rolls back a terminal poll when evidence persistence fails", () => {
+    const db = openMirrorRoundDb();
+
+    runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
+      read: okReader({ stepStatus: "running" }),
+      polledAt: 2_000
+    });
+    db.prepare(
+      `INSERT INTO executor_checkpoints
+         (checkpoint_id, round_id, sequence, stage, detail, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(
+      `${ROUND_ID}-external-state-2`,
+      ROUND_ID,
+      2,
+      "reserved",
+      null,
+      2_500
+    );
+
+    expect(() =>
+      runNoMistakesMirrorRound({
+        db,
+        roundId: ROUND_ID,
+        read: okReader({ stepStatus: "completed", ciState: "passed" }),
+        polledAt: 3_000
+      })
+    ).toThrow(/checkpoint/i);
+
+    expect(loadExecutorRound(db, ROUND_ID)!.state).toBe(
+      "mirroring_external_state"
+    );
+    expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe("running");
+    expect(listExecutorCheckpointsForRound(db, ROUND_ID).map((c) => c.stage)).toEqual([
+      "external_state_mirrored",
+      "reserved"
+    ]);
+  });
+
   it("resumes a waiting_operator round back into mirroring when the decision clears", () => {
     const db = openMirrorRoundDb();
 
@@ -1119,6 +1161,38 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
     );
     expect(result.invocation.state).toBe("manual_recovery_required");
     expect(result.round.round.state).toBe("manual_recovery_required");
+  });
+
+  it("persists the expected external identity before the first poll", () => {
+    const db = openDb(makeTempDir());
+    seedParents(db);
+
+    expect(() =>
+      runNoMistakesMirrorStep({
+        db,
+        workflowRunId: WORKFLOW_RUN_ID,
+        stepRunId: STEP_RUN_ID,
+        stepKey: STEP_KEY,
+        attempt: ATTEMPT,
+        read: () => {
+          throw new Error("simulated poll crash");
+        },
+        expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
+        resolveRoundInputs,
+        now: stubClock()
+      })
+    ).toThrow("simulated poll crash");
+
+    const reattached = runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      read: okReader({ stepStatus: "completed", ciState: "passed" }),
+      polledAt: 5_000
+    });
+
+    expect(reattached.decision.classification).toBe("complete");
+    expect(reattached.round.state).toBe("succeeded");
+    expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe("succeeded");
   });
 
   it("projects the first poll's findings and decisions below the round", () => {

@@ -143,6 +143,9 @@ type NoMistakesExternalIdentity = Pick<
 
 export type NoMistakesExpectedExternalIdentity = NoMistakesExternalIdentity;
 
+const EXTERNAL_STATE_MIRRORED_STAGE = "external_state_mirrored";
+const EXPECTED_EXTERNAL_IDENTITY_STAGE = "expected_external_identity";
+
 function externalIdentity(
   state: NoMistakesExternalState
 ): NoMistakesExternalIdentity {
@@ -194,7 +197,7 @@ function pinnedExternalIdentity(
   roundId: string
 ): NoMistakesExternalIdentity | null {
   for (const checkpoint of listExecutorCheckpointsForRound(db, roundId)) {
-    if (checkpoint.stage !== "external_state_mirrored") {
+    if (checkpoint.stage !== EXTERNAL_STATE_MIRRORED_STAGE) {
       continue;
     }
     const identity = externalIdentityFromCheckpointDetail(checkpoint.detail);
@@ -203,6 +206,34 @@ function pinnedExternalIdentity(
     }
   }
   return null;
+}
+
+function durableExpectedExternalIdentity(
+  db: MomentumDb,
+  roundId: string
+): NoMistakesExternalIdentity | null {
+  for (const checkpoint of listExecutorCheckpointsForRound(db, roundId)) {
+    if (checkpoint.stage !== EXPECTED_EXTERNAL_IDENTITY_STAGE) {
+      continue;
+    }
+    const identity = externalIdentityFromCheckpointDetail(checkpoint.detail);
+    if (identity !== null) {
+      return identity;
+    }
+  }
+  return null;
+}
+
+function externalIdentityAnchor(
+  db: MomentumDb,
+  roundId: string,
+  expected: NoMistakesExpectedExternalIdentity | null
+): NoMistakesExternalIdentity | null {
+  return (
+    pinnedExternalIdentity(db, roundId) ??
+    durableExpectedExternalIdentity(db, roundId) ??
+    expected
+  );
 }
 
 function describeExternalIdentityMismatch(
@@ -227,14 +258,8 @@ function externalIdentityMismatchReason(
   state: NoMistakesExternalState,
   expected: NoMistakesExpectedExternalIdentity | null
 ): string | null {
-  const pinned = pinnedExternalIdentity(db, roundId);
-  if (pinned !== null) {
-    return describeExternalIdentityMismatch(pinned, state);
-  }
-  if (expected !== null) {
-    return describeExternalIdentityMismatch(expected, state);
-  }
-  return null;
+  const anchor = externalIdentityAnchor(db, roundId, expected);
+  return anchor === null ? null : describeExternalIdentityMismatch(anchor, state);
 }
 
 function noMistakesExternalStateInconsistent(
@@ -332,7 +357,7 @@ function insertExternalStateCheckpoint(
       checkpointId: `${roundId}-external-state-${sequence}`,
       roundId,
       sequence,
-      stage: "external_state_mirrored",
+      stage: EXTERNAL_STATE_MIRRORED_STAGE,
       detail: JSON.stringify({
         externalRunId: state.externalRunId,
         branch: state.branch,
@@ -342,6 +367,26 @@ function insertExternalStateCheckpoint(
         prUrl: state.prUrl,
         ciState: state.ciState
       })
+    },
+    { now }
+  );
+}
+
+function insertExpectedExternalIdentityCheckpoint(
+  db: MomentumDb,
+  roundId: string,
+  identity: NoMistakesExpectedExternalIdentity,
+  now: number
+): void {
+  const sequence = listExecutorCheckpointsForRound(db, roundId).length;
+  insertExecutorCheckpoint(
+    db,
+    {
+      checkpointId: `${roundId}-expected-external-identity`,
+      roundId,
+      sequence,
+      stage: EXPECTED_EXTERNAL_IDENTITY_STAGE,
+      detail: JSON.stringify(identity)
     },
     { now }
   );
@@ -423,10 +468,30 @@ function hasPinnedOrExpectedExternalIdentity(
   roundId: string,
   expectedExternalIdentity: NoMistakesExpectedExternalIdentity | null
 ): boolean {
-  return (
-    pinnedExternalIdentity(db, roundId) !== null ||
-    expectedExternalIdentity !== null
-  );
+  return externalIdentityAnchor(db, roundId, expectedExternalIdentity) !== null;
+}
+
+function withSavepoint<T>(
+  db: MomentumDb,
+  name: string,
+  fn: () => T
+): T {
+  db.exec(`SAVEPOINT ${name}`);
+  try {
+    const result = fn();
+    db.exec(`RELEASE SAVEPOINT ${name}`);
+    return result;
+  } catch (error) {
+    try {
+      db.exec(`ROLLBACK TO SAVEPOINT ${name}`);
+    } finally {
+      try {
+        db.exec(`RELEASE SAVEPOINT ${name}`);
+      } catch {
+      }
+    }
+    throw error;
+  }
 }
 
 function reconcileNoMistakesTerminalDecision(
@@ -577,59 +642,66 @@ export function runNoMistakesMirrorRound(
   // 3. Patch the durable round, stamping the daemon clock and re-fingerprinting the
   //    round with the exact bytes this poll mirrored (only on a successful read —
   //    a failure has no trustworthy digest, so the frozen one stays in place).
-  const roundUpdate = noMistakesPollRoundUpdate(decision, stateRead, polledAt);
-  if (decision.invocationState === "succeeded") {
-    resumeWaitingInvocationBeforeSuccess(db, current.invocationId, polledAt);
-  }
-  if (current.state === "waiting_operator" && decision.roundState === "succeeded") {
-    updateExecutorRound(
-      db,
-      roundId,
-      {
-        ...roundUpdate,
-        toState: "mirroring_external_state",
-        classification: "continue",
-        finishedAt: null
-      },
-      { now: polledAt }
-    );
-  }
-  const round = updateExecutorRound(db, roundId, roundUpdate, { now: polledAt });
-  updateInvocationForDecision(db, current.invocationId, decision, polledAt);
-
-  // 4. Mirror the snapshot below the round. A reader failure has no snapshot, so
-  //    it mirrors nothing and preserves prior evidence.
-  if (stateRead.ok && identityCorroborated) {
-    insertExternalStateCheckpoint(db, roundId, stateRead.value, polledAt);
-    if (decision.recoveryCode !== "external_state_unreadable") {
-      insertNewFindings(
+  return withSavepoint(db, "no_mistakes_mirror_poll", () => {
+    const roundUpdate = noMistakesPollRoundUpdate(decision, stateRead, polledAt);
+    if (decision.invocationState === "succeeded") {
+      resumeWaitingInvocationBeforeSuccess(db, current.invocationId, polledAt);
+    }
+    if (
+      current.state === "waiting_operator" &&
+      decision.roundState === "succeeded"
+    ) {
+      updateExecutorRound(
         db,
         roundId,
-        planNoMistakesRoundFindings({
-          roundId,
-          findings: stateRead.value.findings,
-          selectedFindingIds: stateRead.value.selectedFindingIds
-        }),
-        polledAt
-      );
-      insertNewDecisions(
-        db,
-        roundId,
-        planNoMistakesRoundDecisions({
-          roundId,
-          decisions: stateRead.value.decisions
-        }),
-        polledAt
+        {
+          ...roundUpdate,
+          toState: "mirroring_external_state",
+          classification: "continue",
+          finishedAt: null
+        },
+        { now: polledAt }
       );
     }
-  }
+    const round = updateExecutorRound(db, roundId, roundUpdate, {
+      now: polledAt
+    });
+    updateInvocationForDecision(db, current.invocationId, decision, polledAt);
 
-  return {
-    round,
-    decision,
-    findings: listExecutorFindingsForRound(db, roundId),
-    decisions: listExecutorDecisionsForRound(db, roundId)
-  };
+    // 4. Mirror the snapshot below the round. A reader failure has no snapshot, so
+    //    it mirrors nothing and preserves prior evidence.
+    if (stateRead.ok && identityCorroborated) {
+      insertExternalStateCheckpoint(db, roundId, stateRead.value, polledAt);
+      if (decision.recoveryCode !== "external_state_unreadable") {
+        insertNewFindings(
+          db,
+          roundId,
+          planNoMistakesRoundFindings({
+            roundId,
+            findings: stateRead.value.findings,
+            selectedFindingIds: stateRead.value.selectedFindingIds
+          }),
+          polledAt
+        );
+        insertNewDecisions(
+          db,
+          roundId,
+          planNoMistakesRoundDecisions({
+            roundId,
+            decisions: stateRead.value.decisions
+          }),
+          polledAt
+        );
+      }
+    }
+
+    return {
+      round,
+      decision,
+      findings: listExecutorFindingsForRound(db, roundId),
+      decisions: listExecutorDecisionsForRound(db, roundId)
+    };
+  });
 }
 
 /**
@@ -706,26 +778,39 @@ export function runNoMistakesMirrorStep(
   const { db } = input;
 
   // 1. Materialize + insert the durable invocation (running) before any read.
-  const invocationStartedAt = now();
-  const invocation = planNoMistakesInvocation({
-    workflowRunId: input.workflowRunId,
-    stepRunId: input.stepRunId,
-    stepKey: input.stepKey,
-    attempt: input.attempt,
-    startedAt: invocationStartedAt
-  });
-  insertExecutorInvocation(db, invocation, { now: invocationStartedAt });
+  const { invocation, startRecord } = withSavepoint(
+    db,
+    "no_mistakes_mirror_start",
+    () => {
+      const invocationStartedAt = now();
+      const invocation = planNoMistakesInvocation({
+        workflowRunId: input.workflowRunId,
+        stepRunId: input.stepRunId,
+        stepKey: input.stepKey,
+        attempt: input.attempt,
+        startedAt: invocationStartedAt
+      });
+      insertExecutorInvocation(db, invocation, { now: invocationStartedAt });
 
-  // 2. Insert the single mirror round-start row (born in mirroring_external_state),
-  //    inheriting the invocation's identity + family and freezing the daemon's
-  //    runtime inputs in.
-  const roundStartedAt = now();
-  const startRecord = planNoMistakesRoundStart({
-    invocation,
-    runtime: input.resolveRoundInputs(),
-    startedAt: roundStartedAt
-  });
-  insertExecutorRound(db, startRecord, { now: roundStartedAt });
+      // 2. Insert the single mirror round-start row (born in mirroring_external_state),
+      //    inheriting the invocation's identity + family and freezing the daemon's
+      //    runtime inputs in.
+      const roundStartedAt = now();
+      const startRecord = planNoMistakesRoundStart({
+        invocation,
+        runtime: input.resolveRoundInputs(),
+        startedAt: roundStartedAt
+      });
+      insertExecutorRound(db, startRecord, { now: roundStartedAt });
+      insertExpectedExternalIdentityCheckpoint(
+        db,
+        startRecord.roundId,
+        input.expectedExternalIdentity,
+        roundStartedAt
+      );
+      return { invocation, startRecord };
+    }
+  );
 
   // 3. Run the first poll against the freshly-born round.
   const polledAt = now();
