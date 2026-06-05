@@ -309,6 +309,14 @@ For no-mistakes, Momentum mirrors:
 - Decisions and delegated-policy results.
 - PR URL and CI state.
 
+No-mistakes mirrors must pin an external identity anchor — external run id,
+branch, and head SHA — before trusting readable external state. The anchor may
+come from the caller's expected identity or a durable checkpoint, and subsequent
+polls must corroborate the readable snapshot against it. A readable poll with no
+pinned identity, or with a changed external run id / branch / head SHA, routes to
+`manual_recovery_required` with recovery code `external_state_inconsistent`
+instead of mirroring findings or decisions.
+
 External state strings are never enough on their own. Momentum reconciles external state with artifacts, logs, repo state, configured completion requirements, and its own executor records.
 
 ## Executor Families
