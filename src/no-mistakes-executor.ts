@@ -65,12 +65,15 @@
  *     (`external_state_unreadable`): untrusted evidence, not authority.
  */
 
+import type { ExecutorRoundUpdate } from "./executor-loop-persist.js";
 import type {
   ExecutorCompletionClassification,
   ExecutorDecisionRecord,
   ExecutorFindingRecord,
   ExecutorHumanGateType,
+  ExecutorInvocationRecord,
   ExecutorInvocationState,
+  ExecutorRoundRecord,
   ExecutorRoundState,
   WorkflowExecutorFamily
 } from "./executor-loop-reducer.js";
@@ -475,6 +478,201 @@ export function noMistakesInvocationId(
  */
 export function noMistakesRoundId(invocationId: string): string {
   return `${invocationId}::round::0`;
+}
+
+/**
+ * The `StepRun` identity {@link planNoMistakesInvocation} projects into a durable
+ * no-mistakes {@link ExecutorInvocationRecord}: the `(workflowRunId, stepRunId)`
+ * step run, the step key, the re-run `attempt`, and the start clock the
+ * orchestrator owns. There is no `family` field — the mirror serves exactly the
+ * `no-mistakes` family — unlike the single-shot projection that carries a chosen
+ * `one-shot` / `script` family.
+ */
+export type PlanNoMistakesInvocationInput = {
+  workflowRunId: string;
+  stepRunId: string;
+  stepKey: string;
+  attempt: number;
+  /** Invocation start clock; stamped as `started_at` and the initial `heartbeat_at`. */
+  startedAt: number;
+};
+
+/**
+ * Project a `StepRun` identity into the durable no-mistakes
+ * {@link ExecutorInvocationRecord} the orchestrator twin inserts before the mirror
+ * round runs (contract "State Model": `StepRun -> ExecutorInvocation ->
+ * ExecutorRound[]`). One configured mirror session for the step, materialized at
+ * `running` with the deterministic {@link noMistakesInvocationId} and the start
+ * clock copied in. Pure: no ids or clocks are invented beyond the supplied
+ * `startedAt`. A re-mirror is a fresh `attempt` minting a fresh invocation.
+ */
+export function planNoMistakesInvocation(
+  input: PlanNoMistakesInvocationInput
+): ExecutorInvocationRecord {
+  return {
+    invocationId: noMistakesInvocationId(
+      input.workflowRunId,
+      input.stepRunId,
+      input.attempt
+    ),
+    workflowRunId: input.workflowRunId,
+    stepRunId: input.stepRunId,
+    stepKey: input.stepKey,
+    executorFamily: NO_MISTAKES_EXECUTOR_FAMILY,
+    state: "running",
+    attempt: input.attempt,
+    startedAt: input.startedAt,
+    heartbeatAt: input.startedAt,
+    finishedAt: null
+  };
+}
+
+/**
+ * The per-round runtime inputs the daemon provides for the mirror: the round's
+ * input digest, its daemon-provided artifact directory, and its bounded log paths
+ * (contract "Round Lifecycle" steps 4-5). These are the filesystem / content
+ * concerns the pure adapter never invents — the orchestrator resolves them and
+ * {@link planNoMistakesRoundStart} freezes them into the round-start record.
+ */
+export type NoMistakesRoundRuntimeInputs = {
+  inputDigest: string | null;
+  artifactRoot: string | null;
+  logPaths?: string[];
+};
+
+/**
+ * The inputs to {@link planNoMistakesRoundStart}: the materialized no-mistakes
+ * invocation (whose identity and family the single mirror round inherits), the
+ * per-round runtime inputs, and the round start clock. There is no round index — a
+ * mirror is always the one long-lived round at index 0 — and no resolved
+ * agent/model selection, because no-mistakes owns its own pipeline (the mirror
+ * reflects external state, it never drives an agent Momentum chose).
+ */
+export type PlanNoMistakesRoundStartInput = {
+  invocation: ExecutorInvocationRecord;
+  runtime: NoMistakesRoundRuntimeInputs;
+  startedAt: number;
+};
+
+/**
+ * Project a materialized invocation + per-round runtime inputs into the durable
+ * round-start {@link ExecutorRoundRecord} the orchestrator inserts before it begins
+ * mirroring (contract Round Lifecycle step 4). The round inherits the invocation's
+ * `(workflowRunId, stepRunId, stepKey, attempt)` identity and its `no-mistakes`
+ * family, takes the deterministic {@link noMistakesRoundId} (index 0), and copies in
+ * the round's input digest / artifact root / log paths.
+ *
+ * Two mirror-specific differences from the single-shot round-start projection:
+ *
+ *   - The round is born in `mirroring_external_state`, not `running`. The mirror
+ *     reflects external no-mistakes state rather than running local work, so it
+ *     enters the capture/mirror phase directly; from there every decided round
+ *     state ({@link decideNoMistakesMirror}) is a legal transition.
+ *   - `agentProvider` / `model` / `effort` stay `null`. No-mistakes owns its own
+ *     pipeline, so Momentum resolves no agent for the mirror (contract "Preserve
+ *     no-mistakes daemon ownership"), exactly as the deterministic `script` family
+ *     resolves no agent.
+ *
+ * Pure: no ids or clock are invented here — freezing the identity at start is the
+ * contract's "a later config edit must not rewrite the historical record for an
+ * already-started round."
+ *
+ * @throws {Error} if the invocation's family is not `no-mistakes` — the mirror
+ * round must inherit the family {@link planNoMistakesInvocation} establishes.
+ */
+export function planNoMistakesRoundStart(
+  input: PlanNoMistakesRoundStartInput
+): ExecutorRoundRecord {
+  const { invocation, runtime } = input;
+  if (!isNoMistakesExecutorFamily(invocation.executorFamily)) {
+    throw new Error(
+      `planNoMistakesRoundStart: invocation ${invocation.invocationId} has non-no-mistakes family ${invocation.executorFamily}; the mirror round must inherit the no-mistakes family`
+    );
+  }
+  return {
+    roundId: noMistakesRoundId(invocation.invocationId),
+    invocationId: invocation.invocationId,
+    workflowRunId: invocation.workflowRunId,
+    stepRunId: invocation.stepRunId,
+    stepKey: invocation.stepKey,
+    executorFamily: NO_MISTAKES_EXECUTOR_FAMILY,
+    attempt: invocation.attempt,
+    roundIndex: 0,
+    state: "mirroring_external_state",
+    classification: null,
+    startedAt: input.startedAt,
+    heartbeatAt: input.startedAt,
+    finishedAt: null,
+    agentProvider: null,
+    model: null,
+    effort: null,
+    inputDigest: runtime.inputDigest,
+    resultDigest: null,
+    artifactRoot: runtime.artifactRoot,
+    logPaths: runtime.logPaths ?? [],
+    summary: null,
+    keyChanges: [],
+    remainingWork: [],
+    changedFiles: [],
+    verificationStatus: null,
+    commitSha: null,
+    recoveryCode: null,
+    humanGate: null
+  };
+}
+
+/**
+ * The inputs to {@link planNoMistakesRoundPersistence}: the mirrored
+ * {@link NoMistakesExternalState} snapshot the orchestrator read this poll. The plan
+ * composes {@link decideNoMistakesMirror} over it, so the daemon decision and the
+ * round patch can never disagree.
+ */
+export type PlanNoMistakesRoundPersistenceInput = {
+  state: NoMistakesExternalState;
+};
+
+/**
+ * A pure, durable persistence plan for one mirror poll. The orchestrator applies
+ * {@link roundUpdate} through `updateExecutorRound`, stamping the daemon clock the
+ * pure projection cannot supply. Unlike the single-shot / goal-loop plans there is
+ * no separate capture patch: the mirror round already lives in
+ * `mirroring_external_state` (the capture/mirror phase), from which the round
+ * transition graph allows reaching `succeeded` directly, so one patch carries the
+ * whole decision.
+ */
+export type NoMistakesRoundPersistencePlan = {
+  decision: NoMistakesMirrorDecision;
+  roundUpdate: ExecutorRoundUpdate;
+};
+
+/**
+ * Build the durable persistence plan for one mirror poll. Composes
+ * {@link decideNoMistakesMirror} into the single round patch the orchestrator
+ * applies, so the daemon classification, recovery code, and human gate all derive
+ * from the same snapshot (contract "Round Lifecycle" steps 9-10 for the mirror).
+ *
+ * The patch transitions the round to the decided `roundState` — a `continue`
+ * decision keeps it in `mirroring_external_state` (a legal same-state heartbeat),
+ * a gate moves it to `waiting_operator`, and a settle moves it to its terminal —
+ * and stamps the classification, the preserved recovery code, the human gate, and
+ * the decision `reason` as the round's durable `summary` (the mirror has no
+ * normalized result document, so the reason is its human-readable summary). Pure:
+ * no SQLite, no file system; the same snapshot always yields the same plan, and —
+ * like {@link decideNoMistakesMirror} — it is total, never throwing on untrusted
+ * external evidence.
+ */
+export function planNoMistakesRoundPersistence(
+  input: PlanNoMistakesRoundPersistenceInput
+): NoMistakesRoundPersistencePlan {
+  const decision = decideNoMistakesMirror(input.state);
+  const roundUpdate: ExecutorRoundUpdate = {
+    toState: decision.roundState,
+    classification: decision.classification,
+    recoveryCode: decision.recoveryCode,
+    humanGate: decision.humanGate,
+    summary: decision.reason
+  };
+  return { decision, roundUpdate };
 }
 
 /**

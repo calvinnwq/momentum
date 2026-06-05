@@ -19,8 +19,11 @@ import {
   isNoMistakesExecutorFamily,
   noMistakesInvocationId,
   noMistakesRoundId,
+  planNoMistakesInvocation,
   planNoMistakesRoundDecisions,
   planNoMistakesRoundFindings,
+  planNoMistakesRoundPersistence,
+  planNoMistakesRoundStart,
   type NoMistakesExternalState
 } from "../src/no-mistakes-executor.js";
 
@@ -517,5 +520,263 @@ describe("planNoMistakesRoundDecisions", () => {
     expect(
       planNoMistakesRoundDecisions({ roundId: "round-0", decisions: [] })
     ).toEqual([]);
+  });
+});
+
+describe("planNoMistakesInvocation", () => {
+  it("projects a step-run identity into a running no-mistakes invocation record", () => {
+    const invocation = planNoMistakesInvocation({
+      workflowRunId: "run1",
+      stepRunId: "step1",
+      stepKey: "no-mistakes",
+      attempt: 0,
+      startedAt: 1000
+    });
+    expect(invocation.invocationId).toBe(
+      noMistakesInvocationId("run1", "step1", 0)
+    );
+    expect(invocation.workflowRunId).toBe("run1");
+    expect(invocation.stepRunId).toBe("step1");
+    expect(invocation.stepKey).toBe("no-mistakes");
+    expect(invocation.executorFamily).toBe("no-mistakes");
+    expect(invocation.attempt).toBe(0);
+    expect(invocation.state).toBe("running");
+    expect(invocation.startedAt).toBe(1000);
+    expect(invocation.heartbeatAt).toBe(1000);
+    expect(invocation.finishedAt).toBeNull();
+  });
+
+  it("mints a fresh invocation per attempt so a re-mirror never collides", () => {
+    const first = planNoMistakesInvocation({
+      workflowRunId: "run1",
+      stepRunId: "step1",
+      stepKey: "no-mistakes",
+      attempt: 0,
+      startedAt: 1
+    });
+    const second = planNoMistakesInvocation({
+      workflowRunId: "run1",
+      stepRunId: "step1",
+      stepKey: "no-mistakes",
+      attempt: 1,
+      startedAt: 2
+    });
+    expect(first.invocationId).not.toBe(second.invocationId);
+    expect(second.attempt).toBe(1);
+  });
+
+  it("starts a running invocation that can legally settle to a terminal state", () => {
+    const invocation = planNoMistakesInvocation({
+      workflowRunId: "run1",
+      stepRunId: "step1",
+      stepKey: "no-mistakes",
+      attempt: 0,
+      startedAt: 1
+    });
+    const decision = decideNoMistakesMirror(
+      externalState({ stepStatus: "failed" })
+    );
+    const transition = transitionExecutorInvocation(
+      invocation.state,
+      decision.invocationState
+    );
+    expect(transition.ok).toBe(true);
+    expect(INVOCATION_TERMINAL_SET.has(decision.invocationState)).toBe(true);
+  });
+});
+
+describe("planNoMistakesRoundStart", () => {
+  function invocation() {
+    return planNoMistakesInvocation({
+      workflowRunId: "run1",
+      stepRunId: "step1",
+      stepKey: "no-mistakes",
+      attempt: 0,
+      startedAt: 1000
+    });
+  }
+
+  it("projects a single mirror round born in mirroring_external_state at index 0", () => {
+    const round = planNoMistakesRoundStart({
+      invocation: invocation(),
+      runtime: {
+        inputDigest: "sha256:abc",
+        artifactRoot: "/tmp/run1/step1",
+        logPaths: ["/tmp/run1/step1/mirror.log"]
+      },
+      startedAt: 2000
+    });
+
+    expect(round.roundId).toBe(noMistakesRoundId(invocation().invocationId));
+    expect(round.invocationId).toBe(invocation().invocationId);
+    expect(round.workflowRunId).toBe("run1");
+    expect(round.stepRunId).toBe("step1");
+    expect(round.stepKey).toBe("no-mistakes");
+    expect(round.executorFamily).toBe("no-mistakes");
+    expect(round.attempt).toBe(0);
+    // The mirror is one long-lived round.
+    expect(round.roundIndex).toBe(0);
+    expect(round.state).toBe("mirroring_external_state");
+    expect(round.classification).toBeNull();
+    expect(round.startedAt).toBe(2000);
+    expect(round.heartbeatAt).toBe(2000);
+    expect(round.finishedAt).toBeNull();
+    expect(round.inputDigest).toBe("sha256:abc");
+    expect(round.artifactRoot).toBe("/tmp/run1/step1");
+    expect(round.logPaths).toEqual(["/tmp/run1/step1/mirror.log"]);
+    expect(round.summary).toBeNull();
+    expect(round.keyChanges).toEqual([]);
+    expect(round.remainingWork).toEqual([]);
+    expect(round.changedFiles).toEqual([]);
+    expect(round.verificationStatus).toBeNull();
+    expect(round.commitSha).toBeNull();
+    expect(round.recoveryCode).toBeNull();
+    expect(round.humanGate).toBeNull();
+  });
+
+  it("resolves no Momentum agent/model/effort — no-mistakes owns its own pipeline", () => {
+    const round = planNoMistakesRoundStart({
+      invocation: invocation(),
+      runtime: { inputDigest: null, artifactRoot: null },
+      startedAt: 2000
+    });
+    expect(round.agentProvider).toBeNull();
+    expect(round.model).toBeNull();
+    expect(round.effort).toBeNull();
+    expect(round.logPaths).toEqual([]);
+  });
+
+  it("refuses to mirror a round under a non-no-mistakes invocation", () => {
+    const foreign = { ...invocation(), executorFamily: "goal-loop" as const };
+    expect(() =>
+      planNoMistakesRoundStart({
+        invocation: foreign,
+        runtime: { inputDigest: null, artifactRoot: null },
+        startedAt: 2000
+      })
+    ).toThrow(/non-no-mistakes family/);
+  });
+
+  it("is born in a state from which every decided round state is reachable", () => {
+    const round = planNoMistakesRoundStart({
+      invocation: invocation(),
+      runtime: { inputDigest: null, artifactRoot: null },
+      startedAt: 2000
+    });
+    for (const stepStatus of NO_MISTAKES_EXTERNAL_STEP_STATUSES) {
+      const decision = decideNoMistakesMirror(
+        externalState({
+          stepStatus,
+          ciState: stepStatus === "completed" ? "passed" : "pending",
+          decisions:
+            stepStatus === "awaiting_decision"
+              ? [{ externalId: "D-1", summary: "decide", allowedActions: ["a"] }]
+              : []
+        })
+      );
+      const hop = transitionExecutorRound(round.state, decision.roundState);
+      expect(hop.ok).toBe(true);
+    }
+  });
+});
+
+describe("planNoMistakesRoundPersistence", () => {
+  function planFor(overrides: Partial<NoMistakesExternalState> = {}) {
+    return planNoMistakesRoundPersistence({ state: externalState(overrides) });
+  }
+
+  it("keeps a still-running run mirroring with a continue classification", () => {
+    const plan = planFor({ stepStatus: "running" });
+    expect(plan.decision.classification).toBe("continue");
+    expect(plan.roundUpdate.toState).toBe("mirroring_external_state");
+    expect(plan.roundUpdate.classification).toBe("continue");
+    expect(plan.roundUpdate.recoveryCode).toBeNull();
+    expect(plan.roundUpdate.humanGate).toBeNull();
+    expect(plan.roundUpdate.summary).toBe(plan.decision.reason);
+  });
+
+  it("re-mirroring a still-running round is a legal same-state heartbeat", () => {
+    const round = planNoMistakesRoundStart({
+      invocation: planNoMistakesInvocation({
+        workflowRunId: "run1",
+        stepRunId: "step1",
+        stepKey: "no-mistakes",
+        attempt: 0,
+        startedAt: 1
+      }),
+      runtime: { inputDigest: null, artifactRoot: null },
+      startedAt: 2
+    });
+    const plan = planFor({ stepStatus: "running" });
+    const hop = transitionExecutorRound(round.state, plan.roundUpdate.toState);
+    expect(hop.ok).toBe(true);
+  });
+
+  it("turns an operator decision into a durable waiting_operator gate", () => {
+    const plan = planFor({
+      stepStatus: "awaiting_decision",
+      decisions: [
+        { externalId: "D-1", summary: "merge or hold", allowedActions: ["merge", "hold"] }
+      ]
+    });
+    expect(plan.roundUpdate.toState).toBe("waiting_operator");
+    expect(plan.roundUpdate.classification).toBe("operator_decision_required");
+    expect(plan.roundUpdate.humanGate).toBe("operator_decision_required");
+    expect(plan.roundUpdate.recoveryCode).toBeNull();
+  });
+
+  it("turns an approval boundary into a durable waiting_operator gate", () => {
+    const plan = planFor({ stepStatus: "awaiting_approval" });
+    expect(plan.roundUpdate.toState).toBe("waiting_operator");
+    expect(plan.roundUpdate.classification).toBe("approval_required");
+    expect(plan.roundUpdate.humanGate).toBe("approval_required");
+  });
+
+  it("completes a corroborated run into a succeeded round", () => {
+    const plan = planFor({ stepStatus: "completed", ciState: "passed", decisions: [] });
+    expect(plan.roundUpdate.toState).toBe("succeeded");
+    expect(plan.roundUpdate.classification).toBe("complete");
+    expect(plan.roundUpdate.recoveryCode).toBeNull();
+    expect(plan.roundUpdate.humanGate).toBeNull();
+  });
+
+  it("mirrors an external failure into a failed round with the failure recovery code", () => {
+    const plan = planFor({ stepStatus: "failed" });
+    expect(plan.roundUpdate.toState).toBe("failed");
+    expect(plan.roundUpdate.classification).toBe("failed");
+    expect(plan.roundUpdate.recoveryCode).toBe("external_run_failed");
+  });
+
+  it("mirrors an external blockage into a blocked round awaiting external state", () => {
+    const plan = planFor({ stepStatus: "blocked" });
+    expect(plan.roundUpdate.toState).toBe("blocked");
+    expect(plan.roundUpdate.classification).toBe("blocked");
+    expect(plan.roundUpdate.recoveryCode).toBe("external_state_blocked");
+    expect(plan.roundUpdate.humanGate).toBe("external_state_required");
+  });
+
+  it("routes untrusted external state to a manual-recovery round", () => {
+    const plan = planFor({ headSha: "not-a-sha" });
+    expect(plan.roundUpdate.toState).toBe("manual_recovery_required");
+    expect(plan.roundUpdate.classification).toBe("manual_recovery_required");
+    expect(plan.roundUpdate.recoveryCode).toBe("external_state_unreadable");
+    expect(plan.roundUpdate.humanGate).toBe("manual_recovery_required");
+  });
+
+  it("derives the patch from the decision so the two can never disagree", () => {
+    for (const stepStatus of NO_MISTAKES_EXTERNAL_STEP_STATUSES) {
+      const plan = planFor({
+        stepStatus,
+        ciState: stepStatus === "completed" ? "passed" : "pending",
+        decisions:
+          stepStatus === "awaiting_decision"
+            ? [{ externalId: "D-1", summary: "decide", allowedActions: ["a"] }]
+            : []
+      });
+      expect(plan.roundUpdate.toState).toBe(plan.decision.roundState);
+      expect(plan.roundUpdate.classification).toBe(plan.decision.classification);
+      expect(plan.roundUpdate.recoveryCode).toBe(plan.decision.recoveryCode);
+      expect(plan.roundUpdate.humanGate).toBe(plan.decision.humanGate);
+    }
   });
 });
