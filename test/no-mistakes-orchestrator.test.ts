@@ -780,6 +780,52 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
     expect(listExecutorDecisionsForRound(db, ROUND_ID)[0]!.resolution).toBeNull();
   });
 
+  it("refuses completion when a later poll mirrors a different external identity", () => {
+    const mismatches: Partial<NoMistakesExternalState>[] = [
+      { externalRunId: "nm-run-swapped" },
+      { branch: "feat/swapped" },
+      { headSha: "b".repeat(40) }
+    ];
+
+    for (const mismatch of mismatches) {
+      const db = openMirrorRoundDb();
+
+      runNoMistakesMirrorRound({
+        db,
+        roundId: ROUND_ID,
+        read: okReader({ stepStatus: "running" }, "sha256:first"),
+        polledAt: 2_000
+      });
+
+      const completed = runNoMistakesMirrorRound({
+        db,
+        roundId: ROUND_ID,
+        read: okReader(
+          {
+            ...mismatch,
+            stepStatus: "completed",
+            ciState: "passed"
+          },
+          "sha256:swapped"
+        ),
+        polledAt: 3_000
+      });
+
+      expect(completed.decision.classification).toBe(
+        "manual_recovery_required"
+      );
+      expect(completed.decision.recoveryCode).toBe(
+        "external_state_inconsistent"
+      );
+      expect(completed.round.state).toBe("manual_recovery_required");
+      expect(completed.round.inputDigest).toBe("sha256:swapped");
+      expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe(
+        "manual_recovery_required"
+      );
+      expect(listExecutorCheckpointsForRound(db, ROUND_ID)).toHaveLength(1);
+    }
+  });
+
   it("settles a waiting_operator round when the next poll observes completion", () => {
     const db = openMirrorRoundDb();
 

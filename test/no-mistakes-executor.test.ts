@@ -172,6 +172,26 @@ describe("decideNoMistakesMirror — human gates (daemon ownership preserved)", 
     expect(decision.recoveryCode).toBe("external_state_inconsistent");
     expect(decision.humanGate).toBe("manual_recovery_required");
   });
+
+  it("does not gate on awaiting_decision when every surfaced decision is already resolved", () => {
+    const decision = decideNoMistakesMirror(
+      externalState({
+        stepStatus: "awaiting_decision",
+        decisions: [
+          {
+            externalId: "D-1",
+            summary: "merge now or hold for review",
+            allowedActions: ["merge", "hold"],
+            chosenAction: "merge",
+            resolution: "operator:merge"
+          }
+        ]
+      })
+    );
+    expect(decision.classification).toBe("manual_recovery_required");
+    expect(decision.recoveryCode).toBe("external_state_inconsistent");
+    expect(decision.humanGate).toBe("manual_recovery_required");
+  });
 });
 
 describe("decideNoMistakesMirror — completion reconciled against evidence", () => {

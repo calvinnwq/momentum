@@ -135,6 +135,107 @@ export type NoMistakesMirrorReader = (
   round: ExecutorRoundRecord
 ) => NoMistakesExternalStateRead;
 
+type NoMistakesExternalIdentity = Pick<
+  NoMistakesExternalState,
+  "externalRunId" | "branch" | "headSha"
+>;
+
+function externalIdentity(
+  state: NoMistakesExternalState
+): NoMistakesExternalIdentity {
+  return {
+    externalRunId: state.externalRunId,
+    branch: state.branch,
+    headSha: state.headSha
+  };
+}
+
+function externalIdentityFromCheckpointDetail(
+  detail: string | null
+): NoMistakesExternalIdentity | null {
+  if (detail === null) {
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(detail);
+  } catch {
+    return null;
+  }
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    !("externalRunId" in parsed) ||
+    !("branch" in parsed) ||
+    !("headSha" in parsed)
+  ) {
+    return null;
+  }
+  const identity = parsed as Record<string, unknown>;
+  if (
+    typeof identity.externalRunId !== "string" ||
+    typeof identity.branch !== "string" ||
+    typeof identity.headSha !== "string"
+  ) {
+    return null;
+  }
+  return {
+    externalRunId: identity.externalRunId,
+    branch: identity.branch,
+    headSha: identity.headSha
+  };
+}
+
+function pinnedExternalIdentity(
+  db: MomentumDb,
+  roundId: string
+): NoMistakesExternalIdentity | null {
+  for (const checkpoint of listExecutorCheckpointsForRound(db, roundId)) {
+    if (checkpoint.stage !== "external_state_mirrored") {
+      continue;
+    }
+    const identity = externalIdentityFromCheckpointDetail(checkpoint.detail);
+    if (identity !== null) {
+      return identity;
+    }
+  }
+  return null;
+}
+
+function externalIdentityMismatchReason(
+  db: MomentumDb,
+  roundId: string,
+  state: NoMistakesExternalState
+): string | null {
+  const expected = pinnedExternalIdentity(db, roundId);
+  if (expected === null) {
+    return null;
+  }
+  const actual = externalIdentity(state);
+  const changed: string[] = [];
+  for (const key of ["externalRunId", "branch", "headSha"] as const) {
+    if (actual[key] !== expected[key]) {
+      changed.push(`${key} expected ${expected[key]} but got ${actual[key]}`);
+    }
+  }
+  return changed.length > 0
+    ? `external no-mistakes identity changed: ${changed.join(", ")}`
+    : null;
+}
+
+function noMistakesExternalStateInconsistent(
+  reason: string
+): NoMistakesMirrorDecision {
+  return {
+    classification: "manual_recovery_required",
+    roundState: "manual_recovery_required",
+    invocationState: "manual_recovery_required",
+    humanGate: "manual_recovery_required",
+    recoveryCode: "external_state_inconsistent",
+    reason
+  };
+}
+
 /**
  * Mirror the findings/decisions a poll surfaced below the round idempotently: the
  * mirror is a long-lived round that re-derives the same deterministic
@@ -304,15 +405,9 @@ function reconcileNoMistakesCompletionDecision(
   if (unresolvedCount === 0) {
     return decision;
   }
-  return {
-    classification: "manual_recovery_required",
-    roundState: "manual_recovery_required",
-    invocationState: "manual_recovery_required",
-    humanGate: "manual_recovery_required",
-    recoveryCode: "external_state_inconsistent",
-    reason:
-      `external no-mistakes run claims completed but ${unresolvedCount} previously mirrored decision(s) are unresolved`
-  };
+  return noMistakesExternalStateInconsistent(
+    `external no-mistakes run claims completed but ${unresolvedCount} previously mirrored decision(s) are unresolved`
+  );
 }
 
 export type RunNoMistakesMirrorRoundInput = {
@@ -384,11 +479,20 @@ export function runNoMistakesMirrorRound(
   const classified = stateRead.ok
     ? decideNoMistakesMirror(stateRead.value)
     : decideNoMistakesUnreadable(stateRead.error);
+  const identityMismatchReason = stateRead.ok
+    ? externalIdentityMismatchReason(db, roundId, stateRead.value)
+    : null;
+  const identityMatchesPinnedState = identityMismatchReason === null;
+  const identityReconciled =
+    identityMismatchReason === null ||
+    classified.recoveryCode === "external_state_unreadable"
+      ? classified
+      : noMistakesExternalStateInconsistent(identityMismatchReason);
   const decision = reconcileNoMistakesCompletionDecision(
     db,
     roundId,
     stateRead,
-    classified
+    identityReconciled
   );
 
   // 3. Patch the durable round, stamping the daemon clock and re-fingerprinting the
@@ -418,7 +522,7 @@ export function runNoMistakesMirrorRound(
 
   // 4. Mirror the snapshot below the round. A reader failure has no snapshot, so
   //    it mirrors nothing and preserves prior evidence.
-  if (stateRead.ok) {
+  if (stateRead.ok && identityMatchesPinnedState) {
     insertExternalStateCheckpoint(db, roundId, stateRead.value, polledAt);
     if (decision.recoveryCode !== "external_state_unreadable") {
       insertNewFindings(

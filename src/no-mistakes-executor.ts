@@ -373,6 +373,15 @@ export function decideNoMistakesMirror(
           "external no-mistakes run is awaiting_decision but surfaced no decision"
         );
       }
+      const unresolved = state.decisions.filter(
+        (decision) => !isResolved(decision)
+      );
+      if (unresolved.length === 0) {
+        return manualRecovery(
+          "external_state_inconsistent",
+          "external no-mistakes run is awaiting_decision but surfaced no unresolved decision"
+        );
+      }
       return {
         classification: "operator_decision_required",
         roundState: "waiting_operator",
