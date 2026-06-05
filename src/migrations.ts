@@ -71,6 +71,10 @@ const WORKFLOW_STEP_OPERATOR_COLUMNS: ColumnSpec[] = [
   { name: "operator_transition_at", type: "INTEGER" }
 ];
 
+const EXECUTOR_DECISION_EXTERNAL_REF_COLUMNS: ColumnSpec[] = [
+  { name: "external_ref", type: "TEXT" }
+];
+
 const REPO_LOCKS_DDL = `
 CREATE TABLE IF NOT EXISTS repo_locks (
   id TEXT PRIMARY KEY,
@@ -649,6 +653,7 @@ CREATE TABLE IF NOT EXISTS executor_decisions (
   recommended_action TEXT,
   chosen_action TEXT,
   resolution TEXT,
+  external_ref TEXT,
   created_at INTEGER NOT NULL
 ) STRICT;
 
@@ -712,6 +717,11 @@ export function applyQueueMigrations(db: MomentumDb): void {
     db.exec(WORKFLOW_RUNS_IDENTITY_INDEX_DDL);
     db.exec(WORKFLOW_DEFINITIONS_DDL);
     db.exec(EXECUTOR_LOOP_DDL);
+    if (tableExists(db, "executor_decisions")) {
+      for (const column of EXECUTOR_DECISION_EXTERNAL_REF_COLUMNS) {
+        ensureColumn(db, "executor_decisions", column);
+      }
+    }
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");

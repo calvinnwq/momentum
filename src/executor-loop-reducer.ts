@@ -480,4 +480,5 @@ export type ExecutorDecisionRecord = {
   recommendedAction: string | null;
   chosenAction: string | null;
   resolution: string | null;
+  externalRef?: string | null;
 };

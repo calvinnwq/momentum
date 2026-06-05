@@ -537,7 +537,8 @@ describe("planNoMistakesRoundDecisions", () => {
         allowedActions: ["merge", "hold"],
         recommendedAction: "hold",
         chosenAction: "hold",
-        resolution: "delegated:within-envelope"
+        resolution: "delegated:within-envelope",
+        externalRef: "nomistakes:D-1"
       },
       {
         decisionId: "round-0-decision-D-2",
@@ -546,7 +547,8 @@ describe("planNoMistakesRoundDecisions", () => {
         allowedActions: ["apply", "skip"],
         recommendedAction: null,
         chosenAction: null,
-        resolution: null
+        resolution: null,
+        externalRef: "nomistakes:D-2"
       }
     ]);
   });

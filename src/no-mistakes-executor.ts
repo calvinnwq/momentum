@@ -790,6 +790,7 @@ export function planNoMistakesRoundDecisions(
     allowedActions: [...decision.allowedActions],
     recommendedAction: decision.recommendedAction ?? null,
     chosenAction: decision.chosenAction ?? null,
-    resolution: decision.resolution ?? null
+    resolution: decision.resolution ?? null,
+    externalRef: `nomistakes:${decision.externalId}`
   }));
 }

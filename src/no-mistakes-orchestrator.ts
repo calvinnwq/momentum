@@ -283,6 +283,10 @@ function insertNewFindings(
 ): void {
   const existing = listExecutorFindingsForRound(db, roundId);
   const existingIds = new Set(existing.map((finding) => finding.findingId));
+  const reservedIds = new Set([
+    ...existingIds,
+    ...projected.map((finding) => finding.findingId)
+  ]);
   for (const finding of projected) {
     const related = existing.filter(
       (candidate) => candidate.externalRef === finding.externalRef
@@ -292,12 +296,13 @@ function insertNewFindings(
       continue;
     }
     const findingId =
-      latest === undefined
+      latest === undefined && !existingIds.has(finding.findingId)
         ? finding.findingId
-        : nextEvidenceId(finding.findingId, existingIds);
+        : nextEvidenceId(finding.findingId, reservedIds);
     insertExecutorFinding(db, { ...finding, findingId }, { now });
     existing.push({ ...finding, findingId });
     existingIds.add(findingId);
+    reservedIds.add(findingId);
   }
 }
 
@@ -309,22 +314,26 @@ function insertNewDecisions(
 ): void {
   const existing = listExecutorDecisionsForRound(db, roundId);
   const existingIds = new Set(existing.map((decision) => decision.decisionId));
+  const reservedIds = new Set([
+    ...existingIds,
+    ...projected.map((decision) => decision.decisionId)
+  ]);
   for (const decision of projected) {
     const related = existing.filter(
-      (candidate) =>
-        decisionEvidenceBaseId(candidate.decisionId) === decision.decisionId
+      (candidate) => sameDecisionEvidenceStream(candidate, decision)
     );
     const latest = related.at(-1);
     if (latest !== undefined && sameDecisionEvidence(latest, decision)) {
       continue;
     }
     const decisionId =
-      latest === undefined
+      latest === undefined && !existingIds.has(decision.decisionId)
         ? decision.decisionId
-        : nextEvidenceId(decision.decisionId, existingIds);
+        : nextEvidenceId(decision.decisionId, reservedIds);
     insertExecutorDecision(db, { ...decision, decisionId }, { now });
     existing.push({ ...decision, decisionId });
     existingIds.add(decisionId);
+    reservedIds.add(decisionId);
   }
 }
 
@@ -339,6 +348,26 @@ function nextEvidenceId(baseId: string, existingIds: Set<string>): string {
 
 function decisionEvidenceBaseId(decisionId: string): string {
   return decisionId.replace(/-snapshot-\d+$/, "");
+}
+
+function sameDecisionEvidenceStream(
+  left: ExecutorDecisionRecord,
+  right: ExecutorDecisionRecord
+): boolean {
+  if (right.externalRef !== undefined && right.externalRef !== null) {
+    return (
+      left.externalRef === right.externalRef ||
+      (left.externalRef === undefined &&
+        decisionEvidenceBaseId(left.decisionId) === right.decisionId) ||
+      (left.externalRef === null &&
+        decisionEvidenceBaseId(left.decisionId) === right.decisionId)
+    );
+  }
+  return decisionEvidenceBaseId(left.decisionId) === right.decisionId;
+}
+
+function decisionEvidenceStreamKey(decision: ExecutorDecisionRecord): string {
+  return decision.externalRef ?? decisionEvidenceBaseId(decision.decisionId);
 }
 
 function sameFindingEvidence(
@@ -487,15 +516,20 @@ function unresolvedPriorDecisionCount(
   const currentlyResolved = new Set(
     planNoMistakesRoundDecisions({ roundId, decisions: state.decisions })
       .filter(isResolvedDecisionRecord)
-      .map((decision) => decisionEvidenceBaseId(decision.decisionId))
+      .flatMap((decision) => [
+        decisionEvidenceStreamKey(decision),
+        decisionEvidenceBaseId(decision.decisionId)
+      ])
   );
   const latest = new Map<string, ExecutorDecisionRecord>();
   for (const decision of listExecutorDecisionsForRound(db, roundId)) {
-    latest.set(decisionEvidenceBaseId(decision.decisionId), decision);
+    latest.set(decisionEvidenceStreamKey(decision), decision);
   }
   return [...latest.entries()].filter(
     ([baseId, decision]) =>
-      !isResolvedDecisionRecord(decision) && !currentlyResolved.has(baseId)
+      !isResolvedDecisionRecord(decision) &&
+      !currentlyResolved.has(baseId) &&
+      !currentlyResolved.has(decisionEvidenceBaseId(decision.decisionId))
   ).length;
 }
 

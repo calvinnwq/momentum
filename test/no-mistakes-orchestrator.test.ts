@@ -798,6 +798,39 @@ describe("runNoMistakesMirrorRound — idempotent across repeated polls", () => 
 
     expect(listExecutorDecisionsForRound(db, ROUND_ID)).toHaveLength(1);
   });
+
+  it("treats external decision ids ending in snapshot suffixes as stable ids", () => {
+    const db = openMirrorRoundDb();
+    const read = okReader({
+      stepStatus: "awaiting_decision",
+      decisions: [
+        {
+          externalId: "D-1-snapshot-2",
+          summary: "decide with suffix-like external id",
+          allowedActions: ["a", "b"]
+        }
+      ]
+    });
+
+    runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
+      read,
+      polledAt: 2_000
+    });
+    const second = runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      read,
+      polledAt: 3_000
+    });
+
+    expect(second.decisions.map((decision) => decision.decisionId)).toEqual([
+      `${ROUND_ID}-decision-D-1-snapshot-2`
+    ]);
+    expect(listExecutorDecisionsForRound(db, ROUND_ID)).toHaveLength(1);
+  });
 });
 
 describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
