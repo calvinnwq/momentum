@@ -7,6 +7,7 @@ import { openDb, type MomentumDb } from "../src/db.js";
 import {
   insertExecutorInvocation,
   insertExecutorRound,
+  listExecutorCheckpointsForRound,
   listExecutorDecisionsForRound,
   listExecutorFindingsForRound,
   loadExecutorInvocation,
@@ -448,6 +449,109 @@ describe("runNoMistakesMirrorRound — findings and decisions projection", () =>
     expect(result.findings).toEqual([]);
     expect(result.decisions).toEqual([]);
   });
+
+  it("does not mirror evidence from a semantically unreadable snapshot", () => {
+    const db = openMirrorRoundDb();
+
+    const result = runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      read: okReader({
+        stepStatus: "running",
+        findings: [
+          { externalId: "F-1", title: "first duplicate" },
+          { externalId: "F-1", title: "second duplicate" }
+        ],
+        selectedFindingIds: ["F-1"],
+        decisions: [
+          { externalId: "D-1", summary: "first", allowedActions: ["a"] },
+          { externalId: "D-1", summary: "second", allowedActions: ["b"] }
+        ]
+      }),
+      polledAt: 2_000
+    });
+
+    expect(result.decision.recoveryCode).toBe("external_state_unreadable");
+    expect(result.findings).toEqual([]);
+    expect(result.decisions).toEqual([]);
+  });
+
+  it("refreshes mirrored finding selections and decision resolutions across polls", () => {
+    const db = openMirrorRoundDb();
+
+    runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      read: okReader({
+        stepStatus: "running",
+        findings: [{ externalId: "F-1", title: "needs fix" }],
+        selectedFindingIds: [],
+        decisions: [
+          { externalId: "D-1", summary: "choose path", allowedActions: ["a", "b"] }
+        ]
+      }),
+      polledAt: 2_000
+    });
+    const second = runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      read: okReader({
+        stepStatus: "completed",
+        ciState: "passed",
+        findings: [{ externalId: "F-1", title: "needs fix", severity: "high" }],
+        selectedFindingIds: ["F-1"],
+        decisions: [
+          {
+            externalId: "D-1",
+            summary: "choose path",
+            allowedActions: ["a", "b"],
+            chosenAction: "a",
+            resolution: "approved"
+          }
+        ]
+      }),
+      polledAt: 3_000
+    });
+
+    expect(second.findings).toHaveLength(1);
+    expect(second.findings[0]!.selected).toBe(true);
+    expect(second.findings[0]!.severity).toBe("high");
+    expect(second.decisions).toHaveLength(1);
+    expect(second.decisions[0]!.chosenAction).toBe("a");
+    expect(second.decisions[0]!.resolution).toBe("approved");
+  });
+
+  it("persists a durable checkpoint snapshot of mirrored external state", () => {
+    const db = openMirrorRoundDb();
+
+    runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      read: okReader({
+        externalRunId: "nm-run-123",
+        branch: "feat/mirror",
+        headSha: "b".repeat(40),
+        activeStep: "ci",
+        stepStatus: "running",
+        prUrl: "https://github.com/acme/repo/pull/7",
+        ciState: "pending"
+      }),
+      polledAt: 2_000
+    });
+
+    const checkpoints = listExecutorCheckpointsForRound(db, ROUND_ID);
+    expect(checkpoints).toHaveLength(1);
+    expect(checkpoints[0]!.stage).toBe("external_state_mirrored");
+    expect(JSON.parse(checkpoints[0]!.detail!)).toEqual({
+      externalRunId: "nm-run-123",
+      branch: "feat/mirror",
+      headSha: "b".repeat(40),
+      activeStep: "ci",
+      stepStatus: "running",
+      prUrl: "https://github.com/acme/repo/pull/7",
+      ciState: "pending"
+    });
+  });
 });
 
 describe("runNoMistakesMirrorRound — idempotent across repeated polls", () => {
@@ -550,6 +654,8 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
     });
     expect(third.round.state).toBe("succeeded");
     expect(third.round.finishedAt).toBe(4_000);
+    expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe("succeeded");
+    expect(loadExecutorInvocation(db, INVOCATION_ID)!.finishedAt).toBe(4_000);
   });
 
   it("resumes a waiting_operator round back into mirroring when the decision clears", () => {
@@ -578,6 +684,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
     });
     expect(resumed.round.state).toBe("mirroring_external_state");
     expect(resumed.round.finishedAt).toBeNull();
+    expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe("running");
   });
 });
 

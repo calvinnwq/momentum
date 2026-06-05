@@ -429,4 +429,14 @@ describe("readNoMistakesExternalState", () => {
     if (read.ok) return;
     expect(read.error).toMatch(/not valid JSON/i);
   });
+
+  it("returns an unreadable error when the state file exceeds the read cap", () => {
+    const statePath = writeStateFile("x".repeat(1024 * 1024 + 1));
+
+    const read = readNoMistakesExternalState({ statePath });
+
+    expect(read.ok).toBe(false);
+    if (read.ok) return;
+    expect(read.error).toMatch(/too large/i);
+  });
 });

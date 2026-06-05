@@ -56,10 +56,12 @@
 import type { MomentumDb } from "./db.js";
 import {
   ExecutorRoundNotFoundError,
+  insertExecutorCheckpoint,
   insertExecutorDecision,
   insertExecutorFinding,
   insertExecutorInvocation,
   insertExecutorRound,
+  listExecutorCheckpointsForRound,
   listExecutorDecisionsForRound,
   listExecutorFindingsForRound,
   loadExecutorRound,
@@ -83,6 +85,7 @@ import {
   planNoMistakesRoundDecisions,
   planNoMistakesRoundFindings,
   planNoMistakesRoundStart,
+  type NoMistakesExternalState,
   type NoMistakesMirrorDecision,
   type NoMistakesRoundRuntimeInputs
 } from "./no-mistakes-executor.js";
@@ -104,13 +107,10 @@ export type NoMistakesMirrorReader = (
 ) => NoMistakesExternalStateRead;
 
 /**
- * Append the findings/decisions a poll surfaced below the round *idempotently*: the
- * evidence tables are append-only (a duplicate id throws), and the mirror is a
- * long-lived round that re-derives the same deterministic finding/decision ids on
- * every poll, so only ids not already durable are inserted. A later poll's
- * newly-surfaced findings are appended; previously-surfaced ones are left intact
- * (their first-seen `selected` flag / resolution stands — the append-only table
- * records evidence as it first appeared).
+ * Mirror the findings/decisions a poll surfaced below the round idempotently: the
+ * mirror is a long-lived round that re-derives the same deterministic
+ * finding/decision ids on every poll, so existing rows are refreshed with the
+ * latest external values and newly-surfaced rows are inserted.
  */
 function insertNewFindings(
   db: MomentumDb,
@@ -122,8 +122,23 @@ function insertNewFindings(
     listExecutorFindingsForRound(db, roundId).map((f) => f.findingId)
   );
   for (const finding of projected) {
-    if (!existing.has(finding.findingId)) {
+    if (existing.has(finding.findingId)) {
+      db.prepare(
+        `UPDATE executor_findings
+            SET severity = ?, title = ?, detail = ?, selected = ?, external_ref = ?
+          WHERE finding_id = ? AND round_id = ?`
+      ).run(
+        finding.severity,
+        finding.title,
+        finding.detail,
+        finding.selected ? 1 : 0,
+        finding.externalRef,
+        finding.findingId,
+        roundId
+      );
+    } else {
       insertExecutorFinding(db, finding, { now });
+      existing.add(finding.findingId);
     }
   }
 }
@@ -138,10 +153,54 @@ function insertNewDecisions(
     listExecutorDecisionsForRound(db, roundId).map((d) => d.decisionId)
   );
   for (const decision of projected) {
-    if (!existing.has(decision.decisionId)) {
+    if (existing.has(decision.decisionId)) {
+      db.prepare(
+        `UPDATE executor_decisions
+            SET summary = ?, allowed_actions = ?, recommended_action = ?,
+                chosen_action = ?, resolution = ?
+          WHERE decision_id = ? AND round_id = ?`
+      ).run(
+        decision.summary,
+        JSON.stringify(decision.allowedActions),
+        decision.recommendedAction,
+        decision.chosenAction,
+        decision.resolution,
+        decision.decisionId,
+        roundId
+      );
+    } else {
       insertExecutorDecision(db, decision, { now });
+      existing.add(decision.decisionId);
     }
   }
+}
+
+function insertExternalStateCheckpoint(
+  db: MomentumDb,
+  roundId: string,
+  state: NoMistakesExternalState,
+  now: number
+): void {
+  const sequence = listExecutorCheckpointsForRound(db, roundId).length;
+  insertExecutorCheckpoint(
+    db,
+    {
+      checkpointId: `${roundId}-external-state-${sequence}`,
+      roundId,
+      sequence,
+      stage: "external_state_mirrored",
+      detail: JSON.stringify({
+        externalRunId: state.externalRunId,
+        branch: state.branch,
+        headSha: state.headSha,
+        activeStep: state.activeStep,
+        stepStatus: state.stepStatus,
+        prUrl: state.prUrl,
+        ciState: state.ciState
+      })
+    },
+    { now }
+  );
 }
 
 export type RunNoMistakesMirrorRoundInput = {
@@ -219,30 +278,39 @@ export function runNoMistakesMirrorRound(
     ? { ...baseUpdate, inputDigest: stateRead.digest, heartbeatAt: polledAt, finishedAt }
     : { ...baseUpdate, heartbeatAt: polledAt, finishedAt };
   const round = updateExecutorRound(db, roundId, roundUpdate, { now: polledAt });
+  updateExecutorInvocationState(db, current.invocationId, decision.invocationState, {
+    heartbeatAt: polledAt,
+    finishedAt: isTerminalExecutorInvocationState(decision.invocationState)
+      ? polledAt
+      : null,
+    now: polledAt
+  });
 
-  // 4. Mirror the snapshot's findings + decisions below the round, idempotently
-  //    (the round is long-lived and re-derives the same ids each poll). A reader
-  //    failure has no snapshot, so it mirrors nothing and preserves prior evidence.
+  // 4. Mirror the snapshot below the round. A reader failure has no snapshot, so
+  //    it mirrors nothing and preserves prior evidence.
   if (stateRead.ok) {
-    insertNewFindings(
-      db,
-      roundId,
-      planNoMistakesRoundFindings({
+    insertExternalStateCheckpoint(db, roundId, stateRead.value, polledAt);
+    if (decision.recoveryCode !== "external_state_unreadable") {
+      insertNewFindings(
+        db,
         roundId,
-        findings: stateRead.value.findings,
-        selectedFindingIds: stateRead.value.selectedFindingIds
-      }),
-      polledAt
-    );
-    insertNewDecisions(
-      db,
-      roundId,
-      planNoMistakesRoundDecisions({
+        planNoMistakesRoundFindings({
+          roundId,
+          findings: stateRead.value.findings,
+          selectedFindingIds: stateRead.value.selectedFindingIds
+        }),
+        polledAt
+      );
+      insertNewDecisions(
+        db,
         roundId,
-        decisions: stateRead.value.decisions
-      }),
-      polledAt
-    );
+        planNoMistakesRoundDecisions({
+          roundId,
+          decisions: stateRead.value.decisions
+        }),
+        polledAt
+      );
+    }
   }
 
   return {

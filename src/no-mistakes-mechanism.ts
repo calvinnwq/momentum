@@ -86,6 +86,8 @@ export type ReadNoMistakesExternalStateInput = {
   statePath: string;
 };
 
+export const MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES = 1024 * 1024;
+
 /**
  * Read the external no-mistakes state file and parse it into a typed snapshot.
  * The IO twin of {@link parseNoMistakesExternalState}: it reads the raw bytes
@@ -98,6 +100,13 @@ export function readNoMistakesExternalState(
 ): NoMistakesExternalStateRead {
   let raw: string;
   try {
+    const stat = fs.statSync(input.statePath);
+    if (stat.size > MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES) {
+      return {
+        ok: false,
+        error: `external no-mistakes state file is too large: ${stat.size} bytes exceeds ${MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES}`
+      };
+    }
     raw = fs.readFileSync(input.statePath, "utf-8");
   } catch (error) {
     const detail = error instanceof Error ? error.message : "unknown error";
