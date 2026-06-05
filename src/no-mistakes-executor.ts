@@ -454,6 +454,28 @@ export function decideNoMistakesMirror(
 }
 
 /**
+ * Classify an external-state *read failure* into a daemon decision. The mechanism
+ * twin's reader ({@link parseNoMistakesExternalState} / `readNoMistakesExternalState`)
+ * returns an `error` when the external store cannot even be turned into a typed
+ * snapshot — a missing / unreadable file, non-JSON bytes, a wrong-typed field.
+ * That is a structurally unreadable store, so it settles identically to a
+ * semantically unreadable snapshot: `manual_recovery_required` with
+ * `external_state_unreadable`. Exposed so the orchestrator routes a reader error
+ * through this single classification authority rather than reinventing the
+ * manual-recovery decision, keeping the reader (JSON-type) and brain (semantic)
+ * failures converging on one terminal shape.
+ *
+ * `reason` is the reader's own error string, already a full sentence (e.g.
+ * "external no-mistakes state file is unreadable: ..."), so it is preserved
+ * verbatim as the decision reason rather than re-prefixed.
+ */
+export function decideNoMistakesUnreadable(
+  reason: string
+): NoMistakesMirrorDecision {
+  return manualRecovery("external_state_unreadable", reason);
+}
+
+/**
  * Mint the deterministic, reattachable executor-invocation id for a no-mistakes
  * mirror under a step run. The id embeds the `(workflowRunId, stepRunId)`
  * step-run identity, the `no-mistakes` family, and the `attempt`, so it is
@@ -646,33 +668,49 @@ export type NoMistakesRoundPersistencePlan = {
 };
 
 /**
- * Build the durable persistence plan for one mirror poll. Composes
- * {@link decideNoMistakesMirror} into the single round patch the orchestrator
- * applies, so the daemon classification, recovery code, and human gate all derive
- * from the same snapshot (contract "Round Lifecycle" steps 9-10 for the mirror).
- *
+ * Project a mirror decision into the single durable round patch that carries it.
  * The patch transitions the round to the decided `roundState` — a `continue`
  * decision keeps it in `mirroring_external_state` (a legal same-state heartbeat),
  * a gate moves it to `waiting_operator`, and a settle moves it to its terminal —
  * and stamps the classification, the preserved recovery code, the human gate, and
  * the decision `reason` as the round's durable `summary` (the mirror has no
- * normalized result document, so the reason is its human-readable summary). Pure:
- * no SQLite, no file system; the same snapshot always yields the same plan, and —
- * like {@link decideNoMistakesMirror} — it is total, never throwing on untrusted
- * external evidence.
+ * normalized result document, so the reason is its human-readable summary).
+ *
+ * The single source of truth for the decision -> patch mapping: both
+ * {@link planNoMistakesRoundPersistence} (over a typed snapshot) and the
+ * orchestrator's read-failure path (over a {@link decideNoMistakesUnreadable}
+ * decision) build the patch through this, so a readable and an unreadable poll
+ * patch the round identically modulo the decision they carry. The orchestrator
+ * additionally threads the read's content digest onto `inputDigest` so the durable
+ * round fingerprints the exact external evidence it mirrored this poll. Pure: no
+ * SQLite, no file system.
  */
-export function planNoMistakesRoundPersistence(
-  input: PlanNoMistakesRoundPersistenceInput
-): NoMistakesRoundPersistencePlan {
-  const decision = decideNoMistakesMirror(input.state);
-  const roundUpdate: ExecutorRoundUpdate = {
+export function noMistakesRoundUpdate(
+  decision: NoMistakesMirrorDecision
+): ExecutorRoundUpdate {
+  return {
     toState: decision.roundState,
     classification: decision.classification,
     recoveryCode: decision.recoveryCode,
     humanGate: decision.humanGate,
     summary: decision.reason
   };
-  return { decision, roundUpdate };
+}
+
+/**
+ * Build the durable persistence plan for one mirror poll. Composes
+ * {@link decideNoMistakesMirror} into the single round patch the orchestrator
+ * applies (via {@link noMistakesRoundUpdate}), so the daemon classification,
+ * recovery code, and human gate all derive from the same snapshot (contract "Round
+ * Lifecycle" steps 9-10 for the mirror). Pure: no SQLite, no file system; the same
+ * snapshot always yields the same plan, and — like {@link decideNoMistakesMirror}
+ * — it is total, never throwing on untrusted external evidence.
+ */
+export function planNoMistakesRoundPersistence(
+  input: PlanNoMistakesRoundPersistenceInput
+): NoMistakesRoundPersistencePlan {
+  const decision = decideNoMistakesMirror(input.state);
+  return { decision, roundUpdate: noMistakesRoundUpdate(decision) };
 }
 
 /**

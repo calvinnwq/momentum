@@ -16,9 +16,11 @@ import {
   NO_MISTAKES_EXTERNAL_STEP_STATUSES,
   NO_MISTAKES_RECOVERY_CODES,
   decideNoMistakesMirror,
+  decideNoMistakesUnreadable,
   isNoMistakesExecutorFamily,
   noMistakesInvocationId,
   noMistakesRoundId,
+  noMistakesRoundUpdate,
   planNoMistakesInvocation,
   planNoMistakesRoundDecisions,
   planNoMistakesRoundFindings,
@@ -778,5 +780,70 @@ describe("planNoMistakesRoundPersistence", () => {
       expect(plan.roundUpdate.recoveryCode).toBe(plan.decision.recoveryCode);
       expect(plan.roundUpdate.humanGate).toBe(plan.decision.humanGate);
     }
+  });
+});
+
+describe("noMistakesRoundUpdate", () => {
+  it("projects a decision into the round patch fields verbatim", () => {
+    const decision = decideNoMistakesMirror(externalState({ stepStatus: "running" }));
+    const update = noMistakesRoundUpdate(decision);
+    expect(update.toState).toBe(decision.roundState);
+    expect(update.classification).toBe(decision.classification);
+    expect(update.recoveryCode).toBe(decision.recoveryCode);
+    expect(update.humanGate).toBe(decision.humanGate);
+    // The mirror has no normalized result document, so the decision reason is the
+    // round's durable summary.
+    expect(update.summary).toBe(decision.reason);
+  });
+
+  it("is exactly the patch planNoMistakesRoundPersistence carries, for every step status", () => {
+    for (const stepStatus of NO_MISTAKES_EXTERNAL_STEP_STATUSES) {
+      const state = externalState({
+        stepStatus,
+        ciState: stepStatus === "completed" ? "passed" : "pending",
+        decisions:
+          stepStatus === "awaiting_decision"
+            ? [{ externalId: "D-1", summary: "decide", allowedActions: ["a"] }]
+            : []
+      });
+      const plan = planNoMistakesRoundPersistence({ state });
+      // One source of truth: the persistence plan's patch is this projection of
+      // its decision.
+      expect(noMistakesRoundUpdate(plan.decision)).toEqual(plan.roundUpdate);
+    }
+  });
+});
+
+describe("decideNoMistakesUnreadable", () => {
+  it("routes an external-state read failure to manual recovery as unreadable evidence", () => {
+    const decision = decideNoMistakesUnreadable(
+      "external no-mistakes state file is unreadable: ENOENT"
+    );
+    expect(decision.classification).toBe("manual_recovery_required");
+    expect(decision.roundState).toBe("manual_recovery_required");
+    expect(decision.invocationState).toBe("manual_recovery_required");
+    expect(decision.humanGate).toBe("manual_recovery_required");
+    expect(decision.recoveryCode).toBe("external_state_unreadable");
+    // The reader's error is already a full sentence; it is preserved verbatim as
+    // the decision reason rather than double-prefixed.
+    expect(decision.reason).toBe(
+      "external no-mistakes state file is unreadable: ENOENT"
+    );
+  });
+
+  it("settles identically to a semantically unreadable snapshot (one classification authority)", () => {
+    const fromReadFailure = decideNoMistakesUnreadable("bad bytes");
+    const fromBadSnapshot = decideNoMistakesMirror(
+      externalState({ headSha: "not-a-sha" })
+    );
+    // A reader IO/JSON failure and a semantically broken snapshot are both
+    // untrusted external evidence and settle the same way (modulo the reason).
+    expect(fromReadFailure.classification).toBe(fromBadSnapshot.classification);
+    expect(fromReadFailure.roundState).toBe(fromBadSnapshot.roundState);
+    expect(fromReadFailure.invocationState).toBe(
+      fromBadSnapshot.invocationState
+    );
+    expect(fromReadFailure.humanGate).toBe(fromBadSnapshot.humanGate);
+    expect(fromReadFailure.recoveryCode).toBe(fromBadSnapshot.recoveryCode);
   });
 });

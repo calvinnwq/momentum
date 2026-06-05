@@ -135,7 +135,7 @@ The M10 slice order is:
    slice)*
 8. **NGX-351 — M10-07 no-mistakes executor mirror.** Mirror no-mistakes runs, findings,
    selected finding IDs, decisions, PR / CI state, and completion into Momentum
-   executor records.
+   executor records. *(done)*
 9. **NGX-352 — M10-08 Workflow gates and decisions CLI.** Add durable operator decision
    commands and delegated-policy application for workflow / step / executor
    gates.
@@ -168,8 +168,10 @@ M10-00 was docs/spec/tests only. M10-01 adds definition schema, validation, and
 persistence only; M10-02 adds first-class workflow run start; M10-03 adds
 executor-loop schema and persistence only; M10-04 adds the opt-in daemon
 workflow scheduler lane only; M10-05 adds the goal-loop executor adapter only;
-M10-06 adds the one-shot and script executor adapters only. The no-mistakes
-mirror, gates, closeout, and generalized runtime behavior remain later slices.
+M10-06 adds the one-shot and script executor adapters only; M10-07 adds the
+no-mistakes executor mirror only (brain, external-state reader, and polling
+orchestrator). The gates, closeout, and generalized runtime behavior remain later
+slices.
 
 Across the milestone, these remain outside scope unless a later contract
 explicitly changes them:
