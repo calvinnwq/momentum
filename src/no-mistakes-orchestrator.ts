@@ -64,6 +64,7 @@ import {
   listExecutorCheckpointsForRound,
   listExecutorDecisionsForRound,
   listExecutorFindingsForRound,
+  loadExecutorInvocation,
   loadExecutorRound,
   updateExecutorInvocationState,
   updateExecutorRound,
@@ -375,6 +376,22 @@ function updateInvocationForDecision(
   });
 }
 
+function resumeWaitingInvocationBeforeSuccess(
+  db: MomentumDb,
+  invocationId: string,
+  polledAt: number
+): void {
+  const invocation = loadExecutorInvocation(db, invocationId);
+  if (invocation?.state !== "waiting_operator") {
+    return;
+  }
+  updateExecutorInvocationState(db, invocationId, "running", {
+    heartbeatAt: polledAt,
+    finishedAt: null,
+    now: polledAt
+  });
+}
+
 function isResolvedDecisionRecord(
   decision: Pick<ExecutorDecisionRecord, "resolution">
 ): boolean {
@@ -561,6 +578,9 @@ export function runNoMistakesMirrorRound(
   //    round with the exact bytes this poll mirrored (only on a successful read —
   //    a failure has no trustworthy digest, so the frozen one stays in place).
   const roundUpdate = noMistakesPollRoundUpdate(decision, stateRead, polledAt);
+  if (decision.invocationState === "succeeded") {
+    resumeWaitingInvocationBeforeSuccess(db, current.invocationId, polledAt);
+  }
   if (current.state === "waiting_operator" && decision.roundState === "succeeded") {
     updateExecutorRound(
       db,
@@ -573,11 +593,6 @@ export function runNoMistakesMirrorRound(
       },
       { now: polledAt }
     );
-    updateExecutorInvocationState(db, current.invocationId, "running", {
-      heartbeatAt: polledAt,
-      finishedAt: null,
-      now: polledAt
-    });
   }
   const round = updateExecutorRound(db, roundId, roundUpdate, { now: polledAt });
   updateInvocationForDecision(db, current.invocationId, decision, polledAt);
@@ -636,8 +651,8 @@ export type RunNoMistakesMirrorStepInput = {
   attempt: number;
   /** The bounded reader the first poll runs (the real reader plugs in here). */
   read: NoMistakesMirrorReader;
-  /** Optional caller-known identity used to corroborate the first readable poll. */
-  expectedExternalIdentity?: NoMistakesExpectedExternalIdentity;
+  /** Caller-known identity used to corroborate the first readable poll. */
+  expectedExternalIdentity: NoMistakesExpectedExternalIdentity;
   /** Resolves the round's input digest / artifact root / log paths the daemon provides. */
   resolveRoundInputs: () => NoMistakesRoundRuntimeInputs;
   /** Clock for the invocation + round + poll timestamps; defaults to {@link Date.now}. */
@@ -718,11 +733,9 @@ export function runNoMistakesMirrorStep(
     db,
     roundId: startRecord.roundId,
     read: input.read,
+    expectedExternalIdentity: input.expectedExternalIdentity,
     polledAt
   };
-  if (input.expectedExternalIdentity !== undefined) {
-    roundInput.expectedExternalIdentity = input.expectedExternalIdentity;
-  }
   const round = runNoMistakesMirrorRound(roundInput);
 
   // 4. Settle the invocation into the state the first poll's decision maps to. The

@@ -11,7 +11,8 @@ import {
   listExecutorDecisionsForRound,
   listExecutorFindingsForRound,
   loadExecutorInvocation,
-  loadExecutorRound
+  loadExecutorRound,
+  updateExecutorRound
 } from "../src/executor-loop-persist.js";
 import type { ExecutorRoundRecord } from "../src/executor-loop-reducer.js";
 import {
@@ -25,7 +26,8 @@ import { readNoMistakesExternalState } from "../src/no-mistakes-mechanism.js";
 import {
   runNoMistakesMirrorRound,
   runNoMistakesMirrorStep,
-  type NoMistakesMirrorReader
+  type NoMistakesMirrorReader,
+  type RunNoMistakesMirrorStepInput
 } from "../src/no-mistakes-orchestrator.js";
 
 // The stateful seam twin of the pure projections (no-mistakes-executor.test.ts)
@@ -967,9 +969,54 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
     expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe("succeeded");
     expect(loadExecutorInvocation(db, INVOCATION_ID)!.finishedAt).toBe(3_000);
   });
+
+  it("recovers a resumed round whose invocation was still waiting_operator", () => {
+    const db = openMirrorRoundDb();
+
+    runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
+      read: okReader({
+        stepStatus: "awaiting_approval"
+      }),
+      polledAt: 2_000
+    });
+    updateExecutorRound(
+      db,
+      ROUND_ID,
+      {
+        toState: "mirroring_external_state",
+        classification: "continue",
+        finishedAt: null
+      },
+      { now: 2_500 }
+    );
+    expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe(
+      "waiting_operator"
+    );
+
+    const settled = runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      read: okReader({ stepStatus: "completed", ciState: "passed" }),
+      polledAt: 3_000
+    });
+
+    expect(settled.round.state).toBe("succeeded");
+    expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe("succeeded");
+  });
 });
 
 describe("runNoMistakesMirrorStep — materialize invocation + round + first poll", () => {
+  type ExpectedIdentityIsRequired =
+    RunNoMistakesMirrorStepInput extends {
+      expectedExternalIdentity: typeof EXPECTED_EXTERNAL_IDENTITY;
+    }
+      ? true
+      : false;
+  const expectedIdentityIsRequired: ExpectedIdentityIsRequired = true;
+
   function resolveRoundInputs() {
     return {
       inputDigest: "sha256:start",
@@ -1002,6 +1049,7 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
   }
 
   it("materializes a durable running invocation and a mirror round born in mirroring_external_state with deterministic ids", () => {
+    expect(expectedIdentityIsRequired).toBe(true);
     const { db, result } = runStep(okReader({ stepStatus: "running" }));
 
     expect(result.invocation.invocationId).toBe(INVOCATION_ID);
@@ -1098,6 +1146,7 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
       stepRunId: STEP_RUN_ID,
       stepKey: STEP_KEY,
       read: okReader({ stepStatus: "failed" }),
+      expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       resolveRoundInputs
     };
 
@@ -1176,6 +1225,11 @@ describe("runNoMistakesMirrorStep — composes the real external-state reader en
         readNoMistakesExternalState({
           statePath: path.join(makeTempDir(), "does-not-exist.json")
         }),
+      expectedExternalIdentity: {
+        externalRunId: "nm-run-42",
+        branch: "feat/x",
+        headSha: HEAD_SHA
+      },
       resolveRoundInputs: () => ({
         inputDigest: null,
         artifactRoot: null,

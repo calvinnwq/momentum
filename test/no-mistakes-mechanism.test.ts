@@ -417,7 +417,7 @@ describe("readNoMistakesExternalState", () => {
     expect(read.digest).toBe(sha256Digest(raw));
   });
 
-  it("fingerprints the exact state file bytes before UTF-8 decoding", () => {
+  it("rejects malformed UTF-8 bytes before JSON parsing", () => {
     const raw = Buffer.from(
       JSON.stringify({
         ...fullSnapshotObject(),
@@ -429,10 +429,9 @@ describe("readNoMistakesExternalState", () => {
 
     const read = readNoMistakesExternalState({ statePath });
 
-    expect(read.ok).toBe(true);
-    if (!read.ok) return;
-    expect(read.value.externalRunId).toBe("nm-run-\ufffd(");
-    expect(read.digest).toBe(sha256Digest(raw));
+    expect(read.ok).toBe(false);
+    if (read.ok) return;
+    expect(read.error).toMatch(/utf-?8|decode/i);
   });
 
   it("returns an unreadable error when the state file does not exist", () => {

@@ -46,6 +46,7 @@
 
 import crypto from "node:crypto";
 import fs from "node:fs";
+import { TextDecoder } from "node:util";
 
 import type {
   NoMistakesCiState,
@@ -137,7 +138,11 @@ export function readNoMistakesExternalState(
 export function parseNoMistakesExternalState(
   raw: string | Buffer
 ): NoMistakesExternalStateRead {
-  const text = Buffer.isBuffer(raw) ? raw.toString("utf-8") : raw;
+  const decoded = decodeNoMistakesExternalStateText(raw);
+  if (!decoded.ok) {
+    return decoded;
+  }
+  const text = decoded.value;
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
@@ -196,6 +201,24 @@ export function parseNoMistakesExternalState(
 
 /** A field-read outcome: the typed value, or the read error to short-circuit on. */
 type FieldRead<T> = { ok: true; value: T } | NoMistakesExternalStateReadError;
+
+function decodeNoMistakesExternalStateText(raw: string | Buffer): FieldRead<string> {
+  if (typeof raw === "string") {
+    return { ok: true, value: raw };
+  }
+  try {
+    return {
+      ok: true,
+      value: new TextDecoder("utf-8", { fatal: true }).decode(raw)
+    };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "unknown error";
+    return {
+      ok: false,
+      error: `external no-mistakes state is not valid UTF-8: ${detail}`
+    };
+  }
+}
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
