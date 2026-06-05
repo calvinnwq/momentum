@@ -1,6 +1,6 @@
 # Contract: Executor Loop
 
-**Status:** Accepted planning contract. This contract refines the workflow-first runtime pivot by pinning how step executors run bounded autonomous work under a `StepRun`. It does not authorize schema, CLI, daemon, or external integration changes by itself.
+**Status:** Accepted planning contract. This contract refines the workflow-first runtime pivot by pinning how step executors run bounded autonomous work or mirror external executor state under a `StepRun`. It does not authorize schema, CLI, daemon, or external integration changes by itself.
 
 The workflow-first runtime contract defines the top-level product shape:
 
@@ -61,7 +61,7 @@ executor_decisions
 executor_checkpoints
 ```
 
-`StepRun` records whether the workflow step is approved, running, paused, or terminal. `ExecutorInvocation` records one configured executor session for that step. `ExecutorRound` records each bounded loop attempt, including inputs, agent/model selection, output, verification, commit/recovery result, and remaining work.
+`StepRun` records whether the workflow step is approved, running, paused, or terminal. `ExecutorInvocation` records one configured executor session for that step. `ExecutorRound` records each bounded loop attempt or external mirror lane, including inputs, agent/model selection when Momentum owns the runner, output or mirrored state, verification, commit/recovery result, and remaining work.
 
 ## Executor States
 
@@ -102,7 +102,7 @@ Terminal invocation states are `manual_recovery_required`, `blocked`, `failed`, 
 
 ## Round Lifecycle
 
-Each round follows the same durable lifecycle, even when the executor family is different:
+Each result-bearing round follows the same durable lifecycle, even when the executor family is different:
 
 1. Load `WorkflowRun`, `StepRun`, `StepDefinition`, executor config, prior round summaries, repo policy, and current recovery state.
 2. Resolve agent, model, effort, and tool policy from the configured precedence rules.
@@ -115,7 +115,9 @@ Each round follows the same durable lifecycle, even when the executor family is 
 9. Classify the round result.
 10. Persist the daemon's decision to continue, pause, fail, recover, or complete.
 
-An executor cannot silently skip the normalized result step. If the executor cannot produce a valid result or state snapshot, the daemon classifies the round as failed or manual recovery based on the configured recovery taxonomy. The `script` family is the narrow exception: a successful script round records the command exit status and bounded logs, emits a bare capture transition, and omits `result_captured` because no normalized result document exists.
+An executor cannot silently skip the normalized result step. If the executor cannot produce a valid result or state snapshot, the daemon classifies the round as failed or manual recovery based on the configured recovery taxonomy. The `script` family is the narrow result-bearing exception: a successful script round records the command exit status and bounded logs, emits a bare capture transition, and omits `result_captured` because no normalized result document exists.
+
+The `no-mistakes` family uses the same durable envelope differently: one long-lived mirror round is born in `mirroring_external_state`, each daemon poll reconciles the latest external snapshot into that same round, and the round either heartbeats in place, pauses in `waiting_operator`, or settles terminally. Momentum persists findings and decisions below that mirror round but does not split the external review/fix phases into separate Momentum rounds.
 
 ## Round Schema
 

@@ -79,8 +79,9 @@ export type ExecutorInvocationTerminalState =
   (typeof EXECUTOR_INVOCATION_TERMINAL_STATES)[number];
 
 /**
- * Executor round states (contract "Executor States"). One round is a single
- * bounded loop attempt under an invocation.
+ * Executor round states (contract "Executor States"). One round is either a
+ * single bounded loop attempt or a long-lived external mirror lane under an
+ * invocation.
  */
 export const EXECUTOR_ROUND_STATES = [
   "pending",
@@ -380,10 +381,11 @@ export type ExecutorInvocationRecord = {
 };
 
 /**
- * One bounded loop attempt under an invocation (contract "Round Schema"). The
- * common identity, execution, and result fields below are what workflow status,
- * handoff, monitor, and recovery surfaces rely on without understanding the
- * executor internals. Executor-specific evidence is layered on durably as
+ * One bounded loop attempt or long-lived external mirror lane under an invocation
+ * (contract "Round Schema"). The common identity, execution, and result fields
+ * below are what workflow status, handoff, monitor, and recovery surfaces rely on
+ * without understanding the executor internals. Executor-specific evidence is
+ * layered on durably as
  * separate {@link ExecutorArtifactRecord} / {@link ExecutorCheckpointRecord} /
  * {@link ExecutorFindingRecord} / {@link ExecutorDecisionRecord} child records
  * that hang below a round.

@@ -117,12 +117,12 @@ implementation
   round 3
 
 no-mistakes
-  review round 1
-  fix round 1
-  review round 2
+  mirror round 0
+    findings
+    decisions
 ```
 
-Loops live inside executors, but their rounds belong in Momentum's database.
+Loops live inside executors, but their rounds belong in Momentum's database. External no-mistakes review/fix phases remain owned by no-mistakes and are mirrored below one long-lived Momentum round.
 
 ## Executor Families
 

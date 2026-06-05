@@ -79,7 +79,7 @@ Workflow-first runtime target:
 - `StepRun` is the durable execution state for one step in one run.
 - `ExecutorDefinition` chooses an executor family and policy.
 - `ExecutorInvocation` is one configured executor session under a step run.
-- `ExecutorRound` is one bounded unit of autonomous or external work.
+- `ExecutorRound` is one bounded unit of autonomous work or one long-lived external mirror lane.
 - The daemon schedules workflow runs, step runs, invocations, and rounds.
 - Human gates are durable workflow / step / executor records with allowed actions.
 
@@ -107,9 +107,9 @@ Future product surface:
 | Product root | Goal-first execution plus imported workflow runs | WorkflowDefinition / WorkflowRun | Introduce workflow definitions before deprecating goal-first UX |
 | Run start | `goal start`; `workflow import` for external plans; persisted workflow definitions; `workflow run start` materialization with executor records and scheduler-lane eligibility | `workflow run start` connected to execution scheduling | Keep the first-class start command as the workflow-first entry point; remaining attachments are gates and later runtime / dispatch behavior |
 | Step model | Fixed coding workflow step kinds | Configurable StepDefinition list | Keep canonical coding workflow as one built-in definition |
-| Executor model | Runner profiles, M9 wrapper registry, and landed goal-loop / one-shot / script adapter modules | Per-step ExecutorDefinition and executor config | Wire persisted executor config into dispatch while reusing wrapper config as executor config input |
+| Executor model | Runner profiles, M9 wrapper registry, and landed goal-loop / one-shot / script adapter modules plus the no-mistakes mirror | Per-step ExecutorDefinition and executor config | Wire persisted executor config into dispatch while reusing wrapper config as executor config input |
 | Loop state | Goal iteration jobs/artifacts; external GNHF/no-mistakes state | ExecutorInvocation / ExecutorRound records | Goal-loop adapter landed (M10-05), one-shot / script adapters landed (M10-06), and no-mistakes mirror landed (M10-07): bounded rounds and mirrored external state persist common loop evidence in Momentum SQLite |
-| Daemon scheduling | Drains goal iteration queue; opt-in lane recovers/scans/claims runnable workflow steps | Schedules workflow runs and step runs | Scheduler lane landed (M10-04); goal-loop and one-shot / script adapters now drive and persist bounded rounds below StepRun, while direct dispatcher wiring remains later runtime work |
+| Daemon scheduling | Drains goal iteration queue; opt-in lane recovers/scans/claims runnable workflow steps | Schedules workflow runs and step runs | Scheduler lane landed (M10-04); goal-loop and one-shot / script adapters now drive bounded rounds below StepRun, and no-mistakes now mirrors external state into one long-lived round, while direct dispatcher wiring remains later runtime work |
 | Repo safety | Repo locks plus verification / commit transactions | Same safety around executor finalization | Reuse M9 finalization and repo-lock heartbeats |
 | Approvals | M8 workflow approvals for imported runs | Workflow / step / gate approvals | Keep M8 rows; generalize boundary vocabulary |
 | Human gates | Split across approval rows, recovery flag, external TUI/IPC | Durable gates with allowed actions and decisions | Add gate records and `workflow run decide` |
