@@ -320,6 +320,9 @@ function findUnreadableReason(state: NoMistakesExternalState): string | null {
     if (decision.allowedActions.length === 0) {
       return `decision ${decision.externalId} offers no allowed actions`;
     }
+    if (decision.allowedActions.some((action) => !isNonBlank(action))) {
+      return `decision ${decision.externalId} offers a blank allowed action`;
+    }
     if (decisionIds.has(decision.externalId)) {
       return `duplicate decision id ${decision.externalId}`;
     }

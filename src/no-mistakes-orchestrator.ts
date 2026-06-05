@@ -401,23 +401,38 @@ function unresolvedPriorDecisionCount(
   ).length;
 }
 
-function reconcileNoMistakesCompletionDecision(
+function hasPinnedOrExpectedExternalIdentity(
+  db: MomentumDb,
+  roundId: string,
+  expectedExternalIdentity: NoMistakesExpectedExternalIdentity | null
+): boolean {
+  return (
+    pinnedExternalIdentity(db, roundId) !== null ||
+    expectedExternalIdentity !== null
+  );
+}
+
+function reconcileNoMistakesTerminalDecision(
   db: MomentumDb,
   roundId: string,
   stateRead: NoMistakesExternalStateRead,
   decision: NoMistakesMirrorDecision,
   expectedExternalIdentity: NoMistakesExpectedExternalIdentity | null
 ): NoMistakesMirrorDecision {
-  if (!stateRead.ok || decision.classification !== "complete") {
+  if (!stateRead.ok) {
     return decision;
   }
   if (
-    pinnedExternalIdentity(db, roundId) === null &&
-    expectedExternalIdentity === null
+    isTerminalExecutorRoundState(decision.roundState) &&
+    decision.recoveryCode !== "external_state_unreadable" &&
+    !hasPinnedOrExpectedExternalIdentity(db, roundId, expectedExternalIdentity)
   ) {
     return noMistakesExternalStateInconsistent(
-      "external no-mistakes run claims completed before external identity was pinned"
+      `external no-mistakes run reached terminal ${stateRead.value.stepStatus} before external identity was pinned`
     );
+  }
+  if (decision.classification !== "complete") {
+    return decision;
   }
   const unresolvedCount = unresolvedPriorDecisionCount(
     db,
@@ -523,7 +538,7 @@ export function runNoMistakesMirrorRound(
     classified.recoveryCode === "external_state_unreadable"
       ? classified
       : noMistakesExternalStateInconsistent(identityMismatchReason);
-  const decision = reconcileNoMistakesCompletionDecision(
+  const decision = reconcileNoMistakesTerminalDecision(
     db,
     roundId,
     stateRead,

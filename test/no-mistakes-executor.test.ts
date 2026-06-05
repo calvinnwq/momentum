@@ -356,6 +356,19 @@ describe("decideNoMistakesMirror — untrusted external evidence routes to manua
     expect(decision.recoveryCode).toBe("external_state_unreadable");
   });
 
+  it("rejects a decision with only blank allowed actions", () => {
+    const decision = decideNoMistakesMirror(
+      externalState({
+        stepStatus: "awaiting_decision",
+        decisions: [
+          { externalId: "D-1", summary: "x", allowedActions: ["  ", "\t"] }
+        ]
+      })
+    );
+    expect(decision.classification).toBe("manual_recovery_required");
+    expect(decision.recoveryCode).toBe("external_state_unreadable");
+  });
+
   it("rejects duplicate finding ids", () => {
     const decision = decideNoMistakesMirror(
       externalState({

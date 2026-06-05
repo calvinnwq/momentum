@@ -244,6 +244,7 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
     const result = runNoMistakesMirrorRound({
       db,
       roundId: ROUND_ID,
+      expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       read: okReader({ stepStatus: "failed" }),
       polledAt: 2_000
     });
@@ -259,6 +260,7 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
     const result = runNoMistakesMirrorRound({
       db,
       roundId: ROUND_ID,
+      expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       read: okReader({ stepStatus: "blocked" }),
       polledAt: 2_000
     });
@@ -291,6 +293,42 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
       db,
       roundId: ROUND_ID,
       read: okReader({ stepStatus: "completed", ciState: "passed" }),
+      polledAt: 3_000
+    });
+
+    expect(result.decision.classification).toBe("manual_recovery_required");
+    expect(result.decision.recoveryCode).toBe("external_state_inconsistent");
+    expect(result.round.state).toBe("manual_recovery_required");
+    expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe(
+      "manual_recovery_required"
+    );
+  });
+
+  it("refuses first-poll terminal failure without a pinned external identity", () => {
+    const db = openMirrorRoundDb();
+
+    const result = runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      read: okReader({ stepStatus: "failed" }),
+      polledAt: 3_000
+    });
+
+    expect(result.decision.classification).toBe("manual_recovery_required");
+    expect(result.decision.recoveryCode).toBe("external_state_inconsistent");
+    expect(result.round.state).toBe("manual_recovery_required");
+    expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe(
+      "manual_recovery_required"
+    );
+  });
+
+  it("refuses first-poll terminal blockage without a pinned external identity", () => {
+    const db = openMirrorRoundDb();
+
+    const result = runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      read: okReader({ stepStatus: "blocked" }),
       polledAt: 3_000
     });
 
