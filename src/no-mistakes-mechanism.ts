@@ -114,7 +114,11 @@ export function readNoMistakesExternalState(
         error: `external no-mistakes state file is too large: ${stat.size} bytes exceeds ${MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES}`
       };
     }
-    raw = fs.readFileSync(input.statePath);
+    const read = readRegularFileBounded(input.statePath);
+    if (!read.ok) {
+      return read;
+    }
+    raw = read.value;
   } catch (error) {
     const detail = error instanceof Error ? error.message : "unknown error";
     return {
@@ -123,6 +127,60 @@ export function readNoMistakesExternalState(
     };
   }
   return parseNoMistakesExternalState(raw);
+}
+
+function readRegularFileBounded(
+  statePath: string
+): FieldRead<Buffer> {
+  let fd: number | null = null;
+  try {
+    fd = fs.openSync(
+      statePath,
+      fs.constants.O_RDONLY | fs.constants.O_NONBLOCK
+    );
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile()) {
+      return {
+        ok: false,
+        error: "external no-mistakes state path is not a regular file"
+      };
+    }
+    if (stat.size > MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES) {
+      return {
+        ok: false,
+        error: `external no-mistakes state file is too large: ${stat.size} bytes exceeds ${MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES}`
+      };
+    }
+    const chunks: Buffer[] = [];
+    let total = 0;
+    while (total <= MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES) {
+      const remaining = MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES + 1 - total;
+      const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, remaining));
+      const bytesRead = fs.readSync(fd, chunk, 0, chunk.length, null);
+      if (bytesRead === 0) {
+        return { ok: true, value: Buffer.concat(chunks, total) };
+      }
+      chunks.push(chunk.subarray(0, bytesRead));
+      total += bytesRead;
+    }
+    return {
+      ok: false,
+      error: `external no-mistakes state file is too large: more than ${MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES} bytes`
+    };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "unknown error";
+    return {
+      ok: false,
+      error: `external no-mistakes state file is unreadable: ${detail}`
+    };
+  } finally {
+    if (fd !== null) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+      }
+    }
+  }
 }
 
 /**

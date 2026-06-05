@@ -275,40 +275,29 @@ function noMistakesExternalStateInconsistent(
   };
 }
 
-/**
- * Mirror the findings/decisions a poll surfaced below the round idempotently: the
- * mirror is a long-lived round that re-derives the same deterministic
- * finding/decision ids on every poll, so existing rows are refreshed with the
- * latest external values and newly-surfaced rows are inserted.
- */
 function insertNewFindings(
   db: MomentumDb,
   roundId: string,
   projected: readonly ExecutorFindingRecord[],
   now: number
 ): void {
-  const existing = new Set(
-    listExecutorFindingsForRound(db, roundId).map((f) => f.findingId)
-  );
+  const existing = listExecutorFindingsForRound(db, roundId);
+  const existingIds = new Set(existing.map((finding) => finding.findingId));
   for (const finding of projected) {
-    if (existing.has(finding.findingId)) {
-      db.prepare(
-        `UPDATE executor_findings
-            SET severity = ?, title = ?, detail = ?, selected = ?, external_ref = ?
-          WHERE finding_id = ? AND round_id = ?`
-      ).run(
-        finding.severity,
-        finding.title,
-        finding.detail,
-        finding.selected ? 1 : 0,
-        finding.externalRef,
-        finding.findingId,
-        roundId
-      );
-    } else {
-      insertExecutorFinding(db, finding, { now });
-      existing.add(finding.findingId);
+    const related = existing.filter(
+      (candidate) => candidate.externalRef === finding.externalRef
+    );
+    const latest = related.at(-1);
+    if (latest !== undefined && sameFindingEvidence(latest, finding)) {
+      continue;
     }
+    const findingId =
+      latest === undefined
+        ? finding.findingId
+        : nextEvidenceId(finding.findingId, existingIds);
+    insertExecutorFinding(db, { ...finding, findingId }, { now });
+    existing.push({ ...finding, findingId });
+    existingIds.add(findingId);
   }
 }
 
@@ -318,30 +307,74 @@ function insertNewDecisions(
   projected: readonly ExecutorDecisionRecord[],
   now: number
 ): void {
-  const existing = new Set(
-    listExecutorDecisionsForRound(db, roundId).map((d) => d.decisionId)
-  );
+  const existing = listExecutorDecisionsForRound(db, roundId);
+  const existingIds = new Set(existing.map((decision) => decision.decisionId));
   for (const decision of projected) {
-    if (existing.has(decision.decisionId)) {
-      db.prepare(
-        `UPDATE executor_decisions
-            SET summary = ?, allowed_actions = ?, recommended_action = ?,
-                chosen_action = ?, resolution = ?
-          WHERE decision_id = ? AND round_id = ?`
-      ).run(
-        decision.summary,
-        JSON.stringify(decision.allowedActions),
-        decision.recommendedAction,
-        decision.chosenAction,
-        decision.resolution,
-        decision.decisionId,
-        roundId
-      );
-    } else {
-      insertExecutorDecision(db, decision, { now });
-      existing.add(decision.decisionId);
+    const related = existing.filter(
+      (candidate) =>
+        decisionEvidenceBaseId(candidate.decisionId) === decision.decisionId
+    );
+    const latest = related.at(-1);
+    if (latest !== undefined && sameDecisionEvidence(latest, decision)) {
+      continue;
+    }
+    const decisionId =
+      latest === undefined
+        ? decision.decisionId
+        : nextEvidenceId(decision.decisionId, existingIds);
+    insertExecutorDecision(db, { ...decision, decisionId }, { now });
+    existing.push({ ...decision, decisionId });
+    existingIds.add(decisionId);
+  }
+}
+
+function nextEvidenceId(baseId: string, existingIds: Set<string>): string {
+  for (let version = 2; ; version += 1) {
+    const candidate = `${baseId}-snapshot-${version}`;
+    if (!existingIds.has(candidate)) {
+      return candidate;
     }
   }
+}
+
+function decisionEvidenceBaseId(decisionId: string): string {
+  return decisionId.replace(/-snapshot-\d+$/, "");
+}
+
+function sameFindingEvidence(
+  left: ExecutorFindingRecord,
+  right: ExecutorFindingRecord
+): boolean {
+  return (
+    left.severity === right.severity &&
+    left.title === right.title &&
+    left.detail === right.detail &&
+    left.selected === right.selected &&
+    left.externalRef === right.externalRef
+  );
+}
+
+function sameDecisionEvidence(
+  left: ExecutorDecisionRecord,
+  right: ExecutorDecisionRecord
+): boolean {
+  return (
+    left.summary === right.summary &&
+    stringArraysEqual(left.allowedActions, right.allowedActions) &&
+    left.recommendedAction === right.recommendedAction &&
+    left.chosenAction === right.chosenAction &&
+    left.resolution === right.resolution
+  );
+}
+
+function stringArraysEqual(
+  left: readonly string[],
+  right: readonly string[]
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
 }
 
 function insertExternalStateCheckpoint(
@@ -454,12 +487,15 @@ function unresolvedPriorDecisionCount(
   const currentlyResolved = new Set(
     planNoMistakesRoundDecisions({ roundId, decisions: state.decisions })
       .filter(isResolvedDecisionRecord)
-      .map((decision) => decision.decisionId)
+      .map((decision) => decisionEvidenceBaseId(decision.decisionId))
   );
-  return listExecutorDecisionsForRound(db, roundId).filter(
-    (decision) =>
-      !isResolvedDecisionRecord(decision) &&
-      !currentlyResolved.has(decision.decisionId)
+  const latest = new Map<string, ExecutorDecisionRecord>();
+  for (const decision of listExecutorDecisionsForRound(db, roundId)) {
+    latest.set(decisionEvidenceBaseId(decision.decisionId), decision);
+  }
+  return [...latest.entries()].filter(
+    ([baseId, decision]) =>
+      !isResolvedDecisionRecord(decision) && !currentlyResolved.has(baseId)
   ).length;
 }
 

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -7,6 +7,7 @@ import path from "node:path";
 import { decideNoMistakesMirror } from "../src/no-mistakes-executor.js";
 import type { NoMistakesExternalState } from "../src/no-mistakes-executor.js";
 import {
+  MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES,
   parseNoMistakesExternalState,
   readNoMistakesExternalState
 } from "../src/no-mistakes-mechanism.js";
@@ -24,6 +25,7 @@ import {
 const tempRoots: string[] = [];
 
 afterEach(() => {
+  vi.restoreAllMocks();
   while (tempRoots.length > 0) {
     const dir = tempRoots.pop();
     if (dir) fs.rmSync(dir, { recursive: true, force: true });
@@ -456,6 +458,25 @@ describe("readNoMistakesExternalState", () => {
 
   it("returns an unreadable error when the state file exceeds the read cap", () => {
     const statePath = writeStateFile("x".repeat(1024 * 1024 + 1));
+
+    const read = readNoMistakesExternalState({ statePath });
+
+    expect(read.ok).toBe(false);
+    if (read.ok) return;
+    expect(read.error).toMatch(/too large/i);
+  });
+
+  it("returns an unreadable error when the state file grows after the path stat", () => {
+    const statePath = writeStateFile(JSON.stringify(fullSnapshotObject()));
+    const statSync = fs.statSync.bind(fs);
+    vi.spyOn(fs, "statSync").mockImplementation((pathLike, options) => {
+      const stat = statSync(pathLike, options as fs.StatSyncOptions);
+      fs.writeFileSync(
+        statePath,
+        "x".repeat(MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES + 1)
+      );
+      return stat;
+    });
 
     const read = readNoMistakesExternalState({ statePath });
 

@@ -625,7 +625,7 @@ describe("runNoMistakesMirrorRound — findings and decisions projection", () =>
     expect(result.decisions).toEqual([]);
   });
 
-  it("refreshes mirrored finding selections and decision resolutions across polls", () => {
+  it("appends changed finding selections and decision resolutions across polls", () => {
     const db = openMirrorRoundDb();
 
     runNoMistakesMirrorRound({
@@ -663,12 +663,18 @@ describe("runNoMistakesMirrorRound — findings and decisions projection", () =>
       polledAt: 3_000
     });
 
-    expect(second.findings).toHaveLength(1);
-    expect(second.findings[0]!.selected).toBe(true);
-    expect(second.findings[0]!.severity).toBe("high");
-    expect(second.decisions).toHaveLength(1);
-    expect(second.decisions[0]!.chosenAction).toBe("a");
-    expect(second.decisions[0]!.resolution).toBe("approved");
+    expect(second.findings).toHaveLength(2);
+    expect(second.findings[0]!.selected).toBe(false);
+    expect(second.findings[0]!.severity).toBeNull();
+    expect(second.findings[1]!.findingId).not.toBe(second.findings[0]!.findingId);
+    expect(second.findings[1]!.selected).toBe(true);
+    expect(second.findings[1]!.severity).toBe("high");
+    expect(second.decisions).toHaveLength(2);
+    expect(second.decisions[0]!.chosenAction).toBeNull();
+    expect(second.decisions[0]!.resolution).toBeNull();
+    expect(second.decisions[1]!.decisionId).not.toBe(second.decisions[0]!.decisionId);
+    expect(second.decisions[1]!.chosenAction).toBe("a");
+    expect(second.decisions[1]!.resolution).toBe("approved");
   });
 
   it("persists a durable checkpoint snapshot of mirrored external state", () => {
@@ -933,6 +939,55 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
       "manual_recovery_required"
     );
     expect(listExecutorDecisionsForRound(db, ROUND_ID)[0]!.resolution).toBeNull();
+  });
+
+  it("allows completion when a previously mirrored decision was resolved before being omitted", () => {
+    const db = openMirrorRoundDb();
+
+    runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
+      read: okReader({
+        stepStatus: "awaiting_decision",
+        decisions: [
+          { externalId: "D-1", summary: "decide", allowedActions: ["a", "b"] }
+        ]
+      }),
+      polledAt: 2_000
+    });
+    runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      read: okReader({
+        stepStatus: "running",
+        decisions: [
+          {
+            externalId: "D-1",
+            summary: "decide",
+            allowedActions: ["a", "b"],
+            chosenAction: "a",
+            resolution: "approved"
+          }
+        ]
+      }),
+      polledAt: 3_000
+    });
+
+    const completed = runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      read: okReader({
+        stepStatus: "completed",
+        ciState: "passed",
+        decisions: []
+      }),
+      polledAt: 4_000
+    });
+
+    expect(completed.round.state).toBe("succeeded");
+    expect(completed.decisions).toHaveLength(2);
+    expect(completed.decisions[1]!.resolution).toBe("approved");
   });
 
   it("refuses completion when a later poll mirrors a different external identity", () => {
