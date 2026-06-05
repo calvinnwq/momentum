@@ -64,7 +64,7 @@ A single `momentum.db` per data directory backs durable state across all goals:
 - `executor_definitions` — durable executor recipes keyed by `executor_key`, carrying the executor `family`, display name, optional agent / model / effort policy, and lifecycle timestamps.
 - `executor_invocations` — one configured executor session below a workflow step, keyed by `invocation_id` and referencing `(run_id, step_id)`; stores executor family, state, artifact root, model metadata, summary fields, verification / recovery result fields, and lifecycle timestamps.
 - `executor_rounds` — bounded executor-loop attempts or long-lived external mirror lanes keyed by `round_id` and referencing `executor_invocations`; stores attempt / round ordering, durable round state, execution metadata, result summaries, remaining work, verification status, commit / recovery fields, and lifecycle timestamps.
-- `executor_artifacts`, `executor_checkpoints`, `executor_findings`, `executor_decisions` — append-only evidence rows below executor rounds for artifacts, checkpoint events, review findings, and durable decisions. Decisions may carry a mirrored external reference for external-gate identity. Each table references `executor_rounds` and keeps enough structured payload to reattach after process, daemon, or chat loss.
+- `executor_artifacts`, `executor_checkpoints`, `executor_findings`, `executor_decisions` — append-only evidence rows below executor rounds for artifacts, checkpoint events, review findings, and durable decisions. Findings and decisions may carry mirrored external references for external review / gate identity. Each table references `executor_rounds` and keeps enough structured payload to reattach after process, daemon, or chat loss.
 
 ## Per-goal artifact files
 

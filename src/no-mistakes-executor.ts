@@ -775,10 +775,11 @@ export type PlanNoMistakesRoundDecisionsInput = {
  * rows the persistence layer (`insertExecutorDecision`) writes — the no-mistakes
  * mirror's "Decisions and delegated-policy results" (contract "External Executor
  * Mirroring"). Each decision takes a deterministic id
- * (`<roundId>-decision-<externalId>`), copies its allowed actions, and mirrors
- * its recommended / chosen action and `resolution` (the delegated-policy or
- * operator outcome, or `null` while still open) so the durable record reflects —
- * never drives — the external decision. Pure: no SQLite, no file system.
+ * (`<roundId>-decision-<externalId>`) and an `externalRef` of
+ * `nomistakes:<externalId>`, copies its allowed actions, and mirrors its
+ * recommended / chosen action and `resolution` (the delegated-policy or operator
+ * outcome, or `null` while still open) so the durable record reflects — never
+ * drives — the external decision. Pure: no SQLite, no file system.
  */
 export function planNoMistakesRoundDecisions(
   input: PlanNoMistakesRoundDecisionsInput

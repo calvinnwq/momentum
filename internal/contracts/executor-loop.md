@@ -309,6 +309,24 @@ For no-mistakes, Momentum mirrors:
 - Decisions and delegated-policy results.
 - PR URL and CI state.
 
+The no-mistakes external-state reader consumes one bounded JSON snapshot file,
+not the external daemon's private store directly. The file must be at most
+1 MiB, UTF-8 encoded, and a JSON object with these camelCase fields:
+
+- `externalRunId`, `branch`, `headSha`, `stepStatus`, and `ciState`: required strings.
+- `activeStep` and `prUrl`: optional / nullable strings (`null` when absent).
+- `findings`: required array of objects with string `externalId` and `title`,
+  plus optional / nullable string `severity` and `detail`.
+- `selectedFindingIds`: required array of strings matching surfaced finding ids.
+- `decisions`: required array of objects with string `externalId`, string
+  `summary`, string-array `allowedActions`, and optional / nullable string
+  `recommendedAction`, `chosenAction`, and `resolution`.
+
+External producers should emit `stepStatus` as one of `running`,
+`awaiting_decision`, `awaiting_approval`, `blocked`, `failed`, or `completed`,
+and `ciState` as one of `passed`, `failed`, `pending`, or `none`. Unknown enum
+strings are structurally readable but classify as unreadable external evidence.
+
 No-mistakes mirrors must pin an external identity anchor — external run id,
 branch, and head SHA — before trusting readable external state. The anchor may
 come from the caller's expected identity or a durable checkpoint, and subsequent

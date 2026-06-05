@@ -314,7 +314,7 @@ For no-mistakes:
 
 - Mirror run id, branch, head SHA, active step, step status, findings, selected finding IDs, PR URL, CI status, and gate decisions.
 - Read the bounded external JSON state snapshot through `readNoMistakesExternalState` / `parseNoMistakesExternalState` as the integration seam; missing, unreadable, oversized, or malformed snapshots become error evidence instead of daemon throws.
-- Treat that JSON snapshot as external evidence, not direct authority: Momentum `step_runs` / `executor_rounds` / `executor_findings` decide whether the workflow step can advance.
+- Treat that JSON snapshot as external evidence, not direct authority: Momentum `step_runs` / `executor_rounds` / `executor_findings` / `executor_decisions` decide whether the workflow step can advance, and completion requires all mirrored decisions to be resolved.
 
 Momentum must not blindly trust a single external status string. It should reconcile external state with artifacts, logs, repo state, and configured completion requirements.
 
