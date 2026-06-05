@@ -5,8 +5,9 @@ for the workflow-first runtime model accepted in PR #70. M10-00 promoted the
 planning contracts into this executable sequence. M10-01 has begun landing the
 workflow / step definition primitives and is now complete, M10-02 adds workflow
 run start, M10-03 adds the durable executor-loop schema, M10-04 adds the
-opt-in daemon workflow scheduler lane, and M10-05 adds the goal-loop executor
-adapter without closing or rewriting M9 by itself.
+opt-in daemon workflow scheduler lane, M10-05 adds the goal-loop executor
+adapter, and M10-06 adds the one-shot / script executor adapters without
+closing or rewriting M9 by itself.
 
 M10 promotes Momentum from a Goal-first product surface plus imported
 OpenClaw-coding-workflow substrate into a configurable workflow runtime:
@@ -31,7 +32,8 @@ milestone narrative and issue sequence; M10-01 adds the first durable definition
 schema, validation, and persistence primitives, M10-02 adds workflow run start,
 M10-03 adds executor definition / invocation / round persistence, M10-04 adds
 the daemon workflow scheduler lane, M10-05 adds the goal-loop executor adapter,
-and later M10 slices implement the remaining executor adapters and runtime
+M10-06 adds the one-shot / script executor adapters, and later M10 slices
+implement the no-mistakes mirror, gates, closeout, and remaining runtime
 behavior.
 
 ## Relationship To M9
@@ -69,6 +71,7 @@ The first workflow-first dogfood should prove:
 - the daemon can schedule workflow runs and step runs without breaking existing
   goal iteration draining
 - `goal-loop` can run implementation-like bounded autonomous rounds
+- `one-shot` and `script` can run bounded single-invocation work
 - no-mistakes can be mirrored as a specialist executor without reimplementing
   no-mistakes internals
 - durable human gates and operator decisions can pause and resume work
@@ -125,10 +128,11 @@ The M10 slice order is:
    and step runs without breaking existing goal iteration draining.
 6. **NGX-349 — M10-05 Goal-loop executor adapter.** Move implementation-like autonomous
    rounds into the executor-loop model while preserving repo safety and
-   finalization behavior. *(landed in this slice)*
-7. **NGX-350 — M10-06 One-shot and script executor adapters.** Support deterministic
-   commands and bounded one-shot agent/script invocations with normalized
-   results.
+   finalization behavior. *(done)*
+7. **NGX-350 — M10-06 One-shot and script executor adapters.** Support bounded
+   one-shot invocations with normalized results and deterministic script
+   commands that succeed from exit code plus bounded logs. *(landed in this
+   slice)*
 8. **NGX-351 — M10-07 no-mistakes executor mirror.** Mirror no-mistakes runs, findings,
    selected finding IDs, decisions, PR / CI state, and completion into Momentum
    executor records.
@@ -163,9 +167,9 @@ updated.
 M10-00 was docs/spec/tests only. M10-01 adds definition schema, validation, and
 persistence only; M10-02 adds first-class workflow run start; M10-03 adds
 executor-loop schema and persistence only; M10-04 adds the opt-in daemon
-workflow scheduler lane only; M10-05 adds the goal-loop executor adapter only.
-The remaining executor adapters and generalized runtime behavior remain later
-slices.
+workflow scheduler lane only; M10-05 adds the goal-loop executor adapter only;
+M10-06 adds the one-shot and script executor adapters only. The no-mistakes
+mirror, gates, closeout, and generalized runtime behavior remain later slices.
 
 Across the milestone, these remain outside scope unless a later contract
 explicitly changes them:

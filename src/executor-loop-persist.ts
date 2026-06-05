@@ -6,9 +6,10 @@
  * writes them into the durable `executor_definitions` / `executor_invocations` /
  * `executor_rounds` tables added by `migrations.ts`. This is the storage twin of
  * the pure reducer: nothing here runs executors or starts a Goal loop. The
- * M10-04 scheduler lane is owned separately by `workflow-scheduler.ts`; Goal-loop
- * and real executor adapter execution remain later M10 work, exactly as
- * `workflow-definition-persist.ts` is the storage twin of `workflow-definition.ts`.
+ * M10-04 scheduler lane is owned separately by `workflow-scheduler.ts`; the
+ * landed goal-loop and one-shot / script adapters layer on top of this
+ * persistence spine, exactly as `workflow-definition-persist.ts` is the storage
+ * twin of `workflow-definition.ts`.
  *
  * Stable contracts this slice locks in:
  *   - An executor definition's durable identity is its `executorKey`; re-persisting
@@ -26,8 +27,8 @@
  *   - State changes are transition-gated through the same
  *     {@link transitionExecutorInvocation} / {@link transitionExecutorRound}
  *     reducers used everywhere else: a round can never fast-path to `succeeded`
- *     without first capturing or mirroring a normalized result, and the refusal
- *     leaves the durable row unchanged.
+ *     without first entering the capture or mirror phase, and the refusal leaves
+ *     the durable row unchanged.
  *   - The round carries the contract "Round Schema" normalized result fields
  *     (`summary`, `key_changes`, `remaining_work`, `changed_files`,
  *     `verification_status`, `commit_sha`, ...) so workflow status, handoff,

@@ -129,9 +129,9 @@ Loops live inside executors, but their rounds belong in Momentum's database.
 Initial executor families:
 
 - `goal-loop` — bounded autonomous implementation rounds.
-- `one-shot` — one command / agent / script invocation with normalized result output.
+- `one-shot` — one command or agent invocation with normalized result output.
 - `no-mistakes` — specialist review gate mirroring no-mistakes daemon state.
-- `script` — deterministic local command execution.
+- `script` — deterministic local command execution with exit-code/log result semantics.
 - `external-apply` — operator-mediated external write using the M6 external apply contract.
 - `subworkflow` — future nested workflow execution.
 
@@ -335,6 +335,7 @@ Current Momentum state:
 - Has M10-03 `ExecutorDefinition` / `ExecutorInvocation` / `ExecutorRound` schema and persistence below workflow steps, including round artifacts, checkpoints, findings, and decisions.
 - Has M10-04 opt-in daemon workflow scheduler lane (recover → scan → claim → dispatch) that schedules runnable workflow steps alongside goal iteration draining, with the executor-dispatch seam left to later slices.
 - Has M10-05 `goal-loop` executor adapter that drives bounded autonomous rounds below a step run, reusing the M9 verify / commit / reset finalization and persisting per-round agent / model / input / result / verification / commit / artifact / checkpoint evidence.
+- Has M10-06 `one-shot` / `script` executor adapters for bounded single-invocation work, including result-bearing one-shot success and exit-code / bounded-log script success.
 - Has `goal start`, `daemon`, and workflow import / status / run controls.
 
 Required workflow-first gaps:
@@ -343,7 +344,7 @@ Required workflow-first gaps:
 |---|---|---|
 | Top-level entity | Goal-first; persisted WorkflowDefinition primitives; WorkflowRun mostly coding-workflow substrate | WorkflowDefinition / WorkflowRun as product core |
 | Step configuration | Persisted StepDefinition list for definitions; run execution still fixed canonical step kinds | Configurable StepDefinition list |
-| Executor selection | Executor definitions can be persisted, but step execution still uses runner profiles or fixed workflow step kinds | Per-step executor definition and agent / model config |
+| Executor selection | Executor definitions can be persisted, and goal-loop / one-shot / script adapters exist, but dispatch still needs per-step executor config wiring | Per-step executor definition and agent / model config |
 | Daemon scheduling | Drains `goal_iteration` jobs; opt-in scheduler lane recovers, scans, claims, and dispatches runnable workflow steps | Schedules workflow runs, step runs, executor invocations, and rounds |
 | Loop state | Goal iteration artifacts / job rows, plus persisted executor invocations / rounds below workflow steps | ExecutorInvocation / ExecutorRound / checkpoints / artifacts driven by the workflow scheduler |
 | Goal loop | Product-level Goal | `goal-loop` executor inside a workflow step |
@@ -365,4 +366,4 @@ This planning contract does not implement:
 - Public UI.
 - Replacement of GNHF or no-mistakes internals.
 
-M10 is now implementing these as concrete slices: M10-01 lands definition schema / validation / persistence, M10-02 lands CLI run start, M10-03 lands executor state schema / persistence, M10-04 lands the opt-in daemon workflow scheduler lane, and M10-05 lands the goal-loop executor adapter, while the remaining executor adapters and external runtime behavior remain later slices.
+M10 is now implementing these as concrete slices: M10-01 lands definition schema / validation / persistence, M10-02 lands CLI run start, M10-03 lands executor state schema / persistence, M10-04 lands the opt-in daemon workflow scheduler lane, M10-05 lands the goal-loop executor adapter, and M10-06 lands the one-shot / script executor adapters, while the no-mistakes mirror, gates, and external runtime behavior remain later slices.

@@ -29,7 +29,8 @@ An executor owns:
 
 - Preparing a bounded unit of work.
 - Running the configured mechanism for that unit.
-- Writing normalized result output.
+- Writing normalized result output or family-specific outcome evidence such as
+  `script` exit-code plus bounded-log evidence.
 - Emitting artifacts, checkpoints, findings, and decisions.
 - Reporting a recommendation such as `complete`, `continue`, `blocked`, `failed`, or `manual_recovery`.
 
@@ -108,13 +109,13 @@ Each round follows the same durable lifecycle, even when the executor family is 
 3. Acquire or refresh the daemon lease, step lease, and repo lock required by the step.
 4. Create an `executor_rounds` row before invoking external work.
 5. Run the executor with explicit argv/env/config and a daemon-provided artifact directory.
-6. Require a normalized result document or mirrored external state snapshot.
+6. Require a normalized result document or mirrored external state snapshot, except deterministic `script` rounds that succeed from exit code plus bounded logs.
 7. Capture artifacts, logs, checkpoints, findings, decisions, and verification output.
 8. Run finalization when the round may mutate repo state or create a commit.
 9. Classify the round result.
 10. Persist the daemon's decision to continue, pause, fail, recover, or complete.
 
-An executor cannot silently skip the normalized result step. If the executor cannot produce a valid result or state snapshot, the daemon classifies the round as failed or manual recovery based on the configured recovery taxonomy.
+An executor cannot silently skip the normalized result step. If the executor cannot produce a valid result or state snapshot, the daemon classifies the round as failed or manual recovery based on the configured recovery taxonomy. The `script` family is the narrow exception: a successful script round records the command exit status and bounded logs, emits a bare capture transition, and omits `result_captured` because no normalized result document exists.
 
 ## Round Schema
 
@@ -161,9 +162,11 @@ The schema may add executor-specific payload fields, but the common fields above
 
 ## Required Artifacts
 
-Every round writes or mirrors these artifact classes:
+Every round writes or mirrors the artifact classes that apply to its executor
+family:
 
-- Normalized result document.
+- Normalized result document for result-bearing families; the `script` family
+  omits this on success.
 - Bounded stdout/stderr or equivalent external logs.
 - Checkpoint stream for major executor stages.
 - Verification output when verification is configured.
@@ -310,11 +313,11 @@ External state strings are never enough on their own. Momentum reconciles extern
 
 `goal-loop` runs bounded autonomous implementation rounds. It may continue across multiple rounds, but each round must have a normalized result, finalization decision, and daemon classification.
 
-`one-shot` runs a single command, agent call, or script-like invocation. It may retry under policy, but it does not own an open-ended loop.
+`one-shot` runs a single result-bearing command or agent wrapper. It may retry under policy, but it does not own an open-ended loop, and success requires a normalized result document.
 
 `no-mistakes` mirrors no-mistakes daemon state and turns review findings into durable Momentum gates, findings, and decisions.
 
-`script` runs deterministic local commands with explicit argv/env/cwd and bounded logs.
+`script` runs deterministic local commands with explicit argv/env/cwd and bounded logs; success is exit-code and log based, without a normalized result document.
 
 `external-apply` performs operator-mediated external writes through the existing external-apply safety contract.
 
@@ -333,4 +336,4 @@ This contract does not implement:
 - Replacement of GNHF or no-mistakes internals.
 - Remote git operations.
 
-M10 now carries these as implementation slices: M10-01 lands definition migrations, M10-02 lands workflow run start, M10-03 lands executor-loop records, M10-04 lands the opt-in daemon workflow scheduler lane, and M10-05 lands the goal-loop executor adapter, while executor-control CLI surfaces remain later slices.
+M10 now carries these as implementation slices: M10-01 lands definition migrations, M10-02 lands workflow run start, M10-03 lands executor-loop records, M10-04 lands the opt-in daemon workflow scheduler lane, M10-05 lands the goal-loop executor adapter, and M10-06 lands the one-shot / script executor adapters, while executor-control CLI surfaces remain later slices.
