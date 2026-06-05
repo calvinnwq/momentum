@@ -8,8 +8,9 @@
  *
  * Both mechanisms enforce repo-safety at the boundary. `read-only` snapshots
  * require a clean repo before and after the command. `finalize` requires the
- * caller's `baseHead` to match, then maps verification, commit, reset, lock,
- * and git outcomes through the same recovery codes used by live workflow-step
+ * caller's `baseHead` to be a 40-character SHA, match current HEAD, and start
+ * from a clean worktree before mapping verification, commit, reset, lock, and
+ * git outcomes through the same recovery codes used by live workflow-step
  * finalization. Callers must supply absolute artifact log paths on the round;
  * `script` configs must also use an absolute executable path and absolute cwd.
  */
@@ -60,7 +61,7 @@ export type OneShotLiveWrapperRoundRunnerOptions = {
 };
 
 export type SingleShotFinalizationConfig = {
-  /** Expected HEAD before finalization may mutate git state. */
+  /** Expected 40-character HEAD SHA before the command and finalization. */
   baseHead: string;
   /** Verification commands run by live-step finalization. */
   verificationCommands: string[];

@@ -313,11 +313,11 @@ External state strings are never enough on their own. Momentum reconciles extern
 
 `goal-loop` runs bounded autonomous implementation rounds. It may continue across multiple rounds, but each round must have a normalized result, finalization decision, and daemon classification.
 
-`one-shot` runs a single command, agent call, or script-like invocation. It may retry under policy, but it does not own an open-ended loop.
+`one-shot` runs a single result-bearing command or agent wrapper. It may retry under policy, but it does not own an open-ended loop, and success requires a normalized result document.
 
 `no-mistakes` mirrors no-mistakes daemon state and turns review findings into durable Momentum gates, findings, and decisions.
 
-`script` runs deterministic local commands with explicit argv/env/cwd and bounded logs.
+`script` runs deterministic local commands with explicit argv/env/cwd and bounded logs; success is exit-code and log based, without a normalized result document.
 
 `external-apply` performs operator-mediated external writes through the existing external-apply safety contract.
 
