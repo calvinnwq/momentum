@@ -23,8 +23,8 @@
  * finding / decision projections, and the deterministic, reattachable invocation
  * / round identity. Like `single-shot-executor.ts` and `goal-loop-executor.ts`,
  * it is a pure function of its inputs: no SQLite, no file system, no git, no
- * executor invocation. The mechanism / orchestrator twins (later M10-07 slices)
- * layer the external-state reader and durable persistence on top, exactly as the
+ * executor invocation. The mechanism / orchestrator siblings layer the
+ * external-state reader and durable persistence on top, exactly as the
  * single-shot twins layer on `single-shot-executor.ts`.
  *
  * The defining discipline is the ticket's "Treat external no-mistakes state as

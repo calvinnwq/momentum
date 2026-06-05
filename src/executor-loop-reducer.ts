@@ -470,7 +470,8 @@ export type ExecutorFindingRecord = {
  * Classification" `operator_decision_required`; the no-mistakes mirror's
  * "Decisions and delegated-policy results"). `allowedActions` is the action set
  * the decision offers; `resolution` records the delegated-policy or operator
- * outcome once the decision is settled.
+ * outcome once the decision is settled; `externalRef` mirrors the external
+ * decision id / reference when one exists.
  */
 export type ExecutorDecisionRecord = {
   decisionId: string;

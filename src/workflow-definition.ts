@@ -9,8 +9,8 @@
  * / `step_definitions`) is layered on top of these primitives in
  * `workflow-definition-persist.ts`; first-class workflow run start, executor
  * records, the opt-in daemon scheduler lane, and the landed goal-loop /
- * one-shot / script adapters are layered on later modules. The no-mistakes
- * mirror, gates, and remaining runtime slices stay later M10 work.
+ * one-shot / script / no-mistakes mirror adapters are layered on later modules.
+ * Gates and remaining runtime slices stay later M10 work.
  *
  * Scope decisions pinned here, grounded in the accepted planning contracts
  * (internal/contracts/workflow-first-runtime.md and
