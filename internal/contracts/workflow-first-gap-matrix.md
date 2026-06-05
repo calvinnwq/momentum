@@ -1,6 +1,6 @@
 # Contract: Workflow-First Gap Matrix
 
-**Status:** Accepted implementation bridge. M10-00 promoted this matrix into the workflow-first runtime milestone sequence; M10-01 has landed the definition schema and persistence slice, M10-02 adds workflow run start, M10-03 adds executor-loop schema / persistence, M10-04 adds the opt-in daemon workflow scheduler lane, and M10-05 adds the goal-loop executor adapter. It still does not authorize Linear remapping or milestone renumbering by itself.
+**Status:** Accepted implementation bridge. M10-00 promoted this matrix into the workflow-first runtime milestone sequence; M10-01 has landed the definition schema and persistence slice, M10-02 adds workflow run start, M10-03 adds executor-loop schema / persistence, M10-04 adds the opt-in daemon workflow scheduler lane, M10-05 adds the goal-loop executor adapter, and M10-06 adds the one-shot / script executor adapters. It still does not authorize Linear remapping or milestone renumbering by itself.
 
 This contract follows:
 
@@ -39,6 +39,7 @@ Current durable runtime surfaces:
 - M10-03 `ExecutorDefinition` / `ExecutorInvocation` / `ExecutorRound` persistence, with executor artifacts, checkpoints, findings, and decisions below rounds.
 - M10-04 opt-in daemon workflow scheduler lane (`runWorkflowSchedulerOnce`) composing stale-lease recovery, runnable-step scan, atomic dispatch-lease claim, and an executor-dispatch seam, run each daemon cycle alongside goal iteration draining.
 - M10-05 `goal-loop` executor adapter (`runGoalLoopStep`) that drives bounded autonomous rounds below a step run, reusing the M9 verify / commit / reset finalization and the M10-03 round persistence, with per-round agent / model / input / result / verification / commit / artifact / checkpoint evidence.
+- M10-06 `one-shot` / `script` executor adapters for bounded single-invocation work, with normalized-result one-shot success and exit-code / bounded-log script success.
 - Evidence records with typed workflow linkage.
 - Source-item and external-apply contracts.
 
@@ -64,7 +65,7 @@ Current product surface:
 Current limitation:
 
 ```text
-WorkflowRun is durable and can start from definitions, executor records now persist below step runs, the daemon can recover, scan, and claim runnable workflow steps through an opt-in scheduler lane, and the goal-loop executor adapter drives bounded autonomous rounds below a step run. Later slices still attach the remaining executor adapters that fulfil the dispatch seam.
+WorkflowRun is durable and can start from definitions, executor records now persist below step runs, the daemon can recover, scan, and claim runnable workflow steps through an opt-in scheduler lane, the goal-loop executor adapter drives bounded autonomous rounds below a step run, and the one-shot / script adapters drive bounded single-invocation work. Later slices still attach the no-mistakes mirror, gates, and remaining runtime behavior that fulfil the dispatch seam.
 ```
 
 ## Target Inventory
@@ -106,8 +107,8 @@ Future product surface:
 | Run start | `goal start`; `workflow import` for external plans; persisted workflow definitions; `workflow run start` materialization with executor records and scheduler-lane eligibility | `workflow run start` connected to execution scheduling | Keep the first-class start command as the workflow-first entry point; only executor adapter execution remains to be attached |
 | Step model | Fixed coding workflow step kinds | Configurable StepDefinition list | Keep canonical coding workflow as one built-in definition |
 | Executor model | Runner profiles and M9 wrapper registry keyed by fixed step kind | Per-step ExecutorDefinition and executor config | Reuse wrapper config as executor config input |
-| Loop state | Goal iteration jobs/artifacts; external GNHF/no-mistakes state | ExecutorInvocation / ExecutorRound records | Goal-loop adapter landed (M10-05): bounded rounds persist common loop state in Momentum SQLite |
-| Daemon scheduling | Drains goal iteration queue; opt-in lane recovers/scans/claims runnable workflow steps | Schedules workflow runs and step runs | Scheduler lane landed (M10-04); later slices attach executor adapters to the dispatch seam |
+| Loop state | Goal iteration jobs/artifacts; external GNHF/no-mistakes state | ExecutorInvocation / ExecutorRound records | Goal-loop adapter landed (M10-05) and one-shot / script adapters landed (M10-06): bounded rounds persist common loop state in Momentum SQLite |
+| Daemon scheduling | Drains goal iteration queue; opt-in lane recovers/scans/claims runnable workflow steps | Schedules workflow runs and step runs | Scheduler lane landed (M10-04); goal-loop and one-shot / script adapters attach the first executor families to the dispatch seam |
 | Repo safety | Repo locks plus verification / commit transactions | Same safety around executor finalization | Reuse M9 finalization and repo-lock heartbeats |
 | Approvals | M8 workflow approvals for imported runs | Workflow / step / gate approvals | Keep M8 rows; generalize boundary vocabulary |
 | Human gates | Split across approval rows, recovery flag, external TUI/IPC | Durable gates with allowed actions and decisions | Add gate records and `workflow run decide` |
@@ -153,7 +154,7 @@ The M10 slice order:
 4. **M10-03 ExecutorDefinition / Invocation / Round schema**: persist executor loop state under step runs. *(done)*
 5. **M10-04 Daemon workflow scheduler lane**: schedule runnable workflow runs and step runs without breaking goal iteration draining. *(done)*
 6. **M10-05 Goal-loop executor adapter**: migrate existing goal iteration behavior into executor rounds. *(landed in this slice)*
-7. **M10-06 One-shot / script executor adapter**: support deterministic commands and bounded agent/script invocations.
+7. **M10-06 One-shot / script executor adapter**: support deterministic commands and bounded agent/script invocations. *(landed in this slice)*
 8. **M10-07 no-mistakes executor mirror**: mirror no-mistakes runs, findings, decisions, PR/CI state, and completion into Momentum.
 9. **M10-08 Workflow gates and decisions CLI**: add durable operator decisions and delegated policy application.
 10. **M10-09 Workflow-first dogfood and closeout**: run a real Momentum task through the workflow-first start surface and close the milestone.
@@ -183,4 +184,4 @@ This gap matrix does not implement:
 - Public UI.
 - Replacement of external engine internals.
 
-It is the active implementation bridge between the accepted workflow-first pivot, the landed M10-01 definition persistence, M10-02 run start, M10-03 executor-record, M10-04 scheduler-lane, and M10-05 goal-loop-adapter slices, and the remaining workflow-first runtime slices.
+It is the active implementation bridge between the accepted workflow-first pivot, the landed M10-01 definition persistence, M10-02 run start, M10-03 executor-record, M10-04 scheduler-lane, M10-05 goal-loop-adapter, and M10-06 one-shot / script adapter slices, and the remaining workflow-first runtime slices.

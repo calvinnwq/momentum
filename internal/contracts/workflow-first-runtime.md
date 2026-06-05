@@ -335,6 +335,7 @@ Current Momentum state:
 - Has M10-03 `ExecutorDefinition` / `ExecutorInvocation` / `ExecutorRound` schema and persistence below workflow steps, including round artifacts, checkpoints, findings, and decisions.
 - Has M10-04 opt-in daemon workflow scheduler lane (recover → scan → claim → dispatch) that schedules runnable workflow steps alongside goal iteration draining, with the executor-dispatch seam left to later slices.
 - Has M10-05 `goal-loop` executor adapter that drives bounded autonomous rounds below a step run, reusing the M9 verify / commit / reset finalization and persisting per-round agent / model / input / result / verification / commit / artifact / checkpoint evidence.
+- Has M10-06 `one-shot` / `script` executor adapters for bounded single-invocation work, including result-bearing one-shot success and exit-code / bounded-log script success.
 - Has `goal start`, `daemon`, and workflow import / status / run controls.
 
 Required workflow-first gaps:
@@ -365,4 +366,4 @@ This planning contract does not implement:
 - Public UI.
 - Replacement of GNHF or no-mistakes internals.
 
-M10 is now implementing these as concrete slices: M10-01 lands definition schema / validation / persistence, M10-02 lands CLI run start, M10-03 lands executor state schema / persistence, M10-04 lands the opt-in daemon workflow scheduler lane, and M10-05 lands the goal-loop executor adapter, while the remaining executor adapters and external runtime behavior remain later slices.
+M10 is now implementing these as concrete slices: M10-01 lands definition schema / validation / persistence, M10-02 lands CLI run start, M10-03 lands executor state schema / persistence, M10-04 lands the opt-in daemon workflow scheduler lane, M10-05 lands the goal-loop executor adapter, and M10-06 lands the one-shot / script executor adapters, while the no-mistakes mirror, gates, and external runtime behavior remain later slices.
