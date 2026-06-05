@@ -439,4 +439,14 @@ describe("readNoMistakesExternalState", () => {
     if (read.ok) return;
     expect(read.error).toMatch(/too large/i);
   });
+
+  it("returns an unreadable error when the state path is not a regular file", () => {
+    const statePath = makeTempDir();
+
+    const read = readNoMistakesExternalState({ statePath });
+
+    expect(read.ok).toBe(false);
+    if (read.ok) return;
+    expect(read.error).toMatch(/regular file/i);
+  });
 });

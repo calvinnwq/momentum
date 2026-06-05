@@ -101,6 +101,12 @@ export function readNoMistakesExternalState(
   let raw: string;
   try {
     const stat = fs.statSync(input.statePath);
+    if (!stat.isFile()) {
+      return {
+        ok: false,
+        error: "external no-mistakes state path is not a regular file"
+      };
+    }
     if (stat.size > MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES) {
       return {
         ok: false,

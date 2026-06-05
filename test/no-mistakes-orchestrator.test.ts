@@ -364,6 +364,28 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
     // The daemon reads the store from the round's frozen artifact root.
     expect(seen!.artifactRoot).toBe("/artifacts/nm-0");
   });
+
+  it("refuses to poll a live round outside the no-mistakes family", () => {
+    const db = openMirrorRoundDb();
+    db.prepare("UPDATE executor_rounds SET executor_family = 'goal-loop' WHERE round_id = ?").run(
+      ROUND_ID
+    );
+    let readCalls = 0;
+
+    expect(() =>
+      runNoMistakesMirrorRound({
+        db,
+        roundId: ROUND_ID,
+        read: (round) => {
+          readCalls += 1;
+          return { ok: true, value: externalState(), digest: "sha256:foreign" };
+        },
+        polledAt: 2_000
+      })
+    ).toThrow(/non-no-mistakes/i);
+    expect(readCalls).toBe(0);
+    expect(loadExecutorRound(db, ROUND_ID)!.state).toBe("mirroring_external_state");
+  });
 });
 
 describe("runNoMistakesMirrorRound — findings and decisions projection", () => {
@@ -685,6 +707,35 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
     expect(resumed.round.state).toBe("mirroring_external_state");
     expect(resumed.round.finishedAt).toBeNull();
     expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe("running");
+  });
+
+  it("settles a waiting_operator round when the next poll observes completion", () => {
+    const db = openMirrorRoundDb();
+
+    const gated = runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      read: okReader({
+        stepStatus: "awaiting_approval"
+      }),
+      polledAt: 2_000
+    });
+    expect(gated.round.state).toBe("waiting_operator");
+    expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe(
+      "waiting_operator"
+    );
+
+    const settled = runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      read: okReader({ stepStatus: "completed", ciState: "passed" }),
+      polledAt: 3_000
+    });
+
+    expect(settled.round.state).toBe("succeeded");
+    expect(settled.round.finishedAt).toBe(3_000);
+    expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe("succeeded");
+    expect(loadExecutorInvocation(db, INVOCATION_ID)!.finishedAt).toBe(3_000);
   });
 });
 

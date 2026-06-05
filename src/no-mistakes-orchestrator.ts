@@ -80,6 +80,7 @@ import {
 import {
   decideNoMistakesMirror,
   decideNoMistakesUnreadable,
+  isNoMistakesExecutorFamily,
   noMistakesRoundUpdate,
   planNoMistakesInvocation,
   planNoMistakesRoundDecisions,
@@ -90,6 +91,20 @@ import {
   type NoMistakesRoundRuntimeInputs
 } from "./no-mistakes-executor.js";
 import type { NoMistakesExternalStateRead } from "./no-mistakes-mechanism.js";
+
+class NoMistakesMirrorRoundFamilyError extends Error {
+  readonly roundId: string;
+  readonly executorFamily: string;
+
+  constructor(roundId: string, executorFamily: string) {
+    super(
+      `No-mistakes mirror cannot poll non-no-mistakes round ${roundId} with family ${executorFamily}`
+    );
+    this.name = "NoMistakesMirrorRoundFamilyError";
+    this.roundId = roundId;
+    this.executorFamily = executorFamily;
+  }
+}
 
 /**
  * The injected reader one mirror poll runs: it sources and parses the untrusted
@@ -203,6 +218,35 @@ function insertExternalStateCheckpoint(
   );
 }
 
+function noMistakesPollRoundUpdate(
+  decision: NoMistakesMirrorDecision,
+  stateRead: NoMistakesExternalStateRead,
+  polledAt: number
+): ExecutorRoundUpdate {
+  const finishedAt = isTerminalExecutorRoundState(decision.roundState)
+    ? polledAt
+    : null;
+  const baseUpdate = noMistakesRoundUpdate(decision);
+  return stateRead.ok
+    ? { ...baseUpdate, inputDigest: stateRead.digest, heartbeatAt: polledAt, finishedAt }
+    : { ...baseUpdate, heartbeatAt: polledAt, finishedAt };
+}
+
+function updateInvocationForDecision(
+  db: MomentumDb,
+  invocationId: string,
+  decision: NoMistakesMirrorDecision,
+  polledAt: number
+): void {
+  updateExecutorInvocationState(db, invocationId, decision.invocationState, {
+    heartbeatAt: polledAt,
+    finishedAt: isTerminalExecutorInvocationState(decision.invocationState)
+      ? polledAt
+      : null,
+    now: polledAt
+  });
+}
+
 export type RunNoMistakesMirrorRoundInput = {
   db: MomentumDb;
   /** The id of the durable, already-started mirror round to poll. */
@@ -259,6 +303,9 @@ export function runNoMistakesMirrorRound(
   if (current === undefined) {
     throw new ExecutorRoundNotFoundError(roundId);
   }
+  if (!isNoMistakesExecutorFamily(current.executorFamily)) {
+    throw new NoMistakesMirrorRoundFamilyError(roundId, current.executorFamily);
+  }
 
   // 2. Read the untrusted external state (total) and classify it. A reader failure
   //    is untrusted evidence too — it settles like a semantically broken snapshot.
@@ -270,21 +317,27 @@ export function runNoMistakesMirrorRound(
   // 3. Patch the durable round, stamping the daemon clock and re-fingerprinting the
   //    round with the exact bytes this poll mirrored (only on a successful read —
   //    a failure has no trustworthy digest, so the frozen one stays in place).
-  const finishedAt = isTerminalExecutorRoundState(decision.roundState)
-    ? polledAt
-    : null;
-  const baseUpdate = noMistakesRoundUpdate(decision);
-  const roundUpdate: ExecutorRoundUpdate = stateRead.ok
-    ? { ...baseUpdate, inputDigest: stateRead.digest, heartbeatAt: polledAt, finishedAt }
-    : { ...baseUpdate, heartbeatAt: polledAt, finishedAt };
+  const roundUpdate = noMistakesPollRoundUpdate(decision, stateRead, polledAt);
+  if (current.state === "waiting_operator" && decision.roundState === "succeeded") {
+    updateExecutorRound(
+      db,
+      roundId,
+      {
+        ...roundUpdate,
+        toState: "mirroring_external_state",
+        classification: "continue",
+        finishedAt: null
+      },
+      { now: polledAt }
+    );
+    updateExecutorInvocationState(db, current.invocationId, "running", {
+      heartbeatAt: polledAt,
+      finishedAt: null,
+      now: polledAt
+    });
+  }
   const round = updateExecutorRound(db, roundId, roundUpdate, { now: polledAt });
-  updateExecutorInvocationState(db, current.invocationId, decision.invocationState, {
-    heartbeatAt: polledAt,
-    finishedAt: isTerminalExecutorInvocationState(decision.invocationState)
-      ? polledAt
-      : null,
-    now: polledAt
-  });
+  updateInvocationForDecision(db, current.invocationId, decision, polledAt);
 
   // 4. Mirror the snapshot below the round. A reader failure has no snapshot, so
   //    it mirrors nothing and preserves prior evidence.
