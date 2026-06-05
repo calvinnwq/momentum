@@ -453,7 +453,7 @@ export type RunNoMistakesMirrorRoundInput = {
   roundId: string;
   /** The bounded reader that sources + parses the untrusted external state. */
   read: NoMistakesMirrorReader;
-  /** Optional caller-known identity used to corroborate terminal first-poll success. */
+  /** Optional caller-known identity used to corroborate the first readable poll. */
   expectedExternalIdentity?: NoMistakesExpectedExternalIdentity;
   /** Daemon clock stamped as this poll's `heartbeat_at` and terminal `finished_at`. */
   polledAt: number;
@@ -524,7 +524,10 @@ export function runNoMistakesMirrorRound(
   const classified = stateRead.ok
     ? decideNoMistakesMirror(stateRead.value)
     : decideNoMistakesUnreadable(stateRead.error);
-  const identityMismatchReason = stateRead.ok
+  const hasIdentityAnchor = stateRead.ok
+    ? hasPinnedOrExpectedExternalIdentity(db, roundId, expectedExternalIdentity)
+    : false;
+  const identityMismatchReason = stateRead.ok && hasIdentityAnchor
     ? externalIdentityMismatchReason(
         db,
         roundId,
@@ -532,12 +535,20 @@ export function runNoMistakesMirrorRound(
         expectedExternalIdentity
       )
     : null;
-  const identityMatchesPinnedState = identityMismatchReason === null;
+  const identityUnpinnedReason =
+    stateRead.ok &&
+    !hasIdentityAnchor &&
+    classified.recoveryCode !== "external_state_unreadable"
+      ? "external no-mistakes identity is not pinned"
+      : null;
+  const identityTrustReason = identityMismatchReason ?? identityUnpinnedReason;
+  const identityCorroborated =
+    stateRead.ok && hasIdentityAnchor && identityTrustReason === null;
   const identityReconciled =
-    identityMismatchReason === null ||
+    identityTrustReason === null ||
     classified.recoveryCode === "external_state_unreadable"
       ? classified
-      : noMistakesExternalStateInconsistent(identityMismatchReason);
+      : noMistakesExternalStateInconsistent(identityTrustReason);
   const decision = reconcileNoMistakesTerminalDecision(
     db,
     roundId,
@@ -573,7 +584,7 @@ export function runNoMistakesMirrorRound(
 
   // 4. Mirror the snapshot below the round. A reader failure has no snapshot, so
   //    it mirrors nothing and preserves prior evidence.
-  if (stateRead.ok && identityMatchesPinnedState) {
+  if (stateRead.ok && identityCorroborated) {
     insertExternalStateCheckpoint(db, roundId, stateRead.value, polledAt);
     if (decision.recoveryCode !== "external_state_unreadable") {
       insertNewFindings(
@@ -625,7 +636,7 @@ export type RunNoMistakesMirrorStepInput = {
   attempt: number;
   /** The bounded reader the first poll runs (the real reader plugs in here). */
   read: NoMistakesMirrorReader;
-  /** Optional caller-known identity used to corroborate terminal first-poll success. */
+  /** Optional caller-known identity used to corroborate the first readable poll. */
   expectedExternalIdentity?: NoMistakesExpectedExternalIdentity;
   /** Resolves the round's input digest / artifact root / log paths the daemon provides. */
   resolveRoundInputs: () => NoMistakesRoundRuntimeInputs;

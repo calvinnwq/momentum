@@ -98,7 +98,7 @@ export const MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES = 1024 * 1024;
 export function readNoMistakesExternalState(
   input: ReadNoMistakesExternalStateInput
 ): NoMistakesExternalStateRead {
-  let raw: string;
+  let raw: Buffer;
   try {
     const stat = fs.statSync(input.statePath);
     if (!stat.isFile()) {
@@ -113,7 +113,7 @@ export function readNoMistakesExternalState(
         error: `external no-mistakes state file is too large: ${stat.size} bytes exceeds ${MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES}`
       };
     }
-    raw = fs.readFileSync(input.statePath, "utf-8");
+    raw = fs.readFileSync(input.statePath);
   } catch (error) {
     const detail = error instanceof Error ? error.message : "unknown error";
     return {
@@ -135,11 +135,12 @@ export function readNoMistakesExternalState(
  * content digest of `raw`.
  */
 export function parseNoMistakesExternalState(
-  raw: string
+  raw: string | Buffer
 ): NoMistakesExternalStateRead {
+  const text = Buffer.isBuffer(raw) ? raw.toString("utf-8") : raw;
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
+    parsed = JSON.parse(text);
   } catch (error) {
     const detail = error instanceof Error ? error.message : "unknown error";
     return {
@@ -363,6 +364,6 @@ function readDecisions(
 }
 
 /** The self-describing `sha256:` content digest of an artifact's raw bytes. */
-function contentDigest(raw: string): string {
+function contentDigest(raw: string | Buffer): string {
   return `sha256:${crypto.createHash("sha256").update(raw).digest("hex")}`;
 }

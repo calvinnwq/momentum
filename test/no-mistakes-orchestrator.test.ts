@@ -155,6 +155,7 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
     const result = runNoMistakesMirrorRound({
       db,
       roundId: ROUND_ID,
+      expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       read: okReader({ stepStatus: "running" }),
       polledAt: 2_000
     });
@@ -170,6 +171,25 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
     // The decision reason is the mirror's durable summary (no result document).
     expect(result.round.summary).toBe(result.decision.reason);
     expect(loadExecutorRound(db, ROUND_ID)).toEqual(result.round);
+  });
+
+  it("refuses a first-poll non-terminal snapshot without a corroborated external identity", () => {
+    const db = openMirrorRoundDb();
+
+    const result = runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      read: okReader({ stepStatus: "running" }),
+      polledAt: 2_000
+    });
+
+    expect(result.decision.classification).toBe("manual_recovery_required");
+    expect(result.decision.recoveryCode).toBe("external_state_inconsistent");
+    expect(result.round.state).toBe("manual_recovery_required");
+    expect(listExecutorCheckpointsForRound(db, ROUND_ID)).toEqual([]);
+    expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe(
+      "manual_recovery_required"
+    );
   });
 
   it("reaches succeeded directly from mirroring_external_state on a corroborated completed snapshot", () => {
@@ -207,6 +227,7 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
     const result = runNoMistakesMirrorRound({
       db,
       roundId: ROUND_ID,
+      expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       read: okReader({
         stepStatus: "awaiting_decision",
         decisions: [
@@ -229,6 +250,7 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
     const result = runNoMistakesMirrorRound({
       db,
       roundId: ROUND_ID,
+      expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       read: okReader({ stepStatus: "awaiting_approval" }),
       polledAt: 2_000
     });
@@ -387,6 +409,7 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
     const result = runNoMistakesMirrorRound({
       db,
       roundId: ROUND_ID,
+      expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       read: okReader({ stepStatus: "running" }, "sha256:tick-7"),
       polledAt: 2_000
     });
@@ -414,6 +437,7 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
     runNoMistakesMirrorRound({
       db,
       roundId: ROUND_ID,
+      expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       read: (round) => {
         seen = round;
         return { ok: true, value: externalState(), digest: "sha256:poll" };
@@ -494,6 +518,7 @@ describe("runNoMistakesMirrorRound — findings and decisions projection", () =>
     const result = runNoMistakesMirrorRound({
       db,
       roundId: ROUND_ID,
+      expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       read: okReader({
         stepStatus: "running",
         findings: [
@@ -527,6 +552,7 @@ describe("runNoMistakesMirrorRound — findings and decisions projection", () =>
     const result = runNoMistakesMirrorRound({
       db,
       roundId: ROUND_ID,
+      expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       read: okReader({
         stepStatus: "awaiting_decision",
         decisions: [
@@ -603,6 +629,7 @@ describe("runNoMistakesMirrorRound — findings and decisions projection", () =>
     runNoMistakesMirrorRound({
       db,
       roundId: ROUND_ID,
+      expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       read: okReader({
         stepStatus: "running",
         findings: [{ externalId: "F-1", title: "needs fix" }],
@@ -648,6 +675,11 @@ describe("runNoMistakesMirrorRound — findings and decisions projection", () =>
     runNoMistakesMirrorRound({
       db,
       roundId: ROUND_ID,
+      expectedExternalIdentity: {
+        externalRunId: "nm-run-123",
+        branch: "feat/mirror",
+        headSha: "b".repeat(40)
+      },
       read: okReader({
         externalRunId: "nm-run-123",
         branch: "feat/mirror",
@@ -684,7 +716,13 @@ describe("runNoMistakesMirrorRound — idempotent across repeated polls", () => 
       selectedFindingIds: ["F-1"]
     });
 
-    runNoMistakesMirrorRound({ db, roundId: ROUND_ID, read, polledAt: 2_000 });
+    runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
+      read,
+      polledAt: 2_000
+    });
     // A second poll of the same long-lived round re-derives the same finding ids;
     // the append-only evidence table must not be re-inserted (it would throw).
     const second = runNoMistakesMirrorRound({
@@ -706,6 +744,7 @@ describe("runNoMistakesMirrorRound — idempotent across repeated polls", () => 
     runNoMistakesMirrorRound({
       db,
       roundId: ROUND_ID,
+      expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       read: okReader({
         stepStatus: "running",
         findings: [{ externalId: "F-1", title: "first finding" }]
@@ -740,7 +779,13 @@ describe("runNoMistakesMirrorRound — idempotent across repeated polls", () => 
       ]
     });
 
-    runNoMistakesMirrorRound({ db, roundId: ROUND_ID, read, polledAt: 2_000 });
+    runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
+      read,
+      polledAt: 2_000
+    });
     runNoMistakesMirrorRound({ db, roundId: ROUND_ID, read, polledAt: 3_000 });
 
     expect(listExecutorDecisionsForRound(db, ROUND_ID)).toHaveLength(1);
@@ -754,6 +799,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
     const first = runNoMistakesMirrorRound({
       db,
       roundId: ROUND_ID,
+      expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       read: okReader({ stepStatus: "running" }),
       polledAt: 2_000
     });
@@ -785,6 +831,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
     const gated = runNoMistakesMirrorRound({
       db,
       roundId: ROUND_ID,
+      expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       read: okReader({
         stepStatus: "awaiting_decision",
         decisions: [
@@ -814,6 +861,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
     runNoMistakesMirrorRound({
       db,
       roundId: ROUND_ID,
+      expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       read: okReader({
         stepStatus: "awaiting_decision",
         decisions: [
@@ -856,6 +904,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
       runNoMistakesMirrorRound({
         db,
         roundId: ROUND_ID,
+        expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
         read: okReader({ stepStatus: "running" }, "sha256:first"),
         polledAt: 2_000
       });
@@ -895,6 +944,7 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
     const gated = runNoMistakesMirrorRound({
       db,
       roundId: ROUND_ID,
+      expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
       read: okReader({
         stepStatus: "awaiting_approval"
       }),

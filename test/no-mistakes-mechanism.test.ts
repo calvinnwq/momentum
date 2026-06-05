@@ -43,7 +43,14 @@ function writeStateFile(content: string): string {
   return statePath;
 }
 
-function sha256Digest(content: string): string {
+function writeStateFileBytes(content: Buffer): string {
+  const dir = makeTempDir();
+  const statePath = path.join(dir, "no-mistakes-state.json");
+  fs.writeFileSync(statePath, content);
+  return statePath;
+}
+
+function sha256Digest(content: string | Buffer): string {
   return `sha256:${crypto.createHash("sha256").update(content).digest("hex")}`;
 }
 
@@ -407,6 +414,24 @@ describe("readNoMistakesExternalState", () => {
     expect(read.ok).toBe(true);
     if (!read.ok) return;
     expect(read.value.externalRunId).toBe("nm-run-1");
+    expect(read.digest).toBe(sha256Digest(raw));
+  });
+
+  it("fingerprints the exact state file bytes before UTF-8 decoding", () => {
+    const raw = Buffer.from(
+      JSON.stringify({
+        ...fullSnapshotObject(),
+        externalRunId: "nm-run-\ufffd("
+      }).replace("\ufffd", "\xc3"),
+      "latin1"
+    );
+    const statePath = writeStateFileBytes(raw);
+
+    const read = readNoMistakesExternalState({ statePath });
+
+    expect(read.ok).toBe(true);
+    if (!read.ok) return;
+    expect(read.value.externalRunId).toBe("nm-run-\ufffd(");
     expect(read.digest).toBe(sha256Digest(raw));
   });
 
