@@ -66,6 +66,7 @@ export type ScriptCommandRoundRunnerConfig = {
 };
 
 const DEFAULT_SCRIPT_OUTPUT_MAX_BYTES = LIVE_STEP_WRAPPER_OUTPUT_MAX_BYTES;
+const SHA40_RE = /^[0-9a-f]{40}$/;
 
 export function createOneShotLiveWrapperRoundRunner(
   config: LiveWrapperConfig,
@@ -85,6 +86,13 @@ export function createOneShotLiveWrapperRoundRunner(
       return invalidInput(
         "one-shot live wrapper rounds require an absolute log path"
       );
+    }
+    if (options.repoSafety.mode === "finalize") {
+      const recoveryCode = finalizeRepoReadyRecoveryCode(
+        options.repoPath,
+        options.repoSafety.baseHead
+      );
+      if (recoveryCode !== null) return readOnlyRecovery(recoveryCode);
     }
     const readOnlySnapshot =
       options.repoSafety.mode === "read-only"
@@ -212,6 +220,13 @@ export function createScriptCommandRoundRunner(
     }
     if (!isUsableAbsolutePath(logPath)) {
       return invalidInput("script rounds require an absolute log path");
+    }
+    if (config.repoSafety.mode === "finalize") {
+      const recoveryCode = finalizeRepoReadyRecoveryCode(
+        config.cwd,
+        config.repoSafety.baseHead
+      );
+      if (recoveryCode !== null) return readOnlyRecovery(recoveryCode);
     }
     const readOnlySnapshot =
       config.repoSafety.mode === "read-only"
@@ -484,6 +499,19 @@ function readOnlyRepoRecoveryCode(
   const head = readGit(repoPath, ["rev-parse", "HEAD"]);
   if (!head.ok) return "git_failed";
   if (head.value.trim() !== snapshot.head) return "head_mismatch";
+  const status = readGit(repoPath, ["status", "--porcelain"]);
+  if (!status.ok || status.value.trim().length > 0) return "git_failed";
+  return null;
+}
+
+function finalizeRepoReadyRecoveryCode(
+  repoPath: string,
+  baseHead: string
+): SingleShotRecoveryCode | null {
+  if (!SHA40_RE.test(baseHead)) return "invalid_input";
+  const head = readGit(repoPath, ["rev-parse", "HEAD"]);
+  if (!head.ok) return "git_failed";
+  if (head.value.trim() !== baseHead) return "head_mismatch";
   const status = readGit(repoPath, ["status", "--porcelain"]);
   if (!status.ok || status.value.trim().length > 0) return "git_failed";
   return null;

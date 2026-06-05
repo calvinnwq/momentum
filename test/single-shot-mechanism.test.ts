@@ -200,6 +200,52 @@ describe("single-shot concrete mechanisms", () => {
     expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toBe("");
   });
 
+  it("rejects finalize one-shot rounds when the repo is dirty before launch", () => {
+    const { repoPath, baseHead } = initRepo();
+    const artifactRoot = makeTempDir();
+    const json = resultJson(runnerResult());
+    fs.writeFileSync(path.join(repoPath, "preexisting.txt"), "dirty\n");
+    const config: LiveWrapperConfig = {
+      command: process.execPath,
+      args: [
+        "-e",
+        "const fs=require('node:fs');fs.writeFileSync(process.env.MOMENTUM_RESULT_PATH, process.env.RESULT_JSON);fs.writeFileSync(process.env.MOMENTUM_REPO_PATH+'/launched-one-shot.txt', 'launched\\n')"
+      ],
+      cwd: "iteration",
+      timeoutSec: 5,
+      envAllow: ["RESULT_JSON"],
+      resultFile: "result.json",
+      probe: undefined
+    };
+
+    const mechanism = createOneShotLiveWrapperRoundRunner(config, {
+      repoPath,
+      kind: "preflight",
+      env: { RESULT_JSON: json },
+      repoSafety: {
+        mode: "finalize",
+        baseHead,
+        verificationCommands: [],
+        verificationTimeoutSec: 5,
+        verificationLogPath: path.join(artifactRoot, "verify.log")
+      }
+    });
+
+    const result = mechanism(round({ artifactRoot }));
+
+    expect(result.outcome).toEqual({
+      ok: false,
+      recoveryCode: "git_failed"
+    });
+    expect(fs.existsSync(path.join(repoPath, "launched-one-shot.txt"))).toBe(
+      false
+    );
+    expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
+    expect(runGit(repoPath, ["status", "--porcelain"])).toContain(
+      "preexisting.txt"
+    );
+  });
+
   it("rejects relative one-shot log paths before launching the wrapper", () => {
     const { repoPath } = initRepo();
     const artifactRoot = makeTempDir();
@@ -404,6 +450,53 @@ describe("single-shot concrete mechanisms", () => {
       recoveryCode: "command_failed"
     });
     expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
+    expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toBe("");
+  });
+
+  it("rejects finalize script rounds when HEAD moved before launch", () => {
+    const { repoPath, baseHead } = initRepo();
+    const artifactRoot = makeTempDir();
+    fs.writeFileSync(path.join(repoPath, "outside.txt"), "outside\n");
+    runGit(repoPath, ["add", "outside.txt"]);
+    runGit(repoPath, ["commit", "-m", "outside", "--quiet"]);
+    const movedHead = runGit(repoPath, ["rev-parse", "HEAD"]).trim();
+    const mechanism = createScriptCommandRoundRunner({
+      command: "/bin/sh",
+      args: ["-c", "printf 'launched\n' > launched-script.txt"],
+      cwd: repoPath,
+      timeoutSec: 5,
+      repoSafety: {
+        mode: "finalize",
+        baseHead,
+        commitIntent: {
+          type: "chore",
+          scope: "script",
+          subject: "run script",
+          body: "",
+          breaking: false
+        },
+        verificationCommands: [],
+        verificationTimeoutSec: 5,
+        verificationLogPath: path.join(artifactRoot, "verify.log")
+      }
+    });
+
+    const result = mechanism(
+      round({
+        artifactRoot,
+        executorFamily: "script",
+        logPaths: [path.join(artifactRoot, "script.log")]
+      })
+    );
+
+    expect(result.outcome).toEqual({
+      ok: false,
+      recoveryCode: "head_mismatch"
+    });
+    expect(fs.existsSync(path.join(repoPath, "launched-script.txt"))).toBe(
+      false
+    );
+    expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(movedHead);
     expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toBe("");
   });
 
@@ -766,14 +859,15 @@ describe("single-shot concrete mechanisms", () => {
     });
     const { createScriptCommandRoundRunner: createMockedScriptCommandRoundRunner } =
       await import("../src/single-shot-mechanism.js");
+    const { repoPath, baseHead } = initRepo();
     const mechanism = createMockedScriptCommandRoundRunner({
       command: "/bin/sh",
       args: ["-c", "printf 'dirty\n' > ignored.txt"],
-      cwd: makeTempDir(),
+      cwd: repoPath,
       timeoutSec: 5,
       repoSafety: {
         mode: "finalize",
-        baseHead: "a".repeat(40),
+        baseHead,
         commitIntent: {
           type: "chore",
           scope: "script",
