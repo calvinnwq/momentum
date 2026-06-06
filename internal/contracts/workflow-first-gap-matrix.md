@@ -112,7 +112,7 @@ Future product surface:
 | Daemon scheduling | Drains goal iteration queue; opt-in lane recovers/scans/claims runnable workflow steps | Schedules workflow runs and step runs | Scheduler lane landed (M10-04); goal-loop and one-shot / script adapters now drive bounded rounds below StepRun, and no-mistakes now mirrors external state into one long-lived round, while direct dispatcher wiring remains later runtime work |
 | Repo safety | Repo locks plus verification / commit transactions | Same safety around executor finalization | Reuse M9 finalization and repo-lock heartbeats |
 | Approvals | M8 workflow approvals for imported runs | Workflow / step / gate approvals | Keep M8 rows; generalize boundary vocabulary |
-| Human gates | Split across approval rows, recovery flag, external TUI/IPC | Durable gates with allowed actions and decisions | Add gate records and `workflow run decide` |
+| Human gates | Split across approval rows, recovery flag, external TUI/IPC | Durable gates with allowed actions and decisions | Gate records and `workflow run decide` landed (M10-08): durable `workflow_gates` with allowed actions / policy envelope and operator + delegated-policy decisions, surfaced in status / handoff / monitor; daemon-side gate emission during live execution remains later runtime work |
 | Recovery | Goal recovery plus workflow run recovery | Workflow / step / executor recovery taxonomy | Reuse M8/M9 codes, add executor-level recovery records |
 | no-mistakes | External daemon pipeline with a landed Momentum mirror | Specialist executor mirrored into Momentum | Keep the mirror boundary: classify external evidence without reimplementing the pipeline |
 | GNHF | External/in-process implementation loop | `goal-loop` executor behavior | Copy bounded round pattern, not state store |
@@ -156,8 +156,8 @@ The M10 slice order:
 5. **M10-04 Daemon workflow scheduler lane**: schedule runnable workflow runs and step runs without breaking goal iteration draining. *(done)*
 6. **M10-05 Goal-loop executor adapter**: migrate existing goal iteration behavior into executor rounds. *(done)*
 7. **M10-06 One-shot / script executor adapter**: support deterministic commands and bounded agent/script invocations. *(done)*
-8. **M10-07 no-mistakes executor mirror**: mirror no-mistakes runs, findings, decisions, PR/CI state, and completion into Momentum. *(landed in this slice)*
-9. **M10-08 Workflow gates and decisions CLI**: add durable operator decisions and delegated policy application.
+8. **M10-07 no-mistakes executor mirror**: mirror no-mistakes runs, findings, decisions, PR/CI state, and completion into Momentum. *(done)*
+9. **M10-08 Workflow gates and decisions CLI**: add durable operator decisions and delegated policy application. *(landed in this slice)*
 10. **M10-09 Workflow-first dogfood and closeout**: run a real Momentum task through the workflow-first start surface and close the milestone.
 
 This order is deliberately contract -> schema -> start -> executor state -> scheduler -> adapters -> gates -> dogfood.
