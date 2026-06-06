@@ -6,6 +6,10 @@ import path from "node:path";
 import { runCli } from "../src/cli.js";
 import { openDb, type MomentumDb } from "../src/db.js";
 import { ingestEvidenceRecord } from "../src/evidence-records.js";
+import {
+  insertWorkflowGate,
+  resolveWorkflowGate
+} from "../src/workflow-gate-persist.js";
 
 type RunResult = {
   code: number;
@@ -618,6 +622,133 @@ describe("momentum workflow status", () => {
     expect(payload.monitor.activeStep?.stepId).toBe("implementation");
     expect(payload.monitor.nextAction.code).toBe("resume_running");
     expect(payload.monitor.recovery).toBeNull();
+  });
+
+  it("surfaces open and resolved workflow gates in run detail (JSON and text)", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, {
+        runId: "cwfp-gates001",
+        state: "running",
+        startedAt: RECENT
+      });
+      seedStep(db, "cwfp-gates001", {
+        stepId: "implementation",
+        kind: "implementation",
+        state: "running",
+        order: 0,
+        startedAt: RECENT
+      });
+      insertWorkflowGate(
+        db,
+        {
+          gateId: "gate-open-1",
+          workflowRunId: "cwfp-gates001",
+          targetScope: "workflow",
+          gateType: "approval_required",
+          reason: "operator must approve external apply",
+          allowedActions: ["approve", "reject"],
+          recommendedAction: "approve",
+          policyEnvelope: []
+        },
+        { now: RECENT }
+      );
+      insertWorkflowGate(
+        db,
+        {
+          gateId: "gate-done-1",
+          workflowRunId: "cwfp-gates001",
+          stepRunId: "implementation",
+          targetScope: "step",
+          gateType: "operator_decision_required",
+          reason: "decide how to handle a verification failure",
+          allowedActions: ["fix", "skip", "abort"],
+          recommendedAction: "fix",
+          policyEnvelope: ["fix"]
+        },
+        { now: RECENT }
+      );
+      resolveWorkflowGate(
+        db,
+        "gate-done-1",
+        { action: "fix", actor: "calvin", mode: "operator" },
+        { now: NOW }
+      );
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "status",
+      "cwfp-gates001",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      gates: Array<{
+        gateId: string;
+        workflowRunId: string;
+        stepRunId: string | null;
+        targetScope: string;
+        gateType: string;
+        reason: string;
+        allowedActions: string[];
+        recommendedAction: string | null;
+        policyEnvelope: string[];
+        open: boolean;
+        resolvedAt: number | null;
+        resolvedBy: string | null;
+        resolutionMode: string | null;
+        chosenAction: string | null;
+      }>;
+    };
+    expect(payload.gates.map((g) => g.gateId).sort()).toEqual([
+      "gate-done-1",
+      "gate-open-1"
+    ]);
+    const open = payload.gates.find((g) => g.gateId === "gate-open-1");
+    expect(open).toMatchObject({
+      workflowRunId: "cwfp-gates001",
+      stepRunId: null,
+      targetScope: "workflow",
+      gateType: "approval_required",
+      allowedActions: ["approve", "reject"],
+      recommendedAction: "approve",
+      policyEnvelope: [],
+      open: true,
+      resolvedAt: null,
+      resolvedBy: null,
+      resolutionMode: null,
+      chosenAction: null
+    });
+    const resolved = payload.gates.find((g) => g.gateId === "gate-done-1");
+    expect(resolved).toMatchObject({
+      stepRunId: "implementation",
+      targetScope: "step",
+      gateType: "operator_decision_required",
+      open: false,
+      resolvedBy: "calvin",
+      chosenAction: "fix",
+      resolutionMode: "operator"
+    });
+    expect(resolved?.resolvedAt).toBe(NOW);
+
+    const textResult = await run([
+      "workflow",
+      "status",
+      "cwfp-gates001",
+      "--data-dir",
+      dataDir
+    ]);
+    expect(textResult.code).toBe(0);
+    expect(textResult.stdout).toContain("Gates: 2 (open: 1)");
+    expect(textResult.stdout).toContain("gate-open-1");
+    expect(textResult.stdout).toContain("OPEN");
+    expect(textResult.stdout).toContain("gate-done-1");
   });
 
   it("surfaces typed runId/stepId evidence pointers without path inference", async () => {

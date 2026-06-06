@@ -191,7 +191,8 @@ import {
 import {
   WorkflowGateDecisionError,
   WorkflowGateNotFoundError,
-  resolveWorkflowGate
+  resolveWorkflowGate,
+  type WorkflowGateRecord
 } from "./workflow-gate-persist.js";
 import {
   DEFAULT_RECONCILIATION_STALE_THRESHOLD_MS,
@@ -2797,7 +2798,8 @@ function emitWorkflowStatusDetail(
     approvals: detail.approvals.map(workflowApprovalToJsonShape),
     leases: detail.leases.map(workflowLeaseToJsonShape),
     monitor: workflowMonitorToJsonShape(detail.monitor),
-    evidence: detail.evidence.map(workflowEvidenceToJsonShape)
+    evidence: detail.evidence.map(workflowEvidenceToJsonShape),
+    gates: detail.gates.map(workflowGateToJsonShape)
   };
 
   if (parsed.json) {
@@ -4566,6 +4568,7 @@ function workflowHandoff(parsed: ParsedFlags, io: CliIo): number {
     leases: envelope.detail.leases.map(workflowLeaseToJsonShape),
     monitor: workflowMonitorToJsonShape(envelope.detail.monitor),
     evidence: envelope.detail.evidence.map(workflowEvidenceToJsonShape),
+    gates: envelope.detail.gates.map(workflowGateToJsonShape),
     nextAction: nextActionToJsonShape(envelope.detail.monitor)
   };
 
@@ -4775,6 +4778,34 @@ function workflowEvidenceToJsonShape(
   };
 }
 
+function workflowGateToJsonShape(
+  gate: WorkflowGateRecord
+): Record<string, unknown> {
+  return {
+    gateId: gate.gateId,
+    workflowRunId: gate.workflowRunId,
+    stepRunId: gate.stepRunId,
+    invocationId: gate.invocationId,
+    roundId: gate.roundId,
+    targetScope: gate.targetScope,
+    gateType: gate.gateType,
+    reason: gate.reason,
+    evidence: gate.evidence,
+    allowedActions: gate.allowedActions,
+    recommendedAction: gate.recommendedAction,
+    policyEnvelope: gate.policyEnvelope,
+    // Derived convenience flag so consumers can filter the run's still-blocking
+    // (approval-required / operator-decision / manual-recovery) pauses without
+    // re-deriving `resolvedAt === null`.
+    open: gate.resolvedAt === null,
+    resolvedAt: gate.resolvedAt,
+    resolvedBy: gate.resolvedBy,
+    resolutionMode: gate.resolutionMode,
+    chosenAction: gate.chosenAction,
+    resolution: gate.resolution
+  };
+}
+
 function renderWorkflowDetailText(
   dataDir: string,
   detail: WorkflowRunDetail
@@ -4869,6 +4900,26 @@ function renderWorkflowDetailText(
     lines.push(
       `- ${record.evidenceRecordId} [${record.source}/${record.type}] ${record.summary}` +
         (record.stepId !== null ? ` step=${record.stepId}` : "")
+    );
+  }
+  lines.push("");
+
+  const openGateCount = detail.gates.filter(
+    (gate) => gate.resolvedAt === null
+  ).length;
+  lines.push(`Gates: ${detail.gates.length} (open: ${openGateCount})`);
+  for (const gate of detail.gates) {
+    const status =
+      gate.resolvedAt === null
+        ? `OPEN allowed=${gate.allowedActions.join(",") || "(none)"}` +
+          (gate.recommendedAction !== null
+            ? ` recommended=${gate.recommendedAction}`
+            : "")
+        : `resolved by ${gate.resolvedBy ?? "(unknown)"} ` +
+          `action=${gate.chosenAction ?? "(none)"} ` +
+          `(${gate.resolutionMode ?? "?"})`;
+    lines.push(
+      `- ${gate.gateId} [${gate.targetScope}/${gate.gateType}] ${status}`
     );
   }
   lines.push("");

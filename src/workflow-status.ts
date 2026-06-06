@@ -18,6 +18,10 @@
  */
 import type { MomentumDb } from "./db.js";
 import {
+  listWorkflowGatesForRun,
+  type WorkflowGateRecord
+} from "./workflow-gate-persist.js";
+import {
   deriveWorkflowMonitorState,
   type WorkflowMonitorAdvisory,
   type WorkflowMonitorCheckpoint,
@@ -156,6 +160,14 @@ export type WorkflowRunDetail = {
   leases: WorkflowLeaseRow[];
   monitor: WorkflowMonitorState;
   evidence: WorkflowEvidenceLink[];
+  /**
+   * Durable workflow / step / executor gates for this run (M10-08, NGX-352),
+   * oldest first, open and resolved alike. Surfacing them here makes the run's
+   * approval-required / operator-decision / manual-recovery pauses explicit and
+   * inspectable in `workflow status`, `workflow handoff`, and every other
+   * consumer of the shared run-detail loader.
+   */
+  gates: WorkflowGateRecord[];
 };
 
 const STEP_STATE_BUCKETS: readonly WorkflowStepState[] = [
@@ -288,7 +300,8 @@ export function loadWorkflowRunDetail(
       : {})
   });
   const evidence = listEvidenceLinksForRun(db, run);
-  return { run, steps, approvals, leases, monitor, evidence };
+  const gates = listWorkflowGatesForRun(db, runId);
+  return { run, steps, approvals, leases, monitor, evidence, gates };
 }
 
 function listStepsByRunId(db: MomentumDb, runId: string): WorkflowStepRow[] {

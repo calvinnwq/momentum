@@ -297,6 +297,7 @@ function detailFrom(overrides: Partial<WorkflowRunDetail> = {}): WorkflowRunDeta
     leases: [],
     monitor,
     evidence: [],
+    gates: [],
     ...overrides
   };
 }

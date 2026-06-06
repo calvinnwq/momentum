@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { runCli } from "../src/cli.js";
 import { openDb, type MomentumDb } from "../src/db.js";
+import { insertWorkflowGate } from "../src/workflow-gate-persist.js";
 
 type RunResult = {
   code: number;
@@ -251,5 +252,67 @@ describe("momentum workflow handoff", () => {
     expect(result.stdout).toContain("Schema version: 1");
     expect(result.stdout).toContain("Workflow run: cwfp-text-handoff");
     expect(result.stdout).toContain("- Next action: resume_running");
+  });
+
+  it("surfaces open workflow gates in the handoff envelope (JSON and text)", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRunningRun(db, "cwfp-handoffgate");
+      insertWorkflowGate(
+        db,
+        {
+          gateId: "handoff-gate-1",
+          workflowRunId: "cwfp-handoffgate",
+          targetScope: "workflow",
+          gateType: "approval_required",
+          reason: "approve before external apply",
+          allowedActions: ["approve", "reject"],
+          recommendedAction: "approve",
+          policyEnvelope: []
+        },
+        { now: Date.now() }
+      );
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "handoff",
+      "cwfp-handoffgate",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      gates: Array<{
+        gateId: string;
+        targetScope: string;
+        gateType: string;
+        open: boolean;
+        allowedActions: string[];
+      }>;
+    };
+    expect(payload.gates.map((g) => g.gateId)).toEqual(["handoff-gate-1"]);
+    expect(payload.gates[0]).toMatchObject({
+      targetScope: "workflow",
+      gateType: "approval_required",
+      open: true,
+      allowedActions: ["approve", "reject"]
+    });
+
+    const textResult = await run([
+      "workflow",
+      "handoff",
+      "cwfp-handoffgate",
+      "--data-dir",
+      dataDir
+    ]);
+    expect(textResult.code).toBe(0);
+    expect(textResult.stdout).toContain("Gates: 1 (open: 1)");
+    expect(textResult.stdout).toContain("handoff-gate-1");
+    expect(textResult.stdout).toContain("OPEN");
   });
 });
