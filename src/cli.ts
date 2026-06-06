@@ -4316,11 +4316,14 @@ function emitWorkflowRunMonitor(
         }
       : null,
     evidence: envelope.evidence.map(workflowEvidenceToJsonShape),
+    gates: envelope.gates.map(workflowGateToJsonShape),
     counts: {
       steps: envelope.counts.steps,
       stepsByState: envelope.counts.stepsByState,
       approvals: envelope.counts.approvals,
-      leases: envelope.counts.leases
+      leases: envelope.counts.leases,
+      gates: envelope.counts.gates,
+      gatesOpen: envelope.counts.gatesOpen
     }
   };
 
@@ -4361,6 +4364,19 @@ function renderWorkflowMonitorText(
     `Steps: ${envelope.counts.steps}` +
       ` approvals=${envelope.counts.approvals} leases=${envelope.counts.leases}`
   );
+  lines.push(
+    `Gates: ${envelope.counts.gates} (open: ${envelope.counts.gatesOpen})`
+  );
+  for (const gate of envelope.gates) {
+    if (gate.resolvedAt !== null) continue;
+    lines.push(
+      `- ${gate.gateId} [${gate.targetScope}/${gate.gateType}] OPEN ` +
+        `allowed=${gate.allowedActions.join(",") || "(none)"}` +
+        (gate.recommendedAction !== null
+          ? ` recommended=${gate.recommendedAction}`
+          : "")
+    );
+  }
   lines.push(`Data dir: ${dataDir}`);
   lines.push("");
   return lines.join("\n");

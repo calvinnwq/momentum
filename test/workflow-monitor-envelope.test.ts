@@ -17,6 +17,7 @@ import type {
   WorkflowRunDetail,
   WorkflowRunRow
 } from "../src/workflow-status.js";
+import type { WorkflowGateRecord } from "../src/workflow-gate-persist.js";
 import {
   type WorkflowLeaseRecord,
   type WorkflowStepKind,
@@ -46,6 +47,29 @@ function lease(overrides: Partial<WorkflowLeaseRecord> = {}): WorkflowLeaseRecor
     heartbeatAt: 1_000,
     releasedAt: null,
     stalePolicy: "auto-release",
+    ...overrides
+  };
+}
+
+function gate(overrides: Partial<WorkflowGateRecord> = {}): WorkflowGateRecord {
+  return {
+    gateId: "gate-1",
+    workflowRunId: RUN_ID,
+    stepRunId: null,
+    invocationId: null,
+    roundId: null,
+    targetScope: "workflow",
+    gateType: "approval_required",
+    reason: "operator must approve external apply",
+    evidence: null,
+    allowedActions: ["approve", "reject"],
+    recommendedAction: "approve",
+    policyEnvelope: [],
+    resolvedAt: null,
+    resolvedBy: null,
+    resolutionMode: null,
+    chosenAction: null,
+    resolution: null,
     ...overrides
   };
 }
@@ -388,5 +412,37 @@ describe("buildWorkflowMonitorEnvelope", () => {
     expect(envelope.counts.stepsByState.succeeded).toBe(1);
     expect(envelope.counts.stepsByState.running).toBe(1);
     expect(envelope.evidence).toEqual(evidence);
+  });
+
+  it("surfaces durable gates and an open-vs-total gate count", () => {
+    const gates: WorkflowGateRecord[] = [
+      gate({ gateId: "gate-open-1" }),
+      gate({
+        gateId: "gate-done-1",
+        targetScope: "step",
+        stepRunId: "implementation",
+        gateType: "operator_decision_required",
+        resolvedAt: 999,
+        resolvedBy: "calvin",
+        resolutionMode: "operator",
+        chosenAction: "fix",
+        resolution: "applied"
+      })
+    ];
+    const envelope = buildWorkflowMonitorEnvelope(detailFrom({ gates }), {
+      generatedAt: 11
+    });
+    expect(envelope.gates).toEqual(gates);
+    expect(envelope.counts.gates).toBe(2);
+    expect(envelope.counts.gatesOpen).toBe(1);
+  });
+
+  it("defaults the gate count to zero when a run has no gates", () => {
+    const envelope = buildWorkflowMonitorEnvelope(detailFrom(), {
+      generatedAt: 12
+    });
+    expect(envelope.gates).toEqual([]);
+    expect(envelope.counts.gates).toBe(0);
+    expect(envelope.counts.gatesOpen).toBe(0);
   });
 });
