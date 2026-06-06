@@ -1639,6 +1639,11 @@ describe("applyQueueMigrations", () => {
             `missing executor_definitions column: ${col}`
           ).toContain(col);
         }
+
+        const decisionCols = getColumns(db, "executor_decisions").map(
+          (row) => row.name
+        );
+        expect(decisionCols).toContain("external_ref");
       } finally {
         db.close();
       }

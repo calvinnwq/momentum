@@ -1,6 +1,6 @@
 # Contract: Executor Loop
 
-**Status:** Accepted planning contract. This contract refines the workflow-first runtime pivot by pinning how step executors run bounded autonomous work under a `StepRun`. It does not authorize schema, CLI, daemon, or external integration changes by itself.
+**Status:** Accepted planning contract. This contract refines the workflow-first runtime pivot by pinning how step executors run bounded autonomous work or mirror external executor state under a `StepRun`. It does not authorize schema, CLI, daemon, or external integration changes by itself.
 
 The workflow-first runtime contract defines the top-level product shape:
 
@@ -61,7 +61,7 @@ executor_decisions
 executor_checkpoints
 ```
 
-`StepRun` records whether the workflow step is approved, running, paused, or terminal. `ExecutorInvocation` records one configured executor session for that step. `ExecutorRound` records each bounded loop attempt, including inputs, agent/model selection, output, verification, commit/recovery result, and remaining work.
+`StepRun` records whether the workflow step is approved, running, paused, or terminal. `ExecutorInvocation` records one configured executor session for that step. `ExecutorRound` records each bounded loop attempt or external mirror lane, including inputs, agent/model selection when Momentum owns the runner, output or mirrored state, verification, commit/recovery result, and remaining work.
 
 ## Executor States
 
@@ -102,7 +102,7 @@ Terminal invocation states are `manual_recovery_required`, `blocked`, `failed`, 
 
 ## Round Lifecycle
 
-Each round follows the same durable lifecycle, even when the executor family is different:
+Each result-bearing round follows the same durable lifecycle, even when the executor family is different:
 
 1. Load `WorkflowRun`, `StepRun`, `StepDefinition`, executor config, prior round summaries, repo policy, and current recovery state.
 2. Resolve agent, model, effort, and tool policy from the configured precedence rules.
@@ -115,7 +115,9 @@ Each round follows the same durable lifecycle, even when the executor family is 
 9. Classify the round result.
 10. Persist the daemon's decision to continue, pause, fail, recover, or complete.
 
-An executor cannot silently skip the normalized result step. If the executor cannot produce a valid result or state snapshot, the daemon classifies the round as failed or manual recovery based on the configured recovery taxonomy. The `script` family is the narrow exception: a successful script round records the command exit status and bounded logs, emits a bare capture transition, and omits `result_captured` because no normalized result document exists.
+An executor cannot silently skip the normalized result step. If the executor cannot produce a valid result or state snapshot, the daemon classifies the round as failed or manual recovery based on the configured recovery taxonomy. The `script` family is the narrow result-bearing exception: a successful script round records the command exit status and bounded logs, emits a bare capture transition, and omits `result_captured` because no normalized result document exists.
+
+The `no-mistakes` family uses the same durable envelope differently: one long-lived mirror round is born in `mirroring_external_state`, each daemon poll reconciles the latest external snapshot into that same round, and the round either heartbeats in place, pauses in `waiting_operator`, or settles terminally. Momentum persists findings and decisions below that mirror round but does not split the external review/fix phases into separate Momentum rounds.
 
 ## Round Schema
 
@@ -307,6 +309,32 @@ For no-mistakes, Momentum mirrors:
 - Decisions and delegated-policy results.
 - PR URL and CI state.
 
+The no-mistakes external-state reader consumes one bounded JSON snapshot file,
+not the external daemon's private store directly. The file must be at most
+1 MiB, UTF-8 encoded, and a JSON object with these camelCase fields:
+
+- `externalRunId`, `branch`, `headSha`, `stepStatus`, and `ciState`: required strings.
+- `activeStep` and `prUrl`: optional / nullable strings (`null` when absent).
+- `findings`: required array of objects with string `externalId` and `title`,
+  plus optional / nullable string `severity` and `detail`.
+- `selectedFindingIds`: required array of strings matching surfaced finding ids.
+- `decisions`: required array of objects with string `externalId`, string
+  `summary`, string-array `allowedActions`, and optional / nullable string
+  `recommendedAction`, `chosenAction`, and `resolution`.
+
+External producers should emit `stepStatus` as one of `running`,
+`awaiting_decision`, `awaiting_approval`, `blocked`, `failed`, or `completed`,
+and `ciState` as one of `passed`, `failed`, `pending`, or `none`. Unknown enum
+strings are structurally readable but classify as unreadable external evidence.
+
+No-mistakes mirrors must pin an external identity anchor — external run id,
+branch, and head SHA — before trusting readable external state. The anchor may
+come from the caller's expected identity or a durable checkpoint, and subsequent
+polls must corroborate the readable snapshot against it. A readable poll with no
+pinned identity, or with a changed external run id / branch / head SHA, routes to
+`manual_recovery_required` with recovery code `external_state_inconsistent`
+instead of mirroring findings or decisions.
+
 External state strings are never enough on their own. Momentum reconciles external state with artifacts, logs, repo state, configured completion requirements, and its own executor records.
 
 ## Executor Families
@@ -336,4 +364,4 @@ This contract does not implement:
 - Replacement of GNHF or no-mistakes internals.
 - Remote git operations.
 
-M10 now carries these as implementation slices: M10-01 lands definition migrations, M10-02 lands workflow run start, M10-03 lands executor-loop records, M10-04 lands the opt-in daemon workflow scheduler lane, M10-05 lands the goal-loop executor adapter, and M10-06 lands the one-shot / script executor adapters, while executor-control CLI surfaces remain later slices.
+M10 now carries these as implementation slices: M10-01 lands definition migrations, M10-02 lands workflow run start, M10-03 lands executor-loop records, M10-04 lands the opt-in daemon workflow scheduler lane, M10-05 lands the goal-loop executor adapter, M10-06 lands the one-shot / script executor adapters, and M10-07 lands the no-mistakes executor mirror, while executor-control CLI surfaces remain later slices.

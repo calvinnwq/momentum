@@ -931,6 +931,17 @@ describe("executor decisions", () => {
     }
   });
 
+  it("round-trips a decision external reference when provided", () => {
+    const db = openEvidenceDb();
+    try {
+      const record = makeDecision({ externalRef: "nomistakes:D-1" });
+      insertExecutorDecision(db, record, { now: 1000 });
+      expect(listExecutorDecisionsForRound(db, "round-1")).toEqual([record]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("round-trips an open decision with empty actions and null resolution", () => {
     const db = openEvidenceDb();
     try {

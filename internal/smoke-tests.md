@@ -301,9 +301,9 @@ Run locally via the targeted vitest command:
 pnpm vitest run test/live-step-finalize.test.ts test/live-step-run-recovery.test.ts test/live-step-advance.test.ts test/workflow-recovery-artifact.test.ts
 ```
 
-## Milestone 10 workflow-first runtime coverage (NGX-345 through NGX-350)
+## Milestone 10 workflow-first runtime coverage (NGX-345 through NGX-351)
 
-M10-01 through M10-06 are covered by focused unit, migration, CLI, and daemon
+M10-01 through M10-07 are covered by focused unit, migration, CLI, and daemon
 loop tests rather than a built-binary CLI smoke.
 
 Coverage:
@@ -353,11 +353,31 @@ Coverage:
   `test/single-shot-orchestrator.test.ts`.
 - concrete single-shot mechanisms for live-wrapper `one-shot` execution and
   deterministic `script` command execution in `test/single-shot-mechanism.test.ts`.
+- no-mistakes executor mirror brain — external-state classification (running /
+  human-gate / completion-vs-evidence / failure / blockage), untrusted-evidence
+  routing to manual recovery, findings / decisions / invocation / round-start /
+  round-persistence projections, the decision → patch and read-failure helpers,
+  and the `isNoMistakesExecutorFamily` guard in
+  `test/no-mistakes-executor.test.ts`.
+- no-mistakes external-state reader (pure parser + file IO) turning untrusted raw
+  state into a typed snapshot with a raw-bytes content digest, owning JSON-type
+  validation while deferring semantics to the brain, in
+  `test/no-mistakes-mechanism.test.ts`.
+- durable no-mistakes mirror round persistence round-trip through the real
+  executor-loop transition graph (continue heartbeat, direct-to-succeeded
+  completion, non-terminal operator/approval gates, failure / blockage, and
+  untrusted-evidence manual recovery) plus findings / decisions round-trip in
+  `test/no-mistakes-executor-persistence.test.ts`.
+- `runNoMistakesMirrorRound` and `runNoMistakesMirrorStep` end-to-end through the
+  real persistence layer with an injected reader, covering the long-lived
+  multi-poll lifecycle, idempotent findings / decisions mirroring, reader-failure
+  manual recovery, and the real `readNoMistakesExternalState` reader in
+  `test/no-mistakes-orchestrator.test.ts`.
 
 Run locally via the targeted vitest command:
 
 ```
-pnpm vitest run test/workflow-definition.test.ts test/workflow-definition-persist.test.ts test/migrations.test.ts test/workflow-run-start.test.ts test/workflow-run-start-persist.test.ts test/cli-workflow-run-start.test.ts test/executor-loop-reducer.test.ts test/executor-loop-persist.test.ts test/workflow-scheduler.test.ts test/daemon-loop.test.ts test/goal-loop-executor.test.ts test/goal-loop-orchestrator.test.ts test/goal-loop-mechanism.test.ts test/goal-loop-executor-persistence.test.ts test/git-transaction.test.ts test/single-shot-executor.test.ts test/single-shot-executor-persistence.test.ts test/single-shot-orchestrator.test.ts test/single-shot-mechanism.test.ts
+pnpm vitest run test/workflow-definition.test.ts test/workflow-definition-persist.test.ts test/migrations.test.ts test/workflow-run-start.test.ts test/workflow-run-start-persist.test.ts test/cli-workflow-run-start.test.ts test/executor-loop-reducer.test.ts test/executor-loop-persist.test.ts test/workflow-scheduler.test.ts test/daemon-loop.test.ts test/goal-loop-executor.test.ts test/goal-loop-orchestrator.test.ts test/goal-loop-mechanism.test.ts test/goal-loop-executor-persistence.test.ts test/git-transaction.test.ts test/single-shot-executor.test.ts test/single-shot-executor-persistence.test.ts test/single-shot-orchestrator.test.ts test/single-shot-mechanism.test.ts test/no-mistakes-executor.test.ts test/no-mistakes-mechanism.test.ts test/no-mistakes-executor-persistence.test.ts test/no-mistakes-orchestrator.test.ts
 ```
 
 ## Test boundary

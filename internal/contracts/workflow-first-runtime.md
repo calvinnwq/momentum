@@ -117,12 +117,12 @@ implementation
   round 3
 
 no-mistakes
-  review round 1
-  fix round 1
-  review round 2
+  mirror round 0
+    findings
+    decisions
 ```
 
-Loops live inside executors, but their rounds belong in Momentum's database.
+Loops live inside executors, but their rounds belong in Momentum's database. External no-mistakes review/fix phases remain owned by no-mistakes and are mirrored below one long-lived Momentum round.
 
 ## Executor Families
 
@@ -313,7 +313,8 @@ For GNHF-like execution:
 For no-mistakes:
 
 - Mirror run id, branch, head SHA, active step, step status, findings, selected finding IDs, PR URL, CI status, and gate decisions.
-- Treat no-mistakes SQLite as the external executor's state, but Momentum `step_runs` / `executor_rounds` / `executor_findings` decide whether the workflow step can advance.
+- Read the bounded external JSON state snapshot through `readNoMistakesExternalState` / `parseNoMistakesExternalState` as the integration seam; missing, unreadable, oversized, or malformed snapshots become error evidence instead of daemon throws.
+- Treat that JSON snapshot as external evidence, not direct authority: Momentum `step_runs` / `executor_rounds` / `executor_findings` / `executor_decisions` decide whether the workflow step can advance, and completion requires all mirrored decisions to be resolved.
 
 Momentum must not blindly trust a single external status string. It should reconcile external state with artifacts, logs, repo state, and configured completion requirements.
 
@@ -336,6 +337,7 @@ Current Momentum state:
 - Has M10-04 opt-in daemon workflow scheduler lane (recover → scan → claim → dispatch) that schedules runnable workflow steps alongside goal iteration draining, with the executor-dispatch seam left to later slices.
 - Has M10-05 `goal-loop` executor adapter that drives bounded autonomous rounds below a step run, reusing the M9 verify / commit / reset finalization and persisting per-round agent / model / input / result / verification / commit / artifact / checkpoint evidence.
 - Has M10-06 `one-shot` / `script` executor adapters for bounded single-invocation work, including result-bearing one-shot success and exit-code / bounded-log script success.
+- Has M10-07 no-mistakes executor mirror that records external no-mistakes run state, findings, decisions, PR / CI state, and completion below executor invocations / rounds.
 - Has `goal start`, `daemon`, and workflow import / status / run controls.
 
 Required workflow-first gaps:
@@ -344,11 +346,11 @@ Required workflow-first gaps:
 |---|---|---|
 | Top-level entity | Goal-first; persisted WorkflowDefinition primitives; WorkflowRun mostly coding-workflow substrate | WorkflowDefinition / WorkflowRun as product core |
 | Step configuration | Persisted StepDefinition list for definitions; run execution still fixed canonical step kinds | Configurable StepDefinition list |
-| Executor selection | Executor definitions can be persisted, and goal-loop / one-shot / script adapters exist, but dispatch still needs per-step executor config wiring | Per-step executor definition and agent / model config |
+| Executor selection | Executor definitions can be persisted, and goal-loop / one-shot / script / no-mistakes mirror adapters exist, but dispatch still needs per-step executor config wiring | Per-step executor definition and agent / model config |
 | Daemon scheduling | Drains `goal_iteration` jobs; opt-in scheduler lane recovers, scans, claims, and dispatches runnable workflow steps | Schedules workflow runs, step runs, executor invocations, and rounds |
 | Loop state | Goal iteration artifacts / job rows, plus persisted executor invocations / rounds below workflow steps | ExecutorInvocation / ExecutorRound / checkpoints / artifacts driven by the workflow scheduler |
 | Goal loop | Product-level Goal | `goal-loop` executor inside a workflow step |
-| no-mistakes | External fixed pipeline | Specialist executor mirrored into Momentum |
+| no-mistakes | External fixed pipeline with a landed Momentum mirror | Specialist executor mirrored into Momentum |
 | Human gates | Split between approvals, recovery flags, external TUI state | Durable gate records with allowed actions and evidence |
 | Run start | `goal start` plus imported workflow controls plus `workflow run start` from definitions | Workflow-first run start connected to executor scheduling |
 | Recovery | Goal-scoped and WorkflowRun-scoped surfaces | Unified workflow / step / executor recovery taxonomy |
@@ -366,4 +368,4 @@ This planning contract does not implement:
 - Public UI.
 - Replacement of GNHF or no-mistakes internals.
 
-M10 is now implementing these as concrete slices: M10-01 lands definition schema / validation / persistence, M10-02 lands CLI run start, M10-03 lands executor state schema / persistence, M10-04 lands the opt-in daemon workflow scheduler lane, M10-05 lands the goal-loop executor adapter, and M10-06 lands the one-shot / script executor adapters, while the no-mistakes mirror, gates, and external runtime behavior remain later slices.
+M10 is now implementing these as concrete slices: M10-01 lands definition schema / validation / persistence, M10-02 lands CLI run start, M10-03 lands executor state schema / persistence, M10-04 lands the opt-in daemon workflow scheduler lane, M10-05 lands the goal-loop executor adapter, M10-06 lands the one-shot / script executor adapters, and M10-07 lands the no-mistakes executor mirror, while gates and external runtime behavior remain later slices.

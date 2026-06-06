@@ -11,7 +11,8 @@
  * `workflow-run-start-persist.ts`, and the CLI `workflow run start` surface
  * calls that persistence layer. Executor records, the opt-in daemon scheduler
  * lane, and executor adapter dispatch are layered separately; this pure
- * materializer does not run the landed goal-loop / one-shot / script adapters.
+ * materializer does not run the landed goal-loop / one-shot / script /
+ * no-mistakes mirror adapters.
  *
  * Scope decisions pinned here, grounded in the accepted planning contracts
  * (internal/contracts/workflow-first-runtime.md "Run start" gap row and

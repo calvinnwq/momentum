@@ -7,9 +7,9 @@
  * `executor_rounds` tables added by `migrations.ts`. This is the storage twin of
  * the pure reducer: nothing here runs executors or starts a Goal loop. The
  * M10-04 scheduler lane is owned separately by `workflow-scheduler.ts`; the
- * landed goal-loop and one-shot / script adapters layer on top of this
- * persistence spine, exactly as `workflow-definition-persist.ts` is the storage
- * twin of `workflow-definition.ts`.
+ * landed goal-loop, one-shot / script, and no-mistakes mirror adapters layer on
+ * top of this persistence spine, exactly as `workflow-definition-persist.ts` is
+ * the storage twin of `workflow-definition.ts`.
  *
  * Stable contracts this slice locks in:
  *   - An executor definition's durable identity is its `executorKey`; re-persisting
@@ -863,8 +863,8 @@ export function insertExecutorDecision(
     db.prepare(
       `INSERT INTO executor_decisions (
          decision_id, round_id, summary, allowed_actions, recommended_action,
-         chosen_action, resolution, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+         chosen_action, resolution, external_ref, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       record.decisionId,
       record.roundId,
@@ -873,6 +873,7 @@ export function insertExecutorDecision(
       record.recommendedAction,
       record.chosenAction,
       record.resolution,
+      record.externalRef ?? null,
       now
     );
   } catch (error) {
@@ -892,7 +893,7 @@ export function listExecutorDecisionsForRound(
   const rows = db
     .prepare(
       `SELECT decision_id, round_id, summary, allowed_actions, recommended_action,
-              chosen_action, resolution
+              chosen_action, resolution, external_ref
          FROM executor_decisions
         WHERE round_id = ?
         ORDER BY created_at, decision_id`
@@ -1007,6 +1008,7 @@ type ExecutorDecisionRow = {
   recommended_action: string | null;
   chosen_action: string | null;
   resolution: string | null;
+  external_ref: string | null;
 };
 
 const ROUND_SELECT = `
@@ -1131,7 +1133,7 @@ function rowToFinding(row: ExecutorFindingRow): ExecutorFindingRecord {
 }
 
 function rowToDecision(row: ExecutorDecisionRow): ExecutorDecisionRecord {
-  return {
+  const record: ExecutorDecisionRecord = {
     decisionId: row.decision_id,
     roundId: row.round_id,
     summary: row.summary,
@@ -1140,6 +1142,10 @@ function rowToDecision(row: ExecutorDecisionRow): ExecutorDecisionRecord {
     chosenAction: row.chosen_action,
     resolution: row.resolution
   };
+  if (row.external_ref !== null) {
+    record.externalRef = row.external_ref;
+  }
+  return record;
 }
 
 function validateDefinitionRecord(
