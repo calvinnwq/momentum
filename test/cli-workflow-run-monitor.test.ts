@@ -5,6 +5,10 @@ import path from "node:path";
 
 import { runCli } from "../src/cli.js";
 import { openDb, type MomentumDb } from "../src/db.js";
+import {
+  insertWorkflowGate,
+  resolveWorkflowGate
+} from "../src/workflow-gate-persist.js";
 import { parseWorkflowRunImport } from "../src/workflow-run-import.js";
 import { persistWorkflowRunImport } from "../src/workflow-run-import-persist.js";
 
@@ -638,6 +642,118 @@ describe("momentum workflow run monitor (NGX-328)", () => {
     expect(result.stdout).toContain(`Workflow run monitor: ${runId}`);
     expect(result.stdout).toContain("Disposition: wait");
     expect(result.stdout).toContain("Next action: resume_running");
+  });
+
+  it("surfaces open and resolved workflow gates in the monitor envelope (JSON and text)", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-gates";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "running" });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "running",
+        order: 1
+      });
+      seedLease(db, {
+        runId,
+        leaseKind: "managed-step",
+        expiresAt: FRESH_EXPIRY
+      });
+      insertWorkflowGate(
+        db,
+        {
+          gateId: "gate-open-1",
+          workflowRunId: runId,
+          targetScope: "workflow",
+          gateType: "approval_required",
+          reason: "operator must approve external apply",
+          allowedActions: ["approve", "reject"],
+          recommendedAction: "approve",
+          policyEnvelope: []
+        },
+        { now: SEED_NOW }
+      );
+      insertWorkflowGate(
+        db,
+        {
+          gateId: "gate-done-1",
+          workflowRunId: runId,
+          stepRunId: "implementation",
+          targetScope: "step",
+          gateType: "operator_decision_required",
+          reason: "decide how to handle a verification failure",
+          allowedActions: ["fix", "skip", "abort"],
+          recommendedAction: "fix",
+          policyEnvelope: ["fix"]
+        },
+        { now: SEED_NOW }
+      );
+      resolveWorkflowGate(
+        db,
+        "gate-done-1",
+        { action: "fix", actor: "calvin", mode: "operator" },
+        { now: SEED_NOW + 1 }
+      );
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      counts: { gates: number; gatesOpen: number };
+      gates: Array<{
+        gateId: string;
+        targetScope: string;
+        gateType: string;
+        open: boolean;
+        allowedActions: string[];
+        resolvedBy: string | null;
+        chosenAction: string | null;
+      }>;
+    };
+    expect(payload.counts.gates).toBe(2);
+    expect(payload.counts.gatesOpen).toBe(1);
+    expect(payload.gates.map((g) => g.gateId).sort()).toEqual([
+      "gate-done-1",
+      "gate-open-1"
+    ]);
+    const open = payload.gates.find((g) => g.gateId === "gate-open-1");
+    expect(open).toMatchObject({
+      targetScope: "workflow",
+      gateType: "approval_required",
+      open: true,
+      allowedActions: ["approve", "reject"]
+    });
+    const resolved = payload.gates.find((g) => g.gateId === "gate-done-1");
+    expect(resolved).toMatchObject({
+      open: false,
+      resolvedBy: "calvin",
+      chosenAction: "fix"
+    });
+
+    const textResult = await run([
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--data-dir",
+      dataDir
+    ]);
+    expect(textResult.code).toBe(0);
+    expect(textResult.stdout).toContain("Gates: 2 (open: 1)");
+    expect(textResult.stdout).toContain("gate-open-1");
   });
 
   it("never mutates durable state (read-only)", async () => {

@@ -6,8 +6,10 @@ planning contracts into this executable sequence. M10-01 has begun landing the
 workflow / step definition primitives and is now complete, M10-02 adds workflow
 run start, M10-03 adds the durable executor-loop schema, M10-04 adds the
 opt-in daemon workflow scheduler lane, M10-05 adds the goal-loop executor
-adapter, M10-06 adds the one-shot / script executor adapters, and M10-07 adds
-the no-mistakes executor mirror without closing or rewriting M9 by itself.
+adapter, M10-06 adds the one-shot / script executor adapters, M10-07 adds
+the no-mistakes executor mirror, and M10-08 adds the durable workflow gates and
+the `workflow run decide` operator decision CLI without closing or rewriting M9
+by itself.
 
 M10 promotes Momentum from a Goal-first product surface plus imported
 OpenClaw-coding-workflow substrate into a configurable workflow runtime:
@@ -33,8 +35,9 @@ schema, validation, and persistence primitives, M10-02 adds workflow run start,
 M10-03 adds executor definition / invocation / round persistence, M10-04 adds
 the daemon workflow scheduler lane, M10-05 adds the goal-loop executor adapter,
 M10-06 adds the one-shot / script executor adapters, M10-07 adds the
-no-mistakes executor mirror, and later M10 slices implement gates, closeout, and
-remaining runtime behavior.
+no-mistakes executor mirror, M10-08 adds the durable workflow gates and operator
+decision CLI, and later M10 slices implement closeout and remaining runtime
+behavior.
 
 ## Relationship To M9
 
@@ -134,10 +137,10 @@ The M10 slice order is:
    commands that succeed from exit code plus bounded logs. *(done)*
 8. **NGX-351 — M10-07 no-mistakes executor mirror.** Mirror no-mistakes runs, findings,
    selected finding IDs, decisions, PR / CI state, and completion into Momentum
-   executor records. *(landed in this slice)*
+   executor records. *(done)*
 9. **NGX-352 — M10-08 Workflow gates and decisions CLI.** Add durable operator decision
    commands and delegated-policy application for workflow / step / executor
-   gates.
+   gates. *(landed in this slice)*
 10. **NGX-353 — M10-09 Workflow-first dogfood and closeout.** Run a real Momentum task
     through the workflow-first start surface, update regression coverage, and
     close M10.
@@ -169,7 +172,9 @@ executor-loop schema and persistence only; M10-04 adds the opt-in daemon
 workflow scheduler lane only; M10-05 adds the goal-loop executor adapter only;
 M10-06 adds the one-shot and script executor adapters only; M10-07 adds the
 no-mistakes executor mirror only (brain, external-state reader, and polling
-orchestrator). The gates, closeout, and generalized runtime behavior remain later
+orchestrator); M10-08 adds the durable workflow gates, the `evaluateGateDecision`
+brain, gate persistence, and the `workflow run decide` operator decision CLI plus
+gate visibility only. The closeout and generalized runtime behavior remain later
 slices.
 
 Across the milestone, these remain outside scope unless a later contract

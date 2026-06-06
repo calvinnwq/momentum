@@ -183,6 +183,18 @@ import {
   type PersistWorkflowRunStartSummary
 } from "./workflow-run-start-persist.js";
 import {
+  GATE_DECISION_MODES,
+  type GateDecisionMode,
+  type GateDecisionRefusalCode,
+  type GateDecisionRequest
+} from "./workflow-gate.js";
+import {
+  WorkflowGateDecisionError,
+  WorkflowGateNotFoundError,
+  resolveWorkflowGate,
+  type WorkflowGateRecord
+} from "./workflow-gate-persist.js";
+import {
   DEFAULT_RECONCILIATION_STALE_THRESHOLD_MS,
   PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT,
   buildProjectRollup,
@@ -318,6 +330,9 @@ type ParsedFlags = {
   approvalPath?: string;
   approvalDigest?: string;
   step?: string;
+  action?: string;
+  mode?: string;
+  note?: string;
   evidencePointer?: string;
   ledgerPointer?: string;
   definition?: string;
@@ -350,6 +365,7 @@ const COMMANDS = [
   "momentum workflow status [<run-id>] [--state <state>] [--filter <active|blocked|completed|imported>] [--limit <n>] [--data-dir <path>] [--json]",
   "momentum workflow handoff <run-id> [--data-dir <path>] [--json]",
   "momentum workflow run approve <run-id> --approval-boundary <boundary> --phrase <text> [--actor <name>] [--artifact-path <path>] [--artifact-digest <sha256>] [--data-dir <path>] [--json]",
+  "momentum workflow run decide <gate-id> --action <action> --actor <name> [--mode <operator|delegated>] [--note <text>] [--data-dir <path>] [--json]",
   "momentum workflow run list [--state <state>] [--filter <active|blocked|completed|imported>] [--approval-boundary <boundary>] [--repo <path>] [--issue-scope <identifier>] [--updated-since <ms>] [--updated-until <ms>] [--limit <n>] [--data-dir <path>] [--json]",
   "momentum workflow run update-step <run-id> --step <step-id> --state <approved|succeeded|skipped|failed|blocked|canceled> --reason <text> [--actor <name>] [--evidence-pointer <ref>] [--ledger-pointer <ref>] [--data-dir <path>] [--json]",
   "momentum workflow run clear-recovery <run-id> [--data-dir <path>] [--json]",
@@ -2131,7 +2147,7 @@ function workflowRun(parsed: ParsedFlags, io: CliIo): number {
   const subcommand = parsed.args[2];
   if (!subcommand) {
     return usageError(
-      "Missing required subcommand for workflow run. Expected: start, list, approve, update-step, clear-recovery, monitor.",
+      "Missing required subcommand for workflow run. Expected: start, list, approve, decide, update-step, clear-recovery, monitor.",
       parsed,
       io
     );
@@ -2144,6 +2160,9 @@ function workflowRun(parsed: ParsedFlags, io: CliIo): number {
   }
   if (subcommand === "approve") {
     return workflowRunApprove(parsed, io);
+  }
+  if (subcommand === "decide") {
+    return workflowRunDecide(parsed, io);
   }
   if (subcommand === "update-step") {
     return workflowRunUpdateStep(parsed, io);
@@ -2779,7 +2798,8 @@ function emitWorkflowStatusDetail(
     approvals: detail.approvals.map(workflowApprovalToJsonShape),
     leases: detail.leases.map(workflowLeaseToJsonShape),
     monitor: workflowMonitorToJsonShape(detail.monitor),
-    evidence: detail.evidence.map(workflowEvidenceToJsonShape)
+    evidence: detail.evidence.map(workflowEvidenceToJsonShape),
+    gates: detail.gates.map(workflowGateToJsonShape)
   };
 
   if (parsed.json) {
@@ -3346,6 +3366,188 @@ function emitWorkflowRunApproveFailure(
   if (failure.dataDir !== undefined) payload["dataDir"] = failure.dataDir;
   if (failure.runId !== undefined) payload["runId"] = failure.runId;
   if (failure.boundary !== undefined) payload["boundary"] = failure.boundary;
+
+  if (parsed.json) {
+    writeJson(io.stderr, payload);
+    return 1;
+  }
+  write(io.stderr, `${failure.message}\n`);
+  return 1;
+}
+
+type WorkflowRunDecideFailureCode =
+  | "gate_id_required"
+  | "invalid_mode"
+  | "data_dir_failed"
+  | "gate_not_found"
+  | GateDecisionRefusalCode;
+
+type WorkflowRunDecideFailure = {
+  command: "workflow run decide";
+  code: WorkflowRunDecideFailureCode;
+  message: string;
+  dataDir?: string;
+  gateId?: string;
+};
+
+function isGateDecisionMode(value: string): value is GateDecisionMode {
+  return (GATE_DECISION_MODES as readonly string[]).includes(value);
+}
+
+/**
+ * `momentum workflow run decide` — the durable operator decision surface for a
+ * workflow / step / executor human gate (M10-08, NGX-352). It resolves a single
+ * persisted gate by routing the requested action through the same pure
+ * {@link resolveWorkflowGate} brain the daemon uses: an operator may pick any
+ * allowed action, while `--mode delegated` may only auto-apply an action inside
+ * the gate's policy envelope and otherwise pauses for an operator. The brain's
+ * refusal codes (action not allowed, out-of-envelope delegated action, already
+ * resolved) surface verbatim so a caller can branch on the exact reason, and the
+ * durable row is left untouched on any refusal.
+ */
+function workflowRunDecide(parsed: ParsedFlags, io: CliIo): number {
+  const positional = parsed.args.slice(3);
+  const gateId = positional[0]?.trim();
+  if (!gateId) {
+    return emitWorkflowRunDecideFailure(parsed, io, {
+      command: "workflow run decide",
+      code: "gate_id_required",
+      message: "Missing required <gate-id> for workflow run decide."
+    });
+  }
+  if (positional.length > 1) {
+    return usageError(
+      `Unexpected argument for workflow run decide: ${positional[1]}`,
+      parsed,
+      io
+    );
+  }
+
+  const action = parsed.action?.trim();
+  if (!action) {
+    return emitWorkflowRunDecideFailure(parsed, io, {
+      command: "workflow run decide",
+      code: "action_required",
+      message: "Missing required --action <action> for workflow run decide.",
+      gateId
+    });
+  }
+
+  const actor = parsed.actor?.trim();
+  if (!actor) {
+    return emitWorkflowRunDecideFailure(parsed, io, {
+      command: "workflow run decide",
+      code: "actor_required",
+      message: "Missing required --actor <name> for workflow run decide.",
+      gateId
+    });
+  }
+
+  const modeRaw = parsed.mode ?? "operator";
+  if (!isGateDecisionMode(modeRaw)) {
+    return emitWorkflowRunDecideFailure(parsed, io, {
+      command: "workflow run decide",
+      code: "invalid_mode",
+      message: `Invalid --mode: ${modeRaw}. Expected one of: ${GATE_DECISION_MODES.join(", ")}.`,
+      gateId
+    });
+  }
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return emitWorkflowRunDecideFailure(parsed, io, {
+      command: "workflow run decide",
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err),
+      gateId
+    });
+  }
+
+  const request: GateDecisionRequest = {
+    action,
+    actor,
+    mode: modeRaw,
+    resolutionNote: parsed.note ?? null
+  };
+
+  const db = openDb(dataDir);
+  try {
+    const resolved = resolveWorkflowGate(db, gateId, request);
+    const payload = {
+      ok: true,
+      command: "workflow run decide",
+      dataDir,
+      gateId: resolved.gateId,
+      runId: resolved.workflowRunId,
+      targetScope: resolved.targetScope,
+      gateType: resolved.gateType,
+      chosenAction: resolved.chosenAction,
+      resolvedBy: resolved.resolvedBy,
+      mode: resolved.resolutionMode,
+      resolution: resolved.resolution,
+      resolvedAt: resolved.resolvedAt,
+      allowedActions: resolved.allowedActions
+    };
+    if (parsed.json) {
+      writeJson(io.stdout, payload);
+      return 0;
+    }
+    const lines = [
+      `Workflow gate resolved: ${resolved.gateId}`,
+      `Run: ${resolved.workflowRunId}`,
+      `Scope: ${resolved.targetScope} (${resolved.gateType})`,
+      `Action: ${resolved.chosenAction}`,
+      `Resolved by: ${resolved.resolvedBy} (${resolved.resolutionMode})`,
+      `Note: ${resolved.resolution ?? "(none)"}`,
+      `Data dir: ${dataDir}`,
+      ""
+    ];
+    write(io.stdout, lines.join("\n"));
+    return 0;
+  } catch (error) {
+    if (error instanceof WorkflowGateNotFoundError) {
+      return emitWorkflowRunDecideFailure(parsed, io, {
+        command: "workflow run decide",
+        code: "gate_not_found",
+        message: error.message,
+        dataDir,
+        gateId
+      });
+    }
+    if (error instanceof WorkflowGateDecisionError) {
+      return emitWorkflowRunDecideFailure(parsed, io, {
+        command: "workflow run decide",
+        code: error.code,
+        message: error.message,
+        dataDir,
+        gateId
+      });
+    }
+    throw error;
+  } finally {
+    db.close();
+  }
+}
+
+function emitWorkflowRunDecideFailure(
+  parsed: ParsedFlags,
+  io: CliIo,
+  failure: WorkflowRunDecideFailure
+): number {
+  const payload: Record<string, unknown> = {
+    ok: false,
+    command: failure.command,
+    code: failure.code,
+    message: failure.message
+  };
+  if (failure.dataDir !== undefined) payload["dataDir"] = failure.dataDir;
+  if (failure.gateId !== undefined) payload["gateId"] = failure.gateId;
 
   if (parsed.json) {
     writeJson(io.stderr, payload);
@@ -4114,11 +4316,14 @@ function emitWorkflowRunMonitor(
         }
       : null,
     evidence: envelope.evidence.map(workflowEvidenceToJsonShape),
+    gates: envelope.gates.map(workflowGateToJsonShape),
     counts: {
       steps: envelope.counts.steps,
       stepsByState: envelope.counts.stepsByState,
       approvals: envelope.counts.approvals,
-      leases: envelope.counts.leases
+      leases: envelope.counts.leases,
+      gates: envelope.counts.gates,
+      gatesOpen: envelope.counts.gatesOpen
     }
   };
 
@@ -4159,6 +4364,19 @@ function renderWorkflowMonitorText(
     `Steps: ${envelope.counts.steps}` +
       ` approvals=${envelope.counts.approvals} leases=${envelope.counts.leases}`
   );
+  lines.push(
+    `Gates: ${envelope.counts.gates} (open: ${envelope.counts.gatesOpen})`
+  );
+  for (const gate of envelope.gates) {
+    if (gate.resolvedAt !== null) continue;
+    lines.push(
+      `- ${gate.gateId} [${gate.targetScope}/${gate.gateType}] OPEN ` +
+        `allowed=${gate.allowedActions.join(",") || "(none)"}` +
+        (gate.recommendedAction !== null
+          ? ` recommended=${gate.recommendedAction}`
+          : "")
+    );
+  }
   lines.push(`Data dir: ${dataDir}`);
   lines.push("");
   return lines.join("\n");
@@ -4366,6 +4584,7 @@ function workflowHandoff(parsed: ParsedFlags, io: CliIo): number {
     leases: envelope.detail.leases.map(workflowLeaseToJsonShape),
     monitor: workflowMonitorToJsonShape(envelope.detail.monitor),
     evidence: envelope.detail.evidence.map(workflowEvidenceToJsonShape),
+    gates: envelope.detail.gates.map(workflowGateToJsonShape),
     nextAction: nextActionToJsonShape(envelope.detail.monitor)
   };
 
@@ -4575,6 +4794,34 @@ function workflowEvidenceToJsonShape(
   };
 }
 
+function workflowGateToJsonShape(
+  gate: WorkflowGateRecord
+): Record<string, unknown> {
+  return {
+    gateId: gate.gateId,
+    workflowRunId: gate.workflowRunId,
+    stepRunId: gate.stepRunId,
+    invocationId: gate.invocationId,
+    roundId: gate.roundId,
+    targetScope: gate.targetScope,
+    gateType: gate.gateType,
+    reason: gate.reason,
+    evidence: gate.evidence,
+    allowedActions: gate.allowedActions,
+    recommendedAction: gate.recommendedAction,
+    policyEnvelope: gate.policyEnvelope,
+    // Derived convenience flag so consumers can filter the run's still-blocking
+    // (approval-required / operator-decision / manual-recovery) pauses without
+    // re-deriving `resolvedAt === null`.
+    open: gate.resolvedAt === null,
+    resolvedAt: gate.resolvedAt,
+    resolvedBy: gate.resolvedBy,
+    resolutionMode: gate.resolutionMode,
+    chosenAction: gate.chosenAction,
+    resolution: gate.resolution
+  };
+}
+
 function renderWorkflowDetailText(
   dataDir: string,
   detail: WorkflowRunDetail
@@ -4669,6 +4916,26 @@ function renderWorkflowDetailText(
     lines.push(
       `- ${record.evidenceRecordId} [${record.source}/${record.type}] ${record.summary}` +
         (record.stepId !== null ? ` step=${record.stepId}` : "")
+    );
+  }
+  lines.push("");
+
+  const openGateCount = detail.gates.filter(
+    (gate) => gate.resolvedAt === null
+  ).length;
+  lines.push(`Gates: ${detail.gates.length} (open: ${openGateCount})`);
+  for (const gate of detail.gates) {
+    const status =
+      gate.resolvedAt === null
+        ? `OPEN allowed=${gate.allowedActions.join(",") || "(none)"}` +
+          (gate.recommendedAction !== null
+            ? ` recommended=${gate.recommendedAction}`
+            : "")
+        : `resolved by ${gate.resolvedBy ?? "(unknown)"} ` +
+          `action=${gate.chosenAction ?? "(none)"} ` +
+          `(${gate.resolutionMode ?? "?"})`;
+    lines.push(
+      `- ${gate.gateId} [${gate.targetScope}/${gate.gateType}] ${status}`
     );
   }
   lines.push("");
@@ -7976,6 +8243,9 @@ function parseFlags(argv: string[]): ParsedFlags {
   let approvalDigestFlag: string | undefined;
   let phraseFlag: string | undefined;
   let stepFlag: string | undefined;
+  let actionFlag: string | undefined;
+  let modeFlag: string | undefined;
+  let noteFlag: string | undefined;
   let evidencePointerFlag: string | undefined;
   let ledgerPointerFlag: string | undefined;
   let definitionFlag: string | undefined;
@@ -8345,6 +8615,39 @@ function parseFlags(argv: string[]): ParsedFlags {
       continue;
     }
 
+    if (arg === "--action") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --action.";
+      } else {
+        actionFlag = value;
+        index += 1;
+      }
+      continue;
+    }
+
+    if (arg === "--mode") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --mode.";
+      } else {
+        modeFlag = value;
+        index += 1;
+      }
+      continue;
+    }
+
+    if (arg === "--note") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --note.";
+      } else {
+        noteFlag = value;
+        index += 1;
+      }
+      continue;
+    }
+
     if (arg === "--evidence-pointer") {
       const value = readFlagValue(argv, index);
       if (value === undefined) {
@@ -8631,6 +8934,9 @@ function parseFlags(argv: string[]): ParsedFlags {
   if (approvalDigestFlag !== undefined) parsed.approvalDigest = approvalDigestFlag;
   if (phraseFlag !== undefined) parsed.phrase = phraseFlag;
   if (stepFlag !== undefined) parsed.step = stepFlag;
+  if (actionFlag !== undefined) parsed.action = actionFlag;
+  if (modeFlag !== undefined) parsed.mode = modeFlag;
+  if (noteFlag !== undefined) parsed.note = noteFlag;
   if (evidencePointerFlag !== undefined) {
     parsed.evidencePointer = evidencePointerFlag;
   }

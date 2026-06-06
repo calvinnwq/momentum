@@ -124,8 +124,8 @@ becomes an executor family inside a workflow step.
 5. **NGX-348 — M10-04 Daemon workflow scheduler lane.** *(done)*
 6. **NGX-349 — M10-05 Goal-loop executor adapter.** *(done)*
 7. **NGX-350 — M10-06 One-shot and script executor adapters.** *(done)*
-8. **NGX-351 — M10-07 no-mistakes executor mirror.** *(landed in this slice)*
-9. **NGX-352 — M10-08 Workflow gates and decisions CLI.**
+8. **NGX-351 — M10-07 no-mistakes executor mirror.** *(done)*
+9. **NGX-352 — M10-08 Workflow gates and decisions CLI.** *(landed in this slice)*
 10. **NGX-353 — M10-09 Workflow-first dogfood and closeout.**
 
 The `doctor --json` marker stays pinned to the M8 closeout string until a real

@@ -301,9 +301,9 @@ Run locally via the targeted vitest command:
 pnpm vitest run test/live-step-finalize.test.ts test/live-step-run-recovery.test.ts test/live-step-advance.test.ts test/workflow-recovery-artifact.test.ts
 ```
 
-## Milestone 10 workflow-first runtime coverage (NGX-345 through NGX-351)
+## Milestone 10 workflow-first runtime coverage (NGX-345 through NGX-352)
 
-M10-01 through M10-07 are covered by focused unit, migration, CLI, and daemon
+M10-01 through M10-08 are covered by focused unit, migration, CLI, and daemon
 loop tests rather than a built-binary CLI smoke.
 
 Coverage:
@@ -373,11 +373,29 @@ Coverage:
   multi-poll lifecycle, idempotent findings / decisions mirroring, reader-failure
   manual recovery, and the real `readNoMistakesExternalState` reader in
   `test/no-mistakes-orchestrator.test.ts`.
+- the pure workflow-gate decision domain — the nine durable human-gate types,
+  the four target scopes (workflow -> step -> invocation -> round), the decision
+  modes / refusal codes, and the `evaluateGateDecision` operator / delegated
+  brain (allowed-action resolution, delegated-envelope enforcement, note / trim
+  handling, and refusals) in `test/workflow-gate.test.ts`.
+- durable `workflow_gates` insert / load / list / open-list and race-safe
+  `resolveWorkflowGate`, with gate-type / target-scope / scope-ancestry /
+  blank-reason / foreign-key validation and duplicate refusal in
+  `test/workflow-gate-persist.test.ts`.
+- `workflow run decide` CLI coverage for required-argument and invalid-mode
+  usage refusals, unknown / already-resolved / action-not-allowed /
+  out-of-envelope refusals, operator and delegated-policy success, and the
+  JSON / text envelopes in `test/cli-workflow-run-decide.test.ts`.
+- durable gate visibility (gate list plus open / total counts) in the
+  `workflow status` / `workflow handoff` / `workflow run monitor` envelopes in
+  `test/cli-workflow-status.test.ts`, `test/cli-workflow-handoff.test.ts`,
+  `test/cli-workflow-run-monitor.test.ts`, and
+  `test/workflow-monitor-envelope.test.ts`.
 
 Run locally via the targeted vitest command:
 
 ```
-pnpm vitest run test/workflow-definition.test.ts test/workflow-definition-persist.test.ts test/migrations.test.ts test/workflow-run-start.test.ts test/workflow-run-start-persist.test.ts test/cli-workflow-run-start.test.ts test/executor-loop-reducer.test.ts test/executor-loop-persist.test.ts test/workflow-scheduler.test.ts test/daemon-loop.test.ts test/goal-loop-executor.test.ts test/goal-loop-orchestrator.test.ts test/goal-loop-mechanism.test.ts test/goal-loop-executor-persistence.test.ts test/git-transaction.test.ts test/single-shot-executor.test.ts test/single-shot-executor-persistence.test.ts test/single-shot-orchestrator.test.ts test/single-shot-mechanism.test.ts test/no-mistakes-executor.test.ts test/no-mistakes-mechanism.test.ts test/no-mistakes-executor-persistence.test.ts test/no-mistakes-orchestrator.test.ts
+pnpm vitest run test/workflow-definition.test.ts test/workflow-definition-persist.test.ts test/migrations.test.ts test/workflow-run-start.test.ts test/workflow-run-start-persist.test.ts test/cli-workflow-run-start.test.ts test/executor-loop-reducer.test.ts test/executor-loop-persist.test.ts test/workflow-scheduler.test.ts test/daemon-loop.test.ts test/goal-loop-executor.test.ts test/goal-loop-orchestrator.test.ts test/goal-loop-mechanism.test.ts test/goal-loop-executor-persistence.test.ts test/git-transaction.test.ts test/single-shot-executor.test.ts test/single-shot-executor-persistence.test.ts test/single-shot-orchestrator.test.ts test/single-shot-mechanism.test.ts test/no-mistakes-executor.test.ts test/no-mistakes-mechanism.test.ts test/no-mistakes-executor-persistence.test.ts test/no-mistakes-orchestrator.test.ts test/workflow-gate.test.ts test/workflow-gate-persist.test.ts test/cli-workflow-run-decide.test.ts
 ```
 
 ## Test boundary

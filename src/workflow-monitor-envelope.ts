@@ -23,6 +23,7 @@
  * `manual_recovery_lease`.
  */
 import type { MomentumDb } from "./db.js";
+import type { WorkflowGateRecord } from "./workflow-gate-persist.js";
 import {
   type WorkflowMonitorActiveStep,
   type WorkflowMonitorCheckpoint,
@@ -84,6 +85,10 @@ export type WorkflowMonitorEnvelopeCounts = {
   stepsByState: Record<WorkflowStepState, number>;
   approvals: number;
   leases: number;
+  /** Total durable workflow / step / executor gates recorded for the run. */
+  gates: number;
+  /** Gates still awaiting a decision (`resolvedAt === null`). */
+  gatesOpen: number;
 };
 
 export type WorkflowMonitorEnvelope = {
@@ -105,6 +110,14 @@ export type WorkflowMonitorEnvelope = {
   nextAction: WorkflowMonitorNextAction;
   recovery: WorkflowMonitorRecovery | null;
   evidence: readonly WorkflowEvidenceLink[];
+  /**
+   * Durable workflow / step / executor gates for the run (M10-08, NGX-352),
+   * oldest first, open and resolved alike. Surfacing them in the monitor
+   * envelope makes the run's approval-required / operator-decision pauses
+   * explicit and inspectable to the monitor runner alongside the derived
+   * disposition, mirroring `workflow status` / `workflow handoff`.
+   */
+  gates: readonly WorkflowGateRecord[];
   counts: WorkflowMonitorEnvelopeCounts;
 };
 
@@ -196,6 +209,7 @@ export function buildWorkflowMonitorEnvelope(
     nextAction: monitor.nextAction,
     recovery: monitor.recovery,
     evidence: detail.evidence,
+    gates: detail.gates,
     counts: countsFromDetail(detail)
   };
 }
@@ -230,6 +244,8 @@ function countsFromDetail(
     steps: detail.steps.length,
     stepsByState,
     approvals: detail.approvals.length,
-    leases: detail.leases.length
+    leases: detail.leases.length,
+    gates: detail.gates.length,
+    gatesOpen: detail.gates.filter((gate) => gate.resolvedAt === null).length
   };
 }

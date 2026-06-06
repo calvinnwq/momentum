@@ -1,6 +1,6 @@
 # Workflow commands
 
-Operator-facing CLI envelopes for the `workflow run start`, `workflow import`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run approve`, `workflow run update-step`, `workflow run clear-recovery`, and `workflow run monitor` commands.
+Operator-facing CLI envelopes for the `workflow run start`, `workflow import`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run approve`, `workflow run decide`, `workflow run update-step`, `workflow run clear-recovery`, and `workflow run monitor` commands.
 
 - `workflow run start` starts a first-class workflow run from a validated workflow definition: it resolves the definition (a persisted definition, or the built-in `coding-workflow` recipe), loads repo policy, and durably materializes a `workflow_runs` row plus one ordered `workflow_steps` row per definition step, with an approval row when an approval boundary is supplied. `goal start` remains the compatibility path for the older Goal loop.
 - `workflow import` reads local `.agent-workflows/<run-id>/` directories and persists normalized rows into the `workflow_runs`, `workflow_steps`, and `workflow_approvals` tables.
@@ -10,6 +10,7 @@ Operator-facing CLI envelopes for the `workflow run start`, `workflow import`, `
 - `workflow run approve` records durable explicit approvals for workflow boundaries and persists operator-visible metadata (actor, phrase, artifact provenance) into `workflow_approvals`.
 - `workflow run update-step` drives operator-initiated step transitions (`approved` / `succeeded` / `skipped` / `failed` / `blocked` / `canceled`) through the existing state machine, persisting an audit record with operator reason and optional evidence or ledger pointers.
 - `workflow run clear-recovery` explicitly clears a run's durable manual-recovery flag after the blocking condition is resolved.
+- `workflow run decide` resolves a durable workflow / step / executor gate by routing an operator or delegated-policy decision through the gate brain: an operator may pick any allowed action, while `--mode delegated` may only auto-apply an action inside the gate's policy envelope.
 - `workflow run monitor` is a read-only machine envelope that emits one stable JSON shape per run — derived from durable rows and the monitor reducer — so a monitor runner can decide whether to report, wait, or ask an operator to recover without parsing prose or scraping artifacts.
 
 `workflow status`, `workflow handoff`, `workflow run list`, and `workflow run monitor` are read-only: they never write SQLite or files.
@@ -504,6 +505,79 @@ Data dir: /path/to/data
 
 Exit code 0 on success, 1 on structured refusal, 2 on usage error.
 
+## `workflow run decide`
+
+```text
+momentum workflow run decide <gate-id> --action <action> --actor <name> [--mode <operator|delegated>] [--note <text>] [--data-dir <path>] [--json]
+```
+
+Resolves a durable workflow / step / executor gate and emits a stable JSON/text envelope.
+
+Required arguments:
+
+- `<gate-id>` — the gate to resolve.
+- `--action <action>` — the action to apply; must be one of the gate's `allowedActions`.
+- `--actor <name>` — the operator name or delegated-policy identifier recorded with the resolution.
+
+Optional arguments:
+
+- `--mode <operator|delegated>` — how the decision is being made. Defaults to `operator`. With `operator`, any allowed action resolves the gate. With `delegated`, the action must also be inside the gate's `policyEnvelope`; an action outside the envelope is refused so the gate pauses for a human operator instead of being silently auto-applied.
+- `--note <text>` — free-text resolution note recorded with the durable gate row.
+- `--data-dir <path>` — override the data directory.
+- `--json` — emit structured JSON to stdout.
+
+The resolution is race-safe: the update is guarded by `resolved_at IS NULL`, so a concurrent resolve that closed the gate between load and write is refused as `gate_already_resolved` rather than overwriting the prior decision.
+
+### JSON envelope
+
+```json
+{
+  "ok": true,
+  "command": "workflow run decide",
+  "dataDir": "/path/to/data",
+  "gateId": "gate-nm-1",
+  "runId": "cwfp-abc123",
+  "targetScope": "step",
+  "gateType": "operator_decision_required",
+  "chosenAction": "fix",
+  "resolvedBy": "calvinnwq",
+  "mode": "operator",
+  "resolution": "Accepted the finding and will fix.",
+  "resolvedAt": 1730000600000,
+  "allowedActions": ["fix", "skip", "approve_as_is"]
+}
+```
+
+### Text output
+
+```text
+Workflow gate resolved: gate-nm-1
+Run: cwfp-abc123
+Scope: step (operator_decision_required)
+Action: fix
+Resolved by: calvinnwq (operator)
+Note: Accepted the finding and will fix.
+Data dir: /path/to/data
+```
+
+When `--note` is omitted, the `Note:` line prints `(none)`.
+
+### Error codes
+
+| Code | Meaning |
+|------|---------|
+| `data_dir_failed` | Data directory resolution failed. |
+| `gate_id_required` | `<gate-id>` was not supplied. |
+| `action_required` | `--action` was not supplied or is blank. |
+| `actor_required` | `--actor` was not supplied or is blank. |
+| `invalid_mode` | `--mode` is not one of `operator`, `delegated`. |
+| `gate_not_found` | `<gate-id>` does not exist in `workflow_gates`. |
+| `gate_already_resolved` | The gate is already resolved; refusing to re-decide. |
+| `action_not_allowed` | The requested action is not in the gate's `allowedActions`. |
+| `delegated_action_outside_envelope` | `--mode delegated` was used but the action is outside the gate's `policyEnvelope`; an operator decision is required. |
+
+Exit code 0 on success, 1 on structured refusal, 2 on usage error.
+
 ## `workflow status`
 
 ```text
@@ -668,9 +742,12 @@ The detail envelope flattens the per-run view at the top level (`run`, `steps`, 
     "needsRecoveryArtifact": false,
     "recovery": null
   },
-  "evidence": []
+  "evidence": [],
+  "gates": []
 }
 ```
+
+`gates` is the list of durable workflow / step / executor gates for the run, oldest first. Each gate includes: `gateId`, `workflowRunId`, `stepRunId`, `invocationId`, `roundId`, `targetScope` (`workflow` / `step` / `invocation` / `round`), `gateType`, `reason`, `evidence`, `allowedActions`, `recommendedAction`, `policyEnvelope`, `open` (true while unresolved), `resolvedAt`, `resolvedBy`, `resolutionMode`, `chosenAction`, and `resolution`.
 
 ### State / next-action vocabulary
 
@@ -751,9 +828,13 @@ Monitor
 
 Evidence: 1
 - evidence_record_impl [agent-workflow/implementation_complete] implementation finished step=implementation
+
+Gates: 0 (open: 0)
 ```
 
 Evidence rows include a trailing `step=<stepId>` annotation when the record carries typed step linkage.
+
+Open gates print: `- <gate-id> [<scope>/<type>] OPEN allowed=<actions> [recommended=<action>]`. Resolved gates print: `- <gate-id> [<scope>/<type>] resolved by <actor> action=<action> (<mode>)`.
 
 Exit code 0 on success, 1 on failure, 2 on usage error.
 
@@ -780,6 +861,7 @@ Emits a machine-readable next-action envelope for one workflow run. Wraps the sa
   "leases": [ "..." ],
   "monitor": { "...": "same shape as workflow status detail" },
   "evidence": [ "..." ],
+  "gates": [ "..." ],
   "nextAction": {
     "code": "resume_running",
     "stepId": "implementation",
@@ -982,16 +1064,19 @@ Live dispatch / finalization recovery can also set the durable manual-recovery f
   },
   "recovery": null,
   "evidence": [{ "...": "same typed evidence pointers as workflow status detail" }],
+  "gates": [{ "...": "same shape as workflow status detail gates" }],
   "counts": {
     "steps": 5,
     "stepsByState": { "...": "per-state step counts" },
     "approvals": 1,
-    "leases": 1
+    "leases": 1,
+    "gates": 1,
+    "gatesOpen": 1
   }
 }
 ```
 
-`schemaVersion` is `1`. `nextAction`, `recovery`, `monitorDrift`, `leases`, `lastCheckpoint`, and `evidence` reuse the same field shapes as `workflow status`. `stepState` is the active step's state (or `null` when there is no active step).
+`schemaVersion` is `1`. `nextAction`, `recovery`, `monitorDrift`, `leases`, `lastCheckpoint`, `evidence`, and `gates` reuse the same field shapes as `workflow status`. `stepState` is the active step's state (or `null` when there is no active step). `counts.gates` is the total gate count for the run; `counts.gatesOpen` is the count of unresolved gates.
 
 ### Error codes
 
@@ -1017,9 +1102,11 @@ Report reason: in_progress
 Next action: resume_running
 Active step: implementation [running]
 Steps: 5 approvals=1 leases=1
+Gates: 1 (open: 1)
+- gate-nm-1 [step/operator_decision_required] OPEN allowed=fix,skip,approve_as_is recommended=fix
 Data dir: /path/to/data
 ```
 
-A `Recovery: <code>` line is added when a recovery classification is present.
+A `Recovery: <code>` line is added when a recovery classification is present. Open gates print inline after the `Gates:` count; resolved gates are omitted from text output.
 
 Exit code 0 on success, 1 on failure, 2 on usage error.

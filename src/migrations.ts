@@ -661,6 +661,49 @@ CREATE INDEX IF NOT EXISTS idx_executor_decisions_round
   ON executor_decisions(round_id);
 `;
 
+// M10-08 (NGX-352): durable workflow gates and operator decisions. A gate is the
+// contract "Human Gates" record — a durable pause record, not a prompt hidden
+// inside an executor. Each gate hangs from exactly one layer of the workflow-first
+// tree named by `target_scope` (workflow -> step -> invocation -> round), so the
+// scope's anchor id plus its ancestry are stored and ids deeper than the scope
+// stay null (enforced in src/workflow-gate-persist.ts). `workflow_run_id` is a
+// NOT NULL FK to `workflow_runs(id)` because every gate belongs to a run; the
+// deeper `step_run_id` / `invocation_id` / `round_id` are nullable evidence
+// linkage. `allowed_actions` and `policy_envelope` are JSON TEXT arrays mirroring
+// the pure `GateDecisionInput` shape. Openness is `resolved_at IS NULL`; a
+// resolution stamps `resolved_at` / `resolved_by` / `resolution_mode` (operator |
+// delegated) / `chosen_action` / `resolution` from the pure `evaluateGateDecision`
+// brain in src/workflow-gate.ts.
+const WORKFLOW_GATES_DDL = `
+CREATE TABLE IF NOT EXISTS workflow_gates (
+  gate_id TEXT PRIMARY KEY,
+  workflow_run_id TEXT NOT NULL REFERENCES workflow_runs(id),
+  step_run_id TEXT,
+  invocation_id TEXT,
+  round_id TEXT,
+  target_scope TEXT NOT NULL,
+  gate_type TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  evidence TEXT,
+  allowed_actions TEXT NOT NULL DEFAULT '[]',
+  recommended_action TEXT,
+  policy_envelope TEXT NOT NULL DEFAULT '[]',
+  resolved_at INTEGER,
+  resolved_by TEXT,
+  resolution_mode TEXT,
+  chosen_action TEXT,
+  resolution TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS idx_workflow_gates_run
+  ON workflow_gates(workflow_run_id);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_gates_open
+  ON workflow_gates(workflow_run_id) WHERE resolved_at IS NULL;
+`;
+
 export function applyQueueMigrations(db: MomentumDb): void {
   db.exec("BEGIN");
   try {
@@ -722,6 +765,7 @@ export function applyQueueMigrations(db: MomentumDb): void {
         ensureColumn(db, "executor_decisions", column);
       }
     }
+    db.exec(WORKFLOW_GATES_DDL);
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
