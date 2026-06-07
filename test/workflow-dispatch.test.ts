@@ -1,0 +1,132 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  WORKFLOW_EXECUTOR_FAMILIES,
+  type WorkflowExecutorFamily
+} from "../src/workflow-definition.js";
+import {
+  PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES,
+  WORKFLOW_DISPATCH_FAIL_CLOSED_CODES,
+  WORKFLOW_STEP_RESOLUTION_FAILURES,
+  isPhase1DispatchableExecutorFamily,
+  planWorkflowStepDispatch,
+  type WorkflowStepDispatchResolution
+} from "../src/workflow-dispatch.js";
+
+function resolved(
+  executorFamily: WorkflowExecutorFamily
+): WorkflowStepDispatchResolution {
+  return { ok: true, executorFamily };
+}
+
+describe("phase-1 dispatchable executor families", () => {
+  it("supports exactly the four landed bounded-adapter families", () => {
+    expect([...PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES].sort()).toEqual(
+      ["goal-loop", "no-mistakes", "one-shot", "script"].sort()
+    );
+  });
+
+  it("is a strict subset of the workflow executor families", () => {
+    for (const family of PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES) {
+      expect(WORKFLOW_EXECUTOR_FAMILIES).toContain(family);
+    }
+    // external-apply and subworkflow have no landed daemon-dispatchable adapter
+    // this phase, so the supported set is genuinely narrower than the full set.
+    expect(PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES.length).toBeLessThan(
+      WORKFLOW_EXECUTOR_FAMILIES.length
+    );
+  });
+
+  it("guards membership", () => {
+    expect(isPhase1DispatchableExecutorFamily("goal-loop")).toBe(true);
+    expect(isPhase1DispatchableExecutorFamily("one-shot")).toBe(true);
+    expect(isPhase1DispatchableExecutorFamily("no-mistakes")).toBe(true);
+    expect(isPhase1DispatchableExecutorFamily("script")).toBe(true);
+    expect(isPhase1DispatchableExecutorFamily("external-apply")).toBe(false);
+    expect(isPhase1DispatchableExecutorFamily("subworkflow")).toBe(false);
+  });
+});
+
+describe("planWorkflowStepDispatch — supported families", () => {
+  for (const family of PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES) {
+    it(`routes ${family} to a real dispatch`, () => {
+      const plan = planWorkflowStepDispatch(resolved(family));
+      expect(plan.action).toBe("dispatch");
+      if (plan.action === "dispatch") {
+        expect(plan.executorFamily).toBe(family);
+      }
+    });
+  }
+});
+
+describe("planWorkflowStepDispatch — unsupported families fail closed", () => {
+  for (const family of ["external-apply", "subworkflow"] as const) {
+    it(`fails ${family} closed to an operator-visible manual-recovery gate`, () => {
+      const plan = planWorkflowStepDispatch(resolved(family));
+      expect(plan.action).toBe("fail_closed");
+      if (plan.action === "fail_closed") {
+        expect(plan.code).toBe("unsupported_executor_family");
+        expect(plan.gateType).toBe("manual_recovery_required");
+        // The reason must name the offending family so the operator can see it.
+        expect(plan.reason).toContain(family);
+      }
+    });
+  }
+});
+
+describe("planWorkflowStepDispatch — resolution failures fail closed", () => {
+  const cases: Array<{
+    failure: (typeof WORKFLOW_STEP_RESOLUTION_FAILURES)[number];
+    code: (typeof WORKFLOW_DISPATCH_FAIL_CLOSED_CODES)[number];
+  }> = [
+    { failure: "run_not_found", code: "workflow_run_not_found" },
+    { failure: "definition_unlinked", code: "workflow_definition_unlinked" },
+    {
+      failure: "step_definition_not_found",
+      code: "step_definition_not_found"
+    },
+    { failure: "unknown_executor_family", code: "unknown_executor_family" }
+  ];
+
+  for (const { failure, code } of cases) {
+    it(`maps ${failure} to fail-closed code ${code}`, () => {
+      const plan = planWorkflowStepDispatch({ ok: false, failure });
+      expect(plan.action).toBe("fail_closed");
+      if (plan.action === "fail_closed") {
+        expect(plan.code).toBe(code);
+        expect(plan.gateType).toBe("manual_recovery_required");
+        expect(plan.reason.length).toBeGreaterThan(0);
+      }
+    });
+  }
+
+  it("threads a resolution detail into the fail-closed reason when present", () => {
+    const plan = planWorkflowStepDispatch({
+      ok: false,
+      failure: "unknown_executor_family",
+      detail: "legacy-family"
+    });
+    expect(plan.action).toBe("fail_closed");
+    if (plan.action === "fail_closed") {
+      expect(plan.reason).toContain("legacy-family");
+    }
+  });
+});
+
+describe("planWorkflowStepDispatch totality", () => {
+  it("never throws across every executor family and resolution failure", () => {
+    for (const family of WORKFLOW_EXECUTOR_FAMILIES) {
+      expect(() => planWorkflowStepDispatch(resolved(family))).not.toThrow();
+    }
+    for (const failure of WORKFLOW_STEP_RESOLUTION_FAILURES) {
+      expect(() =>
+        planWorkflowStepDispatch({ ok: false, failure })
+      ).not.toThrow();
+    }
+  });
+
+  it("returns one of the two discriminated actions for every input", () => {
+    const plan = planWorkflowStepDispatch(resolved("goal-loop"));
+    expect(["dispatch", "fail_closed"]).toContain(plan.action);
+  });
+});

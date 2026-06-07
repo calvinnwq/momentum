@@ -334,10 +334,12 @@ Current Momentum state:
 - Has M10-01 `WorkflowDefinition` / `StepDefinition` validation, built-in coding workflow definition, and `workflow_definitions` / `step_definitions` persistence.
 - Has M10-02 `workflow run start` materialization from persisted or built-in definitions, including definition provenance on `workflow_runs`.
 - Has M10-03 `ExecutorDefinition` / `ExecutorInvocation` / `ExecutorRound` schema and persistence below workflow steps, including round artifacts, checkpoints, findings, and decisions.
-- Has M10-04 opt-in daemon workflow scheduler lane (recover → scan → claim → dispatch) that schedules runnable workflow steps alongside goal iteration draining, with the executor-dispatch seam left to later slices.
+- Has M10-04 opt-in daemon workflow scheduler lane (recover -> scan -> claim -> dispatch) that schedules runnable workflow steps alongside goal iteration draining, and M10-09a production dispatcher wiring for bounded managed `daemon start`.
 - Has M10-05 `goal-loop` executor adapter that drives bounded autonomous rounds below a step run, reusing the M9 verify / commit / reset finalization and persisting per-round agent / model / input / result / verification / commit / artifact / checkpoint evidence.
 - Has M10-06 `one-shot` / `script` executor adapters for bounded single-invocation work, including result-bearing one-shot success and exit-code / bounded-log script success.
 - Has M10-07 no-mistakes executor mirror that records external no-mistakes run state, findings, decisions, PR / CI state, and completion below executor invocations / rounds.
+- Has M10-08 durable workflow gates and the `workflow run decide` operator / delegated-policy path.
+- Has M10-09a phase-1 workflow-lane dispatch effects: supported executor families create durable executor invocation / first-round start scaffolds; unsupported or unresolvable claims fail closed to a manual-recovery gate.
 - Has `goal start`, `daemon`, and workflow import / status / run controls.
 
 Required workflow-first gaps:
@@ -346,12 +348,12 @@ Required workflow-first gaps:
 |---|---|---|
 | Top-level entity | Goal-first; persisted WorkflowDefinition primitives; WorkflowRun mostly coding-workflow substrate | WorkflowDefinition / WorkflowRun as product core |
 | Step configuration | Persisted StepDefinition list for definitions; run execution still fixed canonical step kinds | Configurable StepDefinition list |
-| Executor selection | Executor definitions can be persisted, and goal-loop / one-shot / script / no-mistakes mirror adapters exist, but dispatch still needs per-step executor config wiring | Per-step executor definition and agent / model config |
-| Daemon scheduling | Drains `goal_iteration` jobs; opt-in scheduler lane recovers, scans, claims, and dispatches runnable workflow steps | Schedules workflow runs, step runs, executor invocations, and rounds |
-| Loop state | Goal iteration artifacts / job rows, plus persisted executor invocations / rounds below workflow steps | ExecutorInvocation / ExecutorRound / checkpoints / artifacts driven by the workflow scheduler |
+| Executor selection | Executor definitions can be persisted; goal-loop / one-shot / script / no-mistakes adapters exist; phase-1 dispatcher resolves per-step executor family but still needs full per-step executor config wiring | Per-step executor definition and agent / model config |
+| Daemon scheduling | Drains `goal_iteration` jobs; bounded managed `daemon start` also recovers, scans, claims, and dispatches runnable approved workflow steps | Schedules workflow runs, step runs, executor invocations, and rounds |
+| Loop state | Goal iteration artifacts / job rows, plus persisted executor invocations / rounds below workflow steps; phase-1 dispatcher creates start scaffolds before later executor driving | ExecutorInvocation / ExecutorRound / checkpoints / artifacts driven by the workflow scheduler |
 | Goal loop | Product-level Goal | `goal-loop` executor inside a workflow step |
 | no-mistakes | External fixed pipeline with a landed Momentum mirror | Specialist executor mirrored into Momentum |
-| Human gates | Split between approvals, recovery flags, external TUI state | Durable gate records with allowed actions and evidence |
+| Human gates | Durable gate records, approvals, recovery flags, and external TUI state | Durable gate records with allowed actions and evidence |
 | Run start | `goal start` plus imported workflow controls plus `workflow run start` from definitions | Workflow-first run start connected to executor scheduling |
 | Recovery | Goal-scoped and WorkflowRun-scoped surfaces | Unified workflow / step / executor recovery taxonomy |
 
@@ -368,4 +370,4 @@ This planning contract does not implement:
 - Public UI.
 - Replacement of GNHF or no-mistakes internals.
 
-M10 is now implementing these as concrete slices: M10-01 lands definition schema / validation / persistence, M10-02 lands CLI run start, M10-03 lands executor state schema / persistence, M10-04 lands the opt-in daemon workflow scheduler lane, M10-05 lands the goal-loop executor adapter, M10-06 lands the one-shot / script executor adapters, and M10-07 lands the no-mistakes executor mirror, while gates and external runtime behavior remain later slices.
+M10 is now implementing these as concrete slices: M10-01 lands definition schema / validation / persistence, M10-02 lands CLI run start, M10-03 lands executor state schema / persistence, M10-04 lands the opt-in daemon workflow scheduler lane, M10-05 lands the goal-loop executor adapter, M10-06 lands the one-shot / script executor adapters, M10-07 lands the no-mistakes executor mirror, M10-08 lands durable workflow gates and decisions, and M10-09a lands phase-1 production dispatcher wiring, while closeout dogfood, `external-apply` / `subworkflow` dispatch, and external runtime behavior remain later slices.

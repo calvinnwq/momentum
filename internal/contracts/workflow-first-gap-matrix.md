@@ -1,6 +1,6 @@
 # Contract: Workflow-First Gap Matrix
 
-**Status:** Accepted implementation bridge. M10-00 promoted this matrix into the workflow-first runtime milestone sequence; M10-01 has landed the definition schema and persistence slice, M10-02 adds workflow run start, M10-03 adds executor-loop schema / persistence, M10-04 adds the opt-in daemon workflow scheduler lane, M10-05 adds the goal-loop executor adapter, M10-06 adds the one-shot / script executor adapters, and M10-07 adds the no-mistakes executor mirror. It still does not authorize Linear remapping or milestone renumbering by itself.
+**Status:** Accepted implementation bridge. M10-00 promoted this matrix into the workflow-first runtime milestone sequence; M10-01 has landed the definition schema and persistence slice, M10-02 adds workflow run start, M10-03 adds executor-loop schema / persistence, M10-04 adds the opt-in daemon workflow scheduler lane, M10-05 adds the goal-loop executor adapter, M10-06 adds the one-shot / script executor adapters, M10-07 adds the no-mistakes executor mirror, M10-08 adds durable workflow gates and the `workflow run decide` operator path, and M10-09a wires the production workflow-lane dispatcher into bounded managed `daemon start`. It still does not authorize Linear remapping or milestone renumbering by itself.
 
 This contract follows:
 
@@ -37,7 +37,7 @@ Current durable runtime surfaces:
 - M10-01 `WorkflowDefinition` / `StepDefinition` validation, built-in coding workflow definition, and `workflow_definitions` / `step_definitions` persistence helpers.
 - M10-02 `workflow run start` materialization from persisted or built-in definitions.
 - M10-03 `ExecutorDefinition` / `ExecutorInvocation` / `ExecutorRound` persistence, with executor artifacts, checkpoints, findings, and decisions below rounds.
-- M10-04 opt-in daemon workflow scheduler lane (`runWorkflowSchedulerOnce`) composing stale-lease recovery, runnable-step scan, atomic dispatch-lease claim, and an executor-dispatch seam, run each daemon cycle alongside goal iteration draining.
+- M10-04 opt-in daemon workflow scheduler lane (`runWorkflowSchedulerOnce`) composing stale-lease recovery, runnable-step scan, atomic dispatch-lease claim, and an executor-dispatch seam, run each daemon cycle alongside goal iteration draining; M10-09a wires that seam into bounded managed `daemon start` with the production dispatcher.
 - M10-05 `goal-loop` executor adapter (`runGoalLoopStep`) that drives bounded autonomous rounds below a step run, reusing the M9 verify / commit / reset finalization and the M10-03 round persistence, with per-round agent / model / input / result / verification / commit / artifact / checkpoint evidence.
 - M10-06 `one-shot` / `script` executor adapters for bounded single-invocation work, with normalized-result one-shot success and exit-code / bounded-log script success.
 - M10-07 no-mistakes executor mirror that records external no-mistakes run state, findings, decisions, PR / CI state, and completion under executor invocations / rounds without reimplementing the no-mistakes pipeline.
@@ -66,7 +66,7 @@ Current product surface:
 Current limitation:
 
 ```text
-WorkflowRun is durable and can start from definitions, executor records now persist below step runs, the daemon can recover, scan, and claim runnable workflow steps through an opt-in scheduler lane, the goal-loop executor adapter drives bounded autonomous rounds below a step run, the one-shot / script adapters drive bounded single-invocation work, and the no-mistakes executor mirror records external review state into executor rounds. Later slices still attach gates and remaining runtime behavior that fulfil the dispatch seam.
+WorkflowRun is durable and can start from definitions, executor records now persist below step runs, the daemon can recover, scan, and claim runnable workflow steps through an opt-in scheduler lane, the goal-loop executor adapter drives bounded autonomous rounds below a step run, the one-shot / script adapters drive bounded single-invocation work, and the no-mistakes executor mirror records external review state into executor rounds. M10-08 attached durable workflow gates and the `workflow run decide` operator path, and M10-09a wired the production workflow-lane dispatcher into bounded managed `daemon start`; the NGX-353 workflow-first dogfood and closeout remain.
 ```
 
 ## Target Inventory
@@ -105,11 +105,11 @@ Future product surface:
 | Area | Current Shape | Target Shape | Migration Direction |
 |---|---|---|---|
 | Product root | Goal-first execution plus imported workflow runs | WorkflowDefinition / WorkflowRun | Introduce workflow definitions before deprecating goal-first UX |
-| Run start | `goal start`; `workflow import` for external plans; persisted workflow definitions; `workflow run start` materialization with executor records and scheduler-lane eligibility | `workflow run start` connected to execution scheduling | Keep the first-class start command as the workflow-first entry point; remaining attachments are gates and later runtime / dispatch behavior |
+| Run start | `goal start`; `workflow import` for external plans; persisted workflow definitions; `workflow run start` materialization with executor records, scheduler-lane eligibility, gates, and phase-1 daemon dispatch scaffolds | `workflow run start` connected to execution scheduling | Keep the first-class start command as the workflow-first entry point; remaining attachments are closeout dogfood plus `external-apply` / `subworkflow` dispatch decisions |
 | Step model | Fixed coding workflow step kinds | Configurable StepDefinition list | Keep canonical coding workflow as one built-in definition |
 | Executor model | Runner profiles, M9 wrapper registry, and landed goal-loop / one-shot / script adapter modules plus the no-mistakes mirror | Per-step ExecutorDefinition and executor config | Wire persisted executor config into dispatch while reusing wrapper config as executor config input |
 | Loop state | Goal iteration jobs/artifacts; external GNHF/no-mistakes state | ExecutorInvocation / ExecutorRound records | Goal-loop adapter landed (M10-05), one-shot / script adapters landed (M10-06), and no-mistakes mirror landed (M10-07): bounded rounds and mirrored external state persist common loop evidence in Momentum SQLite |
-| Daemon scheduling | Drains goal iteration queue; opt-in lane recovers/scans/claims runnable workflow steps | Schedules workflow runs and step runs | Scheduler lane landed (M10-04); goal-loop and one-shot / script adapters now drive bounded rounds below StepRun, and no-mistakes now mirrors external state into one long-lived round, while direct dispatcher wiring remains later runtime work |
+| Daemon scheduling | Drains goal iteration queue; opt-in lane recovers/scans/claims runnable workflow steps | Schedules workflow runs and step runs | Scheduler lane landed (M10-04); goal-loop and one-shot / script adapters now drive bounded rounds below StepRun, and no-mistakes now mirrors external state into one long-lived round; M10-09a wired the production dispatcher into bounded managed `daemon start`, so the shipped daemon path now dispatches approved steps (NGX-353 dogfood still pending) |
 | Repo safety | Repo locks plus verification / commit transactions | Same safety around executor finalization | Reuse M9 finalization and repo-lock heartbeats |
 | Approvals | M8 workflow approvals for imported runs | Workflow / step / gate approvals | Keep M8 rows; generalize boundary vocabulary |
 | Human gates | Split across approval rows, recovery flag, external TUI/IPC | Durable gates with allowed actions and decisions | Gate records and `workflow run decide` landed (M10-08): durable `workflow_gates` with allowed actions / policy envelope and operator + delegated-policy decisions, surfaced in status / handoff / monitor; daemon-side gate emission during live execution remains later runtime work |
@@ -157,10 +157,79 @@ The M10 slice order:
 6. **M10-05 Goal-loop executor adapter**: migrate existing goal iteration behavior into executor rounds. *(done)*
 7. **M10-06 One-shot / script executor adapter**: support deterministic commands and bounded agent/script invocations. *(done)*
 8. **M10-07 no-mistakes executor mirror**: mirror no-mistakes runs, findings, decisions, PR/CI state, and completion into Momentum. *(done)*
-9. **M10-08 Workflow gates and decisions CLI**: add durable operator decisions and delegated policy application. *(landed in this slice)*
-10. **M10-09 Workflow-first dogfood and closeout**: run a real Momentum task through the workflow-first start surface and close the milestone.
+9. **M10-08 Workflow gates and decisions CLI**: add durable operator decisions and delegated policy application. *(done)*
+10. **M10-09 Workflow-first dogfood and closeout**: run a real Momentum task through the workflow-first start surface and close the milestone. **M10-09a (NGX-367)** is the prep/repair slice that wires the production workflow-lane dispatcher into bounded managed `daemon start` before that dogfood; see "M10-09a Production Workflow-Lane Dispatcher Boundary" below.
 
 This order is deliberately contract -> schema -> start -> executor state -> scheduler -> adapters -> gates -> dogfood.
+
+## M10-09a Production Workflow-Lane Dispatcher Boundary
+
+`NGX-367 / M10-09a` is the small phase-1 prep/repair slice taken before the
+`NGX-353 / M10-09` workflow-first dogfood and closeout. Readiness review found
+one blocker: the built CLI already had `workflow run start`, executor / gate
+schema, and `runWorkflowSchedulerOnce`, but shipped `daemon start` never passed a
+production `workflowLane` into `runDaemonLoop`. The daemon workflow lane was
+test-injected only, so a real `workflow run start` could be durable yet never
+dispatch through the shipped daemon path. M10-09a wires that harness and proves
+it; it does not run the actual dogfood or flip the milestone marker.
+
+### What M10-09a landed
+
+- **A dedicated production dispatcher**, not dispatch logic buried in
+  `src/cli.ts`. Three modules mirror the established
+  brain -> read-only-resolution -> durable-effect slicing: `planWorkflowStepDispatch`
+  (`src/workflow-dispatch.ts`, the pure total decision over a resolved family),
+  `resolveWorkflowStepDispatchPlan` (`src/workflow-dispatch-persist.ts`, the
+  read-only run -> definition-link -> step-definition -> executor-family
+  resolution), and `executeWorkflowStepDispatch`
+  (`src/workflow-dispatch-execute.ts`, the durable effect twin shaped to the
+  scheduler's `WorkflowStepDispatch` seam).
+- **A phase-1 dispatchable executor-family allowlist** — exactly the families
+  with a landed bounded adapter: `goal-loop` (M10-05), `one-shot` / `script`
+  (M10-06), and `no-mistakes` (M10-07). `external-apply` (operator-mediated
+  external writes) and `subworkflow` (recurses into another run) have no landed
+  daemon-dispatchable adapter this phase and are intentionally excluded, so they
+  fail closed rather than silently no-op.
+- **Bounded managed `daemon start` now supplies a production `workflowLane` to
+  `runDaemonLoop`**, so the shipped `daemon start --max-*` path claims and
+  dispatches approved workflow steps with no test-only dependency injection.
+  Register-only `daemon start` (no loop bound) is unchanged: it records a daemon
+  run and exits before the scheduler, leaving the workflow lane inert. Goal
+  iteration draining is unchanged; with no runnable workflow step the lane
+  returns `idle` and performs zero writes, so goal-only daemon behavior and its
+  JSON shape stay compatible.
+- **Durable dispatch effects through the production path.** On a dispatchable
+  family the dispatcher atomically advances the step `approved -> running` and
+  creates the `executor_invocations` plus first `executor_rounds` start scaffold,
+  observable by `workflow status`, `workflow handoff`, and `workflow run monitor`
+  from durable rows after the daemon process exits. The loop summary surfaces
+  `workflowStepsDispatched`, `lastWorkflowCode`, and cycle-level `workflowResult`
+  evidence already modeled in `runDaemonLoop`.
+- **Fail-closed lease safety.** An unresolvable, under-configured, or
+  unsupported-family step never silently no-ops after a claim. The dispatcher
+  flags `needs_manual_recovery`, opens a step-scoped operator-visible
+  `manual_recovery_required` `workflow_gates` row, and releases the dispatch
+  lease. On a successful in-progress dispatch the dispatcher instead holds the
+  lease (the work is now owned, not terminal); if the dispatch callback throws
+  before taking ownership, `runWorkflowSchedulerOnce` auto-releases the lease so
+  none is stranded and a later tick can recover. Every effect path is
+  `BEGIN IMMEDIATE` / rollback-wrapped so no half-dispatched state survives a
+  throw, and dispatch is idempotent on a deterministic invocation id.
+
+### What remains for the NGX-353 closeout dogfood
+
+M10-09a deliberately stops at the dispatch harness. The `NGX-353 / M10-09`
+closeout still owns:
+
+- Running the real Momentum workflow-first dogfood end to end through
+  Momentum-owned workflow state (not the OpenClaw `coding-workflow-pipeline`),
+  including driving a run past the first dispatched step.
+- Landing `external-apply` and `subworkflow` dispatch, or explicitly confirming
+  they stay deferred, so the fail-closed allowlist is no longer the runtime
+  boundary.
+- Updating the regression matrix and closeout docs for workflow-first execution.
+- Flipping the `doctor --json` milestone marker off the M8 closeout string —
+  only after the dogfood gate passes. M10-09a does not flip the marker.
 
 ## Risks
 
@@ -185,4 +254,4 @@ This gap matrix does not implement:
 - Public UI.
 - Replacement of external engine internals.
 
-It is the active implementation bridge between the accepted workflow-first pivot, the landed M10-01 definition persistence, M10-02 run start, M10-03 executor-record, M10-04 scheduler-lane, M10-05 goal-loop-adapter, M10-06 one-shot / script adapter, and M10-07 no-mistakes mirror slices, and the remaining workflow-first runtime slices.
+It is the active implementation bridge between the accepted workflow-first pivot, the landed M10-01 definition persistence, M10-02 run start, M10-03 executor-record, M10-04 scheduler-lane, M10-05 goal-loop-adapter, M10-06 one-shot / script adapter, M10-07 no-mistakes mirror, M10-08 workflow-gates / decide, and M10-09a production-dispatcher-wiring slices, and the remaining NGX-353 workflow-first dogfood and closeout work.

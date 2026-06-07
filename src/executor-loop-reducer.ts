@@ -7,9 +7,9 @@
  * `ExecutorRound` layer described in internal/contracts/executor-loop.md. It
  * follows the same discipline as `workflow-run-reducer.ts` and
  * `workflow-definition.ts`: no SQLite, no file system, no executor invocation.
- * Durable `executor_*` tables and the persistence twin are layered on top of
- * these primitives in later M10-03 slices, exactly as M7 layered
- * `workflow-run-import-persist.ts` on top of `workflow-run-reducer.ts`.
+ * Durable `executor_*` tables and the persistence twin layer on top of these
+ * primitives, exactly as M7 layered `workflow-run-import-persist.ts` on top of
+ * `workflow-run-reducer.ts`.
  *
  * The contract pins this nesting so bounded autonomy never flattens into
  * top-level workflow steps:

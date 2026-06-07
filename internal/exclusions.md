@@ -96,12 +96,15 @@ Milestone status:
   pluggable executors such as `goal-loop` and `no-mistakes`. M9 remains
   foundation work; M10 has landed definition schema, persistence primitives,
   first-class workflow run start, executor-loop records, the opt-in daemon
-  workflow scheduler lane, the goal-loop executor adapter, and the one-shot /
-  script executor adapters, plus the no-mistakes executor mirror. The earlier
-  combined "first-class start / execution behavior" deferral has narrowed:
-  start, scheduling, goal-loop, one-shot / script execution, and no-mistakes
-  mirroring have landed, while gates and remaining general-purpose runtime
-  behavior remain deferred until the relevant M10 implementation slices land. See
+  workflow scheduler lane, the goal-loop executor adapter, the one-shot /
+  script executor adapters, the no-mistakes executor mirror, durable workflow
+  gates / decisions, and production workflow-lane dispatcher wiring for bounded
+  managed `daemon start`. The earlier combined first-class start / execution behavior
+  deferral has narrowed: start, scheduling, goal-loop, one-shot /
+  script execution, no-mistakes mirroring, gates, and phase-1 dispatch scaffolds
+  have landed, while the real workflow-first dogfood, `external-apply` /
+  `subworkflow` dispatch, and closeout remain deferred until the relevant M10
+  implementation slices land. See
   [`internal/milestones/m10-workflow-first-runtime.md`](milestones/m10-workflow-first-runtime.md),
   [`internal/contracts/workflow-first-runtime.md`](contracts/workflow-first-runtime.md),
   [`internal/contracts/executor-loop.md`](contracts/executor-loop.md), and
@@ -109,16 +112,18 @@ Milestone status:
 
 The following surfaces remain deferred outside the landed M10 definition,
 persistence, run-start, executor-record, scheduler-lane, goal-loop-adapter,
-one-shot / script adapter, and no-mistakes mirror slices so the runner-boundary,
-policy-loading, and M5 read-first source surfaces stay scoped.
+one-shot / script adapter, no-mistakes mirror, gates / decisions, and
+production dispatcher-wiring slices so the runner-boundary, policy-loading, and
+M5 read-first source surfaces stay scoped.
 
 ## Background runner supervision
 
 NGX-272 landed `daemon start` / `daemon stop` / `daemon status` as
 orchestrator-state contracts; NGX-273 wired an opt-in managed loop on
 `daemon start` that drains queued goal iterations in-process by composing
-`runWorkerOnce`. Background detachment / supervision (forking, daemonization,
-restart-on-crash) remains out of scope.
+`runWorkerOnce`; M10-09a now also runs the production workflow scheduler lane
+inside bounded managed starts. Background detachment / supervision (forking,
+daemonization, restart-on-crash) remains out of scope.
 
 ## Cooperative shutdown
 
@@ -152,7 +157,8 @@ for blocked stale claims, and M4 also uses it for iteration-time HEAD movement:
 
 `worker run` remains a single-shot consumer that processes one claimed job per
 invocation and then exits; the NGX-273 managed loop is the bounded
-continuous-draining path on `daemon start`.
+continuous-draining path on `daemon start`, now with the M10-09a workflow lane
+alongside goal iteration draining.
 
 ## Configurable workflow execution beyond OpenClaw coding workflows
 
@@ -167,10 +173,10 @@ with M10 planning pinned in
 and M10 has landed reusable workflow / step definition schema, first-class
 workflow run start, executor-loop records, the opt-in daemon scheduler lane,
 the goal-loop executor adapter, the one-shot / script executor adapters, and the
-no-mistakes executor mirror. Gates and generalized `WorkflowRun` behavior remain deferred
-until the relevant M10 implementation slices land. Until then, the
-shipped executable `WorkflowRun` substrate remains scoped to the OpenClaw
-coding-workflow backend and the M9 live-wrapper foundation.
+no-mistakes executor mirror, durable gates / decisions, and phase-1 production
+dispatcher wiring for bounded managed `daemon start`. The workflow-first
+dogfood, `external-apply` / `subworkflow` dispatch, and closeout marker remain
+deferred until the relevant M10 implementation slices land.
 
 ## Worktree management and remote git operations
 

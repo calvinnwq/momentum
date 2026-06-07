@@ -351,6 +351,12 @@ External state strings are never enough on their own. Momentum reconciles extern
 
 `subworkflow` starts or attaches to another workflow run and mirrors its terminal classification back to the parent step.
 
+The phase-1 production workflow dispatcher only daemon-dispatches families with
+landed bounded adapters: `goal-loop`, `one-shot`, `script`, and `no-mistakes`.
+`external-apply` and `subworkflow` remain valid executor families, but they fail
+closed to `manual_recovery_required` until their daemon-dispatchable adapters
+land or the closeout explicitly keeps them deferred.
+
 ## Non-Goals
 
 This contract does not implement:
@@ -364,4 +370,4 @@ This contract does not implement:
 - Replacement of GNHF or no-mistakes internals.
 - Remote git operations.
 
-M10 now carries these as implementation slices: M10-01 lands definition migrations, M10-02 lands workflow run start, M10-03 lands executor-loop records, M10-04 lands the opt-in daemon workflow scheduler lane, M10-05 lands the goal-loop executor adapter, M10-06 lands the one-shot / script executor adapters, and M10-07 lands the no-mistakes executor mirror, while executor-control CLI surfaces remain later slices.
+M10 now carries these as implementation slices: M10-01 lands definition migrations, M10-02 lands workflow run start, M10-03 lands executor-loop records, M10-04 lands the opt-in daemon workflow scheduler lane, M10-05 lands the goal-loop executor adapter, M10-06 lands the one-shot / script executor adapters, M10-07 lands the no-mistakes executor mirror, M10-08 lands durable workflow gates / decisions, and M10-09a wires the phase-1 production dispatcher into bounded managed `daemon start`, while closeout dogfood and generalized `external-apply` / `subworkflow` dispatch remain later slices.

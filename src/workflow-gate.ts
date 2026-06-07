@@ -7,9 +7,9 @@
  * operator decision brain ({@link evaluateGateDecision}). It follows the same
  * discipline as `workflow-definition.ts` and the executor-loop reducer: no
  * SQLite, no file system, no daemon. Durable gate persistence and the
- * `workflow run decide` CLI surface are layered on top of these primitives in
- * later M10-08 slices, exactly as `workflow-definition-persist.ts` is the
- * storage twin of `workflow-definition.ts`.
+ * `workflow run decide` CLI surface layer on top of these primitives, exactly
+ * as `workflow-definition-persist.ts` is the storage twin of
+ * `workflow-definition.ts`.
  *
  * Scope decisions pinned here, grounded in the accepted planning contracts
  * (internal/contracts/executor-loop.md "Human Gates" and

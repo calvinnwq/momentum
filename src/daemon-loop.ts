@@ -45,8 +45,9 @@ export type DaemonLoopRunWorker = (input: WorkerRunInput) => WorkerRunResult;
  * each daemon cycle runs one {@link runWorkflowSchedulerOnce} tick (recover →
  * scan → claim → dispatch) alongside — never instead of — goal iteration
  * draining. When omitted the lane is entirely inert and the loop behaves exactly
- * as before (no workflow tables are read or written). The real executor wiring
- * supplied to `dispatch` is a later M10 slice; the daemon only schedules.
+ * as before (no workflow tables are read or written). Bounded CLI starts now
+ * supply the production workflow-step dispatcher; register-only starts still
+ * exit before the loop and never enter this lane.
  */
 export type DaemonWorkflowLaneConfig = {
   /** Executor-dispatch seam handed each claimed workflow step. */
@@ -86,7 +87,8 @@ export type DaemonLoopInput = {
   startupRecoveryGraceMs?: number;
   /**
    * Enables the workflow-first scheduler lane. Omit to leave the lane inert and
-   * preserve goal-iteration-only behavior. See {@link DaemonWorkflowLaneConfig}.
+   * preserve goal-iteration-only behavior in callers that intentionally do not
+   * wire workflow dispatch. See {@link DaemonWorkflowLaneConfig}.
    */
   workflowLane?: DaemonWorkflowLaneConfig;
 };

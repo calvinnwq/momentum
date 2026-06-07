@@ -8,9 +8,10 @@
  * system, no executor invocation. Durable persistence (`workflow_definitions`
  * / `step_definitions`) is layered on top of these primitives in
  * `workflow-definition-persist.ts`; first-class workflow run start, executor
- * records, the opt-in daemon scheduler lane, and the landed goal-loop /
- * one-shot / script / no-mistakes mirror adapters are layered on later modules.
- * Gates and remaining runtime slices stay later M10 work.
+ * records, the opt-in daemon scheduler lane, the landed goal-loop / one-shot /
+ * script / no-mistakes mirror adapters, gates, and production dispatch scaffolds
+ * are layered on later modules. Closeout dogfood and deferred executor-family
+ * adapters stay outside this primitive module.
  *
  * Scope decisions pinned here, grounded in the accepted planning contracts
  * (internal/contracts/workflow-first-runtime.md and

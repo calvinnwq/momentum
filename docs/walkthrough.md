@@ -52,7 +52,13 @@ Replacing the `verification: ["true"]` line with `verification: ["false"]` exerc
 
 ## Managed daemon drain
 
-`worker run` is the single-shot consumer (step 2 above): one invocation drains one claimed job. The managed loop on `daemon start` is the bounded continuous-draining equivalent — composes `runWorkerOnce` in-process, runs the startup-recovery pre-pass, and exits cleanly when a bound, `daemon stop`, `daemon stop --now`, or terminal daemon-run state is observed:
+`worker run` is the single-shot consumer (step 2 above): one invocation drains
+one claimed job. The managed loop on `daemon start` is the bounded
+continuous-draining equivalent for queued goals and also runs the workflow
+scheduler lane once per cycle for approved workflow runs. It composes
+`runWorkerOnce` in-process, runs the startup-recovery pre-pass, and exits
+cleanly when a bound, `daemon stop`, `daemon stop --now`, or terminal
+daemon-run state is observed:
 
 ```bash
 # Drain queued goal_iteration jobs until idle (alternative to repeated `worker run`).
@@ -60,7 +66,13 @@ node dist/index.js daemon start --data-dir "$DATA" --max-idle-cycles 2 --poll-in
 node dist/index.js daemon status --data-dir "$DATA" --json
 ```
 
-Pick `worker run` when you want a one-shot iteration claim with no orchestrator-run record; pick `daemon start --max-*` when you want to drain multiple chained iterations under a single `daemon_runs` row that `daemon status`, `status --json`, and `handoff` can surface. Both paths share the same queue and produce the same artifacts.
+Pick `worker run` when you want a one-shot iteration claim with no
+orchestrator-run record; pick `daemon start --max-*` when you want to drain
+multiple chained iterations under a single `daemon_runs` row that
+`daemon status`, `status --json`, and `handoff` can surface. Goal queue work
+still uses the same queue and artifacts as `worker run`; workflow run work uses
+the separate workflow tables and is surfaced through `workflow status`,
+`workflow handoff`, and `workflow run monitor`.
 
 ## Foreground debug path
 
