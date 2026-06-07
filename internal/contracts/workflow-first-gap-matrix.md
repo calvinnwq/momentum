@@ -37,7 +37,7 @@ Current durable runtime surfaces:
 - M10-01 `WorkflowDefinition` / `StepDefinition` validation, built-in coding workflow definition, and `workflow_definitions` / `step_definitions` persistence helpers.
 - M10-02 `workflow run start` materialization from persisted or built-in definitions.
 - M10-03 `ExecutorDefinition` / `ExecutorInvocation` / `ExecutorRound` persistence, with executor artifacts, checkpoints, findings, and decisions below rounds.
-- M10-04 opt-in daemon workflow scheduler lane (`runWorkflowSchedulerOnce`) composing stale-lease recovery, runnable-step scan, atomic dispatch-lease claim, and an executor-dispatch seam, run each daemon cycle alongside goal iteration draining.
+- M10-04 opt-in daemon workflow scheduler lane (`runWorkflowSchedulerOnce`) composing stale-lease recovery, runnable-step scan, atomic dispatch-lease claim, and an executor-dispatch seam, run each daemon cycle alongside goal iteration draining; M10-09a wires that seam into bounded managed `daemon start` with the production dispatcher.
 - M10-05 `goal-loop` executor adapter (`runGoalLoopStep`) that drives bounded autonomous rounds below a step run, reusing the M9 verify / commit / reset finalization and the M10-03 round persistence, with per-round agent / model / input / result / verification / commit / artifact / checkpoint evidence.
 - M10-06 `one-shot` / `script` executor adapters for bounded single-invocation work, with normalized-result one-shot success and exit-code / bounded-log script success.
 - M10-07 no-mistakes executor mirror that records external no-mistakes run state, findings, decisions, PR / CI state, and completion under executor invocations / rounds without reimplementing the no-mistakes pipeline.
@@ -105,7 +105,7 @@ Future product surface:
 | Area | Current Shape | Target Shape | Migration Direction |
 |---|---|---|---|
 | Product root | Goal-first execution plus imported workflow runs | WorkflowDefinition / WorkflowRun | Introduce workflow definitions before deprecating goal-first UX |
-| Run start | `goal start`; `workflow import` for external plans; persisted workflow definitions; `workflow run start` materialization with executor records and scheduler-lane eligibility | `workflow run start` connected to execution scheduling | Keep the first-class start command as the workflow-first entry point; remaining attachments are gates and later runtime / dispatch behavior |
+| Run start | `goal start`; `workflow import` for external plans; persisted workflow definitions; `workflow run start` materialization with executor records, scheduler-lane eligibility, gates, and phase-1 daemon dispatch scaffolds | `workflow run start` connected to execution scheduling | Keep the first-class start command as the workflow-first entry point; remaining attachments are closeout dogfood plus `external-apply` / `subworkflow` dispatch decisions |
 | Step model | Fixed coding workflow step kinds | Configurable StepDefinition list | Keep canonical coding workflow as one built-in definition |
 | Executor model | Runner profiles, M9 wrapper registry, and landed goal-loop / one-shot / script adapter modules plus the no-mistakes mirror | Per-step ExecutorDefinition and executor config | Wire persisted executor config into dispatch while reusing wrapper config as executor config input |
 | Loop state | Goal iteration jobs/artifacts; external GNHF/no-mistakes state | ExecutorInvocation / ExecutorRound records | Goal-loop adapter landed (M10-05), one-shot / script adapters landed (M10-06), and no-mistakes mirror landed (M10-07): bounded rounds and mirrored external state persist common loop evidence in Momentum SQLite |
@@ -157,7 +157,7 @@ The M10 slice order:
 6. **M10-05 Goal-loop executor adapter**: migrate existing goal iteration behavior into executor rounds. *(done)*
 7. **M10-06 One-shot / script executor adapter**: support deterministic commands and bounded agent/script invocations. *(done)*
 8. **M10-07 no-mistakes executor mirror**: mirror no-mistakes runs, findings, decisions, PR/CI state, and completion into Momentum. *(done)*
-9. **M10-08 Workflow gates and decisions CLI**: add durable operator decisions and delegated policy application. *(landed in this slice)*
+9. **M10-08 Workflow gates and decisions CLI**: add durable operator decisions and delegated policy application. *(done)*
 10. **M10-09 Workflow-first dogfood and closeout**: run a real Momentum task through the workflow-first start surface and close the milestone. **M10-09a (NGX-367)** is the prep/repair slice that wires the production workflow-lane dispatcher into bounded managed `daemon start` before that dogfood; see "M10-09a Production Workflow-Lane Dispatcher Boundary" below.
 
 This order is deliberately contract -> schema -> start -> executor state -> scheduler -> adapters -> gates -> dogfood.

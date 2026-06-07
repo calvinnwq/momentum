@@ -1,10 +1,12 @@
-# M7 / M8 / M9 regression matrix: workflow failure modes
+# M7 / M8 / M9 / M10 regression matrix: workflow failure modes
 
 This matrix pins the failure modes that motivated **Milestone 7: OpenClaw
 Coding Workflow Backend** and **Milestone 8: Workflow Run Operator Controls**,
 plus the live-execution failure modes introduced during **Milestone 9: Live
-Workflow Execution**. Each row names the failure mode, the invariant that
-eliminates it, the code module that owns the invariant, and the test(s) that
+Workflow Execution** and the workflow-first runtime dispatch failure modes now
+covered during **Milestone 10: Workflow-First Runtime**. Each row names the
+failure mode, the invariant that eliminates it, the code module that owns the
+invariant, and the test(s) that
 exercise it. The M7 rows are the closeout gate for NGX-319; the M8 rows are the
 closeout gate for NGX-330; M9 rows are foundation / opt-in evidence that
 M10 can build on while the doctor marker stays pinned until M10 closeout. If any row's
@@ -34,6 +36,13 @@ the M9 milestone sequence lives in
 [`internal/milestones/m9-live-workflow-execution.md`](milestones/m9-live-workflow-execution.md).
 The M9 rows below remain internal-only foundation evidence while live execution
 remains opt-in and M10 owns the next closeout marker advance.
+
+The M10 workflow-first runtime contracts live in
+[`internal/contracts/workflow-first-runtime.md`](contracts/workflow-first-runtime.md),
+[`internal/contracts/executor-loop.md`](contracts/executor-loop.md), and
+[`internal/contracts/workflow-first-gap-matrix.md`](contracts/workflow-first-gap-matrix.md).
+The M10 rows below pin implementation-slice evidence before the NGX-353 closeout
+marker advance.
 
 ## M7 matrix: durable substrate invariants
 
@@ -384,17 +393,79 @@ M9 dogfood and live-resume slices add built-CLI smoke coverage.
     outstanding; and sets finalize or dispatch recovery before releasing the
     deferred managed-step lease.
 
+## M10 workflow-first runtime matrix: production dispatch invariants
+
+The M10-09a slice (NGX-367) wires the production workflow-lane dispatcher into
+bounded managed `daemon start` so workflow-first run start can be dogfooded
+through the shipped CLI path.
+
+### 15. Durable workflow run never reaches shipped daemon dispatch
+
+- **Failure mode.** `workflow run start` and `workflow run approve` can create an
+  approved durable workflow run, but the shipped `daemon start --max-*` path
+  never supplies a production `workflowLane` to `runDaemonLoop`. The run is
+  durable and runnable, yet the built CLI is inert unless a test injects a
+  dispatcher.
+- **M10 invariant.** Bounded managed `daemon start` passes
+  `executeWorkflowStepDispatch` into `runDaemonLoop`. The scheduler lane recovers
+  stale workflow leases, scans, claims one approved step, resolves its executor
+  family through the run's workflow definition link, advances supported-family
+  steps `approved -> running`, and creates durable `executor_invocations` plus
+  first `executor_rounds` scaffold rows. Register-only `daemon start` exits
+  before the loop and remains inert.
+- **Owner.** [`src/cli.ts`](../src/cli.ts) (`daemonStart` wiring and loop summary
+  envelope), [`src/workflow-dispatch.ts`](../src/workflow-dispatch.ts),
+  [`src/workflow-dispatch-persist.ts`](../src/workflow-dispatch-persist.ts), and
+  [`src/workflow-dispatch-execute.ts`](../src/workflow-dispatch-execute.ts).
+- **Evidence.**
+  - Unit / CLI: `test/workflow-dispatch.test.ts`,
+    `test/workflow-dispatch-persist.test.ts`,
+    `test/workflow-dispatch-execute.test.ts`, and
+    `test/cli-daemon-workflow-dispatch.test.ts` pin the phase-1 allowlist,
+    durable resolution, dispatch / fail-closed effects, loop summary fields,
+    and register-only invariant.
+  - Built-CLI smoke: `test/smoke.test.ts` — "drives workflow run start ->
+    approve -> daemon start --max-* -> durable executor rows ->
+    status/handoff/monitor through the built CLI" proves the shipped binary path
+    persists executor rows and remains observable after the daemon exits.
+
+### 16. Claimed unsupported workflow step silently no-ops or strands its lease
+
+- **Failure mode.** A runnable step whose definition resolves to an unsupported
+  executor family, or whose durable definition link is missing/corrupt, can be
+  claimed by the scheduler and then silently ignored. That leaves operators with
+  no durable reason, or leaves a dispatch lease that suppresses future work.
+- **M10 invariant.** The production dispatcher fails closed for every
+  unresolvable or unsupported-family claim. It flags the workflow run for manual
+  recovery, opens a step-scoped `manual_recovery_required` gate with stable
+  evidence (`workflow_run_not_found`, `workflow_definition_unlinked`,
+  `step_definition_not_found`, `unknown_executor_family`, or
+  `unsupported_executor_family`), releases the dispatch lease, and creates no
+  executor rows. The phase-1 dispatchable set is exactly `goal-loop`,
+  `one-shot`, `script`, and `no-mistakes`; `external-apply` and `subworkflow`
+  stay fail-closed until their daemon-dispatchable adapters land or closeout
+  explicitly defers them.
+- **Owner.** [`src/workflow-dispatch.ts`](../src/workflow-dispatch.ts) and
+  [`src/workflow-dispatch-execute.ts`](../src/workflow-dispatch-execute.ts).
+- **Evidence.**
+  - Unit: `test/workflow-dispatch.test.ts` pins the supportability decision and
+    resolution-failure code mapping.
+  - Unit: `test/workflow-dispatch-execute.test.ts` proves unsupported and
+    definition-unlinked claims create manual-recovery gates, set the durable
+    recovery flag, release the lease, and avoid executor scaffolds.
+
 ## How to use this matrix
 
 - Treat each row as a closeout gate. A code change that breaks any listed
   invariant must either restore the invariant or open a follow-up milestone
   that explicitly re-scopes it; the owning milestone (M7 for rows 1–5, M8 for
-  rows 6–11, M9 for rows 12+) cannot be re-closed until every row's evidence is
-  green.
+  rows 6–11, M9 for rows 12–14, M10 for rows 15+) cannot be re-closed until
+  every row's evidence is green.
 - The owner module and tests are intentionally specific. When refactoring,
   move the listed test names atomically with the module they pin so this
   matrix stays accurate.
 - Adding a new failure mode that belongs to a later milestone belongs in that
   milestone's own section or matrix. This document is scoped to the M7 durable
-  substrate, the M8 operator-control surfaces built on top of it, and the M9
-  live-execution slices that have landed.
+  substrate, the M8 operator-control surfaces built on top of it, the M9
+  live-execution slices that have landed, and the M10 workflow-first runtime
+  dispatch slices that have landed.

@@ -27,10 +27,10 @@
  * ({@link runWorkflowSchedulerOnce}) composes the three into one per-cycle pass
  * — recover stale leases, scan, claim one step, then hand it to an injected
  * executor-dispatch seam — as the workflow-first analogue of `runWorkerOnce`.
- * Daemon-loop wiring is now opt-in via `workflowLane`; only the real executor
- * adapter wiring remains a later M10 follow-up. This lane leaves goal iteration
- * draining (`worker-run.ts`) untouched, because workflow scheduling is a
- * separate lane over separate tables.
+ * Bounded `daemon start` now wires that seam with the production dispatcher,
+ * which creates executor start scaffolds or fail-closed manual-recovery gates.
+ * This lane leaves goal iteration draining (`worker-run.ts`) untouched, because
+ * workflow scheduling is a separate lane over separate tables.
  *
  * "Runnable" means, for a run that is neither terminal nor flagged for manual
  * recovery, the run's lease-aware derived state is `approved` (an approved step
@@ -812,8 +812,8 @@ export type WorkflowStepDispatchContext = {
 
 /**
  * What the dispatcher reports back to the lane. The lane does not classify this
- * (daemon classification of executor output is a later M10 slice); it echoes
- * the value into the tick result for callers, telemetry, and tests.
+ * value; it echoes the dispatcher's status into the tick result for callers,
+ * telemetry, and tests.
  */
 export type WorkflowStepDispatchResult = {
   status: string;
@@ -822,12 +822,12 @@ export type WorkflowStepDispatchResult = {
 
 /**
  * The executor-dispatch seam. {@link runWorkflowSchedulerOnce} claims the next
- * runnable step and hands the claim to this callback; a later M10 slice supplies
- * the real executor dispatcher (start an `executor_invocation`, run a round,
- * classify, advance). On a normal return the dispatcher owns the dispatch
- * lease's lifecycle (refresh across rounds, release on terminal). If it throws,
- * the lane releases the lease it just acquired so the claim is not stranded,
- * then rethrows.
+ * runnable step and hands the claim to this callback. The production dispatcher
+ * starts durable executor invocation / round scaffolds for supported families
+ * and fail-closes unsupported or unresolvable steps to manual recovery. On a
+ * normal return the dispatcher owns the dispatch lease's lifecycle (refresh
+ * across rounds, release on terminal). If it throws, the lane releases the lease
+ * it just acquired so the claim is not stranded, then rethrows.
  */
 export type WorkflowStepDispatch = (
   claim: ClaimedWorkflowStep,

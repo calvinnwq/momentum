@@ -140,9 +140,13 @@ condition (`manual_recovery_lease`, `ghost_active_no_lease`,
 `<run-dir>/recovery.md`. Live workflow execution uses the same durable flag and
 artifact when dispatch or finalization cannot safely continue, preserving stable
 classifications such as `head_mismatch`, `result_missing`, `repo_lock_lost`,
-`auth_unavailable`, and `executor_threw`. The workflow scheduler lane also uses
-this run-scoped surface when a stale `manual-recovery-required` workflow lease
-expires; stale `auto-release` workflow leases are released instead of flagged.
+`auth_unavailable`, and `executor_threw`. The workflow scheduler dispatcher also
+uses this run-scoped surface when a claimed step cannot be resolved to a known
+definition step or uses an executor family the daemon cannot dispatch yet; that
+path opens a `manual_recovery_required` workflow gate instead of silently
+dropping the claim. Stale `manual-recovery-required` workflow leases use the
+same surface, while stale `auto-release` workflow leases are released instead of
+flagged.
 
 The run-scoped flag blocks `workflow run approve` and any
 `workflow run update-step` transition that would leave the blocking recovery

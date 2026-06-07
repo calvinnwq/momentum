@@ -8,13 +8,12 @@
  * to a real executor dispatch or to a fail-closed, operator-visible
  * manual-recovery outcome. It follows the same discipline as `workflow-gate.ts`
  * and the executor-loop reducer: no SQLite, no file system, no daemon, no
- * executor invocation. The durable persistence twin — resolve the claimed step
- * against `workflow_runs` / `step_definitions`, create the `executor_invocations`
- * / `executor_rounds` start scaffold, open a `workflow_gates` row or flag manual
- * recovery for the fail-closed outcome, and release the dispatch lease — plus the
- * bounded `daemon start` wiring and the built-CLI dogfood smoke are layered on
- * top in later M10-09a slices, exactly as `workflow-gate-persist.ts` is the
- * storage twin of `workflow-gate.ts`.
+ * executor invocation. The durable twins resolve the claimed step against
+ * `workflow_runs` / `step_definitions`, create the `executor_invocations` /
+ * `executor_rounds` start scaffold, open a `workflow_gates` row or flag manual
+ * recovery for the fail-closed outcome, release the dispatch lease where
+ * appropriate, and wire the dispatcher into bounded `daemon start`, exactly as
+ * `workflow-gate-persist.ts` is the storage twin of `workflow-gate.ts`.
  *
  * Scope decisions pinned here, grounded in the accepted planning contracts
  * (internal/contracts/executor-loop.md "Executor Families" / "Completion

@@ -9,7 +9,7 @@
  * of `workflow-definition.ts` and `executor-loop-persist.ts` is the storage twin
  * of the executor-loop reducer: nothing here runs executors, schedules work, or
  * decides policy beyond what the pure brain already encodes. The `workflow run
- * decide` CLI surface layers on top of these primitives in a later M10-08 slice.
+ * decide` CLI surface layers on top of these primitives.
  *
  * Stable contracts this slice locks in:
  *   - A gate's durable identity is its `gateId`; inserting a duplicate refuses

@@ -301,10 +301,13 @@ Run locally via the targeted vitest command:
 pnpm vitest run test/live-step-finalize.test.ts test/live-step-run-recovery.test.ts test/live-step-advance.test.ts test/workflow-recovery-artifact.test.ts
 ```
 
-## Milestone 10 workflow-first runtime coverage (NGX-345 through NGX-352)
+## Milestone 10 workflow-first runtime coverage (NGX-345 through NGX-367)
 
 M10-01 through M10-08 are covered by focused unit, migration, CLI, and daemon
-loop tests rather than a built-binary CLI smoke.
+loop tests. M10-09a adds the first workflow-first built-binary CLI smoke through
+the shipped `workflow run start` -> `workflow run approve` -> bounded
+`daemon start` path, stopping at the durable executor start scaffold before the
+NGX-353 closeout dogfood.
 
 Coverage:
 
@@ -391,11 +394,38 @@ Coverage:
   `test/cli-workflow-status.test.ts`, `test/cli-workflow-handoff.test.ts`,
   `test/cli-workflow-run-monitor.test.ts`, and
   `test/workflow-monitor-envelope.test.ts`.
+- the pure workflow-dispatch decision domain in `test/workflow-dispatch.test.ts`:
+  the phase-1 dispatchable allowlist (`goal-loop`, `one-shot`, `script`,
+  `no-mistakes`), unsupported `external-apply` / `subworkflow` fail-closed
+  routing, resolution-failure code mapping, and totality.
+- durable dispatch resolution in `test/workflow-dispatch-persist.test.ts`:
+  run -> definition-link -> step-definition -> executor-family resolution,
+  unknown or unlinked state failures, and composed dispatch-plan decisions.
+- production dispatch effects in `test/workflow-dispatch-execute.test.ts`:
+  supported-family executor invocation / first-round scaffold creation,
+  approved -> running step advancement, dispatch-lease ownership, idempotent
+  re-entry, unsupported / unresolvable fail-closed manual-recovery gates, and
+  lease release on no-op safety paths.
+- shipped bounded `daemon start` workflow-lane wiring in
+  `test/cli-daemon-workflow-dispatch.test.ts`: the managed loop dispatches an
+  approved workflow step with no test-only injection, surfaces
+  `workflowStepsDispatched` / `lastWorkflowCode`, persists executor rows, and
+  keeps register-only `daemon start` inert.
+- built-binary smoke coverage in `test/smoke.test.ts`: `workflow run start`,
+  `workflow run approve`, bounded `daemon start`, durable executor rows, and
+  process-loss observability through `workflow status`, `workflow handoff`, and
+  `workflow run monitor`.
 
 Run locally via the targeted vitest command:
 
 ```
-pnpm vitest run test/workflow-definition.test.ts test/workflow-definition-persist.test.ts test/migrations.test.ts test/workflow-run-start.test.ts test/workflow-run-start-persist.test.ts test/cli-workflow-run-start.test.ts test/executor-loop-reducer.test.ts test/executor-loop-persist.test.ts test/workflow-scheduler.test.ts test/daemon-loop.test.ts test/goal-loop-executor.test.ts test/goal-loop-orchestrator.test.ts test/goal-loop-mechanism.test.ts test/goal-loop-executor-persistence.test.ts test/git-transaction.test.ts test/single-shot-executor.test.ts test/single-shot-executor-persistence.test.ts test/single-shot-orchestrator.test.ts test/single-shot-mechanism.test.ts test/no-mistakes-executor.test.ts test/no-mistakes-mechanism.test.ts test/no-mistakes-executor-persistence.test.ts test/no-mistakes-orchestrator.test.ts test/workflow-gate.test.ts test/workflow-gate-persist.test.ts test/cli-workflow-run-decide.test.ts
+pnpm vitest run test/workflow-definition.test.ts test/workflow-definition-persist.test.ts test/migrations.test.ts test/workflow-run-start.test.ts test/workflow-run-start-persist.test.ts test/cli-workflow-run-start.test.ts test/executor-loop-reducer.test.ts test/executor-loop-persist.test.ts test/workflow-scheduler.test.ts test/daemon-loop.test.ts test/goal-loop-executor.test.ts test/goal-loop-orchestrator.test.ts test/goal-loop-mechanism.test.ts test/goal-loop-executor-persistence.test.ts test/git-transaction.test.ts test/single-shot-executor.test.ts test/single-shot-executor-persistence.test.ts test/single-shot-orchestrator.test.ts test/single-shot-mechanism.test.ts test/no-mistakes-executor.test.ts test/no-mistakes-mechanism.test.ts test/no-mistakes-executor-persistence.test.ts test/no-mistakes-orchestrator.test.ts test/workflow-gate.test.ts test/workflow-gate-persist.test.ts test/cli-workflow-run-decide.test.ts test/workflow-dispatch.test.ts test/workflow-dispatch-persist.test.ts test/workflow-dispatch-execute.test.ts test/cli-daemon-workflow-dispatch.test.ts
+```
+
+Run the built-binary production workflow-lane smoke locally via:
+
+```
+pnpm vitest run test/smoke.test.ts -t "production workflow-lane dispatch"
 ```
 
 ## Test boundary

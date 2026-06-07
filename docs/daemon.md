@@ -57,15 +57,18 @@ JSON envelope shape (register-only):
 ### Managed loop mode
 
 Passing `--max-loop-iterations` or `--max-idle-cycles` opts into the managed
-loop: the process keeps running and drains queued `goal_iteration` jobs
-in-process by composing `runWorkerOnce`, refreshes `daemon_runs.heartbeat_at` /
-`active_job_id` / `reconcile_count` per cycle, applies deterministic idle
-backoff between empty polls or unexecutable jobs, and exits cleanly when one of
-the bounds is reached, `daemon stop` records a stop request, `daemon stop
---now` records an immediate-stop request, or a terminal daemon-run state is
-observed. `--poll-interval-ms` only tunes the bounded loop, defaults to 500ms,
-accepts non-negative integer millisecond values (`0` allowed), and is rejected
-unless `--max-loop-iterations` or `--max-idle-cycles` is also present.
+loop: the process keeps running, drains queued `goal_iteration` jobs in-process
+by composing `runWorkerOnce`, and runs one workflow scheduler tick per cycle to
+recover stale workflow leases, claim one runnable approved workflow step, and
+hand it to the production workflow-step dispatcher. The loop refreshes
+`daemon_runs.heartbeat_at` / `active_job_id` / `reconcile_count` per cycle,
+applies deterministic idle backoff between empty polls or unexecutable jobs,
+and exits cleanly when one of the bounds is reached, `daemon stop` records a
+stop request, `daemon stop --now` records an immediate-stop request, or a
+terminal daemon-run state is observed. `--poll-interval-ms` only tunes the
+bounded loop, defaults to 500ms, accepts non-negative integer millisecond values
+(`0` allowed), and is rejected unless `--max-loop-iterations` or
+`--max-idle-cycles` is also present.
 
 The top-level `ok` field reports loop/process health; `workSucceeded` reports
 whether claimed queued jobs succeeded, and managed-loop mode exits non-zero
@@ -80,6 +83,16 @@ and `error`. All loop bounds must be
 non-negative integers; a `--max-idle-cycles 0` or `--max-loop-iterations 0`
 invocation exits before claiming any work, which is useful as a one-shot
 readiness probe.
+
+`workflowStepsDispatched` counts workflow scheduler ticks whose top-level code
+is `dispatched`. `lastWorkflowCode` is the last scheduler-lane tick code
+(`idle`, `claim_contended`, `dispatched`, or `null` when the lane never ran).
+For a supported executor family, dispatch advances the step to `running` and
+creates durable executor invocation / round scaffold rows. If a claimed step
+cannot be resolved or uses an executor family the daemon cannot dispatch yet,
+the dispatcher parks the run behind a `manual_recovery_required` workflow gate
+instead of silently dropping the claim. Register-only `daemon start` exits before
+the managed loop and never runs the workflow scheduler lane.
 
 JSON envelope shape (managed loop):
 

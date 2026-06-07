@@ -24,11 +24,11 @@
  *   - the step's `executor` is not a known family   → `unknown_executor_family`
  *
  * The reads are non-mutating: resolution never writes a row, opens a gate, or
- * touches a lease. The side-effecting half of the dispatcher — create the
- * `executor_invocations` / `executor_rounds` start scaffold for a `dispatch`
- * plan, or open a durable manual-recovery gate and release the dispatch lease for
- * a `fail_closed` plan — is layered on top in a later M10-09a slice, just as the
- * gate-decision CLI was layered on top of the gate persistence twin.
+ * touches a lease. The side-effecting half of the dispatcher lives in
+ * `workflow-dispatch-execute.ts`: it creates the `executor_invocations` /
+ * `executor_rounds` start scaffold for a `dispatch` plan, or opens a durable
+ * manual-recovery gate and releases the dispatch lease for a `fail_closed` plan,
+ * just as the gate-decision CLI was layered on top of the gate persistence twin.
  */
 
 import type { MomentumDb } from "./db.js";

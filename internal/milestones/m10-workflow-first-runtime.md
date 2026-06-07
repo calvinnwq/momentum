@@ -7,9 +7,10 @@ workflow / step definition primitives and is now complete, M10-02 adds workflow
 run start, M10-03 adds the durable executor-loop schema, M10-04 adds the
 opt-in daemon workflow scheduler lane, M10-05 adds the goal-loop executor
 adapter, M10-06 adds the one-shot / script executor adapters, M10-07 adds
-the no-mistakes executor mirror, and M10-08 adds the durable workflow gates and
-the `workflow run decide` operator decision CLI without closing or rewriting M9
-by itself.
+the no-mistakes executor mirror, M10-08 adds the durable workflow gates and
+the `workflow run decide` operator decision CLI, and M10-09a wires the
+production workflow-lane dispatcher into bounded managed `daemon start` without
+closing or rewriting M9 by itself.
 
 M10 promotes Momentum from a Goal-first product surface plus imported
 OpenClaw-coding-workflow substrate into a configurable workflow runtime:
@@ -36,8 +37,9 @@ M10-03 adds executor definition / invocation / round persistence, M10-04 adds
 the daemon workflow scheduler lane, M10-05 adds the goal-loop executor adapter,
 M10-06 adds the one-shot / script executor adapters, M10-07 adds the
 no-mistakes executor mirror, M10-08 adds the durable workflow gates and operator
-decision CLI, and later M10 slices implement closeout and remaining runtime
-behavior.
+decision CLI, M10-09a adds production workflow-lane dispatcher wiring for
+bounded managed `daemon start`, and later M10 work implements closeout dogfood
+and remaining runtime behavior.
 
 ## Relationship To M9
 
@@ -141,12 +143,18 @@ The M10 slice order is:
 9. **NGX-352 — M10-08 Workflow gates and decisions CLI.** Add durable operator decision
    commands and delegated-policy application for workflow / step / executor
    gates. *(landed in this slice)*
-10. **NGX-353 — M10-09 Workflow-first dogfood and closeout.** Run a real Momentum task
+10. **NGX-367 — M10-09a Production workflow-lane dispatcher prep.** Wire bounded
+    managed `daemon start` to a production dispatcher that resolves claimed
+    steps to executor families, creates executor invocation / round start
+    scaffolds for supported families, and fail-closes unsupported or
+    unresolvable claims to manual-recovery gates. *(done)*
+11. **NGX-353 — M10-09 Workflow-first dogfood and closeout.** Run a real Momentum task
     through the workflow-first start surface, update regression coverage, and
     close M10.
 
 NGX-345 through NGX-353 are the assigned Linear issue identifiers for M10-01
-through M10-09. The M10 slice labels remain the stable ordering contract.
+through M10-09, with NGX-367 inserted as the M10-09a prep / repair slice before
+NGX-353. The M10 slice labels remain the stable ordering contract.
 
 ## Doctor Marker Policy
 
@@ -160,7 +168,7 @@ The marker remains:
 Milestone 8: workflow run operator controls (NGX-323, NGX-324, NGX-325, NGX-326, NGX-327, NGX-328, NGX-329, NGX-330) complete
 ```
 
-M10 may only flip the marker at M10 closeout after M10-00 through M10-08 have
+M10 may only flip the marker at M10 closeout after M10-00 through M10-09a have
 merged, the workflow-first dogfood gate passes, and the regression matrix is
 updated.
 
@@ -174,8 +182,10 @@ M10-06 adds the one-shot and script executor adapters only; M10-07 adds the
 no-mistakes executor mirror only (brain, external-state reader, and polling
 orchestrator); M10-08 adds the durable workflow gates, the `evaluateGateDecision`
 brain, gate persistence, and the `workflow run decide` operator decision CLI plus
-gate visibility only. The closeout and generalized runtime behavior remain later
-slices.
+gate visibility only; M10-09a adds production workflow-lane dispatcher wiring,
+executor start scaffolds, and fail-closed manual-recovery gates for unsupported
+or unresolvable dispatch claims only. The closeout dogfood and generalized
+runtime behavior remain later slices.
 
 Across the milestone, these remain outside scope unless a later contract
 explicitly changes them:
