@@ -74,8 +74,9 @@ summary on the response with `exitReason` (`stop_requested` /
 `stop_now_requested` / `run_terminated` / `run_missing` /
 `max_loop_iterations` / `max_idle_cycles` / `internal_error`),
 `terminalState`, `cancelOutcome`, `workSucceeded`, `iterations`, `jobsRun`,
-`jobsFailed`, `jobsNotExecuted`, `idleCycles`, `lastObservedState`,
-`lastWorkerCode`, `startupRecovery`, and `error`. All loop bounds must be
+`jobsFailed`, `jobsNotExecuted`, `idleCycles`, `workflowStepsDispatched`,
+`lastWorkflowCode`, `lastObservedState`, `lastWorkerCode`, `startupRecovery`,
+and `error`. All loop bounds must be
 non-negative integers; a `--max-idle-cycles 0` or `--max-loop-iterations 0`
 invocation exits before claiming any work, which is useful as a one-shot
 readiness probe.
@@ -104,6 +105,8 @@ JSON envelope shape (managed loop):
     "jobsFailed": 0,
     "jobsNotExecuted": 1,
     "idleCycles": 1,
+    "workflowStepsDispatched": 0,
+    "lastWorkflowCode": null,
     "lastObservedState": "running",
     "lastWorkerCode": "not_executed",
     "startupRecovery": {
