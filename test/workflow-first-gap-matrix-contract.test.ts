@@ -141,3 +141,60 @@ describe("workflow-first gap matrix planning contract", () => {
     expect(exclusions).toContain("internal/contracts/workflow-first-gap-matrix.md");
   });
 });
+
+describe("M10-09a production workflow-lane dispatcher boundary (NGX-367)", () => {
+  const contractPath = "internal/contracts/workflow-first-gap-matrix.md";
+
+  it("documents the M10-09a phase-1 dispatcher prep slice and its NGX issue", () => {
+    const contract = readDoc(contractPath);
+
+    expect(contract).toContain("M10-09a");
+    expect(contract).toContain("NGX-367");
+    // M10-09a is the small prep/repair slice before the NGX-353 dogfood closeout.
+    expect(contract).toMatch(/prep|repair/i);
+    expect(contract).toContain("NGX-353");
+  });
+
+  it("pins the phase-1 dispatchable executor-family allowlist and the deferred families", () => {
+    const contract = readDoc(contractPath);
+
+    for (const family of ["goal-loop", "one-shot", "script", "no-mistakes"]) {
+      expect(
+        contract,
+        `dispatcher boundary should name dispatchable family ${family}`
+      ).toContain(family);
+    }
+    // external-apply and subworkflow have no landed adapter this phase; they fail closed.
+    expect(contract).toContain("external-apply");
+    expect(contract).toContain("subworkflow");
+  });
+
+  it("states the production daemon wiring and the register-only invariant", () => {
+    const contract = readDoc(contractPath);
+
+    expect(contract).toContain("workflowLane");
+    expect(contract).toContain("runDaemonLoop");
+    expect(contract).toMatch(/bounded managed `daemon start`/);
+    expect(contract).toMatch(/register-only `daemon start`/i);
+    expect(contract).toMatch(/unchanged|inert/i);
+  });
+
+  it("states the durable dispatch effects and fail-closed lease safety", () => {
+    const contract = readDoc(contractPath);
+
+    expect(contract).toContain("executor_invocations");
+    expect(contract).toContain("executor_rounds");
+    expect(contract).toContain("manual_recovery_required");
+    // The dispatch lease is released/accounted for on fail-closed and never stranded on throw.
+    expect(contract).toMatch(/lease/i);
+    expect(contract).toMatch(/fail closed|fail-closed/i);
+  });
+
+  it("states what remains for the NGX-353 closeout dogfood", () => {
+    const contract = readDoc(contractPath);
+
+    expect(contract).toMatch(/doctor[\s-]*(marker|--json)/i);
+    expect(contract).toMatch(/regression matrix|regression coverage/i);
+    expect(contract).toMatch(/dogfood/i);
+  });
+});
