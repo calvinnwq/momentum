@@ -194,6 +194,7 @@ import {
   resolveWorkflowGate,
   type WorkflowGateRecord
 } from "./workflow-gate-persist.js";
+import { executeWorkflowStepDispatch } from "./workflow-dispatch-execute.js";
 import {
   DEFAULT_RECONCILIATION_STALE_THRESHOLD_MS,
   PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT,
@@ -6143,7 +6144,13 @@ async function daemonStart(
         ? { maxIdleCycles: parsed.maxIdleCycles }
         : {}),
       pollIntervalMs:
-        parsed.pollIntervalMs ?? DEFAULT_DAEMON_POLL_INTERVAL_MS
+        parsed.pollIntervalMs ?? DEFAULT_DAEMON_POLL_INTERVAL_MS,
+      // Production workflow-first dispatch (M10-09a, NGX-367): the bounded managed
+      // loop now drives the workflow scheduler lane alongside goal-iteration
+      // draining, using the durable executor-dispatch seam. Register-only
+      // `daemon start` returns above and never reaches here, so it stays inert.
+      // The lane is harmlessly idle when no workflow run has a runnable step.
+      workflowLane: { dispatch: executeWorkflowStepDispatch }
     });
 
     return emitDaemonStartLoopResult(parsed, io, {
@@ -6475,6 +6482,10 @@ function emitDaemonStartLoopResult(
     jobsFailed: loop.jobsFailed,
     jobsNotExecuted: loop.jobsNotExecuted,
     idleCycles: loop.idleCycles,
+    // Workflow-first scheduler-lane evidence (M10-09a, NGX-367): how many steps
+    // the production lane dispatched and the last lane tick code.
+    workflowStepsDispatched: loop.workflowStepsDispatched,
+    lastWorkflowCode: loop.lastWorkflowCode,
     lastObservedState: loop.lastObservedState,
     lastWorkerCode: loop.lastWorkerCode,
     startupRecovery: summarizeStartupRecovery(loop.startupRecovery),
@@ -6516,6 +6527,8 @@ function emitDaemonStartLoopResult(
     `Jobs failed: ${loop.jobsFailed}`,
     `Jobs not executed: ${loop.jobsNotExecuted}`,
     `Idle cycles: ${loop.idleCycles}`,
+    `Workflow steps dispatched: ${loop.workflowStepsDispatched}`,
+    `Last workflow code: ${loop.lastWorkflowCode ?? "(none)"}`,
     ...formatStartupRecoveryLines(loop.startupRecovery),
     `Pid: ${data.pid ?? "(unset)"}`,
     `Host: ${data.host ?? "(unset)"}`,
