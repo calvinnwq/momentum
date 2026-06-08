@@ -6867,7 +6867,7 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
     node: process.version,
     platform: process.platform,
     milestone:
-      "Milestone 8: workflow run operator controls (NGX-323, NGX-324, NGX-325, NGX-326, NGX-327, NGX-328, NGX-329, NGX-330) complete",
+      "Milestone 10: workflow-first runtime (NGX-344, NGX-345, NGX-346, NGX-347, NGX-348, NGX-349, NGX-350, NGX-351, NGX-352, NGX-367, NGX-353) complete",
     daemon: daemonPayload,
     runners: {
       supported: [...BUILTIN_RUNNER_KINDS],

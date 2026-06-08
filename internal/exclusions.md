@@ -175,8 +175,8 @@ workflow run start, executor-loop records, the opt-in daemon scheduler lane,
 the goal-loop executor adapter, the one-shot / script executor adapters, and the
 no-mistakes executor mirror, durable gates / decisions, and phase-1 production
 dispatcher wiring for bounded managed `daemon start`. The workflow-first
-dogfood, `external-apply` / `subworkflow` dispatch, and closeout marker remain
-deferred until the relevant M10 implementation slices land.
+dogfood and M10 closeout marker have landed; generalized `external-apply` /
+`subworkflow` dispatch remains deferred until later runtime work.
 
 ## Worktree management and remote git operations
 

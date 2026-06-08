@@ -140,7 +140,7 @@ Each implementation slice wrote failing tests first (TDD), kept refusal codes st
 
 ## Closeout marker policy
 
-The `doctor --json` milestone string stayed pinned to the M7 closeout marker `Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete` through the entirety of M8-00 (NGX-323) and every implementation slice through M8-06 (NGX-329). NGX-330 (M8-07) flipped the marker to the M8 closeout string `Milestone 8: workflow run operator controls (NGX-323, NGX-324, NGX-325, NGX-326, NGX-327, NGX-328, NGX-329, NGX-330) complete`; `doctor --json` now reports M8 complete.
+The `doctor --json` milestone string stayed pinned to the M7 closeout marker `Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete` through the entirety of M8-00 (NGX-323) and every implementation slice through M8-06 (NGX-329). NGX-330 (M8-07) flipped the marker to the M8 closeout string `Milestone 8: workflow run operator controls (NGX-323, NGX-324, NGX-325, NGX-326, NGX-327, NGX-328, NGX-329, NGX-330) complete`; later closeout milestones can supersede that current runtime marker while this page keeps the M8 closeout record.
 
 ## Composition with M3 / M4 / M5 / M6 / M7
 

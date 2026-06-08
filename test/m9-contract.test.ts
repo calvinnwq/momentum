@@ -250,9 +250,9 @@ describe("M9 contract decision gate (NGX-331)", () => {
       expect(r).toContain("contracts/live-workflow-execution.md");
     });
 
-    it("keeps the doctor marker pinned to the M8 closeout string (M9-00 does not flip it)", () => {
-      const r = readDoc(roadmap);
-      expect(r).toContain(M8_MARKER);
+    it("records that the M9 decision gate did not flip the M8 marker", () => {
+      const m9 = readDoc("internal/milestones/m9-live-workflow-execution.md");
+      expect(m9).toContain(M8_MARKER);
     });
 
     it("references the M9 implementation sequence NGX-331..NGX-338", () => {
@@ -302,16 +302,15 @@ describe("M9 contract decision gate (NGX-331)", () => {
       expect(a).toContain("internal/contracts/live-workflow-execution.md");
     });
 
-    it("still reports the M8 closeout marker as the doctor milestone string", () => {
+    it("records that M9 kept the M8 marker until M10 closeout", () => {
       const a = readDoc(agentsPath);
       expect(a).toContain(M8_MARKER);
     });
   });
 
-  describe("doctor milestone marker (unchanged at the M9-00 decision gate)", () => {
-    it("the cli still reports the M8 closeout marker and no Milestone 9 completion string", () => {
+  describe("doctor milestone marker history (unchanged at the M9-00 decision gate)", () => {
+    it("the current cli still has no Milestone 9 completion string", () => {
       const cli = fs.readFileSync(path.join(repoRoot, "src", "cli.ts"), "utf8");
-      expect(cli).toContain(M8_MARKER);
       expect(cli, "the M9-00 decision gate must not flip the doctor marker").not.toMatch(
         /Milestone 9:[^\n]*complete/i
       );

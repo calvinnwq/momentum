@@ -155,7 +155,7 @@ describe("momentum CLI scaffold", () => {
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("Momentum doctor: ok");
     expect(result.stdout).toContain(
-      "scope: Milestone 8: workflow run operator controls (NGX-323, NGX-324, NGX-325, NGX-326, NGX-327, NGX-328, NGX-329, NGX-330) complete"
+      "scope: Milestone 10: workflow-first runtime (NGX-344, NGX-345, NGX-346, NGX-347, NGX-348, NGX-349, NGX-350, NGX-351, NGX-352, NGX-367, NGX-353) complete"
     );
     expect(result.stdout).toContain("daemon: never started");
     expect(result.stdout).toContain(
@@ -176,7 +176,7 @@ describe("momentum CLI scaffold", () => {
       command: "doctor",
       version: VERSION,
       milestone:
-        "Milestone 8: workflow run operator controls (NGX-323, NGX-324, NGX-325, NGX-326, NGX-327, NGX-328, NGX-329, NGX-330) complete"
+        "Milestone 10: workflow-first runtime (NGX-344, NGX-345, NGX-346, NGX-347, NGX-348, NGX-349, NGX-350, NGX-351, NGX-352, NGX-367, NGX-353) complete"
     });
     expect(payload["daemon"]).toEqual({
       ok: true,

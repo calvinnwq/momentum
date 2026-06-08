@@ -37,7 +37,7 @@
  * gate without its recovery flag; on any throw the transaction rolls back and the
  * error propagates to the lane, which then releases the just-acquired lease.
  *
- * Phase-1 boundary (what remains for the NGX-353 closeout dogfood): this slice
+ * Phase-1 boundary (validated by the NGX-353 closeout dogfood): this path
  * stops at the *start scaffold*. It does not run the bounded executor mechanism,
  * drive the round `pending -> running -> terminal`, run verification / commit
  * finalization, or advance the step to a terminal state — those are owned by the
@@ -68,10 +68,17 @@ import { releaseWorkflowLease } from "./workflow-leases.js";
 import { markWorkflowRunNeedsManualRecovery } from "./workflow-run-recovery.js";
 import { resolveWorkflowStepDispatchPlan } from "./workflow-dispatch-persist.js";
 import type { WorkflowDispatchFailClosedCode } from "./workflow-dispatch.js";
+import { deriveWorkflowMonitorState } from "./workflow-monitor-state.js";
 import {
   startWorkflowStep,
   type WorkflowStepTransitionOutcome
 } from "./workflow-step-transitions.js";
+import {
+  type WorkflowLeaseRecord,
+  type WorkflowStepKind,
+  type WorkflowStepRecord,
+  type WorkflowStepState
+} from "./workflow-run-reducer.js";
 import type {
   ClaimedWorkflowStep,
   WorkflowStepDispatchContext,
@@ -177,6 +184,7 @@ function dispatchExecutorScaffold(
       buildRoundScaffold(claim, family, invocationId, now),
       { now }
     );
+    refreshWorkflowRunStateAfterDispatch(db, claim.runId, now);
     db.exec("COMMIT");
   } catch (error) {
     safeRollback(db);
@@ -344,6 +352,106 @@ function releaseDispatchLease(
     acquiredAt: claim.lease.acquiredAt,
     now
   });
+}
+
+function refreshWorkflowRunStateAfterDispatch(
+  db: MomentumDb,
+  runId: string,
+  now: number
+): void {
+  const steps = loadWorkflowStepRecords(db, runId);
+  const leases = loadWorkflowLeaseRecords(db, runId);
+  const monitorState = deriveWorkflowMonitorState({
+    runId,
+    steps,
+    leases,
+    monitor: null,
+    lastCheckpoint: null,
+    now
+  });
+  const finishedAt = monitorState.terminal ? now : null;
+  db.prepare(
+    `UPDATE workflow_runs
+       SET state = ?,
+           started_at = COALESCE(started_at, ?),
+           finished_at = COALESCE(finished_at, ?),
+           monitor_last_seen_state = ?,
+           monitor_terminal = ?,
+           monitor_step = ?,
+           monitor_last_seen_digest = NULL,
+           monitor_last_emitted_digest = NULL,
+           updated_at = ?
+     WHERE id = ?`
+  ).run(
+    monitorState.runState,
+    now,
+    finishedAt,
+    monitorState.runState,
+    monitorState.terminal ? 1 : 0,
+    monitorState.activeStep?.stepId ?? null,
+    now,
+    runId
+  );
+}
+
+function loadWorkflowStepRecords(
+  db: MomentumDb,
+  runId: string
+): WorkflowStepRecord[] {
+  const rows = db
+    .prepare(
+      `SELECT step_id, kind, state, step_order, required
+         FROM workflow_steps
+        WHERE run_id = ?
+        ORDER BY step_order, step_id`
+    )
+    .all(runId) as Array<{
+    step_id: string;
+    kind: string;
+    state: string;
+    step_order: number;
+    required: number;
+  }>;
+  return rows.map((row) => ({
+    stepId: row.step_id,
+    kind: row.kind as WorkflowStepKind,
+    state: row.state as WorkflowStepState,
+    order: row.step_order,
+    required: row.required === 1
+  }));
+}
+
+function loadWorkflowLeaseRecords(
+  db: MomentumDb,
+  runId: string
+): WorkflowLeaseRecord[] {
+  const rows = db
+    .prepare(
+      `SELECT run_id, lease_kind, holder, acquired_at, expires_at,
+              heartbeat_at, released_at, stale_policy
+         FROM workflow_leases
+        WHERE run_id = ?`
+    )
+    .all(runId) as Array<{
+    run_id: string;
+    lease_kind: string;
+    holder: string;
+    acquired_at: number;
+    expires_at: number;
+    heartbeat_at: number;
+    released_at: number | null;
+    stale_policy: string;
+  }>;
+  return rows.map((row) => ({
+    runId: row.run_id,
+    leaseKind: row.lease_kind as WorkflowLeaseRecord["leaseKind"],
+    holder: row.holder,
+    acquiredAt: row.acquired_at,
+    expiresAt: row.expires_at,
+    heartbeatAt: row.heartbeat_at,
+    releasedAt: row.released_at,
+    stalePolicy: row.stale_policy as WorkflowLeaseRecord["stalePolicy"]
+  }));
 }
 
 function describeStartFailure(

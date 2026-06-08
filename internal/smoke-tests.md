@@ -301,13 +301,15 @@ Run locally via the targeted vitest command:
 pnpm vitest run test/live-step-finalize.test.ts test/live-step-run-recovery.test.ts test/live-step-advance.test.ts test/workflow-recovery-artifact.test.ts
 ```
 
-## Milestone 10 workflow-first runtime coverage (NGX-345 through NGX-367)
+## Milestone 10 workflow-first runtime coverage (NGX-345 through NGX-353)
 
 M10-01 through M10-08 are covered by focused unit, migration, CLI, and daemon
 loop tests. M10-09a adds the first workflow-first built-binary CLI smoke through
 the shipped `workflow run start` -> `workflow run approve` -> bounded
-`daemon start` path, stopping at the durable executor start scaffold before the
-NGX-353 closeout dogfood.
+`daemon start` path. NGX-353 closes the milestone with a real `ngx353-m10-closeout`
+dogfood run through the same workflow-first start / approval / bounded dispatch
+surface, plus the regression fix that keeps `workflow_runs` state and monitor
+advisory state aligned after dispatch.
 
 Coverage:
 

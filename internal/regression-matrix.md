@@ -35,14 +35,14 @@ The M9 live-execution contract lives in
 the M9 milestone sequence lives in
 [`internal/milestones/m9-live-workflow-execution.md`](milestones/m9-live-workflow-execution.md).
 The M9 rows below remain internal-only foundation evidence while live execution
-remains opt-in and M10 owns the next closeout marker advance.
+remains opt-in; M10 now owns the current closeout marker.
 
 The M10 workflow-first runtime contracts live in
 [`internal/contracts/workflow-first-runtime.md`](contracts/workflow-first-runtime.md),
 [`internal/contracts/executor-loop.md`](contracts/executor-loop.md), and
 [`internal/contracts/workflow-first-gap-matrix.md`](contracts/workflow-first-gap-matrix.md).
-The M10 rows below pin implementation-slice evidence before the NGX-353 closeout
-marker advance.
+The M10 rows below pin implementation-slice and closeout dogfood evidence after
+the NGX-353 marker advance.
 
 ## M7 matrix: durable substrate invariants
 
@@ -396,8 +396,8 @@ M9 dogfood and live-resume slices add built-CLI smoke coverage.
 ## M10 workflow-first runtime matrix: production dispatch invariants
 
 The M10-09a slice (NGX-367) wires the production workflow-lane dispatcher into
-bounded managed `daemon start` so workflow-first run start can be dogfooded
-through the shipped CLI path.
+bounded managed `daemon start`, and the M10-09 closeout slice (NGX-353) dogfoods
+that shipped workflow-first path.
 
 ### 15. Durable workflow run never reaches shipped daemon dispatch
 
@@ -410,9 +410,10 @@ through the shipped CLI path.
   `executeWorkflowStepDispatch` into `runDaemonLoop`. The scheduler lane recovers
   stale workflow leases, scans, claims one approved step, resolves its executor
   family through the run's workflow definition link, advances supported-family
-  steps `approved -> running`, and creates durable `executor_invocations` plus
-  first `executor_rounds` scaffold rows. Register-only `daemon start` exits
-  before the loop and remains inert.
+  steps `approved -> running`, refreshes the parent `workflow_runs` state and
+  monitor advisory snapshot to the same derived state, and creates durable
+  `executor_invocations` plus first `executor_rounds` scaffold rows.
+  Register-only `daemon start` exits before the loop and remains inert.
 - **Owner.** [`src/cli.ts`](../src/cli.ts) (`daemonStart` wiring and loop summary
   envelope), [`src/workflow-dispatch.ts`](../src/workflow-dispatch.ts),
   [`src/workflow-dispatch-persist.ts`](../src/workflow-dispatch-persist.ts), and
@@ -422,12 +423,15 @@ through the shipped CLI path.
     `test/workflow-dispatch-persist.test.ts`,
     `test/workflow-dispatch-execute.test.ts`, and
     `test/cli-daemon-workflow-dispatch.test.ts` pin the phase-1 allowlist,
-    durable resolution, dispatch / fail-closed effects, loop summary fields,
-    and register-only invariant.
+    durable resolution, dispatch / fail-closed effects, parent-state/advisory
+    refresh, loop summary fields, and register-only invariant.
   - Built-CLI smoke: `test/smoke.test.ts` — "drives workflow run start ->
     approve -> daemon start --max-* -> durable executor rows ->
     status/handoff/monitor through the built CLI" proves the shipped binary path
     persists executor rows and remains observable after the daemon exits.
+  - Real closeout dogfood: `ngx353-m10-closeout` in `/Users/ngxcalvin/.momentum`
+    reached `preflight = running` with executor invocation / round scaffold rows
+    and `workflow run monitor` reported `monitorDrift.drifted = false`.
 
 ### 16. Claimed unsupported workflow step silently no-ops or strands its lease
 
