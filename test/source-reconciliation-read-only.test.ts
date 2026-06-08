@@ -81,6 +81,19 @@ function countRows(db: MomentumDb, table: string): number {
   return Number(row.count);
 }
 
+function tableRows(db: MomentumDb, table: string): Array<Record<string, unknown>> {
+  return db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all() as Array<
+    Record<string, unknown>
+  >;
+}
+
+function snapshotTables(
+  db: MomentumDb,
+  tables: readonly string[]
+): Record<string, Array<Record<string, unknown>>> {
+  return Object.fromEntries(tables.map((table) => [table, tableRows(db, table)]));
+}
+
 // Tables the source reconciliation adapter is the durable owner of (M5 contract).
 const SOURCE_TABLES = [
   "source_items",
@@ -89,7 +102,7 @@ const SOURCE_TABLES = [
 ] as const;
 
 // Execution-state and external-write tables a read-only source adapter must
-// never write to. Reconciliation must leave every one of these empty.
+// never write to. Reconciliation must leave preexisting rows unchanged.
 const FORBIDDEN_TABLES = [
   // Goal / Iteration / Job execution state.
   "goals",
@@ -121,10 +134,127 @@ const FORBIDDEN_TABLES = [
   "evidence_records"
 ] as const;
 
+function seedForbiddenTables(db: MomentumDb): void {
+  db.exec(`
+    INSERT INTO goals
+      (id, title, repo, runner, branch, artifact_dir, created_at, updated_at)
+      VALUES
+      ('goal_existing', 'Existing goal', '/repo', 'fake', 'main', '/artifacts', 1000, 1000);
+
+    INSERT INTO jobs
+      (id, goal_id, type, iteration, state, artifact_path, created_at, updated_at)
+      VALUES
+      ('job_existing', 'goal_existing', 'foreground_iteration', 1, 'pending', '/artifacts/job', 1001, 1001);
+
+    INSERT INTO events
+      (goal_id, job_id, type, payload, created_at)
+      VALUES
+      ('goal_existing', 'job_existing', 'goal_created', '{}', 1002);
+
+    INSERT INTO repo_locks
+      (id, repo_root, holder, goal_id, iteration, job_id, state, acquired_at, heartbeat_at, lease_expires_at, updated_at)
+      VALUES
+      ('repo_lock_existing', '/repo', 'worker-1', 'goal_existing', 1, 'job_existing', 'active', 1003, 1003, 2003, 1003);
+
+    INSERT INTO daemon_runs
+      (id, pid, host, state, started_at, heartbeat_at, last_state_change_at, updated_at)
+      VALUES
+      ('daemon_existing', 12345, 'localhost', 'running', 1004, 1004, 1004, 1004);
+
+    INSERT INTO workflow_definitions
+      (key, version, title, created_at, updated_at)
+      VALUES
+      ('workflow_existing', 1, 'Existing workflow', 1005, 1005);
+
+    INSERT INTO step_definitions
+      (definition_key, definition_version, step_key, kind, executor, step_order, created_at, updated_at)
+      VALUES
+      ('workflow_existing', 1, 'step_existing', 'preflight', 'manual', 1, 1006, 1006);
+
+    INSERT INTO workflow_runs
+      (id, state, goal_id, source, workflow_definition_key, workflow_definition_version, created_at, updated_at)
+      VALUES
+      ('workflow_run_existing', 'running', 'goal_existing', 'imported', 'workflow_existing', 1, 1007, 1007);
+
+    INSERT INTO workflow_steps
+      (run_id, step_id, kind, state, step_order, created_at, updated_at)
+      VALUES
+      ('workflow_run_existing', 'step_existing', 'preflight', 'running', 1, 1008, 1008);
+
+    INSERT INTO workflow_approvals
+      (run_id, boundary, actor, phrase, artifact_path, artifact_digest, recorded_at, created_at, updated_at)
+      VALUES
+      ('workflow_run_existing', 'before_apply', 'operator', 'approve', '/artifact/approval', 'digest-approval', 1009, 1009, 1009);
+
+    INSERT INTO workflow_leases
+      (run_id, lease_kind, holder, acquired_at, expires_at, heartbeat_at, created_at, updated_at)
+      VALUES
+      ('workflow_run_existing', 'execution', 'worker-1', 1010, 2010, 1010, 1010, 1010);
+
+    INSERT INTO executor_definitions
+      (executor_key, family, agent_provider, model, created_at, updated_at)
+      VALUES
+      ('executor_existing', 'manual', 'operator', 'none', 1011, 1011);
+
+    INSERT INTO executor_invocations
+      (invocation_id, workflow_run_id, step_run_id, step_key, executor_family, state, created_at, updated_at)
+      VALUES
+      ('invocation_existing', 'workflow_run_existing', 'step_existing', 'step_existing', 'manual', 'running', 1012, 1012);
+
+    INSERT INTO executor_rounds
+      (round_id, invocation_id, workflow_run_id, step_run_id, step_key, executor_family, round_index, state, created_at, updated_at)
+      VALUES
+      ('round_existing', 'invocation_existing', 'workflow_run_existing', 'step_existing', 'step_existing', 'manual', 0, 'running', 1013, 1013);
+
+    INSERT INTO executor_artifacts
+      (artifact_id, round_id, artifact_class, path, digest, created_at)
+      VALUES
+      ('artifact_existing', 'round_existing', 'log', '/artifact/log', 'digest-log', 1014);
+
+    INSERT INTO executor_checkpoints
+      (checkpoint_id, round_id, sequence, stage, detail, created_at)
+      VALUES
+      ('checkpoint_existing', 'round_existing', 1, 'started', 'checkpoint detail', 1015);
+
+    INSERT INTO executor_findings
+      (finding_id, round_id, severity, title, detail, selected, created_at)
+      VALUES
+      ('finding_existing', 'round_existing', 'warning', 'Existing finding', 'finding detail', 1, 1016);
+
+    INSERT INTO executor_decisions
+      (decision_id, round_id, summary, allowed_actions, recommended_action, created_at)
+      VALUES
+      ('decision_existing', 'round_existing', 'Existing decision', '["continue"]', 'continue', 1017);
+
+    INSERT INTO workflow_gates
+      (gate_id, workflow_run_id, step_run_id, invocation_id, round_id, target_scope, gate_type, reason, allowed_actions, policy_envelope, created_at, updated_at)
+      VALUES
+      ('gate_existing', 'workflow_run_existing', 'step_existing', 'invocation_existing', 'round_existing', 'round', 'operator', 'Existing gate', '["continue"]', '[]', 1018, 1018);
+
+    INSERT INTO evidence_records
+      (id, source, type, occurred_at, summary, goal_id, ingest_key, created_at, updated_at)
+      VALUES
+      ('evidence_existing', 'manual', 'note', 1019, 'Existing evidence', 'goal_existing', 'evidence-existing', 1019, 1019);
+
+    INSERT INTO update_intents
+      (id, adapter_kind, target_external_id, intent_type, reason, goal_id, evidence_record_id, idempotency_key, created_at, updated_at)
+      VALUES
+      ('intent_existing', 'linear', 'issue-existing', 'comment', 'Existing intent', 'goal_existing', 'evidence_existing', 'intent-existing', 1020, 1020);
+
+    INSERT INTO intent_apply_audits
+      (id, intent_id, adapter_kind, provider, requested_at, operator_reason, intent_apply_policy, mutation_kind, preview_summary, idempotency_marker, lifecycle_state, created_at, updated_at)
+      VALUES
+      ('audit_existing', 'intent_existing', 'linear', 'linear', 1021, 'Existing audit', 'manual', 'comment', 'Preview', 'audit-existing', 'claimed', 1021, 1021);
+  `);
+}
+
 describe("reconcileLinearSource read-only invariants (NGX-369)", () => {
-  it("writes only to the source_* tables and leaves every execution-state and external-write table empty", async () => {
+  it("writes only to the source_* tables and leaves every execution-state and external-write table unchanged", async () => {
     const db = openDb(makeTempDir());
     try {
+      seedForbiddenTables(db);
+      const forbiddenBefore = snapshotTables(db, FORBIDDEN_TABLES);
+
       // Exercise the busiest durable-write paths against a single db: create,
       // then update, then skip + per-item error, then dry-run.
       await reconcileLinearSource(db, {
@@ -157,13 +287,11 @@ describe("reconcileLinearSource read-only invariants (NGX-369)", () => {
       expect(countRows(db, "source_snapshots")).toBe(3); // 2 creates + 1 update
       expect(countRows(db, "source_reconciliation_runs")).toBe(4); // one row per invocation, incl. dry-run
 
-      // Read-only invariant: no Goal/Workflow/executor execution rows were
-      // created, and no external write was queued.
       for (const table of FORBIDDEN_TABLES) {
         expect(
-          countRows(db, table),
-          `reconciliation must not write to ${table}`
-        ).toBe(0);
+          tableRows(db, table),
+          `reconciliation must leave ${table} unchanged`
+        ).toEqual(forbiddenBefore[table]);
       }
     } finally {
       db.close();

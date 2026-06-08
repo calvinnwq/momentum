@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   buildLinearHttpReconciliationClient,
@@ -27,11 +27,26 @@ type FetchResponse = {
   text: () => Promise<string>;
 };
 
-/**
- * Builds a mock `FetchLike` that records every call and delegates the response
- * to `handler`. Every read-side test injects one of these so the client never
- * touches the network (see the "no real api.linear.app calls" guard below).
- */
+const globalFetchRef = globalThis as { fetch?: unknown };
+let originalGlobalFetch: unknown;
+const globalFetchGuard: FetchLike = async (input) => {
+  if (/api\.linear\.app/.test(input)) {
+    throw new Error(
+      `test guard tripped: real api.linear.app calls are forbidden (target was ${input})`
+    );
+  }
+  throw new Error(`test guard tripped: unexpected fetch target ${input}`);
+};
+
+beforeAll(() => {
+  originalGlobalFetch = globalFetchRef.fetch;
+  globalFetchRef.fetch = globalFetchGuard;
+});
+
+afterAll(() => {
+  globalFetchRef.fetch = originalGlobalFetch;
+});
+
 function recordingFetch(
   handler: (call: CapturedFetchCall) => FetchResponse | Promise<FetchResponse>
 ): { fetch: FetchLike; calls: CapturedFetchCall[] } {
@@ -658,19 +673,8 @@ describe("buildLinearHttpReconciliationClient — no real api.linear.app calls",
     expect(DEFAULT_LINEAR_GRAPHQL_ENDPOINT).toBe("https://api.linear.app/graphql");
   });
 
-  it("would target the real Linear host without an endpoint override, so the test guard intercepts it", async () => {
-    const guard: FetchLike = async (input) => {
-      if (/api\.linear\.app/.test(input)) {
-        throw new Error(
-          `test guard tripped: real api.linear.app calls are forbidden (target was ${input})`
-        );
-      }
-      throw new Error("test guard tripped: unexpected fetch target");
-    };
-    const client = buildLinearHttpReconciliationClient({
-      apiKey: "lin_api_key",
-      fetch: guard
-    });
+  it("would target the real Linear host without an endpoint override, so the suite guard intercepts it", async () => {
+    const client = buildLinearHttpReconciliationClient({ apiKey: "lin_api_key" });
     const result = await client.fetchPage({ cursor: null, filters: {} });
     expect(result).toMatchObject({ ok: false, code: "source_adapter_threw" });
     if (result.ok) return;
