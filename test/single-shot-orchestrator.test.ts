@@ -700,6 +700,43 @@ describe("runSingleShotStep — invocation/round materialization", () => {
     // `blocked` is a terminal invocation state, so finished_at is stamped.
     expect(result.invocation.finishedAt).not.toBeNull();
   });
+
+  it("settles a head_mismatch round into a terminal manual_recovery_required invocation", () => {
+    const db = openStepDb();
+    const result = runSingleShotStep({
+      db,
+      family: "one-shot",
+      workflowRunId: "run-1",
+      stepRunId: "step-1",
+      stepKey: "implementation",
+      attempt: 1,
+      selection: resolveSingleShotRoundSelection({}),
+      resolveRoundInputs: roundInputs,
+      now: monotonicClock(),
+      runRound: () => ({
+        outcome: { ok: false, recoveryCode: "head_mismatch" }
+      })
+    });
+
+    // The manual-recovery branch carries an `invocationState` distinct from
+    // `roundState` in the decision; the step settles the durable invocation into
+    // that state, not the `failed` / `blocked` the other abort terminals take. No
+    // prior step test exercised this fourth terminal, so a regression of the
+    // manual-recovery `invocationState` would otherwise reach the durable row
+    // unobserved (the round-level head_mismatch test pins only `roundState`).
+    expect(result.round.round.state).toBe("manual_recovery_required");
+    expect(result.round.decision.invocationState).toBe(
+      "manual_recovery_required"
+    );
+    expect(result.invocation.state).toBe("manual_recovery_required");
+    // `manual_recovery_required` is a terminal invocation state, so finished_at
+    // is stamped.
+    expect(result.invocation.finishedAt).not.toBeNull();
+    // The durable invocation row matches the settled return value.
+    expect(loadExecutorInvocation(db, result.invocation.invocationId)).toEqual(
+      result.invocation
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------

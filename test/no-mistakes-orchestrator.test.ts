@@ -1245,6 +1245,24 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
     expect(result.invocation.finishedAt).not.toBeNull();
   });
 
+  it("settles the invocation blocked on a blocked first poll", () => {
+    const { db, result } = runStep(okReader({ stepStatus: "blocked" }));
+
+    // The blocked branch carries an `invocationState` distinct from `roundState`
+    // in the decision; the step settles the durable invocation into a terminal
+    // `blocked`, not the `failed` / `manual_recovery_required` the other terminals
+    // take. No prior test asserted the *invocation* settles blocked (the
+    // round-level blocked test pins only `roundState`), so a regression of the
+    // blocked-branch `invocationState` would otherwise reach the durable row
+    // unobserved.
+    expect(result.round.round.state).toBe("blocked");
+    expect(result.round.decision.invocationState).toBe("blocked");
+    expect(result.invocation.state).toBe("blocked");
+    // `blocked` is a terminal invocation state, so finished_at is stamped.
+    expect(result.invocation.finishedAt).not.toBeNull();
+    expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe("blocked");
+  });
+
   it("settles the invocation manual_recovery_required on an unreadable first poll", () => {
     const { result } = runStep(
       failReader("external no-mistakes state is not valid JSON: Unexpected token")
