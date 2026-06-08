@@ -202,17 +202,22 @@ it; it does not run the actual dogfood or flip the milestone marker.
   family the dispatcher atomically advances the step `approved -> running` and
   creates the `executor_invocations` plus first `executor_rounds` start scaffold,
   observable by `workflow status`, `workflow handoff`, and `workflow run monitor`
-  from durable rows after the daemon process exits. The loop summary surfaces
+  from durable rows after the daemon process exits. The scaffold ids are
+  deterministic (`<run>::<step>::dispatch` and `::round-1`) and carry no result
+  evidence until a later adapter fills them. The loop summary surfaces
   `workflowStepsDispatched`, `lastWorkflowCode`, and cycle-level `workflowResult`
   evidence already modeled in `runDaemonLoop`.
 - **Fail-closed lease safety.** An unresolvable, under-configured, or
   unsupported-family step never silently no-ops after a claim. The dispatcher
   flags `needs_manual_recovery`, opens a step-scoped operator-visible
-  `manual_recovery_required` `workflow_gates` row, and releases the dispatch
-  lease. On a successful in-progress dispatch the dispatcher instead holds the
-  lease (the work is now owned, not terminal); if the dispatch callback throws
-  before taking ownership, `runWorkflowSchedulerOnce` auto-releases the lease so
-  none is stranded and a later tick can recover. Every effect path is
+  `manual_recovery_required` `workflow_gates` row when the run row still exists,
+  and releases the dispatch lease. If the run row vanished between claim and
+  dispatch, no recovery flag or gate can be written without orphaning evidence,
+  so the dispatcher only releases the lingering lease. On a successful
+  in-progress dispatch the dispatcher instead holds the lease (the work is now
+  owned, not terminal); if the dispatch callback throws before taking ownership,
+  `runWorkflowSchedulerOnce` auto-releases the lease so none is stranded and a
+  later tick can recover. Every effect path is
   `BEGIN IMMEDIATE` / rollback-wrapped so no half-dispatched state survives a
   throw, and dispatch is idempotent on a deterministic invocation id.
 

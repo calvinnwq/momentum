@@ -148,7 +148,8 @@ The M10 slice order is:
     managed `daemon start` to a production dispatcher that resolves claimed
     steps to executor families, creates executor invocation / round start
     scaffolds for supported families, and fail-closes unsupported or
-    unresolvable claims to manual-recovery gates. *(done)*
+    unresolvable claims to manual-recovery gates when the run row can carry
+    one. *(done)*
 11. **NGX-353 — M10-09 Workflow-first dogfood and closeout.** Run a real Momentum task
     through the workflow-first start surface, update regression coverage, and
     close M10. *(done)*
@@ -222,8 +223,9 @@ no-mistakes executor mirror only (brain, external-state reader, and polling
 orchestrator); M10-08 adds the durable workflow gates, the `evaluateGateDecision`
 brain, gate persistence, and the `workflow run decide` operator decision CLI plus
 gate visibility only; M10-09a adds production workflow-lane dispatcher wiring,
-executor start scaffolds, and fail-closed manual-recovery gates for unsupported
-or unresolvable dispatch claims only; M10-09 adds dogfood closeout evidence and
+executor start scaffolds, fail-closed manual-recovery gates for unsupported or
+unresolvable dispatch claims whose run row still exists, and orphaned lease
+release for vanished-run claims only; M10-09 adds dogfood closeout evidence and
 the marker flip. Generalized runtime behavior remains later work.
 
 Across the milestone, these remain outside scope unless a later contract

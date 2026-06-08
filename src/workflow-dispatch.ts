@@ -10,9 +10,10 @@
  * and the executor-loop reducer: no SQLite, no file system, no daemon, no
  * executor invocation. The durable twins resolve the claimed step against
  * `workflow_runs` / `step_definitions`, create the `executor_invocations` /
- * `executor_rounds` start scaffold, open a `workflow_gates` row or flag manual
- * recovery for the fail-closed outcome, release the dispatch lease where
- * appropriate, and wire the dispatcher into bounded `daemon start`, exactly as
+ * `executor_rounds` start scaffold, open a `workflow_gates` row when the run can
+ * carry one, flag manual recovery for the fail-closed outcome when possible,
+ * release the dispatch lease where appropriate, and wire the dispatcher into
+ * bounded `daemon start`, exactly as
  * `workflow-gate-persist.ts` is the storage twin of `workflow-gate.ts`.
  *
  * Scope decisions pinned here, grounded in the accepted planning contracts
@@ -28,7 +29,10 @@
  *   - Every non-dispatch outcome routes to the contract's
  *     `manual_recovery_required` human gate: "Momentum cannot safely proceed
  *     without operator inspection and recovery." The dispatcher fails *closed*,
- *     producing durable operator-visible state, never a silent success.
+ *     producing durable operator-visible state when the claimed run still
+ *     exists. If the run row vanished, the effect twin cannot hang a gate from a
+ *     missing parent and instead releases the dispatch lease without fabricating
+ *     orphaned recovery state.
  *   - The decision is independent of *how* a claimed step resolves to its
  *     executor family. The persistence twin performs the read-only resolution
  *     (run -> definition link -> step definition -> family) and hands the

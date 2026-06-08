@@ -26,9 +26,10 @@
  * The reads are non-mutating: resolution never writes a row, opens a gate, or
  * touches a lease. The side-effecting half of the dispatcher lives in
  * `workflow-dispatch-execute.ts`: it creates the `executor_invocations` /
- * `executor_rounds` start scaffold for a `dispatch` plan, or opens a durable
- * manual-recovery gate and releases the dispatch lease for a `fail_closed` plan,
- * just as the gate-decision CLI was layered on top of the gate persistence twin.
+ * `executor_rounds` start scaffold for a `dispatch` plan, or records the
+ * fail-closed manual-recovery effect and releases the dispatch lease for a
+ * `fail_closed` plan. A vanished run cannot carry a `workflow_gates` FK, so the
+ * effect layer releases that orphaned lease without inventing a gate.
  */
 
 import type { MomentumDb } from "./db.js";

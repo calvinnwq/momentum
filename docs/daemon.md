@@ -88,11 +88,13 @@ readiness probe.
 is `dispatched`. `lastWorkflowCode` is the last scheduler-lane tick code
 (`idle`, `claim_contended`, `dispatched`, or `null` when the lane never ran).
 For a supported executor family, dispatch advances the step to `running` and
-creates durable executor invocation / round scaffold rows. If a claimed step
-cannot be resolved or uses an executor family the daemon cannot dispatch yet,
-the dispatcher parks the run behind a `manual_recovery_required` workflow gate
-instead of silently dropping the claim. Register-only `daemon start` exits before
-the managed loop and never runs the workflow scheduler lane.
+creates durable executor invocation / round scaffold rows with deterministic
+dispatcher ids. If a claimed step cannot be resolved or uses an executor family
+the daemon cannot dispatch yet, the dispatcher parks the run behind a
+`manual_recovery_required` workflow gate instead of silently dropping the claim;
+if the run row vanished before that gate can be written, it still releases the
+dispatch lease so no claim is stranded. Register-only `daemon start` exits
+before the managed loop and never runs the workflow scheduler lane.
 
 JSON envelope shape (managed loop):
 

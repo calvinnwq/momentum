@@ -26,6 +26,10 @@
  * released when possible; terminal-persistence, final-heartbeat, repo-lock,
  * release ownership failures, and explicit deferrals intentionally leave the
  * lease outstanding so monitor/recovery can see the ambiguous in-flight step.
+ * Managed-step leases default to the fail-closed `manual-recovery-required`
+ * stale policy, unlike the generic workflow-lease default, and repo-lock
+ * refreshes are monotonic so a final workflow-lease heartbeat cannot move a
+ * separately-heartbeated repo lock backward.
  *
  * The orchestrator stays single-step focused. Run-level concerns are composed by
  * the caller from the returned outcome: run-state re-derivation
@@ -900,6 +904,8 @@ function refreshLiveWorkflowRepoLock(
     leaseExpiresAt: number;
   }
 ): { ok: boolean } {
+  // A heartbeat worker can advance repo_locks just before this final refresh
+  // observes the older workflow lease. Preserve the furthest-known timestamps.
   const result = db
     .prepare(
       `UPDATE repo_locks

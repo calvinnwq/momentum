@@ -119,6 +119,14 @@ An executor cannot silently skip the normalized result step. If the executor can
 
 The `no-mistakes` family uses the same durable envelope differently: one long-lived mirror round is born in `mirroring_external_state`, each daemon poll reconciles the latest external snapshot into that same round, and the round either heartbeats in place, pauses in `waiting_operator`, or settles terminally. Momentum persists findings and decisions below that mirror round but does not split the external review/fix phases into separate Momentum rounds.
 
+The phase-1 workflow dispatcher may create an invocation / first-round scaffold
+before a bounded adapter drives the real executor mechanism. That scaffold is
+owned by the dispatcher, uses deterministic ids (`<run>::<step>::dispatch` and
+`<invocation>::round-1`) so re-entry cannot fork a second owner, and must carry
+no fabricated result evidence: no digests, artifact root, logs, summary,
+verification, commit, recovery, or human gate until executor work actually
+produces it.
+
 ## Round Schema
 
 Each `executor_rounds` record must preserve enough information to reattach after process, daemon, or chat loss.
@@ -282,6 +290,9 @@ Heartbeat rules:
 - Expired leases classify as stale and route to the recovery policy for that step/executor family.
 - Lost repo ownership before git mutation fails or pauses the round before mutation.
 - Lost repo ownership after git mutation routes to manual recovery unless the finalizer proves a safe clean state.
+- Deterministic invocation ids are single-owner keys. A duplicate same-attempt
+  dispatch must fail closed before writing another round and must leave the
+  existing invocation untouched; a real retry uses a fresh attempt id.
 
 ## External Executor Mirroring
 

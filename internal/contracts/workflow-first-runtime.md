@@ -339,7 +339,7 @@ Current Momentum state:
 - Has M10-06 `one-shot` / `script` executor adapters for bounded single-invocation work, including result-bearing one-shot success and exit-code / bounded-log script success.
 - Has M10-07 no-mistakes executor mirror that records external no-mistakes run state, findings, decisions, PR / CI state, and completion below executor invocations / rounds.
 - Has M10-08 durable workflow gates and the `workflow run decide` operator / delegated-policy path.
-- Has M10-09a phase-1 workflow-lane dispatch effects: supported executor families create durable executor invocation / first-round start scaffolds; unsupported or unresolvable claims fail closed to a manual-recovery gate.
+- Has M10-09a phase-1 workflow-lane dispatch effects: supported executor families create deterministic durable executor invocation / first-round start scaffolds with empty result evidence; unsupported or unresolvable claims fail closed to a manual-recovery gate when the run can carry one, and vanished-run claims release the orphaned dispatch lease without fabricating a gate.
 - Has `goal start`, `daemon`, and workflow import / status / run controls.
 
 Required workflow-first gaps:
@@ -350,7 +350,7 @@ Required workflow-first gaps:
 | Step configuration | Persisted StepDefinition list for definitions; run execution still fixed canonical step kinds | Configurable StepDefinition list |
 | Executor selection | Executor definitions can be persisted; goal-loop / one-shot / script / no-mistakes adapters exist; phase-1 dispatcher resolves per-step executor family but still needs full per-step executor config wiring | Per-step executor definition and agent / model config |
 | Daemon scheduling | Drains `goal_iteration` jobs; bounded managed `daemon start` also recovers, scans, claims, and dispatches runnable approved workflow steps | Schedules workflow runs, step runs, executor invocations, and rounds |
-| Loop state | Goal iteration artifacts / job rows, plus persisted executor invocations / rounds below workflow steps; phase-1 dispatcher creates start scaffolds before later executor driving | ExecutorInvocation / ExecutorRound / checkpoints / artifacts driven by the workflow scheduler |
+| Loop state | Goal iteration artifacts / job rows, plus persisted executor invocations / rounds below workflow steps; phase-1 dispatcher creates deterministic start scaffolds with no fabricated evidence before later executor driving | ExecutorInvocation / ExecutorRound / checkpoints / artifacts driven by the workflow scheduler |
 | Goal loop | Product-level Goal | `goal-loop` executor inside a workflow step |
 | no-mistakes | External fixed pipeline with a landed Momentum mirror | Specialist executor mirrored into Momentum |
 | Human gates | Durable gate records, approvals, recovery flags, and external TUI state | Durable gate records with allowed actions and evidence |
