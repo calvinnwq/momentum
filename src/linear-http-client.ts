@@ -1,15 +1,19 @@
 /**
  * HTTP-backed `LinearReconciliationClient` (NGX-289 / M5-02 CLI slice).
  *
- * Drives a single Linear GraphQL `issues` query per page and adapts the
+ * Drives a single read-only Linear GraphQL `issues` query per page and adapts the
  * response into the orchestrator's `LinearReconciliationFetchPageResult`
  * vocabulary. Credentials never live in Momentum durable state; the caller
- * passes an `apiKey` it sourced from operator-controlled env or config.
+ * passes an `apiKey` it sourced from operator-controlled env or config. The
+ * client trims credentials before sending them, validates page-size / timeout
+ * options at construction time, and never emits a GraphQL mutation.
  *
  * The client maps:
  *   - missing/empty apiKey → `source_auth_unavailable`
- *   - 401/403 / non-OK auth-shaped responses → `source_auth_unavailable`
- *   - other transport / parse failures → `source_adapter_threw`
+ *   - missing fetch implementation → `source_config_invalid`
+ *   - 401/403 and GraphQL auth-shaped responses → `source_auth_unavailable`
+ *   - other transport, timeout, response body, GraphQL, parse, pagination, or
+ *     response-shape failures → `source_adapter_threw`
  */
 
 import type {

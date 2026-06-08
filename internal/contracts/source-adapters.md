@@ -6,9 +6,10 @@ A **source adapter** is the read / list / get / normalize boundary for an extern
 
 ## Read-only contract
 
-- Source adapters in M5 are **read-only**. They read external state and write only to Momentum's local durable tables (snapshots, SourceItems, reconciliation runs).
-- Source adapters **do not** own Goal / Iteration / Job state.
+- Source adapters in M5 are **read-only**. They read external state and write only to Momentum's local durable source tables (`source_items`, `source_snapshots`, and `source_reconciliation_runs`).
+- Source adapters **do not** own Goal / Iteration / Job state, workflow-run / step / gate / lease state, executor-loop rows, evidence rows, update intents, or apply audits.
 - Source adapters **do not** touch git.
+- Source adapters **do not** write filesystem artifacts; their durable footprint is the local SQLite source tables above.
 - Source adapters **do not** perform automatic external writes. External writes are represented as durable, policy-gated `update_intents` rows. In M5 those intents are never applied externally. In M6 they may be applied through the two-phase apply path documented in `intent-apply.md`, gated by `MOMENTUM.md` `intent_apply_policy: external_apply_allowed`.
 - The read / write split is preserved through M6: M6's Linear write client is a **separate** code path layered on top of the read adapter. The read adapter stays read-only; the write client is the new surface and is invoked only through `intent apply --external-apply`.
 
@@ -16,7 +17,7 @@ A **source adapter** is the read / list / get / normalize boundary for an extern
 
 - Operator-controlled config (Linear project / milestone filters, page size, endpoint override for tests).
 - Credentials supplied via env vars or operator-controlled config paths. **Credentials never enter Momentum durable state or docs.**
-- Test endpoints (for unit tests and smoke). The M5 Linear reconciliation tests already use an in-process mock GraphQL endpoint; M6 extends that pattern for the write client.
+- Test endpoints and injected fetch implementations (for unit tests and smoke). The M5 Linear reconciliation tests use mock GraphQL endpoints; the NGX-369 isolated tests also guard default runs against accidental real `api.linear.app` calls. M6 extends the mock-endpoint pattern for the write client.
 
 ## Outputs the adapter writes
 
@@ -28,10 +29,14 @@ A **source adapter** is the read / list / get / normalize boundary for an extern
 
 Source adapters surface failures through a stable taxonomy so operator tooling can detect deterministically.
 
-- Auth / credential failures: `auth_failed`.
-- Rate-limit / transport failures: `rate_limited`, `transport_failed`.
-- Pagination / response-shape failures: `pagination_invalid`, `response_invalid`.
-- Per-item normalization failures are sampled into the reconciliation-run error column rather than aborting the run.
+- Unsupported adapter dispatch: `unsupported_source_adapter`.
+- Missing source item lookup: `source_item_not_found`.
+- Per-item normalization failures: `source_item_invalid`. Reconciliation samples these into the reconciliation-run item outcomes rather than aborting the whole run.
+- Auth / credential failures: `source_auth_unavailable`.
+- Missing local runtime configuration, such as no available `fetch` implementation: `source_config_invalid`.
+- Transport, timeout, non-auth HTTP, GraphQL, pagination, response-shape, and thrown-adapter failures: `source_adapter_threw`.
+
+Linear reconciliation maps page-level failures onto stable stop reasons in the returned envelope: `auth_unavailable`, `config_invalid`, or `adapter_threw`. Successful drains stop with `complete`, and bounded drains stop with `max_pages`.
 
 `source reconcile linear --dry-run` exercises the adapter without writing snapshot / SourceItem rows so operators can validate connectivity and filter scope safely.
 

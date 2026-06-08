@@ -4,7 +4,10 @@
  * This module owns the read-only normalization of Linear issue payloads into
  * Momentum's SourceAdapterItem vocabulary, plus the in-process list/get
  * surface used by tests and local callers that already have Linear issue
- * payloads.
+ * payloads. Normalization requires Linear's stable identity/title/url/update
+ * fields, preserves the raw issue payload under metadata, and folds optional
+ * project, milestone, label, assignee, state, and priority fields into
+ * structured local metadata without treating those optional shapes as writes.
  *
  * The adapter never performs HTTP itself, never reads credentials, and never
  * writes back to Linear. The paginated reconciliation orchestrator lives in
