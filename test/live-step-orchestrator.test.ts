@@ -1075,6 +1075,65 @@ describe("runLiveWorkflowStep", () => {
     }
   });
 
+  it("does not move the repo lock heartbeat backward when it advanced ahead of the workflow lease", () => {
+    const db = openSeededDb(
+      "run-1",
+      "approved",
+      "/repo",
+      "implementation",
+      null
+    );
+    try {
+      seedStep(db, "run-1", "step-impl", "approved");
+      seedRepoLock(db, "/repo", "worker-1", {
+        leaseExpiresAt: SEED_AT + 2_750
+      });
+
+      const partialHeartbeatAt = SEED_AT + 1_760;
+      const out = runLiveWorkflowStep({
+        db,
+        runId: "run-1",
+        stepId: "step-impl",
+        holder: "worker-1",
+        leaseExpiresAt: SEED_AT + 2_750,
+        executor: fakeExecutor(() => {
+          // Simulate the heartbeat worker's two-row update being observed after
+          // the repo-lock row advanced but before the workflow-lease row caught
+          // up. Finalization must not use the older workflow lease heartbeat to
+          // move the repo lock backward.
+          db.prepare(
+            `UPDATE repo_locks
+                SET heartbeat_at = ?, lease_expires_at = ?, updated_at = ?
+              WHERE repo_root = ?`
+          ).run(
+            partialHeartbeatAt,
+            partialHeartbeatAt + 1_000,
+            partialHeartbeatAt,
+            "/repo"
+          );
+          return successDispatch("sha256:ok");
+        }),
+        executorInput: EXEC_INPUT,
+        now: SEED_AT + 1_750
+      });
+
+      expect(out.ok).toBe(true);
+      const repoLock = db
+        .prepare(
+          `SELECT heartbeat_at AS heartbeatAt, lease_expires_at AS leaseExpiresAt
+             FROM repo_locks
+            WHERE repo_root = ?`
+        )
+        .get("/repo") as { heartbeatAt: number; leaseExpiresAt: number };
+      expect(repoLock.heartbeatAt).toBeGreaterThanOrEqual(partialHeartbeatAt);
+      expect(repoLock.leaseExpiresAt).toBeGreaterThanOrEqual(
+        partialHeartbeatAt + 1_000
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   it("does not finish the step when the repo lock is lost during execution", () => {
     const db = openSeededDb(
       "run-1",

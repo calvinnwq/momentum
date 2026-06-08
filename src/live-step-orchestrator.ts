@@ -903,7 +903,9 @@ function refreshLiveWorkflowRepoLock(
   const result = db
     .prepare(
       `UPDATE repo_locks
-         SET heartbeat_at = ?, lease_expires_at = ?, updated_at = ?
+         SET heartbeat_at = max(heartbeat_at, ?),
+             lease_expires_at = max(lease_expires_at, ?),
+             updated_at = max(updated_at, ?)
        WHERE id = ?
          AND repo_root = ?
          AND holder = ?
