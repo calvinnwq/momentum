@@ -194,6 +194,82 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     });
   });
 
+  it("derives stable, recomputable scaffold ids namespaced to the dispatcher", () => {
+    const db = openSeededDb();
+    const claim = approveAndClaim(db, "preflight");
+
+    executeWorkflowStepDispatch(claim, { db, workerId: WORKER, now: NOW + 1 });
+
+    // The invocation id is the deterministic `<run>::<step>::dispatch` triple,
+    // not a random handle: it is recomputable from durable state (so idempotent
+    // re-entry finds the same row) and the `::dispatch` namespace keeps it
+    // distinct from a future landed adapter's reattachable invocation id.
+    const invocation = db
+      .prepare(
+        "SELECT invocation_id FROM executor_invocations WHERE workflow_run_id = ?"
+      )
+      .get(RUN_ID) as { invocation_id: string };
+    expect(invocation.invocation_id).toBe(`${RUN_ID}::preflight::dispatch`);
+
+    // The first round id is the invocation id suffixed with `::round-1`, equally
+    // recomputable so re-entry never forks a second round.
+    const round = db
+      .prepare(
+        "SELECT round_id, round_index FROM executor_rounds WHERE workflow_run_id = ?"
+      )
+      .get(RUN_ID) as { round_id: string; round_index: number };
+    expect(round.round_id).toBe(`${RUN_ID}::preflight::dispatch::round-1`);
+    expect(round.round_index).toBe(1);
+  });
+
+  it("creates the scaffold round with no fabricated evidence", () => {
+    const db = openSeededDb();
+    const claim = approveAndClaim(db, "preflight");
+
+    executeWorkflowStepDispatch(claim, { db, workerId: WORKER, now: NOW + 1 });
+
+    // The round row is created before any external work runs, so it must carry
+    // zero evidence: an operator or auditor must never mistake a phase-1 scaffold
+    // row for completed adapter work. Every evidence/payload pointer stays empty
+    // (null scalars, empty `[]` arrays) until a landed adapter fills them.
+    const round = db
+      .prepare(
+        `SELECT classification,
+                started_at AS startedAt, heartbeat_at AS heartbeatAt,
+                finished_at AS finishedAt, agent_provider AS agentProvider,
+                model, effort, input_digest AS inputDigest,
+                result_digest AS resultDigest, artifact_root AS artifactRoot,
+                log_paths AS logPaths, summary, key_changes AS keyChanges,
+                remaining_work AS remainingWork, changed_files AS changedFiles,
+                verification_status AS verificationStatus, commit_sha AS commitSha,
+                recovery_code AS recoveryCode, human_gate AS humanGate
+           FROM executor_rounds WHERE workflow_run_id = ?`
+      )
+      .get(RUN_ID) as Record<string, unknown>;
+
+    expect(round).toEqual({
+      classification: null,
+      startedAt: null,
+      heartbeatAt: null,
+      finishedAt: null,
+      agentProvider: null,
+      model: null,
+      effort: null,
+      inputDigest: null,
+      resultDigest: null,
+      artifactRoot: null,
+      logPaths: "[]",
+      summary: null,
+      keyChanges: "[]",
+      remainingWork: "[]",
+      changedFiles: "[]",
+      verificationStatus: null,
+      commitSha: null,
+      recoveryCode: null,
+      humanGate: null
+    });
+  });
+
   it("holds the dispatch lease on a successful dispatch (owns the lifecycle)", () => {
     const db = openSeededDb();
     const claim = approveAndClaim(db, "preflight");
