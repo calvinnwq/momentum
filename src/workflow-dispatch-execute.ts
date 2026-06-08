@@ -28,9 +28,11 @@
  *   - **fail_closed** (unresolvable, under-configured, or an unsupported family):
  *     a terminal outcome. Atomically flag the run `needs_manual_recovery` and open
  *     a durable, operator-visible `workflow_gates` manual-recovery row hung from
- *     the step, then *release* the dispatch lease. The run is parked (the scan
- *     excludes manual-recovery runs) so it is never re-dispatched, and the lease
- *     is not stranded.
+ *     the step when the run row still exists, then *release* the dispatch lease.
+ *     The run is parked (the scan excludes manual-recovery runs) so it is never
+ *     re-dispatched, and the lease is not stranded. If the run vanished between
+ *     claim and dispatch, no gate or recovery flag can be written without
+ *     orphaning evidence, so the orphaned dispatch lease is still released.
  *
  * Both paths are wrapped in a single `BEGIN IMMEDIATE` transaction so a mid-write
  * failure can never leave a half-dispatched step, an orphaned invocation, or a
@@ -94,7 +96,7 @@ export const WORKFLOW_DISPATCH_RESULT_STATUS = {
   dispatched: "executor_dispatched",
   /** A re-entered dispatch found the existing scaffold and made no change. */
   alreadyDispatched: "executor_already_dispatched",
-  /** An unsupported / unresolvable step was parked to a manual-recovery gate. */
+  /** An unsupported / unresolvable step was parked, or an orphaned lease released. */
   failClosed: "manual_recovery_gated",
   /** The step left `approved` between claim and dispatch; nothing was written. */
   stepNotStartable: "step_not_startable"
@@ -198,9 +200,11 @@ function dispatchExecutorScaffold(
 }
 
 /**
- * Park a run for manual recovery and open a durable, operator-visible gate, then
- * release the dispatch lease — the fail-closed terminal outcome. Atomic so the
- * gate and the recovery flag can never drift. Idempotent on the gate id.
+ * Park a run for manual recovery and open a durable, operator-visible gate when
+ * the run row still exists, then release the dispatch lease — the fail-closed
+ * terminal outcome. Atomic so the gate and recovery flag can never drift. A
+ * vanished run cannot satisfy the gate FK, so that branch releases only.
+ * Idempotent on the gate id.
  */
 function failClosedDispatch(
   db: MomentumDb,

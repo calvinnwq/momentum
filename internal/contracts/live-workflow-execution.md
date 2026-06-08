@@ -85,6 +85,10 @@ At the M9-00 decision gate, this contract preferred reusing the existing `goal s
 Each live step execution must:
 
 - Acquire a workflow lease before spawning the process.
+- Acquire that managed-step lease with `manual-recovery-required` as the default
+  stale policy, so a lost live process routes to operator recovery rather than
+  silently auto-releasing. A caller may explicitly override the stale policy for
+  narrower harnesses.
 - Write a start event before spawning.
 - Heartbeat while the process is active; if heartbeat cannot be maintained, leave the outstanding lease to become stale by expiry and stale-policy classification.
 - Capture stdout / stderr to bounded artifact logs.
@@ -114,7 +118,7 @@ Momentum must keep its existing safety posture:
 - Commit intent is explicit and normalized.
 - If verification fails and HEAD is still at the expected base, Momentum resets the worktree using the existing failure-reset path.
 - If HEAD changed unexpectedly, Momentum enters manual recovery instead of destructive reset.
-- The repo lock and managed-step lease stay heartbeated through verification, commit, reset, and post-finalization acceptance; a lost repo lock or workflow lease before any further git mutation routes to `repo_lock_lost` recovery. Heartbeating stops before the shared recovery flag / `recovery.md` write, but the deferred managed-step lease is released only after terminal or recovery reconciliation is durable.
+- The repo lock and managed-step lease stay heartbeated through verification, commit, reset, and post-finalization acceptance; a lost repo lock or workflow lease before any further git mutation routes to `repo_lock_lost` recovery. Repo-lock refreshes are monotonic: finalization must not move `repo_locks.heartbeat_at`, `lease_expires_at`, or `updated_at` backward if a concurrent heartbeat has already advanced that row. Heartbeating stops before the shared recovery flag / `recovery.md` write, but the deferred managed-step lease is released only after terminal or recovery reconciliation is durable.
 - Momentum also re-checks repo / workflow ownership after the finalization transaction returns, before accepting terminal success. If ownership is lost after git already advanced HEAD, Momentum rejects the terminal success, enters `repo_lock_lost` recovery, and leaves the operator to inspect the committed state.
 - Terminal step state for a cleanly dispatched live step is deferred until the finalization transaction reconciles the commit, reset, or recovery outcome.
 - Remote git operations (`fetch`, `pull`, `push`, `rebase`) remain out of scope unless a later contract adds them explicitly.

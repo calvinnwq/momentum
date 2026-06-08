@@ -406,7 +406,8 @@ Coverage:
 - production dispatch effects in `test/workflow-dispatch-execute.test.ts`:
   supported-family executor invocation / first-round scaffold creation,
   approved -> running step advancement, dispatch-lease ownership, idempotent
-  re-entry, unsupported / unresolvable fail-closed manual-recovery gates, and
+  re-entry, unsupported / unresolvable fail-closed manual-recovery gates where a
+  run can carry them, vanished-run lease release without a dangling gate, and
   lease release on no-op safety paths.
 - shipped bounded `daemon start` workflow-lane wiring in
   `test/cli-daemon-workflow-dispatch.test.ts`: the managed loop dispatches an

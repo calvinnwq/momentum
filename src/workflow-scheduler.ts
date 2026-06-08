@@ -28,7 +28,8 @@
  * — recover stale leases, scan, claim one step, then hand it to an injected
  * executor-dispatch seam — as the workflow-first analogue of `runWorkerOnce`.
  * Bounded `daemon start` now wires that seam with the production dispatcher,
- * which creates executor start scaffolds or fail-closed manual-recovery gates.
+ * which creates executor start scaffolds or fail-closed manual-recovery effects
+ * (gates when the run row still exists, lease release when it vanished).
  * This lane leaves goal iteration draining (`worker-run.ts`) untouched, because
  * workflow scheduling is a separate lane over separate tables.
  *
@@ -824,8 +825,9 @@ export type WorkflowStepDispatchResult = {
  * The executor-dispatch seam. {@link runWorkflowSchedulerOnce} claims the next
  * runnable step and hands the claim to this callback. The production dispatcher
  * starts durable executor invocation / round scaffolds for supported families
- * and fail-closes unsupported or unresolvable steps to manual recovery. On a
- * normal return the dispatcher owns the dispatch lease's lifecycle (refresh
+ * and fail-closes unsupported or unresolvable steps to manual recovery when the
+ * run row still exists, or releases only the lease when the run has vanished.
+ * On a normal return the dispatcher owns the dispatch lease's lifecycle (refresh
  * across rounds, release on terminal). If it throws, the lane releases the lease
  * it just acquired so the claim is not stranded, then rethrows.
  */

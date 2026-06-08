@@ -348,6 +348,66 @@ describe("runLiveWorkflowStep", () => {
     }
   });
 
+  it("acquires the managed-step lease with the fail-closed manual-recovery-required stale policy by default", () => {
+    const db = openSeededDb();
+    try {
+      seedStep(db, "run-1", "step-impl", "approved");
+
+      const out = runLiveWorkflowStep({
+        db,
+        runId: "run-1",
+        stepId: "step-impl",
+        holder: "worker-1",
+        leaseExpiresAt: SEED_AT + 60_000,
+        executor: fakeExecutor(successDispatch("sha256:ok")),
+        executorInput: EXEC_INPUT,
+        now: SEED_AT + 1_000
+      });
+
+      expect(out.ok).toBe(true);
+      expect(out.lease.acquired).toBe(true);
+
+      // Fail-closed default: a live step whose process is lost strands the
+      // managed-step lease into operator recovery rather than silently
+      // auto-releasing, even though the generic lease default is "auto-release".
+      // The released row keeps its stale_policy, so the acquisition policy is
+      // still observable after a successful release.
+      const lease = getWorkflowLease(db, "run-1", LIVE_STEP_DEFAULT_LEASE_KIND);
+      expect(lease?.stalePolicy).toBe("manual-recovery-required");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("honors an explicit stalePolicy override when acquiring the managed-step lease", () => {
+    const db = openSeededDb();
+    try {
+      seedStep(db, "run-1", "step-impl", "approved");
+
+      const out = runLiveWorkflowStep({
+        db,
+        runId: "run-1",
+        stepId: "step-impl",
+        holder: "worker-1",
+        leaseExpiresAt: SEED_AT + 60_000,
+        stalePolicy: "auto-release",
+        executor: fakeExecutor(successDispatch("sha256:ok")),
+        executorInput: EXEC_INPUT,
+        now: SEED_AT + 1_000
+      });
+
+      expect(out.ok).toBe(true);
+      expect(out.lease.acquired).toBe(true);
+
+      // An explicit caller-supplied stale policy is forwarded to the lease and
+      // is not overwritten by the fail-closed default.
+      const lease = getWorkflowLease(db, "run-1", LIVE_STEP_DEFAULT_LEASE_KIND);
+      expect(lease?.stalePolicy).toBe("auto-release");
+    } finally {
+      db.close();
+    }
+  });
+
   it("heartbeats the managed-step lease while the executor is still active", () => {
     const db = openSeededDb();
     try {
@@ -1009,6 +1069,65 @@ describe("runLiveWorkflowStep", () => {
       expect(repoLock?.heartbeatAt).toBeGreaterThan(SEED_AT + 1_750);
       expect(repoLock?.leaseExpiresAt).toBeGreaterThan(
         repoHeartbeatDuringExecute ?? 0
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("does not move the repo lock heartbeat backward when it advanced ahead of the workflow lease", () => {
+    const db = openSeededDb(
+      "run-1",
+      "approved",
+      "/repo",
+      "implementation",
+      null
+    );
+    try {
+      seedStep(db, "run-1", "step-impl", "approved");
+      seedRepoLock(db, "/repo", "worker-1", {
+        leaseExpiresAt: SEED_AT + 2_750
+      });
+
+      const partialHeartbeatAt = SEED_AT + 1_760;
+      const out = runLiveWorkflowStep({
+        db,
+        runId: "run-1",
+        stepId: "step-impl",
+        holder: "worker-1",
+        leaseExpiresAt: SEED_AT + 2_750,
+        executor: fakeExecutor(() => {
+          // Simulate the heartbeat worker's two-row update being observed after
+          // the repo-lock row advanced but before the workflow-lease row caught
+          // up. Finalization must not use the older workflow lease heartbeat to
+          // move the repo lock backward.
+          db.prepare(
+            `UPDATE repo_locks
+                SET heartbeat_at = ?, lease_expires_at = ?, updated_at = ?
+              WHERE repo_root = ?`
+          ).run(
+            partialHeartbeatAt,
+            partialHeartbeatAt + 1_000,
+            partialHeartbeatAt,
+            "/repo"
+          );
+          return successDispatch("sha256:ok");
+        }),
+        executorInput: EXEC_INPUT,
+        now: SEED_AT + 1_750
+      });
+
+      expect(out.ok).toBe(true);
+      const repoLock = db
+        .prepare(
+          `SELECT heartbeat_at AS heartbeatAt, lease_expires_at AS leaseExpiresAt
+             FROM repo_locks
+            WHERE repo_root = ?`
+        )
+        .get("/repo") as { heartbeatAt: number; leaseExpiresAt: number };
+      expect(repoLock.heartbeatAt).toBeGreaterThanOrEqual(partialHeartbeatAt);
+      expect(repoLock.leaseExpiresAt).toBeGreaterThanOrEqual(
+        partialHeartbeatAt + 1_000
       );
     } finally {
       db.close();

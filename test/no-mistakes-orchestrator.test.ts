@@ -5,11 +5,13 @@ import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/db.js";
 import {
+  ExecutorInvocationConflictError,
   insertExecutorInvocation,
   insertExecutorRound,
   listExecutorCheckpointsForRound,
   listExecutorDecisionsForRound,
   listExecutorFindingsForRound,
+  listExecutorRoundsForInvocation,
   loadExecutorInvocation,
   loadExecutorRound,
   updateExecutorRound
@@ -1243,6 +1245,24 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
     expect(result.invocation.finishedAt).not.toBeNull();
   });
 
+  it("settles the invocation blocked on a blocked first poll", () => {
+    const { db, result } = runStep(okReader({ stepStatus: "blocked" }));
+
+    // The blocked branch carries an `invocationState` distinct from `roundState`
+    // in the decision; the step settles the durable invocation into a terminal
+    // `blocked`, not the `failed` / `manual_recovery_required` the other terminals
+    // take. No prior test asserted the *invocation* settles blocked (the
+    // round-level blocked test pins only `roundState`), so a regression of the
+    // blocked-branch `invocationState` would otherwise reach the durable row
+    // unobserved.
+    expect(result.round.round.state).toBe("blocked");
+    expect(result.round.decision.invocationState).toBe("blocked");
+    expect(result.invocation.state).toBe("blocked");
+    // `blocked` is a terminal invocation state, so finished_at is stamped.
+    expect(result.invocation.finishedAt).not.toBeNull();
+    expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe("blocked");
+  });
+
   it("settles the invocation manual_recovery_required on an unreadable first poll", () => {
     const { result } = runStep(
       failReader("external no-mistakes state is not valid JSON: Unexpected token")
@@ -1321,6 +1341,46 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
     );
     expect(second.invocation.invocationId).toBe(
       noMistakesInvocationId(WORKFLOW_RUN_ID, STEP_RUN_ID, 2)
+    );
+  });
+
+  it("refuses a duplicate dispatch of the same attempt and leaves the durable owner untouched", () => {
+    // The deterministic invocation id `(workflowRunId, stepRunId, attempt)` is the
+    // mirror adapter's single-owner key. A daemon that re-dispatches the same
+    // claimed step under the same attempt must not mint a second owner: the id
+    // collides at the first durable write inside the start savepoint
+    // (`insertExecutorInvocation`), which rolls back, so nothing is half-written.
+    const db = openDb(makeTempDir());
+    seedParents(db);
+    const base = {
+      db,
+      workflowRunId: WORKFLOW_RUN_ID,
+      stepRunId: STEP_RUN_ID,
+      stepKey: STEP_KEY,
+      attempt: ATTEMPT,
+      read: okReader({ stepStatus: "failed" }),
+      expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
+      resolveRoundInputs
+    };
+
+    const first = runNoMistakesMirrorStep({ ...base, now: stubClock() });
+
+    // Snapshot the durable owner + round the first dispatch settled.
+    const ownerBefore = loadExecutorInvocation(db, INVOCATION_ID);
+    const roundsBefore = listExecutorRoundsForInvocation(db, INVOCATION_ID);
+    expect(ownerBefore).toEqual(first.invocation);
+
+    // A second dispatch under the same attempt collides on the invocation id and
+    // fails closed — never a silent second owner.
+    expect(() =>
+      runNoMistakesMirrorStep({ ...base, now: stubClock() })
+    ).toThrow(ExecutorInvocationConflictError);
+
+    // The durable owner + its round are byte-for-byte unchanged: the start
+    // savepoint left no half-written round behind.
+    expect(loadExecutorInvocation(db, INVOCATION_ID)).toEqual(ownerBefore);
+    expect(listExecutorRoundsForInvocation(db, INVOCATION_ID)).toEqual(
+      roundsBefore
     );
   });
 });

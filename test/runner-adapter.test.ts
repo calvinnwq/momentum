@@ -231,6 +231,43 @@ describe("dispatchRunnerAdapter", () => {
     expect(out.error).toContain("codex");
   });
 
+  it("reports undefined log and result paths for unsupported_runner because no runner ran", () => {
+    // Hermetic on purpose: an unknown kind fails closed after input validation
+    // but before any adapter executes, so synthetic string paths suffice and no
+    // real git repo / iteration dir is initialized (passing both overrides
+    // short-circuits initRepo()/makeTempDir()).
+    const input = makeInput({
+      repoPath: "/synthetic/runner-adapter/repo",
+      iterationDir: "/synthetic/runner-adapter/iter"
+    });
+    const out = dispatchRunnerAdapter("codex", input);
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.code).toBe("unsupported_runner");
+    // Unlike runner_threw (which threads input.runnerLogPath/resultJsonPath so an
+    // operator can inspect partial output), an unsupported kind never reached a
+    // runner and therefore advertises no artifacts to read.
+    expect(out.runnerLogPath).toBeUndefined();
+    expect(out.resultJsonPath).toBeUndefined();
+  });
+
+  it("enumerates the executing runner kinds in the unsupported_runner error as operator guidance", () => {
+    const input = makeInput({
+      repoPath: "/synthetic/runner-adapter/repo",
+      iterationDir: "/synthetic/runner-adapter/iter"
+    });
+    const out = dispatchRunnerAdapter("codex", input);
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.code).toBe("unsupported_runner");
+    // The operator-visible reason lists exactly the executes===true adapters so an
+    // operator can pick a runnable kind; this ties the fail-closed message to the
+    // executing-runner filter rather than a hard-coded string.
+    const executing = listExecutingRunnerAdapterKinds();
+    expect(executing.length).toBeGreaterThan(0);
+    expect(out.error).toContain(executing.join(", "));
+  });
+
   it("maps a thrown adapter to runner_threw and includes the iteration log/result paths", () => {
     const repoPath = initRepo();
     const iterationDir = makeTempDir("momentum-runner-adapter-iter-");

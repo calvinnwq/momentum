@@ -382,16 +382,23 @@ M9 dogfood and live-resume slices add built-CLI smoke coverage.
   post-finalization acceptance. Lost ownership routes to `repo_lock_lost`
   recovery before further git mutation; if ownership is lost after git commits
   but before Momentum accepts the result, the terminal success is rejected and
-  recovery is flagged for operator inspection. Heartbeating stops before the
-  recovery flag / artifact write, but the deferred managed-step lease is
-  released only after terminal or recovery reconciliation has been persisted.
-- **Owner.** [`src/live-step-advance.ts`](../src/live-step-advance.ts).
+  recovery is flagged for operator inspection. Live managed-step leases default
+  to `manual-recovery-required`, and repo-lock refresh is monotonic so a final
+  workflow-lease heartbeat cannot move an already-advanced repo-lock heartbeat
+  or expiry backward. Heartbeating stops before the recovery flag / artifact
+  write, but the deferred managed-step lease is released only after terminal or
+  recovery reconciliation has been persisted.
+- **Owner.** [`src/live-step-advance.ts`](../src/live-step-advance.ts) and
+  [`src/live-step-orchestrator.ts`](../src/live-step-orchestrator.ts).
 - **Evidence.**
   - Unit: `test/live-step-advance.test.ts` — keeps repo-lock and managed-step
     leases fresh during finalization; rejects lost repo-lock ownership before
     commit and after git has advanced HEAD; leaves conflicting deferred leases
     outstanding; and sets finalize or dispatch recovery before releasing the
     deferred managed-step lease.
+  - Unit: `test/live-step-orchestrator.test.ts` — pins the
+    `manual-recovery-required` managed-step stale-policy default, explicit stale
+    policy override, and monotonic repo-lock heartbeat refresh.
 
 ## M10 workflow-first runtime matrix: production dispatch invariants
 
@@ -440,23 +447,26 @@ that shipped workflow-first path.
   claimed by the scheduler and then silently ignored. That leaves operators with
   no durable reason, or leaves a dispatch lease that suppresses future work.
 - **M10 invariant.** The production dispatcher fails closed for every
-  unresolvable or unsupported-family claim. It flags the workflow run for manual
-  recovery, opens a step-scoped `manual_recovery_required` gate with stable
-  evidence (`workflow_run_not_found`, `workflow_definition_unlinked`,
-  `step_definition_not_found`, `unknown_executor_family`, or
-  `unsupported_executor_family`), releases the dispatch lease, and creates no
-  executor rows. The phase-1 dispatchable set is exactly `goal-loop`,
-  `one-shot`, `script`, and `no-mistakes`; `external-apply` and `subworkflow`
-  stay fail-closed until their daemon-dispatchable adapters land or closeout
-  explicitly defers them.
+  unresolvable or unsupported-family claim. When the run row still exists, it
+  flags the workflow run for manual recovery, opens a step-scoped
+  `manual_recovery_required` gate with stable evidence
+  (`workflow_definition_unlinked`, `step_definition_not_found`,
+  `unknown_executor_family`, or `unsupported_executor_family`), releases the
+  dispatch lease, and creates no executor rows. If the run row vanished
+  (`workflow_run_not_found`), it cannot write a run-scoped flag or gate without
+  orphaning evidence, so it releases the lease and creates no executor rows. The
+  phase-1 dispatchable set is exactly `goal-loop`, `one-shot`, `script`, and
+  `no-mistakes`; `external-apply` and `subworkflow` stay fail-closed until their
+  daemon-dispatchable adapters land or closeout explicitly defers them.
 - **Owner.** [`src/workflow-dispatch.ts`](../src/workflow-dispatch.ts) and
   [`src/workflow-dispatch-execute.ts`](../src/workflow-dispatch-execute.ts).
 - **Evidence.**
   - Unit: `test/workflow-dispatch.test.ts` pins the supportability decision and
     resolution-failure code mapping.
   - Unit: `test/workflow-dispatch-execute.test.ts` proves unsupported and
-    definition-unlinked claims create manual-recovery gates, set the durable
-    recovery flag, release the lease, and avoid executor scaffolds.
+    unresolvable claims create manual-recovery gates where possible, set the
+    durable recovery flag where possible, release the lease, avoid executor
+    scaffolds, and handle the vanished-run branch without a dangling gate.
 
 ## How to use this matrix
 
