@@ -631,4 +631,44 @@ describe("persistLiveWorkflowDispatchRecovery", () => {
       db.close();
     }
   });
+
+  it("falls back to command_failed when the dispatch code is outside the live recovery taxonomy", () => {
+    const dataDir = makeTempDir();
+    const agentWorkflowsDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, "run-dispatch-fallback");
+
+      // `process_killed` is not a member of WORKFLOW_LIVE_RUN_RECOVERY_CODES and
+      // no precise wrapper `liveRecoveryCode` is supplied, so the coarse dispatch
+      // code must not be dropped: it is classified into the nearest in-taxonomy
+      // code (`command_failed`) rather than persisted verbatim or lost.
+      const out = persistLiveWorkflowDispatchRecovery(db, {
+        runId: "run-dispatch-fallback",
+        stepId: "implementation",
+        dispatchCode: "process_killed",
+        error: "the live step process was externally killed",
+        executorLogPath: "/tmp/executor.log",
+        agentWorkflowsDir,
+        now: 1_730_000_500_000
+      });
+
+      expect(out.ok).toBe(true);
+      if (!out.ok || out.outcome !== "recovered") {
+        throw new Error("expected recovered");
+      }
+      expect(out.recoveryCode).toBe("command_failed");
+
+      const body = fs.readFileSync(
+        resolveWorkflowRecoveryArtifactPath(
+          agentWorkflowsDir,
+          "run-dispatch-fallback"
+        ),
+        "utf8"
+      );
+      expect(body).toContain("- Recovery classification: command_failed");
+    } finally {
+      db.close();
+    }
+  });
 });
