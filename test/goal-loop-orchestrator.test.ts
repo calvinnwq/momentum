@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/db.js";
 import {
+  ExecutorInvocationConflictError,
   insertExecutorInvocation,
   listExecutorArtifactsForRound,
   listExecutorCheckpointsForRound,
@@ -982,5 +983,82 @@ describe("runGoalLoopStep — invocation/round materialization", () => {
     expect(result.rounds[0]?.round.recoveryCode).toBe("result_missing");
     expect(result.invocation.state).toBe("manual_recovery_required");
     expect(result.invocation.finishedAt).not.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// runGoalLoopStep — single-owner enforcement.
+// ---------------------------------------------------------------------------
+//
+// The deterministic invocation id `(workflowRunId, stepRunId, attempt)` is the
+// adapter's single-owner key (contract "Heartbeat And Reattach"). A daemon that
+// re-dispatches the same claimed step under the same attempt must not mint a
+// second owner: the id collides at the very first durable write
+// (`insertExecutorInvocation`, before any round), so the adapter fails closed
+// and leaves the prior invocation untouched. A genuine re-run uses a fresh
+// `attempt`, which mints an independent invocation rather than mutating the prior.
+
+describe("runGoalLoopStep — single-owner enforcement", () => {
+  function dispatch(db: MomentumDb, attempt: number) {
+    return runGoalLoopStep({
+      db,
+      workflowRunId: "run-1",
+      stepRunId: "step-1",
+      stepKey: "implementation",
+      attempt,
+      selection: stepSelection(3),
+      resolveRoundInputs: roundInputsFor,
+      now: monotonicClock(),
+      runRound: () => ({
+        result: runnerResult({ goal_complete: true }),
+        finalize: COMMITTED
+      })
+    });
+  }
+
+  it("refuses a duplicate dispatch of the same attempt and leaves the durable owner untouched", () => {
+    const db = openInvocationDb();
+    const first = dispatch(db, 1);
+    const invocationId = goalLoopInvocationId("run-1", "step-1", 1);
+
+    // Snapshot the durable owner + rounds the first dispatch settled.
+    const ownerBefore = loadExecutorInvocation(db, invocationId);
+    const roundsBefore = listExecutorRoundsForInvocation(db, invocationId);
+    expect(ownerBefore).toEqual(first.invocation);
+
+    // A second dispatch under the same identity collides on the invocation id and
+    // fails closed before any work — never a silent second owner.
+    expect(() => dispatch(db, 1)).toThrow(ExecutorInvocationConflictError);
+
+    // The durable owner + its rounds are byte-for-byte unchanged: no extra round,
+    // no mutated terminal state.
+    expect(loadExecutorInvocation(db, invocationId)).toEqual(ownerBefore);
+    expect(listExecutorRoundsForInvocation(db, invocationId)).toEqual(
+      roundsBefore
+    );
+  });
+
+  it("mints a distinct, independent invocation for a fresh re-run attempt", () => {
+    const db = openInvocationDb();
+    const first = dispatch(db, 1);
+    const second = dispatch(db, 2);
+
+    expect(first.invocation.invocationId).toBe(
+      goalLoopInvocationId("run-1", "step-1", 1)
+    );
+    expect(second.invocation.invocationId).toBe(
+      goalLoopInvocationId("run-1", "step-1", 2)
+    );
+    expect(first.invocation.invocationId).not.toBe(
+      second.invocation.invocationId
+    );
+
+    // Both owners coexist durably; the re-run did not overwrite the prior attempt.
+    expect(loadExecutorInvocation(db, first.invocation.invocationId)).toEqual(
+      first.invocation
+    );
+    expect(loadExecutorInvocation(db, second.invocation.invocationId)).toEqual(
+      second.invocation
+    );
   });
 });

@@ -5,11 +5,13 @@ import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/db.js";
 import {
+  ExecutorInvocationConflictError,
   insertExecutorInvocation,
   insertExecutorRound,
   listExecutorCheckpointsForRound,
   listExecutorDecisionsForRound,
   listExecutorFindingsForRound,
+  listExecutorRoundsForInvocation,
   loadExecutorInvocation,
   loadExecutorRound,
   updateExecutorRound
@@ -1321,6 +1323,46 @@ describe("runNoMistakesMirrorStep — materialize invocation + round + first pol
     );
     expect(second.invocation.invocationId).toBe(
       noMistakesInvocationId(WORKFLOW_RUN_ID, STEP_RUN_ID, 2)
+    );
+  });
+
+  it("refuses a duplicate dispatch of the same attempt and leaves the durable owner untouched", () => {
+    // The deterministic invocation id `(workflowRunId, stepRunId, attempt)` is the
+    // mirror adapter's single-owner key. A daemon that re-dispatches the same
+    // claimed step under the same attempt must not mint a second owner: the id
+    // collides at the first durable write inside the start savepoint
+    // (`insertExecutorInvocation`), which rolls back, so nothing is half-written.
+    const db = openDb(makeTempDir());
+    seedParents(db);
+    const base = {
+      db,
+      workflowRunId: WORKFLOW_RUN_ID,
+      stepRunId: STEP_RUN_ID,
+      stepKey: STEP_KEY,
+      attempt: ATTEMPT,
+      read: okReader({ stepStatus: "failed" }),
+      expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
+      resolveRoundInputs
+    };
+
+    const first = runNoMistakesMirrorStep({ ...base, now: stubClock() });
+
+    // Snapshot the durable owner + round the first dispatch settled.
+    const ownerBefore = loadExecutorInvocation(db, INVOCATION_ID);
+    const roundsBefore = listExecutorRoundsForInvocation(db, INVOCATION_ID);
+    expect(ownerBefore).toEqual(first.invocation);
+
+    // A second dispatch under the same attempt collides on the invocation id and
+    // fails closed — never a silent second owner.
+    expect(() =>
+      runNoMistakesMirrorStep({ ...base, now: stubClock() })
+    ).toThrow(ExecutorInvocationConflictError);
+
+    // The durable owner + its round are byte-for-byte unchanged: the start
+    // savepoint left no half-written round behind.
+    expect(loadExecutorInvocation(db, INVOCATION_ID)).toEqual(ownerBefore);
+    expect(listExecutorRoundsForInvocation(db, INVOCATION_ID)).toEqual(
+      roundsBefore
     );
   });
 });
