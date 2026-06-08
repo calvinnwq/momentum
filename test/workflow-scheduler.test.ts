@@ -21,6 +21,7 @@ import {
 import { getWorkflowLease } from "../src/workflow-leases.js";
 import { resolveWorkflowRecoveryArtifactPath } from "../src/workflow-recovery-artifact.js";
 import { getWorkflowRunManualRecoveryState } from "../src/workflow-run-recovery.js";
+import { deriveWorkflowRunState } from "../src/workflow-run-reducer.js";
 import type {
   WorkflowLeaseKind,
   WorkflowLeaseRecord,
@@ -260,6 +261,64 @@ describe("selectRunnableWorkflowWork: durable runnable-step scan (NGX-348)", () 
 
       const scan = selectRunnableWorkflowWork(db, { now: NOW });
 
+      expect(scan.runnable).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("withholds an approved step queued behind a still-pending predecessor", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedRun(db, { runId: "run-a", state: "approved" });
+      // Predecessor still awaiting approval; the later step is already
+      // approved. Unlike the succeeded+pending case (which derives to
+      // `pending` and is dropped by the run-state guard), an approved step with
+      // nothing running/blocked/failed derives the whole run to `approved`, so
+      // it clears the scan's `derivedRunState !== "approved"` short-circuit.
+      seedStep(db, {
+        runId: "run-a",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "pending",
+        order: 0
+      });
+      seedStep(db, {
+        runId: "run-a",
+        stepId: "implementation",
+        kind: "implementation",
+        state: "approved",
+        order: 1
+      });
+
+      // Precondition: the run is genuinely dispatchable per run-state, so the
+      // empty scan below proves the in-order rule (nextRunnableStep) withheld
+      // the approved step rather than the run-state guard dropping the run.
+      expect(
+        deriveWorkflowRunState(
+          [
+            {
+              stepId: "preflight",
+              kind: "preflight",
+              state: "pending",
+              order: 0,
+              required: true
+            },
+            {
+              stepId: "implementation",
+              kind: "implementation",
+              state: "approved",
+              order: 1,
+              required: true
+            }
+          ],
+          { leases: [], now: NOW }
+        )
+      ).toBe("approved");
+
+      const scan = selectRunnableWorkflowWork(db, { now: NOW });
+
+      // The approved step is never dispatched past its pending predecessor.
       expect(scan.runnable).toEqual([]);
     } finally {
       db.close();
@@ -1021,6 +1080,54 @@ describe("claimRunnableWorkflowStep: atomic dispatch-lease claim (NGX-348)", () 
         runnableStepId: "preflight"
       });
       expect(getWorkflowLease(db, "run-a", "dispatch")).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses to claim an approved step withheld behind a pending predecessor", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedRun(db, { runId: "run-a", state: "approved" });
+      seedStep(db, {
+        runId: "run-a",
+        stepId: "preflight",
+        kind: "preflight",
+        state: "pending",
+        order: 0
+      });
+      seedStep(db, {
+        runId: "run-a",
+        stepId: "implementation",
+        kind: "implementation",
+        state: "approved",
+        order: 1
+      });
+
+      const result = claimRunnableWorkflowStep(db, {
+        runId: "run-a",
+        stepId: "implementation",
+        holder: "worker-1",
+        leaseExpiresAt: LEASE_EXPIRES_AT,
+        now: NOW
+      });
+
+      // A *pending* predecessor (vs. the superseded case's approved one) means
+      // no step is runnable at all, so the claim fails closed with
+      // run_not_runnable and reports no alternative runnable step.
+      expect(result).toEqual({ ok: false, reason: "run_not_runnable" });
+
+      // Fail-closed: no dispatch lease was acquired and neither step moved.
+      expect(getWorkflowLease(db, "run-a", "dispatch")).toBeUndefined();
+      const states = db
+        .prepare(
+          "SELECT step_id, state FROM workflow_steps WHERE run_id = ? ORDER BY step_order"
+        )
+        .all("run-a") as Array<{ step_id: string; state: string }>;
+      expect(states).toEqual([
+        { step_id: "preflight", state: "pending" },
+        { step_id: "implementation", state: "approved" }
+      ]);
     } finally {
       db.close();
     }
