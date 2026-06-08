@@ -15,7 +15,7 @@ Momentum is built milestone by milestone. Each milestone has a single durable sh
 | Milestone 7 | OpenClaw Coding Workflow Backend | Complete | [m7-openclaw-coding-workflow-backend.md](milestones/m7-openclaw-coding-workflow-backend.md) |
 | Milestone 8 | Workflow Run Operator Controls | Complete | [m8-workflow-run-operator-controls.md](milestones/m8-workflow-run-operator-controls.md) |
 | Milestone 9 | Live Workflow Execution | Foundation in force | [m9-live-workflow-execution.md](milestones/m9-live-workflow-execution.md) |
-| Milestone 10 | Workflow-First Runtime | Implementation started | [m10-workflow-first-runtime.md](milestones/m10-workflow-first-runtime.md) |
+| Milestone 10 | Workflow-First Runtime | Complete | [m10-workflow-first-runtime.md](milestones/m10-workflow-first-runtime.md) |
 
 Accepted planning for the next runtime direction lives in
 [internal/contracts/workflow-first-runtime.md](contracts/workflow-first-runtime.md).
@@ -32,7 +32,7 @@ completion classification, human gates, and agent / model selection precedence.
 The current-to-target planning bridge is pinned in
 [internal/contracts/workflow-first-gap-matrix.md](contracts/workflow-first-gap-matrix.md),
 including what survives from M7/M8/M9, what changes, and the M10 slice order.
-M10 implementation has begun: M10-00 promoted those planning contracts into the
+M10 is complete: M10-00 promoted those planning contracts into the
 milestone narrative, M10-01 lands workflow / step definition schema,
 validation, and persistence primitives, M10-02 lands workflow run start,
 M10-03 lands executor-loop schema / persistence, M10-04 lands the opt-in
@@ -40,10 +40,11 @@ daemon workflow scheduler lane, M10-05 lands the goal-loop executor
 adapter, M10-06 lands the one-shot / script executor adapters, M10-07 lands
 the no-mistakes executor mirror, M10-08 lands workflow gates and decisions, and
 M10-09a lands production workflow-lane dispatcher wiring for bounded managed
-`daemon start`. The M10 milestone narrative is
+`daemon start`. M10-09 dogfoods the workflow-first start / approval / bounded
+daemon dispatch path and closes the milestone. The M10 milestone narrative is
 [internal/milestones/m10-workflow-first-runtime.md](milestones/m10-workflow-first-runtime.md).
 
-The `doctor` readiness marker tracks the **most recently closed** milestone. It currently reads `Milestone 8: workflow run operator controls (NGX-323, NGX-324, NGX-325, NGX-326, NGX-327, NGX-328, NGX-329, NGX-330) complete`. The marker advanced from the M6 closeout string to `Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete` at the M7 closeout slice (NGX-319), stayed pinned to the M7 string through every M8 implementation slice, and advanced to the M8 string at the M8 closeout slice (NGX-330).
+The `doctor` readiness marker tracks the **most recently closed** milestone. It currently reads `Milestone 10: workflow-first runtime (NGX-344, NGX-345, NGX-346, NGX-347, NGX-348, NGX-349, NGX-350, NGX-351, NGX-352, NGX-367, NGX-353) complete`. The marker advanced from the M6 closeout string to `Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete` at the M7 closeout slice (NGX-319), stayed pinned to the M7 string through every M8 implementation slice, advanced to the M8 string at the M8 closeout slice (NGX-330), and advanced again to the M10 string at the M10 closeout slice (NGX-353).
 
 ## Most recently closed milestone: M8
 
@@ -79,9 +80,10 @@ M10-02 has since landed the workflow-first `workflow run start` surface,
 M10-04 has landed the opt-in scheduler lane for those runs, M10-05 has
 landed the goal-loop executor adapter, M10-06 has landed the one-shot /
 script executor adapters, M10-07 has landed the no-mistakes mirror, M10-08 has
-landed workflow gates and decisions, and M10-09a has wired the production
-workflow-lane dispatcher into bounded managed `daemon start`. The workflow-first
-dogfood and closeout remain future M10 work, and `goal start` remains the
+landed workflow gates and decisions, M10-09a has wired the production
+workflow-lane dispatcher into bounded managed `daemon start`, and M10-09 has
+dogfooded that workflow-first path through the real `ngx353-m10-closeout`
+run. `goal start` remains the
 compatibility path for the older Goal loop.
 
 ### Pinned M9 implementation sequence
@@ -131,11 +133,10 @@ becomes an executor family inside a workflow step.
 8. **NGX-351 — M10-07 no-mistakes executor mirror.** *(done)*
 9. **NGX-352 — M10-08 Workflow gates and decisions CLI.** *(done)*
 10. **NGX-367 — M10-09a Production workflow-lane dispatcher prep.** *(done)*
-11. **NGX-353 — M10-09 Workflow-first dogfood and closeout.**
+11. **NGX-353 — M10-09 Workflow-first dogfood and closeout.** *(done)*
 
-The `doctor --json` marker stays pinned to the M8 closeout string until a real
-milestone closeout slice flips it. M10 implementation slices before closeout do
-not flip it.
+The `doctor --json` marker now reports the M10 closeout string after the
+workflow-first dogfood gate passed.
 
 ## Previously closed milestone: M7
 
@@ -191,4 +192,4 @@ The following remain explicitly deferred until a later milestone justifies them.
 - Cooperative mid-job cancellation / signal handling beyond the existing `daemon stop` / `daemon stop --now` semantics.
 - Remote git operations (`fetch` / `pull` / `push` / `rebase`) driven from Momentum.
 - Replacing the GNHF / postflight / no-mistakes / merge-cleanup engines themselves; M7 is the substrate, M8 is the operator-control surface, and M9 wraps the executors — none of them reimplement the engines.
-- Generalizing the `WorkflowRun` substrate beyond OpenClaw coding workflows continues across M10 execution slices. M10-01 has landed reusable definition schema and persistence primitives, M10-02 adds first-class run start, M10-03 persists executor-loop records below step runs, M10-04 adds the opt-in scheduler lane, M10-05 adds the goal-loop executor adapter, M10-06 adds the one-shot / script executor adapters, M10-07 adds the no-mistakes mirror, M10-08 adds workflow gates and decisions, and M10-09a wires production dispatcher scaffolds into bounded managed `daemon start`; the real workflow-first dogfood, `external-apply` / `subworkflow` dispatch, and closeout marker remain pending. The accepted planning contracts for that pivot are [internal/contracts/workflow-first-runtime.md](contracts/workflow-first-runtime.md), [internal/contracts/executor-loop.md](contracts/executor-loop.md), and [internal/contracts/workflow-first-gap-matrix.md](contracts/workflow-first-gap-matrix.md).
+- Generalizing the `WorkflowRun` substrate beyond OpenClaw coding workflows continues after M10. M10-01 landed reusable definition schema and persistence primitives, M10-02 added first-class run start, M10-03 persists executor-loop records below step runs, M10-04 added the opt-in scheduler lane, M10-05 added the goal-loop executor adapter, M10-06 added the one-shot / script executor adapters, M10-07 added the no-mistakes mirror, M10-08 added workflow gates and decisions, M10-09a wired production dispatcher scaffolds into bounded managed `daemon start`, and M10-09 dogfooded that shipped path. Generalized `external-apply` / `subworkflow` dispatch remains deferred. The accepted planning contracts for that pivot are [internal/contracts/workflow-first-runtime.md](contracts/workflow-first-runtime.md), [internal/contracts/executor-loop.md](contracts/executor-loop.md), and [internal/contracts/workflow-first-gap-matrix.md](contracts/workflow-first-gap-matrix.md).

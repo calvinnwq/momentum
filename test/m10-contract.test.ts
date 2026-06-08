@@ -20,6 +20,7 @@ const M10_SLICES = [
   "M10-06",
   "M10-07",
   "M10-08",
+  "M10-09a",
   "M10-09",
 ] as const;
 
@@ -33,11 +34,14 @@ const M10_LINEAR_IDS = [
   "NGX-350",
   "NGX-351",
   "NGX-352",
+  "NGX-367",
   "NGX-353",
 ] as const;
 
 const M8_MARKER =
   "Milestone 8: workflow run operator controls (NGX-323, NGX-324, NGX-325, NGX-326, NGX-327, NGX-328, NGX-329, NGX-330) complete";
+const M10_MARKER =
+  "Milestone 10: workflow-first runtime (NGX-344, NGX-345, NGX-346, NGX-347, NGX-348, NGX-349, NGX-350, NGX-351, NGX-352, NGX-367, NGX-353) complete";
 
 describe("M10 workflow-first runtime planning contract", () => {
   describe("internal/milestones/m10-workflow-first-runtime.md", () => {
@@ -49,13 +53,13 @@ describe("M10 workflow-first runtime planning contract", () => {
       expect(readDoc(milestonePath).trim().length).toBeGreaterThan(0);
     });
 
-    it("marks M10 as implementation started, not accidentally complete", () => {
+    it("marks M10 as complete after the closeout dogfood", () => {
       const m10 = readDoc(milestonePath);
 
-      expect(m10).toMatch(/Status:[^\n]*Implementation started/i);
-      expect(m10).not.toMatch(/Status:[^\n]*Complete/i);
+      expect(m10).toMatch(/Status:[^\n]*Complete/i);
       expect(m10).toMatch(/M10-00 promoted/i);
-      expect(m10).toMatch(/M10-01 has begun landing/i);
+      expect(m10).toMatch(/M10-01 landed/i);
+      expect(m10).toMatch(/M10-09 dogfooded/i);
     });
 
     it("pins the workflow-first runtime product shape", () => {
@@ -101,14 +105,25 @@ describe("M10 workflow-first runtime planning contract", () => {
         expect(m10, `M10 milestone should list ${issueId}`).toContain(issueId);
       }
       expect(m10).toMatch(/NGX-345 through NGX-353 are the assigned Linear issue identifiers/i);
+      expect(m10).toMatch(/NGX-367 inserted as the M10-09a/i);
     });
 
-    it("keeps the doctor marker pinned to the most recently closed milestone", () => {
+    it("records the M10 closeout doctor marker", () => {
       const m10 = readDoc(milestonePath);
 
-      expect(m10).toContain(M8_MARKER);
-      expect(m10).toMatch(/M10 implementation work does not\s+flip it before closeout/i);
-      expect(m10).toMatch(/M10 may only flip the marker at M10 closeout/i);
+      expect(m10).not.toContain(M8_MARKER);
+      expect(m10).toContain(M10_MARKER);
+      expect(m10).toMatch(/M10 flipped the marker at M10 closeout/i);
+    });
+
+    it("records the closeout dogfood evidence and boundary", () => {
+      const m10 = readDoc(milestonePath);
+
+      expect(m10).toContain("ngx353-m10-closeout");
+      expect(m10).toContain("workflow run start");
+      expect(m10).toContain("daemon start --max-loop-iterations 1");
+      expect(m10).toMatch(/monitorDrift\.drifted: false/i);
+      expect(m10).toMatch(/phase-1 start\s+scaffold/i);
     });
 
     it("records explicit M10 non-goals", () => {
@@ -131,11 +146,11 @@ describe("M10 workflow-first runtime planning contract", () => {
   describe("internal/roadmap.md", () => {
     const roadmap = "internal/roadmap.md";
 
-    it("marks M10 as implementation started in the timeline", () => {
+    it("marks M10 as complete in the timeline", () => {
       const r = readDoc(roadmap);
 
       expect(r).toMatch(
-        /\|\s*Milestone 10\s*\|\s*Workflow-First Runtime\s*\|\s*Implementation started\s*\|/
+        /\|\s*Milestone 10\s*\|\s*Workflow-First Runtime\s*\|\s*Complete\s*\|/
       );
       expect(r).toContain("milestones/m10-workflow-first-runtime.md");
     });
@@ -152,18 +167,21 @@ describe("M10 workflow-first runtime planning contract", () => {
       }
     });
 
-    it("keeps the doctor marker on the M8 closeout string", () => {
-      expect(readDoc(roadmap)).toContain(M8_MARKER);
+    it("advances the doctor marker to the M10 closeout string", () => {
+      const r = readDoc(roadmap);
+      expect(r).not.toContain(M8_MARKER);
+      expect(r).toContain(M10_MARKER);
     });
   });
 
   describe("internal/exclusions.md", () => {
-    it("states that M10 implementation has begun while later runtime behavior remains deferred", () => {
+    it("states that M10 closeout landed while later runtime behavior remains deferred", () => {
       const e = readDoc("internal/exclusions.md");
 
       expect(e).toMatch(/M10 planning pinned/i);
       expect(e).toContain("internal/milestones/m10-workflow-first-runtime.md");
-      expect(e).toMatch(/first-class start \/ execution behavior[\s\S]*deferred until the relevant M10 implementation\s+slices land/i);
+      expect(e).toMatch(/workflow-first\s+dogfood and M10 closeout marker have landed/i);
+      expect(e).toMatch(/external-apply[\s\S]*subworkflow[\s\S]*deferred/i);
     });
   });
 

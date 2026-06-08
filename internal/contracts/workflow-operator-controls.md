@@ -171,7 +171,7 @@ If an M8 implementation slice discovers that its acceptance criteria require liv
 
 ## Closeout marker policy
 
-The `doctor --json` milestone string stayed pinned to the M7 closeout marker through every M8 implementation slice (NGX-324..NGX-329). NGX-330 (M8-07) flipped the marker to the M8 closeout string; `doctor --json` now reports `Milestone 8: workflow run operator controls (NGX-323, NGX-324, NGX-325, NGX-326, NGX-327, NGX-328, NGX-329, NGX-330) complete`.
+The `doctor --json` milestone string stayed pinned to the M7 closeout marker through every M8 implementation slice (NGX-324..NGX-329). NGX-330 (M8-07) flipped the marker to the M8 closeout string, recorded here as `Milestone 8: workflow run operator controls (NGX-323, NGX-324, NGX-325, NGX-326, NGX-327, NGX-328, NGX-329, NGX-330) complete`; later milestone closeouts can supersede the current runtime marker without changing this M8 contract history.
 
 ## Test boundary
 

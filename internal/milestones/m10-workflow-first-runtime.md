@@ -1,16 +1,17 @@
 # Milestone 10: Workflow-First Runtime
 
-**Status:** Implementation started. M10 is the first implementation milestone
+**Status:** Complete. M10 is the first implementation milestone
 for the workflow-first runtime model accepted in PR #70. M10-00 promoted the
-planning contracts into this executable sequence. M10-01 has begun landing the
-workflow / step definition primitives and is now complete, M10-02 adds workflow
-run start, M10-03 adds the durable executor-loop schema, M10-04 adds the
+planning contracts into this executable sequence. M10-01 landed the
+workflow / step definition primitives, M10-02 added workflow
+run start, M10-03 added the durable executor-loop schema, M10-04 added the
 opt-in daemon workflow scheduler lane, M10-05 adds the goal-loop executor
 adapter, M10-06 adds the one-shot / script executor adapters, M10-07 adds
 the no-mistakes executor mirror, M10-08 adds the durable workflow gates and
 the `workflow run decide` operator decision CLI, and M10-09a wires the
 production workflow-lane dispatcher into bounded managed `daemon start` without
-closing or rewriting M9 by itself.
+closing or rewriting M9 by itself. M10-09 dogfooded that shipped
+workflow-first path and closes the milestone.
 
 M10 promotes Momentum from a Goal-first product surface plus imported
 OpenClaw-coding-workflow substrate into a configurable workflow runtime:
@@ -38,8 +39,8 @@ the daemon workflow scheduler lane, M10-05 adds the goal-loop executor adapter,
 M10-06 adds the one-shot / script executor adapters, M10-07 adds the
 no-mistakes executor mirror, M10-08 adds the durable workflow gates and operator
 decision CLI, M10-09a adds production workflow-lane dispatcher wiring for
-bounded managed `daemon start`, and later M10 work implements closeout dogfood
-and remaining runtime behavior.
+bounded managed `daemon start`, and M10-09 records the closeout dogfood
+evidence.
 
 ## Relationship To M9
 
@@ -150,27 +151,65 @@ The M10 slice order is:
     unresolvable claims to manual-recovery gates. *(done)*
 11. **NGX-353 — M10-09 Workflow-first dogfood and closeout.** Run a real Momentum task
     through the workflow-first start surface, update regression coverage, and
-    close M10.
+    close M10. *(done)*
 
 NGX-345 through NGX-353 are the assigned Linear issue identifiers for M10-01
 through M10-09, with NGX-367 inserted as the M10-09a prep / repair slice before
 NGX-353. The M10 slice labels remain the stable ordering contract.
 
+## Closeout Dogfood
+
+The M10 closeout dogfood used the real Momentum data dir and shipped CLI path,
+not a test-only injected dispatcher:
+
+```text
+workflow run start --run-id ngx353-m10-closeout --definition coding-workflow --issue-scope NGX-353
+workflow run approve ngx353-m10-closeout --approval-boundary through-implementation
+daemon start --max-loop-iterations 1 --poll-interval-ms 0
+workflow run monitor ngx353-m10-closeout
+```
+
+The dogfood proved the workflow-first start / approval / bounded daemon dispatch
+path creates durable executor rows below a real `WorkflowRun`. It also exposed a
+closeout bug: the dispatch path advanced `workflow_steps.preflight` to
+`running` and created the executor scaffold, but left the parent
+`workflow_runs` state and monitor advisory snapshot stale at `approved`. NGX-353
+fixed that bug by refreshing both the canonical run state and advisory monitor
+columns in the same transaction that creates the dispatch scaffold.
+
+The final closeout evidence for `ngx353-m10-closeout` is:
+
+- `workflow run monitor` reports `runState: "running"`, `stepState: "running"`,
+  `reportReason: "in_progress"`, and `monitorDrift.drifted: false`.
+- `workflow_runs` has `state = running`, `monitor_last_seen_state = running`,
+  `monitor_terminal = 0`, and `monitor_step = preflight`.
+- `workflow_steps` has `preflight = running`, `implementation = approved`, and
+  later steps still pending.
+- `executor_invocations` contains
+  `ngx353-m10-closeout::preflight::dispatch` for the `one-shot` executor family.
+- `executor_rounds` contains
+  `ngx353-m10-closeout::preflight::dispatch::round-1` as the phase-1 start
+  scaffold.
+
+That is the intended M10 boundary: the shipped daemon path can start and observe
+a workflow-first run through durable executor records. Driving the scaffolded
+round all the way through the real executor mechanisms, plus generalized
+`external-apply` and `subworkflow` dispatch, stays deferred to later runtime
+work.
+
 ## Doctor Marker Policy
 
 The `doctor --json` readiness marker tracks the most recently closed
-milestone, not in-flight implementation slices. M10 implementation work does not
-flip it before closeout.
+milestone, not in-flight implementation slices. M10 now owns the current marker.
 
 The marker remains:
 
 ```text
-Milestone 8: workflow run operator controls (NGX-323, NGX-324, NGX-325, NGX-326, NGX-327, NGX-328, NGX-329, NGX-330) complete
+Milestone 10: workflow-first runtime (NGX-344, NGX-345, NGX-346, NGX-347, NGX-348, NGX-349, NGX-350, NGX-351, NGX-352, NGX-367, NGX-353) complete
 ```
 
-M10 may only flip the marker at M10 closeout after M10-00 through M10-09a have
-merged, the workflow-first dogfood gate passes, and the regression matrix is
-updated.
+M10 flipped the marker at M10 closeout after M10-00 through M10-09a merged, the
+workflow-first dogfood gate passed, and the regression matrix was updated.
 
 ## Non-Goals
 
@@ -184,8 +223,8 @@ orchestrator); M10-08 adds the durable workflow gates, the `evaluateGateDecision
 brain, gate persistence, and the `workflow run decide` operator decision CLI plus
 gate visibility only; M10-09a adds production workflow-lane dispatcher wiring,
 executor start scaffolds, and fail-closed manual-recovery gates for unsupported
-or unresolvable dispatch claims only. The closeout dogfood and generalized
-runtime behavior remain later slices.
+or unresolvable dispatch claims only; M10-09 adds dogfood closeout evidence and
+the marker flip. Generalized runtime behavior remains later work.
 
 Across the milestone, these remain outside scope unless a later contract
 explicitly changes them:

@@ -190,11 +190,13 @@ describe("M10-09a production workflow-lane dispatcher boundary (NGX-367)", () =>
     expect(contract).toMatch(/fail closed|fail-closed/i);
   });
 
-  it("states what remains for the NGX-353 closeout dogfood", () => {
+  it("records the NGX-353 closeout dogfood result and remaining runtime work", () => {
     const contract = readDoc(contractPath);
 
     expect(contract).toMatch(/doctor[\s-]*(marker|--json)/i);
     expect(contract).toMatch(/regression matrix|regression coverage/i);
-    expect(contract).toMatch(/dogfood/i);
+    expect(contract).toContain("ngx353-m10-closeout");
+    expect(contract).toMatch(/monitorDrift\.drifted = false/i);
+    expect(contract).toMatch(/external-apply[\s\S]*subworkflow/i);
   });
 });

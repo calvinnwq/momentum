@@ -260,9 +260,9 @@ describe("M8 contract (NGX-323)", () => {
       );
     });
 
-    it("advances the doctor marker to the M8 closeout string (NGX-330 owns the flip)", () => {
-      const r = readDoc(roadmap);
-      expect(r).toContain(
+    it("records the M8 closeout string in the M8 milestone history", () => {
+      const m8 = readDoc("internal/milestones/m8-workflow-run-operator-controls.md");
+      expect(m8).toContain(
         "Milestone 8: workflow run operator controls (NGX-323, NGX-324, NGX-325, NGX-326, NGX-327, NGX-328, NGX-329, NGX-330) complete"
       );
     });
@@ -403,12 +403,16 @@ describe("M8 contract (NGX-323)", () => {
 
   });
 
-  describe("doctor milestone marker (M8 closeout at NGX-330)", () => {
-    it("the cli reports the M8 closeout marker, not the M7 marker", () => {
-      const cli = fs.readFileSync(path.join(repoRoot, "src", "cli.ts"), "utf8");
-      expect(cli).toContain(
+  describe("doctor milestone marker history (M8 closeout at NGX-330)", () => {
+    it("the M8 milestone narrative records the M8 marker that was current at NGX-330", () => {
+      const milestone = readDoc("internal/milestones/m8-workflow-run-operator-controls.md");
+      expect(milestone).toContain(
         "Milestone 8: workflow run operator controls (NGX-323, NGX-324, NGX-325, NGX-326, NGX-327, NGX-328, NGX-329, NGX-330) complete"
       );
+    });
+
+    it("the current cli no longer reports the M7 marker", () => {
+      const cli = fs.readFileSync(path.join(repoRoot, "src", "cli.ts"), "utf8");
       expect(cli).not.toContain(
         "Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete"
       );

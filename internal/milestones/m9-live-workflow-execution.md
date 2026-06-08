@@ -102,4 +102,4 @@ M9 does not include:
 
 ## Closeout Marker Policy
 
-The `doctor --json` marker stays pinned to the most recently closed milestone — currently `Milestone 8: workflow run operator controls (NGX-323, NGX-324, NGX-325, NGX-326, NGX-327, NGX-328, NGX-329, NGX-330) complete` — through M9 foundation work. The M9-00 decision gate (NGX-331) did not flip it; M10 closeout now owns the next possible marker advance.
+The `doctor --json` marker stayed pinned to the then-most-recently closed milestone — `Milestone 8: workflow run operator controls (NGX-323, NGX-324, NGX-325, NGX-326, NGX-327, NGX-328, NGX-329, NGX-330) complete` — through M9 foundation work. The M9-00 decision gate (NGX-331) did not flip it; M10 closeout later advanced the marker.

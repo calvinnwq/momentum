@@ -106,11 +106,12 @@ describe("workflow-first runtime pivot contract", () => {
     expect(roadmap).toMatch(/workflow-first runtime pivot/i);
   });
 
-  it("keeps current exclusions honest while workflow-first implementation slices land", () => {
+  it("keeps current exclusions honest after the M10 closeout", () => {
     const exclusions = readDoc("internal/exclusions.md");
 
     expect(exclusions).toContain("internal/contracts/workflow-first-runtime.md");
     expect(exclusions).toMatch(/accepted planning contract/i);
-    expect(exclusions).toMatch(/first-class start \/ execution behavior[\s\S]*deferred until the relevant M10 implementation\s+slices land/i);
+    expect(exclusions).toMatch(/workflow-first\s+dogfood and M10 closeout marker have landed/i);
+    expect(exclusions).toMatch(/external-apply[\s\S]*subworkflow[\s\S]*deferred/i);
   });
 });

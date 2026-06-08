@@ -105,6 +105,33 @@ function stepState(db: MomentumDb, runId: string, stepId: string): string {
   return row.state;
 }
 
+function runState(db: MomentumDb, runId: string): string {
+  const row = db
+    .prepare("SELECT state FROM workflow_runs WHERE id = ?")
+    .get(runId) as { state: string };
+  return row.state;
+}
+
+function monitorAdvisory(db: MomentumDb, runId: string): {
+  state: string | null;
+  terminal: number | null;
+  step: string | null;
+} {
+  return db
+    .prepare(
+      `SELECT monitor_last_seen_state AS state,
+              monitor_terminal AS terminal,
+              monitor_step AS step
+         FROM workflow_runs
+        WHERE id = ?`
+    )
+    .get(runId) as {
+    state: string | null;
+    terminal: number | null;
+    step: string | null;
+  };
+}
+
 describe("executeWorkflowStepDispatch — supported family", () => {
   it("creates the executor invocation + round scaffold and advances the step", () => {
     const db = openSeededDb();
@@ -159,6 +186,12 @@ describe("executeWorkflowStepDispatch — supported family", () => {
 
     // The step advanced approved -> running so the lane will not re-offer it.
     expect(stepState(db, RUN_ID, "preflight")).toBe("running");
+    expect(runState(db, RUN_ID)).toBe("running");
+    expect(monitorAdvisory(db, RUN_ID)).toEqual({
+      state: "running",
+      terminal: 0,
+      step: "preflight"
+    });
   });
 
   it("holds the dispatch lease on a successful dispatch (owns the lifecycle)", () => {
