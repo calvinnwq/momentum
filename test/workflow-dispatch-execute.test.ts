@@ -301,6 +301,123 @@ describe("executeWorkflowStepDispatch — fail closed", () => {
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
     expect(countInvocations(db, RUN_ID)).toBe(0);
   });
+
+  it("routes an unknown executor family (corrupt step definition) to manual recovery", () => {
+    const db = openSeededDb();
+    // The step definition's `executor` column holds a value that is not a known
+    // WorkflowExecutorFamily (corrupt or legacy durable state). Claiming does not
+    // read `step_definitions`, so the corrupt value only bites at dispatch.
+    db.prepare(
+      `UPDATE step_definitions SET executor = 'definitely-not-a-family'
+         WHERE definition_key = ? AND definition_version = ? AND step_key = ?`
+    ).run(
+      CODING_WORKFLOW_DEFINITION.key,
+      CODING_WORKFLOW_DEFINITION.version,
+      "preflight"
+    );
+    const claim = approveAndClaim(db, "preflight");
+
+    const result = executeWorkflowStepDispatch(claim, {
+      db,
+      workerId: WORKER,
+      now: NOW + 1
+    });
+
+    expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.failClosed);
+
+    // The gate stamps the stable `unknown_executor_family` code as evidence and
+    // surfaces the offending raw family string to the operator.
+    const gates = listWorkflowGatesForRun(db, RUN_ID);
+    expect(gates).toHaveLength(1);
+    expect(gates[0]).toMatchObject({
+      gateType: "manual_recovery_required",
+      targetScope: "step",
+      stepRunId: "preflight",
+      evidence: "unknown_executor_family",
+      resolvedAt: null
+    });
+    expect(gates[0]?.reason).toContain("definitely-not-a-family");
+
+    // Durable park + released lease + no half scaffold + step not advanced.
+    expect(
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+    ).toBe(true);
+    expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
+    expect(countInvocations(db, RUN_ID)).toBe(0);
+    expect(stepState(db, RUN_ID, "preflight")).toBe("approved");
+  });
+
+  it("routes a missing step definition to manual recovery", () => {
+    const db = openSeededDb();
+    const claim = approveAndClaim(db, "preflight");
+    // The step definition row vanished between claim and dispatch, so the claimed
+    // step can no longer be resolved to an executor family.
+    db.prepare(
+      `DELETE FROM step_definitions
+         WHERE definition_key = ? AND definition_version = ? AND step_key = ?`
+    ).run(
+      CODING_WORKFLOW_DEFINITION.key,
+      CODING_WORKFLOW_DEFINITION.version,
+      "preflight"
+    );
+
+    const result = executeWorkflowStepDispatch(claim, {
+      db,
+      workerId: WORKER,
+      now: NOW + 1
+    });
+
+    expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.failClosed);
+    const gates = listWorkflowGatesForRun(db, RUN_ID);
+    expect(gates).toHaveLength(1);
+    expect(gates[0]).toMatchObject({
+      gateType: "manual_recovery_required",
+      targetScope: "step",
+      stepRunId: "preflight",
+      evidence: "step_definition_not_found",
+      resolvedAt: null
+    });
+    expect(gates[0]?.reason).toContain("preflight");
+    expect(
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+    ).toBe(true);
+    expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
+    expect(countInvocations(db, RUN_ID)).toBe(0);
+    expect(stepState(db, RUN_ID, "preflight")).toBe("approved");
+  });
+
+  it("routes a vanished run to manual recovery without stranding the lease or opening a gate", () => {
+    const db = openSeededDb();
+    const claim = approveAndClaim(db, "preflight");
+    // The whole run row vanished between claim and dispatch (e.g. torn down by a
+    // concurrent operation). FK enforcement is toggled off only to delete the
+    // parent row while its claimed step + dispatch lease linger as orphans,
+    // reproducing the race the dispatcher must tolerate without crashing on the
+    // gate's NOT NULL run FK.
+    db.exec("PRAGMA foreign_keys = OFF");
+    db.prepare("DELETE FROM workflow_runs WHERE id = ?").run(RUN_ID);
+    db.exec("PRAGMA foreign_keys = ON");
+
+    const result = executeWorkflowStepDispatch(claim, {
+      db,
+      workerId: WORKER,
+      now: NOW + 1
+    });
+
+    expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.failClosed);
+    expect(result.detail).toContain("workflow_run_not_found");
+
+    // A vanished run cannot carry a gate (the gate's run FK would dangle), so none
+    // is opened and no recovery flag is written — there is no run row to flag.
+    expect(listWorkflowGatesForRun(db, RUN_ID)).toHaveLength(0);
+    expect(getWorkflowRunManualRecoveryState(db, RUN_ID)).toBeUndefined();
+
+    // The dispatch lease is still released so the run is not held busy on a no-op,
+    // no executor scaffold was created, and the orphaned step was not advanced.
+    expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
+    expect(countInvocations(db, RUN_ID)).toBe(0);
+    expect(stepState(db, RUN_ID, "preflight")).toBe("approved");
+  });
 });
 
 describe("executeWorkflowStepDispatch — safety", () => {
