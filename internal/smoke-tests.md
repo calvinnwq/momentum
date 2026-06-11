@@ -534,6 +534,24 @@ Coverage:
   one-shot adapter id, so it mints no second owner), the ordered `succeeded`
   rounds, and the terminal round's `result_captured` checkpoint stream, and
   records goal-loop composition evidence.
+- **no-mistakes mirror terminal composition**: on top of the same real source
+  read → reconciliation → workflow run start, the real `no-mistakes` step (the
+  no-mistakes family in `CODING_WORKFLOW_DEFINITION`) is driven through
+  `runNoMistakesMirrorStep`. Unlike the result-bearing adapters, the mirror
+  reflects an external review gate's state as untrusted evidence to classify
+  rather than driving an agent Momentum chose: the adapter materializes the
+  durable invocation + the single long-lived mirror round (born in
+  `mirroring_external_state`), pins the expected external identity, and runs the
+  first poll. A corroborated `completed` snapshot with `ciState: passed` (identity
+  matching the pinned expected identity) settles the round straight to terminal
+  `succeeded` from the mirror phase — the mirror's equivalent of the
+  result-bearing adapters' passing verification gate. The proof asserts the
+  durable, reattachable no-mistakes invocation id (distinct from the one-shot
+  scaffold's `...::dispatch` id, the one-shot adapter id, and the goal-loop
+  adapter id, so it mints no second owner), the single `succeeded` mirror round,
+  the round's re-fingerprinted `inputDigest`, the pinned-then-mirrored checkpoint
+  stream (`expected_external_identity` → `external_state_mirrored`), and records
+  mirror composition evidence.
 - **external-write policy gate held closed**: the real `linear-refresh`
   (`external-apply`) step is claimed through the scheduler and dispatched; the
   external-write family is not a phase-1 dispatchable family, so the dispatch
@@ -550,12 +568,13 @@ Phase-1 boundary (honest scope): `executeWorkflowStepDispatch` stops at the star
 seam-level reconciliation with the scaffold is the documented real-adapter
 follow-up. The proof therefore exercises the scaffold (via the production seam)
 on the `preflight` one-shot step and terminal finalization (via the landed
-adapters) on distinct steps: the one-shot adapter on `postflight` and the
-goal-loop adapter on `implementation`. Each carries a deliberately distinct
-invocation id (`...::dispatch` for the scaffold vs each landed adapter's own
-reattachable id), so scaffold + one-shot terminal + goal-loop terminal compose
-without minting two owners for one step. Composing the no-mistakes / M9
-live-wrapper terminal finalizations into the E2E remains follow-on NGX-372 work.
+adapters) on distinct steps: the one-shot adapter on `postflight`, the goal-loop
+adapter on `implementation`, and the no-mistakes mirror adapter on `no-mistakes`.
+Each carries a deliberately distinct invocation id (`...::dispatch` for the
+scaffold vs each landed adapter's own reattachable id), so scaffold + one-shot
+terminal + goal-loop terminal + no-mistakes-mirror terminal compose without
+minting two owners for one step. Composing the M9 live-wrapper terminal
+finalization into the E2E remains follow-on NGX-372 work.
 
 Evidence: each test assembles a structured composition-evidence record (per-layer
 states / counts / verification status / gate type) and writes it as a
@@ -653,10 +672,10 @@ verify-before-commit and failure-reset-to-base — documented under *Milestone 9
 live-execution unit coverage* above; any durable evidence is registered per the
 artifact policy.
 
-Remaining NGX-372 work: composing the no-mistakes / M9 live-wrapper *terminal
-finalizations* into the full adapter E2E proof (the one-shot and goal-loop
-terminals are now composed into `test/full-adapter-e2e.test.ts`; no-mistakes and
-the live wrapper are not yet). A full real-agent harness run
+Remaining NGX-372 work: composing the M9 live-wrapper *terminal finalization*
+into the full adapter E2E proof (the one-shot, goal-loop, and no-mistakes-mirror
+terminals are now composed into `test/full-adapter-e2e.test.ts`; the M9 live
+wrapper is not yet). A full real-agent harness run
 (`MOMENTUM_REAL_SMOKE_WORKFLOW_FULL=1`) stays operator-driven and
 `coding-workflow-pipeline`-owned, not a CI spawn.
 

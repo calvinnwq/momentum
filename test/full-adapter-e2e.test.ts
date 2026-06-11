@@ -47,6 +47,13 @@ import {
   type GoalLoopRoundRuntimeInputs
 } from "../src/goal-loop-executor.js";
 import { runGoalLoopStep } from "../src/goal-loop-orchestrator.js";
+import {
+  noMistakesInvocationId,
+  noMistakesRoundId,
+  type NoMistakesExternalState,
+  type NoMistakesRoundRuntimeInputs
+} from "../src/no-mistakes-executor.js";
+import { runNoMistakesMirrorStep } from "../src/no-mistakes-orchestrator.js";
 import type { FinalizeLiveWorkflowStepFromResultFileResult } from "../src/live-step-finalize.js";
 import type { RunnerResult } from "../src/runner-result.js";
 
@@ -86,14 +93,17 @@ import type { RunnerResult } from "../src/runner-result.js";
  * note in src/workflow-dispatch-execute.ts). This proof therefore exercises the
  * scaffold via the production seam on one one-shot step (`preflight`) and the
  * terminal finalization via the landed adapters on distinct steps: the one-shot
- * adapter on `postflight`, and the goal-loop adapter on `implementation` (the
+ * adapter on `postflight`, the goal-loop adapter on `implementation` (the
  * goal-loop family in the real coding workflow definition), which drives a
  * bounded multi-round invocation to terminal `succeeded` with a passing
- * verification gate. Each carries a deliberately distinct invocation id
+ * verification gate, and the no-mistakes mirror adapter on `no-mistakes`, which
+ * settles its single long-lived mirror round to terminal `succeeded` on a
+ * corroborated `completed` external review gate (the mirror's equivalent of a
+ * passing verification gate). Each carries a deliberately distinct invocation id
  * (`...::dispatch` for the scaffold vs each landed adapter's own reattachable
  * id), so composing scaffold + multiple terminal families never mints two owners
- * for one step. Composing the remaining no-mistakes / M9 live-wrapper terminal
- * finalizations is the last NGX-372 follow-up.
+ * for one step. Composing the remaining M9 live-wrapper terminal finalization is
+ * the last NGX-372 follow-up.
  */
 
 const NOW = 1_700_000_000_000;
@@ -278,6 +288,45 @@ function goalLoopRoundInputs(
     inputDigest: `sha256:implementation-input-${roundIndex}`,
     artifactRoot: root,
     logPaths: [path.join(root, "stdout.log")]
+  };
+}
+
+// The no-mistakes mirror reflects external review-gate state rather than driving
+// an agent Momentum chose, so its terminal-success evidence is a *corroborated*
+// `completed` external snapshot with CI passed — the mirror's equivalent of the
+// one-shot / goal-loop adapters' passing verification gate. The snapshot's
+// identity is corroborated against the expected identity pinned at start, and a
+// completed-with-CI-passed snapshot settles the long-lived round straight to
+// `succeeded` from `mirroring_external_state` (no intervening capture phase).
+const NO_MISTAKES_IDENTITY = {
+  externalRunId: "nm-run-ngx-372",
+  branch: "feat/ngx-372",
+  headSha: SHA
+} as const;
+
+function noMistakesCompletedState(): NoMistakesExternalState {
+  return {
+    externalRunId: NO_MISTAKES_IDENTITY.externalRunId,
+    branch: NO_MISTAKES_IDENTITY.branch,
+    headSha: NO_MISTAKES_IDENTITY.headSha,
+    activeStep: "merge",
+    stepStatus: "completed",
+    findings: [],
+    selectedFindingIds: [],
+    decisions: [],
+    prUrl: null,
+    ciState: "passed"
+  };
+}
+
+function noMistakesRoundInputs(
+  artifactRoot: string
+): NoMistakesRoundRuntimeInputs {
+  const root = path.join(artifactRoot, "no-mistakes");
+  return {
+    inputDigest: "sha256:no-mistakes-start",
+    artifactRoot: root,
+    logPaths: [path.join(root, "state.json")]
   };
 }
 
@@ -695,6 +744,141 @@ describe("NGX-372 full adapter E2E proof", () => {
         "continue",
         "complete"
       ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("composes the no-mistakes mirror landed adapter: the no-mistakes step settles its long-lived mirror round to terminal succeeded on a corroborated completed external review gate", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir("momentum-ngx-372-e2e-repo-");
+    const artifactRoot = makeTempDir("momentum-ngx-372-e2e-artifacts-");
+    const db = openDb(dataDir);
+    try {
+      // --- Layer 1: source adapter read -> local reconciliation / persistence ---
+      const client = fakeLinearClient([
+        {
+          ok: true,
+          page: {
+            issues: [makeLinearIssue({ updatedAt: 1_700_000_001_000 })],
+            nextCursor: null
+          }
+        }
+      ]);
+
+      const reconciliation = await reconcileLinearSource(
+        db,
+        { client, filters: { projectId: "momentum-project" } },
+        { now: () => NOW + 2 }
+      );
+      expect(reconciliation.run.state).toBe("succeeded");
+      const sourceItems = listSourceItems(db, { adapterKind: "linear" });
+      expect(sourceItems).toHaveLength(1);
+      const sourceItem = sourceItems[0];
+
+      // --- Layer 2: workflow run start, objective threaded from the source read ---
+      const runId = "ngx-372-no-mistakes-e2e";
+      seedCodingWorkflowRun(db, {
+        runId,
+        repoPath: repoDir,
+        objective: `Implement ${sourceItem?.externalKey} via the coding workflow`
+      });
+
+      // --- Layer 3: no-mistakes mirror landed adapter -> terminal finalization ---
+      // `no-mistakes` is the no-mistakes family in the real coding workflow
+      // definition (src/workflow-definition.ts). Unlike the result-bearing
+      // adapters, the mirror does not drive an agent Momentum chose: it reflects an
+      // external review gate's state as untrusted evidence to classify. The landed
+      // adapter materializes the durable invocation + the single long-lived mirror
+      // round (born in `mirroring_external_state`), pins the expected external
+      // identity, then runs the first poll. A corroborated `completed` snapshot with
+      // CI passed settles the round straight to terminal `succeeded` — the mirror's
+      // equivalent of the other adapters' passing verification gate. Its
+      // deterministic invocation id is distinct from the one-shot scaffold's
+      // `...::dispatch` id, the one-shot adapter's id, and the goal-loop adapter's
+      // id, so composing a fourth terminal family never mints two owners for one
+      // step.
+      const result = runNoMistakesMirrorStep({
+        db,
+        workflowRunId: runId,
+        stepRunId: "no-mistakes",
+        stepKey: "no-mistakes",
+        attempt: 1,
+        read: () => ({
+          ok: true,
+          value: noMistakesCompletedState(),
+          digest: "sha256:no-mistakes-poll"
+        }),
+        expectedExternalIdentity: NO_MISTAKES_IDENTITY,
+        resolveRoundInputs: () => noMistakesRoundInputs(artifactRoot),
+        now: monotonicClock(NOW + 100)
+      });
+
+      // The invocation is the no-mistakes family and terminalized succeeded.
+      expect(result.invocation.executorFamily).toBe("no-mistakes");
+      expect(result.invocation.state).toBe("succeeded");
+      expect(result.invocation.finishedAt).not.toBeNull();
+
+      // The single long-lived mirror round settled succeeded directly from the
+      // mirror phase, gated by the corroborated completed + CI-passed snapshot.
+      expect(result.round.decision.classification).toBe("complete");
+      expect(result.round.round.state).toBe("succeeded");
+      expect(result.round.round.finishedAt).not.toBeNull();
+      // The mirror fingerprints the exact external bytes it mirrored this poll.
+      expect(result.round.round.inputDigest).toBe("sha256:no-mistakes-poll");
+
+      // Durable + reattachable below the StepRun: a deterministic invocation id and
+      // its single mirror round (index 0), distinct from every other terminal
+      // family's id composed in this proof.
+      const invocationId = noMistakesInvocationId(runId, "no-mistakes", 1);
+      expect(result.invocation.invocationId).toBe(invocationId);
+      expect(invocationId).not.toBe(`${runId}::no-mistakes::dispatch`);
+      expect(loadExecutorInvocation(db, invocationId)).toEqual(
+        result.invocation
+      );
+      const roundId = noMistakesRoundId(invocationId);
+      expect(result.round.round.roundId).toBe(roundId);
+      expect(
+        listExecutorRoundsForInvocation(db, invocationId).map((r) => r.state)
+      ).toEqual(["succeeded"]);
+
+      // The mirror's durable evidence: the expected identity pinned at start, then
+      // the corroborated external state mirrored into a durable checkpoint.
+      expect(
+        listExecutorCheckpointsForRound(db, roundId).map((c) => c.stage)
+      ).toEqual(["expected_external_identity", "external_state_mirrored"]);
+
+      // --- Composition evidence (acceptance criterion: the proof records it) ---
+      const evidence = {
+        issue: "NGX-372",
+        proof: "full-adapter-e2e-no-mistakes",
+        source: {
+          runState: reconciliation.run.state,
+          externalKey: sourceItem?.externalKey ?? null
+        },
+        workflow: { runId, definition: CODING_WORKFLOW_DEFINITION.key },
+        noMistakesFinalization: {
+          invocationId,
+          executorFamily: result.invocation.executorFamily,
+          invocationState: result.invocation.state,
+          roundState: result.round.round.state,
+          classification: result.round.decision.classification,
+          mirroredDigest: result.round.round.inputDigest
+        }
+      };
+      const evidencePath = recordCompositionEvidence(
+        dataDir,
+        "no-mistakes",
+        evidence
+      );
+      const recorded = JSON.parse(fs.readFileSync(evidencePath, "utf8")) as {
+        noMistakesFinalization: {
+          invocationState: string;
+          classification: string;
+        };
+      };
+      expect(recorded.noMistakesFinalization.invocationState).toBe("succeeded");
+      expect(recorded.noMistakesFinalization.classification).toBe("complete");
     } finally {
       db.close();
     }
