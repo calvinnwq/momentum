@@ -431,9 +431,294 @@ Run the built-binary production workflow-lane smoke locally via:
 pnpm vitest run test/smoke.test.ts -t "production workflow-lane dispatch"
 ```
 
+## Opt-in real adapter smoke (NGX-372)
+
+NGX-372 adds the first adapter test layer allowed to touch a real external
+system, behind an explicit opt-in switch. It is **not** part of default
+`pnpm test`: the gated suite skips unless the operator opts in, so CI never
+reaches `api.linear.app`. CI-safe vs opt-in separation:
+
+- **CI-safe (always runs):** `test/real-smoke.test.ts` pins the pure gating
+  decision (`planLinearReadSmoke`) and the failure-mode taxonomy
+  (`classifyRealSmokeReadOutcome`) with no network. The gated file also carries
+  one always-on guard test proving it stays opt-in.
+- **Opt-in (manual / flagged):** `test/real-linear-read-smoke.test.ts` performs a
+  bounded, read-only real Linear `issues` reconcile. It is skipped via
+  `describe.skipIf` unless `MOMENTUM_REAL_SMOKE_LINEAR` is truthy **and**
+  `LINEAR_API_KEY` is set.
+
+Read-only by construction: the smoke composes only the read-side
+`LinearReconciliationClient` (`buildLinearHttpReconciliationClient`) — no
+external-write adapter is reachable, so no comment/status mutation can occur.
+Real external **writes** stay a separate, policy-gated adapter (see the M6 row in
+[contracts/adapter-test-coverage.md](contracts/adapter-test-coverage.md)) and are
+out of scope for this read smoke.
+
+Manual run:
+
+```
+MOMENTUM_REAL_SMOKE_LINEAR=1 LINEAR_API_KEY=lin_api_... \
+  pnpm vitest run test/real-linear-read-smoke.test.ts
+```
+
+Optional read-only scoping / safety knobs (all default-off):
+
+- `MOMENTUM_REAL_SMOKE_DRY_RUN=1` — perform the real read but persist nothing
+  locally (no-op mode; the run row is still recorded).
+- `MOMENTUM_REAL_SMOKE_LINEAR_PROJECT=...` — UUID maps to `projectId`, else
+  `projectName`.
+- `MOMENTUM_REAL_SMOKE_LINEAR_MILESTONE=...` — UUID maps to `milestoneId`, else
+  `milestoneName`.
+- `MOMENTUM_REAL_SMOKE_LINEAR_MAX_PAGES=2` — bound the drain (default 1 page);
+  a non-positive / non-integer value fails closed (skip, `config_invalid`).
+- `MOMENTUM_REAL_SMOKE_LINEAR_ENDPOINT=...` — override the GraphQL endpoint, e.g.
+  to point a dry-run at a local mock.
+- `MOMENTUM_REAL_SMOKE_EVIDENCE_DIR=...` — override the evidence directory.
+
+Evidence: the smoke writes a `linear-read-<ts>.json` record (filters, endpoint,
+run state, counts, pagination stop, classified outcome, items persisted) under
+`.agent-runs/real-smoke/` by default and logs the path to stdout.
+
+Documented failure modes (surfaced by `classifyRealSmokeReadOutcome`):
+
+- `missing_credentials` — opted in without `LINEAR_API_KEY` (skip; not a run).
+- `auth_failure` — 401/403 or auth-shaped GraphQL error from Linear.
+- `rate_limited` — HTTP 429 / rate-limit message.
+- `network_failure` — transport timeout / DNS / connection-reset failure.
+- `tool_unavailable` — no global `fetch` available in the runtime.
+- `config_invalid` — bad page-size / endpoint / other config rejection.
+- `adapter_error` — any other unrecognized read failure (response shape, etc.).
+
+Cleanup / rollback: the smoke uses a disposable OS-temp data dir that is removed
+in `afterEach`, initializes no git repo, and writes only the SQLite database
+there, so it leaves the working tree clean. The only durable footprint is the
+gitignored `.agent-runs/real-smoke/` evidence file, which the operator may delete
+once captured in the Linear closeout. Real external state is never mutated.
+
+## Full adapter E2E proof (NGX-372)
+
+`test/full-adapter-e2e.test.ts` is the **CI-safe** capstone of the layered
+adapter-test strategy (see
+[contracts/adapter-test-coverage.md](contracts/adapter-test-coverage.md)): after
+the isolated contracts (NGX-369 / NGX-370) and the stubbed integration smoke
+(NGX-371) are green, it composes the *real* adapter layers through the intended
+operator flow in one proof and records evidence of the composition. Every
+external system is a fake or a local temp dir — no `api.linear.app` call, no real
+agent / runner, no git remote, no external write — so it runs in default
+`pnpm test`. It is the test that should never be the first to discover an
+adapter-contract bug, since every layer it touches is already individually
+pinned.
+
+Coverage:
+
+- **happy-path composition**: a fake Linear read reconciles into the `source_*`
+  tables, a built-in coding-workflow run starts with an objective threaded from
+  the reconciled issue key, the shipped `executeWorkflowStepDispatch` production
+  seam (driven from a real `claimRunnableWorkflowStep` claim) creates the
+  phase-1 one-shot start scaffold (invocation `running`, round `pending`, no
+  fabricated evidence), and the landed `runSingleShotStep` adapter drives a
+  one-shot step to a terminal `succeeded` with a passing verification gate and a
+  recorded commit. The proof asserts the durable composition across
+  `source_items` / `source_snapshots` / `source_reconciliation_runs`,
+  `workflow_runs` / `workflow_steps`, and `executor_invocations` /
+  `executor_rounds` / `executor_artifacts` / `executor_checkpoints` (including
+  the `result_captured` checkpoint and the `verification_output` artifact).
+- **goal-loop terminal composition**: on top of the same real source read →
+  reconciliation → workflow run start, the real `implementation` step (the
+  goal-loop family in `CODING_WORKFLOW_DEFINITION`) is driven through
+  `runGoalLoopStep` to a bounded multi-round invocation that terminalizes
+  `succeeded` (round 0 commits but is incomplete → `continue`; round 1 commits
+  and recommends completion → `complete`), each round gated by a passing
+  verification finalize. The proof asserts the durable, reattachable goal-loop
+  invocation id (distinct from the one-shot scaffold's `...::dispatch` id and the
+  one-shot adapter id, so it mints no second owner), the ordered `succeeded`
+  rounds, and the terminal round's `result_captured` checkpoint stream, and
+  records goal-loop composition evidence.
+- **no-mistakes mirror terminal composition**: on top of the same real source
+  read → reconciliation → workflow run start, the real `no-mistakes` step (the
+  no-mistakes family in `CODING_WORKFLOW_DEFINITION`) is driven through
+  `runNoMistakesMirrorStep`. Unlike the result-bearing adapters, the mirror
+  reflects an external review gate's state as untrusted evidence to classify
+  rather than driving an agent Momentum chose: the adapter materializes the
+  durable invocation + the single long-lived mirror round (born in
+  `mirroring_external_state`), pins the expected external identity, and runs the
+  first poll. A corroborated `completed` snapshot with `ciState: passed` (identity
+  matching the pinned expected identity) settles the round straight to terminal
+  `succeeded` from the mirror phase — the mirror's equivalent of the
+  result-bearing adapters' passing verification gate. The proof asserts the
+  durable, reattachable no-mistakes invocation id (distinct from the one-shot
+  scaffold's `...::dispatch` id, the one-shot adapter id, and the goal-loop
+  adapter id, so it mints no second owner), the single `succeeded` mirror round,
+  the round's re-fingerprinted `inputDigest`, the pinned-then-mirrored checkpoint
+  stream (`expected_external_identity` → `external_state_mirrored`), and records
+  mirror composition evidence.
+- **M9 live-wrapper managed-step terminal composition**: on top of the same real
+  source read → reconciliation → workflow run start (opened `approved` through
+  `merge-cleanup` via the real approval-boundary persistence path, then made
+  repo-backed with an active worker-held repo lock), the real `merge-cleanup` step
+  (a live-wrapper family step) is driven through `runLiveWorkflowStep`. This is the
+  managed-step layer the executor-loop adapters never touch: it acquires the
+  `managed-step` lease, transitions the durable `workflow_steps` row approved →
+  running → succeeded, runs the live wrapper, and persists the terminal state
+  *before* releasing the lease. The proof asserts the terminal step state, the
+  start/finish stamps, the live result digest, the untouched M8 operator-override
+  gate, and the lease released exactly at finalization, and proves the layer is
+  distinct by asserting it mints **no** `executor_invocations` / `executor_rounds`
+  rows. It records live-wrapper composition evidence.
+- **external-write policy gate held closed**: the real `linear-refresh`
+  (`external-apply`) step is claimed through the scheduler and dispatched; the
+  external-write family is not a phase-1 dispatchable family, so the dispatch
+  fails closed — zero executor rows, an operator-visible
+  `manual_recovery_required` gate hung from the step, the run flagged
+  `needs_manual_recovery`, and the dispatch lease released (not stranded). This
+  is the composed proof that real external **reads** stay separated from real
+  external **writes**, which remain disabled unless the separate M6 write policy
+  gate explicitly allows them.
+
+Phase-1 boundary (honest scope): `executeWorkflowStepDispatch` stops at the start
+*scaffold*; the landed `runSingleShotStep` / `runGoalLoopStep` /
+`runNoMistakesMirrorStep` executor-loop adapters and the M9 managed-step
+`runLiveWorkflowStep` adapter own terminal finalization, and the executor-loop
+adapters' seam-level reconciliation with the scaffold is the documented
+real-adapter follow-up. The proof therefore exercises the scaffold (via the
+production seam) on the `preflight` one-shot step and terminal finalization (via
+the landed adapters) on distinct steps: the one-shot adapter on `postflight`, the
+goal-loop adapter on `implementation`, the no-mistakes mirror adapter on
+`no-mistakes`, and the M9 live-wrapper managed-step adapter on `merge-cleanup`.
+The first three settle the `executor_invocations` / `executor_rounds` layer; the
+M9 live wrapper instead advances the durable `workflow_steps` row itself under a
+`managed-step` lease (a genuinely distinct layer that mints no executor-loop
+rows). Each executor-loop adapter carries a deliberately distinct invocation id
+(`...::dispatch` for the scaffold vs each landed adapter's own reattachable id),
+so scaffold + one-shot terminal + goal-loop terminal + no-mistakes-mirror
+terminal + live-wrapper managed-step terminal compose without minting two owners
+for one step. With all four terminal families composed, the NGX-372
+terminal-composition follow-ups are complete.
+
+Evidence: each test assembles a structured composition-evidence record (per-layer
+states / counts / verification status / gate type) and writes it as a
+`full-adapter-e2e-<label>.json` artifact. By default this lands in the disposable
+temp data dir (removed in `afterEach`, so default `pnpm test` leaves no durable
+footprint); set `MOMENTUM_E2E_EVIDENCE_DIR` (e.g. to gitignored
+`.agent-runs/full-adapter-e2e/`) to capture durable closeout evidence, mirroring
+the opt-in real read smoke's `MOMENTUM_REAL_SMOKE_EVIDENCE_DIR` knob.
+
+Run locally via the targeted vitest filter:
+
+```
+pnpm vitest run test/full-adapter-e2e.test.ts
+```
+
+## Opt-in real coding-workflow harness smoke (NGX-372)
+
+The opt-in real Linear *read* smoke above touches a real external **read**. The
+coding-workflow harness smoke is the other in-scope opt-in real path: invoking a
+live OpenClaw wrapper (preflight / implementation (GNHF) / postflight /
+no-mistakes / merge-cleanup / linear-refresh) against a real harness. Spawning
+the full engines is expensive and side-effectful, and full agent execution stays
+owned by the
+`coding-workflow-pipeline` skill and the M9 live step wrapper / orchestrator
+layers (explicitly approved by run id / boundary). NGX-372's deliverable here is
+the **CI-safe decision core** plus a bounded, opt-in **pre-flight probe** smoke —
+never a CI full-agent spawn:
+
+- **CI-safe (always runs):** `test/real-workflow-smoke.test.ts` pins the pure
+  gating decision (`planWorkflowHarnessSmoke`), the pure spawn-result mapping
+  (`classifyProbeSpawnResult`), and the failure-mode taxonomy
+  (`classifyWorkflowHarnessOutcome`) from `src/real-workflow-smoke.ts`, with no
+  process spawned. It composes the existing M9 `LiveWrapperProfile` registry
+  (`parseLiveWrapperProfile` / `resolveLiveWrapper`) to resolve the harness
+  command, so the planner reuses the validated wrapper config rather than minting
+  a new command surface.
+- **CI-safe (always runs):** `test/real-workflow-probe-smoke.test.ts` covers the
+  execution helpers in `src/real-workflow-probe.ts` — `runHarnessProbe` (a
+  bounded `spawnSync` over the resolved probe, same discipline as
+  `src/acp-runner.ts`) and `loadRawWorkflowProfileFromEnv` — by spawning only a
+  cheap local `process.execPath` (node) child (clean exit, non-zero exit, missing
+  binary, timeout) and reading a temp profile file. No external system is reached.
+- **Opt-in (skipped by default):** the same file's
+  `describe.skipIf`-guarded *real probe smoke* actually runs the resolved
+  wrapper's pre-flight probe when an operator opts in, classifies the outcome,
+  and records evidence under gitignored `.agent-runs/real-smoke/`. It spawns only
+  the cheap availability probe (the safe probe-only dry-run), never the full
+  agent.
+
+`planWorkflowHarnessSmoke(env, rawProfile)` is read-only and pure (the caller
+passes the parsed profile value so the planner never touches the filesystem). It
+fails closed to a documented skip reason unless every gate is satisfied:
+
+- `not_opted_in` — the master opt-in flag is unset (the default).
+- `profile_unavailable` — no valid live-wrapper profile to resolve the command.
+- `kind_missing` / `unsupported_kind` — no / non-`WorkflowStepKind` requested.
+- `not_configured` — the kind has no wrapper in the profile.
+- `write_policy_closed` — the kind resolves to the external-write family
+  (`linear-refresh` -> `external-apply`) and the *separate* write opt-in is unset.
+  This keeps real external **reads** separated from real external **writes**:
+  a read-family harness smoke can never reach an external write.
+- `probe_unavailable` — the default probe-only dry-run was requested but the
+  wrapper configures no pre-flight `probe`.
+
+Opt-in switches (all default-off):
+
+- `MOMENTUM_REAL_SMOKE_WORKFLOW=1` — master opt-in.
+- `MOMENTUM_REAL_SMOKE_WORKFLOW_KIND=...` — which step kind's wrapper to smoke
+  (e.g. `no-mistakes`, `postflight`).
+- `MOMENTUM_REAL_SMOKE_WORKFLOW_PROFILE=/abs/path/to/live-wrappers.json` — the
+  live-wrapper profile JSON the gated probe smoke loads to resolve the real
+  wrapper command (`loadRawWorkflowProfileFromEnv`; fails closed to a
+  `profile_unavailable` skip if missing / unreadable / invalid JSON).
+- `MOMENTUM_REAL_SMOKE_WORKFLOW_FULL=1` — opt into spawning the full harness;
+  default is the safe **probe-only dry-run** (runs only the wrapper's cheap
+  pre-flight probe / availability check, never the agent — the no-op mode for an
+  otherwise-expensive harness).
+- `MOMENTUM_REAL_SMOKE_WORKFLOW_ALLOW_WRITE=1` — the separate write-policy gate
+  that must be explicitly opened to smoke an external-write wrapper.
+
+Documented failure modes (surfaced by `classifyWorkflowHarnessOutcome`):
+
+- `tool_unavailable` — the wrapper command is missing (`ENOENT` spawn error).
+- `timeout` — the harness exceeded its configured timeout.
+- `command_failed` — the harness ran but exited non-zero / was killed by signal.
+- `result_missing` / `result_invalid` — the harness produced no / a malformed
+  result document.
+- `harness_error` — any other unrecognized harness failure.
+
+Cleanup / rollback: the planner is pure and spawns nothing. The gated probe
+smoke runs only the cheap pre-flight availability probe and records evidence
+under gitignored `.agent-runs/real-smoke/`, so it leaves the repo clean. A full
+live harness run (operator-driven via `MOMENTUM_REAL_SMOKE_WORKFLOW_FULL=1`,
+outside default CI) inherits the M9 live step transaction's clean-up posture —
+verify-before-commit and failure-reset-to-base — documented under *Milestone 9
+live-execution unit coverage* above; any durable evidence is registered per the
+artifact policy.
+
+The NGX-372 terminal-composition follow-ups are complete: the one-shot,
+goal-loop, no-mistakes-mirror, and M9 live-wrapper managed-step terminals are all
+composed into `test/full-adapter-e2e.test.ts`. A full real-agent harness run
+(`MOMENTUM_REAL_SMOKE_WORKFLOW_FULL=1`) stays operator-driven and
+`coding-workflow-pipeline`-owned, not a CI spawn.
+
+Run the CI-safe decision core and probe-execution coverage locally via the
+targeted vitest filters:
+
+```
+pnpm vitest run test/real-workflow-smoke.test.ts test/real-workflow-probe-smoke.test.ts
+```
+
+Manual run of the opt-in real probe smoke (probe-only dry-run):
+
+```
+MOMENTUM_REAL_SMOKE_WORKFLOW=1 \
+MOMENTUM_REAL_SMOKE_WORKFLOW_KIND=no-mistakes \
+MOMENTUM_REAL_SMOKE_WORKFLOW_PROFILE=/abs/path/to/live-wrappers.json \
+  pnpm vitest run test/real-workflow-probe-smoke.test.ts
+```
+
 ## Test boundary
 
-The smoke must not make real `api.linear.app` calls — see
+The default smoke must not make real `api.linear.app` calls — see
 [internal/contracts/intent-apply.md](contracts/intent-apply.md) for the M6 test
 guard that continues this rule into the policy-gated external apply slices.
-All Linear interactions use the existing mock endpoint pattern.
+All Linear interactions in the default suite use the existing mock endpoint
+pattern; the opt-in real read smoke above is the sole, explicitly gated
+exception and never runs in default CI.
