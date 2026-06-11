@@ -80,6 +80,7 @@ export type WorkflowHarnessSmokePlan =
       args: readonly string[];
       cwd: LiveWrapperCwd;
       timeoutSec: number;
+      envAllow: readonly string[];
       probe: LiveWrapperProbeConfig | null;
     };
 
@@ -167,6 +168,7 @@ export function planWorkflowHarnessSmoke(
     args: config.args,
     cwd: config.cwd,
     timeoutSec: config.timeoutSec,
+    envAllow: config.envAllow,
     probe: config.probe ?? null
   };
 }

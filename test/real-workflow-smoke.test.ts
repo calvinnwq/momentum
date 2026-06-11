@@ -136,6 +136,7 @@ describe("planWorkflowHarnessSmoke (NGX-372)", () => {
     expect(plan.probeOnly).toBe(true);
     expect(plan.command).toBe("/usr/bin/true");
     expect(plan.args).toEqual(["--run"]);
+    expect(plan.envAllow).toEqual(["PATH"]);
     expect(plan.probe).toEqual({
       command: "/usr/bin/true",
       args: ["--version"],

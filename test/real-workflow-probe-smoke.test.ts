@@ -12,6 +12,7 @@ import {
 } from "../src/real-workflow-smoke.js";
 import {
   REAL_SMOKE_WORKFLOW_PROFILE_ENV_VAR,
+  buildHarnessProbeEnv,
   loadRawWorkflowProfileFromEnv,
   runHarnessProbe
 } from "../src/real-workflow-probe.js";
@@ -123,6 +124,38 @@ describe("runHarnessProbe (NGX-372)", () => {
     if (outcome.ok) throw new Error("expected failure");
     expect(outcome.mode).toBe("timeout");
   });
+
+  it("does not inherit parent env variables when no env is supplied", () => {
+    const key = "MOMENTUM_SECRET_PROBE_TOKEN";
+    const previous = process.env[key];
+    process.env[key] = "secret";
+    try {
+      const raw = runHarnessProbe({
+        command: NODE,
+        args: ["-e", `process.exit(process.env.${key} ? 9 : 0)`],
+        timeoutSec: 30
+      });
+      expect(raw).toEqual({ kind: "exited", exitCode: 0, signal: null });
+    } finally {
+      if (previous === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = previous;
+      }
+    }
+  });
+});
+
+describe("buildHarnessProbeEnv (NGX-372)", () => {
+  it("copies only variables named by the wrapper env allowlist", () => {
+    expect(
+      buildHarnessProbeEnv(["KEEP_ME", "ALSO_KEEP"], {
+        KEEP_ME: "yes",
+        ALSO_KEEP: "2",
+        DROP_ME: "secret"
+      })
+    ).toEqual({ KEEP_ME: "yes", ALSO_KEEP: "2" });
+  });
 });
 
 describe("loadRawWorkflowProfileFromEnv (NGX-372)", () => {
@@ -191,6 +224,7 @@ describe("loadRawWorkflowProfileFromEnv (NGX-372)", () => {
     expect(plan.mode).toBe("run");
     if (plan.mode !== "run") throw new Error("expected run");
     expect(plan.probeOnly).toBe(true);
+    expect(plan.envAllow).toEqual(["PATH"]);
     expect(plan.probe).not.toBeNull();
   });
 });
@@ -199,14 +233,15 @@ const smokePlan = planWorkflowHarnessSmoke(
   process.env,
   loadRawWorkflowProfileFromEnv(process.env)
 );
+const shouldRunProbeSmoke =
+  smokePlan.mode === "run" && smokePlan.probeOnly && smokePlan.probe !== null;
 
-describe.skipIf(smokePlan.mode === "skip")(
+describe.skipIf(!shouldRunProbeSmoke)(
   "NGX-372 opt-in real workflow harness probe smoke",
   () => {
     it("runs the resolved pre-flight probe and records evidence", () => {
-      // The skipIf guard guarantees a run plan; narrow the type here.
-      if (smokePlan.mode !== "run") {
-        throw new Error("unreachable: skipIf guards the run mode");
+      if (smokePlan.mode !== "run" || !smokePlan.probeOnly) {
+        throw new Error("unreachable: skipIf guards the probe-only run mode");
       }
       if (smokePlan.probe === null) {
         throw new Error(
@@ -214,7 +249,9 @@ describe.skipIf(smokePlan.mode === "skip")(
         );
       }
 
-      const raw = runHarnessProbe(smokePlan.probe);
+      const raw = runHarnessProbe(smokePlan.probe, {
+        env: buildHarnessProbeEnv(smokePlan.envAllow)
+      });
       const outcome = classifyWorkflowHarnessOutcome(raw);
 
       const evidencePath = recordEvidence("workflow-harness-probe", {

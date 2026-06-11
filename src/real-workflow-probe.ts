@@ -43,6 +43,18 @@ export type RunHarnessProbeOptions = {
   env?: NodeJS.ProcessEnv;
 };
 
+export function buildHarnessProbeEnv(
+  envAllow: readonly string[],
+  source: Record<string, string | undefined> = process.env
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of envAllow) {
+    const value = source[key];
+    if (value !== undefined) env[key] = value;
+  }
+  return env;
+}
+
 /**
  * Spawn a resolved live-wrapper pre-flight probe and reduce the finished
  * process to the harness-smoke raw outcome taxonomy. The probe `command` is
@@ -58,7 +70,7 @@ export function runHarnessProbe(
   try {
     spawn = spawnSync(probe.command, [...probe.args], {
       cwd: options.cwd ?? process.cwd(),
-      env: options.env ?? process.env,
+      env: options.env ?? {},
       timeout: probe.timeoutSec * 1000,
       encoding: "utf-8",
       maxBuffer: PROBE_OUTPUT_MAX_BYTES,
