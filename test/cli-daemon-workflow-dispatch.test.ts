@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { runCli } from "../src/cli.js";
 import { openDb } from "../src/db.js";
+import { DOGFOOD_TERMINALIZE_DISPATCH_ENV_VAR } from "../src/workflow-dogfood-dispatch.js";
 
 type RunResult = {
   code: number;
@@ -29,7 +30,10 @@ function makeTempDir(prefix = "momentum-cli-daemon-wf-"): string {
   return fs.realpathSync(dir);
 }
 
-async function run(argv: string[]): Promise<RunResult> {
+async function run(
+  argv: string[],
+  env: Record<string, string | undefined> = {}
+): Promise<RunResult> {
   let stdout = "";
   let stderr = "";
   const code = await runCli(argv, {
@@ -45,7 +49,7 @@ async function run(argv: string[]): Promise<RunResult> {
         return true;
       }
     },
-    env: {}
+    env
   });
   return { code, stdout, stderr };
 }
@@ -297,6 +301,107 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       ]);
     } finally {
       finalDb.close();
+    }
+  });
+
+  it("dispatches two approved steps in one dogfood-opted-in daemon start when each step terminalizes safely (NGX-391)", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const runId = "ngx391-cli-multi-dispatch";
+    await startApprovedCodingRun(dataDir, repoDir, runId);
+
+    // A SINGLE `daemon start` process, opted into the dogfood terminalize-and-
+    // continue lane against this isolated data dir. Unlike the NGX-390 proof —
+    // which needed three separate processes plus a manual update-step — this one
+    // process dispatches preflight, terminalizes it safely, then dispatches
+    // implementation.
+    const result = await run(
+      [
+        "daemon",
+        "start",
+        "--max-loop-iterations",
+        "5",
+        "--poll-interval-ms",
+        "0",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      { [DOGFOOD_TERMINALIZE_DISPATCH_ENV_VAR]: "1" }
+    );
+
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    const loop = JSON.parse(result.stdout).loop as Record<string, unknown>;
+    // The CLI dogfood receipt: loop iterations and the >= 2 dispatch count.
+    expect(loop["workflowStepsDispatched"]).toBe(2);
+    expect(loop["iterations"]).toBe(5);
+    expect(loop["exitReason"]).toBe("max_loop_iterations");
+    expect(loop["lastWorkflowCode"]).toBe("idle");
+
+    const db = openDb(dataDir);
+    try {
+      const steps = db
+        .prepare(
+          "SELECT step_id, state FROM workflow_steps WHERE run_id = ? ORDER BY step_order"
+        )
+        .all(runId) as Array<{ step_id: string; state: string }>;
+      expect(steps.slice(0, 2)).toEqual([
+        { step_id: "preflight", state: "succeeded" },
+        { step_id: "implementation", state: "succeeded" }
+      ]);
+
+      // The dispatch lease taken for each step was released on terminal — no
+      // lease corruption strands the run.
+      const openLeases = db
+        .prepare(
+          "SELECT lease_kind FROM workflow_leases WHERE run_id = ? AND released_at IS NULL"
+        )
+        .all(runId) as Array<{ lease_kind: string }>;
+      expect(openLeases).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("does not terminalize or re-dispatch in a default daemon start without the dogfood opt-in (NGX-391 gate)", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const runId = "ngx391-default-single-dispatch";
+    await startApprovedCodingRun(dataDir, repoDir, runId);
+
+    // The same bounded loop, but with NO dogfood opt-in: the production dispatch
+    // holds preflight `running` and never terminalizes it, so the run scans as
+    // busy and no second step is ever dispatched — `>= 2` happens only when a
+    // step terminalizes safely.
+    const result = await run([
+      "daemon",
+      "start",
+      "--max-loop-iterations",
+      "5",
+      "--poll-interval-ms",
+      "0",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const loop = JSON.parse(result.stdout).loop as Record<string, unknown>;
+    expect(loop["workflowStepsDispatched"]).toBe(1);
+
+    const db = openDb(dataDir);
+    try {
+      const preflight = db
+        .prepare(
+          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?"
+        )
+        .get(runId, "preflight") as { state: string } | undefined;
+      // The dispatched step stays `running` (held by its dispatch lease); nothing
+      // advanced it.
+      expect(preflight?.state).toBe("running");
+    } finally {
+      db.close();
     }
   });
 

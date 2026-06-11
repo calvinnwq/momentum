@@ -195,6 +195,7 @@ import {
   type WorkflowGateRecord
 } from "./workflow-gate-persist.js";
 import { executeWorkflowStepDispatch } from "./workflow-dispatch-execute.js";
+import { resolveDaemonWorkflowDispatch } from "./workflow-dogfood-dispatch.js";
 import {
   DEFAULT_RECONCILIATION_STALE_THRESHOLD_MS,
   PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT,
@@ -6150,7 +6151,16 @@ async function daemonStart(
       // draining, using the durable executor-dispatch seam. Register-only
       // `daemon start` returns above and never reaches here, so it stays inert.
       // The lane is harmlessly idle when no workflow run has a runnable step.
-      workflowLane: { dispatch: executeWorkflowStepDispatch }
+      //
+      // The opt-in dogfood seam (M10-09b, NGX-391) leaves this as the production
+      // dispatch unless an isolated dogfood explicitly enables the
+      // terminalize-and-continue fixture; default `daemon start` is unchanged.
+      workflowLane: {
+        dispatch: resolveDaemonWorkflowDispatch(
+          io.env ?? {},
+          executeWorkflowStepDispatch
+        )
+      }
     });
 
     return emitDaemonStartLoopResult(parsed, io, {
