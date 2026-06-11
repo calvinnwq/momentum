@@ -54,6 +54,17 @@ import {
   type NoMistakesRoundRuntimeInputs
 } from "../src/no-mistakes-executor.js";
 import { runNoMistakesMirrorStep } from "../src/no-mistakes-orchestrator.js";
+import {
+  LIVE_STEP_DEFAULT_LEASE_KIND,
+  runLiveWorkflowStep
+} from "../src/live-step-orchestrator.js";
+import { getWorkflowStep } from "../src/workflow-step-transitions.js";
+import type {
+  WorkflowStepExecutor,
+  WorkflowStepExecutorDispatchResult,
+  WorkflowStepExecutorInput
+} from "../src/workflow-step-executor.js";
+import type { WorkflowApprovalBoundary } from "../src/workflow-run-reducer.js";
 import type { FinalizeLiveWorkflowStepFromResultFileResult } from "../src/live-step-finalize.js";
 import type { RunnerResult } from "../src/runner-result.js";
 
@@ -102,8 +113,13 @@ import type { RunnerResult } from "../src/runner-result.js";
  * passing verification gate). Each carries a deliberately distinct invocation id
  * (`...::dispatch` for the scaffold vs each landed adapter's own reattachable
  * id), so composing scaffold + multiple terminal families never mints two owners
- * for one step. Composing the remaining M9 live-wrapper terminal finalization is
- * the last NGX-372 follow-up.
+ * for one step. Finally, the M9 live-wrapper managed-step adapter
+ * (`runLiveWorkflowStep`) is composed on `merge-cleanup`: a genuinely distinct
+ * layer from the executor-loop adapters, it drives the durable `workflow_steps`
+ * row itself (approved -> running -> succeeded) under a `managed-step` lease
+ * against a real repo lock, persisting terminal state before releasing the
+ * lease. With the one-shot, goal-loop, no-mistakes mirror, and M9 live-wrapper
+ * terminals all composed, the layered adapter-test strategy is complete.
  */
 
 const NOW = 1_700_000_000_000;
@@ -184,7 +200,12 @@ function fakeLinearClient(
 
 function seedCodingWorkflowRun(
   db: MomentumDb,
-  input: { runId: string; repoPath: string; objective: string }
+  input: {
+    runId: string;
+    repoPath: string;
+    objective: string;
+    approvalBoundary?: WorkflowApprovalBoundary;
+  }
 ): void {
   persistWorkflowDefinition(db, CODING_WORKFLOW_DEFINITION, { now: NOW });
   persistWorkflowRunStart(db, {
@@ -192,7 +213,10 @@ function seedCodingWorkflowRun(
     runId: input.runId,
     repoPath: input.repoPath,
     objective: input.objective,
-    now: NOW
+    now: NOW,
+    ...(input.approvalBoundary !== undefined
+      ? { approvalBoundary: input.approvalBoundary }
+      : {})
   });
 }
 
@@ -327,6 +351,91 @@ function noMistakesRoundInputs(
     inputDigest: "sha256:no-mistakes-start",
     artifactRoot: root,
     logPaths: [path.join(root, "state.json")]
+  };
+}
+
+// The M9 live wrapper is the *managed-step* orchestrator: unlike the
+// executor-loop adapters (one-shot / goal-loop / no-mistakes mirror) that settle
+// the executor_invocations/executor_rounds layer, `runLiveWorkflowStep` drives
+// the durable `workflow_steps` row itself (approved -> running -> succeeded)
+// under a `managed-step` lease, and it requires a repo-backed run with an active
+// worker-held repo lock plus durable approval coverage for the step kind. This
+// seeds those live-execution preconditions: a goal row, the run's goal_id link,
+// and an active repo lock owned by the worker for the run's repo path.
+function seedLiveStepRepoLock(
+  db: MomentumDb,
+  input: { runId: string; goalId: string; repoPath: string; holder: string }
+): void {
+  db.prepare(
+    `INSERT OR IGNORE INTO goals (
+       id, title, repo, runner, branch, max_iterations, verification,
+       verification_timeout_sec, state, artifact_dir, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    input.goalId,
+    input.goalId,
+    input.repoPath,
+    "fake",
+    "main",
+    1,
+    "[]",
+    900,
+    "initialized",
+    path.join(input.repoPath, ".artifacts"),
+    NOW,
+    NOW
+  );
+  db.prepare("UPDATE workflow_runs SET goal_id = ? WHERE id = ?").run(
+    input.goalId,
+    input.runId
+  );
+  db.prepare(
+    `INSERT INTO repo_locks (
+       id, repo_root, holder, goal_id, iteration, job_id, state,
+       acquired_at, heartbeat_at, lease_expires_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    `lock-${input.holder}`,
+    input.repoPath,
+    input.holder,
+    input.goalId,
+    1,
+    "job-1",
+    "active",
+    NOW,
+    NOW,
+    NOW + 60_000,
+    NOW
+  );
+}
+
+// A deterministic M9 live wrapper for the `merge-cleanup` step that reports a
+// clean terminal success — the live-wrapper equivalent of a passing gate. In
+// production this is the spawned GNHF/postflight/no-mistakes/merge-cleanup
+// wrapper; here it is a fake whose `WorkflowStepExecutorDispatchResult` the
+// managed-step orchestrator finalizes into the durable `workflow_steps` row.
+function liveMergeCleanupExecutor(resultDigest: string): WorkflowStepExecutor {
+  return {
+    kind: "merge-cleanup",
+    executes: true,
+    execute: (
+      executorInput: WorkflowStepExecutorInput
+    ): WorkflowStepExecutorDispatchResult => ({
+      ok: true,
+      result: {
+        state: "succeeded",
+        summary: "live merge-cleanup wrapper pass clean",
+        checkpoints: [],
+        artifacts: [],
+        resultDigest,
+        errorCode: null,
+        errorMessage: null,
+        retryHint: null,
+        recoveryHint: null
+      },
+      executorLogPath: executorInput.executorLogPath,
+      resultJsonPath: executorInput.resultJsonPath
+    })
   };
 }
 
@@ -879,6 +988,159 @@ describe("NGX-372 full adapter E2E proof", () => {
       };
       expect(recorded.noMistakesFinalization.invocationState).toBe("succeeded");
       expect(recorded.noMistakesFinalization.classification).toBe("complete");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("composes the M9 live-wrapper landed adapter: the merge-cleanup step drives the managed-step lifecycle (approved -> running -> succeeded) under a managed-step lease against a real repo lock", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir("momentum-ngx-372-e2e-repo-");
+    const db = openDb(dataDir);
+    try {
+      // --- Layer 1: source adapter read -> local reconciliation / persistence ---
+      const client = fakeLinearClient([
+        {
+          ok: true,
+          page: {
+            issues: [makeLinearIssue({ updatedAt: 1_700_000_001_000 })],
+            nextCursor: null
+          }
+        }
+      ]);
+
+      const reconciliation = await reconcileLinearSource(
+        db,
+        { client, filters: { projectId: "momentum-project" } },
+        { now: () => NOW + 2 }
+      );
+      expect(reconciliation.run.state).toBe("succeeded");
+      const sourceItems = listSourceItems(db, { adapterKind: "linear" });
+      expect(sourceItems).toHaveLength(1);
+      const sourceItem = sourceItems[0];
+
+      // --- Layer 2: workflow run start (approved through merge-cleanup), made
+      // repo-backed with an active worker-held repo lock for live execution ---
+      // The `merge-cleanup` approval boundary opens the run `approved` and
+      // promotes preflight..merge-cleanup to `approved` through the real
+      // run-start persistence path (seeding the durable approval coverage the
+      // managed-step orchestrator validates for the merge-cleanup kind).
+      const runId = "ngx-372-live-wrapper-e2e";
+      const goalId = "ngx-372-live-wrapper-goal";
+      seedCodingWorkflowRun(db, {
+        runId,
+        repoPath: repoDir,
+        objective: `Implement ${sourceItem?.externalKey} via the coding workflow`,
+        approvalBoundary: "merge-cleanup"
+      });
+      seedLiveStepRepoLock(db, {
+        runId,
+        goalId,
+        repoPath: repoDir,
+        holder: WORKER
+      });
+      // Advance merge-cleanup's required predecessors to terminal success so it
+      // is the next runnable step; merge-cleanup itself stays `approved`.
+      for (const stepId of [
+        "preflight",
+        "implementation",
+        "postflight",
+        "no-mistakes"
+      ]) {
+        setStepState(db, runId, stepId, "succeeded");
+      }
+
+      // --- Layer 3: M9 live-wrapper managed-step terminal finalization ---
+      // `merge-cleanup` is the live-wrapper family in the real coding workflow
+      // definition not claimed by any other terminal case in this proof.
+      // `runLiveWorkflowStep` acquires the `managed-step` lease, transitions the
+      // durable step approved -> running, runs the live wrapper, then persists
+      // the terminal `succeeded` state BEFORE releasing the lease. This is the
+      // M9 layer the executor-loop adapters never touch.
+      const liveNow = NOW + 1_000;
+      const executorInput: WorkflowStepExecutorInput = {
+        runId,
+        stepId: "merge-cleanup",
+        kind: "merge-cleanup",
+        attempt: 1,
+        repoPath: repoDir,
+        runDir: path.join(repoDir, ".momentum-run"),
+        resultJsonPath: path.join(repoDir, ".momentum-run", "result.json"),
+        executorLogPath: path.join(repoDir, ".momentum-run", "executor.log")
+      };
+      const out = runLiveWorkflowStep({
+        db,
+        runId,
+        stepId: "merge-cleanup",
+        holder: WORKER,
+        leaseExpiresAt: NOW + 60_000,
+        executor: liveMergeCleanupExecutor("sha256:merge-cleanup-live"),
+        executorInput,
+        now: liveNow
+      });
+
+      // The managed-step lifecycle ran approved -> running -> succeeded; the
+      // managed-step lease was acquired then released only after terminal state.
+      expect(out.ok).toBe(true);
+      expect(out.stage).toBe("execute");
+      expect(out.terminalState).toBe("succeeded");
+      expect(out.lease.acquired).toBe(true);
+      expect(out.lease.released).toBe(true);
+
+      // The live wrapper, unlike the executor-loop adapters, advances the durable
+      // `workflow_steps` row itself: merge-cleanup is terminal `succeeded` with
+      // the live result digest and start/finish stamps persisted, and the M8
+      // operator-override gate stays untouched (a live transition, not an
+      // operator one).
+      const step = getWorkflowStep(db, runId, "merge-cleanup");
+      expect(step?.state).toBe("succeeded");
+      expect(step?.startedAt).toBe(liveNow);
+      expect(step?.finishedAt).toBe(liveNow);
+      expect(step?.resultDigest).toBe("sha256:merge-cleanup-live");
+      expect(step?.operatorTransitionAt).toBeNull();
+
+      // The `managed-step` lease is the M9 layer the other terminal families do
+      // not touch: it was released exactly at terminal finalization (the durable
+      // proof that nothing is stranded), holder intact.
+      const lease = getWorkflowLease(db, runId, LIVE_STEP_DEFAULT_LEASE_KIND);
+      expect(lease?.holder).toBe(WORKER);
+      expect(lease?.releasedAt).toBe(liveNow);
+
+      // The live wrapper finalizes at the workflow_steps + lease layer, a
+      // genuinely distinct terminal family from the executor-loop one-shot /
+      // goal-loop / no-mistakes mirror adapters: it mints no executor-loop rows.
+      expect(countRows(db, "executor_invocations")).toBe(0);
+      expect(countRows(db, "executor_rounds")).toBe(0);
+
+      // --- Composition evidence (acceptance criterion: the proof records it) ---
+      const evidence = {
+        issue: "NGX-372",
+        proof: "full-adapter-e2e-live-wrapper",
+        source: {
+          runState: reconciliation.run.state,
+          externalKey: sourceItem?.externalKey ?? null
+        },
+        workflow: { runId, definition: CODING_WORKFLOW_DEFINITION.key },
+        liveWrapperFinalization: {
+          stepId: "merge-cleanup",
+          terminalState: out.terminalState ?? null,
+          stepState: step?.state ?? null,
+          resultDigest: step?.resultDigest ?? null,
+          leaseAcquired: out.lease.acquired,
+          leaseReleased: out.lease.released,
+          leaseReleasedAt: lease?.releasedAt ?? null
+        }
+      };
+      const evidencePath = recordCompositionEvidence(
+        dataDir,
+        "live-wrapper",
+        evidence
+      );
+      const recorded = JSON.parse(fs.readFileSync(evidencePath, "utf8")) as {
+        liveWrapperFinalization: { stepState: string; leaseReleased: boolean };
+      };
+      expect(recorded.liveWrapperFinalization.stepState).toBe("succeeded");
+      expect(recorded.liveWrapperFinalization.leaseReleased).toBe(true);
     } finally {
       db.close();
     }
