@@ -563,20 +563,33 @@ pnpm vitest run test/full-adapter-e2e.test.ts
 The opt-in real Linear *read* smoke above touches a real external **read**. The
 coding-workflow harness smoke is the other in-scope opt-in real path: invoking a
 live OpenClaw wrapper (GNHF / postflight / no-mistakes / merge-cleanup /
-linear-refresh) against a real harness. Spawning these engines is expensive and
-side-effectful, and live execution stays owned by the `coding-workflow-pipeline`
-skill and the M9 live step wrapper / orchestrator layers (explicitly approved by
-run id / boundary). NGX-372's deliverable here is therefore the **CI-safe
-decision core** — the explicitly-flagged, documented opt-in gate — not a CI
-process spawn:
+linear-refresh) against a real harness. Spawning the full engines is expensive
+and side-effectful, and full agent execution stays owned by the
+`coding-workflow-pipeline` skill and the M9 live step wrapper / orchestrator
+layers (explicitly approved by run id / boundary). NGX-372's deliverable here is
+the **CI-safe decision core** plus a bounded, opt-in **pre-flight probe** smoke —
+never a CI full-agent spawn:
 
 - **CI-safe (always runs):** `test/real-workflow-smoke.test.ts` pins the pure
-  gating decision (`planWorkflowHarnessSmoke`) and the failure-mode taxonomy
+  gating decision (`planWorkflowHarnessSmoke`), the pure spawn-result mapping
+  (`classifyProbeSpawnResult`), and the failure-mode taxonomy
   (`classifyWorkflowHarnessOutcome`) from `src/real-workflow-smoke.ts`, with no
   process spawned. It composes the existing M9 `LiveWrapperProfile` registry
   (`parseLiveWrapperProfile` / `resolveLiveWrapper`) to resolve the harness
   command, so the planner reuses the validated wrapper config rather than minting
   a new command surface.
+- **CI-safe (always runs):** `test/real-workflow-probe-smoke.test.ts` covers the
+  execution helpers in `src/real-workflow-probe.ts` — `runHarnessProbe` (a
+  bounded `spawnSync` over the resolved probe, same discipline as
+  `src/acp-runner.ts`) and `loadRawWorkflowProfileFromEnv` — by spawning only a
+  cheap local `process.execPath` (node) child (clean exit, non-zero exit, missing
+  binary, timeout) and reading a temp profile file. No external system is reached.
+- **Opt-in (skipped by default):** the same file's
+  `describe.skipIf`-guarded *real probe smoke* actually runs the resolved
+  wrapper's pre-flight probe when an operator opts in, classifies the outcome,
+  and records evidence under gitignored `.agent-runs/real-smoke/`. It spawns only
+  the cheap availability probe (the safe probe-only dry-run), never the full
+  agent.
 
 `planWorkflowHarnessSmoke(env, rawProfile)` is read-only and pure (the caller
 passes the parsed profile value so the planner never touches the filesystem). It
@@ -598,6 +611,10 @@ Opt-in switches (all default-off):
 - `MOMENTUM_REAL_SMOKE_WORKFLOW=1` — master opt-in.
 - `MOMENTUM_REAL_SMOKE_WORKFLOW_KIND=...` — which step kind's wrapper to smoke
   (e.g. `no-mistakes`, `postflight`).
+- `MOMENTUM_REAL_SMOKE_WORKFLOW_PROFILE=/abs/path/to/live-wrappers.json` — the
+  live-wrapper profile JSON the gated probe smoke loads to resolve the real
+  wrapper command (`loadRawWorkflowProfileFromEnv`; fails closed to a
+  `profile_unavailable` skip if missing / unreadable / invalid JSON).
 - `MOMENTUM_REAL_SMOKE_WORKFLOW_FULL=1` — opt into spawning the full harness;
   default is the safe **probe-only dry-run** (runs only the wrapper's cheap
   pre-flight probe / availability check, never the agent — the no-op mode for an
@@ -614,21 +631,35 @@ Documented failure modes (surfaced by `classifyWorkflowHarnessOutcome`):
   result document.
 - `harness_error` — any other unrecognized harness failure.
 
-Cleanup / rollback: the planner is pure and spawns nothing, so it leaves no
-footprint. A live harness run (operator-driven, outside default CI) inherits the
-M9 live step transaction's clean-up posture — verify-before-commit and
-failure-reset-to-base — documented under *Milestone 9 live-execution unit
-coverage* above; any durable evidence is registered per the artifact policy.
+Cleanup / rollback: the planner is pure and spawns nothing. The gated probe
+smoke runs only the cheap pre-flight availability probe and records evidence
+under gitignored `.agent-runs/real-smoke/`, so it leaves the repo clean. A full
+live harness run (operator-driven via `MOMENTUM_REAL_SMOKE_WORKFLOW_FULL=1`,
+outside default CI) inherits the M9 live step transaction's clean-up posture —
+verify-before-commit and failure-reset-to-base — documented under *Milestone 9
+live-execution unit coverage* above; any durable evidence is registered per the
+artifact policy.
 
-Remaining NGX-372 work: a gated integration test that, when opted in, actually
-runs the resolved pre-flight probe (skipped by default like
-`test/real-linear-read-smoke.test.ts`) and records evidence, plus the
-operator-facing manual run command once that execution home lands.
+Remaining NGX-372 work: composing the goal-loop / no-mistakes / M9 live-wrapper
+*terminal finalizations* into the full adapter E2E proof (only the one-shot
+terminal is composed into `test/full-adapter-e2e.test.ts` so far). A full
+real-agent harness run (`MOMENTUM_REAL_SMOKE_WORKFLOW_FULL=1`) stays
+operator-driven and `coding-workflow-pipeline`-owned, not a CI spawn.
 
-Run the CI-safe decision core locally via the targeted vitest filter:
+Run the CI-safe decision core and probe-execution coverage locally via the
+targeted vitest filters:
 
 ```
-pnpm vitest run test/real-workflow-smoke.test.ts
+pnpm vitest run test/real-workflow-smoke.test.ts test/real-workflow-probe-smoke.test.ts
+```
+
+Manual run of the opt-in real probe smoke (probe-only dry-run):
+
+```
+MOMENTUM_REAL_SMOKE_WORKFLOW=1 \
+MOMENTUM_REAL_SMOKE_WORKFLOW_KIND=no-mistakes \
+MOMENTUM_REAL_SMOKE_WORKFLOW_PROFILE=/abs/path/to/live-wrappers.json \
+  pnpm vitest run test/real-workflow-probe-smoke.test.ts
 ```
 
 ## Test boundary

@@ -5,8 +5,10 @@ import {
   REAL_SMOKE_WORKFLOW_FULL_ENV_VAR,
   REAL_SMOKE_WORKFLOW_KIND_ENV_VAR,
   REAL_SMOKE_WORKFLOW_OPT_IN_ENV_VAR,
+  classifyProbeSpawnResult,
   classifyWorkflowHarnessOutcome,
-  planWorkflowHarnessSmoke
+  planWorkflowHarnessSmoke,
+  type ProbeSpawnResult
 } from "../src/real-workflow-smoke.js";
 
 /**
@@ -262,5 +264,106 @@ describe("classifyWorkflowHarnessOutcome (NGX-372)", () => {
     });
     if (outcome.ok) throw new Error("expected failure");
     expect(outcome.mode).toBe("result_invalid");
+  });
+});
+
+describe("classifyProbeSpawnResult (NGX-372)", () => {
+  const probe = { timeoutSec: 30 };
+
+  it("maps a clean zero exit to an exited outcome", () => {
+    const raw = classifyProbeSpawnResult(
+      { error: null, status: 0, signal: null },
+      probe
+    );
+    expect(raw).toEqual({ kind: "exited", exitCode: 0, signal: null });
+    // ...and the existing classifier treats a clean exit as success.
+    expect(classifyWorkflowHarnessOutcome(raw)).toEqual({ ok: true });
+  });
+
+  it("threads a non-zero exit code through as an exited outcome", () => {
+    const raw = classifyProbeSpawnResult(
+      { error: null, status: 7, signal: null },
+      probe
+    );
+    expect(raw).toEqual({ kind: "exited", exitCode: 7, signal: null });
+    const outcome = classifyWorkflowHarnessOutcome(raw);
+    if (outcome.ok) throw new Error("expected failure");
+    expect(outcome.mode).toBe("command_failed");
+  });
+
+  it("threads a terminating signal through as an exited outcome", () => {
+    const raw = classifyProbeSpawnResult(
+      { error: null, status: null, signal: "SIGKILL" },
+      probe
+    );
+    expect(raw).toEqual({ kind: "exited", exitCode: null, signal: "SIGKILL" });
+    const outcome = classifyWorkflowHarnessOutcome(raw);
+    if (outcome.ok) throw new Error("expected failure");
+    expect(outcome.mode).toBe("command_failed");
+  });
+
+  it("maps an ETIMEDOUT spawn error to timed_out using the probe timeout", () => {
+    const result: ProbeSpawnResult = {
+      error: Object.assign(new Error("spawnSync /bin/sleep ETIMEDOUT"), {
+        code: "ETIMEDOUT"
+      }),
+      status: null,
+      signal: "SIGTERM"
+    };
+    const raw = classifyProbeSpawnResult(result, { timeoutSec: 45 });
+    expect(raw).toEqual({ kind: "timed_out", timeoutSec: 45 });
+    const outcome = classifyWorkflowHarnessOutcome(raw);
+    if (outcome.ok) throw new Error("expected failure");
+    expect(outcome.mode).toBe("timeout");
+  });
+
+  it("maps an ENOENT spawn error to a spawn_error outcome", () => {
+    const result: ProbeSpawnResult = {
+      error: Object.assign(new Error("spawn /usr/bin/gnhf ENOENT"), {
+        code: "ENOENT"
+      }),
+      status: null,
+      signal: null
+    };
+    const raw = classifyProbeSpawnResult(result, probe);
+    expect(raw).toEqual({
+      kind: "spawn_error",
+      code: "ENOENT",
+      message: "spawn /usr/bin/gnhf ENOENT"
+    });
+    const outcome = classifyWorkflowHarnessOutcome(raw);
+    if (outcome.ok) throw new Error("expected failure");
+    expect(outcome.mode).toBe("tool_unavailable");
+  });
+
+  it("maps an unrecognized spawn error to a spawn_error outcome with its code", () => {
+    const result: ProbeSpawnResult = {
+      error: Object.assign(new Error("spawn EACCES"), { code: "EACCES" }),
+      status: null,
+      signal: null
+    };
+    const raw = classifyProbeSpawnResult(result, probe);
+    expect(raw).toEqual({
+      kind: "spawn_error",
+      code: "EACCES",
+      message: "spawn EACCES"
+    });
+    const outcome = classifyWorkflowHarnessOutcome(raw);
+    if (outcome.ok) throw new Error("expected failure");
+    expect(outcome.mode).toBe("harness_error");
+  });
+
+  it("normalizes a spawn error with no errno code to a null code", () => {
+    const result: ProbeSpawnResult = {
+      error: new Error("opaque spawn failure"),
+      status: null,
+      signal: null
+    };
+    const raw = classifyProbeSpawnResult(result, probe);
+    expect(raw).toEqual({
+      kind: "spawn_error",
+      code: null,
+      message: "opaque spawn failure"
+    });
   });
 });
