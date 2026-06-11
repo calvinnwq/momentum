@@ -398,7 +398,13 @@ function refreshWorkflowRunStateAfterDispatch(
   );
 }
 
-function loadWorkflowStepRecords(
+/**
+ * Load the run's `workflow_steps` rows as reducer {@link WorkflowStepRecord}s.
+ * Exported so the dogfood terminalize-and-continue fixture
+ * (`workflow-dogfood-dispatch.ts`) re-derives run state through the exact same
+ * row mapping as this production dispatcher instead of a divergent copy.
+ */
+export function loadWorkflowStepRecords(
   db: MomentumDb,
   runId: string
 ): WorkflowStepRecord[] {
@@ -425,7 +431,12 @@ function loadWorkflowStepRecords(
   }));
 }
 
-function loadWorkflowLeaseRecords(
+/**
+ * Load the run's `workflow_leases` rows as reducer {@link WorkflowLeaseRecord}s.
+ * Exported alongside {@link loadWorkflowStepRecords} so the dogfood terminalize
+ * fixture shares one lease-row mapping with this production dispatcher.
+ */
+export function loadWorkflowLeaseRecords(
   db: MomentumDb,
   runId: string
 ): WorkflowLeaseRecord[] {
