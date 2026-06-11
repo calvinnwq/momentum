@@ -495,6 +495,69 @@ there, so it leaves the working tree clean. The only durable footprint is the
 gitignored `.agent-runs/real-smoke/` evidence file, which the operator may delete
 once captured in the Linear closeout. Real external state is never mutated.
 
+## Full adapter E2E proof (NGX-372)
+
+`test/full-adapter-e2e.test.ts` is the **CI-safe** capstone of the layered
+adapter-test strategy (see
+[contracts/adapter-test-coverage.md](contracts/adapter-test-coverage.md)): after
+the isolated contracts (NGX-369 / NGX-370) and the stubbed integration smoke
+(NGX-371) are green, it composes the *real* adapter layers through the intended
+operator flow in one proof and records evidence of the composition. Every
+external system is a fake or a local temp dir — no `api.linear.app` call, no real
+agent / runner, no git remote, no external write — so it runs in default
+`pnpm test`. It is the test that should never be the first to discover an
+adapter-contract bug, since every layer it touches is already individually
+pinned.
+
+Coverage:
+
+- **happy-path composition**: a fake Linear read reconciles into the `source_*`
+  tables, a built-in coding-workflow run starts with an objective threaded from
+  the reconciled issue key, the shipped `executeWorkflowStepDispatch` production
+  seam (driven from a real `claimRunnableWorkflowStep` claim) creates the
+  phase-1 one-shot start scaffold (invocation `running`, round `pending`, no
+  fabricated evidence), and the landed `runSingleShotStep` adapter drives a
+  one-shot step to a terminal `succeeded` with a passing verification gate and a
+  recorded commit. The proof asserts the durable composition across
+  `source_items` / `source_snapshots` / `source_reconciliation_runs`,
+  `workflow_runs` / `workflow_steps`, and `executor_invocations` /
+  `executor_rounds` / `executor_artifacts` / `executor_checkpoints` (including
+  the `result_captured` checkpoint and the `verification_output` artifact).
+- **external-write policy gate held closed**: the real `linear-refresh`
+  (`external-apply`) step is claimed through the scheduler and dispatched; the
+  external-write family is not a phase-1 dispatchable family, so the dispatch
+  fails closed — zero executor rows, an operator-visible
+  `manual_recovery_required` gate hung from the step, the run flagged
+  `needs_manual_recovery`, and the dispatch lease released (not stranded). This
+  is the composed proof that real external **reads** stay separated from real
+  external **writes**, which remain disabled unless the separate M6 write policy
+  gate explicitly allows them.
+
+Phase-1 boundary (honest scope): `executeWorkflowStepDispatch` stops at the start
+*scaffold*; the landed `runSingleShotStep` / `runGoalLoopStep` /
+`runNoMistakesMirrorStep` adapters own terminal finalization, and their
+seam-level reconciliation with the scaffold is the documented real-adapter
+follow-up. The proof therefore exercises the scaffold (via the production seam)
+and the terminal finalization (via the landed one-shot adapter) on two distinct
+one-shot steps, whose deliberately distinct invocation ids (`...::dispatch` vs
+the adapter's reattachable id) never mint two owners for one step. Composing the
+goal-loop / no-mistakes / M9 live-wrapper terminal finalizations into the E2E
+remains follow-on NGX-372 work.
+
+Evidence: each test assembles a structured composition-evidence record (per-layer
+states / counts / verification status / gate type) and writes it as a
+`full-adapter-e2e-<label>.json` artifact. By default this lands in the disposable
+temp data dir (removed in `afterEach`, so default `pnpm test` leaves no durable
+footprint); set `MOMENTUM_E2E_EVIDENCE_DIR` (e.g. to gitignored
+`.agent-runs/full-adapter-e2e/`) to capture durable closeout evidence, mirroring
+the opt-in real read smoke's `MOMENTUM_REAL_SMOKE_EVIDENCE_DIR` knob.
+
+Run locally via the targeted vitest filter:
+
+```
+pnpm vitest run test/full-adapter-e2e.test.ts
+```
+
 ## Test boundary
 
 The default smoke must not make real `api.linear.app` calls — see
