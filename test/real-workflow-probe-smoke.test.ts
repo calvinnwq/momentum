@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { REAL_SMOKE_EVIDENCE_DIR_ENV_VAR } from "../src/real-smoke.js";
 import {
   REAL_SMOKE_WORKFLOW_KIND_ENV_VAR,
   REAL_SMOKE_WORKFLOW_OPT_IN_ENV_VAR,
@@ -66,7 +67,7 @@ function makeTempDir(prefix = "momentum-ngx-372-probe-smoke-"): string {
 
 function recordEvidence(label: string, payload: Record<string, unknown>): string {
   const baseDir =
-    process.env["MOMENTUM_REAL_SMOKE_EVIDENCE_DIR"]?.trim() ||
+    process.env[REAL_SMOKE_EVIDENCE_DIR_ENV_VAR]?.trim() ||
     path.join(process.cwd(), ".agent-runs", "real-smoke");
   fs.mkdirSync(baseDir, { recursive: true });
   const file = path.join(baseDir, `${label}-${Date.now()}.json`);

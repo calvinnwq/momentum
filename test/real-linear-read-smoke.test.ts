@@ -8,6 +8,7 @@ import { buildLinearHttpReconciliationClient } from "../src/linear-http-client.j
 import { reconcileLinearSource } from "../src/source-reconciliation.js";
 import { listSourceItems } from "../src/source-items.js";
 import {
+  REAL_SMOKE_EVIDENCE_DIR_ENV_VAR,
   REAL_SMOKE_LINEAR_OPT_IN_ENV_VAR,
   classifyRealSmokeReadOutcome,
   planLinearReadSmoke
@@ -59,7 +60,7 @@ function makeTempDir(prefix = "momentum-ngx-372-real-smoke-"): string {
 
 function recordEvidence(label: string, payload: Record<string, unknown>): string {
   const baseDir =
-    process.env["MOMENTUM_REAL_SMOKE_EVIDENCE_DIR"]?.trim() ||
+    process.env[REAL_SMOKE_EVIDENCE_DIR_ENV_VAR]?.trim() ||
     path.join(process.cwd(), ".agent-runs", "real-smoke");
   fs.mkdirSync(baseDir, { recursive: true });
   const file = path.join(baseDir, `${label}-${Date.now()}.json`);

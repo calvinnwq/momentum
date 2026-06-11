@@ -40,6 +40,8 @@ export const REAL_SMOKE_LINEAR_MILESTONE_ENV_VAR = "MOMENTUM_REAL_SMOKE_LINEAR_M
 export const REAL_SMOKE_LINEAR_MAX_PAGES_ENV_VAR = "MOMENTUM_REAL_SMOKE_LINEAR_MAX_PAGES";
 /** Optional GraphQL endpoint override (e.g. to point a dry-run at a mock). */
 export const REAL_SMOKE_LINEAR_ENDPOINT_ENV_VAR = "MOMENTUM_REAL_SMOKE_LINEAR_ENDPOINT";
+/** Override the evidence output directory; defaults to `.agent-runs/real-smoke/`. */
+export const REAL_SMOKE_EVIDENCE_DIR_ENV_VAR = "MOMENTUM_REAL_SMOKE_EVIDENCE_DIR";
 
 /** A single bounded read keeps the opt-in smoke cheap and connectivity-focused. */
 export const DEFAULT_REAL_SMOKE_LINEAR_MAX_PAGES = 1;
