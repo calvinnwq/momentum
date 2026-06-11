@@ -40,6 +40,14 @@ import {
   type SingleShotRoundRuntimeInputs
 } from "../src/single-shot-executor.js";
 import { runSingleShotStep } from "../src/single-shot-orchestrator.js";
+import {
+  goalLoopInvocationId,
+  goalLoopRoundId,
+  resolveGoalLoopRoundSelection,
+  type GoalLoopRoundRuntimeInputs
+} from "../src/goal-loop-executor.js";
+import { runGoalLoopStep } from "../src/goal-loop-orchestrator.js";
+import type { FinalizeLiveWorkflowStepFromResultFileResult } from "../src/live-step-finalize.js";
 import type { RunnerResult } from "../src/runner-result.js";
 
 /**
@@ -77,10 +85,15 @@ import type { RunnerResult } from "../src/runner-result.js";
  * scaffold is the documented real-adapter follow-up (see the phase-1 boundary
  * note in src/workflow-dispatch-execute.ts). This proof therefore exercises the
  * scaffold via the production seam on one one-shot step (`preflight`) and the
- * terminal finalization via the landed adapter on another one-shot step
- * (`postflight`); the two carry deliberately distinct invocation ids
- * (`...::dispatch` vs the adapter's reattachable id), so composing both never
- * mints two owners for one step.
+ * terminal finalization via the landed adapters on distinct steps: the one-shot
+ * adapter on `postflight`, and the goal-loop adapter on `implementation` (the
+ * goal-loop family in the real coding workflow definition), which drives a
+ * bounded multi-round invocation to terminal `succeeded` with a passing
+ * verification gate. Each carries a deliberately distinct invocation id
+ * (`...::dispatch` for the scaffold vs each landed adapter's own reattachable
+ * id), so composing scaffold + multiple terminal families never mints two owners
+ * for one step. Composing the remaining no-mistakes / M9 live-wrapper terminal
+ * finalizations is the last NGX-372 follow-up.
  */
 
 const NOW = 1_700_000_000_000;
@@ -221,6 +234,50 @@ function roundInputs(artifactRoot: string): SingleShotRoundRuntimeInputs {
     inputDigest: "sha256:postflight-input",
     artifactRoot,
     logPaths: [path.join(artifactRoot, "stdout.log")]
+  };
+}
+
+// The goal-loop adapter derives a round's verification/commit evidence from the
+// total `finalize` outcome (mirroring the M9 repo-safety finalize) rather than a
+// caller-supplied `evidence` block. A `committed` outcome with passing
+// verification settles the round `succeeded` with `verificationStatus: "passed"`
+// and the finalize commit's SHA — the goal-loop equivalent of the one-shot
+// adapter's passing verification gate.
+const PARENT_SHA = "b".repeat(40);
+
+const GOAL_LOOP_COMMITTED: FinalizeLiveWorkflowStepFromResultFileResult = {
+  outcome: "committed",
+  verification: {
+    ok: true,
+    results: [
+      {
+        command: "pnpm test",
+        exit_code: 0,
+        signal: null,
+        duration_ms: 12,
+        timed_out: false,
+        succeeded: true
+      }
+    ]
+  },
+  commit: {
+    ok: true,
+    commitSha: SHA,
+    parentSha: PARENT_SHA,
+    message: "feat(adapter): implementation round commit"
+  },
+  head: SHA
+};
+
+function goalLoopRoundInputs(
+  artifactRoot: string,
+  roundIndex: number
+): GoalLoopRoundRuntimeInputs {
+  const root = path.join(artifactRoot, `round-${roundIndex}`);
+  return {
+    inputDigest: `sha256:implementation-input-${roundIndex}`,
+    artifactRoot: root,
+    logPaths: [path.join(root, "stdout.log")]
   };
 }
 
@@ -468,6 +525,176 @@ describe("NGX-372 full adapter E2E proof", () => {
       };
       expect(recorded.source.itemsPersisted).toBe(1);
       expect(recorded.finalization.verificationStatus).toBe("passed");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("composes the goal-loop landed adapter: the implementation step drives a bounded multi-round invocation to terminal succeeded with a passing verification gate", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir("momentum-ngx-372-e2e-repo-");
+    const artifactRoot = makeTempDir("momentum-ngx-372-e2e-artifacts-");
+    const db = openDb(dataDir);
+    try {
+      // --- Layer 1: source adapter read -> local reconciliation / persistence ---
+      const client = fakeLinearClient([
+        {
+          ok: true,
+          page: {
+            issues: [makeLinearIssue({ updatedAt: 1_700_000_001_000 })],
+            nextCursor: null
+          }
+        }
+      ]);
+
+      const reconciliation = await reconcileLinearSource(
+        db,
+        { client, filters: { projectId: "momentum-project" } },
+        { now: () => NOW + 2 }
+      );
+      expect(reconciliation.run.state).toBe("succeeded");
+      const sourceItems = listSourceItems(db, { adapterKind: "linear" });
+      expect(sourceItems).toHaveLength(1);
+      const sourceItem = sourceItems[0];
+
+      // --- Layer 2: workflow run start, objective threaded from the source read ---
+      const runId = "ngx-372-goal-loop-e2e";
+      seedCodingWorkflowRun(db, {
+        runId,
+        repoPath: repoDir,
+        objective: `Implement ${sourceItem?.externalKey} via the coding workflow`
+      });
+
+      // --- Layer 3: goal-loop landed adapter -> terminal finalization ---
+      // `implementation` is the goal-loop family in the real coding workflow
+      // definition (src/workflow-definition.ts). The landed adapter drives a
+      // bounded multi-round invocation below the StepRun: round 0 commits progress
+      // but is incomplete (continue); round 1 commits and recommends completion,
+      // each round gated by a passing verification finalize. `runGoalLoopStep`
+      // mints its own deterministic, reattachable invocation id, distinct from the
+      // one-shot scaffold's `...::dispatch` id and the one-shot adapter's id, so
+      // composing the goal-loop terminal alongside them never mints two owners for
+      // one step.
+      const result = runGoalLoopStep({
+        db,
+        workflowRunId: runId,
+        stepRunId: "implementation",
+        stepKey: "implementation",
+        attempt: 1,
+        selection: resolveGoalLoopRoundSelection({
+          stepConfig: {
+            agentProvider: "claude",
+            model: "claude-opus-4-8",
+            effort: "high",
+            maxRounds: 3
+          }
+        }),
+        resolveRoundInputs: (roundIndex) =>
+          goalLoopRoundInputs(artifactRoot, roundIndex),
+        now: monotonicClock(NOW + 100),
+        runRound: (round) =>
+          round.roundIndex < 1
+            ? {
+                result: runnerResult({
+                  summary: "implementation round: progress committed",
+                  goal_complete: false,
+                  remaining_work: ["finish the implementation"]
+                }),
+                finalize: GOAL_LOOP_COMMITTED,
+                changedFiles: ["src/feature.ts"]
+              }
+            : {
+                result: runnerResult({
+                  summary: "implementation round: goal complete",
+                  goal_complete: true
+                }),
+                finalize: GOAL_LOOP_COMMITTED,
+                changedFiles: ["src/feature.ts", "test/feature.test.ts"]
+              }
+      });
+
+      // The invocation is the goal-loop family and terminalized succeeded.
+      expect(result.invocation.executorFamily).toBe("goal-loop");
+      expect(result.invocation.state).toBe("succeeded");
+      expect(result.invocation.finishedAt).not.toBeNull();
+
+      // Two durable rounds ran in order: continue then complete.
+      expect(result.rounds.map((r) => r.round.roundIndex)).toEqual([0, 1]);
+      expect(result.rounds.map((r) => r.round.classification)).toEqual([
+        "continue",
+        "complete"
+      ]);
+      const lastRound = result.rounds[1]?.round;
+      expect(lastRound?.state).toBe("succeeded");
+      expect(lastRound?.verificationStatus).toBe("passed");
+      expect(lastRound?.commitSha).toBe(SHA);
+      expect(lastRound?.changedFiles).toEqual([
+        "src/feature.ts",
+        "test/feature.test.ts"
+      ]);
+
+      // Durable + reattachable below the StepRun: a deterministic invocation id
+      // and its ordered rounds, all settled succeeded.
+      const invocationId = goalLoopInvocationId(runId, "implementation", 1);
+      expect(result.invocation.invocationId).toBe(invocationId);
+      expect(loadExecutorInvocation(db, invocationId)).toEqual(
+        result.invocation
+      );
+      const durableRounds = listExecutorRoundsForInvocation(db, invocationId);
+      expect(durableRounds.map((r) => r.roundId)).toEqual([
+        goalLoopRoundId(invocationId, 0),
+        goalLoopRoundId(invocationId, 1)
+      ]);
+      expect(durableRounds.map((r) => r.state)).toEqual([
+        "succeeded",
+        "succeeded"
+      ]);
+
+      // The terminal round's verification-bearing capture is durable in its
+      // lifecycle checkpoint stream.
+      expect(
+        listExecutorCheckpointsForRound(
+          db,
+          goalLoopRoundId(invocationId, 1)
+        ).map((c) => c.stage)
+      ).toEqual([
+        "round_started",
+        "mechanism_completed",
+        "result_captured",
+        "classified"
+      ]);
+
+      // --- Composition evidence (acceptance criterion: the proof records it) ---
+      const evidence = {
+        issue: "NGX-372",
+        proof: "full-adapter-e2e-goal-loop",
+        source: {
+          runState: reconciliation.run.state,
+          externalKey: sourceItem?.externalKey ?? null
+        },
+        workflow: { runId, definition: CODING_WORKFLOW_DEFINITION.key },
+        goalLoopFinalization: {
+          invocationId,
+          executorFamily: result.invocation.executorFamily,
+          invocationState: result.invocation.state,
+          rounds: result.rounds.map((r) => r.round.classification),
+          lastRoundVerification: lastRound?.verificationStatus ?? null,
+          lastRoundCommitSha: lastRound?.commitSha ?? null
+        }
+      };
+      const evidencePath = recordCompositionEvidence(
+        dataDir,
+        "goal-loop",
+        evidence
+      );
+      const recorded = JSON.parse(fs.readFileSync(evidencePath, "utf8")) as {
+        goalLoopFinalization: { invocationState: string; rounds: string[] };
+      };
+      expect(recorded.goalLoopFinalization.invocationState).toBe("succeeded");
+      expect(recorded.goalLoopFinalization.rounds).toEqual([
+        "continue",
+        "complete"
+      ]);
     } finally {
       db.close();
     }

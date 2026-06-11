@@ -523,6 +523,17 @@ Coverage:
   `workflow_runs` / `workflow_steps`, and `executor_invocations` /
   `executor_rounds` / `executor_artifacts` / `executor_checkpoints` (including
   the `result_captured` checkpoint and the `verification_output` artifact).
+- **goal-loop terminal composition**: on top of the same real source read →
+  reconciliation → workflow run start, the real `implementation` step (the
+  goal-loop family in `CODING_WORKFLOW_DEFINITION`) is driven through
+  `runGoalLoopStep` to a bounded multi-round invocation that terminalizes
+  `succeeded` (round 0 commits but is incomplete → `continue`; round 1 commits
+  and recommends completion → `complete`), each round gated by a passing
+  verification finalize. The proof asserts the durable, reattachable goal-loop
+  invocation id (distinct from the one-shot scaffold's `...::dispatch` id and the
+  one-shot adapter id, so it mints no second owner), the ordered `succeeded`
+  rounds, and the terminal round's `result_captured` checkpoint stream, and
+  records goal-loop composition evidence.
 - **external-write policy gate held closed**: the real `linear-refresh`
   (`external-apply`) step is claimed through the scheduler and dispatched; the
   external-write family is not a phase-1 dispatchable family, so the dispatch
@@ -538,11 +549,13 @@ Phase-1 boundary (honest scope): `executeWorkflowStepDispatch` stops at the star
 `runNoMistakesMirrorStep` adapters own terminal finalization, and their
 seam-level reconciliation with the scaffold is the documented real-adapter
 follow-up. The proof therefore exercises the scaffold (via the production seam)
-and the terminal finalization (via the landed one-shot adapter) on two distinct
-one-shot steps, whose deliberately distinct invocation ids (`...::dispatch` vs
-the adapter's reattachable id) never mint two owners for one step. Composing the
-goal-loop / no-mistakes / M9 live-wrapper terminal finalizations into the E2E
-remains follow-on NGX-372 work.
+on the `preflight` one-shot step and terminal finalization (via the landed
+adapters) on distinct steps: the one-shot adapter on `postflight` and the
+goal-loop adapter on `implementation`. Each carries a deliberately distinct
+invocation id (`...::dispatch` for the scaffold vs each landed adapter's own
+reattachable id), so scaffold + one-shot terminal + goal-loop terminal compose
+without minting two owners for one step. Composing the no-mistakes / M9
+live-wrapper terminal finalizations into the E2E remains follow-on NGX-372 work.
 
 Evidence: each test assembles a structured composition-evidence record (per-layer
 states / counts / verification status / gate type) and writes it as a
@@ -640,11 +653,12 @@ verify-before-commit and failure-reset-to-base — documented under *Milestone 9
 live-execution unit coverage* above; any durable evidence is registered per the
 artifact policy.
 
-Remaining NGX-372 work: composing the goal-loop / no-mistakes / M9 live-wrapper
-*terminal finalizations* into the full adapter E2E proof (only the one-shot
-terminal is composed into `test/full-adapter-e2e.test.ts` so far). A full
-real-agent harness run (`MOMENTUM_REAL_SMOKE_WORKFLOW_FULL=1`) stays
-operator-driven and `coding-workflow-pipeline`-owned, not a CI spawn.
+Remaining NGX-372 work: composing the no-mistakes / M9 live-wrapper *terminal
+finalizations* into the full adapter E2E proof (the one-shot and goal-loop
+terminals are now composed into `test/full-adapter-e2e.test.ts`; no-mistakes and
+the live wrapper are not yet). A full real-agent harness run
+(`MOMENTUM_REAL_SMOKE_WORKFLOW_FULL=1`) stays operator-driven and
+`coding-workflow-pipeline`-owned, not a CI spawn.
 
 Run the CI-safe decision core and probe-execution coverage locally via the
 targeted vitest filters:
