@@ -4,8 +4,9 @@
  *
  * `src/real-smoke.ts` owns the opt-in real Linear *read* smoke. This sibling
  * module owns the CI-safe decision logic for the opt-in real *coding-workflow
- * harness* smoke: invoking a live OpenClaw wrapper (GNHF / postflight /
- * no-mistakes / merge-cleanup / linear-refresh) behind explicit operator flags.
+ * harness* smoke: invoking a live OpenClaw wrapper (preflight / implementation
+ * (GNHF) / postflight / no-mistakes / merge-cleanup / linear-refresh) behind
+ * explicit operator flags.
  * Like its read-smoke sibling it never performs I/O — it only:
  *
  *   - decides whether the harness smoke may run at all, given operator-controlled

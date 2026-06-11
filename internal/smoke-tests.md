@@ -613,9 +613,10 @@ pnpm vitest run test/full-adapter-e2e.test.ts
 
 The opt-in real Linear *read* smoke above touches a real external **read**. The
 coding-workflow harness smoke is the other in-scope opt-in real path: invoking a
-live OpenClaw wrapper (GNHF / postflight / no-mistakes / merge-cleanup /
-linear-refresh) against a real harness. Spawning the full engines is expensive
-and side-effectful, and full agent execution stays owned by the
+live OpenClaw wrapper (preflight / implementation (GNHF) / postflight /
+no-mistakes / merge-cleanup / linear-refresh) against a real harness. Spawning
+the full engines is expensive and side-effectful, and full agent execution stays
+owned by the
 `coding-workflow-pipeline` skill and the M9 live step wrapper / orchestrator
 layers (explicitly approved by run id / boundary). NGX-372's deliverable here is
 the **CI-safe decision core** plus a bounded, opt-in **pre-flight probe** smoke —

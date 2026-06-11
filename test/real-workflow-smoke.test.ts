@@ -15,8 +15,9 @@ import {
  * NGX-372 opt-in real coding-workflow harness smoke — pure planner / classifier.
  *
  * These tests pin the CI-safe decision logic that gates the real coding-workflow
- * harness smoke (GNHF / postflight / no-mistakes / merge-cleanup): skip unless
- * explicitly opted in with a configured live-wrapper profile, keep the
+ * harness smoke (preflight / implementation (GNHF) / postflight / no-mistakes /
+ * merge-cleanup / linear-refresh): skip unless explicitly opted in with a
+ * configured live-wrapper profile, keep the
  * external-write family (linear-refresh) closed unless a separate write policy
  * is opened, default to the safe probe-only dry-run, and map a finished harness
  * outcome into the documented failure-mode taxonomy. No process is spawned.
