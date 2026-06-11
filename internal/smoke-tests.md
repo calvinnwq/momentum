@@ -431,9 +431,75 @@ Run the built-binary production workflow-lane smoke locally via:
 pnpm vitest run test/smoke.test.ts -t "production workflow-lane dispatch"
 ```
 
+## Opt-in real adapter smoke (NGX-372)
+
+NGX-372 adds the first adapter test layer allowed to touch a real external
+system, behind an explicit opt-in switch. It is **not** part of default
+`pnpm test`: the gated suite skips unless the operator opts in, so CI never
+reaches `api.linear.app`. CI-safe vs opt-in separation:
+
+- **CI-safe (always runs):** `test/real-smoke.test.ts` pins the pure gating
+  decision (`planLinearReadSmoke`) and the failure-mode taxonomy
+  (`classifyRealSmokeReadOutcome`) with no network. The gated file also carries
+  one always-on guard test proving it stays opt-in.
+- **Opt-in (manual / flagged):** `test/real-linear-read-smoke.test.ts` performs a
+  bounded, read-only real Linear `issues` reconcile. It is skipped via
+  `describe.skipIf` unless `MOMENTUM_REAL_SMOKE_LINEAR` is truthy **and**
+  `LINEAR_API_KEY` is set.
+
+Read-only by construction: the smoke composes only the read-side
+`LinearReconciliationClient` (`buildLinearHttpReconciliationClient`) — no
+external-write adapter is reachable, so no comment/status mutation can occur.
+Real external **writes** stay a separate, policy-gated adapter (see the M6 row in
+[contracts/adapter-test-coverage.md](contracts/adapter-test-coverage.md)) and are
+out of scope for this read smoke.
+
+Manual run:
+
+```
+MOMENTUM_REAL_SMOKE_LINEAR=1 LINEAR_API_KEY=lin_api_... \
+  pnpm vitest run test/real-linear-read-smoke.test.ts
+```
+
+Optional read-only scoping / safety knobs (all default-off):
+
+- `MOMENTUM_REAL_SMOKE_DRY_RUN=1` — perform the real read but persist nothing
+  locally (no-op mode; the run row is still recorded).
+- `MOMENTUM_REAL_SMOKE_LINEAR_PROJECT=...` — UUID maps to `projectId`, else
+  `projectName`.
+- `MOMENTUM_REAL_SMOKE_LINEAR_MILESTONE=...` — UUID maps to `milestoneId`, else
+  `milestoneName`.
+- `MOMENTUM_REAL_SMOKE_LINEAR_MAX_PAGES=2` — bound the drain (default 1 page);
+  a non-positive / non-integer value fails closed (skip, `config_invalid`).
+- `MOMENTUM_REAL_SMOKE_LINEAR_ENDPOINT=...` — override the GraphQL endpoint, e.g.
+  to point a dry-run at a local mock.
+- `MOMENTUM_REAL_SMOKE_EVIDENCE_DIR=...` — override the evidence directory.
+
+Evidence: the smoke writes a `linear-read-<ts>.json` record (filters, endpoint,
+run state, counts, pagination stop, classified outcome, items persisted) under
+`.agent-runs/real-smoke/` by default and logs the path to stdout.
+
+Documented failure modes (surfaced by `classifyRealSmokeReadOutcome`):
+
+- `missing_credentials` — opted in without `LINEAR_API_KEY` (skip; not a run).
+- `auth_failure` — 401/403 or auth-shaped GraphQL error from Linear.
+- `rate_limited` — HTTP 429 / rate-limit message.
+- `network_failure` — transport timeout / DNS / connection-reset failure.
+- `tool_unavailable` — no global `fetch` available in the runtime.
+- `config_invalid` — bad page-size / endpoint / other config rejection.
+- `adapter_error` — any other unrecognized read failure (response shape, etc.).
+
+Cleanup / rollback: the smoke uses a disposable OS-temp data dir that is removed
+in `afterEach`, initializes no git repo, and writes only the SQLite database
+there, so it leaves the working tree clean. The only durable footprint is the
+gitignored `.agent-runs/real-smoke/` evidence file, which the operator may delete
+once captured in the Linear closeout. Real external state is never mutated.
+
 ## Test boundary
 
-The smoke must not make real `api.linear.app` calls — see
+The default smoke must not make real `api.linear.app` calls — see
 [internal/contracts/intent-apply.md](contracts/intent-apply.md) for the M6 test
 guard that continues this rule into the policy-gated external apply slices.
-All Linear interactions use the existing mock endpoint pattern.
+All Linear interactions in the default suite use the existing mock endpoint
+pattern; the opt-in real read smoke above is the sole, explicitly gated
+exception and never runs in default CI.
