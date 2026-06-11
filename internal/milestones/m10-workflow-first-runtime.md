@@ -209,7 +209,7 @@ wrapper.
 
 The fixture (`src/workflow-dogfood-dispatch.ts`, enabled via
 `MOMENTUM_DOGFOOD_TERMINALIZE_DISPATCH=1`) wraps the production
-`executeWorkflowStepDispatch`, terminalize the step immediately after the real
+`executeWorkflowStepDispatch`, terminalizes the step immediately after the real
 executor-invocation scaffold is created, and releases its dispatch lease — all
 in one `BEGIN IMMEDIATE` transaction. Because the lease is released and the step
 is `succeeded`, the scheduler sees the run as scannable again and dispatches the
