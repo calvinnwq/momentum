@@ -198,6 +198,36 @@ round all the way through the real executor mechanisms, plus generalized
 `external-apply` and `subworkflow` dispatch, stays deferred to later runtime
 work.
 
+## Post-Closeout Tightening (NGX-391)
+
+NGX-391 (M10-09b) tightens the NGX-353 closeout proof by adding a controlled
+terminalize-and-continue fixture that proves a *single* daemon process can
+dispatch more than one local step. The NGX-353 dogfood required three separate
+`daemon start` invocations plus a manual `workflow run update-step` to advance
+past `preflight`; NGX-391 eliminates that limitation with an opt-in dispatch
+wrapper.
+
+The fixture (`src/workflow-dogfood-dispatch.ts`, enabled via
+`MOMENTUM_DOGFOOD_TERMINALIZE_DISPATCH=1`) wraps the production
+`executeWorkflowStepDispatch`, terminalize the step immediately after the real
+executor-invocation scaffold is created, and releases its dispatch lease — all
+in one `BEGIN IMMEDIATE` transaction. Because the lease is released and the step
+is `succeeded`, the scheduler sees the run as scannable again and dispatches the
+next approved step in the same loop iteration.
+
+Safety posture: the terminalization is gated on `shouldTerminalizeAfterDispatch`
+so a `failClosed` or `stepNotStartable` dispatch (both of which have already
+released their lease and written nothing or parked the run) is echoed back
+untouched. Terminalizing a parked run to `succeeded` would mask a
+manual-recovery condition; the gate exists to prevent exactly that move. The
+default `daemon start` path is byte-for-byte unchanged when the env var is unset.
+
+Coverage lives in `test/workflow-dogfood-dispatch.test.ts` (unit safety gates)
+and `test/workflow-dogfood-multi-dispatch.test.ts` (single-process multi-dispatch
+proof through `runDaemonLoop` and the read-only status / monitor / handoff
+surfaces). The doctor marker and closeout status are unchanged; NGX-391 is a
+proof-layer addition, not a closeout reopening.
+
 ## Doctor Marker Policy
 
 The `doctor --json` readiness marker tracks the most recently closed
