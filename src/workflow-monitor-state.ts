@@ -518,10 +518,7 @@ function decideNextAction(input: NextActionInput): WorkflowMonitorNextAction {
       code: "resume_running",
       stepId: active.stepId,
       leaseKind: leaseKindForStep(active),
-      detail:
-        input.recovery?.code === "monitor_drift_stale"
-          ? "Step is running with fresh evidence, but monitor advisory disagrees with substrate state. Allow it to continue while flagging the drift."
-          : "Step is running with fresh lease / checkpoint evidence. Allow it to continue."
+      detail: describeRunningStepResume(input)
     };
   }
   if (active.state === "approved") {
@@ -555,4 +552,25 @@ function leaseKindForStep(
   // the M7 contract; monitor / dispatch leases live around the step boundary,
   // not on the step itself.
   return "managed-step";
+}
+
+function describeRunningStepResume(
+  input: Pick<
+    NextActionInput,
+    "checkpointFresh" | "hasFreshDispatchLease" | "recovery"
+  >
+): string {
+  if (input.recovery?.code === "monitor_drift_stale") {
+    return "Step is running with fresh evidence, but monitor advisory disagrees with substrate state. Allow it to continue while flagging the drift.";
+  }
+  if (input.hasFreshDispatchLease && input.checkpointFresh) {
+    return "Step is running with a fresh dispatch lease and recent checkpoint evidence. Allow it to continue.";
+  }
+  if (input.hasFreshDispatchLease) {
+    return "Step is running with a fresh dispatch lease. Allow it to continue.";
+  }
+  if (input.checkpointFresh) {
+    return "Step is running with recent checkpoint evidence but no fresh active dispatch lease. Allow the existing work to continue, but do not report the lease as fresh.";
+  }
+  return "Step is running with fresh evidence. Allow it to continue.";
 }

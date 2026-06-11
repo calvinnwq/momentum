@@ -738,7 +738,7 @@ The detail envelope flattens the per-run view at the top level (`run`, `steps`, 
       "code": "resume_running",
       "stepId": "implementation",
       "leaseKind": "managed-step",
-      "detail": "Step is running with fresh lease / checkpoint evidence. Allow it to continue."
+      "detail": "Step is running with a fresh dispatch lease and recent checkpoint evidence. Allow it to continue."
     },
     "needsRecoveryArtifact": false,
     "recovery": null
@@ -825,7 +825,7 @@ Monitor
 - Blocked: no
 - Active step: implementation (running)
 - Last checkpoint: implementation at 1730000100000 (source=ledger)
-- Next action: resume_running - Step is running with fresh lease / checkpoint evidence. Allow it to continue.
+- Next action: resume_running - Step is running with a fresh dispatch lease and recent checkpoint evidence. Allow it to continue.
 
 Evidence: 1
 - evidence_record_impl [agent-workflow/implementation_complete] implementation finished step=implementation
@@ -867,7 +867,7 @@ Emits a machine-readable next-action envelope for one workflow run. Wraps the sa
     "code": "resume_running",
     "stepId": "implementation",
     "leaseKind": "managed-step",
-    "detail": "Step is running with fresh lease / checkpoint evidence. Allow it to continue."
+    "detail": "Step is running with a fresh dispatch lease and recent checkpoint evidence. Allow it to continue."
   }
 }
 ```
@@ -1061,7 +1061,7 @@ Live dispatch / finalization recovery can also set the durable manual-recovery f
     "code": "resume_running",
     "stepId": "implementation",
     "leaseKind": "managed-step",
-    "detail": "Step is running with fresh lease / checkpoint evidence. Allow it to continue."
+    "detail": "Step is running with a fresh dispatch lease and recent checkpoint evidence. Allow it to continue."
   },
   "recovery": null,
   "evidence": [{ "...": "same typed evidence pointers as workflow status detail" }],

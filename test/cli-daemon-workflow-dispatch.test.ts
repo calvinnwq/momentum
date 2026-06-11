@@ -183,6 +183,123 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     expect(monitorResult.code).toBe(0);
   });
 
+  it("dispatches the next approved step after the first dispatch is recovered and terminalized", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const runId = "ngx390-second-dispatch";
+    await startApprovedCodingRun(dataDir, repoDir, runId);
+
+    const firstDispatch = await run([
+      "daemon",
+      "start",
+      "--max-loop-iterations",
+      "1",
+      "--poll-interval-ms",
+      "0",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(firstDispatch.code).toBe(0);
+    expect(JSON.parse(firstDispatch.stdout).loop.workflowStepsDispatched).toBe(1);
+
+    const db = openDb(dataDir);
+    try {
+      db.prepare(
+        `UPDATE workflow_leases
+            SET heartbeat_at = ?, expires_at = ?
+          WHERE run_id = ? AND lease_kind = ?`
+      ).run(1, 2, runId, "dispatch");
+    } finally {
+      db.close();
+    }
+
+    const recoverLease = await run([
+      "daemon",
+      "start",
+      "--max-loop-iterations",
+      "1",
+      "--poll-interval-ms",
+      "0",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(recoverLease.code).toBe(0);
+    expect(JSON.parse(recoverLease.stdout).loop.workflowStepsDispatched).toBe(0);
+
+    const terminalizePreflight = await run([
+      "workflow",
+      "run",
+      "update-step",
+      runId,
+      "--step",
+      "preflight",
+      "--state",
+      "succeeded",
+      "--reason",
+      "test terminalizes preflight before second dispatch",
+      "--actor",
+      "vitest",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(terminalizePreflight.code).toBe(0);
+    expect(JSON.parse(terminalizePreflight.stdout)).toMatchObject({
+      ok: true,
+      stepId: "preflight",
+      state: "succeeded",
+      runState: "approved"
+    });
+
+    const secondDispatch = await run([
+      "daemon",
+      "start",
+      "--max-loop-iterations",
+      "3",
+      "--poll-interval-ms",
+      "0",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(secondDispatch.code).toBe(0);
+    const loop = JSON.parse(secondDispatch.stdout).loop as Record<string, unknown>;
+    expect(loop["exitReason"]).toBe("max_loop_iterations");
+    expect(loop["iterations"]).toBe(3);
+    expect(loop["workflowStepsDispatched"]).toBe(1);
+
+    const finalDb = openDb(dataDir);
+    try {
+      const steps = finalDb
+        .prepare(
+          "SELECT step_id, state FROM workflow_steps WHERE run_id = ? ORDER BY step_order"
+        )
+        .all(runId) as Array<{ step_id: string; state: string }>;
+      expect(steps.slice(0, 2)).toEqual([
+        { step_id: "preflight", state: "succeeded" },
+        { step_id: "implementation", state: "running" }
+      ]);
+
+      const invocations = finalDb
+        .prepare(
+          "SELECT step_key, executor_family, state FROM executor_invocations WHERE workflow_run_id = ? ORDER BY created_at"
+        )
+        .all(runId) as Array<{
+        step_key: string;
+        executor_family: string;
+        state: string;
+      }>;
+      expect(invocations).toEqual([
+        { step_key: "preflight", executor_family: "one-shot", state: "running" },
+        { step_key: "implementation", executor_family: "goal-loop", state: "running" }
+      ]);
+    } finally {
+      finalDb.close();
+    }
+  });
+
   it("leaves the workflow lane untouched for register-only daemon start", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();

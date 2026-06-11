@@ -485,6 +485,46 @@ describe("deriveWorkflowMonitorState: live evidence wins over stale lease for re
     expect(result.nextAction.code).toBe("resume_running");
     expect(result.needsRecoveryArtifact).toBe(false);
   });
+
+  it("does not describe a released dispatch lease as fresh when only checkpoint evidence is fresh", () => {
+    const steps: WorkflowStepRecord[] = [
+      step("preflight", "preflight", "running", 0),
+      step("implementation", "implementation", "approved", 1)
+    ];
+    const now = 100_000;
+    const result = deriveWorkflowMonitorState(
+      buildInput({
+        steps,
+        leases: [
+          lease({
+            leaseKind: "dispatch",
+            holder: "daemon-72503",
+            acquiredAt: 10_000,
+            expiresAt: 40_000,
+            heartbeatAt: 10_000,
+            releasedAt: 80_000,
+            stalePolicy: "auto-release"
+          })
+        ],
+        lastCheckpoint: checkpoint("preflight", now - 5_000, "ledger"),
+        now,
+        checkpointStaleMs: 60_000
+      })
+    );
+
+    expect(result.leases).toMatchObject([
+      {
+        leaseKind: "dispatch",
+        classification: "released",
+        releasedAt: 80_000
+      }
+    ]);
+    expect(result.nextAction.code).toBe("resume_running");
+    expect(result.nextAction.detail).toContain("recent checkpoint evidence");
+    expect(result.nextAction.detail).toContain("no fresh active dispatch lease");
+    expect(result.nextAction.detail).not.toContain("fresh lease");
+    expect(result.needsRecoveryArtifact).toBe(false);
+  });
 });
 
 describe("deriveWorkflowMonitorState: lease views are exposed with classifications", () => {
