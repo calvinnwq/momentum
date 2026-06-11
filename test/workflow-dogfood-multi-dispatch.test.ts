@@ -7,8 +7,13 @@ import { runCli } from "../src/cli.js";
 import { openDb } from "../src/db.js";
 import { runDaemonLoop } from "../src/daemon-loop.js";
 import { startDaemonRun } from "../src/daemon-runs.js";
-import { executeWorkflowStepDispatch } from "../src/workflow-dispatch-execute.js";
+import {
+  executeWorkflowStepDispatch,
+  WORKFLOW_DISPATCH_RESULT_STATUS
+} from "../src/workflow-dispatch-execute.js";
 import { createTerminalizingWorkflowDispatch } from "../src/workflow-dogfood-dispatch.js";
+import { claimRunnableWorkflowStep } from "../src/workflow-scheduler.js";
+import type { WorkflowStepDispatch } from "../src/workflow-scheduler.js";
 
 type RunResult = {
   code: number;
@@ -261,5 +266,63 @@ describe("dogfood single-process multi-dispatch terminalization (NGX-391)", () =
     );
     expect(handoffStepStates["preflight"]).toBe("succeeded");
     expect(handoffStepStates["implementation"]).toBe("succeeded");
+  });
+});
+
+describe("dogfood terminalize fails closed when the step cannot be finished (NGX-391)", () => {
+  it("throws and leaves the dispatch lease held when finishWorkflowStep refuses the terminal transition", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const runId = "ngx391-terminalize-guard";
+    await startApprovedCodingRun(dataDir, repoDir, runId);
+
+    const db = openDb(dataDir);
+    try {
+      const now = Date.now();
+      const claimResult = claimRunnableWorkflowStep(db, {
+        runId,
+        stepId: "preflight",
+        holder: "dogfood-guard",
+        leaseExpiresAt: now + 60_000,
+        now
+      });
+      expect(claimResult.ok).toBe(true);
+      if (!claimResult.ok) return;
+
+      // A base dispatch that reports `dispatched` WITHOUT moving the step to
+      // `running`, so the terminalize's `approved -> succeeded` finish is an
+      // invalid transition — the off-nominal outcome the guard must fail closed
+      // on instead of releasing the lease over a step it never terminalized.
+      const baseDispatchThatNeverStarts: WorkflowStepDispatch = () => ({
+        status: WORKFLOW_DISPATCH_RESULT_STATUS.dispatched
+      });
+      const wrapped = createTerminalizingWorkflowDispatch(
+        baseDispatchThatNeverStarts
+      );
+
+      expect(() =>
+        wrapped(claimResult.claim, { db, workerId: "dogfood-guard", now })
+      ).toThrow(/could not be finished succeeded/);
+
+      // The dispatch lease the claim acquired is still held: the failed
+      // terminalize rolled back rather than committing a released lease over a
+      // non-terminalized step.
+      const openLeases = db
+        .prepare(
+          "SELECT lease_kind FROM workflow_leases WHERE run_id = ? AND released_at IS NULL"
+        )
+        .all(runId) as Array<{ lease_kind: string }>;
+      expect(openLeases).toEqual([{ lease_kind: "dispatch" }]);
+
+      // The step was never silently marked succeeded.
+      const step = db
+        .prepare(
+          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?"
+        )
+        .get(runId, "preflight") as { state: string };
+      expect(step.state).toBe("approved");
+    } finally {
+      db.close();
+    }
   });
 });

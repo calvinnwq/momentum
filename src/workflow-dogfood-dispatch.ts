@@ -40,14 +40,12 @@
 import type { MomentumDb } from "./db.js";
 import { releaseWorkflowLease } from "./workflow-leases.js";
 import { deriveWorkflowMonitorState } from "./workflow-monitor-state.js";
-import { WORKFLOW_DISPATCH_RESULT_STATUS } from "./workflow-dispatch-execute.js";
+import {
+  loadWorkflowLeaseRecords,
+  loadWorkflowStepRecords,
+  WORKFLOW_DISPATCH_RESULT_STATUS
+} from "./workflow-dispatch-execute.js";
 import { finishWorkflowStep } from "./workflow-step-transitions.js";
-import type {
-  WorkflowLeaseRecord,
-  WorkflowStepKind,
-  WorkflowStepRecord,
-  WorkflowStepState
-} from "./workflow-run-reducer.js";
 import type {
   ClaimedWorkflowStep,
   WorkflowStepDispatch,
@@ -169,13 +167,22 @@ function terminalizeDispatchedStep(
 ): void {
   db.exec("BEGIN IMMEDIATE");
   try {
-    finishWorkflowStep(db, {
+    const finished = finishWorkflowStep(db, {
       runId: claim.runId,
       stepId: claim.stepId,
       state: "succeeded",
       resultDigest: `${DOGFOOD_TERMINALIZE_RESULT_DIGEST_PREFIX}::${claim.stepId}`,
       now
     });
+    if (!finished.ok) {
+      const cause =
+        finished.reason === "invalid_transition"
+          ? `${finished.reason} from ${finished.from}`
+          : finished.reason;
+      throw new Error(
+        `dogfood terminalize: step ${claim.runId}/${claim.stepId} could not be finished succeeded (${cause}); rolling back so the dispatch lease is not released over a non-terminalized step`
+      );
+    }
     releaseWorkflowLease(db, {
       runId: claim.lease.runId,
       leaseKind: claim.lease.leaseKind,
@@ -237,64 +244,4 @@ function refreshWorkflowRunStateAfterTerminalize(
     now,
     runId
   );
-}
-
-function loadWorkflowStepRecords(
-  db: MomentumDb,
-  runId: string
-): WorkflowStepRecord[] {
-  const rows = db
-    .prepare(
-      `SELECT step_id, kind, state, step_order, required
-         FROM workflow_steps
-        WHERE run_id = ?
-        ORDER BY step_order, step_id`
-    )
-    .all(runId) as Array<{
-    step_id: string;
-    kind: string;
-    state: string;
-    step_order: number;
-    required: number;
-  }>;
-  return rows.map((row) => ({
-    stepId: row.step_id,
-    kind: row.kind as WorkflowStepKind,
-    state: row.state as WorkflowStepState,
-    order: row.step_order,
-    required: row.required === 1
-  }));
-}
-
-function loadWorkflowLeaseRecords(
-  db: MomentumDb,
-  runId: string
-): WorkflowLeaseRecord[] {
-  const rows = db
-    .prepare(
-      `SELECT run_id, lease_kind, holder, acquired_at, expires_at,
-              heartbeat_at, released_at, stale_policy
-         FROM workflow_leases
-        WHERE run_id = ?`
-    )
-    .all(runId) as Array<{
-    run_id: string;
-    lease_kind: string;
-    holder: string;
-    acquired_at: number;
-    expires_at: number;
-    heartbeat_at: number;
-    released_at: number | null;
-    stale_policy: string;
-  }>;
-  return rows.map((row) => ({
-    runId: row.run_id,
-    leaseKind: row.lease_kind as WorkflowLeaseRecord["leaseKind"],
-    holder: row.holder,
-    acquiredAt: row.acquired_at,
-    expiresAt: row.expires_at,
-    heartbeatAt: row.heartbeat_at,
-    releasedAt: row.released_at,
-    stalePolicy: row.stale_policy as WorkflowLeaseRecord["stalePolicy"]
-  }));
 }
