@@ -558,6 +558,79 @@ Run locally via the targeted vitest filter:
 pnpm vitest run test/full-adapter-e2e.test.ts
 ```
 
+## Opt-in real coding-workflow harness smoke (NGX-372)
+
+The opt-in real Linear *read* smoke above touches a real external **read**. The
+coding-workflow harness smoke is the other in-scope opt-in real path: invoking a
+live OpenClaw wrapper (GNHF / postflight / no-mistakes / merge-cleanup /
+linear-refresh) against a real harness. Spawning these engines is expensive and
+side-effectful, and live execution stays owned by the `coding-workflow-pipeline`
+skill and the M9 live step wrapper / orchestrator layers (explicitly approved by
+run id / boundary). NGX-372's deliverable here is therefore the **CI-safe
+decision core** — the explicitly-flagged, documented opt-in gate — not a CI
+process spawn:
+
+- **CI-safe (always runs):** `test/real-workflow-smoke.test.ts` pins the pure
+  gating decision (`planWorkflowHarnessSmoke`) and the failure-mode taxonomy
+  (`classifyWorkflowHarnessOutcome`) from `src/real-workflow-smoke.ts`, with no
+  process spawned. It composes the existing M9 `LiveWrapperProfile` registry
+  (`parseLiveWrapperProfile` / `resolveLiveWrapper`) to resolve the harness
+  command, so the planner reuses the validated wrapper config rather than minting
+  a new command surface.
+
+`planWorkflowHarnessSmoke(env, rawProfile)` is read-only and pure (the caller
+passes the parsed profile value so the planner never touches the filesystem). It
+fails closed to a documented skip reason unless every gate is satisfied:
+
+- `not_opted_in` — the master opt-in flag is unset (the default).
+- `profile_unavailable` — no valid live-wrapper profile to resolve the command.
+- `kind_missing` / `unsupported_kind` — no / non-`WorkflowStepKind` requested.
+- `not_configured` — the kind has no wrapper in the profile.
+- `write_policy_closed` — the kind resolves to the external-write family
+  (`linear-refresh` -> `external-apply`) and the *separate* write opt-in is unset.
+  This keeps real external **reads** separated from real external **writes**:
+  a read-family harness smoke can never reach an external write.
+- `probe_unavailable` — the default probe-only dry-run was requested but the
+  wrapper configures no pre-flight `probe`.
+
+Opt-in switches (all default-off):
+
+- `MOMENTUM_REAL_SMOKE_WORKFLOW=1` — master opt-in.
+- `MOMENTUM_REAL_SMOKE_WORKFLOW_KIND=...` — which step kind's wrapper to smoke
+  (e.g. `no-mistakes`, `postflight`).
+- `MOMENTUM_REAL_SMOKE_WORKFLOW_FULL=1` — opt into spawning the full harness;
+  default is the safe **probe-only dry-run** (runs only the wrapper's cheap
+  pre-flight probe / availability check, never the agent — the no-op mode for an
+  otherwise-expensive harness).
+- `MOMENTUM_REAL_SMOKE_WORKFLOW_ALLOW_WRITE=1` — the separate write-policy gate
+  that must be explicitly opened to smoke an external-write wrapper.
+
+Documented failure modes (surfaced by `classifyWorkflowHarnessOutcome`):
+
+- `tool_unavailable` — the wrapper command is missing (`ENOENT` spawn error).
+- `timeout` — the harness exceeded its configured timeout.
+- `command_failed` — the harness ran but exited non-zero / was killed by signal.
+- `result_missing` / `result_invalid` — the harness produced no / a malformed
+  result document.
+- `harness_error` — any other unrecognized harness failure.
+
+Cleanup / rollback: the planner is pure and spawns nothing, so it leaves no
+footprint. A live harness run (operator-driven, outside default CI) inherits the
+M9 live step transaction's clean-up posture — verify-before-commit and
+failure-reset-to-base — documented under *Milestone 9 live-execution unit
+coverage* above; any durable evidence is registered per the artifact policy.
+
+Remaining NGX-372 work: a gated integration test that, when opted in, actually
+runs the resolved pre-flight probe (skipped by default like
+`test/real-linear-read-smoke.test.ts`) and records evidence, plus the
+operator-facing manual run command once that execution home lands.
+
+Run the CI-safe decision core locally via the targeted vitest filter:
+
+```
+pnpm vitest run test/real-workflow-smoke.test.ts
+```
+
 ## Test boundary
 
 The default smoke must not make real `api.linear.app` calls — see
