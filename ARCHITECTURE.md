@@ -107,6 +107,24 @@ During and after M11:
 - Test fixtures may read source files for structural guards, but production code
   must not depend on filesystem source scanning.
 
+## Adding a Command Module
+
+When adding or extracting a command family:
+
+1. Register the route in the explicit command registry and keep `src/cli.ts`
+   responsible only for top-level parsing, compatibility flags, and dispatch.
+2. Put command-family parsing and orchestration in `src/commands/<family>/`.
+3. Put reusable JSON, text, help, and diagnostic output contracts in
+   `src/renderers/`, then have command modules call those renderers with
+   already-computed results.
+4. Keep persistence, reducers, state machines, and external-write policy checks
+   in the existing domain or adapter modules.
+
+Do not import sibling command families for JSON or text render shapes. If two
+commands need the same shape, move it to `src/renderers/` first. Do not let
+domain modules import commands or renderers, and do not read or write
+`process.stdout` / `process.stderr` outside the CLI or rendering layers.
+
 ## M11 Migration Order
 
 The migration is deliberately staged:
