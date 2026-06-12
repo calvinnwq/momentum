@@ -10,19 +10,7 @@ import {
 } from "../goal-status.js";
 import { writeHandoff, type HandoffSuccess } from "../handoff.js";
 import type { UpdateIntentApplyPolicy } from "../momentum-policy.js";
-import { COMMANDS } from "./help.js";
-
-type Writer = {
-  write(chunk: string): boolean;
-};
-
-type CliIo = {
-  stdout: Writer;
-  stderr: Writer;
-  env?: NodeJS.ProcessEnv;
-};
-
-type JsonPayload = Record<string, unknown>;
+import { usageError, write, writeJson, type CliIo } from "./cli-io.js";
 
 type ParsedFlags = {
   args: string[];
@@ -706,41 +694,4 @@ function describePolicyFields(payload: {
   }
   if (payload.hasNotes) parts.push("notes");
   return parts.join(", ");
-}
-
-function usageError(message: string, parsed: ParsedFlags, io: CliIo): number {
-  const payload = {
-    ok: false,
-    code: "usage_error",
-    message,
-    commands: COMMANDS
-  };
-
-  if (parsed.json) {
-    writeJson(io.stderr, payload);
-    return 2;
-  }
-
-  write(io.stderr, `${message}\n\n${renderHelp()}`);
-  return 2;
-}
-
-function renderHelp(): string {
-  return [
-    "Momentum",
-    "",
-    "Usage:",
-    ...COMMANDS.map((command) => `  ${command}`),
-    "",
-    "Default goal start enqueues a goal_iteration job for a future worker; pass --foreground to keep the Milestone 1 inline iteration.",
-    ""
-  ].join("\n");
-}
-
-function writeJson(writer: Writer, payload: JsonPayload): void {
-  write(writer, `${JSON.stringify(payload, null, 2)}\n`);
-}
-
-function write(writer: Writer, chunk: string): void {
-  writer.write(chunk);
 }

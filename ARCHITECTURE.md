@@ -11,15 +11,17 @@ The runtime centers on local SQLite state, per-run artifacts, explicit operator
 commands, and stable JSON / text envelopes.
 
 The executable entrypoint is intentionally thin. M11 has introduced an explicit
-command registry skeleton while most command handlers still live in `src/cli.ts`:
+command registry skeleton and has started moving command families behind
+`src/commands/` modules:
 
 ```text
-src/index.ts -> src/cli.ts -> src/commands/ registry -> existing CLI handlers / domain modules
+src/index.ts -> src/cli.ts -> src/commands/ registry + command families -> domain modules
 ```
 
-`src/cli.ts` is still the command parser, renderer host, compatibility surface,
-and home for command handlers not yet extracted. The registry owns only explicit
-top-level routing until later M11 slices move command families behind modules.
+`src/cli.ts` is still the command parser, compatibility surface, and home for
+command handlers not yet extracted. Extracted families currently include the
+read-only status family, workflow, goal, source, evidence, project rollup, and
+update-intent / intent surfaces.
 
 ## Deeper Contracts
 
@@ -114,7 +116,8 @@ The migration is deliberately staged:
 2. `NGX-413` extracts the read-only status family (`status`, `logs`,
    `handoff`, and stable read-only helpers) without changing output.
 3. `NGX-414` extracts the workflow command family after the registry exists.
-4. `NGX-415` extracts the goal, source, and update-intent command families.
+4. `NGX-415` extracts the goal, source, evidence, project, and update-intent
+   command families.
 5. `NGX-416` consolidates renderers and output contracts.
 6. `NGX-417` organizes adapters and infrastructure boundaries.
 7. `NGX-418` enforces import boundaries with structural guardrails.
