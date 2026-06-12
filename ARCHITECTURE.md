@@ -10,15 +10,16 @@ Momentum is a TypeScript CLI for durable autonomous repo-work orchestration.
 The runtime centers on local SQLite state, per-run artifacts, explicit operator
 commands, and stable JSON / text envelopes.
 
-The executable entrypoint is intentionally thin:
+The executable entrypoint is intentionally thin. M11 has introduced an explicit
+command registry skeleton while most command handlers still live in `src/cli.ts`:
 
 ```text
-src/index.ts -> src/cli.ts -> domain modules / adapters / persistence
+src/index.ts -> src/cli.ts -> src/commands/ registry -> existing CLI handlers / domain modules
 ```
 
-`src/cli.ts` is currently the command parser, dispatcher, renderer host, and
-compatibility surface. That is too much for the long term, but M11 migrates it
-in staged slices so command semantics stay frozen.
+`src/cli.ts` is still the command parser, renderer host, compatibility surface,
+and home for command handlers not yet extracted. The registry owns only explicit
+top-level routing until later M11 slices move command families behind modules.
 
 ## Deeper Contracts
 
@@ -108,7 +109,8 @@ During and after M11:
 
 The migration is deliberately staged:
 
-1. `NGX-412` adds the command registry skeleton and shared command contract.
+1. `NGX-412` adds the command registry skeleton and shared command contract
+   with explicit route declarations and no filesystem discovery.
 2. `NGX-413` extracts the read-only status family (`status`, `logs`,
    `handoff`, and stable read-only helpers) without changing output.
 3. `NGX-414` extracts the workflow command family after the registry exists.
@@ -127,8 +129,9 @@ this slice; those moves belong to `NGX-413` and `NGX-414`.
   behavior.
 - JSON envelope keys, refusal codes, and text output must be preserved across
   extraction.
-- Existing workflow/read-only command code remains in `src/cli.ts` until its
-  assigned migration issue.
+- Existing workflow/read-only command implementation remains in `src/cli.ts`
+  until its assigned migration issue, even when a command is registered through
+  the skeleton.
 - Public docs stay in `docs/`; milestone sequencing and NGX detail stay in
   `internal/` or this architecture contract when the detail is structural.
 - Every extraction should leave the repo valid with focused tests, typecheck,
