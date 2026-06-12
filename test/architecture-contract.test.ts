@@ -90,11 +90,19 @@ describe("M11 structural guard around src/cli.ts", () => {
     expect(commandIndex).not.toMatch(/readdir|glob|fs\./);
   });
 
-  it("keeps read-only and workflow command handlers in cli.ts until their migration slices", () => {
+  it("extracts the read-only goal status family for NGX-413 while workflow stays in cli.ts", () => {
+    const statusModule = readFile("src/commands/status.ts");
+
     for (const handler of [
       "function status(",
       "function logs(",
       "function handoff(",
+    ]) {
+      expect(cli, `src/cli.ts should no longer contain ${handler}`).not.toContain(handler);
+      expect(statusModule, `src/commands/status.ts should contain ${handler}`).toContain(handler);
+    }
+
+    for (const handler of [
       "function workflow(",
       "function workflowRun(",
       "function workflowRunStart(",
