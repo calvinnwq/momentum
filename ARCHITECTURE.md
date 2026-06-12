@@ -116,7 +116,8 @@ The migration is deliberately staged:
 2. `NGX-413` extracts the read-only status family (`status`, `logs`,
    `handoff`, and stable read-only helpers) without changing output.
 3. `NGX-414` extracts the workflow command family after the registry exists.
-4. `NGX-415` extracts the goal, source, and update-intent command families.
+4. `NGX-415` extracts the goal, source, evidence, project, and update-intent
+   command families.
 5. `NGX-416` consolidates renderers and output contracts.
 6. `NGX-417` organizes adapters and infrastructure boundaries.
 7. `NGX-418` enforces import boundaries with structural guardrails.

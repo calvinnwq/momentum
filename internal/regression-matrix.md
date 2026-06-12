@@ -192,7 +192,7 @@ it. The end-to-end evidence is the built-CLI smoke under
   a directory scan — are the source of truth whenever they exist, and the
   emitted identifiers feed straight into `workflow status` / `workflow handoff`
   without re-derivation.
-- **Owner.** [`src/cli.ts`](../src/cli.ts) (`workflowRunList`), reusing the M7
+- **Owner.** [`src/commands/workflow/index.ts`](../src/commands/workflow/index.ts) (`workflowRunList`), reusing the M7
   [`src/workflow-status.ts`](../src/workflow-status.ts) filter buckets and the
   [`src/workflow-run-reducer.ts`](../src/workflow-run-reducer.ts) run state.
 - **Evidence.**
@@ -216,7 +216,7 @@ it. The end-to-end evidence is the built-CLI smoke under
   never produce a durable row stays in force. The durable approval survives
   subsequent `workflow import` (upsert `ON CONFLICT(run_id, boundary)`, never
   deleted) and composes into status / handoff / monitor.
-- **Owner.** [`src/cli.ts`](../src/cli.ts) (`workflowRunApprove`) plus
+- **Owner.** [`src/commands/workflow/index.ts`](../src/commands/workflow/index.ts) (`workflowRunApprove`) plus
   [`src/workflow-run-import.ts`](../src/workflow-run-import.ts) (idempotent
   approval upsert).
 - **Evidence.**
@@ -237,7 +237,7 @@ it. The end-to-end evidence is the built-CLI smoke under
   durable mutation, and a terminal run refuses re-finalize except a byte-equal
   idempotent replay. The required-chain derivation in `deriveWorkflowRunState`
   stays the authority on run-level state; M8 never bypasses it.
-- **Owner.** [`src/cli.ts`](../src/cli.ts) (`workflowRunUpdateStep`) plus
+- **Owner.** [`src/commands/workflow/index.ts`](../src/commands/workflow/index.ts) (`workflowRunUpdateStep`) plus
   [`src/workflow-run-reducer.ts`](../src/workflow-run-reducer.ts)
   (`deriveWorkflowRunState`).
 - **Evidence.**
@@ -289,7 +289,7 @@ it. The end-to-end evidence is the built-CLI smoke under
   `clearWorkflowRunManualRecoveryGuarded`),
   [`src/workflow-recovery-artifact.ts`](../src/workflow-recovery-artifact.ts)
   (the `recovery.md` renderer), and
-  [`src/cli.ts`](../src/cli.ts) (`workflowRunClearRecovery`).
+  [`src/commands/workflow/index.ts`](../src/commands/workflow/index.ts) (`workflowRunClearRecovery`).
 - **Evidence.**
   - Built-CLI smoke: `test/smoke.test.ts` — "recovers a ghost-active run: …"
     asserts import sets `needs_manual_recovery` + `ghost_active_no_lease` and
