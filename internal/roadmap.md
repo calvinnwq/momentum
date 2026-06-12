@@ -44,6 +44,13 @@ M10-09a lands production workflow-lane dispatcher wiring for bounded managed
 daemon dispatch path and closes the milestone. The M10 milestone narrative is
 [internal/milestones/m10-workflow-first-runtime.md](milestones/m10-workflow-first-runtime.md).
 
+The post-M10 coding workflow ownership migration is pinned in
+[internal/contracts/coding-workflow-ownership.md](contracts/coding-workflow-ownership.md).
+That contract keeps the current OpenClaw `coding-workflow-pipeline` as the
+stable production path while Momentum builds an opt-in Momentum-native coding
+workflow route. New Momentum-native runs must start from Momentum state; the
+OpenClaw skill boundary is client, rendering, delivery, and compatibility.
+
 The `doctor` readiness marker tracks the **most recently closed** milestone. It currently reads `Milestone 10: workflow-first runtime (NGX-344, NGX-345, NGX-346, NGX-347, NGX-348, NGX-349, NGX-350, NGX-351, NGX-352, NGX-367, NGX-353) complete`. The marker advanced from the M6 closeout string to `Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete` at the M7 closeout slice (NGX-319), stayed pinned to the M7 string through every M8 implementation slice, advanced to the M8 string at the M8 closeout slice (NGX-330), and advanced again to the M10 string at the M10 closeout slice (NGX-353).
 
 ## Most recently closed milestone: M8

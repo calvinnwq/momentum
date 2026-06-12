@@ -146,6 +146,13 @@ merge-cleanup -> external-apply or script
 linear-refresh -> external-apply
 ```
 
+The post-M10 ownership contract for that coding workflow lives in
+[`internal/contracts/coding-workflow-ownership.md`](coding-workflow-ownership.md).
+It pins the migration rule that Momentum owns future coding workflow runtime
+state, while OpenClaw remains the client / rendering / compatibility layer and
+the existing `coding-workflow-pipeline` stays the stable production path until
+the Momentum-native route proves a full dogfood.
+
 ## Daemon Contract
 
 The daemon owns scheduling, leases, durable state transitions, round classification, and whether a step may advance.

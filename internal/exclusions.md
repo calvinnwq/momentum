@@ -178,6 +178,13 @@ dispatcher wiring for bounded managed `daemon start`. The workflow-first
 dogfood and M10 closeout marker have landed; generalized `external-apply` /
 `subworkflow` dispatch remains deferred until later runtime work.
 
+The post-M10 coding workflow ownership migration is accepted in
+[`internal/contracts/coding-workflow-ownership.md`](contracts/coding-workflow-ownership.md).
+Until that contract's migration gates pass, the existing OpenClaw
+`coding-workflow-pipeline` remains the stable production path. Momentum-native
+coding workflow starts are opt-in, must use Momentum as the primary state store,
+and must not silently replace CWFP for normal work.
+
 ## Worktree management and remote git operations
 
 Worktree management, per-source-item worktrees / workspaces, remote git
