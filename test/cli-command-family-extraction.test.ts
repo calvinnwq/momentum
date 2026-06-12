@@ -77,4 +77,37 @@ describe("goal/source/evidence/project/intent command family extraction", () => 
       message: "Missing required <goal.md> for goal start."
     });
   });
+
+  it("renders the shared Momentum help block for text-mode usage errors", async () => {
+    const footer =
+      "Default goal start enqueues a goal_iteration job for a future worker; pass --foreground to keep the Milestone 1 inline iteration.";
+    const cases: Array<{ args: string[]; message: string }> = [
+      {
+        args: ["source"],
+        message:
+          "Missing required subcommand for source. Expected: list, get, link, unlink, reconcile."
+      },
+      { args: ["project", "bogus"], message: "Unknown project subcommand: bogus" },
+      { args: ["evidence", "bogus"], message: "Unknown evidence subcommand: bogus" },
+      { args: ["intent", "bogus"], message: "Unknown intent subcommand: bogus" }
+    ];
+
+    for (const { args, message } of cases) {
+      const result = await run(args);
+
+      expect(result.code, `${args.join(" ")} exits 2`).toBe(2);
+      expect(result.stdout).toBe("");
+      expect(
+        result.stderr.startsWith(`${message}\n\nMomentum\n\nUsage:\n`),
+        `${args.join(" ")} renders the Momentum help header`
+      ).toBe(true);
+      expect(result.stderr, `${args.join(" ")} indents the command list`).toMatch(
+        /\n {2}momentum goal start /
+      );
+      expect(
+        result.stderr.trimEnd().endsWith(footer),
+        `${args.join(" ")} ends with the help footer`
+      ).toBe(true);
+    }
+  });
 });

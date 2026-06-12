@@ -70,4 +70,24 @@ describe("workflow command family extraction", () => {
       message: "Missing required --action <action> for workflow run decide."
     });
   });
+
+  it("renders the shared Momentum help block for text-mode usage errors", async () => {
+    const result = await run(["workflow", "bogus"]);
+
+    expect(result.code).toBe(2);
+    expect(result.stdout).toBe("");
+    expect(
+      result.stderr.startsWith(
+        "Unknown workflow subcommand: bogus\n\nMomentum\n\nUsage:\n"
+      )
+    ).toBe(true);
+    expect(result.stderr).toMatch(/\n {2}momentum goal start /);
+    expect(
+      result.stderr
+        .trimEnd()
+        .endsWith(
+          "Default goal start enqueues a goal_iteration job for a future worker; pass --foreground to keep the Milestone 1 inline iteration."
+        )
+    ).toBe(true);
+  });
 });

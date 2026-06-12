@@ -1,4 +1,10 @@
-import { COMMANDS } from "../help.js";
+import {
+  usageError,
+  write,
+  writeJson,
+  type CliIo,
+  type JsonPayload
+} from "../cli-io.js";
 import { openDb } from "../../db.js";
 import { resolveDataDir, type DataDirOptions } from "../../data-dir.js";
 import {
@@ -65,18 +71,6 @@ export type CliDeps = {
 type ParsedFlags = {
   args: string[]; json: boolean; dataDir?: string; goal?: string; sourceItem?: string; status?: string; reason?: string; limit?: number; externalApply: boolean; repo?: string; adapter?: string; evidenceType?: string; evidenceRecord?: string;
 };
-
-type Writer = {
-  write(chunk: string): boolean;
-};
-
-type CliIo = {
-  stdout: Writer;
-  stderr: Writer;
-  env?: NodeJS.ProcessEnv;
-};
-
-type JsonPayload = Record<string, unknown>;
 
 type IntentFailureCode =
   | "data_dir_failed"
@@ -1103,26 +1097,4 @@ function renderExternalApplyTextLines(
     );
   }
   return lines;
-}
-
-function usageError(message: string, parsed: ParsedFlags, io: CliIo): number {
-  if (parsed.json) {
-    writeJson(io.stderr, {
-      ok: false,
-      code: "usage_error",
-      message,
-      commands: COMMANDS
-    });
-  } else {
-    write(io.stderr, `${message}\n\n${COMMANDS.join("\n")}\n`);
-  }
-  return 2;
-}
-
-function writeJson(writer: Writer, payload: JsonPayload): void {
-  writer.write(`${JSON.stringify(payload, null, 2)}\n`);
-}
-
-function write(writer: Writer, chunk: string): void {
-  writer.write(chunk);
 }

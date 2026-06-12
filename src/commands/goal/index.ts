@@ -1,4 +1,4 @@
-import { COMMANDS } from "../help.js";
+import { usageError, write, writeJson, type CliIo } from "../cli-io.js";
 import { openDb, type MomentumDb } from "../../db.js";
 import { resolveDataDir, type DataDirOptions } from "../../data-dir.js";
 import { initGoal, type GoalInitOptions, type GoalInitSuccess } from "../../goal-init.js";
@@ -13,18 +13,6 @@ type ParsedFlags = {
 
 const QUEUED_NEXT_ACTION =
   "Goal queued. Run `momentum worker run --data-dir <path>` to claim and execute one goal_iteration job.";
-
-type Writer = {
-  write(chunk: string): boolean;
-};
-
-type CliIo = {
-  stdout: Writer;
-  stderr: Writer;
-  env?: NodeJS.ProcessEnv;
-};
-
-type JsonPayload = Record<string, unknown>;
 
 export function goalStart(parsed: ParsedFlags, io: CliIo): number {
   const goalPath = parsed.args[2];
@@ -238,26 +226,4 @@ function emitGoalStart(
 
   write(io.stderr, `${message}\n`);
   return 1;
-}
-
-function usageError(message: string, parsed: ParsedFlags, io: CliIo): number {
-  if (parsed.json) {
-    writeJson(io.stderr, {
-      ok: false,
-      code: "usage_error",
-      message,
-      commands: COMMANDS
-    });
-  } else {
-    write(io.stderr, `${message}\n\n${COMMANDS.join("\n")}\n`);
-  }
-  return 2;
-}
-
-function writeJson(writer: Writer, payload: JsonPayload): void {
-  writer.write(`${JSON.stringify(payload, null, 2)}\n`);
-}
-
-function write(writer: Writer, chunk: string): void {
-  writer.write(chunk);
 }

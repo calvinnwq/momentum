@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { COMMANDS } from "../help.js";
+import { usageError, write, writeJson, type CliIo } from "../cli-io.js";
 import { isUniqueViolation, openDb, type MomentumDb } from "../../db.js";
 import { resolveDataDir, type DataDirOptions } from "../../data-dir.js";
 import { loadMomentumPolicy } from "../../momentum-policy.js";
@@ -99,18 +99,6 @@ import {
   type WorkflowGateRecord
 } from "../../workflow-gate-persist.js";
 import { executeWorkflowStepDispatch } from "../../workflow-dispatch-execute.js";
-
-type Writer = {
-  write(chunk: string): boolean;
-};
-
-type CliIo = {
-  stdout: Writer;
-  stderr: Writer;
-  env?: NodeJS.ProcessEnv;
-};
-
-type JsonPayload = Record<string, unknown>;
 
 type ParsedFlags = {
   args: string[];
@@ -2991,30 +2979,4 @@ function renderWorkflowHandoffText(
   lines.push("");
   lines.push(renderWorkflowDetailText(dataDir, envelope.detail));
   return lines.join("\n");
-}
-
-function usageError(message: string, parsed: ParsedFlags, io: CliIo): number {
-  if (parsed.json) {
-    writeJson(io.stderr, {
-      ok: false,
-      code: "usage_error",
-      message,
-      commands: COMMANDS
-    });
-  } else {
-    write(io.stderr, `${message}\n\n${renderWorkflowHelp()}\n`);
-  }
-  return 2;
-}
-
-function renderWorkflowHelp(): string {
-  return COMMANDS.join("\n");
-}
-
-function writeJson(writer: Writer, payload: JsonPayload): void {
-  writer.write(`${JSON.stringify(payload, null, 2)}\n`);
-}
-
-function write(writer: Writer, chunk: string): void {
-  writer.write(chunk);
 }

@@ -3,7 +3,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { COMMANDS } from "./commands/help.js";
+import {
+  renderHelp,
+  usageError,
+  write,
+  writeJson,
+  type CliIo
+} from "./commands/cli-io.js";
 import {
   createMomentumCommandRegistry,
   dispatchMomentumCommand
@@ -254,16 +260,6 @@ import { type LinearIssueRefreshClient } from "./linear-issue-refresh.js";
 
 export const VERSION = "0.0.0";
 
-type Writer = {
-  write(chunk: string): boolean;
-};
-
-export type CliIo = {
-  stdout: Writer;
-  stderr: Writer;
-  env?: NodeJS.ProcessEnv;
-};
-
 export type LinearReconciliationClientFactoryInput = {
   apiKey: string | null;
   endpoint: string | null;
@@ -292,8 +288,6 @@ export type CliDeps = {
     input: LinearIssueRefreshClientFactoryInput
   ) => LinearIssueRefreshClient | null;
 };
-
-type JsonPayload = Record<string, unknown>;
 
 type ParsedFlags = {
   args: string[];
@@ -1954,24 +1948,6 @@ function isExistingDaemonRunStale(
   return heartbeatAgeMs >= staleAfterMs;
 }
 
-
-function usageError(message: string, parsed: ParsedFlags, io: CliIo): number {
-  const payload = {
-    ok: false,
-    code: "usage_error",
-    message,
-    commands: COMMANDS
-  };
-
-  if (parsed.json) {
-    writeJson(io.stderr, payload);
-    return 2;
-  }
-
-  write(io.stderr, `${message}\n\n${renderHelp()}`);
-  return 2;
-}
-
 function parseFlags(argv: string[]): ParsedFlags {
   const args: string[] = [];
   let json = false;
@@ -2733,26 +2709,6 @@ function readFlagValue(argv: string[], index: number): string | undefined {
   }
 
   return value;
-}
-
-function renderHelp(): string {
-  return [
-    "Momentum",
-    "",
-    "Usage:",
-    ...COMMANDS.map((command) => `  ${command}`),
-    "",
-    "Default goal start enqueues a goal_iteration job for a future worker; pass --foreground to keep the Milestone 1 inline iteration.",
-    ""
-  ].join("\n");
-}
-
-function writeJson(writer: Writer, payload: JsonPayload): void {
-  write(writer, `${JSON.stringify(payload, null, 2)}\n`);
-}
-
-function write(writer: Writer, chunk: string): void {
-  writer.write(chunk);
 }
 
 function defaultIo(): CliIo {
