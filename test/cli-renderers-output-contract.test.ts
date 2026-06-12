@@ -170,24 +170,76 @@ describe("shared renderer output contracts", () => {
       createdAt: 11,
       updatedAt: 12
     });
-    expect(evidenceRecordToJsonShape(evidence)).toMatchObject({
+    expect(evidenceRecordToJsonShape(evidence)).toEqual({
       id: "ev-1",
+      source: "workflow",
+      type: "ledger",
+      formatVersion: 1,
+      artifactPath: ".agent-workflows/run-1/ledger.jsonl",
+      externalId: "ext-1",
+      occurredAt: 20,
+      summary: "Step succeeded",
+      metadata: { runId: "run-1" },
+      goalId: "goal-1",
+      sourceItemId: "src-1",
       runId: "run-1",
       stepId: "step-1",
-      sourceItemId: "src-1"
+      ingestKey: "workflow:run-1:step-1",
+      createdAt: 21,
+      updatedAt: 22
     });
-    expect(updateIntentToJsonShape(intent)).toMatchObject({
+    expect(updateIntentToJsonShape(intent)).toEqual({
       id: "intent-1",
+      adapterKind: "linear",
       targetExternalId: "lin-1",
+      intentType: "source_status",
+      payload: { status: "Done" },
+      reason: "Goal completed",
+      goalId: "goal-1",
+      sourceItemId: "src-1",
       evidenceRecordId: "ev-1",
-      appliedAt: null
+      status: "pending",
+      idempotencyKey: "intent-key",
+      decisionReason: null,
+      errorCode: null,
+      errorMessage: null,
+      createdAt: 31,
+      updatedAt: 32,
+      appliedAt: null,
+      skippedAt: null,
+      canceledAt: null
     });
-    expect(intentApplyAuditToJsonShape(audit)).toMatchObject({
+    expect(intentApplyAuditToJsonShape(audit)).toEqual({
       id: "audit-1",
+      adapterKind: "linear",
+      provider: "linear",
+      target: {
+        externalId: "lin-1",
+        externalKey: "NGX-1",
+        url: "https://linear.example/NGX-1",
+        title: "Renderer shape"
+      },
+      requestedAt: 40,
+      finishedAt: 41,
+      operatorReason: "Apply approved",
+      operatorActor: "operator",
       intentApplyPolicy: "external_apply_allowed",
+      allowStatusMutation: true,
       mutationKind: "status_transition",
+      previewSummary: "Set status to Done",
+      idempotencyMarker: "marker",
+      lifecycleState: "succeeded",
+      resultStatus: "applied",
       resultCode: "ok",
-      reconcile: { status: "matched", warning: null }
+      resultMessage: "Applied",
+      externalRefs: {
+        commentId: "comment-1",
+        commentUrl: "https://linear.example/comment-1",
+        stateTransitionId: "transition-1"
+      },
+      reconcile: { status: "matched", warning: null },
+      createdAt: 42,
+      updatedAt: 43
     });
   });
 
