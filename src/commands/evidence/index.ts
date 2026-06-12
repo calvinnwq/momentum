@@ -1,4 +1,4 @@
-import { usageError, write, writeJson, type CliIo } from "../cli-io.js";
+import { usageError, write, writeJson, type CliIo } from "../../renderers/cli-output.js";
 import { openDb, type MomentumDb } from "../../db.js";
 import { resolveDataDir, type DataDirOptions } from "../../data-dir.js";
 import {
@@ -15,8 +15,9 @@ import {
   type WorkflowEvidenceDiagnostic
 } from "../../evidence-workflow.js";
 import { getSourceItemById } from "../../source-items.js";
-import { sourceItemToJsonShape } from "../source/index.js";
-import { updateIntentToJsonShape } from "../intent/index.js";
+import { evidenceRecordToJsonShape } from "../../renderers/evidence.js";
+import { updateIntentToJsonShape } from "../../renderers/intent.js";
+import { sourceItemToJsonShape } from "../../renderers/source.js";
 import {
   evaluateGoalForSourceSatisfiedIntents,
   type EvaluateGoalForSourceSatisfiedIntentResult
@@ -302,27 +303,6 @@ function emitEvidenceIngestFailure(
   }
   write(io.stderr, `${failure.message}\n`);
   return 1;
-}
-
-function evidenceRecordToJsonShape(record: EvidenceRecord): Record<string, unknown> {
-  return {
-    id: record.id,
-    source: record.source,
-    type: record.type,
-    formatVersion: record.formatVersion,
-    artifactPath: record.artifactPath,
-    externalId: record.externalId,
-    occurredAt: record.occurredAt,
-    summary: record.summary,
-    metadata: record.metadata,
-    goalId: record.goalId,
-    sourceItemId: record.sourceItemId,
-    runId: record.runId,
-    stepId: record.stepId,
-    ingestKey: record.ingestKey,
-    createdAt: record.createdAt,
-    updatedAt: record.updatedAt
-  };
 }
 
 function intentEvaluationToJsonShape(

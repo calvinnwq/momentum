@@ -1,4 +1,4 @@
-import { usageError, write, writeJson, type CliIo } from "../cli-io.js";
+import { usageError, write, writeJson, type CliIo } from "../../renderers/cli-output.js";
 import { openDb } from "../../db.js";
 import { resolveDataDir, type DataDirOptions } from "../../data-dir.js";
 import {
@@ -11,7 +11,7 @@ import {
   type ProjectRollupOptions,
   type ProjectRollupPendingIntentExternalApply
 } from "../../project-rollup.js";
-import { intentApplyAuditToJsonShape } from "../intent/index.js";
+import { intentApplyAuditToJsonShape } from "../../renderers/intent.js";
 
 type ParsedFlags = {
   args: string[]; json: boolean; dataDir?: string; source?: string; project?: string; staleThresholdHours?: number; intentStaleThresholdDays?: number; limit?: number; milestone?: string;

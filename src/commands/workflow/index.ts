@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { usageError, write, writeJson, type CliIo } from "../cli-io.js";
+import { usageError, write, writeJson, type CliIo } from "../../renderers/cli-output.js";
 import { isUniqueViolation, openDb, type MomentumDb } from "../../db.js";
 import { resolveDataDir, type DataDirOptions } from "../../data-dir.js";
 import { loadMomentumPolicy } from "../../momentum-policy.js";

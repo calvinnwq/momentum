@@ -1,4 +1,4 @@
-import { usageError, write, writeJson, type CliIo } from "../cli-io.js";
+import { usageError, write, writeJson, type CliIo } from "../../renderers/cli-output.js";
 import { openDb } from "../../db.js";
 import { resolveDataDir, type DataDirOptions } from "../../data-dir.js";
 import {
@@ -23,8 +23,9 @@ import {
 } from "../../source-reconciliation.js";
 import { buildLinearHttpReconciliationClient } from "../../linear-http-client.js";
 import { LINEAR_API_KEY_ENV_VAR } from "../../intent-apply-execute.js";
-import { type EvidenceRecord } from "../../evidence-records.js";
-import { updateIntentToJsonShape } from "../intent/index.js";
+import { evidenceRecordToJsonShape } from "../../renderers/evidence.js";
+import { updateIntentToJsonShape } from "../../renderers/intent.js";
+import { sourceItemToJsonShape } from "../../renderers/source.js";
 import {
   evaluateGoalForSourceSatisfiedIntents,
   type EvaluateGoalForSourceSatisfiedIntentResult
@@ -733,23 +734,6 @@ function emitSourceFailure(
   return 1;
 }
 
-export function sourceItemToJsonShape(item: SourceItem): Record<string, unknown> {
-  return {
-    id: item.id,
-    adapterKind: item.adapterKind,
-    externalId: item.externalId,
-    externalKey: item.externalKey,
-    url: item.url,
-    title: item.title,
-    status: item.status,
-    metadata: item.metadata,
-    lastObservedAt: item.lastObservedAt,
-    goalId: item.goalId,
-    createdAt: item.createdAt,
-    updatedAt: item.updatedAt
-  };
-}
-
 function intentEvaluationToJsonShape(
   result: EvaluateGoalForSourceSatisfiedIntentResult
 ): Record<string, unknown> {
@@ -779,25 +763,4 @@ function intentEvaluationToJsonShape(
     };
   }
   return { ...result };
-}
-
-function evidenceRecordToJsonShape(record: EvidenceRecord): Record<string, unknown> {
-  return {
-    id: record.id,
-    source: record.source,
-    type: record.type,
-    formatVersion: record.formatVersion,
-    artifactPath: record.artifactPath,
-    externalId: record.externalId,
-    occurredAt: record.occurredAt,
-    summary: record.summary,
-    metadata: record.metadata,
-    goalId: record.goalId,
-    sourceItemId: record.sourceItemId,
-    runId: record.runId,
-    stepId: record.stepId,
-    ingestKey: record.ingestKey,
-    createdAt: record.createdAt,
-    updatedAt: record.updatedAt
-  };
 }

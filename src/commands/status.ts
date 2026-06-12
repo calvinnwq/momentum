@@ -1,5 +1,4 @@
 import { resolveDataDir, type DataDirOptions } from "../data-dir.js";
-import type { IntentApplyAudit } from "../intent-apply-audits.js";
 import { loadGoalLogs, type GoalLogsSuccess } from "../goal-logs.js";
 import {
   loadGoalStatus,
@@ -10,7 +9,8 @@ import {
 } from "../goal-status.js";
 import { writeHandoff, type HandoffSuccess } from "../handoff.js";
 import type { UpdateIntentApplyPolicy } from "../momentum-policy.js";
-import { usageError, write, writeJson, type CliIo } from "./cli-io.js";
+import { intentApplyAuditToJsonShape } from "../renderers/intent.js";
+import { usageError, write, writeJson, type CliIo } from "../renderers/cli-output.js";
 
 type ParsedFlags = {
   args: string[];
@@ -641,34 +641,6 @@ function emitHandoff(
   lines.push("");
   write(io.stdout, lines.join("\n"));
   return 0;
-}
-
-function intentApplyAuditToJsonShape(
-  audit: IntentApplyAudit
-): Record<string, unknown> {
-  return {
-    id: audit.id,
-    adapterKind: audit.adapterKind,
-    provider: audit.provider,
-    target: audit.target,
-    requestedAt: audit.requestedAt,
-    finishedAt: audit.finishedAt,
-    operatorReason: audit.operatorReason,
-    operatorActor: audit.operatorActor,
-    intentApplyPolicy: audit.intentApplyPolicy,
-    allowStatusMutation: audit.allowStatusMutation,
-    mutationKind: audit.mutationKind,
-    previewSummary: audit.previewSummary,
-    idempotencyMarker: audit.idempotencyMarker,
-    lifecycleState: audit.lifecycleState,
-    resultStatus: audit.resultStatus,
-    resultCode: audit.resultCode,
-    resultMessage: audit.resultMessage,
-    externalRefs: audit.externalRefs,
-    reconcile: audit.reconcile,
-    createdAt: audit.createdAt,
-    updatedAt: audit.updatedAt
-  };
 }
 
 function describePolicyFields(payload: {
