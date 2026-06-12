@@ -3,6 +3,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import {
+  createMomentumCommandRegistry,
+  dispatchMomentumCommand
+} from "./commands/index.js";
 import { isUniqueViolation, openDb, type MomentumDb } from "./db.js";
 import { initGoal, type GoalInitOptions, type GoalInitSuccess } from "./goal-init.js";
 import { resolveDataDir, type DataDirOptions } from "./data-dir.js";
@@ -418,16 +422,21 @@ export async function runCli(
     );
   }
 
-  if (command === "doctor") {
-    return doctor(parsed, io);
+  const commandRegistry = createMomentumCommandRegistry<ParsedFlags, CliIo, CliDeps>({
+    doctor,
+    status
+  });
+  const routedCommand = await dispatchMomentumCommand(commandRegistry, {
+    parsed,
+    io,
+    deps
+  });
+  if (routedCommand.handled) {
+    return routedCommand.code;
   }
 
   if (command === "goal" && subcommand === "start") {
     return goalStart(parsed, io);
-  }
-
-  if (command === "status") {
-    return status(parsed, io);
   }
 
   if (command === "logs") {

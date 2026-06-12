@@ -35,7 +35,7 @@ describe("root ARCHITECTURE.md contract", () => {
   });
 
   it("defines the M11 import direction and boundaries", () => {
-    expect(architecture).toContain("src/index.ts -> src/cli.ts -> domain modules / adapters / persistence");
+    expect(architecture).toContain("src/index.ts -> src/cli.ts -> src/commands/ registry -> existing CLI handlers / domain modules");
     expect(architecture).toContain("index -> cli -> commands -> renderers");
     expect(architecture).toMatch(/Domain modules must not import command modules or renderers/i);
     expect(architecture).toMatch(/Renderers must not\s+mutate state/i);
@@ -80,11 +80,14 @@ describe("M11 structural guard around src/cli.ts", () => {
     expect(index).not.toMatch(/\.\/commands\//);
   });
 
-  it("does not introduce command modules before the registry skeleton issue", () => {
+  it("introduces only the explicit command registry skeleton for NGX-412", () => {
     const srcDir = path.join(repoRoot, "src");
+    const commandIndex = readFile("src/commands/index.ts");
 
-    expect(fs.existsSync(path.join(srcDir, "commands"))).toBe(false);
-    expect(cli).not.toMatch(/from "\.\/commands\//);
+    expect(fs.existsSync(path.join(srcDir, "commands", "index.ts"))).toBe(true);
+    expect(cli).toMatch(/from "\.\/commands\/index\.js"/);
+    expect(commandIndex).toContain("createMomentumCommandRegistry");
+    expect(commandIndex).not.toMatch(/readdir|glob|fs\./);
   });
 
   it("keeps read-only and workflow command handlers in cli.ts until their migration slices", () => {
