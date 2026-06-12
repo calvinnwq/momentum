@@ -35,7 +35,7 @@ describe("root ARCHITECTURE.md contract", () => {
   });
 
   it("defines the M11 import direction and boundaries", () => {
-    expect(architecture).toContain("src/index.ts -> src/cli.ts -> src/commands/ registry -> existing CLI handlers / domain modules");
+    expect(architecture).toContain("src/index.ts -> src/cli.ts -> src/commands/ registry + command families -> domain modules");
     expect(architecture).toContain("index -> cli -> commands -> renderers");
     expect(architecture).toMatch(/Domain modules must not import command modules or renderers/i);
     expect(architecture).toMatch(/Renderers must not\s+mutate state/i);
@@ -68,6 +68,7 @@ describe("root ARCHITECTURE.md contract", () => {
     expect(readFile("AGENTS.md")).toContain("ARCHITECTURE.md");
     expect(readFile("internal/roadmap.md")).toContain("../ARCHITECTURE.md");
   });
+
 });
 
 describe("M11 structural guard around src/cli.ts", () => {
@@ -113,4 +114,20 @@ describe("M11 structural guard around src/cli.ts", () => {
       expect(workflowModule, `src/commands/workflow/index.ts should contain ${handler}`).toContain(handler);
     }
   });
+  it("extracts goal, source, evidence, project, and intent command families for NGX-415", () => {
+    const expectations: Array<[string, string]> = [
+      ["function goalStart(", "src/commands/goal/index.ts"],
+      ["function source(", "src/commands/source/index.ts"],
+      ["function project(", "src/commands/project/index.ts"],
+      ["function evidence(", "src/commands/evidence/index.ts"],
+      ["function intent(", "src/commands/intent/index.ts"],
+    ];
+
+    for (const [handler, modulePath] of expectations) {
+      const module = readFile(modulePath);
+      expect(cli, `src/cli.ts should no longer contain ${handler}`).not.toContain(handler);
+      expect(module, `${modulePath} should contain ${handler}`).toContain(handler);
+    }
+  });
+
 });
