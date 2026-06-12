@@ -1,11 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");
 const srcRoot = path.join(repoRoot, "src");
+const commandsDir = path.join("src", "commands");
+const renderersDir = path.join("src", "renderers");
 
 type ImportEdge = {
   from: string;
@@ -34,24 +37,66 @@ function importEdges(): ImportEdge[] {
   const edges: ImportEdge[] = [];
   for (const file of sourceFiles()) {
     const source = readFile(file);
-    const fromImportPattern =
-      /\b(?:import|export)\s+(?:type\s+)?[\s\S]*?\s+from\s+["']([^"']+)["']/g;
-    const dynamicImportPattern = /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
-    for (const pattern of [fromImportPattern, dynamicImportPattern]) {
-      for (const match of source.matchAll(pattern)) {
-        const specifier = match[1];
-        if (!specifier?.startsWith(".")) continue;
-        const resolved = path
-          .relative(
-            repoRoot,
-            path.resolve(path.dirname(path.join(repoRoot, file)), specifier)
-          )
-          .replace(/\.js$/, ".ts");
-        edges.push({ from: file, to: resolved, specifier });
-      }
+    for (const specifier of importSpecifiers(file, source)) {
+      if (!specifier.startsWith(".")) continue;
+      edges.push({
+        from: file,
+        to: resolveRelativeImport(file, specifier),
+        specifier
+      });
     }
   }
   return edges;
+}
+
+function importSpecifiers(file: string, source: string): string[] {
+  const specifiers: string[] = [];
+  const sourceFile = ts.createSourceFile(
+    file,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS
+  );
+
+  function addModuleSpecifier(moduleSpecifier: ts.Expression | undefined): void {
+    if (moduleSpecifier && ts.isStringLiteralLike(moduleSpecifier)) {
+      specifiers.push(moduleSpecifier.text);
+    }
+  }
+
+  function visit(node: ts.Node): void {
+    if (ts.isImportDeclaration(node)) {
+      addModuleSpecifier(node.moduleSpecifier);
+    } else if (ts.isExportDeclaration(node)) {
+      addModuleSpecifier(node.moduleSpecifier);
+    } else if (
+      ts.isCallExpression(node) &&
+      node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+      node.arguments.length === 1
+    ) {
+      addModuleSpecifier(node.arguments[0]);
+    } else if (
+      ts.isImportTypeNode(node) &&
+      ts.isLiteralTypeNode(node.argument) &&
+      ts.isStringLiteralLike(node.argument.literal)
+    ) {
+      specifiers.push(node.argument.literal.text);
+    }
+
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+  return specifiers;
+}
+
+function resolveRelativeImport(file: string, specifier: string): string {
+  const resolved = path.relative(
+    repoRoot,
+    path.resolve(path.dirname(path.join(repoRoot, file)), specifier)
+  );
+  return resolved.replace(/\.js$/, ".ts");
 }
 
 function commandFamily(file: string): string | null {
@@ -62,29 +107,72 @@ function commandFamily(file: string): string | null {
   return parts[2] ?? null;
 }
 
-function isCliOrRenderer(file: string): boolean {
+function isCliEntrypoint(file: string): boolean {
   return (
     file === path.join("src", "index.ts") ||
-    file === path.join("src", "cli.ts") ||
-    file.startsWith(path.join("src", "commands") + path.sep) ||
-    file.startsWith(path.join("src", "renderers") + path.sep)
+    file === path.join("src", "cli.ts")
   );
 }
 
+function isCommandModule(file: string): boolean {
+  return file === commandsDir || file.startsWith(commandsDir + path.sep);
+}
+
+function isRendererModule(file: string): boolean {
+  return file === renderersDir || file.startsWith(renderersDir + path.sep);
+}
+
 describe("M11 CLI import boundaries", () => {
+  it("collects all relative import forms for structural checks", () => {
+    expect(
+      importSpecifiers(
+        "src/domain-example.ts",
+        `
+          import "./commands/source/index.js";
+          import type { Source } from "./commands/source/index.js";
+          export { render } from "./renderers/source.js";
+          const lazy = import("./commands/intent/index.js");
+          type Lazy = import("./renderers/intent.js").IntentJsonShape;
+        `
+      )
+    ).toEqual([
+      "./commands/source/index.js",
+      "./commands/source/index.js",
+      "./renderers/source.js",
+      "./commands/intent/index.js",
+      "./renderers/intent.js"
+    ]);
+  });
+
   it("keeps core/domain modules independent from commands and renderers", () => {
     const violations = importEdges().filter((edge) => {
-      if (isCliOrRenderer(edge.from)) return false;
-      return (
-        edge.to.startsWith(path.join("src", "commands") + path.sep) ||
-        edge.to.startsWith(path.join("src", "renderers") + path.sep)
-      );
+      if (
+        isCliEntrypoint(edge.from) ||
+        isCommandModule(edge.from) ||
+        isRendererModule(edge.from)
+      ) {
+        return false;
+      }
+      return isCommandModule(edge.to) || isRendererModule(edge.to);
     });
 
     expect(
       violations.map(
         (edge) =>
           `${edge.from} imports ${edge.specifier} -> ${edge.to}; move CLI formatting behind src/commands or src/renderers instead of importing it from core/domain code.`
+      )
+    ).toEqual([]);
+  });
+
+  it("prevents renderers from importing command modules", () => {
+    const violations = importEdges().filter(
+      (edge) => isRendererModule(edge.from) && isCommandModule(edge.to)
+    );
+
+    expect(
+      violations.map(
+        (edge) =>
+          `${edge.from} imports ${edge.specifier} -> ${edge.to}; renderers must accept computed results instead of importing command modules.`
       )
     ).toEqual([]);
   });
@@ -106,7 +194,7 @@ describe("M11 CLI import boundaries", () => {
 
   it("keeps direct stdout/stderr process access in CLI or rendering layers", () => {
     const violations = sourceFiles().filter((file) => {
-      if (isCliOrRenderer(file)) return false;
+      if (isCliEntrypoint(file) || isRendererModule(file)) return false;
       return /process\.(?:stdout|stderr)/.test(readFile(file));
     });
 
@@ -121,7 +209,10 @@ describe("M11 CLI import boundaries", () => {
   it("keeps src/cli.ts thin after command-family extraction", () => {
     const lineCount = readFile("src/cli.ts").split("\n").length;
 
-    expect(lineCount, "src/cli.ts should stay below 3000 lines after M11 extraction").toBeLessThan(3000);
+    expect(
+      lineCount,
+      "src/cli.ts should stay below 3000 lines after M11 extraction"
+    ).toBeLessThan(3000);
   });
 
   it("documents how to add a command module without crossing boundaries", () => {
