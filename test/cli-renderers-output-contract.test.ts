@@ -70,7 +70,10 @@ describe("shared renderer output contracts", () => {
       "src/commands/workflow/index.ts",
       "src/commands/project/index.ts",
       "src/commands/status.ts",
-      "src/commands/intent/index.ts"
+      "src/commands/intent/index.ts",
+      "src/commands/goal/index.ts",
+      "src/commands/source/index.ts",
+      "src/commands/evidence/index.ts"
     ];
 
     for (const modulePath of commandModules) {
@@ -85,6 +88,10 @@ describe("shared renderer output contracts", () => {
       ).not.toMatch(/\bfunction\s+\w+ToJsonShape\b/);
       expect(
         source,
+        `${modulePath} should call src/renderers for command-family emit helpers`
+      ).not.toMatch(/\bfunction\s+emit[A-Z]/);
+      expect(
+        source,
         `${modulePath} should route stdout/stderr writes through src/renderers`
       ).not.toMatch(/\bwrite(?:Json)?\(/);
     }
@@ -93,7 +100,10 @@ describe("shared renderer output contracts", () => {
       "src/renderers/workflow.ts",
       "src/renderers/project.ts",
       "src/renderers/status.ts",
-      "src/renderers/intent.ts"
+      "src/renderers/intent.ts",
+      "src/renderers/goal.ts",
+      "src/renderers/source.ts",
+      "src/renderers/evidence.ts"
     ]) {
       expect(
         fs.existsSync(path.join(repoRoot, rendererPath)),

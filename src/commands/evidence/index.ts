@@ -1,49 +1,29 @@
-import { usageError, write, writeJson, type CliIo } from "../../renderers/cli-output.js";
+import { usageError, type CliIo } from "../../renderers/cli-output.js";
 import { openDb, type MomentumDb } from "../../db.js";
 import { resolveDataDir, type DataDirOptions } from "../../data-dir.js";
 import {
   ingestEvidenceRecord,
   listEvidenceRecords,
-  summarizeEvidenceRecords,
   type EvidenceRecord,
   type EvidenceRecordIngestInput,
-  type EvidenceRecordsSummary,
   type ListEvidenceRecordsOptions
 } from "../../evidence-records.js";
-import {
-  parseWorkflowArtifact,
-  type WorkflowEvidenceDiagnostic
-} from "../../evidence-workflow.js";
+import { parseWorkflowArtifact } from "../../evidence-workflow.js";
 import { getSourceItemById } from "../../source-items.js";
-import { evidenceRecordToJsonShape } from "../../renderers/evidence.js";
-import { updateIntentToJsonShape } from "../../renderers/intent.js";
-import { sourceItemToJsonShape } from "../../renderers/source.js";
+import {
+  emitEvidenceIngestFailure,
+  emitEvidenceIngestSuccess,
+  emitEvidenceList,
+  emitEvidenceListFailure
+} from "../../renderers/evidence.js";
 import {
   evaluateGoalForSourceSatisfiedIntents,
   type EvaluateGoalForSourceSatisfiedIntentResult
 } from "../../update-intent-generator.js";
-import { type UpdateIntentStatus } from "../../update-intents.js";
 
 type ParsedFlags = {
   args: string[]; json: boolean; dataDir?: string; goal?: string; path?: string; sourceItem?: string; source?: string; evidenceType?: string; limit?: number;
 };
-
-type EvidenceIngestFailureCode =
-  | "data_dir_failed"
-  | "path_required"
-  | "goal_not_found"
-  | "source_item_not_found";
-
-type EvidenceIngestFailure = {
-  code: EvidenceIngestFailureCode;
-  message: string;
-  dataDir?: string;
-  goalId?: string | null;
-  sourceItemId?: string | null;
-  path?: string | null;
-};
-
-
 
 export function evidence(parsed: ParsedFlags, io: CliIo): number | Promise<number> {
   const subcommand = parsed.args[1];
@@ -205,150 +185,6 @@ function evaluateIntentsForEvidenceRecords(
     );
 }
 
-function emitEvidenceIngestSuccess(
-  parsed: ParsedFlags,
-  io: CliIo,
-  result: {
-    dataDir: string;
-    artifactPath: string;
-    goalId: string | null;
-    sourceItemId: string | null;
-    observed: number;
-    created: EvidenceRecord[];
-    skipped: EvidenceRecord[];
-    intentEvaluations: EvaluateGoalForSourceSatisfiedIntentResult[];
-    diagnostics: WorkflowEvidenceDiagnostic[];
-    errors: Array<{ ingestKey: string; type: string; message: string }>;
-  }
-): number {
-  const ok = result.errors.length === 0;
-  const createdIntents = result.intentEvaluations.filter(
-    (entry) => entry.outcome === "intent_created"
-  );
-  const replayedIntents = result.intentEvaluations.filter(
-    (entry) => entry.outcome === "intent_replayed"
-  );
-  const intentWarnings = result.intentEvaluations.filter(
-    (entry) => entry.outcome === "evidence_insufficient"
-  );
-  const payload = {
-    ok,
-    command: "evidence ingest",
-    dataDir: result.dataDir,
-    path: result.artifactPath,
-    goalId: result.goalId,
-    sourceItemId: result.sourceItemId,
-    counts: {
-      observed: result.observed,
-      created: result.created.length,
-      skipped: result.skipped.length,
-      intentsCreated: createdIntents.length,
-      intentsReplayed: replayedIntents.length,
-      intentWarnings: intentWarnings.length,
-      diagnostics: result.diagnostics.length,
-      errors: result.errors.length
-    },
-    created: result.created.map(evidenceRecordToJsonShape),
-    skipped: result.skipped.map(evidenceRecordToJsonShape),
-    intentEvaluations: result.intentEvaluations.map(intentEvaluationToJsonShape),
-    diagnostics: result.diagnostics.map((diagnostic) => ({ ...diagnostic })),
-    errors: result.errors.map((entry) => ({ ...entry }))
-  };
-
-  if (parsed.json) {
-    writeJson(ok ? io.stdout : io.stderr, payload);
-    return ok ? 0 : 1;
-  }
-
-  const lines = [
-    `Evidence ingest: ${result.artifactPath}`,
-    `Goal: ${result.goalId ?? "(unlinked)"}`,
-    `Source item: ${result.sourceItemId ?? "(unlinked)"}`,
-    `Observed: ${result.observed}`,
-    `Created: ${result.created.length}`,
-    `Skipped (idempotent): ${result.skipped.length}`,
-    `Intents created: ${createdIntents.length}`,
-    `Intents replayed: ${replayedIntents.length}`,
-    `Intent warnings: ${intentWarnings.length}`,
-    `Diagnostics: ${result.diagnostics.length}`,
-    `Errors: ${result.errors.length}`,
-    `Data dir: ${result.dataDir}`,
-    ""
-  ];
-  write(ok ? io.stdout : io.stderr, lines.join("\n"));
-  return ok ? 0 : 1;
-}
-
-function emitEvidenceIngestFailure(
-  parsed: ParsedFlags,
-  io: CliIo,
-  failure: EvidenceIngestFailure
-): number {
-  const payload: Record<string, unknown> = {
-    ok: false,
-    command: "evidence ingest",
-    code: failure.code,
-    message: failure.message
-  };
-  if (failure.dataDir !== undefined) payload["dataDir"] = failure.dataDir;
-  if (failure.goalId !== undefined) payload["goalId"] = failure.goalId;
-  if (failure.sourceItemId !== undefined) {
-    payload["sourceItemId"] = failure.sourceItemId;
-  }
-  if (failure.path !== undefined) payload["path"] = failure.path;
-
-  if (parsed.json) {
-    writeJson(io.stderr, payload);
-    return 1;
-  }
-  write(io.stderr, `${failure.message}\n`);
-  return 1;
-}
-
-function intentEvaluationToJsonShape(
-  result: EvaluateGoalForSourceSatisfiedIntentResult
-): Record<string, unknown> {
-  if (
-    result.outcome === "intent_created" ||
-    result.outcome === "intent_replayed"
-  ) {
-    return {
-      outcome: result.outcome,
-      intent: updateIntentToJsonShape(result.intent),
-      sourceItem: sourceItemToJsonShape(result.sourceItem),
-      verificationEvidence: evidenceRecordToJsonShape(
-        result.verificationEvidence
-      )
-    };
-  }
-  if (result.outcome === "evidence_insufficient") {
-    return {
-      outcome: result.outcome,
-      warning: { ...result.warning }
-    };
-  }
-  if (result.outcome === "source_already_terminal") {
-    return {
-      outcome: result.outcome,
-      sourceItem: sourceItemToJsonShape(result.sourceItem)
-    };
-  }
-  return { ...result };
-}
-
-type EvidenceListFailureCode =
-  | "data_dir_failed"
-  | "goal_not_found"
-  | "source_item_not_found";
-
-type EvidenceListFailure = {
-  code: EvidenceListFailureCode;
-  message: string;
-  dataDir?: string;
-  goalId?: string | null;
-  sourceItemId?: string | null;
-};
-
 function evidenceList(parsed: ParsedFlags, io: CliIo): number {
   if (parsed.args.length > 2) {
     return usageError(
@@ -423,64 +259,5 @@ function evidenceList(parsed: ParsedFlags, io: CliIo): number {
     db.close();
   }
 
-  const payload = {
-    ok: true,
-    command: "evidence list",
-    dataDir,
-    goalId: filters.goalId ?? null,
-    sourceItemId: filters.sourceItemId ?? null,
-    source: filters.source ?? null,
-    type: filters.type ?? null,
-    limit: filters.limit ?? null,
-    count: records.length,
-    records: records.map(evidenceRecordToJsonShape)
-  };
-
-  if (parsed.json) {
-    writeJson(io.stdout, payload);
-    return 0;
-  }
-
-  const lines = [
-    `Evidence records: ${records.length}`,
-    `Goal: ${filters.goalId ?? "(any)"}`,
-    `Source item: ${filters.sourceItemId ?? "(any)"}`,
-    `Source: ${filters.source ?? "(any)"}`,
-    `Type: ${filters.type ?? "(any)"}`,
-    `Data dir: ${dataDir}`,
-    ...records.map(
-      (record) =>
-        `- ${record.id} [${record.source}/${record.type}] @${record.occurredAt}: ${record.summary}` +
-        (record.runId !== null ? ` run=${record.runId}` : "") +
-        (record.stepId !== null ? ` step=${record.stepId}` : "")
-    ),
-    ""
-  ];
-  write(io.stdout, lines.join("\n"));
-  return 0;
-}
-
-function emitEvidenceListFailure(
-  parsed: ParsedFlags,
-  io: CliIo,
-  failure: EvidenceListFailure
-): number {
-  const payload: Record<string, unknown> = {
-    ok: false,
-    command: "evidence list",
-    code: failure.code,
-    message: failure.message
-  };
-  if (failure.dataDir !== undefined) payload["dataDir"] = failure.dataDir;
-  if (failure.goalId !== undefined) payload["goalId"] = failure.goalId;
-  if (failure.sourceItemId !== undefined) {
-    payload["sourceItemId"] = failure.sourceItemId;
-  }
-
-  if (parsed.json) {
-    writeJson(io.stderr, payload);
-    return 1;
-  }
-  write(io.stderr, `${failure.message}\n`);
-  return 1;
+  return emitEvidenceList(parsed, io, { dataDir, filters, records });
 }

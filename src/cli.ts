@@ -16,16 +16,16 @@ import {
 } from "./commands/index.js";
 import { handoff, logs, status } from "./commands/status.js";
 import { goalStart } from "./commands/goal/index.js";
-import {
-  source,
-  sourceReconciliationPaginationStopped,
-  type SourceReconciliationPaginationStoppedJson
-} from "./commands/source/index.js";
+import { source } from "./commands/source/index.js";
 import { project } from "./commands/project/index.js";
 import { evidence } from "./commands/evidence/index.js";
 import { intent } from "./commands/intent/index.js";
 import { workflow } from "./commands/workflow/index.js";
 import { intentApplyAuditToJsonShape } from "./renderers/intent.js";
+import {
+  sourceReconciliationPaginationStopped,
+  type SourceReconciliationPaginationStoppedJson
+} from "./renderers/source.js";
 import { isUniqueViolation, openDb, type MomentumDb } from "./db.js";
 import { initGoal, type GoalInitOptions, type GoalInitSuccess } from "./goal-init.js";
 import { resolveDataDir, type DataDirOptions } from "./data-dir.js";
