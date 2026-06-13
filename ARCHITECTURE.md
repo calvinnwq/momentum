@@ -95,7 +95,9 @@ A command module must not:
 
 During and after M11:
 
-- `src/index.ts` imports only `runCli` from `src/cli.ts`.
+- `src/index.ts` only performs process bootstrap and loads `runCli` from
+  `src/cli.ts`; bootstrap-only warning shims must run before `src/cli.ts`
+  imports persistence-backed modules.
 - `src/cli.ts` may import command-family modules once the registry skeleton
   exists.
 - Command-family modules may import domain modules, renderers, and shared CLI

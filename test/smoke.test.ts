@@ -311,6 +311,39 @@ describe("Milestone 1 end-to-end smoke", () => {
   );
 
   it(
+    "workflow run decide --json emits parseable built-CLI stderr without Node warning noise",
+    () => {
+      const result = spawnSync(
+        process.execPath,
+        [
+          CLI_BIN,
+          "workflow",
+          "run",
+          "decide",
+          "gate-1",
+          "--json"
+        ],
+        {
+          cwd: REPO_ROOT,
+          encoding: "utf-8",
+          stdio: ["ignore", "pipe", "pipe"]
+        }
+      );
+
+      expect(result.status).toBe(1);
+      expect(result.stdout).toBe("");
+      expect(() => JSON.parse(result.stderr ?? "")).not.toThrow();
+      expect(JSON.parse(result.stderr ?? "")).toMatchObject({
+        ok: false,
+        command: "workflow run decide",
+        code: "action_required",
+        gateId: "gate-1"
+      });
+    },
+    60_000
+  );
+
+  it(
     "goal start --json defaults to the queued enqueue path, creates a pending goal_iteration job, and does not run the runner",
     () => {
       const repo = initDisposableRepo();
