@@ -1,12 +1,14 @@
 # Built-binary smoke coverage
 
-`pnpm test` includes a built-binary end-to-end smoke (`test/smoke.test.ts`)
-that builds `dist/` via `pnpm build`, initializes disposable git repos under
-the OS temp dir, and drives core CLI commands through the spawned `node
-dist/index.js` binary. The smoke is the single highest-value integration
-artifact in the repo — it pins public CLI behaviour against the real
-SQLite-backed orchestrator without mocking the runner adapter, the daemon
-loop, or the source / evidence / intent stores.
+`pnpm test:integration` includes a built-binary end-to-end smoke
+(`test/smoke.test.ts`) that builds `dist/` via `pnpm build`, initializes
+disposable git repos under the OS temp dir, and drives core CLI commands
+through the spawned `node dist/index.js` binary. The smoke is the single
+highest-value integration artifact in the repo — it pins public CLI behaviour
+against the real SQLite-backed orchestrator without mocking the runner adapter,
+the daemon loop, or the source / evidence / intent stores. The fast default
+`pnpm test` lane excludes this smoke so everyday development does not pay the
+built-binary integration cost.
 
 See also: [docs/walkthrough.md](../docs/walkthrough.md) for the operator-facing copy-paste
 disposable smoke, [docs/daemon.md](../docs/daemon.md) for the managed-loop envelopes, and
@@ -450,9 +452,10 @@ pnpm vitest run test/smoke.test.ts -t "production workflow-lane dispatch"
 ## Opt-in real adapter smoke (NGX-372)
 
 NGX-372 adds the first adapter test layer allowed to touch a real external
-system, behind an explicit opt-in switch. It is **not** part of default
-`pnpm test`: the gated suite skips unless the operator opts in, so CI never
-reaches `api.linear.app`. CI-safe vs opt-in separation:
+system, behind an explicit opt-in switch. It is **not** part of the fast default
+`pnpm test` lane: the gated suite lives in `pnpm test:integration` and skips
+unless the operator opts in, so normal local validation never reaches
+`api.linear.app`. CI-safe vs opt-in separation:
 
 - **CI-safe (always runs):** `test/real-smoke.test.ts` pins the pure gating
   decision (`planLinearReadSmoke`) and the failure-mode taxonomy
@@ -520,8 +523,9 @@ the isolated contracts (NGX-369 / NGX-370) and the stubbed integration smoke
 (NGX-371) are green, it composes the *real* adapter layers through the intended
 operator flow in one proof and records evidence of the composition. Every
 external system is a fake or a local temp dir — no `api.linear.app` call, no real
-agent / runner, no git remote, no external write — so it runs in default
-`pnpm test`. It is the test that should never be the first to discover an
+agent / runner, no git remote, no external write — so it runs in
+`pnpm test:integration` instead of the fast default `pnpm test` lane. It is the
+test that should never be the first to discover an
 adapter-contract bug, since every layer it touches is already individually
 pinned.
 
@@ -614,8 +618,8 @@ terminal-composition follow-ups are complete.
 Evidence: each test assembles a structured composition-evidence record (per-layer
 states / counts / verification status / gate type) and writes it as a
 `full-adapter-e2e-<label>.json` artifact. By default this lands in the disposable
-temp data dir (removed in `afterEach`, so default `pnpm test` leaves no durable
-footprint); set `MOMENTUM_E2E_EVIDENCE_DIR` (e.g. to gitignored
+temp data dir (removed in `afterEach`, so `pnpm test:integration` leaves no
+durable footprint); set `MOMENTUM_E2E_EVIDENCE_DIR` (e.g. to gitignored
 `.agent-runs/full-adapter-e2e/`) to capture durable closeout evidence, mirroring
 the opt-in real read smoke's `MOMENTUM_REAL_SMOKE_EVIDENCE_DIR` knob.
 
