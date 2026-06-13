@@ -44,7 +44,7 @@ import {
   type UpdateIntentApplyAuditReconcileInput,
   type UpdateIntentApplyAuditReconcileResult
 } from "./intent-apply-audits.js";
-import type { MomentumDb } from "./db.js";
+import type { MomentumDb } from "./adapters/db.js";
 import {
   getExternalUpdateAdapter,
   previewExternalUpdate as previewExternalUpdateFn,

@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { runCli } from "../src/cli.js";
-import { openDb, type MomentumDb } from "../src/db.js";
+import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import { ingestEvidenceRecord } from "../src/evidence-records.js";
 import {
   insertWorkflowGate,

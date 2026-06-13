@@ -1,4 +1,4 @@
-import type { MomentumDb } from "./db.js";
+import type { MomentumDb } from "./adapters/db.js";
 import type { EvidenceRecord } from "./evidence-records.js";
 import { getSourceItemById, type SourceItem } from "./source-items.js";
 import {

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { openDb } from "../src/db.js";
+import { openDb } from "../src/adapters/db.js";
 import {
   acquireRepoLock,
   getActiveRepoLock,

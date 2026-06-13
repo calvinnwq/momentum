@@ -22,8 +22,14 @@ src/index.ts -> src/cli.ts -> src/commands/ registry + command families -> domai
 `src/cli.ts` is still the command parser, compatibility surface, and home for
 command handlers not yet extracted. Extracted families currently include the
 read-only status family, workflow, goal, source, evidence, project rollup, and
-update-intent / intent surfaces. Shared help, IO, and reusable source /
-evidence / intent JSON shapes now live under `src/renderers/`.
+update-intent / intent surfaces. Shared help, IO, reusable source / evidence /
+intent JSON shapes, and remaining daemon / recovery / worker / doctor output
+contracts now live under `src/renderers/`.
+
+Infrastructure-facing clients and runtime adapters that used to sit as flat
+`src/` modules now have explicit ownership under `src/adapters/`: database
+opening helpers, git transactions, Linear HTTP / source adapters, runner and
+trusted-shell adapters, and no-mistakes executor / orchestrator wrappers.
 
 ## Deeper Contracts
 

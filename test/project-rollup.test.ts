@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { openDb, type MomentumDb } from "../src/db.js";
+import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
   DEFAULT_INTENT_STALE_THRESHOLD_MS,
   DEFAULT_RECONCILIATION_STALE_THRESHOLD_MS,

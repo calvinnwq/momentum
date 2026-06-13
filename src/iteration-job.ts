@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type { GoalArtifactPaths } from "./artifacts.js";
-import type { MomentumDb } from "./db.js";
+import type { MomentumDb } from "./adapters/db.js";
 import {
   runForegroundIteration,
   type ForegroundIterationError,

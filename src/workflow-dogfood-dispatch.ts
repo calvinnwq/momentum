@@ -37,7 +37,7 @@
  * manual-recovery condition, the one unsafe move this gate exists to prevent.
  */
 
-import type { MomentumDb } from "./db.js";
+import type { MomentumDb } from "./adapters/db.js";
 import { releaseWorkflowLease } from "./workflow-leases.js";
 import { deriveWorkflowMonitorState } from "./workflow-monitor-state.js";
 import {

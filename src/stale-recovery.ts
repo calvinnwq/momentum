@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 
 import { resolveGoalArtifactPaths } from "./artifacts.js";
-import type { MomentumDb } from "./db.js";
+import type { MomentumDb } from "./adapters/db.js";
 import {
   DAEMON_RUN_AUTO_RECOVERED_IDLE_STATUS,
   getActiveDaemonRunForJob,

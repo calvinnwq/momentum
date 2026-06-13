@@ -1,5 +1,5 @@
 import { usageError, type CliIo } from "../../renderers/cli-output.js";
-import { openDb } from "../../db.js";
+import { openDb } from "../../adapters/db.js";
 import { resolveDataDir, type DataDirOptions } from "../../data-dir.js";
 import {
   buildProjectRollup,

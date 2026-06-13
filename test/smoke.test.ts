@@ -2624,7 +2624,7 @@ describe("Milestone 3 daemon drain end-to-end smoke (NGX-278)", () => {
       // mirrors the in-process seeding pattern used by cli.test.ts daemon-stop
       // visibility tests, while keeping the operator-facing assertions on the
       // built CLI binary.
-      const { openDb } = await import("../src/db.js");
+      const { openDb } = await import("../src/adapters/db.js");
       const { startDaemonRun } = await import("../src/daemon-runs.js");
       const seededDb = openDb(dataDir);
       let runId: string;
@@ -2915,7 +2915,7 @@ describe("Milestone 3 daemon drain end-to-end smoke (NGX-278)", () => {
       // loop binary would require background-process timing; the loop primitive
       // is unit-tested in daemon-loop.test.ts, so here we pin the operator
       // surfaces while keeping the assertions deterministic.
-      const { openDb } = await import("../src/db.js");
+      const { openDb } = await import("../src/adapters/db.js");
       const { startDaemonRun, finishDaemonRun } = await import(
         "../src/daemon-runs.js"
       );
@@ -3226,7 +3226,7 @@ describe("Milestone 3 daemon drain end-to-end smoke (NGX-278)", () => {
     async () => {
       const dataDir = makeTempDir("momentum-smoke-m3-recovery-data-");
 
-      const { openDb } = await import("../src/db.js");
+      const { openDb } = await import("../src/adapters/db.js");
       const { acquireRepoLock } = await import("../src/repo-locks.js");
       const { enqueueGoalIterationJob, claimPendingGoalIterationJob } =
         await import("../src/queue-jobs.js");
@@ -3466,7 +3466,7 @@ describe("Milestone 3 daemon drain end-to-end smoke (NGX-278)", () => {
       const goalId = "smoke-manual-recovery-goal";
       const classifiedAt = 1_700_000_000_000;
 
-      const { openDb } = await import("../src/db.js");
+      const { openDb } = await import("../src/adapters/db.js");
       const { markGoalNeedsManualRecovery } = await import(
         "../src/goal-recovery.js"
       );

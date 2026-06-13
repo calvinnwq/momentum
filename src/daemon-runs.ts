@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 
-import type { MomentumDb } from "./db.js";
+import type { MomentumDb } from "./adapters/db.js";
 
 export const DAEMON_RUN_STATES = [
   "starting",

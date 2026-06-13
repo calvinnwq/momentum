@@ -354,7 +354,7 @@ describe("momentum CLI scaffold", () => {
 
   it("doctor surfaces an ingested-evidence summary with last record details", async () => {
     const dataDir = makeTempDir("momentum-cli-doctor-evidence-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { ingestEvidenceRecord } = await import(
       "../src/evidence-records.js"
     );
@@ -486,7 +486,7 @@ describe("momentum CLI scaffold", () => {
 
   it("doctor --json surfaces audit lifecycle counts and the latest attempt across intents", async () => {
     const dataDir = makeTempDir("momentum-cli-doctor-externalapply-counts-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { createUpdateIntent } = await import("../src/update-intents.js");
     const { claimIntentApply, finalizeIntentApply } = await import(
       "../src/intent-apply-audits.js"
@@ -646,7 +646,7 @@ describe("momentum CLI scaffold", () => {
 
   it("doctor --json reflects in_flight and blocked intent counts from the CAS column", async () => {
     const dataDir = makeTempDir("momentum-cli-doctor-externalapply-states-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { createUpdateIntent } = await import("../src/update-intents.js");
     const { claimIntentApply, finalizeIntentApply } = await import(
       "../src/intent-apply-audits.js"
@@ -763,7 +763,7 @@ describe("momentum CLI scaffold", () => {
 
   it("doctor --json surfaces an active daemon run", async () => {
     const dataDir = makeTempDir("momentum-cli-doctor-active-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { startDaemonRun } = await import("../src/daemon-runs.js");
     const db = openDb(dataDir);
     try {
@@ -1346,7 +1346,7 @@ describe("momentum CLI scaffold", () => {
     const jobId = queuedPayload["jobId"] as string;
 
     const { acquireRepoLock } = await import("../src/repo-locks.js");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const setupDb = openDb(dataDir);
     let blockingLockId: string;
     try {
@@ -1426,7 +1426,7 @@ describe("momentum CLI scaffold", () => {
     const dataDir = makeTempDir("momentum-cli-worker-precheck-stale-");
 
     const { acquireRepoLock } = await import("../src/repo-locks.js");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const setupDb = openDb(dataDir);
     let staleLockId: string;
     try {
@@ -1679,7 +1679,7 @@ runner_profile: {
     const startPayload = JSON.parse(startResult.stdout) as Record<string, unknown>;
     const goalId = startPayload["goalId"] as string;
 
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { upsertSourceItem } = await import("../src/source-items.js");
     const db = openDb(dataDir);
     try {
@@ -1925,7 +1925,7 @@ runner_profile: {
     const startPayload = JSON.parse(startResult.stdout) as Record<string, unknown>;
     const goalId = startPayload["goalId"] as string;
 
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { createUpdateIntent } = await import("../src/update-intents.js");
     const { claimIntentApply, finalizeIntentApply } = await import(
       "../src/intent-apply-audits.js"
@@ -2599,7 +2599,7 @@ Goal body.
 
   it("daemon status surfaces an active running daemon", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { startDaemonRun, setDaemonRunActiveJob } = await import(
       "../src/daemon-runs.js"
     );
@@ -2652,7 +2652,7 @@ Goal body.
 
   it("daemon status surfaces stop-requested state with reason", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { startDaemonRun, requestDaemonRunStop } = await import(
       "../src/daemon-runs.js"
     );
@@ -2690,7 +2690,7 @@ Goal body.
 
   it("daemon status surfaces terminal error state with last error", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { startDaemonRun, finishDaemonRun } = await import(
       "../src/daemon-runs.js"
     );
@@ -2728,7 +2728,7 @@ Goal body.
 
   it("daemon status flags stale active records without auto-recovering", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { startDaemonRun } = await import("../src/daemon-runs.js");
     const db = openDb(dataDir);
     try {
@@ -2760,7 +2760,7 @@ Goal body.
 
   it("daemon status keeps in-flight active work fresh until the active-job cutoff", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { startDaemonRun, setDaemonRunActiveJob } = await import(
       "../src/daemon-runs.js"
     );
@@ -2841,7 +2841,7 @@ Goal body.
 
   it("daemon status surfaces stale repo locks and stale claimed jobs in JSON and text", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { acquireRepoLock } = await import("../src/repo-locks.js");
     const {
       claimPendingGoalIterationJob,
@@ -2930,7 +2930,7 @@ Goal body.
 
   it("daemon status surfaces goals needing manual recovery in JSON and text", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-recovery-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { writeRecoveryArtifact } = await import("../src/recovery-artifact.js");
     const { markGoalNeedsManualRecovery } = await import(
       "../src/goal-recovery.js"
@@ -3006,7 +3006,7 @@ Goal body.
 
   it("doctor --json surfaces stale repo-lock and claimed-job counts", async () => {
     const dataDir = makeTempDir("momentum-cli-doctor-stale-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { acquireRepoLock } = await import("../src/repo-locks.js");
     const {
       claimPendingGoalIterationJob,
@@ -3122,7 +3122,7 @@ Goal body.
 
   it("daemon start refuses to record a second run while one is active", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-start-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { startDaemonRun } = await import("../src/daemon-runs.js");
     let existingRunId: string;
     const db = openDb(dataDir);
@@ -3163,7 +3163,7 @@ Goal body.
 
   it("daemon start refuses and flags stale heartbeats on the existing active run", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-start-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { startDaemonRun } = await import("../src/daemon-runs.js");
     let existingRunId: string;
     const db = openDb(dataDir);
@@ -3197,7 +3197,7 @@ Goal body.
 
   it("daemon start allows a new run once the previous one terminates", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-start-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { startDaemonRun, finishDaemonRun } = await import(
       "../src/daemon-runs.js"
     );
@@ -3233,7 +3233,7 @@ Goal body.
 
   it("daemon stop records a stop request on the active run (json)", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-stop-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { startDaemonRun } = await import("../src/daemon-runs.js");
     let activeRunId: string;
     const db = openDb(dataDir);
@@ -3295,7 +3295,7 @@ Goal body.
 
   it("daemon stop defaults --reason to 'operator-requested' and prints a text summary", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-stop-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { startDaemonRun } = await import("../src/daemon-runs.js");
     const db = openDb(dataDir);
     try {
@@ -3320,7 +3320,7 @@ Goal body.
 
   it("daemon stop is idempotent and refreshes the reason on a stop_requested run", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-stop-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { startDaemonRun, requestDaemonRunStop } = await import(
       "../src/daemon-runs.js"
     );
@@ -3385,7 +3385,7 @@ Goal body.
 
   it("daemon stop refuses when the latest run is already terminal and surfaces it", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-stop-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { startDaemonRun, finishDaemonRun } = await import(
       "../src/daemon-runs.js"
     );
@@ -3431,7 +3431,7 @@ Goal body.
 
   it("daemon stop flags stale heartbeats on the active run but still records the request", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-stop-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { startDaemonRun } = await import("../src/daemon-runs.js");
     let runId: string;
     const db = openDb(dataDir);
@@ -3461,7 +3461,7 @@ Goal body.
 
   it("daemon stop uses active-job freshness when reporting staleness", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-stop-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { startDaemonRun, setDaemonRunActiveJob } = await import(
       "../src/daemon-runs.js"
     );
@@ -3515,7 +3515,7 @@ Goal body.
 
   it("daemon stop --now records an immediate stop request and surfaces stopNowRequestedAt", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-stop-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { startDaemonRun } = await import("../src/daemon-runs.js");
     let activeRunId: string;
     const db = openDb(dataDir);
@@ -3574,7 +3574,7 @@ Goal body.
 
   it("daemon stop --now is idempotent and preserves the first stop-now reason", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-stop-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { startDaemonRun, requestDaemonRunImmediateStop } = await import(
       "../src/daemon-runs.js"
     );
@@ -3619,7 +3619,7 @@ Goal body.
 
   it("daemon stop --now text output reports the preserved reason on a repeat call", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-stop-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { startDaemonRun, requestDaemonRunImmediateStop } = await import(
       "../src/daemon-runs.js"
     );
@@ -3649,7 +3649,7 @@ Goal body.
 
   it("daemon stop --now upgrades a graceful stop_requested run to stop_now", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-stop-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { startDaemonRun, requestDaemonRunStop } = await import(
       "../src/daemon-runs.js"
     );
@@ -3861,7 +3861,7 @@ Goal body.
 
   it("managed daemon start recovers a stale idle active run before registering", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-loop-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { getDaemonRun, startDaemonRun } = await import(
       "../src/daemon-runs.js"
     );
@@ -3907,7 +3907,7 @@ Goal body.
 
   it("daemon start refuses to run the loop while another daemon is active", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-loop-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { startDaemonRun } = await import("../src/daemon-runs.js");
     let existingRunId: string;
     const db = openDb(dataDir);
@@ -3993,7 +3993,7 @@ Goal body.
     >;
     const goalId = enqueuePayload["goalId"] as string;
 
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { startDaemonRun, requestDaemonRunStop } = await import(
       "../src/daemon-runs.js"
     );
@@ -4050,7 +4050,7 @@ Goal body.
     >;
     const goalId = enqueuePayload["goalId"] as string;
 
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { startDaemonRun, requestDaemonRunStop } = await import(
       "../src/daemon-runs.js"
     );
@@ -4095,7 +4095,7 @@ Goal body.
     >;
     const goalId = enqueuePayload["goalId"] as string;
 
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { startDaemonRun, requestDaemonRunStop } = await import(
       "../src/daemon-runs.js"
     );
@@ -4151,7 +4151,7 @@ Goal body.
     >;
     const goalId = enqueuePayload["goalId"] as string;
 
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const {
       startDaemonRun,
       requestDaemonRunImmediateStop,
@@ -4217,7 +4217,7 @@ Goal body.
     >;
     const goalId = enqueuePayload["goalId"] as string;
 
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const {
       startDaemonRun,
       requestDaemonRunImmediateStop,
@@ -4311,7 +4311,7 @@ describe("momentum recovery clear", () => {
 
   it("returns goal_not_found JSON code when goal does not exist", async () => {
     const dataDir = makeTempDir("momentum-cli-recovery-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     // Touch db so the file exists with migrations applied.
     openDb(dataDir).close();
 
@@ -4332,7 +4332,7 @@ describe("momentum recovery clear", () => {
 
   it("returns not_flagged when the goal exists but is not currently flagged", async () => {
     const dataDir = makeTempDir("momentum-cli-recovery-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const db = openDb(dataDir);
     try {
       db.prepare(
@@ -4361,7 +4361,7 @@ describe("momentum recovery clear", () => {
 
   it("returns job_active with activeJobIds when a claimed iteration job still holds the goal", async () => {
     const dataDir = makeTempDir("momentum-cli-recovery-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { enqueueGoalIterationJob } = await import("../src/queue-jobs.js");
     const { markGoalNeedsManualRecovery } = await import(
       "../src/goal-recovery.js"
@@ -4413,7 +4413,7 @@ describe("momentum recovery clear", () => {
 
   it("clears a flagged goal and surfaces the event id in JSON+text output", async () => {
     const dataDir = makeTempDir("momentum-cli-recovery-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { markGoalNeedsManualRecovery } = await import(
       "../src/goal-recovery.js"
     );
@@ -4500,7 +4500,7 @@ describe("momentum recovery clear", () => {
 
   it("lists and gets source items for operator inspection", async () => {
     const dataDir = makeTempDir("momentum-cli-source-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { upsertSourceItem } = await import("../src/source-items.js");
     const db = openDb(dataDir);
     try {
@@ -4613,7 +4613,7 @@ describe("momentum recovery clear", () => {
 
   it("status text surfaces linked source items", async () => {
     const { dataDir, goalFile, repo } = setupGoalAndData();
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { upsertSourceItem } = await import("../src/source-items.js");
     const db = openDb(dataDir);
 
@@ -4662,7 +4662,7 @@ describe("momentum recovery clear", () => {
     const startPayload = JSON.parse(startResult.stdout) as Record<string, unknown>;
     const goalId = startPayload["goalId"] as string;
 
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { upsertSourceItem } = await import("../src/source-items.js");
     const db = openDb(dataDir);
     let sourceItemId: string;
@@ -4734,7 +4734,7 @@ describe("momentum recovery clear", () => {
     const startPayload = JSON.parse(startResult.stdout) as Record<string, unknown>;
     const goalId = startPayload["goalId"] as string;
 
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { upsertSourceItem } = await import("../src/source-items.js");
     const { ingestEvidenceRecord } = await import("../src/evidence-records.js");
     const { listUpdateIntents } = await import("../src/update-intents.js");
@@ -4806,7 +4806,7 @@ describe("momentum recovery clear", () => {
     ]);
     const goalAId = (JSON.parse(startA.stdout) as Record<string, unknown>)["goalId"] as string;
 
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { upsertSourceItem } = await import("../src/source-items.js");
     const db = openDb(dataDir);
     const goalBId = "goal-b-link-target";
@@ -4904,7 +4904,7 @@ describe("momentum recovery clear", () => {
     ]);
     const goalId = (JSON.parse(startResult.stdout) as Record<string, unknown>)["goalId"] as string;
 
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { upsertSourceItem } = await import("../src/source-items.js");
     const db = openDb(dataDir);
     let sourceItemId: string;
@@ -4975,7 +4975,7 @@ describe("momentum recovery clear", () => {
   it("goal start --from-source links the goal at init time and surfaces linkedSourceItem", async () => {
     const { dataDir, goalFile, repo } = setupGoalAndData();
 
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { upsertSourceItem } = await import("../src/source-items.js");
     const db = openDb(dataDir);
     let sourceItemId: string;
@@ -5050,7 +5050,7 @@ describe("momentum recovery clear", () => {
       code: "source_item_not_found"
     });
 
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const db = openDb(dataDir);
     try {
       const goalCount = db
@@ -5067,7 +5067,7 @@ describe("momentum recovery clear", () => {
   it("goal start --from-source does not persist a partial goal when the source is already linked", async () => {
     const { dataDir, goalFile, repo } = setupGoalAndData();
 
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { upsertSourceItem } = await import("../src/source-items.js");
     const db = openDb(dataDir);
     let sourceItemId: string;
@@ -5228,7 +5228,7 @@ describe("momentum recovery clear", () => {
       }
     ]);
 
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { listSourceItems } = await import("../src/source-items.js");
     const db = openDb(dataDir);
     try {
@@ -5487,7 +5487,7 @@ describe("momentum recovery clear", () => {
 
 describe("momentum CLI external apply post-apply reconciliation", () => {
   async function seedExternalApplyFixture(dataDir: string): Promise<string> {
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const db = openDb(dataDir);
     try {
       db.prepare(
@@ -5609,7 +5609,7 @@ describe("momentum CLI external apply post-apply reconciliation", () => {
     const { getLatestIntentApplyAudit } = await import(
       "../src/intent-apply-audits.js"
     );
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const db = openDb(dataDir);
     try {
       const audit = getLatestIntentApplyAudit(db, intentId);
@@ -5688,7 +5688,7 @@ describe("momentum project status", () => {
 
   it("echoes filter values back when --source, --project, and --milestone are passed", async () => {
     const dataDir = makeTempDir("momentum-cli-project-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { upsertSourceItem } = await import("../src/source-items.js");
     const db = openDb(dataDir);
     try {
@@ -5738,7 +5738,7 @@ describe("momentum project status", () => {
 
   it("matches --project and --milestone against non-UUID metadata ids", async () => {
     const dataDir = makeTempDir("momentum-cli-project-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { upsertSourceItem } = await import("../src/source-items.js");
     const db = openDb(dataDir);
     try {
@@ -5788,7 +5788,7 @@ describe("momentum project status", () => {
 
   it("applies --stale-threshold-hours to reconciliation warning detection", async () => {
     const dataDir = makeTempDir("momentum-cli-project-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { upsertSourceItem } = await import("../src/source-items.js");
     const {
       startSourceReconciliationRun,
@@ -5859,7 +5859,7 @@ describe("momentum project status", () => {
 
   it("surfaces manual_recovery_required as the highest-priority next action", async () => {
     const dataDir = makeTempDir("momentum-cli-project-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { upsertSourceItem } = await import("../src/source-items.js");
     const db = openDb(dataDir);
     try {
@@ -5919,7 +5919,7 @@ describe("momentum project status", () => {
 
   it("text mode truncates large source item lists with an `and N more` line", async () => {
     const dataDir = makeTempDir("momentum-cli-project-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { upsertSourceItem } = await import("../src/source-items.js");
     const db = openDb(dataDir);
     try {
@@ -6005,7 +6005,7 @@ describe("momentum project status", () => {
 
   it("surfaces pending update intents in the project status JSON payload", async () => {
     const dataDir = makeTempDir("momentum-cli-project-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { upsertSourceItem } = await import("../src/source-items.js");
     const { createUpdateIntent } = await import("../src/update-intents.js");
     const db = openDb(dataDir);
@@ -6063,7 +6063,7 @@ describe("momentum project status", () => {
 
   it("surfaces an empty external apply rollup when no audits exist", async () => {
     const dataDir = makeTempDir("momentum-cli-project-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { upsertSourceItem } = await import("../src/source-items.js");
     const { createUpdateIntent } = await import("../src/update-intents.js");
     const db = openDb(dataDir);
@@ -6148,7 +6148,7 @@ describe("momentum project status", () => {
 
   it("aggregates per-intent audit surfaces in project status JSON and text output", async () => {
     const dataDir = makeTempDir("momentum-cli-project-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { upsertSourceItem } = await import("../src/source-items.js");
     const { createUpdateIntent } = await import("../src/update-intents.js");
     const { claimIntentApply, finalizeIntentApply } = await import(
@@ -6381,7 +6381,7 @@ describe("momentum project status", () => {
 
   it("honors --intent-stale-threshold-days to flag pending intents stale", async () => {
     const dataDir = makeTempDir("momentum-cli-project-");
-    const { openDb } = await import("../src/db.js");
+    const { openDb } = await import("../src/adapters/db.js");
     const { upsertSourceItem } = await import("../src/source-items.js");
     const { createUpdateIntent } = await import("../src/update-intents.js");
     const db = openDb(dataDir);

@@ -112,6 +112,39 @@ describe("shared renderer output contracts", () => {
     }
   });
 
+  it("keeps remaining inline CLI command surfaces delegated to renderers", () => {
+    const source = readFile("src/cli.ts");
+
+    for (const helperName of [
+      "emitRecoveryClear",
+      "emitDaemonStopSuccess",
+      "emitDaemonStopFailure",
+      "emitDaemonStartSuccess",
+      "emitDaemonStartLoopResult",
+      "emitDaemonStartFailure",
+      "emitDaemonStatus",
+      "emitWorkerRunResult",
+      "emitStalePreCheckText"
+    ]) {
+      expect(
+        source,
+        `src/cli.ts should call ${helperName} from src/renderers instead of defining it inline`
+      ).not.toMatch(new RegExp(`function\\s+${helperName}\\b`));
+    }
+
+    for (const rendererPath of [
+      "src/renderers/recovery.ts",
+      "src/renderers/daemon.ts",
+      "src/renderers/worker.ts",
+      "src/renderers/doctor.ts"
+    ]) {
+      expect(
+        fs.existsSync(path.join(repoRoot, rendererPath)),
+        `${rendererPath} should own output contracts for remaining CLI surfaces`
+      ).toBe(true);
+    }
+  });
+
   it("preserves reusable JSON field contracts for source, evidence, intent, and apply audit shapes", () => {
     const sourceItem: SourceItem = {
       id: "src-1",

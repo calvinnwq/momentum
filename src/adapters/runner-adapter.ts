@@ -9,15 +9,15 @@
  * writes.
  */
 
-import { runAcpRunner } from "./acp-runner.js";
-import type { GoalSpec } from "./goal-spec.js";
-import { runFakeRunner } from "./fake-runner.js";
+import { runAcpRunner } from "../acp-runner.js";
+import type { GoalSpec } from "../goal-spec.js";
+import { runFakeRunner } from "../fake-runner.js";
 import {
   BUILTIN_RUNNER_KINDS,
   type BuiltinRunnerKind,
   isBuiltinRunnerKind
-} from "./runner-profile.js";
-import type { RunnerResult } from "./runner-result.js";
+} from "../runner-profile.js";
+import type { RunnerResult } from "../runner-result.js";
 import { runTrustedShellRunner } from "./trusted-shell-runner.js";
 
 export type RunnerAdapterErrorCode =

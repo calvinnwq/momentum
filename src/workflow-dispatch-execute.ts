@@ -50,7 +50,7 @@
  * rather than silently colliding with them.
  */
 
-import type { MomentumDb } from "./db.js";
+import type { MomentumDb } from "./adapters/db.js";
 import {
   insertExecutorInvocation,
   insertExecutorRound,

@@ -50,7 +50,7 @@
  * live recovery code is surfaced for the recovery layer.
  */
 
-import type { MomentumDb } from "./db.js";
+import type { MomentumDb } from "./adapters/db.js";
 import { Worker } from "node:worker_threads";
 import {
   acquireWorkflowLeaseInTransaction,

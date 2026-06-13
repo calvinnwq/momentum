@@ -64,7 +64,7 @@
  *     routes straight from running to manual recovery, never inventing a result.
  */
 
-import type { MomentumDb } from "./db.js";
+import type { MomentumDb } from "./adapters/db.js";
 import {
   insertExecutorArtifact,
   insertExecutorCheckpoint,

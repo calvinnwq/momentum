@@ -15,7 +15,7 @@ import {
 } from "./daemon-runs.js";
 import { DEFAULT_STALE_LEASE_GRACE_MS } from "./daemon-status.js";
 import { resolveDataDir, type DataDirOptions } from "./data-dir.js";
-import { openDb, type MomentumDb } from "./db.js";
+import { openDb, type MomentumDb } from "./adapters/db.js";
 import { QUEUE_EVENT_TYPES } from "./events.js";
 import { getGoal, type GoalRow } from "./goal-init.js";
 import { GOAL_ITERATION_JOB_TYPE } from "./queue-jobs.js";

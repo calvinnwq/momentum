@@ -45,7 +45,7 @@
  *     round.
  */
 
-import { isUniqueViolation, type MomentumDb } from "./db.js";
+import { isUniqueViolation, type MomentumDb } from "./adapters/db.js";
 import {
   EXECUTOR_ARTIFACT_CLASSES,
   EXECUTOR_COMPLETION_CLASSIFICATIONS,

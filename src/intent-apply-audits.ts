@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { isUniqueViolation, type MomentumDb } from "./db.js";
+import { isUniqueViolation, type MomentumDb } from "./adapters/db.js";
 import type { ExternalUpdateMutationKind } from "./external-update-adapter.js";
 import type { UpdateIntentApplyPolicy } from "./momentum-policy.js";
 

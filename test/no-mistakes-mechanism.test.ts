@@ -4,8 +4,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { decideNoMistakesMirror } from "../src/no-mistakes-executor.js";
-import type { NoMistakesExternalState } from "../src/no-mistakes-executor.js";
+import { decideNoMistakesMirror } from "../src/adapters/no-mistakes-executor.js";
+import type { NoMistakesExternalState } from "../src/adapters/no-mistakes-executor.js";
 import {
   MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES,
   parseNoMistakesExternalState,

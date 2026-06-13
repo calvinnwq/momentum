@@ -37,7 +37,7 @@ import type {
   RunnerAdapterErrorCode,
   RunnerAdapterInput,
   RunnerAdapterResult
-} from "./runner-adapter.js";
+} from "./adapters/runner-adapter.js";
 import { parseRunnerResult } from "./runner-result.js";
 
 export const ACP_ENV_VARS = {

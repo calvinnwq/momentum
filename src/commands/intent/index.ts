@@ -13,7 +13,7 @@ import {
   type IntentExternalApplySummary,
   type IntentFailure
 } from "../../renderers/intent.js";
-import { openDb } from "../../db.js";
+import { openDb } from "../../adapters/db.js";
 import { resolveDataDir, type DataDirOptions } from "../../data-dir.js";
 import {
   DEFAULT_INTENT_APPLY_POLICY,

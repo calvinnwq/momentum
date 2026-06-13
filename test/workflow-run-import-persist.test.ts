@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { openDb, type MomentumDb } from "../src/db.js";
+import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import { parseWorkflowRunImport } from "../src/workflow-run-import.js";
 import { persistWorkflowRunImport } from "../src/workflow-run-import-persist.js";
 

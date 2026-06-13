@@ -12,7 +12,7 @@ import {
   FAKE_RUNNER_TRAJECTORY_ENV
 } from "../src/fake-runner.js";
 import { buildIterationIdempotencyKey, initGoal } from "../src/goal-init.js";
-import { openDb } from "../src/db.js";
+import { openDb } from "../src/adapters/db.js";
 import {
   getJobByIdempotencyKey,
   getQueueJob,

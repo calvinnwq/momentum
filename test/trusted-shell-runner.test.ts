@@ -4,11 +4,11 @@ import os from "node:os";
 import path from "node:path";
 
 import type { GoalSpec } from "../src/goal-spec.js";
-import type { RunnerAdapterInput } from "../src/runner-adapter.js";
+import type { RunnerAdapterInput } from "../src/adapters/runner-adapter.js";
 import {
   runTrustedShellRunner,
   TRUSTED_SHELL_ENV_VARS
-} from "../src/trusted-shell-runner.js";
+} from "../src/adapters/trusted-shell-runner.js";
 
 const tempRoots: string[] = [];
 

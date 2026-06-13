@@ -36,7 +36,7 @@
  * reconciliation.
  */
 
-import type { MomentumDb } from "./db.js";
+import type { MomentumDb } from "./adapters/db.js";
 import {
   isTerminalStepState,
   transitionWorkflowStep,

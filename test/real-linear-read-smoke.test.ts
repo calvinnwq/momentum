@@ -3,8 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { openDb, type MomentumDb } from "../src/db.js";
-import { buildLinearHttpReconciliationClient } from "../src/linear-http-client.js";
+import { openDb, type MomentumDb } from "../src/adapters/db.js";
+import { buildLinearHttpReconciliationClient } from "../src/adapters/linear-http-client.js";
 import { reconcileLinearSource } from "../src/source-reconciliation.js";
 import { listSourceItems } from "../src/source-items.js";
 import {

@@ -1,5 +1,5 @@
 import { usageError, type CliIo } from "../../renderers/cli-output.js";
-import { openDb } from "../../db.js";
+import { openDb } from "../../adapters/db.js";
 import { resolveDataDir, type DataDirOptions } from "../../data-dir.js";
 import {
   getSourceItemById,
@@ -15,7 +15,7 @@ import {
   type ReconcileLinearSourceInput,
   type ReconcileLinearSourceResult
 } from "../../source-reconciliation.js";
-import { buildLinearHttpReconciliationClient } from "../../linear-http-client.js";
+import { buildLinearHttpReconciliationClient } from "../../adapters/linear-http-client.js";
 import { LINEAR_API_KEY_ENV_VAR } from "../../intent-apply-execute.js";
 import {
   emitSourceFailure,

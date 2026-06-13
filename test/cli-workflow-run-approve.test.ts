@@ -7,7 +7,7 @@ import path from "node:path";
 import { Worker } from "node:worker_threads";
 
 import { runCli } from "../src/cli.js";
-import { openDb, type MomentumDb } from "../src/db.js";
+import { openDb, type MomentumDb } from "../src/adapters/db.js";
 
 type RunResult = {
   code: number;

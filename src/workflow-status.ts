@@ -16,7 +16,7 @@
  * against `evidence_records.artifact_path` so pre-NGX-329 evidence keeps
  * surfacing.
  */
-import type { MomentumDb } from "./db.js";
+import type { MomentumDb } from "./adapters/db.js";
 import {
   listWorkflowGatesForRun,
   type WorkflowGateRecord

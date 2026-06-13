@@ -56,7 +56,7 @@
  * transaction produces a committed, reset, or recovery outcome.
  */
 
-import type { MomentumDb } from "./db.js";
+import type { MomentumDb } from "./adapters/db.js";
 import { Worker } from "node:worker_threads";
 import {
   finalizeLiveWorkflowStepFromResultFile,

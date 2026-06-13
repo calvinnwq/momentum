@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { openDb, type MomentumDb } from "../src/db.js";
+import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
   ExecutorInvocationConflictError,
   insertExecutorInvocation,
@@ -23,14 +23,14 @@ import {
   planNoMistakesInvocation,
   planNoMistakesRoundStart,
   type NoMistakesExternalState
-} from "../src/no-mistakes-executor.js";
+} from "../src/adapters/no-mistakes-executor.js";
 import { readNoMistakesExternalState } from "../src/no-mistakes-mechanism.js";
 import {
   runNoMistakesMirrorRound,
   runNoMistakesMirrorStep,
   type NoMistakesMirrorReader,
   type RunNoMistakesMirrorStepInput
-} from "../src/no-mistakes-orchestrator.js";
+} from "../src/adapters/no-mistakes-orchestrator.js";
 
 // The stateful seam twin of the pure projections (no-mistakes-executor.test.ts)
 // and their durable round-trip (no-mistakes-executor-persistence.test.ts): this

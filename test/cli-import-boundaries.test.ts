@@ -9,6 +9,7 @@ const repoRoot = path.resolve(here, "..");
 const srcRoot = path.join(repoRoot, "src");
 const commandsDir = path.join("src", "commands");
 const renderersDir = path.join("src", "renderers");
+const adaptersDir = path.join("src", "adapters");
 
 type ImportEdge = {
   from: string;
@@ -122,6 +123,10 @@ function isRendererModule(file: string): boolean {
   return file === renderersDir || file.startsWith(renderersDir + path.sep);
 }
 
+function isAdapterModule(file: string): boolean {
+  return file === adaptersDir || file.startsWith(adaptersDir + path.sep);
+}
+
 describe("M11 CLI import boundaries", () => {
   it("collects all relative import forms for structural checks", () => {
     expect(
@@ -202,6 +207,59 @@ describe("M11 CLI import boundaries", () => {
       violations.map(
         (file) =>
           `${file} reads process stdout/stderr directly; thread output through CliIo and src/renderers instead.`
+      )
+    ).toEqual([]);
+  });
+
+  it("keeps infrastructure-facing adapters under src/adapters ownership", () => {
+    const expectedAdapters = [
+      "src/adapters/db.ts",
+      "src/adapters/git-transaction.ts",
+      "src/adapters/linear-http-client.ts",
+      "src/adapters/source-adapter.ts",
+      "src/adapters/linear-source-adapter.ts",
+      "src/adapters/runner-adapter.ts",
+      "src/adapters/trusted-shell-runner.ts",
+      "src/adapters/no-mistakes-executor.ts",
+      "src/adapters/no-mistakes-orchestrator.ts"
+    ];
+
+    expect(
+      expectedAdapters.filter((file) => !fs.existsSync(path.join(repoRoot, file))),
+      "NGX-417 adapter/infrastructure modules should have clear ownership under src/adapters"
+    ).toEqual([]);
+
+    const rootInfrastructureModules = [
+      "src/db.ts",
+      "src/git-transaction.ts",
+      "src/linear-http-client.ts",
+      "src/source-adapter.ts",
+      "src/linear-source-adapter.ts",
+      "src/runner-adapter.ts",
+      "src/trusted-shell-runner.ts",
+      "src/no-mistakes-executor.ts",
+      "src/no-mistakes-orchestrator.ts"
+    ];
+
+    expect(
+      rootInfrastructureModules.filter((file) =>
+        fs.existsSync(path.join(repoRoot, file))
+      ),
+      "NGX-417 adapter/infrastructure modules should not remain as flat src/ modules after ownership migration"
+    ).toEqual([]);
+  });
+
+  it("prevents adapters from importing commands or renderers", () => {
+    const violations = importEdges().filter(
+      (edge) =>
+        isAdapterModule(edge.from) &&
+        (isCommandModule(edge.to) || isRendererModule(edge.to))
+    );
+
+    expect(
+      violations.map(
+        (edge) =>
+          `${edge.from} imports ${edge.specifier} -> ${edge.to}; adapters must stay independent from CLI commands and renderers.`
       )
     ).toEqual([]);
   });

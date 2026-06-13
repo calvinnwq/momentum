@@ -19,7 +19,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-import { listCommittedChangedFiles } from "./git-transaction.js";
+import { listCommittedChangedFiles } from "./adapters/git-transaction.js";
 import {
   finalizeLiveWorkflowStep,
   type FinalizeLiveWorkflowStepResult

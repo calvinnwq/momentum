@@ -59,7 +59,7 @@ import type {
   CommitSuccess,
   ResetFailure,
   ResetSuccess
-} from "./git-transaction.js";
+} from "./adapters/git-transaction.js";
 import {
   finalizeIteration,
   type FinalizeResetTrigger

@@ -11,7 +11,7 @@ import {
   listRunnerAdapterKinds,
   type RunnerAdapter,
   type RunnerAdapterInput
-} from "../src/runner-adapter.js";
+} from "../src/adapters/runner-adapter.js";
 import {
   FAKE_RUNNER_FAIL_ENV,
   FAKE_RUNNER_FIXTURE_FILENAME,

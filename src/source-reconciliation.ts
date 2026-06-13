@@ -29,9 +29,9 @@
  *     stay populated for backward compatibility.
  */
 
-import type { MomentumDb } from "./db.js";
-import { normalizeLinearIssue, LINEAR_SOURCE_ADAPTER_KIND } from "./linear-source-adapter.js";
-import type { LinearSourceAdapterFilters } from "./linear-source-adapter.js";
+import type { MomentumDb } from "./adapters/db.js";
+import { normalizeLinearIssue, LINEAR_SOURCE_ADAPTER_KIND } from "./adapters/linear-source-adapter.js";
+import type { LinearSourceAdapterFilters } from "./adapters/linear-source-adapter.js";
 import {
   getSourceItemByAdapterExternalId,
   recordSourceSnapshot,
@@ -44,7 +44,7 @@ import {
   type SourceReconciliationRun,
   type SourceReconciliationTerminalState
 } from "./source-reconciliation-runs.js";
-import type { SourceAdapterErrorCode } from "./source-adapter.js";
+import type { SourceAdapterErrorCode } from "./adapters/source-adapter.js";
 
 export type LinearReconciliationFilters = LinearSourceAdapterFilters;
 

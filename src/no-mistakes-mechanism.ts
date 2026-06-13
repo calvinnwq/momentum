@@ -54,7 +54,7 @@ import type {
   NoMistakesExternalFinding,
   NoMistakesExternalState,
   NoMistakesExternalStepStatus
-} from "./no-mistakes-executor.js";
+} from "./adapters/no-mistakes-executor.js";
 
 /** A successful read: the typed snapshot plus the raw-bytes content digest. */
 export type NoMistakesExternalStateReadSuccess = {

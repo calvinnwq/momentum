@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { openDb, type MomentumDb } from "../src/db.js";
+import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
   insertExecutorDecision,
   insertExecutorFinding,
@@ -23,7 +23,7 @@ import {
   planNoMistakesRoundPersistence,
   planNoMistakesRoundStart,
   type NoMistakesExternalState
-} from "../src/no-mistakes-executor.js";
+} from "../src/adapters/no-mistakes-executor.js";
 
 // Integration twin of the pure projections in no-mistakes-executor.test.ts: this
 // drives the mirror's durable invocation + round-start records and the per-poll

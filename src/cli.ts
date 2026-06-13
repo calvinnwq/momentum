@@ -7,7 +7,6 @@ import {
   renderHelp,
   usageError,
   write,
-  writeJson,
   type CliIo
 } from "./renderers/cli-output.js";
 import {
@@ -26,7 +25,30 @@ import {
   sourceReconciliationPaginationStopped,
   type SourceReconciliationPaginationStoppedJson
 } from "./renderers/source.js";
-import { isUniqueViolation, openDb, type MomentumDb } from "./db.js";
+import {
+  emitDaemonStartFailure,
+  emitDaemonStartLoopResult,
+  emitDaemonStartSuccess,
+  emitDaemonStatus,
+  emitDaemonStatusFailure,
+  emitDaemonStopFailure,
+  emitDaemonStopSuccess,
+  summarizeExistingDaemonRun,
+  type DaemonStartFailurePayload
+} from "./renderers/daemon.js";
+import {
+  emitRecoveryClear,
+  emitRecoveryClearDataDirFailure
+} from "./renderers/recovery.js";
+import { emitWorkerRunResult } from "./renderers/worker.js";
+import {
+  emitDoctor,
+  type DoctorEvidencePayload,
+  type DoctorExternalApplyPayload,
+  type DoctorPolicyPayload,
+  type DoctorSourcesPayload
+} from "./renderers/doctor.js";
+import { isUniqueViolation, openDb, type MomentumDb } from "./adapters/db.js";
 import { initGoal, type GoalInitOptions, type GoalInitSuccess } from "./goal-init.js";
 import { resolveDataDir, type DataDirOptions } from "./data-dir.js";
 import {
@@ -100,7 +122,7 @@ import {
   type ReconcileLinearSourceInput,
   type ReconcileLinearSourceResult
 } from "./source-reconciliation.js";
-import { buildLinearHttpReconciliationClient } from "./linear-http-client.js";
+import { buildLinearHttpReconciliationClient } from "./adapters/linear-http-client.js";
 import {
   ingestEvidenceRecord,
   listEvidenceRecords,
@@ -475,19 +497,10 @@ function recoveryClear(parsed: ParsedFlags, io: CliIo): number {
   try {
     dataDir = resolveDataDir(dataDirOptions);
   } catch (err) {
-    const payload = {
-      ok: false,
-      command: "recovery clear",
-      code: "data_dir_failed",
-      message: err instanceof Error ? err.message : String(err),
-      goalId
-    };
-    if (parsed.json) {
-      writeJson(io.stderr, payload);
-      return 1;
-    }
-    write(io.stderr, `${payload.message}\n`);
-    return 1;
+    return emitRecoveryClearDataDirFailure(parsed, io, {
+      goalId,
+      message: err instanceof Error ? err.message : String(err)
+    });
   }
 
   const db = openDb(dataDir);
@@ -506,63 +519,6 @@ function recoveryClear(parsed: ParsedFlags, io: CliIo): number {
 
   return emitRecoveryClear(parsed, io, dataDir, goalId, result);
 }
-
-function emitRecoveryClear(
-  parsed: ParsedFlags,
-  io: CliIo,
-  dataDir: string,
-  goalId: string,
-  result: ClearGoalManualRecoveryGuardedResult
-): number {
-  if (!result.ok) {
-    const payload: Record<string, unknown> = {
-      ok: false,
-      command: "recovery clear",
-      code: result.reason,
-      message: result.message,
-      goalId,
-      dataDir
-    };
-    if (result.reason === "job_active" && result.activeJobIds) {
-      payload["activeJobIds"] = result.activeJobIds;
-    }
-    if (parsed.json) {
-      writeJson(io.stderr, payload);
-      return 1;
-    }
-    write(io.stderr, `${result.message}\n`);
-    return 1;
-  }
-
-  const payload = {
-    ok: true,
-    command: "recovery clear",
-    goalId: result.goalId,
-    dataDir,
-    previousReason: result.previousReason,
-    previousMarkedAt: result.previousMarkedAt,
-    clearedAt: result.clearedAt,
-    eventId: result.eventId
-  };
-
-  if (parsed.json) {
-    writeJson(io.stdout, payload);
-    return 0;
-  }
-
-  const lines: string[] = [
-    `Manual recovery cleared for goal: ${result.goalId}`,
-    `Previous reason: ${result.previousReason ?? "(unset)"}`,
-    `Previous marked at: ${result.previousMarkedAt ?? "(unset)"}`,
-    `Cleared at: ${result.clearedAt}`,
-    `Event id: ${result.eventId}`,
-    `Data dir: ${dataDir}`,
-    ""
-  ];
-  write(io.stdout, lines.join("\n"));
-  return 0;
-}
-
 
 function daemon(parsed: ParsedFlags, io: CliIo): number | Promise<number> {
   const subcommand = parsed.args[1];
@@ -600,18 +556,10 @@ function daemonStatus(parsed: ParsedFlags, io: CliIo): number {
 
   const result = loadDaemonStatus({ dataDirOptions });
   if (!result.ok) {
-    const payload = {
-      ok: false,
-      command: "daemon status",
+    return emitDaemonStatusFailure(parsed, io, {
       code: result.code,
       message: result.error
-    };
-    if (parsed.json) {
-      writeJson(io.stderr, payload);
-      return 1;
-    }
-    write(io.stderr, `${result.error}\n`);
-    return 1;
+    });
   }
 
   return emitDaemonStatus(parsed, io, result);
@@ -879,442 +827,6 @@ function daemonStop(parsed: ParsedFlags, io: CliIo): number {
   }
 }
 
-type DaemonStopSuccessPayload = {
-  dataDir: string;
-  runId: string;
-  previousState: string;
-  state: string;
-  pid: number | null;
-  host: string | null;
-  startedAt: number;
-  stopRequestedAt: number;
-  stopReason: string;
-  alreadyStopRequested: boolean;
-  immediate: boolean;
-  alreadyStopNow: boolean;
-  stopNowRequestedAt: number | null;
-  heartbeatAt: number;
-  heartbeatAgeMs: number;
-  stale: boolean;
-};
-
-type DaemonStopFailurePayload = {
-  code: "no_active_daemon" | "data_dir_failed";
-  message: string;
-  latest?: {
-    runId: string;
-    state: string;
-    pid: number | null;
-    host: string | null;
-    startedAt: number;
-    finishedAt: number | null;
-  } | null;
-};
-
-function emitDaemonStopSuccess(
-  parsed: ParsedFlags,
-  io: CliIo,
-  data: DaemonStopSuccessPayload
-): number {
-  const payload = {
-    ok: true,
-    command: "daemon stop",
-    dataDir: data.dataDir,
-    runId: data.runId,
-    previousState: data.previousState,
-    state: data.state,
-    pid: data.pid,
-    host: data.host,
-    startedAt: data.startedAt,
-    stopRequestedAt: data.stopRequestedAt,
-    stopReason: data.stopReason,
-    alreadyStopRequested: data.alreadyStopRequested,
-    immediate: data.immediate,
-    alreadyStopNow: data.alreadyStopNow,
-    stopNowRequestedAt: data.stopNowRequestedAt,
-    heartbeatAt: data.heartbeatAt,
-    heartbeatAgeMs: data.heartbeatAgeMs,
-    stale: data.stale
-  };
-
-  if (parsed.json) {
-    writeJson(io.stdout, payload);
-    return 0;
-  }
-
-  const headline = data.immediate
-    ? data.alreadyStopNow
-      ? `Daemon stop-now request refreshed: ${data.runId}`
-      : `Daemon stop-now requested: ${data.runId}`
-    : data.alreadyStopRequested
-      ? `Daemon stop request refreshed: ${data.runId}`
-      : `Daemon stop requested: ${data.runId}`;
-  const lines: string[] = [
-    headline,
-    `State: ${data.state}${data.stale ? " [stale]" : ""}`,
-    `Previous state: ${data.previousState}`,
-    `Reason: ${data.stopReason}`,
-    `Requested at: ${data.stopRequestedAt}`,
-    ...(data.immediate
-      ? [
-          `Stop-now requested at: ${data.stopNowRequestedAt ?? data.stopRequestedAt}`
-        ]
-      : []),
-    `Pid: ${data.pid ?? "(unset)"}`,
-    `Host: ${data.host ?? "(unset)"}`,
-    `Data dir: ${data.dataDir}`,
-    ""
-  ];
-  write(io.stdout, lines.join("\n"));
-  return 0;
-}
-
-function emitDaemonStopFailure(
-  parsed: ParsedFlags,
-  io: CliIo,
-  failure: DaemonStopFailurePayload
-): number {
-  const payload: Record<string, unknown> = {
-    ok: false,
-    command: "daemon stop",
-    code: failure.code,
-    message: failure.message
-  };
-  if (failure.latest !== undefined) payload["latest"] = failure.latest;
-
-  if (parsed.json) {
-    writeJson(io.stderr, payload);
-    return 1;
-  }
-  write(io.stderr, `${failure.message}\n`);
-  return 1;
-}
-
-type DaemonStartSuccessPayload = {
-  dataDir: string;
-  runId: string;
-  pid: number | null;
-  host: string | null;
-  state: string;
-  startedAt: number;
-  heartbeatAt: number;
-};
-
-type DaemonStartFailurePayload = {
-  code: "daemon_already_active" | "data_dir_failed";
-  message: string;
-  existing?: {
-    runId: string;
-    state: string;
-    pid: number | null;
-    host: string | null;
-    startedAt: number;
-    heartbeatAt: number;
-    heartbeatAgeMs: number;
-    stale: boolean;
-  };
-};
-
-function emitDaemonStartSuccess(
-  parsed: ParsedFlags,
-  io: CliIo,
-  data: DaemonStartSuccessPayload
-): number {
-  const payload = {
-    ok: true,
-    command: "daemon start",
-    dataDir: data.dataDir,
-    runId: data.runId,
-    pid: data.pid,
-    host: data.host,
-    state: data.state,
-    startedAt: data.startedAt,
-    heartbeatAt: data.heartbeatAt
-  };
-
-  if (parsed.json) {
-    writeJson(io.stdout, payload);
-    return 0;
-  }
-
-  write(io.stdout, [
-    `Daemon run started: ${data.runId}`,
-    `State: ${data.state}`,
-    `Pid: ${data.pid ?? "(unset)"}`,
-    `Host: ${data.host ?? "(unset)"}`,
-    `Started at: ${data.startedAt}`,
-    `Data dir: ${data.dataDir}`,
-    ""
-  ].join("\n"));
-  return 0;
-}
-
-type DaemonStartLoopPayload = {
-  dataDir: string;
-  runId: string;
-  pid: number | null;
-  host: string | null;
-  startedAt: number;
-  loop: DaemonLoopResult;
-};
-
-function emitDaemonStartLoopResult(
-  parsed: ParsedFlags,
-  io: CliIo,
-  data: DaemonStartLoopPayload
-): number {
-  const loop = data.loop;
-  const loopSummary = {
-    exitReason: loop.exitReason,
-    terminalState: loop.terminalState,
-    cancelOutcome: loop.cancelOutcome,
-    workSucceeded: loop.workSucceeded,
-    iterations: loop.iterations,
-    jobsRun: loop.jobsRun,
-    jobsFailed: loop.jobsFailed,
-    jobsNotExecuted: loop.jobsNotExecuted,
-    idleCycles: loop.idleCycles,
-    // Workflow-first scheduler-lane evidence (M10-09a, NGX-367): how many steps
-    // the production lane dispatched and the last lane tick code.
-    workflowStepsDispatched: loop.workflowStepsDispatched,
-    lastWorkflowCode: loop.lastWorkflowCode,
-    lastObservedState: loop.lastObservedState,
-    lastWorkerCode: loop.lastWorkerCode,
-    startupRecovery: summarizeStartupRecovery(loop.startupRecovery),
-    ...(loop.error !== undefined ? { error: loop.error } : {})
-  };
-
-  const payload: Record<string, unknown> = {
-    ok: loop.ok,
-    workSucceeded: loop.workSucceeded,
-    command: "daemon start",
-    dataDir: data.dataDir,
-    runId: data.runId,
-    pid: data.pid,
-    host: data.host,
-    startedAt: data.startedAt,
-    state: loop.terminalState,
-    workerId: loop.workerId,
-    loop: loopSummary
-  };
-
-  const exitCode = loop.ok && loop.workSucceeded ? 0 : 1;
-  const output = loop.ok ? io.stdout : io.stderr;
-
-  if (parsed.json) {
-    writeJson(output, payload);
-    return exitCode;
-  }
-
-  const lines: string[] = [
-    `Daemon run started: ${data.runId}`,
-    `State: ${loop.terminalState}`,
-    `Exit reason: ${loop.exitReason}`,
-    ...(loop.cancelOutcome !== null
-      ? [`Cancel outcome: ${loop.cancelOutcome}`]
-      : []),
-    `Work succeeded: ${loop.workSucceeded ? "yes" : "no"}`,
-    `Iterations: ${loop.iterations}`,
-    `Jobs run: ${loop.jobsRun}`,
-    `Jobs failed: ${loop.jobsFailed}`,
-    `Jobs not executed: ${loop.jobsNotExecuted}`,
-    `Idle cycles: ${loop.idleCycles}`,
-    `Workflow steps dispatched: ${loop.workflowStepsDispatched}`,
-    `Last workflow code: ${loop.lastWorkflowCode ?? "(none)"}`,
-    ...formatStartupRecoveryLines(loop.startupRecovery),
-    `Pid: ${data.pid ?? "(unset)"}`,
-    `Host: ${data.host ?? "(unset)"}`,
-    `Started at: ${data.startedAt}`,
-    `Data dir: ${data.dataDir}`
-  ];
-  if (loop.error !== undefined) {
-    lines.push(`Error: ${loop.error}`);
-  }
-  lines.push("");
-  write(output, lines.join("\n"));
-  return exitCode;
-}
-
-type StartupRecoverySummary = {
-  observedAt: number;
-  graceMs: number;
-  recoveredRepoLockCount: number;
-  recoveredClaimedJobCount: number;
-  recoveredDaemonRunCount: number;
-  skippedRepoLocks: StaleRepoLockRecoverySkipped[];
-  skippedClaimedJobs: StaleClaimedJobRecoverySkipped[];
-  skippedDaemonRuns: StaleDaemonRunRecoverySkipped[];
-};
-
-function summarizeStartupRecovery(
-  recovery: StartupRecoveryResult | null
-): StartupRecoverySummary | null {
-  if (recovery === null) return null;
-  return {
-    observedAt: recovery.observedAt,
-    graceMs: recovery.graceMs,
-    recoveredRepoLockCount: recovery.repoLocks.recovered.length,
-    recoveredClaimedJobCount: recovery.claimedJobs.recovered.length,
-    recoveredDaemonRunCount: recovery.daemonRuns.recovered.length,
-    skippedRepoLocks: recovery.repoLocks.skipped,
-    skippedClaimedJobs: recovery.claimedJobs.skipped,
-    skippedDaemonRuns: recovery.daemonRuns.skipped
-  };
-}
-
-function formatStartupRecoveryLines(
-  recovery: StartupRecoveryResult | null
-): string[] {
-  if (recovery === null) return [];
-  const recoveredLocks = recovery.repoLocks.recovered.length;
-  const recoveredJobs = recovery.claimedJobs.recovered.length;
-  const recoveredDaemons = recovery.daemonRuns.recovered.length;
-  const skippedLocks = recovery.repoLocks.skipped.length;
-  const skippedJobs = recovery.claimedJobs.skipped.length;
-  const skippedDaemons = recovery.daemonRuns.skipped.length;
-  if (
-    recoveredLocks === 0 &&
-    recoveredJobs === 0 &&
-    recoveredDaemons === 0 &&
-    skippedLocks === 0 &&
-    skippedJobs === 0 &&
-    skippedDaemons === 0
-  ) {
-    return [];
-  }
-  return [
-    `Startup recovery: locks recovered=${recoveredLocks} skipped=${skippedLocks}; claims recovered=${recoveredJobs} skipped=${skippedJobs}; daemons recovered=${recoveredDaemons} skipped=${skippedDaemons}`
-  ];
-}
-
-function emitDaemonStartFailure(
-  parsed: ParsedFlags,
-  io: CliIo,
-  failure: DaemonStartFailurePayload
-): number {
-  const payload: Record<string, unknown> = {
-    ok: false,
-    command: "daemon start",
-    code: failure.code,
-    message: failure.message
-  };
-  if (failure.existing) payload["existing"] = failure.existing;
-
-  if (parsed.json) {
-    writeJson(io.stderr, payload);
-    return 1;
-  }
-  write(io.stderr, `${failure.message}\n`);
-  return 1;
-}
-
-function emitDaemonStatus(
-  parsed: ParsedFlags,
-  io: CliIo,
-  data: DaemonStatusSuccess
-): number {
-  const payload = {
-    ok: true,
-    command: "daemon status",
-    dataDir: data.dataDir,
-    hasRun: data.hasRun,
-    daemonRun: data.daemonRun,
-    staleAfterMs: data.staleAfterMs,
-    activeJobStaleAfterMs: data.activeJobStaleAfterMs,
-    staleLeaseGraceMs: data.staleLeaseGraceMs,
-    staleRuns: data.staleRuns,
-    staleRepoLocks: data.staleRepoLocks,
-    staleClaimedJobs: data.staleClaimedJobs,
-    goalsNeedingRecovery: data.goalsNeedingRecovery,
-    observedAt: data.observedAt
-  };
-
-  if (parsed.json) {
-    writeJson(io.stdout, payload);
-    return 0;
-  }
-
-  if (!data.daemonRun) {
-    const noDaemonLines: string[] = [
-      "Daemon: never started",
-      `Data dir: ${data.dataDir}`
-    ];
-    if (data.staleRepoLocks.length > 0) {
-      noDaemonLines.push(`Stale repo locks: ${data.staleRepoLocks.length}`);
-    }
-    if (data.staleClaimedJobs.length > 0) {
-      noDaemonLines.push(`Stale claimed jobs: ${data.staleClaimedJobs.length}`);
-    }
-    if (data.goalsNeedingRecovery.length > 0) {
-      noDaemonLines.push(
-        `Goals needing manual recovery: ${data.goalsNeedingRecovery.length}`
-      );
-      for (const entry of data.goalsNeedingRecovery) {
-        noDaemonLines.push(
-          `  - ${entry.goalId} [${entry.goalState}] ${entry.recoveryMdPath}`
-        );
-      }
-    }
-    noDaemonLines.push("");
-    write(io.stdout, noDaemonLines.join("\n"));
-    return 0;
-  }
-
-  const run = data.daemonRun;
-  const lines: string[] = [
-    `Daemon run: ${run.runId}`,
-    `State: ${run.state}${run.isActive ? " (active)" : " (terminal)"}${run.stale ? " [stale]" : ""}`,
-    `Pid: ${run.pid ?? "(unset)"}`,
-    `Host: ${run.host ?? "(unset)"}`,
-    `Started at: ${run.startedAt}`,
-    `Heartbeat at: ${run.heartbeatAt} (age ${run.heartbeatAgeMs}ms)`,
-    `Active job: ${run.activeJob.jobId ?? "(none)"}`,
-    `Active lock: ${run.activeJob.lockId ?? "(none)"}`,
-    `Reconcile count: ${run.reconciliation.count}`
-  ];
-  if (run.stopRequest) {
-    lines.push(
-      `Stop requested at: ${run.stopRequest.requestedAt} (reason: ${run.stopRequest.reason})`
-    );
-  }
-  if (run.stopNowRequest) {
-    lines.push(
-      `Stop-now requested at: ${run.stopNowRequest.requestedAt} (reason: ${run.stopNowRequest.reason})`
-    );
-  }
-  if (run.cancelOutcome) {
-    lines.push(`Cancel outcome: ${run.cancelOutcome.outcome}`);
-  }
-  if (run.finishedAt !== null) {
-    lines.push(`Finished at: ${run.finishedAt}`);
-  }
-  if (run.error) {
-    lines.push(`Error: ${run.error.message}`);
-  }
-  if (data.staleRuns.length > 0) {
-    lines.push(`Stale runs: ${data.staleRuns.length}`);
-  }
-  if (data.staleRepoLocks.length > 0) {
-    lines.push(`Stale repo locks: ${data.staleRepoLocks.length}`);
-  }
-  if (data.staleClaimedJobs.length > 0) {
-    lines.push(`Stale claimed jobs: ${data.staleClaimedJobs.length}`);
-  }
-  if (data.goalsNeedingRecovery.length > 0) {
-    lines.push(
-      `Goals needing manual recovery: ${data.goalsNeedingRecovery.length}`
-    );
-    for (const entry of data.goalsNeedingRecovery) {
-      lines.push(
-        `  - ${entry.goalId} [${entry.goalState}] ${entry.recoveryMdPath}`
-      );
-    }
-  }
-  lines.push("");
-  write(io.stdout, lines.join("\n"));
-  return 0;
-}
-
 function workerRun(parsed: ParsedFlags, io: CliIo): number {
   if (parsed.args.length > 2) {
     return usageError(`Unexpected argument for worker run: ${parsed.args[2]}`, parsed, io);
@@ -1340,85 +852,6 @@ function workerRun(parsed: ParsedFlags, io: CliIo): number {
   } finally {
     db.close();
   }
-}
-
-function emitWorkerRunResult(
-  parsed: ParsedFlags,
-  io: CliIo,
-  result: WorkerRunResult,
-  stalePreCheck: StaleLeasePreCheckSnapshot
-): number {
-  const preCheckJson = summarizeStalePreCheckForJson(stalePreCheck);
-  if (parsed.json) {
-    const base = {
-      command: "worker run",
-      ...result,
-      stalePreCheck: preCheckJson
-    };
-    const payload = {
-      ok: result.code === "ran_job" ? result.ok : true,
-      ...base
-    } as Record<string, unknown>;
-
-    writeJson(io.stdout, payload);
-    return result.code === "no_work" || result.code === "not_executed"
-      ? 0
-      : result.ok
-        ? 0
-        : 1;
-  }
-
-  emitStalePreCheckText(io, stalePreCheck);
-
-  if (result.code === "no_work") {
-    write(io.stdout, `${result.message}\n`);
-    return 0;
-  }
-
-  if (result.code === "not_executed") {
-    write(io.stdout, `${result.message}\n`);
-    return 0;
-  }
-
-  const iterResult = result.jobIterationResult;
-  const status = result.ok ? "succeeded" : "failed";
-  write(io.stdout, [
-    `Worker ${result.workerId} ${status} goal ${result.goalId} iteration ${result.iteration}`,
-    `Job: ${result.jobId}`,
-    `Lock: ${result.lockId}`,
-    `Repo: ${result.repoRoot}`,
-    `Goal state: ${result.goalState}`,
-    `Job state: ${result.jobState}`,
-    ""
-  ].join("\n"));
-
-  return result.ok ? 0 : 1;
-}
-
-function summarizeStalePreCheckForJson(
-  snapshot: StaleLeasePreCheckSnapshot
-): Record<string, unknown> {
-  return {
-    observedAt: snapshot.observedAt,
-    staleLeaseGraceMs: snapshot.staleLeaseGraceMs,
-    staleRepoLockCount: snapshot.staleRepoLocks.length,
-    staleClaimedJobCount: snapshot.staleClaimedJobs.length,
-    staleRepoLocks: snapshot.staleRepoLocks,
-    staleClaimedJobs: snapshot.staleClaimedJobs
-  };
-}
-
-function emitStalePreCheckText(
-  io: CliIo,
-  snapshot: StaleLeasePreCheckSnapshot
-): void {
-  const lockCount = snapshot.staleRepoLocks.length;
-  const claimCount = snapshot.staleClaimedJobs.length;
-  if (lockCount === 0 && claimCount === 0) return;
-  write(
-    io.stdout,
-    `Stale leases observed before claim: ${lockCount} repo lock(s), ${claimCount} claimed job(s) — see \`momentum daemon status\` for details.\n`
-  );
 }
 
 function doctor(parsed: ParsedFlags, io: CliIo): number {
@@ -1472,160 +905,10 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
     sources: sourcesPayload,
     evidence: evidencePayload,
     externalApply: externalApplyPayload
-  };
+  } as const;
 
-  if (parsed.json) {
-    writeJson(io.stdout, payload);
-    return 0;
-  }
-
-  const lines: string[] = [
-    "Momentum doctor: ok",
-    `version: ${payload.version}`,
-    `node: ${payload.node}`,
-    `platform: ${payload.platform}`,
-    `scope: ${payload.milestone}`
-  ];
-  if (daemonPayload.ok) {
-    if (!daemonPayload.hasRun) {
-      lines.push("daemon: never started");
-    } else {
-      const flags: string[] = [];
-      if (daemonPayload.isActive) flags.push("active");
-      if (daemonPayload.stale) flags.push("stale");
-      const flagStr = flags.length > 0 ? ` (${flags.join(", ")})` : "";
-      lines.push(`daemon: ${daemonPayload.state}${flagStr}`);
-    }
-    if (daemonPayload.staleRunCount > 0) {
-      lines.push(`daemon stale runs: ${daemonPayload.staleRunCount}`);
-    }
-    if (daemonPayload.staleRepoLockCount > 0) {
-      lines.push(
-        `daemon stale repo locks: ${daemonPayload.staleRepoLockCount}`
-      );
-    }
-    if (daemonPayload.staleClaimedJobCount > 0) {
-      lines.push(
-        `daemon stale claimed jobs: ${daemonPayload.staleClaimedJobCount}`
-      );
-    }
-    if (daemonPayload.goalsNeedingRecoveryCount > 0) {
-      lines.push(
-        `goals needing manual recovery: ${daemonPayload.goalsNeedingRecoveryCount}`
-      );
-    }
-  } else {
-    lines.push(`daemon: error (${daemonPayload.code})`);
-  }
-  lines.push(
-    `runners: ${BUILTIN_RUNNER_KINDS.join(", ")} (default ${DEFAULT_RUNNER_KIND})`
-  );
-  if (policyPayload.repoConfigured) {
-    if (policyPayload.error) {
-      lines.push(
-        `policy (MOMENTUM.md): error ${policyPayload.error.code} at ${policyPayload.path ?? "(unresolved)"}`
-      );
-    } else if (policyPayload.present) {
-      const fields = describePolicyFields(policyPayload);
-      lines.push(
-        `policy (MOMENTUM.md): present at ${policyPayload.path}${fields ? ` (${fields})` : ""}`
-      );
-    } else {
-      lines.push(
-        `policy (MOMENTUM.md): not present (expected at ${policyPayload.path ?? "(unresolved)"})`
-      );
-    }
-  } else {
-    lines.push("policy (MOMENTUM.md): pass --repo <path> to inspect repo policy");
-  }
-  lines.push(
-    `intent_apply_policy: ${policyPayload.effectiveIntentApply.value} (${policyPayload.effectiveIntentApply.source})`
-  );
-  if (sourcesPayload.ok) {
-    lines.push(
-      `sources: total=${sourcesPayload.totalSourceItems} linked=${sourcesPayload.linkedSourceItems} unlinked=${sourcesPayload.unlinkedSourceItems}`
-    );
-    const last = sourcesPayload.lastReconciliation;
-    if (last) {
-      const stoppedText = last.paginationStopped
-        ? `, stopped=${last.paginationStopped.reason}`
-        : "";
-      lines.push(
-        `sources: last ${last.adapterKind} reconciliation ${last.state} (` +
-          `seen=${last.itemsSeen}, upserted=${last.itemsUpserted}${stoppedText}, finished_at=${last.finishedAt ?? "(running)"})`
-      );
-    } else {
-      lines.push("sources: no reconciliation runs recorded yet");
-    }
-  } else {
-    lines.push(`sources: error (${sourcesPayload.code})`);
-  }
-  if (evidencePayload.ok) {
-    lines.push(
-      `evidence: total=${evidencePayload.totalRecords} goal_linked=${evidencePayload.goalLinkedRecords} source_item_linked=${evidencePayload.sourceItemLinkedRecords}`
-    );
-    const last = evidencePayload.lastRecord;
-    if (last) {
-      lines.push(
-        `evidence: last ${last.source}/${last.type} at ${last.occurredAt}` +
-          ` (goal=${last.goalId ?? "(none)"}, source_item=${last.sourceItemId ?? "(none)"})`
-      );
-    } else {
-      lines.push("evidence: no records ingested yet");
-    }
-  } else {
-    lines.push(`evidence: error (${evidencePayload.code})`);
-  }
-  if (externalApplyPayload.ok) {
-    const intentCounts = externalApplyPayload.intentApplyStateCounts;
-    const auditCounts = externalApplyPayload.auditCounts;
-    lines.push(
-      `external apply: intents idle=${intentCounts.idle} in_flight=${intentCounts.in_flight} blocked=${intentCounts.blocked}`
-    );
-    lines.push(
-      `external apply: attempts total=${externalApplyPayload.totalAttempts} ` +
-        `succeeded=${auditCounts.succeeded} failed=${auditCounts.failed} ` +
-        `claimed=${auditCounts.claimed} blocked=${auditCounts.blocked} ` +
-        `audit_incomplete=${auditCounts.audit_incomplete}`
-    );
-    const latest = externalApplyPayload.latestAttempt;
-    if (latest) {
-      lines.push(
-        `external apply: latest ${latest.id} intent=${latest.intentId} ${latest.lifecycleState}` +
-          ` (result=${latest.resultStatus ?? "(none)"} code=${latest.resultCode ?? "(none)"})`
-      );
-    } else {
-      lines.push("external apply: no attempts recorded yet");
-    }
-  } else {
-    lines.push(`external apply: error (${externalApplyPayload.code})`);
-  }
-  lines.push("");
-  write(io.stdout, lines.join("\n"));
-  return 0;
+  return emitDoctor(parsed, io, payload);
 }
-
-type DoctorEvidencePayload =
-  | {
-      ok: true;
-      totalRecords: number;
-      goalLinkedRecords: number;
-      sourceItemLinkedRecords: number;
-      lastRecord: {
-        id: string;
-        source: string;
-        type: string;
-        occurredAt: number;
-        summary: string;
-        goalId: string | null;
-        sourceItemId: string | null;
-      } | null;
-    }
-  | {
-      ok: false;
-      code: string;
-      message: string;
-    };
 
 function buildDoctorEvidencePayload(
   dataDirOptions: DataDirOptions
@@ -1672,24 +955,6 @@ function buildDoctorEvidencePayload(
   }
 }
 
-type DoctorExternalApplyLatestAttempt = {
-  intentId: string;
-} & ReturnType<typeof intentApplyAuditToJsonShape>;
-
-type DoctorExternalApplyPayload =
-  | {
-      ok: true;
-      intentApplyStateCounts: IntentApplyStateCounts;
-      auditCounts: IntentApplyAuditCounts;
-      totalAttempts: number;
-      latestAttempt: DoctorExternalApplyLatestAttempt | null;
-    }
-  | {
-      ok: false;
-      code: string;
-      message: string;
-    };
-
 function buildDoctorExternalApplyPayload(
   dataDirOptions: DataDirOptions
 ): DoctorExternalApplyPayload {
@@ -1728,30 +993,6 @@ function buildDoctorExternalApplyPayload(
     db.close();
   }
 }
-
-type DoctorSourcesPayload =
-  | {
-      ok: true;
-      totalSourceItems: number;
-      linkedSourceItems: number;
-      unlinkedSourceItems: number;
-      lastReconciliation: {
-        id: string;
-        adapterKind: string;
-        state: string;
-        startedAt: number;
-        finishedAt: number | null;
-        error: string | null;
-        itemsSeen: number;
-        itemsUpserted: number;
-        paginationStopped: SourceReconciliationPaginationStoppedJson | null;
-      } | null;
-    }
-  | {
-      ok: false;
-      code: string;
-      message: string;
-    };
 
 function buildDoctorSourcesPayload(
   dataDirOptions: DataDirOptions
@@ -1813,25 +1054,6 @@ function buildDoctorSourcesPayload(
   }
 }
 
-type DoctorPolicyPayload = {
-  repoConfigured: boolean;
-  repoPath: string | null;
-  present: boolean;
-  path: string | null;
-  hasNotes: boolean;
-  config: {
-    runner: string | null;
-    verification: readonly string[] | null;
-    verificationTimeoutSec: number | null;
-    intentApplyPolicy: UpdateIntentApplyPolicy | null;
-  } | null;
-  effectiveIntentApply: {
-    value: UpdateIntentApplyPolicy;
-    source: PolicyEffectiveFieldSource;
-  };
-  error: { code: string; message: string } | null;
-};
-
 function buildDoctorPolicyPayload(repoOverride?: string): DoctorPolicyPayload {
   const defaultEffective = {
     value: DEFAULT_INTENT_APPLY_POLICY,
@@ -1892,48 +1114,6 @@ function buildDoctorPolicyPayload(repoOverride?: string): DoctorPolicyPayload {
     },
     effectiveIntentApply: resolveIntentApplyPolicy(load.policy.config),
     error: null
-  };
-}
-
-function describePolicyFields(payload: {
-  config: {
-    runner: string | null;
-    verification: readonly string[] | null;
-    verificationTimeoutSec: number | null;
-    intentApplyPolicy?: UpdateIntentApplyPolicy | null;
-  } | null;
-  hasNotes: boolean;
-}): string {
-  if (!payload.config) return "";
-  const parts: string[] = [];
-  if (payload.config.runner) parts.push(`runner=${payload.config.runner}`);
-  if (payload.config.verification) {
-    parts.push(`verification=${payload.config.verification.length} cmd(s)`);
-  }
-  if (payload.config.verificationTimeoutSec !== null) {
-    parts.push(`timeout_sec=${payload.config.verificationTimeoutSec}`);
-  }
-  if (payload.config.intentApplyPolicy) {
-    parts.push(`intent_apply=${payload.config.intentApplyPolicy}`);
-  }
-  if (payload.hasNotes) parts.push("notes");
-  return parts.join(", ");
-}
-
-function summarizeExistingDaemonRun(
-  run: ReturnType<typeof getActiveDaemonRun> extends infer T ? NonNullable<T> : never,
-  now: number
-): NonNullable<DaemonStartFailurePayload["existing"]> {
-  const heartbeatAgeMs = Math.max(0, now - run.heartbeat_at);
-  return {
-    runId: run.id,
-    state: run.state,
-    pid: run.pid,
-    host: run.host,
-    startedAt: run.started_at,
-    heartbeatAt: run.heartbeat_at,
-    heartbeatAgeMs,
-    stale: isExistingDaemonRunStale(run, now)
   };
 }
 
