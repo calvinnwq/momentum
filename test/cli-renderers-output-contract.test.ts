@@ -65,6 +65,43 @@ describe("shared renderer output contracts", () => {
     }
   });
 
+  it("keeps command-family renderer helpers in src/renderers modules", () => {
+    const commandModules = [
+      "src/commands/workflow/index.ts",
+      "src/commands/project/index.ts",
+      "src/commands/status.ts",
+      "src/commands/intent/index.ts"
+    ];
+
+    for (const modulePath of commandModules) {
+      const source = readFile(modulePath);
+      expect(
+        source,
+        `${modulePath} should orchestrate commands and call src/renderers for text helpers`
+      ).not.toMatch(/\bfunction\s+render[A-Z]/);
+      expect(
+        source,
+        `${modulePath} should call src/renderers for JSON output shapes`
+      ).not.toMatch(/\bfunction\s+\w+ToJsonShape\b/);
+      expect(
+        source,
+        `${modulePath} should route stdout/stderr writes through src/renderers`
+      ).not.toMatch(/\bwrite(?:Json)?\(/);
+    }
+
+    for (const rendererPath of [
+      "src/renderers/workflow.ts",
+      "src/renderers/project.ts",
+      "src/renderers/status.ts",
+      "src/renderers/intent.ts"
+    ]) {
+      expect(
+        fs.existsSync(path.join(repoRoot, rendererPath)),
+        `${rendererPath} should own command-family output contracts`
+      ).toBe(true);
+    }
+  });
+
   it("preserves reusable JSON field contracts for source, evidence, intent, and apply audit shapes", () => {
     const sourceItem: SourceItem = {
       id: "src-1",
@@ -265,5 +302,11 @@ describe("shared renderer output contracts", () => {
     expect(result.stderr).toContain("Missing required subcommand for source.");
     expect(result.stderr).toContain("Momentum\n\nUsage:\n");
     expect(result.stderr).toContain("  momentum source list");
+  });
+
+  it("does not add repo-local Codex skill files for renderer extraction", () => {
+    expect(
+      fs.existsSync(path.join(repoRoot, ".agents/skills/no-mistakes/SKILL.md"))
+    ).toBe(false);
   });
 });
