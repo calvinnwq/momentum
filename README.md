@@ -91,12 +91,14 @@ Requires Node.js 24 or newer.
 ```sh
 pnpm install
 pnpm test
+pnpm test:integration
+pnpm test:full
 pnpm typecheck
 pnpm build
 node dist/index.js --help
 ```
 
-The test suite covers foreground goals, queued workers, daemon/recovery, runner profiles, source/evidence/intent commands, and a public-docs hygiene guard.
+`pnpm test` runs the fast default lane for everyday development. `pnpm test:integration` runs the heavier repo/git/process and smoke coverage, and `pnpm test:full` runs both lanes.
 
 Releases are managed by Release Please on pushes to `main` or manual workflow dispatch. It opens or updates the release PR, keeps `CHANGELOG.md` current, and creates the GitHub release when that PR is merged; Momentum is still not published to npm.
 
