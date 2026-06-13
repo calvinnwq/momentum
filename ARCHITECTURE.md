@@ -16,12 +16,14 @@ command registry skeleton and has started moving command families behind
 
 ```text
 src/index.ts -> src/cli.ts -> src/commands/ registry + command families -> domain modules
+                                      \-> src/renderers/ shared output contracts
 ```
 
 `src/cli.ts` is still the command parser, compatibility surface, and home for
 command handlers not yet extracted. Extracted families currently include the
 read-only status family, workflow, goal, source, evidence, project rollup, and
-update-intent / intent surfaces.
+update-intent / intent surfaces. Shared help, IO, and reusable source /
+evidence / intent JSON shapes now live under `src/renderers/`.
 
 ## Deeper Contracts
 

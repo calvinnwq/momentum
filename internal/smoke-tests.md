@@ -449,6 +449,31 @@ Run the built-binary production workflow-lane smoke locally via:
 pnpm vitest run test/smoke.test.ts -t "production workflow-lane dispatch"
 ```
 
+## Milestone 11 CLI structure coverage (NGX-416 through NGX-418)
+
+M11 is covered by focused structural tests plus a built-CLI JSON smoke that
+keeps output contracts stable while command code moves behind modules and
+renderers.
+
+Coverage:
+
+- reusable source, evidence, intent, apply-audit, help, and CLI IO output
+  shapes live under `src/renderers/` rather than sibling command families.
+- command families do not import sibling command families for JSON / text
+  shapes; core and domain modules do not import command or renderer modules.
+- direct `process.stdout` / `process.stderr` access stays in the CLI or
+  renderer layers.
+- `src/index.ts` performs bootstrap-only warning suppression before dynamically
+  importing `src/cli.ts`, so built-CLI `workflow run decide --json` structured
+  refusals remain parseable JSON on stderr without SQLite warning noise.
+
+Run locally via targeted vitest commands:
+
+```
+pnpm vitest run test/cli-renderers-output-contract.test.ts test/cli-import-boundaries.test.ts
+pnpm vitest run test/smoke.test.ts -t "without Node warning noise"
+```
+
 ## Opt-in real adapter smoke (NGX-372)
 
 NGX-372 adds the first adapter test layer allowed to touch a real external
