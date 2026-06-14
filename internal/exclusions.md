@@ -50,7 +50,7 @@ Milestone status:
   (`src/workflow-status.ts`, `src/workflow-handoff.ts`) with stable JSON
   field names, refusal taxonomy, and a `schemaVersion: 1` handoff field
   composed on top of the monitor reducer (NGX-317); and the end-to-end
-  built-CLI smoke (`test/smoke.test.ts`) driving a fresh
+  built-CLI smoke (`test/m7-e2e-smoke.test.ts`) driving a fresh
   `.agent-workflows/<runId>/` fixture through the deterministic fake
   executors and re-imported between steps via `workflow import`, covering
   happy-path completion, evidence linkage through `workflow handoff` after
