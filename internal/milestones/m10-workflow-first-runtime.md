@@ -225,22 +225,25 @@ default `daemon start` path is byte-for-byte unchanged when the env var is unset
 Coverage lives in `test/workflow-dogfood-dispatch.test.ts` (unit safety gates)
 and `test/workflow-dogfood-multi-dispatch.test.ts` (single-process multi-dispatch
 proof through `runDaemonLoop` and the read-only status / monitor / handoff
-surfaces). The doctor marker and closeout status are unchanged; NGX-391 is a
-proof-layer addition, not a closeout reopening.
+surfaces). NGX-391 did not reopen M10 or move the then-current M10 doctor
+marker; the later M11 closeout advanced the current marker again.
 
 ## Doctor Marker Policy
 
 The `doctor --json` readiness marker tracks the most recently closed
-milestone, not in-flight implementation slices. M10 now owns the current marker.
+milestone, not in-flight implementation slices. M10 owned the marker after
+NGX-353 until the M11 closeout advanced it again.
 
-The marker remains:
+The M10 marker was:
 
 ```text
 Milestone 10: workflow-first runtime (NGX-344, NGX-345, NGX-346, NGX-347, NGX-348, NGX-349, NGX-350, NGX-351, NGX-352, NGX-367, NGX-353) complete
 ```
 
 M10 flipped the marker at M10 closeout after M10-00 through M10-09a merged, the
-workflow-first dogfood gate passed, and the regression matrix was updated.
+workflow-first dogfood gate passed, and the regression matrix was updated. The
+current marker is the M11 closeout string recorded in
+[`internal/roadmap.md`](../roadmap.md).
 
 ## Non-Goals
 

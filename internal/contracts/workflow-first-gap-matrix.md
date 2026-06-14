@@ -1,17 +1,17 @@
 # Contract: Workflow-First Gap Matrix
 
-**Status:** Accepted active implementation bridge. M10-00 promoted this matrix into the workflow-first runtime milestone sequence; M10-01 has landed the definition schema and persistence slice, M10-02 adds workflow run start, M10-03 adds executor-loop schema / persistence, M10-04 adds the opt-in daemon workflow scheduler lane, M10-05 adds the goal-loop executor adapter, M10-06 adds the one-shot / script executor adapters, M10-07 adds the no-mistakes executor mirror, M10-08 adds durable workflow gates and the `workflow run decide` operator path, and M10-09a wires the production workflow-lane dispatcher into bounded managed `daemon start`. It still does not authorize Linear remapping or milestone renumbering by itself.
+**Status:** Accepted active implementation bridge during M10, now closed with M10. M10-00 promoted this matrix into the workflow-first runtime milestone sequence; M10-01 landed the definition schema and persistence slice, M10-02 added workflow run start, M10-03 added executor-loop schema / persistence, M10-04 added the opt-in daemon workflow scheduler lane, M10-05 added the goal-loop executor adapter, M10-06 added the one-shot / script executor adapters, M10-07 added the no-mistakes executor mirror, M10-08 added durable workflow gates and the `workflow run decide` operator path, M10-09a wired the production workflow-lane dispatcher into bounded managed `daemon start`, and NGX-353 closed M10. It still does not authorize Linear remapping or milestone renumbering by itself.
 
 This contract follows:
 
 - [`internal/contracts/workflow-first-runtime.md`](workflow-first-runtime.md)
 - [`internal/contracts/executor-loop.md`](executor-loop.md)
 
-The purpose is to keep the active M10 implementation concrete without pretending M9 already owns the generic workflow product.
+The purpose is to keep the M10 implementation concrete without pretending M9 already owns the generic workflow product.
 
 ## Decision
 
-Momentum is progressing from the current Goal-first / imported-coding-workflow substrate into a Workflow-first runtime in Milestone 10 after M9 planning was reviewed.
+Momentum progressed from the Goal-first / imported-coding-workflow substrate into a Workflow-first runtime in Milestone 10 after M9 planning was reviewed.
 
 M9 remains foundation work. It should not be renamed into the generic workflow runtime and it should not be forced to carry a changed product definition mid-stream.
 
@@ -236,8 +236,9 @@ The dogfood reached the intended M10 phase-1 boundary: `preflight` running,
 `implementation` approved, executor invocation / round scaffold rows persisted,
 and `monitorDrift.drifted = false` after the closeout bug fix that refreshes
 the parent `workflow_runs` state plus monitor advisory columns during dispatch.
-The regression matrix records that invariant, and the `doctor --json` marker now
-reports the M10 closeout string.
+The regression matrix records that invariant, and the `doctor --json` marker
+reported the M10 closeout string until the later M11 closeout advanced the
+current marker again.
 
 Remaining runtime work after M10: drive scaffolded rounds through real adapter
 mechanisms as the default production loop, and land or continue deferring

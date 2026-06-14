@@ -115,7 +115,7 @@ The M9-00 decision gate (NGX-331) pins the slice order; each slice is a concrete
 5. **NGX-335 — M9-04 Postflight and no-mistakes wrappers.**
 6. **NGX-336 — M9-05 Merge cleanup and Linear refresh boundaries.**
 7. **NGX-337 — M9-06 Live recovery and resume smoke.**
-8. **NGX-338 — M9-07 Dogfood run and closeout** — run the dogfood gate and capture regression updates; M10 closeout now owns the next possible `doctor --json` marker advance.
+8. **NGX-338 — M9-07 Dogfood run and closeout** — run the dogfood gate and capture regression updates; M10 closeout later advanced the `doctor --json` marker, and M11 closeout advanced it again.
 
 The `doctor --json` marker stayed pinned to the M8 closeout string above
 through M9 foundation work; M9 did not flip it.
@@ -153,8 +153,8 @@ becomes an executor family inside a workflow step.
 10. **NGX-367 — M10-09a Production workflow-lane dispatcher prep.** *(done)*
 11. **NGX-353 — M10-09 Workflow-first dogfood and closeout.** *(done)*
 
-The `doctor --json` marker now reports the M10 closeout string after the
-workflow-first dogfood gate passed.
+The `doctor --json` marker reported the M10 closeout string after the
+workflow-first dogfood gate passed, until the M11 closeout advanced it again.
 
 ## Previously closed milestone: M7
 

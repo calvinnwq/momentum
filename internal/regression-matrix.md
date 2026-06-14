@@ -35,7 +35,8 @@ The M9 live-execution contract lives in
 the M9 milestone sequence lives in
 [`internal/milestones/m9-live-workflow-execution.md`](milestones/m9-live-workflow-execution.md).
 The M9 rows below remain internal-only foundation evidence while live execution
-remains opt-in; M10 now owns the current closeout marker.
+remains opt-in; M10 owned the closeout marker until the M11 closeout advanced
+it again.
 
 The M10 workflow-first runtime contracts live in
 [`internal/contracts/workflow-first-runtime.md`](contracts/workflow-first-runtime.md),

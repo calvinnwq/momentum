@@ -1,6 +1,6 @@
 # Milestone 9: Live Workflow Execution
 
-**Status:** Foundation in force. Promoted from draft at the M9-00 decision gate (NGX-331) after M8 closeout; M10 completed the workflow-first implementation, and M11 now owns CLI structure work. The companion contract in [`internal/contracts/live-workflow-execution.md`](../contracts/live-workflow-execution.md) remains the accepted foundation for live workflow execution; the M8 operator-control contract stays in force for its own invariants.
+**Status:** Foundation in force. Promoted from draft at the M9-00 decision gate (NGX-331) after M8 closeout; M10 completed the workflow-first implementation, and M11 completed the CLI structure refactor. The companion contract in [`internal/contracts/live-workflow-execution.md`](../contracts/live-workflow-execution.md) remains the accepted foundation for live workflow execution; the M8 operator-control contract stays in force for its own invariants.
 
 Milestone 9 defines the point where Momentum starts dogfooding real repo work through Momentum-owned live execution rather than using the OpenClaw `coding-workflow-pipeline` skill as the live run loop.
 
@@ -102,4 +102,4 @@ M9 does not include:
 
 ## Closeout Marker Policy
 
-The `doctor --json` marker stayed pinned to the then-most-recently closed milestone — `Milestone 8: workflow run operator controls (NGX-323, NGX-324, NGX-325, NGX-326, NGX-327, NGX-328, NGX-329, NGX-330) complete` — through M9 foundation work. The M9-00 decision gate (NGX-331) did not flip it; M10 closeout later advanced the marker.
+The `doctor --json` marker stayed pinned to the then-most-recently closed milestone — `Milestone 8: workflow run operator controls (NGX-323, NGX-324, NGX-325, NGX-326, NGX-327, NGX-328, NGX-329, NGX-330) complete` — through M9 foundation work. The M9-00 decision gate (NGX-331) did not flip it; M10 closeout later advanced the marker to the M10 string, and M11 closeout advanced it again to the M11 string.
