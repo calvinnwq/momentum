@@ -36,9 +36,10 @@ const BUILD_LOCK_DIR = path.join(
     .digest("hex")
     .slice(0, 12)}.lock`
 );
+const BUILD_LOCK_PID_FILE = path.join(BUILD_LOCK_DIR, "pid");
 const BUILD_LOCK_POLL_MS = 100;
-const BUILD_LOCK_STALE_MS = 45_000;
-const BUILD_LOCK_WAIT_MS = 55_000;
+const BUILD_LOCK_STALE_MS = 120_000;
+const BUILD_LOCK_WAIT_MS = 120_000;
 
 export const SMOKE_GOAL_SPEC = `---
 title: Smoke Goal
@@ -88,9 +89,7 @@ function withBuildLock(run: () => void): void {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
         throw error;
       }
-      const heldMs = lockHeldMs();
-      if (heldMs !== null && heldMs > BUILD_LOCK_STALE_MS) {
-        fs.rmSync(BUILD_LOCK_DIR, { recursive: true, force: true });
+      if (reclaimAbandonedLock()) {
         continue;
       }
       if (Date.now() >= deadline) {
@@ -102,13 +101,51 @@ function withBuildLock(run: () => void): void {
     }
   }
   try {
+    fs.writeFileSync(BUILD_LOCK_PID_FILE, `${process.pid}`, "utf-8");
     run();
   } finally {
     fs.rmSync(BUILD_LOCK_DIR, { recursive: true, force: true });
   }
 }
 
-function lockHeldMs(): number | null {
+function reclaimAbandonedLock(): boolean {
+  const holderPid = readLockHolderPid();
+  if (holderPid === null) {
+    const ageMs = lockAgeMs();
+    if (ageMs === null || ageMs <= BUILD_LOCK_STALE_MS) {
+      return false;
+    }
+  } else if (!pidIsDead(holderPid)) {
+    return false;
+  }
+  fs.rmSync(BUILD_LOCK_DIR, { recursive: true, force: true });
+  return true;
+}
+
+function readLockHolderPid(): number | null {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(BUILD_LOCK_PID_FILE, "utf-8");
+  } catch {
+    return null;
+  }
+  const pid = Number.parseInt(raw.trim(), 10);
+  return Number.isInteger(pid) && pid > 0 ? pid : null;
+}
+
+function pidIsDead(pid: number): boolean {
+  if (pid === process.pid) {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ESRCH";
+  }
+}
+
+function lockAgeMs(): number | null {
   try {
     return Date.now() - fs.statSync(BUILD_LOCK_DIR).mtimeMs;
   } catch {
