@@ -309,7 +309,7 @@ describe("M7 closeout contract (NGX-312, NGX-319)", () => {
         "src/workflow-status.ts",
         "src/workflow-handoff.ts",
         "test/workflow-monitor-state.test.ts",
-        "test/smoke.test.ts",
+        "test/m7-e2e-smoke.test.ts",
       ]) {
         expect(matrix, `${matrixPath} should cite ${owner} as evidence`).toContain(owner);
       }

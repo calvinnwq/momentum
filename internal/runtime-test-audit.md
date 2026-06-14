@@ -121,6 +121,56 @@ The old pre-M11 baseline had a single undifferentiated `pnpm test` gate around
 This milestone should focus on making the heavy lane easier to reason about,
 less duplicated, and less flaky.
 
+## NGX-431: Built-binary smoke split (complete)
+
+`test/smoke.test.ts` — formerly the dominant integration file in the table
+above — has been fully decomposed into milestone-scoped built-binary smoke files
+and removed. Every resulting file matches the `test/*smoke.test.ts` glob, so it routes into
+`pnpm test:integration` and stays out of the fast `pnpm test` lane with no config
+change. The shared base scaffolding (CLI build, disposable repos, temp dirs,
+binary spawns) lives in `test/helpers/smoke-harness.ts`, and the shared
+workflow-run CLI helpers (fixture writer, ledger-driving loop, `workflow` JSON
+envelope readers) used by the M7 e2e / M8 / M10 files live in
+`test/helpers/workflow-smoke-harness.ts`; both are collected by neither lane.
+
+Extracted files (each run rebuilds `dist/` once in `beforeAll`):
+
+| File | Scope | Tests | Local time |
+| --- | --- | ---: | ---: |
+| `test/m1-smoke.test.ts` | M1 CLI surface (doctor, help, status, handoff, usage) | 15 | 2.84s |
+| `test/m2-smoke.test.ts` | M2 queued goal_iteration end-to-end | 4 | 2.45s |
+| `test/m3-smoke.test.ts` | M3 daemon drain end-to-end | 5 | 2.70s |
+| `test/m4-smoke.test.ts` | M4 real-runner end-to-end (trusted-shell, MOMENTUM.md policy, acp) | 4 | 2.21s |
+| `test/m5-smoke.test.ts` | M5 evidence + intent + project-status end-to-end (NGX-294) | 8 | 3.43s |
+| `test/m6-smoke.test.ts` | M6 policy-gated external apply end-to-end (NGX-301) | 8 | 10.51s |
+| `test/m7-import-smoke.test.ts` | M7 workflow import end-to-end (NGX-314) | 5 | 1.31s |
+| `test/m7-e2e-smoke.test.ts` | M7 end-to-end coding workflow (NGX-318) | 2 | 1.85s |
+| `test/m8-smoke.test.ts` | M8 operator-control end-to-end (NGX-330) | 2 | 2.14s |
+| `test/m10-smoke.test.ts` | M10 production workflow-lane dispatch (NGX-367) | 1 | 1.40s |
+
+Timings measured 2026-06-15 AEST via
+`pnpm exec vitest run --config vitest.integration.config.ts <file>`. Coverage is
+unchanged: 15 + 4 + 5 + 4 + 8 + 8 + 5 + 2 + 2 + 1 = 54 tests, matching the pre-split
+total in the integration table above. `test/m6-smoke.test.ts` remains the
+high-water mark at 10.51s local (~17s on the NGX-431 reference class at ~1.6x,
+under the 20s acceptance threshold); every milestone smoke file is now well under
+20s on the slow class. M7-import (NGX-314) is read-only `workflow import` coverage
+backed by its own self-contained `writeM7WorkflowImportFixture` fixture with no
+dependency on the shared workflow-CLI helper set, so it extracted cleanly at
+1.31s. The M7 e2e (NGX-318) carve first lifted the shared workflow-run CLI helper
+set (`importWorkflowRun`, `workflowStatusJson`, `workflowHandoffJson`,
+`workflowRunListJson`, `workflowRunMonitorJson`, `driveStepWithFakeExecutor`,
+`appendLedgerEvent`, `E2E_STEPS`, `writeM7EndToEndFixture`) into the new
+`test/helpers/workflow-smoke-harness.ts`, then moved the two M7 e2e tests into
+`test/m7-e2e-smoke.test.ts`. The final carve then split the last two blocks out
+of the monolith: M8 operator controls (NGX-330) into `test/m8-smoke.test.ts`
+(2 tests / 2.14s) and M10 production dispatch (NGX-367) into
+`test/m10-smoke.test.ts` (1 test / 1.40s), both importing the shared harness, and
+deleted the now-empty `test/smoke.test.ts`. The closeout doc pass repointed the
+`internal/regression-matrix.md` rows, the `internal/smoke-tests.md` targeted
+commands, and the `test/m7-contract.test.ts` evidence-owner gate to the new
+per-milestone files.
+
 ## Runtime Path Classification
 
 ### Keep: Current Required Paths
@@ -220,7 +270,9 @@ Purpose:
 Current state:
 
 - Valuable, but heavy and occasionally timing-sensitive.
-- `test/smoke.test.ts` is the dominant single file.
+- The monolithic built-binary smoke has been split into milestone-scoped files
+  under `test/*smoke.test.ts` (NGX-431). No single file dominates integration
+  timing; `test/m6-smoke.test.ts` remains the slowest at ~10.5s local.
 - Several broad CLI files overlap newer renderer/output contract tests.
 - Live-step heartbeat timing can flake under full-lane load.
 
@@ -257,22 +309,30 @@ Cleanup guidance:
 
 ### Built-Binary Smoke
 
-`test/smoke.test.ts` is still the highest-value integration artifact because it
-pins the real built CLI against SQLite-backed orchestration. It also carries
-many historical milestone proofs in one huge file.
+> **Update (NGX-431, complete):** the monolithic `test/smoke.test.ts` described
+> below has since been split into the milestone-scoped `test/*smoke.test.ts`
+> files and removed — see the NGX-431 section above. The analysis below records
+> the pre-split motivation.
+
+The milestone-scoped `test/*smoke.test.ts` files are the highest-value
+integration artifacts because they pin the real built CLI against
+SQLite-backed orchestration. Before the NGX-431 split, they lived in a single
+monolithic `test/smoke.test.ts` that carried many historical milestone proofs in
+one huge file.
 
 Duplication pattern:
 
 - Lower-level contract tests already pin many reducer, import, monitor, and
   renderer shapes.
-- `test/smoke.test.ts` often re-proves the same invariant through the full CLI.
+- The milestone-scoped smoke files sometimes re-prove the same invariant through
+  the full CLI. This is expected for built-binary integration coverage; do not
+  reduce it until the regression matrix names a replacement test for each row.
 
-Action:
+Action (completed):
 
-- NGX-431 should split this file into milestone- or behavior-scoped smoke files.
-- Preserve coverage in `pnpm test:integration`.
-- Do not reduce evidence until the regression matrix names the replacement
-  smoke file for each row.
+- NGX-431 has split the monolith into milestone-scoped smoke files. Coverage
+  stays in `pnpm test:integration`. The regression matrix and smoke-tests docs
+  now point to the per-milestone files.
 
 ### Broad CLI Compatibility
 

@@ -65,7 +65,7 @@ the NGX-353 marker advance.
   - Unit: `test/workflow-monitor-state.test.ts` — "emits monitor_drift_stale
     when a running step has fresh evidence but monitor advisory drifts" and
     "emits monitor_drift_stale when no running step and monitor drifts".
-  - Built-CLI smoke: `test/smoke.test.ts` — "treats a stale monitor as
+  - Built-CLI smoke: `test/m7-import-smoke.test.ts` — "treats a stale monitor as
     advisory: terminal ledger wins through the built CLI".
 
 ### 2. Lost managed task with completed ledger
@@ -82,7 +82,7 @@ the NGX-353 marker advance.
   [`src/workflow-step-executor.ts`](../src/workflow-step-executor.ts) (terminal
   state mapping from the ledger).
 - **Evidence.**
-  - Built-CLI smoke: `test/smoke.test.ts` — the M7 end-to-end coding-workflow
+  - Built-CLI smoke: `test/m7-e2e-smoke.test.ts` — the M7 end-to-end coding-workflow
     happy-path slice drives each step through the deterministic fake executor,
     re-imports between steps via `workflow import`, and asserts the final
     `state: succeeded`, zero leases, and an empty active / blocked bucket
@@ -113,7 +113,8 @@ the NGX-353 marker advance.
   - Unit: `test/workflow-run-reducer.test.ts` and
     `test/workflow-monitor-state.test.ts` — terminal run states (`succeeded`,
     `canceled`, `failed`) never accept monitor drift as a recovery code.
-  - Built-CLI smoke: `test/smoke.test.ts` — "treats a stale monitor as
+  - Built-CLI smoke: `test/m7-import-smoke.test.ts` / `test/m7-e2e-smoke.test.ts`
+    — "treats a stale monitor as
     advisory: terminal ledger wins through the built CLI" plus the end-to-end
     coding-workflow happy path (evidence ingest surfaces workflow evidence
     types through `workflow handoff`).
@@ -163,7 +164,7 @@ the NGX-353 marker advance.
   (filter buckets), [`src/workflow-handoff.ts`](../src/workflow-handoff.ts)
   (next-action surface).
 - **Evidence.**
-  - Built-CLI smoke: `test/smoke.test.ts` — "leaves no ghost active run when a
+  - Built-CLI smoke: `test/m7-e2e-smoke.test.ts` — "leaves no ghost active run when a
     required step fails mid-workflow" (the M7 end-to-end coding-workflow
     failure-path slice, NGX-318) drives the implementation step with
     `outcome: fail_retry`, re-imports, and asserts `state: failed`, zero
@@ -178,7 +179,7 @@ common control flows. M8 closes those gaps with durable operator-control
 envelopes over the same substrate. Each row pins one operator-control failure
 mode to the envelope / module that eliminates it and the test that exercises
 it. The end-to-end evidence is the built-CLI smoke under
-`test/smoke.test.ts` › "Milestone 8 operator-control end-to-end smoke
+`test/m8-smoke.test.ts` › "Milestone 8 operator-control end-to-end smoke
 (NGX-330)".
 
 ### 6. Run inventory by directory scan
@@ -197,7 +198,7 @@ it. The end-to-end evidence is the built-CLI smoke under
   [`src/workflow-status.ts`](../src/workflow-status.ts) filter buckets and the
   [`src/workflow-run-reducer.ts`](../src/workflow-run-reducer.ts) run state.
 - **Evidence.**
-  - Built-CLI smoke: `test/smoke.test.ts` — "composes list / approve / monitor
+  - Built-CLI smoke: `test/m8-smoke.test.ts` — "composes list / approve / monitor
     / typed evidence linkage through the built CLI" asserts the imported run is
     discoverable through `workflow run list` (and `--filter active`) without an
     `.agent-workflows/` directory scan.
@@ -221,7 +222,7 @@ it. The end-to-end evidence is the built-CLI smoke under
   [`src/workflow-run-import.ts`](../src/workflow-run-import.ts) (idempotent
   approval upsert).
 - **Evidence.**
-  - Built-CLI smoke: `test/smoke.test.ts` — "composes list / approve / monitor
+  - Built-CLI smoke: `test/m8-smoke.test.ts` — "composes list / approve / monitor
     / typed evidence linkage through the built CLI" persists an operator
     approval at a distinct boundary and asserts it survives a re-import and
     surfaces through `workflow status`.
@@ -242,7 +243,7 @@ it. The end-to-end evidence is the built-CLI smoke under
   [`src/workflow-run-reducer.ts`](../src/workflow-run-reducer.ts)
   (`deriveWorkflowRunState`).
 - **Evidence.**
-  - Built-CLI smoke: `test/smoke.test.ts` — "recovers a ghost-active run: flag,
+  - Built-CLI smoke: `test/m8-smoke.test.ts` — "recovers a ghost-active run: flag,
     monitor recover, clear-recovery refusal, update-step resolution, then a
     clean clear" resolves the ghost step through `workflow run update-step`
     without editing `ledger.jsonl`.
@@ -263,7 +264,7 @@ it. The end-to-end evidence is the built-CLI smoke under
   (`buildWorkflowMonitorEnvelope`) over
   [`src/workflow-monitor-state.ts`](../src/workflow-monitor-state.ts).
 - **Evidence.**
-  - Built-CLI smoke: `test/smoke.test.ts` — the happy path ("composes list /
+  - Built-CLI smoke: `test/m8-smoke.test.ts` — the happy path ("composes list /
     approve / monitor / typed evidence linkage through the built CLI") asserts a
     terminal monitor report; the recovery path ("recovers a ghost-active
     run: …") asserts `workflow run monitor` returns disposition `recover` while
@@ -292,7 +293,7 @@ it. The end-to-end evidence is the built-CLI smoke under
   (the `recovery.md` renderer), and
   [`src/commands/workflow/index.ts`](../src/commands/workflow/index.ts) (`workflowRunClearRecovery`).
 - **Evidence.**
-  - Built-CLI smoke: `test/smoke.test.ts` — "recovers a ghost-active run: …"
+  - Built-CLI smoke: `test/m8-smoke.test.ts` — "recovers a ghost-active run: …"
     asserts import sets `needs_manual_recovery` + `ghost_active_no_lease` and
     renders `recovery.md`; `workflow run clear-recovery` refuses while blocked,
     then succeeds only after `workflow run update-step` resolves the ghost step,
@@ -315,7 +316,7 @@ it. The end-to-end evidence is the built-CLI smoke under
 - **Owner.** [`src/evidence-workflow.ts`](../src/evidence-workflow.ts)
   (workflow artifact parsing and typed `runId` / `stepId` linkage).
 - **Evidence.**
-  - Built-CLI smoke: `test/smoke.test.ts` — "composes list / approve / monitor
+  - Built-CLI smoke: `test/m8-smoke.test.ts` — "composes list / approve / monitor
     / typed evidence linkage through the built CLI" runs `evidence ingest`
     against the run directory and asserts the typed `runId` / `stepId` linkage
     surfaces through `workflow run monitor` and `workflow status`.
@@ -433,7 +434,7 @@ that shipped workflow-first path.
     `test/cli-daemon-workflow-dispatch.test.ts` pin the phase-1 allowlist,
     durable resolution, dispatch / fail-closed effects, parent-state/advisory
     refresh, loop summary fields, and register-only invariant.
-  - Built-CLI smoke: `test/smoke.test.ts` — "drives workflow run start ->
+  - Built-CLI smoke: `test/m10-smoke.test.ts` — "drives workflow run start ->
     approve -> daemon start --max-* -> durable executor rows ->
     status/handoff/monitor through the built CLI" proves the shipped binary path
     persists executor rows and remains observable after the daemon exits.

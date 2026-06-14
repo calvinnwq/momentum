@@ -1,14 +1,18 @@
 # Built-binary smoke coverage
 
-`pnpm test:integration` includes a built-binary end-to-end smoke
-(`test/smoke.test.ts`) that builds `dist/` via `pnpm build`, initializes
-disposable git repos under the OS temp dir, and drives core CLI commands
-through the spawned `node dist/index.js` binary. The smoke is the single
-highest-value integration artifact in the repo — it pins public CLI behaviour
-against the real SQLite-backed orchestrator without mocking the runner adapter,
-the daemon loop, or the source / evidence / intent stores. The fast default
-`pnpm test` lane excludes this smoke so everyday development does not pay the
-built-binary integration cost.
+`pnpm test:integration` includes built-binary end-to-end smoke coverage split
+across milestone-scoped files matching the `test/*smoke.test.ts` glob
+(`test/m1-smoke.test.ts` … `test/m10-smoke.test.ts`). Each file builds `dist/`
+via `pnpm build` in `beforeAll`, initializes disposable git repos under the OS
+temp dir, and drives core CLI commands through the spawned `node dist/index.js`
+binary. The shared scaffolding lives in `test/helpers/smoke-harness.ts`, and the
+workflow-run CLI helpers used by the M7 e2e / M8 / M10 files live in
+`test/helpers/workflow-smoke-harness.ts`. This smoke coverage is the
+single highest-value integration layer in the repo — it pins public CLI
+behaviour against the real SQLite-backed orchestrator without mocking the runner
+adapter, the daemon loop, or the source / evidence / intent stores. The fast
+default `pnpm test` lane excludes these files so everyday development does not
+pay the built-binary integration cost.
 
 See also: [docs/walkthrough.md](../docs/walkthrough.md) for the operator-facing copy-paste
 disposable smoke, [docs/daemon.md](../docs/daemon.md) for the managed-loop envelopes, and
@@ -231,7 +235,7 @@ Coverage:
 Run locally via the targeted vitest filter:
 
 ```
-pnpm vitest run test/smoke.test.ts -t "end-to-end coding workflow"
+pnpm vitest run test/m7-e2e-smoke.test.ts -t "end-to-end coding workflow"
 ```
 
 ## Milestone 8 operator-control end-to-end smoke coverage (NGX-330)
@@ -259,7 +263,7 @@ Coverage:
 Run locally via the targeted vitest filter:
 
 ```
-pnpm vitest run test/smoke.test.ts -t "operator-control end-to-end smoke"
+pnpm vitest run test/m8-smoke.test.ts -t "operator-control end-to-end smoke"
 ```
 
 ## Milestone 9 live-execution unit coverage (NGX-334)
@@ -434,7 +438,7 @@ Coverage:
   released, no duplicate invocations, and the remaining steps `pending`;
   `workflow status`, `workflow run monitor`, and `workflow handoff` all read
   the post-terminalize state from durable rows alone.
-- built-binary smoke coverage in `test/smoke.test.ts`: `workflow run start`,
+- built-binary smoke coverage in `test/m10-smoke.test.ts`: `workflow run start`,
   `workflow run approve`, bounded `daemon start`, durable executor rows, and
   process-loss observability through `workflow status`, `workflow handoff`, and
   `workflow run monitor`.
@@ -448,7 +452,7 @@ pnpm vitest run test/workflow-definition.test.ts test/workflow-definition-persis
 Run the built-binary production workflow-lane smoke locally via:
 
 ```
-pnpm vitest run test/smoke.test.ts -t "production workflow-lane dispatch"
+pnpm vitest run test/m10-smoke.test.ts -t "production workflow-lane dispatch"
 ```
 
 ## Milestone 11 CLI structure coverage (NGX-416 through NGX-419)
@@ -479,7 +483,7 @@ Run locally via targeted vitest commands:
 ```
 pnpm vitest run test/cli-renderers-output-contract.test.ts test/cli-import-boundaries.test.ts
 pnpm vitest run test/cli-architecture-command-smoke.test.ts
-pnpm vitest run test/smoke.test.ts -t "without Node warning noise"
+pnpm vitest run test/m1-smoke.test.ts -t "without Node warning noise"
 ```
 
 ## Opt-in real adapter smoke (NGX-372)

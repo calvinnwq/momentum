@@ -178,7 +178,7 @@ The `doctor --json` milestone string stayed pinned to the M7 closeout marker thr
 M8 surfaces are tested through Momentum's existing `pnpm test` pipeline:
 
 - Unit / reducer tests pin filter logic, transition legality, approval boundary validation, recovery classification, and evidence linkage helpers.
-- Built-CLI smoke (`test/smoke.test.ts`) gains M8 coverage at NGX-330: list / approve / update-step / recovery / monitor / evidence linkage composing end-to-end against the deterministic fake executors, with no live OpenClaw pipeline, Discord, GitHub, Linear, or external tracker writes.
+- Built-CLI smoke (`test/m8-smoke.test.ts`) gains M8 coverage at NGX-330: list / approve / update-step / recovery / monitor / evidence linkage composing end-to-end against the deterministic fake executors, with no live OpenClaw pipeline, Discord, GitHub, Linear, or external tracker writes.
 - Contract tests pin the envelope names, refusal taxonomy, JSON field stability, and the preserved M3-M7 surfaces.
 - Public-docs hygiene stays in force: M8 planning lives under `internal/`, not under `docs/` or `README.md`.
 
