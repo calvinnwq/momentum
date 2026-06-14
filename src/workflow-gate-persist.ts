@@ -33,7 +33,7 @@
  *     a gate.
  */
 
-import { isUniqueViolation, type MomentumDb } from "./db.js";
+import { isUniqueViolation, type MomentumDb } from "./adapters/db.js";
 import {
   WORKFLOW_GATE_SCOPES,
   evaluateGateDecision,

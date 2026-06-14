@@ -16,12 +16,22 @@ command registry skeleton and has started moving command families behind
 
 ```text
 src/index.ts -> src/cli.ts -> src/commands/ registry + command families -> domain modules
+                                      \-> src/renderers/ shared output contracts
 ```
 
 `src/cli.ts` is still the command parser, compatibility surface, and home for
 command handlers not yet extracted. Extracted families currently include the
 read-only status family, workflow, goal, source, evidence, project rollup, and
-update-intent / intent surfaces.
+update-intent / intent surfaces. Shared help, IO, reusable source / evidence /
+intent JSON shapes, and remaining daemon / recovery / worker / doctor output
+contracts now live under `src/renderers/`.
+
+Infrastructure-facing clients and runtime adapters that used to sit as flat
+`src/` modules now have explicit ownership under `src/adapters/`: database
+opening helpers, git transactions, Linear HTTP / source / external-update
+adapters and refresh clients, fake / trusted-shell / ACP runner adapters and
+configs, live wrapper / harness-probe adapters for OpenClaw-facing execution,
+and no-mistakes executor / orchestrator wrappers.
 
 ## Deeper Contracts
 
@@ -95,7 +105,9 @@ A command module must not:
 
 During and after M11:
 
-- `src/index.ts` imports only `runCli` from `src/cli.ts`.
+- `src/index.ts` only performs process bootstrap and loads `runCli` from
+  `src/cli.ts`; bootstrap-only warning shims must run before `src/cli.ts`
+  imports persistence-backed modules.
 - `src/cli.ts` may import command-family modules once the registry skeleton
   exists.
 - Command-family modules may import domain modules, renderers, and shared CLI
@@ -106,6 +118,24 @@ During and after M11:
   policy checks.
 - Test fixtures may read source files for structural guards, but production code
   must not depend on filesystem source scanning.
+
+## Adding a Command Module
+
+When adding or extracting a command family:
+
+1. Register the route in the explicit command registry and keep `src/cli.ts`
+   responsible only for top-level parsing, compatibility flags, and dispatch.
+2. Put command-family parsing and orchestration in `src/commands/<family>/`.
+3. Put reusable JSON, text, help, and diagnostic output contracts in
+   `src/renderers/`, then have command modules call those renderers with
+   already-computed results.
+4. Keep persistence, reducers, state machines, and external-write policy checks
+   in the existing domain or adapter modules.
+
+Do not import sibling command families for JSON or text render shapes. If two
+commands need the same shape, move it to `src/renderers/` first. Do not let
+domain modules import commands or renderers, and do not read or write
+`process.stdout` / `process.stderr` outside the CLI or rendering layers.
 
 ## M11 Migration Order
 

@@ -53,7 +53,7 @@
  * explicit and operator-driven through the M8 guarded clear.
  */
 
-import type { MomentumDb } from "./db.js";
+import type { MomentumDb } from "./adapters/db.js";
 import type { FinalizeLiveWorkflowStepFromResultFileResult } from "./live-step-finalize.js";
 import { markWorkflowRunNeedsManualRecovery } from "./workflow-run-recovery.js";
 import {

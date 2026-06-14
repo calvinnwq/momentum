@@ -22,7 +22,7 @@
  * remain outstanding and can still be re-derived here as
  * `manual_recovery_lease`.
  */
-import type { MomentumDb } from "./db.js";
+import type { MomentumDb } from "./adapters/db.js";
 import type { WorkflowGateRecord } from "./workflow-gate-persist.js";
 import {
   type WorkflowMonitorActiveStep,

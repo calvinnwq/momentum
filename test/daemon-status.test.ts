@@ -7,7 +7,7 @@ import {
   loadDaemonStatus,
   loadStaleLeasePreCheck
 } from "../src/daemon-status.js";
-import { openDb } from "../src/db.js";
+import { openDb } from "../src/adapters/db.js";
 import {
   acquireRepoLock,
   releaseRepoLock

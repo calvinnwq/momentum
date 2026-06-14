@@ -5,12 +5,12 @@ import {
   dispatchSourceAdapterList,
   dispatchSourceAdapterNormalize,
   type SourceAdapterClient
-} from "../src/source-adapter.js";
+} from "../src/adapters/source-adapter.js";
 import {
   buildLinearSourceAdapter,
   normalizeLinearIssue,
   type LinearSourceAdapterClient
-} from "../src/linear-source-adapter.js";
+} from "../src/adapters/linear-source-adapter.js";
 
 const ISSUE_ONE_RAW = {
   id: "d901abc0-b872-489c-a07c-aef4dd777c51",

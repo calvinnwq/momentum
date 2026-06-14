@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { openDb, type MomentumDb } from "../src/db.js";
+import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
   claimIntentApply,
   finalizeIntentApply,
@@ -25,15 +25,15 @@ import type {
 import {
   buildIdempotencyMarker,
   type ExternalUpdateAdapter
-} from "../src/external-update-adapter.js";
+} from "../src/adapters/external-update-adapter.js";
 import type {
   LinearExternalUpdateClient,
   LinearExternalUpdateError,
   LinearExternalUpdateInput,
   LinearExternalUpdateResult,
   LinearExternalUpdateSuccess
-} from "../src/linear-external-update-client.js";
-import type { LinearIssueRefreshClient } from "../src/linear-issue-refresh.js";
+} from "../src/adapters/linear-external-update-client.js";
+import type { LinearIssueRefreshClient } from "../src/adapters/linear-issue-refresh.js";
 import { getUpdateIntentById } from "../src/update-intents.js";
 
 const tempRoots: string[] = [];

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { normalizeLinearIssue } from "../src/linear-source-adapter.js";
-import type { SourceAdapterItem } from "../src/source-adapter.js";
+import { normalizeLinearIssue } from "../src/adapters/linear-source-adapter.js";
+import type { SourceAdapterItem } from "../src/adapters/source-adapter.js";
 
 /**
  * NGX-369 normalization-boundary coverage for the Linear source adapter.

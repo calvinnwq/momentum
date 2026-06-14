@@ -44,7 +44,7 @@ import {
   type UpdateIntentApplyAuditReconcileInput,
   type UpdateIntentApplyAuditReconcileResult
 } from "./intent-apply-audits.js";
-import type { MomentumDb } from "./db.js";
+import type { MomentumDb } from "./adapters/db.js";
 import {
   getExternalUpdateAdapter,
   previewExternalUpdate as previewExternalUpdateFn,
@@ -56,7 +56,7 @@ import {
   type ExternalUpdateAdapterPreviewResult,
   type ExternalUpdateAdapterTarget,
   type ExternalUpdateMutationKind
-} from "./external-update-adapter.js";
+} from "./adapters/external-update-adapter.js";
 import { getEvidenceRecordById } from "./evidence-records.js";
 import {
   buildLinearExternalUpdateClient,
@@ -66,11 +66,11 @@ import {
   type LinearExternalUpdateResult,
   type LinearExternalUpdateResultCode,
   type LinearStatusMutationConfig
-} from "./linear-external-update-client.js";
+} from "./adapters/linear-external-update-client.js";
 import {
   buildLinearIssueRefreshClient,
   type LinearIssueRefreshClient
-} from "./linear-issue-refresh.js";
+} from "./adapters/linear-issue-refresh.js";
 import {
   DEFAULT_INTENT_APPLY_POLICY,
   loadMomentumPolicy as loadMomentumPolicyFn,

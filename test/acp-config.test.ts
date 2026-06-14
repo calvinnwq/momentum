@@ -6,7 +6,7 @@ import {
   DEFAULT_ACP_RESULT_FILE,
   DEFAULT_ACP_TIMEOUT_SEC,
   parseAcpConfig
-} from "../src/acp-config.js";
+} from "../src/adapters/acp-config.js";
 
 describe("parseAcpConfig defaults", () => {
   it("returns acp_config_missing when value is undefined", () => {

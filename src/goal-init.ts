@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { parseGoalSpec, type GoalSpec } from "./goal-spec.js";
 import { resolveDataDir, type DataDirOptions } from "./data-dir.js";
-import { openDb, type MomentumDb } from "./db.js";
+import { openDb, type MomentumDb } from "./adapters/db.js";
 import {
   initGoalArtifacts,
   resolveGoalArtifactPaths,

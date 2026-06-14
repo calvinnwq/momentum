@@ -9,8 +9,8 @@ import {
   LIVE_STEP_WRAPPER_RECOVERY_CODES,
   runLiveStepWrapper,
   type LiveStepWrapperInput
-} from "../src/live-step-wrapper.js";
-import type { LiveWrapperConfig } from "../src/live-wrapper-registry.js";
+} from "../src/adapters/live-step-wrapper.js";
+import type { LiveWrapperConfig } from "../src/adapters/live-wrapper-registry.js";
 
 const tempRoots: string[] = [];
 

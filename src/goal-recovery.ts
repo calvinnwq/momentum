@@ -1,4 +1,4 @@
-import type { MomentumDb } from "./db.js";
+import type { MomentumDb } from "./adapters/db.js";
 import { QUEUE_EVENT_TYPES, appendQueueEvent } from "./events.js";
 import { releaseRepoLock } from "./repo-locks.js";
 

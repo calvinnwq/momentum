@@ -5,12 +5,13 @@
  * `src/real-workflow-smoke.ts` owns the pure gate (`planWorkflowHarnessSmoke`)
  * and the pure spawn-result mapping (`classifyProbeSpawnResult`) plus taxonomy
  * (`classifyWorkflowHarnessOutcome`). That module documents that it "never
- * performs I/O". This sibling is the thin layer that *does* perform the two I/O
- * operations the opt-in harness-probe smoke needs, keeping the gate pure:
+ * performs I/O". This adapter module is the thin layer that *does* perform the
+ * two I/O operations the opt-in harness-probe smoke needs, keeping the gate
+ * pure:
  *
  *   - `runHarnessProbe` spawns the resolved live-wrapper pre-flight probe (a
  *     cheap availability check) with the same bounded `spawnSync` discipline as
- *     `src/acp-runner.ts`, then delegates the outcome mapping to the pure
+ *     `src/adapters/acp-runner.ts`, then delegates the outcome mapping to the pure
  *     `classifyProbeSpawnResult`.
  *   - `loadRawWorkflowProfileFromEnv` reads the operator-pointed live-wrapper
  *     profile JSON so the gated smoke can resolve a real wrapper command. It
@@ -29,7 +30,7 @@ import type { LiveWrapperProbeConfig } from "./live-wrapper-registry.js";
 import {
   classifyProbeSpawnResult,
   type WorkflowHarnessRawOutcome
-} from "./real-workflow-smoke.js";
+} from "../real-workflow-smoke.js";
 
 /** Points the opt-in harness-probe smoke at a live-wrapper profile JSON document. */
 export const REAL_SMOKE_WORKFLOW_PROFILE_ENV_VAR =

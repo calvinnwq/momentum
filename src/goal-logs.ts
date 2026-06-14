@@ -6,7 +6,7 @@ import {
   type GoalArtifactPaths
 } from "./artifacts.js";
 import { resolveDataDir, type DataDirOptions } from "./data-dir.js";
-import { openDb, type MomentumDb } from "./db.js";
+import { openDb, type MomentumDb } from "./adapters/db.js";
 import { getGoal, type GoalRow } from "./goal-init.js";
 import { parseRunnerResult } from "./runner-result.js";
 import {

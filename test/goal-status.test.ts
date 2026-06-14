@@ -4,8 +4,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { openDb } from "../src/db.js";
-import { FAKE_RUNNER_GOAL_COMPLETE_ENV } from "../src/fake-runner.js";
+import { openDb } from "../src/adapters/db.js";
+import { FAKE_RUNNER_GOAL_COMPLETE_ENV } from "../src/adapters/fake-runner.js";
 import { initGoal, type GoalInitSuccess } from "../src/goal-init.js";
 import { markGoalNeedsManualRecovery } from "../src/goal-recovery.js";
 import { executeIterationJob } from "../src/iteration-job.js";

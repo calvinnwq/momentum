@@ -10,7 +10,7 @@ import {
   FAKE_RUNNER_GOAL_COMPLETE_ENV,
   FAKE_RUNNER_TRAJECTORY_ENV,
   runFakeRunner
-} from "../src/fake-runner.js";
+} from "../src/adapters/fake-runner.js";
 import { parseRunnerResult } from "../src/runner-result.js";
 
 const tempRoots: string[] = [];

@@ -48,7 +48,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 
-import { listCommittedChangedFiles } from "./git-transaction.js";
+import { listCommittedChangedFiles } from "./adapters/git-transaction.js";
 import {
   goalLoopFinalizeEvidenceFromResult,
   type GoalLoopArtifactPointer,

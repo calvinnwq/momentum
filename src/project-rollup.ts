@@ -12,7 +12,7 @@
  * configurable TTL (default 30 days); the rollup never auto-deletes intents.
  */
 
-import type { MomentumDb } from "./db.js";
+import type { MomentumDb } from "./adapters/db.js";
 import { listSourceItems, type SourceItem } from "./source-items.js";
 import {
   listSourceReconciliationRuns,

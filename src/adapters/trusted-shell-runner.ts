@@ -24,7 +24,7 @@ import type {
   RunnerAdapterInput,
   RunnerAdapterResult
 } from "./runner-adapter.js";
-import { parseRunnerResult } from "./runner-result.js";
+import { parseRunnerResult } from "../runner-result.js";
 import {
   DEFAULT_TRUSTED_SHELL_RESULT_FILE,
   parseTrustedShellConfig,

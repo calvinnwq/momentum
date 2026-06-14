@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { openDb, type MomentumDb } from "../src/db.js";
+import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import { CODING_WORKFLOW_DEFINITION } from "../src/workflow-definition.js";
 import { persistWorkflowDefinition } from "../src/workflow-definition-persist.js";
 import { persistWorkflowRunStart } from "../src/workflow-run-start-persist.js";

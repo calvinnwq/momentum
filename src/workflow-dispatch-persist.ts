@@ -32,7 +32,7 @@
  * effect layer releases that orphaned lease without inventing a gate.
  */
 
-import type { MomentumDb } from "./db.js";
+import type { MomentumDb } from "./adapters/db.js";
 import { isWorkflowExecutorFamily } from "./workflow-definition.js";
 import {
   planWorkflowStepDispatch,

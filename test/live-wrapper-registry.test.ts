@@ -7,7 +7,7 @@ import {
   parseLiveWrapperConfig,
   parseLiveWrapperProfile,
   resolveLiveWrapper
-} from "../src/live-wrapper-registry.js";
+} from "../src/adapters/live-wrapper-registry.js";
 
 const validWrapper = {
   command: "/usr/bin/gnhf-runner",

@@ -9,7 +9,7 @@ import {
   type SourceAdapter,
   type SourceAdapterClient,
   type SourceAdapterItem
-} from "../src/source-adapter.js";
+} from "../src/adapters/source-adapter.js";
 
 const fixtureItems: SourceAdapterItem[] = [
   {

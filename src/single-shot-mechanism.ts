@@ -19,7 +19,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-import { listCommittedChangedFiles } from "./git-transaction.js";
+import { listCommittedChangedFiles } from "./adapters/git-transaction.js";
 import {
   finalizeLiveWorkflowStep,
   type FinalizeLiveWorkflowStepResult
@@ -29,8 +29,8 @@ import {
   runLiveStepWrapper,
   runProcessGroupSync,
   type LiveStepWrapperRecoveryCode
-} from "./live-step-wrapper.js";
-import type { LiveWrapperConfig } from "./live-wrapper-registry.js";
+} from "./adapters/live-step-wrapper.js";
+import type { LiveWrapperConfig } from "./adapters/live-wrapper-registry.js";
 import type { CommitIntent } from "./runner-result.js";
 import type {
   SingleShotArtifactPointer,

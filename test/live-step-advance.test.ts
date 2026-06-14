@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { openDb, type MomentumDb } from "../src/db.js";
+import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import { advanceLiveWorkflowStep } from "../src/live-step-advance.js";
 import { getWorkflowStep } from "../src/workflow-step-transitions.js";
 import { getWorkflowRunManualRecoveryState } from "../src/workflow-run-recovery.js";

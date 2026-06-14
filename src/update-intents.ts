@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { MomentumDb } from "./db.js";
+import type { MomentumDb } from "./adapters/db.js";
 
 export const UPDATE_INTENT_STATUSES = [
   "pending",

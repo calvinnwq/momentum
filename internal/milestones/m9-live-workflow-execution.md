@@ -1,6 +1,6 @@
 # Milestone 9: Live Workflow Execution
 
-**Status:** Foundation in force. Promoted from draft at the M9-00 decision gate (NGX-331) after M8 closeout; M10 now owns the active workflow-first implementation. The companion contract in [`internal/contracts/live-workflow-execution.md`](../contracts/live-workflow-execution.md) remains the accepted foundation for live workflow execution; the M8 operator-control contract stays in force for its own invariants.
+**Status:** Foundation in force. Promoted from draft at the M9-00 decision gate (NGX-331) after M8 closeout; M10 completed the workflow-first implementation, and M11 now owns CLI structure work. The companion contract in [`internal/contracts/live-workflow-execution.md`](../contracts/live-workflow-execution.md) remains the accepted foundation for live workflow execution; the M8 operator-control contract stays in force for its own invariants.
 
 Milestone 9 defines the point where Momentum starts dogfooding real repo work through Momentum-owned live execution rather than using the OpenClaw `coding-workflow-pipeline` skill as the live run loop.
 

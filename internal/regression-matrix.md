@@ -9,7 +9,7 @@ failure mode, the invariant that eliminates it, the code module that owns the
 invariant, and the test(s) that
 exercise it. The M7 rows are the closeout gate for NGX-319; the M8 rows are the
 closeout gate for NGX-330; M9 rows are foundation / opt-in evidence that
-M10 can build on while the doctor marker stays pinned until M10 closeout. If any row's
+M10 built on before the NGX-353 closeout advanced the doctor marker. If any row's
 invariant regresses, the owning milestone has regressed.
 
 The full M7 contract lives in

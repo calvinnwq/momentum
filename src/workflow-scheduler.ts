@@ -43,7 +43,7 @@
  * the single-active-step model the M7 reducer and M9 lease primitives enforce.
  */
 
-import type { MomentumDb } from "./db.js";
+import type { MomentumDb } from "./adapters/db.js";
 import path from "node:path";
 import {
   acquireWorkflowLeaseInTransaction,

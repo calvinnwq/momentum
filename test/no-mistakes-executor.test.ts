@@ -27,7 +27,7 @@ import {
   planNoMistakesRoundPersistence,
   planNoMistakesRoundStart,
   type NoMistakesExternalState
-} from "../src/no-mistakes-executor.js";
+} from "../src/adapters/no-mistakes-executor.js";
 
 const COMPLETION_SET = new Set<string>(EXECUTOR_COMPLETION_CLASSIFICATIONS);
 const ROUND_TERMINAL_SET = new Set<string>(EXECUTOR_ROUND_TERMINAL_STATES);

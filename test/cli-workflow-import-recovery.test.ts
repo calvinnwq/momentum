@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { runCli } from "../src/cli.js";
-import { openDb } from "../src/db.js";
+import { openDb } from "../src/adapters/db.js";
 import { WORKFLOW_RECOVERY_ARTIFACT_FILENAME } from "../src/workflow-recovery-artifact.js";
 
 type RunResult = {

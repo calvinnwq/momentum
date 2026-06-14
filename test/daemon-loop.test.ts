@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 
-import { openDb, type MomentumDb } from "../src/db.js";
+import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
   finishDaemonRun,
   getDaemonRun,
@@ -31,7 +31,7 @@ import {
   FAKE_RUNNER_FAIL_ENV,
   FAKE_RUNNER_GOAL_COMPLETE_ENV,
   FAKE_RUNNER_TRAJECTORY_ENV
-} from "../src/fake-runner.js";
+} from "../src/adapters/fake-runner.js";
 import { initGoal } from "../src/goal-init.js";
 import type {
   WorkerRunInput,

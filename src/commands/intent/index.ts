@@ -1,11 +1,19 @@
 import {
   usageError,
-  write,
-  writeJson,
-  type CliIo,
-  type JsonPayload
-} from "../cli-io.js";
-import { openDb } from "../../db.js";
+  type CliIo
+} from "../../renderers/cli-output.js";
+import {
+  emitIntentDecisionSuccess,
+  emitIntentExternalApplySuccess,
+  emitIntentFailure,
+  emitIntentGetSuccess,
+  emitIntentListSuccess,
+  type IntentApplyPolicySummary,
+  type IntentCommand,
+  type IntentExternalApplySummary,
+  type IntentFailure
+} from "../../renderers/intent.js";
+import { openDb } from "../../adapters/db.js";
 import { resolveDataDir, type DataDirOptions } from "../../data-dir.js";
 import {
   DEFAULT_INTENT_APPLY_POLICY,
@@ -34,7 +42,6 @@ import {
   countIntentsByApplyState,
   listIntentApplyAudits,
   summarizeIntentApplyAuditsForIntent,
-  type IntentApplyAudit,
   type IntentApplyAuditCounts,
   type IntentApplyAuditSummary,
   type IntentApplyStateCounts
@@ -46,8 +53,8 @@ import {
   type ExecuteExternalApplyDeps,
   type ExecuteExternalApplyResult
 } from "../../intent-apply-execute.js";
-import { type LinearExternalUpdateClient } from "../../linear-external-update-client.js";
-import { type LinearIssueRefreshClient } from "../../linear-issue-refresh.js";
+import { type LinearExternalUpdateClient } from "../../adapters/linear-external-update-client.js";
+import { type LinearIssueRefreshClient } from "../../adapters/linear-issue-refresh.js";
 
 export type LinearExternalUpdateClientFactoryInput = {
   apiKey: string | null;
@@ -70,93 +77,6 @@ export type CliDeps = {
 
 type ParsedFlags = {
   args: string[]; json: boolean; dataDir?: string; goal?: string; sourceItem?: string; status?: string; reason?: string; limit?: number; externalApply: boolean; repo?: string; adapter?: string; evidenceType?: string; evidenceRecord?: string;
-};
-
-type IntentFailureCode =
-  | "data_dir_failed"
-  | "invalid_status"
-  | "goal_not_found"
-  | "source_item_not_found"
-  | "evidence_record_not_found"
-  | "intent_not_found"
-  | "reason_required"
-  | "intent_already_terminal"
-  | "policy_load_failed"
-  | "policy_denied"
-  | "auth_unavailable"
-  | "unsupported_adapter"
-  | "unsupported_intent_type"
-  | "target_missing"
-  | "intent_apply_in_progress"
-  | "intent_blocked"
-  | "external_conflict"
-  | "write_rejected"
-  | "write_timeout"
-  | "malformed_response"
-  | "validation_failed"
-  | "adapter_threw"
-  | "preview_failed"
-  | "audit_incomplete";
-
-type IntentCommand =
-  | "intent list"
-  | "intent get"
-  | "intent apply"
-  | "intent skip"
-  | "intent cancel";
-
-type IntentExternalApplySummary = {
-  adapterKind: string;
-  intentType: string;
-  target: {
-    adapterKind: string;
-    externalId: string | null;
-    externalKey: string | null;
-    url: string | null;
-    title: string | null;
-  };
-  allowStatusMutation: boolean;
-  mutationKind: string | null;
-  auditId: string | null;
-  reconcile: {
-    status: string | null;
-    warning: string | null;
-  };
-  external: {
-    alreadyApplied: boolean;
-    issueId: string | null;
-    issueKey: string | null;
-    issueUrl: string | null;
-    commentId: string | null;
-    commentUrl: string | null;
-    statusTransitioned: boolean;
-    nextStateId: string | null;
-    nextStateName: string | null;
-    idempotencyMarker: string;
-  } | null;
-};
-
-type IntentFailure = {
-  command: IntentCommand;
-  code: IntentFailureCode;
-  message: string;
-  dataDir?: string;
-  intentId?: string;
-  goalId?: string;
-  sourceItemId?: string;
-  evidenceRecordId?: string;
-  status?: string;
-  currentStatus?: UpdateIntentStatus;
-  applyPolicy?: IntentApplyPolicySummary;
-  externalApply?: IntentExternalApplySummary;
-};
-
-type IntentApplyPolicySummary = {
-  effective: UpdateIntentApplyPolicy;
-  source: PolicyEffectiveFieldSource;
-  externalApplyRequested: boolean;
-  externalApplyPerformed: boolean;
-  note: string;
 };
 
 type IntentApplyPolicyResolution =
@@ -350,63 +270,15 @@ function intentList(parsed: ParsedFlags, io: CliIo): number {
   const truncated =
     filters.limit !== undefined && totalAvailable > intents.length;
 
-  const payload = {
-    ok: true,
-    command: "intent list",
+  return emitIntentListSuccess(parsed, io, {
     dataDir,
-    status: statusFilter ?? null,
-    adapter: filters.adapterKind ?? null,
-    intentType: filters.intentType ?? null,
-    goalId: filters.goalId ?? null,
-    sourceItemId: filters.sourceItemId ?? null,
-    evidenceRecordId: filters.evidenceRecordId ?? null,
-    limit: filters.limit ?? null,
-    count: intents.length,
+    statusFilter: statusFilter ?? null,
+    filters,
+    intents,
+    auditSummaries,
     totalAvailable,
-    truncated,
-    intents: intents.map((record) => ({
-      ...updateIntentToJsonShape(record),
-      externalApply: intentApplyAuditSummaryToJsonShape(
-        auditSummaries.get(record.id) ?? null
-      )
-    }))
-  };
-
-  if (parsed.json) {
-    writeJson(io.stdout, payload);
-    return 0;
-  }
-
-  const lines: string[] = [
-    `Update intents: ${intents.length}`,
-    `Total available: ${totalAvailable}`,
-    `Truncated: ${truncated ? "yes" : "no"}`,
-    `Status: ${statusFilter ?? "(any)"}`,
-    `Adapter: ${filters.adapterKind ?? "(any)"}`,
-    `Intent type: ${filters.intentType ?? "(any)"}`,
-    `Goal: ${filters.goalId ?? "(any)"}`,
-    `Source item: ${filters.sourceItemId ?? "(any)"}`,
-    `Evidence record: ${filters.evidenceRecordId ?? "(any)"}`,
-    `Data dir: ${dataDir}`,
-    ...intents.map((record) => {
-      const summary = auditSummaries.get(record.id) ?? null;
-      const applyState = summary?.applyState ?? "idle";
-      const totalAttempts = summary?.totalAttempts ?? 0;
-      const latest = summary?.latestAttempt;
-      const latestLabel = latest
-        ? `${latest.lifecycleState}${latest.resultCode ? `/${latest.resultCode}` : ""}`
-        : "(none)";
-      return (
-        `- ${record.id} [${record.adapterKind}/${record.intentType}] ` +
-        `${record.status} target=${record.targetExternalId ?? "(none)"} ` +
-        `apply=${applyState} attempts=${totalAttempts} latest=${latestLabel}: ` +
-        `${record.reason}`
-      );
-    }),
-    ""
-  ];
-  write(io.stdout, lines.join("\n"));
-  return 0;
+    truncated
+  });
 }
 
 function intentGet(parsed: ParsedFlags, io: CliIo): number {
@@ -464,43 +336,7 @@ function intentGet(parsed: ParsedFlags, io: CliIo): number {
     });
   }
 
-  const externalApply = intentApplyAuditSummaryToJsonShape(auditSummary);
-  const payload = {
-    ok: true,
-    command: "intent get",
-    dataDir,
-    intent: updateIntentToJsonShape(record),
-    externalApply
-  };
-
-  if (parsed.json) {
-    writeJson(io.stdout, payload);
-    return 0;
-  }
-
-  const lines: string[] = [
-    `Update intent: ${record.id}`,
-    `Adapter: ${record.adapterKind}`,
-    `Target external id: ${record.targetExternalId ?? "(none)"}`,
-    `Intent type: ${record.intentType}`,
-    `Status: ${record.status}`,
-    `Goal: ${record.goalId ?? "(unlinked)"}`,
-    `Source item: ${record.sourceItemId ?? "(unlinked)"}`,
-    `Evidence record: ${record.evidenceRecordId ?? "(unlinked)"}`,
-    `Idempotency key: ${record.idempotencyKey}`,
-    `Reason: ${record.reason}`,
-    `Decision reason: ${record.decisionReason ?? "(none)"}`,
-    `Created at: ${record.createdAt}`,
-    `Updated at: ${record.updatedAt}`,
-    `Applied at: ${record.appliedAt ?? "(unset)"}`,
-    `Skipped at: ${record.skippedAt ?? "(unset)"}`,
-    `Canceled at: ${record.canceledAt ?? "(unset)"}`,
-    ...renderExternalApplyTextLines(externalApply),
-    `Data dir: ${dataDir}`,
-    ""
-  ];
-  write(io.stdout, lines.join("\n"));
-  return 0;
+  return emitIntentGetSuccess(parsed, io, { dataDir, record, auditSummary });
 }
 
 type IntentDecisionAction = "apply" | "skip" | "cancel";
@@ -617,45 +453,13 @@ function intentDecision(
     return emitIntentFailure(parsed, io, failure);
   }
 
-  const payload: JsonPayload = {
-    ok: true,
+  return emitIntentDecisionSuccess(parsed, io, {
     command,
     dataDir,
     previousStatus: result.previousStatus,
-    intent: updateIntentToJsonShape(result.intent)
-  };
-  if (action === "apply") {
-    payload["applyPolicy"] = applyPolicy;
-  }
-
-  if (parsed.json) {
-    writeJson(io.stdout, payload);
-    return 0;
-  }
-
-  const record = result.intent;
-  const lines: string[] = [
-    `Update intent ${record.id} ${record.status}`,
-    `Adapter: ${record.adapterKind}`,
-    `Target external id: ${record.targetExternalId ?? "(none)"}`,
-    `Intent type: ${record.intentType}`,
-    `Previous status: ${result.previousStatus}`,
-    `Status: ${record.status}`,
-    `Decision reason: ${record.decisionReason ?? "(none)"}`,
-    `Applied at: ${record.appliedAt ?? "(unset)"}`,
-    `Skipped at: ${record.skippedAt ?? "(unset)"}`,
-    `Canceled at: ${record.canceledAt ?? "(unset)"}`,
-    `Updated at: ${record.updatedAt}`,
-    `Data dir: ${dataDir}`
-  ];
-  if (action === "apply") {
-    lines.push(
-      `Apply policy: ${applyPolicy.effective} (${applyPolicy.source}); ${applyPolicy.note}`
-    );
-  }
-  lines.push("");
-  write(io.stdout, lines.join("\n"));
-  return 0;
+    record: result.intent,
+    ...(action === "apply" ? { applyPolicy } : {})
+  });
 }
 
 async function intentExternalApply(args: {
@@ -758,62 +562,12 @@ async function intentExternalApply(args: {
     return emitIntentFailure(parsed, io, failure);
   }
 
-  const payload: JsonPayload = {
-    ok: true,
-    command,
+  return emitIntentExternalApplySuccess(parsed, io, {
     dataDir,
-    previousStatus: "pending",
-    intent: updateIntentToJsonShape(result.intent),
+    record: result.intent,
     applyPolicy,
     externalApply
-  };
-
-  if (parsed.json) {
-    writeJson(io.stdout, payload);
-    return 0;
-  }
-
-  const record = result.intent;
-  const target = externalApply.target;
-  const lines: string[] = [
-    `Update intent ${record.id} ${record.status}`,
-    `Adapter: ${record.adapterKind}`,
-    `Target external id: ${record.targetExternalId ?? "(none)"}`,
-    `Intent type: ${record.intentType}`,
-    `Previous status: pending`,
-    `Status: ${record.status}`,
-    `Decision reason: ${record.decisionReason ?? "(none)"}`,
-    `Applied at: ${record.appliedAt ?? "(unset)"}`,
-    `Updated at: ${record.updatedAt}`,
-    `Data dir: ${dataDir}`,
-    `Apply policy: ${applyPolicy.effective} (${applyPolicy.source}); ${applyPolicy.note}`,
-    `External apply: performed (audit ${externalApply.auditId ?? "(none)"})`,
-    `Target: ${target.adapterKind} ${target.externalKey ?? target.externalId ?? "(unknown)"}${target.url ? ` <${target.url}>` : ""}`
-  ];
-  if (externalApply.external) {
-    const ext = externalApply.external;
-    lines.push(
-      `Comment: ${ext.commentId ?? "(none)"}${ext.commentUrl ? ` <${ext.commentUrl}>` : ""}${ext.alreadyApplied ? " (replay)" : ""}`
-    );
-    if (ext.statusTransitioned) {
-      lines.push(
-        `Status transition: ${ext.nextStateName ?? ext.nextStateId ?? "(unknown)"}`
-      );
-    }
-    lines.push(`Idempotency marker: ${ext.idempotencyMarker}`);
-  }
-  if (externalApply.reconcile.status) {
-    lines.push(
-      `Reconcile: ${externalApply.reconcile.status}${
-        externalApply.reconcile.warning
-          ? ` (${externalApply.reconcile.warning})`
-          : ""
-      }`
-    );
-  }
-  lines.push("");
-  write(io.stdout, lines.join("\n"));
-  return 0;
+  });
 }
 
 function buildExternalApplyPolicySummary(
@@ -926,175 +680,6 @@ function buildIntentApplyPolicySummary(
   };
 }
 
-function emitIntentFailure(
-  parsed: ParsedFlags,
-  io: CliIo,
-  failure: IntentFailure
-): number {
-  const payload: Record<string, unknown> = {
-    ok: false,
-    command: failure.command,
-    code: failure.code,
-    message: failure.message
-  };
-  if (failure.dataDir !== undefined) payload["dataDir"] = failure.dataDir;
-  if (failure.intentId !== undefined) payload["intentId"] = failure.intentId;
-  if (failure.goalId !== undefined) payload["goalId"] = failure.goalId;
-  if (failure.sourceItemId !== undefined) {
-    payload["sourceItemId"] = failure.sourceItemId;
-  }
-  if (failure.evidenceRecordId !== undefined) {
-    payload["evidenceRecordId"] = failure.evidenceRecordId;
-  }
-  if (failure.status !== undefined) payload["status"] = failure.status;
-  if (failure.currentStatus !== undefined) {
-    payload["currentStatus"] = failure.currentStatus;
-  }
-  if (failure.applyPolicy !== undefined) {
-    payload["applyPolicy"] = failure.applyPolicy;
-  }
-  if (failure.externalApply !== undefined) {
-    payload["externalApply"] = failure.externalApply;
-  }
-
-  if (parsed.json) {
-    writeJson(io.stderr, payload);
-    return 1;
-  }
-  write(io.stderr, `${failure.message}\n`);
-  return 1;
-}
-
 function isUpdateIntentStatus(value: string): value is UpdateIntentStatus {
   return (UPDATE_INTENT_STATUSES as readonly string[]).includes(value);
-}
-
-export function updateIntentToJsonShape(record: UpdateIntent): Record<string, unknown> {
-  return {
-    id: record.id,
-    adapterKind: record.adapterKind,
-    targetExternalId: record.targetExternalId,
-    intentType: record.intentType,
-    payload: record.payload,
-    reason: record.reason,
-    goalId: record.goalId,
-    sourceItemId: record.sourceItemId,
-    evidenceRecordId: record.evidenceRecordId,
-    status: record.status,
-    idempotencyKey: record.idempotencyKey,
-    decisionReason: record.decisionReason,
-    errorCode: record.errorCode,
-    errorMessage: record.errorMessage,
-    createdAt: record.createdAt,
-    updatedAt: record.updatedAt,
-    appliedAt: record.appliedAt,
-    skippedAt: record.skippedAt,
-    canceledAt: record.canceledAt
-  };
-}
-
-type IntentApplyAuditJsonShape = {
-  intentId: string;
-  applyState: IntentApplyAuditSummary["applyState"];
-  totalAttempts: number;
-  counts: IntentApplyAuditSummary["counts"];
-  latestAttempt: ReturnType<typeof intentApplyAuditToJsonShape> | null;
-};
-
-function intentApplyAuditSummaryToJsonShape(
-  summary: IntentApplyAuditSummary | null
-): IntentApplyAuditJsonShape {
-  if (!summary) {
-    return {
-      intentId: "",
-      applyState: "idle",
-      totalAttempts: 0,
-      counts: {
-        claimed: 0,
-        succeeded: 0,
-        failed: 0,
-        blocked: 0,
-        audit_incomplete: 0
-      },
-      latestAttempt: null
-    };
-  }
-  return {
-    intentId: summary.intentId,
-    applyState: summary.applyState,
-    totalAttempts: summary.totalAttempts,
-    counts: summary.counts,
-    latestAttempt: summary.latestAttempt
-      ? intentApplyAuditToJsonShape(summary.latestAttempt)
-      : null
-  };
-}
-
-export function intentApplyAuditToJsonShape(
-  audit: IntentApplyAudit
-): Record<string, unknown> {
-  return {
-    id: audit.id,
-    adapterKind: audit.adapterKind,
-    provider: audit.provider,
-    target: audit.target,
-    requestedAt: audit.requestedAt,
-    finishedAt: audit.finishedAt,
-    operatorReason: audit.operatorReason,
-    operatorActor: audit.operatorActor,
-    intentApplyPolicy: audit.intentApplyPolicy,
-    allowStatusMutation: audit.allowStatusMutation,
-    mutationKind: audit.mutationKind,
-    previewSummary: audit.previewSummary,
-    idempotencyMarker: audit.idempotencyMarker,
-    lifecycleState: audit.lifecycleState,
-    resultStatus: audit.resultStatus,
-    resultCode: audit.resultCode,
-    resultMessage: audit.resultMessage,
-    externalRefs: audit.externalRefs,
-    reconcile: audit.reconcile,
-    createdAt: audit.createdAt,
-    updatedAt: audit.updatedAt
-  };
-}
-
-function renderExternalApplyTextLines(
-  external: IntentApplyAuditJsonShape
-): string[] {
-  const counts = external.counts;
-  const lines: string[] = [
-    `External apply state: ${external.applyState}`,
-    `External apply attempts: total=${external.totalAttempts} ` +
-      `succeeded=${counts.succeeded} failed=${counts.failed} ` +
-      `claimed=${counts.claimed} blocked=${counts.blocked} ` +
-      `audit_incomplete=${counts.audit_incomplete}`
-  ];
-  const latest = external.latestAttempt;
-  if (!latest) {
-    lines.push("External apply latest attempt: (none)");
-    return lines;
-  }
-  lines.push(
-    `External apply latest attempt: ${latest.id} ${latest.lifecycleState}` +
-      ` (result=${latest.resultStatus ?? "(none)"}` +
-      ` code=${latest.resultCode ?? "(none)"})`
-  );
-  lines.push(
-    `External apply latest target: ${latest.adapterKind}/` +
-      `${(latest.target as { externalKey: string | null }).externalKey ?? "(none)"}` +
-      ` (${(latest.target as { externalId: string | null }).externalId ?? "(none)"})`
-  );
-  const refs = latest.externalRefs as {
-    commentId: string | null;
-    commentUrl: string | null;
-    stateTransitionId: string | null;
-  };
-  if (refs.commentId || refs.commentUrl || refs.stateTransitionId) {
-    lines.push(
-      `External apply refs: comment=${refs.commentId ?? "(none)"}` +
-        ` url=${refs.commentUrl ?? "(none)"}` +
-        ` transition=${refs.stateTransitionId ?? "(none)"}`
-    );
-  }
-  return lines;
 }

@@ -3,7 +3,7 @@ import fs from "node:fs";
 
 import type { GoalArtifactPaths } from "./artifacts.js";
 import { ensureMomentumBranch } from "./branch-manager.js";
-import { resetToBase } from "./git-transaction.js";
+import { resetToBase } from "./adapters/git-transaction.js";
 import type { GoalSpec } from "./goal-spec.js";
 import {
   finalizeIteration,
@@ -21,7 +21,7 @@ import {
   listExecutingRunnerAdapterKinds,
   type RunnerAdapterErrorCode,
   type RunnerAdapterResult
-} from "./runner-adapter.js";
+} from "./adapters/runner-adapter.js";
 import type { RunnerResult } from "./runner-result.js";
 
 export type ForegroundIterationErrorCode =

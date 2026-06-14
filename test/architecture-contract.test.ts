@@ -77,7 +77,8 @@ describe("M11 structural guard around src/cli.ts", () => {
   it("keeps src/index.ts thin and pointed at runCli", () => {
     const index = readFile("src/index.ts");
 
-    expect(index).toContain('import { runCli } from "./cli.js";');
+    expect(index).toContain('await import("./cli.js")');
+    expect(index).toContain("runCli");
     expect(index).not.toMatch(/\.\/commands\//);
   });
 

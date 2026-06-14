@@ -16,7 +16,7 @@ Momentum is built milestone by milestone. Each milestone has a single durable sh
 | Milestone 8 | Workflow Run Operator Controls | Complete | [m8-workflow-run-operator-controls.md](milestones/m8-workflow-run-operator-controls.md) |
 | Milestone 9 | Live Workflow Execution | Foundation in force | [m9-live-workflow-execution.md](milestones/m9-live-workflow-execution.md) |
 | Milestone 10 | Workflow-First Runtime | Complete | [m10-workflow-first-runtime.md](milestones/m10-workflow-first-runtime.md) |
-| Milestone 11 | CLI Architecture Refactor | Contract in progress | [../ARCHITECTURE.md](../ARCHITECTURE.md) |
+| Milestone 11 | CLI Architecture Refactor | Implementation in progress | [../ARCHITECTURE.md](../ARCHITECTURE.md) |
 
 Accepted planning for the next runtime direction lives in
 [internal/contracts/workflow-first-runtime.md](contracts/workflow-first-runtime.md).
@@ -52,16 +52,16 @@ stable production path while Momentum builds an opt-in Momentum-native coding
 workflow route. New Momentum-native runs must start from Momentum state; the
 OpenClaw skill boundary is client, rendering, delivery, and compatibility.
 
-Milestone 11 starts the CLI structure refactor. Its active contract is root
+Milestone 11 is the CLI structure refactor. Its active contract is root
 [ARCHITECTURE.md](../ARCHITECTURE.md): `src/cli.ts` remains the stable command
-surface while the repo adds a command registry, extracts command families, and
-then enforces import boundaries in ordered slices. M11 is a structure migration;
-Momentum command semantics stay frozen unless a later issue explicitly changes
-behavior.
+surface while the repo adds a command registry, extracts command families,
+consolidates reusable renderers, and enforces import boundaries with structural
+guards. M11 is a structure migration; Momentum command semantics stay frozen
+unless a later issue explicitly changes behavior.
 
 The `doctor` readiness marker tracks the **most recently closed** milestone. It currently reads `Milestone 10: workflow-first runtime (NGX-344, NGX-345, NGX-346, NGX-347, NGX-348, NGX-349, NGX-350, NGX-351, NGX-352, NGX-367, NGX-353) complete`. The marker advanced from the M6 closeout string to `Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete` at the M7 closeout slice (NGX-319), stayed pinned to the M7 string through every M8 implementation slice, advanced to the M8 string at the M8 closeout slice (NGX-330), and advanced again to the M10 string at the M10 closeout slice (NGX-353).
 
-## Most recently closed milestone: M8
+## Previously closed milestone: M8
 
 Milestone 8 layers operator-control CLI envelopes (`workflow run list`, `workflow run approve`, `workflow run update-step`, `workflow run clear-recovery`, `workflow run monitor`) plus the per-run `recovery.md` / `needs_manual_recovery` artifact, additive `workflow_runs` monitor-advisory columns, and typed `runId` / `stepId` evidence linkage on top of the M7 OpenClaw coding-workflow backend substrate. The M7 substrate stays wire-stable; M8 does not rename the M7 `workflow import` / `workflow status` / `workflow handoff` envelopes, and does not move executor invocation, Discord delivery, or monitor cron scheduling out of the `coding-workflow-pipeline` skill.
 

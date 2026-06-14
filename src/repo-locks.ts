@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 
-import { isUniqueViolation, type MomentumDb } from "./db.js";
+import { isUniqueViolation, type MomentumDb } from "./adapters/db.js";
 
 export type RepoLockState = "active" | "released" | "needs_manual_recovery";
 

@@ -23,7 +23,7 @@
  *     loaded definition always round-trips to what was last persisted.
  */
 
-import type { MomentumDb } from "./db.js";
+import type { MomentumDb } from "./adapters/db.js";
 import {
   BUILT_IN_WORKFLOW_DEFINITIONS,
   validateWorkflowDefinition,

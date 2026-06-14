@@ -2,7 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
 
-import { applyQueueMigrations } from "./migrations.js";
+import { applyQueueMigrations } from "../migrations.js";
 
 export type MomentumDb = DatabaseSync;
 

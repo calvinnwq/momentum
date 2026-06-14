@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 
 import type { ExecutorRoundRecord } from "../src/executor-loop-reducer.js";
-import type { LiveWrapperConfig } from "../src/live-wrapper-registry.js";
+import type { LiveWrapperConfig } from "../src/adapters/live-wrapper-registry.js";
 import type { RunnerResult } from "../src/runner-result.js";
 import {
   createOneShotLiveWrapperRoundRunner,
@@ -17,7 +17,7 @@ const tempRoots: string[] = [];
 
 afterEach(() => {
   vi.restoreAllMocks();
-  vi.doUnmock("../src/live-step-wrapper.js");
+  vi.doUnmock("../src/adapters/live-step-wrapper.js");
   vi.doUnmock("../src/live-step-finalize.js");
   vi.resetModules();
   while (tempRoots.length > 0) {
@@ -685,9 +685,9 @@ describe("single-shot concrete mechanisms", () => {
     const { repoPath, baseHead } = initRepo();
     const artifactRoot = makeTempDir();
     vi.resetModules();
-    vi.doMock("../src/live-step-wrapper.js", async (importOriginal) => {
+    vi.doMock("../src/adapters/live-step-wrapper.js", async (importOriginal) => {
       const actual =
-        await importOriginal<typeof import("../src/live-step-wrapper.js")>();
+        await importOriginal<typeof import("../src/adapters/live-step-wrapper.js")>();
       return {
         ...actual,
         runProcessGroupSync: () => {

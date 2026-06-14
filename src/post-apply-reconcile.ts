@@ -22,15 +22,15 @@
  *    warning, mark the audit as deferred, or carry on as success.
  */
 
-import type { MomentumDb } from "./db.js";
+import type { MomentumDb } from "./adapters/db.js";
 import {
   normalizeLinearIssue,
   LINEAR_SOURCE_ADAPTER_KIND
-} from "./linear-source-adapter.js";
+} from "./adapters/linear-source-adapter.js";
 import type {
   LinearIssueRefreshClient,
   LinearIssueRefreshTarget
-} from "./linear-issue-refresh.js";
+} from "./adapters/linear-issue-refresh.js";
 import {
   recordSourceSnapshot,
   upsertSourceItem

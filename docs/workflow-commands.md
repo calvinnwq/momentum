@@ -525,7 +525,7 @@ Optional arguments:
 - `--mode <operator|delegated>` — how the decision is being made. Defaults to `operator`. With `operator`, any allowed action resolves the gate. With `delegated`, the action must also be inside the gate's `policyEnvelope`; an action outside the envelope is refused so the gate pauses for a human operator instead of being silently auto-applied.
 - `--note <text>` — free-text resolution note recorded with the durable gate row.
 - `--data-dir <path>` — override the data directory.
-- `--json` — emit structured JSON to stdout.
+- `--json` — emit structured JSON; success writes to stdout, while structured refusals and usage errors write JSON to stderr.
 
 The resolution is race-safe: the update is guarded by `resolved_at IS NULL`, so a concurrent resolve that closed the gate between load and write is refused as `gate_already_resolved` rather than overwriting the prior decision.
 

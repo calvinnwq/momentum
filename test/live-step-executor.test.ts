@@ -14,7 +14,7 @@ import {
   LIVE_STEP_WRAPPER_RECOVERY_CODES,
   type LiveStepWrapperError,
   type LiveStepWrapperSuccess
-} from "../src/live-step-wrapper.js";
+} from "../src/adapters/live-step-wrapper.js";
 import {
   WORKFLOW_STEP_EXECUTOR_ERROR_CODES,
   type WorkflowStepExecutorInput
@@ -22,7 +22,7 @@ import {
 import {
   parseLiveWrapperProfile,
   type LiveWrapperConfig
-} from "../src/live-wrapper-registry.js";
+} from "../src/adapters/live-wrapper-registry.js";
 import type { RunnerResult } from "../src/runner-result.js";
 
 const tempRoots: string[] = [];

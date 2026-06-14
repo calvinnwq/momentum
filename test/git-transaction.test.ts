@@ -9,7 +9,7 @@ import {
   formatCommitMessage,
   listCommittedChangedFiles,
   resetToBase
-} from "../src/git-transaction.js";
+} from "../src/adapters/git-transaction.js";
 import type { CommitIntent } from "../src/runner-result.js";
 
 const ZERO_SHA = "0".repeat(40);

@@ -29,7 +29,7 @@
  *     every upsert so downstream tooling can detect re-ingest.
  */
 
-import type { MomentumDb } from "./db.js";
+import type { MomentumDb } from "./adapters/db.js";
 import type {
   WorkflowRunImport,
   WorkflowRunImportApproval,

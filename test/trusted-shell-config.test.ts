@@ -5,7 +5,7 @@ import {
   DEFAULT_TRUSTED_SHELL_RESULT_FILE,
   DEFAULT_TRUSTED_SHELL_TIMEOUT_SEC,
   parseTrustedShellConfig
-} from "../src/trusted-shell-config.js";
+} from "../src/adapters/trusted-shell-config.js";
 
 describe("parseTrustedShellConfig defaults", () => {
   it("returns trusted_shell_config_missing when value is undefined", () => {

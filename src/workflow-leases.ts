@@ -31,7 +31,7 @@
  * primitive here.
  */
 
-import type { MomentumDb } from "./db.js";
+import type { MomentumDb } from "./adapters/db.js";
 import {
   WORKFLOW_LEASE_KINDS,
   WORKFLOW_LEASE_STALE_POLICIES,

@@ -3,7 +3,7 @@ import path from "node:path";
 import {
   WORKFLOW_STEP_KINDS,
   type WorkflowStepKind
-} from "./workflow-run-reducer.js";
+} from "../workflow-run-reducer.js";
 
 /**
  * Live workflow-step wrapper configuration and registry introduced by

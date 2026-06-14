@@ -6,14 +6,14 @@ import {
   type ExternalUpdateAdapterInput,
   type ExternalUpdateAdapterPreview,
   type ExternalUpdateAdapterTarget
-} from "../src/external-update-adapter.js";
+} from "../src/adapters/external-update-adapter.js";
 import {
   DEFAULT_LINEAR_EXTERNAL_UPDATE_ENDPOINT,
   LINEAR_EXTERNAL_UPDATE_RESULT_CODES,
   buildLinearExternalUpdateClient,
   type FetchLike,
   type LinearExternalUpdateInput
-} from "../src/linear-external-update-client.js";
+} from "../src/adapters/linear-external-update-client.js";
 import type { UpdateIntent } from "../src/update-intents.js";
 
 function buildIntent(overrides: Partial<UpdateIntent> = {}): UpdateIntent {

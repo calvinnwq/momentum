@@ -59,12 +59,12 @@ import type {
   CommitSuccess,
   ResetFailure,
   ResetSuccess
-} from "./git-transaction.js";
+} from "./adapters/git-transaction.js";
 import {
   finalizeIteration,
   type FinalizeResetTrigger
 } from "./iteration-finalize.js";
-import { LIVE_STEP_WRAPPER_RESULT_MAX_BYTES } from "./live-step-wrapper.js";
+import { LIVE_STEP_WRAPPER_RESULT_MAX_BYTES } from "./adapters/live-step-wrapper.js";
 import {
   parseRunnerResult,
   type CommitIntent,

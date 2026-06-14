@@ -12,7 +12,7 @@ import {
   FAKE_RUNNER_FAIL_ENV,
   FAKE_RUNNER_FIXTURE_FILENAME,
   FAKE_RUNNER_GOAL_COMPLETE_ENV
-} from "../src/fake-runner.js";
+} from "../src/adapters/fake-runner.js";
 import {
   dispatchWorkflowStepExecutor,
   type FakeWorkflowStepExecutorOutcome,
@@ -306,6 +306,39 @@ describe("Milestone 1 end-to-end smoke", () => {
         "momentum intent cancel <intent-id> --reason <text> [--data-dir <path>] [--json]",
         "momentum doctor [--repo <path>] [--data-dir <path>] [--json]"
       ]);
+    },
+    60_000
+  );
+
+  it(
+    "workflow run decide --json emits parseable built-CLI stderr without Node warning noise",
+    () => {
+      const result = spawnSync(
+        process.execPath,
+        [
+          CLI_BIN,
+          "workflow",
+          "run",
+          "decide",
+          "gate-1",
+          "--json"
+        ],
+        {
+          cwd: REPO_ROOT,
+          encoding: "utf-8",
+          stdio: ["ignore", "pipe", "pipe"]
+        }
+      );
+
+      expect(result.status).toBe(1);
+      expect(result.stdout).toBe("");
+      expect(() => JSON.parse(result.stderr ?? "")).not.toThrow();
+      expect(JSON.parse(result.stderr ?? "")).toMatchObject({
+        ok: false,
+        command: "workflow run decide",
+        code: "action_required",
+        gateId: "gate-1"
+      });
     },
     60_000
   );
@@ -2591,7 +2624,7 @@ describe("Milestone 3 daemon drain end-to-end smoke (NGX-278)", () => {
       // mirrors the in-process seeding pattern used by cli.test.ts daemon-stop
       // visibility tests, while keeping the operator-facing assertions on the
       // built CLI binary.
-      const { openDb } = await import("../src/db.js");
+      const { openDb } = await import("../src/adapters/db.js");
       const { startDaemonRun } = await import("../src/daemon-runs.js");
       const seededDb = openDb(dataDir);
       let runId: string;
@@ -2882,7 +2915,7 @@ describe("Milestone 3 daemon drain end-to-end smoke (NGX-278)", () => {
       // loop binary would require background-process timing; the loop primitive
       // is unit-tested in daemon-loop.test.ts, so here we pin the operator
       // surfaces while keeping the assertions deterministic.
-      const { openDb } = await import("../src/db.js");
+      const { openDb } = await import("../src/adapters/db.js");
       const { startDaemonRun, finishDaemonRun } = await import(
         "../src/daemon-runs.js"
       );
@@ -3193,7 +3226,7 @@ describe("Milestone 3 daemon drain end-to-end smoke (NGX-278)", () => {
     async () => {
       const dataDir = makeTempDir("momentum-smoke-m3-recovery-data-");
 
-      const { openDb } = await import("../src/db.js");
+      const { openDb } = await import("../src/adapters/db.js");
       const { acquireRepoLock } = await import("../src/repo-locks.js");
       const { enqueueGoalIterationJob, claimPendingGoalIterationJob } =
         await import("../src/queue-jobs.js");
@@ -3433,7 +3466,7 @@ describe("Milestone 3 daemon drain end-to-end smoke (NGX-278)", () => {
       const goalId = "smoke-manual-recovery-goal";
       const classifiedAt = 1_700_000_000_000;
 
-      const { openDb } = await import("../src/db.js");
+      const { openDb } = await import("../src/adapters/db.js");
       const { markGoalNeedsManualRecovery } = await import(
         "../src/goal-recovery.js"
       );

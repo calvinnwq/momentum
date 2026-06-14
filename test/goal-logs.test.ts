@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { ensureIterationArtifactDir } from "../src/artifacts.js";
-import { openDb } from "../src/db.js";
+import { openDb } from "../src/adapters/db.js";
 import { initGoal, type GoalInitSuccess } from "../src/goal-init.js";
 import { executeIterationJob } from "../src/iteration-job.js";
 import { loadGoalLogs } from "../src/goal-logs.js";

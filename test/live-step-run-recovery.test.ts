@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { openDb, type MomentumDb } from "../src/db.js";
+import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import { getWorkflowRunManualRecoveryState } from "../src/workflow-run-recovery.js";
 import { resolveWorkflowRecoveryArtifactPath } from "../src/workflow-recovery-artifact.js";
 import {

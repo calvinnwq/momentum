@@ -21,7 +21,7 @@ import type {
   LinearReconciliationFetchPageInput,
   LinearReconciliationFetchPageResult,
   LinearReconciliationFilters
-} from "./source-reconciliation.js";
+} from "../source-reconciliation.js";
 
 export const DEFAULT_LINEAR_GRAPHQL_ENDPOINT = "https://api.linear.app/graphql";
 export const DEFAULT_LINEAR_PAGE_SIZE = 50;

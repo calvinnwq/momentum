@@ -5,7 +5,7 @@ import {
   DEFAULT_LINEAR_GRAPHQL_ENDPOINT,
   DEFAULT_LINEAR_PAGE_SIZE,
   type FetchLike
-} from "../src/linear-http-client.js";
+} from "../src/adapters/linear-http-client.js";
 import type {
   LinearReconciliationFetchPageResult,
   LinearReconciliationFilters
