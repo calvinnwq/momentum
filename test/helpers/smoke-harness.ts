@@ -1,5 +1,5 @@
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -109,23 +109,44 @@ function withBuildLock(run: () => void): void {
 }
 
 function reclaimAbandonedLock(): boolean {
-  const holderPid = readLockHolderPid();
-  if (holderPid === null) {
-    const ageMs = lockAgeMs();
-    if (ageMs === null || ageMs <= BUILD_LOCK_STALE_MS) {
-      return false;
-    }
-  } else if (!pidIsDead(holderPid)) {
+  if (!lockDirLooksAbandoned(BUILD_LOCK_DIR)) {
     return false;
   }
-  fs.rmSync(BUILD_LOCK_DIR, { recursive: true, force: true });
+  const stolenDir = `${BUILD_LOCK_DIR}.steal.${randomUUID()}`;
+  try {
+    fs.renameSync(BUILD_LOCK_DIR, stolenDir);
+  } catch {
+    return false;
+  }
+  if (!lockDirLooksAbandoned(stolenDir)) {
+    restoreStolenLock(stolenDir);
+    return false;
+  }
+  fs.rmSync(stolenDir, { recursive: true, force: true });
   return true;
 }
 
-function readLockHolderPid(): number | null {
+function lockDirLooksAbandoned(lockDir: string): boolean {
+  const holderPid = readLockHolderPid(lockDir);
+  if (holderPid === null) {
+    const ageMs = lockAgeMs(lockDir);
+    return ageMs !== null && ageMs > BUILD_LOCK_STALE_MS;
+  }
+  return pidIsDead(holderPid);
+}
+
+function restoreStolenLock(stolenDir: string): void {
+  try {
+    fs.renameSync(stolenDir, BUILD_LOCK_DIR);
+  } catch {
+    fs.rmSync(stolenDir, { recursive: true, force: true });
+  }
+}
+
+function readLockHolderPid(lockDir: string): number | null {
   let raw: string;
   try {
-    raw = fs.readFileSync(BUILD_LOCK_PID_FILE, "utf-8");
+    raw = fs.readFileSync(path.join(lockDir, "pid"), "utf-8");
   } catch {
     return null;
   }
@@ -145,9 +166,9 @@ function pidIsDead(pid: number): boolean {
   }
 }
 
-function lockAgeMs(): number | null {
+function lockAgeMs(lockDir: string): number | null {
   try {
-    return Date.now() - fs.statSync(BUILD_LOCK_DIR).mtimeMs;
+    return Date.now() - fs.statSync(lockDir).mtimeMs;
   } catch {
     return null;
   }
