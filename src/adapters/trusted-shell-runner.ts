@@ -29,7 +29,7 @@ import {
   DEFAULT_TRUSTED_SHELL_RESULT_FILE,
   parseTrustedShellConfig,
   type TrustedShellConfig
-} from "../trusted-shell-config.js";
+} from "./trusted-shell-config.js";
 
 export const TRUSTED_SHELL_ENV_VARS = {
   GOAL_ID: "MOMENTUM_GOAL_ID",

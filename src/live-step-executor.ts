@@ -44,13 +44,13 @@ import {
   type LiveStepWrapperInput,
   type LiveStepWrapperRecoveryCode,
   type LiveStepWrapperResult
-} from "./live-step-wrapper.js";
+} from "./adapters/live-step-wrapper.js";
 import {
   listConfiguredLiveWrapperKinds,
   resolveLiveWrapper,
   type LiveWrapperConfig,
   type LiveWrapperProfile
-} from "./live-wrapper-registry.js";
+} from "./adapters/live-wrapper-registry.js";
 import type { WorkflowStepKind } from "./workflow-run-reducer.js";
 import type {
   WorkflowStepExecutor,

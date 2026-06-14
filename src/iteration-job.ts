@@ -10,13 +10,13 @@ import {
 } from "./foreground-iteration.js";
 import type { GoalSpec } from "./goal-spec.js";
 import { markGoalNeedsManualRecovery } from "./goal-recovery.js";
-import { parseAcpConfig } from "./acp-config.js";
+import { parseAcpConfig } from "./adapters/acp-config.js";
 import {
   writeRecoveryArtifact,
   type RecoveryArtifactPathBundle
 } from "./recovery-artifact.js";
 import { buildIterationSourceContext } from "./source-context.js";
-import { parseTrustedShellConfig } from "./trusted-shell-config.js";
+import { parseTrustedShellConfig } from "./adapters/trusted-shell-config.js";
 
 export type ExecuteIterationJobInput = {
   db: MomentumDb;

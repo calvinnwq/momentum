@@ -8,7 +8,7 @@ import {
   FAKE_RUNNER_FAIL_ENV,
   FAKE_RUNNER_FIXTURE_FILENAME,
   FAKE_RUNNER_GOAL_COMPLETE_ENV
-} from "../src/fake-runner.js";
+} from "../src/adapters/fake-runner.js";
 
 const GOAL_SPEC = `---
 title: CLI Test Goal

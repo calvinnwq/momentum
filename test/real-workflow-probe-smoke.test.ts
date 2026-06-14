@@ -15,7 +15,7 @@ import {
   buildHarnessProbeEnv,
   loadRawWorkflowProfileFromEnv,
   runHarnessProbe
-} from "../src/real-workflow-probe.js";
+} from "../src/adapters/real-workflow-probe.js";
 
 /**
  * NGX-372 opt-in real coding-workflow harness *probe* smoke (Adapter Test

@@ -72,7 +72,7 @@ import type {
   WorkflowExecutorFamily
 } from "./executor-loop-reducer.js";
 import type { ExecutorRoundUpdate } from "./executor-loop-persist.js";
-import { LIVE_STEP_WRAPPER_RECOVERY_CODES } from "./live-step-wrapper.js";
+import { LIVE_STEP_WRAPPER_RECOVERY_CODES } from "./adapters/live-step-wrapper.js";
 import type { RunnerResult } from "./runner-result.js";
 
 /**

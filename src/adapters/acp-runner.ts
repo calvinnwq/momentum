@@ -37,8 +37,8 @@ import type {
   RunnerAdapterErrorCode,
   RunnerAdapterInput,
   RunnerAdapterResult
-} from "./adapters/runner-adapter.js";
-import { parseRunnerResult } from "./runner-result.js";
+} from "./runner-adapter.js";
+import { parseRunnerResult } from "../runner-result.js";
 
 export const ACP_ENV_VARS = {
   GOAL_ID: "MOMENTUM_GOAL_ID",

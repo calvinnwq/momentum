@@ -10,7 +10,7 @@ import {
   FAKE_RUNNER_FIXTURE_FILENAME,
   FAKE_RUNNER_GOAL_COMPLETE_ENV,
   FAKE_RUNNER_TRAJECTORY_ENV
-} from "../src/fake-runner.js";
+} from "../src/adapters/fake-runner.js";
 import { buildIterationIdempotencyKey, initGoal } from "../src/goal-init.js";
 import { openDb } from "../src/adapters/db.js";
 import {

@@ -29,8 +29,8 @@ import {
   runLiveStepWrapper,
   runProcessGroupSync,
   type LiveStepWrapperRecoveryCode
-} from "./live-step-wrapper.js";
-import type { LiveWrapperConfig } from "./live-wrapper-registry.js";
+} from "./adapters/live-step-wrapper.js";
+import type { LiveWrapperConfig } from "./adapters/live-wrapper-registry.js";
 import type { CommitIntent } from "./runner-result.js";
 import type {
   SingleShotArtifactPointer,

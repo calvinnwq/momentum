@@ -8,7 +8,7 @@ import { runForegroundIteration } from "../src/foreground-iteration.js";
 import {
   FAKE_RUNNER_FAIL_ENV,
   FAKE_RUNNER_FIXTURE_FILENAME
-} from "../src/fake-runner.js";
+} from "../src/adapters/fake-runner.js";
 import { parseRunnerResult } from "../src/runner-result.js";
 import {
   initGoalArtifacts,

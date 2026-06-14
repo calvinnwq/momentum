@@ -216,12 +216,19 @@ describe("M11 CLI import boundaries", () => {
       "src/adapters/db.ts",
       "src/adapters/git-transaction.ts",
       "src/adapters/linear-http-client.ts",
+      "src/adapters/acp-config.ts",
+      "src/adapters/acp-runner.ts",
+      "src/adapters/fake-runner.ts",
+      "src/adapters/live-step-wrapper.ts",
+      "src/adapters/live-wrapper-registry.ts",
       "src/adapters/source-adapter.ts",
       "src/adapters/linear-source-adapter.ts",
       "src/adapters/runner-adapter.ts",
+      "src/adapters/trusted-shell-config.ts",
       "src/adapters/trusted-shell-runner.ts",
       "src/adapters/no-mistakes-executor.ts",
-      "src/adapters/no-mistakes-orchestrator.ts"
+      "src/adapters/no-mistakes-orchestrator.ts",
+      "src/adapters/real-workflow-probe.ts"
     ];
 
     expect(
@@ -233,12 +240,19 @@ describe("M11 CLI import boundaries", () => {
       "src/db.ts",
       "src/git-transaction.ts",
       "src/linear-http-client.ts",
+      "src/acp-config.ts",
+      "src/acp-runner.ts",
+      "src/fake-runner.ts",
+      "src/live-step-wrapper.ts",
+      "src/live-wrapper-registry.ts",
       "src/source-adapter.ts",
       "src/linear-source-adapter.ts",
       "src/runner-adapter.ts",
+      "src/trusted-shell-config.ts",
       "src/trusted-shell-runner.ts",
       "src/no-mistakes-executor.ts",
-      "src/no-mistakes-orchestrator.ts"
+      "src/no-mistakes-orchestrator.ts",
+      "src/real-workflow-probe.ts"
     ];
 
     expect(

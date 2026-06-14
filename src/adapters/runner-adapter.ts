@@ -9,9 +9,9 @@
  * writes.
  */
 
-import { runAcpRunner } from "../acp-runner.js";
+import { runAcpRunner } from "./acp-runner.js";
 import type { GoalSpec } from "../goal-spec.js";
-import { runFakeRunner } from "../fake-runner.js";
+import { runFakeRunner } from "./fake-runner.js";
 import {
   BUILTIN_RUNNER_KINDS,
   type BuiltinRunnerKind,

@@ -44,7 +44,7 @@ import {
   resolveLiveWrapper,
   type LiveWrapperCwd,
   type LiveWrapperProbeConfig
-} from "./live-wrapper-registry.js";
+} from "./adapters/live-wrapper-registry.js";
 import {
   WORKFLOW_STEP_KINDS,
   type WorkflowStepKind
