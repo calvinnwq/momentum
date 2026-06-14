@@ -42,6 +42,8 @@ const M8_MARKER =
   "Milestone 8: workflow run operator controls (NGX-323, NGX-324, NGX-325, NGX-326, NGX-327, NGX-328, NGX-329, NGX-330) complete";
 const M10_MARKER =
   "Milestone 10: workflow-first runtime (NGX-344, NGX-345, NGX-346, NGX-347, NGX-348, NGX-349, NGX-350, NGX-351, NGX-352, NGX-367, NGX-353) complete";
+const M11_MARKER =
+  "Milestone 11: CLI architecture refactor (NGX-411, NGX-412, NGX-413, NGX-414, NGX-415, NGX-416, NGX-417, NGX-418, NGX-419) complete";
 
 describe("M10 workflow-first runtime planning contract", () => {
   describe("internal/milestones/m10-workflow-first-runtime.md", () => {
@@ -167,10 +169,11 @@ describe("M10 workflow-first runtime planning contract", () => {
       }
     });
 
-    it("advances the doctor marker to the M10 closeout string", () => {
+    it("preserves the M10 marker in history after the M11 closeout advance", () => {
       const r = readDoc(roadmap);
       expect(r).not.toContain(M8_MARKER);
       expect(r).toContain(M10_MARKER);
+      expect(r).toContain(M11_MARKER);
     });
   });
 

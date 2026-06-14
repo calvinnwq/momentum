@@ -52,17 +52,6 @@ const M5_NON_GOALS_DOC = [
   "Remote git operations"
 ] as const;
 
-const M5_NON_GOALS_AGENTS = [
-  "automatic external tracker writes",
-  "inbound webhooks",
-  "dashboards / UI surfaces",
-  "per-source-item worktrees / parallel same-repo Goals",
-  "background runner supervision",
-  "strong sandboxing",
-  "cooperative mid-job cancellation / signal handling",
-  "remote git operations"
-] as const;
-
 const M5_DOC_PATH = path.join("internal", "milestones", "m5-source-adapters.md");
 
 describe("M5 contract docs (NGX-287 setup, NGX-294 closeout)", () => {

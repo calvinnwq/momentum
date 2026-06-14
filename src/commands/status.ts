@@ -1,4 +1,4 @@
-import { resolveDataDir, type DataDirOptions } from "../data-dir.js";
+import { type DataDirOptions } from "../data-dir.js";
 import { loadGoalLogs } from "../goal-logs.js";
 import { loadGoalStatus } from "../goal-status.js";
 import { writeHandoff } from "../handoff.js";

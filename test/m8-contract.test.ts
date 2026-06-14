@@ -278,12 +278,12 @@ describe("M8 contract (NGX-323)", () => {
   describe("AGENTS.md", () => {
     const agentsPath = "AGENTS.md";
 
-    it("names M8 as the most recently closed milestone while keeping the M7 narrative", () => {
+    it("preserves the M8 closeout narrative while keeping the M7 narrative", () => {
       const a = readDoc(agentsPath);
       expect(a).toMatch(/Milestone 8/);
       expect(a).toMatch(/Workflow Run Operator Controls/i);
       expect(a).toMatch(/Milestone 7/);
-      expect(a).toMatch(/most recently closed milestone/i);
+      expect(a).toMatch(/previously the most recently closed milestone/i);
     });
 
     it("links the M8 internal milestone narrative and the operator-controls contract", () => {

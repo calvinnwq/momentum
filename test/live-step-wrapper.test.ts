@@ -29,10 +29,6 @@ function makeTempDir(prefix = "momentum-live-step-"): string {
   return fs.realpathSync(dir);
 }
 
-function shellScript(body: string): { command: string; args: string[] } {
-  return { command: "/bin/sh", args: ["-c", body] };
-}
-
 // A full, valid RunnerResult document. parseRunnerResult requires success,
 // summary, key_changes_made, goal_complete, and a valid commit intent.
 const VALID_RESULT_JSON = JSON.stringify({

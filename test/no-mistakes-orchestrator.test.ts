@@ -503,7 +503,7 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
       runNoMistakesMirrorRound({
         db,
         roundId: ROUND_ID,
-        read: (round) => {
+        read: (_round) => {
           readCalls += 1;
           return { ok: true, value: externalState(), digest: "sha256:foreign" };
         },

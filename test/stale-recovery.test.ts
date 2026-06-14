@@ -14,7 +14,6 @@ import {
 } from "../src/daemon-runs.js";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
-  GOAL_ITERATION_JOB_TYPE,
   claimPendingGoalIterationJob,
   enqueueGoalIterationJob,
   getQueueJob,

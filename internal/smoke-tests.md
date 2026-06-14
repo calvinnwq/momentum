@@ -449,7 +449,7 @@ Run the built-binary production workflow-lane smoke locally via:
 pnpm vitest run test/smoke.test.ts -t "production workflow-lane dispatch"
 ```
 
-## Milestone 11 CLI structure coverage (NGX-416 through NGX-418)
+## Milestone 11 CLI structure coverage (NGX-416 through NGX-419)
 
 M11 is covered by focused structural tests plus a built-CLI JSON smoke that
 keeps output contracts stable while command code moves behind modules and
@@ -466,11 +466,17 @@ Coverage:
 - `src/index.ts` performs bootstrap-only warning suppression before dynamically
   importing `src/cli.ts`, so built-CLI `workflow run decide --json` structured
   refusals remain parseable JSON on stderr without SQLite warning noise.
+- the closeout command-family smoke covers representative JSON envelopes for
+  the migrated `status` / `logs` / `handoff`, `workflow`, `goal`, `source`,
+  `evidence`, `project`, and `intent` families, plus the remaining
+  daemon / recovery / worker / doctor compatibility surfaces in `src/cli.ts`.
+- `doctor --json` reports the M11 closeout marker after NGX-419.
 
 Run locally via targeted vitest commands:
 
 ```
 pnpm vitest run test/cli-renderers-output-contract.test.ts test/cli-import-boundaries.test.ts
+pnpm vitest run test/cli-architecture-command-smoke.test.ts
 pnpm vitest run test/smoke.test.ts -t "without Node warning noise"
 ```
 

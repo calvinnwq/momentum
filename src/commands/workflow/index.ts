@@ -5,12 +5,7 @@ import { usageError, type CliIo } from "../../renderers/cli-output.js";
 import { isUniqueViolation, openDb, type MomentumDb } from "../../adapters/db.js";
 import { resolveDataDir, type DataDirOptions } from "../../data-dir.js";
 import { loadMomentumPolicy } from "../../momentum-policy.js";
-import {
-  parseWorkflowRunImport,
-  type WorkflowRunImport,
-  type WorkflowRunImportDiagnostic,
-  type WorkflowRunImportErrorCode
-} from "../../workflow-run-import.js";
+import { parseWorkflowRunImport } from "../../workflow-run-import.js";
 import {
   persistWorkflowRunImport,
   type PersistWorkflowRunImportSummary
@@ -39,7 +34,6 @@ import {
   type WorkflowStepState
 } from "../../workflow-run-reducer.js";
 import {
-  WORKFLOW_HANDOFF_SCHEMA_VERSION,
   loadWorkflowHandoff,
   type WorkflowHandoffEnvelope
 } from "../../workflow-handoff.js";
@@ -72,7 +66,6 @@ import {
   persistWorkflowDefinition
 } from "../../workflow-definition-persist.js";
 import type {
-  WorkflowRunStartError,
   WorkflowRunStartInput
 } from "../../workflow-run-start.js";
 import {
@@ -84,7 +77,6 @@ import {
 import {
   GATE_DECISION_MODES,
   type GateDecisionMode,
-  type GateDecisionRefusalCode,
   type GateDecisionRequest
 } from "../../workflow-gate.js";
 import {
@@ -92,7 +84,6 @@ import {
   WorkflowGateNotFoundError,
   resolveWorkflowGate
 } from "../../workflow-gate-persist.js";
-import { executeWorkflowStepDispatch } from "../../workflow-dispatch-execute.js";
 import {
   emitWorkflowHandoff,
   emitWorkflowHandoffFailure,
@@ -147,19 +138,6 @@ type ParsedFlags = {
   runId?: string;
   skillRevision?: string;
   error?: string;
-};
-
-type WorkflowImportFailureCode =
-  | "path_required"
-  | "data_dir_failed"
-  | WorkflowRunImportErrorCode;
-
-type WorkflowImportFailure = {
-  code: WorkflowImportFailureCode;
-  message: string;
-  dataDir?: string;
-  path?: string;
-  diagnostics?: WorkflowRunImportDiagnostic[];
 };
 
 export function workflow(parsed: ParsedFlags, io: CliIo): number {
@@ -222,24 +200,6 @@ function workflowRun(parsed: ParsedFlags, io: CliIo): number {
     io
   );
 }
-
-type WorkflowRunStartFailureCode =
-  | "run_id_required"
-  | "repo_required"
-  | "objective_required"
-  | "data_dir_failed"
-  | "definition_not_found"
-  | "policy_invalid"
-  | "invalid_run_start"
-  | "run_exists";
-
-type WorkflowRunStartFailure = {
-  code: WorkflowRunStartFailureCode;
-  message: string;
-  dataDir?: string;
-  runId?: string;
-  errors?: readonly WorkflowRunStartError[];
-};
 
 /**
  * `momentum workflow run start` — the first-class workflow-first start surface
@@ -480,21 +440,6 @@ function workflowImport(parsed: ParsedFlags, io: CliIo): number {
   });
 }
 
-type WorkflowStatusFailureCode =
-  | "data_dir_failed"
-  | "invalid_state"
-  | "invalid_filter"
-  | "invalid_limit"
-  | "run_not_found";
-
-type WorkflowStatusFailure = {
-  command: "workflow status";
-  code: WorkflowStatusFailureCode;
-  message: string;
-  dataDir?: string;
-  runId?: string;
-};
-
 function workflowStatus(parsed: ParsedFlags, io: CliIo): number {
   const positional = parsed.args.slice(2);
   if (positional.length > 1) {
@@ -593,19 +538,6 @@ function workflowStatus(parsed: ParsedFlags, io: CliIo): number {
   return emitWorkflowStatusList(parsed, io, dataDir, summaries);
 }
 
-type WorkflowRunListFailureCode =
-  | "data_dir_failed"
-  | "invalid_state"
-  | "invalid_filter"
-  | "invalid_limit";
-
-type WorkflowRunListFailure = {
-  command: "workflow run list";
-  code: WorkflowRunListFailureCode;
-  message: string;
-  dataDir?: string;
-};
-
 function workflowRunList(parsed: ParsedFlags, io: CliIo): number {
   if (parsed.args.length > 3) {
     return usageError(
@@ -696,25 +628,6 @@ function workflowRunList(parsed: ParsedFlags, io: CliIo): number {
 
   return emitWorkflowRunList(parsed, io, dataDir, summaries);
 }
-
-type WorkflowRunApproveFailureCode =
-  | "data_dir_failed"
-  | "run_id_required"
-  | "run_not_found"
-  | "manual_recovery_required"
-  | "invalid_state"
-  | "invalid_boundary"
-  | "approval_digest_mismatch"
-  | "duplicate_approval";
-
-type WorkflowRunApproveFailure = {
-  command: "workflow run approve";
-  code: WorkflowRunApproveFailureCode;
-  message: string;
-  dataDir?: string;
-  runId?: string;
-  boundary?: string;
-};
 
 function workflowRunApprove(parsed: ParsedFlags, io: CliIo): number {
   const positional = parsed.args.slice(3);
@@ -1019,21 +932,6 @@ function workflowRunApprove(parsed: ParsedFlags, io: CliIo): number {
   );
 }
 
-type WorkflowRunDecideFailureCode =
-  | "gate_id_required"
-  | "invalid_mode"
-  | "data_dir_failed"
-  | "gate_not_found"
-  | GateDecisionRefusalCode;
-
-type WorkflowRunDecideFailure = {
-  command: "workflow run decide";
-  code: WorkflowRunDecideFailureCode;
-  message: string;
-  dataDir?: string;
-  gateId?: string;
-};
-
 function isGateDecisionMode(value: string): value is GateDecisionMode {
   return (GATE_DECISION_MODES as readonly string[]).includes(value);
 }
@@ -1168,24 +1066,6 @@ function isWorkflowRunUpdateStepTargetState(
     value
   );
 }
-
-type WorkflowRunUpdateStepFailureCode =
-  | "data_dir_failed"
-  | "run_id_required"
-  | "run_not_found"
-  | "manual_recovery_required"
-  | "step_not_found"
-  | "invalid_state"
-  | "invalid_transition";
-
-type WorkflowRunUpdateStepFailure = {
-  command: "workflow run update-step";
-  code: WorkflowRunUpdateStepFailureCode;
-  message: string;
-  dataDir?: string;
-  runId?: string;
-  stepId?: string;
-};
 
 function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
   const positional = parsed.args.slice(3);
@@ -1814,16 +1694,6 @@ function resolveApprovalArtifactDigest(
   }
   return { value: actualDigest };
 }
-
-type WorkflowHandoffFailureCode = "data_dir_failed" | "run_not_found" | "run_id_required";
-
-type WorkflowHandoffFailure = {
-  command: "workflow handoff";
-  code: WorkflowHandoffFailureCode;
-  message: string;
-  dataDir?: string;
-  runId?: string;
-};
 
 function workflowHandoff(parsed: ParsedFlags, io: CliIo): number {
   const positional = parsed.args.slice(2);
