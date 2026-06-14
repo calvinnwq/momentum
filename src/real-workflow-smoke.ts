@@ -266,7 +266,7 @@ export function classifyWorkflowHarnessOutcome(
  * The facts a finished `spawnSync` carries that the probe mapping needs: the
  * thrown/returned spawn error (with its optional errno `code`), the exit
  * `status`, and the terminating `signal`. The executing layer
- * (`src/real-workflow-probe.ts`) adapts a real `SpawnSyncReturns` into this
+ * (`src/adapters/real-workflow-probe.ts`) adapts a real `SpawnSyncReturns` into this
  * shape so this module stays I/O-free and exhaustively unit-testable.
  */
 export type ProbeSpawnResult = {
@@ -279,7 +279,7 @@ export type ProbeSpawnResult = {
  * Reduce a finished probe `spawnSync` into the `WorkflowHarnessRawOutcome` the
  * taxonomy classifier consumes. Pure: inspects only the supplied result. The
  * timeout detection mirrors the repo's canonical probe handling in
- * `src/acp-runner.ts` — a `spawnSync` timeout surfaces as an `ETIMEDOUT` error
+ * `src/adapters/acp-runner.ts` — a `spawnSync` timeout surfaces as an `ETIMEDOUT` error
  * (alongside a `SIGTERM` kill) rather than a plain non-zero exit.
  */
 export function classifyProbeSpawnResult(

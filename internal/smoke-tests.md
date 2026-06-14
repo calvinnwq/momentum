@@ -73,9 +73,9 @@ mock Linear endpoints (no real `api.linear.app` calls — see
 [internal/contracts/intent-apply.md](contracts/intent-apply.md) for the test
 boundary that M6 inherits):
 
-- the `doctor --json` milestone marker reads the M8 closeout string
-  (NGX-302 flipped the marker from M5 to M6, NGX-319 from M6 to M7, and
-  NGX-330 from M7 to M8 — see
+- the `doctor --json` milestone marker reads the M10 closeout string
+  (NGX-302 flipped the marker from M5 to M6, NGX-319 from M6 to M7,
+  NGX-330 from M7 to M8, and NGX-353 from M8 to M10 — see
   [internal/milestones/m7-openclaw-coding-workflow-backend.md](milestones/m7-openclaw-coding-workflow-backend.md)).
 - workflow evidence ingestion through `momentum evidence ingest` and
   `evidence list` (see [docs/evidence-commands.md](../docs/evidence-commands.md)).
@@ -108,9 +108,9 @@ request counts.
 
 Coverage:
 
-- the `doctor --json` milestone marker reads the M8 closeout string
-  (NGX-302 flipped the marker from M5 to M6, NGX-319 from M6 to M7, then
-  NGX-330 from M7 to M8).
+- the `doctor --json` milestone marker reads the M10 closeout string
+  (NGX-302 flipped the marker from M5 to M6, NGX-319 from M6 to M7,
+  NGX-330 from M7 to M8, then NGX-353 from M8 to M10).
 - happy-path external apply: a pending `source_satisfied` intent is applied
   through `intent apply --external-apply` against the mock, producing an
   `applied` intent, a deterministic idempotency marker matching
@@ -676,9 +676,9 @@ never a CI full-agent spawn:
   command, so the planner reuses the validated wrapper config rather than minting
   a new command surface.
 - **CI-safe (always runs):** `test/real-workflow-probe-smoke.test.ts` covers the
-  execution helpers in `src/real-workflow-probe.ts` — `runHarnessProbe` (a
+  execution helpers in `src/adapters/real-workflow-probe.ts` — `runHarnessProbe` (a
   bounded `spawnSync` over the resolved probe, same discipline as
-  `src/acp-runner.ts`) and `loadRawWorkflowProfileFromEnv` — by spawning only a
+  `src/adapters/acp-runner.ts`) and `loadRawWorkflowProfileFromEnv` — by spawning only a
   cheap local `process.execPath` (node) child (clean exit, non-zero exit, missing
   binary, timeout) and reading a temp profile file. No external system is reached.
 - **Opt-in (skipped by default):** the same file's
