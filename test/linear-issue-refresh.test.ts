@@ -5,7 +5,7 @@ import {
   buildLinearIssueRefreshClient,
   type FetchLike,
   type LinearIssueRefreshTarget
-} from "../src/linear-issue-refresh.js";
+} from "../src/adapters/linear-issue-refresh.js";
 
 type MockGraphqlCall = {
   endpoint: string;

@@ -214,8 +214,11 @@ describe("M11 CLI import boundaries", () => {
   it("keeps infrastructure-facing adapters under src/adapters ownership", () => {
     const expectedAdapters = [
       "src/adapters/db.ts",
+      "src/adapters/external-update-adapter.ts",
       "src/adapters/git-transaction.ts",
+      "src/adapters/linear-external-update-client.ts",
       "src/adapters/linear-http-client.ts",
+      "src/adapters/linear-issue-refresh.ts",
       "src/adapters/acp-config.ts",
       "src/adapters/acp-runner.ts",
       "src/adapters/fake-runner.ts",
@@ -238,8 +241,11 @@ describe("M11 CLI import boundaries", () => {
 
     const rootInfrastructureModules = [
       "src/db.ts",
+      "src/external-update-adapter.ts",
       "src/git-transaction.ts",
+      "src/linear-external-update-client.ts",
       "src/linear-http-client.ts",
+      "src/linear-issue-refresh.ts",
       "src/acp-config.ts",
       "src/acp-runner.ts",
       "src/fake-runner.ts",

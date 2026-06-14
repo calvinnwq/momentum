@@ -13,7 +13,7 @@ import {
   type ExternalUpdateAdapter,
   type ExternalUpdateAdapterInput,
   type ExternalUpdateAdapterTarget
-} from "../src/external-update-adapter.js";
+} from "../src/adapters/external-update-adapter.js";
 import type { UpdateIntent } from "../src/update-intents.js";
 
 function buildIntent(overrides: Partial<UpdateIntent> = {}): UpdateIntent {
@@ -349,7 +349,7 @@ describe("no external mutation side effects in boundary slice", () => {
   it("does not import any HTTP / network module from the boundary surface", async () => {
     const moduleSource = await import("node:fs").then((fs) =>
       fs.readFileSync(
-        new URL("../src/external-update-adapter.ts", import.meta.url),
+        new URL("../src/adapters/external-update-adapter.ts", import.meta.url),
         "utf8"
       )
     );

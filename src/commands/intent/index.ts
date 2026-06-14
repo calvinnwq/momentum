@@ -53,8 +53,8 @@ import {
   type ExecuteExternalApplyDeps,
   type ExecuteExternalApplyResult
 } from "../../intent-apply-execute.js";
-import { type LinearExternalUpdateClient } from "../../linear-external-update-client.js";
-import { type LinearIssueRefreshClient } from "../../linear-issue-refresh.js";
+import { type LinearExternalUpdateClient } from "../../adapters/linear-external-update-client.js";
+import { type LinearIssueRefreshClient } from "../../adapters/linear-issue-refresh.js";
 
 export type LinearExternalUpdateClientFactoryInput = {
   apiKey: string | null;

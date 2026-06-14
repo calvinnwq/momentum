@@ -30,7 +30,7 @@ import {
 import type {
   LinearIssueRefreshClient,
   LinearIssueRefreshTarget
-} from "./linear-issue-refresh.js";
+} from "./adapters/linear-issue-refresh.js";
 import {
   recordSourceSnapshot,
   upsertSourceItem

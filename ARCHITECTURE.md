@@ -28,10 +28,10 @@ contracts now live under `src/renderers/`.
 
 Infrastructure-facing clients and runtime adapters that used to sit as flat
 `src/` modules now have explicit ownership under `src/adapters/`: database
-opening helpers, git transactions, Linear HTTP / source adapters, fake /
-trusted-shell / ACP runner adapters and configs, live wrapper / harness-probe
-adapters for OpenClaw-facing execution, and no-mistakes executor / orchestrator
-wrappers.
+opening helpers, git transactions, Linear HTTP / source / external-update
+adapters and refresh clients, fake / trusted-shell / ACP runner adapters and
+configs, live wrapper / harness-probe adapters for OpenClaw-facing execution,
+and no-mistakes executor / orchestrator wrappers.
 
 ## Deeper Contracts
 
