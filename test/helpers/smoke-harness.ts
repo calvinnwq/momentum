@@ -1,4 +1,5 @@
 import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -28,6 +29,17 @@ export const REPO_ROOT = path.resolve(
 );
 export const CLI_BIN = path.join(REPO_ROOT, "dist", "index.js");
 
+const BUILD_LOCK_DIR = path.join(
+  os.tmpdir(),
+  `momentum-smoke-build-${createHash("sha1")
+    .update(REPO_ROOT)
+    .digest("hex")
+    .slice(0, 12)}.lock`
+);
+const BUILD_LOCK_POLL_MS = 100;
+const BUILD_LOCK_STALE_MS = 45_000;
+const BUILD_LOCK_WAIT_MS = 55_000;
+
 export const SMOKE_GOAL_SPEC = `---
 title: Smoke Goal
 runner: fake
@@ -52,13 +64,88 @@ const tempRoots: string[] = [];
  * `dist/index.js` artifact rather than a stale one.
  */
 export function buildCli(): void {
-  execFileSync("pnpm", ["build"], {
-    cwd: REPO_ROOT,
-    stdio: ["ignore", "pipe", "pipe"]
+  withBuildLock(() => {
+    if (!cliArtifactIsFresh()) {
+      execFileSync("pnpm", ["build"], {
+        cwd: REPO_ROOT,
+        stdio: ["ignore", "pipe", "pipe"]
+      });
+    }
   });
   if (!fs.existsSync(CLI_BIN)) {
     throw new Error(`smoke: built CLI not found at ${CLI_BIN}`);
   }
+}
+
+function withBuildLock(run: () => void): void {
+  fs.mkdirSync(path.dirname(BUILD_LOCK_DIR), { recursive: true });
+  const deadline = Date.now() + BUILD_LOCK_WAIT_MS;
+  for (;;) {
+    try {
+      fs.mkdirSync(BUILD_LOCK_DIR);
+      break;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+        throw error;
+      }
+      const heldMs = lockHeldMs();
+      if (heldMs !== null && heldMs > BUILD_LOCK_STALE_MS) {
+        fs.rmSync(BUILD_LOCK_DIR, { recursive: true, force: true });
+        continue;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(
+          `smoke: timed out waiting for build lock at ${BUILD_LOCK_DIR}`
+        );
+      }
+      sleepSync(BUILD_LOCK_POLL_MS);
+    }
+  }
+  try {
+    run();
+  } finally {
+    fs.rmSync(BUILD_LOCK_DIR, { recursive: true, force: true });
+  }
+}
+
+function lockHeldMs(): number | null {
+  try {
+    return Date.now() - fs.statSync(BUILD_LOCK_DIR).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function cliArtifactIsFresh(): boolean {
+  let artifactMtime: number;
+  try {
+    artifactMtime = fs.statSync(CLI_BIN).mtimeMs;
+  } catch {
+    return false;
+  }
+  try {
+    const newestSrc = newestMtime(path.join(REPO_ROOT, "src"));
+    const tsconfig = fs.statSync(path.join(REPO_ROOT, "tsconfig.json")).mtimeMs;
+    return newestSrc <= artifactMtime && tsconfig <= artifactMtime;
+  } catch {
+    return false;
+  }
+}
+
+function newestMtime(target: string): number {
+  const stat = fs.statSync(target);
+  if (!stat.isDirectory()) {
+    return stat.mtimeMs;
+  }
+  let newest = stat.mtimeMs;
+  for (const entry of fs.readdirSync(target)) {
+    newest = Math.max(newest, newestMtime(path.join(target, entry)));
+  }
+  return newest;
 }
 
 /**
