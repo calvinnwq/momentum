@@ -10,21 +10,22 @@ Momentum is a TypeScript CLI for durable autonomous repo-work orchestration.
 The runtime centers on local SQLite state, per-run artifacts, explicit operator
 commands, and stable JSON / text envelopes.
 
-The executable entrypoint is intentionally thin. M11 has introduced an explicit
-command registry skeleton and has started moving command families behind
-`src/commands/` modules:
+The executable entrypoint is intentionally thin. M11 leaves `src/cli.ts` as the
+stable parser and compatibility surface while command-family orchestration lives
+behind explicit `src/commands/` modules:
 
 ```text
 src/index.ts -> src/cli.ts -> src/commands/ registry + command families -> domain modules
                                       \-> src/renderers/ shared output contracts
 ```
 
-`src/cli.ts` is still the command parser, compatibility surface, and home for
-command handlers not yet extracted. Extracted families currently include the
-read-only status family, workflow, goal, source, evidence, project rollup, and
-update-intent / intent surfaces. Shared help, IO, reusable source / evidence /
-intent JSON shapes, and remaining daemon / recovery / worker / doctor output
-contracts now live under `src/renderers/`.
+`src/cli.ts` owns top-level parsing, global compatibility flags, route
+dispatch, and the remaining daemon / recovery / worker / doctor compatibility
+surfaces. Extracted command-family modules own the read-only status family,
+workflow, goal, source, evidence, project rollup, and update-intent / intent
+surfaces. Shared help, IO, reusable source / evidence / intent JSON shapes, and
+daemon / recovery / worker / doctor output contracts live under
+`src/renderers/`.
 
 Infrastructure-facing clients and runtime adapters that used to sit as flat
 `src/` modules now have explicit ownership under `src/adapters/`: database
@@ -52,22 +53,21 @@ Use these docs for detailed behavior:
 - [internal/contracts/source-adapters.md](internal/contracts/source-adapters.md):
   source adapter and evidence-sync boundaries.
 
-## M11 Target
+## M11 Final Shape
 
-M11 changes structure, not semantics. The end state is:
+M11 changed structure, not semantics. The final shape is:
 
 ```text
 src/index.ts              process entrypoint only
-src/cli.ts                thin parser, top-level dispatch, shared CLI plumbing
+src/cli.ts                parser, top-level dispatch, compatibility surfaces
 src/commands/             command-family modules
 src/renderers/            text / JSON envelope rendering helpers
 src/adapters/             infrastructure-facing clients and runtime adapters
-src/core/ or existing src domain modules
+existing src domain modules
                           domain state, reducers, policies, persistence helpers
 ```
 
-The exact folder names may evolve as slices land, but the import direction is
-fixed:
+The import direction is fixed:
 
 ```text
 index -> cli -> commands -> renderers
@@ -82,9 +82,11 @@ paths and existing policy gates.
 
 ## Command Module Contract
 
-Each command-family module introduced during M11 should own one coherent command
-family, for example `workflow`, read-only status, goal, source, evidence, intent,
-daemon, project, recovery, or doctor.
+Each command-family module introduced during M11 owns one coherent command
+family, for example `workflow`, read-only status, goal, source, evidence,
+intent, or project. Daemon, recovery, worker, and doctor remain deliberate
+`src/cli.ts` compatibility surfaces, with their output contracts delegated to
+`src/renderers/`.
 
 A command module may:
 
@@ -103,13 +105,14 @@ A command module must not:
 
 ## M11 Import Boundaries
 
-During and after M11:
+After M11:
 
 - `src/index.ts` only performs process bootstrap and loads `runCli` from
   `src/cli.ts`; bootstrap-only warning shims must run before `src/cli.ts`
   imports persistence-backed modules.
-- `src/cli.ts` may import command-family modules once the registry skeleton
-  exists.
+- `src/cli.ts` imports command-family modules through the explicit command
+  registry or direct top-level dispatch and keeps remaining compatibility
+  surfaces local.
 - Command-family modules may import domain modules, renderers, and shared CLI
   helpers.
 - Domain modules stay independent of CLI argv parsing and process IO.
@@ -137,24 +140,24 @@ commands need the same shape, move it to `src/renderers/` first. Do not let
 domain modules import commands or renderers, and do not read or write
 `process.stdout` / `process.stderr` outside the CLI or rendering layers.
 
-## M11 Migration Order
+## M11 Closeout
 
-The migration is deliberately staged:
+The migration shipped in deliberately staged slices:
 
-1. `NGX-412` adds the command registry skeleton and shared command contract
+1. `NGX-411` pinned this architecture contract and the M11 non-semantic
+   structure boundary.
+2. `NGX-412` added the command registry skeleton and shared command contract
    with explicit route declarations and no filesystem discovery.
-2. `NGX-413` extracts the read-only status family (`status`, `logs`,
+3. `NGX-413` extracted the read-only status family (`status`, `logs`,
    `handoff`, and stable read-only helpers) without changing output.
-3. `NGX-414` extracts the workflow command family after the registry exists.
-4. `NGX-415` extracts the goal, source, evidence, project, and update-intent
+4. `NGX-414` extracted the workflow command family after the registry exists.
+5. `NGX-415` extracted the goal, source, evidence, project, and update-intent
    command families.
-5. `NGX-416` consolidates renderers and output contracts.
-6. `NGX-417` organizes adapters and infrastructure boundaries.
-7. `NGX-418` enforces import boundaries with structural guardrails.
-8. `NGX-419` closes out M11 with final regression coverage and docs cleanup.
-
-`NGX-411` is contract-only. Do not move workflow or read-only command code in
-this slice; those moves belong to `NGX-413` and `NGX-414`.
+6. `NGX-416` consolidated renderers and output contracts.
+7. `NGX-417` organized adapters and infrastructure boundaries.
+8. `NGX-418` enforced import boundaries with structural guardrails.
+9. `NGX-419` closes out M11 with final regression coverage, doctor marker
+   advancement, and docs cleanup.
 
 ## Stability Rules
 
@@ -162,9 +165,9 @@ this slice; those moves belong to `NGX-413` and `NGX-414`.
   behavior.
 - JSON envelope keys, refusal codes, and text output must be preserved across
   extraction.
-- Existing workflow/read-only command implementation remains in `src/cli.ts`
-  until its assigned migration issue, even when a command is registered through
-  the skeleton.
+- `src/cli.ts` intentionally retains top-level parsing plus daemon, recovery,
+  worker, and doctor compatibility surfaces; broad extraction of those surfaces
+  belongs to a future scoped issue.
 - Public docs stay in `docs/`; milestone sequencing and NGX detail stay in
   `internal/` or this architecture contract when the detail is structural.
 - Every extraction should leave the repo valid with focused tests, typecheck,

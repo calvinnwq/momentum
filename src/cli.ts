@@ -1,7 +1,4 @@
-import crypto from "node:crypto";
-import fs from "node:fs";
 import os from "node:os";
-import path from "node:path";
 import process from "node:process";
 import {
   renderHelp,
@@ -21,10 +18,7 @@ import { evidence } from "./commands/evidence/index.js";
 import { intent } from "./commands/intent/index.js";
 import { workflow } from "./commands/workflow/index.js";
 import { intentApplyAuditToJsonShape } from "./renderers/intent.js";
-import {
-  sourceReconciliationPaginationStopped,
-  type SourceReconciliationPaginationStoppedJson
-} from "./renderers/source.js";
+import { sourceReconciliationPaginationStopped } from "./renderers/source.js";
 import {
   emitDaemonStartFailure,
   emitDaemonStartLoopResult,
@@ -33,8 +27,7 @@ import {
   emitDaemonStatusFailure,
   emitDaemonStopFailure,
   emitDaemonStopSuccess,
-  summarizeExistingDaemonRun,
-  type DaemonStartFailurePayload
+  summarizeExistingDaemonRun
 } from "./renderers/daemon.js";
 import {
   emitRecoveryClear,
@@ -48,21 +41,14 @@ import {
   type DoctorPolicyPayload,
   type DoctorSourcesPayload
 } from "./renderers/doctor.js";
-import { isUniqueViolation, openDb, type MomentumDb } from "./adapters/db.js";
-import { initGoal, type GoalInitOptions, type GoalInitSuccess } from "./goal-init.js";
+import { isUniqueViolation, openDb } from "./adapters/db.js";
 import { resolveDataDir, type DataDirOptions } from "./data-dir.js";
-import {
-  executeIterationJob,
-  type ExecuteIterationJobResult
-} from "./iteration-job.js";
-import { runWorkerOnce, type WorkerRunResult } from "./worker-run.js";
+import { runWorkerOnce } from "./worker-run.js";
 import {
   loadDaemonStatus,
   loadStaleLeasePreCheck,
   DEFAULT_DAEMON_ACTIVE_JOB_STALE_AFTER_MS,
-  DEFAULT_DAEMON_STALE_AFTER_MS,
-  type DaemonStatusSuccess,
-  type StaleLeasePreCheckSnapshot
+  DEFAULT_DAEMON_STALE_AFTER_MS
 } from "./daemon-status.js";
 import {
   getActiveDaemonRun,
@@ -75,16 +61,9 @@ import {
 import {
   runDaemonLoop,
   DEFAULT_DAEMON_POLL_INTERVAL_MS,
-  DEFAULT_DAEMON_STARTUP_RECOVERY_GRACE_MS,
-  type DaemonLoopResult
+  DEFAULT_DAEMON_STARTUP_RECOVERY_GRACE_MS
 } from "./daemon-loop.js";
-import {
-  runStartupRecovery,
-  type StaleClaimedJobRecoverySkipped,
-  type StaleDaemonRunRecoverySkipped,
-  type StaleRepoLockRecoverySkipped,
-  type StartupRecoveryResult
-} from "./stale-recovery.js";
+import { runStartupRecovery } from "./stale-recovery.js";
 import {
   clearGoalManualRecoveryGuarded,
   type ClearGoalManualRecoveryGuardedResult
@@ -98,190 +77,30 @@ import {
 import {
   DEFAULT_INTENT_APPLY_POLICY,
   loadMomentumPolicy,
-  resolveIntentApplyPolicy,
-  type PolicyEffectiveFieldSource,
-  type UpdateIntentApplyPolicy
+  resolveIntentApplyPolicy
 } from "./momentum-policy.js";
-import {
-  getSourceItemById,
-  linkGoalToSourceItem,
-  listSourceItems,
-  unlinkGoalFromSourceItem,
-  type LinkGoalToSourceItemErrorCode,
-  type SourceItem,
-  type UnlinkGoalFromSourceItemErrorCode
-} from "./source-items.js";
 import {
   listSourceReconciliationRuns,
   type SourceReconciliationRun
 } from "./source-reconciliation-runs.js";
+import { type LinearReconciliationClient } from "./source-reconciliation.js";
 import {
-  reconcileLinearSource,
-  type LinearReconciliationClient,
-  type LinearReconciliationFilters,
-  type ReconcileLinearSourceInput,
-  type ReconcileLinearSourceResult
-} from "./source-reconciliation.js";
-import { buildLinearHttpReconciliationClient } from "./adapters/linear-http-client.js";
-import {
-  ingestEvidenceRecord,
-  listEvidenceRecords,
   summarizeEvidenceRecords,
-  type EvidenceRecord,
-  type EvidenceRecordIngestInput,
-  type EvidenceRecordsSummary,
-  type ListEvidenceRecordsOptions
+  type EvidenceRecordsSummary
 } from "./evidence-records.js";
-import {
-  parseWorkflowArtifact,
-  type WorkflowEvidenceDiagnostic
-} from "./evidence-workflow.js";
-import {
-  parseWorkflowRunImport,
-  type WorkflowRunImport,
-  type WorkflowRunImportDiagnostic,
-  type WorkflowRunImportErrorCode
-} from "./workflow-run-import.js";
-import {
-  persistWorkflowRunImport,
-  type PersistWorkflowRunImportSummary
-} from "./workflow-run-import-persist.js";
-import {
-  WORKFLOW_STATUS_FILTER_KEYS,
-  listWorkflowRunSummaries,
-  loadWorkflowRunDetail,
-  type WorkflowApprovalRow,
-  type WorkflowEvidenceLink,
-  type WorkflowLeaseRow,
-  type WorkflowRunDetail,
-  type WorkflowRunRow,
-  type WorkflowRunSummary,
-  type WorkflowStatusFilterKey,
-  type WorkflowStepRow
-} from "./workflow-status.js";
-import {
-  deriveWorkflowRunState,
-  highestWorkflowApprovalBoundary,
-  isTerminalStepState,
-  isWorkflowApprovalBoundary,
-  isTerminalRunState,
-  transitionWorkflowStep,
-  WORKFLOW_RUN_STATES,
-  workflowStepKindsForApprovalBoundary,
-  type WorkflowRunState,
-  type WorkflowLeaseRecord,
-  type WorkflowStepKind,
-  type WorkflowStepRecord,
-  type WorkflowStepState,
-  type WorkflowApprovalBoundary
-} from "./workflow-run-reducer.js";
-import {
-  WORKFLOW_HANDOFF_SCHEMA_VERSION,
-  loadWorkflowHandoff,
-  type WorkflowHandoffEnvelope
-} from "./workflow-handoff.js";
-import {
-  loadWorkflowMonitorEnvelope,
-  type WorkflowMonitorEnvelope
-} from "./workflow-monitor-envelope.js";
-import {
-  deriveWorkflowMonitorState,
-  type WorkflowMonitorState
-} from "./workflow-monitor-state.js";
-import {
-  clearWorkflowRunManualRecoveryGuarded,
-  getWorkflowRunManualRecoveryState,
-  isBlockingWorkflowRecoveryCode,
-  type ClearWorkflowRunManualRecoveryGuardedResult,
-  type WorkflowRunManualRecoveryState
-} from "./workflow-run-recovery.js";
-import {
-  reconcileWorkflowRunManualRecovery,
-  type ReconcileWorkflowRunManualRecoveryResult
-} from "./workflow-recovery-reconcile.js";
-import {
-  CODING_WORKFLOW_DEFINITION_KEY,
-  getBuiltInWorkflowDefinition,
-  type WorkflowDefinition
-} from "./workflow-definition.js";
-import {
-  loadWorkflowDefinition,
-  persistWorkflowDefinition
-} from "./workflow-definition-persist.js";
-import type {
-  WorkflowRunStartError,
-  WorkflowRunStartInput
-} from "./workflow-run-start.js";
-import {
-  InvalidWorkflowRunStartError,
-  WorkflowRunStartConflictError,
-  persistWorkflowRunStart,
-  type PersistWorkflowRunStartSummary
-} from "./workflow-run-start-persist.js";
-import {
-  GATE_DECISION_MODES,
-  type GateDecisionMode,
-  type GateDecisionRefusalCode,
-  type GateDecisionRequest
-} from "./workflow-gate.js";
-import {
-  WorkflowGateDecisionError,
-  WorkflowGateNotFoundError,
-  resolveWorkflowGate,
-  type WorkflowGateRecord
-} from "./workflow-gate-persist.js";
 import { executeWorkflowStepDispatch } from "./workflow-dispatch-execute.js";
 import { resolveDaemonWorkflowDispatch } from "./workflow-dogfood-dispatch.js";
 import {
-  DEFAULT_RECONCILIATION_STALE_THRESHOLD_MS,
-  PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT,
-  buildProjectRollup,
-  type ProjectRollup,
-  type ProjectRollupExternalApply,
-  type ProjectRollupFilters,
-  type ProjectRollupOptions,
-  type ProjectRollupPendingIntentExternalApply
-} from "./project-rollup.js";
-import {
-  UPDATE_INTENT_STATUSES,
-  cancelUpdateIntent,
-  countUpdateIntents,
-  getUpdateIntentById,
-  listUpdateIntents,
-  markUpdateIntentApplied,
-  markUpdateIntentSkipped,
-  type CountUpdateIntentsOptions,
-  type ListUpdateIntentsOptions,
-  type UpdateIntent,
-  type UpdateIntentDecisionInput,
-  type UpdateIntentDecisionResult,
-  type UpdateIntentStatus
-} from "./update-intents.js";
-import {
-  evaluateGoalForSourceSatisfiedIntents,
-  type EvaluateGoalForSourceSatisfiedIntentResult
-} from "./update-intent-generator.js";
-import {
   countIntentApplyAuditsByLifecycleState,
   countIntentsByApplyState,
-  listIntentApplyAudits,
-  summarizeIntentApplyAuditsForIntent,
-  type IntentApplyAudit,
-  type IntentApplyAuditCounts,
-  type IntentApplyAuditSummary,
-  type IntentApplyStateCounts
+  listIntentApplyAudits
 } from "./intent-apply-audits.js";
-import {
-  defaultBuildLinearRefreshClient,
-  executeExternalApply,
-  LINEAR_API_KEY_ENV_VAR,
-  type ExecuteExternalApplyDeps,
-  type ExecuteExternalApplyResult
-} from "./intent-apply-execute.js";
 import { type LinearExternalUpdateClient } from "./adapters/linear-external-update-client.js";
 import { type LinearIssueRefreshClient } from "./adapters/linear-issue-refresh.js";
 
 export const VERSION = "0.0.0";
+export const DOCTOR_MILESTONE =
+  "Milestone 11: CLI architecture refactor (NGX-411, NGX-412, NGX-413, NGX-414, NGX-415, NGX-416, NGX-417, NGX-418, NGX-419) complete";
 
 export type LinearReconciliationClientFactoryInput = {
   apiKey: string | null;
@@ -891,8 +710,7 @@ function doctor(parsed: ParsedFlags, io: CliIo): number {
     version: VERSION,
     node: process.version,
     platform: process.platform,
-    milestone:
-      "Milestone 10: workflow-first runtime (NGX-344, NGX-345, NGX-346, NGX-347, NGX-348, NGX-349, NGX-350, NGX-351, NGX-352, NGX-367, NGX-353) complete",
+    milestone: DOCTOR_MILESTONE,
     daemon: daemonPayload,
     runners: {
       supported: [...BUILTIN_RUNNER_KINDS],

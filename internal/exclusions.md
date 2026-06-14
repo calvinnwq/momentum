@@ -1,12 +1,11 @@
 # Current Exclusions
 
 This page lists features and behaviors that are intentionally **out of scope**
-after the M9-00 decision gate and the M10 workflow-first implementation start.
-The most recently shipped milestone is M8 closeout, Milestone 9 remains
-foundation work, and Milestone 10 has started landing implementation slices. It
-exists so contributors and
-operators can see at a glance what Momentum does *not* do today, what the
-current milestone now owns, and what remains explicitly deferred.
+after the M11 CLI architecture refactor closeout. Milestone 9 remains
+foundation work, Milestone 10 completed the workflow-first runtime, and
+Milestone 11 completed the CLI structure refactor. It exists so contributors
+and operators can see at a glance what Momentum does *not* do today, what
+closed milestones now own, and what remains explicitly deferred.
 
 Milestone status:
 
@@ -87,11 +86,12 @@ Milestone status:
   M9 design decision, superseded for future workflow-first work by M10: `goal
   start` remains a compatibility path, while first-class workflow run start has
   landed in the M10 run-start slice. The `doctor --json` marker advanced to the
-  M10 closeout string at NGX-353. See
+  M10 closeout string at NGX-353 and to the M11 closeout string at NGX-419. See
   [`internal/milestones/m9-live-workflow-execution.md`](milestones/m9-live-workflow-execution.md)
   and [`internal/contracts/live-workflow-execution.md`](contracts/live-workflow-execution.md).
-- **Workflow-first runtime pivot** is an accepted planning contract. It
-  reframes the future product model around
+- **Milestone 10 (Workflow-First Runtime)** is complete. The workflow-first
+  runtime pivot remains an accepted planning contract and reframed the product
+  model around
   `WorkflowDefinition`, `WorkflowRun`, `StepDefinition`, `StepRun`, and
   pluggable executors such as `goal-loop` and `no-mistakes`. M9 remains
   foundation work; M10 has landed definition schema, persistence primitives,
@@ -102,13 +102,17 @@ Milestone status:
   managed `daemon start`. The earlier combined first-class start / execution behavior
   deferral has narrowed: start, scheduling, goal-loop, one-shot /
   script execution, no-mistakes mirroring, gates, and phase-1 dispatch scaffolds
-  have landed, while the real workflow-first dogfood, `external-apply` /
-  `subworkflow` dispatch, and closeout remain deferred until the relevant M10
-  implementation slices land. See
+  have landed, while generalized `external-apply` / `subworkflow` dispatch
+  remains deferred to later runtime work. See
   [`internal/milestones/m10-workflow-first-runtime.md`](milestones/m10-workflow-first-runtime.md),
   [`internal/contracts/workflow-first-runtime.md`](contracts/workflow-first-runtime.md),
   [`internal/contracts/executor-loop.md`](contracts/executor-loop.md), and
   [`internal/contracts/workflow-first-gap-matrix.md`](contracts/workflow-first-gap-matrix.md).
+- **Milestone 11 (CLI Architecture Refactor)** is complete. It left public
+  command semantics frozen while moving command-family orchestration under
+  `src/commands/`, shared output contracts under `src/renderers/`, and
+  infrastructure-facing clients and runtime adapters under `src/adapters/`.
+  See [`ARCHITECTURE.md`](../ARCHITECTURE.md).
 
 The following surfaces remain deferred outside the landed M10 definition,
 persistence, run-start, executor-record, scheduler-lane, goal-loop-adapter,

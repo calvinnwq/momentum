@@ -40,10 +40,12 @@ describe("root ARCHITECTURE.md contract", () => {
     expect(architecture).toMatch(/Domain modules must not import command modules or renderers/i);
     expect(architecture).toMatch(/Renderers must not\s+mutate state/i);
     expect(architecture).toMatch(/External adapters stay behind domain or command boundaries/i);
+    expect(architecture).toMatch(/daemon, recovery, worker, and doctor remain deliberate\s+`src\/cli\.ts` compatibility surfaces/i);
   });
 
-  it("pins NGX-412 through NGX-419 migration order", () => {
+  it("pins NGX-411 through NGX-419 closeout order", () => {
     const expected = [
+      "NGX-411",
       "NGX-412",
       "NGX-413",
       "NGX-414",
@@ -60,7 +62,7 @@ describe("root ARCHITECTURE.md contract", () => {
       cursor = index;
     }
 
-    expect(architecture).toMatch(/Do not move workflow or read-only command code/i);
+    expect(architecture).toMatch(/closes out M11 with final regression coverage/i);
     expect(architecture).toMatch(/NGX-413.*NGX-414/s);
   });
 

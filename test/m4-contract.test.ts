@@ -42,17 +42,6 @@ const M4_NON_GOALS_DOC = [
   "Remote git operations"
 ] as const;
 
-const M4_NON_GOALS_AGENTS = [
-  "external tracker writes",
-  "inbound webhooks",
-  "per-source-item worktrees / parallel same-repo Goals",
-  "background runner supervision",
-  "dashboards / UI surfaces",
-  "strong sandboxing",
-  "cooperative mid-job cancellation / signal handling",
-  "remote git operations"
-] as const;
-
 const M4_DOC_PATH = path.join("internal", "milestones", "m4-real-runners.md");
 
 describe("M4 contract docs (NGX-279..NGX-286)", () => {

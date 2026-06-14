@@ -16,7 +16,7 @@ Momentum is built milestone by milestone. Each milestone has a single durable sh
 | Milestone 8 | Workflow Run Operator Controls | Complete | [m8-workflow-run-operator-controls.md](milestones/m8-workflow-run-operator-controls.md) |
 | Milestone 9 | Live Workflow Execution | Foundation in force | [m9-live-workflow-execution.md](milestones/m9-live-workflow-execution.md) |
 | Milestone 10 | Workflow-First Runtime | Complete | [m10-workflow-first-runtime.md](milestones/m10-workflow-first-runtime.md) |
-| Milestone 11 | CLI Architecture Refactor | Implementation in progress | [../ARCHITECTURE.md](../ARCHITECTURE.md) |
+| Milestone 11 | CLI Architecture Refactor | Complete | [../ARCHITECTURE.md](../ARCHITECTURE.md) |
 
 Accepted planning for the next runtime direction lives in
 [internal/contracts/workflow-first-runtime.md](contracts/workflow-first-runtime.md).
@@ -52,14 +52,17 @@ stable production path while Momentum builds an opt-in Momentum-native coding
 workflow route. New Momentum-native runs must start from Momentum state; the
 OpenClaw skill boundary is client, rendering, delivery, and compatibility.
 
-Milestone 11 is the CLI structure refactor. Its active contract is root
-[ARCHITECTURE.md](../ARCHITECTURE.md): `src/cli.ts` remains the stable command
-surface while the repo adds a command registry, extracts command families,
-consolidates reusable renderers, and enforces import boundaries with structural
-guards. M11 is a structure migration; Momentum command semantics stay frozen
-unless a later issue explicitly changes behavior.
+Milestone 11 is the closed CLI structure refactor. Its final contract is root
+[ARCHITECTURE.md](../ARCHITECTURE.md): `src/cli.ts` remains the stable parser,
+top-level dispatch surface, and daemon / recovery / worker / doctor
+compatibility home; command-family orchestration lives under `src/commands/`;
+reusable JSON/text/help/diagnostic output contracts live under
+`src/renderers/`; infrastructure-facing clients and runtime adapters live under
+`src/adapters/`; structural guardrails enforce those import boundaries. M11 is a
+structure migration; Momentum command semantics stay frozen unless a later issue
+explicitly changes behavior.
 
-The `doctor` readiness marker tracks the **most recently closed** milestone. It currently reads `Milestone 10: workflow-first runtime (NGX-344, NGX-345, NGX-346, NGX-347, NGX-348, NGX-349, NGX-350, NGX-351, NGX-352, NGX-367, NGX-353) complete`. The marker advanced from the M6 closeout string to `Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete` at the M7 closeout slice (NGX-319), stayed pinned to the M7 string through every M8 implementation slice, advanced to the M8 string at the M8 closeout slice (NGX-330), and advanced again to the M10 string at the M10 closeout slice (NGX-353).
+The `doctor` readiness marker tracks the **most recently closed** milestone. It currently reads `Milestone 11: CLI architecture refactor (NGX-411, NGX-412, NGX-413, NGX-414, NGX-415, NGX-416, NGX-417, NGX-418, NGX-419) complete`. The marker advanced from the M6 closeout string to `Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete` at the M7 closeout slice (NGX-319), stayed pinned to the M7 string through every M8 implementation slice, advanced to the M8 string at the M8 closeout slice (NGX-330), advanced again to `Milestone 10: workflow-first runtime (NGX-344, NGX-345, NGX-346, NGX-347, NGX-348, NGX-349, NGX-350, NGX-351, NGX-352, NGX-367, NGX-353) complete` at the M10 closeout slice (NGX-353), and advanced to the M11 string at the M11 closeout slice (NGX-419).
 
 ## Previously closed milestone: M8
 
@@ -112,7 +115,7 @@ The M9-00 decision gate (NGX-331) pins the slice order; each slice is a concrete
 5. **NGX-335 — M9-04 Postflight and no-mistakes wrappers.**
 6. **NGX-336 — M9-05 Merge cleanup and Linear refresh boundaries.**
 7. **NGX-337 — M9-06 Live recovery and resume smoke.**
-8. **NGX-338 — M9-07 Dogfood run and closeout** — run the dogfood gate and capture regression updates; M10 closeout now owns the next possible `doctor --json` marker advance.
+8. **NGX-338 — M9-07 Dogfood run and closeout** — run the dogfood gate and capture regression updates; M10 closeout later advanced the `doctor --json` marker, and M11 closeout advanced it again.
 
 The `doctor --json` marker stayed pinned to the M8 closeout string above
 through M9 foundation work; M9 did not flip it.
@@ -150,8 +153,8 @@ becomes an executor family inside a workflow step.
 10. **NGX-367 — M10-09a Production workflow-lane dispatcher prep.** *(done)*
 11. **NGX-353 — M10-09 Workflow-first dogfood and closeout.** *(done)*
 
-The `doctor --json` marker now reports the M10 closeout string after the
-workflow-first dogfood gate passed.
+The `doctor --json` marker reported the M10 closeout string after the
+workflow-first dogfood gate passed, until the M11 closeout advanced it again.
 
 ## Previously closed milestone: M7
 

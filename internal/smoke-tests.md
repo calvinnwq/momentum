@@ -73,9 +73,10 @@ mock Linear endpoints (no real `api.linear.app` calls — see
 [internal/contracts/intent-apply.md](contracts/intent-apply.md) for the test
 boundary that M6 inherits):
 
-- the `doctor --json` milestone marker reads the M10 closeout string
+- the `doctor --json` milestone marker reads the M11 closeout string
   (NGX-302 flipped the marker from M5 to M6, NGX-319 from M6 to M7,
-  NGX-330 from M7 to M8, and NGX-353 from M8 to M10 — see
+  NGX-330 from M7 to M8, NGX-353 from M8 to M10, and NGX-419 from M10
+  to M11 — see
   [internal/milestones/m7-openclaw-coding-workflow-backend.md](milestones/m7-openclaw-coding-workflow-backend.md)).
 - workflow evidence ingestion through `momentum evidence ingest` and
   `evidence list` (see [docs/evidence-commands.md](../docs/evidence-commands.md)).
@@ -108,9 +109,10 @@ request counts.
 
 Coverage:
 
-- the `doctor --json` milestone marker reads the M10 closeout string
+- the `doctor --json` milestone marker reads the M11 closeout string
   (NGX-302 flipped the marker from M5 to M6, NGX-319 from M6 to M7,
-  NGX-330 from M7 to M8, then NGX-353 from M8 to M10).
+  NGX-330 from M7 to M8, NGX-353 from M8 to M10, then NGX-419 from M10
+  to M11).
 - happy-path external apply: a pending `source_satisfied` intent is applied
   through `intent apply --external-apply` against the mock, producing an
   `applied` intent, a deterministic idempotency marker matching
@@ -449,7 +451,7 @@ Run the built-binary production workflow-lane smoke locally via:
 pnpm vitest run test/smoke.test.ts -t "production workflow-lane dispatch"
 ```
 
-## Milestone 11 CLI structure coverage (NGX-416 through NGX-418)
+## Milestone 11 CLI structure coverage (NGX-416 through NGX-419)
 
 M11 is covered by focused structural tests plus a built-CLI JSON smoke that
 keeps output contracts stable while command code moves behind modules and
@@ -466,11 +468,17 @@ Coverage:
 - `src/index.ts` performs bootstrap-only warning suppression before dynamically
   importing `src/cli.ts`, so built-CLI `workflow run decide --json` structured
   refusals remain parseable JSON on stderr without SQLite warning noise.
+- the closeout command-family smoke covers representative JSON envelopes for
+  the migrated `status` / `logs` / `handoff`, `workflow`, `goal`, `source`,
+  `evidence`, `project`, and `intent` families, plus the remaining
+  daemon / recovery / worker / doctor compatibility surfaces in `src/cli.ts`.
+- `doctor --json` reports the M11 closeout marker after NGX-419.
 
 Run locally via targeted vitest commands:
 
 ```
 pnpm vitest run test/cli-renderers-output-contract.test.ts test/cli-import-boundaries.test.ts
+pnpm vitest run test/cli-architecture-command-smoke.test.ts
 pnpm vitest run test/smoke.test.ts -t "without Node warning noise"
 ```
 

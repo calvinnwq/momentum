@@ -284,7 +284,7 @@ function buildRoundScaffold(
   claim: ClaimedWorkflowStep,
   family: WorkflowExecutorFamily,
   invocationId: string,
-  now: number
+  _now: number
 ): ExecutorRoundRecord {
   return {
     roundId: deriveDispatchRoundId(invocationId),

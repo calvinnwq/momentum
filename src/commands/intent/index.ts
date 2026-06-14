@@ -38,13 +38,8 @@ import {
   type UpdateIntentStatus
 } from "../../update-intents.js";
 import {
-  countIntentApplyAuditsByLifecycleState,
-  countIntentsByApplyState,
-  listIntentApplyAudits,
   summarizeIntentApplyAuditsForIntent,
-  type IntentApplyAuditCounts,
-  type IntentApplyAuditSummary,
-  type IntentApplyStateCounts
+  type IntentApplyAuditSummary
 } from "../../intent-apply-audits.js";
 import {
   defaultBuildLinearRefreshClient,

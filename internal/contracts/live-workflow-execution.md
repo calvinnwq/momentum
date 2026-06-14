@@ -220,4 +220,4 @@ M9 can close only when:
 - Postflight / no-mistakes / merge-cleanup / linear-refresh wrappers are either implemented or explicitly split into follow-up slices with a documented dogfood limitation.
 - A live dogfood run is recorded in internal docs with command evidence, artifacts, and rollback notes.
 - The regression matrix is extended with live-wrapper failure modes.
-- Closeout evidence is recorded without flipping `doctor --json`; the marker stays pinned to the M8 closeout string through M9 foundation work, and M10 closeout owns the next possible marker advance.
+- Closeout evidence is recorded without flipping `doctor --json`; the marker stayed pinned to the M8 closeout string through M9 foundation work, M10 closeout advanced it to the M10 string, and M11 closeout later advanced the current marker to the M11 string.

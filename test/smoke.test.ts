@@ -13,6 +13,7 @@ import {
   FAKE_RUNNER_FIXTURE_FILENAME,
   FAKE_RUNNER_GOAL_COMPLETE_ENV
 } from "../src/adapters/fake-runner.js";
+import { DOCTOR_MILESTONE } from "../src/cli.js";
 import {
   dispatchWorkflowStepExecutor,
   type FakeWorkflowStepExecutorOutcome,
@@ -4398,14 +4399,12 @@ async function startLinearMockServer(
 
 describe("Milestone 5 evidence + intent + project status smoke (NGX-294)", () => {
   it(
-    "doctor --json reports the M10 closeout milestone marker",
+    "doctor --json reports the M11 closeout milestone marker",
     () => {
       const result = runCliBinary(["doctor", "--json"]);
       expect(result.code, `doctor stderr: ${result.stderr}`).toBe(0);
       const payload = JSON.parse(result.stdout) as Record<string, unknown>;
-      expect(payload["milestone"]).toBe(
-        "Milestone 10: workflow-first runtime (NGX-344, NGX-345, NGX-346, NGX-347, NGX-348, NGX-349, NGX-350, NGX-351, NGX-352, NGX-367, NGX-353) complete"
-      );
+      expect(payload["milestone"]).toBe(DOCTOR_MILESTONE);
     },
     60_000
   );

@@ -288,12 +288,12 @@ describe("M9 contract decision gate (NGX-331)", () => {
   describe("AGENTS.md", () => {
     const agentsPath = "AGENTS.md";
 
-    it("names M9 as the active milestone promoted at NGX-331 while keeping M8 most recently closed", () => {
+    it("preserves the M9 foundation narrative after later milestone closeouts", () => {
       const a = readDoc(agentsPath);
       expect(a).toMatch(/Milestone 9/);
       expect(a).toMatch(/Live Workflow Execution/i);
       expect(a).toContain("NGX-331");
-      expect(a).toMatch(/most recently closed milestone/i);
+      expect(a).toMatch(/remains valid foundation work/i);
     });
 
     it("links the M9 milestone narrative and the live-workflow-execution contract", () => {
