@@ -270,7 +270,9 @@ Purpose:
 Current state:
 
 - Valuable, but heavy and occasionally timing-sensitive.
-- `test/smoke.test.ts` is the dominant single file.
+- The monolithic built-binary smoke has been split into milestone-scoped files
+  under `test/*smoke.test.ts` (NGX-431). No single file dominates integration
+  timing; `test/m6-smoke.test.ts` remains the slowest at ~10.5s local.
 - Several broad CLI files overlap newer renderer/output contract tests.
 - Live-step heartbeat timing can flake under full-lane load.
 
@@ -312,22 +314,25 @@ Cleanup guidance:
 > files and removed — see the NGX-431 section above. The analysis below records
 > the pre-split motivation.
 
-`test/smoke.test.ts` is still the highest-value integration artifact because it
-pins the real built CLI against SQLite-backed orchestration. It also carries
-many historical milestone proofs in one huge file.
+The milestone-scoped `test/*smoke.test.ts` files are the highest-value
+integration artifacts because they pin the real built CLI against
+SQLite-backed orchestration. Before the NGX-431 split, they lived in a single
+monolithic `test/smoke.test.ts` that carried many historical milestone proofs in
+one huge file.
 
 Duplication pattern:
 
 - Lower-level contract tests already pin many reducer, import, monitor, and
   renderer shapes.
-- `test/smoke.test.ts` often re-proves the same invariant through the full CLI.
+- The milestone-scoped smoke files sometimes re-prove the same invariant through
+  the full CLI. This is expected for built-binary integration coverage; do not
+  reduce it until the regression matrix names a replacement test for each row.
 
-Action:
+Action (completed):
 
-- NGX-431 should split this file into milestone- or behavior-scoped smoke files.
-- Preserve coverage in `pnpm test:integration`.
-- Do not reduce evidence until the regression matrix names the replacement
-  smoke file for each row.
+- NGX-431 has split the monolith into milestone-scoped smoke files. Coverage
+  stays in `pnpm test:integration`. The regression matrix and smoke-tests docs
+  now point to the per-milestone files.
 
 ### Broad CLI Compatibility
 
