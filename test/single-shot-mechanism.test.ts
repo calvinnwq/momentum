@@ -5,6 +5,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { waitMs } from "./helpers/process-kill-harness.js";
 import type { ExecutorRoundRecord } from "../src/executor-loop-reducer.js";
 import type { LiveWrapperConfig } from "../src/adapters/live-wrapper-registry.js";
 import type { RunnerResult } from "../src/runner-result.js";
@@ -500,7 +501,7 @@ describe("single-shot concrete mechanisms", () => {
     expect(runGit(repoPath, ["status", "--porcelain"]).trim()).toBe("");
   });
 
-  it("kills a timed-out script command process group", async () => {
+  it("kills a timed-out script command process group", () => {
     const { repoPath, baseHead } = initRepo();
     const artifactRoot = makeTempDir();
     const sentinelPath = path.join(artifactRoot, "child-survived");
@@ -540,7 +541,7 @@ describe("single-shot concrete mechanisms", () => {
       recoveryCode: "command_timed_out"
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 2_500));
+    waitMs(2_500);
     expect(fs.existsSync(sentinelPath)).toBe(false);
   });
 

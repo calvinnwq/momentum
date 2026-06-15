@@ -4,6 +4,10 @@ import os from "node:os";
 import path from "node:path";
 
 import {
+  sigtermImmuneSleep,
+  waitMs
+} from "./helpers/process-kill-harness.js";
+import {
   LIVE_STEP_WRAPPER_RESULT_MAX_BYTES,
   LIVE_STEP_WRAPPER_OUTPUT_MAX_BYTES,
   LIVE_STEP_WRAPPER_RECOVERY_CODES,
@@ -392,7 +396,7 @@ describe("runLiveStepWrapper — command failure mapping", () => {
 
   it("enforces command timeout even when the process ignores SIGTERM", () => {
     const input = setup({
-      config: { timeoutSec: 1, args: ["-c", 'trap "" TERM; sleep 3'] }
+      config: { timeoutSec: 1, args: ["-c", sigtermImmuneSleep(3)] }
     });
 
     const start = Date.now();
@@ -422,7 +426,7 @@ describe("runLiveStepWrapper — command failure mapping", () => {
     });
 
     const out = runLiveStepWrapper(input);
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2_500);
+    waitMs(2_500);
 
     expect(out.ok).toBe(false);
     if (out.ok) return;
@@ -448,7 +452,7 @@ describe("runLiveStepWrapper — command failure mapping", () => {
     });
 
     const out = runLiveStepWrapper(input);
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1_500);
+    waitMs(1_500);
 
     expect(out.ok).toBe(true);
     expect(fs.existsSync(markerPath)).toBe(false);
@@ -855,7 +859,7 @@ describe("runLiveStepWrapper — pre-flight probe", () => {
       config: {
         probe: {
           command: "/bin/sh",
-          args: ["-c", 'trap "" TERM; sleep 3'],
+          args: ["-c", sigtermImmuneSleep(3)],
           timeoutSec: 1
         },
         args: ["-c", WRITE_VALID_RESULT]

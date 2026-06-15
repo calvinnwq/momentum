@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { waitMs } from "./helpers/process-kill-harness.js";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
   LIVE_STEP_DEFAULT_LEASE_KIND,
@@ -258,12 +259,6 @@ function successDispatch(
     executorLogPath: "/run/executor.log",
     resultJsonPath: "/run/result.json"
   };
-}
-
-function waitMs(ms: number): void {
-  const buffer = new SharedArrayBuffer(4);
-  const view = new Int32Array(buffer);
-  Atomics.wait(view, 0, 0, ms);
 }
 
 function waitForHeartbeatAfter(
