@@ -62,6 +62,9 @@ describe("runtime consolidation plan contract", () => {
     expect(contract).toContain("finishWorkflowStep");
     expect(contract).toContain("executor_invocations");
     expect(contract).toContain("executor_rounds");
+    expect(contract).toContain("merge-cleanup` to the dispatchable `script`");
+    expect(contract).toContain("linear-refresh` to the non-dispatchable, fail-closed");
+    expect(contract).toMatch(/execution lane/i);
     // The open gap: only the dogfood stand-in finalizes a dispatched step today.
     expect(contract).toContain("workflow-dogfood-dispatch.ts");
     expect(contract).toMatch(/exactly one/i);

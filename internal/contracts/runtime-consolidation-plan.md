@@ -134,13 +134,23 @@ finalize a workflow step today, and they must never both own the same step.
 
 **M9 live wrappers (direct).** `runLiveWorkflowStep`
 (`src/live-step-orchestrator.ts`) and `advanceLiveWorkflowStep`
-(`src/live-step-advance.ts`) own the full `workflow_steps` lifecycle for their
-step kinds: `startWorkflowStep` → executor → `finishWorkflowStep`
+(`src/live-step-advance.ts`) own the full `workflow_steps` lifecycle for legacy /
+imported live-step runs: `startWorkflowStep` → executor → `finishWorkflowStep`
 (`workflow-step-transitions.ts`) inside the `managed-step` lease. They never write
-`executor_invocations` / `executor_rounds`. In the canonical coding workflow these
-are the non-executor-loop step kinds (e.g. `merge-cleanup`, `linear-refresh`), and
-they are invoked by a run-level caller holding a repo lock — not by the daemon
-scheduler.
+`executor_invocations` / `executor_rounds`. This is the M7/M9 substrate path that
+imported `.agent-workflows` / `cwfp-*` runs and manual live-wrapper advancement
+still depend on; it must stay readable and recoverable while those compatibility
+paths remain.
+
+The workflow-first built-in coding definition is not identical to that legacy
+live-wrapper partition. It maps `merge-cleanup` to the dispatchable `script`
+executor family and `linear-refresh` to the non-dispatchable, fail-closed
+`external-apply` family (`src/workflow-definition.ts:306-355`). Therefore the
+boundary is by *execution lane*, not by step-name vocabulary: a `merge-cleanup`
+step in an imported/manual live-wrapper run can direct-finalize through M9, while
+a `merge-cleanup` step resolved from the built-in workflow definition enters the
+M10 dispatch lane as `script` and must be finalized by the future reconciliation
+seam.
 
 **M10 executor-loop adapters (nested evidence).** The scheduler-lane dispatcher
 `executeWorkflowStepDispatch` (`src/workflow-dispatch-execute.ts`) advances the
@@ -154,13 +164,16 @@ call `finishWorkflowStep`.
 the pure decider `planWorkflowStepDispatch` (`src/workflow-dispatch.ts:186-210`):
 only `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES`
 (`workflow-dispatch.ts:56` = `goal-loop`, `one-shot`, `script`, `no-mistakes`) take
-the executor-loop path. M9 step kinds are not in that set and are not scheduler-
-dispatched. The `managed-step` and `dispatch` leases are both in the scheduler's
-non-monitor blocking set, so a run holding either lease is not re-scanned —
-mutual exclusion on the same step is structural, and
-`test/full-adapter-e2e.test.ts` (≈1053-1113) pins that a live-wrapper
-`merge-cleanup` finishes with `workflow_steps.state = 'succeeded'` and **zero**
-executor rows.
+the executor-loop path. `external-apply` and `subworkflow` fail closed before
+executor rows are created. Legacy live-wrapper execution enters through the
+`managed-step` lane instead, and the `managed-step` and `dispatch` leases are both
+in the scheduler's non-monitor blocking set, so a run holding either lease is not
+re-scanned. Mutual exclusion on the same step is structural by lease/lane, not by
+assuming every step name belongs to exactly one family. `test/full-adapter-e2e.test.ts`
+(≈1053-1113) pins that a live-wrapper `merge-cleanup` finishes with
+`workflow_steps.state = 'succeeded'` and **zero** executor rows; the built-in
+definition's `script`-family `merge-cleanup` remains part of the M10 dispatch lane
+and is covered by the RC-2 reconciliation requirement below.
 
 **The open gap.** In the M10 dispatch lane no production code finalizes the
 `workflow_steps` row after the scaffold — the step is left `running`. The only
@@ -184,9 +197,9 @@ boundary is:
   dispatched step and calls `finishWorkflowStep`, replacing the dogfood stand-in.
   It must be single-owner and idempotent on the deterministic `::dispatch` ids so
   re-entry cannot double-finalize.
-- **M9 live wrappers stay the direct-finalize path** for non-executor-loop step
-  kinds until/unless those kinds become executor families. They are not collapsed
-  into the executor-loop path by this milestone.
+- **M9 live wrappers stay the direct-finalize path** for imported/manual live-step
+  compatibility lanes until those lanes are migrated or retired. They are not
+  collapsed into the executor-loop path by this milestone.
 
 **Prerequisite before narrowing the coexistence (RC-2).** A landed reconciliation
 adapter plus a test that proves, end-to-end through the production dispatch lane,
