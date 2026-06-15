@@ -25,15 +25,20 @@ Quick map of `internal/`:
 - [`internal/roadmap.md`](internal/roadmap.md) — milestone timeline and current ordering.
 - [`internal/milestones/`](internal/milestones/) — `m3-operational-safety.md`, `m4-real-runners.md`, `m5-source-adapters.md`, `m6-external-apply.md`, `m7-openclaw-coding-workflow-backend.md`, `m8-workflow-run-operator-controls.md`, `m9-live-workflow-execution.md` (M9 live workflow execution foundation), `m10-workflow-first-runtime.md` (M10 workflow-first runtime, complete).
 - [`internal/contracts/`](internal/contracts/) — `intent-apply.md` (M6 two-phase external apply), `source-adapters.md`, `workflow-runs.md` (M7 OpenClaw coding workflow backend substrate), `workflow-operator-controls.md` (M8 workflow run operator controls), `live-workflow-execution.md` (M9 live execution contract), `workflow-first-runtime.md`, `executor-loop.md`, and `workflow-first-gap-matrix.md` (M10 workflow-first runtime contracts), plus `coding-workflow-ownership.md` (post-M10 coding workflow ownership migration) and `runtime-consolidation-plan.md` (post-M11 runtime keep / deprecate-later / defer decisions).
+- [`internal/contracts/repo-architecture-standard.md`](internal/contracts/repo-architecture-standard.md) — post-M11 source taxonomy, docs taxonomy, type placement, root `src/*.ts` policy, and ARCH migration sequence.
+- [`internal/plans/README.md`](internal/plans/README.md) — accepted future implementation plans, such as RC-1..RC-5, when those plans are written.
 - [`internal/smoke-tests.md`](internal/smoke-tests.md), [`internal/exclusions.md`](internal/exclusions.md), [`internal/regression-matrix.md`](internal/regression-matrix.md) (closeout and foundation regression matrix).
 
-Root [`ARCHITECTURE.md`](ARCHITECTURE.md) is the source of truth for the M11
-CLI structure refactor contract and import boundaries.
+Root [`ARCHITECTURE.md`](ARCHITECTURE.md) is the source of truth for the current
+repo architecture contract and import boundaries; it links deeper contracts when
+the detail would make the root file too long.
 
 ## Current milestone
 Milestone 11 (CLI Architecture Refactor) is the most recently closed structure milestone. Its source of truth is [`ARCHITECTURE.md`](ARCHITECTURE.md): `src/cli.ts` remains the stable parser, top-level dispatch surface, and daemon/recovery/worker/doctor compatibility home; command-family orchestration lives under `src/commands/`; shared JSON/text/help/diagnostic output contracts live under `src/renderers/`; infrastructure-facing clients and runtime adapters live under `src/adapters/`. Public command semantics remain frozen while import-boundary guardrails preserve that final shape. The `doctor --json` marker now reports `Milestone 11: CLI architecture refactor (NGX-411, NGX-412, NGX-413, NGX-414, NGX-415, NGX-416, NGX-417, NGX-418, NGX-419) complete`. See [`internal/roadmap.md`](internal/roadmap.md) for the full timeline.
 
 Post-M11 runtime/test cleanup planning is recorded in [`internal/runtime-test-audit.md`](internal/runtime-test-audit.md) and [`internal/contracts/runtime-consolidation-plan.md`](internal/contracts/runtime-consolidation-plan.md). NGX-434 authorizes no production deletion by itself; historical runtime paths narrow only after their named prerequisite proof lands.
+
+Post-M11 repo architecture planning is recorded in [`internal/contracts/repo-architecture-standard.md`](internal/contracts/repo-architecture-standard.md). It defines the target `src/commands`, `src/renderers`, `src/adapters`, `src/config`, `src/shared`, and `src/core/<domain>` taxonomy for ARCH-02..ARCH-08. It does not authorize source moves, runtime changes, public CLI behavior changes, or compatibility-path deletion by itself.
 
 Milestone 10 (Workflow-First Runtime) is the previously closed runtime milestone. See [`internal/milestones/m10-workflow-first-runtime.md`](internal/milestones/m10-workflow-first-runtime.md), [`internal/contracts/workflow-first-runtime.md`](internal/contracts/workflow-first-runtime.md), [`internal/contracts/executor-loop.md`](internal/contracts/executor-loop.md), and [`internal/contracts/workflow-first-gap-matrix.md`](internal/contracts/workflow-first-gap-matrix.md).
 
