@@ -1,6 +1,7 @@
 # Runtime and Test Weight Audit
 
-Status: baseline for the Runtime/Test Weight Audit Cleanup milestone.
+Status: planning record for the Runtime/Test Weight Audit Cleanup milestone
+through NGX-434.
 
 This audit is internal planning evidence. It maps the shipped runtime paths and
 test gates after the Milestone 11 CLI architecture refactor, then separates
@@ -27,24 +28,24 @@ coverage is removed.
 
 ## Current Test Inventory
 
-Post-M11 inventory:
+Post-NGX-434 inventory:
 
-- `test/**/*.test.ts`: 148 files
-- Approximate total test lines: 101,022
-- Process / CLI style test files: 45 files reference `runCli`,
+- `test/**/*.test.ts`: 160 files
+- Approximate total test lines: 101,023
+- Process / CLI style test files: 54 files reference `runCli`,
   `execFileSync`, `execSync`, `spawnSync`, or `spawn(`
-- Internal spec / contract reader tests: 17 files reference internal contract,
+- Internal spec / contract reader tests: 18 files reference internal contract,
   milestone, regression, smoke-test, or architecture docs
 
 Largest files by line count:
 
 | File | Lines | Notes |
 | --- | ---: | --- |
-| `test/smoke.test.ts` | 9,647 | Built-binary milestone smoke; highest value and highest weight. |
-| `test/cli.test.ts` | 6,495 | Broad CLI output compatibility coverage. |
+| `test/cli.test.ts` | 6,485 | Broad CLI output compatibility coverage. |
 | `test/goal-status.test.ts` | 2,517 | Broad goal/status compatibility coverage. |
+| `test/m6-smoke.test.ts` | 2,343 | Largest milestone-scoped built-binary smoke after the NGX-431 split. |
+| `test/live-step-orchestrator.test.ts` | 2,173 | M9 live-wrapper orchestration and lease behavior. |
 | `test/handoff.test.ts` | 2,118 | Broad handoff compatibility coverage. |
-| `test/live-step-orchestrator.test.ts` | 2,103 | M9 live-wrapper orchestration and lease behavior. |
 | `test/cli-intents.test.ts` | 2,054 | Intent command coverage. |
 | `test/stale-recovery.test.ts` | 1,962 | Daemon/recovery integration coverage. |
 | `test/migrations.test.ts` | 1,901 | Schema migration coverage. |
@@ -433,6 +434,44 @@ qualitative — the heavy lane is now deterministic (1 failure at baseline, 0
 now), with the timing primitives centralized and the pure taxonomy checks moved
 off the real-timeout path.
 
+## NGX-434: Runtime consolidation plan (complete)
+
+The consolidation plan called for in the "Recommended Cleanup Sequence" item 5
+below has landed as
+[`contracts/runtime-consolidation-plan.md`](contracts/runtime-consolidation-plan.md).
+It promotes the first-pass "Runtime Path Classification" below into explicit,
+per-path keep / deprecate-later / defer decisions, each with a named prerequisite
+proof or migration path, and decides the M9/M10 step-finalization boundary.
+
+Decisions at a glance (full evidence and prerequisites live in the plan):
+
+- **Goal-first CLI compatibility** — deprecate-later; blocked on workflow-first
+  read-back/recover parity, byte-equivalent migration coverage, and
+  disentangling the iteration-finalization primitive the `goal-loop` executor
+  reuses (`goal-loop-mechanism.ts:83` →
+  `finalizeLiveWorkflowStepFromResultFile`).
+- **`.agent-workflows` / `cwfp-*` import** — defer; governed by
+  [`contracts/coding-workflow-ownership.md`](contracts/coding-workflow-ownership.md),
+  narrowed only by the existing deferred `NGX-404` default switch, and the
+  import/read path survives regardless.
+- **M9 direct `workflow_steps` finalize vs M10 executor-loop adapters** — keep
+  both, coexisting, behind a named boundary: adapters own
+  `executor_invocations` / `executor_rounds` evidence, and a single idempotent
+  reconciliation seam (replacing the `workflow-dogfood-dispatch.ts` stand-in)
+  finalizes dispatched steps exactly once.
+- **Phase-1 dispatch scaffold** — keep; its no-fabricated-evidence rule is a
+  recovery safety feature, narrowable only once adapter finalization replaces its
+  terminal gap.
+- **`external-apply` / `subworkflow`** — defer; fail-closed is a safety feature,
+  removed only when a daemon-dispatchable adapter lands per family.
+- **Fake `WorkflowStepExecutor` adapters shipped in `src/`** — deprecate-later;
+  demote to a test-only seam once real adapters land, preserving substrate smoke.
+
+No production code is deleted: the plan's unreachable-branch audit finds every
+candidate reachable. Actual deletion / migration work is listed as a `RC-1`..`RC-5`
+follow-up sequence (plus the existing `NGX-404`), led by `RC-2`, the M9/M10
+reconciliation seam.
+
 ## Runtime Path Classification
 
 ### Keep: Current Required Paths
@@ -493,7 +532,10 @@ Do not remove these until an issue lists the replacement proof:
 - External write refusal and audit rows.
 - Subworkflow fail-closed paths.
 
-NGX-434 should own the consolidation plan and follow-up deletion sequence.
+NGX-434 owns the consolidation plan and follow-up deletion sequence; it landed as
+[`contracts/runtime-consolidation-plan.md`](contracts/runtime-consolidation-plan.md)
+with explicit per-path keep / deprecate-later / defer decisions, the M9/M10
+step-finalization boundary, and the `RC-*` follow-up sequence.
 
 ## Test Taxonomy
 
@@ -677,11 +719,15 @@ Action:
    - The full-lane `live-step-orchestrator` heartbeat flake should be part of
      this issue.
 
-5. **NGX-434: Plan runtime consolidation boundaries.**
+5. **NGX-434: Plan runtime consolidation boundaries.** *(complete)*
    - Goal: write keep/deprecate/defer decisions and a follow-up sequence before
      deleting historical runtime paths.
    - No broad production code deletion in this milestone unless a branch is
      proven unreachable by tests.
+   - Landed as
+     [`contracts/runtime-consolidation-plan.md`](contracts/runtime-consolidation-plan.md);
+     see the "NGX-434: Runtime consolidation plan (complete)" section above. No
+     production code deleted (unreachable-branch audit found none in scope).
 
 ## Non-Goals For This Milestone
 
@@ -692,4 +738,3 @@ Action:
 - No movement of real process-kill or built-binary smoke into the fast default
   lane.
 - No broad product behavior changes.
-

@@ -17,9 +17,12 @@
  * merge-cleanup implementation details into Momentum core.
  *
  * This M7 module still ships the dispatch boundary and deterministic fake
- * executor. M9 owns the live-wrapper registry / command configuration in
- * `live-wrapper-registry.ts`; live local command execution is layered around
- * this boundary rather than owned by the fake dispatcher.
+ * executor. The NGX-434 runtime consolidation plan classifies the fake
+ * `ADAPTERS` map as deprecate-later, not production executor support: it stays
+ * until real `WorkflowStepExecutor` adapters can replace it and the fake can move
+ * behind a test-only seam. M9 owns the live-wrapper registry / command
+ * configuration in `live-wrapper-registry.ts`; live local command execution is
+ * layered around this boundary rather than owned by the fake dispatcher.
  */
 
 import {

@@ -18,7 +18,8 @@
  *
  * Scope decisions pinned here, grounded in the accepted planning contracts
  * (internal/contracts/executor-loop.md "Executor Families" / "Completion
- * Classification" and internal/contracts/workflow-first-gap-matrix.md):
+ * Classification", internal/contracts/workflow-first-gap-matrix.md, and
+ * internal/contracts/runtime-consolidation-plan.md):
  *
  *   - The phase-1 dispatchable set is exactly the executor families that already
  *     have a landed bounded adapter (`goal-loop` M10-05, `one-shot` / `script`
@@ -26,6 +27,7 @@
  *     landed daemon-dispatchable adapter this phase — `external-apply` is
  *     operator-mediated external writes and `subworkflow` recurses into another
  *     run — so they fail closed rather than silently no-op or strand a lease.
+ *     NGX-434 keeps those branches until RC-3 / RC-4 land replacement adapters.
  *   - Every non-dispatch outcome routes to the contract's
  *     `manual_recovery_required` human gate: "Momentum cannot safely proceed
  *     without operator inspection and recovery." The dispatcher fails *closed*,
