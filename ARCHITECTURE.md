@@ -48,6 +48,8 @@ Use these docs for detailed behavior:
   executor invocation and round model.
 - [internal/contracts/coding-workflow-ownership.md](internal/contracts/coding-workflow-ownership.md):
   Momentum-owned coding workflow boundary.
+- [internal/contracts/runtime-consolidation-plan.md](internal/contracts/runtime-consolidation-plan.md):
+  post-M11 runtime keep / deprecate-later / defer decisions and RC follow-ups.
 - [internal/contracts/intent-apply.md](internal/contracts/intent-apply.md):
   policy-gated external apply.
 - [internal/contracts/source-adapters.md](internal/contracts/source-adapters.md):

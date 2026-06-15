@@ -114,6 +114,14 @@ Milestone status:
   infrastructure-facing clients and runtime adapters under `src/adapters/`.
   See [`ARCHITECTURE.md`](../ARCHITECTURE.md).
 
+Post-M11 runtime/test cleanup planning lives in
+[`internal/runtime-test-audit.md`](runtime-test-audit.md) and its accepted
+NGX-434 capstone,
+[`internal/contracts/runtime-consolidation-plan.md`](contracts/runtime-consolidation-plan.md).
+That plan does not authorize production deletion by itself; it records the
+prerequisite proofs and `RC-*` follow-ups required before historical runtime
+paths can narrow.
+
 The following surfaces remain deferred outside the landed M10 definition,
 persistence, run-start, executor-record, scheduler-lane, goal-loop-adapter,
 one-shot / script adapter, no-mistakes mirror, gates / decisions, and
@@ -180,14 +188,18 @@ the goal-loop executor adapter, the one-shot / script executor adapters, and the
 no-mistakes executor mirror, durable gates / decisions, and phase-1 production
 dispatcher wiring for bounded managed `daemon start`. The workflow-first
 dogfood and M10 closeout marker have landed; generalized `external-apply` /
-`subworkflow` dispatch remains deferred until later runtime work.
+`subworkflow` dispatch remains deferred until later runtime work. The NGX-434
+runtime consolidation plan keeps those fail-closed branches until a
+daemon-dispatchable adapter lands per family.
 
 The post-M10 coding workflow ownership migration is accepted in
 [`internal/contracts/coding-workflow-ownership.md`](contracts/coding-workflow-ownership.md).
 Until that contract's migration gates pass, the existing OpenClaw
 `coding-workflow-pipeline` remains the stable production path. Momentum-native
 coding workflow starts are opt-in, must use Momentum as the primary state store,
-and must not silently replace CWFP for normal work.
+and must not silently replace CWFP for normal work. The same consolidation plan
+keeps historical `.agent-workflows` / `cwfp-*` import/read visibility even after
+the default route narrows.
 
 ## Worktree management and remote git operations
 

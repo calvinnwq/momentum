@@ -39,15 +39,18 @@
  * gate without its recovery flag; on any throw the transaction rolls back and the
  * error propagates to the lane, which then releases the just-acquired lease.
  *
- * Phase-1 boundary (validated by the NGX-353 closeout dogfood): this path
- * stops at the *start scaffold*. It does not run the bounded executor mechanism,
- * drive the round `pending -> running -> terminal`, run verification / commit
- * finalization, or advance the step to a terminal state — those are owned by the
- * landed `runGoalLoopStep` / `runSingleShotStep` / `runNoMistakesMirrorStep`
- * adapters, wired in behind this seam in the real-adapter follow-up. The phase-1
- * invocation / round ids are deliberately namespaced (`...::dispatch`) so that
- * follow-up owns reconciling the scaffold with the adapters' own reattachable ids
- * rather than silently colliding with them.
+ * Phase-1 boundary (validated by the NGX-353 closeout dogfood and clarified by
+ * the NGX-434 runtime consolidation plan): this path stops at the *start
+ * scaffold*. It does not run the bounded executor mechanism, drive the round
+ * `pending -> running -> terminal`, run verification / commit finalization, or
+ * advance the step to a terminal state. The landed `runGoalLoopStep` /
+ * `runSingleShotStep` / `runNoMistakesMirrorStep` adapters own nested
+ * `executor_invocations` / `executor_rounds` evidence only; a future RC-2
+ * reconciliation seam must be the single owner that converts terminal executor
+ * evidence into the workflow step's terminal transition. The phase-1 invocation /
+ * round ids are deliberately namespaced (`...::dispatch`) so that follow-up owns
+ * reconciling the scaffold with the adapters' own reattachable ids rather than
+ * silently colliding with them.
  */
 
 import type { MomentumDb } from "./adapters/db.js";
