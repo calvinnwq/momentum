@@ -3,11 +3,18 @@
  *
  * The heavy integration suites that prove child-process timeout, descendant
  * cleanup, and process-group teardown — `test/live-step-wrapper.test.ts`,
- * `test/single-shot-mechanism.test.ts`, `test/live-step-orchestrator.test.ts`,
- * and `test/foreground-iteration-trusted-shell.test.ts` — repeat a small set of
- * timing primitives around each real process proof. Centralizing them here
- * keeps the per-mechanism assertions in the test files while removing the
- * duplicated, easy-to-mistype scaffolding.
+ * `test/single-shot-mechanism.test.ts`, and
+ * `test/live-step-orchestrator.test.ts` — repeat a small set of timing
+ * primitives around each real process proof. Centralizing them here keeps the
+ * per-mechanism assertions in the test files while removing the duplicated,
+ * easy-to-mistype scaffolding.
+ *
+ * `test/foreground-iteration-trusted-shell.test.ts` is the fourth timeout
+ * mechanism in the audit, but it is intentionally *not* a consumer: its timeout
+ * proof is a plain bounded `sleep` terminated by the runner's own `timeout_sec`,
+ * so it shares neither the `waitMs` thread-blocking wait nor the
+ * `sigtermImmuneSleep` SIGTERM-trap fragment. Forcing it onto either primitive
+ * would change what that proof asserts, so its fixture stays inline.
  *
  * This module has no `*.test.ts` suffix and lives under `test/helpers/`, so
  * neither the fast lane nor the integration lane collects it directly.
