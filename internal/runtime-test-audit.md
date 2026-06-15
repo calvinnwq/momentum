@@ -171,6 +171,87 @@ deleted the now-empty `test/smoke.test.ts`. The closeout doc pass repointed the
 commands, and the `test/m7-contract.test.ts` evidence-owner gate to the new
 per-milestone files.
 
+## NGX-433: Timeout/process-kill fixture centralization (complete)
+
+The duplicated child-process timeout, descendant-kill, and process-group
+cleanup scaffolding flagged in the "Timeout And Process-Kill Proofs" note below
+has been centralized into `test/helpers/process-kill-harness.ts`, which exports
+two timing primitives:
+
+- `waitMs(ms)` — a synchronous `Atomics.wait` thread-blocking wait, used to pace
+  heartbeat/lease probes and to let a backgrounded "survivor" descendant reach
+  its marker window before a kill proof checks it.
+- `sigtermImmuneSleep(sleepSec)` — the `trap "" TERM; sleep N` shell fragment
+  that forces a mechanism to escalate past SIGTERM (to SIGKILL or a
+  process-group kill) to stop the child.
+
+Consumers are `test/live-step-wrapper.test.ts`,
+`test/single-shot-mechanism.test.ts`, and
+`test/live-step-orchestrator.test.ts`; the helper itself is pinned by the
+fast-lane `test/process-kill-harness.test.ts` with no real spawn. The
+mechanism-specific descendant-survivor fragments (single-shot's nohup+touch vs
+live-wrapper's subshell+printf) were deliberately left inline so each suite
+keeps its own SIGHUP / process-group intent visible, and the
+`test/live-step-advance.test.ts` worker-script `Atomics.wait` string literals
+(source embedded into temp worker files, not real waits) were left untouched.
+
+`test/foreground-iteration-trusted-shell.test.ts` — the fourth timeout
+mechanism in the audit — keeps its timeout proof inline: it is a plain bounded
+`sleep` terminated by the runner's own `timeout_sec`, sharing neither primitive,
+so forcing it onto the harness would change what the proof asserts.
+
+Pure taxonomy/decision constants that no longer need a real spawn moved to the
+fast lane in `test/runtime-contract-taxonomy.test.ts` (the live-wrapper recovery
+vocabulary, the 256 MiB output cap, and the trusted-shell `MOMENTUM_*` env
+contract). Every runtime mechanism still has at least one real process-behavior
+proof in `pnpm test:integration`.
+
+The full-lane `live-step-orchestrator` heartbeat flake called out in the cleanup
+sequence (NGX-433, item 4) was root-caused and fixed test-side in commit
+`4a5f2ba`: a worker-beat clobber race (the injected advance must wait for the
+worker's first real beat, not the seed timestamp, because lease acquisition
+already stamps the heartbeat) and a `SQLITE_BUSY` contention race (the in-process
+heartbeat worker holds a write lock while the main thread reads, and `openDb`
+sets no `busy_timeout`). The probes are now `SQLITE_BUSY`-tolerant and
+synchronize on the worker's first beat; the file ran 60/60 clean in isolation
+and contributes 0 failures across the full lane.
+
+### Re-captured integration timing
+
+Re-run locally on 2026-06-15 AEST:
+
+```text
+pnpm vitest run --config vitest.integration.config.ts \
+  --reporter=default --reporter=json \
+  --outputFile=/tmp/momentum-ngx433-integration.json
+```
+
+Result:
+
+- Wall time: 91.36s (baseline `1:46.48` = 106.48s).
+- Tests: 940 passed, 2 skipped, 0 failed across 48 files.
+- `test/live-step-orchestrator.test.ts` passed clean, including the formerly
+  flaky `continues heartbeating after a transient SQLite busy error` case — the
+  baseline run recorded exactly this file as the single integration failure.
+
+Timeout / process-kill files versus the baseline integration table above:
+
+| File | Baseline | Post-NGX-433 | Notes |
+| --- | ---: | ---: | --- |
+| `test/live-step-wrapper.test.ts` | 10.62s | 9.88s | real timeout + descendant-kill proofs retained |
+| `test/live-step-advance.test.ts` | 7.18s | 7.13s | worker-script `Atomics.wait` literals left untouched |
+| `test/single-shot-mechanism.test.ts` | 6.99s | 6.65s | process-group kill proof retained |
+| `test/foreground-iteration-trusted-shell.test.ts` | 2.41s | 2.27s | inline plain-`sleep` timeout proof |
+| `test/live-step-orchestrator.test.ts` | 1.54s (flaky) | 1.60s | now stable |
+
+The timeout/process-kill files are flat-to-slightly-faster: removing the
+duplicated scaffolding did not add per-file cost, and no real process proof was
+weakened. The ~15s lane reduction is within run-to-run variance and also
+reflects the earlier NGX-431 smoke split; the durable NGX-433 outcome is
+qualitative — the heavy lane is now deterministic (1 failure at baseline, 0
+now), with the timing primitives centralized and the pure taxonomy checks moved
+off the real-timeout path.
+
 ## Runtime Path Classification
 
 ### Keep: Current Required Paths
@@ -354,6 +435,13 @@ Action:
 - Safe removals require a named focused test preserving each JSON/text contract.
 
 ### Timeout And Process-Kill Proofs
+
+> **Update (NGX-433, complete):** the duplicated timeout/process-kill scaffolding
+> described below has since been centralized into
+> `test/helpers/process-kill-harness.ts`, pure taxonomy constants moved to the
+> fast lane, and the orchestrator heartbeat flake root-caused and fixed — see the
+> NGX-433 section above. The analysis below records the pre-centralization
+> motivation.
 
 Heavy files:
 

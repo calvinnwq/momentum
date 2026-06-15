@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { waitMs } from "./helpers/process-kill-harness.js";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
   LIVE_STEP_DEFAULT_LEASE_KIND,
@@ -260,10 +261,41 @@ function successDispatch(
   };
 }
 
-function waitMs(ms: number): void {
-  const buffer = new SharedArrayBuffer(4);
-  const view = new Int32Array(buffer);
-  Atomics.wait(view, 0, 0, ms);
+// SQLITE_BUSY primary result code. The live heartbeat worker runs on its own
+// thread with its own connection, so a main-thread read/transaction here can
+// collide with the worker's in-flight write and throw `SQLITE_BUSY`. These DBs
+// are opened without a `busy_timeout`, so the collision surfaces immediately
+// rather than being retried inside SQLite. The probe/lock helpers below absorb
+// that transient contention instead of letting it escape into an executor
+// callback (where the orchestrator would trap it as `executor_threw`).
+const SQLITE_BUSY = 5;
+
+function isSqliteBusy(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const errcode = (error as { errcode?: number }).errcode;
+  if (typeof errcode === "number" && (errcode & 0xff) === SQLITE_BUSY) {
+    return true;
+  }
+  return /\bbusy\b|database is locked|database table is locked/i.test(
+    error.message
+  );
+}
+
+/**
+ * Run a one-shot DB operation that must succeed, retrying only on transient
+ * `SQLITE_BUSY` contention from the concurrent heartbeat worker until it
+ * commits or the timeout elapses. Any non-busy error propagates immediately.
+ */
+function withBusyRetry<T>(op: () => T, timeoutMs = 5_000): T {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      return op();
+    } catch (error) {
+      if (!isSqliteBusy(error) || Date.now() >= deadline) throw error;
+      waitMs(5);
+    }
+  }
 }
 
 function waitForHeartbeatAfter(
@@ -275,9 +307,14 @@ function waitForHeartbeatAfter(
 ): number | null {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const heartbeatAt = getWorkflowLease(db, runId, leaseKind)?.heartbeatAt;
-    if (heartbeatAt !== undefined && heartbeatAt > after) {
-      return heartbeatAt;
+    try {
+      const heartbeatAt = getWorkflowLease(db, runId, leaseKind)?.heartbeatAt;
+      if (heartbeatAt !== undefined && heartbeatAt > after) {
+        return heartbeatAt;
+      }
+    } catch (error) {
+      if (!isSqliteBusy(error)) throw error;
+      // Worker held the write lock during the probe; re-poll after a backoff.
     }
     waitMs(10);
   }
@@ -292,17 +329,22 @@ function waitForRepoLockHeartbeatAfter(
 ): number | null {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const row = db
-      .prepare(
-        `SELECT heartbeat_at AS heartbeatAt
-           FROM repo_locks
-          WHERE repo_root = ? AND state = 'active'
-          ORDER BY acquired_at DESC, id DESC
-          LIMIT 1`
-      )
-      .get(repoRoot) as { heartbeatAt: number } | undefined;
-    if (row !== undefined && row.heartbeatAt > after) {
-      return row.heartbeatAt;
+    try {
+      const row = db
+        .prepare(
+          `SELECT heartbeat_at AS heartbeatAt
+             FROM repo_locks
+            WHERE repo_root = ? AND state = 'active'
+            ORDER BY acquired_at DESC, id DESC
+            LIMIT 1`
+        )
+        .get(repoRoot) as { heartbeatAt: number } | undefined;
+      if (row !== undefined && row.heartbeatAt > after) {
+        return row.heartbeatAt;
+      }
+    } catch (error) {
+      if (!isSqliteBusy(error)) throw error;
+      // Worker held the write lock during the probe; re-poll after a backoff.
     }
     waitMs(10);
   }
@@ -421,19 +463,17 @@ describe("runLiveWorkflowStep", () => {
         holder: "worker-1",
         leaseExpiresAt: SEED_AT + 200,
         executor: fakeExecutor(() => {
-          const waitBuffer = new SharedArrayBuffer(4);
-          const waitView = new Int32Array(waitBuffer);
-          const deadline = Date.now() + 500;
-          while (Date.now() < deadline) {
-            Atomics.wait(waitView, 0, 0, 20);
-            const heartbeatAt =
-              getWorkflowLease(db, "run-1", "managed-step")?.heartbeatAt ??
-              null;
-            if (heartbeatAt !== null && heartbeatAt > SEED_AT) {
-              heartbeatDuringExecute = heartbeatAt;
-              break;
-            }
-          }
+          // Capture a heartbeat the live worker writes while the executor is
+          // still running. The shared probe tolerates transient SQLITE_BUSY
+          // contention from the worker's own write lock instead of letting it
+          // escape the executor as an `executor_threw` dispatch failure.
+          heartbeatDuringExecute = waitForHeartbeatAfter(
+            db,
+            "run-1",
+            "managed-step",
+            SEED_AT,
+            500
+          );
           return successDispatch("sha256:ok");
         }),
         executorInput: EXEC_INPUT,
@@ -474,7 +514,11 @@ describe("runLiveWorkflowStep", () => {
           );
           expect(heartbeatBeforeBusy).not.toBeNull();
 
-          db.exec("BEGIN EXCLUSIVE");
+          // Hold an exclusive transaction so the worker's next beat hits a busy
+          // error and must recover. Acquiring it can itself momentarily lose the
+          // race to the worker's in-flight write, so retry past that transient
+          // contention rather than letting the simulation's own setup flake.
+          withBusyRetry(() => db.exec("BEGIN EXCLUSIVE"));
           try {
             waitMs(80);
           } finally {
@@ -1097,19 +1141,45 @@ describe("runLiveWorkflowStep", () => {
         holder: "worker-1",
         leaseExpiresAt: SEED_AT + 2_750,
         executor: fakeExecutor(() => {
+          // The live heartbeat worker advances the repo-lock row with a plain
+          // (non-monotonic) `startNow + elapsedWallClock` assignment. Acquiring
+          // the lease already stamped the repo-lock heartbeat to exactly
+          // `startNow` (SEED_AT + 1_750), so we must wait for a value strictly
+          // greater than that — only the worker's first real beat clears it.
+          // Injecting the simulated advance before that beat lands would let the
+          // worker's plain assignment clobber our write with a lower wall-clock
+          // value (the historical flake). With a 1s lease the heartbeat interval
+          // is 500ms, so exactly one worker beat fires in this window; once it is
+          // observed the worker sleeps until `heartbeat.stop()`, leaving our
+          // injection as the deterministic last writer.
+          const workerBeatAt = waitForRepoLockHeartbeatAfter(
+            db,
+            "/repo",
+            SEED_AT + 1_750,
+            3_000
+          );
+          expect(workerBeatAt).not.toBeNull();
+
           // Simulate the heartbeat worker's two-row update being observed after
           // the repo-lock row advanced but before the workflow-lease row caught
           // up. Finalization must not use the older workflow lease heartbeat to
-          // move the repo lock backward.
-          db.prepare(
-            `UPDATE repo_locks
-                SET heartbeat_at = ?, lease_expires_at = ?, updated_at = ?
-              WHERE repo_root = ?`
-          ).run(
-            partialHeartbeatAt,
-            partialHeartbeatAt + 1_000,
-            partialHeartbeatAt,
-            "/repo"
+          // move the repo lock backward. The observed beat only proves the
+          // repo-lock row was written; the worker may still be mid-beat writing
+          // the workflow-lease row, so guard the injection against that residual
+          // write-lock contention.
+          withBusyRetry(() =>
+            db
+              .prepare(
+                `UPDATE repo_locks
+                    SET heartbeat_at = ?, lease_expires_at = ?, updated_at = ?
+                  WHERE repo_root = ?`
+              )
+              .run(
+                partialHeartbeatAt,
+                partialHeartbeatAt + 1_000,
+                partialHeartbeatAt,
+                "/repo"
+              )
           );
           return successDispatch("sha256:ok");
         }),
