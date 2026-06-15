@@ -2143,26 +2143,12 @@ runner_profile: {
     });
   });
 
-  it("logs returns goal_not_found in JSON mode for an unknown goalId", async () => {
-    const dataDir = makeTempDir("momentum-cli-data-");
-
-    const result = await run([
-      "logs",
-      "no-such-goal",
-      "--data-dir",
-      dataDir,
-      "--json"
-    ]);
-
-    expect(result.code).toBe(1);
-    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
-    expect(payload).toMatchObject({
-      ok: false,
-      command: "logs",
-      code: "goal_not_found",
-      goalId: "no-such-goal"
-    });
-  });
+  // The `logs --json` missing-goal envelope (exit 1, empty stdout, stderr
+  // ok:false/command:logs/code:goal_not_found/goalId echo) was de-duplicated
+  // here (NGX-432); it is preserved as a strict superset by
+  // test/cli-readonly-status-family.test.ts "keeps logs --json missing-goal
+  // error envelope stable through the extracted command module", which also
+  // asserts stdout === "" and that the message contains the goal id.
 
   it("logs --json returns runner.log/verification.log content after a successful goal start", async () => {
     const { dataDir, goalFile, repo } = setupGoalAndData();
@@ -4554,12 +4540,15 @@ describe("momentum recovery clear", () => {
     expect(items).toHaveLength(1);
     const firstItem = items[0];
     expect(firstItem).toBeDefined();
+    // The exhaustive per-field source-item JSON shape (adapterKind, externalKey,
+    // title, status, url, timestamps, ...) is pinned in the fast lane by
+    // test/cli-renderers-output-contract.test.ts via a sourceItemToJsonShape
+    // toEqual over the full field set. Thinned here (NGX-432) to the end-to-end
+    // CLI wiring proof that the renderer unit test cannot cover: the `--adapter`
+    // filter selected the right item, an unlinked item serializes goalId as
+    // null, and opaque metadata round-trips DB -> command -> renderer -> stdout.
     expect(firstItem).toMatchObject({
-      adapterKind: "local-fixture",
       externalId: "fixture-1",
-      externalKey: "SRC-1",
-      title: "Fixture source item",
-      status: "In Progress",
       goalId: null,
       metadata: { opaque: { priority: "high" } }
     });
@@ -4575,13 +4564,14 @@ describe("momentum recovery clear", () => {
     ]);
     expect(getResult.code).toBe(0);
     const getPayload = JSON.parse(getResult.stdout) as Record<string, unknown>;
+    // `source get` envelope + get-by-id wiring and opaque metadata round-trip;
+    // the full item field shape is pinned by the fast renderer contract cited
+    // above.
     expect(getPayload).toMatchObject({
       ok: true,
       command: "source get",
       item: {
         id: sourceId,
-        adapterKind: "local-fixture",
-        externalId: "fixture-1",
         metadata: { opaque: { priority: "high" } }
       }
     });

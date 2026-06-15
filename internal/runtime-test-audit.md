@@ -171,7 +171,7 @@ deleted the now-empty `test/smoke.test.ts`. The closeout doc pass repointed the
 commands, and the `test/m7-contract.test.ts` evidence-owner gate to the new
 per-milestone files.
 
-## NGX-432: Broad CLI coverage map (coverage map landed; removals pending)
+## NGX-432: Broad CLI coverage map (coverage map landed; shortlist executed)
 
 This is the per-command coverage map required by NGX-432 before any broad-CLI
 assertion is moved or removed. **No test assertions are removed in this slice.**
@@ -179,6 +179,12 @@ For each broad-CLI surface it names the lower-level or focused test that already
 pins the public JSON/text contract, and classifies each overlap as a *safe* or
 *unsafe* dedup axis so the follow-up removal slice cannot silently drop a wire
 contract (JSON field, refusal code, stdout/stderr routing, or text wording).
+
+> **Update (NGX-432, shortlist executed):** the follow-up removal slice has now
+> run both safe-removal candidates below — see "Execution slice (shortlist
+> executed)" near the end of this section for the per-candidate record and
+> re-captured timing. The coverage-map slice's "no assertions removed" sentence
+> describes that earlier slice only.
 
 Method: every claim below was grounded by reading the test files directly
 (`describe`/`it` inventories plus the asserted fields), not inferred from names.
@@ -190,7 +196,7 @@ they sit at two different layers (confirmed by their imports and process style):
 
 | File | Layer | Entry point | Lane | Weight source |
 | --- | --- | --- | --- | --- |
-| `test/cli.test.ts` | CLI dispatch | in-process `runCli` via a local `run()`/`runWithDeps()` helper (152 tests) | integration | many real `goal start`/foreground iteration spawns |
+| `test/cli.test.ts` | CLI dispatch | in-process `runCli` via a local `run()`/`runWithDeps()` helper (151 tests) | integration | many real `goal start`/foreground iteration spawns |
 | `test/goal-status.test.ts` | domain loader | `loadGoalStatus(...)` directly (0 `runCli`) | integration | real `executeIterationJob` child spawns in setup |
 | `test/handoff.test.ts` | domain loader | `writeHandoff(...)` directly (0 `runCli`) | integration | real `executeIterationJob` child spawns in setup |
 | `test/goal-logs.test.ts` | domain loader | `loadGoalLogs(...)` directly (0 `runCli`) | integration | real `executeIterationJob` child spawns in setup |
@@ -292,16 +298,59 @@ equivalent is another integration-lane test). The non-goals stand: no broad
 deletion of `cli.test.ts` / status / handoff / logs, and no merge of the loader
 files into each other or into the domain tests.
 
-### Remaining NGX-432 acceptance items (next slices)
+### Execution slice (shortlist executed)
 
-- Execute the verified-safe removals/thins from the shortlist, expanding it only
-  with new entries that name a preserving test.
-- Re-capture heavy-lane timing and compare against this audit's baseline table
-  (`cli.test.ts` 6.38s, `goal-status` 7.05s, `handoff` 4.24s, `goal-logs` 2.65s
-  from the JSON run above). Note the NGX-432 ticket body quotes a slower
-  reference class (15.28s / 13.75s / 9.95s / 2.65s); compare like-for-like
-  against whichever class the re-capture is run on.
-- Confirm `pnpm test` and `pnpm test:integration` stay green after each removal.
+Both safe-removal candidates above were executed after confirming byte-level
+equivalence against their named preserving tests (read directly, not inferred):
+
+1. **Candidate 1 — removed.** `test/cli.test.ts` "logs returns goal_not_found in
+   JSON mode for an unknown goalId" was deleted; a breadcrumb comment in its
+   place names the preserving superset
+   `test/cli-readonly-status-family.test.ts` "keeps logs --json missing-goal
+   error envelope stable through the extracted command module" (asserts the same
+   `code 1` + stderr `ok:false`/`command:logs`/`code:goal_not_found`/`goalId`,
+   *and additionally* `stdout === ""` and message-contains-id). No contract
+   dropped. `cli.test.ts` 152 → 151 tests; integration lane 940 → 939 passed.
+2. **Candidate 2 — thinned.** The `test/cli.test.ts` "lists and gets source
+   items for operator inspection" per-field shape assertions were thinned to the
+   end-to-end CLI-wiring proof (`--adapter` filter selects the right item, an
+   unlinked item serializes `goalId: null`, opaque metadata round-trips
+   DB → command → renderer → stdout). The exhaustive field set
+   (`adapterKind`/`externalKey`/`title`/`status`/`url`/timestamps/…) stays pinned
+   in the fast lane by `test/cli-renderers-output-contract.test.ts`'s
+   `sourceItemToJsonShape` `toEqual`; a breadcrumb in the test cites it. No
+   contract dropped.
+
+The shortlist is now exhausted: every other surface in the per-surface map is
+classified KEEP (no focused CLI envelope exists, or the only equivalent is
+another integration-lane test), so there is no further verified-safe candidate
+without expanding scope, which the milestone non-goals forbid.
+
+### Acceptance status (all criteria met)
+
+- **Per-command coverage map names the preserving test for each moved assertion:**
+  met — the per-surface map plus the two execution-slice breadcrumbs name the
+  preserving test for each removed/thinned assertion.
+- **`pnpm test` and `pnpm test:integration` pass:** met — fast lane 2301 passed
+  (111 files); integration lane 939 passed / 2 skipped / 0 failed (48 files).
+  `pnpm typecheck` is clean and `pnpm build` exits 0 as well. (`pnpm lint` /
+  `pnpm format:check` are not configured in this repo — no such scripts in
+  `package.json` — matching CLAUDE.md's verification gates and prior NGX-43x
+  closeouts.)
+- **No JSON field, refusal code, stdout/stderr routing, or text wording contract
+  dropped without an equivalent assertion:** met — Candidate 1's preserver is a
+  strict superset; Candidate 2's removed fields are all re-pinned by the fast
+  `sourceItemToJsonShape` `toEqual`.
+- **Heavy-lane timing re-captured vs baseline:** met — `cli.test.ts` under the
+  integration config measured 6.42s before the slice and 6.55–7.05s across three
+  runs after (median ~6.67s), i.e. within run-to-run noise of the audit's 6.38s
+  per-file baseline. The removed case is an error path with no `goal start`
+  child spawn and the thinned assertions are negligible, so the dedup is a
+  test-count / duplication win (integration lane 940 → 939 tests), not a
+  wall-clock reduction; the milestone's real heavy-lane reductions came from
+  NGX-431/NGX-433. The ticket body's slower reference class (15.28s) reflects a
+  different timing run than this per-file baseline; compared like-for-like
+  against the 6.38s per-file baseline here.
 
 ## NGX-433: Timeout/process-kill fixture centralization (complete)
 
