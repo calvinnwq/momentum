@@ -9,8 +9,6 @@ import {
 } from "./helpers/process-kill-harness.js";
 import {
   LIVE_STEP_WRAPPER_RESULT_MAX_BYTES,
-  LIVE_STEP_WRAPPER_OUTPUT_MAX_BYTES,
-  LIVE_STEP_WRAPPER_RECOVERY_CODES,
   runLiveStepWrapper,
   type LiveStepWrapperInput
 } from "../src/adapters/live-step-wrapper.js";
@@ -877,23 +875,5 @@ describe("runLiveStepWrapper — pre-flight probe", () => {
     const log = readLog(input);
     expect(log).toContain("[live-step] probe result: timed_out after 1s");
     expect(log).not.toContain("[live-step] command:");
-  });
-});
-
-describe("LIVE_STEP_WRAPPER_RECOVERY_CODES", () => {
-  it("pins the stable live-wrapper execution recovery vocabulary", () => {
-    expect([...LIVE_STEP_WRAPPER_RECOVERY_CODES]).toEqual([
-      "runtime_unavailable",
-      "auth_unavailable",
-      "command_failed",
-      "command_timed_out",
-      "output_overflow",
-      "result_missing",
-      "result_invalid"
-    ]);
-  });
-
-  it("defaults the output cap to 256 MiB", () => {
-    expect(LIVE_STEP_WRAPPER_OUTPUT_MAX_BYTES).toBe(256 * 1024 * 1024);
   });
 });

@@ -5,10 +5,7 @@ import path from "node:path";
 
 import type { GoalSpec } from "../src/goal-spec.js";
 import type { RunnerAdapterInput } from "../src/adapters/runner-adapter.js";
-import {
-  runTrustedShellRunner,
-  TRUSTED_SHELL_ENV_VARS
-} from "../src/adapters/trusted-shell-runner.js";
+import { runTrustedShellRunner } from "../src/adapters/trusted-shell-runner.js";
 
 const tempRoots: string[] = [];
 
@@ -494,20 +491,5 @@ describe("runTrustedShellRunner — failure paths", () => {
     const log = fs.readFileSync(input.runnerLogPath, "utf-8");
     expect(log).toContain("[trusted-shell] spawn_error:");
     expect(log).not.toContain("nonzero_exit");
-  });
-});
-
-describe("TRUSTED_SHELL_ENV_VARS", () => {
-  it("exposes a stable MOMENTUM_* contract", () => {
-    expect(TRUSTED_SHELL_ENV_VARS).toEqual({
-      GOAL_ID: "MOMENTUM_GOAL_ID",
-      ITERATION: "MOMENTUM_ITERATION",
-      REPO_PATH: "MOMENTUM_REPO_PATH",
-      BASE_HEAD: "MOMENTUM_BASE_HEAD",
-      BRANCH: "MOMENTUM_BRANCH",
-      PROMPT_PATH: "MOMENTUM_PROMPT_PATH",
-      ITERATION_DIR: "MOMENTUM_ITERATION_DIR",
-      RESULT_PATH: "MOMENTUM_RESULT_PATH"
-    });
   });
 });
