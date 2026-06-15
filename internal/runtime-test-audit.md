@@ -208,7 +208,7 @@ proof in `pnpm test:integration`.
 
 The full-lane `live-step-orchestrator` heartbeat flake called out in the cleanup
 sequence (NGX-433, item 4) was root-caused and fixed test-side in commit
-`c8ad55f`: a worker-beat clobber race (the injected advance must wait for the
+`4a5f2ba`: a worker-beat clobber race (the injected advance must wait for the
 worker's first real beat, not the seed timestamp, because lease acquisition
 already stamps the heartbeat) and a `SQLITE_BUSY` contention race (the in-process
 heartbeat worker holds a write lock while the main thread reads, and `openDb`
