@@ -50,6 +50,8 @@ Use these docs for detailed behavior:
   Momentum-owned coding workflow boundary.
 - [internal/contracts/runtime-consolidation-plan.md](internal/contracts/runtime-consolidation-plan.md):
   post-M11 runtime keep / deprecate-later / defer decisions and RC follow-ups.
+- [internal/contracts/repo-architecture-standard.md](internal/contracts/repo-architecture-standard.md):
+  post-M11 source, type, docs, tests, exception, and ARCH migration standard.
 - [internal/contracts/intent-apply.md](internal/contracts/intent-apply.md):
   policy-gated external apply.
 - [internal/contracts/source-adapters.md](internal/contracts/source-adapters.md):
@@ -68,6 +70,13 @@ src/adapters/             infrastructure-facing clients and runtime adapters
 existing src domain modules
                           domain state, reducers, policies, persistence helpers
 ```
+
+The target post-M11 source taxonomy is `src/commands/`, `src/renderers/`,
+`src/adapters/`, `src/config/`, `src/shared/`, and `src/core/<domain>/`.
+Detailed placement rules, allowed root `src/*.ts` exceptions, type ownership,
+docs taxonomy, test placement, and the ARCH-02..ARCH-08 migration sequence live
+in
+[internal/contracts/repo-architecture-standard.md](internal/contracts/repo-architecture-standard.md).
 
 The import direction is fixed:
 
@@ -144,22 +153,12 @@ domain modules import commands or renderers, and do not read or write
 
 ## M11 Closeout
 
-The migration shipped in deliberately staged slices:
-
-1. `NGX-411` pinned this architecture contract and the M11 non-semantic
-   structure boundary.
-2. `NGX-412` added the command registry skeleton and shared command contract
-   with explicit route declarations and no filesystem discovery.
-3. `NGX-413` extracted the read-only status family (`status`, `logs`,
-   `handoff`, and stable read-only helpers) without changing output.
-4. `NGX-414` extracted the workflow command family after the registry exists.
-5. `NGX-415` extracted the goal, source, evidence, project, and update-intent
-   command families.
-6. `NGX-416` consolidated renderers and output contracts.
-7. `NGX-417` organized adapters and infrastructure boundaries.
-8. `NGX-418` enforced import boundaries with structural guardrails.
-9. `NGX-419` closes out M11 with final regression coverage, doctor marker
-   advancement, and docs cleanup.
+The M11 migration shipped in deliberate, behavior-preserving slices:
+`NGX-411` pinned this architecture contract, `NGX-412` added the command
+registry skeleton, `NGX-413` extracted the read-only status family, `NGX-414`
+extracted workflow commands, `NGX-415` extracted goal / source / evidence /
+project / intent command families, `NGX-416` consolidated renderers, `NGX-417`
+organized adapters, `NGX-418` enforced import boundaries, and `NGX-419` closes out M11 with final regression coverage, doctor marker advancement, and docs cleanup.
 
 ## Stability Rules
 
