@@ -171,6 +171,138 @@ deleted the now-empty `test/smoke.test.ts`. The closeout doc pass repointed the
 commands, and the `test/m7-contract.test.ts` evidence-owner gate to the new
 per-milestone files.
 
+## NGX-432: Broad CLI coverage map (coverage map landed; removals pending)
+
+This is the per-command coverage map required by NGX-432 before any broad-CLI
+assertion is moved or removed. **No test assertions are removed in this slice.**
+For each broad-CLI surface it names the lower-level or focused test that already
+pins the public JSON/text contract, and classifies each overlap as a *safe* or
+*unsafe* dedup axis so the follow-up removal slice cannot silently drop a wire
+contract (JSON field, refusal code, stdout/stderr routing, or text wording).
+
+Method: every claim below was grounded by reading the test files directly
+(`describe`/`it` inventories plus the asserted fields), not inferred from names.
+
+### Structural finding: only one of the four files is CLI-level
+
+The "Broad CLI Compatibility" list further down groups four files together, but
+they sit at two different layers (confirmed by their imports and process style):
+
+| File | Layer | Entry point | Lane | Weight source |
+| --- | --- | --- | --- | --- |
+| `test/cli.test.ts` | CLI dispatch | in-process `runCli` via a local `run()`/`runWithDeps()` helper (152 tests) | integration | many real `goal start`/foreground iteration spawns |
+| `test/goal-status.test.ts` | domain loader | `loadGoalStatus(...)` directly (0 `runCli`) | integration | real `executeIterationJob` child spawns in setup |
+| `test/handoff.test.ts` | domain loader | `writeHandoff(...)` directly (0 `runCli`) | integration | real `executeIterationJob` child spawns in setup |
+| `test/goal-logs.test.ts` | domain loader | `loadGoalLogs(...)` directly (0 `runCli`) | integration | real `executeIterationJob` child spawns in setup |
+
+Implication: `goal-status` / `handoff` / `goal-logs` are themselves the
+**focused loader tests**. They do not pin CLI envelopes; they pin loader return
+shapes. Their weight is dominated by real iteration execution in setup, not by
+duplicated CLI assertions, so the bulk of the NGX-432 dedup opportunity lives in
+`test/cli.test.ts`, the one true broad-CLI file.
+
+### Lane rule for a real heavy-lane win
+
+`pnpm test` (fast) excludes the integration include-list in
+`vitest.fast.config.ts`; `pnpm test:integration` runs exactly that list. Among
+the M11 focused CLI tests:
+
+- `test/cli-command-family-extraction.test.ts` — **fast lane**
+- `test/cli-renderers-output-contract.test.ts` — **fast lane**
+- `test/cli-readonly-status-family.test.ts` — **integration lane** (it is in the
+  include-list)
+
+So a contract whose equivalent already lives in a *fast-lane* focused test can
+have its `cli.test.ts` (integration) copy retired for a real heavy-lane
+reduction. Retiring a `cli.test.ts` copy whose only equivalent is in
+`cli-readonly-status-family` (also integration) is test-count-neutral for lane
+time and is not a win on its own — though it still reduces duplication.
+
+### Safe vs unsafe dedup axes
+
+**Unsafe — loader projection vs domain storage (do NOT dedupe).**
+`loadGoalStatus` / `writeHandoff` / `loadGoalLogs` assert that the loader
+*projects* a value into its public return shape. The lower-level domain tests
+(`goal-reducer`, `evidence-records`, `source-items`, `project-rollup`,
+`daemon-status`, `momentum-policy`, `stale-recovery`, `update-intents`) assert
+that the underlying record is *stored or derived* correctly. These are different
+contracts: deleting a loader projection assertion because a domain test stores
+the same value would drop the projection contract. Keep both layers.
+
+**Unsafe — status vs handoff (do NOT merge).** `goal-status` and `handoff`
+re-derive the same surfaces from the same goal aggregate (adapter failure codes,
+reducer decision/next-action, daemon stop-request, stale-recovery counts,
+MOMENTUM.md policy, linked source items, latest evidence, pending update intents,
+external apply rollup), but each pins a distinct public envelope
+(`status --json` data vs `handoff.json` + the human `handoff.md`). Equivalent
+inputs, non-equivalent outputs. Keep both.
+
+**Safe — a `cli.test.ts` CLI envelope vs a focused CLI test that proves the same
+wiring + envelope.** Both spawn the CLI through `runCli` and assert the same
+exit code / stdout / stderr / envelope for the same command. Here the
+`cli.test.ts` copy can be retired once the focused test is confirmed to pin the
+same fields, refusal code, and stdout/stderr routing. This is the primary safe
+axis, and it is the only one that retires whole integration tests.
+
+### Per-surface coverage map for `test/cli.test.ts`
+
+Lower-level/focused tests that preserve each surface's contract. "Fast?" marks
+whether the preserving focused test runs in the fast lane (a heavy-lane win if
+the `cli.test.ts` copy is later retired).
+
+| Surface (cli.test.ts lines) | Lower-level / focused coverage | Preserving focused test in fast lane? | Classification |
+| --- | --- | --- | --- |
+| `doctor` text/json, milestone marker, policy, evidence, audit/intent counts (151–761, 3004) | `momentum-policy.test.ts`, `evidence-records.test.ts` (`summarizeEvidenceRecords`), `intent-apply-audits.test.ts` | no focused `doctor` *envelope* test | KEEP — broad compat; no focused doctor CLI envelope exists |
+| `goal start` foreground/queued/idempotency/failure modes (789–1138, 2338–2553) | `cli-readonly-status-family.test.ts` (seeds via `goal start`), `cli-command-family-extraction.test.ts` (`goal start --json` usage_error, fast), `goal-init.test.ts`, `iteration-job.test.ts` | partial (usage_error only) | KEEP — foreground iteration wiring is unique compat |
+| `worker run` (1155–1478) | `worker-run.test.ts`, `queue-jobs.test.ts`, `repo-locks.test.ts` | no | KEEP — no focused worker CLI envelope |
+| arg validation: `--worker-id`/`--data-dir`/extra positionals (1478–1547) | `cli-command-family-extraction.test.ts` (shared usage rendering, fast) | partial | KEEP-MOSTLY — a few generic usage cases overlap |
+| `handoff` CLI (1547–1747, 4080–4202) | `handoff.test.ts` (loader projection) | no | KEEP — loader proves projection, not CLI envelope/routing |
+| `status` CLI (1747–1912, 3978–4262) | `cli-readonly-status-family.test.ts` (`status --json` healthy, integration), `goal-status.test.ts` (loader) | no (integration only) | KEEP — broad compat; healthy-payload case partially overlaps |
+| `logs` CLI (2134–2338) | `cli-readonly-status-family.test.ts` (`logs --json` missing-goal, integration), `goal-logs.test.ts` (loader) | no (integration only) | DEDUP-CANDIDATE — see shortlist |
+| `daemon status`/`start`/`stop` (2561–3978) | `daemon-status.test.ts`, `daemon-loop.test.ts`, `stale-recovery.test.ts` | no | KEEP — `daemon` is the cli.ts-owned compat surface; no focused daemon CLI envelope |
+| `recovery clear` (4262–4498) | `goal-recovery.test.ts` | no | KEEP — no focused recovery-clear CLI envelope |
+| `source` list/get/link/unlink/reconcile (4498–5485) | `source-items.test.ts`, `source-reconciliation*.test.ts`, `cli-command-family-extraction.test.ts` (`source list --json` empty, fast), `cli-renderers-output-contract.test.ts` (`sourceItemToJsonShape` field map + `source` usage, fast) | yes (empty list + field shape) | DEDUP-CANDIDATE — field shape pinned in fast lane; CLI wiring still needs one proof |
+| external apply reconcile (5485–5648) | `intent-apply-execute.test.ts`, `post-apply-reconcile.test.ts`, `cli-intents.test.ts` | no | KEEP — no focused external-apply CLI envelope |
+| `project status` (5648–end) | `project-rollup.test.ts` (`buildProjectRollup`, fast), `cli-intents.test.ts` | yes (rollup shape) | KEEP-MOSTLY — rollup shape pinned in fast lane; CLI filter-echo/text-truncation/routing unique |
+
+### Safe removal shortlist for the execution slice
+
+Each candidate must have its byte-level equivalence (fields, refusal code,
+stdout vs stderr routing, exit code, text wording) confirmed against the named
+preserving test *before* removal; the map says where to look, not "delete now":
+
+1. `test/cli.test.ts:2146` "logs returns goal_not_found in JSON mode for an
+   unknown goalId" — preserving test:
+   `test/cli-readonly-status-family.test.ts` "keeps logs --json missing-goal
+   error envelope stable through the extracted command module" (both assert
+   `code 1`, empty stdout, stderr `ok:false`/`command:logs`/
+   `code:goal_not_found`/`goalId`, message contains the id). Both integration:
+   test-count win, not a fast/heavy reshuffle.
+2. `test/cli.test.ts` source `--json` field-shape assertions (within 4498–4590)
+   — the per-field `sourceItemToJsonShape` contract is already pinned in the
+   fast lane by `test/cli-renderers-output-contract.test.ts`. Candidate: thin
+   the broad copy to one CLI-wiring proof (DB → command → renderer → stdout) and
+   cite the fast renderer field map for the exhaustive field contract. This is
+   the one candidate that can move weight from the integration lane to the fast
+   lane.
+
+Everything else classified KEEP above is broad public-command compatibility the
+audit explicitly preserves (no focused CLI envelope exists, or the only
+equivalent is another integration-lane test). The non-goals stand: no broad
+deletion of `cli.test.ts` / status / handoff / logs, and no merge of the loader
+files into each other or into the domain tests.
+
+### Remaining NGX-432 acceptance items (next slices)
+
+- Execute the verified-safe removals/thins from the shortlist, expanding it only
+  with new entries that name a preserving test.
+- Re-capture heavy-lane timing and compare against this audit's baseline table
+  (`cli.test.ts` 6.38s, `goal-status` 7.05s, `handoff` 4.24s, `goal-logs` 2.65s
+  from the JSON run above). Note the NGX-432 ticket body quotes a slower
+  reference class (15.28s / 13.75s / 9.95s / 2.65s); compare like-for-like
+  against whichever class the re-capture is run on.
+- Confirm `pnpm test` and `pnpm test:integration` stay green after each removal.
+
 ## NGX-433: Timeout/process-kill fixture centralization (complete)
 
 The duplicated child-process timeout, descendant-kill, and process-group
@@ -416,6 +548,14 @@ Action (completed):
   now point to the per-milestone files.
 
 ### Broad CLI Compatibility
+
+> **Update (NGX-432, coverage map landed):** the per-command coverage map called
+> for below now lives in the "NGX-432: Broad CLI coverage map" section above. It
+> records that only `test/cli.test.ts` is CLI-level (the other three are domain
+> loader tests), names the preserving focused/lower-level test per surface, and
+> separates the safe dedup axis (`cli.test.ts` envelope vs a focused CLI test)
+> from the unsafe ones (loader projection vs domain storage; status vs handoff).
+> The analysis below records the pre-map motivation.
 
 Heavy files:
 
