@@ -64,7 +64,7 @@
  *     routes straight from running to manual recovery, never inventing a result.
  */
 
-import type { MomentumDb } from "./adapters/db.js";
+import type { MomentumDb } from "../../adapters/db.js";
 import {
   insertExecutorArtifact,
   insertExecutorCheckpoint,
@@ -72,14 +72,14 @@ import {
   insertExecutorRound,
   updateExecutorInvocationState,
   updateExecutorRound
-} from "./executor-loop-persist.js";
+} from "./loop-persist.js";
 import {
   isTerminalExecutorInvocationState,
   type ExecutorArtifactRecord,
   type ExecutorCheckpointRecord,
   type ExecutorInvocationRecord,
   type ExecutorRoundRecord
-} from "./executor-loop-reducer.js";
+} from "./loop-reducer.js";
 import {
   invocationStateForRoundClassification,
   planGoalLoopInvocation,
@@ -96,7 +96,7 @@ import {
   type PlanGoalLoopRoundStartInput
 } from "./goal-loop-executor.js";
 import type { FinalizeLiveWorkflowStepFromResultFileResult } from "./live-step-finalize.js";
-import type { RunnerResult } from "./runner-result.js";
+import type { RunnerResult } from "../../runner-result.js";
 
 /**
  * The output of one bounded mechanism run: the normalized runner result (or

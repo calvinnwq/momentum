@@ -12,8 +12,8 @@ import {
   listExecutorRoundsForInvocation,
   loadExecutorInvocation,
   loadExecutorRound
-} from "../src/executor-loop-persist.js";
-import type { ExecutorInvocationRecord } from "../src/executor-loop-reducer.js";
+} from "../src/core/executors/loop-persist.js";
+import type { ExecutorInvocationRecord } from "../src/core/executors/loop-reducer.js";
 import type { RunnerResult } from "../src/runner-result.js";
 import {
   resolveSingleShotRoundSelection,
@@ -22,11 +22,11 @@ import {
   type PlanSingleShotRoundStartInput,
   type SingleShotExecutorFamily,
   type SingleShotRoundRuntimeInputs
-} from "../src/single-shot-executor.js";
+} from "../src/core/executors/single-shot-executor.js";
 import {
   runSingleShotRound,
   runSingleShotStep
-} from "../src/single-shot-orchestrator.js";
+} from "../src/core/executors/single-shot-orchestrator.js";
 
 // Drives the single-shot executor step (one-shot / script families) through the
 // *real* executor-loop persistence layer and round transition graph around an

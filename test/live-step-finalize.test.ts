@@ -7,7 +7,7 @@ import path from "node:path";
 import {
   finalizeLiveWorkflowStep,
   finalizeLiveWorkflowStepFromResultFile
-} from "../src/live-step-finalize.js";
+} from "../src/core/executors/live-step-finalize.js";
 import type { CommitIntent, RunnerResult } from "../src/runner-result.js";
 
 const ZERO_SHA = "0".repeat(40);

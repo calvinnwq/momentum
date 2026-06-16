@@ -48,7 +48,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 
-import { listCommittedChangedFiles } from "./adapters/git-transaction.js";
+import { listCommittedChangedFiles } from "../../adapters/git-transaction.js";
 import {
   goalLoopFinalizeEvidenceFromResult,
   type GoalLoopArtifactPointer,
@@ -60,7 +60,7 @@ import {
   type FinalizeLiveWorkflowStepFromResultFileInput,
   type FinalizeLiveWorkflowStepFromResultFileResult
 } from "./live-step-finalize.js";
-import { parseRunnerResult, type RunnerResult } from "./runner-result.js";
+import { parseRunnerResult, type RunnerResult } from "../../runner-result.js";
 
 /**
  * The inputs to {@link goalLoopRoundMechanismFromResultFile}: exactly the

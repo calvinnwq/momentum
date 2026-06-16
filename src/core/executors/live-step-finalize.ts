@@ -59,21 +59,21 @@ import type {
   CommitSuccess,
   ResetFailure,
   ResetSuccess
-} from "./adapters/git-transaction.js";
+} from "../../adapters/git-transaction.js";
 import {
   finalizeIteration,
   type FinalizeResetTrigger
-} from "./iteration-finalize.js";
-import { LIVE_STEP_WRAPPER_RESULT_MAX_BYTES } from "./adapters/live-step-wrapper.js";
+} from "../../iteration-finalize.js";
+import { LIVE_STEP_WRAPPER_RESULT_MAX_BYTES } from "../../adapters/live-step-wrapper.js";
 import {
   parseRunnerResult,
   type CommitIntent,
   type RunnerResult
-} from "./runner-result.js";
+} from "../../runner-result.js";
 import type {
   VerificationFailure,
   VerificationSuccess
-} from "./verification.js";
+} from "../../verification.js";
 
 const SHA40_RE = /^[0-9a-f]{40}$/;
 

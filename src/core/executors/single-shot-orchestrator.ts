@@ -62,7 +62,7 @@
  *     a result document exists.
  */
 
-import type { MomentumDb } from "./adapters/db.js";
+import type { MomentumDb } from "../../adapters/db.js";
 import {
   insertExecutorArtifact,
   insertExecutorCheckpoint,
@@ -70,15 +70,15 @@ import {
   insertExecutorRound,
   updateExecutorInvocationState,
   updateExecutorRound
-} from "./executor-loop-persist.js";
+} from "./loop-persist.js";
 import {
   isTerminalExecutorInvocationState,
   type ExecutorArtifactRecord,
   type ExecutorCheckpointRecord,
   type ExecutorInvocationRecord,
   type ExecutorRoundRecord
-} from "./executor-loop-reducer.js";
-import type { RunnerResult } from "./runner-result.js";
+} from "./loop-reducer.js";
+import type { RunnerResult } from "../../runner-result.js";
 import {
   planSingleShotInvocation,
   planSingleShotRoundArtifacts,

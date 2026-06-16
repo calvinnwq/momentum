@@ -2,7 +2,7 @@
  * Persistence layer for the executor-loop spine (M10-03, NGX-347).
  *
  * Takes the pure {@link ExecutorDefinitionRecord} / {@link ExecutorInvocationRecord}
- * / {@link ExecutorRoundRecord} shapes owned by `executor-loop-reducer.ts` and
+ * / {@link ExecutorRoundRecord} shapes owned by `loop-reducer.ts` and
  * writes them into the durable `executor_definitions` / `executor_invocations` /
  * `executor_rounds` tables added by `migrations.ts`. This is the storage twin of
  * the pure reducer: nothing here runs executors or starts a Goal loop. The
@@ -45,7 +45,7 @@
  *     round.
  */
 
-import { isUniqueViolation, type MomentumDb } from "./adapters/db.js";
+import { isUniqueViolation, type MomentumDb } from "../../adapters/db.js";
 import {
   EXECUTOR_ARTIFACT_CLASSES,
   EXECUTOR_COMPLETION_CLASSIFICATIONS,
@@ -69,8 +69,8 @@ import {
   type ExecutorRoundState,
   type ExecutorRoundTransitionErrorCode,
   type WorkflowExecutorFamily
-} from "./executor-loop-reducer.js";
-import { isWorkflowExecutorFamily } from "./core/workflow/definition.js";
+} from "./loop-reducer.js";
+import { isWorkflowExecutorFamily } from "../workflow/definition.js";
 
 const INVOCATION_STATE_SET: ReadonlySet<string> = new Set(
   EXECUTOR_INVOCATION_STATES

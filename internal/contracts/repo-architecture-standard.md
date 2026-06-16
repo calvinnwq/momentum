@@ -3,8 +3,9 @@
 **Status:** Accepted post-M11 repository architecture standard. `ARCH-02` /
 `NGX-446` enforces the first source-layout guardrails from this contract;
 `ARCH-03` / `NGX-447` has mechanically regrouped workflow runtime modules under
-`src/core/workflow/`; `ARCH-04` through `ARCH-08` execute the remaining module
-moves and information architecture cleanup. This contract does not authorize
+`src/core/workflow/`; `ARCH-04` / `NGX-448` has mechanically regrouped executor
+runtime modules under `src/core/executors/`; `ARCH-05` through `ARCH-08` execute
+the remaining module moves and information architecture cleanup. This contract does not authorize
 runtime behavior changes, public CLI behavior changes, compatibility-lane
 deletion, or weakening any NGX-434 runtime-consolidation decision.
 
@@ -197,10 +198,14 @@ work has stable homes for workflow, executor, repo, adapter, and evidence code.
    planning, and workflow handoff behavior under `src/core/workflow/`, leaving
    command and renderer seams in place. The local module map lives in
    [`../../src/core/workflow/README.md`](../../src/core/workflow/README.md).
-3. **ARCH-04 / NGX-448 — Executor core domain.** Move executor-loop reducers/persistence
-   and goal-loop, one-shot/script, no-mistakes, and live-wrapper-facing executor
-   behavior under `src/core/executors/`. Do not collapse the M9 direct-finalize
-   path into the M10 executor-loop path.
+3. **ARCH-04 / NGX-448 — Executor core domain.** Moved executor-loop reducers/
+   persistence and goal-loop, single-shot, live-step, no-mistakes mechanism,
+   runner-profile, foreground iteration, and runner-smoke behavior under
+   `src/core/executors/`, leaving the no-mistakes external integration
+   (`no-mistakes-executor`, `no-mistakes-orchestrator`) in `src/adapters/`. The
+   M9 direct-finalize path was kept as separate modules from the M10
+   executor-loop path. The local module map lives in
+   [`../../src/core/executors/README.md`](../../src/core/executors/README.md).
 4. **ARCH-05 / NGX-449 — Remaining pseudo-domains.** Move goal-first compatibility,
    source reconciliation/items/context, update intents/apply audit/apply
    execution, daemon/worker/queue/stale-recovery, repo guard/lock/branch/

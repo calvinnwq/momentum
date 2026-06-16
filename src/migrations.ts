@@ -502,7 +502,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_state_type
 //
 // The spine tables mirror the pure `ExecutorDefinitionRecord` /
 // `ExecutorInvocationRecord` / `ExecutorRoundRecord` shapes in
-// src/executor-loop-reducer.ts (the round columns are exactly the contract
+// src/core/executors/loop-reducer.ts (the round columns are exactly the contract
 // "Round Schema" identity / execution / result fields). The four child evidence
 // tables the contract names — `executor_artifacts` / `executor_findings` /
 // `executor_decisions` / `executor_checkpoints` — hang below a round by

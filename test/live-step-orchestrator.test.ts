@@ -8,7 +8,7 @@ import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
   LIVE_STEP_DEFAULT_LEASE_KIND,
   runLiveWorkflowStep
-} from "../src/live-step-orchestrator.js";
+} from "../src/core/executors/live-step-orchestrator.js";
 import {
   acquireWorkflowLease,
   getWorkflowLease

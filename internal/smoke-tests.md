@@ -687,7 +687,7 @@ never a CI full-agent spawn:
 - **CI-safe (always runs):** `test/real-workflow-smoke.test.ts` pins the pure
   gating decision (`planWorkflowHarnessSmoke`), the pure spawn-result mapping
   (`classifyProbeSpawnResult`), and the failure-mode taxonomy
-  (`classifyWorkflowHarnessOutcome`) from `src/real-workflow-smoke.ts`, with no
+  (`classifyWorkflowHarnessOutcome`) from `src/core/executors/real-workflow-smoke.ts`, with no
   process spawned. It composes the existing M9 `LiveWrapperProfile` registry
   (`parseLiveWrapperProfile` / `resolveLiveWrapper`) to resolve the harness
   command, so the planner reuses the validated wrapper config rather than minting

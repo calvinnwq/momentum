@@ -7,7 +7,7 @@ import {
   runForegroundIteration,
   type ForegroundIterationError,
   type ForegroundIterationSuccess
-} from "./foreground-iteration.js";
+} from "./core/executors/foreground-iteration.js";
 import type { GoalSpec } from "./goal-spec.js";
 import { markGoalNeedsManualRecovery } from "./goal-recovery.js";
 import { parseAcpConfig } from "./adapters/acp-config.js";

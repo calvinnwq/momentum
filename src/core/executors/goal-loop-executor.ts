@@ -13,7 +13,7 @@
  * preserved recovery code, and any durable human gate.
  *
  * It is a pure function of its inputs: no SQLite, no file system, no git, no
- * executor invocation — exactly the discipline `executor-loop-reducer.ts` and
+ * executor invocation — exactly the discipline `loop-reducer.ts` and
  * `live-step-finalize.ts` follow. The durable orchestrator that creates the
  * invocation, inserts the round, runs the bounded mechanism, runs finalization,
  * and persists this decision is layered on top in later M10-05 slices, the same
@@ -21,7 +21,7 @@
  *
  * Beyond the classification, this module also projects a finished round into the
  * durable {@link ExecutorRoundUpdate} patches the M10-03 persistence twin
- * (`executor-loop-persist.ts`) writes — implementing the contract's "Round
+ * (`loop-persist.ts`) writes — implementing the contract's "Round
  * Schema" result/verification/commit/recovery evidence requirement. The
  * projection is two-phase to honour both the contract's Round Lifecycle and the
  * round transition graph: a `capturing_result` patch carries the normalized
@@ -79,10 +79,10 @@ import type {
   ExecutorRoundRecord,
   ExecutorRoundState,
   WorkflowExecutorFamily
-} from "./executor-loop-reducer.js";
-import type { ExecutorRoundUpdate } from "./executor-loop-persist.js";
+} from "./loop-reducer.js";
+import type { ExecutorRoundUpdate } from "./loop-persist.js";
 import type { FinalizeLiveWorkflowStepFromResultFileResult } from "./live-step-finalize.js";
-import type { RunnerResult } from "./runner-result.js";
+import type { RunnerResult } from "../../runner-result.js";
 
 /**
  * The finalize outcomes a goal-loop round consumes: exactly the discriminant of

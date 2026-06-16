@@ -73,21 +73,6 @@ const TRANSITIONAL_ROOT_SRC_EXCEPTIONS = {
     targetHome: "src/core/evidence/workflow.ts",
     reason: "Workflow evidence linkage is owned by the evidence domain."
   },
-  "src/executor-loop-persist.ts": {
-    ownerIssue: "NGX-448",
-    targetHome: "src/core/executors/loop-persist.ts",
-    reason: "Executor-loop persistence moves with executor core ownership."
-  },
-  "src/executor-loop-reducer.ts": {
-    ownerIssue: "NGX-448",
-    targetHome: "src/core/executors/loop-reducer.ts",
-    reason: "Executor-loop reducer behavior moves with executor core ownership."
-  },
-  "src/foreground-iteration.ts": {
-    ownerIssue: "NGX-448",
-    targetHome: "src/core/executors/foreground-iteration.ts",
-    reason: "Foreground iteration runtime behavior belongs with executor core modules."
-  },
   "src/goal-init.ts": {
     ownerIssue: "NGX-449",
     targetHome: "src/core/goal/init.ts",
@@ -97,21 +82,6 @@ const TRANSITIONAL_ROOT_SRC_EXCEPTIONS = {
     ownerIssue: "NGX-449",
     targetHome: "src/core/goal/logs.ts",
     reason: "Goal log behavior moves with goal compatibility state."
-  },
-  "src/goal-loop-executor.ts": {
-    ownerIssue: "NGX-448",
-    targetHome: "src/core/executors/goal-loop-executor.ts",
-    reason: "Goal-loop execution belongs with executor-family runtime behavior."
-  },
-  "src/goal-loop-mechanism.ts": {
-    ownerIssue: "NGX-448",
-    targetHome: "src/core/executors/goal-loop-mechanism.ts",
-    reason: "Goal-loop mechanism behavior belongs with executor-family runtime behavior."
-  },
-  "src/goal-loop-orchestrator.ts": {
-    ownerIssue: "NGX-448",
-    targetHome: "src/core/executors/goal-loop-orchestrator.ts",
-    reason: "Goal-loop orchestration belongs with executor-family runtime behavior."
   },
   "src/goal-recovery.ts": {
     ownerIssue: "NGX-449",
@@ -163,31 +133,6 @@ const TRANSITIONAL_ROOT_SRC_EXCEPTIONS = {
     targetHome: "src/core/goal/iteration-prompt.ts",
     reason: "Goal iteration prompt helpers move with the goal domain."
   },
-  "src/live-step-advance.ts": {
-    ownerIssue: "NGX-448",
-    targetHome: "src/core/executors/live-step-advance.ts",
-    reason: "Live step execution behavior moves with executor core modules."
-  },
-  "src/live-step-executor.ts": {
-    ownerIssue: "NGX-448",
-    targetHome: "src/core/executors/live-step-executor.ts",
-    reason: "Live step execution behavior moves with executor core modules."
-  },
-  "src/live-step-finalize.ts": {
-    ownerIssue: "NGX-448",
-    targetHome: "src/core/executors/live-step-finalize.ts",
-    reason: "Live step finalization behavior moves with executor core modules."
-  },
-  "src/live-step-orchestrator.ts": {
-    ownerIssue: "NGX-448",
-    targetHome: "src/core/executors/live-step-orchestrator.ts",
-    reason: "Live step orchestration behavior moves with executor core modules."
-  },
-  "src/live-step-run-recovery.ts": {
-    ownerIssue: "NGX-448",
-    targetHome: "src/core/executors/live-step-run-recovery.ts",
-    reason: "Live step recovery behavior moves with executor core modules."
-  },
   "src/migrations.ts": {
     ownerIssue: "NGX-449",
     targetHome: "src/adapters/db/migrations.ts",
@@ -197,11 +142,6 @@ const TRANSITIONAL_ROOT_SRC_EXCEPTIONS = {
     ownerIssue: "NGX-449",
     targetHome: "src/core/intent/policy.ts",
     reason: "External-write policy checks move with intent/apply ownership."
-  },
-  "src/no-mistakes-mechanism.ts": {
-    ownerIssue: "NGX-448",
-    targetHome: "src/core/executors/no-mistakes-mechanism.ts",
-    reason: "No-mistakes mechanism behavior moves with executor core modules."
   },
   "src/post-apply-reconcile.ts": {
     ownerIssue: "NGX-449",
@@ -218,16 +158,6 @@ const TRANSITIONAL_ROOT_SRC_EXCEPTIONS = {
     targetHome: "src/core/daemon/queue-jobs.ts",
     reason: "Queue job state moves with daemon compatibility ownership."
   },
-  "src/real-smoke.ts": {
-    ownerIssue: "NGX-448",
-    targetHome: "src/core/executors/real-smoke.ts",
-    reason: "Runner smoke behavior moves with executor-family runtime behavior."
-  },
-  "src/real-workflow-smoke.ts": {
-    ownerIssue: "NGX-448",
-    targetHome: "src/core/executors/real-workflow-smoke.ts",
-    reason: "Workflow runner smoke behavior moves with executor-family runtime behavior."
-  },
   "src/recovery-artifact.ts": {
     ownerIssue: "NGX-449",
     targetHome: "src/core/goal/recovery-artifact.ts",
@@ -243,30 +173,10 @@ const TRANSITIONAL_ROOT_SRC_EXCEPTIONS = {
     targetHome: "src/core/repo/locks.ts",
     reason: "Repo lock primitives move with repo-domain ownership."
   },
-  "src/runner-profile.ts": {
-    ownerIssue: "NGX-448",
-    targetHome: "src/core/executors/runner-profile.ts",
-    reason: "Runner profile resolution moves with executor-family runtime behavior."
-  },
   "src/runner-result.ts": {
     ownerIssue: "NGX-450",
     targetHome: "src/core/executors/types.ts",
     reason: "Runner result shapes and parsing belong beside executor behavior."
-  },
-  "src/single-shot-executor.ts": {
-    ownerIssue: "NGX-448",
-    targetHome: "src/core/executors/single-shot-executor.ts",
-    reason: "Single-shot execution behavior moves with executor core modules."
-  },
-  "src/single-shot-mechanism.ts": {
-    ownerIssue: "NGX-448",
-    targetHome: "src/core/executors/single-shot-mechanism.ts",
-    reason: "Single-shot mechanism behavior moves with executor core modules."
-  },
-  "src/single-shot-orchestrator.ts": {
-    ownerIssue: "NGX-448",
-    targetHome: "src/core/executors/single-shot-orchestrator.ts",
-    reason: "Single-shot orchestration behavior moves with executor core modules."
   },
   "src/source-context.ts": {
     ownerIssue: "NGX-449",

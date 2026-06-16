@@ -23,7 +23,7 @@
  *
  * It is a pure function of its inputs: no SQLite, no file system, no git, no
  * executor invocation — exactly the discipline `goal-loop-executor.ts` and
- * `executor-loop-reducer.ts` follow.
+ * `loop-reducer.ts` follow.
  *
  * Classification, grounded in the contract's "Completion Classification"
  * definitions:
@@ -70,10 +70,10 @@ import type {
   ExecutorRoundRecord,
   ExecutorRoundState,
   WorkflowExecutorFamily
-} from "./executor-loop-reducer.js";
-import type { ExecutorRoundUpdate } from "./executor-loop-persist.js";
-import { LIVE_STEP_WRAPPER_RECOVERY_CODES } from "./adapters/live-step-wrapper.js";
-import type { RunnerResult } from "./runner-result.js";
+} from "./loop-reducer.js";
+import type { ExecutorRoundUpdate } from "./loop-persist.js";
+import { LIVE_STEP_WRAPPER_RECOVERY_CODES } from "../../adapters/live-step-wrapper.js";
+import type { RunnerResult } from "../../runner-result.js";
 
 /**
  * The executor families this adapter serves: the single-invocation families from

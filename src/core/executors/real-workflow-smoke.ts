@@ -2,7 +2,7 @@
  * Opt-in real coding-workflow harness smoke — planning and outcome
  * classification (NGX-372 / Adapter Test Coverage milestone).
  *
- * `src/real-smoke.ts` owns the opt-in real Linear *read* smoke. This sibling
+ * `src/core/executors/real-smoke.ts` owns the opt-in real Linear *read* smoke. This sibling
  * module owns the CI-safe decision logic for the opt-in real *coding-workflow
  * harness* smoke: invoking a live OpenClaw wrapper (preflight / implementation
  * (GNHF) / postflight / no-mistakes / merge-cleanup / linear-refresh) behind
@@ -38,17 +38,17 @@
 import {
   CODING_WORKFLOW_DEFINITION,
   type WorkflowExecutorFamily
-} from "./core/workflow/definition.js";
+} from "../workflow/definition.js";
 import {
   parseLiveWrapperProfile,
   resolveLiveWrapper,
   type LiveWrapperCwd,
   type LiveWrapperProbeConfig
-} from "./adapters/live-wrapper-registry.js";
+} from "../../adapters/live-wrapper-registry.js";
 import {
   WORKFLOW_STEP_KINDS,
   type WorkflowStepKind
-} from "./core/workflow/run-reducer.js";
+} from "../workflow/run-reducer.js";
 
 /** Master opt-in switch. The real coding-workflow harness smoke skips unless truthy. */
 export const REAL_SMOKE_WORKFLOW_OPT_IN_ENV_VAR = "MOMENTUM_REAL_SMOKE_WORKFLOW";

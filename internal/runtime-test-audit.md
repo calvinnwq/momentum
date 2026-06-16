@@ -448,7 +448,7 @@ Decisions at a glance (full evidence and prerequisites live in the plan):
 - **Goal-first CLI compatibility** — deprecate-later; blocked on workflow-first
   read-back/recover parity, byte-equivalent migration coverage, and
   disentangling the iteration-finalization primitive the `goal-loop` executor
-  reuses (`goal-loop-mechanism.ts:83` →
+  reuses (`src/core/executors/goal-loop-mechanism.ts:83` →
   `finalizeLiveWorkflowStepFromResultFile`).
 - **`.agent-workflows` / `cwfp-*` import** — defer; governed by
   [`contracts/coding-workflow-ownership.md`](contracts/coding-workflow-ownership.md),

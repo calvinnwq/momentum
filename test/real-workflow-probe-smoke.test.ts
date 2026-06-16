@@ -3,13 +3,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { REAL_SMOKE_EVIDENCE_DIR_ENV_VAR } from "../src/real-smoke.js";
+import { REAL_SMOKE_EVIDENCE_DIR_ENV_VAR } from "../src/core/executors/real-smoke.js";
 import {
   REAL_SMOKE_WORKFLOW_KIND_ENV_VAR,
   REAL_SMOKE_WORKFLOW_OPT_IN_ENV_VAR,
   classifyWorkflowHarnessOutcome,
   planWorkflowHarnessSmoke
-} from "../src/real-workflow-smoke.js";
+} from "../src/core/executors/real-workflow-smoke.js";
 import {
   REAL_SMOKE_WORKFLOW_PROFILE_ENV_VAR,
   buildHarnessProbeEnv,
@@ -21,7 +21,7 @@ import {
  * NGX-372 opt-in real coding-workflow harness *probe* smoke (Adapter Test
  * Coverage milestone).
  *
- * `src/real-workflow-smoke.ts` owns the pure gate (`planWorkflowHarnessSmoke`)
+ * `src/core/executors/real-workflow-smoke.ts` owns the pure gate (`planWorkflowHarnessSmoke`)
  * and taxonomy (`classifyWorkflowHarnessOutcome`). This file owns the executing
  * layer: it actually spawns the resolved live-wrapper pre-flight probe.
  *

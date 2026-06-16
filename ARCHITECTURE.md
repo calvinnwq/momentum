@@ -68,6 +68,7 @@ src/commands/             command-family modules
 src/renderers/            text / JSON envelope rendering helpers
 src/adapters/             infrastructure-facing clients and runtime adapters
 src/core/workflow/        workflow runtime reducers, policies, persistence helpers
+src/core/executors/       executor runtime reducers, persistence, families
 flat src domain modules   transitional helpers awaiting later ARCH slices
 ```
 
@@ -75,7 +76,8 @@ The target post-M11 source taxonomy is `src/commands/`, `src/renderers/`,
 `src/adapters/`, `src/config/`, `src/shared/`, and `src/core/<domain>/`.
 ARCH-02 enforces this with root `src/*.ts` allowlists, transitional exceptions,
 placeholder-free pending homes, and import guards; ARCH-03 has populated
-`src/core/workflow/`. Detailed placement, type, docs, test, and remaining rules live in
+`src/core/workflow/`; ARCH-04 has populated `src/core/executors/`. Detailed
+placement, type, docs, test, and remaining rules live in
 [internal/contracts/repo-architecture-standard.md](internal/contracts/repo-architecture-standard.md).
 
 The import direction is fixed:
@@ -127,7 +129,8 @@ After M11:
 - Command-family modules may import domain modules, renderers, and shared CLI
   helpers.
 - Domain modules stay independent of CLI argv parsing and process IO.
-- Core modules, including `src/core/workflow/`, must not import command or renderer layers.
+- Core modules, including `src/core/workflow/` and `src/core/executors/`, must
+  not import command or renderer layers.
 - Renderer modules accept already-computed results and must not import commands,
   adapters, persistence, or mutation modules except documented transitional edges.
 - External adapters stay behind domain or command boundaries with explicit
@@ -161,7 +164,8 @@ The M11 migration shipped in deliberate, behavior-preserving slices:
 registry skeleton, `NGX-413` extracted the read-only status family, `NGX-414`
 extracted workflow commands, `NGX-415` extracted goal / source / evidence /
 project / intent command families, `NGX-416` consolidated renderers, `NGX-417`
-organized adapters, `NGX-418` enforced import boundaries, and `NGX-419` closes out M11 with final regression coverage, doctor marker advancement, and docs cleanup.
+organized adapters, `NGX-418` enforced import boundaries, and `NGX-419` closes out M11 with final regression coverage,
+doctor marker advancement, and docs cleanup.
 
 ## Stability Rules
 

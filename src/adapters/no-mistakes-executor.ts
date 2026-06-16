@@ -65,7 +65,7 @@
  *     (`external_state_unreadable`): untrusted evidence, not authority.
  */
 
-import type { ExecutorRoundUpdate } from "../executor-loop-persist.js";
+import type { ExecutorRoundUpdate } from "../core/executors/loop-persist.js";
 import type {
   ExecutorCompletionClassification,
   ExecutorDecisionRecord,
@@ -76,7 +76,7 @@ import type {
   ExecutorRoundRecord,
   ExecutorRoundState,
   WorkflowExecutorFamily
-} from "../executor-loop-reducer.js";
+} from "../core/executors/loop-reducer.js";
 
 /**
  * The single executor family this adapter mirrors. Pinned as a named constant —

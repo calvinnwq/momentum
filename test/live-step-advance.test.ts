@@ -5,12 +5,12 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
-import { advanceLiveWorkflowStep } from "../src/live-step-advance.js";
+import { advanceLiveWorkflowStep } from "../src/core/executors/live-step-advance.js";
 import { getWorkflowStep } from "../src/core/workflow/step-transitions.js";
 import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run-recovery.js";
 import { resolveWorkflowRecoveryArtifactPath } from "../src/core/workflow/recovery-artifact.js";
 import { getRepoLock } from "../src/repo-locks.js";
-import type { PersistLiveWorkflowFinalizeRecoveryResult } from "../src/live-step-run-recovery.js";
+import type { PersistLiveWorkflowFinalizeRecoveryResult } from "../src/core/executors/live-step-run-recovery.js";
 import type {
   WorkflowStepExecutor,
   WorkflowStepExecutorDispatchResult,

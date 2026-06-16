@@ -1,28 +1,28 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 
-import type { GoalArtifactPaths } from "./artifacts.js";
-import { ensureMomentumBranch } from "./branch-manager.js";
-import { resetToBase } from "./adapters/git-transaction.js";
-import type { GoalSpec } from "./goal-spec.js";
+import type { GoalArtifactPaths } from "../../artifacts.js";
+import { ensureMomentumBranch } from "../../branch-manager.js";
+import { resetToBase } from "../../adapters/git-transaction.js";
+import type { GoalSpec } from "../../goal-spec.js";
 import {
   finalizeIteration,
   type FinalizeIterationResult
-} from "./iteration-finalize.js";
+} from "../../iteration-finalize.js";
 import {
   renderIterationPrompt,
   type IterationPromptSourceContext
-} from "./iteration-prompt.js";
-import { loadMomentumPolicy } from "./momentum-policy.js";
-import { inspectRepo } from "./repo-guard.js";
+} from "../../iteration-prompt.js";
+import { loadMomentumPolicy } from "../../momentum-policy.js";
+import { inspectRepo } from "../../repo-guard.js";
 import {
   dispatchRunnerAdapter,
   getRunnerAdapter,
   listExecutingRunnerAdapterKinds,
   type RunnerAdapterErrorCode,
   type RunnerAdapterResult
-} from "./adapters/runner-adapter.js";
-import type { RunnerResult } from "./runner-result.js";
+} from "../../adapters/runner-adapter.js";
+import type { RunnerResult } from "../../runner-result.js";
 
 export type ForegroundIterationErrorCode =
   | "invalid_input"

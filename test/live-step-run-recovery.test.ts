@@ -9,11 +9,11 @@ import { resolveWorkflowRecoveryArtifactPath } from "../src/core/workflow/recove
 import {
   persistLiveWorkflowDispatchRecovery,
   persistLiveWorkflowFinalizeRecovery
-} from "../src/live-step-run-recovery.js";
+} from "../src/core/executors/live-step-run-recovery.js";
 import type {
   FinalizeLiveWorkflowStepFromResultFileResult,
   FinalizeLiveWorkflowStepResult
-} from "../src/live-step-finalize.js";
+} from "../src/core/executors/live-step-finalize.js";
 
 const tempRoots: string[] = [];
 

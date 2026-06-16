@@ -16,7 +16,7 @@
  * internal/contracts/workflow-first-runtime.md "Human Gates"):
  *
  *   - Gate types are the contract's nine durable human-gate classes. They are
- *     re-exported from `executor-loop-reducer.ts` so a workflow gate and an
+ *     re-exported from `src/core/executors/loop-reducer.ts` so a workflow gate and an
  *     executor gate can never drift into two vocabularies — there is one set,
  *     and the contract describes one set.
  *   - A gate's *target scope* (ticket "target scope") names which layer of the
@@ -40,7 +40,7 @@
 import {
   EXECUTOR_HUMAN_GATE_TYPES,
   type ExecutorHumanGateType
-} from "../../executor-loop-reducer.js";
+} from "../executors/loop-reducer.js";
 
 /**
  * Durable human-gate types (contract "Human Gates"). Re-exported from the

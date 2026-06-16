@@ -7,7 +7,7 @@ import {
   parseRunnerProfile,
   resolveRunnerProfile,
   safeRunnerProfileSummary
-} from "../src/runner-profile.js";
+} from "../src/core/executors/runner-profile.js";
 
 describe("runner-profile registry", () => {
   it("exposes a stable set of supported built-in kinds including fake, trusted-shell, and acp", () => {

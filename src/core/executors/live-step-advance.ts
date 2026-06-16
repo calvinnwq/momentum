@@ -56,7 +56,7 @@
  * transaction produces a committed, reset, or recovery outcome.
  */
 
-import type { MomentumDb } from "./adapters/db.js";
+import type { MomentumDb } from "../../adapters/db.js";
 import { Worker } from "node:worker_threads";
 import {
   finalizeLiveWorkflowStepFromResultFile,
@@ -79,24 +79,24 @@ import type {
   WorkflowStepKind,
   WorkflowStepRecord,
   WorkflowStepState
-} from "./core/workflow/run-reducer.js";
+} from "../workflow/run-reducer.js";
 import {
   deriveWorkflowRunState,
   isTerminalRunState
-} from "./core/workflow/run-reducer.js";
+} from "../workflow/run-reducer.js";
 import {
   heartbeatWorkflowLease,
   releaseWorkflowLease
-} from "./core/workflow/leases.js";
+} from "../workflow/leases.js";
 import {
   finishWorkflowStep,
   getWorkflowStep,
   type WorkflowStepTransitionOutcome
-} from "./core/workflow/step-transitions.js";
+} from "../workflow/step-transitions.js";
 import type {
   WorkflowStepExecutor,
   WorkflowStepExecutorInput
-} from "./core/workflow/step-executor.js";
+} from "../workflow/step-executor.js";
 
 export type AdvanceLiveWorkflowStepInput = {
   /**

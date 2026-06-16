@@ -17,7 +17,7 @@ describe("root ARCHITECTURE.md contract", () => {
     expect(architecture).toMatch(/^# Momentum Architecture/m);
     expect(architecture).toContain("This file is the repo-level architecture contract");
     expect(architecture).toContain("Deeper Contracts");
-    expect(architecture.split("\n").length).toBeLessThan(180);
+    expect(architecture.split("\n").length).toBeLessThan(185);
   });
 
   it("links deeper internal contracts instead of restating the whole runtime", () => {

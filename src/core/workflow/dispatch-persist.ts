@@ -8,7 +8,7 @@
  * manual-recovery outcome. This module owns the read-only half that produces that
  * resolution from durable SQLite state — the storage twin, exactly as
  * `gate-persist.ts` is the storage twin of `gate.ts` and
- * `executor-loop-persist.ts` is the storage twin of the executor-loop reducer.
+ * `src/core/executors/loop-persist.ts` is the storage twin of the executor-loop reducer.
  *
  * Resolution walks the same chain the workflow-first runtime materializes a run
  * from, in reverse: a claimed step is identified by `(runId, stepId)`; the run

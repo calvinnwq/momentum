@@ -58,12 +58,12 @@ import {
   insertExecutorInvocation,
   insertExecutorRound,
   loadExecutorInvocation
-} from "../../executor-loop-persist.js";
+} from "../executors/loop-persist.js";
 import type {
   ExecutorInvocationRecord,
   ExecutorRoundRecord,
   WorkflowExecutorFamily
-} from "../../executor-loop-reducer.js";
+} from "../executors/loop-reducer.js";
 import {
   insertWorkflowGate,
   loadWorkflowGate

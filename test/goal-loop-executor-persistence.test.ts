@@ -9,14 +9,14 @@ import {
   insertExecutorRound,
   loadExecutorRound,
   updateExecutorRound
-} from "../src/executor-loop-persist.js";
-import type { ExecutorInvocationRecord } from "../src/executor-loop-reducer.js";
+} from "../src/core/executors/loop-persist.js";
+import type { ExecutorInvocationRecord } from "../src/core/executors/loop-reducer.js";
 import {
   planGoalLoopRoundPersistence,
   planGoalLoopRoundStart,
   resolveGoalLoopRoundSelection
-} from "../src/goal-loop-executor.js";
-import type { FinalizeLiveWorkflowStepFromResultFileResult } from "../src/live-step-finalize.js";
+} from "../src/core/executors/goal-loop-executor.js";
+import type { FinalizeLiveWorkflowStepFromResultFileResult } from "../src/core/executors/live-step-finalize.js";
 import type { RunnerResult } from "../src/runner-result.js";
 
 // This is the integration twin of the pure projections in
