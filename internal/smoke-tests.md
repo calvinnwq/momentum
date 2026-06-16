@@ -467,6 +467,11 @@ Coverage:
   shapes live under `src/renderers/` rather than sibling command families.
 - command families do not import sibling command families for JSON / text
   shapes; core and domain modules do not import command or renderer modules.
+- ARCH-02 source-layout guardrails keep root `src/*.ts` additions behind the
+  durable allowlist or named transitional exceptions, reject placeholder-only
+  `src/core/`, `src/config/`, and `src/shared/` directories, and prevent
+  renderers from importing commands, adapters, persistence, or mutation modules
+  outside documented type-only/read-only transitional edges.
 - direct `process.stdout` / `process.stderr` access stays in the CLI or
   renderer layers.
 - `src/index.ts` performs bootstrap-only warning suppression before dynamically
