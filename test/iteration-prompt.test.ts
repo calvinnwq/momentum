@@ -4,7 +4,7 @@ import {
   renderIterationPrompt,
   type IterationPromptContext
 } from "../src/core/goal/iteration-prompt.js";
-import type { GoalSpec } from "../src/goal-spec.js";
+import type { GoalSpec } from "../src/core/goal/types.js";
 import type { SourceItemSummary } from "../src/core/source/items.js";
 
 const FAKE_HEAD = "0123456789abcdef0123456789abcdef01234567";

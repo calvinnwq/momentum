@@ -14,7 +14,7 @@ import {
   initGoalArtifacts,
   resolveGoalArtifactPaths
 } from "../src/core/evidence/artifacts.js";
-import type { GoalSpec } from "../src/goal-spec.js";
+import type { GoalSpec } from "../src/core/goal/types.js";
 
 const tempRoots: string[] = [];
 

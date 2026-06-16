@@ -18,7 +18,7 @@ import {
   ensureIterationArtifactDir,
   resolveGoalArtifactPaths
 } from "../evidence/artifacts.js";
-import { parseGoalSpecFile } from "../../goal-spec.js";
+import { parseGoalSpecFile } from "../goal/spec.js";
 import {
   executeIterationJob,
   type GoalIterationState,

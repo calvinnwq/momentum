@@ -21,6 +21,10 @@ the folder now carries the domain (`goal-init.ts` → `init.ts`, `goal-logs.ts` 
 | Status / logs read models | `status.ts`, `logs.ts` |
 | Recovery compatibility | `recovery.ts`, `recovery-artifact.ts` |
 | Iteration helpers | `iteration-job.ts`, `iteration-prompt.ts` |
+| Goal spec parsing / types | `spec.ts`, `types.ts` |
 
-Goal specification types (`src/goal-spec.ts` → `types.ts`) land here under
-ARCH-06 / NGX-450 type placement; they remain a flat root module for now.
+Goal specification parsing (`spec.ts`) and its exported `GoalSpec*` shapes
+(`types.ts`) moved here from the former flat `src/goal-spec.ts` root module under
+ARCH-06 / NGX-450 type placement, dropping the redundant `goal-` prefix. The
+parser keeps its private YAML helpers and types local and imports the public
+shapes from `./types.js`.

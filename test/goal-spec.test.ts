@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseGoalSpec, parseGoalSpecFile } from "../src/goal-spec.js";
+import { parseGoalSpec, parseGoalSpecFile } from "../src/core/goal/spec.js";
 import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";

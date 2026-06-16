@@ -13,7 +13,7 @@ import {
 import { QUEUE_EVENT_TYPES, appendQueueEvent } from "../../shared/events.js";
 import { getGoal, type GoalRow } from "../goal/init.js";
 import { markGoalNeedsManualRecovery } from "../goal/recovery.js";
-import { parseGoalSpecFile } from "../../goal-spec.js";
+import { parseGoalSpecFile } from "../goal/spec.js";
 import { buildRunnerProfileSummary } from "../goal/iteration-job.js";
 import {
   getQueueJob,

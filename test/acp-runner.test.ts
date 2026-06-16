@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { ACP_ENV_VARS, runAcpRunner } from "../src/adapters/acp-runner.js";
-import type { GoalSpec } from "../src/goal-spec.js";
+import type { GoalSpec } from "../src/core/goal/types.js";
 import type { RunnerAdapterInput } from "../src/adapters/runner-adapter.js";
 
 const tempRoots: string[] = [];

@@ -28,11 +28,6 @@ type RootSrcException = {
 };
 
 const TRANSITIONAL_ROOT_SRC_EXCEPTIONS = {
-  "src/goal-spec.ts": {
-    ownerIssue: "NGX-450",
-    targetHome: "src/core/goal/types.ts",
-    reason: "Goal specification types should live beside goal behavior."
-  },
   "src/runner-result.ts": {
     ownerIssue: "NGX-450",
     targetHome: "src/core/executors/types.ts",
@@ -368,11 +363,11 @@ describe("M11 CLI import boundaries", () => {
 
   it("classifies transitional root and future core source modules as renderer runtime boundaries", () => {
     // Remaining transitional-root exceptions (NGX-450) still classify as boundaries.
-    expect(isPersistenceOrMutationModule("src/goal-spec.ts")).toBe(true);
     expect(isPersistenceOrMutationModule("src/runner-result.ts")).toBe(true);
-    // Owned core/domain homes (post NGX-449) classify as renderer runtime boundaries.
+    // Owned core/domain homes (post NGX-449/NGX-450) classify as renderer runtime boundaries.
     expect(isPersistenceOrMutationModule("src/core/daemon/status.ts")).toBe(true);
     expect(isPersistenceOrMutationModule("src/core/goal/status.ts")).toBe(true);
+    expect(isPersistenceOrMutationModule("src/core/goal/types.ts")).toBe(true);
     expect(isPersistenceOrMutationModule("src/core/source/context.ts")).toBe(true);
     expect(isPersistenceOrMutationModule("src/core/evidence/handoff.ts")).toBe(true);
     expect(isPersistenceOrMutationModule("src/core/intent/policy.ts")).toBe(true);
@@ -491,8 +486,7 @@ describe("M11 CLI import boundaries", () => {
       )
     );
     expect([...documentedTargetPrefixes].sort()).toEqual([
-      "src/core/executors",
-      "src/core/goal"
+      "src/core/executors"
     ]);
   });
 

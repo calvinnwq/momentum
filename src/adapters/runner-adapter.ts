@@ -10,7 +10,7 @@
  */
 
 import { runAcpRunner } from "./acp-runner.js";
-import type { GoalSpec } from "../goal-spec.js";
+import type { GoalSpec } from "../core/goal/types.js";
 import { runFakeRunner } from "./fake-runner.js";
 import {
   BUILTIN_RUNNER_KINDS,

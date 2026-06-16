@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { parseGoalSpec, type GoalSpec } from "../../goal-spec.js";
+import { parseGoalSpec } from "./spec.js";
+import type { GoalSpec } from "./types.js";
 import { resolveDataDir, type DataDirOptions } from "../../config/data-dir.js";
 import { openDb, type MomentumDb } from "../../adapters/db.js";
 import {
