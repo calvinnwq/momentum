@@ -1,10 +1,11 @@
 # Contract: Repo Architecture Standard
 
-**Status:** Accepted planning contract for `NGX-445`. This contract defines the
-post-M11 repository architecture and documentation standard that `ARCH-02`
-through `ARCH-08` execute from. It is docs/contract-only: no source modules move,
-no runtime behavior changes, no public CLI behavior changes, no compatibility
-lanes are deleted, and no NGX-434 runtime-consolidation decision is weakened.
+**Status:** Accepted post-M11 repository architecture standard. `ARCH-02` /
+`NGX-446` enforces the first source-layout guardrails from this contract;
+`ARCH-03` through `ARCH-08` execute the remaining module moves and information
+architecture cleanup. This contract does not authorize runtime behavior changes,
+public CLI behavior changes, compatibility-lane deletion, or weakening any
+NGX-434 runtime-consolidation decision.
 
 Root [`../../ARCHITECTURE.md`](../../ARCHITECTURE.md) remains the entry point.
 This file holds the longer placement rules so the root contract stays compact.
@@ -70,17 +71,17 @@ Documented exceptions:
 
 ## Allowed Root `src/*.ts` Policy
 
-`ARCH-02` must encode an allowlist for root `src/*.ts` files before broad moves
-begin. The starting allowlist should be intentionally small:
+`ARCH-02` encodes an allowlist for root `src/*.ts` files before broad moves
+begin. The durable allowlist is intentionally small:
 
 - `src/index.ts`
 - `src/cli.ts`
 - `src/suppress-sqlite-experimental-warning.ts`
 - `src/node-shims.d.ts`
 
-During migration, the allowlist may include named transitional files with a
-ticket owner and removal target. New production modules should not be added at
-root unless a contract update names the exception.
+During migration, the guard may include named transitional files with an owner
+issue, target home, and removal reason. New production modules should not be
+added at root unless a contract update names the exception.
 
 ## Adding Source Modules During ARCH Migration
 
@@ -93,9 +94,10 @@ exists.
 
 If a future slice must keep migration debt at root temporarily, add a
 transitional exception to the ARCH-02 guard with the owner issue, target home,
-and removal reason. Do not create placeholder directories or generic dumping
-grounds just to satisfy the taxonomy; absent pending homes are better than
-empty or misleading ones.
+and removal reason. The guard should fail stale exceptions after their root file
+moves. Do not create placeholder directories or generic dumping grounds just to
+satisfy the taxonomy; absent pending homes are better than empty or misleading
+ones.
 
 ## Import Direction
 
@@ -111,8 +113,11 @@ index -> cli -> commands -> core -> adapters
 Commands orchestrate: they parse command-family arguments, call core behavior or
 adapter-backed seams, and pass computed results to renderers. Renderers output
 only: they format stable JSON/text/help/diagnostics and do not mutate state,
-open databases, read repos, call adapters, or inspect argv. Core owns
-business/runtime behavior: reducers, state machines, persistence policies,
+open databases, read repos, call adapters, or inspect argv. Until transitional
+root files move, renderers may keep explicit type-only imports for stable shapes
+and named read-only constants that the guard allowlists; new runtime imports
+from commands, adapters, persistence, or mutation modules are not allowed. Core
+owns business/runtime behavior: reducers, state machines, persistence policies,
 runtime decisions, and compatibility behavior. Adapters own external concrete
 integrations: databases, git, Linear, runners, shells, probes, and remote or
 process IO. `shared` and `config` are support layers, not domain escape hatches.
@@ -181,10 +186,11 @@ Tests should follow the behavior owner rather than the historical filename:
 The ARCH sequence must land before RC-2 so the step-finalization reconciliation
 work has stable homes for workflow, executor, repo, adapter, and evidence code.
 
-1. **ARCH-02 / NGX-446 — Source-layout guardrails.** Add the allowed-root `src/*.ts`
-   policy, target directory existence checks, and import-direction guardrails
-   for `core`, `config`, and `shared`. This issue enforces, but does not broadly
-   move, the standard.
+1. **ARCH-02 / NGX-446 — Source-layout guardrails.** Enforce the allowed-root
+   `src/*.ts` policy, named transitional root exceptions, placeholder-free
+   target directory checks, and import-direction guardrails for `core`,
+   `config`, `shared`, renderers, and transitional root modules. This issue
+   enforces, but does not broadly move, the standard.
 2. **ARCH-03 / NGX-447 — Workflow core domain.** Move workflow definitions, run/start,
    import, status, monitor, recovery, gates, leases, dispatch planning, and
    workflow handoff behavior under `src/core/workflow/`, leaving command and
@@ -221,9 +227,9 @@ runtime narrowing.
 
 ## Non-Goals
 
-- No source module moves in NGX-445.
+- No broad source module moves in ARCH-02.
 - No runtime behavior changes or public CLI output changes.
-- No broad source-layout guardrail implementation before ARCH-02.
+- No placeholder-only `src/core/`, `src/config/`, or `src/shared/` directories.
 - No compatibility-path deletion, default switch, or runtime narrowing.
 - No contradiction of the keep / deprecate-later / defer decisions in
   [`runtime-consolidation-plan.md`](runtime-consolidation-plan.md).

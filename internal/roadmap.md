@@ -73,10 +73,12 @@ boundary, and `RC-*` follow-up sequence for historical runtime paths.
 Post-M11 repo architecture planning is tracked in
 [internal/contracts/repo-architecture-standard.md](contracts/repo-architecture-standard.md).
 It defines the target source taxonomy, type placement, docs taxonomy, root
-`src/*.ts` policy, and `ARCH-02` through `ARCH-08` migration order. That
-architecture sequence should land before `RC-2` so the M9/M10 step-finalization
-reconciliation seam has stable workflow, executor, repo, adapter, and evidence
-homes.
+`src/*.ts` policy, and `ARCH-02` through `ARCH-08` migration order. ARCH-02 now
+pins the first enforceable source-layout guardrails: allowed root files,
+transitional exception metadata, placeholder-free pending homes, and renderer /
+core import boundaries. The remaining architecture sequence should land before
+`RC-2` so the M9/M10 step-finalization reconciliation seam has stable workflow,
+executor, repo, adapter, and evidence homes.
 
 The `doctor` readiness marker tracks the **most recently closed** milestone. It currently reads `Milestone 11: CLI architecture refactor (NGX-411, NGX-412, NGX-413, NGX-414, NGX-415, NGX-416, NGX-417, NGX-418, NGX-419) complete`. The marker advanced from the M6 closeout string to `Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete` at the M7 closeout slice (NGX-319), stayed pinned to the M7 string through every M8 implementation slice, advanced to the M8 string at the M8 closeout slice (NGX-330), advanced again to `Milestone 10: workflow-first runtime (NGX-344, NGX-345, NGX-346, NGX-347, NGX-348, NGX-349, NGX-350, NGX-351, NGX-352, NGX-367, NGX-353) complete` at the M10 closeout slice (NGX-353), and advanced to the M11 string at the M11 closeout slice (NGX-419).
 

@@ -73,9 +73,9 @@ existing src domain modules
 
 The target post-M11 source taxonomy is `src/commands/`, `src/renderers/`,
 `src/adapters/`, `src/config/`, `src/shared/`, and `src/core/<domain>/`.
-Detailed placement rules, allowed root `src/*.ts` exceptions, type ownership,
-docs taxonomy, test placement, and the ARCH-02..ARCH-08 migration sequence live
-in
+ARCH-02 enforces this with root `src/*.ts` allowlists, transitional exceptions,
+placeholder-free pending homes, and import guards. Detailed placement, type,
+docs, test, and remaining ARCH migration rules live in
 [internal/contracts/repo-architecture-standard.md](internal/contracts/repo-architecture-standard.md).
 
 The import direction is fixed:
@@ -127,7 +127,9 @@ After M11:
 - Command-family modules may import domain modules, renderers, and shared CLI
   helpers.
 - Domain modules stay independent of CLI argv parsing and process IO.
-- Renderer modules accept already-computed results and emit stable shapes.
+- Future `src/core/` modules must not import command or renderer layers.
+- Renderer modules accept already-computed results and must not import commands,
+  adapters, persistence, or mutation modules except documented transitional edges.
 - External adapters stay behind domain or command boundaries with explicit
   policy checks.
 - Test fixtures may read source files for structural guards, but production code
@@ -144,7 +146,8 @@ When adding or extracting a command family:
    `src/renderers/`, then have command modules call those renderers with
    already-computed results.
 4. Keep persistence, reducers, state machines, and external-write policy checks
-   in the existing domain or adapter modules.
+   in the existing domain or adapter modules; do not add root `src/*.ts` support
+   files when a narrower owner exists.
 
 Do not import sibling command families for JSON or text render shapes. If two
 commands need the same shape, move it to `src/renderers/` first. Do not let
