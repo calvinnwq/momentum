@@ -73,7 +73,7 @@ import {
   DEFAULT_RUNNER_KIND,
   buildRunnerProfile,
   safeRunnerProfileSummary
-} from "./runner-profile.js";
+} from "./core/executors/runner-profile.js";
 import {
   DEFAULT_INTENT_APPLY_POLICY,
   loadMomentumPolicy,

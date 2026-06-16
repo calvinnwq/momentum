@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { runForegroundIteration } from "../src/foreground-iteration.js";
+import { runForegroundIteration } from "../src/core/executors/foreground-iteration.js";
 import {
   FAKE_RUNNER_FAIL_ENV,
   FAKE_RUNNER_FIXTURE_FILENAME

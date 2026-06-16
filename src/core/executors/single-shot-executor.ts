@@ -70,10 +70,10 @@ import type {
   ExecutorRoundRecord,
   ExecutorRoundState,
   WorkflowExecutorFamily
-} from "./executor-loop-reducer.js";
-import type { ExecutorRoundUpdate } from "./executor-loop-persist.js";
-import { LIVE_STEP_WRAPPER_RECOVERY_CODES } from "./adapters/live-step-wrapper.js";
-import type { RunnerResult } from "./runner-result.js";
+} from "./loop-reducer.js";
+import type { ExecutorRoundUpdate } from "./loop-persist.js";
+import { LIVE_STEP_WRAPPER_RECOVERY_CODES } from "../../adapters/live-step-wrapper.js";
+import type { RunnerResult } from "../../runner-result.js";
 
 /**
  * The executor families this adapter serves: the single-invocation families from

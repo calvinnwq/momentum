@@ -32,21 +32,21 @@ import {
   listExecutorRoundsForInvocation,
   loadExecutorInvocation,
   loadExecutorRound
-} from "../src/executor-loop-persist.js";
+} from "../src/core/executors/loop-persist.js";
 import {
   resolveSingleShotRoundSelection,
   singleShotInvocationId,
   singleShotRoundId,
   type SingleShotRoundRuntimeInputs
-} from "../src/single-shot-executor.js";
-import { runSingleShotStep } from "../src/single-shot-orchestrator.js";
+} from "../src/core/executors/single-shot-executor.js";
+import { runSingleShotStep } from "../src/core/executors/single-shot-orchestrator.js";
 import {
   goalLoopInvocationId,
   goalLoopRoundId,
   resolveGoalLoopRoundSelection,
   type GoalLoopRoundRuntimeInputs
-} from "../src/goal-loop-executor.js";
-import { runGoalLoopStep } from "../src/goal-loop-orchestrator.js";
+} from "../src/core/executors/goal-loop-executor.js";
+import { runGoalLoopStep } from "../src/core/executors/goal-loop-orchestrator.js";
 import {
   noMistakesInvocationId,
   noMistakesRoundId,
@@ -57,7 +57,7 @@ import { runNoMistakesMirrorStep } from "../src/adapters/no-mistakes-orchestrato
 import {
   LIVE_STEP_DEFAULT_LEASE_KIND,
   runLiveWorkflowStep
-} from "../src/live-step-orchestrator.js";
+} from "../src/core/executors/live-step-orchestrator.js";
 import { getWorkflowStep } from "../src/core/workflow/step-transitions.js";
 import type {
   WorkflowStepExecutor,
@@ -65,7 +65,7 @@ import type {
   WorkflowStepExecutorInput
 } from "../src/core/workflow/step-executor.js";
 import type { WorkflowApprovalBoundary } from "../src/core/workflow/run-reducer.js";
-import type { FinalizeLiveWorkflowStepFromResultFileResult } from "../src/live-step-finalize.js";
+import type { FinalizeLiveWorkflowStepFromResultFileResult } from "../src/core/executors/live-step-finalize.js";
 import type { RunnerResult } from "../src/runner-result.js";
 
 /**

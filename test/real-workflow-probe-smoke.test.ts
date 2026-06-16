@@ -3,13 +3,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { REAL_SMOKE_EVIDENCE_DIR_ENV_VAR } from "../src/real-smoke.js";
+import { REAL_SMOKE_EVIDENCE_DIR_ENV_VAR } from "../src/core/executors/real-smoke.js";
 import {
   REAL_SMOKE_WORKFLOW_KIND_ENV_VAR,
   REAL_SMOKE_WORKFLOW_OPT_IN_ENV_VAR,
   classifyWorkflowHarnessOutcome,
   planWorkflowHarnessSmoke
-} from "../src/real-workflow-smoke.js";
+} from "../src/core/executors/real-workflow-smoke.js";
 import {
   REAL_SMOKE_WORKFLOW_PROFILE_ENV_VAR,
   buildHarnessProbeEnv,

@@ -16,7 +16,7 @@ import {
   type ExecutorInvocationState,
   type ExecutorRoundRecord,
   type ExecutorRoundState
-} from "../src/executor-loop-reducer.js";
+} from "../src/core/executors/loop-reducer.js";
 
 describe("executor-loop-reducer vocabulary", () => {
   it("exposes the invocation states pinned by the executor-loop contract", () => {

@@ -9,7 +9,7 @@ import {
   createLiveWorkflowStepExecutor,
   createLiveWorkflowStepExecutorsFromProfile,
   mapLiveStepWrapperResult
-} from "../src/live-step-executor.js";
+} from "../src/core/executors/live-step-executor.js";
 import {
   LIVE_STEP_WRAPPER_RECOVERY_CODES,
   type LiveStepWrapperError,

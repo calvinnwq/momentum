@@ -13,7 +13,7 @@ import {
   listExecutorFindingsForRound,
   loadExecutorRound,
   updateExecutorRound
-} from "../src/executor-loop-persist.js";
+} from "../src/core/executors/loop-persist.js";
 import {
   noMistakesInvocationId,
   noMistakesRoundId,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { EXECUTOR_HUMAN_GATE_TYPES } from "../src/executor-loop-reducer.js";
+import { EXECUTOR_HUMAN_GATE_TYPES } from "../src/core/executors/loop-reducer.js";
 import {
   GATE_DECISION_MODES,
   GATE_DECISION_REFUSAL_CODES,

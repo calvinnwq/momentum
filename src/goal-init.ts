@@ -20,7 +20,7 @@ import {
   type RunnerProfile,
   type RunnerProfileErrorCode,
   type RunnerProfileSource
-} from "./runner-profile.js";
+} from "./core/executors/runner-profile.js";
 import {
   loadMomentumPolicy,
   resolvePolicyEffectiveValues,

@@ -45,7 +45,7 @@
  *     round.
  */
 
-import { isUniqueViolation, type MomentumDb } from "./adapters/db.js";
+import { isUniqueViolation, type MomentumDb } from "../../adapters/db.js";
 import {
   EXECUTOR_ARTIFACT_CLASSES,
   EXECUTOR_COMPLETION_CLASSIFICATIONS,
@@ -69,8 +69,8 @@ import {
   type ExecutorRoundState,
   type ExecutorRoundTransitionErrorCode,
   type WorkflowExecutorFamily
-} from "./executor-loop-reducer.js";
-import { isWorkflowExecutorFamily } from "./core/workflow/definition.js";
+} from "./loop-reducer.js";
+import { isWorkflowExecutorFamily } from "../workflow/definition.js";
 
 const INVOCATION_STATE_SET: ReadonlySet<string> = new Set(
   EXECUTOR_INVOCATION_STATES

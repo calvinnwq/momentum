@@ -23,7 +23,7 @@ import {
   buildRunnerProfile,
   isBuiltinRunnerKind,
   type RunnerProfile
-} from "./runner-profile.js";
+} from "./core/executors/runner-profile.js";
 import {
   loadMomentumPolicy,
   type MomentumPolicyErrorCode

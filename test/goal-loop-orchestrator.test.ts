@@ -12,24 +12,24 @@ import {
   listExecutorRoundsForInvocation,
   loadExecutorInvocation,
   loadExecutorRound
-} from "../src/executor-loop-persist.js";
+} from "../src/core/executors/loop-persist.js";
 import type {
   ExecutorInvocationRecord,
   ExecutorRoundRecord
-} from "../src/executor-loop-reducer.js";
+} from "../src/core/executors/loop-reducer.js";
 import {
   goalLoopInvocationId,
   goalLoopRoundId,
   resolveGoalLoopRoundSelection,
   type GoalLoopRoundRuntimeInputs,
   type PlanGoalLoopRoundStartInput
-} from "../src/goal-loop-executor.js";
+} from "../src/core/executors/goal-loop-executor.js";
 import {
   runGoalLoopInvocation,
   runGoalLoopRound,
   runGoalLoopStep
-} from "../src/goal-loop-orchestrator.js";
-import type { FinalizeLiveWorkflowStepFromResultFileResult } from "../src/live-step-finalize.js";
+} from "../src/core/executors/goal-loop-orchestrator.js";
+import type { FinalizeLiveWorkflowStepFromResultFileResult } from "../src/core/executors/live-step-finalize.js";
 import type { RunnerResult } from "../src/runner-result.js";
 
 // Drives the single-round goal-loop executor step through the *real*

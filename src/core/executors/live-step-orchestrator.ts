@@ -50,14 +50,14 @@
  * live recovery code is surfaced for the recovery layer.
  */
 
-import type { MomentumDb } from "./adapters/db.js";
+import type { MomentumDb } from "../../adapters/db.js";
 import { Worker } from "node:worker_threads";
 import {
   acquireWorkflowLeaseInTransaction,
   getWorkflowLease,
   heartbeatWorkflowLease,
   releaseWorkflowLease
-} from "./core/workflow/leases.js";
+} from "../workflow/leases.js";
 import {
   finishWorkflowStep,
   getWorkflowStep,
@@ -65,13 +65,13 @@ import {
   type FinishWorkflowStepInput,
   type WorkflowStepTerminalState,
   type WorkflowStepTransitionOutcome
-} from "./core/workflow/step-transitions.js";
+} from "../workflow/step-transitions.js";
 import type {
   WorkflowStepExecutor,
   WorkflowStepExecutorDispatchResult,
   WorkflowStepExecutorInput,
   WorkflowStepExecutorTerminalState
-} from "./core/workflow/step-executor.js";
+} from "../workflow/step-executor.js";
 import type {
   WorkflowLeaseKind,
   WorkflowLeaseRecord,
@@ -79,12 +79,12 @@ import type {
   WorkflowStepState,
   WorkflowStepKind,
   WorkflowRunState
-} from "./core/workflow/run-reducer.js";
+} from "../workflow/run-reducer.js";
 import {
   isTerminalRunState,
   isWorkflowApprovalBoundary,
   workflowStepKindsForApprovalBoundary
-} from "./core/workflow/run-reducer.js";
+} from "../workflow/run-reducer.js";
 
 /**
  * The default managed-step lease kind for a live workflow step. The `monitor`

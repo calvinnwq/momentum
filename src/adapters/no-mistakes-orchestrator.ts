@@ -69,7 +69,7 @@ import {
   updateExecutorInvocationState,
   updateExecutorRound,
   type ExecutorRoundUpdate
-} from "../executor-loop-persist.js";
+} from "../core/executors/loop-persist.js";
 import {
   isTerminalExecutorInvocationState,
   isTerminalExecutorRoundState,
@@ -77,7 +77,7 @@ import {
   type ExecutorFindingRecord,
   type ExecutorInvocationRecord,
   type ExecutorRoundRecord
-} from "../executor-loop-reducer.js";
+} from "../core/executors/loop-reducer.js";
 import {
   decideNoMistakesMirror,
   decideNoMistakesUnreadable,
@@ -91,7 +91,7 @@ import {
   type NoMistakesMirrorDecision,
   type NoMistakesRoundRuntimeInputs
 } from "./no-mistakes-executor.js";
-import type { NoMistakesExternalStateRead } from "../no-mistakes-mechanism.js";
+import type { NoMistakesExternalStateRead } from "../core/executors/no-mistakes-mechanism.js";
 
 class NoMistakesMirrorRoundFamilyError extends Error {
   readonly roundId: string;

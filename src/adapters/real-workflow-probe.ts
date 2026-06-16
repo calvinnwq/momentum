@@ -30,7 +30,7 @@ import type { LiveWrapperProbeConfig } from "./live-wrapper-registry.js";
 import {
   classifyProbeSpawnResult,
   type WorkflowHarnessRawOutcome
-} from "../real-workflow-smoke.js";
+} from "../core/executors/real-workflow-smoke.js";
 
 /** Points the opt-in harness-probe smoke at a live-wrapper profile JSON document. */
 export const REAL_SMOKE_WORKFLOW_PROFILE_ENV_VAR =

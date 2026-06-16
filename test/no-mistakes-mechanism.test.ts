@@ -10,7 +10,7 @@ import {
   MAX_NO_MISTAKES_EXTERNAL_STATE_BYTES,
   parseNoMistakesExternalState,
   readNoMistakesExternalState
-} from "../src/no-mistakes-mechanism.js";
+} from "../src/core/executors/no-mistakes-mechanism.js";
 
 // Proves the no-mistakes executor *mechanism* — the external-state reader — turns
 // the untrusted raw external no-mistakes state store into the typed

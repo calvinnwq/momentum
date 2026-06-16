@@ -19,7 +19,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-import { listCommittedChangedFiles } from "./adapters/git-transaction.js";
+import { listCommittedChangedFiles } from "../../adapters/git-transaction.js";
 import {
   finalizeLiveWorkflowStep,
   type FinalizeLiveWorkflowStepResult
@@ -29,9 +29,9 @@ import {
   runLiveStepWrapper,
   runProcessGroupSync,
   type LiveStepWrapperRecoveryCode
-} from "./adapters/live-step-wrapper.js";
-import type { LiveWrapperConfig } from "./adapters/live-wrapper-registry.js";
-import type { CommitIntent } from "./runner-result.js";
+} from "../../adapters/live-step-wrapper.js";
+import type { LiveWrapperConfig } from "../../adapters/live-wrapper-registry.js";
+import type { CommitIntent } from "../../runner-result.js";
 import type {
   SingleShotArtifactPointer,
   SingleShotRoundArtifacts,
@@ -43,7 +43,7 @@ import type {
   SingleShotRoundMechanismResult,
   SingleShotRoundRunner
 } from "./single-shot-orchestrator.js";
-import type { WorkflowStepKind } from "./core/workflow/run-reducer.js";
+import type { WorkflowStepKind } from "../workflow/run-reducer.js";
 
 export type OneShotLiveWrapperRoundRunnerOptions = {
   /** Absolute repository root passed to the live wrapper and safety checks. */

@@ -10,14 +10,14 @@ import {
   insertExecutorInvocation,
   listExecutorArtifactsForRound,
   loadExecutorRound
-} from "../src/executor-loop-persist.js";
-import type { ExecutorInvocationRecord } from "../src/executor-loop-reducer.js";
+} from "../src/core/executors/loop-persist.js";
+import type { ExecutorInvocationRecord } from "../src/core/executors/loop-reducer.js";
 import {
   resolveGoalLoopRoundSelection,
   type PlanGoalLoopRoundStartInput
-} from "../src/goal-loop-executor.js";
-import { goalLoopRoundMechanismFromResultFile } from "../src/goal-loop-mechanism.js";
-import { runGoalLoopRound } from "../src/goal-loop-orchestrator.js";
+} from "../src/core/executors/goal-loop-executor.js";
+import { goalLoopRoundMechanismFromResultFile } from "../src/core/executors/goal-loop-mechanism.js";
+import { runGoalLoopRound } from "../src/core/executors/goal-loop-orchestrator.js";
 import type { CommitIntent, RunnerResult } from "../src/runner-result.js";
 
 // Proves the goal-loop round *mechanism* bridge reuses the existing M9 goal /
