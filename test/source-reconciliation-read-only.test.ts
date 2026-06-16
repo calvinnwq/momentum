@@ -9,7 +9,7 @@ import {
   type LinearReconciliationClient,
   type LinearReconciliationFetchPageInput,
   type LinearReconciliationFetchPageResult
-} from "../src/source-reconciliation.js";
+} from "../src/core/source/reconciliation.js";
 
 /**
  * NGX-369 read-only invariant proof for the Linear source reconciliation adapter.

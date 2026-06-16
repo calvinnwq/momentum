@@ -421,7 +421,7 @@ describe("Milestone 3 daemon drain end-to-end smoke (NGX-278)", () => {
       // visibility tests, while keeping the operator-facing assertions on the
       // built CLI binary.
       const { openDb } = await import("../src/adapters/db.js");
-      const { startDaemonRun } = await import("../src/daemon-runs.js");
+      const { startDaemonRun } = await import("../src/core/daemon/runs.js");
       const seededDb = openDb(dataDir);
       let runId: string;
       try {
@@ -713,7 +713,7 @@ describe("Milestone 3 daemon drain end-to-end smoke (NGX-278)", () => {
       // surfaces while keeping the assertions deterministic.
       const { openDb } = await import("../src/adapters/db.js");
       const { startDaemonRun, finishDaemonRun } = await import(
-        "../src/daemon-runs.js"
+        "../src/core/daemon/runs.js"
       );
       const seededDb = openDb(dataDir);
       let runId: string;
@@ -1023,9 +1023,9 @@ describe("Milestone 3 daemon drain end-to-end smoke (NGX-278)", () => {
       const dataDir = makeTempDir("momentum-smoke-m3-recovery-data-");
 
       const { openDb } = await import("../src/adapters/db.js");
-      const { acquireRepoLock } = await import("../src/repo-locks.js");
+      const { acquireRepoLock } = await import("../src/core/repo/locks.js");
       const { enqueueGoalIterationJob, claimPendingGoalIterationJob } =
-        await import("../src/queue-jobs.js");
+        await import("../src/core/daemon/queue-jobs.js");
 
       // Seed a goal with NO repo column so the stale-claim auto-recovery's
       // repo inspector skips the dirty/unknown-commit/unavailable guard and
@@ -1264,10 +1264,10 @@ describe("Milestone 3 daemon drain end-to-end smoke (NGX-278)", () => {
 
       const { openDb } = await import("../src/adapters/db.js");
       const { markGoalNeedsManualRecovery } = await import(
-        "../src/goal-recovery.js"
+        "../src/core/goal/recovery.js"
       );
       const { writeRecoveryArtifact } = await import(
-        "../src/recovery-artifact.js"
+        "../src/core/goal/recovery-artifact.js"
       );
 
       const goalArtifactDir = path.join(dataDir, "goals", goalId);

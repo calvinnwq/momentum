@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import os from "node:os";
 import path from "node:path";
-import { resolveDataDir } from "../src/data-dir.js";
+import { resolveDataDir } from "../src/config/data-dir.js";
 
 describe("resolveDataDir", () => {
   it("returns --data-dir when provided", () => {

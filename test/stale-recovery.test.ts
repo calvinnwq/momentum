@@ -11,15 +11,15 @@ import {
   heartbeatDaemonRun,
   setDaemonRunActiveJob,
   startDaemonRun
-} from "../src/daemon-runs.js";
+} from "../src/core/daemon/runs.js";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
   claimPendingGoalIterationJob,
   enqueueGoalIterationJob,
   getQueueJob,
   type QueueJobState
-} from "../src/queue-jobs.js";
-import { acquireRepoLock, getRepoLock } from "../src/repo-locks.js";
+} from "../src/core/daemon/queue-jobs.js";
+import { acquireRepoLock, getRepoLock } from "../src/core/repo/locks.js";
 import {
   DAEMON_RUN_AUTO_RECOVERED_STATUS,
   JOB_RECOVERED_AUTO_REPENDED_STATUS,
@@ -28,7 +28,7 @@ import {
   recoverStaleDaemonRuns,
   recoverStaleRepoLocksForTerminalJobs,
   runStartupRecovery
-} from "../src/stale-recovery.js";
+} from "../src/core/daemon/stale-recovery.js";
 
 const tempRoots: string[] = [];
 

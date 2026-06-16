@@ -28,238 +28,33 @@ type RootSrcException = {
 };
 
 const TRANSITIONAL_ROOT_SRC_EXCEPTIONS = {
-  "src/artifacts.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/core/evidence/artifacts.ts",
-    reason: "Evidence artifact helpers remain flat until the evidence domain is grouped."
-  },
-  "src/branch-manager.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/core/repo/branch-manager.ts",
-    reason: "Repo branch mutation primitives move with remaining repo-domain modules."
-  },
-  "src/daemon-loop.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/core/daemon/loop.ts",
-    reason: "Daemon compatibility behavior remains flat until the daemon domain slice."
-  },
-  "src/daemon-runs.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/core/daemon/runs.ts",
-    reason: "Daemon run persistence moves with daemon state ownership."
-  },
-  "src/daemon-status.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/core/daemon/status.ts",
-    reason: "Daemon status state moves with daemon compatibility ownership."
-  },
-  "src/data-dir.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/config/data-dir.ts",
-    reason: "Data-dir resolution is config support, not a root domain module."
-  },
   "src/events.ts": {
     ownerIssue: "NGX-450",
     targetHome: "src/shared/events.ts",
     reason: "Cross-cutting event types need a shared/type-owned home."
-  },
-  "src/evidence-records.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/core/evidence/records.ts",
-    reason: "Evidence record persistence moves with the evidence domain."
-  },
-  "src/evidence-workflow.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/core/evidence/workflow.ts",
-    reason: "Workflow evidence linkage is owned by the evidence domain."
-  },
-  "src/goal-init.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/core/goal/init.ts",
-    reason: "Goal-first compatibility initialization moves with the goal domain."
-  },
-  "src/goal-logs.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/core/goal/logs.ts",
-    reason: "Goal log behavior moves with goal compatibility state."
-  },
-  "src/goal-recovery.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/core/goal/recovery.ts",
-    reason: "Goal recovery compatibility behavior moves with the goal domain."
-  },
-  "src/goal-reducer.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/core/goal/reducer.ts",
-    reason: "Goal state reducer behavior moves with goal compatibility state."
   },
   "src/goal-spec.ts": {
     ownerIssue: "NGX-450",
     targetHome: "src/core/goal/types.ts",
     reason: "Goal specification types should live beside goal behavior."
   },
-  "src/goal-status.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/core/goal/status.ts",
-    reason: "Goal status behavior moves with goal compatibility state."
-  },
-  "src/handoff.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/core/evidence/handoff.ts",
-    reason: "Goal handoff data is evidence-facing compatibility behavior."
-  },
-  "src/intent-apply-audits.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/core/intent/apply-audits.ts",
-    reason: "Intent apply audit state moves with the intent domain."
-  },
-  "src/intent-apply-execute.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/core/intent/apply-execute.ts",
-    reason: "Policy-gated intent apply execution moves with the intent domain."
-  },
-  "src/iteration-finalize.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/core/repo/iteration-finalize.ts",
-    reason: "Iteration finalization primitives move with repo verification ownership."
-  },
-  "src/iteration-job.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/core/goal/iteration-job.ts",
-    reason: "Goal iteration job compatibility helpers move with the goal domain."
-  },
-  "src/iteration-prompt.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/core/goal/iteration-prompt.ts",
-    reason: "Goal iteration prompt helpers move with the goal domain."
-  },
-  "src/migrations.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/adapters/db/migrations.ts",
-    reason: "SQLite migration support belongs under the database adapter seam."
-  },
-  "src/momentum-policy.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/core/intent/policy.ts",
-    reason: "External-write policy checks move with intent/apply ownership."
-  },
-  "src/post-apply-reconcile.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/core/intent/post-apply-reconcile.ts",
-    reason: "Post-apply reconciliation moves with intent/apply ownership."
-  },
-  "src/project-rollup.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/core/repo/project-rollup.ts",
-    reason: "Project rollup behavior is remaining repo/project domain ownership."
-  },
-  "src/queue-jobs.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/core/daemon/queue-jobs.ts",
-    reason: "Queue job state moves with daemon compatibility ownership."
-  },
-  "src/recovery-artifact.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/core/goal/recovery-artifact.ts",
-    reason: "Goal recovery artifact helpers move with goal compatibility behavior."
-  },
-  "src/repo-guard.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/core/repo/guard.ts",
-    reason: "Repo guard primitives move with repo-domain ownership."
-  },
-  "src/repo-locks.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/core/repo/locks.ts",
-    reason: "Repo lock primitives move with repo-domain ownership."
-  },
   "src/runner-result.ts": {
     ownerIssue: "NGX-450",
     targetHome: "src/core/executors/types.ts",
     reason: "Runner result shapes and parsing belong beside executor behavior."
-  },
-  "src/source-context.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/core/source/context.ts",
-    reason: "Source context behavior moves with source-domain ownership."
-  },
-  "src/source-items.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/core/source/items.ts",
-    reason: "Source item persistence moves with source-domain ownership."
-  },
-  "src/source-reconciliation-runs.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/core/source/reconciliation-runs.ts",
-    reason: "Source reconciliation run records move with source-domain ownership."
-  },
-  "src/source-reconciliation.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/core/source/reconciliation.ts",
-    reason: "Source reconciliation behavior moves with source-domain ownership."
-  },
-  "src/stale-recovery.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/core/daemon/stale-recovery.ts",
-    reason: "Stale recovery behavior moves with daemon compatibility ownership."
-  },
-  "src/update-intent-generator.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/core/source/update-intent-generator.ts",
-    reason: "Source-backed intent generation moves with source ownership."
-  },
-  "src/update-intents.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/core/intent/update-intents.ts",
-    reason: "Update intent state moves with intent-domain ownership."
-  },
-  "src/verification.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/core/repo/verification.ts",
-    reason: "Verification primitives move with repo-domain ownership."
-  },
-  "src/worker-run.ts": {
-    ownerIssue: "NGX-449",
-    targetHome: "src/core/daemon/worker-run.ts",
-    reason: "Worker run compatibility behavior moves with daemon ownership."
-  },
+  }
 } satisfies Record<string, RootSrcException>;
 
-const RENDERER_TYPE_ONLY_TRANSITIONAL_IMPORTS = new Set([
-  "src/renderers/daemon.ts -> src/daemon-loop.ts",
-  "src/renderers/daemon.ts -> src/daemon-runs.ts",
-  "src/renderers/daemon.ts -> src/stale-recovery.ts",
-  "src/renderers/evidence.ts -> src/evidence-records.ts",
-  "src/renderers/evidence.ts -> src/evidence-workflow.ts",
-  "src/renderers/evidence.ts -> src/update-intent-generator.ts",
-  "src/renderers/goal.ts -> src/goal-init.ts",
-  "src/renderers/goal.ts -> src/iteration-job.ts",
-  "src/renderers/intent.ts -> src/intent-apply-audits.ts",
-  "src/renderers/intent.ts -> src/momentum-policy.ts",
-  "src/renderers/intent.ts -> src/update-intents.ts",
-  "src/renderers/project.ts -> src/project-rollup.ts",
-  "src/renderers/recovery.ts -> src/goal-recovery.ts",
-  "src/renderers/source.ts -> src/source-items.ts",
-  "src/renderers/source.ts -> src/source-reconciliation.ts",
-  "src/renderers/source.ts -> src/source-reconciliation-runs.ts",
-  "src/renderers/source.ts -> src/update-intent-generator.ts",
-  "src/renderers/status.ts -> src/goal-logs.ts",
-  "src/renderers/status.ts -> src/goal-status.ts",
-  "src/renderers/status.ts -> src/handoff.ts",
-  "src/renderers/status.ts -> src/momentum-policy.ts",
-  "src/renderers/worker.ts -> src/daemon-status.ts",
-  "src/renderers/worker.ts -> src/worker-run.ts",
-]);
+// Renderer -> transitional-root type-only edges. Empty after NGX-449 moved the
+// daemon / evidence / goal / source / intent / project modules into
+// src/core/<domain>; renderer type-only imports of those now target core and
+// are allowed generically by rendererTransitionalImportIsAllowed.
+const RENDERER_TYPE_ONLY_TRANSITIONAL_IMPORTS = new Set<string>();
 
-const RENDERER_READONLY_TRANSITIONAL_IMPORTS = new Map([
-  [
-    "src/renderers/daemon.ts -> src/daemon-status.ts",
-    new Set([
-      "DEFAULT_DAEMON_ACTIVE_JOB_STALE_AFTER_MS",
-      "DEFAULT_DAEMON_STALE_AFTER_MS"
-    ])
-  ]
-]);
+// Renderer -> transitional-root runtime read-only constant edges. Empty after
+// NGX-449 relocated the daemon stale-threshold defaults into
+// src/config/daemon-defaults, which renderers may import at runtime directly.
+const RENDERER_READONLY_TRANSITIONAL_IMPORTS = new Map<string, Set<string>>();
 
 type ImportReference = {
   specifier: string;
@@ -577,15 +372,15 @@ describe("M11 CLI import boundaries", () => {
   });
 
   it("classifies transitional root and future core source modules as renderer runtime boundaries", () => {
-    expect(isPersistenceOrMutationModule("src/artifacts.ts")).toBe(true);
-    expect(isPersistenceOrMutationModule("src/branch-manager.ts")).toBe(true);
-    expect(isPersistenceOrMutationModule("src/goal-init.ts")).toBe(true);
-    expect(isPersistenceOrMutationModule("src/handoff.ts")).toBe(true);
-    expect(isPersistenceOrMutationModule("src/source-reconciliation.ts")).toBe(true);
-    expect(isPersistenceOrMutationModule("src/update-intent-generator.ts")).toBe(true);
+    // Remaining transitional-root exceptions (NGX-450) still classify as boundaries.
+    expect(isPersistenceOrMutationModule("src/goal-spec.ts")).toBe(true);
+    expect(isPersistenceOrMutationModule("src/runner-result.ts")).toBe(true);
+    // Owned core/domain homes (post NGX-449) classify as renderer runtime boundaries.
+    expect(isPersistenceOrMutationModule("src/core/daemon/status.ts")).toBe(true);
     expect(isPersistenceOrMutationModule("src/core/goal/status.ts")).toBe(true);
     expect(isPersistenceOrMutationModule("src/core/source/context.ts")).toBe(true);
     expect(isPersistenceOrMutationModule("src/core/evidence/handoff.ts")).toBe(true);
+    expect(isPersistenceOrMutationModule("src/core/intent/policy.ts")).toBe(true);
     expect(isPersistenceOrMutationModule("src/core/repo/project-rollup.ts")).toBe(true);
   });
 
@@ -597,8 +392,8 @@ describe("M11 CLI import boundaries", () => {
   it("allows only explicit renderer transitional imports", () => {
     const updateIntentTypeEdge: ImportEdge = {
       from: "src/renderers/evidence.ts",
-      to: "src/update-intent-generator.ts",
-      specifier: "../update-intent-generator.js",
+      to: "src/core/source/update-intent-generator.ts",
+      specifier: "../core/source/update-intent-generator.js",
       isTypeOnly: true,
       runtimeBindings: []
     };
@@ -608,24 +403,6 @@ describe("M11 CLI import boundaries", () => {
         ...updateIntentTypeEdge,
         isTypeOnly: false,
         runtimeBindings: ["evaluateGoalForSourceSatisfiedIntent"]
-      })
-    ).toBe(false);
-
-    const daemonStatusReadonlyEdge: ImportEdge = {
-      from: "src/renderers/daemon.ts",
-      to: "src/daemon-status.ts",
-      specifier: "../daemon-status.js",
-      isTypeOnly: false,
-      runtimeBindings: [
-        "DEFAULT_DAEMON_ACTIVE_JOB_STALE_AFTER_MS",
-        "DEFAULT_DAEMON_STALE_AFTER_MS"
-      ]
-    };
-    expect(rendererTransitionalImportIsAllowed(daemonStatusReadonlyEdge)).toBe(true);
-    expect(
-      rendererTransitionalImportIsAllowed({
-        ...daemonStatusReadonlyEdge,
-        runtimeBindings: ["loadDaemonStatus"]
       })
     ).toBe(false);
 
@@ -719,15 +496,8 @@ describe("M11 CLI import boundaries", () => {
       )
     );
     expect([...documentedTargetPrefixes].sort()).toEqual([
-      "src/adapters/db",
-      "src/config/data-dir.ts",
-      "src/core/daemon",
-      "src/core/evidence",
       "src/core/executors",
       "src/core/goal",
-      "src/core/intent",
-      "src/core/repo",
-      "src/core/source",
       "src/shared/events.ts"
     ]);
   });

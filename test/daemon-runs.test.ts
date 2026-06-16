@@ -22,7 +22,7 @@ import {
   requestDaemonRunStop,
   setDaemonRunActiveJob,
   startDaemonRun
-} from "../src/daemon-runs.js";
+} from "../src/core/daemon/runs.js";
 
 const tempRoots: string[] = [];
 

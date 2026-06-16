@@ -6,18 +6,18 @@ import path from "node:path";
 
 import { openDb } from "../src/adapters/db.js";
 import { FAKE_RUNNER_GOAL_COMPLETE_ENV } from "../src/adapters/fake-runner.js";
-import { initGoal, type GoalInitSuccess } from "../src/goal-init.js";
-import { markGoalNeedsManualRecovery } from "../src/goal-recovery.js";
-import { executeIterationJob } from "../src/iteration-job.js";
-import { loadGoalStatus } from "../src/goal-status.js";
-import { reduceGoalIteration } from "../src/goal-reducer.js";
-import { ensureIterationArtifactDir } from "../src/artifacts.js";
-import { claimPendingGoalIterationJob } from "../src/queue-jobs.js";
-import { writeRecoveryArtifact } from "../src/recovery-artifact.js";
-import { upsertSourceItem } from "../src/source-items.js";
-import { ingestEvidenceRecord } from "../src/evidence-records.js";
-import { createUpdateIntent } from "../src/update-intents.js";
-import { DEFAULT_INTENT_STALE_THRESHOLD_MS } from "../src/project-rollup.js";
+import { initGoal, type GoalInitSuccess } from "../src/core/goal/init.js";
+import { markGoalNeedsManualRecovery } from "../src/core/goal/recovery.js";
+import { executeIterationJob } from "../src/core/goal/iteration-job.js";
+import { loadGoalStatus } from "../src/core/goal/status.js";
+import { reduceGoalIteration } from "../src/core/goal/reducer.js";
+import { ensureIterationArtifactDir } from "../src/core/evidence/artifacts.js";
+import { claimPendingGoalIterationJob } from "../src/core/daemon/queue-jobs.js";
+import { writeRecoveryArtifact } from "../src/core/goal/recovery-artifact.js";
+import { upsertSourceItem } from "../src/core/source/items.js";
+import { ingestEvidenceRecord } from "../src/core/evidence/records.js";
+import { createUpdateIntent } from "../src/core/intent/update-intents.js";
+import { DEFAULT_INTENT_STALE_THRESHOLD_MS } from "../src/core/repo/project-rollup.js";
 
 const tempRoots: string[] = [];
 
@@ -1766,7 +1766,7 @@ describe("loadGoalStatus", () => {
         mode: "queued"
       });
       const { startDaemonRun, requestDaemonRunStop } = await import(
-        "../src/daemon-runs.js"
+        "../src/core/daemon/runs.js"
       );
       const db = openDb(setup.dataDir);
       let runId: string;
@@ -1812,7 +1812,7 @@ describe("loadGoalStatus", () => {
       const repo = initRepo();
       const setup = setupGoal(repo, "Status daemon terminal");
       const { startDaemonRun, finishDaemonRun } = await import(
-        "../src/daemon-runs.js"
+        "../src/core/daemon/runs.js"
       );
       const db = openDb(setup.dataDir);
       let runId: string;
@@ -1974,7 +1974,7 @@ describe("loadGoalStatus", () => {
       const setup = setupGoal(repo, "Status pending stale", {
         mode: "queued"
       });
-      const { acquireRepoLock } = await import("../src/repo-locks.js");
+      const { acquireRepoLock } = await import("../src/core/repo/locks.js");
 
       const db = openDb(setup.dataDir);
       try {

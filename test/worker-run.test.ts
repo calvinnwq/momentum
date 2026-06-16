@@ -4,26 +4,26 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 
-import { acquireRepoLock } from "../src/repo-locks.js";
+import { acquireRepoLock } from "../src/core/repo/locks.js";
 import {
   FAKE_RUNNER_FAIL_ENV,
   FAKE_RUNNER_FIXTURE_FILENAME,
   FAKE_RUNNER_GOAL_COMPLETE_ENV,
   FAKE_RUNNER_TRAJECTORY_ENV
 } from "../src/adapters/fake-runner.js";
-import { buildIterationIdempotencyKey, initGoal } from "../src/goal-init.js";
+import { buildIterationIdempotencyKey, initGoal } from "../src/core/goal/init.js";
 import { openDb } from "../src/adapters/db.js";
 import {
   getJobByIdempotencyKey,
   getQueueJob,
   claimPendingGoalIterationJob,
-} from "../src/queue-jobs.js";
-import { runWorkerOnce } from "../src/worker-run.js";
-import * as goalReducerModule from "../src/goal-reducer.js";
+} from "../src/core/daemon/queue-jobs.js";
+import { runWorkerOnce } from "../src/core/daemon/worker-run.js";
+import * as goalReducerModule from "../src/core/goal/reducer.js";
 import {
   recordSourceSnapshot,
   upsertSourceItem
-} from "../src/source-items.js";
+} from "../src/core/source/items.js";
 
 const GOAL_SPEC = makeGoalSpec("true");
 
@@ -1357,7 +1357,7 @@ describe("runWorkerOnce", () => {
   });
 
   it("re-invoking the reducer after a queued CONTINUE worker run does not double-enqueue or duplicate events", async () => {
-    const { reduceGoalIteration } = await import("../src/goal-reducer.js");
+    const { reduceGoalIteration } = await import("../src/core/goal/reducer.js");
     const dataDir = makeTempDir("momentum-worker-run-reducer-replay-");
     const repo = initRepo();
     const seed = seedQueuedGoal(dataDir, repo, makeGoalSpec("true", { maxIterations: 3 }));

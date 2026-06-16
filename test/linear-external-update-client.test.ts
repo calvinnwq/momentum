@@ -14,7 +14,7 @@ import {
   type FetchLike,
   type LinearExternalUpdateInput
 } from "../src/adapters/linear-external-update-client.js";
-import type { UpdateIntent } from "../src/update-intents.js";
+import type { UpdateIntent } from "../src/core/intent/update-intents.js";
 
 function buildIntent(overrides: Partial<UpdateIntent> = {}): UpdateIntent {
   return {

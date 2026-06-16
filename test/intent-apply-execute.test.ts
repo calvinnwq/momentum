@@ -9,7 +9,7 @@ import {
   finalizeIntentApply,
   getLatestIntentApplyAudit,
   listIntentApplyAudits
-} from "../src/intent-apply-audits.js";
+} from "../src/core/intent/apply-audits.js";
 import {
   defaultBuildLinearClient,
   defaultBuildLinearRefreshClient,
@@ -17,11 +17,11 @@ import {
   LINEAR_API_KEY_ENV_VAR,
   LINEAR_EXTERNAL_UPDATE_ENDPOINT_ENV_VAR,
   LINEAR_REFRESH_ENDPOINT_ENV_VAR
-} from "../src/intent-apply-execute.js";
+} from "../src/core/intent/apply-execute.js";
 import type {
   ExecuteExternalApplyDeps,
   ExecuteExternalApplyInput
-} from "../src/intent-apply-execute.js";
+} from "../src/core/intent/apply-execute.js";
 import {
   buildIdempotencyMarker,
   type ExternalUpdateAdapter
@@ -34,7 +34,7 @@ import type {
   LinearExternalUpdateSuccess
 } from "../src/adapters/linear-external-update-client.js";
 import type { LinearIssueRefreshClient } from "../src/adapters/linear-issue-refresh.js";
-import { getUpdateIntentById } from "../src/update-intents.js";
+import { getUpdateIntentById } from "../src/core/intent/update-intents.js";
 
 const tempRoots: string[] = [];
 

@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { finalizeIteration } from "../src/iteration-finalize.js";
+import { finalizeIteration } from "../src/core/repo/iteration-finalize.js";
 import type { CommitIntent } from "../src/runner-result.js";
 
 const ZERO_SHA = "0".repeat(40);

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { runVerification } from "../src/verification.js";
+import { runVerification } from "../src/core/repo/verification.js";
 
 const tempRoots: string[] = [];
 

@@ -313,7 +313,7 @@ it. The end-to-end evidence is the built-CLI smoke under
   overwrites non-null linkage, and the existing M5 ingest shape, diagnostic
   codes, and idempotency stay wire-stable. Typed pointers surface identically
   through `workflow status` / `workflow handoff` / `workflow run monitor`.
-- **Owner.** [`src/evidence-workflow.ts`](../src/evidence-workflow.ts)
+- **Owner.** [`src/core/evidence/workflow.ts`](../src/core/evidence/workflow.ts)
   (workflow artifact parsing and typed `runId` / `stepId` linkage).
 - **Evidence.**
   - Built-CLI smoke: `test/m8-smoke.test.ts` — "composes list / approve / monitor

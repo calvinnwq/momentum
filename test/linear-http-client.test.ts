@@ -9,7 +9,7 @@ import {
 import type {
   LinearReconciliationFetchPageResult,
   LinearReconciliationFilters
-} from "../src/source-reconciliation.js";
+} from "../src/core/source/reconciliation.js";
 
 type CapturedFetchCall = {
   endpoint: string;

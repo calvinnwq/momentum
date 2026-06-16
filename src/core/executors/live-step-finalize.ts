@@ -63,7 +63,7 @@ import type {
 import {
   finalizeIteration,
   type FinalizeResetTrigger
-} from "../../iteration-finalize.js";
+} from "../repo/iteration-finalize.js";
 import { LIVE_STEP_WRAPPER_RESULT_MAX_BYTES } from "../../adapters/live-step-wrapper.js";
 import {
   parseRunnerResult,
@@ -73,7 +73,7 @@ import {
 import type {
   VerificationFailure,
   VerificationSuccess
-} from "../../verification.js";
+} from "../repo/verification.js";
 
 const SHA40_RE = /^[0-9a-f]{40}$/;
 

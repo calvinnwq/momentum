@@ -1,4 +1,4 @@
-import type { ClearGoalManualRecoveryGuardedResult } from "../goal-recovery.js";
+import type { ClearGoalManualRecoveryGuardedResult } from "../core/goal/recovery.js";
 import { write, writeJson, type CliIo } from "./cli-output.js";
 
 type JsonFlags = {

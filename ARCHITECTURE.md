@@ -67,18 +67,19 @@ src/cli.ts                parser, top-level dispatch, compatibility surfaces
 src/commands/             command-family modules
 src/renderers/            text / JSON envelope rendering helpers
 src/adapters/             infrastructure-facing clients and runtime adapters
-src/core/workflow/        workflow runtime reducers, policies, persistence helpers
-src/core/executors/       executor runtime reducers, persistence, families
-flat src domain modules   transitional helpers awaiting later ARCH slices
+src/config/               env, path, and default-resolution support
+src/core/<domain>/        workflow, executors, goal, source, intent, daemon, repo,
+                          evidence — reducers, state, policies, persistence
 ```
 
 The target post-M11 source taxonomy is `src/commands/`, `src/renderers/`,
 `src/adapters/`, `src/config/`, `src/shared/`, and `src/core/<domain>/`.
 ARCH-02 enforces this with root `src/*.ts` allowlists, transitional exceptions,
-placeholder-free pending homes, and import guards; ARCH-03 has populated
-`src/core/workflow/`; ARCH-04 has populated `src/core/executors/`. Detailed
-placement, type, docs, test, and remaining rules live in
-[internal/contracts/repo-architecture-standard.md](internal/contracts/repo-architecture-standard.md).
+placeholder-free pending homes, and import guards; ARCH-03 populated
+`src/core/workflow/`, ARCH-04 `src/core/executors/`, and ARCH-05 the remaining
+`src/core/<domain>/` (goal, source, intent, daemon, repo, evidence) plus
+`src/config/`, each core domain carrying a local `README.md` module map. Detailed
+rules live in [repo-architecture-standard.md](internal/contracts/repo-architecture-standard.md).
 
 The import direction is fixed:
 

@@ -4,13 +4,13 @@ import type {
   SourceItem,
   UnlinkGoalFromSourceItemErrorCode,
   UnlinkGoalFromSourceItemResult
-} from "../source-items.js";
-import type { SourceReconciliationRun } from "../source-reconciliation-runs.js";
+} from "../core/source/items.js";
+import type { SourceReconciliationRun } from "../core/source/reconciliation-runs.js";
 import type {
   LinearReconciliationFilters,
   ReconcileLinearSourceResult
-} from "../source-reconciliation.js";
-import type { EvaluateGoalForSourceSatisfiedIntentResult } from "../update-intent-generator.js";
+} from "../core/source/reconciliation.js";
+import type { EvaluateGoalForSourceSatisfiedIntentResult } from "../core/source/update-intent-generator.js";
 import { evidenceRecordToJsonShape } from "./evidence.js";
 import { updateIntentToJsonShape } from "./intent.js";
 import { write, writeJson, type CliIo } from "./cli-output.js";

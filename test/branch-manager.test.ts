@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { ensureMomentumBranch } from "../src/branch-manager.js";
+import { ensureMomentumBranch } from "../src/core/repo/branch-manager.js";
 
 const ZERO_SHA = "0".repeat(40);
 const tempRoots: string[] = [];

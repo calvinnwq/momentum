@@ -23,10 +23,10 @@
 
 import { createHash } from "node:crypto";
 
-import type { EvidenceRecord } from "../evidence-records.js";
-import type { SourceItem } from "../source-items.js";
-import type { UpdateIntentApplyPolicy } from "../momentum-policy.js";
-import type { UpdateIntent } from "../update-intents.js";
+import type { EvidenceRecord } from "../core/evidence/records.js";
+import type { SourceItem } from "../core/source/items.js";
+import type { UpdateIntentApplyPolicy } from "../core/intent/policy.js";
+import type { UpdateIntent } from "../core/intent/update-intents.js";
 
 export const BUILTIN_EXTERNAL_UPDATE_ADAPTER_KINDS = Object.freeze([
   "linear"

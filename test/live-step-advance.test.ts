@@ -9,7 +9,7 @@ import { advanceLiveWorkflowStep } from "../src/core/executors/live-step-advance
 import { getWorkflowStep } from "../src/core/workflow/step-transitions.js";
 import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run-recovery.js";
 import { resolveWorkflowRecoveryArtifactPath } from "../src/core/workflow/recovery-artifact.js";
-import { getRepoLock } from "../src/repo-locks.js";
+import { getRepoLock } from "../src/core/repo/locks.js";
 import type { PersistLiveWorkflowFinalizeRecoveryResult } from "../src/core/executors/live-step-run-recovery.js";
 import type {
   WorkflowStepExecutor,

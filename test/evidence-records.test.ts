@@ -12,7 +12,7 @@ import {
   listLatestEvidenceRecordsForGoal,
   summarizeEvidenceRecords,
   type EvidenceRecordIngestInput
-} from "../src/evidence-records.js";
+} from "../src/core/evidence/records.js";
 
 const tempRoots: string[] = [];
 

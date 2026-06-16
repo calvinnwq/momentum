@@ -374,7 +374,7 @@ describe("M8 contract (NGX-323)", () => {
         "src/core/workflow/run-recovery.ts",
         "src/core/workflow/monitor-envelope.ts",
         "src/core/workflow/recovery-artifact.ts",
-        "src/evidence-workflow.ts",
+        "src/core/evidence/workflow.ts",
       ]) {
         expect(matrix, `regression matrix should cite ${owner} as an M8 owner`).toContain(
           owner

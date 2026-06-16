@@ -7,13 +7,13 @@ import { openDb } from "../src/adapters/db.js";
 import {
   REDUCER_DECISIONS,
   reduceGoalIteration
-} from "../src/goal-reducer.js";
+} from "../src/core/goal/reducer.js";
 import {
   GOAL_ITERATION_JOB_TYPE,
   enqueueGoalIterationJob,
   getQueueJob
-} from "../src/queue-jobs.js";
-import { listUpdateIntents } from "../src/update-intents.js";
+} from "../src/core/daemon/queue-jobs.js";
+import { listUpdateIntents } from "../src/core/intent/update-intents.js";
 
 const tempRoots: string[] = [];
 

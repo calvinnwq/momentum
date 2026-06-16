@@ -13,7 +13,7 @@ import {
   resolveIntentApplyPolicy,
   resolvePolicyEffectiveValues,
   resolvePolicyPath
-} from "../src/momentum-policy.js";
+} from "../src/core/intent/policy.js";
 
 function makeTempRepo(label = "momentum-policy-"): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), label));

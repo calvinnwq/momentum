@@ -22,11 +22,11 @@
  *   - Invalid configuration fails closed (skip), never runs with bad input.
  */
 
-import { LINEAR_API_KEY_ENV_VAR } from "../../intent-apply-execute.js";
+import { LINEAR_API_KEY_ENV_VAR } from "../intent/apply-execute.js";
 import type {
   LinearReconciliationFilters,
   ReconcileLinearSourceResult
-} from "../../source-reconciliation.js";
+} from "../source/reconciliation.js";
 
 /** Master opt-in switch. The real Linear read smoke skips unless this is truthy. */
 export const REAL_SMOKE_LINEAR_OPT_IN_ENV_VAR = "MOMENTUM_REAL_SMOKE_LINEAR";

@@ -8,12 +8,12 @@ import {
   POST_APPLY_RECONCILE_OUTCOME_CODES,
   reconcileAfterExternalApply,
   type PostApplyReconcileClient
-} from "../src/post-apply-reconcile.js";
+} from "../src/core/intent/post-apply-reconcile.js";
 import {
   getSourceItemByAdapterExternalId,
   listSourceSnapshotsForItem,
   upsertSourceItem
-} from "../src/source-items.js";
+} from "../src/core/source/items.js";
 
 const tempRoots: string[] = [];
 

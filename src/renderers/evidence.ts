@@ -1,6 +1,6 @@
-import type { EvidenceRecord } from "../evidence-records.js";
-import type { WorkflowEvidenceDiagnostic } from "../evidence-workflow.js";
-import type { EvaluateGoalForSourceSatisfiedIntentResult } from "../update-intent-generator.js";
+import type { EvidenceRecord } from "../core/evidence/records.js";
+import type { WorkflowEvidenceDiagnostic } from "../core/evidence/workflow.js";
+import type { EvaluateGoalForSourceSatisfiedIntentResult } from "../core/source/update-intent-generator.js";
 import { intentEvaluationToJsonShape } from "./source.js";
 import { write, writeJson, type CliIo } from "./cli-output.js";
 

@@ -13,7 +13,7 @@ import {
   getLatestIntentApplyAudit,
   listIntentApplyAudits,
   type ClaimIntentApplyInput
-} from "../src/intent-apply-audits.js";
+} from "../src/core/intent/apply-audits.js";
 
 const tempRoots: string[] = [];
 

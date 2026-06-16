@@ -1,12 +1,12 @@
 import { usageError, type CliIo } from "../../renderers/cli-output.js";
 import { openDb } from "../../adapters/db.js";
-import { resolveDataDir, type DataDirOptions } from "../../data-dir.js";
+import { resolveDataDir, type DataDirOptions } from "../../config/data-dir.js";
 import {
   buildProjectRollup,
   type ProjectRollup,
   type ProjectRollupFilters,
   type ProjectRollupOptions
-} from "../../project-rollup.js";
+} from "../../core/repo/project-rollup.js";
 import {
   emitProjectStatusFailure,
   emitProjectStatusSuccess

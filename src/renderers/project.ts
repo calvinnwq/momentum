@@ -3,7 +3,7 @@ import {
   type ProjectRollupExternalApply,
   type ProjectRollupFilters,
   type ProjectRollupPendingIntentExternalApply
-} from "../project-rollup.js";
+} from "../core/repo/project-rollup.js";
 import {
   intentApplyAuditToJsonShape,
   type IntentApplyAuditJsonShape

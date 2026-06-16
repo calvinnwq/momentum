@@ -5,24 +5,24 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDb } from "../src/adapters/db.js";
-import { initGoal, type GoalInitSuccess } from "../src/goal-init.js";
-import { executeIterationJob } from "../src/iteration-job.js";
-import { reduceGoalIteration } from "../src/goal-reducer.js";
-import { ensureIterationArtifactDir } from "../src/artifacts.js";
+import { initGoal, type GoalInitSuccess } from "../src/core/goal/init.js";
+import { executeIterationJob } from "../src/core/goal/iteration-job.js";
+import { reduceGoalIteration } from "../src/core/goal/reducer.js";
+import { ensureIterationArtifactDir } from "../src/core/evidence/artifacts.js";
 import {
   HANDOFF_SCHEMA_VERSION,
   writeHandoff,
   type HandoffSuccess
-} from "../src/handoff.js";
-import { writeRecoveryArtifact } from "../src/recovery-artifact.js";
-import { upsertSourceItem } from "../src/source-items.js";
-import { ingestEvidenceRecord } from "../src/evidence-records.js";
-import { createUpdateIntent } from "../src/update-intents.js";
+} from "../src/core/evidence/handoff.js";
+import { writeRecoveryArtifact } from "../src/core/goal/recovery-artifact.js";
+import { upsertSourceItem } from "../src/core/source/items.js";
+import { ingestEvidenceRecord } from "../src/core/evidence/records.js";
+import { createUpdateIntent } from "../src/core/intent/update-intents.js";
 import {
   claimIntentApply,
   finalizeIntentApply
-} from "../src/intent-apply-audits.js";
-import { DEFAULT_INTENT_STALE_THRESHOLD_MS } from "../src/project-rollup.js";
+} from "../src/core/intent/apply-audits.js";
+import { DEFAULT_INTENT_STALE_THRESHOLD_MS } from "../src/core/repo/project-rollup.js";
 
 const tempRoots: string[] = [];
 
@@ -1144,7 +1144,7 @@ describe("writeHandoff", () => {
     const repo = initRepo();
     const setup = setupGoal(repo, "Handoff daemon stop");
     const { startDaemonRun, requestDaemonRunStop } = await import(
-      "../src/daemon-runs.js"
+      "../src/core/daemon/runs.js"
     );
     const db = openDb(setup.dataDir);
     let runId: string;

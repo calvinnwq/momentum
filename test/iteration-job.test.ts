@@ -4,14 +4,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { resolveGoalArtifactPaths } from "../src/artifacts.js";
+import { resolveGoalArtifactPaths } from "../src/core/evidence/artifacts.js";
 import { openDb } from "../src/adapters/db.js";
 import {
   FAKE_RUNNER_FAIL_ENV,
   FAKE_RUNNER_FIXTURE_FILENAME
 } from "../src/adapters/fake-runner.js";
-import { initGoal, type GoalInitSuccess } from "../src/goal-init.js";
-import { executeIterationJob } from "../src/iteration-job.js";
+import { initGoal, type GoalInitSuccess } from "../src/core/goal/init.js";
+import { executeIterationJob } from "../src/core/goal/iteration-job.js";
 
 const tempRoots: string[] = [];
 

@@ -42,14 +42,13 @@ import {
   type DoctorSourcesPayload
 } from "./renderers/doctor.js";
 import { isUniqueViolation, openDb } from "./adapters/db.js";
-import { resolveDataDir, type DataDirOptions } from "./data-dir.js";
-import { runWorkerOnce } from "./worker-run.js";
+import { resolveDataDir, type DataDirOptions } from "./config/data-dir.js";
+import { runWorkerOnce } from "./core/daemon/worker-run.js";
+import { loadDaemonStatus, loadStaleLeasePreCheck } from "./core/daemon/status.js";
 import {
-  loadDaemonStatus,
-  loadStaleLeasePreCheck,
   DEFAULT_DAEMON_ACTIVE_JOB_STALE_AFTER_MS,
   DEFAULT_DAEMON_STALE_AFTER_MS
-} from "./daemon-status.js";
+} from "./config/daemon-defaults.js";
 import {
   getActiveDaemonRun,
   getDaemonRun,
@@ -57,17 +56,17 @@ import {
   requestDaemonRunImmediateStop,
   requestDaemonRunStop,
   startDaemonRun
-} from "./daemon-runs.js";
+} from "./core/daemon/runs.js";
 import {
   runDaemonLoop,
   DEFAULT_DAEMON_POLL_INTERVAL_MS,
   DEFAULT_DAEMON_STARTUP_RECOVERY_GRACE_MS
-} from "./daemon-loop.js";
-import { runStartupRecovery } from "./stale-recovery.js";
+} from "./core/daemon/loop.js";
+import { runStartupRecovery } from "./core/daemon/stale-recovery.js";
 import {
   clearGoalManualRecoveryGuarded,
   type ClearGoalManualRecoveryGuardedResult
-} from "./goal-recovery.js";
+} from "./core/goal/recovery.js";
 import {
   BUILTIN_RUNNER_KINDS,
   DEFAULT_RUNNER_KIND,
@@ -78,23 +77,23 @@ import {
   DEFAULT_INTENT_APPLY_POLICY,
   loadMomentumPolicy,
   resolveIntentApplyPolicy
-} from "./momentum-policy.js";
+} from "./core/intent/policy.js";
 import {
   listSourceReconciliationRuns,
   type SourceReconciliationRun
-} from "./source-reconciliation-runs.js";
-import { type LinearReconciliationClient } from "./source-reconciliation.js";
+} from "./core/source/reconciliation-runs.js";
+import { type LinearReconciliationClient } from "./core/source/reconciliation.js";
 import {
   summarizeEvidenceRecords,
   type EvidenceRecordsSummary
-} from "./evidence-records.js";
+} from "./core/evidence/records.js";
 import { executeWorkflowStepDispatch } from "./core/workflow/dispatch-execute.js";
 import { resolveDaemonWorkflowDispatch } from "./core/workflow/dogfood-dispatch.js";
 import {
   countIntentApplyAuditsByLifecycleState,
   countIntentsByApplyState,
   listIntentApplyAudits
-} from "./intent-apply-audits.js";
+} from "./core/intent/apply-audits.js";
 import { type LinearExternalUpdateClient } from "./adapters/linear-external-update-client.js";
 import { type LinearIssueRefreshClient } from "./adapters/linear-issue-refresh.js";
 

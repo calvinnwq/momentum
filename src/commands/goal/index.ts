@@ -1,11 +1,11 @@
 import { usageError, type CliIo } from "../../renderers/cli-output.js";
 import { openDb, type MomentumDb } from "../../adapters/db.js";
-import { type DataDirOptions } from "../../data-dir.js";
-import { initGoal, type GoalInitOptions, type GoalInitSuccess } from "../../goal-init.js";
+import { type DataDirOptions } from "../../config/data-dir.js";
+import { initGoal, type GoalInitOptions, type GoalInitSuccess } from "../../core/goal/init.js";
 import {
   executeIterationJob,
   type ExecuteIterationJobResult
-} from "../../iteration-job.js";
+} from "../../core/goal/iteration-job.js";
 import {
   emitGoalStart,
   emitGoalStartFailure,
