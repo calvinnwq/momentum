@@ -23,7 +23,7 @@
  *
  * It is a pure function of its inputs: no SQLite, no file system, no git, no
  * executor invocation — exactly the discipline `goal-loop-executor.ts` and
- * `executor-loop-reducer.ts` follow.
+ * `loop-reducer.ts` follow.
  *
  * Classification, grounded in the contract's "Completion Classification"
  * definitions:

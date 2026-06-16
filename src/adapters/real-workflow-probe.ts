@@ -2,7 +2,7 @@
  * Opt-in real coding-workflow harness *probe* execution layer (NGX-372 /
  * Adapter Test Coverage milestone).
  *
- * `src/real-workflow-smoke.ts` owns the pure gate (`planWorkflowHarnessSmoke`)
+ * `src/core/executors/real-workflow-smoke.ts` owns the pure gate (`planWorkflowHarnessSmoke`)
  * and the pure spawn-result mapping (`classifyProbeSpawnResult`) plus taxonomy
  * (`classifyWorkflowHarnessOutcome`). That module documents that it "never
  * performs I/O". This adapter module is the thin layer that *does* perform the

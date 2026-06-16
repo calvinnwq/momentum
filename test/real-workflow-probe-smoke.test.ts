@@ -21,7 +21,7 @@ import {
  * NGX-372 opt-in real coding-workflow harness *probe* smoke (Adapter Test
  * Coverage milestone).
  *
- * `src/real-workflow-smoke.ts` owns the pure gate (`planWorkflowHarnessSmoke`)
+ * `src/core/executors/real-workflow-smoke.ts` owns the pure gate (`planWorkflowHarnessSmoke`)
  * and taxonomy (`classifyWorkflowHarnessOutcome`). This file owns the executing
  * layer: it actually spawns the resolved live-wrapper pre-flight probe.
  *

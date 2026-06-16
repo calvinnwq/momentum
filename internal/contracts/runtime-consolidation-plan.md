@@ -65,9 +65,10 @@ the workflow-first executor for bounded autonomous implementation rounds
 (`src/core/executors/goal-loop-executor.ts`, `src/core/executors/goal-loop-mechanism.ts`,
 `src/core/executors/goal-loop-orchestrator.ts`) and writes `executor_invocations` /
 `executor_rounds`, not goal-iteration job artifacts. The load-bearing cross-link:
-`goal-loop-mechanism.ts:83` **reuses the M9 `finalizeLiveWorkflowStepFromResultFile`**
-verify/commit/reset transaction. So "goal iteration paths back `goal-loop`" is
-true only at the *finalization-primitive* layer, not the `goal start` CLI layer.
+`src/core/executors/goal-loop-mechanism.ts:83` **reuses the M9
+`finalizeLiveWorkflowStepFromResultFile`** verify/commit/reset transaction. So
+"goal iteration paths back `goal-loop`" is true only at the
+*finalization-primitive* layer, not the `goal start` CLI layer.
 
 **Decision: Deprecate-later.** Goal-first CLI stays a required compatibility
 surface (the audit "Keep" list and `workflow-first-gap-matrix.md` both keep
@@ -87,7 +88,7 @@ operator read-back and recovery.
 3. The shared iteration-finalization primitive is disentangled: narrowing
    goal-first must not delete `finalizeLiveWorkflowStepFromResultFile` or its
    verify/commit/reset helpers while the `goal-loop` executor
-   (`goal-loop-mechanism.ts:83`) still depends on them. Either the executor keeps
+   (`src/core/executors/goal-loop-mechanism.ts:83`) still depends on them. Either the executor keeps
    the primitive or the primitive moves to a shared home first.
 
 **Equivalent-behavior proof to preserve:** `test/cli.test.ts` (goal-first CLI
@@ -179,12 +180,14 @@ and is covered by the RC-2 reconciliation requirement below.
 `workflow_steps` row after the scaffold — the step is left `running`. The only
 code that calls `finishWorkflowStep` on a dispatcher-started step is the
 **dogfood stand-in** `src/core/workflow/dogfood-dispatch.ts`, not a production adapter
-(`finishWorkflowStep` callers: `live-step-advance.ts`, `live-step-orchestrator.ts`,
+(`finishWorkflowStep` callers: `src/core/executors/live-step-advance.ts`,
+`src/core/executors/live-step-orchestrator.ts`,
 `src/core/workflow/dogfood-dispatch.ts` — formerly `src/workflow-dogfood-dispatch.ts` —
-plus the definition in `src/core/workflow/step-transitions.ts`). The phase-1 scaffold ids are deliberately
-namespaced `<run>::<step>::dispatch` so a follow-up owns reconciling the scaffold
-with the real adapter's reattachable ids (`executor-loop.md` round-lifecycle note;
-`src/core/workflow/dispatch-execute.ts` id derivation).
+plus the definition in `src/core/workflow/step-transitions.ts`). The phase-1
+scaffold ids are deliberately namespaced `<run>::<step>::dispatch` so a follow-up
+owns reconciling the scaffold with the real adapter's reattachable ids
+(`executor-loop.md` round-lifecycle note; `src/core/workflow/dispatch-execute.ts`
+id derivation).
 
 **Decision: Keep both, coexisting, behind a named future boundary.** The target
 boundary is:
