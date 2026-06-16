@@ -2,7 +2,7 @@
  * Auto-set wiring for the run-scoped manual-recovery flag + artifact
  * (NGX-327, M8-04).
  *
- * The symmetric sibling of {@link ./workflow-run-recovery.ts}'s
+ * The symmetric sibling of {@link ./run-recovery.ts}'s
  * `clearWorkflowRunManualRecoveryGuarded`: where the guarded clear re-derives
  * the M7 monitor state and *clears* the durable `needs_manual_recovery` flag
  * only when no blocking condition remains, this reconcile re-derives the same

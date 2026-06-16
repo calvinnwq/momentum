@@ -200,7 +200,7 @@ The smoke exercises a real end-to-end coding workflow against the M7
 Momentum-owned substrate without invoking the live OpenClaw pipeline,
 Discord, GitHub, Linear, or any external tracker writes. Steps are driven
 through the deterministic fake executors exposed by
-`dispatchWorkflowStepExecutor` (see [src/workflow-step-executor.ts](../src/workflow-step-executor.ts))
+`dispatchWorkflowStepExecutor` (see [src/core/workflow/step-executor.ts](../src/core/workflow/step-executor.ts))
 and the resulting outcomes are appended to `ledger.jsonl` and re-imported
 through the spawned `workflow import` CLI between steps so the durable
 `workflow_runs` / `workflow_steps` / `workflow_approvals` / `workflow_leases`

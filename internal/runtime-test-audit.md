@@ -457,8 +457,9 @@ Decisions at a glance (full evidence and prerequisites live in the plan):
 - **M9 direct `workflow_steps` finalize vs M10 executor-loop adapters** — keep
   both, coexisting, behind a named boundary: adapters own
   `executor_invocations` / `executor_rounds` evidence, and a single idempotent
-  reconciliation seam (replacing the `workflow-dogfood-dispatch.ts` stand-in)
-  finalizes dispatched steps exactly once.
+  reconciliation seam (replacing the `src/core/workflow/dogfood-dispatch.ts`
+  stand-in, formerly `src/workflow-dogfood-dispatch.ts`) finalizes dispatched
+  steps exactly once.
 - **Phase-1 dispatch scaffold** — keep; its no-fabricated-evidence rule is a
   recovery safety feature, narrowable only once adapter finalization replaces its
   terminal gap.

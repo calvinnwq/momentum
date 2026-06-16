@@ -2,12 +2,12 @@
  * Durable resolution twin of the production workflow-lane dispatch brain
  * (M10-09a, NGX-367).
  *
- * `workflow-dispatch.ts` owns the *pure* dispatch decision: given a claimed
+ * `dispatch.ts` owns the *pure* dispatch decision: given a claimed
  * step's already-resolved executor family (a {@link WorkflowStepDispatchResolution}),
  * {@link planWorkflowStepDispatch} routes it to a real dispatch or a fail-closed
  * manual-recovery outcome. This module owns the read-only half that produces that
  * resolution from durable SQLite state — the storage twin, exactly as
- * `workflow-gate-persist.ts` is the storage twin of `workflow-gate.ts` and
+ * `gate-persist.ts` is the storage twin of `gate.ts` and
  * `executor-loop-persist.ts` is the storage twin of the executor-loop reducer.
  *
  * Resolution walks the same chain the workflow-first runtime materializes a run
@@ -25,7 +25,7 @@
  *
  * The reads are non-mutating: resolution never writes a row, opens a gate, or
  * touches a lease. The side-effecting half of the dispatcher lives in
- * `workflow-dispatch-execute.ts`: it creates the `executor_invocations` /
+ * `dispatch-execute.ts`: it creates the `executor_invocations` /
  * `executor_rounds` start scaffold for a `dispatch` plan, or records the
  * fail-closed manual-recovery effect and releases the dispatch lease for a
  * `fail_closed` plan. A vanished run cannot carry a `workflow_gates` FK, so the

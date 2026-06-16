@@ -207,7 +207,7 @@ dispatch more than one local step. The NGX-353 dogfood required three separate
 past `preflight`; NGX-391 eliminates that limitation with an opt-in dispatch
 wrapper.
 
-The fixture (`src/workflow-dogfood-dispatch.ts`, enabled via
+The fixture (`src/core/workflow/dogfood-dispatch.ts`, enabled via
 `MOMENTUM_DOGFOOD_TERMINALIZE_DISPATCH=1`) wraps the production
 `executeWorkflowStepDispatch`, terminalizes the step immediately after the real
 executor-invocation scaffold is created, and releases its dispatch lease — all

@@ -1,7 +1,7 @@
 /**
  * Dogfood terminalize-and-continue dispatch wrapper (M10-09b, NGX-391).
  *
- * The production workflow-lane dispatcher (`workflow-dispatch-execute.ts`) stops
+ * The production workflow-lane dispatcher (`dispatch-execute.ts`) stops
  * at the phase-1 *start scaffold*: it advances a claimed step `approved ->
  * running`, creates the durable `executor_invocations` / `executor_rounds` rows,
  * and *holds* the dispatch lease while the (not-yet-landed) bounded executor

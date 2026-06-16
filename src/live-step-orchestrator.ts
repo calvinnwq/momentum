@@ -4,8 +4,8 @@
  * Iterations 1-4 of M9-02 added the caller-side building blocks: the live
  * execution core (`live-step-wrapper.ts`), the M7 executor bridge
  * (`live-step-executor.ts`), the durable `workflow_leases` lifecycle primitives
- * (`workflow-leases.ts`), and the durable `workflow_steps` transition primitives
- * (`workflow-step-transitions.ts`). This module is the seam that composes them
+ * (`src/core/workflow/leases.ts`), and the durable `workflow_steps` transition primitives
+ * (`src/core/workflow/step-transitions.ts`). This module is the seam that composes them
  * into the single managed-step lifecycle the M9 live-execution contract's "Step
  * Execution" section requires, around any `WorkflowStepExecutor` (the M9 live
  * wrapper in production, a deterministic fake in tests):

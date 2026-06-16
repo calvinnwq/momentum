@@ -4,7 +4,7 @@
  *
  * Iteration 1-3 of M9-02 added the live execution core (`live-step-wrapper.ts`),
  * the M7 executor bridge (`live-step-executor.ts`), and the durable
- * `workflow_leases` lifecycle primitives (`workflow-leases.ts`). The remaining
+ * `workflow_leases` lifecycle primitives (`leases.ts`). The remaining
  * caller-side foundation the live-execution contract requires is the step-state
  * half of the lifecycle: "write a start event before spawning" and "persist
  * terminal state before releasing the lease".
@@ -12,7 +12,7 @@
  * Before this slice there was no `src` function that performed a *live* (system)
  * `workflow_steps` transition. Two adjacent paths exist but neither fits:
  *
- *   - `persistWorkflowRunImport` (`workflow-run-import-persist.ts`) upserts step
+ *   - `persistWorkflowRunImport` (`run-import-persist.ts`) upserts step
  *     state from a *static* imported artifact tree, not from live execution.
  *   - The M8 `workflow run update-step` CLI handler transitions a step but does
  *     so as an *operator override*: it stamps `operator_transition_at` plus the
@@ -26,7 +26,7 @@
  * `started_at`) and then into a terminal state (stamping `finished_at` plus the
  * `error_code` / `error_message` / `result_digest` produced by the run), and
  * they return reducer-compatible state so the result feeds
- * `deriveWorkflowRunState` directly. Mirrors the `workflow-leases.ts` primitives
+ * `deriveWorkflowRunState` directly. Mirrors the `leases.ts` primitives
  * in shape and race-guard discipline.
  *
  * The live-step orchestrator wires these together with the lease primitives and

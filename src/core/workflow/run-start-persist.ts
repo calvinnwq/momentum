@@ -1,13 +1,13 @@
 /**
  * Persistence layer for the workflow-first run start surface (M10-02, NGX-346).
  *
- * Takes the pure {@link WorkflowRunStartInput} owned by `workflow-run-start.ts`,
+ * Takes the pure {@link WorkflowRunStartInput} owned by `run-start.ts`,
  * materializes it through {@link materializeWorkflowRunStart}, and writes the
  * resulting `WorkflowRun` + `StepRun` plan into the durable `workflow_runs` /
  * `workflow_steps` tables, with a `workflow_approvals` row when the start has an
  * approval boundary. This is the storage twin of the pure materializer:
  * nothing here runs executors, schedules work, or starts a Goal loop. Scheduling
- * is owned separately by `workflow-scheduler.ts`; the landed goal-loop and
+ * is owned separately by `scheduler.ts`; the landed goal-loop and
  * one-shot / script / no-mistakes mirror adapters attach through executor-loop
  * persistence rather than this start persistence layer. `goal start` stays the
  * compatibility path for old Goal-loop usage and is untouched.

@@ -2,17 +2,17 @@
  * Side-effecting twin of the production workflow-lane dispatcher (M10-09a,
  * NGX-367).
  *
- * `workflow-dispatch.ts` owns the *pure* dispatch decision and
- * `workflow-dispatch-persist.ts` owns the *read-only* resolution that produces
+ * `dispatch.ts` owns the *pure* dispatch decision and
+ * `dispatch-persist.ts` owns the *read-only* resolution that produces
  * it. This module owns the third layer: applying that decision durably as the
  * scheduler's executor-dispatch seam. {@link executeWorkflowStepDispatch} has the
  * exact {@link WorkflowStepDispatch} shape `runWorkflowSchedulerOnce` calls with a
  * claimed step, so the bounded `daemon start` workflow lane can pass it straight
  * through with no test-only injection. It is the storage/effect twin of the
- * dispatch brain, exactly as `workflow-gate-persist.ts` is the effect twin of
- * `workflow-gate.ts`.
+ * dispatch brain, exactly as `gate-persist.ts` is the effect twin of
+ * `gate.ts`.
  *
- * The seam contract (`workflow-scheduler.ts`): "On a normal return the dispatcher
+ * The seam contract (`scheduler.ts`): "On a normal return the dispatcher
  * owns the dispatch lease's lifecycle (refresh across rounds, release on
  * terminal). If it throws, the lane releases the lease." This module honours both
  * halves and never silently no-ops a claimed step:
@@ -404,7 +404,7 @@ function refreshWorkflowRunStateAfterDispatch(
 /**
  * Load the run's `workflow_steps` rows as reducer {@link WorkflowStepRecord}s.
  * Exported so the dogfood terminalize-and-continue fixture
- * (`workflow-dogfood-dispatch.ts`) re-derives run state through the exact same
+ * (`dogfood-dispatch.ts`) re-derives run state through the exact same
  * row mapping as this production dispatcher instead of a divergent copy.
  */
 export function loadWorkflowStepRecords(

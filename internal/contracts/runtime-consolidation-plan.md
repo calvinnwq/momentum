@@ -99,11 +99,11 @@ and the `goal-loop` adapter suite (`test/goal-loop-executor.test.ts`,
 
 ### 2. Imported `.agent-workflows` / `cwfp-*` compatibility
 
-**Current shape.** `src/workflow-run-import.ts` normalizes a
+**Current shape.** `src/core/workflow/run-import.ts` normalizes a
 `.agent-workflows/<run-id>/` directory (`plan.json`, `ledger.jsonl`,
 `approval-*.json`, advisory `monitor.json`) into the M7 substrate, stamping
-`source = "agent-workflow"` (`workflow-run-import.ts:44`). Legacy run IDs match
-`/^(cwfp|cwfb|overnight)-[A-Za-z0-9]+$/` (`workflow-run-import.ts:155`, mirrored
+`source = "agent-workflow"` (`src/core/workflow/run-import.ts:44`). Legacy run IDs match
+`/^(cwfp|cwfb|overnight)-[A-Za-z0-9]+$/` (`src/core/workflow/run-import.ts:155`, mirrored
 in `evidence-workflow.ts:670`). `workflow import`
 (`src/commands/workflow/index.ts:375-441`) drives parse → persist → reconcile.
 
@@ -136,7 +136,7 @@ finalize a workflow step today, and they must never both own the same step.
 (`src/live-step-orchestrator.ts`) and `advanceLiveWorkflowStep`
 (`src/live-step-advance.ts`) own the full `workflow_steps` lifecycle for legacy /
 imported live-step runs: `startWorkflowStep` → executor → `finishWorkflowStep`
-(`workflow-step-transitions.ts`) inside the `managed-step` lease. They never write
+(`src/core/workflow/step-transitions.ts`) inside the `managed-step` lease. They never write
 `executor_invocations` / `executor_rounds`. This is the M7/M9 substrate path that
 imported `.agent-workflows` / `cwfp-*` runs and manual live-wrapper advancement
 still depend on; it must stay readable and recoverable while those compatibility
@@ -145,7 +145,7 @@ paths remain.
 The workflow-first built-in coding definition is not identical to that legacy
 live-wrapper partition. It maps `merge-cleanup` to the dispatchable `script`
 executor family and `linear-refresh` to the non-dispatchable, fail-closed
-`external-apply` family (`src/workflow-definition.ts:306-355`). Therefore the
+`external-apply` family (`src/core/workflow/definition.ts:306-355`). Therefore the
 boundary is by *execution lane*, not by step-name vocabulary: a `merge-cleanup`
 step in an imported/manual live-wrapper run can direct-finalize through M9, while
 a `merge-cleanup` step resolved from the built-in workflow definition enters the
@@ -153,7 +153,7 @@ M10 dispatch lane as `script` and must be finalized by the future reconciliation
 seam.
 
 **M10 executor-loop adapters (nested evidence).** The scheduler-lane dispatcher
-`executeWorkflowStepDispatch` (`src/workflow-dispatch-execute.ts`) advances the
+`executeWorkflowStepDispatch` (`src/core/workflow/dispatch-execute.ts`) advances the
 step `approved → running` once via `startWorkflowStep`, then creates the executor
 invocation / round scaffold and **holds** the `dispatch` lease. The adapter
 orchestrators (`runGoalLoopStep`, `runSingleShotStep`, `runNoMistakesMirrorStep`)
@@ -161,9 +161,9 @@ advance only their `executor_invocations` / `executor_rounds` sub-rows; they nev
 call `finishWorkflowStep`.
 
 **Why they cannot collide today.** Dispatch is partitioned by executor family in
-the pure decider `planWorkflowStepDispatch` (`src/workflow-dispatch.ts:186-210`):
+the pure decider `planWorkflowStepDispatch` (`src/core/workflow/dispatch.ts:186-210`):
 only `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES`
-(`workflow-dispatch.ts:56` = `goal-loop`, `one-shot`, `script`, `no-mistakes`) take
+(`src/core/workflow/dispatch.ts:58` = `goal-loop`, `one-shot`, `script`, `no-mistakes`) take
 the executor-loop path. `external-apply` and `subworkflow` fail closed before
 executor rows are created. Legacy live-wrapper execution enters through the
 `managed-step` lane instead, and the `managed-step` and `dispatch` leases are both
@@ -178,13 +178,13 @@ and is covered by the RC-2 reconciliation requirement below.
 **The open gap.** In the M10 dispatch lane no production code finalizes the
 `workflow_steps` row after the scaffold — the step is left `running`. The only
 code that calls `finishWorkflowStep` on a dispatcher-started step is the
-**dogfood stand-in** `src/workflow-dogfood-dispatch.ts`, not a production adapter
+**dogfood stand-in** `src/core/workflow/dogfood-dispatch.ts`, not a production adapter
 (`finishWorkflowStep` callers: `live-step-advance.ts`, `live-step-orchestrator.ts`,
-`workflow-dogfood-dispatch.ts`, plus the definition in
-`workflow-step-transitions.ts`). The phase-1 scaffold ids are deliberately
+`src/core/workflow/dogfood-dispatch.ts` — formerly `src/workflow-dogfood-dispatch.ts` —
+plus the definition in `src/core/workflow/step-transitions.ts`). The phase-1 scaffold ids are deliberately
 namespaced `<run>::<step>::dispatch` so a follow-up owns reconciling the scaffold
 with the real adapter's reattachable ids (`executor-loop.md` round-lifecycle note;
-`workflow-dispatch-execute.ts` id derivation).
+`src/core/workflow/dispatch-execute.ts` id derivation).
 
 **Decision: Keep both, coexisting, behind a named future boundary.** The target
 boundary is:
@@ -218,7 +218,7 @@ would strand dispatched steps in `running`.
 ### 4. Production dispatch phase-1 scaffold
 
 **Current shape.** `dispatchExecutorScaffold` / `buildRoundScaffold`
-(`src/workflow-dispatch-execute.ts`) atomically advances the step to `running`,
+(`src/core/workflow/dispatch-execute.ts`) atomically advances the step to `running`,
 inserts one `executor_invocations` row (`running`) and one `executor_rounds` row
 (`pending`) with **every** evidence/payload field null or empty, under
 deterministic `<run>::<step>::dispatch` ids, idempotently.
@@ -240,11 +240,11 @@ idempotency cases).
 ### 5. `external-apply` and `subworkflow` fail-closed families
 
 **Current shape.** Both are valid members of `WORKFLOW_EXECUTOR_FAMILIES`
-(`src/workflow-definition.ts:44`) but are absent from
+(`src/core/workflow/definition.ts:44`) but are absent from
 `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES`. A claimed step resolving to either fails
 closed: `planWorkflowStepDispatch` returns
 `code: "unsupported_executor_family"` → `manual_recovery_required`, and
-`failClosedDispatch` (`workflow-dispatch-execute.ts`) sets `needs_manual_recovery`,
+`failClosedDispatch` (`src/core/workflow/dispatch-execute.ts`) sets `needs_manual_recovery`,
 opens a `workflow_gates` row, releases the dispatch lease, and creates no executor
 rows (the step stays `approved`).
 
@@ -268,7 +268,7 @@ released, zero invocations, vanished-run safety).
 
 ### 6. Fake workflow-step executors shipped in `src/`
 
-**Current shape.** `src/workflow-step-executor.ts:202` builds the production
+**Current shape.** `src/core/workflow/step-executor.ts:202` builds the production
 `ADAPTERS` map entirely from `buildFakeExecutor` (`:256`); `getWorkflowStepExecutor`
 / `dispatchWorkflowStepExecutor` therefore resolve to a fake for any
 `WorkflowStepExecutorKind`. This is the M7 `WorkflowStepExecutor` substrate
@@ -317,9 +317,10 @@ and add `RC-*` placeholders for the genuinely new consolidation work.
    goal-first CLI. Blocks on the gap-matrix "future product surface." (Path 1)
 2. **RC-2 — M9/M10 step-finalization reconciliation seam.** Land a single
    idempotent seam that finalizes dispatched steps from terminal executor
-   evidence, replacing the `workflow-dogfood-dispatch.ts` stand-in, with a
-   no-double-write proof. Unblocks narrowing of both the coexistence (Path 3) and
-   the dispatch scaffold (Path 4). Highest-value next runtime slice.
+   evidence, replacing the `src/core/workflow/dogfood-dispatch.ts` stand-in
+   (formerly `src/workflow-dogfood-dispatch.ts`), with a no-double-write proof.
+   Unblocks narrowing of both the coexistence (Path 3) and the dispatch scaffold
+   (Path 4). Highest-value next runtime slice.
 3. **RC-3 — `external-apply` daemon-dispatchable adapter** behind the M6
    external-apply safety contract, replacing the fail-closed branch with durable
    dispatch. (Path 5)

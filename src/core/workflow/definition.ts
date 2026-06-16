@@ -4,10 +4,10 @@
  *
  * This module owns the *pure* `WorkflowDefinition` / `StepDefinition` shape,
  * a deterministic validator, and the built-in coding workflow definition. It
- * follows the same discipline as `workflow-run-reducer.ts`: no SQLite, no file
+ * follows the same discipline as `run-reducer.ts`: no SQLite, no file
  * system, no executor invocation. Durable persistence (`workflow_definitions`
  * / `step_definitions`) is layered on top of these primitives in
- * `workflow-definition-persist.ts`; first-class workflow run start, executor
+ * `definition-persist.ts`; first-class workflow run start, executor
  * records, the opt-in daemon scheduler lane, the landed goal-loop / one-shot /
  * script / no-mistakes mirror adapters, gates, and production dispatch scaffolds
  * are layered on later modules. Closeout dogfood and deferred executor-family

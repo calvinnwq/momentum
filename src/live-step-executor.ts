@@ -9,7 +9,7 @@
  * `WorkflowStepKind`-keyed profile/registry.
  *
  * This module is the seam that makes that execution core usable through the
- * existing M7 `WorkflowStepExecutor` boundary (`workflow-step-executor.ts`)
+ * existing M7 `WorkflowStepExecutor` boundary (`src/core/workflow/step-executor.ts`)
  * without rewriting either side:
  *
  *   - `buildLiveStepWrapperInput` adapts a `WorkflowStepExecutorInput` into a
