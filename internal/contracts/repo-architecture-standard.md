@@ -7,8 +7,11 @@
 runtime modules under `src/core/executors/`; `ARCH-05` / `NGX-449` has
 mechanically regrouped the remaining pseudo-domain modules under
 `src/core/{goal,source,intent,daemon,repo,evidence}/`, `src/config/`, and
-`src/adapters/db/`; `ARCH-06` through `ARCH-08` execute the remaining type
-placement and information architecture cleanup. This contract does not authorize
+`src/adapters/db/`; `ARCH-06` / `NGX-450` has normalized TypeScript type
+placement, draining the three guard-tracked transitional root type modules into
+their owning seams and auditing the rest of the tree against the placement rules
+below; `ARCH-07` through `ARCH-08` execute the remaining information-architecture
+and workflow-runtime cleanup. This contract does not authorize
 runtime behavior changes, public CLI behavior changes, compatibility-lane
 deletion, or weakening any NGX-434 runtime-consolidation decision.
 
@@ -219,10 +222,20 @@ work has stable homes for workflow, executor, repo, adapter, and evidence code.
    daemon stale-threshold defaults moved to `src/config/daemon-defaults.ts` so the
    daemon renderer no longer takes a runtime import on inspector internals. Local
    module maps live in the per-domain `README.md` files under `src/core/`.
-5. **ARCH-06 / NGX-450 — Type placement normalization.** Drain generic or misplaced
-   exported types into owned domain, adapter, command, renderer, shared, or local
-   homes according to the type placement rules above. Do not introduce a generic
-   `src/types/` dumping ground.
+5. **ARCH-06 / NGX-450 — Type placement normalization.** Drained the three
+   guard-tracked transitional root type modules into their owning seams —
+   `src/events.ts` → `src/shared/events.ts`, `src/goal-spec.ts` →
+   `src/core/goal/types.ts` (with the parser in `spec.ts`), and
+   `src/runner-result.ts` → `src/core/executors/types.ts` (with the parser in
+   `runner-result.ts`) — which emptied the ARCH-02 transitional root exception
+   list. A repo-wide audit of exported interfaces, DTOs, result/envelope, and
+   adapter-payload types then confirmed the rest of the tree already sat at its
+   owning domain, adapter, renderer, command, shared, or local seams after
+   ARCH-03..ARCH-05, so no further moves were required. No generic `src/types.ts`
+   or `src/types/` dumping ground was introduced. The repo convention keeps
+   exported types co-located with their behavior inside the owning domain; a
+   per-domain `types.ts` is the documented home for shapes that need a dedicated
+   seam (as for `goal` and `executors`), not a mandate to extract every type.
 6. **ARCH-07 / NGX-451 — Human and agent docs information architecture.** Reconcile
    `ARCHITECTURE.md`, `AGENTS.md`, `docs/`, `internal/contracts/`,
    `internal/milestones/`, `internal/roadmap.md`, and `internal/plans/` so
