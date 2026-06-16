@@ -1,4 +1,4 @@
-import type { MomentumDb } from "./adapters/db.js";
+import type { MomentumDb } from "../adapters/db.js";
 
 export const QUEUE_EVENT_TYPES = {
   JOB_ENQUEUED: "job.enqueued",

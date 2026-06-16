@@ -1877,7 +1877,7 @@ describe("loadGoalStatus", () => {
         mode: "queued"
       });
       const { appendQueueEvent, QUEUE_EVENT_TYPES } = await import(
-        "../src/events.js"
+        "../src/shared/events.js"
       );
 
       const db = openDb(setup.dataDir);
@@ -1934,7 +1934,7 @@ describe("loadGoalStatus", () => {
         { mode: "queued" }
       );
       const { appendQueueEvent, QUEUE_EVENT_TYPES } = await import(
-        "../src/events.js"
+        "../src/shared/events.js"
       );
 
       const db = openDb(setupA.dataDir);

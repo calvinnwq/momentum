@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 
 import { isUniqueViolation, type MomentumDb } from "../../adapters/db.js";
-import { QUEUE_EVENT_TYPES, appendQueueEvent } from "../../events.js";
+import { QUEUE_EVENT_TYPES, appendQueueEvent } from "../../shared/events.js";
 import {
   getRepoLock,
   updateRepoLockHeartbeat,

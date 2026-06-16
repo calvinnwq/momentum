@@ -28,11 +28,6 @@ type RootSrcException = {
 };
 
 const TRANSITIONAL_ROOT_SRC_EXCEPTIONS = {
-  "src/events.ts": {
-    ownerIssue: "NGX-450",
-    targetHome: "src/shared/events.ts",
-    reason: "Cross-cutting event types need a shared/type-owned home."
-  },
   "src/goal-spec.ts": {
     ownerIssue: "NGX-450",
     targetHome: "src/core/goal/types.ts",
@@ -497,8 +492,7 @@ describe("M11 CLI import boundaries", () => {
     );
     expect([...documentedTargetPrefixes].sort()).toEqual([
       "src/core/executors",
-      "src/core/goal",
-      "src/shared/events.ts"
+      "src/core/goal"
     ]);
   });
 

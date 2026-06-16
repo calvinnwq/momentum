@@ -16,7 +16,7 @@ import {
   getGoalManualRecoveryState,
   markGoalNeedsManualRecovery
 } from "../src/core/goal/recovery.js";
-import { QUEUE_EVENT_TYPES } from "../src/events.js";
+import { QUEUE_EVENT_TYPES } from "../src/shared/events.js";
 import {
   acquireRepoLock,
   getBlockingRepoLock,

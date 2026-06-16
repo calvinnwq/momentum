@@ -1213,7 +1213,7 @@ describe("writeHandoff", () => {
       "queued"
     );
     const { appendQueueEvent, QUEUE_EVENT_TYPES } = await import(
-      "../src/events.js"
+      "../src/shared/events.js"
     );
 
     const db = openDb(setup.dataDir);
