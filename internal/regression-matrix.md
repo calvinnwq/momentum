@@ -340,8 +340,8 @@ M9 dogfood and live-resume slices add built-CLI smoke coverage.
   equals the recorded base. A live wrapper-created commit is classified as
   `head_mismatch` and routed to manual recovery instead of being reset or
   accepted silently.
-- **Owner.** [`src/live-step-advance.ts`](../src/live-step-advance.ts) and
-  [`src/live-step-finalize.ts`](../src/live-step-finalize.ts).
+- **Owner.** [`src/core/executors/live-step-advance.ts`](../src/core/executors/live-step-advance.ts) and
+  [`src/core/executors/live-step-finalize.ts`](../src/core/executors/live-step-finalize.ts).
 - **Evidence.**
   - Unit: `test/live-step-finalize.test.ts` — commits the live-step diff only
     after verification passes; resets when verification fails; preserves a
@@ -360,8 +360,8 @@ M9 dogfood and live-resume slices add built-CLI smoke coverage.
   mutates git. The run-level recovery seam sets `needs_manual_recovery` before
   attempting the per-run `recovery.md` artifact, so the durable flag and reason
   remain authoritative even if best-effort artifact rendering fails.
-- **Owner.** [`src/live-step-finalize.ts`](../src/live-step-finalize.ts),
-  [`src/live-step-run-recovery.ts`](../src/live-step-run-recovery.ts), and
+- **Owner.** [`src/core/executors/live-step-finalize.ts`](../src/core/executors/live-step-finalize.ts),
+  [`src/core/executors/live-step-run-recovery.ts`](../src/core/executors/live-step-run-recovery.ts), and
   [`src/core/workflow/recovery-artifact.ts`](../src/core/workflow/recovery-artifact.ts).
 - **Evidence.**
   - Unit: `test/live-step-finalize.test.ts` — missing, invalid JSON,
@@ -390,8 +390,8 @@ M9 dogfood and live-resume slices add built-CLI smoke coverage.
   or expiry backward. Heartbeating stops before the recovery flag / artifact
   write, but the deferred managed-step lease is released only after terminal or
   recovery reconciliation has been persisted.
-- **Owner.** [`src/live-step-advance.ts`](../src/live-step-advance.ts) and
-  [`src/live-step-orchestrator.ts`](../src/live-step-orchestrator.ts).
+- **Owner.** [`src/core/executors/live-step-advance.ts`](../src/core/executors/live-step-advance.ts) and
+  [`src/core/executors/live-step-orchestrator.ts`](../src/core/executors/live-step-orchestrator.ts).
 - **Evidence.**
   - Unit: `test/live-step-advance.test.ts` — keeps repo-lock and managed-step
     leases fresh during finalization; rejects lost repo-lock ownership before

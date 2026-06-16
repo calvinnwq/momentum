@@ -62,8 +62,8 @@ runtime.
 
 The `goal-loop` *executor family* is a different thing that shares a name. It is
 the workflow-first executor for bounded autonomous implementation rounds
-(`src/goal-loop-executor.ts`, `src/goal-loop-mechanism.ts`,
-`src/goal-loop-orchestrator.ts`) and writes `executor_invocations` /
+(`src/core/executors/goal-loop-executor.ts`, `src/core/executors/goal-loop-mechanism.ts`,
+`src/core/executors/goal-loop-orchestrator.ts`) and writes `executor_invocations` /
 `executor_rounds`, not goal-iteration job artifacts. The load-bearing cross-link:
 `goal-loop-mechanism.ts:83` **reuses the M9 `finalizeLiveWorkflowStepFromResultFile`**
 verify/commit/reset transaction. So "goal iteration paths back `goal-loop`" is
@@ -133,8 +133,8 @@ This is the central boundary decision the ticket asks for. Two mechanisms
 finalize a workflow step today, and they must never both own the same step.
 
 **M9 live wrappers (direct).** `runLiveWorkflowStep`
-(`src/live-step-orchestrator.ts`) and `advanceLiveWorkflowStep`
-(`src/live-step-advance.ts`) own the full `workflow_steps` lifecycle for legacy /
+(`src/core/executors/live-step-orchestrator.ts`) and `advanceLiveWorkflowStep`
+(`src/core/executors/live-step-advance.ts`) own the full `workflow_steps` lifecycle for legacy /
 imported live-step runs: `startWorkflowStep` → executor → `finishWorkflowStep`
 (`src/core/workflow/step-transitions.ts`) inside the `managed-step` lease. They never write
 `executor_invocations` / `executor_rounds`. This is the M7/M9 substrate path that
