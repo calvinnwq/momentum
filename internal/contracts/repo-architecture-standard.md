@@ -118,11 +118,11 @@ index -> cli -> commands -> core -> adapters
 Commands orchestrate: they parse command-family arguments, call core behavior or
 adapter-backed seams, and pass computed results to renderers. Renderers output
 only: they format stable JSON/text/help/diagnostics and do not mutate state,
-open databases, read repos, call adapters, or inspect argv. Until transitional
-root files move, renderers may keep explicit type-only imports for stable shapes
-and named read-only constants that the guard allowlists; new runtime imports
-from commands, adapters, persistence, or mutation modules are not allowed. Core
-owns business/runtime behavior: reducers, state machines, persistence policies,
+open databases, read repos, call adapters, or inspect argv. Renderers may keep
+explicit type-only imports from core modules for stable result shapes and may
+read configuration constants from `src/config/`; runtime imports from commands,
+adapters, persistence, or mutation modules are not allowed. Core owns
+business/runtime behavior: reducers, state machines, persistence policies,
 runtime decisions, and compatibility behavior. Adapters own external concrete
 integrations: databases, git, Linear, runners, shells, probes, and remote or
 process IO. `shared` and `config` are support layers, not domain escape hatches.

@@ -130,10 +130,10 @@ After M11:
 - Command-family modules may import domain modules, renderers, and shared CLI
   helpers.
 - Domain modules stay independent of CLI argv parsing and process IO.
-- Core modules, including `src/core/workflow/` and `src/core/executors/`, must
-  not import command or renderer layers.
-- Renderer modules accept already-computed results and must not import commands,
-  adapters, persistence, or mutation modules except documented transitional edges.
+- All `src/core/<domain>/` modules must not import command or renderer layers.
+- Renderer modules accept already-computed results. They may import stable result
+  shapes from core modules only with `import type`; runtime imports from
+  commands, adapters, persistence, or mutation modules stay forbidden.
 - External adapters stay behind domain or command boundaries with explicit
   policy checks.
 - Test fixtures may read source files for structural guards, but production code
