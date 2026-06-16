@@ -82,6 +82,21 @@ During migration, the allowlist may include named transitional files with a
 ticket owner and removal target. New production modules should not be added at
 root unless a contract update names the exception.
 
+## Adding Source Modules During ARCH Migration
+
+Do not add new root `src/*.ts` modules. Put new behavior in the narrowest
+existing owner first: command orchestration in `src/commands/`, output-only JSON
+or text helpers in `src/renderers/`, external integrations in `src/adapters/`,
+configuration helpers in `src/config/`, cross-cutting utilities in `src/shared/`,
+and business/runtime behavior in `src/core/<domain>` once that domain home
+exists.
+
+If a future slice must keep migration debt at root temporarily, add a
+transitional exception to the ARCH-02 guard with the owner issue, target home,
+and removal reason. Do not create placeholder directories or generic dumping
+grounds just to satisfy the taxonomy; absent pending homes are better than
+empty or misleading ones.
+
 ## Import Direction
 
 The high-level import direction is:
