@@ -441,6 +441,7 @@ const RENDERER_TYPE_ONLY_TRANSITIONAL_IMPORTS = new Set([
   "src/renderers/intent.ts -> src/intent-apply-audits.ts",
   "src/renderers/intent.ts -> src/update-intents.ts",
   "src/renderers/source.ts -> src/source-items.ts",
+  "src/renderers/source.ts -> src/source-reconciliation.ts",
   "src/renderers/source.ts -> src/source-reconciliation-runs.ts",
   "src/renderers/workflow.ts -> src/workflow-gate-persist.ts",
   "src/renderers/workflow.ts -> src/workflow-run-import-persist.ts",
@@ -609,8 +610,14 @@ function isCoreModule(file: string): boolean {
 function isPersistenceOrMutationModule(file: string): boolean {
   if (isAdapterModule(file)) return true;
 
-  return /(?:^|[/.-])(?:persist|migrations|db|lock|locks|queue|runs|records|audits|execute|finalize|reconcile|leases|items|intents)(?:[/.-]|$)/.test(
-    file
+  const transitionalException =
+    TRANSITIONAL_ROOT_SRC_EXCEPTIONS[
+      file as keyof typeof TRANSITIONAL_ROOT_SRC_EXCEPTIONS
+    ];
+  return [file, transitionalException?.targetHome].some((candidate) =>
+    /(?:^|[/.-])(?:persist|migrations|db|lock|locks|queue|runs|records|audits|execute|finalize|reconcile|reconciliation|leases|items|intents|branch)(?:[/.-]|$)/.test(
+      candidate ?? ""
+    )
   );
 }
 
@@ -667,6 +674,11 @@ describe("M11 CLI import boundaries", () => {
       { specifier: "./cli-output.js", isTypeOnly: false },
       { specifier: "../goal-spec.js", isTypeOnly: false }
     ]);
+  });
+
+  it("classifies transitional repo and source mutation owners without relying on persistence nouns only", () => {
+    expect(isPersistenceOrMutationModule("src/branch-manager.ts")).toBe(true);
+    expect(isPersistenceOrMutationModule("src/source-reconciliation.ts")).toBe(true);
   });
 
   it("enforces the durable root src allowlist with named transitional debt", () => {
