@@ -691,7 +691,9 @@ function isTransitionalRootSrcException(file: string): boolean {
 }
 
 function isPersistenceOrMutationModule(file: string): boolean {
-  if (isAdapterModule(file) || isTransitionalRootSrcException(file)) return true;
+  if (isAdapterModule(file) || isCoreModule(file) || isTransitionalRootSrcException(file)) {
+    return true;
+  }
 
   return /(?:^|[/.-])(?:persist|migrations|db|lock|locks|queue|runs|records|audits|execute|finalize|reconcile|reconciliation|leases|items|intents|branch)(?:[/.-]|$)/.test(
     file
@@ -699,6 +701,7 @@ function isPersistenceOrMutationModule(file: string): boolean {
 }
 
 function rendererTransitionalImportIsAllowed(edge: ImportEdge): boolean {
+  if (isCoreModule(edge.to)) return edge.isTypeOnly;
   if (!isTransitionalRootSrcException(edge.to)) return false;
 
   const key = `${edge.from} -> ${edge.to}`;
@@ -785,13 +788,17 @@ describe("M11 CLI import boundaries", () => {
     ]);
   });
 
-  it("classifies all transitional root source modules as renderer runtime boundaries", () => {
+  it("classifies transitional root and future core source modules as renderer runtime boundaries", () => {
     expect(isPersistenceOrMutationModule("src/artifacts.ts")).toBe(true);
     expect(isPersistenceOrMutationModule("src/branch-manager.ts")).toBe(true);
     expect(isPersistenceOrMutationModule("src/goal-init.ts")).toBe(true);
     expect(isPersistenceOrMutationModule("src/handoff.ts")).toBe(true);
     expect(isPersistenceOrMutationModule("src/source-reconciliation.ts")).toBe(true);
     expect(isPersistenceOrMutationModule("src/update-intent-generator.ts")).toBe(true);
+    expect(isPersistenceOrMutationModule("src/core/goal/status.ts")).toBe(true);
+    expect(isPersistenceOrMutationModule("src/core/source/context.ts")).toBe(true);
+    expect(isPersistenceOrMutationModule("src/core/evidence/handoff.ts")).toBe(true);
+    expect(isPersistenceOrMutationModule("src/core/repo/project-rollup.ts")).toBe(true);
   });
 
   it("allows only explicit renderer transitional imports", () => {
@@ -826,6 +833,22 @@ describe("M11 CLI import boundaries", () => {
       rendererTransitionalImportIsAllowed({
         ...daemonStatusReadonlyEdge,
         runtimeBindings: ["loadDaemonStatus"]
+      })
+    ).toBe(false);
+
+    const coreTypeEdge: ImportEdge = {
+      from: "src/renderers/status.ts",
+      to: "src/core/goal/status.ts",
+      specifier: "../core/goal/status.js",
+      isTypeOnly: true,
+      runtimeBindings: []
+    };
+    expect(rendererTransitionalImportIsAllowed(coreTypeEdge)).toBe(true);
+    expect(
+      rendererTransitionalImportIsAllowed({
+        ...coreTypeEdge,
+        isTypeOnly: false,
+        runtimeBindings: ["loadGoalStatus"]
       })
     ).toBe(false);
   });
