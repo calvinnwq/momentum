@@ -3,8 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { usageError, type CliIo } from "../../renderers/cli-output.js";
 import { isUniqueViolation, openDb, type MomentumDb } from "../../adapters/db.js";
-import { resolveDataDir, type DataDirOptions } from "../../data-dir.js";
-import { loadMomentumPolicy } from "../../momentum-policy.js";
+import { resolveDataDir, type DataDirOptions } from "../../config/data-dir.js";
+import { loadMomentumPolicy } from "../../core/intent/policy.js";
 import { parseWorkflowRunImport } from "../../core/workflow/run-import.js";
 import {
   persistWorkflowRunImport,

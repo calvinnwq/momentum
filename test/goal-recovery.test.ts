@@ -9,19 +9,19 @@ import {
   claimPendingGoalIterationJob,
   enqueueGoalIterationJob,
   getQueueJob
-} from "../src/queue-jobs.js";
+} from "../src/core/daemon/queue-jobs.js";
 import {
   clearGoalManualRecovery,
   clearGoalManualRecoveryGuarded,
   getGoalManualRecoveryState,
   markGoalNeedsManualRecovery
-} from "../src/goal-recovery.js";
+} from "../src/core/goal/recovery.js";
 import { QUEUE_EVENT_TYPES } from "../src/events.js";
 import {
   acquireRepoLock,
   getBlockingRepoLock,
   markRepoLockNeedsManualRecovery
-} from "../src/repo-locks.js";
+} from "../src/core/repo/locks.js";
 
 const tempRoots: string[] = [];
 

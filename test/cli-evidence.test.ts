@@ -5,8 +5,8 @@ import path from "node:path";
 
 import { runCli } from "../src/cli.js";
 import { openDb } from "../src/adapters/db.js";
-import { listEvidenceRecords } from "../src/evidence-records.js";
-import { listUpdateIntents } from "../src/update-intents.js";
+import { listEvidenceRecords } from "../src/core/evidence/records.js";
+import { listUpdateIntents } from "../src/core/intent/update-intents.js";
 
 type RunResult = {
   code: number;

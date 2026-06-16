@@ -1,15 +1,15 @@
 import { usageError, type CliIo } from "../../renderers/cli-output.js";
 import { openDb, type MomentumDb } from "../../adapters/db.js";
-import { resolveDataDir, type DataDirOptions } from "../../data-dir.js";
+import { resolveDataDir, type DataDirOptions } from "../../config/data-dir.js";
 import {
   ingestEvidenceRecord,
   listEvidenceRecords,
   type EvidenceRecord,
   type EvidenceRecordIngestInput,
   type ListEvidenceRecordsOptions
-} from "../../evidence-records.js";
-import { parseWorkflowArtifact } from "../../evidence-workflow.js";
-import { getSourceItemById } from "../../source-items.js";
+} from "../../core/evidence/records.js";
+import { parseWorkflowArtifact } from "../../core/evidence/workflow.js";
+import { getSourceItemById } from "../../core/source/items.js";
 import {
   emitEvidenceIngestFailure,
   emitEvidenceIngestSuccess,
@@ -19,7 +19,7 @@ import {
 import {
   evaluateGoalForSourceSatisfiedIntents,
   type EvaluateGoalForSourceSatisfiedIntentResult
-} from "../../update-intent-generator.js";
+} from "../../core/source/update-intent-generator.js";
 
 type ParsedFlags = {
   args: string[]; json: boolean; dataDir?: string; goal?: string; path?: string; sourceItem?: string; source?: string; evidenceType?: string; limit?: number;

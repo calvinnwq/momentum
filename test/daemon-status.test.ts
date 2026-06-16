@@ -6,23 +6,23 @@ import path from "node:path";
 import {
   loadDaemonStatus,
   loadStaleLeasePreCheck
-} from "../src/daemon-status.js";
+} from "../src/core/daemon/status.js";
 import { openDb } from "../src/adapters/db.js";
 import {
   acquireRepoLock,
   releaseRepoLock
-} from "../src/repo-locks.js";
+} from "../src/core/repo/locks.js";
 import {
   claimPendingGoalIterationJob,
   enqueueGoalIterationJob,
   getQueueJob,
   releaseClaimedGoalIterationJob
-} from "../src/queue-jobs.js";
-import { writeRecoveryArtifact } from "../src/recovery-artifact.js";
+} from "../src/core/daemon/queue-jobs.js";
+import { writeRecoveryArtifact } from "../src/core/goal/recovery-artifact.js";
 import {
   clearGoalManualRecovery,
   markGoalNeedsManualRecovery
-} from "../src/goal-recovery.js";
+} from "../src/core/goal/recovery.js";
 
 const tempRoots: string[] = [];
 

@@ -14,7 +14,7 @@ import {
   type ExternalUpdateAdapterInput,
   type ExternalUpdateAdapterTarget
 } from "../src/adapters/external-update-adapter.js";
-import type { UpdateIntent } from "../src/update-intents.js";
+import type { UpdateIntent } from "../src/core/intent/update-intents.js";
 
 function buildIntent(overrides: Partial<UpdateIntent> = {}): UpdateIntent {
   return {

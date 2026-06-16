@@ -11,7 +11,7 @@ import {
   listStaleRepoLocks,
   releaseRepoLock,
   updateRepoLockHeartbeat
-} from "../src/repo-locks.js";
+} from "../src/core/repo/locks.js";
 
 const tempRoots: string[] = [];
 

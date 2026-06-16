@@ -1,20 +1,20 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 
-import type { GoalArtifactPaths } from "../../artifacts.js";
-import { ensureMomentumBranch } from "../../branch-manager.js";
+import type { GoalArtifactPaths } from "../evidence/artifacts.js";
+import { ensureMomentumBranch } from "../repo/branch-manager.js";
 import { resetToBase } from "../../adapters/git-transaction.js";
 import type { GoalSpec } from "../../goal-spec.js";
 import {
   finalizeIteration,
   type FinalizeIterationResult
-} from "../../iteration-finalize.js";
+} from "../repo/iteration-finalize.js";
 import {
   renderIterationPrompt,
   type IterationPromptSourceContext
-} from "../../iteration-prompt.js";
-import { loadMomentumPolicy } from "../../momentum-policy.js";
-import { inspectRepo } from "../../repo-guard.js";
+} from "../goal/iteration-prompt.js";
+import { loadMomentumPolicy } from "../intent/policy.js";
+import { inspectRepo } from "../repo/guard.js";
 import {
   dispatchRunnerAdapter,
   getRunnerAdapter,

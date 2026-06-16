@@ -105,7 +105,7 @@ and the `goal-loop` adapter suite (`test/goal-loop-executor.test.ts`,
 `approval-*.json`, advisory `monitor.json`) into the M7 substrate, stamping
 `source = "agent-workflow"` (`src/core/workflow/run-import.ts:44`). Legacy run IDs match
 `/^(cwfp|cwfb|overnight)-[A-Za-z0-9]+$/` (`src/core/workflow/run-import.ts:155`, mirrored
-in `evidence-workflow.ts:670`). `workflow import`
+in `src/core/evidence/workflow.ts:670`). `workflow import`
 (`src/commands/workflow/index.ts:375-441`) drives parse → persist → reconcile.
 
 **Decision: Defer.** This is governed by an existing accepted contract, not by a

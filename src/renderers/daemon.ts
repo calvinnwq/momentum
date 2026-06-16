@@ -1,16 +1,16 @@
-import type { DaemonLoopResult } from "../daemon-loop.js";
+import type { DaemonLoopResult } from "../core/daemon/loop.js";
+import type { DaemonStatusSuccess } from "../core/daemon/status.js";
 import {
   DEFAULT_DAEMON_ACTIVE_JOB_STALE_AFTER_MS,
-  DEFAULT_DAEMON_STALE_AFTER_MS,
-  type DaemonStatusSuccess
-} from "../daemon-status.js";
-import type { getActiveDaemonRun } from "../daemon-runs.js";
+  DEFAULT_DAEMON_STALE_AFTER_MS
+} from "../config/daemon-defaults.js";
+import type { getActiveDaemonRun } from "../core/daemon/runs.js";
 import type {
   StaleClaimedJobRecoverySkipped,
   StaleDaemonRunRecoverySkipped,
   StaleRepoLockRecoverySkipped,
   StartupRecoveryResult
-} from "../stale-recovery.js";
+} from "../core/daemon/stale-recovery.js";
 import { write, writeJson, type CliIo } from "./cli-output.js";
 
 type JsonFlags = {

@@ -13,7 +13,7 @@ import { parseRunnerResult } from "../src/runner-result.js";
 import {
   initGoalArtifacts,
   resolveGoalArtifactPaths
-} from "../src/artifacts.js";
+} from "../src/core/evidence/artifacts.js";
 import type { GoalSpec } from "../src/goal-spec.js";
 
 const tempRoots: string[] = [];

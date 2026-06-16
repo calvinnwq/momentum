@@ -9,7 +9,7 @@ import {
   resolveRecoveryArtifactPath,
   writeRecoveryArtifact,
   type RecoveryArtifactInput
-} from "../src/recovery-artifact.js";
+} from "../src/core/goal/recovery-artifact.js";
 
 const tempRoots: string[] = [];
 

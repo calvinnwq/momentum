@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { runCli } from "../src/cli.js";
 import { openDb } from "../src/adapters/db.js";
-import { ingestEvidenceRecord } from "../src/evidence-records.js";
+import { ingestEvidenceRecord } from "../src/core/evidence/records.js";
 
 type RunResult = {
   code: number;

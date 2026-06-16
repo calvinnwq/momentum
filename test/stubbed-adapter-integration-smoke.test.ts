@@ -12,12 +12,12 @@ import {
   type LinearReconciliationClient,
   type LinearReconciliationFetchPageInput,
   type LinearReconciliationFetchPageResult
-} from "../src/source-reconciliation.js";
+} from "../src/core/source/reconciliation.js";
 import {
   listSourceItems,
   listSourceSnapshotsForItem
-} from "../src/source-items.js";
-import { listSourceReconciliationRuns } from "../src/source-reconciliation-runs.js";
+} from "../src/core/source/items.js";
+import { listSourceReconciliationRuns } from "../src/core/source/reconciliation-runs.js";
 import { claimRunnableWorkflowStep } from "../src/core/workflow/scheduler.js";
 import { getWorkflowLease } from "../src/core/workflow/leases.js";
 import { listWorkflowGatesForRun } from "../src/core/workflow/gate-persist.js";

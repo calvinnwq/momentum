@@ -10,10 +10,10 @@ import {
   updateIntentToJsonShape
 } from "../src/renderers/intent.js";
 import { sourceItemToJsonShape } from "../src/renderers/source.js";
-import type { EvidenceRecord } from "../src/evidence-records.js";
-import type { IntentApplyAudit } from "../src/intent-apply-audits.js";
-import type { SourceItem } from "../src/source-items.js";
-import type { UpdateIntent } from "../src/update-intents.js";
+import type { EvidenceRecord } from "../src/core/evidence/records.js";
+import type { IntentApplyAudit } from "../src/core/intent/apply-audits.js";
+import type { SourceItem } from "../src/core/source/items.js";
+import type { UpdateIntent } from "../src/core/intent/update-intents.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");

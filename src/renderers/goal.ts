@@ -1,5 +1,5 @@
-import type { GoalInitSuccess } from "../goal-init.js";
-import type { ExecuteIterationJobResult } from "../iteration-job.js";
+import type { GoalInitSuccess } from "../core/goal/init.js";
+import type { ExecuteIterationJobResult } from "../core/goal/iteration-job.js";
 import { write, writeJson, type CliIo } from "./cli-output.js";
 
 type JsonFlags = {

@@ -1,5 +1,5 @@
-import type { StaleLeasePreCheckSnapshot } from "../daemon-status.js";
-import type { WorkerRunResult } from "../worker-run.js";
+import type { StaleLeasePreCheckSnapshot } from "../core/daemon/status.js";
+import type { WorkerRunResult } from "../core/daemon/worker-run.js";
 import { write, writeJson, type CliIo } from "./cli-output.js";
 
 type JsonFlags = {

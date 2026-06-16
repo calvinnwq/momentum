@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDb } from "../src/adapters/db.js";
-import { applyQueueMigrations } from "../src/migrations.js";
+import { applyQueueMigrations } from "../src/adapters/db/migrations.js";
 
 const tempRoots: string[] = [];
 

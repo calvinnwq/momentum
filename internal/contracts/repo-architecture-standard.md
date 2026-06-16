@@ -4,8 +4,11 @@
 `NGX-446` enforces the first source-layout guardrails from this contract;
 `ARCH-03` / `NGX-447` has mechanically regrouped workflow runtime modules under
 `src/core/workflow/`; `ARCH-04` / `NGX-448` has mechanically regrouped executor
-runtime modules under `src/core/executors/`; `ARCH-05` through `ARCH-08` execute
-the remaining module moves and information architecture cleanup. This contract does not authorize
+runtime modules under `src/core/executors/`; `ARCH-05` / `NGX-449` has
+mechanically regrouped the remaining pseudo-domain modules under
+`src/core/{goal,source,intent,daemon,repo,evidence}/`, `src/config/`, and
+`src/adapters/db/`; `ARCH-06` through `ARCH-08` execute the remaining type
+placement and information architecture cleanup. This contract does not authorize
 runtime behavior changes, public CLI behavior changes, compatibility-lane
 deletion, or weakening any NGX-434 runtime-consolidation decision.
 
@@ -115,11 +118,11 @@ index -> cli -> commands -> core -> adapters
 Commands orchestrate: they parse command-family arguments, call core behavior or
 adapter-backed seams, and pass computed results to renderers. Renderers output
 only: they format stable JSON/text/help/diagnostics and do not mutate state,
-open databases, read repos, call adapters, or inspect argv. Until transitional
-root files move, renderers may keep explicit type-only imports for stable shapes
-and named read-only constants that the guard allowlists; new runtime imports
-from commands, adapters, persistence, or mutation modules are not allowed. Core
-owns business/runtime behavior: reducers, state machines, persistence policies,
+open databases, read repos, call adapters, or inspect argv. Renderers may keep
+explicit type-only imports from core modules for stable result shapes and may
+read configuration constants from `src/config/`; runtime imports from commands,
+adapters, persistence, or mutation modules are not allowed. Core owns
+business/runtime behavior: reducers, state machines, persistence policies,
 runtime decisions, and compatibility behavior. Adapters own external concrete
 integrations: databases, git, Linear, runners, shells, probes, and remote or
 process IO. `shared` and `config` are support layers, not domain escape hatches.
@@ -206,12 +209,16 @@ work has stable homes for workflow, executor, repo, adapter, and evidence code.
    M9 direct-finalize path was kept as separate modules from the M10
    executor-loop path. The local module map lives in
    [`../../src/core/executors/README.md`](../../src/core/executors/README.md).
-4. **ARCH-05 / NGX-449 — Remaining pseudo-domains.** Move goal-first compatibility,
-   source reconciliation/items/context, update intents/apply audit/apply
-   execution, daemon/worker/queue/stale-recovery, repo guard/lock/branch/
-   verification, project/status/recovery, evidence, and small config/shared
-   support layers into their owned homes while preserving compatibility surfaces
-   in `src/cli.ts`.
+4. **ARCH-05 / NGX-449 — Remaining pseudo-domains.** Moved goal-first
+   compatibility, source reconciliation/items/context, update intents/apply
+   audit/apply execution, daemon/worker/queue/stale-recovery, repo guard/lock/
+   branch/verification, project rollup, and evidence behavior into
+   `src/core/{goal,source,intent,daemon,repo,evidence}/`, with `data-dir` and the
+   daemon/lease default constants under `src/config/` and SQLite migrations under
+   `src/adapters/db/`, preserving the compatibility surfaces in `src/cli.ts`. The
+   daemon stale-threshold defaults moved to `src/config/daemon-defaults.ts` so the
+   daemon renderer no longer takes a runtime import on inspector internals. Local
+   module maps live in the per-domain `README.md` files under `src/core/`.
 5. **ARCH-06 / NGX-450 — Type placement normalization.** Drain generic or misplaced
    exported types into owned domain, adapter, command, renderer, shared, or local
    homes according to the type placement rules above. Do not introduce a generic

@@ -1,22 +1,22 @@
 import { usageError, type CliIo } from "../../renderers/cli-output.js";
 import { openDb } from "../../adapters/db.js";
-import { resolveDataDir, type DataDirOptions } from "../../data-dir.js";
+import { resolveDataDir, type DataDirOptions } from "../../config/data-dir.js";
 import {
   getSourceItemById,
   linkGoalToSourceItem,
   listSourceItems,
   unlinkGoalFromSourceItem
-} from "../../source-items.js";
-import { listSourceReconciliationRuns } from "../../source-reconciliation-runs.js";
+} from "../../core/source/items.js";
+import { listSourceReconciliationRuns } from "../../core/source/reconciliation-runs.js";
 import {
   reconcileLinearSource,
   type LinearReconciliationClient,
   type LinearReconciliationFilters,
   type ReconcileLinearSourceInput,
   type ReconcileLinearSourceResult
-} from "../../source-reconciliation.js";
+} from "../../core/source/reconciliation.js";
 import { buildLinearHttpReconciliationClient } from "../../adapters/linear-http-client.js";
-import { LINEAR_API_KEY_ENV_VAR } from "../../intent-apply-execute.js";
+import { LINEAR_API_KEY_ENV_VAR } from "../../core/intent/apply-execute.js";
 import {
   emitSourceFailure,
   emitSourceGet,
@@ -28,7 +28,7 @@ import {
 } from "../../renderers/source.js";
 import {
   evaluateGoalForSourceSatisfiedIntents
-} from "../../update-intent-generator.js";
+} from "../../core/source/update-intent-generator.js";
 
 export type LinearReconciliationClientFactoryInput = {
   apiKey: string | null;

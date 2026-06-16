@@ -9,7 +9,7 @@ import {
   getSourceReconciliationRun,
   listSourceReconciliationRuns,
   startSourceReconciliationRun
-} from "../src/source-reconciliation-runs.js";
+} from "../src/core/source/reconciliation-runs.js";
 
 const tempRoots: string[] = [];
 

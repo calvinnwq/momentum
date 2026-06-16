@@ -11,11 +11,11 @@ import {
   classifyRealSmokeReadOutcome,
   planLinearReadSmoke
 } from "../src/core/executors/real-smoke.js";
-import { LINEAR_API_KEY_ENV_VAR } from "../src/intent-apply-execute.js";
+import { LINEAR_API_KEY_ENV_VAR } from "../src/core/intent/apply-execute.js";
 import type {
   LinearReconciliationStop,
   ReconcileLinearSourceResult
-} from "../src/source-reconciliation.js";
+} from "../src/core/source/reconciliation.js";
 
 /**
  * NGX-372 opt-in real adapter smoke harness — pure planner / classifier.

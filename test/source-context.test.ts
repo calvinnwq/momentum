@@ -4,11 +4,11 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDb } from "../src/adapters/db.js";
-import { buildIterationSourceContext } from "../src/source-context.js";
+import { buildIterationSourceContext } from "../src/core/source/context.js";
 import {
   recordSourceSnapshot,
   upsertSourceItem
-} from "../src/source-items.js";
+} from "../src/core/source/items.js";
 
 const tempRoots: string[] = [];
 

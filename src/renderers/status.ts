@@ -1,12 +1,12 @@
-import type { GoalLogsSuccess } from "../goal-logs.js";
+import type { GoalLogsSuccess } from "../core/goal/logs.js";
 import type {
   GoalStatusExternalApply,
   GoalStatusPendingIntentExternalApply,
   GoalStatusPendingIntentSummary,
   GoalStatusSuccess
-} from "../goal-status.js";
-import type { HandoffSuccess } from "../handoff.js";
-import type { UpdateIntentApplyPolicy } from "../momentum-policy.js";
+} from "../core/goal/status.js";
+import type { HandoffSuccess } from "../core/evidence/handoff.js";
+import type { UpdateIntentApplyPolicy } from "../core/intent/policy.js";
 import { intentApplyAuditToJsonShape } from "./intent.js";
 import { write, writeJson, type CliIo } from "./cli-output.js";
 

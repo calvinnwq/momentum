@@ -14,14 +14,14 @@ import {
   type IntentFailure
 } from "../../renderers/intent.js";
 import { openDb } from "../../adapters/db.js";
-import { resolveDataDir, type DataDirOptions } from "../../data-dir.js";
+import { resolveDataDir, type DataDirOptions } from "../../config/data-dir.js";
 import {
   DEFAULT_INTENT_APPLY_POLICY,
   loadMomentumPolicy,
   resolveIntentApplyPolicy,
   type PolicyEffectiveFieldSource,
   type UpdateIntentApplyPolicy
-} from "../../momentum-policy.js";
+} from "../../core/intent/policy.js";
 import {
   UPDATE_INTENT_STATUSES,
   cancelUpdateIntent,
@@ -36,18 +36,18 @@ import {
   type UpdateIntentDecisionInput,
   type UpdateIntentDecisionResult,
   type UpdateIntentStatus
-} from "../../update-intents.js";
+} from "../../core/intent/update-intents.js";
 import {
   summarizeIntentApplyAuditsForIntent,
   type IntentApplyAuditSummary
-} from "../../intent-apply-audits.js";
+} from "../../core/intent/apply-audits.js";
 import {
   defaultBuildLinearRefreshClient,
   executeExternalApply,
   LINEAR_API_KEY_ENV_VAR,
   type ExecuteExternalApplyDeps,
   type ExecuteExternalApplyResult
-} from "../../intent-apply-execute.js";
+} from "../../core/intent/apply-execute.js";
 import { type LinearExternalUpdateClient } from "../../adapters/linear-external-update-client.js";
 import { type LinearIssueRefreshClient } from "../../adapters/linear-issue-refresh.js";
 

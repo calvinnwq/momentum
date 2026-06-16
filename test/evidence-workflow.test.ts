@@ -7,7 +7,7 @@ import {
   WORKFLOW_EVIDENCE_FORMAT_VERSION,
   WORKFLOW_EVIDENCE_SOURCE,
   parseWorkflowArtifact
-} from "../src/evidence-workflow.js";
+} from "../src/core/evidence/workflow.js";
 
 const tempRoots: string[] = [];
 

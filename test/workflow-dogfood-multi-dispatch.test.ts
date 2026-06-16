@@ -5,8 +5,8 @@ import path from "node:path";
 
 import { runCli } from "../src/cli.js";
 import { openDb } from "../src/adapters/db.js";
-import { runDaemonLoop } from "../src/daemon-loop.js";
-import { startDaemonRun } from "../src/daemon-runs.js";
+import { runDaemonLoop } from "../src/core/daemon/loop.js";
+import { startDaemonRun } from "../src/core/daemon/runs.js";
 import {
   executeWorkflowStepDispatch,
   WORKFLOW_DISPATCH_RESULT_STATUS

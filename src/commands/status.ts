@@ -1,7 +1,7 @@
-import { type DataDirOptions } from "../data-dir.js";
-import { loadGoalLogs } from "../goal-logs.js";
-import { loadGoalStatus } from "../goal-status.js";
-import { writeHandoff } from "../handoff.js";
+import { type DataDirOptions } from "../config/data-dir.js";
+import { loadGoalLogs } from "../core/goal/logs.js";
+import { loadGoalStatus } from "../core/goal/status.js";
+import { writeHandoff } from "../core/evidence/handoff.js";
 import { usageError, type CliIo } from "../renderers/cli-output.js";
 import {
   emitHandoff,

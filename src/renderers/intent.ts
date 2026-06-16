@@ -1,7 +1,7 @@
-import type { IntentApplyAudit } from "../intent-apply-audits.js";
-import type { IntentApplyAuditSummary } from "../intent-apply-audits.js";
-import type { PolicyEffectiveFieldSource, UpdateIntentApplyPolicy } from "../momentum-policy.js";
-import type { UpdateIntent, UpdateIntentStatus } from "../update-intents.js";
+import type { IntentApplyAudit } from "../core/intent/apply-audits.js";
+import type { IntentApplyAuditSummary } from "../core/intent/apply-audits.js";
+import type { PolicyEffectiveFieldSource, UpdateIntentApplyPolicy } from "../core/intent/policy.js";
+import type { UpdateIntent, UpdateIntentStatus } from "../core/intent/update-intents.js";
 import { write, writeJson, type CliIo } from "./cli-output.js";
 
 export type IntentCommand =

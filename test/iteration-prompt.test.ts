@@ -3,9 +3,9 @@ import {
   DEFAULT_SOURCE_CONTEXT_MAX_CHARS,
   renderIterationPrompt,
   type IterationPromptContext
-} from "../src/iteration-prompt.js";
+} from "../src/core/goal/iteration-prompt.js";
 import type { GoalSpec } from "../src/goal-spec.js";
-import type { SourceItemSummary } from "../src/source-items.js";
+import type { SourceItemSummary } from "../src/core/source/items.js";
 
 const FAKE_HEAD = "0123456789abcdef0123456789abcdef01234567";
 

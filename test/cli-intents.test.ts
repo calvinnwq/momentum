@@ -5,13 +5,13 @@ import path from "node:path";
 
 import { runCli } from "../src/cli.js";
 import { openDb } from "../src/adapters/db.js";
-import { createUpdateIntent } from "../src/update-intents.js";
+import { createUpdateIntent } from "../src/core/intent/update-intents.js";
 import {
   claimIntentApply,
   finalizeIntentApply,
   type ClaimIntentApplyInput,
   type IntentApplyFinalLifecycleState
-} from "../src/intent-apply-audits.js";
+} from "../src/core/intent/apply-audits.js";
 
 type RunResult = {
   code: number;

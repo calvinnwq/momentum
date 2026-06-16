@@ -3,7 +3,7 @@ import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { initGoal } from "../src/goal-init.js";
+import { initGoal } from "../src/core/goal/init.js";
 
 const VALID_SPEC = `---
 title: Test Goal

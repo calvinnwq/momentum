@@ -8,11 +8,11 @@ import {
   DEFAULT_VERIFICATION_EVIDENCE_TYPES,
   evaluateGoalForSourceSatisfiedIntent,
   evaluateGoalForSourceSatisfiedIntents
-} from "../src/update-intent-generator.js";
+} from "../src/core/source/update-intent-generator.js";
 import {
   getUpdateIntentById,
   listUpdateIntents
-} from "../src/update-intents.js";
+} from "../src/core/intent/update-intents.js";
 
 const tempRoots: string[] = [];
 

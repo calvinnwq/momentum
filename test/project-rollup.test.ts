@@ -10,14 +10,14 @@ import {
   PROJECT_ROLLUP_ITEM_LIST_TRUNCATION_LIMIT,
   buildProjectRollup,
   type ProjectRollupMismatchKind
-} from "../src/project-rollup.js";
-import { ingestEvidenceRecord } from "../src/evidence-records.js";
+} from "../src/core/repo/project-rollup.js";
+import { ingestEvidenceRecord } from "../src/core/evidence/records.js";
 import {
   finishSourceReconciliationRun,
   startSourceReconciliationRun
-} from "../src/source-reconciliation-runs.js";
-import { upsertSourceItem } from "../src/source-items.js";
-import { createUpdateIntent } from "../src/update-intents.js";
+} from "../src/core/source/reconciliation-runs.js";
+import { upsertSourceItem } from "../src/core/source/items.js";
+import { createUpdateIntent } from "../src/core/intent/update-intents.js";
 
 const tempRoots: string[] = [];
 

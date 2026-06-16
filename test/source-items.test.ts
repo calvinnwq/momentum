@@ -14,7 +14,7 @@ import {
   unlinkGoalFromSourceItem,
   upsertSourceItem,
   type SourceItemUpsertInput
-} from "../src/source-items.js";
+} from "../src/core/source/items.js";
 
 const tempRoots: string[] = [];
 

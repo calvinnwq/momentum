@@ -13,12 +13,12 @@ import {
   heartbeatGoalIterationJob,
   listStaleClaimedGoalIterationJobs,
   releaseClaimedGoalIterationJob
-} from "../src/queue-jobs.js";
+} from "../src/core/daemon/queue-jobs.js";
 import {
   acquireRepoLock,
   getRepoLock,
   releaseRepoLock
-} from "../src/repo-locks.js";
+} from "../src/core/repo/locks.js";
 
 const tempRoots: string[] = [];
 

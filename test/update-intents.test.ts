@@ -13,7 +13,7 @@ import {
   markUpdateIntentApplied,
   markUpdateIntentSkipped,
   type CreateUpdateIntentInput
-} from "../src/update-intents.js";
+} from "../src/core/intent/update-intents.js";
 
 const tempRoots: string[] = [];
 

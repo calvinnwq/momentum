@@ -5,8 +5,8 @@ import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import { buildLinearHttpReconciliationClient } from "../src/adapters/linear-http-client.js";
-import { reconcileLinearSource } from "../src/source-reconciliation.js";
-import { listSourceItems } from "../src/source-items.js";
+import { reconcileLinearSource } from "../src/core/source/reconciliation.js";
+import { listSourceItems } from "../src/core/source/items.js";
 import {
   REAL_SMOKE_EVIDENCE_DIR_ENV_VAR,
   REAL_SMOKE_LINEAR_OPT_IN_ENV_VAR,

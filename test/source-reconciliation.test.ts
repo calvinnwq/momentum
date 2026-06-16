@@ -9,15 +9,15 @@ import {
   type LinearReconciliationClient,
   type LinearReconciliationFetchPageInput,
   type LinearReconciliationFetchPageResult
-} from "../src/source-reconciliation.js";
+} from "../src/core/source/reconciliation.js";
 import {
   listSourceItems,
   listSourceSnapshotsForItem
-} from "../src/source-items.js";
+} from "../src/core/source/items.js";
 import {
   getSourceReconciliationRun,
   listSourceReconciliationRuns
-} from "../src/source-reconciliation-runs.js";
+} from "../src/core/source/reconciliation-runs.js";
 
 const tempRoots: string[] = [];
 

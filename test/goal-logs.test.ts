@@ -4,12 +4,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { ensureIterationArtifactDir } from "../src/artifacts.js";
+import { ensureIterationArtifactDir } from "../src/core/evidence/artifacts.js";
 import { openDb } from "../src/adapters/db.js";
-import { initGoal, type GoalInitSuccess } from "../src/goal-init.js";
-import { executeIterationJob } from "../src/iteration-job.js";
-import { loadGoalLogs } from "../src/goal-logs.js";
-import { ingestEvidenceRecord } from "../src/evidence-records.js";
+import { initGoal, type GoalInitSuccess } from "../src/core/goal/init.js";
+import { executeIterationJob } from "../src/core/goal/iteration-job.js";
+import { loadGoalLogs } from "../src/core/goal/logs.js";
+import { ingestEvidenceRecord } from "../src/core/evidence/records.js";
 
 const tempRoots: string[] = [];
 

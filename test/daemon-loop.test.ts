@@ -11,32 +11,32 @@ import {
   requestDaemonRunImmediateStop,
   requestDaemonRunStop,
   startDaemonRun
-} from "../src/daemon-runs.js";
+} from "../src/core/daemon/runs.js";
 import {
   runDaemonLoop,
   type DaemonLoopInput,
   type DaemonLoopResult
-} from "../src/daemon-loop.js";
+} from "../src/core/daemon/loop.js";
 import {
   acquireRepoLock,
   getRepoLock
-} from "../src/repo-locks.js";
+} from "../src/core/repo/locks.js";
 import {
   claimPendingGoalIterationJob,
   enqueueGoalIterationJob,
   getQueueJob
-} from "../src/queue-jobs.js";
-import { JOB_RECOVERED_AUTO_REPENDED_STATUS, REPO_LOCK_AUTO_RELEASED_TERMINAL_JOB_STATUS } from "../src/stale-recovery.js";
+} from "../src/core/daemon/queue-jobs.js";
+import { JOB_RECOVERED_AUTO_REPENDED_STATUS, REPO_LOCK_AUTO_RELEASED_TERMINAL_JOB_STATUS } from "../src/core/daemon/stale-recovery.js";
 import {
   FAKE_RUNNER_FAIL_ENV,
   FAKE_RUNNER_GOAL_COMPLETE_ENV,
   FAKE_RUNNER_TRAJECTORY_ENV
 } from "../src/adapters/fake-runner.js";
-import { initGoal } from "../src/goal-init.js";
+import { initGoal } from "../src/core/goal/init.js";
 import type {
   WorkerRunInput,
   WorkerRunResult
-} from "../src/worker-run.js";
+} from "../src/core/daemon/worker-run.js";
 import {
   WORKFLOW_DISPATCH_LEASE_KIND,
   type ClaimedWorkflowStep,
