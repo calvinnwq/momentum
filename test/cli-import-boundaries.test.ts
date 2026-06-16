@@ -518,9 +518,9 @@ function importReferences(
 
   function visit(node: ts.Node): void {
     if (ts.isImportDeclaration(node)) {
-      addModuleSpecifier(node.moduleSpecifier, node.importClause?.isTypeOnly ?? false);
+      addModuleSpecifier(node.moduleSpecifier, importDeclarationIsTypeOnly(node));
     } else if (ts.isExportDeclaration(node)) {
-      addModuleSpecifier(node.moduleSpecifier, node.isTypeOnly);
+      addModuleSpecifier(node.moduleSpecifier, exportDeclarationIsTypeOnly(node));
     } else if (
       ts.isCallExpression(node) &&
       node.expression.kind === ts.SyntaxKind.ImportKeyword &&
@@ -540,6 +540,31 @@ function importReferences(
 
   visit(sourceFile);
   return references;
+}
+
+function importDeclarationIsTypeOnly(node: ts.ImportDeclaration): boolean {
+  const importClause = node.importClause;
+  if (!importClause) return false;
+  if (importClause.isTypeOnly) return true;
+  if (importClause.name) return false;
+  const namedBindings = importClause.namedBindings;
+  return (
+    !!namedBindings &&
+    ts.isNamedImports(namedBindings) &&
+    namedBindings.elements.length > 0 &&
+    namedBindings.elements.every((element) => element.isTypeOnly)
+  );
+}
+
+function exportDeclarationIsTypeOnly(node: ts.ExportDeclaration): boolean {
+  if (node.isTypeOnly) return true;
+  const exportClause = node.exportClause;
+  return (
+    !!exportClause &&
+    ts.isNamedExports(exportClause) &&
+    exportClause.elements.length > 0 &&
+    exportClause.elements.every((element) => element.isTypeOnly)
+  );
 }
 
 function resolveRelativeImport(file: string, specifier: string): string {
@@ -622,6 +647,25 @@ describe("M11 CLI import boundaries", () => {
       "./renderers/source.js",
       "./commands/intent/index.js",
       "./renderers/intent.js"
+    ]);
+  });
+
+  it("classifies inline type-only named imports without treating mixed imports as type-only", () => {
+    expect(
+      importReferences(
+        "src/renderers/example.ts",
+        `
+          import { type SourceItem } from "../source-items.js";
+          export { type WorkflowRunImport } from "../workflow-run-import.js";
+          import { write, type CliIo } from "./cli-output.js";
+          import DefaultExport, { type GoalSpec } from "../goal-spec.js";
+        `
+      )
+    ).toEqual([
+      { specifier: "../source-items.js", isTypeOnly: true },
+      { specifier: "../workflow-run-import.js", isTypeOnly: true },
+      { specifier: "./cli-output.js", isTypeOnly: false },
+      { specifier: "../goal-spec.js", isTypeOnly: false }
     ]);
   });
 
