@@ -700,6 +700,15 @@ function isPersistenceOrMutationModule(file: string): boolean {
   );
 }
 
+function isForbiddenRendererRuntimeTarget(file: string): boolean {
+  return (
+    isCliEntrypoint(file) ||
+    isCommandModule(file) ||
+    isAdapterModule(file) ||
+    isPersistenceOrMutationModule(file)
+  );
+}
+
 function rendererTransitionalImportIsAllowed(edge: ImportEdge): boolean {
   if (isCoreModule(edge.to)) return edge.isTypeOnly;
   if (!isTransitionalRootSrcException(edge.to)) return false;
@@ -799,6 +808,11 @@ describe("M11 CLI import boundaries", () => {
     expect(isPersistenceOrMutationModule("src/core/source/context.ts")).toBe(true);
     expect(isPersistenceOrMutationModule("src/core/evidence/handoff.ts")).toBe(true);
     expect(isPersistenceOrMutationModule("src/core/repo/project-rollup.ts")).toBe(true);
+  });
+
+  it("classifies CLI entrypoints as forbidden renderer runtime targets", () => {
+    expect(isForbiddenRendererRuntimeTarget("src/index.ts")).toBe(true);
+    expect(isForbiddenRendererRuntimeTarget("src/cli.ts")).toBe(true);
   });
 
   it("allows only explicit renderer transitional imports", () => {
@@ -978,10 +992,7 @@ describe("M11 CLI import boundaries", () => {
   it("prevents renderers from importing commands, adapters, or runtime mutation modules", () => {
     const violations = importEdges().filter((edge) => {
       if (!isRendererModule(edge.from)) return false;
-      const forbidden =
-        isCommandModule(edge.to) ||
-        isAdapterModule(edge.to) ||
-        isPersistenceOrMutationModule(edge.to);
+      const forbidden = isForbiddenRendererRuntimeTarget(edge.to);
       if (!forbidden) return false;
       return !rendererTransitionalImportIsAllowed(edge);
     });
@@ -989,7 +1000,7 @@ describe("M11 CLI import boundaries", () => {
     expect(
       violations.map(
         (edge) =>
-          `${edge.from} imports ${edge.specifier} -> ${edge.to}; renderers must accept computed results and type-only shapes instead of importing commands, adapters, persistence, or mutation modules.`
+          `${edge.from} imports ${edge.specifier} -> ${edge.to}; renderers must accept computed results and type-only shapes instead of importing CLI entrypoints, commands, adapters, persistence, or mutation modules.`
       )
     ).toEqual([]);
   });
