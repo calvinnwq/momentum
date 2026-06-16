@@ -436,24 +436,64 @@ const TRANSITIONAL_ROOT_SRC_EXCEPTIONS = {
 } satisfies Record<string, RootSrcException>;
 
 const RENDERER_TYPE_ONLY_TRANSITIONAL_IMPORTS = new Set([
+  "src/renderers/daemon.ts -> src/daemon-loop.ts",
   "src/renderers/daemon.ts -> src/daemon-runs.ts",
+  "src/renderers/daemon.ts -> src/stale-recovery.ts",
   "src/renderers/evidence.ts -> src/evidence-records.ts",
+  "src/renderers/evidence.ts -> src/evidence-workflow.ts",
+  "src/renderers/evidence.ts -> src/update-intent-generator.ts",
+  "src/renderers/goal.ts -> src/goal-init.ts",
+  "src/renderers/goal.ts -> src/iteration-job.ts",
   "src/renderers/intent.ts -> src/intent-apply-audits.ts",
+  "src/renderers/intent.ts -> src/momentum-policy.ts",
   "src/renderers/intent.ts -> src/update-intents.ts",
+  "src/renderers/project.ts -> src/project-rollup.ts",
+  "src/renderers/recovery.ts -> src/goal-recovery.ts",
   "src/renderers/source.ts -> src/source-items.ts",
   "src/renderers/source.ts -> src/source-reconciliation.ts",
   "src/renderers/source.ts -> src/source-reconciliation-runs.ts",
+  "src/renderers/source.ts -> src/update-intent-generator.ts",
+  "src/renderers/status.ts -> src/goal-logs.ts",
+  "src/renderers/status.ts -> src/goal-status.ts",
+  "src/renderers/status.ts -> src/handoff.ts",
+  "src/renderers/status.ts -> src/momentum-policy.ts",
+  "src/renderers/worker.ts -> src/daemon-status.ts",
+  "src/renderers/worker.ts -> src/worker-run.ts",
   "src/renderers/workflow.ts -> src/workflow-gate-persist.ts",
+  "src/renderers/workflow.ts -> src/workflow-handoff.ts",
+  "src/renderers/workflow.ts -> src/workflow-monitor-envelope.ts",
+  "src/renderers/workflow.ts -> src/workflow-monitor-state.ts",
+  "src/renderers/workflow.ts -> src/workflow-recovery-reconcile.ts",
+  "src/renderers/workflow.ts -> src/workflow-run-import.ts",
   "src/renderers/workflow.ts -> src/workflow-run-import-persist.ts",
+  "src/renderers/workflow.ts -> src/workflow-run-recovery.ts",
+  "src/renderers/workflow.ts -> src/workflow-run-start.ts",
   "src/renderers/workflow.ts -> src/workflow-run-start-persist.ts",
-  "src/renderers/workflow.ts -> src/workflow-recovery-reconcile.ts"
+  "src/renderers/workflow.ts -> src/workflow-status.ts"
 ]);
+
+const RENDERER_READONLY_TRANSITIONAL_IMPORTS = new Map([
+  [
+    "src/renderers/daemon.ts -> src/daemon-status.ts",
+    new Set([
+      "DEFAULT_DAEMON_ACTIVE_JOB_STALE_AFTER_MS",
+      "DEFAULT_DAEMON_STALE_AFTER_MS"
+    ])
+  ]
+]);
+
+type ImportReference = {
+  specifier: string;
+  isTypeOnly: boolean;
+  runtimeBindings: string[];
+};
 
 type ImportEdge = {
   from: string;
   to: string;
   specifier: string;
   isTypeOnly: boolean;
+  runtimeBindings: string[];
 };
 
 function readFile(relative: string): string {
@@ -484,7 +524,8 @@ function importEdges(): ImportEdge[] {
         from: file,
         to: resolveRelativeImport(file, specifier),
         specifier,
-        isTypeOnly: reference.isTypeOnly
+        isTypeOnly: reference.isTypeOnly,
+        runtimeBindings: reference.runtimeBindings
       });
     }
   }
@@ -495,11 +536,8 @@ function importSpecifiers(file: string, source: string): string[] {
   return importReferences(file, source).map((reference) => reference.specifier);
 }
 
-function importReferences(
-  file: string,
-  source: string
-): Array<{ specifier: string; isTypeOnly: boolean }> {
-  const references: Array<{ specifier: string; isTypeOnly: boolean }> = [];
+function importReferences(file: string, source: string): ImportReference[] {
+  const references: ImportReference[] = [];
   const sourceFile = ts.createSourceFile(
     file,
     source,
@@ -510,30 +548,47 @@ function importReferences(
 
   function addModuleSpecifier(
     moduleSpecifier: ts.Expression | undefined,
-    isTypeOnly = false
+    isTypeOnly = false,
+    runtimeBindings: string[] = []
   ): void {
     if (moduleSpecifier && ts.isStringLiteralLike(moduleSpecifier)) {
-      references.push({ specifier: moduleSpecifier.text, isTypeOnly });
+      references.push({
+        specifier: moduleSpecifier.text,
+        isTypeOnly,
+        runtimeBindings
+      });
     }
   }
 
   function visit(node: ts.Node): void {
     if (ts.isImportDeclaration(node)) {
-      addModuleSpecifier(node.moduleSpecifier, importDeclarationIsTypeOnly(node));
+      addModuleSpecifier(
+        node.moduleSpecifier,
+        importDeclarationIsTypeOnly(node),
+        importDeclarationRuntimeBindings(node)
+      );
     } else if (ts.isExportDeclaration(node)) {
-      addModuleSpecifier(node.moduleSpecifier, exportDeclarationIsTypeOnly(node));
+      addModuleSpecifier(
+        node.moduleSpecifier,
+        exportDeclarationIsTypeOnly(node),
+        exportDeclarationIsTypeOnly(node) ? [] : ["*"]
+      );
     } else if (
       ts.isCallExpression(node) &&
       node.expression.kind === ts.SyntaxKind.ImportKeyword &&
       node.arguments.length === 1
     ) {
-      addModuleSpecifier(node.arguments[0]);
+      addModuleSpecifier(node.arguments[0], false, ["*"]);
     } else if (
       ts.isImportTypeNode(node) &&
       ts.isLiteralTypeNode(node.argument) &&
       ts.isStringLiteralLike(node.argument.literal)
     ) {
-      references.push({ specifier: node.argument.literal.text, isTypeOnly: true });
+      references.push({
+        specifier: node.argument.literal.text,
+        isTypeOnly: true,
+        runtimeBindings: []
+      });
     }
 
     ts.forEachChild(node, visit);
@@ -555,6 +610,30 @@ function importDeclarationIsTypeOnly(node: ts.ImportDeclaration): boolean {
     namedBindings.elements.length > 0 &&
     namedBindings.elements.every((element) => element.isTypeOnly)
   );
+}
+
+function importDeclarationRuntimeBindings(node: ts.ImportDeclaration): string[] {
+  const importClause = node.importClause;
+  if (!importClause || importClause.isTypeOnly) return [];
+
+  const bindings: string[] = [];
+  if (importClause.name) {
+    bindings.push("default");
+  }
+
+  const namedBindings = importClause.namedBindings;
+  if (!namedBindings) return bindings;
+  if (ts.isNamespaceImport(namedBindings)) {
+    bindings.push("*");
+    return bindings;
+  }
+
+  bindings.push(
+    ...namedBindings.elements
+      .filter((element) => !element.isTypeOnly)
+      .map((element) => (element.propertyName ?? element.name).text)
+  );
+  return bindings;
 }
 
 function exportDeclarationIsTypeOnly(node: ts.ExportDeclaration): boolean {
@@ -607,17 +686,31 @@ function isCoreModule(file: string): boolean {
   return file === coreDir || file.startsWith(coreDir + path.sep);
 }
 
-function isPersistenceOrMutationModule(file: string): boolean {
-  if (isAdapterModule(file)) return true;
+function isTransitionalRootSrcException(file: string): boolean {
+  return Object.hasOwn(TRANSITIONAL_ROOT_SRC_EXCEPTIONS, file);
+}
 
-  const transitionalException =
-    TRANSITIONAL_ROOT_SRC_EXCEPTIONS[
-      file as keyof typeof TRANSITIONAL_ROOT_SRC_EXCEPTIONS
-    ];
-  return [file, transitionalException?.targetHome].some((candidate) =>
-    /(?:^|[/.-])(?:persist|migrations|db|lock|locks|queue|runs|records|audits|execute|finalize|reconcile|reconciliation|leases|items|intents|branch)(?:[/.-]|$)/.test(
-      candidate ?? ""
-    )
+function isPersistenceOrMutationModule(file: string): boolean {
+  if (isAdapterModule(file) || isTransitionalRootSrcException(file)) return true;
+
+  return /(?:^|[/.-])(?:persist|migrations|db|lock|locks|queue|runs|records|audits|execute|finalize|reconcile|reconciliation|leases|items|intents|branch)(?:[/.-]|$)/.test(
+    file
+  );
+}
+
+function rendererTransitionalImportIsAllowed(edge: ImportEdge): boolean {
+  if (!isTransitionalRootSrcException(edge.to)) return false;
+
+  const key = `${edge.from} -> ${edge.to}`;
+  if (edge.isTypeOnly) {
+    return RENDERER_TYPE_ONLY_TRANSITIONAL_IMPORTS.has(key);
+  }
+
+  const allowedBindings = RENDERER_READONLY_TRANSITIONAL_IMPORTS.get(key);
+  return (
+    !!allowedBindings &&
+    edge.runtimeBindings.length > 0 &&
+    edge.runtimeBindings.every((binding) => allowedBindings.has(binding))
   );
 }
 
@@ -669,16 +762,72 @@ describe("M11 CLI import boundaries", () => {
         `
       )
     ).toEqual([
-      { specifier: "../source-items.js", isTypeOnly: true },
-      { specifier: "../workflow-run-import.js", isTypeOnly: true },
-      { specifier: "./cli-output.js", isTypeOnly: false },
-      { specifier: "../goal-spec.js", isTypeOnly: false }
+      {
+        specifier: "../source-items.js",
+        isTypeOnly: true,
+        runtimeBindings: []
+      },
+      {
+        specifier: "../workflow-run-import.js",
+        isTypeOnly: true,
+        runtimeBindings: []
+      },
+      {
+        specifier: "./cli-output.js",
+        isTypeOnly: false,
+        runtimeBindings: ["write"]
+      },
+      {
+        specifier: "../goal-spec.js",
+        isTypeOnly: false,
+        runtimeBindings: ["default"]
+      }
     ]);
   });
 
-  it("classifies transitional repo and source mutation owners without relying on persistence nouns only", () => {
+  it("classifies all transitional root source modules as renderer runtime boundaries", () => {
+    expect(isPersistenceOrMutationModule("src/artifacts.ts")).toBe(true);
     expect(isPersistenceOrMutationModule("src/branch-manager.ts")).toBe(true);
+    expect(isPersistenceOrMutationModule("src/goal-init.ts")).toBe(true);
+    expect(isPersistenceOrMutationModule("src/handoff.ts")).toBe(true);
     expect(isPersistenceOrMutationModule("src/source-reconciliation.ts")).toBe(true);
+    expect(isPersistenceOrMutationModule("src/update-intent-generator.ts")).toBe(true);
+  });
+
+  it("allows only explicit renderer transitional imports", () => {
+    const updateIntentTypeEdge: ImportEdge = {
+      from: "src/renderers/evidence.ts",
+      to: "src/update-intent-generator.ts",
+      specifier: "../update-intent-generator.js",
+      isTypeOnly: true,
+      runtimeBindings: []
+    };
+    expect(rendererTransitionalImportIsAllowed(updateIntentTypeEdge)).toBe(true);
+    expect(
+      rendererTransitionalImportIsAllowed({
+        ...updateIntentTypeEdge,
+        isTypeOnly: false,
+        runtimeBindings: ["evaluateGoalForSourceSatisfiedIntent"]
+      })
+    ).toBe(false);
+
+    const daemonStatusReadonlyEdge: ImportEdge = {
+      from: "src/renderers/daemon.ts",
+      to: "src/daemon-status.ts",
+      specifier: "../daemon-status.js",
+      isTypeOnly: false,
+      runtimeBindings: [
+        "DEFAULT_DAEMON_ACTIVE_JOB_STALE_AFTER_MS",
+        "DEFAULT_DAEMON_STALE_AFTER_MS"
+      ]
+    };
+    expect(rendererTransitionalImportIsAllowed(daemonStatusReadonlyEdge)).toBe(true);
+    expect(
+      rendererTransitionalImportIsAllowed({
+        ...daemonStatusReadonlyEdge,
+        runtimeBindings: ["loadDaemonStatus"]
+      })
+    ).toBe(false);
   });
 
   it("enforces the durable root src allowlist with named transitional debt", () => {
@@ -806,18 +955,12 @@ describe("M11 CLI import boundaries", () => {
   it("prevents renderers from importing commands, adapters, or runtime mutation modules", () => {
     const violations = importEdges().filter((edge) => {
       if (!isRendererModule(edge.from)) return false;
-      const transitionalTypeOnlyKey = `${edge.from} -> ${edge.to}`;
-      if (
-        edge.isTypeOnly &&
-        RENDERER_TYPE_ONLY_TRANSITIONAL_IMPORTS.has(transitionalTypeOnlyKey)
-      ) {
-        return false;
-      }
-      return (
+      const forbidden =
         isCommandModule(edge.to) ||
         isAdapterModule(edge.to) ||
-        isPersistenceOrMutationModule(edge.to)
-      );
+        isPersistenceOrMutationModule(edge.to);
+      if (!forbidden) return false;
+      return !rendererTransitionalImportIsAllowed(edge);
     });
 
     expect(
