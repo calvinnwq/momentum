@@ -3,13 +3,13 @@ import { describe, expect, it } from "vitest";
 import {
   CODING_WORKFLOW_DEFINITION,
   type WorkflowDefinition
-} from "../src/workflow-definition.js";
+} from "../src/core/workflow/definition.js";
 import {
   WORKFLOW_RUN_START_ERROR_CODES,
   WORKFLOW_RUN_START_SOURCE,
   materializeWorkflowRunStart,
   type WorkflowRunStartInput
-} from "../src/workflow-run-start.js";
+} from "../src/core/workflow/run-start.js";
 
 const NOW = 1_700_000_000_000;
 

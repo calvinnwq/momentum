@@ -22,8 +22,8 @@
  * remain outstanding and can still be re-derived here as
  * `manual_recovery_lease`.
  */
-import type { MomentumDb } from "./adapters/db.js";
-import type { WorkflowGateRecord } from "./workflow-gate-persist.js";
+import type { MomentumDb } from "../../adapters/db.js";
+import type { WorkflowGateRecord } from "./gate-persist.js";
 import {
   type WorkflowMonitorActiveStep,
   type WorkflowMonitorCheckpoint,
@@ -32,17 +32,17 @@ import {
   type WorkflowMonitorNextAction,
   type WorkflowMonitorRecovery,
   type WorkflowMonitorState
-} from "./workflow-monitor-state.js";
+} from "./monitor-state.js";
 import {
   loadWorkflowRunDetail,
   type LoadWorkflowRunDetailOptions,
   type WorkflowEvidenceLink,
   type WorkflowRunDetail
-} from "./workflow-status.js";
+} from "./status.js";
 import type {
   WorkflowRunState,
   WorkflowStepState
-} from "./workflow-run-reducer.js";
+} from "./run-reducer.js";
 
 export const WORKFLOW_MONITOR_SCHEMA_VERSION = 1;
 

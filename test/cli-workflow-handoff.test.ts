@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { runCli } from "../src/cli.js";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
-import { insertWorkflowGate } from "../src/workflow-gate-persist.js";
+import { insertWorkflowGate } from "../src/core/workflow/gate-persist.js";
 
 type RunResult = {
   code: number;

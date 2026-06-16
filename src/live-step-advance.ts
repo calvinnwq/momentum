@@ -79,24 +79,24 @@ import type {
   WorkflowStepKind,
   WorkflowStepRecord,
   WorkflowStepState
-} from "./workflow-run-reducer.js";
+} from "./core/workflow/run-reducer.js";
 import {
   deriveWorkflowRunState,
   isTerminalRunState
-} from "./workflow-run-reducer.js";
+} from "./core/workflow/run-reducer.js";
 import {
   heartbeatWorkflowLease,
   releaseWorkflowLease
-} from "./workflow-leases.js";
+} from "./core/workflow/leases.js";
 import {
   finishWorkflowStep,
   getWorkflowStep,
   type WorkflowStepTransitionOutcome
-} from "./workflow-step-transitions.js";
+} from "./core/workflow/step-transitions.js";
 import type {
   WorkflowStepExecutor,
   WorkflowStepExecutorInput
-} from "./workflow-step-executor.js";
+} from "./core/workflow/step-executor.js";
 
 export type AdvanceLiveWorkflowStepInput = {
   /**

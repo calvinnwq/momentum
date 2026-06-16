@@ -9,7 +9,7 @@
  * `WorkflowStepKind`-keyed profile/registry.
  *
  * This module is the seam that makes that execution core usable through the
- * existing M7 `WorkflowStepExecutor` boundary (`workflow-step-executor.ts`)
+ * existing M7 `WorkflowStepExecutor` boundary (`src/core/workflow/step-executor.ts`)
  * without rewriting either side:
  *
  *   - `buildLiveStepWrapperInput` adapts a `WorkflowStepExecutorInput` into a
@@ -51,7 +51,7 @@ import {
   type LiveWrapperConfig,
   type LiveWrapperProfile
 } from "./adapters/live-wrapper-registry.js";
-import type { WorkflowStepKind } from "./workflow-run-reducer.js";
+import type { WorkflowStepKind } from "./core/workflow/run-reducer.js";
 import type {
   WorkflowStepExecutor,
   WorkflowStepExecutorError,
@@ -59,7 +59,7 @@ import type {
   WorkflowStepExecutorInput,
   WorkflowStepExecutorResult,
   WorkflowStepExecutorSuccess
-} from "./workflow-step-executor.js";
+} from "./core/workflow/step-executor.js";
 
 /**
  * Stable mapping from the live-wrapper execution recovery vocabulary onto the

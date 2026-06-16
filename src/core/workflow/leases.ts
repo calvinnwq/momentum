@@ -31,14 +31,14 @@
  * primitive here.
  */
 
-import type { MomentumDb } from "./adapters/db.js";
+import type { MomentumDb } from "../../adapters/db.js";
 import {
   WORKFLOW_LEASE_KINDS,
   WORKFLOW_LEASE_STALE_POLICIES,
   type WorkflowLeaseKind,
   type WorkflowLeaseRecord,
   type WorkflowLeaseStalePolicy
-} from "./workflow-run-reducer.js";
+} from "./run-reducer.js";
 
 const LEASE_KIND_SET: ReadonlySet<string> = new Set(WORKFLOW_LEASE_KINDS);
 const STALE_POLICY_SET: ReadonlySet<string> = new Set(

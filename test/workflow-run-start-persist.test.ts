@@ -7,16 +7,16 @@ import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
   CODING_WORKFLOW_DEFINITION,
   type WorkflowDefinition
-} from "../src/workflow-definition.js";
+} from "../src/core/workflow/definition.js";
 import {
   WORKFLOW_RUN_START_SOURCE,
   type WorkflowRunStartInput
-} from "../src/workflow-run-start.js";
+} from "../src/core/workflow/run-start.js";
 import {
   InvalidWorkflowRunStartError,
   WorkflowRunStartConflictError,
   persistWorkflowRunStart
-} from "../src/workflow-run-start-persist.js";
+} from "../src/core/workflow/run-start-persist.js";
 
 const NOW = 1_700_000_000_000;
 

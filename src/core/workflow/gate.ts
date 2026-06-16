@@ -5,11 +5,11 @@
  * This module owns the *pure* half of workflow gates and operator decisions: the
  * durable gate-type and target-scope vocabularies plus the delegated-policy /
  * operator decision brain ({@link evaluateGateDecision}). It follows the same
- * discipline as `workflow-definition.ts` and the executor-loop reducer: no
+ * discipline as `definition.ts` and the executor-loop reducer: no
  * SQLite, no file system, no daemon. Durable gate persistence and the
  * `workflow run decide` CLI surface layer on top of these primitives, exactly
- * as `workflow-definition-persist.ts` is the storage twin of
- * `workflow-definition.ts`.
+ * as `definition-persist.ts` is the storage twin of
+ * `definition.ts`.
  *
  * Scope decisions pinned here, grounded in the accepted planning contracts
  * (internal/contracts/executor-loop.md "Human Gates" and
@@ -40,7 +40,7 @@
 import {
   EXECUTOR_HUMAN_GATE_TYPES,
   type ExecutorHumanGateType
-} from "./executor-loop-reducer.js";
+} from "../../executor-loop-reducer.js";
 
 /**
  * Durable human-gate types (contract "Human Gates"). Re-exported from the

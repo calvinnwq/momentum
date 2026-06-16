@@ -7,14 +7,14 @@ import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
   CODING_WORKFLOW_DEFINITION,
   type WorkflowDefinition
-} from "../src/workflow-definition.js";
+} from "../src/core/workflow/definition.js";
 import {
   InvalidWorkflowDefinitionError,
   listWorkflowDefinitionKeys,
   loadWorkflowDefinition,
   persistWorkflowDefinition,
   seedBuiltInWorkflowDefinitions
-} from "../src/workflow-definition-persist.js";
+} from "../src/core/workflow/definition-persist.js";
 
 const tempRoots: string[] = [];
 

@@ -2,7 +2,7 @@
  * Auto-set wiring for the run-scoped manual-recovery flag + artifact
  * (NGX-327, M8-04).
  *
- * The symmetric sibling of {@link ./workflow-run-recovery.ts}'s
+ * The symmetric sibling of {@link ./run-recovery.ts}'s
  * `clearWorkflowRunManualRecoveryGuarded`: where the guarded clear re-derives
  * the M7 monitor state and *clears* the durable `needs_manual_recovery` flag
  * only when no blocking condition remains, this reconcile re-derives the same
@@ -35,22 +35,22 @@
  * classification.
  */
 
-import type { MomentumDb } from "./adapters/db.js";
+import type { MomentumDb } from "../../adapters/db.js";
 import {
   loadWorkflowRunDetail,
   type WorkflowRunDetail
-} from "./workflow-status.js";
+} from "./status.js";
 import {
   isBlockingWorkflowRecoveryCode,
   markWorkflowRunNeedsManualRecovery
-} from "./workflow-run-recovery.js";
+} from "./run-recovery.js";
 import {
   buildWorkflowRecoveryArtifactInput,
   writeWorkflowRecoveryArtifact,
   writeWorkflowRecoveryArtifactInRunDir,
   type WorkflowRecoveryEvidencePointer
-} from "./workflow-recovery-artifact.js";
-import type { WorkflowMonitorRecoveryCode } from "./workflow-monitor-state.js";
+} from "./recovery-artifact.js";
+import type { WorkflowMonitorRecoveryCode } from "./monitor-state.js";
 
 export type ReconcileWorkflowRunManualRecoveryInput = {
   runId: string;

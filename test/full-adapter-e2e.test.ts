@@ -4,9 +4,9 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
-import { CODING_WORKFLOW_DEFINITION } from "../src/workflow-definition.js";
-import { persistWorkflowDefinition } from "../src/workflow-definition-persist.js";
-import { persistWorkflowRunStart } from "../src/workflow-run-start-persist.js";
+import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition.js";
+import { persistWorkflowDefinition } from "../src/core/workflow/definition-persist.js";
+import { persistWorkflowRunStart } from "../src/core/workflow/run-start-persist.js";
 import {
   reconcileLinearSource,
   type LinearReconciliationClient,
@@ -18,14 +18,14 @@ import {
   listSourceSnapshotsForItem
 } from "../src/source-items.js";
 import { listSourceReconciliationRuns } from "../src/source-reconciliation-runs.js";
-import { claimRunnableWorkflowStep } from "../src/workflow-scheduler.js";
-import { getWorkflowLease } from "../src/workflow-leases.js";
-import { listWorkflowGatesForRun } from "../src/workflow-gate-persist.js";
-import { getWorkflowRunManualRecoveryState } from "../src/workflow-run-recovery.js";
+import { claimRunnableWorkflowStep } from "../src/core/workflow/scheduler.js";
+import { getWorkflowLease } from "../src/core/workflow/leases.js";
+import { listWorkflowGatesForRun } from "../src/core/workflow/gate-persist.js";
+import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run-recovery.js";
 import {
   executeWorkflowStepDispatch,
   WORKFLOW_DISPATCH_RESULT_STATUS
-} from "../src/workflow-dispatch-execute.js";
+} from "../src/core/workflow/dispatch-execute.js";
 import {
   listExecutorArtifactsForRound,
   listExecutorCheckpointsForRound,
@@ -58,13 +58,13 @@ import {
   LIVE_STEP_DEFAULT_LEASE_KIND,
   runLiveWorkflowStep
 } from "../src/live-step-orchestrator.js";
-import { getWorkflowStep } from "../src/workflow-step-transitions.js";
+import { getWorkflowStep } from "../src/core/workflow/step-transitions.js";
 import type {
   WorkflowStepExecutor,
   WorkflowStepExecutorDispatchResult,
   WorkflowStepExecutorInput
-} from "../src/workflow-step-executor.js";
-import type { WorkflowApprovalBoundary } from "../src/workflow-run-reducer.js";
+} from "../src/core/workflow/step-executor.js";
+import type { WorkflowApprovalBoundary } from "../src/core/workflow/run-reducer.js";
 import type { FinalizeLiveWorkflowStepFromResultFileResult } from "../src/live-step-finalize.js";
 import type { RunnerResult } from "../src/runner-result.js";
 
@@ -101,7 +101,7 @@ import type { RunnerResult } from "../src/runner-result.js";
  * row are owned by the landed `runSingleShotStep` / `runGoalLoopStep` /
  * `runNoMistakesMirrorStep` adapters, whose seam-level reconciliation with the
  * scaffold is the documented real-adapter follow-up (see the phase-1 boundary
- * note in src/workflow-dispatch-execute.ts). This proof therefore exercises the
+ * note in src/core/workflow/dispatch-execute.ts). This proof therefore exercises the
  * scaffold via the production seam on one one-shot step (`preflight`) and the
  * terminal finalization via the landed adapters on distinct steps: the one-shot
  * adapter on `postflight`, the goal-loop adapter on `implementation` (the
@@ -725,7 +725,7 @@ describe("NGX-372 full adapter E2E proof", () => {
 
       // --- Layer 3: goal-loop landed adapter -> terminal finalization ---
       // `implementation` is the goal-loop family in the real coding workflow
-      // definition (src/workflow-definition.ts). The landed adapter drives a
+      // definition (src/core/workflow/definition.ts). The landed adapter drives a
       // bounded multi-round invocation below the StepRun: round 0 commits progress
       // but is incomplete (continue); round 1 commits and recommends completion,
       // each round gated by a passing verification finalize. `runGoalLoopStep`
@@ -895,7 +895,7 @@ describe("NGX-372 full adapter E2E proof", () => {
 
       // --- Layer 3: no-mistakes mirror landed adapter -> terminal finalization ---
       // `no-mistakes` is the no-mistakes family in the real coding workflow
-      // definition (src/workflow-definition.ts). Unlike the result-bearing
+      // definition (src/core/workflow/definition.ts). Unlike the result-bearing
       // adapters, the mirror does not drive an agent Momentum chose: it reflects an
       // external review gate's state as untrusted evidence to classify. The landed
       // adapter materializes the durable invocation + the single long-lived mirror

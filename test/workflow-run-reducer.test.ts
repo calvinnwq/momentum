@@ -19,7 +19,7 @@ import {
   transitionWorkflowStep,
   type WorkflowLeaseRecord,
   type WorkflowStepRecord
-} from "../src/workflow-run-reducer.js";
+} from "../src/core/workflow/run-reducer.js";
 
 describe("workflow-run-reducer constants", () => {
   it("exposes canonical step kinds matching the M7 contract", () => {

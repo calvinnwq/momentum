@@ -1,12 +1,12 @@
 /**
  * Persistence layer for workflow gates and operator decisions (M10-08, NGX-352).
  *
- * Takes the pure gate-decision domain owned by `workflow-gate.ts` — the
+ * Takes the pure gate-decision domain owned by `gate.ts` — the
  * gate-type / target-scope vocabularies and the {@link evaluateGateDecision}
  * delegated-policy / operator brain — and writes durable gate records into the
  * `workflow_gates` table added by `migrations.ts`. This is the storage twin of
- * the pure brain, exactly as `workflow-definition-persist.ts` is the storage twin
- * of `workflow-definition.ts` and `executor-loop-persist.ts` is the storage twin
+ * the pure brain, exactly as `definition-persist.ts` is the storage twin
+ * of `definition.ts` and `executor-loop-persist.ts` is the storage twin
  * of the executor-loop reducer: nothing here runs executors, schedules work, or
  * decides policy beyond what the pure brain already encodes. The `workflow run
  * decide` CLI surface layers on top of these primitives.
@@ -33,7 +33,7 @@
  *     a gate.
  */
 
-import { isUniqueViolation, type MomentumDb } from "./adapters/db.js";
+import { isUniqueViolation, type MomentumDb } from "../../adapters/db.js";
 import {
   WORKFLOW_GATE_SCOPES,
   evaluateGateDecision,
@@ -44,7 +44,7 @@ import {
   type GateDecisionRequest,
   type WorkflowGateScope,
   type WorkflowGateType
-} from "./workflow-gate.js";
+} from "./gate.js";
 
 /** One typed validation problem with a field of a {@link NewWorkflowGate}. */
 export type WorkflowGateValidationError = {

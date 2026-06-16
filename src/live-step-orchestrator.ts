@@ -4,8 +4,8 @@
  * Iterations 1-4 of M9-02 added the caller-side building blocks: the live
  * execution core (`live-step-wrapper.ts`), the M7 executor bridge
  * (`live-step-executor.ts`), the durable `workflow_leases` lifecycle primitives
- * (`workflow-leases.ts`), and the durable `workflow_steps` transition primitives
- * (`workflow-step-transitions.ts`). This module is the seam that composes them
+ * (`src/core/workflow/leases.ts`), and the durable `workflow_steps` transition primitives
+ * (`src/core/workflow/step-transitions.ts`). This module is the seam that composes them
  * into the single managed-step lifecycle the M9 live-execution contract's "Step
  * Execution" section requires, around any `WorkflowStepExecutor` (the M9 live
  * wrapper in production, a deterministic fake in tests):
@@ -57,7 +57,7 @@ import {
   getWorkflowLease,
   heartbeatWorkflowLease,
   releaseWorkflowLease
-} from "./workflow-leases.js";
+} from "./core/workflow/leases.js";
 import {
   finishWorkflowStep,
   getWorkflowStep,
@@ -65,13 +65,13 @@ import {
   type FinishWorkflowStepInput,
   type WorkflowStepTerminalState,
   type WorkflowStepTransitionOutcome
-} from "./workflow-step-transitions.js";
+} from "./core/workflow/step-transitions.js";
 import type {
   WorkflowStepExecutor,
   WorkflowStepExecutorDispatchResult,
   WorkflowStepExecutorInput,
   WorkflowStepExecutorTerminalState
-} from "./workflow-step-executor.js";
+} from "./core/workflow/step-executor.js";
 import type {
   WorkflowLeaseKind,
   WorkflowLeaseRecord,
@@ -79,12 +79,12 @@ import type {
   WorkflowStepState,
   WorkflowStepKind,
   WorkflowRunState
-} from "./workflow-run-reducer.js";
+} from "./core/workflow/run-reducer.js";
 import {
   isTerminalRunState,
   isWorkflowApprovalBoundary,
   workflowStepKindsForApprovalBoundary
-} from "./workflow-run-reducer.js";
+} from "./core/workflow/run-reducer.js";
 
 /**
  * The default managed-step lease kind for a live workflow step. The `monitor`

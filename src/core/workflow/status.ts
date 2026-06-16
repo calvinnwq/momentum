@@ -4,7 +4,7 @@
  *
  * Reads durable substrate rows from `workflow_runs` / `workflow_steps` /
  * `workflow_approvals` / `workflow_leases` and composes them with the pure
- * `deriveWorkflowMonitorState` reducer from `src/workflow-monitor-state.ts`,
+ * `deriveWorkflowMonitorState` reducer from `src/core/workflow/monitor-state.ts`,
  * including the durable `workflow_runs` monitor advisory snapshot, yielding a
  * normalized monitor view (active step pick, lease freshness, drift,
  * next-action code, recovery taxonomy) suitable for OpenClaw tooling to
@@ -16,17 +16,17 @@
  * against `evidence_records.artifact_path` so pre-NGX-329 evidence keeps
  * surfacing.
  */
-import type { MomentumDb } from "./adapters/db.js";
+import type { MomentumDb } from "../../adapters/db.js";
 import {
   listWorkflowGatesForRun,
   type WorkflowGateRecord
-} from "./workflow-gate-persist.js";
+} from "./gate-persist.js";
 import {
   deriveWorkflowMonitorState,
   type WorkflowMonitorAdvisory,
   type WorkflowMonitorCheckpoint,
   type WorkflowMonitorState
-} from "./workflow-monitor-state.js";
+} from "./monitor-state.js";
 import type {
   WorkflowApprovalBoundary,
   WorkflowLeaseKind,
@@ -36,7 +36,7 @@ import type {
   WorkflowStepKind,
   WorkflowStepRecord,
   WorkflowStepState
-} from "./workflow-run-reducer.js";
+} from "./run-reducer.js";
 
 export type WorkflowRunRow = {
   runId: string;

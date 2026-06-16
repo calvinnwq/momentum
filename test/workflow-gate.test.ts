@@ -11,7 +11,7 @@ import {
   isWorkflowGateType,
   type GateDecisionInput,
   type GateDecisionRequest
-} from "../src/workflow-gate.js";
+} from "../src/core/workflow/gate.js";
 
 function gate(overrides: Partial<GateDecisionInput> = {}): GateDecisionInput {
   return {

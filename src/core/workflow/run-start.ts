@@ -5,10 +5,10 @@
  * This module owns the *pure* translation of a validated
  * {@link WorkflowDefinition} graph into the in-memory `WorkflowRun` /
  * `StepRun` shape that a run start persists. It follows the same discipline as
- * `workflow-definition.ts` and `workflow-run-import.ts`: no SQLite, no file
+ * `definition.ts` and `run-import.ts`: no SQLite, no file
  * system, no executor invocation, no wall-clock reads. Durable persistence into
  * `workflow_runs` / `workflow_steps` is layered on top in
- * `workflow-run-start-persist.ts`, and the CLI `workflow run start` surface
+ * `run-start-persist.ts`, and the CLI `workflow run start` surface
  * calls that persistence layer. Executor records, the opt-in daemon scheduler
  * lane, and executor adapter dispatch are layered separately; this pure
  * materializer does not run the landed goal-loop / one-shot / script /
@@ -36,11 +36,11 @@
  *     with `ExecutorDefinition` in M10-03 (NGX-347).
  */
 
-import { isSafeWorkflowRunPathSegment } from "./workflow-recovery-artifact.js";
+import { isSafeWorkflowRunPathSegment } from "./recovery-artifact.js";
 import {
   validateWorkflowDefinition,
   type WorkflowDefinition
-} from "./workflow-definition.js";
+} from "./definition.js";
 import {
   deriveWorkflowRunState,
   isWorkflowApprovalBoundary,
@@ -49,7 +49,7 @@ import {
   type WorkflowRunState,
   type WorkflowStepKind,
   type WorkflowStepRecord
-} from "./workflow-run-reducer.js";
+} from "./run-reducer.js";
 
 /**
  * Default `workflow_runs.source` value for a run started from a workflow

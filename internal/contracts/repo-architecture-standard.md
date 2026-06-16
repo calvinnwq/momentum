@@ -2,10 +2,11 @@
 
 **Status:** Accepted post-M11 repository architecture standard. `ARCH-02` /
 `NGX-446` enforces the first source-layout guardrails from this contract;
-`ARCH-03` through `ARCH-08` execute the remaining module moves and information
-architecture cleanup. This contract does not authorize runtime behavior changes,
-public CLI behavior changes, compatibility-lane deletion, or weakening any
-NGX-434 runtime-consolidation decision.
+`ARCH-03` / `NGX-447` has mechanically regrouped workflow runtime modules under
+`src/core/workflow/`; `ARCH-04` through `ARCH-08` execute the remaining module
+moves and information architecture cleanup. This contract does not authorize
+runtime behavior changes, public CLI behavior changes, compatibility-lane
+deletion, or weakening any NGX-434 runtime-consolidation decision.
 
 Root [`../../ARCHITECTURE.md`](../../ARCHITECTURE.md) remains the entry point.
 This file holds the longer placement rules so the root contract stays compact.
@@ -191,10 +192,11 @@ work has stable homes for workflow, executor, repo, adapter, and evidence code.
    target directory checks, and import-direction guardrails for `core`,
    `config`, `shared`, renderers, and transitional root modules. This issue
    enforces, but does not broadly move, the standard.
-2. **ARCH-03 / NGX-447 — Workflow core domain.** Move workflow definitions, run/start,
-   import, status, monitor, recovery, gates, leases, dispatch planning, and
-   workflow handoff behavior under `src/core/workflow/`, leaving command and
-   renderer seams in place.
+2. **ARCH-03 / NGX-447 — Workflow core domain.** Moved workflow definitions,
+   run/start, import, status, monitor, recovery, gates, leases, dispatch
+   planning, and workflow handoff behavior under `src/core/workflow/`, leaving
+   command and renderer seams in place. The local module map lives in
+   [`../../src/core/workflow/README.md`](../../src/core/workflow/README.md).
 3. **ARCH-04 / NGX-448 — Executor core domain.** Move executor-loop reducers/persistence
    and goal-loop, one-shot/script, no-mistakes, and live-wrapper-facing executor
    behavior under `src/core/executors/`. Do not collapse the M9 direct-finalize

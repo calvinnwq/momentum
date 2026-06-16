@@ -10,7 +10,7 @@ import {
   listBuiltInWorkflowDefinitionKeys,
   validateWorkflowDefinition,
   type WorkflowDefinition
-} from "../src/workflow-definition.js";
+} from "../src/core/workflow/definition.js";
 
 function baseValidDefinition(): WorkflowDefinition {
   return {

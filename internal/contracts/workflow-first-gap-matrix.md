@@ -178,11 +178,11 @@ it; it does not run the actual dogfood or flip the milestone marker.
 - **A dedicated production dispatcher**, not dispatch logic buried in
   `src/cli.ts`. Three modules mirror the established
   brain -> read-only-resolution -> durable-effect slicing: `planWorkflowStepDispatch`
-  (`src/workflow-dispatch.ts`, the pure total decision over a resolved family),
-  `resolveWorkflowStepDispatchPlan` (`src/workflow-dispatch-persist.ts`, the
+  (`src/core/workflow/dispatch.ts`, the pure total decision over a resolved family),
+  `resolveWorkflowStepDispatchPlan` (`src/core/workflow/dispatch-persist.ts`, the
   read-only run -> definition-link -> step-definition -> executor-family
   resolution), and `executeWorkflowStepDispatch`
-  (`src/workflow-dispatch-execute.ts`, the durable effect twin shaped to the
+  (`src/core/workflow/dispatch-execute.ts`, the durable effect twin shaped to the
   scheduler's `WorkflowStepDispatch` seam).
 - **A phase-1 dispatchable executor-family allowlist** — exactly the families
   with a landed bounded adapter: `goal-loop` (M10-05), `one-shot` / `script`

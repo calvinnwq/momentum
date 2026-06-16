@@ -5,11 +5,11 @@
  * This module owns only the canonical vocabulary, the transition reducers, and
  * the record *shapes* for the `ExecutorDefinition` / `ExecutorInvocation` /
  * `ExecutorRound` layer described in internal/contracts/executor-loop.md. It
- * follows the same discipline as `workflow-run-reducer.ts` and
- * `workflow-definition.ts`: no SQLite, no file system, no executor invocation.
+ * follows the same discipline as `src/core/workflow/run-reducer.ts` and
+ * `src/core/workflow/definition.ts`: no SQLite, no file system, no executor invocation.
  * Durable `executor_*` tables and the persistence twin layer on top of these
- * primitives, exactly as M7 layered `workflow-run-import-persist.ts` on top of
- * `workflow-run-reducer.ts`.
+ * primitives, exactly as M7 layered `src/core/workflow/run-import-persist.ts` on top of
+ * `src/core/workflow/run-reducer.ts`.
  *
  * The contract pins this nesting so bounded autonomy never flattens into
  * top-level workflow steps:
@@ -44,10 +44,10 @@
  *     `StepDefinition.executor`.
  */
 
-import type { WorkflowExecutorFamily } from "./workflow-definition.js";
-import type { TransitionResult } from "./workflow-run-reducer.js";
+import type { WorkflowExecutorFamily } from "./core/workflow/definition.js";
+import type { TransitionResult } from "./core/workflow/run-reducer.js";
 
-export type { WorkflowExecutorFamily } from "./workflow-definition.js";
+export type { WorkflowExecutorFamily } from "./core/workflow/definition.js";
 
 /**
  * Executor invocation states (contract "Executor States"). One invocation is a

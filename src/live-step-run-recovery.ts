@@ -46,7 +46,7 @@
  * `committed`, a `reset_step_failure` / `reset_verification_failure` where the
  * worktree was already safely reset, or a clean commit-failure step failure.
  *
- * Mirroring {@link ./workflow-recovery-reconcile.ts}, the durable flag is
+ * Mirroring {@link ./core/workflow/recovery-reconcile.ts}, the durable flag is
  * written *first*: it is the authority that blocks unsafe progression, so it
  * must land even if the best-effort `recovery.md` write later fails
  * (`artifact_write_failed`). This module never clears recovery — clearing stays
@@ -55,7 +55,7 @@
 
 import type { MomentumDb } from "./adapters/db.js";
 import type { FinalizeLiveWorkflowStepFromResultFileResult } from "./live-step-finalize.js";
-import { markWorkflowRunNeedsManualRecovery } from "./workflow-run-recovery.js";
+import { markWorkflowRunNeedsManualRecovery } from "./core/workflow/run-recovery.js";
 import {
   WORKFLOW_LIVE_RUN_RECOVERY_CODES,
   writeWorkflowRecoveryArtifact,
@@ -64,7 +64,7 @@ import {
   type WorkflowRecoveryArtifactInput,
   type WorkflowRecoveryEvidencePointer,
   type WorkflowRecoveryNextAction
-} from "./workflow-recovery-artifact.js";
+} from "./core/workflow/recovery-artifact.js";
 
 export type PersistLiveWorkflowFinalizeRecoveryInput = {
   runId: string;

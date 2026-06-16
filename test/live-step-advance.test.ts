@@ -6,9 +6,9 @@ import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import { advanceLiveWorkflowStep } from "../src/live-step-advance.js";
-import { getWorkflowStep } from "../src/workflow-step-transitions.js";
-import { getWorkflowRunManualRecoveryState } from "../src/workflow-run-recovery.js";
-import { resolveWorkflowRecoveryArtifactPath } from "../src/workflow-recovery-artifact.js";
+import { getWorkflowStep } from "../src/core/workflow/step-transitions.js";
+import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run-recovery.js";
+import { resolveWorkflowRecoveryArtifactPath } from "../src/core/workflow/recovery-artifact.js";
 import { getRepoLock } from "../src/repo-locks.js";
 import type { PersistLiveWorkflowFinalizeRecoveryResult } from "../src/live-step-run-recovery.js";
 import type {
@@ -16,12 +16,12 @@ import type {
   WorkflowStepExecutorDispatchResult,
   WorkflowStepExecutorInput,
   WorkflowStepExecutorKind
-} from "../src/workflow-step-executor.js";
+} from "../src/core/workflow/step-executor.js";
 import type { CommitIntent, RunnerResult } from "../src/runner-result.js";
 import type {
   WorkflowApprovalBoundary,
   WorkflowStepState
-} from "../src/workflow-run-reducer.js";
+} from "../src/core/workflow/run-reducer.js";
 
 const SEED_AT = 1_730_000_000_000;
 const NOW = SEED_AT + 1_000;

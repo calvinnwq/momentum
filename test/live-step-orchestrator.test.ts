@@ -12,19 +12,19 @@ import {
 import {
   acquireWorkflowLease,
   getWorkflowLease
-} from "../src/workflow-leases.js";
-import { getWorkflowStep } from "../src/workflow-step-transitions.js";
+} from "../src/core/workflow/leases.js";
+import { getWorkflowStep } from "../src/core/workflow/step-transitions.js";
 import type {
   WorkflowStepExecutor,
   WorkflowStepExecutorDispatchResult,
   WorkflowStepExecutorKind,
   WorkflowStepExecutorInput
-} from "../src/workflow-step-executor.js";
+} from "../src/core/workflow/step-executor.js";
 import type {
   WorkflowApprovalBoundary,
   WorkflowLeaseKind,
   WorkflowStepState
-} from "../src/workflow-run-reducer.js";
+} from "../src/core/workflow/run-reducer.js";
 
 const tempRoots: string[] = [];
 

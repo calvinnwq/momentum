@@ -27,7 +27,7 @@ import {
   type WorkflowMonitorNextAction,
   type WorkflowMonitorRecovery,
   type WorkflowMonitorRecoveryCode
-} from "./workflow-monitor-state.js";
+} from "./monitor-state.js";
 
 /**
  * Filename for the run-scoped manual-recovery artifact. Co-located with the

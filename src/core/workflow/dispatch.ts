@@ -6,7 +6,7 @@
  * the phase-1 executor-family allowlist and the deterministic decision
  * ({@link planWorkflowStepDispatch}) that routes a claimed workflow step either
  * to a real executor dispatch or to a fail-closed, operator-visible
- * manual-recovery outcome. It follows the same discipline as `workflow-gate.ts`
+ * manual-recovery outcome. It follows the same discipline as `gate.ts`
  * and the executor-loop reducer: no SQLite, no file system, no daemon, no
  * executor invocation. The durable twins resolve the claimed step against
  * `workflow_runs` / `step_definitions`, create the `executor_invocations` /
@@ -14,7 +14,7 @@
  * carry one, flag manual recovery for the fail-closed outcome when possible,
  * release the dispatch lease where appropriate, and wire the dispatcher into
  * bounded `daemon start`, exactly as
- * `workflow-gate-persist.ts` is the storage twin of `workflow-gate.ts`.
+ * `gate-persist.ts` is the storage twin of `gate.ts`.
  *
  * Scope decisions pinned here, grounded in the accepted planning contracts
  * (internal/contracts/executor-loop.md "Executor Families" / "Completion
@@ -47,8 +47,8 @@
  * `{ action: ... }` convention used by the reducers and the gate brain.
  */
 
-import type { WorkflowExecutorFamily } from "./workflow-definition.js";
-import type { WorkflowGateType } from "./workflow-gate.js";
+import type { WorkflowExecutorFamily } from "./definition.js";
+import type { WorkflowGateType } from "./gate.js";
 
 /**
  * Executor families the production workflow lane can genuinely dispatch this

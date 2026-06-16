@@ -7,7 +7,7 @@ import path from "node:path";
 import {
   WORKFLOW_RUN_IMPORT_SOURCE,
   parseWorkflowRunImport
-} from "../src/workflow-run-import.js";
+} from "../src/core/workflow/run-import.js";
 
 const tempRoots: string[] = [];
 

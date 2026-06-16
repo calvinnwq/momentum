@@ -1,7 +1,7 @@
 /**
  * Dogfood terminalize-and-continue dispatch wrapper (M10-09b, NGX-391).
  *
- * The production workflow-lane dispatcher (`workflow-dispatch-execute.ts`) stops
+ * The production workflow-lane dispatcher (`dispatch-execute.ts`) stops
  * at the phase-1 *start scaffold*: it advances a claimed step `approved ->
  * running`, creates the durable `executor_invocations` / `executor_rounds` rows,
  * and *holds* the dispatch lease while the (not-yet-landed) bounded executor
@@ -37,21 +37,21 @@
  * manual-recovery condition, the one unsafe move this gate exists to prevent.
  */
 
-import type { MomentumDb } from "./adapters/db.js";
-import { releaseWorkflowLease } from "./workflow-leases.js";
-import { deriveWorkflowMonitorState } from "./workflow-monitor-state.js";
+import type { MomentumDb } from "../../adapters/db.js";
+import { releaseWorkflowLease } from "./leases.js";
+import { deriveWorkflowMonitorState } from "./monitor-state.js";
 import {
   loadWorkflowLeaseRecords,
   loadWorkflowStepRecords,
   WORKFLOW_DISPATCH_RESULT_STATUS
-} from "./workflow-dispatch-execute.js";
-import { finishWorkflowStep } from "./workflow-step-transitions.js";
+} from "./dispatch-execute.js";
+import { finishWorkflowStep } from "./step-transitions.js";
 import type {
   ClaimedWorkflowStep,
   WorkflowStepDispatch,
   WorkflowStepDispatchContext,
   WorkflowStepDispatchResult
-} from "./workflow-scheduler.js";
+} from "./scheduler.js";
 
 /**
  * `result_digest` stamped on a step this fixture terminalizes, so durable state

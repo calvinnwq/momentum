@@ -13,13 +13,13 @@ import {
   listWorkflowStepExecutorKinds,
   type WorkflowStepExecutorInput,
   type WorkflowStepExecutorKind
-} from "../src/workflow-step-executor.js";
+} from "../src/core/workflow/step-executor.js";
 import {
   deriveWorkflowRunState,
   isTerminalStepState,
   transitionWorkflowStep,
   type WorkflowStepRecord
-} from "../src/workflow-run-reducer.js";
+} from "../src/core/workflow/run-reducer.js";
 
 function makeInput(
   overrides: Partial<WorkflowStepExecutorInput> & {

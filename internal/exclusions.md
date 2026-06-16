@@ -40,14 +40,14 @@ Milestone status:
   checkpoint / artifact shapes, the registry keyed by `WorkflowStepKind`,
   the stable error code taxonomy, and the deterministic fake executors per
   kind (NGX-315); the pure `deriveWorkflowMonitorState` reducer
-  (`src/workflow-monitor-state.ts`) with per-lease freshness view,
+  (`src/core/workflow/monitor-state.ts`) with per-lease freshness view,
   last-checkpoint visibility, monitor-advisory drift classification,
   deterministic machine-readable `nextAction` codes, and the recovery
   taxonomy `stale_running_step` / `ghost_active_no_lease` /
   `manual_recovery_lease` / `monitor_drift_stale` / `failed_required_step`,
   with terminal ledger evidence beating a stale monitor advisory (NGX-316);
   the read-only `workflow status` and `workflow handoff` CLI envelopes
-  (`src/workflow-status.ts`, `src/workflow-handoff.ts`) with stable JSON
+  (`src/core/workflow/status.ts`, `src/core/workflow/handoff.ts`) with stable JSON
   field names, refusal taxonomy, and a `schemaVersion: 1` handoff field
   composed on top of the monitor reducer (NGX-317); and the end-to-end
   built-CLI smoke (`test/m7-e2e-smoke.test.ts`) driving a fresh
