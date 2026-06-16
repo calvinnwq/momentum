@@ -17,7 +17,7 @@ import type {
   WorkflowStepExecutorInput,
   WorkflowStepExecutorKind
 } from "../src/core/workflow/step-executor.js";
-import type { CommitIntent, RunnerResult } from "../src/runner-result.js";
+import type { CommitIntent, RunnerResult } from "../src/core/executors/types.js";
 import type {
   WorkflowApprovalBoundary,
   WorkflowStepState

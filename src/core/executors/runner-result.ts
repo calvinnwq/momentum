@@ -1,38 +1,10 @@
-export const COMMIT_TYPES = [
-  "build",
-  "ci",
-  "docs",
-  "feat",
-  "fix",
-  "perf",
-  "refactor",
-  "test",
-  "chore"
-] as const;
-
-export type CommitType = (typeof COMMIT_TYPES)[number];
-
-export type CommitIntent = {
-  type: CommitType;
-  scope: string | undefined;
-  subject: string;
-  body: string;
-  breaking: boolean;
-};
-
-export type RunnerResult = {
-  success: boolean;
-  summary: string;
-  key_changes_made: string[];
-  key_learnings: string[];
-  remaining_work: string[];
-  goal_complete: boolean;
-  commit: CommitIntent;
-};
-
-export type RunnerResultError = { ok: false; error: string };
-export type RunnerResultSuccess = { ok: true; value: RunnerResult };
-export type RunnerResultParse = RunnerResultError | RunnerResultSuccess;
+import { COMMIT_TYPES } from "./types.js";
+import type {
+  CommitIntent,
+  CommitType,
+  RunnerResultError,
+  RunnerResultParse
+} from "./types.js";
 
 export function parseRunnerResult(raw: string): RunnerResultParse {
   let parsed: unknown;

@@ -17,7 +17,7 @@ import {
   type BuiltinRunnerKind,
   isBuiltinRunnerKind
 } from "../core/executors/runner-profile.js";
-import type { RunnerResult } from "../runner-result.js";
+import type { RunnerResult } from "../core/executors/types.js";
 import { runTrustedShellRunner } from "./trusted-shell-runner.js";
 
 export type RunnerAdapterErrorCode =

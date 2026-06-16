@@ -49,7 +49,8 @@ import type {
   LiveWrapperConfig,
   LiveWrapperProbeConfig
 } from "./live-wrapper-registry.js";
-import { parseRunnerResult, type RunnerResult } from "../runner-result.js";
+import { parseRunnerResult } from "../core/executors/runner-result.js";
+import type { RunnerResult } from "../core/executors/types.js";
 import type { WorkflowStepKind } from "../core/workflow/run-reducer.js";
 
 /**

@@ -8,7 +8,7 @@ import path from "node:path";
 import { waitMs } from "./helpers/process-kill-harness.js";
 import type { ExecutorRoundRecord } from "../src/core/executors/loop-reducer.js";
 import type { LiveWrapperConfig } from "../src/adapters/live-wrapper-registry.js";
-import type { RunnerResult } from "../src/runner-result.js";
+import type { RunnerResult } from "../src/core/executors/types.js";
 import {
   createOneShotLiveWrapperRoundRunner,
   createScriptCommandRoundRunner

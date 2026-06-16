@@ -11,7 +11,7 @@ import {
   FAKE_RUNNER_TRAJECTORY_ENV,
   runFakeRunner
 } from "../src/adapters/fake-runner.js";
-import { parseRunnerResult } from "../src/runner-result.js";
+import { parseRunnerResult } from "../src/core/executors/runner-result.js";
 
 const tempRoots: string[] = [];
 

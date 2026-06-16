@@ -6,7 +6,7 @@ import path from "node:path";
 
 import { runForegroundIteration } from "../src/core/executors/foreground-iteration.js";
 import { initGoalArtifacts } from "../src/core/evidence/artifacts.js";
-import { parseRunnerResult } from "../src/runner-result.js";
+import { parseRunnerResult } from "../src/core/executors/runner-result.js";
 import type { GoalSpec } from "../src/core/goal/types.js";
 
 const tempRoots: string[] = [];

@@ -18,7 +18,7 @@ import {
 } from "../src/core/executors/goal-loop-executor.js";
 import { goalLoopRoundMechanismFromResultFile } from "../src/core/executors/goal-loop-mechanism.js";
 import { runGoalLoopRound } from "../src/core/executors/goal-loop-orchestrator.js";
-import type { CommitIntent, RunnerResult } from "../src/runner-result.js";
+import type { CommitIntent, RunnerResult } from "../src/core/executors/types.js";
 
 // Proves the goal-loop round *mechanism* bridge reuses the existing M9 goal /
 // iteration safety (the `finalizeLiveWorkflowStepFromResultFile` verify ->

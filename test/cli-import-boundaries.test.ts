@@ -27,13 +27,13 @@ type RootSrcException = {
   reason: string;
 };
 
-const TRANSITIONAL_ROOT_SRC_EXCEPTIONS = {
-  "src/runner-result.ts": {
-    ownerIssue: "NGX-450",
-    targetHome: "src/core/executors/types.ts",
-    reason: "Runner result shapes and parsing belong beside executor behavior."
-  }
-} satisfies Record<string, RootSrcException>;
+// Every ARCH-02..ARCH-06 transitional root module has now been drained into its
+// owned taxonomy home; NGX-450 moved the final one (src/runner-result.ts) into
+// src/core/executors/types.ts (shapes) and src/core/executors/runner-result.ts
+// (parsing). This stays declared rather than deleted so a future migration slice
+// can re-add a named entry with owner issue, target home, and removal reason if
+// root migration debt ever becomes unavoidable again.
+const TRANSITIONAL_ROOT_SRC_EXCEPTIONS: Record<string, RootSrcException> = {};
 
 // Renderer -> transitional-root type-only edges. Empty after NGX-449 moved the
 // daemon / evidence / goal / source / intent / project modules into
@@ -361,9 +361,11 @@ describe("M11 CLI import boundaries", () => {
     ]);
   });
 
-  it("classifies transitional root and future core source modules as renderer runtime boundaries", () => {
-    // Remaining transitional-root exceptions (NGX-450) still classify as boundaries.
-    expect(isPersistenceOrMutationModule("src/runner-result.ts")).toBe(true);
+  it("classifies core source modules as renderer runtime boundaries", () => {
+    // The runner-result shapes/parsing drained into src/core/executors (NGX-450);
+    // its owned core home classifies as a renderer runtime boundary.
+    expect(isPersistenceOrMutationModule("src/core/executors/types.ts")).toBe(true);
+    expect(isPersistenceOrMutationModule("src/core/executors/runner-result.ts")).toBe(true);
     // Owned core/domain homes (post NGX-449/NGX-450) classify as renderer runtime boundaries.
     expect(isPersistenceOrMutationModule("src/core/daemon/status.ts")).toBe(true);
     expect(isPersistenceOrMutationModule("src/core/goal/status.ts")).toBe(true);
@@ -485,9 +487,8 @@ describe("M11 CLI import boundaries", () => {
         exception.targetHome.split("/").slice(0, 3).join("/")
       )
     );
-    expect([...documentedTargetPrefixes].sort()).toEqual([
-      "src/core/executors"
-    ]);
+    // Empty now that NGX-450 drained the last transitional root module.
+    expect([...documentedTargetPrefixes].sort()).toEqual([]);
   });
 
   it("keeps core/domain modules independent from commands and renderers", () => {

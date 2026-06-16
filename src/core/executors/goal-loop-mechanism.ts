@@ -60,7 +60,8 @@ import {
   type FinalizeLiveWorkflowStepFromResultFileInput,
   type FinalizeLiveWorkflowStepFromResultFileResult
 } from "./live-step-finalize.js";
-import { parseRunnerResult, type RunnerResult } from "../../runner-result.js";
+import { parseRunnerResult } from "./runner-result.js";
+import type { RunnerResult } from "./types.js";
 
 /**
  * The inputs to {@link goalLoopRoundMechanismFromResultFile}: exactly the

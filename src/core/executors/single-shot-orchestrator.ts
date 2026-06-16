@@ -78,7 +78,7 @@ import {
   type ExecutorInvocationRecord,
   type ExecutorRoundRecord
 } from "./loop-reducer.js";
-import type { RunnerResult } from "../../runner-result.js";
+import type { RunnerResult } from "./types.js";
 import {
   planSingleShotInvocation,
   planSingleShotRoundArtifacts,

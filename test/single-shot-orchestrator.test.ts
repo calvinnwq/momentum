@@ -14,7 +14,7 @@ import {
   loadExecutorRound
 } from "../src/core/executors/loop-persist.js";
 import type { ExecutorInvocationRecord } from "../src/core/executors/loop-reducer.js";
-import type { RunnerResult } from "../src/runner-result.js";
+import type { RunnerResult } from "../src/core/executors/types.js";
 import {
   resolveSingleShotRoundSelection,
   singleShotInvocationId,

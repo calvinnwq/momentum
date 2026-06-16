@@ -10,7 +10,7 @@ import {
   listCommittedChangedFiles,
   resetToBase
 } from "../src/adapters/git-transaction.js";
-import type { CommitIntent } from "../src/runner-result.js";
+import type { CommitIntent } from "../src/core/executors/types.js";
 
 const ZERO_SHA = "0".repeat(40);
 const tempRoots: string[] = [];

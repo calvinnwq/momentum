@@ -30,7 +30,7 @@ import {
   runGoalLoopStep
 } from "../src/core/executors/goal-loop-orchestrator.js";
 import type { FinalizeLiveWorkflowStepFromResultFileResult } from "../src/core/executors/live-step-finalize.js";
-import type { RunnerResult } from "../src/runner-result.js";
+import type { RunnerResult } from "../src/core/executors/types.js";
 
 // Drives the single-round goal-loop executor step through the *real*
 // executor-loop persistence layer and round transition graph around an injected

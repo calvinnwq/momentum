@@ -25,6 +25,7 @@ importers still reference the concrete modules below.
 | Runner support | `runner-profile.ts` |
 | Foreground iteration | `foreground-iteration.ts` |
 | Runner smoke | `real-smoke.ts`, `real-workflow-smoke.ts` |
+| Runner result shapes & parsing | `types.ts`, `runner-result.ts` |
 
 `loop-reducer.ts` is the central pure reducer and the most widely consumed entry
 point; `loop-persist.ts` wraps it with persistence. The goal-loop and single-shot
@@ -54,10 +55,16 @@ ARCH-04 is a mechanical move with no adapter rewrite:
   `loop-reducer` / `loop-persist`.
 - `src/adapters/runner-adapter.ts` imports `runner-profile`.
 - `src/adapters/real-workflow-probe.ts` imports `real-workflow-smoke`.
+- `src/adapters/acp-runner.ts`, `trusted-shell-runner.ts`, and
+  `live-step-wrapper.ts` import the `parseRunnerResult` parser from
+  `runner-result`; the `RunnerResult` shapes they also consume are type-only
+  imports from `types.ts`. This runtime edge moved from the former root
+  `src/runner-result.ts` under ARCH-06 / NGX-450.
 
-These edges predate ARCH-04. Tightening them (so adapters depend on core types
-only) is deferred; it would require an interface decision that ARCH-04 explicitly
-declines to make.
+These edges predate ARCH-04 (and, for the runner-result parser, ARCH-06).
+Tightening them (so adapters depend on core types only) is deferred; it would
+require an interface decision that the mechanical ARCH slices explicitly decline
+to make.
 
 ## Boundaries
 
@@ -68,9 +75,14 @@ declines to make.
 ## Deferred
 
 - Exported executor types stay beside their behavior in their owning module. The
-  shared runner-result shapes are slated to consolidate at
-  `src/core/executors/types.ts` under the type-placement slice (ARCH-06), not
-  here; `src/runner-result.ts` is intentionally left at root for that slice.
+  shared runner-result shapes now live at `src/core/executors/types.ts`
+  (`COMMIT_TYPES`, `CommitType`, `CommitIntent`, `RunnerResult`, and the
+  `RunnerResult{Error,Success,Parse}` envelopes), with their parser
+  (`parseRunnerResult` / `normalizeRunnerResult` / `normalizeCommitIntent`) in
+  `src/core/executors/runner-result.ts`. Both were drained from the former root
+  `src/runner-result.ts` under the type-placement slice (ARCH-06 / NGX-450).
+  `COMMIT_TYPES` is a runtime const, but it backs the `CommitType` union and has
+  no behavior, so it is colocated with the type it defines.
 - No barrel/seam consolidation and no finalizer/reconciliation redesign — those
   are owned by later slices (ARCH-08 / RC-2). Importers keep direct typed module
   paths until then.

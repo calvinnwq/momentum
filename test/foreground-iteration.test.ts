@@ -9,7 +9,7 @@ import {
   FAKE_RUNNER_FAIL_ENV,
   FAKE_RUNNER_FIXTURE_FILENAME
 } from "../src/adapters/fake-runner.js";
-import { parseRunnerResult } from "../src/runner-result.js";
+import { parseRunnerResult } from "../src/core/executors/runner-result.js";
 import {
   initGoalArtifacts,
   resolveGoalArtifactPaths

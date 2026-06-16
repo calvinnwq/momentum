@@ -22,7 +22,7 @@ import {
   type RunnerAdapterErrorCode,
   type RunnerAdapterResult
 } from "../../adapters/runner-adapter.js";
-import type { RunnerResult } from "../../runner-result.js";
+import type { RunnerResult } from "./types.js";
 
 export type ForegroundIterationErrorCode =
   | "invalid_input"
