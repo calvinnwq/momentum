@@ -371,9 +371,9 @@ describe("M8 contract (NGX-323)", () => {
       const matrix = readDoc(matrixPath);
       for (const owner of [
         "src/cli.ts",
-        "src/workflow-run-recovery.ts",
-        "src/workflow-monitor-envelope.ts",
-        "src/workflow-recovery-artifact.ts",
+        "src/core/workflow/run-recovery.ts",
+        "src/core/workflow/monitor-envelope.ts",
+        "src/core/workflow/recovery-artifact.ts",
         "src/evidence-workflow.ts",
       ]) {
         expect(matrix, `regression matrix should cite ${owner} as an M8 owner`).toContain(

@@ -101,7 +101,7 @@ import type { RunnerResult } from "../src/runner-result.js";
  * row are owned by the landed `runSingleShotStep` / `runGoalLoopStep` /
  * `runNoMistakesMirrorStep` adapters, whose seam-level reconciliation with the
  * scaffold is the documented real-adapter follow-up (see the phase-1 boundary
- * note in src/workflow-dispatch-execute.ts). This proof therefore exercises the
+ * note in src/core/workflow/dispatch-execute.ts). This proof therefore exercises the
  * scaffold via the production seam on one one-shot step (`preflight`) and the
  * terminal finalization via the landed adapters on distinct steps: the one-shot
  * adapter on `postflight`, the goal-loop adapter on `implementation` (the
@@ -725,7 +725,7 @@ describe("NGX-372 full adapter E2E proof", () => {
 
       // --- Layer 3: goal-loop landed adapter -> terminal finalization ---
       // `implementation` is the goal-loop family in the real coding workflow
-      // definition (src/workflow-definition.ts). The landed adapter drives a
+      // definition (src/core/workflow/definition.ts). The landed adapter drives a
       // bounded multi-round invocation below the StepRun: round 0 commits progress
       // but is incomplete (continue); round 1 commits and recommends completion,
       // each round gated by a passing verification finalize. `runGoalLoopStep`
@@ -895,7 +895,7 @@ describe("NGX-372 full adapter E2E proof", () => {
 
       // --- Layer 3: no-mistakes mirror landed adapter -> terminal finalization ---
       // `no-mistakes` is the no-mistakes family in the real coding workflow
-      // definition (src/workflow-definition.ts). Unlike the result-bearing
+      // definition (src/core/workflow/definition.ts). Unlike the result-bearing
       // adapters, the mirror does not drive an agent Momentum chose: it reflects an
       // external review gate's state as untrusted evidence to classify. The landed
       // adapter materializes the durable invocation + the single long-lived mirror

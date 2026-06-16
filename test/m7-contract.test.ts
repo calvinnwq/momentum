@@ -303,11 +303,11 @@ describe("M7 closeout contract (NGX-312, NGX-319)", () => {
     it("references the substrate modules and tests that own each invariant", () => {
       const matrix = readDoc(matrixPath);
       for (const owner of [
-        "src/workflow-monitor-state.ts",
-        "src/workflow-run-reducer.ts",
-        "src/workflow-run-import.ts",
-        "src/workflow-status.ts",
-        "src/workflow-handoff.ts",
+        "src/core/workflow/monitor-state.ts",
+        "src/core/workflow/run-reducer.ts",
+        "src/core/workflow/run-import.ts",
+        "src/core/workflow/status.ts",
+        "src/core/workflow/handoff.ts",
         "test/workflow-monitor-state.test.ts",
         "test/m7-e2e-smoke.test.ts",
       ]) {

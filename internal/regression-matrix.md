@@ -59,7 +59,7 @@ the NGX-353 marker advance.
   `monitor.json` advisory. `deriveWorkflowMonitorState` classifies the
   disagreement as `monitor_drift_stale` (or one of the other recovery codes
   when an additional condition applies) without flipping the substrate state.
-- **Owner.** [`src/workflow-monitor-state.ts`](../src/workflow-monitor-state.ts)
+- **Owner.** [`src/core/workflow/monitor-state.ts`](../src/core/workflow/monitor-state.ts)
   (`deriveWorkflowMonitorState`, recovery code `monitor_drift_stale`).
 - **Evidence.**
   - Unit: `test/workflow-monitor-state.test.ts` — "emits monitor_drift_stale
@@ -78,8 +78,8 @@ the NGX-353 marker advance.
   `workflow import` envelope from `ledger.jsonl`, is the source of truth.
   Terminal ledger entries are imported into the substrate regardless of
   managed-task liveness; lost managed children never re-open a completed step.
-- **Owner.** [`src/workflow-run-import.ts`](../src/workflow-run-import.ts) plus
-  [`src/workflow-step-executor.ts`](../src/workflow-step-executor.ts) (terminal
+- **Owner.** [`src/core/workflow/run-import.ts`](../src/core/workflow/run-import.ts) plus
+  [`src/core/workflow/step-executor.ts`](../src/core/workflow/step-executor.ts) (terminal
   state mapping from the ledger).
 - **Evidence.**
   - Built-CLI smoke: `test/m7-e2e-smoke.test.ts` — the M7 end-to-end coding-workflow
@@ -105,9 +105,9 @@ the NGX-353 marker advance.
   apply audit ledger (`intent apply --external-apply`) continues to be the only
   mechanism that touches an external tracker, so external-side terminal state
   is never overwritten by local drift.
-- **Owner.** [`src/workflow-run-reducer.ts`](../src/workflow-run-reducer.ts)
+- **Owner.** [`src/core/workflow/run-reducer.ts`](../src/core/workflow/run-reducer.ts)
   (`deriveWorkflowRunState`, `isTerminalRunState`) and
-  [`src/workflow-monitor-state.ts`](../src/workflow-monitor-state.ts) (terminal
+  [`src/core/workflow/monitor-state.ts`](../src/core/workflow/monitor-state.ts) (terminal
   short-circuit in the monitor reducer).
 - **Evidence.**
   - Unit: `test/workflow-run-reducer.test.ts` and
@@ -136,7 +136,7 @@ the NGX-353 marker advance.
   run before any further claim is allowed. The reducer refuses to silently
   promote the step back to `succeeded` and refuses to report it as healthy in
   any of these cases.
-- **Owner.** [`src/workflow-monitor-state.ts`](../src/workflow-monitor-state.ts)
+- **Owner.** [`src/core/workflow/monitor-state.ts`](../src/core/workflow/monitor-state.ts)
   (`deriveWorkflowMonitorState`, recovery codes `stale_running_step`,
   `ghost_active_no_lease`, and `manual_recovery_lease`).
 - **Evidence.**
@@ -159,9 +159,9 @@ the NGX-353 marker advance.
   through `--filter completed` / `--state failed`, and `workflow handoff`
   reporting `nextAction.code: rerun_failed_step` with the failed `stepId` plus
   `monitor.recovery: { code: "failed_required_step", stepId: <id> }`.
-- **Owner.** [`src/workflow-run-reducer.ts`](../src/workflow-run-reducer.ts)
-  (failure-path terminal state), [`src/workflow-status.ts`](../src/workflow-status.ts)
-  (filter buckets), [`src/workflow-handoff.ts`](../src/workflow-handoff.ts)
+- **Owner.** [`src/core/workflow/run-reducer.ts`](../src/core/workflow/run-reducer.ts)
+  (failure-path terminal state), [`src/core/workflow/status.ts`](../src/core/workflow/status.ts)
+  (filter buckets), [`src/core/workflow/handoff.ts`](../src/core/workflow/handoff.ts)
   (next-action surface).
 - **Evidence.**
   - Built-CLI smoke: `test/m7-e2e-smoke.test.ts` — "leaves no ghost active run when a
@@ -195,8 +195,8 @@ it. The end-to-end evidence is the built-CLI smoke under
   emitted identifiers feed straight into `workflow status` / `workflow handoff`
   without re-derivation.
 - **Owner.** [`src/commands/workflow/index.ts`](../src/commands/workflow/index.ts) (`workflowRunList`), reusing the M7
-  [`src/workflow-status.ts`](../src/workflow-status.ts) filter buckets and the
-  [`src/workflow-run-reducer.ts`](../src/workflow-run-reducer.ts) run state.
+  [`src/core/workflow/status.ts`](../src/core/workflow/status.ts) filter buckets and the
+  [`src/core/workflow/run-reducer.ts`](../src/core/workflow/run-reducer.ts) run state.
 - **Evidence.**
   - Built-CLI smoke: `test/m8-smoke.test.ts` — "composes list / approve / monitor
     / typed evidence linkage through the built CLI" asserts the imported run is
@@ -219,7 +219,7 @@ it. The end-to-end evidence is the built-CLI smoke under
   subsequent `workflow import` (upsert `ON CONFLICT(run_id, boundary)`, never
   deleted) and composes into status / handoff / monitor.
 - **Owner.** [`src/commands/workflow/index.ts`](../src/commands/workflow/index.ts) (`workflowRunApprove`) plus
-  [`src/workflow-run-import.ts`](../src/workflow-run-import.ts) (idempotent
+  [`src/core/workflow/run-import.ts`](../src/core/workflow/run-import.ts) (idempotent
   approval upsert).
 - **Evidence.**
   - Built-CLI smoke: `test/m8-smoke.test.ts` — "composes list / approve / monitor
@@ -240,7 +240,7 @@ it. The end-to-end evidence is the built-CLI smoke under
   idempotent replay. The required-chain derivation in `deriveWorkflowRunState`
   stays the authority on run-level state; M8 never bypasses it.
 - **Owner.** [`src/commands/workflow/index.ts`](../src/commands/workflow/index.ts) (`workflowRunUpdateStep`) plus
-  [`src/workflow-run-reducer.ts`](../src/workflow-run-reducer.ts)
+  [`src/core/workflow/run-reducer.ts`](../src/core/workflow/run-reducer.ts)
   (`deriveWorkflowRunState`).
 - **Evidence.**
   - Built-CLI smoke: `test/m8-smoke.test.ts` — "recovers a ghost-active run: flag,
@@ -260,9 +260,9 @@ it. The end-to-end evidence is the built-CLI smoke under
   ledger evidence still beats a stale monitor advisory, and whenever
   `needs_manual_recovery` is set the envelope forces disposition `recover` even
   over a terminally-succeeded substrate.
-- **Owner.** [`src/workflow-monitor-envelope.ts`](../src/workflow-monitor-envelope.ts)
+- **Owner.** [`src/core/workflow/monitor-envelope.ts`](../src/core/workflow/monitor-envelope.ts)
   (`buildWorkflowMonitorEnvelope`) over
-  [`src/workflow-monitor-state.ts`](../src/workflow-monitor-state.ts).
+  [`src/core/workflow/monitor-state.ts`](../src/core/workflow/monitor-state.ts).
 - **Evidence.**
   - Built-CLI smoke: `test/m8-smoke.test.ts` — the happy path ("composes list /
     approve / monitor / typed evidence linkage through the built CLI") asserts a
@@ -286,10 +286,10 @@ it. The end-to-end evidence is the built-CLI smoke under
   while the blocking condition persists and leaves `recovery.md` on disk as
   audit evidence. The run-scoped surface is a sibling of the M3 goal-scoped
   recovery contract, not a replacement.
-- **Owner.** [`src/workflow-run-recovery.ts`](../src/workflow-run-recovery.ts)
+- **Owner.** [`src/core/workflow/run-recovery.ts`](../src/core/workflow/run-recovery.ts)
   (`markWorkflowRunNeedsManualRecovery`,
   `clearWorkflowRunManualRecoveryGuarded`),
-  [`src/workflow-recovery-artifact.ts`](../src/workflow-recovery-artifact.ts)
+  [`src/core/workflow/recovery-artifact.ts`](../src/core/workflow/recovery-artifact.ts)
   (the `recovery.md` renderer), and
   [`src/commands/workflow/index.ts`](../src/commands/workflow/index.ts) (`workflowRunClearRecovery`).
 - **Evidence.**
@@ -362,7 +362,7 @@ M9 dogfood and live-resume slices add built-CLI smoke coverage.
   remain authoritative even if best-effort artifact rendering fails.
 - **Owner.** [`src/live-step-finalize.ts`](../src/live-step-finalize.ts),
   [`src/live-step-run-recovery.ts`](../src/live-step-run-recovery.ts), and
-  [`src/workflow-recovery-artifact.ts`](../src/workflow-recovery-artifact.ts).
+  [`src/core/workflow/recovery-artifact.ts`](../src/core/workflow/recovery-artifact.ts).
 - **Evidence.**
   - Unit: `test/live-step-finalize.test.ts` — missing, invalid JSON,
     non-RunnerResult, oversized, and symlink result documents return
@@ -424,9 +424,9 @@ that shipped workflow-first path.
   `executor_invocations` plus first `executor_rounds` scaffold rows.
   Register-only `daemon start` exits before the loop and remains inert.
 - **Owner.** [`src/cli.ts`](../src/cli.ts) (`daemonStart` wiring and loop summary
-  envelope), [`src/workflow-dispatch.ts`](../src/workflow-dispatch.ts),
-  [`src/workflow-dispatch-persist.ts`](../src/workflow-dispatch-persist.ts), and
-  [`src/workflow-dispatch-execute.ts`](../src/workflow-dispatch-execute.ts).
+  envelope), [`src/core/workflow/dispatch.ts`](../src/core/workflow/dispatch.ts),
+  [`src/core/workflow/dispatch-persist.ts`](../src/core/workflow/dispatch-persist.ts), and
+  [`src/core/workflow/dispatch-execute.ts`](../src/core/workflow/dispatch-execute.ts).
 - **Evidence.**
   - Unit / CLI: `test/workflow-dispatch.test.ts`,
     `test/workflow-dispatch-persist.test.ts`,
@@ -460,8 +460,8 @@ that shipped workflow-first path.
   phase-1 dispatchable set is exactly `goal-loop`, `one-shot`, `script`, and
   `no-mistakes`; `external-apply` and `subworkflow` stay fail-closed until their
   daemon-dispatchable adapters land or closeout explicitly defers them.
-- **Owner.** [`src/workflow-dispatch.ts`](../src/workflow-dispatch.ts) and
-  [`src/workflow-dispatch-execute.ts`](../src/workflow-dispatch-execute.ts).
+- **Owner.** [`src/core/workflow/dispatch.ts`](../src/core/workflow/dispatch.ts) and
+  [`src/core/workflow/dispatch-execute.ts`](../src/core/workflow/dispatch-execute.ts).
 - **Evidence.**
   - Unit: `test/workflow-dispatch.test.ts` pins the supportability decision and
     resolution-failure code mapping.
