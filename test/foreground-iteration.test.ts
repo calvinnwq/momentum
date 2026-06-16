@@ -9,12 +9,12 @@ import {
   FAKE_RUNNER_FAIL_ENV,
   FAKE_RUNNER_FIXTURE_FILENAME
 } from "../src/adapters/fake-runner.js";
-import { parseRunnerResult } from "../src/runner-result.js";
+import { parseRunnerResult } from "../src/core/executors/runner-result.js";
 import {
   initGoalArtifacts,
   resolveGoalArtifactPaths
 } from "../src/core/evidence/artifacts.js";
-import type { GoalSpec } from "../src/goal-spec.js";
+import type { GoalSpec } from "../src/core/goal/types.js";
 
 const tempRoots: string[] = [];
 

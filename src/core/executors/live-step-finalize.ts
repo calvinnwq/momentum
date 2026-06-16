@@ -65,11 +65,8 @@ import {
   type FinalizeResetTrigger
 } from "../repo/iteration-finalize.js";
 import { LIVE_STEP_WRAPPER_RESULT_MAX_BYTES } from "../../adapters/live-step-wrapper.js";
-import {
-  parseRunnerResult,
-  type CommitIntent,
-  type RunnerResult
-} from "../../runner-result.js";
+import { parseRunnerResult } from "./runner-result.js";
+import type { CommitIntent, RunnerResult } from "./types.js";
 import type {
   VerificationFailure,
   VerificationSuccess

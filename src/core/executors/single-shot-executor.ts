@@ -73,7 +73,7 @@ import type {
 } from "./loop-reducer.js";
 import type { ExecutorRoundUpdate } from "./loop-persist.js";
 import { LIVE_STEP_WRAPPER_RECOVERY_CODES } from "../../adapters/live-step-wrapper.js";
-import type { RunnerResult } from "../../runner-result.js";
+import type { RunnerResult } from "./types.js";
 
 /**
  * The executor families this adapter serves: the single-invocation families from

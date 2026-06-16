@@ -66,7 +66,7 @@ import type {
 } from "../src/core/workflow/step-executor.js";
 import type { WorkflowApprovalBoundary } from "../src/core/workflow/run-reducer.js";
 import type { FinalizeLiveWorkflowStepFromResultFileResult } from "../src/core/executors/live-step-finalize.js";
-import type { RunnerResult } from "../src/runner-result.js";
+import type { RunnerResult } from "../src/core/executors/types.js";
 
 /**
  * NGX-372 full adapter E2E proof (Adapter Test Coverage milestone).

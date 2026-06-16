@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { finalizeIteration } from "../src/core/repo/iteration-finalize.js";
-import type { CommitIntent } from "../src/runner-result.js";
+import type { CommitIntent } from "../src/core/executors/types.js";
 
 const ZERO_SHA = "0".repeat(40);
 const tempRoots: string[] = [];

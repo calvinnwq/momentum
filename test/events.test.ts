@@ -8,7 +8,7 @@ import {
   QUEUE_EVENT_TYPES,
   appendQueueEvent,
   isQueueEventType
-} from "../src/events.js";
+} from "../src/shared/events.js";
 
 const tempRoots: string[] = [];
 

@@ -82,7 +82,7 @@ import type {
 } from "./loop-reducer.js";
 import type { ExecutorRoundUpdate } from "./loop-persist.js";
 import type { FinalizeLiveWorkflowStepFromResultFileResult } from "./live-step-finalize.js";
-import type { RunnerResult } from "../../runner-result.js";
+import type { RunnerResult } from "./types.js";
 
 /**
  * The finalize outcomes a goal-loop round consumes: exactly the discriminant of

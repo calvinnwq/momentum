@@ -10,14 +10,14 @@
  */
 
 import { runAcpRunner } from "./acp-runner.js";
-import type { GoalSpec } from "../goal-spec.js";
+import type { GoalSpec } from "../core/goal/types.js";
 import { runFakeRunner } from "./fake-runner.js";
 import {
   BUILTIN_RUNNER_KINDS,
   type BuiltinRunnerKind,
   isBuiltinRunnerKind
 } from "../core/executors/runner-profile.js";
-import type { RunnerResult } from "../runner-result.js";
+import type { RunnerResult } from "../core/executors/types.js";
 import { runTrustedShellRunner } from "./trusted-shell-runner.js";
 
 export type RunnerAdapterErrorCode =

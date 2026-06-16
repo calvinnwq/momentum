@@ -1,4 +1,4 @@
-import type { GoalSpec } from "../../goal-spec.js";
+import type { GoalSpec } from "./types.js";
 import type { SourceItemSummary } from "../source/items.js";
 
 export const DEFAULT_SOURCE_CONTEXT_MAX_CHARS = 2000;

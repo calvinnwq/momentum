@@ -34,7 +34,7 @@ import {
   type SingleShotRoundArtifacts,
   type SingleShotRoundSelection
 } from "../src/core/executors/single-shot-executor.js";
-import type { RunnerResult } from "../src/runner-result.js";
+import type { RunnerResult } from "../src/core/executors/types.js";
 
 const COMPLETION_SET = new Set<string>(EXECUTOR_COMPLETION_CLASSIFICATIONS);
 const ROUND_TERMINAL_SET = new Set<string>(EXECUTOR_ROUND_TERMINAL_STATES);

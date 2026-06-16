@@ -96,7 +96,7 @@ import {
   type PlanGoalLoopRoundStartInput
 } from "./goal-loop-executor.js";
 import type { FinalizeLiveWorkflowStepFromResultFileResult } from "./live-step-finalize.js";
-import type { RunnerResult } from "../../runner-result.js";
+import type { RunnerResult } from "./types.js";
 
 /**
  * The output of one bounded mechanism run: the normalized runner result (or

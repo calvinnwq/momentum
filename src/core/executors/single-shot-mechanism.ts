@@ -31,7 +31,7 @@ import {
   type LiveStepWrapperRecoveryCode
 } from "../../adapters/live-step-wrapper.js";
 import type { LiveWrapperConfig } from "../../adapters/live-wrapper-registry.js";
-import type { CommitIntent } from "../../runner-result.js";
+import type { CommitIntent } from "./types.js";
 import type {
   SingleShotArtifactPointer,
   SingleShotRoundArtifacts,

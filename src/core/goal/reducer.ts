@@ -1,7 +1,7 @@
 import path from "node:path";
 
 import type { MomentumDb } from "../../adapters/db.js";
-import { QUEUE_EVENT_TYPES, appendQueueEvent } from "../../events.js";
+import { QUEUE_EVENT_TYPES, appendQueueEvent } from "../../shared/events.js";
 import {
   buildIterationIdempotencyKey,
   getGoal,

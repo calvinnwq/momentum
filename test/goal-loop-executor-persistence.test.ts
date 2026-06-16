@@ -17,7 +17,7 @@ import {
   resolveGoalLoopRoundSelection
 } from "../src/core/executors/goal-loop-executor.js";
 import type { FinalizeLiveWorkflowStepFromResultFileResult } from "../src/core/executors/live-step-finalize.js";
-import type { RunnerResult } from "../src/runner-result.js";
+import type { RunnerResult } from "../src/core/executors/types.js";
 
 // This is the integration twin of the pure projections in
 // goal-loop-executor.test.ts: it drives a goal-loop round's start record and the

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import type { GoalSpec } from "../src/goal-spec.js";
+import type { GoalSpec } from "../src/core/goal/types.js";
 import type { RunnerAdapterInput } from "../src/adapters/runner-adapter.js";
 import { runTrustedShellRunner } from "../src/adapters/trusted-shell-runner.js";
 

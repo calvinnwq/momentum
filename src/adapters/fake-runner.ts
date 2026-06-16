@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import type { RunnerResult } from "../runner-result.js";
+import type { RunnerResult } from "../core/executors/types.js";
 
 export const FAKE_RUNNER_FIXTURE_FILENAME = "momentum-fixture.txt";
 

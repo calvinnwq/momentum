@@ -2,7 +2,7 @@ import type { MomentumDb } from "../../adapters/db.js";
 import {
   appendQueueEvent,
   QUEUE_EVENT_TYPES
-} from "../../events.js";
+} from "../../shared/events.js";
 import {
   claimPendingGoalIterationJob,
   heartbeatGoalIterationJob,
@@ -18,7 +18,7 @@ import {
   ensureIterationArtifactDir,
   resolveGoalArtifactPaths
 } from "../evidence/artifacts.js";
-import { parseGoalSpecFile } from "../../goal-spec.js";
+import { parseGoalSpecFile } from "../goal/spec.js";
 import {
   executeIterationJob,
   type GoalIterationState,

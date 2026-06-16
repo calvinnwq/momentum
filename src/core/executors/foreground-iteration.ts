@@ -4,7 +4,7 @@ import fs from "node:fs";
 import type { GoalArtifactPaths } from "../evidence/artifacts.js";
 import { ensureMomentumBranch } from "../repo/branch-manager.js";
 import { resetToBase } from "../../adapters/git-transaction.js";
-import type { GoalSpec } from "../../goal-spec.js";
+import type { GoalSpec } from "../goal/types.js";
 import {
   finalizeIteration,
   type FinalizeIterationResult
@@ -22,7 +22,7 @@ import {
   type RunnerAdapterErrorCode,
   type RunnerAdapterResult
 } from "../../adapters/runner-adapter.js";
-import type { RunnerResult } from "../../runner-result.js";
+import type { RunnerResult } from "./types.js";
 
 export type ForegroundIterationErrorCode =
   | "invalid_input"

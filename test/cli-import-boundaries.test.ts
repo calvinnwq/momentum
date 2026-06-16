@@ -27,23 +27,13 @@ type RootSrcException = {
   reason: string;
 };
 
-const TRANSITIONAL_ROOT_SRC_EXCEPTIONS = {
-  "src/events.ts": {
-    ownerIssue: "NGX-450",
-    targetHome: "src/shared/events.ts",
-    reason: "Cross-cutting event types need a shared/type-owned home."
-  },
-  "src/goal-spec.ts": {
-    ownerIssue: "NGX-450",
-    targetHome: "src/core/goal/types.ts",
-    reason: "Goal specification types should live beside goal behavior."
-  },
-  "src/runner-result.ts": {
-    ownerIssue: "NGX-450",
-    targetHome: "src/core/executors/types.ts",
-    reason: "Runner result shapes and parsing belong beside executor behavior."
-  }
-} satisfies Record<string, RootSrcException>;
+// Every ARCH-02..ARCH-06 transitional root module has now been drained into its
+// owned taxonomy home; NGX-450 moved the final one (src/runner-result.ts) into
+// src/core/executors/types.ts (shapes) and src/core/executors/runner-result.ts
+// (parsing). This stays declared rather than deleted so a future migration slice
+// can re-add a named entry with owner issue, target home, and removal reason if
+// root migration debt ever becomes unavoidable again.
+const TRANSITIONAL_ROOT_SRC_EXCEPTIONS: Record<string, RootSrcException> = {};
 
 // Renderer -> transitional-root type-only edges. Empty after NGX-449 moved the
 // daemon / evidence / goal / source / intent / project modules into
@@ -55,6 +45,10 @@ const RENDERER_TYPE_ONLY_TRANSITIONAL_IMPORTS = new Set<string>();
 // NGX-449 relocated the daemon stale-threshold defaults into
 // src/config/daemon-defaults, which renderers may import at runtime directly.
 const RENDERER_READONLY_TRANSITIONAL_IMPORTS = new Map<string, Set<string>>();
+
+const FORBIDDEN_RENDERER_RUNTIME_SHARED_MODULES = new Set<string>([
+  "src/shared/events.ts"
+]);
 
 type ImportReference = {
   specifier: string;
@@ -274,11 +268,16 @@ function isPersistenceOrMutationModule(file: string): boolean {
   );
 }
 
+function isForbiddenRendererRuntimeSharedModule(file: string): boolean {
+  return FORBIDDEN_RENDERER_RUNTIME_SHARED_MODULES.has(file);
+}
+
 function isForbiddenRendererRuntimeTarget(file: string): boolean {
   return (
     isCliEntrypoint(file) ||
     isCommandModule(file) ||
     isAdapterModule(file) ||
+    isForbiddenRendererRuntimeSharedModule(file) ||
     isPersistenceOrMutationModule(file)
   );
 }
@@ -371,13 +370,15 @@ describe("M11 CLI import boundaries", () => {
     ]);
   });
 
-  it("classifies transitional root and future core source modules as renderer runtime boundaries", () => {
-    // Remaining transitional-root exceptions (NGX-450) still classify as boundaries.
-    expect(isPersistenceOrMutationModule("src/goal-spec.ts")).toBe(true);
-    expect(isPersistenceOrMutationModule("src/runner-result.ts")).toBe(true);
-    // Owned core/domain homes (post NGX-449) classify as renderer runtime boundaries.
+  it("classifies core source modules as renderer runtime boundaries", () => {
+    // The runner-result shapes/parsing drained into src/core/executors (NGX-450);
+    // its owned core home classifies as a renderer runtime boundary.
+    expect(isPersistenceOrMutationModule("src/core/executors/types.ts")).toBe(true);
+    expect(isPersistenceOrMutationModule("src/core/executors/runner-result.ts")).toBe(true);
+    // Owned core/domain homes (post NGX-449/NGX-450) classify as renderer runtime boundaries.
     expect(isPersistenceOrMutationModule("src/core/daemon/status.ts")).toBe(true);
     expect(isPersistenceOrMutationModule("src/core/goal/status.ts")).toBe(true);
+    expect(isPersistenceOrMutationModule("src/core/goal/types.ts")).toBe(true);
     expect(isPersistenceOrMutationModule("src/core/source/context.ts")).toBe(true);
     expect(isPersistenceOrMutationModule("src/core/evidence/handoff.ts")).toBe(true);
     expect(isPersistenceOrMutationModule("src/core/intent/policy.ts")).toBe(true);
@@ -387,6 +388,23 @@ describe("M11 CLI import boundaries", () => {
   it("classifies CLI entrypoints as forbidden renderer runtime targets", () => {
     expect(isForbiddenRendererRuntimeTarget("src/index.ts")).toBe(true);
     expect(isForbiddenRendererRuntimeTarget("src/cli.ts")).toBe(true);
+  });
+
+  it("classifies shared queue events as a forbidden renderer runtime target", () => {
+    expect(isForbiddenRendererRuntimeTarget("src/shared/events.ts")).toBe(true);
+  });
+
+  it("rejects renderer runtime imports from shared queue events", () => {
+    const edge: ImportEdge = {
+      from: "src/renderers/status.ts",
+      to: "src/shared/events.ts",
+      specifier: "../shared/events.js",
+      isTypeOnly: false,
+      runtimeBindings: ["appendQueueEvent"]
+    };
+
+    expect(isForbiddenRendererRuntimeTarget(edge.to)).toBe(true);
+    expect(rendererTransitionalImportIsAllowed(edge)).toBe(false);
   });
 
   it("allows only explicit renderer transitional imports", () => {
@@ -495,11 +513,8 @@ describe("M11 CLI import boundaries", () => {
         exception.targetHome.split("/").slice(0, 3).join("/")
       )
     );
-    expect([...documentedTargetPrefixes].sort()).toEqual([
-      "src/core/executors",
-      "src/core/goal",
-      "src/shared/events.ts"
-    ]);
+    // Empty now that NGX-450 drained the last transitional root module.
+    expect([...documentedTargetPrefixes].sort()).toEqual([]);
   });
 
   it("keeps core/domain modules independent from commands and renderers", () => {

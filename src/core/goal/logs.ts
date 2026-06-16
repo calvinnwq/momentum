@@ -8,7 +8,7 @@ import {
 import { resolveDataDir, type DataDirOptions } from "../../config/data-dir.js";
 import { openDb, type MomentumDb } from "../../adapters/db.js";
 import { getGoal, type GoalRow } from "./init.js";
-import { parseRunnerResult } from "../../runner-result.js";
+import { parseRunnerResult } from "../executors/runner-result.js";
 import {
   listSourceItemSummariesForGoal,
   type SourceItemSummary

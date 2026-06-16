@@ -23,7 +23,7 @@ import {
   parseLiveWrapperProfile,
   type LiveWrapperConfig
 } from "../src/adapters/live-wrapper-registry.js";
-import type { RunnerResult } from "../src/runner-result.js";
+import type { RunnerResult } from "../src/core/executors/types.js";
 
 const tempRoots: string[] = [];
 
