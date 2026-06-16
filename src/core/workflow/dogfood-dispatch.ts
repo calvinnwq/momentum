@@ -37,21 +37,21 @@
  * manual-recovery condition, the one unsafe move this gate exists to prevent.
  */
 
-import type { MomentumDb } from "./adapters/db.js";
-import { releaseWorkflowLease } from "./workflow-leases.js";
-import { deriveWorkflowMonitorState } from "./workflow-monitor-state.js";
+import type { MomentumDb } from "../../adapters/db.js";
+import { releaseWorkflowLease } from "./leases.js";
+import { deriveWorkflowMonitorState } from "./monitor-state.js";
 import {
   loadWorkflowLeaseRecords,
   loadWorkflowStepRecords,
   WORKFLOW_DISPATCH_RESULT_STATUS
-} from "./workflow-dispatch-execute.js";
-import { finishWorkflowStep } from "./workflow-step-transitions.js";
+} from "./dispatch-execute.js";
+import { finishWorkflowStep } from "./step-transitions.js";
 import type {
   ClaimedWorkflowStep,
   WorkflowStepDispatch,
   WorkflowStepDispatchContext,
   WorkflowStepDispatchResult
-} from "./workflow-scheduler.js";
+} from "./scheduler.js";
 
 /**
  * `result_digest` stamped on a step this fixture terminalizes, so durable state

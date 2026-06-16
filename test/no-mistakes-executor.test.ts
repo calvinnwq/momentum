@@ -8,7 +8,7 @@ import {
   transitionExecutorInvocation,
   transitionExecutorRound
 } from "../src/executor-loop-reducer.js";
-import { isWorkflowExecutorFamily } from "../src/workflow-definition.js";
+import { isWorkflowExecutorFamily } from "../src/core/workflow/definition.js";
 import {
   NO_MISTAKES_CI_STATES,
   NO_MISTAKES_EXECUTOR_FAMILIES,

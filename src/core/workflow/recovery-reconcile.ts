@@ -35,22 +35,22 @@
  * classification.
  */
 
-import type { MomentumDb } from "./adapters/db.js";
+import type { MomentumDb } from "../../adapters/db.js";
 import {
   loadWorkflowRunDetail,
   type WorkflowRunDetail
-} from "./workflow-status.js";
+} from "./status.js";
 import {
   isBlockingWorkflowRecoveryCode,
   markWorkflowRunNeedsManualRecovery
-} from "./workflow-run-recovery.js";
+} from "./run-recovery.js";
 import {
   buildWorkflowRecoveryArtifactInput,
   writeWorkflowRecoveryArtifact,
   writeWorkflowRecoveryArtifactInRunDir,
   type WorkflowRecoveryEvidencePointer
-} from "./workflow-recovery-artifact.js";
-import type { WorkflowMonitorRecoveryCode } from "./workflow-monitor-state.js";
+} from "./recovery-artifact.js";
+import type { WorkflowMonitorRecoveryCode } from "./monitor-state.js";
 
 export type ReconcileWorkflowRunManualRecoveryInput = {
   runId: string;

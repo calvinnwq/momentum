@@ -40,7 +40,7 @@
 import {
   EXECUTOR_HUMAN_GATE_TYPES,
   type ExecutorHumanGateType
-} from "./executor-loop-reducer.js";
+} from "../../executor-loop-reducer.js";
 
 /**
  * Durable human-gate types (contract "Human Gates"). Re-exported from the

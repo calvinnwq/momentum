@@ -4,9 +4,9 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
-import { CODING_WORKFLOW_DEFINITION } from "../src/workflow-definition.js";
-import { persistWorkflowDefinition } from "../src/workflow-definition-persist.js";
-import { persistWorkflowRunStart } from "../src/workflow-run-start-persist.js";
+import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition.js";
+import { persistWorkflowDefinition } from "../src/core/workflow/definition-persist.js";
+import { persistWorkflowRunStart } from "../src/core/workflow/run-start-persist.js";
 import {
   reconcileLinearSource,
   type LinearReconciliationClient,
@@ -18,14 +18,14 @@ import {
   listSourceSnapshotsForItem
 } from "../src/source-items.js";
 import { listSourceReconciliationRuns } from "../src/source-reconciliation-runs.js";
-import { claimRunnableWorkflowStep } from "../src/workflow-scheduler.js";
-import { getWorkflowLease } from "../src/workflow-leases.js";
-import { listWorkflowGatesForRun } from "../src/workflow-gate-persist.js";
-import { getWorkflowRunManualRecoveryState } from "../src/workflow-run-recovery.js";
+import { claimRunnableWorkflowStep } from "../src/core/workflow/scheduler.js";
+import { getWorkflowLease } from "../src/core/workflow/leases.js";
+import { listWorkflowGatesForRun } from "../src/core/workflow/gate-persist.js";
+import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run-recovery.js";
 import {
   executeWorkflowStepDispatch,
   WORKFLOW_DISPATCH_RESULT_STATUS
-} from "../src/workflow-dispatch-execute.js";
+} from "../src/core/workflow/dispatch-execute.js";
 
 const NOW = 1_700_000_000_000;
 const WORKER = "ngx-371-stub-worker";

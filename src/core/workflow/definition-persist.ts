@@ -23,7 +23,7 @@
  *     loaded definition always round-trips to what was last persisted.
  */
 
-import type { MomentumDb } from "./adapters/db.js";
+import type { MomentumDb } from "../../adapters/db.js";
 import {
   BUILT_IN_WORKFLOW_DEFINITIONS,
   validateWorkflowDefinition,
@@ -31,8 +31,8 @@ import {
   type WorkflowDefinition,
   type WorkflowDefinitionValidationError,
   type WorkflowExecutorFamily
-} from "./workflow-definition.js";
-import type { WorkflowStepKind } from "./workflow-run-reducer.js";
+} from "./definition.js";
+import type { WorkflowStepKind } from "./run-reducer.js";
 
 /**
  * Thrown by {@link persistWorkflowDefinition} when the supplied value is not a

@@ -55,7 +55,7 @@
 
 import type { MomentumDb } from "./adapters/db.js";
 import type { FinalizeLiveWorkflowStepFromResultFileResult } from "./live-step-finalize.js";
-import { markWorkflowRunNeedsManualRecovery } from "./workflow-run-recovery.js";
+import { markWorkflowRunNeedsManualRecovery } from "./core/workflow/run-recovery.js";
 import {
   WORKFLOW_LIVE_RUN_RECOVERY_CODES,
   writeWorkflowRecoveryArtifact,
@@ -64,7 +64,7 @@ import {
   type WorkflowRecoveryArtifactInput,
   type WorkflowRecoveryEvidencePointer,
   type WorkflowRecoveryNextAction
-} from "./workflow-recovery-artifact.js";
+} from "./core/workflow/recovery-artifact.js";
 
 export type PersistLiveWorkflowFinalizeRecoveryInput = {
   runId: string;

@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { runCli } from "../src/cli.js";
 import { openDb } from "../src/adapters/db.js";
-import { DOGFOOD_TERMINALIZE_DISPATCH_ENV_VAR } from "../src/workflow-dogfood-dispatch.js";
+import { DOGFOOD_TERMINALIZE_DISPATCH_ENV_VAR } from "../src/core/workflow/dogfood-dispatch.js";
 
 type RunResult = {
   code: number;

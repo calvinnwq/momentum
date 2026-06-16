@@ -17,11 +17,11 @@ import {
   type WorkflowStepDispatch,
   type WorkflowStepDispatchContext,
   type WorkflowStepDispatchResult
-} from "../src/workflow-scheduler.js";
-import { getWorkflowLease } from "../src/workflow-leases.js";
-import { resolveWorkflowRecoveryArtifactPath } from "../src/workflow-recovery-artifact.js";
-import { getWorkflowRunManualRecoveryState } from "../src/workflow-run-recovery.js";
-import { deriveWorkflowRunState } from "../src/workflow-run-reducer.js";
+} from "../src/core/workflow/scheduler.js";
+import { getWorkflowLease } from "../src/core/workflow/leases.js";
+import { resolveWorkflowRecoveryArtifactPath } from "../src/core/workflow/recovery-artifact.js";
+import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run-recovery.js";
+import { deriveWorkflowRunState } from "../src/core/workflow/run-reducer.js";
 import type {
   WorkflowLeaseKind,
   WorkflowLeaseRecord,
@@ -29,7 +29,7 @@ import type {
   WorkflowRunState,
   WorkflowStepKind,
   WorkflowStepState
-} from "../src/workflow-run-reducer.js";
+} from "../src/core/workflow/run-reducer.js";
 
 const NOW = 1_730_000_000_000;
 

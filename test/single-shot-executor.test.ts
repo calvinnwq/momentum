@@ -11,7 +11,7 @@ import {
   transitionExecutorInvocation,
   type WorkflowExecutorFamily
 } from "../src/executor-loop-reducer.js";
-import { isWorkflowExecutorFamily } from "../src/workflow-definition.js";
+import { isWorkflowExecutorFamily } from "../src/core/workflow/definition.js";
 import {
   SINGLE_SHOT_BLOCKED_RECOVERY_CODES,
   SINGLE_SHOT_EXECUTOR_FAMILIES,

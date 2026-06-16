@@ -29,12 +29,12 @@
  *     every upsert so downstream tooling can detect re-ingest.
  */
 
-import type { MomentumDb } from "./adapters/db.js";
+import type { MomentumDb } from "../../adapters/db.js";
 import type {
   WorkflowRunImport,
   WorkflowRunImportApproval,
   WorkflowRunImportStep
-} from "./workflow-run-import.js";
+} from "./run-import.js";
 import {
   deriveWorkflowRunState,
   classifyWorkflowLease,
@@ -47,7 +47,7 @@ import {
   type WorkflowRunState,
   type WorkflowStepKind,
   type WorkflowStepRecord
-} from "./workflow-run-reducer.js";
+} from "./run-reducer.js";
 
 export type PersistWorkflowRunImportOptions = {
   now?: number;

@@ -30,7 +30,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 
-import { isSafeWorkflowRunPathSegment } from "./workflow-recovery-artifact.js";
+import { isSafeWorkflowRunPathSegment } from "./recovery-artifact.js";
 import {
   WORKFLOW_APPROVAL_BOUNDARIES,
   WORKFLOW_STEP_KINDS,
@@ -39,7 +39,7 @@ import {
   type WorkflowRunState,
   type WorkflowStepKind,
   type WorkflowStepState
-} from "./workflow-run-reducer.js";
+} from "./run-reducer.js";
 
 export const WORKFLOW_RUN_IMPORT_SOURCE = "agent-workflow" as const;
 

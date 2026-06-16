@@ -313,126 +313,6 @@ const TRANSITIONAL_ROOT_SRC_EXCEPTIONS = {
     targetHome: "src/core/daemon/worker-run.ts",
     reason: "Worker run compatibility behavior moves with daemon ownership."
   },
-  "src/workflow-definition-persist.ts": {
-    ownerIssue: "NGX-447",
-    targetHome: "src/core/workflow/definition-persist.ts",
-    reason: "Workflow definition persistence moves with workflow core ownership."
-  },
-  "src/workflow-definition.ts": {
-    ownerIssue: "NGX-447",
-    targetHome: "src/core/workflow/definition.ts",
-    reason: "Workflow definitions move with workflow core ownership."
-  },
-  "src/workflow-dispatch-execute.ts": {
-    ownerIssue: "NGX-447",
-    targetHome: "src/core/workflow/dispatch-execute.ts",
-    reason: "Workflow dispatch execution moves with workflow core ownership."
-  },
-  "src/workflow-dispatch-persist.ts": {
-    ownerIssue: "NGX-447",
-    targetHome: "src/core/workflow/dispatch-persist.ts",
-    reason: "Workflow dispatch persistence moves with workflow core ownership."
-  },
-  "src/workflow-dispatch.ts": {
-    ownerIssue: "NGX-447",
-    targetHome: "src/core/workflow/dispatch.ts",
-    reason: "Workflow dispatch planning moves with workflow core ownership."
-  },
-  "src/workflow-dogfood-dispatch.ts": {
-    ownerIssue: "NGX-447",
-    targetHome: "src/core/workflow/dogfood-dispatch.ts",
-    reason: "Workflow dogfood dispatch helpers move with workflow core ownership."
-  },
-  "src/workflow-gate-persist.ts": {
-    ownerIssue: "NGX-447",
-    targetHome: "src/core/workflow/gate-persist.ts",
-    reason: "Workflow gate persistence moves with workflow core ownership."
-  },
-  "src/workflow-gate.ts": {
-    ownerIssue: "NGX-447",
-    targetHome: "src/core/workflow/gate.ts",
-    reason: "Workflow gates move with workflow core ownership."
-  },
-  "src/workflow-handoff.ts": {
-    ownerIssue: "NGX-447",
-    targetHome: "src/core/workflow/handoff.ts",
-    reason: "Workflow handoff behavior moves with workflow core ownership."
-  },
-  "src/workflow-leases.ts": {
-    ownerIssue: "NGX-447",
-    targetHome: "src/core/workflow/leases.ts",
-    reason: "Workflow leases move with workflow core ownership."
-  },
-  "src/workflow-monitor-envelope.ts": {
-    ownerIssue: "NGX-447",
-    targetHome: "src/core/workflow/monitor-envelope.ts",
-    reason: "Workflow monitor envelopes move with workflow core ownership."
-  },
-  "src/workflow-monitor-state.ts": {
-    ownerIssue: "NGX-447",
-    targetHome: "src/core/workflow/monitor-state.ts",
-    reason: "Workflow monitor state moves with workflow core ownership."
-  },
-  "src/workflow-recovery-artifact.ts": {
-    ownerIssue: "NGX-447",
-    targetHome: "src/core/workflow/recovery-artifact.ts",
-    reason: "Workflow recovery artifacts move with workflow core ownership."
-  },
-  "src/workflow-recovery-reconcile.ts": {
-    ownerIssue: "NGX-447",
-    targetHome: "src/core/workflow/recovery-reconcile.ts",
-    reason: "Workflow recovery reconciliation moves with workflow core ownership."
-  },
-  "src/workflow-run-import-persist.ts": {
-    ownerIssue: "NGX-447",
-    targetHome: "src/core/workflow/run-import-persist.ts",
-    reason: "Workflow import persistence moves with workflow core ownership."
-  },
-  "src/workflow-run-import.ts": {
-    ownerIssue: "NGX-447",
-    targetHome: "src/core/workflow/run-import.ts",
-    reason: "Workflow run import behavior moves with workflow core ownership."
-  },
-  "src/workflow-run-recovery.ts": {
-    ownerIssue: "NGX-447",
-    targetHome: "src/core/workflow/run-recovery.ts",
-    reason: "Workflow run recovery state moves with workflow core ownership."
-  },
-  "src/workflow-run-reducer.ts": {
-    ownerIssue: "NGX-447",
-    targetHome: "src/core/workflow/run-reducer.ts",
-    reason: "Workflow run reducer behavior moves with workflow core ownership."
-  },
-  "src/workflow-run-start-persist.ts": {
-    ownerIssue: "NGX-447",
-    targetHome: "src/core/workflow/run-start-persist.ts",
-    reason: "Workflow run start persistence moves with workflow core ownership."
-  },
-  "src/workflow-run-start.ts": {
-    ownerIssue: "NGX-447",
-    targetHome: "src/core/workflow/run-start.ts",
-    reason: "Workflow run start behavior moves with workflow core ownership."
-  },
-  "src/workflow-scheduler.ts": {
-    ownerIssue: "NGX-447",
-    targetHome: "src/core/workflow/scheduler.ts",
-    reason: "Workflow scheduling behavior moves with workflow core ownership."
-  },
-  "src/workflow-status.ts": {
-    ownerIssue: "NGX-447",
-    targetHome: "src/core/workflow/status.ts",
-    reason: "Workflow status behavior moves with workflow core ownership."
-  },
-  "src/workflow-step-executor.ts": {
-    ownerIssue: "NGX-447",
-    targetHome: "src/core/workflow/step-executor.ts",
-    reason: "Workflow step executor registry moves with workflow core ownership."
-  },
-  "src/workflow-step-transitions.ts": {
-    ownerIssue: "NGX-447",
-    targetHome: "src/core/workflow/step-transitions.ts",
-    reason: "Workflow step transition behavior moves with workflow core ownership."
-  }
 } satisfies Record<string, RootSrcException>;
 
 const RENDERER_TYPE_ONLY_TRANSITIONAL_IMPORTS = new Set([
@@ -459,17 +339,6 @@ const RENDERER_TYPE_ONLY_TRANSITIONAL_IMPORTS = new Set([
   "src/renderers/status.ts -> src/momentum-policy.ts",
   "src/renderers/worker.ts -> src/daemon-status.ts",
   "src/renderers/worker.ts -> src/worker-run.ts",
-  "src/renderers/workflow.ts -> src/workflow-gate-persist.ts",
-  "src/renderers/workflow.ts -> src/workflow-handoff.ts",
-  "src/renderers/workflow.ts -> src/workflow-monitor-envelope.ts",
-  "src/renderers/workflow.ts -> src/workflow-monitor-state.ts",
-  "src/renderers/workflow.ts -> src/workflow-recovery-reconcile.ts",
-  "src/renderers/workflow.ts -> src/workflow-run-import.ts",
-  "src/renderers/workflow.ts -> src/workflow-run-import-persist.ts",
-  "src/renderers/workflow.ts -> src/workflow-run-recovery.ts",
-  "src/renderers/workflow.ts -> src/workflow-run-start.ts",
-  "src/renderers/workflow.ts -> src/workflow-run-start-persist.ts",
-  "src/renderers/workflow.ts -> src/workflow-status.ts"
 ]);
 
 const RENDERER_READONLY_TRANSITIONAL_IMPORTS = new Map([
@@ -949,7 +818,6 @@ describe("M11 CLI import boundaries", () => {
       "src/core/intent",
       "src/core/repo",
       "src/core/source",
-      "src/core/workflow",
       "src/shared/events.ts"
     ]);
   });

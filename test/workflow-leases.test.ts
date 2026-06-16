@@ -9,8 +9,8 @@ import {
   getWorkflowLease,
   heartbeatWorkflowLease,
   releaseWorkflowLease
-} from "../src/workflow-leases.js";
-import { classifyWorkflowLease } from "../src/workflow-run-reducer.js";
+} from "../src/core/workflow/leases.js";
+import { classifyWorkflowLease } from "../src/core/workflow/run-reducer.js";
 
 const tempRoots: string[] = [];
 

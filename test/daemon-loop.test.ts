@@ -44,8 +44,8 @@ import {
   type WorkflowStepDispatch,
   type WorkflowStepDispatchContext,
   type WorkflowStepDispatchResult
-} from "../src/workflow-scheduler.js";
-import { getWorkflowLease } from "../src/workflow-leases.js";
+} from "../src/core/workflow/scheduler.js";
+import { getWorkflowLease } from "../src/core/workflow/leases.js";
 
 const tempRoots: string[] = [];
 

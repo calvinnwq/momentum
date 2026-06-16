@@ -4,9 +4,9 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
-import { CODING_WORKFLOW_DEFINITION } from "../src/workflow-definition.js";
-import { persistWorkflowDefinition } from "../src/workflow-definition-persist.js";
-import { persistWorkflowRunStart } from "../src/workflow-run-start-persist.js";
+import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition.js";
+import { persistWorkflowDefinition } from "../src/core/workflow/definition-persist.js";
+import { persistWorkflowRunStart } from "../src/core/workflow/run-start-persist.js";
 import {
   reconcileLinearSource,
   type LinearReconciliationClient,
@@ -18,14 +18,14 @@ import {
   listSourceSnapshotsForItem
 } from "../src/source-items.js";
 import { listSourceReconciliationRuns } from "../src/source-reconciliation-runs.js";
-import { claimRunnableWorkflowStep } from "../src/workflow-scheduler.js";
-import { getWorkflowLease } from "../src/workflow-leases.js";
-import { listWorkflowGatesForRun } from "../src/workflow-gate-persist.js";
-import { getWorkflowRunManualRecoveryState } from "../src/workflow-run-recovery.js";
+import { claimRunnableWorkflowStep } from "../src/core/workflow/scheduler.js";
+import { getWorkflowLease } from "../src/core/workflow/leases.js";
+import { listWorkflowGatesForRun } from "../src/core/workflow/gate-persist.js";
+import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run-recovery.js";
 import {
   executeWorkflowStepDispatch,
   WORKFLOW_DISPATCH_RESULT_STATUS
-} from "../src/workflow-dispatch-execute.js";
+} from "../src/core/workflow/dispatch-execute.js";
 import {
   listExecutorArtifactsForRound,
   listExecutorCheckpointsForRound,
@@ -58,13 +58,13 @@ import {
   LIVE_STEP_DEFAULT_LEASE_KIND,
   runLiveWorkflowStep
 } from "../src/live-step-orchestrator.js";
-import { getWorkflowStep } from "../src/workflow-step-transitions.js";
+import { getWorkflowStep } from "../src/core/workflow/step-transitions.js";
 import type {
   WorkflowStepExecutor,
   WorkflowStepExecutorDispatchResult,
   WorkflowStepExecutorInput
-} from "../src/workflow-step-executor.js";
-import type { WorkflowApprovalBoundary } from "../src/workflow-run-reducer.js";
+} from "../src/core/workflow/step-executor.js";
+import type { WorkflowApprovalBoundary } from "../src/core/workflow/run-reducer.js";
 import type { FinalizeLiveWorkflowStepFromResultFileResult } from "../src/live-step-finalize.js";
 import type { RunnerResult } from "../src/runner-result.js";
 

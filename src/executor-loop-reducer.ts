@@ -44,10 +44,10 @@
  *     `StepDefinition.executor`.
  */
 
-import type { WorkflowExecutorFamily } from "./workflow-definition.js";
-import type { TransitionResult } from "./workflow-run-reducer.js";
+import type { WorkflowExecutorFamily } from "./core/workflow/definition.js";
+import type { TransitionResult } from "./core/workflow/run-reducer.js";
 
-export type { WorkflowExecutorFamily } from "./workflow-definition.js";
+export type { WorkflowExecutorFamily } from "./core/workflow/definition.js";
 
 /**
  * Executor invocation states (contract "Executor States"). One invocation is a

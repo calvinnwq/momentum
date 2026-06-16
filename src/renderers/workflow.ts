@@ -1,12 +1,12 @@
-import type { WorkflowGateRecord } from "../workflow-gate-persist.js";
-import type { WorkflowHandoffEnvelope } from "../workflow-handoff.js";
-import type { WorkflowMonitorEnvelope } from "../workflow-monitor-envelope.js";
-import type { WorkflowMonitorState } from "../workflow-monitor-state.js";
-import type { WorkflowRunImport, WorkflowRunImportDiagnostic } from "../workflow-run-import.js";
-import type { PersistWorkflowRunImportSummary } from "../workflow-run-import-persist.js";
-import type { WorkflowRunManualRecoveryState } from "../workflow-run-recovery.js";
-import type { PersistWorkflowRunStartSummary } from "../workflow-run-start-persist.js";
-import type { WorkflowRunStartError } from "../workflow-run-start.js";
+import type { WorkflowGateRecord } from "../core/workflow/gate-persist.js";
+import type { WorkflowHandoffEnvelope } from "../core/workflow/handoff.js";
+import type { WorkflowMonitorEnvelope } from "../core/workflow/monitor-envelope.js";
+import type { WorkflowMonitorState } from "../core/workflow/monitor-state.js";
+import type { WorkflowRunImport, WorkflowRunImportDiagnostic } from "../core/workflow/run-import.js";
+import type { PersistWorkflowRunImportSummary } from "../core/workflow/run-import-persist.js";
+import type { WorkflowRunManualRecoveryState } from "../core/workflow/run-recovery.js";
+import type { PersistWorkflowRunStartSummary } from "../core/workflow/run-start-persist.js";
+import type { WorkflowRunStartError } from "../core/workflow/run-start.js";
 import type {
   WorkflowApprovalRow,
   WorkflowEvidenceLink,
@@ -15,9 +15,9 @@ import type {
   WorkflowRunRow,
   WorkflowRunSummary,
   WorkflowStepRow
-} from "../workflow-status.js";
-import type { ClearWorkflowRunManualRecoveryGuardedResult } from "../workflow-run-recovery.js";
-import type { ReconcileWorkflowRunManualRecoveryResult } from "../workflow-recovery-reconcile.js";
+} from "../core/workflow/status.js";
+import type { ClearWorkflowRunManualRecoveryGuardedResult } from "../core/workflow/run-recovery.js";
+import type { ReconcileWorkflowRunManualRecoveryResult } from "../core/workflow/recovery-reconcile.js";
 import { write, writeJson, type CliIo } from "./cli-output.js";
 
 type WorkflowRendererFailure = {

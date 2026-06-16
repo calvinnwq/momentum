@@ -33,7 +33,7 @@
  *     a gate.
  */
 
-import { isUniqueViolation, type MomentumDb } from "./adapters/db.js";
+import { isUniqueViolation, type MomentumDb } from "../../adapters/db.js";
 import {
   WORKFLOW_GATE_SCOPES,
   evaluateGateDecision,
@@ -44,7 +44,7 @@ import {
   type GateDecisionRequest,
   type WorkflowGateScope,
   type WorkflowGateType
-} from "./workflow-gate.js";
+} from "./gate.js";
 
 /** One typed validation problem with a field of a {@link NewWorkflowGate}. */
 export type WorkflowGateValidationError = {

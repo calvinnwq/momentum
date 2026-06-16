@@ -28,7 +28,7 @@
 import {
   WORKFLOW_STEP_KINDS,
   type WorkflowStepKind
-} from "./workflow-run-reducer.js";
+} from "./run-reducer.js";
 
 export type WorkflowStepExecutorKind = WorkflowStepKind;
 

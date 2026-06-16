@@ -53,42 +53,42 @@
  * silently colliding with them.
  */
 
-import type { MomentumDb } from "./adapters/db.js";
+import type { MomentumDb } from "../../adapters/db.js";
 import {
   insertExecutorInvocation,
   insertExecutorRound,
   loadExecutorInvocation
-} from "./executor-loop-persist.js";
+} from "../../executor-loop-persist.js";
 import type {
   ExecutorInvocationRecord,
   ExecutorRoundRecord,
   WorkflowExecutorFamily
-} from "./executor-loop-reducer.js";
+} from "../../executor-loop-reducer.js";
 import {
   insertWorkflowGate,
   loadWorkflowGate
-} from "./workflow-gate-persist.js";
-import type { WorkflowGateType } from "./workflow-gate.js";
-import { releaseWorkflowLease } from "./workflow-leases.js";
-import { markWorkflowRunNeedsManualRecovery } from "./workflow-run-recovery.js";
-import { resolveWorkflowStepDispatchPlan } from "./workflow-dispatch-persist.js";
-import type { WorkflowDispatchFailClosedCode } from "./workflow-dispatch.js";
-import { deriveWorkflowMonitorState } from "./workflow-monitor-state.js";
+} from "./gate-persist.js";
+import type { WorkflowGateType } from "./gate.js";
+import { releaseWorkflowLease } from "./leases.js";
+import { markWorkflowRunNeedsManualRecovery } from "./run-recovery.js";
+import { resolveWorkflowStepDispatchPlan } from "./dispatch-persist.js";
+import type { WorkflowDispatchFailClosedCode } from "./dispatch.js";
+import { deriveWorkflowMonitorState } from "./monitor-state.js";
 import {
   startWorkflowStep,
   type WorkflowStepTransitionOutcome
-} from "./workflow-step-transitions.js";
+} from "./step-transitions.js";
 import {
   type WorkflowLeaseRecord,
   type WorkflowStepKind,
   type WorkflowStepRecord,
   type WorkflowStepState
-} from "./workflow-run-reducer.js";
+} from "./run-reducer.js";
 import type {
   ClaimedWorkflowStep,
   WorkflowStepDispatchContext,
   WorkflowStepDispatchResult
-} from "./workflow-scheduler.js";
+} from "./scheduler.js";
 
 /**
  * Stable `WorkflowStepDispatchResult.status` strings this dispatcher echoes into

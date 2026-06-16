@@ -40,7 +40,7 @@ import {
   type WorkflowStepKind,
   type WorkflowStepRecord,
   type WorkflowStepState
-} from "./workflow-run-reducer.js";
+} from "./run-reducer.js";
 
 export const WORKFLOW_MONITOR_NEXT_ACTION_CODES = [
   "no_action",

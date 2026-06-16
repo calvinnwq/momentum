@@ -32,13 +32,13 @@
  * effect layer releases that orphaned lease without inventing a gate.
  */
 
-import type { MomentumDb } from "./adapters/db.js";
-import { isWorkflowExecutorFamily } from "./workflow-definition.js";
+import type { MomentumDb } from "../../adapters/db.js";
+import { isWorkflowExecutorFamily } from "./definition.js";
 import {
   planWorkflowStepDispatch,
   type WorkflowStepDispatchPlan,
   type WorkflowStepDispatchResolution
-} from "./workflow-dispatch.js";
+} from "./dispatch.js";
 
 /**
  * The durable identity of a claimed workflow step the dispatcher must resolve.

@@ -10,10 +10,10 @@ import { startDaemonRun } from "../src/daemon-runs.js";
 import {
   executeWorkflowStepDispatch,
   WORKFLOW_DISPATCH_RESULT_STATUS
-} from "../src/workflow-dispatch-execute.js";
-import { createTerminalizingWorkflowDispatch } from "../src/workflow-dogfood-dispatch.js";
-import { claimRunnableWorkflowStep } from "../src/workflow-scheduler.js";
-import type { WorkflowStepDispatch } from "../src/workflow-scheduler.js";
+} from "../src/core/workflow/dispatch-execute.js";
+import { createTerminalizingWorkflowDispatch } from "../src/core/workflow/dogfood-dispatch.js";
+import { claimRunnableWorkflowStep } from "../src/core/workflow/scheduler.js";
+import type { WorkflowStepDispatch } from "../src/core/workflow/scheduler.js";
 
 type RunResult = {
   code: number;

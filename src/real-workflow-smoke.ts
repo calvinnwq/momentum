@@ -38,7 +38,7 @@
 import {
   CODING_WORKFLOW_DEFINITION,
   type WorkflowExecutorFamily
-} from "./workflow-definition.js";
+} from "./core/workflow/definition.js";
 import {
   parseLiveWrapperProfile,
   resolveLiveWrapper,
@@ -48,7 +48,7 @@ import {
 import {
   WORKFLOW_STEP_KINDS,
   type WorkflowStepKind
-} from "./workflow-run-reducer.js";
+} from "./core/workflow/run-reducer.js";
 
 /** Master opt-in switch. The real coding-workflow harness smoke skips unless truthy. */
 export const REAL_SMOKE_WORKFLOW_OPT_IN_ENV_VAR = "MOMENTUM_REAL_SMOKE_WORKFLOW";

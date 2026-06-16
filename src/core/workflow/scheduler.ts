@@ -43,19 +43,19 @@
  * the single-active-step model the M7 reducer and M9 lease primitives enforce.
  */
 
-import type { MomentumDb } from "./adapters/db.js";
+import type { MomentumDb } from "../../adapters/db.js";
 import path from "node:path";
 import {
   acquireWorkflowLeaseInTransaction,
   getWorkflowLease,
   releaseWorkflowLease
-} from "./workflow-leases.js";
+} from "./leases.js";
 import {
   writeWorkflowRecoveryArtifact,
   writeWorkflowRecoveryArtifactInRunDir,
   type WorkflowRecoveryArtifactInput
-} from "./workflow-recovery-artifact.js";
-import { markWorkflowRunNeedsManualRecovery } from "./workflow-run-recovery.js";
+} from "./recovery-artifact.js";
+import { markWorkflowRunNeedsManualRecovery } from "./run-recovery.js";
 import {
   classifyWorkflowLease,
   deriveWorkflowRunState,
@@ -68,7 +68,7 @@ import {
   type WorkflowStepKind,
   type WorkflowStepRecord,
   type WorkflowStepState
-} from "./workflow-run-reducer.js";
+} from "./run-reducer.js";
 
 /** Run states that can never produce a runnable step or accept a new claim. */
 const RUN_TERMINAL_STATE_SET: ReadonlySet<string> = new Set(

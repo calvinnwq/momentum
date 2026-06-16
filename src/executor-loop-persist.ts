@@ -70,7 +70,7 @@ import {
   type ExecutorRoundTransitionErrorCode,
   type WorkflowExecutorFamily
 } from "./executor-loop-reducer.js";
-import { isWorkflowExecutorFamily } from "./workflow-definition.js";
+import { isWorkflowExecutorFamily } from "./core/workflow/definition.js";
 
 const INVOCATION_STATE_SET: ReadonlySet<string> = new Set(
   EXECUTOR_INVOCATION_STATES

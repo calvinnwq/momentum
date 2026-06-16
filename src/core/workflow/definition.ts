@@ -34,7 +34,7 @@
 import {
   WORKFLOW_STEP_KINDS,
   type WorkflowStepKind
-} from "./workflow-run-reducer.js";
+} from "./run-reducer.js";
 
 /**
  * Executor families pinned by internal/contracts/executor-loop.md ("Executor

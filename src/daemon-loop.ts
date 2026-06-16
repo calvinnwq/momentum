@@ -23,8 +23,8 @@ import {
   type RunWorkflowSchedulerOnceInput,
   type RunWorkflowSchedulerOnceResult,
   type WorkflowStepDispatch
-} from "./workflow-scheduler.js";
-import type { WorkflowLeaseStalePolicy } from "./workflow-run-reducer.js";
+} from "./core/workflow/scheduler.js";
+import type { WorkflowLeaseStalePolicy } from "./core/workflow/run-reducer.js";
 
 export const DEFAULT_DAEMON_POLL_INTERVAL_MS = 500;
 export const DEFAULT_DAEMON_WORKER_LEASE_MS = 30_000;

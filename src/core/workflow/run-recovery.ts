@@ -22,9 +22,9 @@
  * still be re-derived as `manual_recovery_lease` blockers until resolved.
  */
 
-import type { MomentumDb } from "./adapters/db.js";
-import { loadWorkflowRunDetail } from "./workflow-status.js";
-import type { WorkflowMonitorRecoveryCode } from "./workflow-monitor-state.js";
+import type { MomentumDb } from "../../adapters/db.js";
+import { loadWorkflowRunDetail } from "./status.js";
+import type { WorkflowMonitorRecoveryCode } from "./monitor-state.js";
 
 export type MarkWorkflowRunNeedsManualRecoveryInput = {
   runId: string;

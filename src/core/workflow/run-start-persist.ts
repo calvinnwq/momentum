@@ -32,16 +32,16 @@
 
 import crypto from "node:crypto";
 
-import { isUniqueViolation, type MomentumDb } from "./adapters/db.js";
+import { isUniqueViolation, type MomentumDb } from "../../adapters/db.js";
 import {
   materializeWorkflowRunStart,
   type WorkflowRunStartError,
   type WorkflowRunStartInput
-} from "./workflow-run-start.js";
+} from "./run-start.js";
 import type {
   WorkflowApprovalBoundary,
   WorkflowRunState
-} from "./workflow-run-reducer.js";
+} from "./run-reducer.js";
 
 /**
  * Thrown by {@link persistWorkflowRunStart} when the supplied input does not

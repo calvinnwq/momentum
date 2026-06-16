@@ -8,9 +8,9 @@ import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
   insertWorkflowGate,
   resolveWorkflowGate
-} from "../src/workflow-gate-persist.js";
-import { parseWorkflowRunImport } from "../src/workflow-run-import.js";
-import { persistWorkflowRunImport } from "../src/workflow-run-import-persist.js";
+} from "../src/core/workflow/gate-persist.js";
+import { parseWorkflowRunImport } from "../src/core/workflow/run-import.js";
+import { persistWorkflowRunImport } from "../src/core/workflow/run-import-persist.js";
 
 type RunResult = {
   code: number;

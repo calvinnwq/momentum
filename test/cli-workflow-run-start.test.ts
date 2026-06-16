@@ -9,8 +9,8 @@ import { openDb } from "../src/adapters/db.js";
 import {
   loadWorkflowDefinition,
   persistWorkflowDefinition
-} from "../src/workflow-definition-persist.js";
-import type { WorkflowDefinition } from "../src/workflow-definition.js";
+} from "../src/core/workflow/definition-persist.js";
+import type { WorkflowDefinition } from "../src/core/workflow/definition.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 

@@ -47,8 +47,8 @@
  * `{ action: ... }` convention used by the reducers and the gate brain.
  */
 
-import type { WorkflowExecutorFamily } from "./workflow-definition.js";
-import type { WorkflowGateType } from "./workflow-gate.js";
+import type { WorkflowExecutorFamily } from "./definition.js";
+import type { WorkflowGateType } from "./gate.js";
 
 /**
  * Executor families the production workflow lane can genuinely dispatch this

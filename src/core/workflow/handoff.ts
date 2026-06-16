@@ -7,12 +7,12 @@
  * action without re-reading the substrate. No SQLite writes, no file writes —
  * the envelope flows through stdout (or the CLI text renderer).
  */
-import type { MomentumDb } from "./adapters/db.js";
+import type { MomentumDb } from "../../adapters/db.js";
 import {
   loadWorkflowRunDetail,
   type LoadWorkflowRunDetailOptions,
   type WorkflowRunDetail
-} from "./workflow-status.js";
+} from "./status.js";
 
 export const WORKFLOW_HANDOFF_SCHEMA_VERSION = 1;
 

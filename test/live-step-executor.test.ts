@@ -18,7 +18,7 @@ import {
 import {
   WORKFLOW_STEP_EXECUTOR_ERROR_CODES,
   type WorkflowStepExecutorInput
-} from "../src/workflow-step-executor.js";
+} from "../src/core/workflow/step-executor.js";
 import {
   parseLiveWrapperProfile,
   type LiveWrapperConfig

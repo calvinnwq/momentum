@@ -36,7 +36,7 @@
  * reconciliation.
  */
 
-import type { MomentumDb } from "./adapters/db.js";
+import type { MomentumDb } from "../../adapters/db.js";
 import {
   isTerminalStepState,
   transitionWorkflowStep,
@@ -44,7 +44,7 @@ import {
   type StepTransitionErrorCode,
   type WorkflowStepKind,
   type WorkflowStepState
-} from "./workflow-run-reducer.js";
+} from "./run-reducer.js";
 
 /** A terminal step state a live step can be finished into. */
 export type WorkflowStepTerminalState =

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   WORKFLOW_EXECUTOR_FAMILIES,
   type WorkflowExecutorFamily
-} from "../src/workflow-definition.js";
+} from "../src/core/workflow/definition.js";
 import {
   PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES,
   WORKFLOW_DISPATCH_FAIL_CLOSED_CODES,
@@ -11,7 +11,7 @@ import {
   isPhase1DispatchableExecutorFamily,
   planWorkflowStepDispatch,
   type WorkflowStepDispatchResolution
-} from "../src/workflow-dispatch.js";
+} from "../src/core/workflow/dispatch.js";
 
 function resolved(
   executorFamily: WorkflowExecutorFamily

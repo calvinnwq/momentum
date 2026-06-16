@@ -43,7 +43,7 @@ import type {
   SingleShotRoundMechanismResult,
   SingleShotRoundRunner
 } from "./single-shot-orchestrator.js";
-import type { WorkflowStepKind } from "./workflow-run-reducer.js";
+import type { WorkflowStepKind } from "./core/workflow/run-reducer.js";
 
 export type OneShotLiveWrapperRoundRunnerOptions = {
   /** Absolute repository root passed to the live wrapper and safety checks. */

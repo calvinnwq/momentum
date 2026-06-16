@@ -88,8 +88,8 @@ import {
   summarizeEvidenceRecords,
   type EvidenceRecordsSummary
 } from "./evidence-records.js";
-import { executeWorkflowStepDispatch } from "./workflow-dispatch-execute.js";
-import { resolveDaemonWorkflowDispatch } from "./workflow-dogfood-dispatch.js";
+import { executeWorkflowStepDispatch } from "./core/workflow/dispatch-execute.js";
+import { resolveDaemonWorkflowDispatch } from "./core/workflow/dogfood-dispatch.js";
 import {
   countIntentApplyAuditsByLifecycleState,
   countIntentsByApplyState,

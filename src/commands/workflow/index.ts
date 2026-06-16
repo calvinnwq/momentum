@@ -5,11 +5,11 @@ import { usageError, type CliIo } from "../../renderers/cli-output.js";
 import { isUniqueViolation, openDb, type MomentumDb } from "../../adapters/db.js";
 import { resolveDataDir, type DataDirOptions } from "../../data-dir.js";
 import { loadMomentumPolicy } from "../../momentum-policy.js";
-import { parseWorkflowRunImport } from "../../workflow-run-import.js";
+import { parseWorkflowRunImport } from "../../core/workflow/run-import.js";
 import {
   persistWorkflowRunImport,
   type PersistWorkflowRunImportSummary
-} from "../../workflow-run-import-persist.js";
+} from "../../core/workflow/run-import-persist.js";
 import {
   WORKFLOW_STATUS_FILTER_KEYS,
   listWorkflowRunSummaries,
@@ -17,7 +17,7 @@ import {
   type WorkflowRunDetail,
   type WorkflowRunSummary,
   type WorkflowStatusFilterKey
-} from "../../workflow-status.js";
+} from "../../core/workflow/status.js";
 import {
   deriveWorkflowRunState,
   highestWorkflowApprovalBoundary,
@@ -32,58 +32,58 @@ import {
   type WorkflowStepKind,
   type WorkflowStepRecord,
   type WorkflowStepState
-} from "../../workflow-run-reducer.js";
+} from "../../core/workflow/run-reducer.js";
 import {
   loadWorkflowHandoff,
   type WorkflowHandoffEnvelope
-} from "../../workflow-handoff.js";
+} from "../../core/workflow/handoff.js";
 import {
   loadWorkflowMonitorEnvelope,
   type WorkflowMonitorEnvelope
-} from "../../workflow-monitor-envelope.js";
+} from "../../core/workflow/monitor-envelope.js";
 import {
   deriveWorkflowMonitorState,
   type WorkflowMonitorState
-} from "../../workflow-monitor-state.js";
+} from "../../core/workflow/monitor-state.js";
 import {
   clearWorkflowRunManualRecoveryGuarded,
   getWorkflowRunManualRecoveryState,
   isBlockingWorkflowRecoveryCode,
   type ClearWorkflowRunManualRecoveryGuardedResult,
   type WorkflowRunManualRecoveryState
-} from "../../workflow-run-recovery.js";
+} from "../../core/workflow/run-recovery.js";
 import {
   reconcileWorkflowRunManualRecovery,
   type ReconcileWorkflowRunManualRecoveryResult
-} from "../../workflow-recovery-reconcile.js";
+} from "../../core/workflow/recovery-reconcile.js";
 import {
   CODING_WORKFLOW_DEFINITION_KEY,
   getBuiltInWorkflowDefinition,
   type WorkflowDefinition
-} from "../../workflow-definition.js";
+} from "../../core/workflow/definition.js";
 import {
   loadWorkflowDefinition,
   persistWorkflowDefinition
-} from "../../workflow-definition-persist.js";
+} from "../../core/workflow/definition-persist.js";
 import type {
   WorkflowRunStartInput
-} from "../../workflow-run-start.js";
+} from "../../core/workflow/run-start.js";
 import {
   InvalidWorkflowRunStartError,
   WorkflowRunStartConflictError,
   persistWorkflowRunStart,
   type PersistWorkflowRunStartSummary
-} from "../../workflow-run-start-persist.js";
+} from "../../core/workflow/run-start-persist.js";
 import {
   GATE_DECISION_MODES,
   type GateDecisionMode,
   type GateDecisionRequest
-} from "../../workflow-gate.js";
+} from "../../core/workflow/gate.js";
 import {
   WorkflowGateDecisionError,
   WorkflowGateNotFoundError,
   resolveWorkflowGate
-} from "../../workflow-gate-persist.js";
+} from "../../core/workflow/gate-persist.js";
 import {
   emitWorkflowHandoff,
   emitWorkflowHandoffFailure,

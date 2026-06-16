@@ -9,7 +9,7 @@ import { ingestEvidenceRecord } from "../src/evidence-records.js";
 import {
   insertWorkflowGate,
   resolveWorkflowGate
-} from "../src/workflow-gate-persist.js";
+} from "../src/core/workflow/gate-persist.js";
 
 type RunResult = {
   code: number;
