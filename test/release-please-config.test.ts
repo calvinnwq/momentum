@@ -15,13 +15,22 @@ describe('release-please configuration', () => {
     const packageJson = await readJson<{ name: string }>('package.json');
     const config = await readJson<{
       'bootstrap-sha': string;
-      packages: Record<string, { 'release-type': string; 'package-name': string; 'changelog-path': string }>;
+      packages: Record<
+        string,
+        {
+          'release-type': string;
+          'package-name': string;
+          'include-component-in-tag': boolean;
+          'changelog-path': string;
+        }
+      >;
     }>('release-please-config.json');
 
     expect(config['bootstrap-sha']).toMatch(/^[0-9a-f]{40}$/);
     expect(config.packages['.']).toEqual({
       'release-type': 'node',
       'package-name': packageJson.name,
+      'include-component-in-tag': false,
       'changelog-path': 'CHANGELOG.md',
     });
   });
