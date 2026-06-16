@@ -68,8 +68,8 @@ src/commands/             command-family modules
 src/renderers/            text / JSON envelope rendering helpers
 src/adapters/             infrastructure-facing clients and runtime adapters
 src/config/               env, path, and default-resolution support
-src/core/<domain>/        workflow, executors, goal, source, intent, daemon, repo,
-                          evidence — reducers, state, policies, persistence
+src/shared/               cross-cutting helpers with no narrower domain owner
+src/core/<domain>/        workflow, executors, goal, source, intent, daemon, repo, evidence
 ```
 
 The target post-M11 source taxonomy is `src/commands/`, `src/renderers/`,
@@ -78,7 +78,10 @@ ARCH-02 enforces this with root `src/*.ts` allowlists, transitional exceptions,
 placeholder-free pending homes, and import guards; ARCH-03 populated
 `src/core/workflow/`, ARCH-04 `src/core/executors/`, and ARCH-05 the remaining
 `src/core/<domain>/` (goal, source, intent, daemon, repo, evidence) plus
-`src/config/`, each core domain carrying a local `README.md` module map. Detailed
+`src/config/`. ARCH-06 drained the final root type modules into
+`src/shared/events.ts`, `src/core/goal/{spec,types}.ts`, and
+`src/core/executors/{runner-result,types}.ts`; transitional root exceptions are
+now empty. Each core domain carries a local `README.md` module map. Detailed
 rules live in [repo-architecture-standard.md](internal/contracts/repo-architecture-standard.md).
 
 The import direction is fixed:
@@ -133,7 +136,7 @@ After M11:
 - All `src/core/<domain>/` modules must not import command or renderer layers.
 - Renderer modules accept already-computed results. They may import stable result
   shapes from core modules only with `import type`; runtime imports from
-  commands, adapters, persistence, or mutation modules stay forbidden.
+  commands, adapters, persistence, mutation modules, or state-mutating shared helpers stay forbidden.
 - External adapters stay behind domain or command boundaries with explicit
   policy checks.
 - Test fixtures may read source files for structural guards, but production code
@@ -160,13 +163,10 @@ domain modules import commands or renderers, and do not read or write
 
 ## M11 Closeout
 
-The M11 migration shipped in deliberate, behavior-preserving slices:
-`NGX-411` pinned this architecture contract, `NGX-412` added the command
-registry skeleton, `NGX-413` extracted the read-only status family, `NGX-414`
-extracted workflow commands, `NGX-415` extracted goal / source / evidence /
-project / intent command families, `NGX-416` consolidated renderers, `NGX-417`
-organized adapters, `NGX-418` enforced import boundaries, and `NGX-419` closes out M11 with final regression coverage,
-doctor marker advancement, and docs cleanup.
+The M11 migration shipped in deliberate, behavior-preserving slices: `NGX-411`,
+`NGX-412`, `NGX-413`, `NGX-414`, `NGX-415`, `NGX-416`, `NGX-417`, `NGX-418`, and
+`NGX-419`, which closes out M11 with final regression coverage, doctor marker
+advancement, and docs cleanup.
 
 ## Stability Rules
 

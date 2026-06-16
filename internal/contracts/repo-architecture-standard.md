@@ -124,7 +124,8 @@ only: they format stable JSON/text/help/diagnostics and do not mutate state,
 open databases, read repos, call adapters, or inspect argv. Renderers may keep
 explicit type-only imports from core modules for stable result shapes and may
 read configuration constants from `src/config/`; runtime imports from commands,
-adapters, persistence, or mutation modules are not allowed. Core owns
+adapters, persistence, mutation modules, or state-mutating shared helpers are not
+allowed. Core owns
 business/runtime behavior: reducers, state machines, persistence policies,
 runtime decisions, and compatibility behavior. Adapters own external concrete
 integrations: databases, git, Linear, runners, shells, probes, and remote or
@@ -142,8 +143,8 @@ There is no generic `src/types.ts` or `src/types/` dumping ground in the target
 shape. Existing generic type files should be drained into owned homes as their
 domains move.
 
-- Exported domain types live beside their behavior in
-  `src/core/<domain>/types.ts`.
+- Exported domain types live beside their behavior; use
+  `src/core/<domain>/types.ts` when reused shapes need a dedicated seam.
 - Adapter-owned external request/response shapes live with the adapter that
   normalizes them, using `src/adapters/<adapter>/types.ts` when the shapes are
   exported or reused beyond one adapter file.
@@ -151,8 +152,10 @@ domains move.
 - Renderer JSON/text envelope types stay with the renderer seam that emits them.
 - Private implementation types stay local to the file or submodule that uses
   them.
-- Shared utility types are allowed in `src/shared/` only when they have no
-  domain semantics.
+- Shared cross-cutting types and helpers are allowed in `src/shared/` only when
+  they have no narrower domain owner. Domain-owned types still belong beside
+  their behavior in `src/core/<domain>/`; `src/shared/` is not a generic type
+  dump.
 - Use `import type` / `export type` for type-only edges when moving modules, so
   structural guardrails can reason about runtime dependencies.
 

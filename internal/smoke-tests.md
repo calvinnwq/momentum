@@ -469,9 +469,10 @@ Coverage:
   shapes; core and domain modules do not import command or renderer modules.
 - ARCH source-layout guardrails keep root `src/*.ts` additions behind the
   durable allowlist or named transitional exceptions, keep real ownership
-  modules under `src/core/`, `src/config/`, and `src/adapters/`, and prevent
-  renderers from importing commands, adapters, persistence, or mutation modules
-  except for type-only core result shapes and config constants.
+  modules under `src/core/`, `src/config/`, `src/shared/`, and `src/adapters/`,
+  and prevent renderers from importing commands, adapters, persistence,
+  state-mutating shared helpers, or mutation modules except for type-only core
+  result shapes and config constants.
 - direct `process.stdout` / `process.stderr` access stays in the CLI or
   renderer layers.
 - `src/index.ts` performs bootstrap-only warning suppression before dynamically
