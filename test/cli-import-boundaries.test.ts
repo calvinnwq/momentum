@@ -46,6 +46,10 @@ const RENDERER_TYPE_ONLY_TRANSITIONAL_IMPORTS = new Set<string>();
 // src/config/daemon-defaults, which renderers may import at runtime directly.
 const RENDERER_READONLY_TRANSITIONAL_IMPORTS = new Map<string, Set<string>>();
 
+const FORBIDDEN_RENDERER_RUNTIME_SHARED_MODULES = new Set<string>([
+  "src/shared/events.ts"
+]);
+
 type ImportReference = {
   specifier: string;
   isTypeOnly: boolean;
@@ -264,11 +268,16 @@ function isPersistenceOrMutationModule(file: string): boolean {
   );
 }
 
+function isForbiddenRendererRuntimeSharedModule(file: string): boolean {
+  return FORBIDDEN_RENDERER_RUNTIME_SHARED_MODULES.has(file);
+}
+
 function isForbiddenRendererRuntimeTarget(file: string): boolean {
   return (
     isCliEntrypoint(file) ||
     isCommandModule(file) ||
     isAdapterModule(file) ||
+    isForbiddenRendererRuntimeSharedModule(file) ||
     isPersistenceOrMutationModule(file)
   );
 }
@@ -379,6 +388,23 @@ describe("M11 CLI import boundaries", () => {
   it("classifies CLI entrypoints as forbidden renderer runtime targets", () => {
     expect(isForbiddenRendererRuntimeTarget("src/index.ts")).toBe(true);
     expect(isForbiddenRendererRuntimeTarget("src/cli.ts")).toBe(true);
+  });
+
+  it("classifies shared queue events as a forbidden renderer runtime target", () => {
+    expect(isForbiddenRendererRuntimeTarget("src/shared/events.ts")).toBe(true);
+  });
+
+  it("rejects renderer runtime imports from shared queue events", () => {
+    const edge: ImportEdge = {
+      from: "src/renderers/status.ts",
+      to: "src/shared/events.ts",
+      specifier: "../shared/events.js",
+      isTypeOnly: false,
+      runtimeBindings: ["appendQueueEvent"]
+    };
+
+    expect(isForbiddenRendererRuntimeTarget(edge.to)).toBe(true);
+    expect(rendererTransitionalImportIsAllowed(edge)).toBe(false);
   });
 
   it("allows only explicit renderer transitional imports", () => {
