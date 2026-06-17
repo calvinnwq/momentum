@@ -73,17 +73,11 @@ import { releaseWorkflowLease } from "./leases.js";
 import { markWorkflowRunNeedsManualRecovery } from "./run-recovery.js";
 import { resolveWorkflowStepDispatchPlan } from "./dispatch-persist.js";
 import type { WorkflowDispatchFailClosedCode } from "./dispatch.js";
-import { deriveWorkflowMonitorState } from "./monitor-state.js";
+import { refreshWorkflowRunRuntimeState } from "./runtime-state.js";
 import {
   startWorkflowStep,
   type WorkflowStepTransitionOutcome
 } from "./step-transitions.js";
-import {
-  type WorkflowLeaseRecord,
-  type WorkflowStepKind,
-  type WorkflowStepRecord,
-  type WorkflowStepState
-} from "./run-reducer.js";
 import type {
   ClaimedWorkflowStep,
   WorkflowStepDispatchContext,
@@ -366,110 +360,11 @@ function refreshWorkflowRunStateAfterDispatch(
   runId: string,
   now: number
 ): void {
-  const steps = loadWorkflowStepRecords(db, runId);
-  const leases = loadWorkflowLeaseRecords(db, runId);
-  const monitorState = deriveWorkflowMonitorState({
+  refreshWorkflowRunRuntimeState(db, {
     runId,
-    steps,
-    leases,
-    monitor: null,
-    lastCheckpoint: null,
-    now
+    now,
+    startedAt: "coalesce-now"
   });
-  const finishedAt = monitorState.terminal ? now : null;
-  db.prepare(
-    `UPDATE workflow_runs
-       SET state = ?,
-           started_at = COALESCE(started_at, ?),
-           finished_at = COALESCE(finished_at, ?),
-           monitor_last_seen_state = ?,
-           monitor_terminal = ?,
-           monitor_step = ?,
-           monitor_last_seen_digest = NULL,
-           monitor_last_emitted_digest = NULL,
-           updated_at = ?
-     WHERE id = ?`
-  ).run(
-    monitorState.runState,
-    now,
-    finishedAt,
-    monitorState.runState,
-    monitorState.terminal ? 1 : 0,
-    monitorState.activeStep?.stepId ?? null,
-    now,
-    runId
-  );
-}
-
-/**
- * Load the run's `workflow_steps` rows as reducer {@link WorkflowStepRecord}s.
- * Exported so the dogfood terminalize-and-continue fixture
- * (`dogfood-dispatch.ts`) re-derives run state through the exact same
- * row mapping as this production dispatcher instead of a divergent copy.
- */
-export function loadWorkflowStepRecords(
-  db: MomentumDb,
-  runId: string
-): WorkflowStepRecord[] {
-  const rows = db
-    .prepare(
-      `SELECT step_id, kind, state, step_order, required
-         FROM workflow_steps
-        WHERE run_id = ?
-        ORDER BY step_order, step_id`
-    )
-    .all(runId) as Array<{
-    step_id: string;
-    kind: string;
-    state: string;
-    step_order: number;
-    required: number;
-  }>;
-  return rows.map((row) => ({
-    stepId: row.step_id,
-    kind: row.kind as WorkflowStepKind,
-    state: row.state as WorkflowStepState,
-    order: row.step_order,
-    required: row.required === 1
-  }));
-}
-
-/**
- * Load the run's `workflow_leases` rows as reducer {@link WorkflowLeaseRecord}s.
- * Exported alongside {@link loadWorkflowStepRecords} so the dogfood terminalize
- * fixture shares one lease-row mapping with this production dispatcher.
- */
-export function loadWorkflowLeaseRecords(
-  db: MomentumDb,
-  runId: string
-): WorkflowLeaseRecord[] {
-  const rows = db
-    .prepare(
-      `SELECT run_id, lease_kind, holder, acquired_at, expires_at,
-              heartbeat_at, released_at, stale_policy
-         FROM workflow_leases
-        WHERE run_id = ?`
-    )
-    .all(runId) as Array<{
-    run_id: string;
-    lease_kind: string;
-    holder: string;
-    acquired_at: number;
-    expires_at: number;
-    heartbeat_at: number;
-    released_at: number | null;
-    stale_policy: string;
-  }>;
-  return rows.map((row) => ({
-    runId: row.run_id,
-    leaseKind: row.lease_kind as WorkflowLeaseRecord["leaseKind"],
-    holder: row.holder,
-    acquiredAt: row.acquired_at,
-    expiresAt: row.expires_at,
-    heartbeatAt: row.heartbeat_at,
-    releasedAt: row.released_at,
-    stalePolicy: row.stale_policy as WorkflowLeaseRecord["stalePolicy"]
-  }));
 }
 
 function describeStartFailure(

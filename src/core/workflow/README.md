@@ -16,6 +16,7 @@ in place; importers still reference the concrete modules below.
 | --- | --- |
 | Definition | `definition.ts`, `definition-persist.ts` |
 | Run lifecycle | `run-start.ts`, `run-start-persist.ts`, `run-import.ts`, `run-import-persist.ts`, `run-reducer.ts`, `run-recovery.ts`, `status.ts` |
+| Runtime state refresh | `runtime-state.ts` |
 | Steps | `step-executor.ts`, `step-transitions.ts` |
 | Gates | `gate.ts`, `gate-persist.ts` |
 | Leases | `leases.ts` |
@@ -26,7 +27,10 @@ in place; importers still reference the concrete modules below.
 
 `dispatch.ts` and `dispatch-persist.ts` are internal helpers behind
 `dispatch-execute.ts`; `run-reducer.ts` is the central pure reducer and the most
-widely consumed entry point.
+widely consumed entry point. `runtime-state.ts` is the ARCH-08 seam for callers
+that already changed durable step / lease rows and need to re-read reducer rows,
+derive monitor state, and refresh the cached `workflow_runs` status / monitor
+advisory columns without duplicating SQL.
 
 ## Public interface for other domains
 
@@ -36,14 +40,15 @@ Other domains reach workflow behavior through these modules:
   `definition-persist`, `gate` / `gate-persist`, `run-start` /
   `run-start-persist`, `run-import` / `run-import-persist`, `run-recovery`,
   `run-reducer`, `status`, `monitor-state` / `monitor-envelope`,
-  `recovery-reconcile`, `handoff`.
+  `runtime-state`, `recovery-reconcile`, `handoff`.
 - **CLI renderers** (`src/renderers/workflow.ts`): the same run/gate/monitor/
   status/handoff shapes, imported **type-only** (renderers format, they do not
   mutate state).
 - **Top-level dispatch** (`src/cli.ts`): `dispatch-execute`, `dogfood-dispatch`.
 - **Executor / live-step / daemon runtime**: `run-reducer` (shared run-state
-  reduction), `step-executor`, `step-transitions`, `leases`, `definition`,
-  `recovery-artifact`, `scheduler`.
+  reduction), `runtime-state` (cached run-state / monitor refresh after a
+  caller-owned mutation), `step-executor`, `step-transitions`, `leases`,
+  `definition`, `recovery-artifact`, `scheduler`.
 
 ## Boundaries
 
@@ -53,7 +58,9 @@ Other domains reach workflow behavior through these modules:
 
 ## Deferred
 
-A single curated module seam (barrel) and any consolidation of the
-finalization / status / recovery coordination is intentionally **not** part of
-the mechanical regrouping. That seam-deepening is owned by the workflow runtime
-deepening slice (ARCH-08); until then, importers keep direct typed module paths.
+A single curated module seam (barrel) is intentionally **not** part of ARCH-08;
+importers keep direct typed module paths. ARCH-08 only introduces the
+`runtime-state.ts` seam around the mechanical finalization / status / monitor
+refresh shared by dispatch, dogfood terminalization, and operator/recovery
+callers. It does **not** choose the future RC-2 single finalization owner, delete
+the dogfood stand-in, or narrow M9/M10 compatibility paths.

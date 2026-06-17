@@ -19,7 +19,6 @@ import {
   type WorkflowStatusFilterKey
 } from "../../core/workflow/status.js";
 import {
-  deriveWorkflowRunState,
   highestWorkflowApprovalBoundary,
   isTerminalStepState,
   isWorkflowApprovalBoundary,
@@ -28,9 +27,6 @@ import {
   WORKFLOW_RUN_STATES,
   workflowStepKindsForApprovalBoundary,
   type WorkflowRunState,
-  type WorkflowLeaseRecord,
-  type WorkflowStepKind,
-  type WorkflowStepRecord,
   type WorkflowStepState
 } from "../../core/workflow/run-reducer.js";
 import {
@@ -45,6 +41,10 @@ import {
   deriveWorkflowMonitorState,
   type WorkflowMonitorState
 } from "../../core/workflow/monitor-state.js";
+import {
+  loadWorkflowRuntimeStateRows,
+  refreshWorkflowRunRuntimeState
+} from "../../core/workflow/runtime-state.js";
 import {
   clearWorkflowRunManualRecoveryGuarded,
   getWorkflowRunManualRecoveryState,
@@ -1300,26 +1300,11 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
         );
       }
 
-      const stepRecords = loadWorkflowStepRecords(db, runId);
-      const leaseRecords = loadWorkflowLeaseRecords(db, runId);
-      const runState = deriveWorkflowRunState(stepRecords, {
-        leases: leaseRecords,
+      const monitorState = refreshWorkflowRunRuntimeState(db, {
+        runId,
         now
       });
-      refreshWorkflowRunMonitorAdvisory(db, runId, now);
-      const runFinishedAt = isTerminalRunState(runState) ? now : null;
-      db.prepare(
-        `UPDATE workflow_runs
-           SET state = ?,
-               finished_at = COALESCE(finished_at, ?),
-               updated_at = ?
-         WHERE id = ?`
-      ).run(
-        runState,
-        runFinishedAt,
-        now,
-        runId
-      );
+      const runState = monitorState.runState;
 
       db.exec("COMMIT");
 
@@ -1373,16 +1358,16 @@ function workflowRunStepUpdateResolvesManualRecovery(
     now: number;
   }
 ): boolean {
-  const steps = loadWorkflowStepRecords(db, input.runId).map((step) =>
+  const rows = loadWorkflowRuntimeStateRows(db, input.runId);
+  const steps = rows.steps.map((step) =>
     step.stepId === input.stepId
       ? { ...step, state: input.targetState }
       : step
   );
-  const leases = loadWorkflowLeaseRecords(db, input.runId);
   const monitor = deriveWorkflowMonitorState({
     runId: input.runId,
     steps,
-    leases,
+    leases: rows.leases,
     monitor: null,
     lastCheckpoint: null,
     now: input.now
@@ -1393,73 +1378,16 @@ function workflowRunStepUpdateResolvesManualRecovery(
   );
 }
 
-function loadWorkflowStepRecords(
-  db: MomentumDb,
-  runId: string
-): WorkflowStepRecord[] {
-  const rows = db
-    .prepare(
-      "SELECT step_id, kind, state, step_order, required FROM workflow_steps WHERE run_id = ? ORDER BY step_order"
-    )
-    .all(runId) as Array<{
-    step_id: string;
-    kind: string;
-    state: string;
-    step_order: number;
-    required: number;
-  }>;
-  return rows.map((row) => ({
-    stepId: row.step_id,
-    kind: row.kind as WorkflowStepKind,
-    state: row.state as WorkflowStepState,
-    order: row.step_order,
-    required: row.required === 1
-  }));
-}
-
-function loadWorkflowLeaseRecords(
-  db: MomentumDb,
-  runId: string
-): WorkflowLeaseRecord[] {
-  const rows = db
-    .prepare(
-      `SELECT run_id, lease_kind, holder, acquired_at, expires_at,
-              heartbeat_at, released_at, stale_policy
-         FROM workflow_leases WHERE run_id = ? ORDER BY lease_kind`
-    )
-    .all(runId) as Array<{
-    run_id: string;
-    lease_kind: string;
-    holder: string;
-    acquired_at: number;
-    expires_at: number;
-    heartbeat_at: number;
-    released_at: number | null;
-    stale_policy: string;
-  }>;
-  return rows.map((row) => ({
-    runId: row.run_id,
-    leaseKind: row.lease_kind as WorkflowLeaseRecord["leaseKind"],
-    holder: row.holder,
-    acquiredAt: row.acquired_at,
-    expiresAt: row.expires_at,
-    heartbeatAt: row.heartbeat_at,
-    releasedAt: row.released_at,
-    stalePolicy: row.stale_policy as WorkflowLeaseRecord["stalePolicy"]
-  }));
-}
-
 function refreshWorkflowRunMonitorAdvisory(
   db: MomentumDb,
   runId: string,
   now: number
 ): WorkflowMonitorState {
-  const stepRecords = loadWorkflowStepRecords(db, runId);
-  const leaseRecords = loadWorkflowLeaseRecords(db, runId);
+  const rows = loadWorkflowRuntimeStateRows(db, runId);
   const monitorState = deriveWorkflowMonitorState({
     runId,
-    steps: stepRecords,
-    leases: leaseRecords,
+    steps: rows.steps,
+    leases: rows.leases,
     monitor: null,
     lastCheckpoint: null,
     now

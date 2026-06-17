@@ -39,12 +39,8 @@
 
 import type { MomentumDb } from "../../adapters/db.js";
 import { releaseWorkflowLease } from "./leases.js";
-import { deriveWorkflowMonitorState } from "./monitor-state.js";
-import {
-  loadWorkflowLeaseRecords,
-  loadWorkflowStepRecords,
-  WORKFLOW_DISPATCH_RESULT_STATUS
-} from "./dispatch-execute.js";
+import { WORKFLOW_DISPATCH_RESULT_STATUS } from "./dispatch-execute.js";
+import { refreshWorkflowRunRuntimeState } from "./runtime-state.js";
 import { finishWorkflowStep } from "./step-transitions.js";
 import type {
   ClaimedWorkflowStep,
@@ -213,35 +209,8 @@ function refreshWorkflowRunStateAfterTerminalize(
   runId: string,
   now: number
 ): void {
-  const steps = loadWorkflowStepRecords(db, runId);
-  const leases = loadWorkflowLeaseRecords(db, runId);
-  const monitorState = deriveWorkflowMonitorState({
+  refreshWorkflowRunRuntimeState(db, {
     runId,
-    steps,
-    leases,
-    monitor: null,
-    lastCheckpoint: null,
     now
   });
-  const finishedAt = monitorState.terminal ? now : null;
-  db.prepare(
-    `UPDATE workflow_runs
-       SET state = ?,
-           finished_at = COALESCE(finished_at, ?),
-           monitor_last_seen_state = ?,
-           monitor_terminal = ?,
-           monitor_step = ?,
-           monitor_last_seen_digest = NULL,
-           monitor_last_emitted_digest = NULL,
-           updated_at = ?
-     WHERE id = ?`
-  ).run(
-    monitorState.runState,
-    finishedAt,
-    monitorState.runState,
-    monitorState.terminal ? 1 : 0,
-    monitorState.activeStep?.stepId ?? null,
-    now,
-    runId
-  );
 }
