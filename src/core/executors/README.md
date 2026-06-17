@@ -83,6 +83,7 @@ to make.
   `src/runner-result.ts` under the type-placement slice (ARCH-06 / NGX-450).
   `COMMIT_TYPES` is a runtime const, but it backs the `CommitType` union and has
   no behavior, so it is colocated with the type it defines.
-- No barrel/seam consolidation and no finalizer/reconciliation redesign — those
-  are owned by later slices (ARCH-08 / RC-2). Importers keep direct typed module
-  paths until then.
+- No executor barrel/seam consolidation and no finalizer/reconciliation redesign.
+  ARCH-08 only added the workflow-owned `runtime-state.ts` refresh seam after
+  caller-owned durable mutations; the cross-path finalization owner remains RC-2
+  work. Importers keep direct typed module paths until that future decision.
