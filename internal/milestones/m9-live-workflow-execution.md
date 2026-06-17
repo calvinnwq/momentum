@@ -2,6 +2,8 @@
 
 **Status:** Foundation in force. Promoted from draft at the M9-00 decision gate (NGX-331) after M8 closeout; M10 completed the workflow-first implementation, and M11 completed the CLI structure refactor. The companion contract in [`internal/contracts/live-workflow-execution.md`](../contracts/live-workflow-execution.md) remains the accepted foundation for live workflow execution; the M8 operator-control contract stays in force for its own invariants.
 
+**Historical/provenance note:** This file preserves milestone scope, shipped order, and closeout evidence. For current repo architecture start with [`../../ARCHITECTURE.md`](../../ARCHITECTURE.md); for active runtime invariants start with [`../contracts/README.md`](../contracts/README.md).
+
 Milestone 9 defines the point where Momentum starts dogfooding real repo work through Momentum-owned live execution rather than using the OpenClaw `coding-workflow-pipeline` skill as the live run loop.
 
 The contract for this milestone lives in [`internal/contracts/live-workflow-execution.md`](../contracts/live-workflow-execution.md). The M7 substrate contract and M8 operator-control contract remain prerequisites.
@@ -66,7 +68,7 @@ The M9-00 decision gate originally preferred reusing the existing `goal start` p
 
 The M9-00 decision gate (NGX-331) pinned the slice order below. These slices remain the source context for the live-wrapper foundation that M10 builds on:
 
-1. **NGX-331 — M9-00 Contract and decision gate:** promote this draft into the active milestone, choose the live-wrapper architecture, pin non-goals, pin this implementation sequence, and update roadmap / doctor-marker policy. No runtime behavior change.
+1. **NGX-331 — M9-00 Contract and decision gate:** promoted this draft into the milestone in force at that time, chose the live-wrapper architecture, pinned non-goals, pinned this implementation sequence, and updated roadmap / doctor-marker policy. No runtime behavior change.
 2. **NGX-332 — M9-01 Live wrapper config and registry:** add typed config parsing, refusal codes, wrapper resolution, probe support, and deterministic fixture tests.
 3. **NGX-333 — M9-02 Live implementation step wrapper:** run the `implementation` step through an explicit live wrapper with lease / heartbeat / result-file capture.
 4. **NGX-334 — M9-03 Verification and commit transaction:** wire live step output into Momentum verification, commit intent, failure reset, result-document recovery, unsafe finalization recovery, dispatch recovery, and finalization lock / lease reconciliation.

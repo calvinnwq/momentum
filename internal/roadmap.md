@@ -1,6 +1,15 @@
 # Momentum Roadmap
 
-Momentum is built milestone by milestone. Each milestone has a single durable shape that lands in code, in docs, and in the `doctor` readiness marker before the next one starts. The roadmap below is the canonical timeline; deeper detail lives in each milestone doc under `internal/milestones/` and each cross-milestone contract under `internal/contracts/`.
+Momentum is built milestone by milestone. Each milestone has a single durable
+shape that lands in code, in docs, and in the `doctor` readiness marker before
+the next one starts. The roadmap below is the canonical timeline; deeper detail
+lives in each milestone doc under `internal/milestones/` and each
+cross-milestone contract under `internal/contracts/`.
+
+For navigation, start with the internal documentation map
+([`internal/README.md`](README.md)), active contract index
+([`internal/contracts/README.md`](contracts/README.md)), and historical
+milestone index ([`internal/milestones/README.md`](milestones/README.md)).
 
 ## Timeline
 
@@ -87,6 +96,9 @@ and auditing the remaining exported types as already owned. The remaining
 ARCH-07 through ARCH-08 sequence should land before `RC-2` so the M9/M10
 step-finalization reconciliation seam has stable docs and workflow-runtime
 ownership homes on top of those core domains.
+Accepted future runtime slices are indexed in
+[`internal/plans/README.md`](plans/README.md); `RC-2` remains the highest-value
+next runtime consolidation slice after ARCH-08 unless that issue is re-scoped.
 
 The `doctor` readiness marker tracks the **most recently closed** milestone. It currently reads `Milestone 11: CLI architecture refactor (NGX-411, NGX-412, NGX-413, NGX-414, NGX-415, NGX-416, NGX-417, NGX-418, NGX-419) complete`. The marker advanced from the M6 closeout string to `Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete` at the M7 closeout slice (NGX-319), stayed pinned to the M7 string through every M8 implementation slice, advanced to the M8 string at the M8 closeout slice (NGX-330), advanced again to `Milestone 10: workflow-first runtime (NGX-344, NGX-345, NGX-346, NGX-347, NGX-348, NGX-349, NGX-350, NGX-351, NGX-352, NGX-367, NGX-353) complete` at the M10 closeout slice (NGX-353), and advanced to the M11 string at the M11 closeout slice (NGX-419).
 

@@ -40,6 +40,14 @@ Use these docs for detailed behavior:
 
 - [README.md](README.md) and [docs/index.md](docs/index.md): public command
   usage and operator documentation.
+- [internal/README.md](internal/README.md): internal map for current truth,
+  active contracts, milestone provenance, and accepted future plans.
+- [internal/contracts/README.md](internal/contracts/README.md): active contract
+  index.
+- [internal/milestones/README.md](internal/milestones/README.md): historical
+  milestone narrative index.
+- [internal/plans/README.md](internal/plans/README.md): accepted future plan
+  queue, including RC-1..RC-5 discovery.
 - [internal/roadmap.md](internal/roadmap.md): milestone timeline and current
   sequencing.
 - [internal/contracts/workflow-first-runtime.md](internal/contracts/workflow-first-runtime.md):

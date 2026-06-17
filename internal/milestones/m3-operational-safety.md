@@ -2,6 +2,8 @@
 
 **Status:** Complete (NGX-272 through NGX-278).
 
+**Historical/provenance note:** This file preserves milestone scope, shipped order, and closeout evidence. For current repo architecture start with [`../../ARCHITECTURE.md`](../../ARCHITECTURE.md); for active runtime invariants start with [`../contracts/README.md`](../contracts/README.md).
+
 Milestone 3 is **orchestrator lifecycle / operational safety**, not merely daemon process plumbing. It landed durable daemon / orchestrator state, stop-request visibility, stale-lease recovery, manual-recovery artifacts, and closeout smoke / docs while preserving Momentum's durable Goal / Iteration / Job / Handoff model and SQLite-backed queue. The work is informed by OpenAI Symphony's orchestration model ([SPEC.md](https://github.com/openai/symphony/blob/main/SPEC.md)) but Momentum is a durable local-first engine, not an issue-tracker poller / Codex app-server clone.
 
 ## M3 durable primitives
