@@ -2,6 +2,8 @@
 
 **Status:** Complete (NGX-279 through NGX-286).
 
+**Historical/provenance note:** This file preserves milestone scope, shipped order, and closeout evidence. For current repo architecture start with [`../../ARCHITECTURE.md`](../../ARCHITECTURE.md); for active runtime invariants start with [`../contracts/README.md`](../contracts/README.md).
+
 Milestone 4 landed real runner profiles behind the existing Goal / Iteration / verification / handoff contract, then a runtime `MOMENTUM.md` policy loader, while keeping external tracker automation deferred. M4 introduced a `RunnerAdapter` boundary so Momentum can execute Goals through more than the in-process `fake` runner without changing the Goal / Iteration / Job contract or the M3 daemon / recovery surfaces. The first real profile is a `trusted-shell` runner; an `acp` ACP/acpx-style runtime smoke profile lands alongside it. Runtime `MOMENTUM.md` policy loading provides repo-owned defaults between goal frontmatter and built-in defaults. External tracker automation (Linear / GitHub / Jira writes, webhooks) remains deferred and is **not** part of M4.
 
 ## M4 architecture: Momentum core vs runner adapters

@@ -22,12 +22,32 @@ Two trees:
 
 Quick map of `internal/`:
 
-- [`internal/roadmap.md`](internal/roadmap.md) — milestone timeline and current ordering.
-- [`internal/milestones/`](internal/milestones/) — `m3-operational-safety.md`, `m4-real-runners.md`, `m5-source-adapters.md`, `m6-external-apply.md`, `m7-openclaw-coding-workflow-backend.md`, `m8-workflow-run-operator-controls.md`, `m9-live-workflow-execution.md` (M9 live workflow execution foundation), `m10-workflow-first-runtime.md` (M10 workflow-first runtime, complete).
-- [`internal/contracts/`](internal/contracts/) — `intent-apply.md` (M6 two-phase external apply), `source-adapters.md`, `workflow-runs.md` (M7 OpenClaw coding workflow backend substrate), `workflow-operator-controls.md` (M8 workflow run operator controls), `live-workflow-execution.md` (M9 live execution contract), `workflow-first-runtime.md`, `executor-loop.md`, and `workflow-first-gap-matrix.md` (M10 workflow-first runtime contracts), plus `coding-workflow-ownership.md` (post-M10 coding workflow ownership migration) and `runtime-consolidation-plan.md` (post-M11 runtime keep / deprecate-later / defer decisions).
-- [`internal/contracts/repo-architecture-standard.md`](internal/contracts/repo-architecture-standard.md) — post-M11 source taxonomy, docs taxonomy, type placement, root `src/*.ts` policy, and ARCH migration sequence.
-- [`internal/plans/README.md`](internal/plans/README.md) — accepted future implementation plans, such as RC-1..RC-5, when those plans are written.
-- [`internal/smoke-tests.md`](internal/smoke-tests.md), [`internal/exclusions.md`](internal/exclusions.md), [`internal/regression-matrix.md`](internal/regression-matrix.md) (closeout and foundation regression matrix).
+- [`internal/README.md`](internal/README.md) — internal documentation map for
+  current truth, active contracts, historical milestone provenance, and accepted
+  future plans.
+- [`internal/contracts/README.md`](internal/contracts/README.md) — active
+  contract index. Start here for runtime invariants, repo architecture rules,
+  and RC-1..RC-5 consolidation scope.
+- [`internal/milestones/README.md`](internal/milestones/README.md) —
+  historical milestone narrative index. Preserve shipped order and provenance;
+  do not treat superseded milestone prose as current instructions without the
+  matching active contract. It points to `m3-operational-safety.md`,
+  `m4-real-runners.md`, `m5-source-adapters.md`, `m6-external-apply.md`,
+  `m7-openclaw-coding-workflow-backend.md`,
+  `m8-workflow-run-operator-controls.md`,
+  `m9-live-workflow-execution.md`, and `m10-workflow-first-runtime.md`.
+- [`internal/roadmap.md`](internal/roadmap.md) — milestone timeline and current
+  sequencing.
+- [`internal/contracts/repo-architecture-standard.md`](internal/contracts/repo-architecture-standard.md)
+  — post-M11 source taxonomy, docs taxonomy, type placement, root `src/*.ts`
+  policy, and ARCH migration sequence.
+- [`internal/plans/README.md`](internal/plans/README.md) — accepted future plan
+  queue and RC-1..RC-5 discovery.
+- [`internal/smoke-tests.md`](internal/smoke-tests.md),
+  [`internal/exclusions.md`](internal/exclusions.md),
+  [`internal/regression-matrix.md`](internal/regression-matrix.md), and
+  [`internal/runtime-test-audit.md`](internal/runtime-test-audit.md) — durable
+  audit and closeout evidence.
 
 Root [`ARCHITECTURE.md`](ARCHITECTURE.md) is the source of truth for the current
 repo architecture contract and import boundaries; it links deeper contracts when
@@ -38,7 +58,7 @@ Milestone 11 (CLI Architecture Refactor) is the most recently closed structure m
 
 Post-M11 runtime/test cleanup planning is recorded in [`internal/runtime-test-audit.md`](internal/runtime-test-audit.md) and [`internal/contracts/runtime-consolidation-plan.md`](internal/contracts/runtime-consolidation-plan.md). NGX-434 authorizes no production deletion; historical runtime paths narrow only after their named prerequisite proof lands.
 
-Post-M11 repo architecture planning is recorded in [`internal/contracts/repo-architecture-standard.md`](internal/contracts/repo-architecture-standard.md). It defines the target taxonomy and ARCH-02..ARCH-08 order. ARCH-02 pins root allowlists, transitional exceptions, pending homes, and import guards; ARCH-03..ARCH-05 regrouped workflow, executors, remaining domains, and config; ARCH-06 drained the final root type modules into `src/shared/events.ts`, `src/core/goal/types.ts`, and `src/core/executors/types.ts`. None authorize runtime changes, public CLI behavior changes, or compatibility-path deletion.
+Post-M11 repo architecture planning is recorded in [`internal/contracts/repo-architecture-standard.md`](internal/contracts/repo-architecture-standard.md). It defines the target taxonomy and ARCH-02..ARCH-08 order. ARCH-02 pins root allowlists, transitional exceptions, pending homes, and import guards; ARCH-03..ARCH-05 regrouped workflow, executors, remaining domains, and config; ARCH-06 drained the final root type modules into `src/shared/events.ts`, `src/core/goal/types.ts`, and `src/core/executors/types.ts`; ARCH-07 added the internal documentation indexes and historical-provenance guidance. ARCH-08 remains the next repo-architecture cleanup. None authorize runtime changes, public CLI behavior changes, or compatibility-path deletion.
 
 Milestone 10 (Workflow-First Runtime) is the previously closed runtime milestone. See [`internal/milestones/m10-workflow-first-runtime.md`](internal/milestones/m10-workflow-first-runtime.md), [`internal/contracts/workflow-first-runtime.md`](internal/contracts/workflow-first-runtime.md), [`internal/contracts/executor-loop.md`](internal/contracts/executor-loop.md), and [`internal/contracts/workflow-first-gap-matrix.md`](internal/contracts/workflow-first-gap-matrix.md).
 
@@ -59,6 +79,18 @@ TypeScript on Node.js with Vitest tests, managed by pnpm. See [README.md](README
 - Preserve existing local/work-in-progress changes.
 - Prefer surgical patches.
 - Add focused tests for behavior changes.
+
+## Source and test placement
+- Keep process bootstrap in `src/index.ts` and top-level parser /
+  compatibility dispatch in `src/cli.ts`.
+- Put command-family parsing and orchestration in `src/commands/`; put stable
+  JSON/text/help/diagnostic output in `src/renderers/`.
+- Put infrastructure-facing clients and runtime adapters in `src/adapters/`,
+  env/path/default helpers in `src/config/`, cross-cutting helpers in
+  `src/shared/`, and domain runtime behavior in `src/core/<domain>/`.
+- Keep CLI/parser/output tests in `test/cli-*`, `test/commands-*`, or
+  renderer-specific files; keep source-layout and import-boundary guards in
+  the existing architecture tests.
 
 ## CLI expectations
 The full public CLI surface lives in [README.md](README.md); per-command JSON envelopes, refusal codes, and idempotency semantics live in `docs/` (linked from [`docs/index.md`](docs/index.md)). The operational-safety surfaces — `daemon start`, `daemon stop`, `daemon status`, `recovery clear`, and `doctor` — remain wire-stable.

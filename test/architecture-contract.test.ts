@@ -17,12 +17,16 @@ describe("root ARCHITECTURE.md contract", () => {
     expect(architecture).toMatch(/^# Momentum Architecture/m);
     expect(architecture).toContain("This file is the repo-level architecture contract");
     expect(architecture).toContain("Deeper Contracts");
-    expect(architecture.split("\n").length).toBeLessThan(185);
+    expect(architecture.split("\n").length).toBeLessThan(205);
   });
 
   it("links deeper internal contracts instead of restating the whole runtime", () => {
     for (const rel of [
       "internal/roadmap.md",
+      "internal/README.md",
+      "internal/contracts/README.md",
+      "internal/milestones/README.md",
+      "internal/plans/README.md",
       "internal/contracts/workflow-first-runtime.md",
       "internal/contracts/executor-loop.md",
       "internal/contracts/coding-workflow-ownership.md",

@@ -13,6 +13,8 @@ production workflow-lane dispatcher into bounded managed `daemon start` without
 closing or rewriting M9 by itself. M10-09 dogfooded that shipped
 workflow-first path and closes the milestone.
 
+**Historical/provenance note:** This file preserves milestone scope, shipped order, and closeout evidence. For current repo architecture start with [`../../ARCHITECTURE.md`](../../ARCHITECTURE.md); for active runtime invariants start with [`../contracts/README.md`](../contracts/README.md).
+
 M10 promotes Momentum from a Goal-first product surface plus imported
 OpenClaw-coding-workflow substrate into a configurable workflow runtime:
 

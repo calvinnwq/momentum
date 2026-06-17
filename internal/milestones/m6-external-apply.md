@@ -2,6 +2,8 @@
 
 **Status:** Complete (NGX-295 through NGX-302). NGX-302 flipped the `doctor --json` milestone marker to the M6 closeout string `Milestone 6: policy-gated external apply (NGX-295, NGX-296, NGX-297, NGX-298, NGX-299, NGX-300, NGX-301, NGX-302) complete`; NGX-319 (M7-07) later flipped it forward to the M7 closeout marker, NGX-330 (M8-07) advanced it to the M8 closeout string, NGX-353 (M10-09) advanced it to the M10 closeout string, and NGX-419 (M11 closeout) advanced the current marker to the M11 closeout string. The M6 contract surfaces themselves remain wire-stable.
 
+**Historical/provenance note:** This file preserves milestone scope, shipped order, and closeout evidence. For current repo architecture start with [`../../ARCHITECTURE.md`](../../ARCHITECTURE.md); for active runtime invariants start with [`../contracts/README.md`](../contracts/README.md).
+
 Milestone 6 turns the durable `update_intents` rows from M5 into **policy-gated external writes against Linear**. M6 adds a real external write path through a single, explicitly-trusted adapter without weakening any M3/M4/M5 safety contract. External apply remains operator-mediated: nothing in M6 makes Momentum write to an external tracker automatically.
 
 The runtime invariants for the apply path itself live in [internal/contracts/intent-apply.md](../contracts/intent-apply.md). The source-adapter boundary that the write client extends lives in [internal/contracts/source-adapters.md](../contracts/source-adapters.md). Treat those two contract docs as the source of truth; the milestone doc here scopes and sequences the work.

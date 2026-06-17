@@ -11,9 +11,13 @@ function readDoc(rel: string): string {
 }
 
 const REQUIRED_FILES = [
+  "internal/README.md",
   "internal/roadmap.md",
   "internal/exclusions.md",
   "internal/smoke-tests.md",
+  "internal/contracts/README.md",
+  "internal/milestones/README.md",
+  "internal/plans/README.md",
   "internal/milestones/m3-operational-safety.md",
   "internal/milestones/m4-real-runners.md",
   "internal/milestones/m5-source-adapters.md",
@@ -74,6 +78,38 @@ describe("internal planning docs shape", () => {
       );
     }
   });
+
+  it("indexes current truth, active contracts, historical milestones, and accepted plans", () => {
+    const internalIndex = readDoc("internal/README.md");
+    for (const phrase of [
+      "Current Truth",
+      "Active Contracts",
+      "Historical Milestone Provenance",
+      "Accepted Future Plans",
+    ]) {
+      expect(internalIndex, `internal/README.md should include ${phrase}`).toContain(phrase);
+    }
+
+    const contractsIndex = readDoc("internal/contracts/README.md");
+    expect(contractsIndex).toContain("runtime-consolidation-plan.md");
+    expect(contractsIndex).toContain("repo-architecture-standard.md");
+
+    const plansIndex = readDoc("internal/plans/README.md");
+    for (const item of ["RC-1", "RC-2", "RC-3", "RC-4", "RC-5", "ARCH-08 / NGX-452"]) {
+      expect(plansIndex, `internal/plans/README.md should mention ${item}`).toContain(item);
+    }
+  });
+
+  it("milestone narratives are marked as historical provenance", () => {
+    for (const rel of REQUIRED_FILES.filter(
+      (rel) => rel.startsWith("internal/milestones/") && rel !== "internal/milestones/README.md"
+    )) {
+      const body = readDoc(rel);
+      expect(body, `${rel} should identify itself as historical/provenance material`).toContain(
+        "Historical/provenance note"
+      );
+    }
+  });
 });
 
 describe("AGENTS.md points agents at internal/", () => {
@@ -91,8 +127,10 @@ describe("AGENTS.md points agents at internal/", () => {
     expect(agents).toMatch(/internal\/contracts\//);
   });
 
-  it("names the active milestone (M6) compactly", () => {
-    expect(agents).toMatch(/Milestone 6/);
+  it("names the current architecture and most recently closed milestone compactly", () => {
+    expect(agents).toMatch(/Milestone 11/);
+    expect(agents).toMatch(/src\/core\/<domain>/);
+    expect(agents).toMatch(/internal\/contracts\/README\.md/);
   });
 
   it("stays compact (under 200 lines)", () => {
