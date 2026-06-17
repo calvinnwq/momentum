@@ -10,8 +10,9 @@ mechanically regrouped the remaining pseudo-domain modules under
 `src/adapters/db/`; `ARCH-06` / `NGX-450` has normalized TypeScript type
 placement, draining the three guard-tracked transitional root type modules into
 their owning seams and auditing the rest of the tree against the placement rules
-below; `ARCH-07` through `ARCH-08` execute the remaining information-architecture
-and workflow-runtime cleanup. This contract does not authorize
+below; `ARCH-07` / `NGX-451` has reconciled the human and agent
+documentation information architecture, leaving `ARCH-08` / `NGX-452` as the
+remaining workflow-runtime cleanup. This contract does not authorize
 runtime behavior changes, public CLI behavior changes, compatibility-lane
 deletion, or weakening any NGX-434 runtime-consolidation decision.
 
@@ -239,18 +240,20 @@ work has stable homes for workflow, executor, repo, adapter, and evidence code.
    exported types co-located with their behavior inside the owning domain; a
    per-domain `types.ts` is the documented home for shapes that need a dedicated
    seam (as for `goal` and `executors`), not a mandate to extract every type.
-6. **ARCH-07 / NGX-451 — Human and agent docs information architecture.** Reconcile
+6. **ARCH-07 / NGX-451 — Human and agent docs information architecture.** Reconciled
    `ARCHITECTURE.md`, `AGENTS.md`, `docs/`, `internal/contracts/`,
    `internal/milestones/`, `internal/roadmap.md`, and `internal/plans/` so
    current truth, operator docs, active contracts, history, and accepted future
-   plans are easy to find.
+   plans are easy to find. Added internal indexes for current truth, active
+   contracts, historical milestone provenance, and accepted future queues.
 7. **ARCH-08 / NGX-452 — Workflow runtime deepening.** After mechanical regrouping,
    deepen the smallest useful `core/workflow` seam, preferably around
    finalization/status/recovery coordination, without implementing the full RC-2
    reconciliation unless that issue is explicitly re-scoped.
 
-Only after ARCH-02 through ARCH-08 have created stable ownership homes should
-RC-2 implement the M9/M10 step-finalization reconciliation seam. RC-2 still
+Only after ARCH-08 creates the remaining workflow-runtime seam on top of the
+ARCH-02 through ARCH-07 ownership homes should RC-2 implement the M9/M10
+step-finalization reconciliation seam. RC-2 still
 follows [`runtime-consolidation-plan.md`](runtime-consolidation-plan.md): it must
 prove a single idempotent finalization owner and no double-write path before any
 runtime narrowing.

@@ -92,11 +92,12 @@ under `src/core/workflow/`, ARCH-04 regrouped the executor runtime under
 and renderer seams in place. ARCH-06 normalized TypeScript type placement by
 draining the three guard-tracked root type modules into their owning seams
 (`src/shared/events.ts`, `src/core/goal/types.ts`, `src/core/executors/types.ts`)
-and auditing the remaining exported types as already owned. The remaining
-ARCH-07 through ARCH-08 sequence should land before `RC-2` so the M9/M10
-step-finalization reconciliation seam has stable docs and workflow-runtime
-ownership homes on top of those core domains.
-Accepted future runtime slices are indexed in
+and auditing the remaining exported types as already owned. ARCH-07 reconciled
+the human and agent documentation information architecture by adding internal
+indexes for current truth, active contracts, historical milestone provenance,
+and accepted future queues. ARCH-08 remains before `RC-2` so the M9/M10
+step-finalization reconciliation seam has a stable workflow-runtime ownership
+home on top of those core domains. Accepted future runtime slices are indexed in
 [`internal/plans/README.md`](plans/README.md); `RC-2` remains the highest-value
 next runtime consolidation slice after ARCH-08 unless that issue is re-scoped.
 
