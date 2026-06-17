@@ -28,8 +28,9 @@ own implementation issue and proof.
 
 The ARCH sequence is defined by
 [`../contracts/repo-architecture-standard.md`](../contracts/repo-architecture-standard.md#migration-sequence).
-ARCH-07 / NGX-451 completed the docs IA cleanup. The next repo-architecture
-step is **ARCH-08 / NGX-452**, which should deepen the smallest useful
-`src/core/workflow/` seam around finalization/status/recovery coordination
-without implementing the full RC-2 reconciliation unless that issue is
-explicitly re-scoped.
+ARCH-07 / NGX-451 completed the docs IA cleanup. **ARCH-08 / NGX-452** added
+`src/core/workflow/runtime-state.ts` as the smallest useful workflow-owned seam
+around mechanical finalization/status/monitor refresh coordination: callers that
+already mutated durable step / lease rows can re-read reducer rows and refresh
+cached `workflow_runs` state / monitor columns without duplicating SQL. The full
+RC-2 single-finalization owner remains future runtime-consolidation work.
