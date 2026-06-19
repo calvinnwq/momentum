@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import os from "node:os";
 import process from "node:process";
 import {
@@ -89,6 +90,18 @@ import {
 } from "./core/evidence/records.js";
 import { executeWorkflowStepDispatch } from "./core/workflow/dispatch-execute.js";
 import { resolveDaemonWorkflowDispatch } from "./core/workflow/dogfood-dispatch.js";
+import {
+  readDaemonLiveWrapperProfileSource,
+  resolveDaemonLiveWrapperProfile,
+  DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR
+} from "./core/workflow/daemon-live-wrapper-profile.js";
+import {
+  loadDispatchedStepRunProvenance,
+  resolveDispatchedStepExecutorContext
+} from "./core/workflow/daemon-dispatch-exec-context.js";
+import { createLiveWrapperWorkflowDispatch } from "./core/workflow/live-wrapper-dispatch.js";
+import { buildRealWorkflowStepExecutorRegistry } from "./core/workflow/step-executor-real-adapters.js";
+import type { WorkflowStepDispatch } from "./core/workflow/scheduler.js";
 import {
   countIntentApplyAuditsByLifecycleState,
   countIntentsByApplyState,
@@ -450,6 +463,23 @@ async function daemonStart(
       });
     }
 
+    let workflowDispatchResolution: DaemonStartWorkflowDispatchResolution = {
+      ok: true,
+      dispatch: executeWorkflowStepDispatch
+    };
+    if (loopRequested) {
+      workflowDispatchResolution = resolveDaemonStartWorkflowDispatch(
+        io.env ?? {},
+        executeWorkflowStepDispatch
+      );
+      if (!workflowDispatchResolution.ok) {
+        return emitDaemonStartFailure(parsed, io, {
+          code: "daemon_live_wrapper_profile_invalid",
+          message: workflowDispatchResolution.message
+        });
+      }
+    }
+
     let runId: string;
     let run: ReturnType<typeof startDaemonRun>["run"];
     try {
@@ -494,20 +524,14 @@ async function daemonStart(
         : {}),
       pollIntervalMs:
         parsed.pollIntervalMs ?? DEFAULT_DAEMON_POLL_INTERVAL_MS,
-      // Production workflow-first dispatch (M10-09a, NGX-367): the bounded managed
-      // loop now drives the workflow scheduler lane alongside goal-iteration
-      // draining, using the durable executor-dispatch seam. Register-only
-      // `daemon start` returns above and never reaches here, so it stays inert.
-      // The lane is harmlessly idle when no workflow run has a runnable step.
-      //
-      // The opt-in dogfood seam (M10-09b, NGX-391) leaves this as the production
-      // dispatch unless an isolated dogfood explicitly enables the
-      // terminalize-and-continue fixture; default `daemon start` is unchanged.
+      // Production workflow-first dispatch (M10-09a, NGX-367): bounded loops
+      // drive the workflow scheduler lane alongside goal-iteration draining.
+      // Register-only `daemon start` returns above and never reaches here, so it
+      // stays inert. The lane is harmlessly idle when no workflow run has a
+      // runnable step. Without a live-wrapper profile, the dogfood resolver keeps
+      // the default dispatch unchanged unless its explicit fixture opt-in is set.
       workflowLane: {
-        dispatch: resolveDaemonWorkflowDispatch(
-          io.env ?? {},
-          executeWorkflowStepDispatch
-        )
+        dispatch: workflowDispatchResolution.dispatch
       }
     });
 
@@ -522,6 +546,60 @@ async function daemonStart(
   } finally {
     db.close();
   }
+}
+
+type DaemonStartWorkflowDispatchResolution =
+  | { ok: true; dispatch: WorkflowStepDispatch }
+  | { ok: false; message: string };
+
+function resolveDaemonStartWorkflowDispatch(
+  env: Record<string, string | undefined>,
+  baseDispatch: WorkflowStepDispatch
+): DaemonStartWorkflowDispatchResolution {
+  const profile = resolveDaemonLiveWrapperProfile(env, {
+    loadSource: readDaemonLiveWrapperProfileSource
+  });
+
+  if (profile.status === "invalid") {
+    return {
+      ok: false,
+      message: `Invalid ${DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR} (${profile.source}): ${profile.code}: ${profile.error}`
+    };
+  }
+
+  if (profile.status === "not_configured") {
+    return {
+      ok: true,
+      dispatch: resolveDaemonWorkflowDispatch(env, baseDispatch)
+    };
+  }
+
+  const registry = buildRealWorkflowStepExecutorRegistry({
+    profile: profile.profile
+  });
+  return {
+    ok: true,
+    dispatch: createLiveWrapperWorkflowDispatch(baseDispatch, {
+      registry,
+      deriveExec: (claim, context) => {
+        const provenance = loadDispatchedStepRunProvenance(
+          context.db,
+          claim.runId
+        );
+        if (provenance === undefined) {
+          return { ok: false, reason: "run_not_found" };
+        }
+        const resolved = resolveDispatchedStepExecutorContext(
+          claim.runId,
+          provenance
+        );
+        if (resolved.ok) {
+          fs.mkdirSync(resolved.exec.runDir, { recursive: true });
+        }
+        return resolved;
+      }
+    })
+  };
 }
 
 const DEFAULT_DAEMON_STOP_REASON = "operator-requested";
