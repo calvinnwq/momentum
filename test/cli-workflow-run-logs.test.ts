@@ -21,6 +21,7 @@ import type {
   ExecutorInvocationRecord,
   ExecutorRoundRecord
 } from "../src/core/executors/loop-reducer.js";
+import { insertWorkflowGate } from "../src/core/workflow/gate-persist.js";
 
 type RunResult = {
   code: number;
@@ -178,6 +179,37 @@ function seedRunWithRound(db: MomentumDb, runId: string): void {
   insertExecutorDecision(db, makeDecision(), { now: 9 });
 }
 
+function seedRunDetailCategories(db: MomentumDb, runId: string): void {
+  db.prepare(
+    `INSERT INTO workflow_approvals
+       (run_id, boundary, actor, phrase, artifact_path, artifact_digest,
+        recorded_at, discharged_at, created_at, updated_at)
+       VALUES (?, 'implementation', 'calvin', 'approve implementation',
+        '/runs/approval.json', 'sha256:approval', 11, NULL, 11, 11)`
+  ).run(runId);
+  db.prepare(
+    `INSERT INTO workflow_leases
+       (run_id, lease_kind, holder, acquired_at, expires_at, heartbeat_at,
+        released_at, stale_policy, created_at, updated_at)
+       VALUES (?, 'managed-step', 'worker-1', 12, 9999999999999, 12,
+        NULL, 'auto-release', 12, 12)`
+  ).run(runId);
+  insertWorkflowGate(
+    db,
+    {
+      gateId: "gate-open-1",
+      workflowRunId: runId,
+      targetScope: "workflow",
+      gateType: "approval_required",
+      reason: "operator must approve external apply",
+      allowedActions: ["approve", "reject"],
+      recommendedAction: "approve",
+      policyEnvelope: []
+    },
+    { now: 13 }
+  );
+}
+
 describe("momentum workflow run logs", () => {
   it("advertises the command in top-level help", async () => {
     const result = await run(["--help"]);
@@ -228,6 +260,31 @@ describe("momentum workflow run logs", () => {
     });
   });
 
+  it("returns data_dir_failed when the database cannot be opened", async () => {
+    const dataDir = path.join(makeTempDir(), "not-a-directory");
+    fs.writeFileSync(dataDir, "not a directory");
+
+    const result = await run([
+      "workflow",
+      "run",
+      "logs",
+      "cwfp-db-failed",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "workflow run logs",
+      code: "data_dir_failed",
+      dataDir,
+      runId: "cwfp-db-failed"
+    });
+  });
+
   it("rejects an unexpected positional argument", async () => {
     const dataDir = makeTempDir();
     const result = await run([
@@ -250,6 +307,7 @@ describe("momentum workflow run logs", () => {
     const db = openDb(dataDir);
     try {
       seedRunWithRound(db, "cwfp-logs01");
+      seedRunDetailCategories(db, "cwfp-logs01");
     } finally {
       db.close();
     }
@@ -271,6 +329,9 @@ describe("momentum workflow run logs", () => {
       generatedAt: number;
       run: { runId: string; state: string };
       steps: Array<{ stepId: string }>;
+      approvals: Array<{ boundary: string; actor: string | null }>;
+      leases: Array<{ leaseKind: string; holder: string }>;
+      gates: Array<{ gateId: string; open: boolean; allowedActions: string[] }>;
       rounds: Array<{
         roundId: string;
         summary: string | null;
@@ -290,6 +351,25 @@ describe("momentum workflow run logs", () => {
     expect(typeof payload.generatedAt).toBe("number");
     expect(payload.run.runId).toBe("cwfp-logs01");
     expect(payload.steps.map((s) => s.stepId)).toEqual(["implementation"]);
+    expect(payload.approvals).toEqual([
+      expect.objectContaining({
+        boundary: "implementation",
+        actor: "calvin"
+      })
+    ]);
+    expect(payload.leases).toEqual([
+      expect.objectContaining({
+        leaseKind: "managed-step",
+        holder: "worker-1"
+      })
+    ]);
+    expect(payload.gates).toEqual([
+      expect.objectContaining({
+        gateId: "gate-open-1",
+        open: true,
+        allowedActions: ["approve", "reject"]
+      })
+    ]);
     expect(payload.rounds).toHaveLength(1);
     const round = payload.rounds[0]!;
     expect(round.roundId).toBe("round-1");
@@ -309,6 +389,7 @@ describe("momentum workflow run logs", () => {
     const db = openDb(dataDir);
     try {
       seedRunWithRound(db, "cwfp-logs-text");
+      seedRunDetailCategories(db, "cwfp-logs-text");
     } finally {
       db.close();
     }
@@ -326,5 +407,9 @@ describe("momentum workflow run logs", () => {
     expect(result.stdout).toContain("Schema version: 1");
     expect(result.stdout).toContain("round-1");
     expect(result.stdout).toContain("implemented the slice");
+    expect(result.stdout).toContain("Approvals: 1");
+    expect(result.stdout).toContain("Leases: 1");
+    expect(result.stdout).toContain("Gates: 1 (open: 1)");
+    expect(result.stdout).toContain("gate-open-1");
   });
 });

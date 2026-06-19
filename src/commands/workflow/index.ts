@@ -1559,11 +1559,19 @@ function workflowRunLogs(parsed: ParsedFlags, io: CliIo): number {
   }
 
   let envelope: WorkflowRunLogsEnvelope | null;
-  const db = openDb(dataDir);
+  let db: MomentumDb | undefined;
   try {
+    db = openDb(dataDir);
     envelope = loadWorkflowRunLogs(db, runId);
+  } catch (err) {
+    return emitWorkflowRunLogsFailure(parsed, io, {
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err),
+      dataDir,
+      runId
+    });
   } finally {
-    db.close();
+    db?.close();
   }
 
   if (envelope === null) {

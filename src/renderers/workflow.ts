@@ -727,8 +727,11 @@ export function emitWorkflowRunLogs(
     generatedAt: envelope.generatedAt,
     run: workflowRunToJsonShape(envelope.detail.run),
     steps: envelope.detail.steps.map(workflowStepToJsonShape),
+    approvals: envelope.detail.approvals.map(workflowApprovalToJsonShape),
+    leases: envelope.detail.leases.map(workflowLeaseToJsonShape),
     monitor: workflowMonitorToJsonShape(envelope.detail.monitor),
     evidence: envelope.detail.evidence.map(workflowEvidenceToJsonShape),
+    gates: envelope.detail.gates.map(workflowGateToJsonShape),
     rounds: envelope.rounds.map(workflowRoundToJsonShape),
     nextAction: nextActionToJsonShape(envelope.detail.monitor)
   };
@@ -803,6 +806,23 @@ export function renderWorkflowRunLogsText(
   lines.push(`Generated at (epoch ms): ${envelope.generatedAt}`);
   lines.push(`Run state: ${envelope.detail.run.state}`);
   lines.push(`Steps: ${envelope.detail.steps.length}`);
+  lines.push(`Approvals: ${envelope.detail.approvals.length}`);
+  lines.push(`Leases: ${envelope.detail.leases.length}`);
+  const openGates = envelope.detail.gates.filter(
+    (gate) => gate.resolvedAt === null
+  );
+  lines.push(
+    `Gates: ${envelope.detail.gates.length} (open: ${openGates.length})`
+  );
+  for (const gate of openGates) {
+    lines.push(
+      `- ${gate.gateId} [${gate.targetScope}/${gate.gateType}] OPEN` +
+        ` allowed=${gate.allowedActions.join(",")}` +
+        (gate.recommendedAction !== null
+          ? ` recommended=${gate.recommendedAction}`
+          : "")
+    );
+  }
   lines.push(`Executor rounds: ${envelope.rounds.length}`);
   for (const round of envelope.rounds) {
     lines.push(

@@ -1118,7 +1118,7 @@ Exit code 0 on success, 1 on failure, 2 on usage error.
 momentum workflow run logs <run-id> [--data-dir <path>] [--json]
 ```
 
-Read-back of one workflow run's durable logs and evidence, for operators inspecting what each step actually ran and produced. It is the workflow-first equivalent of goal-first `logs <goal-id>`: it wraps the same detail loader as `workflow status <run-id>` / `workflow handoff` (run, steps, monitor, evidence) and adds the per-round executor evidence that the detail loader does not carry — executor family / agent / model, log paths, summaries, key changes, changed files, verification status, commit SHA, recovery codes, and the child artifacts / checkpoints / findings / decisions emitted below each round. Read-only: no SQLite mutation, no file reads, no external writes.
+Read-back of one workflow run's durable logs and evidence, for operators inspecting what each step actually ran and produced. It is the workflow-first equivalent of goal-first `logs <goal-id>`: it wraps the same detail loader as `workflow status <run-id>` / `workflow handoff` (run, steps, approvals, leases, monitor, evidence, gates) and adds the per-round executor evidence that the detail loader does not carry — executor family / agent / model, log paths, summaries, key changes, changed files, verification status, commit SHA, recovery codes, and the child artifacts / checkpoints / findings / decisions emitted below each round. Read-only: no SQLite mutation, no file reads, no external writes.
 
 Rounds are returned across every invocation in the run, ordered by step key, then invocation attempt, then invocation id, then round index, then round id.
 
@@ -1133,8 +1133,11 @@ Rounds are returned across every invocation in the run, ordered by step key, the
   "generatedAt": 1730000600000,
   "run": { "...": "same shape as workflow status detail" },
   "steps": [ "..." ],
+  "approvals": [ "..." ],
+  "leases": [ "..." ],
   "monitor": { "...": "same shape as workflow status detail" },
   "evidence": [ "..." ],
+  "gates": [ "..." ],
   "rounds": [
     {
       "roundId": "cwfp-abc123::implementation::dispatch::round-1",
@@ -1196,7 +1199,7 @@ Rounds are returned across every invocation in the run, ordered by step key, the
 | Code | Meaning |
 |------|---------|
 | `run_id_required` | `<run-id>` was not supplied. |
-| `data_dir_failed` | Data directory resolution failed. |
+| `data_dir_failed` | Data directory resolution, open, or read failed. |
 | `run_not_found` | `<run-id>` does not exist in `workflow_runs`. |
 
 ### Text output
@@ -1207,6 +1210,10 @@ Schema version: 1
 Generated at (epoch ms): 1730000600000
 Run state: running
 Steps: 5
+Approvals: 1
+Leases: 1
+Gates: 1 (open: 1)
+- gate-nm-1 [step/operator_decision_required] OPEN allowed=fix,skip,approve_as_is recommended=fix
 Executor rounds: 1
 - cwfp-abc123::implementation::dispatch::round-1 [implementation/succeeded] complete
     summary: implemented the slice
