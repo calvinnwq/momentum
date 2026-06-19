@@ -198,6 +198,79 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     ).toBe(true);
   });
 
+  it("parks the run for manual recovery when daemon live-wrapper run-dir creation fails", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const profileDir = makeTempDir();
+    const profilePath = writeSucceedingPreflightProfile(profileDir);
+    const runId = "ngx492-run-dir-unavailable";
+    fs.writeFileSync(path.join(repoDir, ".agent-workflows"), "not a directory");
+    await startApprovedCodingRun(dataDir, repoDir, runId);
+
+    const result = await run(
+      [
+        "daemon",
+        "start",
+        "--max-loop-iterations",
+        "1",
+        "--poll-interval-ms",
+        "0",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath }
+    );
+
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    const loop = JSON.parse(result.stdout).loop as Record<string, unknown>;
+    expect(loop["workflowStepsDispatched"]).toBe(1);
+    expect(loop["lastWorkflowCode"]).toBe("dispatched");
+
+    const db = openDb(dataDir);
+    try {
+      const runRow = db
+        .prepare(
+          "SELECT needs_manual_recovery, manual_recovery_reason FROM workflow_runs WHERE id = ?"
+        )
+        .get(runId) as
+        | { needs_manual_recovery: number; manual_recovery_reason: string | null }
+        | undefined;
+      expect(runRow?.needs_manual_recovery).toBe(1);
+      expect(runRow?.manual_recovery_reason).toContain(
+        "manual_recovery_required"
+      );
+
+      const invocation = db
+        .prepare(
+          "SELECT state FROM executor_invocations WHERE workflow_run_id = ? AND step_key = ?"
+        )
+        .get(runId, "preflight") as { state: string } | undefined;
+      expect(invocation).toEqual({ state: "manual_recovery_required" });
+
+      const round = db
+        .prepare(
+          "SELECT state, recovery_code, summary FROM executor_rounds WHERE workflow_run_id = ? AND step_key = ?"
+        )
+        .get(runId, "preflight") as
+        | { state: string; recovery_code: string | null; summary: string | null }
+        | undefined;
+      expect(round?.state).toBe("manual_recovery_required");
+      expect(round?.recovery_code).toBe("runtime_unavailable");
+      expect(round?.summary).toContain("run_dir_unavailable");
+
+      const openLeases = db
+        .prepare(
+          "SELECT lease_kind FROM workflow_leases WHERE run_id = ? AND released_at IS NULL"
+        )
+        .all(runId) as Array<{ lease_kind: string }>;
+      expect(openLeases).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("advances an approved workflow run through the shipped daemon start --max-* path and records durable executor rows", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();

@@ -594,7 +594,14 @@ function resolveDaemonStartWorkflowDispatch(
           provenance
         );
         if (resolved.ok) {
-          fs.mkdirSync(resolved.exec.runDir, { recursive: true });
+          try {
+            fs.mkdirSync(resolved.exec.runDir, { recursive: true });
+          } catch (error) {
+            return {
+              ok: false,
+              reason: `run_dir_unavailable: ${error instanceof Error ? error.message : String(error)}`
+            };
+          }
         }
         return resolved;
       }
