@@ -18,7 +18,7 @@ own implementation issue and proof.
 
 | Item | Plan source | What it unlocks |
 | --- | --- | --- |
-| RC-1 | [`runtime-consolidation-plan.md`](../contracts/runtime-consolidation-plan.md#follow-up-issue-sequence) | Goal-first read-back / recovery parity before any goal-first narrowing. |
+| RC-1 — landed (NGX-486) | [`runtime-consolidation-plan.md`](../contracts/runtime-consolidation-plan.md#follow-up-issue-sequence) | Goal-first status / logs / handoff / recovery parity now has workflow-first equivalents and migration proofs; actual goal-first narrowing still waits on the shared finalization primitive. |
 | RC-2 — landed (NGX-480) | [`runtime-consolidation-plan.md`](../contracts/runtime-consolidation-plan.md#follow-up-issue-sequence) | Single M9/M10 step-finalization reconciliation seam and no-double-write proof — seam shipped as `reconcileDispatchedWorkflowStep`; narrowing Paths 3/4 still gated on compatibility-lane migration. |
 | RC-3 | [`runtime-consolidation-plan.md`](../contracts/runtime-consolidation-plan.md#follow-up-issue-sequence) | Daemon-dispatchable `external-apply` adapter behind M6 safety gates. |
 | RC-4 | [`runtime-consolidation-plan.md`](../contracts/runtime-consolidation-plan.md#follow-up-issue-sequence) | Daemon-dispatchable `subworkflow` adapter after workflow start is stable. |
@@ -36,5 +36,6 @@ cached `workflow_runs` state / monitor columns without duplicating SQL. The full
 RC-2 single-finalization owner has since landed separately (NGX-480; see the
 runtime-consolidation plan), as has RC-5's fake demotion (NGX-485: real adapters
 back the production executor default, fakes are a test-only injected seam),
-leaving RC-1 and the remaining RC-5 narrowing (a daemon-default live-wrapper
+leaving the actual goal-first narrowing (after the shared finalization primitive
+is disentangled) and the remaining RC-5 narrowing (a daemon-default live-wrapper
 profile) as the next independent items.

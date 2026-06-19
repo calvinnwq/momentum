@@ -72,7 +72,7 @@ multiple chained iterations under a single `daemon_runs` row that
 `daemon status`, `status --json`, and `handoff` can surface. Goal queue work
 still uses the same queue and artifacts as `worker run`; workflow run work uses
 the separate workflow tables and is surfaced through `workflow status`,
-`workflow handoff`, and `workflow run monitor`.
+`workflow handoff`, `workflow run monitor`, and `workflow run logs`.
 
 ## Foreground debug path
 

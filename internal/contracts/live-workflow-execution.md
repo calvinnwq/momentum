@@ -94,7 +94,7 @@ Each live step execution must:
 - Capture stdout / stderr to bounded artifact logs.
 - Require a normalized result file for success.
 - Persist terminal state before releasing the lease.
-- Preserve enough evidence for `workflow status`, `workflow handoff`, `workflow run monitor`, and `evidence ingest`.
+- Preserve enough evidence for `workflow status`, `workflow handoff`, `workflow run monitor`, `workflow run logs`, and `evidence ingest`.
 
 If the process exits successfully but the result file is missing or invalid, the step fails with `result_missing` or `result_invalid`. Success without a durable result is not success.
 

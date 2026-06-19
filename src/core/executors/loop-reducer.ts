@@ -383,9 +383,9 @@ export type ExecutorInvocationRecord = {
 /**
  * One bounded loop attempt or long-lived external mirror lane under an invocation
  * (contract "Round Schema"). The common identity, execution, and result fields
- * below are what workflow status, handoff, monitor, and recovery surfaces rely on
- * without understanding the executor internals. Executor-specific evidence is
- * layered on durably as
+ * below are what workflow status, handoff, monitor, logs, and recovery
+ * surfaces rely on without understanding the executor internals.
+ * Executor-specific evidence is layered on durably as
  * separate {@link ExecutorArtifactRecord} / {@link ExecutorCheckpointRecord} /
  * {@link ExecutorFindingRecord} / {@link ExecutorDecisionRecord} child records
  * that hang below a round.

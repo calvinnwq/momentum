@@ -62,6 +62,7 @@ Current product surface:
 - `workflow run update-step`
 - `workflow run clear-recovery`
 - `workflow run monitor`
+- `workflow run logs`
 
 Current limitation:
 
@@ -112,7 +113,7 @@ Future product surface:
 | Daemon scheduling | Drains goal iteration queue; opt-in lane recovers/scans/claims runnable workflow steps | Schedules workflow runs and step runs | Scheduler lane landed (M10-04); goal-loop and one-shot / script adapters now drive bounded rounds below StepRun, and no-mistakes now mirrors external state into one long-lived round; M10-09a wired the production dispatcher into bounded managed `daemon start`, and NGX-353 proved the shipped daemon path dispatches approved steps without monitor drift |
 | Repo safety | Repo locks plus verification / commit transactions | Same safety around executor finalization | Reuse M9 finalization and repo-lock heartbeats |
 | Approvals | M8 workflow approvals for imported runs | Workflow / step / gate approvals | Keep M8 rows; generalize boundary vocabulary |
-| Human gates | Split across approval rows, recovery flag, external TUI/IPC | Durable gates with allowed actions and decisions | Gate records and `workflow run decide` landed (M10-08): durable `workflow_gates` with allowed actions / policy envelope and operator + delegated-policy decisions, surfaced in status / handoff / monitor; daemon-side gate emission during live execution remains later runtime work |
+| Human gates | Split across approval rows, recovery flag, external TUI/IPC | Durable gates with allowed actions and decisions | Gate records and `workflow run decide` landed (M10-08): durable `workflow_gates` with allowed actions / policy envelope and operator + delegated-policy decisions, surfaced in status / handoff / monitor and reattached by `workflow run logs`; daemon-side gate emission during live execution remains later runtime work |
 | Recovery | Goal recovery plus workflow run recovery | Workflow / step / executor recovery taxonomy | Reuse M8/M9 codes, add executor-level recovery records |
 | no-mistakes | External daemon pipeline with a landed Momentum mirror | Specialist executor mirrored into Momentum | Keep the mirror boundary: classify external evidence without reimplementing the pipeline |
 | GNHF | External/in-process implementation loop | `goal-loop` executor behavior | Copy bounded round pattern, not state store |
@@ -201,8 +202,8 @@ it; it does not run the actual dogfood or flip the milestone marker.
 - **Durable dispatch effects through the production path.** On a dispatchable
   family the dispatcher atomically advances the step `approved -> running` and
   creates the `executor_invocations` plus first `executor_rounds` start scaffold,
-  observable by `workflow status`, `workflow handoff`, and `workflow run monitor`
-  from durable rows after the daemon process exits. The scaffold ids are
+  observable by `workflow status`, `workflow handoff`, `workflow run monitor`,
+  and `workflow run logs` from durable rows after the daemon process exits. The scaffold ids are
   deterministic (`<run>::<step>::dispatch` and `::round-1`) and carry no result
   evidence until a later adapter fills them. The loop summary surfaces
   `workflowStepsDispatched`, `lastWorkflowCode`, and cycle-level `workflowResult`

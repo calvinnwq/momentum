@@ -405,7 +405,8 @@ Coverage:
   `workflow status` / `workflow handoff` / `workflow run monitor` envelopes in
   `test/cli-workflow-status.test.ts`, `test/cli-workflow-handoff.test.ts`,
   `test/cli-workflow-run-monitor.test.ts`, and
-  `test/workflow-monitor-envelope.test.ts`.
+  `test/workflow-monitor-envelope.test.ts`; `workflow run logs` reuses the
+  same gate list in `test/cli-workflow-run-logs.test.ts`.
 - the pure workflow-dispatch decision domain in `test/workflow-dispatch.test.ts`:
   the phase-1 dispatchable allowlist (`goal-loop`, `one-shot`, `script`,
   `no-mistakes`), unsupported `external-apply` / `subworkflow` fail-closed
@@ -444,12 +445,13 @@ Coverage:
   `runDaemonLoop` call with the terminalize-and-continue fixture dispatches and
   terminalizes `preflight` then `implementation` in order, leaving leases
   released, no duplicate invocations, and the remaining steps `pending`;
-  `workflow status`, `workflow run monitor`, and `workflow handoff` all read
-  the post-terminalize state from durable rows alone.
+  `workflow status`, `workflow run monitor`, `workflow handoff`, and
+  `workflow run logs` all read the post-terminalize state from durable rows
+  alone.
 - built-binary smoke coverage in `test/m10-smoke.test.ts`: `workflow run start`,
   `workflow run approve`, bounded `daemon start`, durable executor rows, and
-  process-loss observability through `workflow status`, `workflow handoff`, and
-  `workflow run monitor`.
+  process-loss observability through `workflow status`, `workflow handoff`,
+  `workflow run monitor`, and `workflow run logs`.
 
 Run locally via the targeted vitest command:
 

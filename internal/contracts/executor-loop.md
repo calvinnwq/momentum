@@ -168,7 +168,7 @@ Required result fields:
 - `recovery_code`
 - `human_gate`
 
-The schema may add executor-specific payload fields, but the common fields above are what workflow status, handoff, monitor, and recovery surfaces can rely on without understanding the executor internals.
+The schema may add executor-specific payload fields, but the common fields above are what workflow status, handoff, monitor, and recovery surfaces can rely on without understanding the executor internals. `workflow run logs` reuses the same fields and attaches the round child-evidence tables for run-scoped read-back.
 
 ## Required Artifacts
 

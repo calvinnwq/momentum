@@ -217,7 +217,7 @@ it. The end-to-end evidence is the built-CLI smoke under
   (`"go ahead"`, `"sure"`) still refuses — the M7 contract that casual phrases
   never produce a durable row stays in force. The durable approval survives
   subsequent `workflow import` (upsert `ON CONFLICT(run_id, boundary)`, never
-  deleted) and composes into status / handoff / monitor.
+  deleted) and composes into status / handoff / monitor / logs.
 - **Owner.** [`src/commands/workflow/index.ts`](../src/commands/workflow/index.ts) (`workflowRunApprove`) plus
   [`src/core/workflow/run-import.ts`](../src/core/workflow/run-import.ts) (idempotent
   approval upsert).
@@ -312,7 +312,7 @@ it. The end-to-end evidence is the built-CLI smoke under
   null `stepId`. Idempotent replay can fill missing linkage but never
   overwrites non-null linkage, and the existing M5 ingest shape, diagnostic
   codes, and idempotency stay wire-stable. Typed pointers surface identically
-  through `workflow status` / `workflow handoff` / `workflow run monitor`.
+  through `workflow status` / `workflow handoff` / `workflow run monitor` / `workflow run logs`.
 - **Owner.** [`src/core/evidence/workflow.ts`](../src/core/evidence/workflow.ts)
   (workflow artifact parsing and typed `runId` / `stepId` linkage).
 - **Evidence.**

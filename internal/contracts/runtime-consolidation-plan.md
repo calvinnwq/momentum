@@ -78,9 +78,10 @@ operator read-back and recovery.
 
 **Prerequisite before any narrowing.**
 
-1. Workflow-first equivalents for `workflow run status` / `logs` / `handoff` /
-   `recover` exist and are wire-proven (the gap matrix lists these as *future*
-   product surface, not yet shipped).
+1. Workflow-first equivalents for status (`workflow status`), logs
+   (`workflow run logs`), handoff (`workflow handoff`), and recovery clear
+   (`workflow run clear-recovery`) exist and are wire-proven; this is now
+   satisfied by NGX-486.
 2. Migration coverage proves a goal-first operator command maps to its
    workflow-first equivalent without dropping a JSON field, refusal code, or
    text-routing contract — the same byte-equivalence discipline NGX-432 applied

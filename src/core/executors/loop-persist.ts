@@ -32,8 +32,8 @@
  *   - The round carries the contract "Round Schema" normalized result fields
  *     (`summary`, `key_changes`, `remaining_work`, `changed_files`,
  *     `verification_status`, `commit_sha`, ...) so workflow status, handoff,
- *     monitor, and recovery surfaces can reattach without understanding executor
- *     internals.
+ *     monitor, logs, and recovery surfaces can reattach without understanding
+ *     executor internals.
  *   - The `executor_artifacts` / `executor_checkpoints` / `executor_findings` /
  *     `executor_decisions` child evidence tables hang below a round by
  *     `round_id`. They are append-only: an evidence row is durable proof a round

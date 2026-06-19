@@ -445,8 +445,9 @@ proof or migration path, and decides the M9/M10 step-finalization boundary.
 
 Decisions at a glance (full evidence and prerequisites live in the plan):
 
-- **Goal-first CLI compatibility** — deprecate-later; blocked on workflow-first
-  read-back/recover parity, byte-equivalent migration coverage, and
+- **Goal-first CLI compatibility** — deprecate-later; workflow-first
+  read-back/recover parity plus contract-equivalent migration coverage has
+  landed (RC-1 / NGX-486), but actual narrowing remains blocked on
   disentangling the iteration-finalization primitive the `goal-loop` executor
   reuses (`src/core/executors/goal-loop-mechanism.ts:83` →
   `finalizeLiveWorkflowStepFromResultFile`).
@@ -505,8 +506,11 @@ These are not cleanup candidates yet:
 These are legitimate future consolidation areas, but removal needs a separate
 proof issue:
 
-- Goal-first status/logs/handoff paths can narrow only after workflow-first
-  equivalents are complete and migration coverage proves compatibility.
+- Goal-first status/logs/handoff/recovery paths now have workflow-first
+  equivalents and contract-equivalent migration coverage (RC-1 / NGX-486), but
+  actual narrowing still requires a separate proof that the shared
+  iteration-finalization primitive is no longer coupled to goal-first CLI
+  compatibility.
 - `.agent-workflows` import and `cwfp-*` compatibility can narrow only after
   old run recovery and workflow history import are explicitly retired.
 - M9 live-wrapper direct `workflow_steps` advancement and M10 executor-loop

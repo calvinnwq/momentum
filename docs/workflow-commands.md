@@ -1,6 +1,6 @@
 # Workflow commands
 
-Operator-facing CLI envelopes for the `workflow run start`, `workflow import`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run approve`, `workflow run decide`, `workflow run update-step`, `workflow run clear-recovery`, and `workflow run monitor` commands.
+Operator-facing CLI envelopes for the `workflow run start`, `workflow import`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run approve`, `workflow run decide`, `workflow run update-step`, `workflow run clear-recovery`, `workflow run monitor`, and `workflow run logs` commands.
 
 - `workflow run start` starts a first-class workflow run from a validated workflow definition: it resolves the definition (a persisted definition, or the built-in `coding-workflow` recipe), loads repo policy, and durably materializes a `workflow_runs` row plus one ordered `workflow_steps` row per definition step, with an approval row when an approval boundary is supplied. `goal start` remains the compatibility path for the older Goal loop.
 - `workflow import` reads local `.agent-workflows/<run-id>/` directories and persists normalized rows into the `workflow_runs`, `workflow_steps`, and `workflow_approvals` tables.
@@ -12,12 +12,13 @@ Operator-facing CLI envelopes for the `workflow run start`, `workflow import`, `
 - `workflow run clear-recovery` explicitly clears a run's durable manual-recovery flag after the blocking condition is resolved.
 - `workflow run decide` resolves a durable workflow / step / executor gate by routing an operator or delegated-policy decision through the gate brain: an operator may pick any allowed action, while `--mode delegated` may only auto-apply an action inside the gate's policy envelope.
 - `workflow run monitor` is a read-only machine envelope that emits one stable JSON shape per run — derived from durable rows and the monitor reducer — so a monitor runner can decide whether to report, wait, or ask an operator to recover without parsing prose or scraping artifacts.
+- `workflow run logs` is a read-only run-scoped log and evidence reader that reuses the workflow detail shape and attaches executor rounds plus their child artifacts, checkpoints, findings, and decisions.
 
-`workflow status`, `workflow handoff`, `workflow run list`, and `workflow run monitor` are read-only: they never write SQLite or files.
+`workflow status`, `workflow handoff`, `workflow run list`, `workflow run monitor`, and `workflow run logs` are read-only: they never write SQLite or files.
 
 See also:
 
-- [docs/data-directory.md](data-directory.md) — the `workflow_runs` / `workflow_steps` / `workflow_approvals` / `workflow_leases` table schemas.
+- [docs/data-directory.md](data-directory.md) — the workflow, gate, executor invocation / round, and executor child-evidence table schemas.
 - [docs/evidence-commands.md](evidence-commands.md) — `evidence ingest` and `evidence list` envelopes for the `evidence_records` table.
 
 ## `workflow run start`
@@ -158,7 +159,7 @@ Reads the `.agent-workflows/<run-id>/` directory at `<run-dir>` and normalizes t
 ### Processing rules
 
 - **Idempotent re-import**: running `workflow import` on the same directory twice produces no duplicate rows. `created_at` is preserved on upsert; `updated_at` is bumped.
-- **Terminal ledger wins**: `monitor.json` is advisory. Step and run state are derived from `ledger.jsonl` and `plan.json`; a stale monitor does not override completed ledger evidence. Its advisory snapshot is persisted on `workflow_runs` (`monitor_last_seen_state`, `monitor_terminal`, `monitor_step`, `monitor_last_seen_digest`, `monitor_last_emitted_digest`) so status / handoff / monitor drift views can compare durable substrate state against the last imported or operator-refreshed advisory snapshot. Successful `workflow run approve`, `workflow run update-step`, and `workflow run clear-recovery` mutations refresh the same columns from durable rows and clear the digest fields, so later views do not report drift against a stale pre-mutation monitor tick.
+- **Terminal ledger wins**: `monitor.json` is advisory. Step and run state are derived from `ledger.jsonl` and `plan.json`; a stale monitor does not override completed ledger evidence. Its advisory snapshot is persisted on `workflow_runs` (`monitor_last_seen_state`, `monitor_terminal`, `monitor_step`, `monitor_last_seen_digest`, `monitor_last_emitted_digest`) so status / handoff / monitor / logs drift views can compare durable substrate state against the last imported or operator-refreshed advisory snapshot. Successful `workflow run approve`, `workflow run update-step`, and `workflow run clear-recovery` mutations refresh the same columns from durable rows and clear the digest fields, so later views do not report drift against a stale pre-mutation monitor tick.
 - **Lost managed-task markers**: `managed-*.pid`, `managed-*.log`, and `locks/` sibling entries are ignored without diagnostics. They do not force a failed step state.
 - **Unknown siblings**: unrecognized files produce `evidence_format_unknown` diagnostics but do not drop the valid records around them. The generated `recovery.md` artifact is a known sibling and is ignored by import.
 - **Malformed artifacts**: invalid `plan.json`, `ledger.jsonl` lines, or `approval-*.json` files produce `evidence_format_invalid` diagnostics. Valid siblings are still imported.
