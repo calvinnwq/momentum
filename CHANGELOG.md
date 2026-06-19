@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.1](https://github.com/calvinnwq/momentum/compare/v0.1.0...v0.1.1) (2026-06-17)
+
+
+### Bug Fixes
+
+* **release:** use plain version tags ([d73ec50](https://github.com/calvinnwq/momentum/commit/d73ec50fd0a46a726630da0c69abf37fcc131757))
+* **release:** use plain version tags ([d73cfbe](https://github.com/calvinnwq/momentum/commit/d73cfbe9bb3297b913e568cb482f30be8d58a626))
+
 ## 0.1.0 (2026-06-16)
 
 
