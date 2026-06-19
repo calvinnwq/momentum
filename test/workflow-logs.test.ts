@@ -5,10 +5,18 @@ import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
+  insertExecutorArtifact,
+  insertExecutorCheckpoint,
+  insertExecutorDecision,
+  insertExecutorFinding,
   insertExecutorInvocation,
   insertExecutorRound
 } from "../src/core/executors/loop-persist.js";
 import type {
+  ExecutorArtifactRecord,
+  ExecutorCheckpointRecord,
+  ExecutorDecisionRecord,
+  ExecutorFindingRecord,
   ExecutorInvocationRecord,
   ExecutorRoundRecord
 } from "../src/core/executors/loop-reducer.js";
@@ -100,6 +108,64 @@ function makeRound(
   };
 }
 
+function makeArtifact(
+  overrides: Partial<ExecutorArtifactRecord> = {}
+): ExecutorArtifactRecord {
+  return {
+    artifactId: "artifact-1",
+    roundId: "round-1",
+    artifactClass: "verification_output",
+    path: "/runs/run-logs-1/round-1/verify.txt",
+    digest: "sha256:verify",
+    description: "verification output",
+    ...overrides
+  };
+}
+
+function makeCheckpoint(
+  overrides: Partial<ExecutorCheckpointRecord> = {}
+): ExecutorCheckpointRecord {
+  return {
+    checkpointId: "checkpoint-1",
+    roundId: "round-1",
+    sequence: 0,
+    stage: "verify",
+    detail: "pnpm test passed",
+    ...overrides
+  };
+}
+
+function makeFinding(
+  overrides: Partial<ExecutorFindingRecord> = {}
+): ExecutorFindingRecord {
+  return {
+    findingId: "finding-1",
+    roundId: "round-1",
+    severity: "warning",
+    title: "missing evidence",
+    detail: "round evidence was not attached",
+    selected: true,
+    externalRef: "nomistakes:F-1",
+    ...overrides
+  };
+}
+
+function makeDecision(
+  overrides: Partial<ExecutorDecisionRecord> = {}
+): ExecutorDecisionRecord {
+  return {
+    decisionId: "decision-1",
+    roundId: "round-1",
+    summary: "choose recovery path",
+    allowedActions: ["retry", "hold"],
+    recommendedAction: "retry",
+    chosenAction: "retry",
+    resolution: "delegated:within-envelope",
+    externalRef: "nomistakes:D-1",
+    ...overrides
+  };
+}
+
 describe("loadWorkflowRunLogs", () => {
   it("returns null for an unknown run", () => {
     const db = openTempDb();
@@ -143,6 +209,36 @@ describe("loadWorkflowRunLogs", () => {
       expect(round.verificationStatus).toBe("passed");
       expect(round.commitSha).toBe("abc123");
       expect(round.changedFiles).toEqual(["src/core/workflow/logs.ts"]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("attaches durable child evidence to each executor round", () => {
+    const db = openTempDb();
+    try {
+      seedRun(db, "run-logs-1");
+      insertExecutorInvocation(db, makeInvocation(), { now: 1 });
+      insertExecutorRound(db, makeRound(), { now: 1 });
+      insertExecutorArtifact(db, makeArtifact(), { now: 5 });
+      insertExecutorCheckpoint(db, makeCheckpoint(), { now: 3 });
+      insertExecutorFinding(db, makeFinding(), { now: 7 });
+      insertExecutorDecision(db, makeDecision(), { now: 9 });
+
+      const envelope = loadWorkflowRunLogs(db, "run-logs-1", {
+        generatedAt: 999
+      });
+      const round = envelope!.rounds[0]! as ExecutorRoundRecord & {
+        artifacts?: ExecutorArtifactRecord[];
+        checkpoints?: ExecutorCheckpointRecord[];
+        findings?: ExecutorFindingRecord[];
+        decisions?: ExecutorDecisionRecord[];
+      };
+
+      expect(round.artifacts).toEqual([makeArtifact()]);
+      expect(round.checkpoints).toEqual([makeCheckpoint()]);
+      expect(round.findings).toEqual([makeFinding()]);
+      expect(round.decisions).toEqual([makeDecision()]);
     } finally {
       db.close();
     }

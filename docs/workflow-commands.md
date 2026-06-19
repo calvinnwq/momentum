@@ -1118,7 +1118,7 @@ Exit code 0 on success, 1 on failure, 2 on usage error.
 momentum workflow run logs <run-id> [--data-dir <path>] [--json]
 ```
 
-Read-back of one workflow run's durable logs and evidence, for operators inspecting what each step actually ran and produced. It is the workflow-first equivalent of goal-first `logs <goal-id>`: it wraps the same detail loader as `workflow status <run-id>` / `workflow handoff` (run, steps, monitor, evidence) and adds the per-round executor evidence that the detail loader does not carry — executor family / agent / model, log paths, summaries, key changes, changed files, verification status, commit SHA, and recovery codes. Read-only: no SQLite mutation, no file reads, no external writes.
+Read-back of one workflow run's durable logs and evidence, for operators inspecting what each step actually ran and produced. It is the workflow-first equivalent of goal-first `logs <goal-id>`: it wraps the same detail loader as `workflow status <run-id>` / `workflow handoff` (run, steps, monitor, evidence) and adds the per-round executor evidence that the detail loader does not carry — executor family / agent / model, log paths, summaries, key changes, changed files, verification status, commit SHA, recovery codes, and the child artifacts / checkpoints / findings / decisions emitted below each round. Read-only: no SQLite mutation, no file reads, no external writes.
 
 Rounds are returned across every invocation in the run, ordered by step key, then invocation attempt, then invocation id, then round index, then round id.
 
@@ -1163,7 +1163,28 @@ Rounds are returned across every invocation in the run, ordered by step key, the
       "verificationStatus": "passed",
       "commitSha": "abc123",
       "recoveryCode": null,
-      "humanGate": null
+      "humanGate": null,
+      "artifacts": [
+        {
+          "artifactId": "artifact-1",
+          "roundId": "cwfp-abc123::implementation::dispatch::round-1",
+          "artifactClass": "verification_output",
+          "path": "/path/to/data/runs/cwfp-abc123/round-1/verify.txt",
+          "digest": "sha256:...",
+          "description": "verification output"
+        }
+      ],
+      "checkpoints": [
+        {
+          "checkpointId": "checkpoint-1",
+          "roundId": "cwfp-abc123::implementation::dispatch::round-1",
+          "sequence": 0,
+          "stage": "verify",
+          "detail": "verification completed"
+        }
+      ],
+      "findings": [],
+      "decisions": []
     }
   ],
   "nextAction": { "...": "same shape as workflow status detail monitor.nextAction" }
@@ -1192,6 +1213,9 @@ Executor rounds: 1
     verification: passed commit: abc123
     logs: /path/to/data/runs/cwfp-abc123/round-1/agent.log
     changed files: src/core/workflow/logs.ts
+    child evidence: 2
+    artifacts: /path/to/data/runs/cwfp-abc123/round-1/verify.txt
+    checkpoints: 0:verify
 Evidence records: 0
 Data dir: /path/to/data
 ```

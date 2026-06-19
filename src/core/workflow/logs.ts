@@ -7,14 +7,27 @@
  * monitor / evidence / gates) with the per-round executor evidence that the
  * run-detail loader deliberately omits — agent/model identity, log paths,
  * summaries, key changes, changed files, verification status, commit SHA, and
- * recovery codes — so an operator migrating off goal `logs` keeps the same
- * "what ran and what it produced" read-back.
+ * recovery codes, plus child artifacts / checkpoints / findings / decisions —
+ * so an operator migrating off goal `logs` keeps the same "what ran and what it
+ * produced" read-back.
  *
  * No SQLite mutation, no file reads, no external writes.
  */
 import type { MomentumDb } from "../../adapters/db.js";
-import { listExecutorRoundsForRun } from "../executors/loop-persist.js";
-import type { ExecutorRoundRecord } from "../executors/loop-reducer.js";
+import {
+  listExecutorArtifactsForRound,
+  listExecutorCheckpointsForRound,
+  listExecutorDecisionsForRound,
+  listExecutorFindingsForRound,
+  listExecutorRoundsForRun
+} from "../executors/loop-persist.js";
+import type {
+  ExecutorArtifactRecord,
+  ExecutorCheckpointRecord,
+  ExecutorDecisionRecord,
+  ExecutorFindingRecord,
+  ExecutorRoundRecord
+} from "../executors/loop-reducer.js";
 import {
   loadWorkflowRunDetail,
   type LoadWorkflowRunDetailOptions,
@@ -27,11 +40,18 @@ export type LoadWorkflowRunLogsOptions = LoadWorkflowRunDetailOptions & {
   generatedAt?: number;
 };
 
+export type WorkflowRunLogRound = ExecutorRoundRecord & {
+  artifacts: ExecutorArtifactRecord[];
+  checkpoints: ExecutorCheckpointRecord[];
+  findings: ExecutorFindingRecord[];
+  decisions: ExecutorDecisionRecord[];
+};
+
 export type WorkflowRunLogsEnvelope = {
   schemaVersion: number;
   generatedAt: number;
   detail: WorkflowRunDetail;
-  rounds: ExecutorRoundRecord[];
+  rounds: WorkflowRunLogRound[];
 };
 
 export function loadWorkflowRunLogs(
@@ -42,7 +62,13 @@ export function loadWorkflowRunLogs(
   const detail = loadWorkflowRunDetail(db, runId, options);
   if (detail === null) return null;
   const generatedAt = options.generatedAt ?? Date.now();
-  const rounds = listExecutorRoundsForRun(db, runId);
+  const rounds = listExecutorRoundsForRun(db, runId).map((round) => ({
+    ...round,
+    artifacts: listExecutorArtifactsForRound(db, round.roundId),
+    checkpoints: listExecutorCheckpointsForRound(db, round.roundId),
+    findings: listExecutorFindingsForRound(db, round.roundId),
+    decisions: listExecutorDecisionsForRound(db, round.roundId)
+  }));
   return {
     schemaVersion: WORKFLOW_RUN_LOGS_SCHEMA_VERSION,
     generatedAt,

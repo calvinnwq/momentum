@@ -1,7 +1,9 @@
-import type { ExecutorRoundRecord } from "../core/executors/loop-reducer.js";
 import type { WorkflowGateRecord } from "../core/workflow/gate-persist.js";
 import type { WorkflowHandoffEnvelope } from "../core/workflow/handoff.js";
-import type { WorkflowRunLogsEnvelope } from "../core/workflow/logs.js";
+import type {
+  WorkflowRunLogRound,
+  WorkflowRunLogsEnvelope
+} from "../core/workflow/logs.js";
 import type { WorkflowMonitorEnvelope } from "../core/workflow/monitor-envelope.js";
 import type { WorkflowMonitorState } from "../core/workflow/monitor-state.js";
 import type { WorkflowRunImport, WorkflowRunImportDiagnostic } from "../core/workflow/run-import.js";
@@ -754,7 +756,7 @@ export function emitWorkflowRunLogsFailure(
 }
 
 export function workflowRoundToJsonShape(
-  round: ExecutorRoundRecord
+  round: WorkflowRunLogRound
 ): Record<string, unknown> {
   return {
     roundId: round.roundId,
@@ -783,7 +785,11 @@ export function workflowRoundToJsonShape(
     verificationStatus: round.verificationStatus,
     commitSha: round.commitSha,
     recoveryCode: round.recoveryCode,
-    humanGate: round.humanGate
+    humanGate: round.humanGate,
+    artifacts: round.artifacts.map((artifact) => ({ ...artifact })),
+    checkpoints: round.checkpoints.map((checkpoint) => ({ ...checkpoint })),
+    findings: round.findings.map((finding) => ({ ...finding })),
+    decisions: round.decisions.map((decision) => ({ ...decision }))
   };
 }
 
@@ -818,6 +824,38 @@ export function renderWorkflowRunLogsText(
     }
     if (round.changedFiles.length > 0) {
       lines.push(`    changed files: ${round.changedFiles.join(", ")}`);
+    }
+    const childEvidenceCount =
+      round.artifacts.length +
+      round.checkpoints.length +
+      round.findings.length +
+      round.decisions.length;
+    if (childEvidenceCount > 0) {
+      lines.push(`    child evidence: ${childEvidenceCount}`);
+    }
+    if (round.artifacts.length > 0) {
+      lines.push(
+        `    artifacts: ${round.artifacts.map((artifact) => artifact.path).join(", ")}`
+      );
+    }
+    if (round.checkpoints.length > 0) {
+      lines.push(
+        `    checkpoints: ${round.checkpoints
+          .map((checkpoint) => `${checkpoint.sequence}:${checkpoint.stage}`)
+          .join(", ")}`
+      );
+    }
+    if (round.findings.length > 0) {
+      lines.push(
+        `    findings: ${round.findings.map((finding) => finding.title).join(", ")}`
+      );
+    }
+    if (round.decisions.length > 0) {
+      lines.push(
+        `    decisions: ${round.decisions
+          .map((decision) => decision.summary)
+          .join(", ")}`
+      );
     }
   }
   lines.push(`Evidence records: ${envelope.detail.evidence.length}`);

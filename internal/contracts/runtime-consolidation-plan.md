@@ -102,7 +102,8 @@ observable category, refusal code, or success/failure text-routing contract:
   `workflow status <run-id>` (`test/rc1-status-migration-parity.test.ts`).
 - **logs / evidence read-back** — goal-first `logs <goal-id>` ↔ workflow-first
   `workflow run logs <run-id>`, the one flow that previously had zero
-  workflow-first coverage and was landed as a vertical slice
+  workflow-first coverage and was landed as a vertical slice with per-round
+  child artifacts, checkpoints, findings, and decisions reattached
   (`src/core/workflow/logs.ts`; `test/rc1-logs-migration-parity.test.ts`).
 - **handoff / restart context** — goal-first `handoff <goal-id>` ↔
   workflow-first `workflow handoff <run-id>`

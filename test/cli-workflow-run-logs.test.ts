@@ -6,10 +6,18 @@ import path from "node:path";
 import { runCli } from "../src/cli.js";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
+  insertExecutorArtifact,
+  insertExecutorCheckpoint,
+  insertExecutorDecision,
+  insertExecutorFinding,
   insertExecutorInvocation,
   insertExecutorRound
 } from "../src/core/executors/loop-persist.js";
 import type {
+  ExecutorArtifactRecord,
+  ExecutorCheckpointRecord,
+  ExecutorDecisionRecord,
+  ExecutorFindingRecord,
   ExecutorInvocationRecord,
   ExecutorRoundRecord
 } from "../src/core/executors/loop-reducer.js";
@@ -104,6 +112,52 @@ function makeRound(runId: string): ExecutorRoundRecord {
   };
 }
 
+function makeArtifact(runId: string): ExecutorArtifactRecord {
+  return {
+    artifactId: "artifact-1",
+    roundId: "round-1",
+    artifactClass: "verification_output",
+    path: `/runs/${runId}/round-1/verify.txt`,
+    digest: "sha256:verify",
+    description: "verification output"
+  };
+}
+
+function makeCheckpoint(): ExecutorCheckpointRecord {
+  return {
+    checkpointId: "checkpoint-1",
+    roundId: "round-1",
+    sequence: 0,
+    stage: "verify",
+    detail: "pnpm test passed"
+  };
+}
+
+function makeFinding(): ExecutorFindingRecord {
+  return {
+    findingId: "finding-1",
+    roundId: "round-1",
+    severity: "warning",
+    title: "missing evidence",
+    detail: "round evidence was not attached",
+    selected: true,
+    externalRef: "nomistakes:F-1"
+  };
+}
+
+function makeDecision(): ExecutorDecisionRecord {
+  return {
+    decisionId: "decision-1",
+    roundId: "round-1",
+    summary: "choose recovery path",
+    allowedActions: ["retry", "hold"],
+    recommendedAction: "retry",
+    chosenAction: "retry",
+    resolution: "delegated:within-envelope",
+    externalRef: "nomistakes:D-1"
+  };
+}
+
 function seedRunWithRound(db: MomentumDb, runId: string): void {
   db.prepare(
     `INSERT INTO workflow_runs
@@ -118,6 +172,10 @@ function seedRunWithRound(db: MomentumDb, runId: string): void {
   ).run(runId);
   insertExecutorInvocation(db, makeInvocation(runId), { now: 1 });
   insertExecutorRound(db, makeRound(runId), { now: 1 });
+  insertExecutorArtifact(db, makeArtifact(runId), { now: 5 });
+  insertExecutorCheckpoint(db, makeCheckpoint(), { now: 3 });
+  insertExecutorFinding(db, makeFinding(), { now: 7 });
+  insertExecutorDecision(db, makeDecision(), { now: 9 });
 }
 
 describe("momentum workflow run logs", () => {
@@ -220,6 +278,10 @@ describe("momentum workflow run logs", () => {
         commitSha: string | null;
         logPaths: string[];
         changedFiles: string[];
+        artifacts: ExecutorArtifactRecord[];
+        checkpoints: ExecutorCheckpointRecord[];
+        findings: ExecutorFindingRecord[];
+        decisions: ExecutorDecisionRecord[];
       }>;
     };
     expect(payload.ok).toBe(true);
@@ -236,6 +298,10 @@ describe("momentum workflow run logs", () => {
     expect(round.commitSha).toBe("abc123");
     expect(round.logPaths).toEqual(["/runs/cwfp-logs01/round-1/agent.log"]);
     expect(round.changedFiles).toEqual(["src/core/workflow/logs.ts"]);
+    expect(round.artifacts).toEqual([makeArtifact("cwfp-logs01")]);
+    expect(round.checkpoints).toEqual([makeCheckpoint()]);
+    expect(round.findings).toEqual([makeFinding()]);
+    expect(round.decisions).toEqual([makeDecision()]);
   });
 
   it("renders text output with schema version and round log lines", async () => {
