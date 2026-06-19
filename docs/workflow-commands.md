@@ -1,6 +1,6 @@
 # Workflow commands
 
-Operator-facing CLI envelopes for the `workflow run start`, `workflow import`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run approve`, `workflow run decide`, `workflow run update-step`, `workflow run clear-recovery`, and `workflow run monitor` commands.
+Operator-facing CLI envelopes for the `workflow run start`, `workflow import`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run approve`, `workflow run decide`, `workflow run update-step`, `workflow run clear-recovery`, `workflow run monitor`, and `workflow run logs` commands.
 
 - `workflow run start` starts a first-class workflow run from a validated workflow definition: it resolves the definition (a persisted definition, or the built-in `coding-workflow` recipe), loads repo policy, and durably materializes a `workflow_runs` row plus one ordered `workflow_steps` row per definition step, with an approval row when an approval boundary is supplied. `goal start` remains the compatibility path for the older Goal loop.
 - `workflow import` reads local `.agent-workflows/<run-id>/` directories and persists normalized rows into the `workflow_runs`, `workflow_steps`, and `workflow_approvals` tables.
@@ -12,12 +12,13 @@ Operator-facing CLI envelopes for the `workflow run start`, `workflow import`, `
 - `workflow run clear-recovery` explicitly clears a run's durable manual-recovery flag after the blocking condition is resolved.
 - `workflow run decide` resolves a durable workflow / step / executor gate by routing an operator or delegated-policy decision through the gate brain: an operator may pick any allowed action, while `--mode delegated` may only auto-apply an action inside the gate's policy envelope.
 - `workflow run monitor` is a read-only machine envelope that emits one stable JSON shape per run — derived from durable rows and the monitor reducer — so a monitor runner can decide whether to report, wait, or ask an operator to recover without parsing prose or scraping artifacts.
+- `workflow run logs` is a read-only run-scoped log and evidence reader that reuses the workflow detail shape and attaches executor rounds plus their child artifacts, checkpoints, findings, and decisions.
 
-`workflow status`, `workflow handoff`, `workflow run list`, and `workflow run monitor` are read-only: they never write SQLite or files.
+`workflow status`, `workflow handoff`, `workflow run list`, `workflow run monitor`, and `workflow run logs` are read-only: they never write SQLite or files.
 
 See also:
 
-- [docs/data-directory.md](data-directory.md) — the `workflow_runs` / `workflow_steps` / `workflow_approvals` / `workflow_leases` table schemas.
+- [docs/data-directory.md](data-directory.md) — the workflow, gate, executor invocation / round, and executor child-evidence table schemas.
 - [docs/evidence-commands.md](evidence-commands.md) — `evidence ingest` and `evidence list` envelopes for the `evidence_records` table.
 
 ## `workflow run start`
@@ -158,7 +159,7 @@ Reads the `.agent-workflows/<run-id>/` directory at `<run-dir>` and normalizes t
 ### Processing rules
 
 - **Idempotent re-import**: running `workflow import` on the same directory twice produces no duplicate rows. `created_at` is preserved on upsert; `updated_at` is bumped.
-- **Terminal ledger wins**: `monitor.json` is advisory. Step and run state are derived from `ledger.jsonl` and `plan.json`; a stale monitor does not override completed ledger evidence. Its advisory snapshot is persisted on `workflow_runs` (`monitor_last_seen_state`, `monitor_terminal`, `monitor_step`, `monitor_last_seen_digest`, `monitor_last_emitted_digest`) so status / handoff / monitor drift views can compare durable substrate state against the last imported or operator-refreshed advisory snapshot. Successful `workflow run approve`, `workflow run update-step`, and `workflow run clear-recovery` mutations refresh the same columns from durable rows and clear the digest fields, so later views do not report drift against a stale pre-mutation monitor tick.
+- **Terminal ledger wins**: `monitor.json` is advisory. Step and run state are derived from `ledger.jsonl` and `plan.json`; a stale monitor does not override completed ledger evidence. Its advisory snapshot is persisted on `workflow_runs` (`monitor_last_seen_state`, `monitor_terminal`, `monitor_step`, `monitor_last_seen_digest`, `monitor_last_emitted_digest`) so status / handoff / monitor / logs drift views can compare durable substrate state against the last imported or operator-refreshed advisory snapshot. Successful `workflow run approve`, `workflow run update-step`, and `workflow run clear-recovery` mutations refresh the same columns from durable rows and clear the digest fields, so later views do not report drift against a stale pre-mutation monitor tick.
 - **Lost managed-task markers**: `managed-*.pid`, `managed-*.log`, and `locks/` sibling entries are ignored without diagnostics. They do not force a failed step state.
 - **Unknown siblings**: unrecognized files produce `evidence_format_unknown` diagnostics but do not drop the valid records around them. The generated `recovery.md` artifact is a known sibling and is ignored by import.
 - **Malformed artifacts**: invalid `plan.json`, `ledger.jsonl` lines, or `approval-*.json` files produce `evidence_format_invalid` diagnostics. Valid siblings are still imported.
@@ -1109,5 +1110,122 @@ Data dir: /path/to/data
 ```
 
 A `Recovery: <code>` line is added when a recovery classification is present. Open gates print inline after the `Gates:` count; resolved gates are omitted from text output.
+
+Exit code 0 on success, 1 on failure, 2 on usage error.
+
+## `workflow run logs`
+
+```text
+momentum workflow run logs <run-id> [--data-dir <path>] [--json]
+```
+
+Read-back of one workflow run's durable logs and evidence, for operators inspecting what each step actually ran and produced. It is the workflow-first equivalent of goal-first `logs <goal-id>`: it wraps the same detail loader as `workflow status <run-id>` / `workflow handoff` (run, steps, approvals, leases, monitor, evidence, gates) and adds the per-round executor evidence that the detail loader does not carry — executor family / agent / model, log paths, summaries, key changes, changed files, verification status, commit SHA, recovery codes, and the child artifacts / checkpoints / findings / decisions emitted below each round. Read-only: no SQLite mutation, no file reads, no external writes.
+
+Rounds are returned across every invocation in the run, ordered by step key, then invocation attempt, then invocation id, then round index, then round id.
+
+### JSON envelope
+
+```json
+{
+  "ok": true,
+  "command": "workflow run logs",
+  "dataDir": "/path/to/data",
+  "schemaVersion": 1,
+  "generatedAt": 1730000600000,
+  "run": { "...": "same shape as workflow status detail" },
+  "steps": [ "..." ],
+  "approvals": [ "..." ],
+  "leases": [ "..." ],
+  "monitor": { "...": "same shape as workflow status detail" },
+  "evidence": [ "..." ],
+  "gates": [ "..." ],
+  "rounds": [
+    {
+      "roundId": "cwfp-abc123::implementation::dispatch::round-1",
+      "invocationId": "cwfp-abc123::implementation::dispatch",
+      "stepRunId": "implementation",
+      "stepKey": "implementation",
+      "executorFamily": "goal-loop",
+      "attempt": 1,
+      "roundIndex": 0,
+      "state": "succeeded",
+      "classification": "complete",
+      "startedAt": 1730000500000,
+      "heartbeatAt": 1730000550000,
+      "finishedAt": 1730000600000,
+      "agentProvider": "claude",
+      "model": "claude-opus-4-8",
+      "effort": "high",
+      "inputDigest": "sha256:...",
+      "resultDigest": "sha256:...",
+      "artifactRoot": "/path/to/data/runs/cwfp-abc123/round-1",
+      "logPaths": ["/path/to/data/runs/cwfp-abc123/round-1/agent.log"],
+      "summary": "implemented the slice",
+      "keyChanges": ["added reader"],
+      "remainingWork": [],
+      "changedFiles": ["src/core/workflow/logs.ts"],
+      "verificationStatus": "passed",
+      "commitSha": "abc123",
+      "recoveryCode": null,
+      "humanGate": null,
+      "artifacts": [
+        {
+          "artifactId": "artifact-1",
+          "roundId": "cwfp-abc123::implementation::dispatch::round-1",
+          "artifactClass": "verification_output",
+          "path": "/path/to/data/runs/cwfp-abc123/round-1/verify.txt",
+          "digest": "sha256:...",
+          "description": "verification output"
+        }
+      ],
+      "checkpoints": [
+        {
+          "checkpointId": "checkpoint-1",
+          "roundId": "cwfp-abc123::implementation::dispatch::round-1",
+          "sequence": 0,
+          "stage": "verify",
+          "detail": "verification completed"
+        }
+      ],
+      "findings": [],
+      "decisions": []
+    }
+  ],
+  "nextAction": { "...": "same shape as workflow status detail monitor.nextAction" }
+}
+```
+
+### Error codes
+
+| Code | Meaning |
+|------|---------|
+| `run_id_required` | `<run-id>` was not supplied. |
+| `data_dir_failed` | Data directory resolution, open, or read failed. |
+| `run_not_found` | `<run-id>` does not exist in `workflow_runs`. |
+
+### Text output
+
+```text
+Workflow run logs: cwfp-abc123
+Schema version: 1
+Generated at (epoch ms): 1730000600000
+Run state: running
+Steps: 5
+Approvals: 1
+Leases: 1
+Gates: 1 (open: 1)
+- gate-nm-1 [step/operator_decision_required] OPEN allowed=fix,skip,approve_as_is recommended=fix
+Executor rounds: 1
+- cwfp-abc123::implementation::dispatch::round-1 [implementation/succeeded] complete
+    summary: implemented the slice
+    verification: passed commit: abc123
+    logs: /path/to/data/runs/cwfp-abc123/round-1/agent.log
+    changed files: src/core/workflow/logs.ts
+    child evidence: 2
+    artifacts: /path/to/data/runs/cwfp-abc123/round-1/verify.txt
+    checkpoints: 0:verify
+Evidence records: 0
+Data dir: /path/to/data
+```
 
 Exit code 0 on success, 1 on failure, 2 on usage error.

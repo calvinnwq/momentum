@@ -33,6 +33,7 @@ import {
   listExecutorDecisionsForRound,
   listExecutorFindingsForRound,
   listExecutorRoundsForInvocation,
+  listExecutorRoundsForRun,
   loadExecutorDefinition,
   loadExecutorInvocation,
   loadExecutorRound,
@@ -557,6 +558,114 @@ describe("executor rounds", () => {
         "round-0",
         "round-1",
         "round-2"
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("lists every round for a run across invocations ordered by step key then attempt and round index", () => {
+    const db = openRoundDb();
+    try {
+      // A second step + invocation under the same run so the run-scoped reader
+      // has to aggregate rounds the invocation-scoped reader would never join.
+      db.prepare(
+        `INSERT INTO workflow_steps (run_id, step_id, kind, step_order, created_at, updated_at)
+           VALUES ('run-1', 'step-2', 'preflight', 1, 1, 1)`
+      ).run();
+      insertExecutorInvocation(
+        db,
+        makeInvocation({
+          invocationId: "inv-2",
+          stepRunId: "step-2",
+          stepKey: "preflight"
+        }),
+        { now: 1 }
+      );
+      insertExecutorRound(
+        db,
+        makeRound({ roundId: "round-impl-b", roundIndex: 1 }),
+        { now: 1000 }
+      );
+      insertExecutorRound(
+        db,
+        makeRound({ roundId: "round-impl-a", roundIndex: 0 }),
+        { now: 1000 }
+      );
+      insertExecutorRound(
+        db,
+        makeRound({
+          roundId: "round-pre",
+          roundIndex: 0,
+          invocationId: "inv-2",
+          stepRunId: "step-2",
+          stepKey: "preflight"
+        }),
+        { now: 1000 }
+      );
+
+      const rounds = listExecutorRoundsForRun(db, "run-1");
+      expect(rounds.map((r) => r.roundId)).toEqual([
+        "round-impl-a",
+        "round-impl-b",
+        "round-pre"
+      ]);
+
+      expect(listExecutorRoundsForRun(db, "missing-run")).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("lists retry rounds in invocation order before round index", () => {
+    const db = openRoundDb();
+    try {
+      insertExecutorInvocation(
+        db,
+        makeInvocation({
+          invocationId: "inv-2",
+          attempt: 2
+        }),
+        { now: 2000 }
+      );
+      insertExecutorRound(
+        db,
+        makeRound({ roundId: "attempt-1-round-0", roundIndex: 0 }),
+        { now: 1100 }
+      );
+      insertExecutorRound(
+        db,
+        makeRound({ roundId: "attempt-1-round-1", roundIndex: 1 }),
+        { now: 1200 }
+      );
+      insertExecutorRound(
+        db,
+        makeRound({
+          roundId: "attempt-2-round-0",
+          invocationId: "inv-2",
+          attempt: 2,
+          roundIndex: 0
+        }),
+        { now: 2100 }
+      );
+      insertExecutorRound(
+        db,
+        makeRound({
+          roundId: "attempt-2-round-1",
+          invocationId: "inv-2",
+          attempt: 2,
+          roundIndex: 1
+        }),
+        { now: 2200 }
+      );
+
+      expect(
+        listExecutorRoundsForRun(db, "run-1").map((r) => r.roundId)
+      ).toEqual([
+        "attempt-1-round-0",
+        "attempt-1-round-1",
+        "attempt-2-round-0",
+        "attempt-2-round-1"
       ]);
     } finally {
       db.close();

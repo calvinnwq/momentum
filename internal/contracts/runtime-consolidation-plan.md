@@ -40,7 +40,7 @@ unreachable-branch audit below finds nothing safe to delete within scope.
 
 | # | Runtime path | Decision | Prerequisite before any narrowing | Follow-up |
 |---|---|---|---|---|
-| 1 | Goal-first CLI compatibility (`goal start` / `status` / `logs` / `handoff` / `recovery clear`) | Deprecate-later | Workflow-first equivalents for status/logs/handoff/recover + migration coverage; disentangle the shared iteration-finalization primitive the `goal-loop` executor reuses | RC-1 |
+| 1 | Goal-first CLI compatibility (`goal start` / `status` / `logs` / `handoff` / `recovery clear`) | Deprecate-later; **read-back/recovery parity landed (NGX-486)** | Workflow-first equivalents + migration coverage now landed; narrowing still waits on disentangling the shared iteration-finalization primitive the `goal-loop` executor reuses | RC-1 (parity landed, NGX-486) |
 | 2 | Imported `.agent-workflows` / `cwfp-*` compatibility | Defer | `NGX-404` default-switch dogfood passes its `coding-workflow-ownership.md` gates | `NGX-404` (existing) |
 | 3 | M9 live-wrapper direct `workflow_steps` advancement vs M10 executor-loop finalization | Keep (coexist); boundary seam landed | A single reconciliation seam now finalizes dispatched steps from durable executor evidence with a no-double-finalize proof; narrowing still waits on compatibility-lane migrations | RC-2 (seam landed, NGX-480) |
 | 4 | Production dispatch phase-1 scaffold (no fabricated result evidence) | Keep | RC-2 replaced the seam-level terminal gap; narrowing the scaffold still waits for real terminal executor evidence / adapter migration | RC-2 (seam landed, NGX-480), RC-5 |
@@ -78,9 +78,10 @@ operator read-back and recovery.
 
 **Prerequisite before any narrowing.**
 
-1. Workflow-first equivalents for `workflow run status` / `logs` / `handoff` /
-   `recover` exist and are wire-proven (the gap matrix lists these as *future*
-   product surface, not yet shipped).
+1. Workflow-first equivalents for status (`workflow status`), logs
+   (`workflow run logs`), handoff (`workflow handoff`), and recovery clear
+   (`workflow run clear-recovery`) exist and are wire-proven; this is now
+   satisfied by NGX-486.
 2. Migration coverage proves a goal-first operator command maps to its
    workflow-first equivalent without dropping a JSON field, refusal code, or
    text-routing contract — the same byte-equivalence discipline NGX-432 applied
@@ -90,6 +91,44 @@ operator read-back and recovery.
    verify/commit/reset helpers while the `goal-loop` executor
    (`src/core/executors/goal-loop-mechanism.ts:83`) still depends on them. Either the executor keeps
    the primitive or the primitive moves to a shared home first.
+
+**Landed (NGX-486): read-back / recovery parity + migration coverage.**
+Prerequisites 1 and 2 are now satisfied. Every practical goal-first operator
+read-back/recovery flow has a wire-proven workflow-first equivalent, and each is
+backed by a non-vacuous contract-equivalent migration proof that runs *both*
+commands in one data dir and asserts the workflow-first surface drops no
+observable category, refusal code, or success/failure text-routing contract:
+
+- **status read-back** — goal-first `status <goal-id>` ↔ workflow-first
+  `workflow status <run-id>` (`test/rc1-status-migration-parity.test.ts`).
+- **logs / evidence read-back** — goal-first `logs <goal-id>` ↔ workflow-first
+  `workflow run logs <run-id>`, the one flow that previously had zero
+  workflow-first coverage and was landed as a vertical slice with per-round
+  child artifacts, checkpoints, findings, and decisions reattached
+  (`src/core/workflow/logs.ts`; `test/rc1-logs-migration-parity.test.ts`).
+- **handoff / restart context** — goal-first `handoff <goal-id>` ↔
+  workflow-first `workflow handoff <run-id>`
+  (`test/rc1-handoff-migration-parity.test.ts`).
+- **recovery clear / recovery status** — goal-first `recovery clear <goal-id>` ↔
+  workflow-first `workflow run clear-recovery <run-id>`, with the recovery-status
+  read-back observable through `status` / `workflow status` /
+  `workflow run monitor`; the proof includes the distinctive guarded-clear
+  contract (both refuse-and-preserve the durable flag while a blocking condition
+  persists) (`test/rc1-recovery-migration-parity.test.ts`).
+
+Parity is **contract-equivalent**, not byte-equivalent: the two surfaces read
+different durable domains (goal iteration/job rows vs workflow run/step/lease
+rows), so the bar the proofs hold is "same observable categories, same refusal
+*contract*, same text routing," which is the equivalence the ticket allows.
+
+**Compatibility paths that remain.** RC-1 lands *parity and coverage only*; it
+does **not** narrow or remove any goal-first command. Goal-first
+`goal start` / `status` / `logs` / `handoff` / `recovery clear` stay fully in
+force as the compatibility surface, the gap-matrix keeps `goal start` as a
+compatibility/shorthand entry point, and the existing goal-first compatibility
+tests remain green. Prerequisite 3 (disentangling
+`finalizeLiveWorkflowStepFromResultFile` from the `goal-loop` executor) is
+unchanged future work and still gates any actual narrowing of the goal-first CLI.
 
 **Equivalent-behavior proof to preserve:** `test/cli.test.ts` (goal-first CLI
 envelopes), `test/goal-init.test.ts`, `test/goal-reducer.test.ts`,
@@ -372,10 +411,16 @@ schedule it without speculative Linear churn from a runtime worker. Items reuse
 the existing `coding-workflow-ownership.md` track where one already owns the work,
 and add `RC-*` placeholders for the genuinely new consolidation work.
 
-1. **RC-1 — Goal-first read-back / recovery parity + migration coverage.** Land
-   workflow-first `status` / `logs` / `handoff` / `recover` equivalents and prove
-   byte-equivalent migration from the goal-first commands before narrowing
-   goal-first CLI. Blocks on the gap-matrix "future product surface." (Path 1)
+1. **RC-1 — Goal-first read-back / recovery parity + migration coverage. ✅
+   Landed (NGX-486).** Workflow-first `status` / `logs` / `handoff` /
+   `clear-recovery` equivalents exist and are each backed by a non-vacuous
+   contract-equivalent migration proof (`test/rc1-status-migration-parity.test.ts`,
+   `test/rc1-logs-migration-parity.test.ts`,
+   `test/rc1-handoff-migration-parity.test.ts`,
+   `test/rc1-recovery-migration-parity.test.ts`). This lands parity + coverage
+   only; goal-first CLI stays the compatibility surface and is **not** narrowed
+   here — the actual narrowing still waits on disentangling the shared
+   iteration-finalization primitive (Path 1, prerequisite 3). (Path 1)
 2. **RC-2 — M9/M10 step-finalization reconciliation seam. ✅ Landed (NGX-480).**
    The single idempotent seam that finalizes dispatched steps from terminal
    executor evidence now ships as `reconcileDispatchedWorkflowStep`
@@ -411,8 +456,13 @@ and add `RC-*` placeholders for the genuinely new consolidation work.
 Ordering note: RC-2 is the prerequisite for the most consolidation (Paths 3 and
 4) and led — its reconciliation seam has now **landed** (NGX-480). RC-5's fake
 demotion has since **landed** (NGX-485): the production executor default is real
-adapters and the fakes are a test-only injected seam. The next remaining runtime
-consolidation items are RC-1 (goal-first read-back / recovery parity) and the
+adapters and the fakes are a test-only injected seam. RC-1's goal-first
+read-back / recovery parity + migration coverage has since **landed** (NGX-486):
+all four operator flows (status / logs / handoff / recovery) have wire-proven
+workflow-first equivalents and contract-equivalent migration proofs, while
+goal-first CLI stays the compatibility surface (no narrowing). The next remaining runtime
+consolidation items are the goal-first CLI narrowing itself (gated on
+Path 1 prerequisite 3, disentangling the shared finalization primitive) and the
 remaining RC-5 narrowing (wiring a daemon-default live-wrapper profile so
 dispatched steps feed real terminal evidence, which is what fully unblocks wiring
 the RC-2 reconciliation seam as the daemon default). RC-3 / RC-4 and `NGX-404`

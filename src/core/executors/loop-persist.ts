@@ -32,8 +32,8 @@
  *   - The round carries the contract "Round Schema" normalized result fields
  *     (`summary`, `key_changes`, `remaining_work`, `changed_files`,
  *     `verification_status`, `commit_sha`, ...) so workflow status, handoff,
- *     monitor, and recovery surfaces can reattach without understanding executor
- *     internals.
+ *     monitor, logs, and recovery surfaces can reattach without understanding
+ *     executor internals.
  *   - The `executor_artifacts` / `executor_checkpoints` / `executor_findings` /
  *     `executor_decisions` child evidence tables hang below a round by
  *     `round_id`. They are append-only: an evidence row is durable proof a round
@@ -539,6 +539,26 @@ export function listExecutorRoundsForInvocation(
   const rows = db
     .prepare(`${ROUND_SELECT} WHERE invocation_id = ? ORDER BY round_index`)
     .all(invocationId) as ExecutorRoundRow[];
+  return rows.map(rowToRound);
+}
+
+/**
+ * List every round for a workflow run across all of its invocations, ordered
+ * deterministically by step key, invocation attempt, invocation id, then round
+ * index and round id. This is the run-scoped read-back the workflow-first logs
+ * surface needs to aggregate per-round executor evidence (logs, summaries,
+ * verification, commit, recovery) that the run-detail loader does not carry.
+ */
+export function listExecutorRoundsForRun(
+  db: MomentumDb,
+  runId: string
+): ExecutorRoundRecord[] {
+  const rows = db
+    .prepare(
+      `${ROUND_SELECT} WHERE workflow_run_id = ?
+       ORDER BY step_key, attempt, invocation_id, round_index, round_id`
+    )
+    .all(runId) as ExecutorRoundRow[];
   return rows.map(rowToRound);
 }
 

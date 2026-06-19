@@ -347,7 +347,7 @@ Current Momentum state:
 - Has M10-07 no-mistakes executor mirror that records external no-mistakes run state, findings, decisions, PR / CI state, and completion below executor invocations / rounds.
 - Has M10-08 durable workflow gates and the `workflow run decide` operator / delegated-policy path.
 - Has M10-09a phase-1 workflow-lane dispatch effects: supported executor families create deterministic durable executor invocation / first-round start scaffolds with empty result evidence; unsupported or unresolvable claims fail closed to a manual-recovery gate when the run can carry one, and vanished-run claims release the orphaned dispatch lease without fabricating a gate.
-- Has `goal start`, `daemon`, and workflow import / status / run controls.
+- Has `goal start`, `daemon`, workflow import / status / handoff controls, workflow run controls, and the RC-1 `workflow run logs` read-back surface.
 
 Required workflow-first gaps:
 

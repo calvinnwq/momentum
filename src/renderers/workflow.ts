@@ -1,5 +1,9 @@
 import type { WorkflowGateRecord } from "../core/workflow/gate-persist.js";
 import type { WorkflowHandoffEnvelope } from "../core/workflow/handoff.js";
+import type {
+  WorkflowRunLogRound,
+  WorkflowRunLogsEnvelope
+} from "../core/workflow/logs.js";
 import type { WorkflowMonitorEnvelope } from "../core/workflow/monitor-envelope.js";
 import type { WorkflowMonitorState } from "../core/workflow/monitor-state.js";
 import type { WorkflowRunImport, WorkflowRunImportDiagnostic } from "../core/workflow/run-import.js";
@@ -707,6 +711,177 @@ export function emitWorkflowHandoffFailure(
   failure: WorkflowRendererFailure
 ): number {
   return emitWorkflowFailure(parsed, io, failure);
+}
+
+export function emitWorkflowRunLogs(
+  parsed: { json: boolean },
+  io: CliIo,
+  dataDir: string,
+  envelope: WorkflowRunLogsEnvelope
+): number {
+  const payload = {
+    ok: true,
+    command: "workflow run logs",
+    dataDir,
+    schemaVersion: envelope.schemaVersion,
+    generatedAt: envelope.generatedAt,
+    run: workflowRunToJsonShape(envelope.detail.run),
+    steps: envelope.detail.steps.map(workflowStepToJsonShape),
+    approvals: envelope.detail.approvals.map(workflowApprovalToJsonShape),
+    leases: envelope.detail.leases.map(workflowLeaseToJsonShape),
+    monitor: workflowMonitorToJsonShape(envelope.detail.monitor),
+    evidence: envelope.detail.evidence.map(workflowEvidenceToJsonShape),
+    gates: envelope.detail.gates.map(workflowGateToJsonShape),
+    rounds: envelope.rounds.map(workflowRoundToJsonShape),
+    nextAction: nextActionToJsonShape(envelope.detail.monitor)
+  };
+
+  if (parsed.json) {
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  write(io.stdout, renderWorkflowRunLogsText(dataDir, envelope));
+  return 0;
+}
+
+export function emitWorkflowRunLogsFailure(
+  parsed: { json: boolean },
+  io: CliIo,
+  failure: Omit<WorkflowRendererFailure, "command"> & {
+    command?: "workflow run logs";
+  }
+): number {
+  return emitWorkflowFailure(parsed, io, {
+    ...failure,
+    command: "workflow run logs"
+  });
+}
+
+export function workflowRoundToJsonShape(
+  round: WorkflowRunLogRound
+): Record<string, unknown> {
+  return {
+    roundId: round.roundId,
+    invocationId: round.invocationId,
+    stepRunId: round.stepRunId,
+    stepKey: round.stepKey,
+    executorFamily: round.executorFamily,
+    attempt: round.attempt,
+    roundIndex: round.roundIndex,
+    state: round.state,
+    classification: round.classification,
+    startedAt: round.startedAt,
+    heartbeatAt: round.heartbeatAt,
+    finishedAt: round.finishedAt,
+    agentProvider: round.agentProvider,
+    model: round.model,
+    effort: round.effort,
+    inputDigest: round.inputDigest,
+    resultDigest: round.resultDigest,
+    artifactRoot: round.artifactRoot,
+    logPaths: round.logPaths,
+    summary: round.summary,
+    keyChanges: round.keyChanges,
+    remainingWork: round.remainingWork,
+    changedFiles: round.changedFiles,
+    verificationStatus: round.verificationStatus,
+    commitSha: round.commitSha,
+    recoveryCode: round.recoveryCode,
+    humanGate: round.humanGate,
+    artifacts: round.artifacts.map((artifact) => ({ ...artifact })),
+    checkpoints: round.checkpoints.map((checkpoint) => ({ ...checkpoint })),
+    findings: round.findings.map((finding) => ({ ...finding })),
+    decisions: round.decisions.map((decision) => ({ ...decision }))
+  };
+}
+
+export function renderWorkflowRunLogsText(
+  dataDir: string,
+  envelope: WorkflowRunLogsEnvelope
+): string {
+  const lines: string[] = [];
+  lines.push(`Workflow run logs: ${envelope.detail.run.runId}`);
+  lines.push(`Schema version: ${envelope.schemaVersion}`);
+  lines.push(`Generated at (epoch ms): ${envelope.generatedAt}`);
+  lines.push(`Run state: ${envelope.detail.run.state}`);
+  lines.push(`Steps: ${envelope.detail.steps.length}`);
+  lines.push(`Approvals: ${envelope.detail.approvals.length}`);
+  lines.push(`Leases: ${envelope.detail.leases.length}`);
+  const openGates = envelope.detail.gates.filter(
+    (gate) => gate.resolvedAt === null
+  );
+  lines.push(
+    `Gates: ${envelope.detail.gates.length} (open: ${openGates.length})`
+  );
+  for (const gate of openGates) {
+    lines.push(
+      `- ${gate.gateId} [${gate.targetScope}/${gate.gateType}] OPEN` +
+        ` allowed=${gate.allowedActions.join(",")}` +
+        (gate.recommendedAction !== null
+          ? ` recommended=${gate.recommendedAction}`
+          : "")
+    );
+  }
+  lines.push(`Executor rounds: ${envelope.rounds.length}`);
+  for (const round of envelope.rounds) {
+    lines.push(
+      `- ${round.roundId} [${round.stepKey}/${round.state}]` +
+        (round.classification !== null ? ` ${round.classification}` : "")
+    );
+    if (round.summary !== null) {
+      lines.push(`    summary: ${round.summary}`);
+    }
+    lines.push(
+      `    verification: ${round.verificationStatus ?? "(none)"}` +
+        ` commit: ${round.commitSha ?? "(none)"}` +
+        (round.recoveryCode !== null
+          ? ` recovery: ${round.recoveryCode}`
+          : "")
+    );
+    if (round.logPaths.length > 0) {
+      lines.push(`    logs: ${round.logPaths.join(", ")}`);
+    }
+    if (round.changedFiles.length > 0) {
+      lines.push(`    changed files: ${round.changedFiles.join(", ")}`);
+    }
+    const childEvidenceCount =
+      round.artifacts.length +
+      round.checkpoints.length +
+      round.findings.length +
+      round.decisions.length;
+    if (childEvidenceCount > 0) {
+      lines.push(`    child evidence: ${childEvidenceCount}`);
+    }
+    if (round.artifacts.length > 0) {
+      lines.push(
+        `    artifacts: ${round.artifacts.map((artifact) => artifact.path).join(", ")}`
+      );
+    }
+    if (round.checkpoints.length > 0) {
+      lines.push(
+        `    checkpoints: ${round.checkpoints
+          .map((checkpoint) => `${checkpoint.sequence}:${checkpoint.stage}`)
+          .join(", ")}`
+      );
+    }
+    if (round.findings.length > 0) {
+      lines.push(
+        `    findings: ${round.findings.map((finding) => finding.title).join(", ")}`
+      );
+    }
+    if (round.decisions.length > 0) {
+      lines.push(
+        `    decisions: ${round.decisions
+          .map((decision) => decision.summary)
+          .join(", ")}`
+      );
+    }
+  }
+  lines.push(`Evidence records: ${envelope.detail.evidence.length}`);
+  lines.push(`Data dir: ${dataDir}`);
+  lines.push("");
+  return lines.join("\n");
 }
 
 function emitWorkflowFailure(

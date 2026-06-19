@@ -15,7 +15,7 @@ in place; importers still reference the concrete modules below.
 | Concern | Modules |
 | --- | --- |
 | Definition | `definition.ts`, `definition-persist.ts` |
-| Run lifecycle | `run-start.ts`, `run-start-persist.ts`, `run-import.ts`, `run-import-persist.ts`, `run-reducer.ts`, `run-recovery.ts`, `status.ts` |
+| Run lifecycle | `run-start.ts`, `run-start-persist.ts`, `run-import.ts`, `run-import-persist.ts`, `run-reducer.ts`, `run-recovery.ts`, `status.ts`, `logs.ts` |
 | Runtime state refresh | `runtime-state.ts` |
 | Steps | `step-executor.ts`, `step-executor-real-adapters.ts`, `step-transitions.ts` |
 | Gates | `gate.ts`, `gate-persist.ts` |
@@ -40,10 +40,10 @@ Other domains reach workflow behavior through these modules:
   `definition-persist`, `gate` / `gate-persist`, `run-start` /
   `run-start-persist`, `run-import` / `run-import-persist`, `run-recovery`,
   `run-reducer`, `status`, `monitor-state` / `monitor-envelope`,
-  `runtime-state`, `recovery-reconcile`, `handoff`.
+  `runtime-state`, `recovery-reconcile`, `handoff`, `logs`.
 - **CLI renderers** (`src/renderers/workflow.ts`): the same run/gate/monitor/
-  status/handoff shapes, imported **type-only** (renderers format, they do not
-  mutate state).
+  status/handoff/logs shapes, imported **type-only** (renderers format, they
+  do not mutate state).
 - **Top-level dispatch** (`src/cli.ts`): `dispatch-execute`, `dogfood-dispatch`.
 - **Dispatched-step reconciliation**: `dispatch-reconcile` /
   `dispatch-reconcile-execute` own the RC-2 pure/effect seam that finalizes a

@@ -34,6 +34,10 @@ import {
   type WorkflowHandoffEnvelope
 } from "../../core/workflow/handoff.js";
 import {
+  loadWorkflowRunLogs,
+  type WorkflowRunLogsEnvelope
+} from "../../core/workflow/logs.js";
+import {
   loadWorkflowMonitorEnvelope,
   type WorkflowMonitorEnvelope
 } from "../../core/workflow/monitor-envelope.js";
@@ -87,6 +91,8 @@ import {
 import {
   emitWorkflowHandoff,
   emitWorkflowHandoffFailure,
+  emitWorkflowRunLogs,
+  emitWorkflowRunLogsFailure,
   emitWorkflowImportFailure,
   emitWorkflowImportSuccess,
   emitWorkflowRunApproveFailure,
@@ -168,13 +174,16 @@ function workflowRun(parsed: ParsedFlags, io: CliIo): number {
   const subcommand = parsed.args[2];
   if (!subcommand) {
     return usageError(
-      "Missing required subcommand for workflow run. Expected: start, list, approve, decide, update-step, clear-recovery, monitor.",
+      "Missing required subcommand for workflow run. Expected: start, list, approve, decide, update-step, clear-recovery, monitor, logs.",
       parsed,
       io
     );
   }
   if (subcommand === "start") {
     return workflowRunStart(parsed, io);
+  }
+  if (subcommand === "logs") {
+    return workflowRunLogs(parsed, io);
   }
   if (subcommand === "list") {
     return workflowRunList(parsed, io);
@@ -1515,6 +1524,66 @@ function workflowRunMonitor(parsed: ParsedFlags, io: CliIo): number {
   }
 
   return emitWorkflowRunMonitor(parsed, io, dataDir, envelope);
+}
+
+function workflowRunLogs(parsed: ParsedFlags, io: CliIo): number {
+  const positional = parsed.args.slice(3);
+  if (positional.length === 0 || !positional[0]) {
+    return emitWorkflowRunLogsFailure(parsed, io, {
+      code: "run_id_required",
+      message: "Missing required <run-id> for workflow run logs."
+    });
+  }
+  if (positional.length > 1) {
+    return usageError(
+      `Unexpected argument for workflow run logs: ${positional[1]}`,
+      parsed,
+      io
+    );
+  }
+  const runId = positional[0];
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return emitWorkflowRunLogsFailure(parsed, io, {
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err),
+      runId
+    });
+  }
+
+  let envelope: WorkflowRunLogsEnvelope | null;
+  let db: MomentumDb | undefined;
+  try {
+    db = openDb(dataDir);
+    envelope = loadWorkflowRunLogs(db, runId);
+  } catch (err) {
+    return emitWorkflowRunLogsFailure(parsed, io, {
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err),
+      dataDir,
+      runId
+    });
+  } finally {
+    db?.close();
+  }
+
+  if (envelope === null) {
+    return emitWorkflowRunLogsFailure(parsed, io, {
+      code: "run_not_found",
+      message: `Workflow run not found: ${runId}`,
+      dataDir,
+      runId
+    });
+  }
+
+  return emitWorkflowRunLogs(parsed, io, dataDir, envelope);
 }
 
 function isExplicitBoundaryPhraseForApproval(
