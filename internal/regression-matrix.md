@@ -427,6 +427,10 @@ that shipped workflow-first path.
   envelope), [`src/core/workflow/dispatch.ts`](../src/core/workflow/dispatch.ts),
   [`src/core/workflow/dispatch-persist.ts`](../src/core/workflow/dispatch-persist.ts), and
   [`src/core/workflow/dispatch-execute.ts`](../src/core/workflow/dispatch-execute.ts).
+  RC-2 terminal reconciliation is owned by
+  [`src/core/workflow/dispatch-reconcile.ts`](../src/core/workflow/dispatch-reconcile.ts)
+  and
+  [`src/core/workflow/dispatch-reconcile-execute.ts`](../src/core/workflow/dispatch-reconcile-execute.ts).
 - **Evidence.**
   - Unit / CLI: `test/workflow-dispatch.test.ts`,
     `test/workflow-dispatch-persist.test.ts`,
@@ -438,6 +442,11 @@ that shipped workflow-first path.
     approve -> daemon start --max-* -> durable executor rows ->
     status/handoff/monitor through the built CLI" proves the shipped binary path
     persists executor rows and remains observable after the daemon exits.
+  - RC-2 unit/effect proof: `test/workflow-dispatch-reconcile.test.ts` and
+    `test/workflow-dispatch-reconcile-execute.test.ts` prove terminal executor
+    evidence finalizes a dispatched step exactly once, unclean terminal evidence
+    parks the run for manual recovery, non-terminal evidence defers, and M9
+    direct-finalize plus M10 reconciliation cannot both close the same step.
   - Real closeout dogfood: `ngx353-m10-closeout` in `/Users/ngxcalvin/.momentum`
     reached `preflight = running` with executor invocation / round scaffold rows
     and `workflow run monitor` reported `monitorDrift.drifted = false`.

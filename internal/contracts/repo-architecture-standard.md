@@ -195,8 +195,8 @@ Tests should follow the behavior owner rather than the historical filename:
 
 ## Migration Sequence
 
-The ARCH sequence must land before RC-2 so the step-finalization reconciliation
-work has stable homes for workflow, executor, repo, adapter, and evidence code.
+The ARCH sequence landed before RC-2 so the step-finalization reconciliation
+work had stable homes for workflow, executor, repo, adapter, and evidence code.
 
 1. **ARCH-02 / NGX-446 — Source-layout guardrails.** Enforce the allowed-root
    `src/*.ts` policy, named transitional root exceptions, placeholder-free
@@ -251,14 +251,15 @@ work has stable homes for workflow, executor, repo, adapter, and evidence code.
    mechanical finalization/status/recovery coordination: callers that already
    mutated durable step / lease rows can re-read reducer rows, derive monitor
    state, and refresh cached `workflow_runs` state / monitor columns without
-   duplicating SQL. This does not implement full RC-2 reconciliation.
+   duplicating SQL. This did not implement full RC-2 reconciliation.
 
-Only after ARCH-08's runtime-state seam exists on top of the ARCH-02 through
-ARCH-07 ownership homes should RC-2 implement the M9/M10 step-finalization
-reconciliation seam. RC-2 still
-follows [`runtime-consolidation-plan.md`](runtime-consolidation-plan.md): it must
-prove a single idempotent finalization owner and no double-write path before any
-runtime narrowing.
+ARCH-08's runtime-state seam now underpins the landed RC-2 (NGX-480) M9/M10
+step-finalization reconciliation seam in `src/core/workflow/dispatch-reconcile.ts`
+and `src/core/workflow/dispatch-reconcile-execute.ts`. RC-2 follows
+[`runtime-consolidation-plan.md`](runtime-consolidation-plan.md): it proves a
+single idempotent finalization owner and no double-write path, while actual
+runtime narrowing remains gated by the compatibility-lane migrations named
+there.
 
 ## Non-Goals
 

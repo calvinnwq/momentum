@@ -92,6 +92,24 @@ describe("runtime consolidation plan contract", () => {
     expect(contract).toMatch(/RC-2 is the prerequisite for the most consolidation/i);
   });
 
+  it("records the RC-2 reconciliation seam as landed (NGX-480) and names the next item", () => {
+    const contract = readDoc(contractPath);
+
+    // RC-2's production reconciliation seam has landed under NGX-480, naming the
+    // pure decider + effect twin that own the single finalization path.
+    expect(contract).toContain("NGX-480");
+    expect(contract).toMatch(/Landed \(NGX-480\)/);
+    expect(contract).toContain("reconcileDispatchedWorkflowStep");
+    expect(contract).toContain("dispatch-reconcile-execute.ts");
+
+    // The dogfood stand-in is retained as an explicit test/dogfood-only fixture,
+    // with no production terminal gap hidden behind it.
+    expect(contract).toMatch(/test\/dogfood-only/);
+
+    // With RC-2 landed, the plan names the next remaining runtime consolidation item.
+    expect(contract).toMatch(/next remaining runtime\s+consolidation/i);
+  });
+
   it("is linked from the runtime/test audit baseline", () => {
     const audit = readDoc("internal/runtime-test-audit.md");
     expect(audit, "audit should link the consolidation plan").toContain(

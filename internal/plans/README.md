@@ -19,7 +19,7 @@ own implementation issue and proof.
 | Item | Plan source | What it unlocks |
 | --- | --- | --- |
 | RC-1 | [`runtime-consolidation-plan.md`](../contracts/runtime-consolidation-plan.md#follow-up-issue-sequence) | Goal-first read-back / recovery parity before any goal-first narrowing. |
-| RC-2 | [`runtime-consolidation-plan.md`](../contracts/runtime-consolidation-plan.md#follow-up-issue-sequence) | Single M9/M10 step-finalization reconciliation seam and no-double-write proof. |
+| RC-2 — landed (NGX-480) | [`runtime-consolidation-plan.md`](../contracts/runtime-consolidation-plan.md#follow-up-issue-sequence) | Single M9/M10 step-finalization reconciliation seam and no-double-write proof — seam shipped as `reconcileDispatchedWorkflowStep`; narrowing Paths 3/4 still gated on compatibility-lane migration. |
 | RC-3 | [`runtime-consolidation-plan.md`](../contracts/runtime-consolidation-plan.md#follow-up-issue-sequence) | Daemon-dispatchable `external-apply` adapter behind M6 safety gates. |
 | RC-4 | [`runtime-consolidation-plan.md`](../contracts/runtime-consolidation-plan.md#follow-up-issue-sequence) | Daemon-dispatchable `subworkflow` adapter after workflow start is stable. |
 | RC-5 | [`runtime-consolidation-plan.md`](../contracts/runtime-consolidation-plan.md#follow-up-issue-sequence) | Real `WorkflowStepExecutor` adapters and fake-executor demotion. |
@@ -33,4 +33,5 @@ ARCH-07 / NGX-451 completed the docs IA cleanup. **ARCH-08 / NGX-452** added
 around mechanical finalization/status/monitor refresh coordination: callers that
 already mutated durable step / lease rows can re-read reducer rows and refresh
 cached `workflow_runs` state / monitor columns without duplicating SQL. The full
-RC-2 single-finalization owner remains future runtime-consolidation work.
+RC-2 single-finalization owner has since landed separately (NGX-480; see the
+runtime-consolidation plan), leaving RC-1 and RC-5 as the next independent items.

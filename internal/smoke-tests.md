@@ -417,6 +417,12 @@ Coverage:
   re-entry, unsupported / unresolvable fail-closed manual-recovery gates where a
   run can carry them, vanished-run lease release without a dangling gate, and
   lease release on no-op safety paths.
+- RC-2 dispatched-step reconciliation in `test/workflow-dispatch-reconcile.test.ts`
+  and `test/workflow-dispatch-reconcile-execute.test.ts`: the pure decider maps
+  every executor-invocation state to exactly one action, clean terminal evidence
+  finalizes the owning workflow step, unclean terminals park the run for manual
+  recovery with a step gate, non-terminal evidence defers without writes, and the
+  bidirectional M9/M10 proof prevents double finalization.
 - shipped bounded `daemon start` workflow-lane wiring in
   `test/cli-daemon-workflow-dispatch.test.ts`: the managed loop dispatches an
   approved workflow step with no test-only injection, surfaces
@@ -446,7 +452,7 @@ Coverage:
 Run locally via the targeted vitest command:
 
 ```
-pnpm vitest run test/workflow-definition.test.ts test/workflow-definition-persist.test.ts test/migrations.test.ts test/workflow-run-start.test.ts test/workflow-run-start-persist.test.ts test/cli-workflow-run-start.test.ts test/executor-loop-reducer.test.ts test/executor-loop-persist.test.ts test/workflow-scheduler.test.ts test/daemon-loop.test.ts test/goal-loop-executor.test.ts test/goal-loop-orchestrator.test.ts test/goal-loop-mechanism.test.ts test/goal-loop-executor-persistence.test.ts test/git-transaction.test.ts test/single-shot-executor.test.ts test/single-shot-executor-persistence.test.ts test/single-shot-orchestrator.test.ts test/single-shot-mechanism.test.ts test/no-mistakes-executor.test.ts test/no-mistakes-mechanism.test.ts test/no-mistakes-executor-persistence.test.ts test/no-mistakes-orchestrator.test.ts test/workflow-gate.test.ts test/workflow-gate-persist.test.ts test/cli-workflow-run-decide.test.ts test/workflow-dispatch.test.ts test/workflow-dispatch-persist.test.ts test/workflow-dispatch-execute.test.ts test/cli-daemon-workflow-dispatch.test.ts test/workflow-dogfood-dispatch.test.ts test/workflow-dogfood-multi-dispatch.test.ts
+pnpm vitest run test/workflow-definition.test.ts test/workflow-definition-persist.test.ts test/migrations.test.ts test/workflow-run-start.test.ts test/workflow-run-start-persist.test.ts test/cli-workflow-run-start.test.ts test/executor-loop-reducer.test.ts test/executor-loop-persist.test.ts test/workflow-scheduler.test.ts test/daemon-loop.test.ts test/goal-loop-executor.test.ts test/goal-loop-orchestrator.test.ts test/goal-loop-mechanism.test.ts test/goal-loop-executor-persistence.test.ts test/git-transaction.test.ts test/single-shot-executor.test.ts test/single-shot-executor-persistence.test.ts test/single-shot-orchestrator.test.ts test/single-shot-mechanism.test.ts test/no-mistakes-executor.test.ts test/no-mistakes-mechanism.test.ts test/no-mistakes-executor-persistence.test.ts test/no-mistakes-orchestrator.test.ts test/workflow-gate.test.ts test/workflow-gate-persist.test.ts test/cli-workflow-run-decide.test.ts test/workflow-dispatch.test.ts test/workflow-dispatch-persist.test.ts test/workflow-dispatch-execute.test.ts test/workflow-dispatch-reconcile.test.ts test/workflow-dispatch-reconcile-execute.test.ts test/cli-daemon-workflow-dispatch.test.ts test/workflow-dogfood-dispatch.test.ts test/workflow-dogfood-multi-dispatch.test.ts
 ```
 
 Run the built-binary production workflow-lane smoke locally via:

@@ -45,9 +45,10 @@
  * `pending -> running -> terminal`, run verification / commit finalization, or
  * advance the step to a terminal state. The landed `runGoalLoopStep` /
  * `runSingleShotStep` / `runNoMistakesMirrorStep` adapters own nested
- * `executor_invocations` / `executor_rounds` evidence only; a future RC-2
- * reconciliation seam must be the single owner that converts terminal executor
- * evidence into the workflow step's terminal transition. The phase-1 invocation /
+ * `executor_invocations` / `executor_rounds` evidence only; the RC-2
+ * reconciliation seam (`dispatch-reconcile-execute.ts`, NGX-480) is now the
+ * single owner that converts terminal executor evidence into the workflow step's
+ * terminal transition. The phase-1 invocation /
  * round ids are deliberately namespaced (`...::dispatch`) so that follow-up owns
  * reconciling the scaffold with the adapters' own reattachable ids rather than
  * silently colliding with them.
@@ -323,8 +324,13 @@ function buildRoundScaffold(
  * `::dispatch` so it is recomputable from durable state (idempotent re-entry) yet
  * unmistakably the phase-1 dispatcher's row, not a landed adapter's reattachable
  * id (see the module doc's phase-1 boundary note).
+ *
+ * Exported as the single source of truth for this id: the RC-2 reconciliation
+ * seam (`dispatch-reconcile-execute.ts`) recomputes the same id to find the
+ * dispatched step's terminal executor evidence, so the two halves can never drift
+ * apart on the namespacing convention.
  */
-function deriveDispatchInvocationId(runId: string, stepId: string): string {
+export function deriveDispatchInvocationId(runId: string, stepId: string): string {
   return `${runId}::${stepId}::dispatch`;
 }
 
