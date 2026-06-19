@@ -11,7 +11,10 @@ import {
   claimRunnableWorkflowStep,
   type ClaimedWorkflowStep
 } from "../src/core/workflow/scheduler.js";
-import { getWorkflowLease } from "../src/core/workflow/leases.js";
+import {
+  getWorkflowLease,
+  releaseWorkflowLease
+} from "../src/core/workflow/leases.js";
 import { listWorkflowGatesForRun } from "../src/core/workflow/gate-persist.js";
 import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run-recovery.js";
 import {
@@ -91,7 +94,9 @@ function openSeededDb(runId: string = RUN_ID): MomentumDb {
 function approveAndClaim(
   db: MomentumDb,
   stepId: string,
-  runId: string = RUN_ID
+  runId: string = RUN_ID,
+  now: number = NOW,
+  holder: string = WORKER
 ): ClaimedWorkflowStep {
   db.prepare(
     "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?"
@@ -99,9 +104,9 @@ function approveAndClaim(
   const claim = claimRunnableWorkflowStep(db, {
     runId,
     stepId,
-    holder: WORKER,
-    leaseExpiresAt: NOW + 30_000,
-    now: NOW
+    holder,
+    leaseExpiresAt: now + 30_000,
+    now
   });
   if (!claim.ok) throw new Error(`test setup: claim failed (${claim.reason})`);
   return claim.claim;
@@ -315,6 +320,42 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
     expect(afterSecond.finishedAt).toBe(RECONCILE_AT);
   });
 
+  it("does not release a newer dispatch lease while reconciling old terminal evidence", () => {
+    const db = openSeededDb();
+    dispatchStep(db, "preflight");
+    driveInvocationTerminal(db, "preflight", "succeeded");
+    finishWorkflowStep(db, {
+      runId: RUN_ID,
+      stepId: "preflight",
+      state: "succeeded",
+      now: TERMINAL_AT
+    });
+    const oldLease = getWorkflowLease(db, RUN_ID, "dispatch");
+    if (!oldLease) throw new Error("test setup: missing dispatch lease");
+    releaseWorkflowLease(db, {
+      runId: oldLease.runId,
+      leaseKind: oldLease.leaseKind,
+      holder: oldLease.holder,
+      acquiredAt: oldLease.acquiredAt,
+      now: TERMINAL_AT
+    });
+    approveAndClaim(db, "implementation", RUN_ID, RECONCILE_AT + 10, "worker-2");
+
+    const result = reconcileDispatchedWorkflowStep({
+      db,
+      runId: RUN_ID,
+      stepId: "preflight",
+      now: RECONCILE_AT + 20
+    });
+
+    expect(result.status).toBe(
+      WORKFLOW_RECONCILE_RESULT_STATUS.alreadyFinalized
+    );
+    const currentLease = getWorkflowLease(db, RUN_ID, "dispatch");
+    expect(currentLease?.holder).toBe("worker-2");
+    expect(currentLease?.releasedAt).toBeNull();
+  });
+
   it("does not open a duplicate manual-recovery gate on re-entry", () => {
     const db = openSeededDb();
     dispatchStep(db, "preflight");
@@ -335,6 +376,35 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
 
     expect(second.status).toBe(WORKFLOW_RECONCILE_RESULT_STATUS.manualRecovery);
     expect(listWorkflowGatesForRun(db, RUN_ID)).toHaveLength(1);
+  });
+
+  it("does not park manual recovery over an already-terminal step", () => {
+    const db = openSeededDb();
+    dispatchStep(db, "preflight");
+    driveInvocationTerminal(db, "preflight", "blocked");
+    finishWorkflowStep(db, {
+      runId: RUN_ID,
+      stepId: "preflight",
+      state: "succeeded",
+      now: TERMINAL_AT
+    });
+
+    const result = reconcileDispatchedWorkflowStep({
+      db,
+      runId: RUN_ID,
+      stepId: "preflight",
+      now: RECONCILE_AT
+    });
+
+    expect(result.status).toBe(
+      WORKFLOW_RECONCILE_RESULT_STATUS.alreadyFinalized
+    );
+    expect(stepRow(db, "preflight").state).toBe("succeeded");
+    expect(
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+    ).toBe(false);
+    expect(listWorkflowGatesForRun(db, RUN_ID)).toHaveLength(0);
+    expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
   });
 });
 

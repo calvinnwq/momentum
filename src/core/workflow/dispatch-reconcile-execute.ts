@@ -152,6 +152,7 @@ export function reconcileDispatchedWorkflowStep(
     return parkForManualRecovery(db, {
       runId,
       stepId,
+      dispatchStartedAt: invocation.startedAt,
       invocationState: plan.invocationState,
       reason: plan.reason,
       now
@@ -160,6 +161,7 @@ export function reconcileDispatchedWorkflowStep(
   return finalizeDispatchedStep(db, {
     runId,
     stepId,
+    dispatchStartedAt: invocation.startedAt,
     stepState: plan.stepState,
     now
   });
@@ -177,11 +179,12 @@ function finalizeDispatchedStep(
   args: {
     runId: string;
     stepId: string;
+    dispatchStartedAt: number | null;
     stepState: WorkflowStepTerminalState;
     now: number;
   }
 ): WorkflowStepReconciliationResult {
-  const { runId, stepId, stepState, now } = args;
+  const { runId, stepId, dispatchStartedAt, stepState, now } = args;
   db.exec("BEGIN IMMEDIATE");
   try {
     const step = getWorkflowStep(db, runId, stepId);
@@ -198,7 +201,7 @@ function finalizeDispatchedStep(
       // step. The terminal result is immutable, so never override it — just
       // converge the lease + run-state so a crashed prior finalize cannot strand
       // the dispatch lease or leave cached run-state stale.
-      releaseHeldDispatchLease(db, runId, now);
+      releaseHeldDispatchLease(db, runId, dispatchStartedAt, now);
       refreshWorkflowRunRuntimeState(db, { runId, now });
       db.exec("COMMIT");
       return {
@@ -226,7 +229,13 @@ function finalizeDispatchedStep(
       now
     });
     if (!finished.ok) {
-      const recovered = recoverFinishConflict(db, finished, runId, now);
+      const recovered = recoverFinishConflict(
+        db,
+        finished,
+        runId,
+        dispatchStartedAt,
+        now
+      );
       if (recovered !== undefined) {
         db.exec("COMMIT");
         return recovered;
@@ -235,7 +244,7 @@ function finalizeDispatchedStep(
       return mapFinishRefusal(finished);
     }
 
-    releaseHeldDispatchLease(db, runId, now);
+    releaseHeldDispatchLease(db, runId, dispatchStartedAt, now);
     refreshWorkflowRunRuntimeState(db, { runId, now });
     db.exec("COMMIT");
     return {
@@ -262,14 +271,40 @@ function parkForManualRecovery(
   args: {
     runId: string;
     stepId: string;
+    dispatchStartedAt: number | null;
     invocationState: string;
     reason: string;
     now: number;
   }
 ): WorkflowStepReconciliationResult {
-  const { runId, stepId, invocationState, reason, now } = args;
+  const { runId, stepId, dispatchStartedAt, invocationState, reason, now } = args;
   db.exec("BEGIN IMMEDIATE");
   try {
+    const step = getWorkflowStep(db, runId, stepId);
+    if (step === undefined) {
+      db.exec("ROLLBACK");
+      return {
+        status: WORKFLOW_RECONCILE_RESULT_STATUS.stepNotFound,
+        detail: stepId
+      };
+    }
+    if (isTerminalStepState(step.state)) {
+      releaseHeldDispatchLease(db, runId, dispatchStartedAt, now);
+      refreshWorkflowRunRuntimeState(db, { runId, now });
+      db.exec("COMMIT");
+      return {
+        status: WORKFLOW_RECONCILE_RESULT_STATUS.alreadyFinalized,
+        detail: step.state
+      };
+    }
+    if (step.state !== "running") {
+      db.exec("ROLLBACK");
+      return {
+        status: WORKFLOW_RECONCILE_RESULT_STATUS.stepNotRunning,
+        detail: step.state
+      };
+    }
+
     const marked = markWorkflowRunNeedsManualRecovery(db, { runId, reason, now });
     if (marked.ok) {
       const gateId = deriveReconcileRecoveryGateId(runId, stepId, invocationState);
@@ -294,7 +329,7 @@ function parkForManualRecovery(
         );
       }
     }
-    releaseHeldDispatchLease(db, runId, now);
+    releaseHeldDispatchLease(db, runId, dispatchStartedAt, now);
     refreshWorkflowRunRuntimeState(db, { runId, now });
     db.exec("COMMIT");
     return {
@@ -318,13 +353,14 @@ function recoverFinishConflict(
   db: MomentumDb,
   outcome: Exclude<WorkflowStepTransitionOutcome, { ok: true }>,
   runId: string,
+  dispatchStartedAt: number | null,
   now: number
 ): WorkflowStepReconciliationResult | undefined {
   if (
     outcome.reason === "invalid_transition" &&
     isTerminalStepState(outcome.from)
   ) {
-    releaseHeldDispatchLease(db, runId, now);
+    releaseHeldDispatchLease(db, runId, dispatchStartedAt, now);
     refreshWorkflowRunRuntimeState(db, { runId, now });
     return {
       status: WORKFLOW_RECONCILE_RESULT_STATUS.alreadyFinalized,
@@ -354,10 +390,13 @@ function mapFinishRefusal(
 function releaseHeldDispatchLease(
   db: MomentumDb,
   runId: string,
+  dispatchStartedAt: number | null,
   now: number
 ): void {
+  if (dispatchStartedAt === null) return;
   const lease = getWorkflowLease(db, runId, "dispatch");
   if (lease === undefined || lease.releasedAt !== null) return;
+  if (lease.acquiredAt > dispatchStartedAt) return;
   releaseWorkflowLease(db, {
     runId: lease.runId,
     leaseKind: lease.leaseKind,
