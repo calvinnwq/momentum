@@ -1111,3 +1111,89 @@ Data dir: /path/to/data
 A `Recovery: <code>` line is added when a recovery classification is present. Open gates print inline after the `Gates:` count; resolved gates are omitted from text output.
 
 Exit code 0 on success, 1 on failure, 2 on usage error.
+
+## `workflow run logs`
+
+```text
+momentum workflow run logs <run-id> [--data-dir <path>] [--json]
+```
+
+Read-back of one workflow run's durable logs and evidence, for operators inspecting what each step actually ran and produced. It is the workflow-first equivalent of goal-first `logs <goal-id>`: it wraps the same detail loader as `workflow status <run-id>` / `workflow handoff` (run, steps, monitor, evidence) and adds the per-round executor evidence that the detail loader does not carry — executor family / agent / model, log paths, summaries, key changes, changed files, verification status, commit SHA, and recovery codes. Read-only: no SQLite mutation, no file reads, no external writes.
+
+Rounds are returned across every invocation in the run, ordered by step key, then round index, then round id.
+
+### JSON envelope
+
+```json
+{
+  "ok": true,
+  "command": "workflow run logs",
+  "dataDir": "/path/to/data",
+  "schemaVersion": 1,
+  "generatedAt": 1730000600000,
+  "run": { "...": "same shape as workflow status detail" },
+  "steps": [ "..." ],
+  "monitor": { "...": "same shape as workflow status detail" },
+  "evidence": [ "..." ],
+  "rounds": [
+    {
+      "roundId": "cwfp-abc123::implementation::dispatch::round-1",
+      "invocationId": "cwfp-abc123::implementation::dispatch",
+      "stepRunId": "implementation",
+      "stepKey": "implementation",
+      "executorFamily": "goal-loop",
+      "attempt": 1,
+      "roundIndex": 0,
+      "state": "succeeded",
+      "classification": "complete",
+      "startedAt": 1730000500000,
+      "heartbeatAt": 1730000550000,
+      "finishedAt": 1730000600000,
+      "agentProvider": "claude",
+      "model": "claude-opus-4-8",
+      "effort": "high",
+      "inputDigest": "sha256:...",
+      "resultDigest": "sha256:...",
+      "artifactRoot": "/path/to/data/runs/cwfp-abc123/round-1",
+      "logPaths": ["/path/to/data/runs/cwfp-abc123/round-1/agent.log"],
+      "summary": "implemented the slice",
+      "keyChanges": ["added reader"],
+      "remainingWork": [],
+      "changedFiles": ["src/core/workflow/logs.ts"],
+      "verificationStatus": "passed",
+      "commitSha": "abc123",
+      "recoveryCode": null,
+      "humanGate": null
+    }
+  ],
+  "nextAction": { "...": "same shape as workflow status detail monitor.nextAction" }
+}
+```
+
+### Error codes
+
+| Code | Meaning |
+|------|---------|
+| `run_id_required` | `<run-id>` was not supplied. |
+| `data_dir_failed` | Data directory resolution failed. |
+| `run_not_found` | `<run-id>` does not exist in `workflow_runs`. |
+
+### Text output
+
+```text
+Workflow run logs: cwfp-abc123
+Schema version: 1
+Generated at (epoch ms): 1730000600000
+Run state: running
+Steps: 5
+Executor rounds: 1
+- cwfp-abc123::implementation::dispatch::round-1 [implementation/succeeded] complete
+    summary: implemented the slice
+    verification: passed commit: abc123
+    logs: /path/to/data/runs/cwfp-abc123/round-1/agent.log
+    changed files: src/core/workflow/logs.ts
+Evidence records: 0
+Data dir: /path/to/data
+```
+
+Exit code 0 on success, 1 on failure, 2 on usage error.
