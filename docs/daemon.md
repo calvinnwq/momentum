@@ -89,12 +89,78 @@ is `dispatched`. `lastWorkflowCode` is the last scheduler-lane tick code
 (`idle`, `claim_contended`, `dispatched`, or `null` when the lane never ran).
 For a supported executor family, dispatch advances the step to `running` and
 creates durable executor invocation / round scaffold rows with deterministic
-dispatcher ids. If a claimed step cannot be resolved or uses an executor family
-the daemon cannot dispatch yet, the dispatcher parks the run behind a
-`manual_recovery_required` workflow gate instead of silently dropping the claim;
-if the run row vanished before that gate can be written, it still releases the
-dispatch lease so no claim is stranded. Register-only `daemon start` exits
-before the managed loop and never runs the workflow scheduler lane.
+dispatcher ids. When `MOMENTUM_LIVE_WRAPPER_PROFILE` points at a valid workflow
+step wrapper profile, the managed loop also runs a genuinely dispatched step's
+live wrapper in the same tick, records terminal executor evidence on the
+dispatch scaffold, and lets the reconciliation seam finalize the step or park it
+for manual recovery. When the variable is unset or blank, the default lane is
+unchanged: supported steps get the durable start scaffold only, while
+unconfigured wrapper kinds fail honestly with `runtime_unavailable` if a profile
+is configured but omits that step kind. If a claimed step cannot be resolved or
+uses an executor family the daemon cannot dispatch yet, the dispatcher parks the
+run behind a `manual_recovery_required` workflow gate instead of silently
+dropping the claim; if the run row vanished before that gate can be written, it
+still releases the dispatch lease so no claim is stranded. Register-only
+`daemon start` exits before the managed loop and never runs the workflow
+scheduler lane or reads `MOMENTUM_LIVE_WRAPPER_PROFILE`.
+
+### Workflow live-wrapper profile
+
+Managed-loop `daemon start` can execute workflow steps through local commands by
+setting `MOMENTUM_LIVE_WRAPPER_PROFILE` to a readable JSON file:
+
+```sh
+MOMENTUM_LIVE_WRAPPER_PROFILE=/path/to/live-wrapper-profile.json \
+  momentum daemon start --max-idle-cycles 1 --json
+```
+
+The profile has a non-empty `name` and a `wrappers` object keyed by workflow
+step kind (`preflight`, `implementation`, `postflight`, `no-mistakes`,
+`merge-cleanup`, or `linear-refresh`). Each wrapper requires:
+
+- `command` — absolute executable path.
+- `args` — array of strings or numbers; use `[]` when no arguments are needed.
+- `cwd` — `repo` or `iteration`.
+- `timeout_sec` — positive integer seconds.
+- `env_allow` — environment variable names copied from the daemon process;
+  include `PATH` explicitly if the wrapper or its child processes need it.
+- `result_file` — relative path inside the workflow run directory where the
+  wrapper writes the normalized runner result JSON.
+- `probe` — optional `{ "command", "args", "timeout_sec" }` pre-flight check.
+
+Example:
+
+```json
+{
+  "name": "local-workflow",
+  "wrappers": {
+    "preflight": {
+      "command": "/usr/local/bin/momentum-preflight",
+      "args": [],
+      "cwd": "repo",
+      "timeout_sec": 900,
+      "env_allow": ["PATH", "HOME"],
+      "result_file": "result.json",
+      "probe": {
+        "command": "/usr/local/bin/momentum-preflight",
+        "args": ["--version"],
+        "timeout_sec": 30
+      }
+    }
+  }
+}
+```
+
+Momentum injects `MOMENTUM_RUN_ID`, `MOMENTUM_STEP_ID`,
+`MOMENTUM_STEP_KIND`, `MOMENTUM_ATTEMPT`, `MOMENTUM_REPO_PATH`,
+`MOMENTUM_ITERATION_DIR`, `MOMENTUM_PROMPT_PATH` when available, and
+`MOMENTUM_RESULT_PATH` for every wrapper. The wrapper must write the same
+normalized runner result JSON documented in [`runners.md`](runners.md) at
+`$MOMENTUM_RESULT_PATH`. A valid profile may configure only the step kinds it
+can run; a dispatched kind missing from the profile routes to manual recovery
+rather than fake success. An unreadable, invalid JSON, or schema-invalid profile
+causes `daemon start` managed-loop mode to fail before registering a daemon run
+with `code: "daemon_live_wrapper_profile_invalid"`.
 
 JSON envelope shape (managed loop):
 

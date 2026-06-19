@@ -139,7 +139,10 @@ export type DaemonStartSuccessPayload = {
 };
 
 export type DaemonStartFailurePayload = {
-  code: "daemon_already_active" | "data_dir_failed";
+  code:
+    | "daemon_already_active"
+    | "data_dir_failed"
+    | "daemon_live_wrapper_profile_invalid";
   message: string;
   existing?: {
     runId: string;

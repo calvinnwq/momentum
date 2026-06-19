@@ -50,6 +50,13 @@ import {
   getWorkflowLease,
   releaseWorkflowLease
 } from "./leases.js";
+import { isTerminalExecutorInvocationState } from "../executors/loop-reducer.js";
+import { loadExecutorInvocation } from "../executors/loop-persist.js";
+import { deriveDispatchInvocationId } from "./dispatch-execute.js";
+import {
+  reconcileDispatchedWorkflowStep,
+  WORKFLOW_RECONCILE_RESULT_STATUS
+} from "./dispatch-reconcile-execute.js";
 import {
   writeWorkflowRecoveryArtifact,
   writeWorkflowRecoveryArtifactInRunDir,
@@ -400,6 +407,28 @@ export function recoverStaleWorkflowLeases(
   const skipped: SkippedStaleWorkflowLease[] = [];
 
   for (const candidate of scan.staleLeases) {
+    const reconciled = tryRecoverTerminalDispatchEvidence(
+      db,
+      candidate,
+      now,
+      graceMs
+    );
+    if (reconciled !== undefined) {
+      recovered.push(reconciled);
+      continue;
+    }
+
+    const parkedDispatch = tryParkStaleRunningDispatchLease(
+      db,
+      candidate,
+      now,
+      graceMs
+    );
+    if (parkedDispatch !== undefined) {
+      recovered.push(parkedDispatch);
+      continue;
+    }
+
     db.exec("BEGIN IMMEDIATE");
     try {
       const live = getWorkflowLease(db, candidate.runId, candidate.leaseKind);
@@ -498,6 +527,167 @@ export function recoverStaleWorkflowLeases(
   }
 
   return { recovered, skipped };
+}
+
+function tryRecoverTerminalDispatchEvidence(
+  db: MomentumDb,
+  candidate: StaleWorkflowLease,
+  now: number,
+  graceMs: number
+): RecoveredStaleWorkflowLease | undefined {
+  if (
+    candidate.leaseKind !== WORKFLOW_DISPATCH_LEASE_KIND ||
+    candidate.stalePolicy !== "auto-release"
+  ) {
+    return undefined;
+  }
+
+  const live = getWorkflowLease(db, candidate.runId, candidate.leaseKind);
+  if (
+    live === undefined ||
+    classifyWorkflowLease(live, { now, graceMs }) !== "stale-auto-release"
+  ) {
+    return undefined;
+  }
+
+  const runningStep = loadStepRecords(db, candidate.runId).find(
+    (step) => step.state === "running"
+  );
+  if (runningStep === undefined) return undefined;
+
+  const invocation = loadExecutorInvocation(
+    db,
+    deriveDispatchInvocationId(candidate.runId, runningStep.stepId)
+  );
+  if (
+    invocation === undefined ||
+    !isTerminalExecutorInvocationState(invocation.state)
+  ) {
+    return undefined;
+  }
+
+  const reconciled = reconcileDispatchedWorkflowStep({
+    db,
+    runId: candidate.runId,
+    stepId: runningStep.stepId,
+    now
+  });
+  if (
+    reconciled.status !== WORKFLOW_RECONCILE_RESULT_STATUS.finalized &&
+    reconciled.status !== WORKFLOW_RECONCILE_RESULT_STATUS.alreadyFinalized &&
+    reconciled.status !== WORKFLOW_RECONCILE_RESULT_STATUS.manualRecovery
+  ) {
+    return undefined;
+  }
+
+  return {
+    runId: live.runId,
+    leaseKind: live.leaseKind,
+    holder: live.holder,
+    stalePolicy: live.stalePolicy,
+    action: "released",
+    recoveryStatus: WORKFLOW_LEASE_AUTO_RELEASED_STATUS
+  };
+}
+
+function tryParkStaleRunningDispatchLease(
+  db: MomentumDb,
+  candidate: StaleWorkflowLease,
+  now: number,
+  graceMs: number
+): RecoveredStaleWorkflowLease | undefined {
+  if (
+    candidate.leaseKind !== WORKFLOW_DISPATCH_LEASE_KIND ||
+    candidate.stalePolicy !== "auto-release"
+  ) {
+    return undefined;
+  }
+
+  let parked:
+    | { lease: WorkflowLeaseRecord; runningStep: WorkflowStepRecord }
+    | undefined;
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const live = getWorkflowLease(db, candidate.runId, candidate.leaseKind);
+    if (
+      live === undefined ||
+      classifyWorkflowLease(live, { now, graceMs }) !== "stale-auto-release"
+    ) {
+      db.exec("ROLLBACK");
+      return undefined;
+    }
+
+    const runningStep = loadStepRecords(db, candidate.runId).find(
+      (step) => step.state === "running"
+    );
+    if (runningStep === undefined) {
+      db.exec("ROLLBACK");
+      return undefined;
+    }
+
+    const invocation = loadExecutorInvocation(
+      db,
+      deriveDispatchInvocationId(candidate.runId, runningStep.stepId)
+    );
+    if (
+      invocation !== undefined &&
+      isTerminalExecutorInvocationState(invocation.state)
+    ) {
+      db.exec("ROLLBACK");
+      return undefined;
+    }
+
+    const reason =
+      `${WORKFLOW_LEASE_MANUAL_RECOVERY_STATUS}: dispatch lease held by ${live.holder} ` +
+      `expired while step ${runningStep.stepId} remained running without terminal dispatch evidence`;
+    const marked = markWorkflowRunNeedsManualRecovery(db, {
+      runId: live.runId,
+      reason,
+      now
+    });
+    if (!marked.ok) {
+      db.exec("ROLLBACK");
+      return undefined;
+    }
+    const released = releaseWorkflowLease(db, {
+      runId: live.runId,
+      leaseKind: live.leaseKind,
+      holder: live.holder,
+      acquiredAt: live.acquiredAt,
+      now
+    });
+    if (!released.ok) {
+      db.exec("ROLLBACK");
+      return undefined;
+    }
+
+    parked = { lease: live, runningStep };
+    db.exec("COMMIT");
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+    }
+    throw error;
+  }
+
+  const reason =
+    `${WORKFLOW_LEASE_MANUAL_RECOVERY_STATUS}: dispatch lease held by ${parked.lease.holder} ` +
+    `expired while step ${parked.runningStep.stepId} remained running without terminal dispatch evidence`;
+  tryWriteWorkflowManualRecoveryArtifact({
+    context: loadWorkflowManualRecoveryArtifactContext(db, parked.lease.runId),
+    reason,
+    now
+  });
+
+  return {
+    runId: parked.lease.runId,
+    leaseKind: parked.lease.leaseKind,
+    holder: parked.lease.holder,
+    stalePolicy: parked.lease.stalePolicy,
+    action: "flagged_manual_recovery",
+    recoveryStatus: WORKFLOW_LEASE_MANUAL_RECOVERY_STATUS
+  };
 }
 
 function refreshWorkflowRunStateAfterLeaseRecovery(

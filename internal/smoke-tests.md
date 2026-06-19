@@ -432,7 +432,11 @@ Coverage:
   `workflowStepsDispatched` / `lastWorkflowCode`, persists executor rows, keeps
   register-only `daemon start` inert, and (NGX-391) proves the dogfood
   terminalize-and-continue lane dispatches two steps in a single process while
-  the default lane is byte-for-byte unchanged.
+  the default lane is byte-for-byte unchanged. NGX-492 extends the same suite to
+  cover `MOMENTUM_LIVE_WRAPPER_PROFILE`: configured live-wrapper execution,
+  durable terminal executor evidence, RC-2 reconciliation, configured
+  dispatch-lease sizing, env forwarding, run-dir creation failure recovery, and
+  no stranded dispatch lease.
 - terminalize-and-continue dispatch fixture in
   `test/workflow-dogfood-dispatch.test.ts` (NGX-391): `shouldTerminalizeAfterDispatch`
   safety gate — `dispatched` / `alreadyDispatched` → terminalize; `failClosed` /

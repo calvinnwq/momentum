@@ -6,6 +6,8 @@ import path from "node:path";
 import { runCli } from "../src/cli.js";
 import { openDb } from "../src/adapters/db.js";
 import { DOGFOOD_TERMINALIZE_DISPATCH_ENV_VAR } from "../src/core/workflow/dogfood-dispatch.js";
+import { DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR } from "../src/core/workflow/daemon-live-wrapper-profile.js";
+import { terminalizeDispatchedExecutorInvocation } from "../src/core/workflow/dispatch-executor-terminalize.js";
 
 type RunResult = {
   code: number;
@@ -97,7 +99,304 @@ async function startApprovedCodingRun(
   expect(approveResult.code).toBe(0);
 }
 
+function writeSucceedingPreflightProfile(dir: string, timeoutSec = 5): string {
+  const profilePath = path.join(dir, "live-wrapper-profile.json");
+  const script = `cat > "$MOMENTUM_RESULT_PATH" <<'JSON'
+{"success":true,"summary":"daemon live wrapper preflight succeeded","key_changes_made":[],"key_learnings":[],"remaining_work":[],"goal_complete":false,"commit":{"type":"test","subject":"daemon live wrapper preflight","body":"","breaking":false}}
+JSON`;
+  fs.writeFileSync(
+    profilePath,
+    JSON.stringify({
+      name: "daemon-default-test",
+      wrappers: {
+        preflight: {
+          command: "/bin/sh",
+          args: ["-c", script],
+          cwd: "iteration",
+          timeout_sec: timeoutSec,
+          env_allow: [],
+          result_file: "result.json"
+        }
+      }
+    }),
+    "utf8"
+  );
+  return profilePath;
+}
+
+function writeEnvForwardingPreflightProfile(dir: string): string {
+  const profilePath = path.join(dir, "live-wrapper-env-profile.json");
+  const script = `test "$MOMENTUM_TEST_TOKEN" = "from-cli-io" || exit 7
+cat > "$MOMENTUM_RESULT_PATH" <<'JSON'
+{"success":true,"summary":"daemon live wrapper env forwarded","key_changes_made":[],"key_learnings":[],"remaining_work":[],"goal_complete":false,"commit":{"type":"test","subject":"daemon live wrapper env","body":"","breaking":false}}
+JSON`;
+  fs.writeFileSync(
+    profilePath,
+    JSON.stringify({
+      name: "daemon-env-test",
+      wrappers: {
+        preflight: {
+          command: "/bin/sh",
+          args: ["-c", script],
+          cwd: "iteration",
+          timeout_sec: 5,
+          env_allow: ["MOMENTUM_TEST_TOKEN"],
+          result_file: "result.json"
+        }
+      }
+    }),
+    "utf8"
+  );
+  return profilePath;
+}
+
 describe("daemon start production workflow lane (NGX-367)", () => {
+  it("uses a configured daemon live-wrapper profile to execute and reconcile a dispatched step", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const profileDir = makeTempDir();
+    const profilePath = writeSucceedingPreflightProfile(profileDir);
+    const runId = "ngx492-live-wrapper-profile";
+    await startApprovedCodingRun(dataDir, repoDir, runId);
+
+    const result = await run(
+      [
+        "daemon",
+        "start",
+        "--max-loop-iterations",
+        "1",
+        "--poll-interval-ms",
+        "0",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath }
+    );
+
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    const loop = JSON.parse(result.stdout).loop as Record<string, unknown>;
+    expect(loop["workflowStepsDispatched"]).toBe(1);
+    expect(loop["lastWorkflowCode"]).toBe("dispatched");
+
+    const db = openDb(dataDir);
+    try {
+      const step = db
+        .prepare(
+          "SELECT state, result_digest FROM workflow_steps WHERE run_id = ? AND step_id = ?"
+        )
+        .get(runId, "preflight") as
+        | { state: string; result_digest: string | null }
+        | undefined;
+      expect(step).toMatchObject({ state: "succeeded" });
+
+      const invocation = db
+        .prepare(
+          "SELECT state FROM executor_invocations WHERE workflow_run_id = ? AND step_key = ?"
+        )
+        .get(runId, "preflight") as { state: string } | undefined;
+      expect(invocation).toEqual({ state: "succeeded" });
+
+      const round = db
+        .prepare(
+          "SELECT state, summary FROM executor_rounds WHERE workflow_run_id = ? AND step_key = ?"
+        )
+        .get(runId, "preflight") as
+        | { state: string; summary: string | null }
+        | undefined;
+      expect(round).toEqual({
+        state: "succeeded",
+        summary: "daemon live wrapper preflight succeeded"
+      });
+
+      const openLeases = db
+        .prepare(
+          "SELECT lease_kind FROM workflow_leases WHERE run_id = ? AND released_at IS NULL"
+        )
+        .all(runId) as Array<{ lease_kind: string }>;
+      expect(openLeases).toEqual([]);
+    } finally {
+      db.close();
+    }
+
+    expect(
+      fs.existsSync(path.join(repoDir, ".agent-workflows", runId, "result.json"))
+    ).toBe(true);
+  });
+
+  it("sizes the dispatch lease for the configured live-wrapper timeout", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const profileDir = makeTempDir();
+    const profilePath = writeSucceedingPreflightProfile(profileDir, 120);
+    const runId = "ngx492-live-wrapper-lease-duration";
+    await startApprovedCodingRun(dataDir, repoDir, runId);
+
+    const result = await run(
+      [
+        "daemon",
+        "start",
+        "--max-loop-iterations",
+        "1",
+        "--poll-interval-ms",
+        "0",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath }
+    );
+
+    expect(result.code).toBe(0);
+    const db = openDb(dataDir);
+    try {
+      const lease = db
+        .prepare(
+          "SELECT acquired_at, expires_at FROM workflow_leases WHERE run_id = ? AND lease_kind = 'dispatch'"
+        )
+        .get(runId) as
+        | { acquired_at: number; expires_at: number }
+        | undefined;
+      expect(lease).not.toBeUndefined();
+      expect(lease!.expires_at - lease!.acquired_at).toBeGreaterThanOrEqual(
+        120_000
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("forwards the injected CLI env to daemon live-wrapper commands", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const profileDir = makeTempDir();
+    const profilePath = writeEnvForwardingPreflightProfile(profileDir);
+    const runId = "ngx492-live-wrapper-env";
+    const oldToken = process.env["MOMENTUM_TEST_TOKEN"];
+    delete process.env["MOMENTUM_TEST_TOKEN"];
+    try {
+      await startApprovedCodingRun(dataDir, repoDir, runId);
+
+      const result = await run(
+        [
+          "daemon",
+          "start",
+          "--max-loop-iterations",
+          "1",
+          "--poll-interval-ms",
+          "0",
+          "--data-dir",
+          dataDir,
+          "--json"
+        ],
+        {
+          [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath,
+          MOMENTUM_TEST_TOKEN: "from-cli-io"
+        }
+      );
+
+      expect(result.code).toBe(0);
+      expect(result.stderr).toBe("");
+      const db = openDb(dataDir);
+      try {
+        const step = db
+          .prepare(
+            "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?"
+          )
+          .get(runId, "preflight") as { state: string } | undefined;
+        expect(step).toEqual({ state: "succeeded" });
+        const round = db
+          .prepare(
+            "SELECT summary FROM executor_rounds WHERE workflow_run_id = ? AND step_key = ?"
+          )
+          .get(runId, "preflight") as { summary: string | null } | undefined;
+        expect(round?.summary).toBe("daemon live wrapper env forwarded");
+      } finally {
+        db.close();
+      }
+    } finally {
+      if (oldToken === undefined) {
+        delete process.env["MOMENTUM_TEST_TOKEN"];
+      } else {
+        process.env["MOMENTUM_TEST_TOKEN"] = oldToken;
+      }
+    }
+  });
+
+  it("parks the run for manual recovery when daemon live-wrapper run-dir creation fails", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const profileDir = makeTempDir();
+    const profilePath = writeSucceedingPreflightProfile(profileDir);
+    const runId = "ngx492-run-dir-unavailable";
+    fs.writeFileSync(path.join(repoDir, ".agent-workflows"), "not a directory");
+    await startApprovedCodingRun(dataDir, repoDir, runId);
+
+    const result = await run(
+      [
+        "daemon",
+        "start",
+        "--max-loop-iterations",
+        "1",
+        "--poll-interval-ms",
+        "0",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath }
+    );
+
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    const loop = JSON.parse(result.stdout).loop as Record<string, unknown>;
+    expect(loop["workflowStepsDispatched"]).toBe(1);
+    expect(loop["lastWorkflowCode"]).toBe("dispatched");
+
+    const db = openDb(dataDir);
+    try {
+      const runRow = db
+        .prepare(
+          "SELECT needs_manual_recovery, manual_recovery_reason FROM workflow_runs WHERE id = ?"
+        )
+        .get(runId) as
+        | { needs_manual_recovery: number; manual_recovery_reason: string | null }
+        | undefined;
+      expect(runRow?.needs_manual_recovery).toBe(1);
+      expect(runRow?.manual_recovery_reason).toContain(
+        "manual_recovery_required"
+      );
+
+      const invocation = db
+        .prepare(
+          "SELECT state FROM executor_invocations WHERE workflow_run_id = ? AND step_key = ?"
+        )
+        .get(runId, "preflight") as { state: string } | undefined;
+      expect(invocation).toEqual({ state: "manual_recovery_required" });
+
+      const round = db
+        .prepare(
+          "SELECT state, recovery_code, summary FROM executor_rounds WHERE workflow_run_id = ? AND step_key = ?"
+        )
+        .get(runId, "preflight") as
+        | { state: string; recovery_code: string | null; summary: string | null }
+        | undefined;
+      expect(round?.state).toBe("manual_recovery_required");
+      expect(round?.recovery_code).toBe("runtime_unavailable");
+      expect(round?.summary).toContain("run_dir_unavailable");
+
+      const openLeases = db
+        .prepare(
+          "SELECT lease_kind FROM workflow_leases WHERE run_id = ? AND released_at IS NULL"
+        )
+        .all(runId) as Array<{ lease_kind: string }>;
+      expect(openLeases).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("advances an approved workflow run through the shipped daemon start --max-* path and records durable executor rows", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
@@ -214,6 +513,28 @@ describe("daemon start production workflow lane (NGX-367)", () => {
             SET heartbeat_at = ?, expires_at = ?
           WHERE run_id = ? AND lease_kind = ?`
       ).run(1, 2, runId, "dispatch");
+      terminalizeDispatchedExecutorInvocation({
+        db,
+        runId,
+        stepId: "preflight",
+        now: Date.now(),
+        result: {
+          ok: true,
+          result: {
+            state: "succeeded",
+            summary: "test terminalizes preflight before second dispatch",
+            checkpoints: [],
+            artifacts: [],
+            resultDigest: "sha256:cli-second-dispatch-preflight",
+            errorCode: null,
+            errorMessage: null,
+            retryHint: null,
+            recoveryHint: null
+          },
+          executorLogPath: path.join(repoDir, ".agent-workflows", runId, "executor.log"),
+          resultJsonPath: path.join(repoDir, ".agent-workflows", runId, "result.json")
+        }
+      });
     } finally {
       db.close();
     }
@@ -230,48 +551,9 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       "--json"
     ]);
     expect(recoverLease.code).toBe(0);
-    expect(JSON.parse(recoverLease.stdout).loop.workflowStepsDispatched).toBe(0);
-
-    const terminalizePreflight = await run([
-      "workflow",
-      "run",
-      "update-step",
-      runId,
-      "--step",
-      "preflight",
-      "--state",
-      "succeeded",
-      "--reason",
-      "test terminalizes preflight before second dispatch",
-      "--actor",
-      "vitest",
-      "--data-dir",
-      dataDir,
-      "--json"
-    ]);
-    expect(terminalizePreflight.code).toBe(0);
-    expect(JSON.parse(terminalizePreflight.stdout)).toMatchObject({
-      ok: true,
-      stepId: "preflight",
-      state: "succeeded",
-      runState: "approved"
-    });
-
-    const secondDispatch = await run([
-      "daemon",
-      "start",
-      "--max-loop-iterations",
-      "3",
-      "--poll-interval-ms",
-      "0",
-      "--data-dir",
-      dataDir,
-      "--json"
-    ]);
-    expect(secondDispatch.code).toBe(0);
-    const loop = JSON.parse(secondDispatch.stdout).loop as Record<string, unknown>;
+    const loop = JSON.parse(recoverLease.stdout).loop as Record<string, unknown>;
     expect(loop["exitReason"]).toBe("max_loop_iterations");
-    expect(loop["iterations"]).toBe(3);
+    expect(loop["iterations"]).toBe(1);
     expect(loop["workflowStepsDispatched"]).toBe(1);
 
     const finalDb = openDb(dataDir);
@@ -296,7 +578,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         state: string;
       }>;
       expect(invocations).toEqual([
-        { step_key: "preflight", executor_family: "one-shot", state: "running" },
+        { step_key: "preflight", executor_family: "one-shot", state: "succeeded" },
         { step_key: "implementation", executor_family: "goal-loop", state: "running" }
       ]);
     } finally {

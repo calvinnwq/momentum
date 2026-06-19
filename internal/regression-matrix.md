@@ -431,6 +431,12 @@ that shipped workflow-first path.
   [`src/core/workflow/dispatch-reconcile.ts`](../src/core/workflow/dispatch-reconcile.ts)
   and
   [`src/core/workflow/dispatch-reconcile-execute.ts`](../src/core/workflow/dispatch-reconcile-execute.ts).
+  NGX-492 daemon-default live-wrapper execution is owned by
+  [`src/core/workflow/daemon-live-wrapper-profile.ts`](../src/core/workflow/daemon-live-wrapper-profile.ts),
+  [`src/core/workflow/live-wrapper-dispatch.ts`](../src/core/workflow/live-wrapper-dispatch.ts),
+  [`src/core/workflow/dispatch-executor-run.ts`](../src/core/workflow/dispatch-executor-run.ts),
+  [`src/core/workflow/dispatch-executor-terminalize.ts`](../src/core/workflow/dispatch-executor-terminalize.ts), and
+  [`src/core/workflow/daemon-dispatch-exec-context.ts`](../src/core/workflow/daemon-dispatch-exec-context.ts).
 - **Evidence.**
   - Unit / CLI: `test/workflow-dispatch.test.ts`,
     `test/workflow-dispatch-persist.test.ts`,
@@ -447,6 +453,15 @@ that shipped workflow-first path.
     evidence finalizes a dispatched step exactly once, unclean terminal evidence
     parks the run for manual recovery, non-terminal evidence defers, and M9
     direct-finalize plus M10 reconciliation cannot both close the same step.
+  - RC-5b unit / CLI proof: `test/workflow-daemon-live-wrapper-profile.test.ts`,
+    `test/workflow-daemon-dispatch-exec-context.test.ts`,
+    `test/workflow-dispatch-executor-terminalize.test.ts`,
+    `test/workflow-dispatch-executor-run.test.ts`,
+    `test/workflow-live-wrapper-dispatch.test.ts`, and
+    `test/cli-daemon-workflow-dispatch.test.ts` prove configured daemon profiles
+    run real wrapper commands, terminalize evidence, reconcile through RC-2,
+    fail unconfigured / unresolved contexts into manual recovery, preserve
+    idempotent re-entry, and avoid stranded dispatch leases.
   - Real closeout dogfood: `ngx353-m10-closeout` in `/Users/ngxcalvin/.momentum`
     reached `preflight = running` with executor invocation / round scaffold rows
     and `workflow run monitor` reported `monitorDrift.drifted = false`.

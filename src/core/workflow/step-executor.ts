@@ -216,10 +216,10 @@ export function createUnconfiguredWorkflowStepExecutor(
 }
 
 /**
- * The production default registry (RC-5). With no live-wrapper profile wired
- * (the daemon-default profile source is deferred per the runtime-consolidation
- * contract), every canonical kind resolves to the honest unconfigured adapter:
- * lookup/dispatch never resolves to a fake success by default.
+ * The production default registry (RC-5). With no live-wrapper profile supplied,
+ * every canonical kind resolves to the honest unconfigured adapter: lookup/dispatch
+ * never resolves to a fake success by default. Daemon callers that resolve a
+ * configured live-wrapper profile pass an explicit registry instead.
  */
 const DEFAULT_REGISTRY: WorkflowStepExecutorRegistry = new Map(
   WORKFLOW_STEP_EXECUTOR_KINDS.map(

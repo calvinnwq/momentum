@@ -4,14 +4,14 @@
  * The production workflow-lane dispatcher (`dispatch-execute.ts`) stops
  * at the phase-1 *start scaffold*: it advances a claimed step `approved ->
  * running`, creates the durable `executor_invocations` / `executor_rounds` rows,
- * and *holds* the dispatch lease while the still-deferred daemon-default live
- * executor mechanism would drive the round to terminal out of band. Because nothing
- * terminalizes the step inside a single managed loop, the scheduler can only ever
+ * and *holds* the dispatch lease while an executor lane drives the round to terminal
+ * out of band. Before the daemon-default live-wrapper lane landed, nothing
+ * terminalized the step inside a single managed loop, so the scheduler could only
  * dispatch the *first* runnable step per process — the NGX-390 proof needed three
  * separate `daemon start` invocations plus a manual `update-step` to advance past
  * preflight.
  *
- * This module supplies the missing controlled fixture: a {@link WorkflowStepDispatch}
+ * This module supplies the controlled fixture: a {@link WorkflowStepDispatch}
  * that wraps the real production dispatch, then — only when that dispatch actually
  * started a scaffold — safely terminalizes the step through the shipped durable
  * primitives so the *same* daemon process can scan, claim, and dispatch the next
@@ -44,14 +44,13 @@
  * This module is therefore **test/dogfood-only** and hides no production terminal
  * gap behind it: it is the opt-in single-process multi-dispatch fixture
  * ({@link DOGFOOD_TERMINALIZE_DISPATCH_ENV_VAR}, off by default), never the
- * production terminal path. It is retained — not deleted — only because wiring the
- * reconciliation seam as the daemon default still needs a configured live-wrapper
- * profile that yields terminal executor evidence in production. RC-5's fake
- * demotion has landed — production dispatch no longer resolves to shipped fake
- * successes by default — but unconfigured adapters honestly refuse with
- * `runtime_unavailable`, so this fixture remains the opt-in way to exercise
- * single-process multi-dispatch without spawning an agent, running verification,
- * or writing anything external.
+ * production terminal path. It is retained — not deleted — because it remains the
+ * cheap opt-in way to exercise single-process multi-dispatch without a configured
+ * daemon live-wrapper profile, spawning an agent, running verification, or
+ * writing anything external. RC-5's fake demotion has landed — production
+ * dispatch no longer resolves to shipped fake successes by default — and RC-5b
+ * has wired configured daemon profiles to real terminal executor evidence, while
+ * unconfigured adapters still refuse honestly with `runtime_unavailable`.
  */
 
 import type { MomentumDb } from "../../adapters/db.js";

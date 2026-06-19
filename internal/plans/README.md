@@ -22,7 +22,7 @@ own implementation issue and proof.
 | RC-2 — landed (NGX-480) | [`runtime-consolidation-plan.md`](../contracts/runtime-consolidation-plan.md#follow-up-issue-sequence) | Single M9/M10 step-finalization reconciliation seam and no-double-write proof — seam shipped as `reconcileDispatchedWorkflowStep`; narrowing Paths 3/4 still gated on compatibility-lane migration. |
 | RC-3 | [`runtime-consolidation-plan.md`](../contracts/runtime-consolidation-plan.md#follow-up-issue-sequence) | Daemon-dispatchable `external-apply` adapter behind M6 safety gates. |
 | RC-4 | [`runtime-consolidation-plan.md`](../contracts/runtime-consolidation-plan.md#follow-up-issue-sequence) | Daemon-dispatchable `subworkflow` adapter after workflow start is stable. |
-| RC-5 — fake demotion landed (NGX-485) | [`runtime-consolidation-plan.md`](../contracts/runtime-consolidation-plan.md#follow-up-issue-sequence) | Production default now uses real `WorkflowStepExecutor` adapters and the fakes are test-only; remaining narrowing is a daemon-default live-wrapper profile. |
+| RC-5 — fake demotion landed (NGX-485); RC-5b seams + daemon-start wiring landed (NGX-492) | [`runtime-consolidation-plan.md`](../contracts/runtime-consolidation-plan.md#follow-up-issue-sequence) | Production default now uses real `WorkflowStepExecutor` adapters and the fakes are test-only. RC-5b landed the reusable execution seams (terminalize bridge, execution-path producer, profile source resolver, live-wrapper dispatch composition, exec-context deriver) plus bounded `daemon start` wiring for configured daemon-default profiles. |
 
 ## Repo Architecture Queue
 
@@ -35,7 +35,10 @@ already mutated durable step / lease rows can re-read reducer rows and refresh
 cached `workflow_runs` state / monitor columns without duplicating SQL. The full
 RC-2 single-finalization owner has since landed separately (NGX-480; see the
 runtime-consolidation plan), as has RC-5's fake demotion (NGX-485: real adapters
-back the production executor default, fakes are a test-only injected seam),
-leaving the actual goal-first narrowing (after the shared finalization primitive
-is disentangled) and the remaining RC-5 narrowing (a daemon-default live-wrapper
-profile) as the next independent items.
+back the production executor default, fakes are a test-only injected seam).
+RC-5b's reusable execution seams have since landed (NGX-492: terminalize bridge,
+execution-path producer, profile source resolver, live-wrapper dispatch
+composition, exec-context deriver) and the bounded `daemon start` workflow lane
+now wires them for configured daemon-default profiles, leaving the actual
+goal-first narrowing after the shared finalization primitive is disentangled as
+the next Path 1 item.

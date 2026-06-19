@@ -125,7 +125,10 @@ owned by the dispatcher, uses deterministic ids (`<run>::<step>::dispatch` and
 `<invocation>::round-1`) so re-entry cannot fork a second owner, and must carry
 no fabricated result evidence: no digests, artifact root, logs, summary,
 verification, commit, recovery, or human gate until executor work actually
-produces it.
+produces it. A configured daemon-default live-wrapper profile may now drive that
+scaffold to terminal executor evidence in the same daemon tick; without a
+configured wrapper for the dispatched step kind, the scaffold is parked for
+manual recovery rather than being treated as a clean terminal.
 
 ## Round Schema
 
@@ -381,4 +384,4 @@ This contract does not implement:
 - Replacement of GNHF or no-mistakes internals.
 - Remote git operations.
 
-M10 carried these as implementation slices: M10-01 landed definition migrations, M10-02 landed workflow run start, M10-03 landed executor-loop records, M10-04 landed the opt-in daemon workflow scheduler lane, M10-05 landed the goal-loop executor adapter, M10-06 landed the one-shot / script executor adapters, M10-07 landed the no-mistakes executor mirror, M10-08 landed durable workflow gates / decisions, M10-09a wired the phase-1 production dispatcher into bounded managed `daemon start`, and M10-09 dogfooded the workflow-first path. Generalized `external-apply` / `subworkflow` dispatch remains later runtime work.
+M10 carried these as implementation slices: M10-01 landed definition migrations, M10-02 landed workflow run start, M10-03 landed executor-loop records, M10-04 landed the opt-in daemon workflow scheduler lane, M10-05 landed the goal-loop executor adapter, M10-06 landed the one-shot / script executor adapters, M10-07 landed the no-mistakes executor mirror, M10-08 landed durable workflow gates / decisions, M10-09a wired the phase-1 production dispatcher into bounded managed `daemon start`, and M10-09 dogfooded the workflow-first path. RC-5b later wired configured daemon-default live-wrapper profiles into the bounded daemon lane so dispatch scaffolds can be terminalized by real wrapper results and reconciled through RC-2. Generalized `external-apply` / `subworkflow` dispatch remains later runtime work.

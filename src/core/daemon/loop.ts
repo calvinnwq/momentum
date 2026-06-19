@@ -176,11 +176,30 @@ export async function runDaemonLoop(
     workflowLane === undefined
       ? undefined
       : (claim, context) => {
+          setDaemonRunActiveJob(input.db, {
+            runId: input.runId,
+            jobId: `workflow:${claim.runId}:${claim.stepId}`,
+            lockId: null,
+            now: context.now
+          });
           heartbeatDaemonRun(input.db, {
             runId: input.runId,
             now: context.now
           });
-          return workflowLane.dispatch(claim, context);
+          try {
+            return workflowLane.dispatch(claim, context);
+          } finally {
+            setDaemonRunActiveJob(input.db, {
+              runId: input.runId,
+              jobId: null,
+              lockId: null,
+              now: context.now
+            });
+            heartbeatDaemonRun(input.db, {
+              runId: input.runId,
+              now: context.now
+            });
+          }
         };
 
   const markInternalError = (error: unknown): void => {
