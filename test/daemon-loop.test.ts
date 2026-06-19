@@ -1745,6 +1745,48 @@ describe("runDaemonLoop workflow scheduler lane (NGX-348)", () => {
     }
   });
 
+  it("marks workflow dispatch as the active daemon job while the dispatcher runs", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const runId = seedDaemonRun(db);
+      const wfRunId = seedRunnableWorkflow(db);
+      let observed: { activeJobId: string | null | undefined } | null = null;
+      const dispatch: WorkflowStepDispatch = () => {
+        observed = {
+          activeJobId: getDaemonRun(db, runId)?.active_job_id
+        };
+        return { status: "dispatched" };
+      };
+
+      await runDaemonLoop({
+        db,
+        dataDir,
+        runId,
+        workerId: "daemon-loop-wf-active-job",
+        pollIntervalMs: 0,
+        maxLoopIterations: 1,
+        now: makeMonotonicNow(),
+        sleep: async () => undefined,
+        runWorker: () => ({
+          code: "no_work",
+          workerId: "daemon-loop-wf-active-job",
+          dataDir,
+          outcome: "idle",
+          message: "no work"
+        }),
+        workflowLane: { dispatch }
+      });
+
+      expect(observed).toEqual({
+        activeJobId: `workflow:${wfRunId}:preflight`
+      });
+      expect(getDaemonRun(db, runId)?.active_job_id).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
   it("does not dispatch workflow work after a stop request during goal work", async () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);

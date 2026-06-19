@@ -43,9 +43,9 @@ unreachable-branch audit below finds nothing safe to delete within scope.
 | 1 | Goal-first CLI compatibility (`goal start` / `status` / `logs` / `handoff` / `recovery clear`) | Deprecate-later; **read-back/recovery parity landed (NGX-486)** | Workflow-first equivalents + migration coverage now landed; narrowing still waits on disentangling the shared iteration-finalization primitive the `goal-loop` executor reuses | RC-1 (parity landed, NGX-486) |
 | 2 | Imported `.agent-workflows` / `cwfp-*` compatibility | Defer | `NGX-404` default-switch dogfood passes its `coding-workflow-ownership.md` gates | `NGX-404` (existing) |
 | 3 | M9 live-wrapper direct `workflow_steps` advancement vs M10 executor-loop finalization | Keep (coexist); boundary seam landed | A single reconciliation seam now finalizes dispatched steps from durable executor evidence with a no-double-finalize proof; narrowing still waits on compatibility-lane migrations | RC-2 (seam landed, NGX-480) |
-| 4 | Production dispatch phase-1 scaffold (no fabricated result evidence) | Keep | RC-2 replaced the seam-level terminal gap; narrowing the scaffold still waits for real terminal executor evidence / adapter migration | RC-2 (seam landed, NGX-480), RC-5 |
+| 4 | Production dispatch phase-1 scaffold (no fabricated result evidence) | Keep | RC-2 replaced the seam-level terminal gap and RC-5b now feeds real terminal executor evidence from configured daemon profiles; narrowing the scaffold still waits on compatibility-lane migrations | RC-2 (seam landed, NGX-480), RC-5 |
 | 5 | `external-apply` / `subworkflow` fail-closed executor families | Defer | A landed daemon-dispatchable adapter per family, behind the existing safety contracts | RC-3 (`external-apply`), RC-4 (`subworkflow`) |
-| 6 | Fake workflow-step executors shipped in `src/` | Deprecate-later; **fake demotion landed (NGX-485)** | Real adapters now back the production default and the fakes are a test-only injected seam; remaining narrowing (daemon-default live profile) is gated on Paths 3/4 | RC-5 (fake demotion landed, NGX-485) |
+| 6 | Fake workflow-step executors shipped in `src/` | Deprecate-later; **fake demotion landed (NGX-485); daemon-default live profile wiring landed (NGX-492)** | Real adapters now back the production default, fakes are a test-only injected seam, and configured daemon profiles now feed live executor evidence through bounded `daemon start` | RC-5 (fake demotion landed, NGX-485; daemon wiring landed, NGX-492) |
 
 ## Path-By-Path Decisions
 
@@ -380,10 +380,9 @@ deterministic fake moved to a test-only seam
 (`test/helpers/workflow-smoke-harness.ts`) and the boundary contract inject
 explicitly. No fake ships in `dist/` (the build compiles `src/**` only).
 `listExecutingWorkflowStepExecutorKinds` now reflects the real default adapters.
-Remaining RC-5 narrowing — wiring a daemon-default live profile so dispatched
-steps actually execute a live command in production (the real terminal executor
-evidence Paths 3/4 still wait on) — is unchanged future work and is **not** part
-of this fake-demotion slice.
+The later RC-5b slice wired daemon-default live profiles into bounded
+`daemon start`, so configured dispatched steps now execute a live command in
+production and feed real terminal executor evidence to RC-2.
 
 **Equivalent-behavior proof to preserve:** `test/workflow-step-executor.test.ts`
 (now split into real-default / injected-fake-seam / registry-agnostic-validation
@@ -453,12 +452,10 @@ and add `RC-*` placeholders for the genuinely new consolidation work.
    (`daemon-live-wrapper-profile.ts`), the live-wrapper dispatch composition
    (`live-wrapper-dispatch.ts`), and the daemon-lane exec-context deriver
    (`daemon-dispatch-exec-context.ts`) are all in place and individually
-   unit-tested. The remaining RC-5 narrowing — wiring those seams into the
-   bounded `daemon start` workflow lane (composing
-   `createLiveWrapperWorkflowDispatch` inside `resolveDaemonWorkflowDispatch`)
-   so dispatched steps actually run a live command in production and feed real
-   terminal evidence to the RC-2 reconciliation seam — stays future work gated
-   on Paths 3/4. (Path 6)
+   unit-tested, and the bounded `daemon start` workflow lane now composes
+   `createLiveWrapperWorkflowDispatch` for configured daemon-default profiles so
+   dispatched steps run a live command in production and feed real terminal
+   evidence to the RC-2 reconciliation seam. (Path 6)
 6. **`NGX-404` (existing, deferred) — coding-workflow default switch.** Owns the
    `cwfp-*` default-route narrowing under `coding-workflow-ownership.md`; the
    import/read path survives regardless. (Path 2)
@@ -471,14 +468,12 @@ read-back / recovery parity + migration coverage has since **landed** (NGX-486):
 all four operator flows (status / logs / handoff / recovery) have wire-proven
 workflow-first equivalents and contract-equivalent migration proofs, while
 goal-first CLI stays the compatibility surface (no narrowing). RC-5b's reusable
-execution seams have since **landed** (NGX-492): the terminalization bridge,
-execution-path producer, profile source resolver, live-wrapper dispatch
-composition, and exec-context deriver are all in place and tested. The next remaining runtime
-consolidation items are the goal-first CLI narrowing itself (gated on
-Path 1 prerequisite 3, disentangling the shared finalization primitive) and the
-remaining RC-5 narrowing (wiring those RC-5b seams into the `daemon start` lane
-so dispatched steps feed real terminal evidence, which is what fully unblocks
-wiring the RC-2 reconciliation seam as the daemon default). RC-3 / RC-4 and
+execution seams and bounded `daemon start` wiring have since **landed**
+(NGX-492): the terminalization bridge, execution-path producer, profile source
+resolver, live-wrapper dispatch composition, exec-context deriver, and
+daemon-default profile wiring are all in place and tested. The next remaining
+next remaining runtime consolidation item in Path 1 is the goal-first CLI narrowing itself
+(gated on prerequisite 3, disentangling the shared finalization primitive). RC-3 / RC-4 and
 `NGX-404` remain capability-gated and stay deferred until their adapters /
 dogfood land.
 

@@ -108,6 +108,6 @@ to manual recovery (`recordUnresolvedDispatchedStepContext` in
 `manual_recovery_required` evidence an unconfigured executor produces and lets RC-2
 park the run) instead of throwing — a throw inside the dispatch closure, after the
 scaffold exists, would release the lease over a still-`running` step and strand it.
-Wiring the resolved profile + registry + this deriver into the `daemon start` lane
-(composing `live-wrapper-dispatch.ts` inside `resolveDaemonWorkflowDispatch`) is the
-one remaining deferred runtime-consolidation slice.
+The bounded `daemon start` workflow lane now wires the resolved profile,
+registry, and deriver by composing `live-wrapper-dispatch.ts` around the base
+workflow dispatcher for configured daemon-default profiles.
