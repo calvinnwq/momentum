@@ -199,10 +199,12 @@ diagnostic taxonomy):
 The smoke exercises a real end-to-end coding workflow against the M7
 Momentum-owned substrate without invoking the live OpenClaw pipeline,
 Discord, GitHub, Linear, or any external tracker writes. Steps are driven
-through the deterministic fake executors exposed by
-`dispatchWorkflowStepExecutor` (see [src/core/workflow/step-executor.ts](../src/core/workflow/step-executor.ts))
-and the resulting outcomes are appended to `ledger.jsonl` and re-imported
-through the spawned `workflow import` CLI between steps so the durable
+through the deterministic fake executor registry that the smoke harness injects
+into `dispatchWorkflowStepExecutor` (see
+[test/helpers/fake-workflow-step-executor.ts](../test/helpers/fake-workflow-step-executor.ts)
+and [src/core/workflow/step-executor.ts](../src/core/workflow/step-executor.ts));
+the resulting outcomes are appended to `ledger.jsonl` and re-imported through
+the spawned `workflow import` CLI between steps so the durable
 `workflow_runs` / `workflow_steps` / `workflow_approvals` / `workflow_leases`
 rows are populated exclusively via the public M7 surface.
 

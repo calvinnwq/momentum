@@ -101,8 +101,10 @@ cached run-state / monitor refresh after caller-owned durable mutations. It does
 not choose the M9/M10 finalization owner; that landed separately as `RC-2`
 (NGX-480) with `dispatch-reconcile.ts` /
 `dispatch-reconcile-execute.ts`. Accepted future runtime slices are indexed in
-[`internal/plans/README.md`](plans/README.md); the next independent runtime
-consolidation items are `RC-1` and `RC-5`.
+[`internal/plans/README.md`](plans/README.md). `RC-5`'s fake demotion has since
+landed (NGX-485: the production executor default is real adapters, the fakes are a
+test-only injected seam); the next independent runtime consolidation items are
+`RC-1` and the remaining `RC-5` narrowing (a daemon-default live-wrapper profile).
 
 The `doctor` readiness marker tracks the **most recently closed** milestone. It currently reads `Milestone 11: CLI architecture refactor (NGX-411, NGX-412, NGX-413, NGX-414, NGX-415, NGX-416, NGX-417, NGX-418, NGX-419) complete`. The marker advanced from the M6 closeout string to `Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete` at the M7 closeout slice (NGX-319), stayed pinned to the M7 string through every M8 implementation slice, advanced to the M8 string at the M8 closeout slice (NGX-330), advanced again to `Milestone 10: workflow-first runtime (NGX-344, NGX-345, NGX-346, NGX-347, NGX-348, NGX-349, NGX-350, NGX-351, NGX-352, NGX-367, NGX-353) complete` at the M10 closeout slice (NGX-353), and advanced to the M11 string at the M11 closeout slice (NGX-419).
 
@@ -211,10 +213,10 @@ The Linear milestone "Milestone 7: OpenClaw Coding Workflow Backend" shipped the
 1. **NGX-312 — M7-00 Contract, roadmap, and docs setup**: pinned the M7 contract, ownership boundary, old monitor failure modes, compatibility list, and non-goals.
 2. **NGX-313 — M7-01 WorkflowRun substrate schema and state model**: shipped the `workflow_runs` / `workflow_steps` / `workflow_approvals` / `workflow_leases` schema migration, the `WorkflowRun` identity columns, the pure run / step state vocabulary plus transition reducer, the lease-aware `deriveWorkflowRunState`, and the `classifyWorkflowLease` freshness classifier.
 3. **NGX-314 — M7-02 Import current agent-workflow plans**: shipped the `.agent-workflows/<runId>/` normalizer, the SQLite persistence layer for the M7 substrate tables, the `workflow import` CLI envelope, and built-CLI smoke coverage for import edge cases.
-4. **NGX-315 — M7-03 Step execution adapter boundary**: shipped the pure `WorkflowStepExecutor` boundary, the typed input / result / checkpoint / artifact / error shapes, the registry / resolver keyed by `WorkflowStepKind`, deterministic fake executors per kind, and focused unit tests pumping a full required-step chain through the state machine.
+4. **NGX-315 — M7-03 Step execution adapter boundary**: shipped the pure `WorkflowStepExecutor` boundary, the typed input / result / checkpoint / artifact / error shapes, the registry / resolver keyed by `WorkflowStepKind`, original deterministic fake executors per kind (now test-only after NGX-485), and focused unit tests pumping a full required-step chain through the state machine.
 5. **NGX-316 — M7-04 Momentum-owned monitor and recovery state**: shipped the pure `deriveWorkflowMonitorState` reducer, the per-lease freshness view, monitor-advisory drift classification, deterministic `nextAction` codes, and the recovery taxonomy (`stale_running_step`, `ghost_active_no_lease`, `manual_recovery_lease`, `monitor_drift_stale`, `failed_required_step`).
 6. **NGX-317 — M7-05 Workflow status and handoff CLI surfaces**: shipped the read-only `workflow status` and `workflow handoff` CLI envelopes with stable JSON field names, refusal taxonomy, and text rendering composed on top of the monitor reducer.
-7. **NGX-318 — M7-06 End-to-end coding workflow smoke**: shipped the end-to-end built-CLI smoke driving a fresh `.agent-workflows/<runId>/` fixture through the deterministic fake executors, covering happy-path completion, evidence linkage through `workflow handoff`, and a failure path that proves no ghost active / blocked run remains.
+7. **NGX-318 — M7-06 End-to-end coding workflow smoke**: shipped the end-to-end built-CLI smoke driving a fresh `.agent-workflows/<runId>/` fixture through the injected deterministic fake executors, covering happy-path completion, evidence linkage through `workflow handoff`, and a failure path that proves no ghost active / blocked run remains.
 8. **NGX-319 — M7-07 Docs, regression matrix, and milestone closeout**: closed the milestone, added [internal/regression-matrix.md](regression-matrix.md), aligned the contract tests, and flipped the `doctor --json` milestone marker to the M7 closeout string.
 
 ## Previously closed milestone: M6

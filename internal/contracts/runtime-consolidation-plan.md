@@ -45,7 +45,7 @@ unreachable-branch audit below finds nothing safe to delete within scope.
 | 3 | M9 live-wrapper direct `workflow_steps` advancement vs M10 executor-loop finalization | Keep (coexist); boundary seam landed | A single reconciliation seam now finalizes dispatched steps from durable executor evidence with a no-double-finalize proof; narrowing still waits on compatibility-lane migrations | RC-2 (seam landed, NGX-480) |
 | 4 | Production dispatch phase-1 scaffold (no fabricated result evidence) | Keep | RC-2 replaced the seam-level terminal gap; narrowing the scaffold still waits for real terminal executor evidence / adapter migration | RC-2 (seam landed, NGX-480), RC-5 |
 | 5 | `external-apply` / `subworkflow` fail-closed executor families | Defer | A landed daemon-dispatchable adapter per family, behind the existing safety contracts | RC-3 (`external-apply`), RC-4 (`subworkflow`) |
-| 6 | Fake workflow-step executors shipped in `src/` | Deprecate-later | Real `WorkflowStepExecutor` adapters per kind, with the fakes demoted to a test-only seam while preserving substrate smoke | RC-5 |
+| 6 | Fake workflow-step executors shipped in `src/` | Deprecate-later; **fake demotion landed (NGX-485)** | Real adapters now back the production default and the fakes are a test-only injected seam; remaining narrowing (daemon-default live profile) is gated on Paths 3/4 | RC-5 (fake demotion landed, NGX-485) |
 
 ## Path-By-Path Decisions
 
@@ -239,8 +239,10 @@ explicit **test/dogfood-only** opt-in fixture
 (`MOMENTUM_DOGFOOD_TERMINALIZE_DISPATCH`, off by default) that hides no production
 terminal gap behind it — the production terminal owner is the reconciliation seam
 above. Wiring that seam as the daemon default still needs real terminal executor
-evidence in production, which depends on RC-5 (real `WorkflowStepExecutor`
-adapters; the shipped adapters are fakes today). So narrowing the coexistence
+evidence in production. RC-5's fake demotion has landed (NGX-485): production
+dispatch no longer resolves to shipped fake successes by default, but
+unconfigured adapters honestly refuse with `runtime_unavailable` until a
+daemon-default live-wrapper profile is wired. So narrowing the coexistence
 (Path 3) and the dispatch scaffold (Path 4) is unblocked at the seam level but
 still gated on the remaining compatibility-lane migrations.
 
@@ -305,12 +307,12 @@ released, zero invocations, vanished-run safety).
 
 ### 6. Fake workflow-step executors shipped in `src/`
 
-**Current shape.** `src/core/workflow/step-executor.ts:202` builds the production
-`ADAPTERS` map entirely from `buildFakeExecutor` (`:256`); `getWorkflowStepExecutor`
-/ `dispatchWorkflowStepExecutor` therefore resolve to a fake for any
+**Pre-RC-5 shape.** `src/core/workflow/step-executor.ts` built the production
+`ADAPTERS` map entirely from a `buildFakeExecutor` helper; `getWorkflowStepExecutor`
+/ `dispatchWorkflowStepExecutor` therefore resolved to a fake for any
 `WorkflowStepExecutorKind`. This is the M7 `WorkflowStepExecutor` substrate
 (keyed by `WorkflowStepExecutorKind`), distinct from the M10 executor-loop
-families. The fakes are shipped source, not test-only helpers, and back the
+families. The fakes were shipped source, not test-only helpers, and backed the
 deterministic substrate smoke.
 
 **Decision: Deprecate-later.** The fakes are valuable deterministic substrate
@@ -325,21 +327,43 @@ so the M7/M8/M10 substrate smoke keeps a deterministic executor without shipping
 a fake as the production default. `listExecutingWorkflowStepExecutorKinds` must
 then reflect real executors, not fakes.
 
-**Equivalent-behavior proof to preserve:** `test/workflow-step-executor.test.ts`,
-`test/live-step-executor.test.ts`, `test/full-adapter-e2e.test.ts`, and the smoke
-files that drive `driveStepWithFakeExecutor`
+**Landed (NGX-485).** The fake demotion shipped. The default `WorkflowStepExecutor`
+registry is now built from real adapters: with no live-wrapper profile wired, each
+canonical kind resolves to the honest `createUnconfiguredWorkflowStepExecutor`
+(`step-executor.ts`) that refuses with `runtime_unavailable` rather than
+fabricating a success, and `step-executor-real-adapters.ts`'s
+`buildRealWorkflowStepExecutorRegistry` wires configured kinds to real M9 live
+executors. The three entrypoints (`getWorkflowStepExecutor` /
+`dispatchWorkflowStepExecutor` / `listExecutingWorkflowStepExecutorKinds`) take an
+optional `registry` parameter that defaults to that real registry; the
+deterministic fake moved to a test-only seam
+(`test/helpers/fake-workflow-step-executor.ts`) that the substrate smoke
+(`test/helpers/workflow-smoke-harness.ts`) and the boundary contract inject
+explicitly. No fake ships in `dist/` (the build compiles `src/**` only).
+`listExecutingWorkflowStepExecutorKinds` now reflects the real default adapters.
+Remaining RC-5 narrowing — wiring a daemon-default live profile so dispatched
+steps actually execute a live command in production (the real terminal executor
+evidence Paths 3/4 still wait on) — is unchanged future work and is **not** part
+of this fake-demotion slice.
+
+**Equivalent-behavior proof to preserve:** `test/workflow-step-executor.test.ts`
+(now split into real-default / injected-fake-seam / registry-agnostic-validation
+sections), `test/workflow-step-executor-fakes.test.ts` (the test-only seam +
+opt-in proof), `test/workflow-step-executor-real-adapters.test.ts` (the real
+profile-backed registry), `test/live-step-executor.test.ts`,
+`test/full-adapter-e2e.test.ts`, and the smoke files that drive
+`driveStepWithFakeExecutor`
 (`test/m7-e2e-smoke.test.ts`, `test/m8-smoke.test.ts`, `test/m10-smoke.test.ts`).
 
 ## No Production Code Deleted In This Issue
 
-This planning issue deletes no production code. The acceptance criteria permit
-deleting a trivially unreachable branch only if the plan identifies one and the
-PR proves it with tests. The path-by-path audit above finds none within scope:
-the fake `ADAPTERS` map is live (it backs every dispatch today), the fail-closed
-branches are reachable safety paths, the dispatch scaffold is the live production
-dispatch effect, and goal-first plus `cwfp-*` import are live compatibility
-surfaces. Every candidate is reachable, so the milestone non-goal ("no broad
-production logic deletion") and the audit's defer list both hold.
+This planning issue deletes no production code by itself. RC-5's later fake demotion
+intentionally removed the fake production default from `src/` and moved that
+deterministic behavior behind `test/helpers/fake-workflow-step-executor.ts`; the
+remaining fail-closed branches, dispatch scaffold, goal-first paths, and
+`cwfp-*` import lanes are still reachable safety / compatibility surfaces. The
+milestone non-goal ("no broad production logic deletion") and the audit's defer
+list both hold.
 
 ## Follow-Up Issue Sequence
 
@@ -371,20 +395,28 @@ and add `RC-*` placeholders for the genuinely new consolidation work.
    dispatch. (Path 5)
 4. **RC-4 — `subworkflow` daemon-dispatchable adapter**, after first-class
    workflow start is stable, replacing its fail-closed branch. (Path 5)
-5. **RC-5 — Real `WorkflowStepExecutor` adapters + fake demotion.** Replace the
-   shipped fake `ADAPTERS` map with real adapters and move the fakes to a
-   test-only injection seam while preserving substrate smoke. (Path 6)
+5. **RC-5 — Real `WorkflowStepExecutor` adapters + fake demotion. ✅ Fake demotion
+   landed (NGX-485).** The shipped fake `ADAPTERS` map is replaced: the production
+   default registry is now real adapters (honest `runtime_unavailable` when
+   unconfigured), the deterministic fake moved to a test-only injection seam
+   (`test/helpers/fake-workflow-step-executor.ts`) injected through the entrypoints'
+   `registry` parameter, and substrate smoke is preserved. The remaining RC-5
+   narrowing — wiring a daemon-default live-wrapper profile so dispatched steps run
+   a real command and feed real terminal evidence to the RC-2 reconciliation seam —
+   stays future work gated on Paths 3/4. (Path 6)
 6. **`NGX-404` (existing, deferred) — coding-workflow default switch.** Owns the
    `cwfp-*` default-route narrowing under `coding-workflow-ownership.md`; the
    import/read path survives regardless. (Path 2)
 
 Ordering note: RC-2 is the prerequisite for the most consolidation (Paths 3 and
-4) and led — its reconciliation seam has now **landed** (NGX-480). With RC-2 done,
-the next remaining runtime consolidation items are RC-1 (goal-first read-back /
-recovery parity) and RC-5 (real `WorkflowStepExecutor` adapters + fake demotion),
-which are independent; RC-5 in particular also unblocks wiring the RC-2
-reconciliation seam as the daemon default. RC-3 / RC-4 and `NGX-404` remain
-capability-gated and stay deferred until their adapters / dogfood land.
+4) and led — its reconciliation seam has now **landed** (NGX-480). RC-5's fake
+demotion has since **landed** (NGX-485): the production executor default is real
+adapters and the fakes are a test-only injected seam. The next remaining runtime
+consolidation items are RC-1 (goal-first read-back / recovery parity) and the
+remaining RC-5 narrowing (wiring a daemon-default live-wrapper profile so
+dispatched steps feed real terminal evidence, which is what fully unblocks wiring
+the RC-2 reconciliation seam as the daemon default). RC-3 / RC-4 and `NGX-404`
+remain capability-gated and stay deferred until their adapters / dogfood land.
 
 ## Non-Goals
 

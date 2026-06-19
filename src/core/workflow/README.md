@@ -17,7 +17,7 @@ in place; importers still reference the concrete modules below.
 | Definition | `definition.ts`, `definition-persist.ts` |
 | Run lifecycle | `run-start.ts`, `run-start-persist.ts`, `run-import.ts`, `run-import-persist.ts`, `run-reducer.ts`, `run-recovery.ts`, `status.ts` |
 | Runtime state refresh | `runtime-state.ts` |
-| Steps | `step-executor.ts`, `step-transitions.ts` |
+| Steps | `step-executor.ts`, `step-executor-real-adapters.ts`, `step-transitions.ts` |
 | Gates | `gate.ts`, `gate-persist.ts` |
 | Leases | `leases.ts` |
 | Scheduling | `scheduler.ts` |
@@ -50,8 +50,10 @@ Other domains reach workflow behavior through these modules:
   dispatched step from terminal executor evidence.
 - **Executor / live-step / daemon runtime**: `run-reducer` (shared run-state
   reduction), `runtime-state` (cached run-state / monitor refresh after a
-  caller-owned mutation), `step-executor`, `step-transitions`, `leases`,
-  `definition`, `recovery-artifact`, `scheduler`.
+  caller-owned mutation), `step-executor` (registry/dispatch boundary),
+  `step-executor-real-adapters` (RC-5 production registry builder backed by
+  live wrappers or honest `runtime_unavailable` adapters), `step-transitions`,
+  `leases`, `definition`, `recovery-artifact`, `scheduler`.
 
 ## Boundaries
 
@@ -68,3 +70,9 @@ refresh shared by dispatch, reconciliation, dogfood terminalization, and operato
 callers. It does **not** choose the RC-2 reconciliation seam (that landed separately
 as NGX-480: `dispatch-reconcile.ts` / `dispatch-reconcile-execute.ts`), delete
 the dogfood stand-in, or narrow M9/M10 compatibility paths.
+
+RC-5 fake demotion has since landed in this folder: the production
+`WorkflowStepExecutor` default no longer fabricates fake successes, while the
+deterministic fake registry lives under `test/helpers/` and is injected only by
+tests that need substrate smoke coverage. Wiring a daemon-default live-wrapper
+profile remains deferred runtime-consolidation work.

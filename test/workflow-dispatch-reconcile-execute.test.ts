@@ -460,7 +460,7 @@ describe("reconcileDispatchedWorkflowStep — M9 / M10 boundary", () => {
     // mutation: a managed step can only start from `approved`. So the M9
     // direct-finalize path can never close a step the M10 dispatch lane owns.
     const executor = getWorkflowStepExecutor("preflight");
-    if (!executor) throw new Error("test setup: missing fake preflight executor");
+    if (!executor) throw new Error("test setup: missing preflight executor");
     const executorInput: WorkflowStepExecutorInput = {
       runId: RUN_ID,
       stepId: "preflight",

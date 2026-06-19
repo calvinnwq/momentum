@@ -83,7 +83,7 @@ the NGX-353 marker advance.
   state mapping from the ledger).
 - **Evidence.**
   - Built-CLI smoke: `test/m7-e2e-smoke.test.ts` — the M7 end-to-end coding-workflow
-    happy-path slice drives each step through the deterministic fake executor,
+    happy-path slice drives each step through the injected deterministic fake executor,
     re-imports between steps via `workflow import`, and asserts the final
     `state: succeeded`, zero leases, and an empty active / blocked bucket
     (NGX-318). The same smoke covers `lost managed-task markers` (siblings
