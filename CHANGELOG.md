@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.0](https://github.com/calvinnwq/momentum/compare/v0.1.1...v0.2.0) (2026-06-19)
+
+
+### Features
+
+* **rc-2:** Landed the production RC-2 reconciliation effect twin (reconcileDispatchedWorkflowStep) for NGX-480, finalizing a dispatched M10 workflow step from terminal executor evidence idempotently and single-owner, with 10 focused TDD tests and all repo gates green. ([42bb7d4](https://github.com/calvinnwq/momentum/commit/42bb7d4af4b76e1174cadbf017c576981e371a28))
+* **rc-2:** Landed the pure RC-2 reconciliation decider (planWorkflowStepReconciliation) for NGX-480 via TDD, mapping a dispatched step's terminal executor-invocation evidence to a workflow-step finalization decision, with all repo verification gates green. ([9947ebe](https://github.com/calvinnwq/momentum/commit/9947ebe91d1cadd02c442d6f6d3b80adda6642e0))
+* **workflow:** reconcile dispatched step finalization ([9ce4439](https://github.com/calvinnwq/momentum/commit/9ce4439c4b4235904c64e442a492a5e2d355f5a7))
+
 ## [0.1.1](https://github.com/calvinnwq/momentum/compare/v0.1.0...v0.1.1) (2026-06-17)
 
 
