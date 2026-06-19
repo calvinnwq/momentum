@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0](https://github.com/calvinnwq/momentum/compare/v0.2.0...v0.3.0) (2026-06-19)
+
+
+### Features
+
+* **core:** use real WorkflowStepExecutor adapters ([6f68ad3](https://github.com/calvinnwq/momentum/commit/6f68ad37c2b6fc19bac6ee8f0f987bd44d98d83c))
+* **step-executor:** Landed the foundational RC-5 slice: a real, TDD-tested WorkflowStepExecutor production adapter-registry builder that reuses the M9 live-wrapper boundary for configured kinds and reports honest runtime_unavailable (never a fake success) for unconfigured kinds. ([c429c8c](https://github.com/calvinnwq/momentum/commit/c429c8ca078a66bbb8853f55f460b4a4026ebbf3))
+
 ## [0.2.0](https://github.com/calvinnwq/momentum/compare/v0.1.1...v0.2.0) (2026-06-19)
 
 
