@@ -696,6 +696,75 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
     }
   });
 
+  it("parks a stale nonterminal dispatch invocation instead of auto-releasing its lease", () => {
+    const db = openDb(makeTempDir());
+    try {
+      persistWorkflowDefinition(db, CODING_WORKFLOW_DEFINITION, { now: NOW });
+      persistWorkflowRunStart(db, {
+        definition: CODING_WORKFLOW_DEFINITION,
+        runId: "run-a",
+        repoPath: "/repos/a",
+        objective: "Recover nonterminal dispatch evidence",
+        now: NOW
+      });
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?"
+      ).run("run-a", "preflight");
+      const claim = claimRunnableWorkflowStep(db, {
+        runId: "run-a",
+        stepId: "preflight",
+        holder: "worker-1",
+        leaseExpiresAt: NOW + 30_000,
+        now: NOW,
+        stalePolicy: "auto-release"
+      });
+      if (!claim.ok) throw new Error(`claim failed: ${claim.reason}`);
+      executeWorkflowStepDispatch(claim.claim, {
+        db,
+        workerId: "worker-1",
+        now: NOW + 1
+      });
+      db.prepare(
+        `UPDATE workflow_leases
+            SET acquired_at = ?, heartbeat_at = ?, expires_at = ?, updated_at = ?
+          WHERE run_id = ? AND lease_kind = 'dispatch'`
+      ).run(NOW - 60_000, NOW - 60_000, NOW - 10_000, NOW - 60_000, "run-a");
+
+      expect(getWorkflowStep(db, "run-a", "preflight")?.state).toBe("running");
+      expect(
+        loadExecutorInvocation(
+          db,
+          deriveDispatchInvocationId("run-a", "preflight")
+        )?.state
+      ).toBe("running");
+
+      const result = recoverStaleWorkflowLeases(db, { now: NOW + 100 });
+
+      expect(result.recovered).toEqual([
+        {
+          runId: "run-a",
+          leaseKind: "dispatch",
+          holder: "worker-1",
+          stalePolicy: "auto-release",
+          action: "flagged_manual_recovery",
+          recoveryStatus: WORKFLOW_LEASE_MANUAL_RECOVERY_STATUS
+        }
+      ]);
+      expect(result.skipped).toEqual([]);
+      expect(getWorkflowStep(db, "run-a", "preflight")?.state).toBe("running");
+      expect(getWorkflowLease(db, "run-a", "dispatch")?.releasedAt).toBeNull();
+      const recovery = getWorkflowRunManualRecoveryState(db, "run-a");
+      expect(recovery?.needsManualRecovery).toBe(true);
+      expect(recovery?.reason).toContain("dispatch lease");
+      expect(selectRunnableWorkflowWork(db, { now: NOW + 100 })).toEqual({
+        runnable: [],
+        staleLeases: []
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   it("releases a stale auto-release lease so the run becomes runnable again", () => {
     const db = openDb(makeTempDir());
     try {

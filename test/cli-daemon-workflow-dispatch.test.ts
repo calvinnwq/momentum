@@ -7,6 +7,7 @@ import { runCli } from "../src/cli.js";
 import { openDb } from "../src/adapters/db.js";
 import { DOGFOOD_TERMINALIZE_DISPATCH_ENV_VAR } from "../src/core/workflow/dogfood-dispatch.js";
 import { DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR } from "../src/core/workflow/daemon-live-wrapper-profile.js";
+import { terminalizeDispatchedExecutorInvocation } from "../src/core/workflow/dispatch-executor-terminalize.js";
 
 type RunResult = {
   code: number;
@@ -98,7 +99,7 @@ async function startApprovedCodingRun(
   expect(approveResult.code).toBe(0);
 }
 
-function writeSucceedingPreflightProfile(dir: string): string {
+function writeSucceedingPreflightProfile(dir: string, timeoutSec = 5): string {
   const profilePath = path.join(dir, "live-wrapper-profile.json");
   const script = `cat > "$MOMENTUM_RESULT_PATH" <<'JSON'
 {"success":true,"summary":"daemon live wrapper preflight succeeded","key_changes_made":[],"key_learnings":[],"remaining_work":[],"goal_complete":false,"commit":{"type":"test","subject":"daemon live wrapper preflight","body":"","breaking":false}}
@@ -112,7 +113,7 @@ JSON`;
           command: "/bin/sh",
           args: ["-c", script],
           cwd: "iteration",
-          timeout_sec: 5,
+          timeout_sec: timeoutSec,
           env_allow: [],
           result_file: "result.json"
         }
@@ -222,6 +223,48 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     expect(
       fs.existsSync(path.join(repoDir, ".agent-workflows", runId, "result.json"))
     ).toBe(true);
+  });
+
+  it("sizes the dispatch lease for the configured live-wrapper timeout", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const profileDir = makeTempDir();
+    const profilePath = writeSucceedingPreflightProfile(profileDir, 120);
+    const runId = "ngx492-live-wrapper-lease-duration";
+    await startApprovedCodingRun(dataDir, repoDir, runId);
+
+    const result = await run(
+      [
+        "daemon",
+        "start",
+        "--max-loop-iterations",
+        "1",
+        "--poll-interval-ms",
+        "0",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath }
+    );
+
+    expect(result.code).toBe(0);
+    const db = openDb(dataDir);
+    try {
+      const lease = db
+        .prepare(
+          "SELECT acquired_at, expires_at FROM workflow_leases WHERE run_id = ? AND lease_kind = 'dispatch'"
+        )
+        .get(runId) as
+        | { acquired_at: number; expires_at: number }
+        | undefined;
+      expect(lease).not.toBeUndefined();
+      expect(lease!.expires_at - lease!.acquired_at).toBeGreaterThanOrEqual(
+        120_000
+      );
+    } finally {
+      db.close();
+    }
   });
 
   it("forwards the injected CLI env to daemon live-wrapper commands", async () => {
@@ -470,6 +513,28 @@ describe("daemon start production workflow lane (NGX-367)", () => {
             SET heartbeat_at = ?, expires_at = ?
           WHERE run_id = ? AND lease_kind = ?`
       ).run(1, 2, runId, "dispatch");
+      terminalizeDispatchedExecutorInvocation({
+        db,
+        runId,
+        stepId: "preflight",
+        now: Date.now(),
+        result: {
+          ok: true,
+          result: {
+            state: "succeeded",
+            summary: "test terminalizes preflight before second dispatch",
+            checkpoints: [],
+            artifacts: [],
+            resultDigest: "sha256:cli-second-dispatch-preflight",
+            errorCode: null,
+            errorMessage: null,
+            retryHint: null,
+            recoveryHint: null
+          },
+          executorLogPath: path.join(repoDir, ".agent-workflows", runId, "executor.log"),
+          resultJsonPath: path.join(repoDir, ".agent-workflows", runId, "result.json")
+        }
+      });
     } finally {
       db.close();
     }
@@ -486,48 +551,9 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       "--json"
     ]);
     expect(recoverLease.code).toBe(0);
-    expect(JSON.parse(recoverLease.stdout).loop.workflowStepsDispatched).toBe(0);
-
-    const terminalizePreflight = await run([
-      "workflow",
-      "run",
-      "update-step",
-      runId,
-      "--step",
-      "preflight",
-      "--state",
-      "succeeded",
-      "--reason",
-      "test terminalizes preflight before second dispatch",
-      "--actor",
-      "vitest",
-      "--data-dir",
-      dataDir,
-      "--json"
-    ]);
-    expect(terminalizePreflight.code).toBe(0);
-    expect(JSON.parse(terminalizePreflight.stdout)).toMatchObject({
-      ok: true,
-      stepId: "preflight",
-      state: "succeeded",
-      runState: "approved"
-    });
-
-    const secondDispatch = await run([
-      "daemon",
-      "start",
-      "--max-loop-iterations",
-      "3",
-      "--poll-interval-ms",
-      "0",
-      "--data-dir",
-      dataDir,
-      "--json"
-    ]);
-    expect(secondDispatch.code).toBe(0);
-    const loop = JSON.parse(secondDispatch.stdout).loop as Record<string, unknown>;
+    const loop = JSON.parse(recoverLease.stdout).loop as Record<string, unknown>;
     expect(loop["exitReason"]).toBe("max_loop_iterations");
-    expect(loop["iterations"]).toBe(3);
+    expect(loop["iterations"]).toBe(1);
     expect(loop["workflowStepsDispatched"]).toBe(1);
 
     const finalDb = openDb(dataDir);
@@ -552,7 +578,7 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         state: string;
       }>;
       expect(invocations).toEqual([
-        { step_key: "preflight", executor_family: "one-shot", state: "running" },
+        { step_key: "preflight", executor_family: "one-shot", state: "succeeded" },
         { step_key: "implementation", executor_family: "goal-loop", state: "running" }
       ]);
     } finally {

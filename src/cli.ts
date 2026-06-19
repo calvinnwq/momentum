@@ -101,6 +101,7 @@ import {
 } from "./core/workflow/daemon-dispatch-exec-context.js";
 import { createLiveWrapperWorkflowDispatch } from "./core/workflow/live-wrapper-dispatch.js";
 import { buildRealWorkflowStepExecutorRegistry } from "./core/workflow/step-executor-real-adapters.js";
+import type { LiveWrapperProfile } from "./adapters/live-wrapper-registry.js";
 import type { WorkflowStepDispatch } from "./core/workflow/scheduler.js";
 import {
   countIntentApplyAuditsByLifecycleState,
@@ -531,7 +532,10 @@ async function daemonStart(
       // runnable step. Without a live-wrapper profile, the dogfood resolver keeps
       // the default dispatch unchanged unless its explicit fixture opt-in is set.
       workflowLane: {
-        dispatch: workflowDispatchResolution.dispatch
+        dispatch: workflowDispatchResolution.dispatch,
+        ...(workflowDispatchResolution.leaseDurationMs !== undefined
+          ? { leaseDurationMs: workflowDispatchResolution.leaseDurationMs }
+          : {})
       }
     });
 
@@ -549,7 +553,7 @@ async function daemonStart(
 }
 
 type DaemonStartWorkflowDispatchResolution =
-  | { ok: true; dispatch: WorkflowStepDispatch }
+  | { ok: true; dispatch: WorkflowStepDispatch; leaseDurationMs?: number }
   | { ok: false; message: string };
 
 function resolveDaemonStartWorkflowDispatch(
@@ -612,8 +616,20 @@ function resolveDaemonStartWorkflowDispatch(
         }
         return resolved;
       }
-    })
+    }),
+    leaseDurationMs: maxDaemonLiveWrapperProfileTimeoutMs(profile.profile)
   };
+}
+
+function maxDaemonLiveWrapperProfileTimeoutMs(profile: LiveWrapperProfile): number {
+  let maxSeconds = 0;
+  for (const wrapper of profile.wrappers.values()) {
+    maxSeconds = Math.max(
+      maxSeconds,
+      wrapper.timeoutSec + (wrapper.probe?.timeoutSec ?? 0)
+    );
+  }
+  return maxSeconds * 1000 + DEFAULT_DAEMON_STARTUP_RECOVERY_GRACE_MS;
 }
 
 const DEFAULT_DAEMON_STOP_REASON = "operator-requested";
