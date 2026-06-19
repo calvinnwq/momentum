@@ -617,6 +617,61 @@ describe("executor rounds", () => {
     }
   });
 
+  it("lists retry rounds in invocation order before round index", () => {
+    const db = openRoundDb();
+    try {
+      insertExecutorInvocation(
+        db,
+        makeInvocation({
+          invocationId: "inv-2",
+          attempt: 2
+        }),
+        { now: 2000 }
+      );
+      insertExecutorRound(
+        db,
+        makeRound({ roundId: "attempt-1-round-0", roundIndex: 0 }),
+        { now: 1100 }
+      );
+      insertExecutorRound(
+        db,
+        makeRound({ roundId: "attempt-1-round-1", roundIndex: 1 }),
+        { now: 1200 }
+      );
+      insertExecutorRound(
+        db,
+        makeRound({
+          roundId: "attempt-2-round-0",
+          invocationId: "inv-2",
+          attempt: 2,
+          roundIndex: 0
+        }),
+        { now: 2100 }
+      );
+      insertExecutorRound(
+        db,
+        makeRound({
+          roundId: "attempt-2-round-1",
+          invocationId: "inv-2",
+          attempt: 2,
+          roundIndex: 1
+        }),
+        { now: 2200 }
+      );
+
+      expect(
+        listExecutorRoundsForRun(db, "run-1").map((r) => r.roundId)
+      ).toEqual([
+        "attempt-1-round-0",
+        "attempt-1-round-1",
+        "attempt-2-round-0",
+        "attempt-2-round-1"
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("captures a normalized result while advancing the round state", () => {
     const db = openRoundDb();
     try {

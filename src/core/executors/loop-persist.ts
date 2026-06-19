@@ -544,10 +544,10 @@ export function listExecutorRoundsForInvocation(
 
 /**
  * List every round for a workflow run across all of its invocations, ordered
- * deterministically by step key, then round index, then round id. This is the
- * run-scoped read-back the workflow-first logs surface needs to aggregate
- * per-round executor evidence (logs, summaries, verification, commit, recovery)
- * that the run-detail loader does not carry.
+ * deterministically by step key, invocation attempt, invocation id, then round
+ * index and round id. This is the run-scoped read-back the workflow-first logs
+ * surface needs to aggregate per-round executor evidence (logs, summaries,
+ * verification, commit, recovery) that the run-detail loader does not carry.
  */
 export function listExecutorRoundsForRun(
   db: MomentumDb,
@@ -555,7 +555,8 @@ export function listExecutorRoundsForRun(
 ): ExecutorRoundRecord[] {
   const rows = db
     .prepare(
-      `${ROUND_SELECT} WHERE workflow_run_id = ? ORDER BY step_key, round_index, round_id`
+      `${ROUND_SELECT} WHERE workflow_run_id = ?
+       ORDER BY step_key, attempt, invocation_id, round_index, round_id`
     )
     .all(runId) as ExecutorRoundRow[];
   return rows.map(rowToRound);
