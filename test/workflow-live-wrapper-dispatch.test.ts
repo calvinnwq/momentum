@@ -274,7 +274,7 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
     const { registry, calls } = countingRegistry(succeededResult);
     const dispatch = createLiveWrapperWorkflowDispatch(
       executeWorkflowStepDispatch,
-      { registry, deriveExec: () => EXEC_CONTEXT }
+      { registry, deriveExec: () => ({ ok: true, exec: EXEC_CONTEXT }) }
     );
 
     const result = dispatch(claim, tickContext(db));
@@ -302,7 +302,7 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
     const { registry } = countingRegistry(failedResult);
     const dispatch = createLiveWrapperWorkflowDispatch(
       executeWorkflowStepDispatch,
-      { registry, deriveExec: () => EXEC_CONTEXT }
+      { registry, deriveExec: () => ({ ok: true, exec: EXEC_CONTEXT }) }
     );
 
     dispatch(claim, tickContext(db));
@@ -327,7 +327,7 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
     };
     const dispatch = createLiveWrapperWorkflowDispatch(
       executeWorkflowStepDispatch,
-      { registry, deriveExec: () => exec }
+      { registry, deriveExec: () => ({ ok: true, exec }) }
     );
 
     const result = dispatch(claim, tickContext(db));
@@ -346,7 +346,7 @@ describe("createLiveWrapperWorkflowDispatch — unconfigured fails honestly", ()
     const registry = buildRealWorkflowStepExecutorRegistry();
     const dispatch = createLiveWrapperWorkflowDispatch(
       executeWorkflowStepDispatch,
-      { registry, deriveExec: () => EXEC_CONTEXT }
+      { registry, deriveExec: () => ({ ok: true, exec: EXEC_CONTEXT }) }
     );
 
     const result = dispatch(claim, tickContext(db));
@@ -379,7 +379,7 @@ describe("createLiveWrapperWorkflowDispatch — idempotent re-entry", () => {
     const { registry, calls } = countingRegistry(succeededResult);
     const dispatch = createLiveWrapperWorkflowDispatch(
       executeWorkflowStepDispatch,
-      { registry, deriveExec: () => EXEC_CONTEXT }
+      { registry, deriveExec: () => ({ ok: true, exec: EXEC_CONTEXT }) }
     );
 
     const first = dispatch(claim, tickContext(db, TICK_AT));
@@ -397,6 +397,81 @@ describe("createLiveWrapperWorkflowDispatch — idempotent re-entry", () => {
     expect(calls()).toBe(1);
     expect(dispatchRounds(db, "preflight")).toHaveLength(1);
     expect(stepState(db, "preflight")).toBe("succeeded");
+  });
+});
+
+describe("createLiveWrapperWorkflowDispatch — non-derivable exec context parks for manual recovery", () => {
+  it("routes a refused context derivation through manual recovery without running the executor or stranding the step", () => {
+    const db = openSeededDb();
+    const claim = approveAndClaim(db, "preflight");
+    const { registry, calls } = countingRegistry(succeededResult);
+    const dispatch = createLiveWrapperWorkflowDispatch(
+      executeWorkflowStepDispatch,
+      {
+        registry,
+        deriveExec: () => ({ ok: false, reason: "missing_repo_path" })
+      }
+    );
+
+    const result = dispatch(claim, tickContext(db));
+
+    // The base dispatch still reports the scaffold start. Parking is a durable
+    // side effect — NOT a thrown error that would make the scheduler release the
+    // lease over a still-running step and strand it.
+    expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
+    // The executor was never consulted: a non-derivable context runs no bounded
+    // session at all (not even input validation).
+    expect(calls()).toBe(0);
+    // The run is parked with the derivation failure as honest evidence — NOT a
+    // fabricated clean terminal, and NOT a generic input-validation failure.
+    expect(
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+    ).toBe(true);
+    expect(stepState(db, "preflight")).toBe("running");
+    const invocation = loadExecutorInvocation(
+      db,
+      deriveDispatchInvocationId(RUN_ID, "preflight")
+    );
+    expect(invocation?.state).toBe("manual_recovery_required");
+    const rounds = dispatchRounds(db, "preflight");
+    expect(rounds).toHaveLength(1);
+    expect(rounds[0]?.recoveryCode).toBe("runtime_unavailable");
+    expect(rounds[0]?.summary).toContain("cannot derive execution context");
+    const gates = listWorkflowGatesForRun(db, RUN_ID);
+    expect(gates).toHaveLength(1);
+    expect(gates[0]).toMatchObject({
+      gateType: "manual_recovery_required",
+      stepRunId: "preflight"
+    });
+    // No stranded lease: RC-2 released the held dispatch lease while parking.
+    expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
+  });
+
+  it("is idempotent on re-entry: never runs the executor and opens no duplicate gate", () => {
+    const db = openSeededDb();
+    const claim = approveAndClaim(db, "preflight");
+    const { registry, calls } = countingRegistry(succeededResult);
+    const dispatch = createLiveWrapperWorkflowDispatch(
+      executeWorkflowStepDispatch,
+      {
+        registry,
+        deriveExec: () => ({ ok: false, reason: "missing_repo_path" })
+      }
+    );
+
+    const first = dispatch(claim, tickContext(db, TICK_AT));
+    expect(first.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
+    const second = dispatch(claim, tickContext(db, TICK_AT + 100));
+
+    expect(second.status).toBe(
+      WORKFLOW_DISPATCH_RESULT_STATUS.alreadyDispatched
+    );
+    expect(calls()).toBe(0);
+    const rounds = dispatchRounds(db, "preflight");
+    expect(rounds).toHaveLength(1);
+    expect(rounds[0]?.summary).toContain("cannot derive execution context");
+    expect(listWorkflowGatesForRun(db, RUN_ID)).toHaveLength(1);
+    expect(stepState(db, "preflight")).toBe("running");
   });
 });
 

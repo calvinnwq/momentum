@@ -33,16 +33,25 @@
  *   - Idempotent on re-entry: a re-entered tick's base dispatch reports
  *     `alreadyDispatched` and the producer recognises the already-terminal invocation,
  *     so the executor is never run a second time.
+ *   - A refused context derivation never throws: the deriver returns a total
+ *     {@link DispatchedStepExecutorContextResolution}, and an `ok: false` resolution
+ *     is routed to manual recovery (`recordUnresolvedDispatchedStepContext`) instead
+ *     of running the executor. Throwing inside the dispatch closure — after the base
+ *     dispatch advanced the step to `running` and created the scaffold — would make
+ *     the scheduler release the dispatch lease and rethrow (its dispatch contract),
+ *     stranding a `running` step with no terminal evidence and no recovery gate.
  *
  * It takes the {@link WorkflowStepExecutorRegistry} and the per-step execution-context
  * deriver by injection: resolving the daemon-default live-wrapper profile into a
  * registry (`daemon-live-wrapper-profile.ts`) and deriving the run-dir / result / log
- * layout are the caller's concern (the remaining RC-5b wiring slice). This module is
- * the reusable, registry-agnostic dispatch-lane composition.
+ * layout (`daemon-dispatch-exec-context.ts`) are the caller's concern (the remaining
+ * RC-5b wiring slice). This module is the reusable, registry-agnostic dispatch-lane
+ * composition.
  */
 
 import {
   executeAndReconcileDispatchedWorkflowStep,
+  recordUnresolvedDispatchedStepContext,
   type DispatchedStepExecutorContext
 } from "./dispatch-executor-run.js";
 import { WORKFLOW_DISPATCH_RESULT_STATUS } from "./dispatch-execute.js";
@@ -55,15 +64,29 @@ import type {
 import type { WorkflowStepExecutorRegistry } from "./step-executor.js";
 
 /**
+ * The outcome of deriving a dispatched step's execution context. Total so the
+ * deriver never has to throw inside the dispatch closure: a refused derivation
+ * (`ok: false`) is routed to manual recovery instead — a throw there would make the
+ * scheduler release the dispatch lease over a still-`running` step and strand it.
+ * The `reason` is preserved as the parked run's recovery evidence. Kept general
+ * (`reason: string`) so the wrapper does not couple to the daemon lane's specific
+ * refusal codes; the daemon deriver's narrower resolution is assignable to it.
+ */
+export type DispatchedStepExecutorContextResolution =
+  | { ok: true; exec: DispatchedStepExecutorContext }
+  | { ok: false; reason: string };
+
+/**
  * Derive the per-run/per-step execution context a claimed dispatched step's executor
  * needs (repo path, run dir, result / log paths). Injected so the daemon-lane caller
- * owns the run-dir layout decision; the wrapper forwards the derived context verbatim
- * into the execution-path producer.
+ * owns the run-dir layout decision; the wrapper forwards a resolved context verbatim
+ * into the execution-path producer and routes a refused derivation through manual
+ * recovery.
  */
 export type DeriveDispatchedStepExecutorContext = (
   claim: ClaimedWorkflowStep,
   context: WorkflowStepDispatchContext
-) => DispatchedStepExecutorContext;
+) => DispatchedStepExecutorContextResolution;
 
 /** The injected dependencies the live-wrapper dispatch composition needs. */
 export type LiveWrapperWorkflowDispatchDeps = {
@@ -115,14 +138,29 @@ export function createLiveWrapperWorkflowDispatch(
   ): WorkflowStepDispatchResult => {
     const result = baseDispatch(claim, context);
     if (shouldRunDispatchedExecutor(result.status)) {
-      executeAndReconcileDispatchedWorkflowStep({
-        db: context.db,
-        runId: claim.runId,
-        stepId: claim.stepId,
-        registry: deps.registry,
-        exec: deps.deriveExec(claim, context),
-        now: context.now
-      });
+      const resolved = deps.deriveExec(claim, context);
+      if (resolved.ok) {
+        executeAndReconcileDispatchedWorkflowStep({
+          db: context.db,
+          runId: claim.runId,
+          stepId: claim.stepId,
+          registry: deps.registry,
+          exec: resolved.exec,
+          now: context.now
+        });
+      } else {
+        // The context could not be derived (e.g. the run carries no repo path).
+        // Park the run for manual recovery through the same terminalize -> RC-2
+        // reconcile path an unconfigured executor takes, rather than throwing —
+        // a throw here would release the lease over a still-running step.
+        recordUnresolvedDispatchedStepContext({
+          db: context.db,
+          runId: claim.runId,
+          stepId: claim.stepId,
+          reason: resolved.reason,
+          now: context.now
+        });
+      }
     }
     return result;
   };

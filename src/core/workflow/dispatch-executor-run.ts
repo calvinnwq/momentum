@@ -133,7 +133,13 @@ export const WORKFLOW_EXECUTE_RECONCILE_STATUS = {
   /** The executor ran and its terminal evidence was reconciled this call. */
   executedAndReconciled: "execute_reconciled",
   /** Re-entry over an already-terminal invocation: executor not re-run. */
-  alreadyExecuted: "execute_already_executed"
+  alreadyExecuted: "execute_already_executed",
+  /**
+   * The dispatched step's execution context could not be derived, so the run was
+   * parked for manual recovery WITHOUT running an executor (no clean terminal was
+   * fabricated). See {@link recordUnresolvedDispatchedStepContext}.
+   */
+  contextUnresolved: "execute_context_unresolved"
 } as const;
 
 export type WorkflowExecuteReconcileStatus =
@@ -247,5 +253,70 @@ export function executeAndReconcileDispatchedWorkflowStep(
     executorResult,
     terminalize,
     reconcile
+  };
+}
+
+export type RecordUnresolvedDispatchedStepContextInput = {
+  db: MomentumDb;
+  runId: string;
+  stepId: string;
+  /** Why the execution context could not be derived (preserved as evidence). */
+  reason: string;
+  now: number;
+};
+
+/**
+ * Record that a dispatched step's executor could not be RUN because its execution
+ * context could not be derived (e.g. the run carries no repo path the bounded
+ * session could work in), routing the step to manual recovery through the SAME
+ * `terminalize -> RC-2 reconcile` path an honest `runtime_unavailable` executor
+ * result takes — without running any executor and without fabricating a clean
+ * terminal.
+ *
+ * The daemon lane (`live-wrapper-dispatch.ts`) calls this when its context deriver
+ * refuses. Deriving the context happens INSIDE the dispatch closure, *after* the
+ * base dispatch advanced the step `approved -> running` and created the
+ * `<run>::<step>::dispatch` scaffold. Throwing there would make the scheduler
+ * release the dispatch lease and rethrow (its dispatch contract), stranding a
+ * `running` step with no terminal evidence and no recovery gate. Recording manual
+ * recovery instead parks the run safely — `needs_manual_recovery` + an
+ * operator-visible gate, with RC-2 releasing the held lease — the no-stranded-step
+ * guarantee.
+ *
+ * Idempotent on re-entry: `terminalizeDispatchedExecutorInvocation` preserves an
+ * already-terminal invocation and `reconcileDispatchedWorkflowStep` re-converges
+ * the parked run, so a re-entered tick records no duplicate evidence and opens no
+ * duplicate gate. A step with no dispatch invocation (the M9 direct-finalize lane)
+ * is left untouched: both seams refuse it and write nothing.
+ */
+export function recordUnresolvedDispatchedStepContext(
+  input: RecordUnresolvedDispatchedStepContextInput
+): ExecuteAndReconcileDispatchedStepResult {
+  const { db, runId, stepId, reason, now } = input;
+  // Synthesize the honest process-level failure the missing context implies. The
+  // terminalize decider maps any `ok: false` result to `manual_recovery_required`,
+  // so this parks the run exactly like an unconfigured `runtime_unavailable`
+  // adapter — never a fabricated clean terminal.
+  const executorResult: WorkflowStepExecutorDispatchResult = {
+    ok: false,
+    code: "runtime_unavailable",
+    error: `cannot derive execution context for dispatched step ${runId}/${stepId}: ${reason}`,
+    executorLogPath: undefined,
+    resultJsonPath: undefined
+  };
+  const terminalize = terminalizeDispatchedExecutorInvocation({
+    db,
+    runId,
+    stepId,
+    result: executorResult,
+    now
+  });
+  const reconcile = reconcileDispatchedWorkflowStep({ db, runId, stepId, now });
+  return {
+    status: WORKFLOW_EXECUTE_RECONCILE_STATUS.contextUnresolved,
+    executorResult,
+    terminalize,
+    reconcile,
+    detail: reason
   };
 }

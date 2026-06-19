@@ -40,6 +40,7 @@ import {
 import {
   buildDispatchedStepExecutorInput,
   executeAndReconcileDispatchedWorkflowStep,
+  recordUnresolvedDispatchedStepContext,
   WORKFLOW_EXECUTE_RECONCILE_STATUS
 } from "../src/core/workflow/dispatch-executor-run.js";
 
@@ -466,6 +467,113 @@ describe("executeAndReconcileDispatchedWorkflowStep — idempotent re-entry", ()
     // No duplicate scaffold round, step still terminal exactly once.
     expect(dispatchRounds(db, "preflight")).toHaveLength(1);
     expect(stepState(db, "preflight")).toBe("succeeded");
+  });
+});
+
+describe("recordUnresolvedDispatchedStepContext — non-derivable context parks for manual recovery", () => {
+  it("parks the dispatched run for manual recovery WITHOUT running any executor", () => {
+    const db = openSeededDb();
+    dispatchStep(db, "preflight");
+    // A registry that would succeed if it ever ran, so the test proves the
+    // executor is never invoked when the context cannot be derived.
+    const { registry, calls } = countingRegistry(succeededResult);
+
+    const out = recordUnresolvedDispatchedStepContext({
+      db,
+      runId: RUN_ID,
+      stepId: "preflight",
+      reason: "missing_repo_path",
+      now: EXECUTE_AT
+    });
+
+    // No executor ran: the bounded session never started, so there is nothing to
+    // run against — the registry is irrelevant to this path.
+    expect(calls()).toBe(0);
+    void registry;
+    expect(out.status).toBe(
+      WORKFLOW_EXECUTE_RECONCILE_STATUS.contextUnresolved
+    );
+    expect(out.reconcile?.status).toBe(
+      WORKFLOW_RECONCILE_RESULT_STATUS.manualRecovery
+    );
+
+    // The dispatch invocation carries terminal manual-recovery evidence the RC-2
+    // seam parked from — NOT a fabricated clean terminal.
+    const invocation = loadExecutorInvocation(
+      db,
+      deriveDispatchInvocationId(RUN_ID, "preflight")
+    );
+    expect(invocation?.state).toBe("manual_recovery_required");
+    expect(
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+    ).toBe(true);
+    expect(stepState(db, "preflight")).toBe("running");
+    const gates = listWorkflowGatesForRun(db, RUN_ID);
+    expect(gates).toHaveLength(1);
+    expect(gates[0]).toMatchObject({
+      gateType: "manual_recovery_required",
+      stepRunId: "preflight"
+    });
+    // No stranded lease: RC-2 released the held dispatch lease while parking.
+    expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
+  });
+
+  it("is idempotent on re-entry: opens no duplicate gate and re-runs no executor", () => {
+    const db = openSeededDb();
+    dispatchStep(db, "preflight");
+    const { registry, calls } = countingRegistry(succeededResult);
+    void registry;
+
+    recordUnresolvedDispatchedStepContext({
+      db,
+      runId: RUN_ID,
+      stepId: "preflight",
+      reason: "missing_repo_path",
+      now: EXECUTE_AT
+    });
+    const second = recordUnresolvedDispatchedStepContext({
+      db,
+      runId: RUN_ID,
+      stepId: "preflight",
+      reason: "missing_repo_path",
+      now: EXECUTE_AT + 100
+    });
+
+    expect(calls()).toBe(0);
+    // The terminal evidence is immutable; a re-entry preserves it.
+    expect(second.terminalize?.status).toBe("terminalize_already_terminal");
+    expect(loadExecutorInvocation(
+      db,
+      deriveDispatchInvocationId(RUN_ID, "preflight")
+    )?.state).toBe("manual_recovery_required");
+    expect(dispatchRounds(db, "preflight")).toHaveLength(1);
+    expect(listWorkflowGatesForRun(db, RUN_ID)).toHaveLength(1);
+    expect(stepState(db, "preflight")).toBe("running");
+  });
+
+  it("writes nothing for a step that was never dispatched (no scaffold invocation)", () => {
+    const db = openSeededDb();
+    // No dispatch: an M9 direct-finalize / never-dispatched step has no
+    // `<run>::<step>::dispatch` invocation, so there is nothing to park.
+    const out = recordUnresolvedDispatchedStepContext({
+      db,
+      runId: RUN_ID,
+      stepId: "preflight",
+      reason: "missing_repo_path",
+      now: EXECUTE_AT
+    });
+
+    expect(out.terminalize?.status).toBe("terminalize_not_dispatched");
+    expect(out.reconcile?.status).toBe(
+      WORKFLOW_RECONCILE_RESULT_STATUS.notDispatched
+    );
+    expect(
+      loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, "preflight"))
+    ).toBeUndefined();
+    expect(
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+    ).not.toBe(true);
+    expect(stepState(db, "preflight")).toBe("pending");
   });
 });
 

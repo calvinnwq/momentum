@@ -100,7 +100,14 @@ provenance to the bounded session's working directory — a native run runs unde
 `<repoPath>/.agent-workflows/<runId>/` and an imported run under its source
 artifact's run dir — and refuses honestly with `missing_repo_path` (rather than
 fabricating a working directory) when the run has no repo, so the lane can fail
-closed into manual recovery. Wiring the resolved profile + registry + this deriver
-into the `daemon start` lane (composing `live-wrapper-dispatch.ts` inside
-`resolveDaemonWorkflowDispatch`) is the one remaining deferred
-runtime-consolidation slice.
+closed into manual recovery. `live-wrapper-dispatch.ts` now consumes that refusal
+safely: its deriver injection returns a total
+`DispatchedStepExecutorContextResolution`, and an `ok: false` resolution is routed
+to manual recovery (`recordUnresolvedDispatchedStepContext` in
+`dispatch-executor-run.ts`, which terminalizes the same honest
+`manual_recovery_required` evidence an unconfigured executor produces and lets RC-2
+park the run) instead of throwing — a throw inside the dispatch closure, after the
+scaffold exists, would release the lease over a still-`running` step and strand it.
+Wiring the resolved profile + registry + this deriver into the `daemon start` lane
+(composing `live-wrapper-dispatch.ts` inside `resolveDaemonWorkflowDispatch`) is the
+one remaining deferred runtime-consolidation slice.
