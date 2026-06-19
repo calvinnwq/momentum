@@ -602,6 +602,13 @@ function resolveDaemonStartWorkflowDispatch(
               reason: `run_dir_unavailable: ${error instanceof Error ? error.message : String(error)}`
             };
           }
+          return {
+            ok: true,
+            exec: {
+              ...resolved.exec,
+              env
+            }
+          };
         }
         return resolved;
       }

@@ -380,6 +380,41 @@ describe("executeAndReconcileDispatchedWorkflowStep — configured success", () 
     expect(out.executorResult?.ok).toBe(true);
     expect(stepState(db, "preflight")).toBe("succeeded");
   });
+
+  it("does not release the dispatch lease when reconciliation throws after terminal evidence is recorded", () => {
+    const db = openSeededDb();
+    dispatchStep(db, "preflight");
+    const { registry } = countingRegistry(succeededResult);
+    db.exec(`
+      CREATE TRIGGER test_block_reconcile
+      BEFORE UPDATE OF state ON workflow_steps
+      WHEN NEW.run_id = '${RUN_ID}' AND NEW.step_id = 'preflight'
+      BEGIN
+        SELECT RAISE(ABORT, 'reconcile blocked');
+      END;
+    `);
+
+    const out = executeAndReconcileDispatchedWorkflowStep({
+      db,
+      runId: RUN_ID,
+      stepId: "preflight",
+      registry,
+      exec: EXEC_CONTEXT,
+      now: EXECUTE_AT
+    });
+
+    expect(out.status).toBe(
+      WORKFLOW_EXECUTE_RECONCILE_STATUS.reconcileDeferred
+    );
+    expect(out.reconcile).toBeUndefined();
+    expect(out.terminalize?.status).toBe("terminalize_recorded");
+    expect(
+      loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, "preflight"))
+        ?.state
+    ).toBe("succeeded");
+    expect(stepState(db, "preflight")).toBe("running");
+    expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).toBeNull();
+  });
 });
 
 describe("executeAndReconcileDispatchedWorkflowStep — unconfigured fails honestly", () => {

@@ -134,6 +134,8 @@ export const WORKFLOW_EXECUTE_RECONCILE_STATUS = {
   executedAndReconciled: "execute_reconciled",
   /** Re-entry over an already-terminal invocation: executor not re-run. */
   alreadyExecuted: "execute_already_executed",
+  /** Terminal evidence exists, but RC-2 reconciliation threw and must be retried. */
+  reconcileDeferred: "execute_reconcile_deferred",
   /**
    * The dispatched step's execution context could not be derived, so the run was
    * parked for manual recovery WITHOUT running an executor (no clean terminal was
@@ -197,10 +199,21 @@ export function executeAndReconcileDispatchedWorkflowStep(
     // recorded its terminal evidence. NEVER re-run the executor (a second process
     // / duplicate evidence); just re-drive the idempotent RC-2 reconciliation so
     // a crashed prior finalize still converges the step / lease / run-state.
-    const reconcile = reconcileDispatchedWorkflowStep({ db, runId, stepId, now });
+    const reconciled = tryReconcileDispatchedWorkflowStep({
+      db,
+      runId,
+      stepId,
+      now
+    });
+    if (!reconciled.ok) {
+      return {
+        status: WORKFLOW_EXECUTE_RECONCILE_STATUS.reconcileDeferred,
+        detail: reconciled.detail
+      };
+    }
     return {
       status: WORKFLOW_EXECUTE_RECONCILE_STATUS.alreadyExecuted,
-      reconcile,
+      reconcile: reconciled.reconcile,
       detail: invocation.state
     };
   }
@@ -246,13 +259,26 @@ export function executeAndReconcileDispatchedWorkflowStep(
     result: executorResult,
     now
   });
-  const reconcile = reconcileDispatchedWorkflowStep({ db, runId, stepId, now });
+  const reconciled = tryReconcileDispatchedWorkflowStep({
+    db,
+    runId,
+    stepId,
+    now
+  });
+  if (!reconciled.ok) {
+    return {
+      status: WORKFLOW_EXECUTE_RECONCILE_STATUS.reconcileDeferred,
+      executorResult,
+      terminalize,
+      detail: reconciled.detail
+    };
+  }
 
   return {
     status: WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled,
     executorResult,
     terminalize,
-    reconcile
+    reconcile: reconciled.reconcile
   };
 }
 
@@ -311,12 +337,46 @@ export function recordUnresolvedDispatchedStepContext(
     result: executorResult,
     now
   });
-  const reconcile = reconcileDispatchedWorkflowStep({ db, runId, stepId, now });
+  const reconciled = tryReconcileDispatchedWorkflowStep({
+    db,
+    runId,
+    stepId,
+    now
+  });
+  if (!reconciled.ok) {
+    return {
+      status: WORKFLOW_EXECUTE_RECONCILE_STATUS.reconcileDeferred,
+      executorResult,
+      terminalize,
+      detail: reconciled.detail
+    };
+  }
   return {
     status: WORKFLOW_EXECUTE_RECONCILE_STATUS.contextUnresolved,
     executorResult,
     terminalize,
-    reconcile,
+    reconcile: reconciled.reconcile,
     detail: reason
   };
+}
+
+function tryReconcileDispatchedWorkflowStep(input: {
+  db: MomentumDb;
+  runId: string;
+  stepId: string;
+  now: number;
+}):
+  | { ok: true; reconcile: WorkflowStepReconciliationResult }
+  | { ok: false; detail: string } {
+  try {
+    return {
+      ok: true,
+      reconcile: reconcileDispatchedWorkflowStep(input)
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      detail: error instanceof Error ? error.message : String(error)
+    };
+  }
 }

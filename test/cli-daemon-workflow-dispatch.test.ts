@@ -123,6 +123,32 @@ JSON`;
   return profilePath;
 }
 
+function writeEnvForwardingPreflightProfile(dir: string): string {
+  const profilePath = path.join(dir, "live-wrapper-env-profile.json");
+  const script = `test "$MOMENTUM_TEST_TOKEN" = "from-cli-io" || exit 7
+cat > "$MOMENTUM_RESULT_PATH" <<'JSON'
+{"success":true,"summary":"daemon live wrapper env forwarded","key_changes_made":[],"key_learnings":[],"remaining_work":[],"goal_complete":false,"commit":{"type":"test","subject":"daemon live wrapper env","body":"","breaking":false}}
+JSON`;
+  fs.writeFileSync(
+    profilePath,
+    JSON.stringify({
+      name: "daemon-env-test",
+      wrappers: {
+        preflight: {
+          command: "/bin/sh",
+          args: ["-c", script],
+          cwd: "iteration",
+          timeout_sec: 5,
+          env_allow: ["MOMENTUM_TEST_TOKEN"],
+          result_file: "result.json"
+        }
+      }
+    }),
+    "utf8"
+  );
+  return profilePath;
+}
+
 describe("daemon start production workflow lane (NGX-367)", () => {
   it("uses a configured daemon live-wrapper profile to execute and reconcile a dispatched step", async () => {
     const dataDir = makeTempDir();
@@ -196,6 +222,63 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     expect(
       fs.existsSync(path.join(repoDir, ".agent-workflows", runId, "result.json"))
     ).toBe(true);
+  });
+
+  it("forwards the injected CLI env to daemon live-wrapper commands", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const profileDir = makeTempDir();
+    const profilePath = writeEnvForwardingPreflightProfile(profileDir);
+    const runId = "ngx492-live-wrapper-env";
+    const oldToken = process.env["MOMENTUM_TEST_TOKEN"];
+    delete process.env["MOMENTUM_TEST_TOKEN"];
+    try {
+      await startApprovedCodingRun(dataDir, repoDir, runId);
+
+      const result = await run(
+        [
+          "daemon",
+          "start",
+          "--max-loop-iterations",
+          "1",
+          "--poll-interval-ms",
+          "0",
+          "--data-dir",
+          dataDir,
+          "--json"
+        ],
+        {
+          [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath,
+          MOMENTUM_TEST_TOKEN: "from-cli-io"
+        }
+      );
+
+      expect(result.code).toBe(0);
+      expect(result.stderr).toBe("");
+      const db = openDb(dataDir);
+      try {
+        const step = db
+          .prepare(
+            "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?"
+          )
+          .get(runId, "preflight") as { state: string } | undefined;
+        expect(step).toEqual({ state: "succeeded" });
+        const round = db
+          .prepare(
+            "SELECT summary FROM executor_rounds WHERE workflow_run_id = ? AND step_key = ?"
+          )
+          .get(runId, "preflight") as { summary: string | null } | undefined;
+        expect(round?.summary).toBe("daemon live wrapper env forwarded");
+      } finally {
+        db.close();
+      }
+    } finally {
+      if (oldToken === undefined) {
+        delete process.env["MOMENTUM_TEST_TOKEN"];
+      } else {
+        process.env["MOMENTUM_TEST_TOKEN"] = oldToken;
+      }
+    }
   });
 
   it("parks the run for manual recovery when daemon live-wrapper run-dir creation fails", async () => {
