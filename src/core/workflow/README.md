@@ -21,7 +21,7 @@ in place; importers still reference the concrete modules below.
 | Gates | `gate.ts`, `gate-persist.ts` |
 | Leases | `leases.ts` |
 | Scheduling | `scheduler.ts` |
-| Dispatch | `dispatch.ts`, `dispatch-persist.ts`, `dispatch-execute.ts`, `dogfood-dispatch.ts` |
+| Dispatch | `dispatch.ts`, `dispatch-persist.ts`, `dispatch-execute.ts`, `dispatch-reconcile.ts`, `dispatch-reconcile-execute.ts`, `dogfood-dispatch.ts` |
 | Recovery & monitor | `recovery-artifact.ts`, `recovery-reconcile.ts`, `monitor-state.ts`, `monitor-envelope.ts` |
 | Handoff | `handoff.ts` |
 
@@ -61,6 +61,7 @@ Other domains reach workflow behavior through these modules:
 A single curated module seam (barrel) is intentionally **not** part of ARCH-08;
 importers keep direct typed module paths. ARCH-08 only introduces the
 `runtime-state.ts` seam around the mechanical finalization / status / monitor
-refresh shared by dispatch, dogfood terminalization, and operator/recovery
-callers. It does **not** choose the future RC-2 single finalization owner, delete
+refresh shared by dispatch, reconciliation, dogfood terminalization, and operator/recovery
+callers. It does **not** choose the RC-2 reconciliation seam (that landed separately
+as NGX-480: `dispatch-reconcile.ts` / `dispatch-reconcile-execute.ts`), delete
 the dogfood stand-in, or narrow M9/M10 compatibility paths.

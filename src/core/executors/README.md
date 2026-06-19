@@ -38,7 +38,8 @@ families build on `loop-reducer` / `loop-persist`.
 families (goal-loop and single-shot). The two paths intentionally stay separate
 modules: the M9 direct-finalize path is **not** collapsed into the M10
 executor-loop path. Any unification is reconciliation work owned by a later slice
-(RC-2), not by this mechanical regrouping.
+(now landed as RC-2 / NGX-480: `dispatch-reconcile.ts` /
+`dispatch-reconcile-execute.ts`), not by this mechanical regrouping.
 
 ## Ownership boundary with adapters
 
@@ -85,5 +86,6 @@ to make.
   no behavior, so it is colocated with the type it defines.
 - No executor barrel/seam consolidation and no finalizer/reconciliation redesign.
   ARCH-08 only added the workflow-owned `runtime-state.ts` refresh seam after
-  caller-owned durable mutations; the cross-path finalization owner remains RC-2
-  work. Importers keep direct typed module paths until that future decision.
+  caller-owned durable mutations; the cross-path finalization owner has since landed
+  as RC-2 (NGX-480: `dispatch-reconcile.ts` /
+  `dispatch-reconcile-execute.ts`). Importers keep direct typed module paths.

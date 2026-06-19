@@ -45,9 +45,10 @@
  * `pending -> running -> terminal`, run verification / commit finalization, or
  * advance the step to a terminal state. The landed `runGoalLoopStep` /
  * `runSingleShotStep` / `runNoMistakesMirrorStep` adapters own nested
- * `executor_invocations` / `executor_rounds` evidence only; a future RC-2
- * reconciliation seam must be the single owner that converts terminal executor
- * evidence into the workflow step's terminal transition. The phase-1 invocation /
+ * `executor_invocations` / `executor_rounds` evidence only; the RC-2
+ * reconciliation seam (`dispatch-reconcile-execute.ts`, NGX-480) is now the
+ * single owner that converts terminal executor evidence into the workflow step's
+ * terminal transition. The phase-1 invocation /
  * round ids are deliberately namespaced (`...::dispatch`) so that follow-up owns
  * reconciling the scaffold with the adapters' own reattachable ids rather than
  * silently colliding with them.

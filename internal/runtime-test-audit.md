@@ -456,10 +456,11 @@ Decisions at a glance (full evidence and prerequisites live in the plan):
   import/read path survives regardless.
 - **M9 direct `workflow_steps` finalize vs M10 executor-loop adapters** — keep
   both, coexisting, behind a named boundary: adapters own
-  `executor_invocations` / `executor_rounds` evidence, and a single idempotent
-  reconciliation seam (replacing the `src/core/workflow/dogfood-dispatch.ts`
-  stand-in, formerly `src/workflow-dogfood-dispatch.ts`) finalizes dispatched
-  steps exactly once.
+  `executor_invocations` / `executor_rounds` evidence, and the landed RC-2
+  reconciliation seam (`reconcileDispatchedWorkflowStep`,
+  `dispatch-reconcile-execute.ts`, NGX-480) finalizes dispatched steps exactly
+  once. The `dogfood-dispatch.ts` stand-in is now an explicit test/dogfood-only
+  fixture, not a production terminal path.
 - **Phase-1 dispatch scaffold** — keep; its no-fabricated-evidence rule is a
   recovery safety feature, narrowable only once adapter finalization replaces its
   terminal gap.
@@ -470,8 +471,8 @@ Decisions at a glance (full evidence and prerequisites live in the plan):
 
 No production code is deleted: the plan's unreachable-branch audit finds every
 candidate reachable. Actual deletion / migration work is listed as a `RC-1`..`RC-5`
-follow-up sequence (plus the existing `NGX-404`), led by `RC-2`, the M9/M10
-reconciliation seam.
+follow-up sequence (plus the existing `NGX-404`), led by `RC-2` (now landed as
+  NGX-480), the M9/M10 reconciliation seam.
 
 ## Runtime Path Classification
 
