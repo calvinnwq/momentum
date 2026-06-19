@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.0](https://github.com/calvinnwq/momentum/compare/v0.3.0...v0.4.0) (2026-06-19)
+
+
+### Features
+
+* **workflow:** add run-scoped logs read-back ([6c70bc3](https://github.com/calvinnwq/momentum/commit/6c70bc34434524d86ed2227f8b9229f3510b6334))
+* **workflow:** add workflow run logs command and listExecutorRoundsForRun for RC-1 read-back parity (NGX-486) ([a49ef54](https://github.com/calvinnwq/momentum/commit/a49ef54ec219df9e290a52fe1e8b4d167abadefd))
+
 ## [0.3.0](https://github.com/calvinnwq/momentum/compare/v0.2.0...v0.3.0) (2026-06-19)
 
 
