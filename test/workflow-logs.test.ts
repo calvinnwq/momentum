@@ -148,7 +148,7 @@ describe("loadWorkflowRunLogs", () => {
     }
   });
 
-  it("orders rounds across invocations by step key then round index", () => {
+  it("orders rounds across invocations by step key then attempt and round index", () => {
     const db = openTempDb();
     try {
       seedRun(db, "run-logs-1");

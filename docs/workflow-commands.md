@@ -1120,7 +1120,7 @@ momentum workflow run logs <run-id> [--data-dir <path>] [--json]
 
 Read-back of one workflow run's durable logs and evidence, for operators inspecting what each step actually ran and produced. It is the workflow-first equivalent of goal-first `logs <goal-id>`: it wraps the same detail loader as `workflow status <run-id>` / `workflow handoff` (run, steps, monitor, evidence) and adds the per-round executor evidence that the detail loader does not carry — executor family / agent / model, log paths, summaries, key changes, changed files, verification status, commit SHA, and recovery codes. Read-only: no SQLite mutation, no file reads, no external writes.
 
-Rounds are returned across every invocation in the run, ordered by step key, then round index, then round id.
+Rounds are returned across every invocation in the run, ordered by step key, then invocation attempt, then invocation id, then round index, then round id.
 
 ### JSON envelope
 

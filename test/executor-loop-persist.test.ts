@@ -564,7 +564,7 @@ describe("executor rounds", () => {
     }
   });
 
-  it("lists every round for a run across invocations ordered by step key then round index", () => {
+  it("lists every round for a run across invocations ordered by step key then attempt and round index", () => {
     const db = openRoundDb();
     try {
       // A second step + invocation under the same run so the run-scoped reader
