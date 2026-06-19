@@ -29,8 +29,8 @@
  * seam stays the *single* owner of the workflow-step finalization. This module
  * produces the evidence; RC-2 consumes it. There is no second finalization owner.
  *
- * Mapping discipline (so an unconfigured profile fails honestly, never as a fake
- * success):
+ * Mapping discipline (so an unconfigured wrapper / adapter fails honestly,
+ * never as a fake success):
  *
  *   - A clean executor terminal (`succeeded` / `failed`) records a matching clean
  *     terminal invocation the RC-2 decider maps to a clean workflow-step terminal.

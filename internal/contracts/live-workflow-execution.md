@@ -60,6 +60,13 @@ The typed in-memory config may expose camelCase properties such as `timeoutSec`,
 
 Durable live-wrapper profiles must be mappings with a non-empty `name` and a non-empty `wrappers` object. `wrappers` keys must be canonical `WorkflowStepKind` values; each value is one wrapper config. A profile may configure only the step kinds it supports. Resolving a known but unconfigured kind refuses separately from an unknown kind instead of guessing.
 
+The later RC-5b daemon-default path reuses this exact profile shape via
+`MOMENTUM_LIVE_WRAPPER_PROFILE`, but it composes through the M10 dispatch
+scaffold, `dispatch-executor-terminalize.ts`, and RC-2 reconciliation rather
+than the M9 managed-step direct-finalization lane below. The same profile can
+therefore configure real local commands for bounded `daemon start` while keeping
+the M9 direct lane available for compatibility runs.
+
 Missing or malformed config refuses before mutating workflow state. The live-wrapper config and registry layer uses these stable refusal codes:
 
 - `live_wrapper_config_missing`: a wrapper config value is absent.

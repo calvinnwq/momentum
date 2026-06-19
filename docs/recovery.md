@@ -32,7 +32,7 @@ ticks.
 | Repo lock (`repo_locks`) | `state = 'active'` AND `lease_expires_at < now - staleLeaseGraceMs` | Released when the owning job is terminal (`succeeded` / `failed`); emits `repo_lock.recovered` and stamps `recovery_status = 'auto_released_job_terminal'`. | `job_pending` / `job_claimed` / `job_running` / `job_missing`. |
 | Claimed/running `goal_iteration` job (`jobs`) | `state IN ('claimed', 'running')` AND `lease_expires_at < now - staleLeaseGraceMs` | Safe stale `claimed` jobs are re-pended without losing `attempt_count` or idempotency key; emits `job.recovered` with `recovery_status = 'auto_repended_stale_claim'`. `running` jobs are skipped. | `job_running` (in-flight repo writes), `daemon_active` (live owner), `lock_active` (held lock), `repo_dirty` / `repo_unknown_commit` / `repo_unavailable` (repo-state safety refusal), `job_state_changed` (concurrent update race). |
 | Daemon record (`daemon_runs`) | Active state (`starting` / `running` / `stop_requested`) AND `heartbeat_at` is older than `staleAfterMs` (90s idle / 930s with `active_job_id`) | Finalized to `error` terminal with `recovery_status = 'auto_recovered_idle_stale'` when `active_job_id` and `active_lock_id` are both `NULL`. | `self` (caller's own run), `active_job_present` (delegates to job-side recovery), `active_lock_present` (delegates to lock-side recovery), `run_state_changed` (concurrent update race). |
-| Workflow lease (`workflow_leases`) | Non-released `monitor`, `managed-step`, or `dispatch` lease with `expires_at < now - graceMs` during an enabled workflow scheduler tick | `auto-release` leases are released in place and the run state is re-derived; emits `auto_released_stale_workflow_lease`. | `manual-recovery-required` leases leave the lease as evidence, set the run-scoped `needs_manual_recovery` flag with `stale_workflow_lease_manual_recovery_required`, and render run-scoped `recovery.md` best-effort. Concurrent row changes surface as `lease_changed` / `run_not_found`. |
+| Workflow lease (`workflow_leases`) | Non-released `monitor`, `managed-step`, or `dispatch` lease with `expires_at < now - graceMs` during an enabled workflow scheduler tick | `auto-release` leases are released in place and the run state is re-derived; emits `auto_released_stale_workflow_lease`. A stale dispatch lease with terminal executor evidence is reconciled first so the owning step finalizes from that evidence before release. | `manual-recovery-required` leases leave the lease as evidence, set the run-scoped `needs_manual_recovery` flag with `stale_workflow_lease_manual_recovery_required`, and render run-scoped `recovery.md` best-effort. A stale dispatch lease over a still-`running` step with no terminal dispatch evidence is parked for run-scoped manual recovery and then released so future work is not suppressed. Concurrent row changes surface as `lease_changed` / `run_not_found`. |
 
 The managed `daemon start` loop runs a one-shot `runStartupRecovery` pass before
 its first cycle. Those three startup primitives are independently idempotent,
@@ -144,11 +144,15 @@ classifications such as `head_mismatch`, `result_missing`, `repo_lock_lost`,
 uses this run-scoped surface when a claimed step cannot be resolved to a known
 definition step or uses an executor family the daemon cannot dispatch yet; that
 path opens a `manual_recovery_required` workflow gate instead of silently
-dropping the claim. If the claimed run row has vanished, Momentum cannot write a
-run-scoped flag or gate without orphaning evidence, so it releases the lingering
-dispatch lease only. Stale `manual-recovery-required` workflow leases use the
-same surface, while stale `auto-release` workflow leases are released instead of
-flagged.
+dropping the claim. The configured live-wrapper dispatch lane uses the same
+surface when the wrapper is unconfigured for the claimed step kind, the step's
+repo/run directory cannot be derived, the run directory cannot be created, or a
+live wrapper returns a process-level failure such as `runtime_unavailable`. If
+the claimed run row has vanished, Momentum cannot write a run-scoped flag or
+gate without orphaning evidence, so it releases the lingering dispatch lease
+only. Stale `manual-recovery-required` workflow leases use the same surface;
+stale `auto-release` workflow leases are usually released, but a stale running
+dispatch without terminal evidence is parked for manual recovery before release.
 
 The run-scoped flag blocks `workflow run approve` and any
 `workflow run update-step` transition that would leave the blocking recovery

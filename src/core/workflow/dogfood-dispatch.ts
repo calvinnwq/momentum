@@ -44,14 +44,13 @@
  * This module is therefore **test/dogfood-only** and hides no production terminal
  * gap behind it: it is the opt-in single-process multi-dispatch fixture
  * ({@link DOGFOOD_TERMINALIZE_DISPATCH_ENV_VAR}, off by default), never the
- * production terminal path. It is retained — not deleted — only because wiring the
- * reconciliation seam as the daemon default still needs a configured live-wrapper
- * profile that yields terminal executor evidence in production. RC-5's fake
- * demotion has landed — production dispatch no longer resolves to shipped fake
- * successes by default — but unconfigured adapters honestly refuse with
- * `runtime_unavailable`, so this fixture remains the opt-in way to exercise
- * single-process multi-dispatch without spawning an agent, running verification,
- * or writing anything external.
+ * production terminal path. It is retained — not deleted — because it remains the
+ * cheap opt-in way to exercise single-process multi-dispatch without a configured
+ * daemon live-wrapper profile, spawning an agent, running verification, or
+ * writing anything external. RC-5's fake demotion has landed — production
+ * dispatch no longer resolves to shipped fake successes by default — and RC-5b
+ * has wired configured daemon profiles to real terminal executor evidence, while
+ * unconfigured adapters still refuse honestly with `runtime_unavailable`.
  */
 
 import type { MomentumDb } from "../../adapters/db.js";

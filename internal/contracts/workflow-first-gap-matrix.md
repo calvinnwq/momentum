@@ -67,7 +67,7 @@ Current product surface:
 Current limitation:
 
 ```text
-WorkflowRun is durable and can start from definitions, executor records now persist below step runs, the daemon can recover, scan, and claim runnable workflow steps through an opt-in scheduler lane, the goal-loop executor adapter drives bounded autonomous rounds below a step run, the one-shot / script adapters drive bounded single-invocation work, and the no-mistakes executor mirror records external review state into executor rounds. M10-08 attached durable workflow gates and the `workflow run decide` operator path, M10-09a wired the production workflow-lane dispatcher into bounded managed `daemon start`, and NGX-353 dogfooded the workflow-first start / approval / bounded dispatch path through real Momentum state.
+WorkflowRun is durable and can start from definitions, executor records now persist below step runs, the daemon can recover, scan, and claim runnable workflow steps through an opt-in scheduler lane, the goal-loop executor adapter drives bounded autonomous rounds below a step run, the one-shot / script adapters drive bounded single-invocation work, and the no-mistakes executor mirror records external review state into executor rounds. M10-08 attached durable workflow gates and the `workflow run decide` operator path, M10-09a wired the production workflow-lane dispatcher into bounded managed `daemon start`, and NGX-353 dogfooded the workflow-first start / approval / bounded dispatch path through real Momentum state. RC-5b later wired configured daemon-default live-wrapper profiles into that bounded daemon lane so dispatched steps can produce terminal executor evidence and reconcile through RC-2.
 ```
 
 ## Target Inventory
@@ -110,7 +110,7 @@ Future product surface:
 | Step model | Fixed coding workflow step kinds | Configurable StepDefinition list | Keep canonical coding workflow as one built-in definition |
 | Executor model | Runner profiles, M9 wrapper registry, and landed goal-loop / one-shot / script adapter modules plus the no-mistakes mirror | Per-step ExecutorDefinition and executor config | Wire persisted executor config into dispatch while reusing wrapper config as executor config input |
 | Loop state | Goal iteration jobs/artifacts; external GNHF/no-mistakes state | ExecutorInvocation / ExecutorRound records | Goal-loop adapter landed (M10-05), one-shot / script adapters landed (M10-06), and no-mistakes mirror landed (M10-07): bounded rounds and mirrored external state persist common loop evidence in Momentum SQLite |
-| Daemon scheduling | Drains goal iteration queue; opt-in lane recovers/scans/claims runnable workflow steps | Schedules workflow runs and step runs | Scheduler lane landed (M10-04); goal-loop and one-shot / script adapters now drive bounded rounds below StepRun, and no-mistakes now mirrors external state into one long-lived round; M10-09a wired the production dispatcher into bounded managed `daemon start`, and NGX-353 proved the shipped daemon path dispatches approved steps without monitor drift |
+| Daemon scheduling | Drains goal iteration queue; opt-in lane recovers/scans/claims runnable workflow steps | Schedules workflow runs and step runs | Scheduler lane landed (M10-04); goal-loop and one-shot / script adapters now drive bounded rounds below StepRun, and no-mistakes now mirrors external state into one long-lived round; M10-09a wired the production dispatcher into bounded managed `daemon start`, NGX-353 proved the shipped daemon path dispatches approved steps without monitor drift, and RC-5b later wired configured daemon-default live-wrapper profiles so the daemon can produce terminal executor evidence through RC-2 |
 | Repo safety | Repo locks plus verification / commit transactions | Same safety around executor finalization | Reuse M9 finalization and repo-lock heartbeats |
 | Approvals | M8 workflow approvals for imported runs | Workflow / step / gate approvals | Keep M8 rows; generalize boundary vocabulary |
 | Human gates | Split across approval rows, recovery flag, external TUI/IPC | Durable gates with allowed actions and decisions | Gate records and `workflow run decide` landed (M10-08): durable `workflow_gates` with allowed actions / policy envelope and operator + delegated-policy decisions, surfaced in status / handoff / monitor and reattached by `workflow run logs`; daemon-side gate emission during live execution remains later runtime work |
@@ -241,9 +241,11 @@ The regression matrix records that invariant, and the `doctor --json` marker
 reported the M10 closeout string until the later M11 closeout advanced the
 current marker again.
 
-Remaining runtime work after M10: drive scaffolded rounds through real adapter
-mechanisms as the default production loop, and land or continue deferring
-generalized `external-apply` / `subworkflow` dispatch.
+Remaining runtime work after M10 originally included driving scaffolded rounds
+through real adapter mechanisms as the default production loop; RC-5b later
+landed that path for configured daemon-default live-wrapper profiles. The
+generalized `external-apply` / `subworkflow` dispatch decisions still need to
+land or remain explicitly deferred.
 
 ## Risks
 

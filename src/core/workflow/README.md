@@ -81,8 +81,9 @@ RC-5b (NGX-492) has since added the dispatched-step execution path producer:
 `WorkflowStepExecutorDispatchResult` as terminal scaffold evidence, and
 `dispatch-executor-run.ts` composes "run the dispatched step's executor (through
 an injected real registry) → terminalize → RC-2 reconcile" so a configured
-profile finalizes the step exactly once and an unconfigured profile parks the run
-for manual recovery instead of fabricating success. `daemon-live-wrapper-profile.ts`
+profile finalizes the step exactly once and a configured profile that lacks the
+claimed step kind parks the run for manual recovery instead of fabricating
+success. `daemon-live-wrapper-profile.ts`
 has since added the daemon-default profile **source resolution**: a pure resolver
 that turns the `MOMENTUM_LIVE_WRAPPER_PROFILE` env var (a JSON profile file path)
 into an absent profile (unchanged default lane), a parsed `LiveWrapperProfile` the
