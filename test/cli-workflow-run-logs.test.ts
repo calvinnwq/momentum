@@ -121,6 +121,15 @@ function seedRunWithRound(db: MomentumDb, runId: string): void {
 }
 
 describe("momentum workflow run logs", () => {
+  it("advertises the command in top-level help", async () => {
+    const result = await run(["--help"]);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(
+      "momentum workflow run logs <run-id> [--data-dir <path>] [--json]"
+    );
+    expect(result.stderr).toBe("");
+  });
+
   it("requires <run-id>", async () => {
     const dataDir = makeTempDir();
     const result = await run([
