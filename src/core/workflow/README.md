@@ -21,7 +21,7 @@ in place; importers still reference the concrete modules below.
 | Gates | `gate.ts`, `gate-persist.ts` |
 | Leases | `leases.ts` |
 | Scheduling | `scheduler.ts` |
-| Dispatch | `dispatch.ts`, `dispatch-persist.ts`, `dispatch-execute.ts`, `dispatch-executor-run.ts`, `dispatch-executor-terminalize.ts`, `dispatch-reconcile.ts`, `dispatch-reconcile-execute.ts`, `dogfood-dispatch.ts` |
+| Dispatch | `dispatch.ts`, `dispatch-persist.ts`, `dispatch-execute.ts`, `dispatch-executor-run.ts`, `dispatch-executor-terminalize.ts`, `dispatch-reconcile.ts`, `dispatch-reconcile-execute.ts`, `daemon-live-wrapper-profile.ts`, `dogfood-dispatch.ts` |
 | Recovery & monitor | `recovery-artifact.ts`, `recovery-reconcile.ts`, `monitor-state.ts`, `monitor-envelope.ts` |
 | Handoff | `handoff.ts` |
 
@@ -82,6 +82,11 @@ RC-5b (NGX-492) has since added the dispatched-step execution path producer:
 `dispatch-executor-run.ts` composes "run the dispatched step's executor (through
 an injected real registry) → terminalize → RC-2 reconcile" so a configured
 profile finalizes the step exactly once and an unconfigured profile parks the run
-for manual recovery instead of fabricating success. Resolving the daemon-default
-live-wrapper profile source and wiring this seam into the `daemon start` lane
-remain deferred runtime-consolidation work.
+for manual recovery instead of fabricating success. `daemon-live-wrapper-profile.ts`
+has since added the daemon-default profile **source resolution**: a pure resolver
+that turns the `MOMENTUM_LIVE_WRAPPER_PROFILE` env var (a JSON profile file path)
+into an absent profile (unchanged default lane), a parsed `LiveWrapperProfile` the
+lane can build a real registry from, or an honest invalid outcome — never a
+silently fabricated profile. Deriving the per-step execution context
+(repo/run-dir/result paths) and wiring the resolved profile + producer into the
+`daemon start` lane remain deferred runtime-consolidation work.
