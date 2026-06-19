@@ -239,8 +239,10 @@ explicit **test/dogfood-only** opt-in fixture
 (`MOMENTUM_DOGFOOD_TERMINALIZE_DISPATCH`, off by default) that hides no production
 terminal gap behind it — the production terminal owner is the reconciliation seam
 above. Wiring that seam as the daemon default still needs real terminal executor
-evidence in production, which depends on RC-5 (real `WorkflowStepExecutor`
-adapters; the shipped adapters are fakes today). So narrowing the coexistence
+evidence in production. RC-5's fake demotion has landed (NGX-485): production
+dispatch no longer resolves to shipped fake successes by default, but
+unconfigured adapters honestly refuse with `runtime_unavailable` until a
+daemon-default live-wrapper profile is wired. So narrowing the coexistence
 (Path 3) and the dispatch scaffold (Path 4) is unblocked at the seam level but
 still gated on the remaining compatibility-lane migrations.
 
@@ -355,14 +357,13 @@ profile-backed registry), `test/live-step-executor.test.ts`,
 
 ## No Production Code Deleted In This Issue
 
-This planning issue deletes no production code. The acceptance criteria permit
-deleting a trivially unreachable branch only if the plan identifies one and the
-PR proves it with tests. The path-by-path audit above finds none within scope:
-the fake `ADAPTERS` map is live (it backs every dispatch today), the fail-closed
-branches are reachable safety paths, the dispatch scaffold is the live production
-dispatch effect, and goal-first plus `cwfp-*` import are live compatibility
-surfaces. Every candidate is reachable, so the milestone non-goal ("no broad
-production logic deletion") and the audit's defer list both hold.
+This planning issue deletes no production code by itself. RC-5's later fake demotion
+intentionally removed the fake production default from `src/` and moved that
+deterministic behavior behind `test/helpers/fake-workflow-step-executor.ts`; the
+remaining fail-closed branches, dispatch scaffold, goal-first paths, and
+`cwfp-*` import lanes are still reachable safety / compatibility surfaces. The
+milestone non-goal ("no broad production logic deletion") and the audit's defer
+list both hold.
 
 ## Follow-Up Issue Sequence
 

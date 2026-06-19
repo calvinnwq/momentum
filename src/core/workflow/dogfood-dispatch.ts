@@ -4,7 +4,7 @@
  * The production workflow-lane dispatcher (`dispatch-execute.ts`) stops
  * at the phase-1 *start scaffold*: it advances a claimed step `approved ->
  * running`, creates the durable `executor_invocations` / `executor_rounds` rows,
- * and *holds* the dispatch lease while the (RC-5, not-yet-landed) real bounded
+ * and *holds* the dispatch lease while the still-deferred daemon-default live
  * executor mechanism would drive the round to terminal out of band. Because nothing
  * terminalizes the step inside a single managed loop, the scheduler can only ever
  * dispatch the *first* runnable step per process — the NGX-390 proof needed three
@@ -45,10 +45,13 @@
  * gap behind it: it is the opt-in single-process multi-dispatch fixture
  * ({@link DOGFOOD_TERMINALIZE_DISPATCH_ENV_VAR}, off by default), never the
  * production terminal path. It is retained — not deleted — only because wiring the
- * reconciliation seam as the daemon default still needs real terminal executor
- * evidence in production (RC-5: real executor adapters; the shipped adapters are
- * fakes today). It still never spawns an agent, runs verification, or writes
- * anything external.
+ * reconciliation seam as the daemon default still needs a configured live-wrapper
+ * profile that yields terminal executor evidence in production. RC-5's fake
+ * demotion has landed — production dispatch no longer resolves to shipped fake
+ * successes by default — but unconfigured adapters honestly refuse with
+ * `runtime_unavailable`, so this fixture remains the opt-in way to exercise
+ * single-process multi-dispatch without spawning an agent, running verification,
+ * or writing anything external.
  */
 
 import type { MomentumDb } from "../../adapters/db.js";

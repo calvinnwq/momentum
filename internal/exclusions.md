@@ -38,8 +38,8 @@ Milestone status:
   `workflow import` CLI envelope and its built-CLI smoke coverage (NGX-314);
   the pure `WorkflowStepExecutor` boundary with typed input / result /
   checkpoint / artifact shapes, the registry keyed by `WorkflowStepKind`,
-  the stable error code taxonomy, and the deterministic fake executors per
-  kind (NGX-315); the pure `deriveWorkflowMonitorState` reducer
+  the stable error code taxonomy, and the original deterministic fake
+  executors per kind (NGX-315; now a test-only injected seam after NGX-485); the pure `deriveWorkflowMonitorState` reducer
   (`src/core/workflow/monitor-state.ts`) with per-lease freshness view,
   last-checkpoint visibility, monitor-advisory drift classification,
   deterministic machine-readable `nextAction` codes, and the recovery
@@ -51,7 +51,7 @@ Milestone status:
   field names, refusal taxonomy, and a `schemaVersion: 1` handoff field
   composed on top of the monitor reducer (NGX-317); and the end-to-end
   built-CLI smoke (`test/m7-e2e-smoke.test.ts`) driving a fresh
-  `.agent-workflows/<runId>/` fixture through the deterministic fake
+  `.agent-workflows/<runId>/` fixture through the injected deterministic fake
   executors and re-imported between steps via `workflow import`, covering
   happy-path completion, evidence linkage through `workflow handoff` after
   `evidence ingest`, and a failure path proving no ghost active / blocked

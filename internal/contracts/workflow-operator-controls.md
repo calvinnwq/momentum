@@ -159,13 +159,13 @@ The M3 daemon (`daemon start` / `daemon stop` / `daemon status` / `recovery clea
 - **M4 runners and policy.** Unchanged. M8 envelopes never spawn a managed child or a runner; live executor invocation stayed inside the skill for M8, with later Momentum-side wrappers governed by the M9 live-execution contract.
 - **M5 source / evidence / intent.** Source and intent schemas stay unchanged, and evidence CLI semantics stay wire-stable. M8 adds only the additive nullable `run_id` / `step_id` linkage columns and lookup index on `evidence_records`.
 - **M6 external apply.** Unchanged. `intent apply --external-apply`, `intent_apply_policy`, the `intent_apply_in_progress` CAS result, the comment-only default, the idempotency marker shape, and the `blocked` non-replay state stay wire-stable. M8 envelopes never issue an external write directly.
-- **M7 substrate.** Wire-stable. `workflow_runs` / `workflow_steps` / `workflow_approvals` / `workflow_leases`, `deriveWorkflowRunState`, `deriveWorkflowMonitorState`, `classifyWorkflowLease`, the `WorkflowStepExecutor` boundary, the deterministic fake executors, and the read-only `workflow import` / `workflow status` / `workflow handoff` envelopes all stay compatible. M8 reuses them and adds only nullable monitor-advisory columns on `workflow_runs` so imports and operator mutations can persist the snapshot consumed by status / handoff / monitor views; it does not rename or replace the substrate.
+- **M7 substrate.** Wire-stable. `workflow_runs` / `workflow_steps` / `workflow_approvals` / `workflow_leases`, `deriveWorkflowRunState`, `deriveWorkflowMonitorState`, `classifyWorkflowLease`, the `WorkflowStepExecutor` boundary, the deterministic fake executor seam (now injected from tests after NGX-485), and the read-only `workflow import` / `workflow status` / `workflow handoff` envelopes all stay compatible. M8 reuses them and adds only nullable monitor-advisory columns on `workflow_runs` so imports and operator mutations can persist the snapshot consumed by status / handoff / monitor views; it does not rename or replace the substrate.
 
 The M7 closeout regression matrix at [`../regression-matrix.md`](../regression-matrix.md) and the M7 milestone narrative at [`../milestones/m7-openclaw-coding-workflow-backend.md`](../milestones/m7-openclaw-coding-workflow-backend.md) stay the source of truth for the substrate guard. NGX-330 (M8-07) extends the matrix with the new operator-control failure modes M8 closes.
 
 ## Live wrapper boundary
 
-M8 explicitly deferred live executor wrappers around `gnhf-runner`, `gnhf-postflight`, `harness-delegate`, `no-mistakes-pipeline`, `model-evidence`, or `project-progress-refresh` to a later milestone; the M9-00 decision gate (NGX-331) then promoted Milestone 9 to own them. The deterministic M7 fake executors continue to satisfy the substrate boundary through M8. Momentum never schedules cron, never renders Discord, never spawns a managed child, and never invokes a live executor as part of an M8 envelope.
+M8 explicitly deferred live executor wrappers around `gnhf-runner`, `gnhf-postflight`, `harness-delegate`, `no-mistakes-pipeline`, `model-evidence`, or `project-progress-refresh` to a later milestone; the M9-00 decision gate (NGX-331) then promoted Milestone 9 to own them. The deterministic M7 fake executors satisfied the substrate boundary through M8 and now do so through the test-only injected seam after NGX-485. Momentum never schedules cron, never renders Discord, never spawns a managed child, and never invokes a live executor as part of an M8 envelope.
 
 If an M8 implementation slice discovers that its acceptance criteria require live process management, the slice stops and asks for a separately approved decision gate. M8 will not be re-scoped silently.
 
@@ -178,7 +178,7 @@ The `doctor --json` milestone string stayed pinned to the M7 closeout marker thr
 M8 surfaces are tested through Momentum's existing `pnpm test` pipeline:
 
 - Unit / reducer tests pin filter logic, transition legality, approval boundary validation, recovery classification, and evidence linkage helpers.
-- Built-CLI smoke (`test/m8-smoke.test.ts`) gains M8 coverage at NGX-330: list / approve / update-step / recovery / monitor / evidence linkage composing end-to-end against the deterministic fake executors, with no live OpenClaw pipeline, Discord, GitHub, Linear, or external tracker writes.
+- Built-CLI smoke (`test/m8-smoke.test.ts`) gains M8 coverage at NGX-330: list / approve / update-step / recovery / monitor / evidence linkage composing end-to-end against the injected deterministic fake executors, with no live OpenClaw pipeline, Discord, GitHub, Linear, or external tracker writes.
 - Contract tests pin the envelope names, refusal taxonomy, JSON field stability, and the preserved M3-M7 surfaces.
 - Public-docs hygiene stays in force: M8 planning lives under `internal/`, not under `docs/` or `README.md`.
 
