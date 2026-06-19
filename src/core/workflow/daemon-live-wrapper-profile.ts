@@ -4,10 +4,9 @@
  * RC-5 (NGX-485) made the production `WorkflowStepExecutor` default real: with no
  * live-wrapper profile wired, every canonical kind resolves to the honest
  * `runtime_unavailable` adapter rather than a fabricated success
- * (`step-executor-real-adapters.ts`). RC-5b's remaining narrowing is to let the
- * daemon actually run dispatched steps through a configured live command and feed
- * the terminal evidence into the RC-2 reconciliation seam. That narrowing has two
- * deferred halves (see `internal/contracts/runtime-consolidation-plan.md`):
+ * (`step-executor-real-adapters.ts`). RC-5b lets the daemon run dispatched
+ * steps through a configured live command and feed the terminal evidence into the
+ * RC-2 reconciliation seam. The production lane is split across two focused pieces:
  *
  *   1. **profile source resolution** — how the daemon discovers a
  *      {@link LiveWrapperProfile} from operator configuration (this module); and
@@ -15,12 +14,12 @@
  *      `executeAndReconcileDispatchedWorkflowStep` producer
  *      (`dispatch-executor-run.ts`) into the bounded `daemon start` workflow lane.
  *
- * This module owns the first half. It resolves the daemon's live-wrapper profile
- * from a single operator-controlled environment variable
+ * This module owns profile source resolution. It resolves the daemon's
+ * live-wrapper profile from a single operator-controlled environment variable
  * ({@link DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR}) that names a JSON profile file,
  * matching the repo's `MOMENTUM_*` opt-in convention
  * (`MOMENTUM_DOGFOOD_TERMINALIZE_DISPATCH`, `MOMENTUM_REAL_SMOKE_WORKFLOW`). The
- * resolution is deliberately three-valued so the daemon-lane wiring can stay
+ * resolution is deliberately three-valued so the daemon-lane caller can stay
  * honest:
  *
  *   - **not_configured** — the env var is unset/blank. The default `daemon start`

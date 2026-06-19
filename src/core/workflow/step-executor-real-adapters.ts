@@ -24,11 +24,9 @@
  * profile injected, dispatch never resolves to a fake success.
  *
  * The profile is supplied by dependency injection only. This module deliberately
- * does not read environment variables or the filesystem to discover a profile:
- * wiring a daemon-default profile source is future work
- * (`runtime-consolidation-plan.md` Paths 3/4 — "wiring that seam as the daemon
- * default still needs real terminal executor evidence"), so resolving a
- * production config source is left to the caller that owns that decision.
+ * does not read environment variables or the filesystem to discover a profile.
+ * Resolving a production config source is left to callers that own that decision,
+ * including the daemon-default live-wrapper profile lane.
  */
 
 import {

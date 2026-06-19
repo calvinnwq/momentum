@@ -42,11 +42,10 @@
  *     stranding a `running` step with no terminal evidence and no recovery gate.
  *
  * It takes the {@link WorkflowStepExecutorRegistry} and the per-step execution-context
- * deriver by injection: resolving the daemon-default live-wrapper profile into a
- * registry (`daemon-live-wrapper-profile.ts`) and deriving the run-dir / result / log
- * layout (`daemon-dispatch-exec-context.ts`) are the caller's concern (the remaining
- * RC-5b wiring slice). This module is the reusable, registry-agnostic dispatch-lane
- * composition.
+ * deriver by injection: daemon callers resolve the daemon-default live-wrapper
+ * profile into a registry (`daemon-live-wrapper-profile.ts`) and derive the run-dir
+ * / result / log layout (`daemon-dispatch-exec-context.ts`) before handing both to
+ * this reusable, registry-agnostic dispatch-lane composition.
  */
 
 import {
