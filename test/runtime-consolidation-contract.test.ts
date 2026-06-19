@@ -54,7 +54,7 @@ describe("runtime consolidation plan contract", () => {
     expect(contract).toMatch(/Prerequisite before removal of the fail-closed branch/i);
   });
 
-  it("decides the M9 / M10 step-finalization boundary and names the open gap", () => {
+  it("decides the M9 / M10 step-finalization boundary and landed seam", () => {
     const contract = readDoc(contractPath);
 
     expect(contract).toMatch(/M9 \/ M10 step-finalization boundary/i);
@@ -65,7 +65,8 @@ describe("runtime consolidation plan contract", () => {
     expect(contract).toContain("merge-cleanup` to the dispatchable `script`");
     expect(contract).toContain("linear-refresh` to the non-dispatchable, fail-closed");
     expect(contract).toMatch(/execution lane/i);
-    // The open gap: only the dogfood stand-in finalizes a dispatched step today.
+    // The landed RC-2 seam is the single production owner for dispatched steps;
+    // dogfood dispatch stays documented as an explicit test/dogfood-only fixture.
     expect(contract).toContain("workflow-dogfood-dispatch.ts");
     expect(contract).toMatch(/exactly one/i);
     expect(contract).toMatch(/reconciliation seam/i);
