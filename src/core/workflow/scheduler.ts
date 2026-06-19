@@ -649,6 +649,17 @@ function tryParkStaleRunningDispatchLease(
       db.exec("ROLLBACK");
       return undefined;
     }
+    const released = releaseWorkflowLease(db, {
+      runId: live.runId,
+      leaseKind: live.leaseKind,
+      holder: live.holder,
+      acquiredAt: live.acquiredAt,
+      now
+    });
+    if (!released.ok) {
+      db.exec("ROLLBACK");
+      return undefined;
+    }
 
     parked = { lease: live, runningStep };
     db.exec("COMMIT");

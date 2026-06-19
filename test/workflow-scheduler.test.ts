@@ -696,7 +696,7 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
     }
   });
 
-  it("parks a stale nonterminal dispatch invocation instead of auto-releasing its lease", () => {
+  it("parks a stale nonterminal dispatch invocation and releases its lease", () => {
     const db = openDb(makeTempDir());
     try {
       persistWorkflowDefinition(db, CODING_WORKFLOW_DEFINITION, { now: NOW });
@@ -752,10 +752,12 @@ describe("recoverStaleWorkflowLeases: durable stale-lease recovery (NGX-348)", (
       ]);
       expect(result.skipped).toEqual([]);
       expect(getWorkflowStep(db, "run-a", "preflight")?.state).toBe("running");
-      expect(getWorkflowLease(db, "run-a", "dispatch")?.releasedAt).toBeNull();
       const recovery = getWorkflowRunManualRecoveryState(db, "run-a");
       expect(recovery?.needsManualRecovery).toBe(true);
       expect(recovery?.reason).toContain("dispatch lease");
+      expect(getWorkflowLease(db, "run-a", "dispatch")?.releasedAt).toBe(
+        NOW + 100
+      );
       expect(selectRunnableWorkflowWork(db, { now: NOW + 100 })).toEqual({
         runnable: [],
         staleLeases: []

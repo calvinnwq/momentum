@@ -29,10 +29,9 @@
  * profile resolves a kind to a real live executor that spawns the local command;
  * an unconfigured registry resolves the kind to the honest
  * `runtime_unavailable` adapter so dispatch fails honestly into manual recovery
- * rather than fabricating a clean terminal. Resolving the daemon-default profile
- * source and wiring this seam into the `daemon start` lane is the caller's
- * decision (the next RC-5b slice); this module is the reusable, registry-agnostic
- * execution path.
+ * rather than fabricating a clean terminal. The `daemon start` lane owns
+ * resolving the daemon-default profile source before calling this reusable,
+ * registry-agnostic execution path.
  *
  * Boundary discipline (so RC-2 stays the single finalization owner and the M9
  * direct-finalize lane is never double-finalized):
