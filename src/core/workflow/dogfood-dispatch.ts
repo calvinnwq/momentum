@@ -4,8 +4,8 @@
  * The production workflow-lane dispatcher (`dispatch-execute.ts`) stops
  * at the phase-1 *start scaffold*: it advances a claimed step `approved ->
  * running`, creates the durable `executor_invocations` / `executor_rounds` rows,
- * and *holds* the dispatch lease while the (not-yet-landed) bounded executor
- * mechanism would drive the round to terminal out of band. Because nothing
+ * and *holds* the dispatch lease while the (RC-5, not-yet-landed) real bounded
+ * executor mechanism would drive the round to terminal out of band. Because nothing
  * terminalizes the step inside a single managed loop, the scheduler can only ever
  * dispatch the *first* runnable step per process — the NGX-390 proof needed three
  * separate `daemon start` invocations plus a manual `update-step` to advance past
@@ -35,6 +35,20 @@
  * the lease and either parked the run for manual recovery or wrote nothing — is
  * echoed back untouched. Terminalizing a parked run to `succeeded` would mask a
  * manual-recovery condition, the one unsafe move this gate exists to prevent.
+ *
+ * RC-2 status (NGX-480): the production owner of post-scaffold `workflow_steps`
+ * finalization is now `reconcileDispatchedWorkflowStep`
+ * (`dispatch-reconcile-execute.ts`), built on the pure decider
+ * `planWorkflowStepReconciliation` (`dispatch-reconcile.ts`); it finalizes a
+ * dispatched step from terminal executor evidence idempotently and single-owner.
+ * This module is therefore **test/dogfood-only** and hides no production terminal
+ * gap behind it: it is the opt-in single-process multi-dispatch fixture
+ * ({@link DOGFOOD_TERMINALIZE_DISPATCH_ENV_VAR}, off by default), never the
+ * production terminal path. It is retained — not deleted — only because wiring the
+ * reconciliation seam as the daemon default still needs real terminal executor
+ * evidence in production (RC-5: real executor adapters; the shipped adapters are
+ * fakes today). It still never spawns an agent, runs verification, or writes
+ * anything external.
  */
 
 import type { MomentumDb } from "../../adapters/db.js";

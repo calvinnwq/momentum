@@ -42,8 +42,8 @@ unreachable-branch audit below finds nothing safe to delete within scope.
 |---|---|---|---|---|
 | 1 | Goal-first CLI compatibility (`goal start` / `status` / `logs` / `handoff` / `recovery clear`) | Deprecate-later | Workflow-first equivalents for status/logs/handoff/recover + migration coverage; disentangle the shared iteration-finalization primitive the `goal-loop` executor reuses | RC-1 |
 | 2 | Imported `.agent-workflows` / `cwfp-*` compatibility | Defer | `NGX-404` default-switch dogfood passes its `coding-workflow-ownership.md` gates | `NGX-404` (existing) |
-| 3 | M9 live-wrapper direct `workflow_steps` advancement vs M10 executor-loop finalization | Keep (coexist) until boundary lands | A single reconciliation seam that finalizes dispatched steps from durable executor evidence, replacing the dogfood stand-in, with a no-double-write proof | RC-2 |
-| 4 | Production dispatch phase-1 scaffold (no fabricated result evidence) | Keep | Landed adapter finalization (RC-2) must replace the scaffold's terminal gap before the scaffold can narrow | RC-2 |
+| 3 | M9 live-wrapper direct `workflow_steps` advancement vs M10 executor-loop finalization | Keep (coexist) until boundary lands | A single reconciliation seam that finalizes dispatched steps from durable executor evidence, replacing the dogfood stand-in, with a no-double-write proof | RC-2 (seam landed, NGX-480) |
+| 4 | Production dispatch phase-1 scaffold (no fabricated result evidence) | Keep | Landed adapter finalization (RC-2) must replace the scaffold's terminal gap before the scaffold can narrow | RC-2 (seam landed, NGX-480) |
 | 5 | `external-apply` / `subworkflow` fail-closed executor families | Defer | A landed daemon-dispatchable adapter per family, behind the existing safety contracts | RC-3 (`external-apply`), RC-4 (`subworkflow`) |
 | 6 | Fake workflow-step executors shipped in `src/` | Deprecate-later | Real `WorkflowStepExecutor` adapters per kind, with the fakes demoted to a test-only seam while preserving substrate smoke | RC-5 |
 
@@ -211,6 +211,38 @@ with no path where both the M9 finalize and the M10 reconciliation finalize the
 same step. Until that proof exists, removing the dogfood stand-in or the scaffold
 would strand dispatched steps in `running`.
 
+**Landed (NGX-480).** RC-2's reconciliation seam now ships in production:
+`reconcileDispatchedWorkflowStep` (`src/core/workflow/dispatch-reconcile-execute.ts`),
+built on the pure, total decider `planWorkflowStepReconciliation`
+(`src/core/workflow/dispatch-reconcile.ts`). It reads the deterministic
+`<run>::<step>::dispatch` executor invocation, asks the decider what the
+invocation's terminal state means, and applies that inside one `BEGIN IMMEDIATE`
+transaction: a clean terminal (`succeeded` / `failed` / `cancelled`) finalizes the
+owning `workflow_steps` row via `finishWorkflowStep`, releases the held `dispatch`
+lease, and refreshes cached run-state through the ARCH-08 `runtime-state.ts` seam;
+an unclean terminal (`blocked` / `manual_recovery_required`) parks the run for
+operator recovery with a step-scoped gate instead of fabricating a clean terminal;
+a non-terminal invocation defers with no writes. It is structurally single-owner:
+it acts only when a `::dispatch` invocation exists, so it refuses an M9
+direct-finalized step that carries no executor rows, and it is idempotent on
+re-entry (an already-terminal step preserves its immutable record and only
+converges the lease / run-state, never changing terminal result semantics).
+`test/workflow-dispatch-reconcile-execute.test.ts` proves both directions of the
+no-double-finalize boundary — reconciliation refuses an M9-finalized step, and the
+M9 live wrapper (`runLiveWorkflowStep`) refuses an M10-dispatched step at its
+start-state gate before any durable mutation — so exactly one mechanism finalizes
+any given step.
+
+The `dogfood-dispatch.ts` stand-in is **not** deleted by RC-2; it is now an
+explicit **test/dogfood-only** opt-in fixture
+(`MOMENTUM_DOGFOOD_TERMINALIZE_DISPATCH`, off by default) that hides no production
+terminal gap behind it — the production terminal owner is the reconciliation seam
+above. Wiring that seam as the daemon default still needs real terminal executor
+evidence in production, which depends on RC-5 (real `WorkflowStepExecutor`
+adapters; the shipped adapters are fakes today). So narrowing the coexistence
+(Path 3) and the dispatch scaffold (Path 4) is unblocked at the seam level but
+still gated on the remaining compatibility-lane migrations.
+
 **Equivalent-behavior proof to preserve:** M9 — `test/live-step-orchestrator.test.ts`,
 `test/live-step-finalize.test.ts`, `test/live-step-run-recovery.test.ts`,
 `test/live-step-executor.test.ts`, `test/full-adapter-e2e.test.ts`. M10 —
@@ -318,12 +350,20 @@ and add `RC-*` placeholders for the genuinely new consolidation work.
    workflow-first `status` / `logs` / `handoff` / `recover` equivalents and prove
    byte-equivalent migration from the goal-first commands before narrowing
    goal-first CLI. Blocks on the gap-matrix "future product surface." (Path 1)
-2. **RC-2 — M9/M10 step-finalization reconciliation seam.** Land a single
-   idempotent seam that finalizes dispatched steps from terminal executor
-   evidence, replacing the `src/core/workflow/dogfood-dispatch.ts` stand-in
-   (formerly `src/workflow-dogfood-dispatch.ts`), with a no-double-write proof.
-   Unblocks narrowing of both the coexistence (Path 3) and the dispatch scaffold
-   (Path 4). Highest-value next runtime slice.
+2. **RC-2 — M9/M10 step-finalization reconciliation seam. ✅ Landed (NGX-480).**
+   The single idempotent seam that finalizes dispatched steps from terminal
+   executor evidence now ships as `reconcileDispatchedWorkflowStep`
+   (`src/core/workflow/dispatch-reconcile-execute.ts`) over the pure decider
+   `planWorkflowStepReconciliation` (`src/core/workflow/dispatch-reconcile.ts`),
+   with a bidirectional no-double-finalize proof
+   (`test/workflow-dispatch-reconcile-execute.test.ts`). The
+   `src/core/workflow/dogfood-dispatch.ts` stand-in (formerly
+   `src/workflow-dogfood-dispatch.ts`) is retained as an explicit
+   test/dogfood-only opt-in fixture rather than deleted, because making the seam
+   the daemon default needs real production executor evidence (RC-5); it now hides
+   no production terminal gap behind it. RC-2 unblocks narrowing of both the
+   coexistence (Path 3) and the dispatch scaffold (Path 4), each still gated on the
+   remaining compatibility-lane migrations.
 3. **RC-3 — `external-apply` daemon-dispatchable adapter** behind the M6
    external-apply safety contract, replacing the fail-closed branch with durable
    dispatch. (Path 5)
@@ -337,7 +377,11 @@ and add `RC-*` placeholders for the genuinely new consolidation work.
    import/read path survives regardless. (Path 2)
 
 Ordering note: RC-2 is the prerequisite for the most consolidation (Paths 3 and
-4) and should lead. RC-1 and RC-5 are independent. RC-3 / RC-4 and `NGX-404` are
+4) and led — its reconciliation seam has now **landed** (NGX-480). With RC-2 done,
+the next remaining runtime consolidation items are RC-1 (goal-first read-back /
+recovery parity) and RC-5 (real `WorkflowStepExecutor` adapters + fake demotion),
+which are independent; RC-5 in particular also unblocks wiring the RC-2
+reconciliation seam as the daemon default. RC-3 / RC-4 and `NGX-404` remain
 capability-gated and stay deferred until their adapters / dogfood land.
 
 ## Non-Goals
