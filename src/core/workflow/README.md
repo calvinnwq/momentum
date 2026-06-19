@@ -45,6 +45,9 @@ Other domains reach workflow behavior through these modules:
   status/handoff shapes, imported **type-only** (renderers format, they do not
   mutate state).
 - **Top-level dispatch** (`src/cli.ts`): `dispatch-execute`, `dogfood-dispatch`.
+- **Dispatched-step reconciliation**: `dispatch-reconcile` /
+  `dispatch-reconcile-execute` own the RC-2 pure/effect seam that finalizes a
+  dispatched step from terminal executor evidence.
 - **Executor / live-step / daemon runtime**: `run-reducer` (shared run-state
   reduction), `runtime-state` (cached run-state / monitor refresh after a
   caller-owned mutation), `step-executor`, `step-transitions`, `leases`,

@@ -42,8 +42,8 @@ unreachable-branch audit below finds nothing safe to delete within scope.
 |---|---|---|---|---|
 | 1 | Goal-first CLI compatibility (`goal start` / `status` / `logs` / `handoff` / `recovery clear`) | Deprecate-later | Workflow-first equivalents for status/logs/handoff/recover + migration coverage; disentangle the shared iteration-finalization primitive the `goal-loop` executor reuses | RC-1 |
 | 2 | Imported `.agent-workflows` / `cwfp-*` compatibility | Defer | `NGX-404` default-switch dogfood passes its `coding-workflow-ownership.md` gates | `NGX-404` (existing) |
-| 3 | M9 live-wrapper direct `workflow_steps` advancement vs M10 executor-loop finalization | Keep (coexist) until boundary lands | A single reconciliation seam that finalizes dispatched steps from durable executor evidence, replacing the dogfood stand-in, with a no-double-write proof | RC-2 (seam landed, NGX-480) |
-| 4 | Production dispatch phase-1 scaffold (no fabricated result evidence) | Keep | Landed adapter finalization (RC-2) must replace the scaffold's terminal gap before the scaffold can narrow | RC-2 (seam landed, NGX-480) |
+| 3 | M9 live-wrapper direct `workflow_steps` advancement vs M10 executor-loop finalization | Keep (coexist); boundary seam landed | A single reconciliation seam now finalizes dispatched steps from durable executor evidence with a no-double-finalize proof; narrowing still waits on compatibility-lane migrations | RC-2 (seam landed, NGX-480) |
+| 4 | Production dispatch phase-1 scaffold (no fabricated result evidence) | Keep | RC-2 replaced the seam-level terminal gap; narrowing the scaffold still waits for real terminal executor evidence / adapter migration | RC-2 (seam landed, NGX-480), RC-5 |
 | 5 | `external-apply` / `subworkflow` fail-closed executor families | Defer | A landed daemon-dispatchable adapter per family, behind the existing safety contracts | RC-3 (`external-apply`), RC-4 (`subworkflow`) |
 | 6 | Fake workflow-step executors shipped in `src/` | Deprecate-later | Real `WorkflowStepExecutor` adapters per kind, with the fakes demoted to a test-only seam while preserving substrate smoke | RC-5 |
 
@@ -176,9 +176,9 @@ assuming every step name belongs to exactly one family. `test/full-adapter-e2e.t
 definition's `script`-family `merge-cleanup` remains part of the M10 dispatch lane
 and is covered by the RC-2 reconciliation requirement below.
 
-**The open gap.** In the M10 dispatch lane no production code finalizes the
-`workflow_steps` row after the scaffold — the step is left `running`. The only
-code that calls `finishWorkflowStep` on a dispatcher-started step is the
+**Pre-RC-2 gap.** In the M10 dispatch lane no production code finalized the
+`workflow_steps` row after the scaffold — the step was left `running`. The only
+code that called `finishWorkflowStep` on a dispatcher-started step was the
 **dogfood stand-in** `src/core/workflow/dogfood-dispatch.ts`, not a production adapter
 (`finishWorkflowStep` callers: `src/core/executors/live-step-advance.ts`,
 `src/core/executors/live-step-orchestrator.ts`,
@@ -189,7 +189,7 @@ owns reconciling the scaffold with the real adapter's reattachable ids
 (`executor-loop.md` round-lifecycle note; `src/core/workflow/dispatch-execute.ts`
 id derivation).
 
-**Decision: Keep both, coexisting, behind a named future boundary.** The target
+**Decision: Keep both, coexisting, behind the landed RC-2 boundary.** The
 boundary is:
 
 - **M10 executor-loop adapters own per-round evidence** (`executor_invocations` /
@@ -204,12 +204,13 @@ boundary is:
   compatibility lanes until those lanes are migrated or retired. They are not
   collapsed into the executor-loop path by this milestone.
 
-**Prerequisite before narrowing the coexistence (RC-2).** A landed reconciliation
-adapter plus a test that proves, end-to-end through the production dispatch lane,
-that a dispatched step reaches a terminal `workflow_steps.state` exactly once,
-with no path where both the M9 finalize and the M10 reconciliation finalize the
-same step. Until that proof exists, removing the dogfood stand-in or the scaffold
-would strand dispatched steps in `running`.
+**Prerequisite before narrowing the coexistence (RC-2).** Now satisfied at the
+seam level: a landed reconciliation adapter plus tests prove, end-to-end through
+the production dispatch lane, that a dispatched step reaches a terminal
+`workflow_steps.state` exactly once, with no path where both the M9 finalize and
+the M10 reconciliation finalize the same step. Removing the dogfood fixture or
+narrowing the scaffold still waits on the compatibility-lane migrations below,
+especially RC-5 real executor evidence.
 
 **Landed (NGX-480).** RC-2's reconciliation seam now ships in production:
 `reconcileDispatchedWorkflowStep` (`src/core/workflow/dispatch-reconcile-execute.ts`),
@@ -261,12 +262,13 @@ deterministic `<run>::<step>::dispatch` ids, idempotently.
 **Decision: Keep.** The scaffold's no-fabricated-evidence rule is a recovery
 safety feature mandated by `executor-loop.md`: the dispatcher must carry no
 digests, artifact root, logs, summary, verification, commit, recovery, or human
-gate until executor work produces it. Deleting the scaffold before a landed
-adapter replaces its terminal gap (RC-2) would weaken recovery by either
-fabricating evidence or stranding the step.
+gate until executor work produces it. Deleting the scaffold before real executor
+evidence is wired through the landed RC-2 reconciliation seam would weaken
+recovery by either fabricating evidence or stranding the step.
 
-**Prerequisite before any narrowing.** Same as RC-2 — the scaffold can only
-narrow once adapter finalization owns the terminal `workflow_steps` write.
+**Prerequisite before any narrowing.** The RC-2 terminal owner has landed, but the
+scaffold can only narrow once real executor adapters provide terminal evidence to
+that seam in production.
 
 **Equivalent-behavior proof to preserve:** `test/workflow-dispatch-execute.test.ts`
 (the "creates the scaffold round with no fabricated evidence", stable-id, and
@@ -391,4 +393,5 @@ capability-gated and stay deferred until their adapters / dogfood land.
 - No new migrations, CLI commands, or daemon scheduling changes — this is a plan.
 - No external writes, remote git operations, or Linear updates from runtime code.
 - No collapsing of the M9 direct-finalize path into the M10 executor-loop path
-  within this milestone; that is RC-2's future work, gated on its proof.
+  within this milestone; RC-2 proved the reconciliation boundary, while
+  compatibility-lane narrowing remains future work.

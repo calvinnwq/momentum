@@ -5,9 +5,9 @@
  * owned durable runtime mutation: re-read reducer-compatible step / lease rows,
  * derive the monitor view, and refresh the cached `workflow_runs` status plus
  * monitor advisory columns. It deliberately does not own step finalization
- * policy: callers still decide whether they are dispatch-starting,
- * terminalizing a dogfood step, or applying an operator transition before
- * calling this seam.
+ * policy: callers still decide whether they are dispatch-starting, reconciling
+ * terminal executor evidence, terminalizing a dogfood step, or applying an
+ * operator transition before calling this seam.
  */
 
 import type { MomentumDb } from "../../adapters/db.js";
@@ -52,9 +52,9 @@ export type RefreshWorkflowRunRuntimeStateInput = {
 
 /**
  * Load the workflow rows that the reducer / monitor state need. Keeping this in
- * one workflow-owned module lets dispatch, dogfood terminalization, and
- * operator/recovery callers share the same mapping instead of exporting
- * incidental helpers from whichever caller first needed them.
+ * one workflow-owned module lets dispatch, reconciliation, dogfood
+ * terminalization, and operator/recovery callers share the same mapping instead
+ * of exporting incidental helpers from whichever caller first needed them.
  */
 export function loadWorkflowRuntimeStateRows(
   db: MomentumDb,

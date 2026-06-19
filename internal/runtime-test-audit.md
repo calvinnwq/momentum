@@ -472,7 +472,7 @@ Decisions at a glance (full evidence and prerequisites live in the plan):
 No production code is deleted: the plan's unreachable-branch audit finds every
 candidate reachable. Actual deletion / migration work is listed as a `RC-1`..`RC-5`
 follow-up sequence (plus the existing `NGX-404`), led by `RC-2` (now landed as
-  NGX-480), the M9/M10 reconciliation seam.
+NGX-480), the M9/M10 reconciliation seam.
 
 ## Runtime Path Classification
 
