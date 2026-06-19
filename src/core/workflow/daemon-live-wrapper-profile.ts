@@ -23,8 +23,8 @@
  * honest:
  *
  *   - **not_configured** — the env var is unset/blank. The default `daemon start`
- *     lane is unchanged; dispatched steps resolve to `runtime_unavailable` and
- *     park for manual recovery rather than fabricating success.
+ *     lane is unchanged; the caller keeps its existing base/dogfood dispatch
+ *     behavior and does not synthesize a profile.
  *   - **resolved** — a readable, valid profile the lane can build a real executor
  *     registry from (`buildRealWorkflowStepExecutorRegistry`).
  *   - **invalid** — the env var is set but the source is unreadable, not JSON, or
