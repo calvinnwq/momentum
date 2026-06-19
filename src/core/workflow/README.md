@@ -21,7 +21,7 @@ in place; importers still reference the concrete modules below.
 | Gates | `gate.ts`, `gate-persist.ts` |
 | Leases | `leases.ts` |
 | Scheduling | `scheduler.ts` |
-| Dispatch | `dispatch.ts`, `dispatch-persist.ts`, `dispatch-execute.ts`, `dispatch-executor-run.ts`, `dispatch-executor-terminalize.ts`, `dispatch-reconcile.ts`, `dispatch-reconcile-execute.ts`, `daemon-live-wrapper-profile.ts`, `dogfood-dispatch.ts` |
+| Dispatch | `dispatch.ts`, `dispatch-persist.ts`, `dispatch-execute.ts`, `dispatch-executor-run.ts`, `dispatch-executor-terminalize.ts`, `dispatch-reconcile.ts`, `dispatch-reconcile-execute.ts`, `daemon-live-wrapper-profile.ts`, `live-wrapper-dispatch.ts`, `dogfood-dispatch.ts` |
 | Recovery & monitor | `recovery-artifact.ts`, `recovery-reconcile.ts`, `monitor-state.ts`, `monitor-envelope.ts` |
 | Handoff | `handoff.ts` |
 
@@ -87,6 +87,13 @@ has since added the daemon-default profile **source resolution**: a pure resolve
 that turns the `MOMENTUM_LIVE_WRAPPER_PROFILE` env var (a JSON profile file path)
 into an absent profile (unchanged default lane), a parsed `LiveWrapperProfile` the
 lane can build a real registry from, or an honest invalid outcome — never a
-silently fabricated profile. Deriving the per-step execution context
-(repo/run-dir/result paths) and wiring the resolved profile + producer into the
-`daemon start` lane remain deferred runtime-consolidation work.
+silently fabricated profile. `live-wrapper-dispatch.ts` then composes the base
+dispatch with that producer into a `WorkflowStepDispatch`
+(`createLiveWrapperWorkflowDispatch`): the production analogue of the dogfood
+`createTerminalizingWorkflowDispatch`, it starts the scaffold via the base dispatch
+and — only for a genuinely-started dispatch — runs the executor + RC-2 reconcile in
+the same tick, taking the registry and the per-step exec-context deriver by
+injection and leaving RC-2 the single finalization owner. Deriving the per-step
+execution context (repo/run-dir/result paths) and wiring the resolved profile +
+this composition into the `daemon start` lane remain deferred
+runtime-consolidation work.
