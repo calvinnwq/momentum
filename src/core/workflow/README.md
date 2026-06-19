@@ -21,7 +21,7 @@ in place; importers still reference the concrete modules below.
 | Gates | `gate.ts`, `gate-persist.ts` |
 | Leases | `leases.ts` |
 | Scheduling | `scheduler.ts` |
-| Dispatch | `dispatch.ts`, `dispatch-persist.ts`, `dispatch-execute.ts`, `dispatch-reconcile.ts`, `dispatch-reconcile-execute.ts`, `dogfood-dispatch.ts` |
+| Dispatch | `dispatch.ts`, `dispatch-persist.ts`, `dispatch-execute.ts`, `dispatch-executor-run.ts`, `dispatch-executor-terminalize.ts`, `dispatch-reconcile.ts`, `dispatch-reconcile-execute.ts`, `dogfood-dispatch.ts` |
 | Recovery & monitor | `recovery-artifact.ts`, `recovery-reconcile.ts`, `monitor-state.ts`, `monitor-envelope.ts` |
 | Handoff | `handoff.ts` |
 
@@ -74,5 +74,14 @@ the dogfood stand-in, or narrow M9/M10 compatibility paths.
 RC-5 fake demotion has since landed in this folder: the production
 `WorkflowStepExecutor` default no longer fabricates fake successes, while the
 deterministic fake registry lives under `test/helpers/` and is injected only by
-tests that need substrate smoke coverage. Wiring a daemon-default live-wrapper
-profile remains deferred runtime-consolidation work.
+tests that need substrate smoke coverage.
+
+RC-5b (NGX-492) has since added the dispatched-step execution path producer:
+`dispatch-executor-terminalize.ts` records a finished
+`WorkflowStepExecutorDispatchResult` as terminal scaffold evidence, and
+`dispatch-executor-run.ts` composes "run the dispatched step's executor (through
+an injected real registry) → terminalize → RC-2 reconcile" so a configured
+profile finalizes the step exactly once and an unconfigured profile parks the run
+for manual recovery instead of fabricating success. Resolving the daemon-default
+live-wrapper profile source and wiring this seam into the `daemon start` lane
+remain deferred runtime-consolidation work.
