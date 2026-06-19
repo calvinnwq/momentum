@@ -21,7 +21,7 @@ in place; importers still reference the concrete modules below.
 | Gates | `gate.ts`, `gate-persist.ts` |
 | Leases | `leases.ts` |
 | Scheduling | `scheduler.ts` |
-| Dispatch | `dispatch.ts`, `dispatch-persist.ts`, `dispatch-execute.ts`, `dispatch-executor-run.ts`, `dispatch-executor-terminalize.ts`, `dispatch-reconcile.ts`, `dispatch-reconcile-execute.ts`, `daemon-live-wrapper-profile.ts`, `live-wrapper-dispatch.ts`, `dogfood-dispatch.ts` |
+| Dispatch | `dispatch.ts`, `dispatch-persist.ts`, `dispatch-execute.ts`, `dispatch-executor-run.ts`, `dispatch-executor-terminalize.ts`, `dispatch-reconcile.ts`, `dispatch-reconcile-execute.ts`, `daemon-live-wrapper-profile.ts`, `daemon-dispatch-exec-context.ts`, `live-wrapper-dispatch.ts`, `dogfood-dispatch.ts` |
 | Recovery & monitor | `recovery-artifact.ts`, `recovery-reconcile.ts`, `monitor-state.ts`, `monitor-envelope.ts` |
 | Handoff | `handoff.ts` |
 
@@ -93,7 +93,14 @@ dispatch with that producer into a `WorkflowStepDispatch`
 `createTerminalizingWorkflowDispatch`, it starts the scaffold via the base dispatch
 and — only for a genuinely-started dispatch — runs the executor + RC-2 reconcile in
 the same tick, taking the registry and the per-step exec-context deriver by
-injection and leaving RC-2 the single finalization owner. Deriving the per-step
-execution context (repo/run-dir/result paths) and wiring the resolved profile +
-this composition into the `daemon start` lane remain deferred
-runtime-consolidation work.
+injection and leaving RC-2 the single finalization owner.
+`daemon-dispatch-exec-context.ts` has since added that per-step exec-context
+**deriver**: a pure resolver (plus its injected run-row loader) that maps a run's
+provenance to the bounded session's working directory — a native run runs under
+`<repoPath>/.agent-workflows/<runId>/` and an imported run under its source
+artifact's run dir — and refuses honestly with `missing_repo_path` (rather than
+fabricating a working directory) when the run has no repo, so the lane can fail
+closed into manual recovery. Wiring the resolved profile + registry + this deriver
+into the `daemon start` lane (composing `live-wrapper-dispatch.ts` inside
+`resolveDaemonWorkflowDispatch`) is the one remaining deferred
+runtime-consolidation slice.
