@@ -29,6 +29,11 @@ import {
   reconcileDispatchedWorkflowStep,
   WORKFLOW_RECONCILE_RESULT_STATUS
 } from "../src/core/workflow/dispatch-reconcile-execute.js";
+import { runLiveWorkflowStep } from "../src/core/executors/live-step-orchestrator.js";
+import {
+  getWorkflowStepExecutor,
+  type WorkflowStepExecutorInput
+} from "../src/core/workflow/step-executor.js";
 
 /**
  * RC-2 (NGX-480) production reconciliation effect twin.
@@ -367,6 +372,76 @@ describe("reconcileDispatchedWorkflowStep — M9 / M10 boundary", () => {
     expect(
       getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
     ).toBe(false);
+  });
+
+  it("refuses to let the M9 live-wrapper finalize an M10-dispatched step, leaving reconciliation the only finalizer", () => {
+    const db = openSeededDb();
+    // M10 lane: drive preflight through the REAL production dispatch so it is
+    // `running` under a held dispatch lease with its `<run>::<step>::dispatch`
+    // invocation — exactly how the daemon leaves it before the executor ends.
+    dispatchStep(db, "preflight");
+    expect(stepRow(db, "preflight").state).toBe("running");
+    expect(countInvocations(db)).toBe(1);
+    expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).toBeNull();
+
+    // The M9 live wrapper owns the `managed-step` lane (startWorkflowStep
+    // approved -> running -> executor -> finishWorkflowStep). Pointed at the
+    // already-`running`, M10-dispatched step, it MUST refuse before any durable
+    // mutation: a managed step can only start from `approved`. So the M9
+    // direct-finalize path can never close a step the M10 dispatch lane owns.
+    const executor = getWorkflowStepExecutor("preflight");
+    if (!executor) throw new Error("test setup: missing fake preflight executor");
+    const executorInput: WorkflowStepExecutorInput = {
+      runId: RUN_ID,
+      stepId: "preflight",
+      kind: "preflight",
+      attempt: 1,
+      repoPath: "/repos/momentum",
+      runDir: "/repos/momentum/.momentum-run",
+      resultJsonPath: "/repos/momentum/.momentum-run/result.json",
+      executorLogPath: "/repos/momentum/.momentum-run/executor.log"
+    };
+    const live = runLiveWorkflowStep({
+      db,
+      runId: RUN_ID,
+      stepId: "preflight",
+      holder: WORKER,
+      leaseExpiresAt: NOW + 60_000,
+      executor,
+      executorInput,
+      now: NOW + 5
+    });
+
+    // The live wrapper refused at the start-state gate: it never started the
+    // step, acquired no managed-step lease, and minted no executor rows.
+    expect(live.ok).toBe(false);
+    expect(live.stage).toBe("input");
+    expect(live.inputError).toContain("cannot start from state running");
+    expect(live.lease.acquired).toBe(false);
+    expect(getWorkflowLease(db, RUN_ID, "managed-step")).toBeUndefined();
+
+    // The M10-dispatched step is untouched by the refused M9 attempt: still
+    // `running`, still exactly the one dispatch invocation, dispatch lease held.
+    expect(stepRow(db, "preflight").state).toBe("running");
+    expect(countInvocations(db)).toBe(1);
+    expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).toBeNull();
+
+    // Reconciliation from terminal executor evidence is now the ONLY path that
+    // finalizes the dispatched step — exactly once, stamped with the rc2 marker
+    // (not an M9 live digest), with no second executor write.
+    driveInvocationTerminal(db, "preflight", "succeeded");
+    const reconciled = reconcileDispatchedWorkflowStep({
+      db,
+      runId: RUN_ID,
+      stepId: "preflight",
+      now: RECONCILE_AT
+    });
+    expect(reconciled.status).toBe(WORKFLOW_RECONCILE_RESULT_STATUS.finalized);
+    const step = stepRow(db, "preflight");
+    expect(step.state).toBe("succeeded");
+    expect(step.resultDigest).toContain("rc2-reconcile");
+    expect(countInvocations(db)).toBe(1);
+    expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
   });
 
   it("never overrides an existing terminal result (terminal immutability)", () => {
