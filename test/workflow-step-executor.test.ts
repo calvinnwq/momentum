@@ -14,6 +14,7 @@ import {
   type WorkflowStepExecutorInput,
   type WorkflowStepExecutorKind
 } from "../src/core/workflow/step-executor.js";
+import { buildFakeWorkflowStepExecutorRegistry } from "./helpers/fake-workflow-step-executor.js";
 import {
   deriveWorkflowRunState,
   isTerminalStepState,
@@ -42,6 +43,22 @@ function makeInput(
   };
 }
 
+/**
+ * RC-5 (NGX-485) flipped the production default to real adapters and moved the
+ * deterministic fake behind a test-only seam. The boundary contract injects that
+ * seam through `dispatchWorkflowStepExecutor`'s `registry` parameter to exercise
+ * the fake outcome / config surface, while the production-default cases dispatch
+ * with no registry to prove the honest `runtime_unavailable` default.
+ */
+const FAKE_REGISTRY = buildFakeWorkflowStepExecutorRegistry();
+
+function dispatchFake(
+  kind: string,
+  input: WorkflowStepExecutorInput
+): ReturnType<typeof dispatchWorkflowStepExecutor> {
+  return dispatchWorkflowStepExecutor(kind, input, FAKE_REGISTRY);
+}
+
 describe("workflow-step-executor registry", () => {
   it("registers one executor per canonical step kind", () => {
     expect([...listWorkflowStepExecutorKinds()]).toEqual([
@@ -65,7 +82,7 @@ describe("workflow-step-executor registry", () => {
     }
   });
 
-  it("marks all built-in kinds as executing for the first M7-03 slice", () => {
+  it("marks every built-in kind as executing through the real default adapters", () => {
     expect([...listExecutingWorkflowStepExecutorKinds()]).toEqual([
       ...WORKFLOW_STEP_EXECUTOR_KINDS
     ]);
@@ -111,10 +128,32 @@ describe("workflow-step-executor registry", () => {
   });
 });
 
-describe("dispatchWorkflowStepExecutor", () => {
-  it("returns a succeeded fake result for the default outcome and surfaces the log/result paths", () => {
+describe("dispatchWorkflowStepExecutor production default (honest, no fake)", () => {
+  it("refuses with runtime_unavailable for the unconfigured default and surfaces the log/result paths", () => {
     const input = makeInput({ kind: "preflight" });
     const out = dispatchWorkflowStepExecutor("preflight", input);
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.code).toBe("runtime_unavailable");
+    expect(out.error).toContain("preflight");
+    expect(out.executorLogPath).toBe(input.executorLogPath);
+    expect(out.resultJsonPath).toBe(input.resultJsonPath);
+  });
+
+  it("never fabricates a terminal success for any canonical kind by default", () => {
+    for (const kind of WORKFLOW_STEP_EXECUTOR_KINDS) {
+      const out = dispatchWorkflowStepExecutor(kind, makeInput({ kind }));
+      expect(out.ok, `expected ${kind} default to refuse`).toBe(false);
+      if (out.ok) continue;
+      expect(out.code).toBe("runtime_unavailable");
+    }
+  });
+});
+
+describe("dispatchWorkflowStepExecutor through the injected fake seam", () => {
+  it("returns a succeeded fake result for the default outcome and surfaces the log/result paths", () => {
+    const input = makeInput({ kind: "preflight" });
+    const out = dispatchFake("preflight", input);
     expect(out.ok).toBe(true);
     if (!out.ok) return;
     expect(out.result.state).toBe("succeeded");
@@ -138,7 +177,7 @@ describe("dispatchWorkflowStepExecutor", () => {
         resultDigest: "sha256:result"
       }
     });
-    const out = dispatchWorkflowStepExecutor("implementation", input);
+    const out = dispatchFake("implementation", input);
     expect(out.ok).toBe(true);
     if (!out.ok) return;
     expect(out.result.artifacts).toEqual([
@@ -155,7 +194,7 @@ describe("dispatchWorkflowStepExecutor", () => {
       kind: "no-mistakes",
       config: { outcome: "fail_retry", errorMessage: "patch conflict" }
     });
-    const out = dispatchWorkflowStepExecutor("no-mistakes", input);
+    const out = dispatchFake("no-mistakes", input);
     expect(out.ok).toBe(true);
     if (!out.ok) return;
     expect(out.result.state).toBe("failed");
@@ -170,7 +209,7 @@ describe("dispatchWorkflowStepExecutor", () => {
       kind: "merge-cleanup",
       config: { outcome: "fail_manual_recovery" }
     });
-    const out = dispatchWorkflowStepExecutor("merge-cleanup", input);
+    const out = dispatchFake("merge-cleanup", input);
     expect(out.ok).toBe(true);
     if (!out.ok) return;
     expect(out.result.state).toBe("failed");
@@ -184,7 +223,7 @@ describe("dispatchWorkflowStepExecutor", () => {
       kind: "postflight",
       config: { outcome: "skip" }
     });
-    const out = dispatchWorkflowStepExecutor("postflight", input);
+    const out = dispatchFake("postflight", input);
     expect(out.ok).toBe(true);
     if (!out.ok) return;
     expect(out.result.state).toBe("skipped");
@@ -197,7 +236,7 @@ describe("dispatchWorkflowStepExecutor", () => {
       kind: "implementation",
       config: { outcome: "throw", errorMessage: "boom" }
     });
-    const out = dispatchWorkflowStepExecutor("implementation", input);
+    const out = dispatchFake("implementation", input);
     expect(out.ok).toBe(false);
     if (out.ok) return;
     expect(out.code).toBe("executor_threw");
@@ -214,13 +253,30 @@ describe("dispatchWorkflowStepExecutor", () => {
         errorMessage: "linear cli not installed"
       }
     });
-    const out = dispatchWorkflowStepExecutor("linear-refresh", input);
+    const out = dispatchFake("linear-refresh", input);
     expect(out.ok).toBe(false);
     if (out.ok) return;
     expect(out.code).toBe("runtime_unavailable");
     expect(out.error).toContain("linear cli not installed");
   });
 
+  it("propagates a taxonomy errorCode override on fail_retry results", () => {
+    const input = makeInput({
+      kind: "preflight",
+      config: {
+        outcome: "fail_retry",
+        errorCode: "command_timed_out"
+      }
+    });
+    const out = dispatchFake("preflight", input);
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.result.state).toBe("failed");
+    expect(out.result.errorCode).toBe("command_timed_out");
+  });
+});
+
+describe("dispatchWorkflowStepExecutor input validation (registry-agnostic boundary)", () => {
   it("surfaces invalid_input for dispatch kind when input.kind does not match", () => {
     const base = makeInput({ kind: "preflight" });
     const out = dispatchWorkflowStepExecutor("gnhf", base);
@@ -267,13 +323,15 @@ describe("dispatchWorkflowStepExecutor", () => {
     expect(out.code).toBe("invalid_input");
     expect(out.error).toContain("attempt");
   });
+});
 
+describe("fake seam config validation (test-only config schema)", () => {
   it("rejects malformed config with invalid_input", () => {
     const input = makeInput({
       kind: "preflight",
       config: { outcome: "explode" } as unknown as Record<string, unknown>
     });
-    const out = dispatchWorkflowStepExecutor("preflight", input);
+    const out = dispatchFake("preflight", input);
     expect(out.ok).toBe(false);
     if (out.ok) return;
     expect(out.code).toBe("invalid_input");
@@ -285,7 +343,7 @@ describe("dispatchWorkflowStepExecutor", () => {
       kind: "preflight",
       config: [] as unknown as Record<string, unknown>
     });
-    const out = dispatchWorkflowStepExecutor("preflight", input);
+    const out = dispatchFake("preflight", input);
     expect(out.ok).toBe(false);
     if (out.ok) return;
     expect(out.code).toBe("invalid_input");
@@ -297,7 +355,7 @@ describe("dispatchWorkflowStepExecutor", () => {
       kind: "preflight",
       config: { errorCode: 42 } as unknown as Record<string, unknown>
     });
-    const out = dispatchWorkflowStepExecutor("preflight", input);
+    const out = dispatchFake("preflight", input);
     expect(out.ok).toBe(false);
     if (out.ok) return;
     expect(out.code).toBe("invalid_input");
@@ -312,7 +370,7 @@ describe("dispatchWorkflowStepExecutor", () => {
         errorCode: "gnhf_prompt_rejected"
       } as unknown as Record<string, unknown>
     });
-    const out = dispatchWorkflowStepExecutor("preflight", input);
+    const out = dispatchFake("preflight", input);
     expect(out.ok).toBe(false);
     if (out.ok) return;
     expect(out.code).toBe("invalid_input");
@@ -320,27 +378,12 @@ describe("dispatchWorkflowStepExecutor", () => {
     expect(out.error).toContain("command_failed");
   });
 
-  it("propagates a taxonomy errorCode override on fail_retry results", () => {
-    const input = makeInput({
-      kind: "preflight",
-      config: {
-        outcome: "fail_retry",
-        errorCode: "command_timed_out"
-      }
-    });
-    const out = dispatchWorkflowStepExecutor("preflight", input);
-    expect(out.ok).toBe(true);
-    if (!out.ok) return;
-    expect(out.result.state).toBe("failed");
-    expect(out.result.errorCode).toBe("command_timed_out");
-  });
-
   it("rejects non-string errorMessage in config", () => {
     const input = makeInput({
       kind: "preflight",
       config: { errorMessage: false } as unknown as Record<string, unknown>
     });
-    const out = dispatchWorkflowStepExecutor("preflight", input);
+    const out = dispatchFake("preflight", input);
     expect(out.ok).toBe(false);
     if (out.ok) return;
     expect(out.code).toBe("invalid_input");
@@ -352,7 +395,7 @@ describe("dispatchWorkflowStepExecutor", () => {
       kind: "preflight",
       config: { resultDigest: 99 } as unknown as Record<string, unknown>
     });
-    const out = dispatchWorkflowStepExecutor("preflight", input);
+    const out = dispatchFake("preflight", input);
     expect(out.ok).toBe(false);
     if (out.ok) return;
     expect(out.code).toBe("invalid_input");
@@ -366,7 +409,7 @@ describe("dispatchWorkflowStepExecutor", () => {
         artifacts: [{ kind: 5, path: "x" }] as unknown as Record<string, unknown>[]
       }
     });
-    const out = dispatchWorkflowStepExecutor("preflight", input);
+    const out = dispatchFake("preflight", input);
     expect(out.ok).toBe(false);
     if (out.ok) return;
     expect(out.code).toBe("invalid_input");
@@ -380,7 +423,7 @@ describe("dispatchWorkflowStepExecutor", () => {
         artifacts: [{ kind: "plan", path: "p.json", digest: 3 } as unknown as Record<string, unknown>]
       }
     });
-    const out = dispatchWorkflowStepExecutor("preflight", input);
+    const out = dispatchFake("preflight", input);
     expect(out.ok).toBe(false);
     if (out.ok) return;
     expect(out.code).toBe("invalid_input");
@@ -394,7 +437,7 @@ describe("dispatchWorkflowStepExecutor", () => {
         checkpointMessages: [1, 2] as unknown as string[]
       }
     });
-    const out = dispatchWorkflowStepExecutor("preflight", input);
+    const out = dispatchFake("preflight", input);
     expect(out.ok).toBe(false);
     if (out.ok) return;
     expect(out.code).toBe("invalid_input");
@@ -406,7 +449,7 @@ describe("dispatchWorkflowStepExecutor", () => {
       kind: "preflight",
       config: { artifacts: "not-array" } as unknown as Record<string, unknown>
     });
-    const out = dispatchWorkflowStepExecutor("preflight", input);
+    const out = dispatchFake("preflight", input);
     expect(out.ok).toBe(false);
     if (out.ok) return;
     expect(out.code).toBe("invalid_input");
@@ -418,7 +461,7 @@ describe("dispatchWorkflowStepExecutor", () => {
       kind: "preflight",
       config: { checkpointMessages: "not-array" } as unknown as Record<string, unknown>
     });
-    const out = dispatchWorkflowStepExecutor("preflight", input);
+    const out = dispatchFake("preflight", input);
     expect(out.ok).toBe(false);
     if (out.ok) return;
     expect(out.code).toBe("invalid_input");
@@ -467,7 +510,7 @@ describe("fake executors driving the workflow state machine", () => {
         kind: entry.kind,
         stepId: entry.stepId
       });
-      const out = dispatchWorkflowStepExecutor(entry.kind, input);
+      const out = dispatchFake(entry.kind, input);
       expect(out.ok).toBe(true);
       if (!out.ok) return;
       const nextState = out.result.state;
@@ -491,7 +534,7 @@ describe("fake executors driving the workflow state machine", () => {
         required: true
       }
     ];
-    const out = dispatchWorkflowStepExecutor(
+    const out = dispatchFake(
       "preflight",
       makeInput({
         kind: "preflight",

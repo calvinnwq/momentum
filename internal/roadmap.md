@@ -101,8 +101,10 @@ cached run-state / monitor refresh after caller-owned durable mutations. It does
 not choose the M9/M10 finalization owner; that landed separately as `RC-2`
 (NGX-480) with `dispatch-reconcile.ts` /
 `dispatch-reconcile-execute.ts`. Accepted future runtime slices are indexed in
-[`internal/plans/README.md`](plans/README.md); the next independent runtime
-consolidation items are `RC-1` and `RC-5`.
+[`internal/plans/README.md`](plans/README.md). `RC-5`'s fake demotion has since
+landed (NGX-485: the production executor default is real adapters, the fakes are a
+test-only injected seam); the next independent runtime consolidation items are
+`RC-1` and the remaining `RC-5` narrowing (a daemon-default live-wrapper profile).
 
 The `doctor` readiness marker tracks the **most recently closed** milestone. It currently reads `Milestone 11: CLI architecture refactor (NGX-411, NGX-412, NGX-413, NGX-414, NGX-415, NGX-416, NGX-417, NGX-418, NGX-419) complete`. The marker advanced from the M6 closeout string to `Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete` at the M7 closeout slice (NGX-319), stayed pinned to the M7 string through every M8 implementation slice, advanced to the M8 string at the M8 closeout slice (NGX-330), advanced again to `Milestone 10: workflow-first runtime (NGX-344, NGX-345, NGX-346, NGX-347, NGX-348, NGX-349, NGX-350, NGX-351, NGX-352, NGX-367, NGX-353) complete` at the M10 closeout slice (NGX-353), and advanced to the M11 string at the M11 closeout slice (NGX-419).
 

@@ -38,9 +38,18 @@ import {
 import type { LiveWrapperProfile } from "../../adapters/live-wrapper-registry.js";
 import {
   WORKFLOW_STEP_EXECUTOR_KINDS,
+  createUnconfiguredWorkflowStepExecutor,
   type WorkflowStepExecutor,
   type WorkflowStepExecutorKind
 } from "./step-executor.js";
+
+/**
+ * Re-exported from the base executor module (RC-5 moved the honest "no live
+ * wrapper configured" adapter to `step-executor.ts` so it can also back the
+ * production default registry). Kept exported here for callers that resolve it
+ * alongside {@link buildRealWorkflowStepExecutorRegistry}.
+ */
+export { createUnconfiguredWorkflowStepExecutor };
 
 export type RealWorkflowStepExecutorRegistryOptions = {
   /**
@@ -52,28 +61,6 @@ export type RealWorkflowStepExecutorRegistryOptions = {
   /** Per-stream output cap forwarded to each configured live executor. */
   outputMaxBytes?: number;
 };
-
-/**
- * Build the honest "no live wrapper configured" adapter for a canonical step
- * kind. It is a real adapter (`executes: true`) that refuses with
- * `runtime_unavailable` rather than fabricating a terminal result — the daemon /
- * dispatcher then treats it as a missing prerequisite, never as a clean success.
- */
-export function createUnconfiguredWorkflowStepExecutor(
-  kind: WorkflowStepExecutorKind
-): WorkflowStepExecutor {
-  return {
-    kind,
-    executes: true,
-    execute: (input) => ({
-      ok: false,
-      code: "runtime_unavailable",
-      error: `No live workflow-step wrapper is configured for step kind "${kind}"; configure a live-wrapper profile to execute it.`,
-      executorLogPath: input.executorLogPath,
-      resultJsonPath: input.resultJsonPath
-    })
-  };
-}
 
 /**
  * Build the real production `WorkflowStepExecutor` registry, keyed by every

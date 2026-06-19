@@ -4,12 +4,24 @@ import path from "node:path";
 
 import {
   dispatchWorkflowStepExecutor,
-  type FakeWorkflowStepExecutorOutcome,
   type WorkflowStepExecutorInput
 } from "../../src/core/workflow/step-executor.js";
 import type { WorkflowStepKind } from "../../src/core/workflow/run-reducer.js";
 
+import {
+  buildFakeWorkflowStepExecutorRegistry,
+  type FakeWorkflowStepExecutorOutcome
+} from "./fake-workflow-step-executor.js";
 import { runCliBinary } from "./smoke-harness.js";
+
+/**
+ * The deterministic fake registry RC-5 (NGX-485) moved out of the production
+ * default. The substrate smoke explicitly injects it into
+ * `dispatchWorkflowStepExecutor`'s `registry` parameter so it keeps a
+ * deterministic executor without depending on a shipped fake default.
+ */
+const FAKE_WORKFLOW_STEP_EXECUTOR_REGISTRY =
+  buildFakeWorkflowStepExecutorRegistry();
 
 /**
  * Shared workflow-run CLI helpers for the built-binary smoke suite.
@@ -149,7 +161,11 @@ export function driveStepWithFakeExecutor(
     config: { outcome }
   };
 
-  const dispatch = dispatchWorkflowStepExecutor(step.kind, input);
+  const dispatch = dispatchWorkflowStepExecutor(
+    step.kind,
+    input,
+    FAKE_WORKFLOW_STEP_EXECUTOR_REGISTRY
+  );
 
   appendLedgerEvent(runDir, {
     runId,

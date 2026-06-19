@@ -16,13 +16,20 @@
  * state machine without leaking GNHF / postflight / no-mistakes /
  * merge-cleanup implementation details into Momentum core.
  *
- * This M7 module still ships the dispatch boundary and deterministic fake
- * executor. The NGX-434 runtime consolidation plan classifies the fake
- * `ADAPTERS` map as deprecate-later, not production executor support: it stays
- * until real `WorkflowStepExecutor` adapters can replace it and the fake can move
- * behind a test-only seam. M9 owns the live-wrapper registry / command
- * configuration in `live-wrapper-registry.ts`; live local command execution is
- * layered around this boundary rather than owned by the fake dispatcher.
+ * This M7 module owns the dispatch boundary (input validation, executor
+ * resolution, thrown-executor trapping, stable error codes). RC-5 (NGX-485)
+ * flipped the production default away from the deterministic fake the
+ * NGX-434 runtime consolidation plan classified as deprecate-later: the default
+ * registry is now built from real adapters (the honest unconfigured adapter
+ * below, which refuses with `runtime_unavailable` rather than fabricating a
+ * success), and `step-executor-real-adapters.ts` wires configured kinds to real
+ * M9 live wrappers. The deterministic fake moved behind an explicit test-only
+ * seam (`test/helpers/fake-workflow-step-executor.ts`) that the M7/M8/M10
+ * substrate smokes inject through the `registry` parameter of the three
+ * entrypoints; no fake ships in `dist/`. M9 owns the live-wrapper registry /
+ * command configuration in `live-wrapper-registry.ts`; live local command
+ * execution is layered around this boundary rather than owned by a fake
+ * dispatcher.
  */
 
 import {
@@ -172,74 +179,89 @@ export function isWorkflowStepExecutorKind(
   return EXECUTOR_KIND_SET.has(value);
 }
 
-export type FakeWorkflowStepExecutorOutcome =
-  | "success"
-  | "skip"
-  | "fail_retry"
-  | "fail_manual_recovery"
-  | "throw"
-  | "runtime_unavailable";
+/**
+ * A resolvable `WorkflowStepExecutor` registry keyed by canonical step kind.
+ * Production callers omit it and get the honest {@link DEFAULT_REGISTRY}; the
+ * M7/M8/M10 substrate tests inject the deterministic fake registry from
+ * `test/helpers/fake-workflow-step-executor.ts` through the `registry` parameter
+ * of the entrypoints below.
+ */
+export type WorkflowStepExecutorRegistry = ReadonlyMap<
+  WorkflowStepExecutorKind,
+  WorkflowStepExecutor
+>;
 
-export type FakeWorkflowStepExecutorConfig = {
-  outcome?: FakeWorkflowStepExecutorOutcome;
-  errorCode?: WorkflowStepExecutorErrorCode;
-  errorMessage?: string;
-  resultDigest?: string;
-  artifacts?: WorkflowStepExecutorArtifact[];
-  checkpointMessages?: string[];
-};
+/**
+ * Build the honest "no live wrapper configured" adapter for a canonical step
+ * kind. It is a real adapter (`executes: true`) that refuses at execute time
+ * with `runtime_unavailable` — the established prerequisite-missing class —
+ * rather than fabricating a terminal result. The dispatcher then treats it as a
+ * missing prerequisite, never as a clean success. `step-executor-real-adapters.ts`
+ * reuses this for canonical kinds a live-wrapper profile does not configure.
+ */
+export function createUnconfiguredWorkflowStepExecutor(
+  kind: WorkflowStepExecutorKind
+): WorkflowStepExecutor {
+  return {
+    kind,
+    executes: true,
+    execute: (input) => ({
+      ok: false,
+      code: "runtime_unavailable",
+      error: `No live workflow-step wrapper is configured for step kind "${kind}"; configure a live-wrapper profile to execute it.`,
+      executorLogPath: input.executorLogPath,
+      resultJsonPath: input.resultJsonPath
+    })
+  };
+}
 
-const FAKE_OUTCOMES: ReadonlySet<FakeWorkflowStepExecutorOutcome> = new Set([
-  "success",
-  "skip",
-  "fail_retry",
-  "fail_manual_recovery",
-  "throw",
-  "runtime_unavailable"
-]);
-
-const EXECUTOR_ERROR_CODE_SET: ReadonlySet<string> = new Set(
-  WORKFLOW_STEP_EXECUTOR_ERROR_CODES
+/**
+ * The production default registry (RC-5). With no live-wrapper profile wired
+ * (the daemon-default profile source is deferred per the runtime-consolidation
+ * contract), every canonical kind resolves to the honest unconfigured adapter:
+ * lookup/dispatch never resolves to a fake success by default.
+ */
+const DEFAULT_REGISTRY: WorkflowStepExecutorRegistry = new Map(
+  WORKFLOW_STEP_EXECUTOR_KINDS.map(
+    (kind) => [kind, createUnconfiguredWorkflowStepExecutor(kind)] as const
+  )
 );
 
-const ADAPTERS: ReadonlyMap<WorkflowStepExecutorKind, WorkflowStepExecutor> =
-  new Map(
-    WORKFLOW_STEP_EXECUTOR_KINDS.map(
-      (kind) => [kind, buildFakeExecutor(kind)] as const
-    )
-  );
-
 export function getWorkflowStepExecutor(
-  kind: string
+  kind: string,
+  registry: WorkflowStepExecutorRegistry = DEFAULT_REGISTRY
 ): WorkflowStepExecutor | undefined {
   if (!isWorkflowStepExecutorKind(kind)) return undefined;
-  return ADAPTERS.get(kind);
+  return registry.get(kind);
 }
 
 export function listWorkflowStepExecutorKinds(): readonly WorkflowStepExecutorKind[] {
   return WORKFLOW_STEP_EXECUTOR_KINDS;
 }
 
-export function listExecutingWorkflowStepExecutorKinds(): readonly WorkflowStepExecutorKind[] {
+export function listExecutingWorkflowStepExecutorKinds(
+  registry: WorkflowStepExecutorRegistry = DEFAULT_REGISTRY
+): readonly WorkflowStepExecutorKind[] {
   return WORKFLOW_STEP_EXECUTOR_KINDS.filter((kind) => {
-    const adapter = ADAPTERS.get(kind);
+    const adapter = registry.get(kind);
     return adapter?.executes === true;
   });
 }
 
 export function dispatchWorkflowStepExecutor(
   kind: string,
-  input: WorkflowStepExecutorInput
+  input: WorkflowStepExecutorInput,
+  registry: WorkflowStepExecutorRegistry = DEFAULT_REGISTRY
 ): WorkflowStepExecutorDispatchResult {
   const invalid = validateInput(input, kind);
   if (invalid !== null) return invalid;
 
-  const executor = getWorkflowStepExecutor(kind);
+  const executor = getWorkflowStepExecutor(kind, registry);
   if (!executor) {
-    return unsupportedStepError(kind);
+    return unsupportedStepError(kind, registry);
   }
   if (!executor.executes) {
-    return unsupportedStepError(kind);
+    return unsupportedStepError(kind, registry);
   }
 
   try {
@@ -256,300 +278,11 @@ export function dispatchWorkflowStepExecutor(
   }
 }
 
-function buildFakeExecutor(
-  kind: WorkflowStepExecutorKind
-): WorkflowStepExecutor {
-  return {
-    kind,
-    executes: true,
-    execute: (input) => runFakeWorkflowStepExecutor(kind, input)
-  };
-}
-
-function runFakeWorkflowStepExecutor(
-  kind: WorkflowStepExecutorKind,
-  input: WorkflowStepExecutorInput
-): WorkflowStepExecutorDispatchResult {
-  const config = readFakeConfig(input.config);
-  if (!config.ok) {
-    return {
-      ok: false,
-      code: "invalid_input",
-      error: config.error,
-      executorLogPath: input.executorLogPath,
-      resultJsonPath: input.resultJsonPath
-    };
-  }
-  const outcome = config.value.outcome ?? "success";
-  const checkpointMessages = config.value.checkpointMessages ?? [
-    `${kind}:start`,
-    `${kind}:work`
-  ];
-  const baseAt = 1;
-  const checkpoints: WorkflowStepExecutorCheckpoint[] = checkpointMessages.map(
-    (message, index) => ({
-      at: baseAt + index,
-      message
-    })
-  );
-
-  switch (outcome) {
-    case "success":
-      return success({
-        kind,
-        input,
-        config: config.value,
-        checkpoints,
-        state: "succeeded"
-      });
-    case "skip":
-      return success({
-        kind,
-        input,
-        config: config.value,
-        checkpoints,
-        state: "skipped"
-      });
-    case "fail_retry":
-      return failure({
-        kind,
-        input,
-        config: config.value,
-        checkpoints,
-        errorCode: config.value.errorCode ?? "command_failed",
-        retryHint: "retry_after_delay",
-        recoveryHint: "resume"
-      });
-    case "fail_manual_recovery":
-      return failure({
-        kind,
-        input,
-        config: config.value,
-        checkpoints,
-        errorCode: config.value.errorCode ?? "manual_recovery_required",
-        retryHint: "do_not_retry",
-        recoveryHint: "manual_recovery_required"
-      });
-    case "throw":
-      throw new Error(
-        config.value.errorMessage ??
-          `fake workflow step executor "${kind}" forced throw`
-      );
-    case "runtime_unavailable":
-      return {
-        ok: false,
-        code: "runtime_unavailable",
-        error:
-          config.value.errorMessage ??
-          `fake workflow step executor "${kind}" simulated runtime_unavailable`,
-        executorLogPath: input.executorLogPath,
-        resultJsonPath: input.resultJsonPath
-      };
-  }
-}
-
-type FakeConfigParse =
-  | { ok: true; value: FakeWorkflowStepExecutorConfig }
-  | { ok: false; error: string };
-
-function readFakeConfig(raw: unknown): FakeConfigParse {
-  if (raw === undefined || raw === null) {
-    return { ok: true, value: {} };
-  }
-  if (typeof raw !== "object" || Array.isArray(raw)) {
-    return {
-      ok: false,
-      error: "WorkflowStepExecutorInput.config must be a plain object."
-    };
-  }
-  const record = raw as Record<string, unknown>;
-  const value: FakeWorkflowStepExecutorConfig = {};
-
-  if (record["outcome"] !== undefined) {
-    const rawOutcome = record["outcome"];
-    if (
-      typeof rawOutcome !== "string" ||
-      !FAKE_OUTCOMES.has(rawOutcome as FakeWorkflowStepExecutorOutcome)
-    ) {
-      return {
-        ok: false,
-        error: `WorkflowStepExecutorInput.config.outcome must be one of: ${[...FAKE_OUTCOMES].join(", ")}.`
-      };
-    }
-    value.outcome = rawOutcome as FakeWorkflowStepExecutorOutcome;
-  }
-  if (record["errorCode"] !== undefined) {
-    if (typeof record["errorCode"] !== "string") {
-      return {
-        ok: false,
-        error: "WorkflowStepExecutorInput.config.errorCode must be a string."
-      };
-    }
-    if (!EXECUTOR_ERROR_CODE_SET.has(record["errorCode"])) {
-      return {
-        ok: false,
-        error: `WorkflowStepExecutorInput.config.errorCode must be one of: ${WORKFLOW_STEP_EXECUTOR_ERROR_CODES.join(", ")}.`
-      };
-    }
-    value.errorCode = record["errorCode"] as WorkflowStepExecutorErrorCode;
-  }
-  if (record["errorMessage"] !== undefined) {
-    if (typeof record["errorMessage"] !== "string") {
-      return {
-        ok: false,
-        error: "WorkflowStepExecutorInput.config.errorMessage must be a string."
-      };
-    }
-    value.errorMessage = record["errorMessage"];
-  }
-  if (record["resultDigest"] !== undefined) {
-    if (typeof record["resultDigest"] !== "string") {
-      return {
-        ok: false,
-        error: "WorkflowStepExecutorInput.config.resultDigest must be a string."
-      };
-    }
-    value.resultDigest = record["resultDigest"];
-  }
-  if (record["artifacts"] !== undefined) {
-    if (!Array.isArray(record["artifacts"])) {
-      return {
-        ok: false,
-        error: "WorkflowStepExecutorInput.config.artifacts must be an array."
-      };
-    }
-    const artifacts: WorkflowStepExecutorArtifact[] = [];
-    for (const entry of record["artifacts"]) {
-      if (
-        !entry ||
-        typeof entry !== "object" ||
-        typeof (entry as Record<string, unknown>)["kind"] !== "string" ||
-        typeof (entry as Record<string, unknown>)["path"] !== "string"
-      ) {
-        return {
-          ok: false,
-          error:
-            "WorkflowStepExecutorInput.config.artifacts entries must have string `kind` and `path`."
-        };
-      }
-      const record2 = entry as Record<string, unknown>;
-      const artifact: WorkflowStepExecutorArtifact = {
-        kind: record2["kind"] as string,
-        path: record2["path"] as string
-      };
-      if (record2["digest"] !== undefined) {
-        if (typeof record2["digest"] !== "string") {
-          return {
-            ok: false,
-            error:
-              "WorkflowStepExecutorInput.config.artifacts.digest must be a string."
-          };
-        }
-        artifact.digest = record2["digest"];
-      }
-      artifacts.push(artifact);
-    }
-    value.artifacts = artifacts;
-  }
-  if (record["checkpointMessages"] !== undefined) {
-    if (!Array.isArray(record["checkpointMessages"])) {
-      return {
-        ok: false,
-        error:
-          "WorkflowStepExecutorInput.config.checkpointMessages must be an array of strings."
-      };
-    }
-    const messages: string[] = [];
-    for (const entry of record["checkpointMessages"]) {
-      if (typeof entry !== "string") {
-        return {
-          ok: false,
-          error:
-            "WorkflowStepExecutorInput.config.checkpointMessages entries must be strings."
-        };
-      }
-      messages.push(entry);
-    }
-    value.checkpointMessages = messages;
-  }
-  return { ok: true, value };
-}
-
-type FakeOutcomeInput = {
-  kind: WorkflowStepExecutorKind;
-  input: WorkflowStepExecutorInput;
-  config: FakeWorkflowStepExecutorConfig;
-  checkpoints: WorkflowStepExecutorCheckpoint[];
-};
-
-function success(
-  args: FakeOutcomeInput & {
-    state: Extract<WorkflowStepExecutorTerminalState, "succeeded" | "skipped">;
-  }
-): WorkflowStepExecutorSuccess {
-  const { input, config, checkpoints, state, kind } = args;
-  const result: WorkflowStepExecutorResult = {
-    state,
-    summary: `fake ${kind} executor reported ${state}`,
-    checkpoints,
-    artifacts: config.artifacts ?? [],
-    resultDigest: config.resultDigest ?? null,
-    errorCode: null,
-    errorMessage: null,
-    retryHint: null,
-    recoveryHint: state === "skipped" ? "skip_already_complete" : null
-  };
-  return {
-    ok: true,
-    result,
-    executorLogPath: input.executorLogPath,
-    resultJsonPath: input.resultJsonPath,
-    diagnostics: {
-      executor: "fake",
-      kind,
-      attempt: input.attempt
-    }
-  };
-}
-
-function failure(
-  args: FakeOutcomeInput & {
-    errorCode: WorkflowStepExecutorErrorCode;
-    retryHint: WorkflowStepExecutorRetryHint;
-    recoveryHint: WorkflowStepExecutorRecoveryHint;
-  }
-): WorkflowStepExecutorSuccess {
-  const { input, config, checkpoints, errorCode, retryHint, recoveryHint, kind } =
-    args;
-  const result: WorkflowStepExecutorResult = {
-    state: "failed",
-    summary: `fake ${kind} executor reported failed (${errorCode})`,
-    checkpoints,
-    artifacts: config.artifacts ?? [],
-    resultDigest: config.resultDigest ?? null,
-    errorCode,
-    errorMessage:
-      config.errorMessage ??
-      `fake ${kind} executor injected ${errorCode}`,
-    retryHint,
-    recoveryHint
-  };
-  return {
-    ok: true,
-    result,
-    executorLogPath: input.executorLogPath,
-    resultJsonPath: input.resultJsonPath,
-    diagnostics: {
-      executor: "fake",
-      kind,
-      attempt: input.attempt,
-      injected: errorCode
-    }
-  };
-}
-
-function unsupportedStepError(kind: string): WorkflowStepExecutorError {
-  const executing = listExecutingWorkflowStepExecutorKinds();
+function unsupportedStepError(
+  kind: string,
+  registry: WorkflowStepExecutorRegistry
+): WorkflowStepExecutorError {
+  const executing = listExecutingWorkflowStepExecutorKinds(registry);
   return {
     ok: false,
     code: "unsupported_step",

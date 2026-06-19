@@ -34,4 +34,7 @@ around mechanical finalization/status/monitor refresh coordination: callers that
 already mutated durable step / lease rows can re-read reducer rows and refresh
 cached `workflow_runs` state / monitor columns without duplicating SQL. The full
 RC-2 single-finalization owner has since landed separately (NGX-480; see the
-runtime-consolidation plan), leaving RC-1 and RC-5 as the next independent items.
+runtime-consolidation plan), as has RC-5's fake demotion (NGX-485: real adapters
+back the production executor default, fakes are a test-only injected seam),
+leaving RC-1 and the remaining RC-5 narrowing (a daemon-default live-wrapper
+profile) as the next independent items.
