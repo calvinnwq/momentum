@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.7.0](https://github.com/calvinnwq/momentum/compare/v0.6.0...v0.7.0) (2026-06-20)
+
+
+### Features
+
+* **workflow:** add dispatchable subworkflow adapter ([ad9c0ed](https://github.com/calvinnwq/momentum/commit/ad9c0ed4d445dd7dfa3bb79db8b227d2849e6a3f))
+* **workflow:** Landed the async daemon-dispatchable subworkflow producer for RC-4 (NGX-497) — executeAndReconcileDispatchedSubworkflowStep, which observes a child workflow run via an injected start-or-attach runner, mirrors a terminal child onto the dispatch scaffold for RC-2 finalization, and defers (no terminal evidence) while the child is in flight — with 12 TDD-verified tests; all applicable gates pass. ([c31a8fe](https://github.com/calvinnwq/momentum/commit/c31a8fe348832f488e66da7bc8a675d6c5ead32d))
+* **workflow:** Landed the pure, total mapping core of the RC-4 daemon-dispatchable subworkflow adapter (NGX-497) — planSubworkflowChildMirror, which maps a child workflow run's terminal classification into defer/mirror executor evidence — with 14 TDD-verified tests; all required gates pass. ([cfdd356](https://github.com/calvinnwq/momentum/commit/cfdd35626531cd876b1eb9fba8e736b5673e40ba))
+* **workflow:** Landed the RC-4 daemon-lane entry-point factory createSubworkflowWorkflowDispatch (NGX-497), the async sibling of RC-3's external-apply entry point, which composes the landed subworkflow producer behind the base dispatch with a subworkflow-family gate and fail-closed-on-refusal discipline — with 6 TDD tests; all applicable gates pass and production stays fail-closed (PHASE1 untouched). ([299591e](https://github.com/calvinnwq/momentum/commit/299591ebce44e85165efe6a2927b4f9a693b6fe8))
+
 ## [0.6.0](https://github.com/calvinnwq/momentum/compare/v0.5.0...v0.6.0) (2026-06-20)
 
 
