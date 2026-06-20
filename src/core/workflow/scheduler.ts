@@ -25,8 +25,10 @@
  * transaction and acquiring its `dispatch` lease (the lease kind the contract
  * reserves for the dispatcher layer). The *tick* primitive
  * ({@link runWorkflowSchedulerOnce}) composes the three into one per-cycle pass
- * — recover stale leases, scan, claim one step, then hand it to an injected
- * executor-dispatch seam — as the workflow-first analogue of `runWorkerOnce`.
+ * — recover stale leases, recheck any active deferred `subworkflow` dispatch
+ * that is due, otherwise scan and claim one runnable step, then hand it to an
+ * injected executor-dispatch seam — as the workflow-first analogue of
+ * `runWorkerOnce`.
  * Bounded `daemon start` now wires that seam with the production dispatcher,
  * which creates executor start scaffolds or fail-closed manual-recovery effects
  * (gates when the run row still exists, lease release when it vanished).
@@ -48,6 +50,7 @@ import path from "node:path";
 import {
   acquireWorkflowLeaseInTransaction,
   getWorkflowLease,
+  heartbeatWorkflowLease,
   releaseWorkflowLease
 } from "./leases.js";
 import { isTerminalExecutorInvocationState } from "../executors/loop-reducer.js";
@@ -381,6 +384,11 @@ export type RecoverStaleWorkflowLeasesInput = {
  *     `needs_manual_recovery` flag and leave the lease outstanding as evidence;
  *     the reducer keeps the run blocked and an operator must resolve it via the
  *     guarded clear before the run is eligible again.
+ *   - A stale `dispatch` lease over terminal executor evidence is reconciled
+ *     before the lease is reported recovered. A stale non-terminal `subworkflow`
+ *     dispatch is released instead of parked, allowing a restarted daemon to
+ *     reacquire the parent lease and reattach to the same child run through the
+ *     injected child runner.
  *
  * Each lease is re-read and re-classified inside a `BEGIN IMMEDIATE`
  * transaction before acting, so a lease another worker heartbeated (extending
@@ -629,6 +637,14 @@ function tryParkStaleRunningDispatchLease(
       db,
       deriveDispatchInvocationId(candidate.runId, runningStep.stepId)
     );
+    if (
+      invocation !== undefined &&
+      invocation.executorFamily === "subworkflow" &&
+      !isTerminalExecutorInvocationState(invocation.state)
+    ) {
+      db.exec("ROLLBACK");
+      return undefined;
+    }
     if (
       invocation !== undefined &&
       isTerminalExecutorInvocationState(invocation.state)
@@ -1096,6 +1112,252 @@ export type RunWorkflowSchedulerOnceResult =
       dispatch: WorkflowStepDispatchResult;
     };
 
+function selectActiveSubworkflowDispatchRecheck(
+  db: MomentumDb,
+  input: {
+    now: number;
+    graceMs: number;
+    holder: string;
+    leaseDurationMs: number;
+    stalePolicy: WorkflowLeaseStalePolicy;
+  }
+): ClaimedWorkflowStep | undefined {
+  const runs = db
+    .prepare(
+      `SELECT id, state, repo_path
+         FROM workflow_runs
+        WHERE needs_manual_recovery = 0
+          AND state NOT IN ('succeeded', 'failed', 'canceled')
+        ORDER BY created_at ASC, id ASC`
+    )
+    .all() as WorkflowRunScanRow[];
+
+  for (const run of runs) {
+    const lease = getWorkflowLease(db, run.id, WORKFLOW_DISPATCH_LEASE_KIND);
+    if (lease !== undefined && lease.releasedAt === null) {
+      const classification = classifyWorkflowLease(lease, {
+        now: input.now,
+        graceMs: input.graceMs
+      });
+      if (
+        classification !== "fresh" ||
+        lease.holder !== input.holder ||
+        !isActiveSubworkflowRecheckDue(lease, input)
+      ) {
+        continue;
+      }
+
+      const claim = buildActiveSubworkflowClaim(db, run, lease, input);
+      if (claim !== undefined) return claim;
+      continue;
+    }
+
+    const acquired = acquireActiveSubworkflowDispatchClaim(db, run.id, input);
+    if (acquired !== undefined) return acquired;
+  }
+
+  return undefined;
+}
+
+function isActiveSubworkflowRecheckDue(
+  lease: WorkflowLeaseRecord,
+  input: { now: number; leaseDurationMs: number }
+): boolean {
+  const heartbeatIntervalMs = Math.max(1, Math.floor(input.leaseDurationMs / 2));
+  return input.now - lease.heartbeatAt >= heartbeatIntervalMs;
+}
+
+function buildActiveSubworkflowClaim(
+  db: MomentumDb,
+  run: WorkflowRunScanRow,
+  lease: WorkflowLeaseRecord,
+  input: { now: number; graceMs: number }
+): ClaimedWorkflowStep | undefined {
+  const steps = loadStepRecords(db, run.id);
+  const runningStep = steps.find((step) => step.state === "running");
+  if (runningStep === undefined) return undefined;
+
+  const invocation = loadExecutorInvocation(
+    db,
+    deriveDispatchInvocationId(run.id, runningStep.stepId)
+  );
+  if (
+    invocation === undefined ||
+    invocation.executorFamily !== "subworkflow" ||
+    isTerminalExecutorInvocationState(invocation.state)
+  ) {
+    return undefined;
+  }
+
+  const leases = loadLeaseRecords(db, run.id);
+  return {
+    runId: run.id,
+    stepId: runningStep.stepId,
+    kind: runningStep.kind,
+    stepOrder: runningStep.order,
+    required: runningStep.required,
+    repoPath: run.repo_path,
+    runState: deriveWorkflowRunState(steps, {
+      leases,
+      now: input.now,
+      graceMs: input.graceMs
+    }),
+    lease
+  };
+}
+
+function acquireActiveSubworkflowDispatchClaim(
+  db: MomentumDb,
+  runId: string,
+  input: {
+    now: number;
+    graceMs: number;
+    holder: string;
+    leaseDurationMs: number;
+    stalePolicy: WorkflowLeaseStalePolicy;
+  }
+): ClaimedWorkflowStep | undefined {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const run = db
+      .prepare(
+        `SELECT id, state, repo_path
+           FROM workflow_runs
+          WHERE id = ?
+            AND needs_manual_recovery = 0
+            AND state NOT IN ('succeeded', 'failed', 'canceled')`
+      )
+      .get(runId) as WorkflowRunScanRow | undefined;
+    if (run === undefined) {
+      db.exec("ROLLBACK");
+      return undefined;
+    }
+
+    const existing = getWorkflowLease(db, run.id, WORKFLOW_DISPATCH_LEASE_KIND);
+    if (existing !== undefined && existing.releasedAt === null) {
+      db.exec("ROLLBACK");
+      return undefined;
+    }
+
+    const acquired = acquireWorkflowLeaseInTransaction(
+      db,
+      {
+        runId: run.id,
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: input.holder,
+        expiresAt: input.now + input.leaseDurationMs,
+        stalePolicy: input.stalePolicy,
+        now: input.now
+      },
+      input.now,
+      input.stalePolicy
+    );
+    if (!acquired.ok) {
+      db.exec("ROLLBACK");
+      return undefined;
+    }
+
+    const claim = buildActiveSubworkflowClaim(db, run, acquired.lease, input);
+    if (claim === undefined) {
+      db.exec("ROLLBACK");
+      return undefined;
+    }
+
+    db.exec("COMMIT");
+    return claim;
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+    }
+    throw error;
+  }
+}
+
+function heartbeatActiveDispatchClaim(
+  db: MomentumDb,
+  input: {
+    claim: ClaimedWorkflowStep;
+    now: number;
+    leaseDurationMs: number;
+  }
+): ClaimedWorkflowStep | undefined {
+  const { claim, now, leaseDurationMs } = input;
+  const heartbeated = heartbeatWorkflowLease(db, {
+    runId: claim.lease.runId,
+    leaseKind: claim.lease.leaseKind,
+    holder: claim.lease.holder,
+    acquiredAt: claim.lease.acquiredAt,
+    heartbeatAt: now,
+    expiresAt: now + leaseDurationMs
+  });
+  if (!heartbeated.ok) return undefined;
+  const lease = getWorkflowLease(db, claim.lease.runId, claim.lease.leaseKind);
+  if (lease === undefined || lease.releasedAt !== null) return undefined;
+  return { ...claim, lease };
+}
+
+function dispatchClaim(
+  input: {
+    db: MomentumDb;
+    workerId: string;
+    recovery: RecoverStaleWorkflowLeasesResult;
+    claim: ClaimedWorkflowStep;
+    tickNow: number;
+  },
+  dispatch: AsyncWorkflowStepDispatch
+): MaybePromise<RunWorkflowSchedulerOnceResult> {
+  const { db, workerId, recovery, claim, tickNow } = input;
+  let dispatchResult: MaybePromise<WorkflowStepDispatchResult>;
+  try {
+    dispatchResult = dispatch(claim, { db, workerId, now: tickNow });
+  } catch (error) {
+    try {
+      releaseWorkflowLease(db, {
+        runId: claim.lease.runId,
+        leaseKind: claim.lease.leaseKind,
+        holder: claim.lease.holder,
+        acquiredAt: claim.lease.acquiredAt,
+        now: tickNow
+      });
+    } catch {
+    }
+    throw error;
+  }
+
+  if (isPromiseLike(dispatchResult)) {
+    return dispatchResult
+      .then((resolvedDispatchResult) => ({
+        code: "dispatched" as const,
+        workerId,
+        recovery,
+        claim,
+        dispatch: resolvedDispatchResult
+      }))
+      .catch((error) => {
+        try {
+          releaseWorkflowLease(db, {
+            runId: claim.lease.runId,
+            leaseKind: claim.lease.leaseKind,
+            holder: claim.lease.holder,
+            acquiredAt: claim.lease.acquiredAt,
+            now: tickNow
+          });
+        } catch {
+        }
+        throw error;
+      });
+  }
+
+  return {
+    code: "dispatched",
+    workerId,
+    recovery,
+    claim,
+    dispatch: dispatchResult
+  };
+}
+
 /**
  * Run one workflow scheduler-lane tick: recover stale leases, scan for the next
  * runnable step, atomically claim it, and hand it to the executor-dispatch seam.
@@ -1109,18 +1371,23 @@ export type RunWorkflowSchedulerOnceResult =
  *   1. Recover stale leases first, so a dead worker's `auto-release` lease is
  *      freed before the scan and its run becomes schedulable this same tick;
  *      a stale `manual-recovery-required` lease parks its run instead.
- *   2. Scan the post-recovery durable state for the next runnable step (one per
- *      eligible run, oldest run first).
- *   3. Claim the first candidate atomically. The scan is only a hint — the claim
+ *   2. Recheck any active, non-terminal `subworkflow` dispatch that is due for
+ *      a heartbeat: the same worker refreshes a fresh lease, while a restarted
+ *      daemon can reacquire a released parent dispatch lease and reattach to the
+ *      child run instead of parking the parent.
+ *   3. If no active `subworkflow` recheck is due, scan the post-recovery durable
+ *      state for the next runnable step (one per eligible run, oldest run first).
+ *   4. Claim the first candidate atomically. The scan is only a hint — the claim
  *      re-verifies under `BEGIN IMMEDIATE`, so a run that advanced or was taken
  *      by another worker between scan and claim yields `claim_contended` rather
  *      than a double dispatch.
- *   4. Dispatch the claimed step. On success the dispatcher owns the dispatch
+ *   5. Dispatch the claimed step. On success the dispatcher owns the dispatch
  *      lease; if it throws, the lane releases the lease and rethrows.
  *
- * Exactly one step is claimed per tick (mirroring `runWorkerOnce`); the daemon
- * loop drives throughput across runs over successive ticks. SQLite stays the
- * source of truth: no process handle, socket, or event is consulted.
+ * Exactly one claim is dispatched per tick (either an active `subworkflow`
+ * recheck or a newly runnable step, mirroring `runWorkerOnce`); the daemon loop
+ * drives throughput across runs over successive ticks. SQLite stays the source of
+ * truth: no process handle, socket, or event is consulted.
  */
 export function runWorkflowSchedulerOnce(
   input: RunWorkflowSchedulerOnceInput
@@ -1174,6 +1441,27 @@ function runWorkflowSchedulerOnceCore(
 
   const recovery = recoverStaleLeases(db, { now: tickNow, graceMs });
 
+  const activeClaim = selectActiveSubworkflowDispatchRecheck(db, {
+    now: tickNow,
+    graceMs,
+    holder: workerId,
+    leaseDurationMs,
+    stalePolicy
+  });
+  if (activeClaim !== undefined) {
+    const refreshedClaim = heartbeatActiveDispatchClaim(db, {
+      claim: activeClaim,
+      now: tickNow,
+      leaseDurationMs
+    });
+    if (refreshedClaim !== undefined) {
+      return dispatchClaim(
+        { db, workerId, recovery, claim: refreshedClaim, tickNow },
+        dispatch
+      );
+    }
+  }
+
   const scan = selectRunnableWork(db, { now: tickNow, graceMs });
   const candidate = scan.runnable[0];
   if (candidate === undefined) {
@@ -1194,58 +1482,7 @@ function runWorkflowSchedulerOnceCore(
   }
 
   const claim = claimResult.claim;
-  let dispatchResult: MaybePromise<WorkflowStepDispatchResult>;
-  try {
-    dispatchResult = dispatch(claim, { db, workerId, now: tickNow });
-  } catch (error) {
-    try {
-      releaseWorkflowLease(db, {
-        runId: claim.lease.runId,
-        leaseKind: claim.lease.leaseKind,
-        holder: claim.lease.holder,
-        acquiredAt: claim.lease.acquiredAt,
-        now: tickNow
-      });
-    } catch {
-      // Best-effort release: surface the original dispatcher failure, not a
-      // secondary release error.
-    }
-    throw error;
-  }
-
-  if (isPromiseLike(dispatchResult)) {
-    return dispatchResult
-      .then((resolvedDispatchResult) => ({
-        code: "dispatched" as const,
-        workerId,
-        recovery,
-        claim,
-        dispatch: resolvedDispatchResult
-      }))
-      .catch((error) => {
-        try {
-          releaseWorkflowLease(db, {
-            runId: claim.lease.runId,
-            leaseKind: claim.lease.leaseKind,
-            holder: claim.lease.holder,
-            acquiredAt: claim.lease.acquiredAt,
-            now: tickNow
-          });
-        } catch {
-          // Best-effort release: surface the original dispatcher failure, not a
-          // secondary release error.
-        }
-        throw error;
-      });
-  }
-
-  return {
-    code: "dispatched",
-    workerId,
-    recovery,
-    claim,
-    dispatch: dispatchResult
-  };
+  return dispatchClaim({ db, workerId, recovery, claim, tickNow }, dispatch);
 }
 
 function isPromiseLike<T>(value: MaybePromise<T>): value is Promise<T> {

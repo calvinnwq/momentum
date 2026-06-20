@@ -22,11 +22,12 @@
  * internal/contracts/runtime-consolidation-plan.md):
  *
  *   - The phase-1 dispatchable set is exactly the executor families that already
- *     have a landed bounded adapter (`goal-loop` M10-05, `one-shot` / `script`
- *     M10-06, `no-mistakes` M10-07, `external-apply` RC-3). `subworkflow` has no
- *     landed daemon-dispatchable adapter this phase — it recurses into another
- *     run — so it fails closed rather than silently no-op or strand a lease.
- *     NGX-434 keeps those branches until RC-3 / RC-4 land replacement adapters.
+ *     have a landed production adapter in the base allowlist (`goal-loop` M10-05,
+ *     `one-shot` / `script` M10-06, `no-mistakes` M10-07, `external-apply` RC-3).
+ *     RC-4 landed the `subworkflow` child-run mirror mechanism, but the production
+ *     base allowlist still excludes `subworkflow` until the child-definition config
+ *     decision and PHASE1 dispatch-lane flip land, so it fails closed rather than
+ *     silently no-op or strand a lease.
  *   - Every non-dispatch outcome routes to the contract's
  *     `manual_recovery_required` human gate: "Momentum cannot safely proceed
  *     without operator inspection and recovery." The dispatcher fails *closed*,
@@ -50,9 +51,10 @@ import type { WorkflowExecutorFamily } from "./definition.js";
 import type { WorkflowGateType } from "./gate.js";
 
 /**
- * Executor families the production workflow lane can genuinely dispatch this
- * phase: those with a landed bounded adapter. Anything outside this set fails
- * closed (see the module doc). The order mirrors the adapter landing order.
+ * Executor families the production workflow lane can genuinely dispatch through
+ * the base PHASE1 allowlist. Anything outside this set fails closed (see the
+ * module doc), including `subworkflow` until its separate production lane flip
+ * lands. The order mirrors the adapter landing order.
  */
 export const PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES = [
   "goal-loop",

@@ -474,8 +474,15 @@ Decisions at a glance (full evidence and prerequisites live in the plan):
   (`src/core/workflow/dispatch-external-apply.ts`), async run-path producer
   (`src/core/workflow/dispatch-external-apply-run.ts`), family guard, and daemon
   dispatch composition reuse the single M6 `executeExternalApply` write path
-  under its full safety contract. RC-4 (`subworkflow`) stays fail-closed and
-  deferred.
+  under its full safety contract. RC-4's `subworkflow` adapter mechanism has
+  since landed (NGX-497): the pure child-mirror mapping
+  (`src/core/workflow/dispatch-subworkflow.ts`), the async run-path producer
+  (`src/core/workflow/dispatch-subworkflow-run.ts`), and the daemon-lane
+  entry-point factory (`src/core/workflow/subworkflow-dispatch.ts`) mirror a child
+  run's terminal classification to the parent step behind the parent/child
+  ownership boundary, while the production `subworkflow` branch stays fail-closed
+  until a separate PHASE1 dispatch-lane flip lands (deferred pending a
+  child-definition config decision).
 - **Fake `WorkflowStepExecutor` adapters shipped in `src/`** — deprecate-later;
   demote to a test-only seam once real adapters land, preserving substrate smoke.
 
@@ -536,8 +543,10 @@ proof issue:
   weaken recovery.
 - `external-apply` and `subworkflow` are valid executor families. RC-3's
   `external-apply` adapter has since landed (NGX-496) and is wired through the
-  production dispatch lane under the M6 safety contract; `subworkflow` (RC-4)
-  remains fail-closed and deferred.
+  production dispatch lane under the M6 safety contract; RC-4's `subworkflow`
+  adapter mechanism has since landed (NGX-497) but the production `subworkflow`
+  branch stays fail-closed until a separate PHASE1 dispatch-lane flip lands
+  (deferred pending a child-definition config decision).
 
 ### Defer: Removal Candidates Need New Contracts
 

@@ -440,6 +440,24 @@ Coverage:
   Linear client (no real `api.linear.app` calls), with production daemon dispatch
   wiring now composing the adapter and a scaffold-family guard preventing
   non-`external-apply` writes.
+- RC-4 daemon-dispatchable `subworkflow` adapter mechanism in
+  `test/workflow-dispatch-subworkflow.test.ts`,
+  `test/workflow-dispatch-subworkflow-run.test.ts`,
+  `test/workflow-subworkflow-dispatch.test.ts`, and
+  `test/workflow-dispatch-subworkflow-child-run.test.ts` (NGX-497): the pure
+  child-mirror mapping defers a non-terminal child (`pending` / `approved` /
+  `running`), mirrors a clean child terminal to the parent (`succeeded` /
+  `failed`), and fails closed on `canceled` / `blocked` / unexpected states; the
+  async producer defers without finalizing, mirrors a terminal child onto the
+  dispatch scaffold for RC-2 to finalize once, never re-starts the child on
+  idempotent re-entry, and refuses the M9 lane; the entry-point factory runs the
+  producer only for a `subworkflow` invocation and parks a refused / thrown
+  child-context derivation in manual recovery; and the child-run integration test
+  binds the producer to a real child workflow run through the existing run-start /
+  status seams (no duplicate child run, parent finalized only from durable
+  terminal child evidence). The production `subworkflow` branch stays fail-closed
+  (not yet in `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES`) until a separate PHASE1
+  dispatch-lane flip.
 - shipped bounded `daemon start` workflow-lane wiring in
   `test/cli-daemon-workflow-dispatch.test.ts`: the managed loop dispatches an
   approved workflow step with no test-only injection, surfaces
@@ -474,7 +492,7 @@ Coverage:
 Run locally via the targeted vitest command:
 
 ```
-pnpm vitest run test/workflow-definition.test.ts test/workflow-definition-persist.test.ts test/migrations.test.ts test/workflow-run-start.test.ts test/workflow-run-start-persist.test.ts test/cli-workflow-run-start.test.ts test/executor-loop-reducer.test.ts test/executor-loop-persist.test.ts test/workflow-scheduler.test.ts test/daemon-loop.test.ts test/goal-loop-executor.test.ts test/goal-loop-orchestrator.test.ts test/goal-loop-mechanism.test.ts test/goal-loop-executor-persistence.test.ts test/git-transaction.test.ts test/single-shot-executor.test.ts test/single-shot-executor-persistence.test.ts test/single-shot-orchestrator.test.ts test/single-shot-mechanism.test.ts test/no-mistakes-executor.test.ts test/no-mistakes-mechanism.test.ts test/no-mistakes-executor-persistence.test.ts test/no-mistakes-orchestrator.test.ts test/workflow-gate.test.ts test/workflow-gate-persist.test.ts test/cli-workflow-run-decide.test.ts test/workflow-dispatch.test.ts test/workflow-dispatch-persist.test.ts test/workflow-dispatch-execute.test.ts test/workflow-dispatch-reconcile.test.ts test/workflow-dispatch-reconcile-execute.test.ts test/cli-daemon-workflow-dispatch.test.ts test/workflow-dogfood-dispatch.test.ts test/workflow-dogfood-multi-dispatch.test.ts
+pnpm vitest run test/workflow-definition.test.ts test/workflow-definition-persist.test.ts test/migrations.test.ts test/workflow-run-start.test.ts test/workflow-run-start-persist.test.ts test/cli-workflow-run-start.test.ts test/executor-loop-reducer.test.ts test/executor-loop-persist.test.ts test/workflow-scheduler.test.ts test/daemon-loop.test.ts test/goal-loop-executor.test.ts test/goal-loop-orchestrator.test.ts test/goal-loop-mechanism.test.ts test/goal-loop-executor-persistence.test.ts test/git-transaction.test.ts test/single-shot-executor.test.ts test/single-shot-executor-persistence.test.ts test/single-shot-orchestrator.test.ts test/single-shot-mechanism.test.ts test/no-mistakes-executor.test.ts test/no-mistakes-mechanism.test.ts test/no-mistakes-executor-persistence.test.ts test/no-mistakes-orchestrator.test.ts test/workflow-gate.test.ts test/workflow-gate-persist.test.ts test/cli-workflow-run-decide.test.ts test/workflow-dispatch.test.ts test/workflow-dispatch-persist.test.ts test/workflow-dispatch-execute.test.ts test/workflow-dispatch-reconcile.test.ts test/workflow-dispatch-reconcile-execute.test.ts test/workflow-dispatch-external-apply.test.ts test/workflow-dispatch-external-apply-run.test.ts test/workflow-dispatch-external-apply-m6.test.ts test/workflow-dispatch-subworkflow.test.ts test/workflow-dispatch-subworkflow-run.test.ts test/workflow-subworkflow-dispatch.test.ts test/workflow-dispatch-subworkflow-child-run.test.ts test/cli-daemon-workflow-dispatch.test.ts test/workflow-dogfood-dispatch.test.ts test/workflow-dogfood-multi-dispatch.test.ts
 ```
 
 Run the built-binary production workflow-lane smoke locally via:
