@@ -440,6 +440,24 @@ Coverage:
   Linear client (no real `api.linear.app` calls), with production daemon dispatch
   wiring now composing the adapter and a scaffold-family guard preventing
   non-`external-apply` writes.
+- RC-4 daemon-dispatchable `subworkflow` adapter mechanism in
+  `test/workflow-dispatch-subworkflow.test.ts`,
+  `test/workflow-dispatch-subworkflow-run.test.ts`,
+  `test/workflow-subworkflow-dispatch.test.ts`, and
+  `test/workflow-dispatch-subworkflow-child-run.test.ts` (NGX-497): the pure
+  child-mirror mapping defers a non-terminal child (`pending` / `approved` /
+  `running`), mirrors a clean child terminal to the parent (`succeeded` /
+  `failed`), and fails closed on `canceled` / `blocked` / unexpected states; the
+  async producer defers without finalizing, mirrors a terminal child onto the
+  dispatch scaffold for RC-2 to finalize once, never re-starts the child on
+  idempotent re-entry, and refuses the M9 lane; the entry-point factory runs the
+  producer only for a `subworkflow` invocation and parks a refused / thrown
+  child-context derivation in manual recovery; and the child-run integration test
+  binds the producer to a real child workflow run through the existing run-start /
+  status seams (no duplicate child run, parent finalized only from durable
+  terminal child evidence). The production `subworkflow` branch stays fail-closed
+  (not yet in `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES`) until a separate PHASE1
+  dispatch-lane flip.
 - shipped bounded `daemon start` workflow-lane wiring in
   `test/cli-daemon-workflow-dispatch.test.ts`: the managed loop dispatches an
   approved workflow step with no test-only injection, surfaces

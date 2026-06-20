@@ -44,7 +44,7 @@ unreachable-branch audit below finds nothing safe to delete within scope.
 | 2 | Imported `.agent-workflows` / `cwfp-*` compatibility | Defer | `NGX-404` default-switch dogfood passes its `coding-workflow-ownership.md` gates | `NGX-404` (existing) |
 | 3 | M9 live-wrapper direct `workflow_steps` advancement vs M10 executor-loop finalization | Keep (coexist); boundary seam landed | A single reconciliation seam now finalizes dispatched steps from durable executor evidence with a no-double-finalize proof; narrowing still waits on compatibility-lane migrations | RC-2 (seam landed, NGX-480) |
 | 4 | Production dispatch phase-1 scaffold (no fabricated result evidence) | Keep | RC-2 replaced the seam-level terminal gap and RC-5b now feeds real terminal executor evidence from configured daemon profiles; narrowing the scaffold still waits on compatibility-lane migrations | RC-2 (seam landed, NGX-480), RC-5 |
-| 5 | `external-apply` / `subworkflow` fail-closed executor families | `external-apply` narrowed; `subworkflow` defer | A landed daemon-dispatchable adapter per family, behind the existing safety contracts; RC-3 now wires `external-apply` through the daemon dispatch lane while `subworkflow` remains fail-closed | RC-3 (`external-apply` wired, NGX-496), RC-4 (`subworkflow`) |
+| 5 | `external-apply` / `subworkflow` fail-closed executor families | `external-apply` narrowed; **RC-4 `subworkflow` adapter mechanism landed (NGX-497)**, production stays fail-closed | A landed daemon-dispatchable adapter per family, behind the existing safety contracts; RC-3 wires `external-apply` through the daemon dispatch lane, and the RC-4 `subworkflow` adapter mechanism (pure child-mirror mapping + async producer + daemon-lane entry-point factory + tests) has landed while the production `subworkflow` branch stays fail-closed until a separate PHASE1 dispatch-lane flip lands (deferred pending a child-definition config decision) | RC-3 (`external-apply` wired, NGX-496), RC-4 (`subworkflow` adapter landed, NGX-497) |
 | 6 | Fake workflow-step executors shipped in `src/` | Deprecate-later; **fake demotion landed (NGX-485); daemon-default live profile wiring landed (NGX-492)** | Real adapters now back the production default, fakes are a test-only injected seam, and configured daemon profiles now feed live executor evidence through bounded `daemon start` | RC-5 (fake demotion landed, NGX-485; daemon wiring landed, NGX-492) |
 
 ## Path-By-Path Decisions
@@ -556,8 +556,45 @@ and add `RC-*` placeholders for the genuinely new consolidation work.
    `external-apply` in `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES` and composes the
    landed adapter through bounded `daemon start`; `subworkflow` remains the
    fail-closed family for Path 5. (Path 5)
-4. **RC-4 — `subworkflow` daemon-dispatchable adapter**, after first-class
-   workflow start is stable, replacing its fail-closed branch. (Path 5)
+4. **RC-4 — `subworkflow` daemon-dispatchable adapter. ✅ Adapter mechanism
+   landed (NGX-497).** The pure, total mapping from a child workflow run's
+   observed `WorkflowRunState` into the `WorkflowStepExecutorDispatchResult`
+   evidence the terminalize bridge consumes now ships as
+   `planSubworkflowChildMirror` (`src/core/workflow/dispatch-subworkflow.ts`): a
+   non-terminal child (`pending` / `approved` / `running`) defers with no terminal
+   evidence; a clean child terminal mirrors the child's classification
+   (`succeeded` → clean `succeeded`, `failed` → clean `failed` — a child failure
+   is a legitimate mirrored terminal, not a process-level executor failure); and
+   an ambiguous `canceled` / stuck `blocked` / unexpected child state fails closed
+   to a `manual_recovery_required` result. The async daemon-dispatchable producer
+   `executeAndReconcileDispatchedSubworkflowStep`
+   (`src/core/workflow/dispatch-subworkflow-run.ts`) observes the child run
+   through an injected start-or-attach runner (no parallel ad hoc child runtime —
+   the parent step owns dispatch evidence; the child run owns its own steps /
+   gates / recovery / terminal state), maps the observation through the pure
+   mapping, mirrors a terminal child onto the `<run>::<step>::dispatch` scaffold
+   for RC-2 to finalize exactly once, and defers a non-terminal child (new shared
+   `childDeferred` status) without finalizing the parent — with an
+   idempotent-re-entry guard that never re-starts the child run once the dispatch
+   invocation is terminal. The daemon-lane entry-point factory
+   `createSubworkflowWorkflowDispatch`
+   (`src/core/workflow/subworkflow-dispatch.ts`) composes that producer behind the
+   base dispatch under a `subworkflow`-family gate, injecting the child-run
+   start/attach derivation and routing a refused or thrown derivation to manual
+   recovery rather than stranding the dispatch lease over a `running` step.
+   Coverage: `test/workflow-dispatch-subworkflow.test.ts` (pure mapping +
+   terminalize composition), `test/workflow-dispatch-subworkflow-run.test.ts`
+   (producer contract: defer, clean mirror, fail-closed, idempotent re-entry, M9
+   lane boundary), `test/workflow-subworkflow-dispatch.test.ts` (entry-point
+   factory composition + fail-closed-on-refusal), and
+   `test/workflow-dispatch-subworkflow-child-run.test.ts` (the producer bound to a
+   real child workflow run through the existing run-start / status seams). **The
+   production `subworkflow` branch stays fail-closed** — `subworkflow` is not yet
+   in `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES` and the daemon lane still routes it
+   to `manual_recovery_required`; the PHASE1 dispatch-lane flip plus the daemon
+   child-runner are deferred pending a child-definition config decision (no
+   built-in workflow step declares the `subworkflow` family or its child
+   definition / recursion bounds yet). (Path 5)
 5. **RC-5 — Real `WorkflowStepExecutor` adapters + fake demotion. ✅ Fake demotion
    landed (NGX-485).** The shipped fake `ADAPTERS` map is replaced: the production
    default registry is now real adapters (honest `runtime_unavailable` when
@@ -604,10 +641,16 @@ command-surface narrowing — stays deferred (no safe domain-neutral dedup today
 the commands stay the compatibility surface). RC-3's daemon-dispatchable
 `external-apply` adapter has since **landed** (NGX-496): the pure M6 → executor
 evidence mapping and the async run-path producer are in place and tested, reusing
-the single M6 write path behind its full safety contract; the production
-fail-closed branch narrowing stays a separate follow-up. The remaining
-capability-gated consolidation work is RC-4 (`subworkflow`) and `NGX-404`, which
-stay deferred until their adapters / dogfood land.
+the single M6 write path behind its full safety contract, and `external-apply` is
+now wired through the daemon dispatch lane. RC-4's daemon-dispatchable
+`subworkflow` adapter mechanism has since **landed** (NGX-497): the pure
+child-mirror mapping, the async run-path producer, and the daemon-lane entry-point
+factory are in place and tested behind the child-run ownership boundary, while the
+production `subworkflow` branch stays fail-closed until a separate PHASE1
+dispatch-lane flip lands (deferred pending a child-definition config decision).
+The remaining capability-gated consolidation work is the RC-4 (`subworkflow`)
+PHASE1 flip and `NGX-404`, which stay deferred until that child-config decision /
+dogfood lands.
 
 ## Non-Goals
 
