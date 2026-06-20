@@ -18,7 +18,7 @@ own implementation issue and proof.
 
 | Item | Plan source | What it unlocks |
 | --- | --- | --- |
-| RC-1 — landed (NGX-486); RC-1b finalization disentangle landed (NGX-494) | [`runtime-consolidation-plan.md`](../contracts/runtime-consolidation-plan.md#follow-up-issue-sequence) | Goal-first status / logs / handoff / recovery parity now has workflow-first equivalents and migration proofs; the shared finalization primitive the goal-loop executor reused is now disentangled into the neutral `step-finalize.ts` seam (NGX-494), leaving the goal-first CLI narrowing itself as the remaining Path 1 work. |
+| RC-1 — landed (NGX-486); RC-1b finalization disentangle landed (NGX-494); RC-1c read-back dedup narrowing landed (NGX-495) | [`runtime-consolidation-plan.md`](../contracts/runtime-consolidation-plan.md#follow-up-issue-sequence) | Goal-first status / logs / handoff / recovery parity now has workflow-first equivalents and migration proofs; the shared finalization primitive the goal-loop executor reused is disentangled into the neutral `step-finalize.ts` seam (NGX-494); RC-1c (NGX-495) narrowed the duplicate goal-first read-back logic into the shared `src/core/goal/read-back.ts` seam while keeping the goal-first commands as the compatibility surface and deferring the domain-specific recovery guarded-clear dedup. |
 | RC-2 — landed (NGX-480) | [`runtime-consolidation-plan.md`](../contracts/runtime-consolidation-plan.md#follow-up-issue-sequence) | Single M9/M10 step-finalization reconciliation seam and no-double-write proof — seam shipped as `reconcileDispatchedWorkflowStep`; narrowing Paths 3/4 still gated on compatibility-lane migration. |
 | RC-3 | [`runtime-consolidation-plan.md`](../contracts/runtime-consolidation-plan.md#follow-up-issue-sequence) | Daemon-dispatchable `external-apply` adapter behind M6 safety gates. |
 | RC-4 | [`runtime-consolidation-plan.md`](../contracts/runtime-consolidation-plan.md#follow-up-issue-sequence) | Daemon-dispatchable `subworkflow` adapter after workflow start is stable. |
@@ -41,5 +41,7 @@ execution-path producer, profile source resolver, live-wrapper dispatch
 composition, exec-context deriver) and the bounded `daemon start` workflow lane
 now wires them for configured daemon-default profiles. RC-1b (NGX-494) has since
 disentangled the shared finalization primitive the goal-loop executor reused into
-the neutral `step-finalize.ts` seam, leaving the goal-first CLI narrowing itself
-as the next Path 1 item.
+the neutral `step-finalize.ts` seam, and RC-1c (NGX-495) has since narrowed the
+duplicate goal-first read-back logic into the shared `src/core/goal/read-back.ts`
+seam (commands unchanged; the domain-specific recovery guarded-clear dedup stays
+deferred).

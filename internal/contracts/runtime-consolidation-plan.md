@@ -40,7 +40,7 @@ unreachable-branch audit below finds nothing safe to delete within scope.
 
 | # | Runtime path | Decision | Prerequisite before any narrowing | Follow-up |
 |---|---|---|---|---|
-| 1 | Goal-first CLI compatibility (`goal start` / `status` / `logs` / `handoff` / `recovery clear`) | Deprecate-later; **read-back/recovery parity landed (NGX-486)** | Workflow-first equivalents + migration coverage landed (NGX-486); the shared iteration-finalization primitive the `goal-loop` executor reused is now disentangled into the neutral `step-finalize.ts` seam (NGX-494); narrowing itself is the remaining work | RC-1 (parity, NGX-486) / RC-1b (NGX-494) |
+| 1 | Goal-first CLI compatibility (`goal start` / `status` / `logs` / `handoff` / `recovery clear`) | Deprecate-later; **read-back/recovery parity landed (NGX-486); read-back dedup narrowing landed (NGX-495)** | Workflow-first equivalents + migration coverage landed (NGX-486); the shared iteration-finalization primitive the `goal-loop` executor reused is now disentangled into the neutral `step-finalize.ts` seam (NGX-494); the duplicate goal-first read-back logic is now owned once by the shared `read-back.ts` seam (NGX-495); the domain-specific recovery guarded-clear dedup stays deferred and no goal-first command is removed | RC-1 (parity, NGX-486) / RC-1b (NGX-494) / RC-1c (narrowing, NGX-495) |
 | 2 | Imported `.agent-workflows` / `cwfp-*` compatibility | Defer | `NGX-404` default-switch dogfood passes its `coding-workflow-ownership.md` gates | `NGX-404` (existing) |
 | 3 | M9 live-wrapper direct `workflow_steps` advancement vs M10 executor-loop finalization | Keep (coexist); boundary seam landed | A single reconciliation seam now finalizes dispatched steps from durable executor evidence with a no-double-finalize proof; narrowing still waits on compatibility-lane migrations | RC-2 (seam landed, NGX-480) |
 | 4 | Production dispatch phase-1 scaffold (no fabricated result evidence) | Keep | RC-2 replaced the seam-level terminal gap and RC-5b now feeds real terminal executor evidence from configured daemon profiles; narrowing the scaffold still waits on compatibility-lane migrations | RC-2 (seam landed, NGX-480), RC-5 |
@@ -141,12 +141,59 @@ tests remain green. Prerequisite 3 (disentangling the shared finalization
 primitive from the `goal-loop` executor) has since **landed (NGX-494)**: the
 transaction moved to the neutral `step-finalize.ts` seam and the `goal-loop`
 executor now depends on that shared home, so the finalization disentanglement no
-longer gates the goal-first CLI narrowing — that narrowing itself stays the
-remaining future work.
+longer gates the goal-first read-back narrowing — the first slice of which has
+since landed (below).
+
+**Landed (NGX-495, RC-1c): goal-first read-back dedup narrowing.** The first
+narrowing slice removes the duplicate read-back logic the goal-first surface
+*owned* — the form of narrowing the parity proofs make safe without changing
+user-visible behavior, since the two domains (goal iteration/job rows vs workflow
+run/step/lease rows) read different durable substrate and so cannot be
+byte-collapsed into one command path. Before the slice `loadGoalStatus`
+(`src/core/goal/status.ts`) and `loadGoalLogs` (`src/core/goal/logs.ts`) each
+carried a private, byte-for-byte identical copy of the read-back input preamble
+(optional goal-id validation, then data-directory resolution), the latest-goal
+lookup, the resolve-the-goal-or-refuse decision (`goal_not_found` / `no_goals`),
+and the `EvidenceRecord` → summary projection. Those now live once in the shared
+`src/core/goal/read-back.ts` seam (`validateGoalReadBackInput`,
+`resolveReadBackDataDir`, `findLatestGoal`, `resolveGoalForReadBack`,
+`toGoalEvidenceSummary`), which both loaders compose — mirroring how the
+workflow-first read-back surfaces compose the one proven `loadWorkflowRunDetail`
+foundation. The preamble stays two composable steps so `loadGoalLogs` keeps its
+exact `goalId → iteration → dataDir` refusal precedence. `goal handoff` already
+composed `loadGoalStatus` (`src/core/evidence/handoff.ts:121`), so it inherits the
+narrowing transitively. All refusal codes, messages, and success/failure text
+routing are reproduced verbatim, so the goal-first envelopes stay wire-stable:
+`test/goal-read-back.test.ts` unit-tests the extracted seam and the
+`test/goal-status.test.ts` / `test/goal-logs.test.ts` / `test/goal-recovery.test.ts`
+compatibility suites stay green.
+
+**Deferred from RC-1c (recorded, not narrowed).** Two further consolidations stay
+out of this slice on purpose:
+
+1. **Goal-first commands themselves are not removed.** `goal start` / `status` /
+   `logs` / `handoff` / `recovery clear` remain the full compatibility surface
+   (ticket out-of-scope; the gap-matrix keeps `goal start`). RC-1c removed
+   *duplicate internal logic*, not any command or envelope.
+2. **The recovery guarded-clear stays domain-specific.**
+   `clearGoalManualRecoveryGuarded` (`src/core/goal/recovery.ts`) and
+   `clearWorkflowRunManualRecoveryGuarded` (`src/core/workflow/run-recovery.ts`)
+   share a structural skeleton (`BEGIN IMMEDIATE` → not-found → not-flagged →
+   blocking-condition refusal → clear → commit) but read different durable rows
+   and refuse on different blocking semantics: the goal path queries active
+   `goal_iteration` job rows and refuses with `job_active` (+ `activeJobIds`),
+   while the workflow path reads the run monitor's recovery code and refuses with
+   `recovery_clear_refused` (+ `recoveryCode` / `blockingStepId`). Their
+   failure-reason vocabularies and result payloads differ, so a forced shared
+   helper would obscure the distinct domain semantics rather than remove proven
+   duplication. RC-1's `test/rc1-recovery-migration-parity.test.ts` already pins
+   the two as *contract-equivalent* (both refuse-and-preserve the durable flag
+   while a blocking condition persists); the implementations stay separate.
 
 **Equivalent-behavior proof to preserve:** `test/cli.test.ts` (goal-first CLI
 envelopes), `test/goal-init.test.ts`, `test/goal-reducer.test.ts`,
 `test/goal-status.test.ts`, `test/goal-logs.test.ts`, `test/goal-recovery.test.ts`,
+`test/goal-read-back.test.ts` (the RC-1c shared read-back seam),
 and the `goal-loop` adapter suite (`test/goal-loop-executor.test.ts`,
 `test/goal-loop-mechanism.test.ts`, `test/goal-loop-orchestrator.test.ts`,
 `test/goal-loop-executor-persistence.test.ts`).
@@ -437,8 +484,13 @@ and add `RC-*` placeholders for the genuinely new consolidation work.
    `test/rc1-recovery-migration-parity.test.ts`). This lands parity + coverage
    only; goal-first CLI stays the compatibility surface and is **not** narrowed
    here — and the shared iteration-finalization primitive it reused has since
-   been disentangled (NGX-494; Path 1, prerequisite 3), so the actual narrowing
-   is the remaining open work. (Path 1)
+   been disentangled (NGX-494; Path 1, prerequisite 3). **RC-1c (NGX-495) has
+   since landed the first narrowing slice:** the duplicate goal-first read-back
+   logic owned by `goal/status.ts` and `goal/logs.ts` (input preamble,
+   latest-goal lookup, resolve-or-refuse, evidence projection) now lives once in
+   the shared `src/core/goal/read-back.ts` seam with all envelopes wire-stable
+   (`test/goal-read-back.test.ts`); the domain-specific recovery guarded-clear
+   dedup stays deferred and no goal-first command is removed. (Path 1)
 2. **RC-2 — M9/M10 step-finalization reconciliation seam. ✅ Landed (NGX-480).**
    The single idempotent seam that finalizes dispatched steps from terminal
    executor evidence now ships as `reconcileDispatchedWorkflowStep`
@@ -493,10 +545,16 @@ resolver, live-wrapper dispatch composition, exec-context deriver, and
 daemon-default profile wiring are all in place and tested. RC-1b's shared
 finalization disentanglement has since **landed** (NGX-494): the
 verify/commit/reset transaction moved to the neutral `step-finalize.ts` seam and
-the goal-loop executor depends on that shared home. The next remaining runtime
-consolidation item in Path 1 is the goal-first CLI narrowing itself
-(its finalization prerequisite now cleared).
-RC-3 / RC-4 and `NGX-404` remain capability-gated and stay deferred until their
+the goal-loop executor depends on that shared home. RC-1c's first goal-first
+narrowing slice has since **landed** (NGX-495): the duplicate goal-first
+read-back logic is now owned once by the shared `src/core/goal/read-back.ts`
+seam, while the goal-first commands stay the compatibility surface and the
+domain-specific recovery guarded-clear dedup stays deferred. With that slice
+landed, the next remaining runtime consolidation item in Path 1 — the
+domain-specific recovery guarded-clear dedup and the eventual goal-first
+command-surface narrowing — stays deferred (no safe domain-neutral dedup today;
+the commands stay the compatibility surface), so the remaining capability-gated
+consolidation work is RC-3 / RC-4 and `NGX-404`, which stay deferred until their
 adapters / dogfood land.
 
 ## Non-Goals
