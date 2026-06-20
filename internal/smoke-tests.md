@@ -426,6 +426,19 @@ Coverage:
   finalizes the owning workflow step, unclean terminals park the run for manual
   recovery with a step gate, non-terminal evidence defers without writes, and the
   bidirectional M9/M10 proof prevents double finalization.
+- RC-3 daemon-dispatchable `external-apply` adapter in
+  `test/workflow-dispatch-external-apply.test.ts`,
+  `test/workflow-dispatch-external-apply-run.test.ts`, and
+  `test/workflow-dispatch-external-apply-m6.test.ts` (NGX-496): the pure M6 →
+  executor-evidence mapping routes every `applied` (including idempotent
+  already-applied replay) to `succeeded` and every M6 failure to
+  `manual_recovery_required`; the async producer runs the injected M6 write once,
+  records succeeded evidence, and RC-2 finalizes the step, with idempotent
+  re-entry never re-running the write, reconcile deferral keeping the lease held,
+  and the M9 lane boundary refused without running the write; the M6 integration
+  proof binds the producer to the real `executeExternalApply` through a mock
+  Linear client (no real `api.linear.app` calls). The production fail-closed
+  branch in `dispatch.ts` stays in force until a separate narrowing slice.
 - shipped bounded `daemon start` workflow-lane wiring in
   `test/cli-daemon-workflow-dispatch.test.ts`: the managed loop dispatches an
   approved workflow step with no test-only injection, surfaces

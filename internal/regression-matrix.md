@@ -441,6 +441,13 @@ that shipped workflow-first path.
   [`src/core/workflow/dispatch-executor-run.ts`](../src/core/workflow/dispatch-executor-run.ts),
   [`src/core/workflow/dispatch-executor-terminalize.ts`](../src/core/workflow/dispatch-executor-terminalize.ts), and
   [`src/core/workflow/daemon-dispatch-exec-context.ts`](../src/core/workflow/daemon-dispatch-exec-context.ts).
+  NGX-496 RC-3 daemon-dispatchable `external-apply` is owned by
+  [`src/core/workflow/dispatch-external-apply.ts`](../src/core/workflow/dispatch-external-apply.ts)
+  (pure M6 → executor-evidence mapping) and
+  [`src/core/workflow/dispatch-external-apply-run.ts`](../src/core/workflow/dispatch-external-apply-run.ts)
+  (async run-path producer); the production fail-closed branch in
+  [`src/core/workflow/dispatch.ts`](../src/core/workflow/dispatch.ts) stays in
+  force until a separate narrowing slice switches the dispatch lane.
 - **Evidence.**
   - Unit / CLI: `test/workflow-dispatch.test.ts`,
     `test/workflow-dispatch-persist.test.ts`,
@@ -466,6 +473,20 @@ that shipped workflow-first path.
     run real wrapper commands, terminalize evidence, reconcile through RC-2,
     fail unconfigured / unresolved contexts into manual recovery, preserve
     idempotent re-entry, and avoid stranded dispatch leases.
+  - RC-3 unit / integration proof: `test/workflow-dispatch-external-apply.test.ts`
+    pins the pure M6 → executor-evidence mapping (every `applied` → `succeeded`,
+    every M6 failure → `manual_recovery_required`, idempotency marker preserved,
+    composition with `planDispatchedExecutorTerminalization`);
+    `test/workflow-dispatch-external-apply-run.test.ts` proves the async producer
+    runs the injected M6 write once, records succeeded evidence, RC-2 finalizes
+    the step, fail-closed on every M6 refusal, idempotent re-entry never re-runs
+    the write, reconcile deferral keeps the lease held, and the M9 lane boundary
+    refuses without running the write; `test/workflow-dispatch-external-apply-m6.test.ts`
+    binds the producer to the real `executeExternalApply` through a mock Linear
+    client (applied → succeeded + RC-2 finalize, idempotent re-entry never
+    re-writes, real `policy_denied` refusal → manual recovery with no write
+    attempted). The production `external-apply` fail-closed branch in `dispatch.ts`
+    stays in force until a separate narrowing slice switches the dispatch lane.
   - Real closeout dogfood: `ngx353-m10-closeout` in `/Users/ngxcalvin/.momentum`
     reached `preflight = running` with executor invocation / round scaffold rows
     and `workflow run monitor` reported `monitorDrift.drifted = false`.
