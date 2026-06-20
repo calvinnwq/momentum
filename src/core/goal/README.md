@@ -18,7 +18,7 @@ the folder now carries the domain (`goal-init.ts` → `init.ts`, `goal-logs.ts` 
 | Concern | Modules |
 | --- | --- |
 | Goal init / state | `init.ts`, `reducer.ts` |
-| Status / logs read models | `status.ts`, `logs.ts` |
+| Status / logs read models | `status.ts`, `logs.ts`, `read-back.ts` |
 | Recovery compatibility | `recovery.ts`, `recovery-artifact.ts` |
 | Iteration helpers | `iteration-job.ts`, `iteration-prompt.ts` |
 | Goal spec parsing / types | `spec.ts`, `types.ts` |

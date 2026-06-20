@@ -7,29 +7,22 @@ import {
 } from "../evidence/artifacts.js";
 import { resolveDataDir, type DataDirOptions } from "../../config/data-dir.js";
 import { openDb, type MomentumDb } from "../../adapters/db.js";
-import { getGoal, type GoalRow } from "./init.js";
+import { type GoalRow } from "./init.js";
+import {
+  resolveGoalForReadBack,
+  toGoalEvidenceSummary,
+  type GoalEvidenceSummary
+} from "./read-back.js";
 import { parseRunnerResult } from "../executors/runner-result.js";
 import {
   listSourceItemSummariesForGoal,
   type SourceItemSummary
 } from "../source/items.js";
-import {
-  listLatestEvidenceRecordsForGoal,
-  type EvidenceRecord
-} from "../evidence/records.js";
+import { listLatestEvidenceRecordsForGoal } from "../evidence/records.js";
 
 export const DEFAULT_GOAL_LOGS_EVIDENCE_LIMIT = 5;
 
-export type GoalLogsEvidenceSummary = {
-  id: string;
-  source: string;
-  type: string;
-  formatVersion: number;
-  occurredAt: number;
-  summary: string;
-  artifactPath: string | null;
-  sourceItemId: string | null;
-};
+export type GoalLogsEvidenceSummary = GoalEvidenceSummary;
 
 export type GoalLogsErrorCode =
   | "invalid_input"
@@ -112,24 +105,11 @@ export function loadGoalLogs(input: LoadGoalLogsInput = {}): GoalLogsResult {
   try {
     db = openDb(dataDir);
 
-    const goal = input.goalId !== undefined
-      ? getGoal(db, input.goalId)
-      : findLatestGoal(db);
-
-    if (!goal) {
-      if (input.goalId !== undefined) {
-        return {
-          ok: false,
-          code: "goal_not_found",
-          error: `Goal ${input.goalId} was not found in ${dataDir}.`
-        };
-      }
-      return {
-        ok: false,
-        code: "no_goals",
-        error: `No goals found in ${dataDir}.`
-      };
+    const resolved = resolveGoalForReadBack(db, dataDir, input.goalId);
+    if (!resolved.ok) {
+      return resolved;
     }
+    const goal = resolved.goal;
 
     const goalDir = path.join(dataDir, "goals", goal.id);
     const availableIterations = listAvailableIterations(goalDir);
@@ -170,30 +150,11 @@ export function loadGoalLogs(input: LoadGoalLogsInput = {}): GoalLogsResult {
         db,
         goal.id,
         DEFAULT_GOAL_LOGS_EVIDENCE_LIMIT
-      ).map(toEvidenceSummary)
+      ).map(toGoalEvidenceSummary)
     };
   } finally {
     db?.close();
   }
-}
-
-function toEvidenceSummary(record: EvidenceRecord): GoalLogsEvidenceSummary {
-  return {
-    id: record.id,
-    source: record.source,
-    type: record.type,
-    formatVersion: record.formatVersion,
-    occurredAt: record.occurredAt,
-    summary: record.summary,
-    artifactPath: record.artifactPath,
-    sourceItemId: record.sourceItemId
-  };
-}
-
-function findLatestGoal(db: MomentumDb): GoalRow | undefined {
-  return db
-    .prepare("SELECT * FROM goals ORDER BY created_at DESC, id ASC LIMIT 1")
-    .get() as GoalRow | undefined;
 }
 
 function listAvailableIterations(goalDir: string): number[] {
