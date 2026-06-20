@@ -1,0 +1,337 @@
+import { afterEach, describe, expect, it } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+import { openDb, type MomentumDb } from "../src/adapters/db.js";
+import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition.js";
+import { persistWorkflowDefinition } from "../src/core/workflow/definition-persist.js";
+import { persistWorkflowRunStart } from "../src/core/workflow/run-start-persist.js";
+import {
+  claimRunnableWorkflowStep,
+  type AsyncWorkflowStepDispatch,
+  type ClaimedWorkflowStep,
+  type WorkflowStepDispatchContext,
+  type WorkflowStepDispatchResult
+} from "../src/core/workflow/scheduler.js";
+import { getWorkflowLease } from "../src/core/workflow/leases.js";
+import { listWorkflowGatesForRun } from "../src/core/workflow/gate-persist.js";
+import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run-recovery.js";
+import { getWorkflowStep } from "../src/core/workflow/step-transitions.js";
+import { loadExecutorInvocation } from "../src/core/executors/loop-persist.js";
+import {
+  deriveDispatchInvocationId,
+  executeWorkflowStepDispatch,
+  WORKFLOW_DISPATCH_RESULT_STATUS
+} from "../src/core/workflow/dispatch-execute.js";
+import {
+  createSubworkflowWorkflowDispatch,
+  type DispatchedSubworkflowContextResolution
+} from "../src/core/workflow/subworkflow-dispatch.js";
+import type { SubworkflowChildObservation } from "../src/core/workflow/dispatch-subworkflow-run.js";
+import type { WorkflowRunState } from "../src/core/workflow/run-reducer.js";
+
+/**
+ * NGX-497 (RC-4) — the daemon-lane *entry point* that composes the landed
+ * subworkflow producer ({@link executeAndReconcileDispatchedSubworkflowStep})
+ * behind the production base dispatch, the async sibling of
+ * `external-apply-dispatch.ts`'s `createExternalApplyWorkflowDispatch`.
+ *
+ * These tests pin the factory's composition contract — *not* the producer (that
+ * is exhaustively covered in `workflow-dispatch-subworkflow-run.test.ts`):
+ *   - it runs the subworkflow producer only for a `subworkflow`-family dispatch
+ *     invocation; any other family (the live-wrapper / external-apply lanes own
+ *     those) is echoed through untouched;
+ *   - it only acts on a base dispatch that genuinely started a scaffold
+ *     ({@link shouldRunDispatchedExecutor}); a fail-closed base result is echoed
+ *     through without deriving a child runner;
+ *   - a refused context derivation parks the parent for manual recovery (the
+ *     fail-closed-on-missing-child-config path) instead of throwing and stranding
+ *     the lease;
+ *   - a thrown derivation is trapped into the same manual-recovery park;
+ *   - it returns the base dispatch's result verbatim (finalization is a durable
+ *     side effect layered after the dispatch).
+ *
+ * `subworkflow` is not yet in `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES`, so the real
+ * base dispatcher still fail-closes it. To exercise the post-wiring substrate, a
+ * test base dispatch drives the genuine one-shot scaffold and re-stamps the
+ * invocation family to `subworkflow` — the exact row the PHASE1-wired base
+ * dispatch will create once the family flip lands.
+ */
+
+const NOW = 1_700_000_000_000;
+const RUN_ID = "run-subdisp-001";
+const WORKER = "worker-1";
+const DISPATCH_AT = NOW + 1;
+const STEP_ID = "preflight";
+const CHILD_RUN_ID = "child-run-abc";
+
+const tempRoots: string[] = [];
+
+afterEach(() => {
+  while (tempRoots.length > 0) {
+    const dir = tempRoots.pop();
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+function makeTempDir(prefix = "momentum-subdisp-"): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempRoots.push(dir);
+  return fs.realpathSync(dir);
+}
+
+/** Open a migrated DB seeded exactly as the CLI `workflow run start` leaves it. */
+function openSeededDb(runId: string = RUN_ID): MomentumDb {
+  const db = openDb(makeTempDir());
+  persistWorkflowDefinition(db, CODING_WORKFLOW_DEFINITION, { now: NOW });
+  persistWorkflowRunStart(db, {
+    definition: CODING_WORKFLOW_DEFINITION,
+    runId,
+    repoPath: "/repos/momentum",
+    objective: "Dogfood NGX-497",
+    now: NOW
+  });
+  return db;
+}
+
+function approveAndClaim(
+  db: MomentumDb,
+  stepId: string = STEP_ID,
+  runId: string = RUN_ID
+): ClaimedWorkflowStep {
+  db.prepare(
+    "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?"
+  ).run(runId, stepId);
+  const claim = claimRunnableWorkflowStep(db, {
+    runId,
+    stepId,
+    holder: WORKER,
+    leaseExpiresAt: NOW + 30_000,
+    now: NOW
+  });
+  if (!claim.ok) throw new Error(`test setup: claim failed (${claim.reason})`);
+  return claim.claim;
+}
+
+/**
+ * A base dispatch that creates the genuine production one-shot scaffold (running
+ * invocation + pending round + held lease + running step) and then re-stamps the
+ * invocation family to `subworkflow` — standing in for the PHASE1-wired base
+ * dispatch that will create a `subworkflow` scaffold directly once the family
+ * flip lands. The factory keys its gate on this family.
+ */
+function subworkflowScaffoldBaseDispatch(): AsyncWorkflowStepDispatch {
+  return (claim, context) => {
+    const result = executeWorkflowStepDispatch(claim, context);
+    context.db
+      .prepare(
+        "UPDATE executor_invocations SET executor_family = 'subworkflow' WHERE invocation_id = ?"
+      )
+      .run(deriveDispatchInvocationId(claim.runId, claim.stepId));
+    return result;
+  };
+}
+
+function stepState(db: MomentumDb, stepId: string = STEP_ID): string {
+  const row = getWorkflowStep(db, RUN_ID, stepId);
+  if (!row) throw new Error(`step ${stepId} not found`);
+  return row.state;
+}
+
+function invocationState(db: MomentumDb): string | undefined {
+  return loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+    ?.state;
+}
+
+function makeWritableEvidence(root = makeTempDir("momentum-subdisp-evidence-")) {
+  return {
+    executorLogPath: path.join(root, "nested", "subworkflow.log"),
+    resultJsonPath: path.join(root, "nested", "subworkflow.json")
+  };
+}
+
+function observe(childState: WorkflowRunState): SubworkflowChildObservation {
+  return { childRunId: CHILD_RUN_ID, childState };
+}
+
+/** A child runner whose call count proves whether the producer ran. */
+function countingChildRunner(observation: SubworkflowChildObservation): {
+  run: () => Promise<SubworkflowChildObservation>;
+  calls: () => number;
+} {
+  let calls = 0;
+  return {
+    run: async () => {
+      calls += 1;
+      return observation;
+    },
+    calls: () => calls
+  };
+}
+
+const context = (db: MomentumDb): WorkflowStepDispatchContext => ({
+  db,
+  workerId: WORKER,
+  now: DISPATCH_AT
+});
+
+describe("createSubworkflowWorkflowDispatch — family gate", () => {
+  it("echoes a non-subworkflow (one-shot) invocation through without running the producer", async () => {
+    const db = openSeededDb();
+    const claim = approveAndClaim(db);
+    const runner = countingChildRunner(observe("succeeded"));
+    let derives = 0;
+    const dispatch = createSubworkflowWorkflowDispatch(
+      // The real base dispatch leaves a genuine `one-shot` scaffold.
+      executeWorkflowStepDispatch,
+      {
+        deriveSubworkflow: () => {
+          derives += 1;
+          return { ok: true, runSubworkflowChild: runner.run, evidence: makeWritableEvidence() };
+        }
+      }
+    );
+
+    const result = await dispatch(claim, context(db));
+
+    expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
+    // The subworkflow lane is not this step's owner: neither the child runner nor
+    // even the context deriver is consulted.
+    expect(derives).toBe(0);
+    expect(runner.calls()).toBe(0);
+    expect(
+      loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+        ?.executorFamily
+    ).toBe("one-shot");
+  });
+});
+
+describe("createSubworkflowWorkflowDispatch — runs the producer for subworkflow", () => {
+  it("mirrors a succeeded child into a clean succeeded parent terminal", async () => {
+    const db = openSeededDb();
+    const claim = approveAndClaim(db);
+    const runner = countingChildRunner(observe("succeeded"));
+    const dispatch = createSubworkflowWorkflowDispatch(
+      subworkflowScaffoldBaseDispatch(),
+      {
+        deriveSubworkflow: () => ({
+          ok: true,
+          runSubworkflowChild: runner.run,
+          evidence: makeWritableEvidence()
+        })
+      }
+    );
+
+    const result = await dispatch(claim, context(db));
+
+    // The factory returns the base dispatch result verbatim; finalization is a
+    // durable side effect layered after it.
+    expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
+    expect(runner.calls()).toBe(1);
+    expect(invocationState(db)).toBe("succeeded");
+    expect(stepState(db)).toBe("succeeded");
+    expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
+  });
+
+  it("defers an in-flight child: no terminal evidence, lease held, parent running", async () => {
+    const db = openSeededDb();
+    const claim = approveAndClaim(db);
+    const runner = countingChildRunner(observe("running"));
+    const dispatch = createSubworkflowWorkflowDispatch(
+      subworkflowScaffoldBaseDispatch(),
+      {
+        deriveSubworkflow: () => ({
+          ok: true,
+          runSubworkflowChild: runner.run,
+          evidence: makeWritableEvidence()
+        })
+      }
+    );
+
+    await dispatch(claim, context(db));
+
+    expect(runner.calls()).toBe(1);
+    expect(invocationState(db)).toBe("running");
+    expect(stepState(db)).toBe("running");
+    expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).toBeNull();
+  });
+});
+
+describe("createSubworkflowWorkflowDispatch — fail-closed context", () => {
+  it("parks the parent for manual recovery when the child context cannot be derived", async () => {
+    const db = openSeededDb();
+    const claim = approveAndClaim(db);
+    const resolution: DispatchedSubworkflowContextResolution = {
+      ok: false,
+      reason: "child_definition_missing"
+    };
+    const dispatch = createSubworkflowWorkflowDispatch(
+      subworkflowScaffoldBaseDispatch(),
+      { deriveSubworkflow: () => resolution }
+    );
+
+    await dispatch(claim, context(db));
+
+    expect(invocationState(db)).toBe("manual_recovery_required");
+    expect(
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+    ).toBe(true);
+    // The parent step is parked (still running) with an operator-visible gate,
+    // not fabricated terminal.
+    expect(stepState(db)).toBe("running");
+    const gates = listWorkflowGatesForRun(db, RUN_ID);
+    expect(gates).toHaveLength(1);
+    expect(gates[0]).toMatchObject({
+      gateType: "manual_recovery_required",
+      stepRunId: STEP_ID
+    });
+  });
+
+  it("traps a thrown derivation into the same manual-recovery park", async () => {
+    const db = openSeededDb();
+    const claim = approveAndClaim(db);
+    const dispatch = createSubworkflowWorkflowDispatch(
+      subworkflowScaffoldBaseDispatch(),
+      {
+        deriveSubworkflow: () => {
+          throw new Error("boom resolving child run");
+        }
+      }
+    );
+
+    await dispatch(claim, context(db));
+
+    expect(invocationState(db)).toBe("manual_recovery_required");
+    expect(
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+    ).toBe(true);
+    expect(stepState(db)).toBe("running");
+  });
+});
+
+describe("createSubworkflowWorkflowDispatch — not-startable base dispatch", () => {
+  it("echoes a fail-closed base result without deriving a child runner", async () => {
+    const db = openSeededDb();
+    const claim = approveAndClaim(db);
+    const runner = countingChildRunner(observe("succeeded"));
+    let derives = 0;
+    const failClosedBase: AsyncWorkflowStepDispatch = (): WorkflowStepDispatchResult => ({
+      status: WORKFLOW_DISPATCH_RESULT_STATUS.failClosed
+    });
+    const dispatch = createSubworkflowWorkflowDispatch(failClosedBase, {
+      deriveSubworkflow: () => {
+        derives += 1;
+        return { ok: true, runSubworkflowChild: runner.run, evidence: makeWritableEvidence() };
+      }
+    });
+
+    const result = await dispatch(claim, context(db));
+
+    expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.failClosed);
+    // A fail-closed base dispatch already parked/released the claim; the factory
+    // never derives a child runner or touches the run.
+    expect(derives).toBe(0);
+    expect(runner.calls()).toBe(0);
+  });
+});
