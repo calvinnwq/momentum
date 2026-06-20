@@ -23,10 +23,9 @@
  *
  *   - The phase-1 dispatchable set is exactly the executor families that already
  *     have a landed bounded adapter (`goal-loop` M10-05, `one-shot` / `script`
- *     M10-06, `no-mistakes` M10-07). `external-apply` and `subworkflow` have no
- *     landed daemon-dispatchable adapter this phase — `external-apply` is
- *     operator-mediated external writes and `subworkflow` recurses into another
- *     run — so they fail closed rather than silently no-op or strand a lease.
+ *     M10-06, `no-mistakes` M10-07, `external-apply` RC-3). `subworkflow` has no
+ *     landed daemon-dispatchable adapter this phase — it recurses into another
+ *     run — so it fails closed rather than silently no-op or strand a lease.
  *     NGX-434 keeps those branches until RC-3 / RC-4 land replacement adapters.
  *   - Every non-dispatch outcome routes to the contract's
  *     `manual_recovery_required` human gate: "Momentum cannot safely proceed
@@ -59,7 +58,8 @@ export const PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES = [
   "goal-loop",
   "one-shot",
   "script",
-  "no-mistakes"
+  "no-mistakes",
+  "external-apply"
 ] as const;
 export type Phase1DispatchableExecutorFamily =
   (typeof PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES)[number];

@@ -445,9 +445,9 @@ that shipped workflow-first path.
   [`src/core/workflow/dispatch-external-apply.ts`](../src/core/workflow/dispatch-external-apply.ts)
   (pure M6 → executor-evidence mapping) and
   [`src/core/workflow/dispatch-external-apply-run.ts`](../src/core/workflow/dispatch-external-apply-run.ts)
-  (async run-path producer); the production fail-closed branch in
-  [`src/core/workflow/dispatch.ts`](../src/core/workflow/dispatch.ts) stays in
-  force until a separate narrowing slice switches the dispatch lane.
+  (async run-path producer) plus production daemon dispatch wiring in
+  [`src/core/workflow/external-apply-dispatch.ts`](../src/core/workflow/external-apply-dispatch.ts)
+  and [`src/cli.ts`](../src/cli.ts).
 - **Evidence.**
   - Unit / CLI: `test/workflow-dispatch.test.ts`,
     `test/workflow-dispatch-persist.test.ts`,
@@ -485,8 +485,7 @@ that shipped workflow-first path.
     binds the producer to the real `executeExternalApply` through a mock Linear
     client (applied → succeeded + RC-2 finalize, idempotent re-entry never
     re-writes, real `policy_denied` refusal → manual recovery with no write
-    attempted). The production `external-apply` fail-closed branch in `dispatch.ts`
-    stays in force until a separate narrowing slice switches the dispatch lane.
+    attempted). `external-apply` is now in the dispatchable family set and wired through daemon dispatch composition; `subworkflow` remains fail-closed.
   - Real closeout dogfood: `ngx353-m10-closeout` in `/Users/ngxcalvin/.momentum`
     reached `preflight = running` with executor invocation / round scaffold rows
     and `workflow run monitor` reported `monitorDrift.drifted = false`.
@@ -506,9 +505,9 @@ that shipped workflow-first path.
   dispatch lease, and creates no executor rows. If the run row vanished
   (`workflow_run_not_found`), it cannot write a run-scoped flag or gate without
   orphaning evidence, so it releases the lease and creates no executor rows. The
-  phase-1 dispatchable set is exactly `goal-loop`, `one-shot`, `script`, and
-  `no-mistakes`; `external-apply` and `subworkflow` stay fail-closed until their
-  daemon-dispatchable adapters land or closeout explicitly defers them.
+  phase-1 dispatchable set is exactly `goal-loop`, `one-shot`, `script`,
+  `no-mistakes`, and `external-apply`; `subworkflow` stays fail-closed until its
+  daemon-dispatchable adapter lands or closeout explicitly defers it.
 - **Owner.** [`src/core/workflow/dispatch.ts`](../src/core/workflow/dispatch.ts) and
   [`src/core/workflow/dispatch-execute.ts`](../src/core/workflow/dispatch-execute.ts).
 - **Evidence.**

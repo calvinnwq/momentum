@@ -155,18 +155,16 @@ describe("resolveWorkflowStepDispatchPlan — composed durable decision", () => 
     expect(plan).toEqual({ action: "dispatch", executorFamily: "goal-loop" });
   });
 
-  it("fails an unsupported resolved family closed to a manual-recovery gate", () => {
+  it("routes the external-apply family to a real dispatch plan", () => {
     const db = openSeededDb();
     const plan = resolveWorkflowStepDispatchPlan(db, {
       runId: RUN_ID,
       stepId: "linear-refresh"
     });
-    expect(plan.action).toBe("fail_closed");
-    if (plan.action === "fail_closed") {
-      expect(plan.code).toBe("unsupported_executor_family");
-      expect(plan.gateType).toBe("manual_recovery_required");
-      expect(plan.reason).toContain("external-apply");
-    }
+    expect(plan).toEqual({
+      action: "dispatch",
+      executorFamily: "external-apply"
+    });
   });
 
   it("maps a durable resolution failure to its fail-closed code", () => {

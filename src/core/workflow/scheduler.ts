@@ -1026,6 +1026,13 @@ export type WorkflowStepDispatch = (
   context: WorkflowStepDispatchContext
 ) => WorkflowStepDispatchResult;
 
+export type MaybePromise<T> = T | Promise<T>;
+
+export type AsyncWorkflowStepDispatch = (
+  claim: ClaimedWorkflowStep,
+  context: WorkflowStepDispatchContext
+) => MaybePromise<WorkflowStepDispatchResult>;
+
 /**
  * The lane's durable primitives, overridable for tests (mirrors the dependency
  * injection `runDaemonLoop` uses for `runWorker` / `now` / `sleep`). Production
@@ -1053,6 +1060,13 @@ export type RunWorkflowSchedulerOnceInput = {
   stalePolicy?: WorkflowLeaseStalePolicy;
   /** Overridable durable primitives (testing seam). */
   deps?: Partial<WorkflowSchedulerDeps>;
+};
+
+export type RunWorkflowSchedulerOnceAsyncInput = Omit<
+  RunWorkflowSchedulerOnceInput,
+  "dispatch"
+> & {
+  dispatch: AsyncWorkflowStepDispatch;
 };
 
 export type RunWorkflowSchedulerOnceResult =
@@ -1111,11 +1125,30 @@ export type RunWorkflowSchedulerOnceResult =
 export function runWorkflowSchedulerOnce(
   input: RunWorkflowSchedulerOnceInput
 ): RunWorkflowSchedulerOnceResult {
+  const result = runWorkflowSchedulerOnceCore(input, input.dispatch);
+  if (isPromiseLike(result)) {
+    throw new Error("runWorkflowSchedulerOnce: synchronous dispatch returned a Promise");
+  }
+  return result;
+}
+
+export async function runWorkflowSchedulerOnceAsync(
+  input: RunWorkflowSchedulerOnceAsyncInput
+): Promise<RunWorkflowSchedulerOnceResult> {
+  return runWorkflowSchedulerOnceCore(input, (claim, context) =>
+    Promise.resolve(input.dispatch(claim, context))
+  );
+}
+
+function runWorkflowSchedulerOnceCore(
+  input: Omit<RunWorkflowSchedulerOnceInput, "dispatch">,
+  dispatch: AsyncWorkflowStepDispatch
+): MaybePromise<RunWorkflowSchedulerOnceResult> {
   const { db, workerId } = input;
   if (typeof workerId !== "string" || workerId.length === 0) {
     throw new Error("runWorkflowSchedulerOnce: workerId is required");
   }
-  if (typeof input.dispatch !== "function") {
+  if (typeof dispatch !== "function") {
     throw new Error("runWorkflowSchedulerOnce: dispatch is required");
   }
   const leaseDurationMs =
@@ -1161,9 +1194,9 @@ export function runWorkflowSchedulerOnce(
   }
 
   const claim = claimResult.claim;
-  let dispatchResult: WorkflowStepDispatchResult;
+  let dispatchResult: MaybePromise<WorkflowStepDispatchResult>;
   try {
-    dispatchResult = input.dispatch(claim, { db, workerId, now: tickNow });
+    dispatchResult = dispatch(claim, { db, workerId, now: tickNow });
   } catch (error) {
     try {
       releaseWorkflowLease(db, {
@@ -1180,6 +1213,32 @@ export function runWorkflowSchedulerOnce(
     throw error;
   }
 
+  if (isPromiseLike(dispatchResult)) {
+    return dispatchResult
+      .then((resolvedDispatchResult) => ({
+        code: "dispatched" as const,
+        workerId,
+        recovery,
+        claim,
+        dispatch: resolvedDispatchResult
+      }))
+      .catch((error) => {
+        try {
+          releaseWorkflowLease(db, {
+            runId: claim.lease.runId,
+            leaseKind: claim.lease.leaseKind,
+            holder: claim.lease.holder,
+            acquiredAt: claim.lease.acquiredAt,
+            now: tickNow
+          });
+        } catch {
+          // Best-effort release: surface the original dispatcher failure, not a
+          // secondary release error.
+        }
+        throw error;
+      });
+  }
+
   return {
     code: "dispatched",
     workerId,
@@ -1187,6 +1246,15 @@ export function runWorkflowSchedulerOnce(
     claim,
     dispatch: dispatchResult
   };
+}
+
+function isPromiseLike<T>(value: MaybePromise<T>): value is Promise<T> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "then" in value &&
+    typeof (value as { then?: unknown }).then === "function"
+  );
 }
 
 function loadLeaseRecords(db: MomentumDb, runId: string): WorkflowLeaseRecord[] {

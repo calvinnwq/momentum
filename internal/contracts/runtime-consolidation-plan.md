@@ -44,7 +44,7 @@ unreachable-branch audit below finds nothing safe to delete within scope.
 | 2 | Imported `.agent-workflows` / `cwfp-*` compatibility | Defer | `NGX-404` default-switch dogfood passes its `coding-workflow-ownership.md` gates | `NGX-404` (existing) |
 | 3 | M9 live-wrapper direct `workflow_steps` advancement vs M10 executor-loop finalization | Keep (coexist); boundary seam landed | A single reconciliation seam now finalizes dispatched steps from durable executor evidence with a no-double-finalize proof; narrowing still waits on compatibility-lane migrations | RC-2 (seam landed, NGX-480) |
 | 4 | Production dispatch phase-1 scaffold (no fabricated result evidence) | Keep | RC-2 replaced the seam-level terminal gap and RC-5b now feeds real terminal executor evidence from configured daemon profiles; narrowing the scaffold still waits on compatibility-lane migrations | RC-2 (seam landed, NGX-480), RC-5 |
-| 5 | `external-apply` / `subworkflow` fail-closed executor families | Defer; **RC-3 `external-apply` adapter landed (NGX-496)** | A landed daemon-dispatchable adapter per family, behind the existing safety contracts; the RC-3 adapter ships but the production fail-closed branch stays in force until a separate narrowing slice switches the dispatch lane | RC-3 (`external-apply` adapter landed, NGX-496), RC-4 (`subworkflow`) |
+| 5 | `external-apply` / `subworkflow` fail-closed executor families | `external-apply` narrowed; `subworkflow` defer | A landed daemon-dispatchable adapter per family, behind the existing safety contracts; RC-3 now wires `external-apply` through the daemon dispatch lane while `subworkflow` remains fail-closed | RC-3 (`external-apply` wired, NGX-496), RC-4 (`subworkflow`) |
 | 6 | Fake workflow-step executors shipped in `src/` | Deprecate-later; **fake demotion landed (NGX-485); daemon-default live profile wiring landed (NGX-492)** | Real adapters now back the production default, fakes are a test-only injected seam, and configured daemon profiles now feed live executor evidence through bounded `daemon start` | RC-5 (fake demotion landed, NGX-485; daemon wiring landed, NGX-492) |
 
 ## Path-By-Path Decisions
@@ -383,31 +383,37 @@ idempotency cases).
 ### 5. `external-apply` and `subworkflow` fail-closed families
 
 **Current shape.** Both are valid members of `WORKFLOW_EXECUTOR_FAMILIES`
-(`src/core/workflow/definition.ts:44`) but are absent from
-`PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES`. A claimed step resolving to either fails
-closed: `planWorkflowStepDispatch` returns
+(`src/core/workflow/definition.ts:44`). `external-apply` is now included in
+`PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES` and daemon dispatch composes the M6
+`executeExternalApply` path through `createExternalApplyWorkflowDispatch`,
+terminal executor evidence, and RC-2 reconciliation. The producer verifies the
+recorded scaffold family before any external write. `subworkflow` remains absent
+from the dispatchable set; a claimed step resolving to it fails closed with
 `code: "unsupported_executor_family"` → `manual_recovery_required`, and
-`failClosedDispatch` (`src/core/workflow/dispatch-execute.ts`) sets `needs_manual_recovery`,
-opens a `workflow_gates` row, releases the dispatch lease, and creates no executor
-rows (the step stays `approved`).
+`failClosedDispatch` (`src/core/workflow/dispatch-execute.ts`) sets
+`needs_manual_recovery`, opens a `workflow_gates` row, releases the dispatch
+lease, and creates no executor rows.
 
-**Decision: Defer.** The fail-closed behavior is a product safety feature, not
-dead code (`executor-loop.md`: "`external-apply` is operator-mediated external
-writes and `subworkflow` recurses into another run — so they fail closed rather
-than silently no-op or strand a lease"). `external-apply` must route through the
-existing M6 external-apply safety contract; `subworkflow` is deferred until
-first-class workflow start is stable (`workflow-first-gap-matrix.md`).
+**Decision: external-apply narrowed; subworkflow deferred.** The former
+`external-apply` fail-closed branch has been replaced by the RC-3 safety-gated
+adapter wiring. M6 policy gating, audit-before-write, idempotency, and adapter
+refusals remain the safety contract; unsafe/unconfigured outcomes terminalize to
+manual recovery. `subworkflow` is deferred until first-class workflow start is
+stable (`workflow-first-gap-matrix.md`).
 
 **Prerequisite before removal of the fail-closed branch.** A landed
-daemon-dispatchable adapter for that family, behind its safety contract, plus a
-test proving the family now dispatches durable evidence instead of gating. The
+daemon-dispatchable `subworkflow` adapter behind its safety contract, plus a test
+proving the family now dispatches durable evidence instead of gating. The
 fail-closed branch is removed only when an adapter replaces it — never as a bare
 deletion.
 
 **Equivalent-behavior proof to preserve:** `test/workflow-dispatch.test.ts`
-(parametrized `external-apply` / `subworkflow` fail-closed cases),
+(`external-apply` dispatchability and `subworkflow` fail-closed),
 `test/workflow-dispatch-execute.test.ts` (durable manual-recovery gate, lease
-released, zero invocations, vanished-run safety).
+released, zero invocations, vanished-run safety), and
+`test/workflow-dispatch-external-apply-run.test.ts` /
+`test/workflow-dispatch-external-apply-m6.test.ts` (family guard, daemon wrapper,
+M6 write-path reuse, and fail-closed M6 refusals).
 
 ### 6. Fake workflow-step executors shipped in `src/`
 
@@ -505,7 +511,7 @@ and add `RC-*` placeholders for the genuinely new consolidation work.
    so the fixture hides no production terminal gap behind it. RC-2 unblocks
    narrowing of both the coexistence (Path 3) and the dispatch scaffold (Path 4),
    each still gated on the remaining compatibility-lane migrations.
-3. **RC-3 — `external-apply` daemon-dispatchable adapter. ✅ Adapter landed
+3. **RC-3 — `external-apply` daemon-dispatchable adapter. ✅ Adapter wired
    (NGX-496).** The pure mapping from an M6 `ExecuteExternalApplyResult` into the
    `WorkflowStepExecutorDispatchResult` evidence the terminalize bridge consumes
    now ships as `mapExternalApplyResultToExecutorResult`
@@ -540,11 +546,10 @@ and add `RC-*` placeholders for the genuinely new consolidation work.
    binding the producer to the real `executeExternalApply` through a mock
    Linear write/refresh client: applied → succeeded + RC-2 finalize, idempotent
    re-entry never re-writes, real `policy_denied` refusal → manual recovery
-   with no write attempted). **The production `external-apply` fail-closed
-   branch in `dispatch.ts` is not yet narrowed** — `external-apply` stays
-   outside `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES` and the daemon lane still
-   routes it to `manual_recovery_required` until a separate follow-up slice
-   switches the dispatch lane to compose the landed adapter. (Path 5)
+   with no write attempted). The production dispatch lane now includes
+   `external-apply` in `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES` and composes the
+   landed adapter through bounded `daemon start`; `subworkflow` remains the
+   fail-closed family for Path 5. (Path 5)
 4. **RC-4 — `subworkflow` daemon-dispatchable adapter**, after first-class
    workflow start is stable, replacing its fail-closed branch. (Path 5)
 5. **RC-5 — Real `WorkflowStepExecutor` adapters + fake demotion. ✅ Fake demotion

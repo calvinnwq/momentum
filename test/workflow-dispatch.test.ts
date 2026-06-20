@@ -20,9 +20,9 @@ function resolved(
 }
 
 describe("phase-1 dispatchable executor families", () => {
-  it("supports exactly the four landed bounded-adapter families", () => {
+  it("supports exactly the daemon-dispatchable bounded-adapter families", () => {
     expect([...PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES].sort()).toEqual(
-      ["goal-loop", "no-mistakes", "one-shot", "script"].sort()
+      ["external-apply", "goal-loop", "no-mistakes", "one-shot", "script"].sort()
     );
   });
 
@@ -30,8 +30,6 @@ describe("phase-1 dispatchable executor families", () => {
     for (const family of PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES) {
       expect(WORKFLOW_EXECUTOR_FAMILIES).toContain(family);
     }
-    // external-apply and subworkflow have no landed daemon-dispatchable adapter
-    // this phase, so the supported set is genuinely narrower than the full set.
     expect(PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES.length).toBeLessThan(
       WORKFLOW_EXECUTOR_FAMILIES.length
     );
@@ -42,7 +40,7 @@ describe("phase-1 dispatchable executor families", () => {
     expect(isPhase1DispatchableExecutorFamily("one-shot")).toBe(true);
     expect(isPhase1DispatchableExecutorFamily("no-mistakes")).toBe(true);
     expect(isPhase1DispatchableExecutorFamily("script")).toBe(true);
-    expect(isPhase1DispatchableExecutorFamily("external-apply")).toBe(false);
+    expect(isPhase1DispatchableExecutorFamily("external-apply")).toBe(true);
     expect(isPhase1DispatchableExecutorFamily("subworkflow")).toBe(false);
   });
 });
@@ -60,7 +58,7 @@ describe("planWorkflowStepDispatch — supported families", () => {
 });
 
 describe("planWorkflowStepDispatch — unsupported families fail closed", () => {
-  for (const family of ["external-apply", "subworkflow"] as const) {
+  for (const family of ["subworkflow"] as const) {
     it(`fails ${family} closed to an operator-visible manual-recovery gate`, () => {
       const plan = planWorkflowStepDispatch(resolved(family));
       expect(plan.action).toBe("fail_closed");

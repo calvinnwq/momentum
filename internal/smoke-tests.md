@@ -409,8 +409,8 @@ Coverage:
   same gate list in `test/cli-workflow-run-logs.test.ts`.
 - the pure workflow-dispatch decision domain in `test/workflow-dispatch.test.ts`:
   the phase-1 dispatchable allowlist (`goal-loop`, `one-shot`, `script`,
-  `no-mistakes`), unsupported `external-apply` / `subworkflow` fail-closed
-  routing, resolution-failure code mapping, and totality.
+  `no-mistakes`, `external-apply`), `subworkflow` fail-closed routing,
+  resolution-failure code mapping, and totality.
 - durable dispatch resolution in `test/workflow-dispatch-persist.test.ts`:
   run -> definition-link -> step-definition -> executor-family resolution,
   unknown or unlinked state failures, and composed dispatch-plan decisions.
@@ -437,8 +437,9 @@ Coverage:
   re-entry never re-running the write, reconcile deferral keeping the lease held,
   and the M9 lane boundary refused without running the write; the M6 integration
   proof binds the producer to the real `executeExternalApply` through a mock
-  Linear client (no real `api.linear.app` calls). The production fail-closed
-  branch in `dispatch.ts` stays in force until a separate narrowing slice.
+  Linear client (no real `api.linear.app` calls), with production daemon dispatch
+  wiring now composing the adapter and a scaffold-family guard preventing
+  non-`external-apply` writes.
 - shipped bounded `daemon start` workflow-lane wiring in
   `test/cli-daemon-workflow-dispatch.test.ts`: the managed loop dispatches an
   approved workflow step with no test-only injection, surfaces

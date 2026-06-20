@@ -25,6 +25,7 @@ import {
 } from "../src/core/workflow/dispatch-execute.js";
 import { WORKFLOW_RECONCILE_RESULT_STATUS } from "../src/core/workflow/dispatch-reconcile-execute.js";
 import { WORKFLOW_EXECUTE_RECONCILE_STATUS } from "../src/core/workflow/dispatch-executor-run.js";
+import { createExternalApplyWorkflowDispatch } from "../src/core/workflow/external-apply-dispatch.js";
 import { executeAndReconcileDispatchedExternalApplyStep } from "../src/core/workflow/dispatch-external-apply-run.js";
 import type {
   ExecuteExternalApplyContext,
@@ -120,14 +121,47 @@ function approveAndClaim(
  * Drive a (dispatchable) step through the production base dispatch so it lands
  * `running` with a `<run>::<step>::dispatch` invocation (`running`) + scaffold
  * round (`pending`) and a held dispatch lease — the exact substrate the
- * external-apply producer runs against. The producer is family-agnostic (it
- * runs the injected M6 write path regardless of the scaffold's recorded
- * family), so a landed dispatchable step provides a faithful scaffold while
- * `external-apply` itself is still fail-closed in the base dispatcher.
+ * external-apply producer runs against. The producer is family-gated: it only runs the injected M6 write path when the
+ * scaffold records `external-apply`, so tests set the definition executor before
+ * dispatching the scaffold.
  */
-function dispatchStep(db: MomentumDb, stepId: string = STEP_ID): void {
+function dispatchStep(
+  db: MomentumDb,
+  stepId: string = STEP_ID,
+  executor: "external-apply" | "one-shot" = "external-apply"
+): void {
+  db.prepare(
+    `UPDATE step_definitions
+        SET executor = ?
+      WHERE definition_key = ? AND definition_version = ? AND step_key = ?`
+  ).run(
+    executor,
+    CODING_WORKFLOW_DEFINITION.key,
+    CODING_WORKFLOW_DEFINITION.version,
+    stepId
+  );
   const claim = approveAndClaim(db, stepId);
   executeWorkflowStepDispatch(claim, { db, workerId: WORKER, now: DISPATCH_AT });
+}
+
+async function dispatchStepThroughExternalApplyWrapper(
+  db: MomentumDb,
+  runner: ReturnType<typeof countingRunner>
+): Promise<void> {
+  db.prepare(
+    `UPDATE step_definitions
+        SET executor = 'external-apply'
+      WHERE definition_key = ? AND definition_version = ? AND step_key = ?`
+  ).run(CODING_WORKFLOW_DEFINITION.key, CODING_WORKFLOW_DEFINITION.version, STEP_ID);
+  const claim = approveAndClaim(db, STEP_ID);
+  const dispatch = createExternalApplyWorkflowDispatch(executeWorkflowStepDispatch, {
+    deriveExternalApply: () => ({
+      ok: true,
+      runExternalApply: runner.run,
+      evidence: EVIDENCE
+    })
+  });
+  await dispatch(claim, { db, workerId: WORKER, now: DISPATCH_AT });
 }
 
 function stepState(db: MomentumDb, stepId: string = STEP_ID): string {
@@ -304,6 +338,21 @@ function makeFailure(
 }
 
 describe("executeAndReconcileDispatchedExternalApplyStep — clean applied", () => {
+  it("is reachable through the daemon dispatch wrapper for an external-apply scaffold", async () => {
+    const db = openSeededDb();
+    const runner = countingRunner(makeSuccess());
+
+    await dispatchStepThroughExternalApplyWrapper(db, runner);
+
+    expect(runner.calls()).toBe(1);
+    expect(
+      loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+        ?.executorFamily
+    ).toBe("external-apply");
+    expect(stepState(db)).toBe("succeeded");
+    expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
+  });
+
   it("runs the M6 write once, records succeeded evidence, and RC-2 finalizes the step", async () => {
     const db = openSeededDb();
     dispatchStep(db);
@@ -503,6 +552,29 @@ describe("executeAndReconcileDispatchedExternalApplyStep — reconcile deferral"
 });
 
 describe("executeAndReconcileDispatchedExternalApplyStep — M9 lane boundary", () => {
+  it("refuses a non-external-apply dispatch scaffold and never runs the external write", async () => {
+    const db = openSeededDb();
+    dispatchStep(db, STEP_ID, "one-shot");
+    const runner = countingRunner(makeSuccess());
+
+    const out = await executeAndReconcileDispatchedExternalApplyStep({
+      db,
+      runId: RUN_ID,
+      stepId: STEP_ID,
+      runExternalApply: runner.run,
+      evidence: EVIDENCE,
+      now: EXECUTE_AT
+    });
+
+    expect(out.status).toBe(WORKFLOW_EXECUTE_RECONCILE_STATUS.notDispatched);
+    expect(runner.calls()).toBe(0);
+    expect(
+      loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+        ?.state
+    ).toBe("running");
+    expect(stepState(db)).toBe("running");
+  });
+
   it("refuses a step with no dispatch invocation and never runs the external write", async () => {
     const db = openSeededDb();
     // No dispatch: an M9 direct-finalize / never-dispatched step writes no

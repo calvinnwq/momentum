@@ -128,6 +128,12 @@ export async function executeAndReconcileDispatchedExternalApplyStep(
       detail: invocationId
     };
   }
+  if (invocation.executorFamily !== "external-apply") {
+    return {
+      status: WORKFLOW_EXECUTE_RECONCILE_STATUS.notDispatched,
+      detail: `${invocationId}: ${invocation.executorFamily}`
+    };
+  }
 
   if (isTerminalExecutorInvocationState(invocation.state)) {
     // Idempotent re-entry: a prior execution already issued the external write and

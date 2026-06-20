@@ -306,8 +306,8 @@ export const CODING_WORKFLOW_DEFINITION_KEY = "coding-workflow";
  *   - merge-cleanup  -> script        (deterministic local cleanup; remote git
  *                                       stays out of M10 scope)
  *   - linear-refresh -> external-apply (operator-mediated external write;
- *                                       currently fail-closed until a
- *                                       daemon-dispatchable adapter lands)
+ *                                       daemon-dispatchable through the
+ *                                       M6 safety-gated adapter)
  *
  * These families are editable defaults, not a fixed product boundary.
  */

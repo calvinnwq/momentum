@@ -139,6 +139,11 @@ function approveAndClaim(db: MomentumDb): ClaimedWorkflowStep {
 }
 
 function dispatchStep(db: MomentumDb): void {
+  db.prepare(
+    `UPDATE step_definitions
+        SET executor = 'external-apply'
+      WHERE definition_key = ? AND definition_version = ? AND step_key = ?`
+  ).run(CODING_WORKFLOW_DEFINITION.key, CODING_WORKFLOW_DEFINITION.version, STEP_ID);
   const claim = approveAndClaim(db);
   executeWorkflowStepDispatch(claim, { db, workerId: WORKER, now: DISPATCH_AT });
 }

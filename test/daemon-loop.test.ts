@@ -39,6 +39,7 @@ import type {
 } from "../src/core/daemon/worker-run.js";
 import {
   WORKFLOW_DISPATCH_LEASE_KIND,
+  type AsyncWorkflowStepDispatch,
   type ClaimedWorkflowStep,
   type RunWorkflowSchedulerOnceResult,
   type WorkflowStepDispatch,
@@ -1492,7 +1493,7 @@ function seedRunnableWorkflow(db: MomentumDb, runId = "wf-run-a"): string {
 }
 
 type WorkflowDispatchRecorder = {
-  dispatch: WorkflowStepDispatch;
+  dispatch: WorkflowStepDispatch | AsyncWorkflowStepDispatch;
   calls: Array<{ claim: ClaimedWorkflowStep; context: WorkflowStepDispatchContext }>;
 };
 
@@ -1502,6 +1503,18 @@ function recordingWorkflowDispatch(
   const calls: WorkflowDispatchRecorder["calls"] = [];
   const dispatch: WorkflowStepDispatch = (claim, context) => {
     calls.push({ claim, context });
+    return result;
+  };
+  return { dispatch, calls };
+}
+
+function asyncRecordingWorkflowDispatch(
+  result: WorkflowStepDispatchResult = { status: "dispatched" }
+): WorkflowDispatchRecorder {
+  const calls: WorkflowDispatchRecorder["calls"] = [];
+  const dispatch: AsyncWorkflowStepDispatch = async (claim, context) => {
+    calls.push({ claim, context });
+    await Promise.resolve();
     return result;
   };
   return { dispatch, calls };
@@ -1612,6 +1625,49 @@ describe("runDaemonLoop workflow scheduler lane (NGX-348)", () => {
       // The scheduler tick result is surfaced to onCycleComplete observers.
       expect(observedCycles).toHaveLength(1);
       expect(observedCycles[0]?.code).toBe("dispatched");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("awaits an async workflow dispatch before reporting the cycle", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const runId = seedDaemonRun(db);
+      const wfRunId = seedRunnableWorkflow(db);
+      const recorder = asyncRecordingWorkflowDispatch({
+        status: "async-dispatched"
+      });
+      const observedCycles: Array<RunWorkflowSchedulerOnceResult | undefined> = [];
+
+      const result = await runDaemonLoop({
+        db,
+        dataDir,
+        runId,
+        workerId: "daemon-loop-wf-async-dispatch",
+        pollIntervalMs: 0,
+        maxLoopIterations: 1,
+        now: makeMonotonicNow(),
+        sleep: async () => undefined,
+        onCycleComplete: (cycle) => observedCycles.push(cycle.workflowResult),
+        runWorker: () => ({
+          code: "no_work",
+          workerId: "daemon-loop-wf-async-dispatch",
+          dataDir,
+          outcome: "idle",
+          message: "no work"
+        }),
+        workflowLane: { dispatch: recorder.dispatch }
+      });
+
+      expect(result.workflowStepsDispatched).toBe(1);
+      expect(recorder.calls).toHaveLength(1);
+      expect(recorder.calls[0]?.claim.runId).toBe(wfRunId);
+      expect(observedCycles[0]?.code).toBe("dispatched");
+      if (observedCycles[0]?.code === "dispatched") {
+        expect(observedCycles[0].dispatch.status).toBe("async-dispatched");
+      }
     } finally {
       db.close();
     }
