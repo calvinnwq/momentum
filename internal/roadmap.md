@@ -111,8 +111,11 @@ for configured daemon-default profiles. RC-1b's shared finalization
 disentanglement has since landed (NGX-494): the
 verify/commit/reset transaction now lives in the neutral
 `src/core/executors/step-finalize.ts` seam and the goal-loop executor imports
-that shared home directly. The next Path 1 runtime consolidation item is the
-goal-first narrowing itself.
+that shared home directly. RC-1c's first goal-first narrowing slice has since
+landed (NGX-495): duplicate goal-first read-back logic now lives in
+`src/core/goal/read-back.ts` while the goal-first commands remain the
+compatibility surface and the domain-specific recovery guarded-clear dedup stays
+deferred.
 The `doctor` readiness marker tracks the **most recently closed** milestone. It currently reads `Milestone 11: CLI architecture refactor (NGX-411, NGX-412, NGX-413, NGX-414, NGX-415, NGX-416, NGX-417, NGX-418, NGX-419) complete`. The marker advanced from the M6 closeout string to `Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete` at the M7 closeout slice (NGX-319), stayed pinned to the M7 string through every M8 implementation slice, advanced to the M8 string at the M8 closeout slice (NGX-330), advanced again to `Milestone 10: workflow-first runtime (NGX-344, NGX-345, NGX-346, NGX-347, NGX-348, NGX-349, NGX-350, NGX-351, NGX-352, NGX-367, NGX-353) complete` at the M10 closeout slice (NGX-353), and advanced to the M11 string at the M11 closeout slice (NGX-419).
 
 ## Previously closed milestone: M8

@@ -450,7 +450,10 @@ Decisions at a glance (full evidence and prerequisites live in the plan):
   landed (RC-1 / NGX-486), and RC-1b / NGX-494 has disentangled the
   shared finalization primitive into `src/core/executors/step-finalize.ts` so
   the `goal-loop` executor no longer imports the M9 `live-step-finalize.ts`
-  ownership surface. Actual narrowing is the remaining Path 1 work.
+  ownership surface. RC-1c / NGX-495 has since narrowed the duplicate
+  goal-first read-back logic into `src/core/goal/read-back.ts` while leaving the
+  goal-first commands intact; the domain-specific recovery guarded-clear dedup
+  stays deferred.
 - **`.agent-workflows` / `cwfp-*` import** — defer; governed by
   [`contracts/coding-workflow-ownership.md`](contracts/coding-workflow-ownership.md),
   narrowed only by the existing deferred `NGX-404` default switch, and the
@@ -509,8 +512,10 @@ proof issue:
 - Goal-first status/logs/handoff/recovery paths now have workflow-first
   equivalents and contract-equivalent migration coverage (RC-1 / NGX-486), and
   the shared iteration-finalization primitive is no longer coupled to the
-  M9-named live-step finalization surface (RC-1b / NGX-494). Actual goal-first
-  narrowing still requires its own scoped proof issue.
+  M9-named live-step finalization surface (RC-1b / NGX-494). The first scoped
+  narrowing proof has since landed (RC-1c / NGX-495): status/logs read-back now
+  share `src/core/goal/read-back.ts`, while the domain-specific recovery
+  guarded-clear dedup and any command-surface narrowing remain deferred.
 - `.agent-workflows` import and `cwfp-*` compatibility can narrow only after
   old run recovery and workflow history import are explicitly retired.
 - M9 live-wrapper direct `workflow_steps` advancement and M10 executor-loop
