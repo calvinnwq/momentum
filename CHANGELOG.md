@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.0](https://github.com/calvinnwq/momentum/compare/v0.4.0...v0.5.0) (2026-06-19)
+
+
+### Features
+
+* **workflow:** add daemon-default live-wrapper profile source resolver (NGX-492) ([b95be38](https://github.com/calvinnwq/momentum/commit/b95be3891cffbdf7bf63ca8b1a855140edb70a5a))
+* **workflow:** add daemon-lane exec-context deriver for dispatched steps (NGX-492) ([b227ace](https://github.com/calvinnwq/momentum/commit/b227ace904759982f29544669e6d49391783d0b0))
+* **workflow:** add dispatched-step executor terminalization seam for RC-5b (NGX-492) ([33514a6](https://github.com/calvinnwq/momentum/commit/33514a60f4a97142a3b4ab48abd1ce445c7dcbd1))
+* **workflow:** add live-wrapper dispatch composition for daemon lane (NGX-492) ([67993c6](https://github.com/calvinnwq/momentum/commit/67993c6c6e507540c32ac4bf6c89bd44dde17d31))
+* **workflow:** compose run-executor-terminalize-reconcile path for dispatched steps (NGX-492) ([43633bd](https://github.com/calvinnwq/momentum/commit/43633bd30c760db16a701a37c188d0082fdb12aa))
+* **workflow:** route daemon dispatch through live-wrapper profiles ([d907166](https://github.com/calvinnwq/momentum/commit/d907166fa6fb24b6b632eae45b0a94678b5d135f))
+* **workflow:** route non-derivable exec context to manual recovery in live-wrapper dispatch (NGX-492) ([90cbedf](https://github.com/calvinnwq/momentum/commit/90cbedf98edb09b034e23b046ece98b96154e954))
+
 ## [0.4.0](https://github.com/calvinnwq/momentum/compare/v0.3.0...v0.4.0) (2026-06-19)
 
 
