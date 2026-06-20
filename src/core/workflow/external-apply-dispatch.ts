@@ -1,6 +1,10 @@
 import { loadExecutorInvocation } from "../executors/loop-persist.js";
 import { deriveDispatchInvocationId } from "./dispatch-execute.js";
-import { recordUnresolvedDispatchedStepContext } from "./dispatch-executor-run.js";
+import {
+  recordDispatchedStepManualRecovery,
+  recordUnresolvedDispatchedStepContext,
+  WORKFLOW_EXECUTE_RECONCILE_STATUS
+} from "./dispatch-executor-run.js";
 import {
   executeAndReconcileDispatchedExternalApplyStep,
   type DispatchedExternalApplyRunner
@@ -45,22 +49,35 @@ export function createExternalApplyWorkflowDispatch(
     );
     if (invocation?.executorFamily !== "external-apply") return result;
 
-    const resolved = await deps.deriveExternalApply(claim, context);
-    if (resolved.ok) {
-      await executeAndReconcileDispatchedExternalApplyStep({
+    try {
+      const resolved = await deps.deriveExternalApply(claim, context);
+      if (resolved.ok) {
+        await executeAndReconcileDispatchedExternalApplyStep({
+          db: context.db,
+          runId: claim.runId,
+          stepId: claim.stepId,
+          runExternalApply: resolved.runExternalApply,
+          evidence: resolved.evidence,
+          now: context.now
+        });
+      } else {
+        recordUnresolvedDispatchedStepContext({
+          db: context.db,
+          runId: claim.runId,
+          stepId: claim.stepId,
+          reason: resolved.reason,
+          now: context.now
+        });
+      }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      recordDispatchedStepManualRecovery({
         db: context.db,
         runId: claim.runId,
         stepId: claim.stepId,
-        runExternalApply: resolved.runExternalApply,
-        evidence: resolved.evidence,
-        now: context.now
-      });
-    } else {
-      recordUnresolvedDispatchedStepContext({
-        db: context.db,
-        runId: claim.runId,
-        stepId: claim.stepId,
-        reason: resolved.reason,
+        error: `external-apply dispatch failed for dispatched step ${claim.runId}/${claim.stepId}: ${detail}`,
+        status: WORKFLOW_EXECUTE_RECONCILE_STATUS.executionRejected,
+        detail,
         now: context.now
       });
     }

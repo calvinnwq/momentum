@@ -34,25 +34,30 @@ function makeTempDir(prefix = "momentum-cli-daemon-wf-"): string {
 
 async function run(
   argv: string[],
-  env: Record<string, string | undefined> = {}
+  env: Record<string, string | undefined> = {},
+  deps: Parameters<typeof runCli>[2] = {}
 ): Promise<RunResult> {
   let stdout = "";
   let stderr = "";
-  const code = await runCli(argv, {
-    stdout: {
-      write(chunk: string) {
-        stdout += chunk;
-        return true;
-      }
+  const code = await runCli(
+    argv,
+    {
+      stdout: {
+        write(chunk: string) {
+          stdout += chunk;
+          return true;
+        }
+      },
+      stderr: {
+        write(chunk: string) {
+          stderr += chunk;
+          return true;
+        }
+      },
+      env
     },
-    stderr: {
-      write(chunk: string) {
-        stderr += chunk;
-        return true;
-      }
-    },
-    env
-  });
+    deps
+  );
   return { code, stdout, stderr };
 }
 
@@ -223,6 +228,160 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     expect(
       fs.existsSync(path.join(repoDir, ".agent-workflows", runId, "result.json"))
     ).toBe(true);
+  });
+
+  it("matches external-apply intents by Linear issue key scope", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    fs.writeFileSync(
+      path.join(repoDir, "MOMENTUM.md"),
+      "---\nintent_apply_policy: external_apply_allowed\n---\n",
+      "utf8"
+    );
+    const runId = "ngx496-linear-key-scope";
+
+    const startResult = await run([
+      "workflow",
+      "run",
+      "start",
+      "--run-id",
+      runId,
+      "--repo",
+      repoDir,
+      "--objective",
+      "Apply Linear refresh",
+      "--issue-scope",
+      "NGX-1001",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(startResult.code).toBe(0);
+
+    const db = openDb(dataDir);
+    try {
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_order < 5"
+      ).run(runId);
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'linear-refresh'"
+      ).run(runId);
+      db.prepare("UPDATE workflow_runs SET state = 'approved' WHERE id = ?").run(
+        runId
+      );
+      db.prepare(
+        `INSERT INTO source_items
+           (id, adapter_kind, external_id, external_key, url, title, status,
+            metadata_json, last_observed_at, goal_id, created_at, updated_at)
+         VALUES ('source_ngx1001', 'linear', 'linear-issue-1001', 'NGX-1001',
+                 'https://linear.app/example/issue/NGX-1001', 'Scoped issue',
+                 'Todo', '{}', 1, NULL, 1, 1)`
+      ).run();
+      db.prepare(
+        `INSERT INTO update_intents
+           (id, adapter_kind, target_external_id, intent_type, payload_json,
+            reason, source_item_id, status, idempotency_key, created_at,
+            updated_at, applied_at, skipped_at, canceled_at, decision_reason)
+         VALUES ('intent_ngx1001', 'linear', 'linear-issue-1001',
+                 'source_satisfied', '{"kind":"comment"}', 'evidence says done',
+                 'source_ngx1001', 'pending', 'idemp:intent_ngx1001', 1, 1,
+                 NULL, NULL, NULL, NULL)`
+      ).run();
+    } finally {
+      db.close();
+    }
+
+    let marker = "";
+    let applyCalls = 0;
+    const deps = {
+      buildLinearExternalUpdateClient: () => ({
+        async apply(input: { preview: { idempotencyMarker: string } }) {
+          applyCalls += 1;
+          marker = input.preview.idempotencyMarker;
+          return {
+            ok: true as const,
+            alreadyApplied: false,
+            issue: {
+              id: "linear-issue-1001",
+              key: "NGX-1001",
+              url: "https://linear.app/example/issue/NGX-1001"
+            },
+            comment: {
+              id: "comment-ngx1001",
+              url: "https://linear.app/example/comment/NGX-1001"
+            },
+            status: {
+              transitioned: false as const,
+              previousStateId: "state-todo",
+              previousStateName: "Todo",
+              nextStateId: null,
+              nextStateName: null
+            },
+            idempotencyMarker: marker
+          };
+        }
+      }),
+      buildLinearIssueRefreshClient: () => ({
+        async refresh() {
+          return {
+            ok: true as const,
+            issue: {
+              id: "linear-issue-1001",
+              identifier: "NGX-1001",
+              title: "Scoped issue",
+              url: "https://linear.app/example/issue/NGX-1001",
+              updatedAt: "2026-05-21T00:00:00.000Z",
+              state: { id: "state-done", name: "Done" }
+            },
+            comments: [
+              {
+                id: "comment-ngx1001",
+                body: `Applied ${marker}`,
+                url: "https://linear.app/example/comment/NGX-1001"
+              }
+            ]
+          };
+        }
+      })
+    };
+
+    const result = await run(
+      [
+        "daemon",
+        "start",
+        "--max-loop-iterations",
+        "1",
+        "--poll-interval-ms",
+        "0",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      { LINEAR_API_KEY: "test-key" },
+      deps
+    );
+
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(applyCalls).toBe(1);
+    const loop = JSON.parse(result.stdout).loop as Record<string, unknown>;
+    expect(loop["workflowStepsDispatched"]).toBe(1);
+
+    const verifyDb = openDb(dataDir);
+    try {
+      const intent = verifyDb
+        .prepare("SELECT status FROM update_intents WHERE id = 'intent_ngx1001'")
+        .get() as { status: string } | undefined;
+      expect(intent).toEqual({ status: "applied" });
+      const step = verifyDb
+        .prepare(
+          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = 'linear-refresh'"
+        )
+        .get(runId) as { state: string } | undefined;
+      expect(step).toEqual({ state: "succeeded" });
+    } finally {
+      verifyDb.close();
+    }
   });
 
   it("sizes the dispatch lease for the configured live-wrapper timeout", async () => {

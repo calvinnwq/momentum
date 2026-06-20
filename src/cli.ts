@@ -86,7 +86,11 @@ import {
   executeExternalApply,
   type ExecuteExternalApplyDeps
 } from "./core/intent/apply-execute.js";
-import { listUpdateIntents } from "./core/intent/update-intents.js";
+import {
+  listUpdateIntents,
+  type UpdateIntent
+} from "./core/intent/update-intents.js";
+import { getSourceItemById } from "./core/source/items.js";
 import {
   listSourceReconciliationRuns,
   type SourceReconciliationRun
@@ -699,10 +703,10 @@ function resolveDaemonExternalApplyContext(
     return { ok: false, reason: "external_apply_issue_scope_missing" };
   }
 
-  const pending = listUpdateIntents(context.db, {
-    status: "pending",
-    adapterKind: "linear"
-  }).filter((intent) => intent.targetExternalId === issueScopeIdentifier);
+  const pending = findPendingLinearExternalApplyIntents(
+    context.db,
+    issueScopeIdentifier
+  );
   if (pending.length === 0) {
     return { ok: false, reason: "external_apply_intent_not_found" };
   }
@@ -745,6 +749,34 @@ function resolveDaemonExternalApplyContext(
         deps: executeDeps
       })
   };
+}
+
+function findPendingLinearExternalApplyIntents(
+  db: MomentumDb,
+  issueScopeIdentifier: string
+): UpdateIntent[] {
+  return listUpdateIntents(db, {
+    status: "pending",
+    adapterKind: "linear"
+  }).filter((intent) =>
+    pendingLinearIntentMatchesIssueScope(db, intent, issueScopeIdentifier)
+  );
+}
+
+function pendingLinearIntentMatchesIssueScope(
+  db: MomentumDb,
+  intent: UpdateIntent,
+  issueScopeIdentifier: string
+): boolean {
+  if (intent.targetExternalId === issueScopeIdentifier) return true;
+  if (intent.sourceItemId === null) return false;
+
+  const sourceItem = getSourceItemById(db, intent.sourceItemId);
+  if (sourceItem === null || sourceItem.adapterKind !== "linear") return false;
+  return (
+    sourceItem.externalId === issueScopeIdentifier ||
+    sourceItem.externalKey === issueScopeIdentifier
+  );
 }
 
 function readLinearApiKey(

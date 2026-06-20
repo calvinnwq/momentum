@@ -360,6 +360,34 @@ describe("executeAndReconcileDispatchedExternalApplyStep — clean applied", () 
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
   });
 
+  it("parks manual recovery when the async external-apply runner rejects", async () => {
+    const db = openSeededDb();
+    let calls = 0;
+    const runner = {
+      run: async (): Promise<ExecuteExternalApplyResult> => {
+        calls += 1;
+        throw new Error("external apply exploded");
+      },
+      calls: () => calls
+    };
+
+    await dispatchStepThroughExternalApplyWrapper(db, runner);
+
+    expect(runner.calls()).toBe(1);
+    const invocation = loadExecutorInvocation(
+      db,
+      deriveDispatchInvocationId(RUN_ID, STEP_ID)
+    );
+    expect(invocation?.state).toBe("manual_recovery_required");
+    expect(
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+    ).toBe(true);
+    expect(stepState(db)).toBe("running");
+    expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
+    expect(listWorkflowGatesForRun(db, RUN_ID)).toHaveLength(1);
+    expect(dispatchRounds(db)[0]?.summary).toContain("external apply exploded");
+  });
+
   it("runs the M6 write once, records succeeded evidence, and RC-2 finalizes the step", async () => {
     const db = openSeededDb();
     dispatchStep(db);
