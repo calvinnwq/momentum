@@ -359,6 +359,45 @@ describe("executeAndReconcileDispatchedSubworkflowStep — clean terminal mirror
 });
 
 describe("executeAndReconcileDispatchedSubworkflowStep — fail-closed child terminal", () => {
+  it("parks the parent for manual recovery when an in-flight child is already marked for manual recovery", async () => {
+    const db = openSeededDb();
+    dispatchStep(db);
+    const evidence = makeWritableEvidence();
+    const runner = countingChildRunner({
+      ...observe("running"),
+      childNeedsManualRecovery: true,
+      childManualRecoveryReason: "child run blocked on recovery gate"
+    });
+
+    const out = await executeAndReconcileDispatchedSubworkflowStep({
+      db,
+      runId: RUN_ID,
+      stepId: STEP_ID,
+      runSubworkflowChild: runner.run,
+      evidence,
+      now: EXECUTE_AT
+    });
+
+    expect(out.status).toBe(
+      WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled
+    );
+    expect(out.executorResult?.ok).toBe(false);
+    expect(out.reconcile?.status).toBe(
+      WORKFLOW_RECONCILE_RESULT_STATUS.manualRecovery
+    );
+    expect(
+      loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+        ?.state
+    ).toBe("manual_recovery_required");
+    expect(dispatchRounds(db)[0]?.summary).toContain(
+      "child run blocked on recovery gate"
+    );
+    expect(
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+    ).toBe(true);
+    expect(stepState(db)).toBe("running");
+  });
+
   it.each<{ childState: WorkflowRunState; marker: string }>([
     { childState: "canceled", marker: "canceled" },
     { childState: "blocked", marker: "blocked" }

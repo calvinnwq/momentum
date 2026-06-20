@@ -130,6 +130,23 @@ describe("planSubworkflowChildMirror — non-terminal child runs defer", () => {
       expect(plan.reason).toContain(childState);
     });
   }
+
+  it("routes an in-flight child already marked for manual recovery to fail-closed evidence", () => {
+    const plan = planSubworkflowChildMirror("running", EVIDENCE, {
+      childNeedsManualRecovery: true,
+      childManualRecoveryReason: "child step requires operator recovery"
+    });
+
+    expect(plan.outcome).toBe("mirror");
+    if (plan.outcome !== "mirror") throw new Error("expected mirror outcome");
+    expect(plan.childState).toBe("running");
+    expect(plan.result.ok).toBe(false);
+    if (plan.result.ok) throw new Error("expected error result");
+    expect(plan.result.code).toBe("manual_recovery_required");
+    expect(plan.result.error).toContain(EVIDENCE.childRunId);
+    expect(plan.result.error).toContain("manual recovery");
+    expect(plan.result.error).toContain("child step requires operator recovery");
+  });
 });
 
 describe("planSubworkflowChildMirror — composes with the terminalize bridge", () => {

@@ -77,6 +77,11 @@ export type SubworkflowMirrorEvidence = {
   resultJsonPath: string;
 };
 
+export type SubworkflowChildMirrorOptions = {
+  childNeedsManualRecovery?: boolean;
+  childManualRecoveryReason?: string | null;
+};
+
 /**
  * The decision a child run's observed {@link WorkflowRunState} implies for a
  * dispatched `subworkflow` parent step.
@@ -115,8 +120,18 @@ export type SubworkflowChildMirrorPlan =
  */
 export function planSubworkflowChildMirror(
   childState: WorkflowRunState,
-  evidence: SubworkflowMirrorEvidence
+  evidence: SubworkflowMirrorEvidence,
+  options: SubworkflowChildMirrorOptions = {}
 ): SubworkflowChildMirrorPlan {
+  if (options.childNeedsManualRecovery === true) {
+    const reason = options.childManualRecoveryReason?.trim();
+    const error =
+      `Subworkflow child run ${evidence.childRunId} is marked for manual recovery ` +
+      `while ${childState}; routing the parent step to manual recovery` +
+      (reason ? ` (${reason}).` : ".");
+    return mirror(childState, evidence, manualRecoveryResult(error, evidence));
+  }
+
   if (SUBWORKFLOW_DEFERRED_CHILD_RUN_STATES.has(childState)) {
     // `pending` / `approved` / `running`: the child run is still in flight.
     // Produce no terminal evidence so the parent step is never prematurely

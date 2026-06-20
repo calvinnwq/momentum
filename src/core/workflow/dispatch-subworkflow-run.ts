@@ -71,6 +71,7 @@ import {
 } from "./dispatch-executor-run.js";
 import {
   planSubworkflowChildMirror,
+  type SubworkflowChildMirrorOptions,
   type SubworkflowChildMirrorPlan,
   type SubworkflowMirrorEvidence
 } from "./dispatch-subworkflow.js";
@@ -88,6 +89,8 @@ export type SubworkflowChildObservation = {
   childRunId: string;
   /** The child run's current {@link WorkflowRunState} as observed this tick. */
   childState: WorkflowRunState;
+  childNeedsManualRecovery?: boolean;
+  childManualRecoveryReason?: string | null;
 };
 
 /**
@@ -208,7 +211,19 @@ export async function executeAndReconcileDispatchedSubworkflowStep(
     executorLogPath: evidence.executorLogPath,
     resultJsonPath: evidence.resultJsonPath
   };
-  const plan = planSubworkflowChildMirror(observation.childState, mirrorEvidence);
+  const mirrorOptions: SubworkflowChildMirrorOptions = {};
+  if (observation.childNeedsManualRecovery !== undefined) {
+    mirrorOptions.childNeedsManualRecovery = observation.childNeedsManualRecovery;
+  }
+  if (observation.childManualRecoveryReason !== undefined) {
+    mirrorOptions.childManualRecoveryReason =
+      observation.childManualRecoveryReason;
+  }
+  const plan = planSubworkflowChildMirror(
+    observation.childState,
+    mirrorEvidence,
+    mirrorOptions
+  );
 
   // Snapshot the observed child run for the operator before acting on it, so a
   // long-running deferred child and a mirrored terminal both leave a durable
@@ -319,9 +334,18 @@ function subworkflowLog(
     outcome,
     `childRun: ${observation.childRunId}`,
     `childState: ${observation.childState}`,
+    observation.childNeedsManualRecovery === undefined
+      ? undefined
+      : `childNeedsManualRecovery: ${observation.childNeedsManualRecovery}`,
+    observation.childManualRecoveryReason === undefined ||
+    observation.childManualRecoveryReason === null
+      ? undefined
+      : `childManualRecoveryReason: ${observation.childManualRecoveryReason}`,
     plan.outcome === "defer"
       ? `reason: ${plan.reason}`
       : `result: ${plan.result.ok ? plan.result.result.state : plan.result.code}`,
     ""
-  ].join("\n");
+  ]
+    .filter((line): line is string => line !== undefined)
+    .join("\n");
 }

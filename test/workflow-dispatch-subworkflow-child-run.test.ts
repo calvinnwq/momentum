@@ -16,7 +16,10 @@ import {
 } from "../src/core/workflow/scheduler.js";
 import { getWorkflowLease } from "../src/core/workflow/leases.js";
 import { listWorkflowGatesForRun } from "../src/core/workflow/gate-persist.js";
-import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run-recovery.js";
+import {
+  getWorkflowRunManualRecoveryState,
+  markWorkflowRunNeedsManualRecovery
+} from "../src/core/workflow/run-recovery.js";
 import { getWorkflowStep } from "../src/core/workflow/step-transitions.js";
 import {
   listExecutorRoundsForInvocation,
@@ -237,7 +240,12 @@ function realChildRunner(
       if (detail === null) {
         throw new Error(`child run ${childRunId} not found after start/attach`);
       }
-      return { childRunId, childState: detail.run.state };
+      return {
+        childRunId,
+        childState: detail.run.state,
+        childNeedsManualRecovery: detail.run.needsManualRecovery,
+        childManualRecoveryReason: detail.run.manualRecoveryReason
+      };
     },
     starts: () => starts,
     attaches: () => attaches
@@ -418,6 +426,62 @@ describe("subworkflow producer × real child run — idempotent re-entry", () =>
 });
 
 describe("subworkflow producer × real child run — fail-closed ambiguous terminal", () => {
+  it("parks the parent when the real child run is in flight but flagged for manual recovery", async () => {
+    const db = openSeededDb();
+    dispatchStep(db);
+    const evidence = makeWritableEvidence();
+    const childRepo = makeTempDir("momentum-sub-child-repo-");
+    const runner = realChildRunner(db, CHILD_RUN_ID, childRepo);
+
+    await executeAndReconcileDispatchedSubworkflowStep({
+      db,
+      runId: RUN_ID,
+      stepId: STEP_ID,
+      runSubworkflowChild: runner.run,
+      evidence,
+      now: EXECUTE_AT
+    });
+    const childRecoveryReason = "child run entered recovery while still running";
+    const marked = markWorkflowRunNeedsManualRecovery(db, {
+      runId: CHILD_RUN_ID,
+      reason: childRecoveryReason,
+      now: EXECUTE_AT + 25
+    });
+    expect(marked.ok).toBe(true);
+    db.prepare("UPDATE workflow_runs SET state = 'running' WHERE id = ?").run(
+      CHILD_RUN_ID
+    );
+
+    const out = await executeAndReconcileDispatchedSubworkflowStep({
+      db,
+      runId: RUN_ID,
+      stepId: STEP_ID,
+      runSubworkflowChild: runner.run,
+      evidence,
+      now: EXECUTE_AT + 50
+    });
+
+    expect(out.status).toBe(
+      WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled
+    );
+    expect(out.executorResult?.ok).toBe(false);
+    expect(out.reconcile?.status).toBe(
+      WORKFLOW_RECONCILE_RESULT_STATUS.manualRecovery
+    );
+    expect(
+      loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+        ?.state
+    ).toBe("manual_recovery_required");
+    expect(dispatchRounds(db)[0]?.summary).toContain(childRecoveryReason);
+    expect(
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+    ).toBe(true);
+    expect(stepState(db)).toBe("running");
+    expect(runner.starts()).toBe(1);
+    expect(runner.attaches()).toBe(1);
+    expect(countRuns(db)).toBe(2);
+  });
+
   it("parks the parent for manual recovery when the real child run reaches an ambiguous canceled terminal", async () => {
     const db = openSeededDb();
     dispatchStep(db);
