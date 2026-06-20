@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.7.0](https://github.com/calvinnwq/momentum/compare/v0.6.0...v0.7.0) (2026-06-20)
+
+
+### Features
+
+* **workflow:** add subworkflow adapter mechanism ([ad9c0ed](https://github.com/calvinnwq/momentum/commit/ad9c0ed4d445dd7dfa3bb79db8b227d2849e6a3f))
+* **workflow:** add async subworkflow producer that observes a child workflow run and mirrors terminal child evidence into RC-2 finalization ([c31a8fe](https://github.com/calvinnwq/momentum/commit/c31a8fe348832f488e66da7bc8a675d6c5ead32d))
+* **workflow:** add pure child-run mirror planning for subworkflow executor evidence ([cfdd356](https://github.com/calvinnwq/momentum/commit/cfdd35626531cd876b1eb9fba8e736b5673e40ba))
+* **workflow:** add subworkflow dispatch entry-point factory for the workflow dispatch seam ([299591e](https://github.com/calvinnwq/momentum/commit/299591ebce44e85165efe6a2927b4f9a693b6fe8))
+
 ## [0.6.0](https://github.com/calvinnwq/momentum/compare/v0.5.0...v0.6.0) (2026-06-20)
 
 
