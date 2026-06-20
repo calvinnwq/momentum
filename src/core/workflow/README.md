@@ -21,7 +21,7 @@ in place; importers still reference the concrete modules below.
 | Gates | `gate.ts`, `gate-persist.ts` |
 | Leases | `leases.ts` |
 | Scheduling | `scheduler.ts` |
-| Dispatch | `dispatch.ts`, `dispatch-persist.ts`, `dispatch-execute.ts`, `dispatch-executor-run.ts`, `dispatch-executor-terminalize.ts`, `dispatch-reconcile.ts`, `dispatch-reconcile-execute.ts`, `daemon-live-wrapper-profile.ts`, `daemon-dispatch-exec-context.ts`, `live-wrapper-dispatch.ts`, `dogfood-dispatch.ts` |
+| Dispatch | `dispatch.ts`, `dispatch-persist.ts`, `dispatch-execute.ts`, `dispatch-executor-run.ts`, `dispatch-executor-terminalize.ts`, `dispatch-external-apply.ts`, `dispatch-external-apply-run.ts`, `external-apply-dispatch.ts`, `dispatch-subworkflow.ts`, `dispatch-subworkflow-run.ts`, `subworkflow-dispatch.ts`, `dispatch-reconcile.ts`, `dispatch-reconcile-execute.ts`, `daemon-live-wrapper-profile.ts`, `daemon-dispatch-exec-context.ts`, `live-wrapper-dispatch.ts`, `dogfood-dispatch.ts` |
 | Recovery & monitor | `recovery-artifact.ts`, `recovery-reconcile.ts`, `monitor-state.ts`, `monitor-envelope.ts` |
 | Handoff | `handoff.ts` |
 
@@ -44,7 +44,7 @@ Other domains reach workflow behavior through these modules:
 - **CLI renderers** (`src/renderers/workflow.ts`): the same run/gate/monitor/
   status/handoff/logs shapes, imported **type-only** (renderers format, they
   do not mutate state).
-- **Top-level dispatch** (`src/cli.ts`): `dispatch-execute`, `dogfood-dispatch`.
+- **Top-level dispatch** (`src/cli.ts`): `dispatch-execute`, `dogfood-dispatch`, `external-apply-dispatch`; future `subworkflow` production wiring composes `subworkflow-dispatch` after the child-definition config decision and PHASE1 allowlist flip.
 - **Dispatched-step reconciliation**: `dispatch-reconcile` /
   `dispatch-reconcile-execute` own the RC-2 pure/effect seam that finalizes a
   dispatched step from terminal executor evidence.
@@ -112,3 +112,19 @@ scaffold exists, would release the lease over a still-`running` step and strand 
 The bounded `daemon start` workflow lane now wires the resolved profile,
 registry, and deriver by composing `live-wrapper-dispatch.ts` around the base
 workflow dispatcher for configured daemon-default profiles.
+
+RC-3 (NGX-496) added the daemon-dispatchable `external-apply` adapter:
+`dispatch-external-apply.ts` maps the M6 apply result into executor evidence,
+`dispatch-external-apply-run.ts` runs the injected M6 write path and reconciles
+through RC-2, and `external-apply-dispatch.ts` gates the producer by scaffold
+family after the base dispatcher creates the durable start rows.
+
+RC-4 (NGX-497) added the `subworkflow` adapter mechanism without flipping the
+production family allowlist: `dispatch-subworkflow.ts` maps a child workflow
+run's observed state into defer / mirror evidence,
+`dispatch-subworkflow-run.ts` starts or attaches to the child through an injected
+runner and reconciles the parent only after terminal child evidence,
+`subworkflow-dispatch.ts` provides the daemon-lane entry-point factory, and
+`scheduler.ts` can recheck a deferred child run by heartbeating or reacquiring
+the parent dispatch lease. Production `subworkflow` dispatch remains fail-closed
+until the separate PHASE1 flip and child-definition config decision land.

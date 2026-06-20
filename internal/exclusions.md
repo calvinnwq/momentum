@@ -101,9 +101,10 @@ Milestone status:
   gates / decisions, and production workflow-lane dispatcher wiring for bounded
   managed `daemon start`. The earlier combined first-class start / execution behavior
   deferral has narrowed: start, scheduling, goal-loop, one-shot /
-  script execution, no-mistakes mirroring, gates, and phase-1 dispatch scaffolds
-  have landed, while generalized `external-apply` / `subworkflow` dispatch
-  remains deferred to later runtime work. See
+  script execution, no-mistakes mirroring, gates, phase-1 dispatch scaffolds,
+  generalized `external-apply` dispatch, and the `subworkflow` adapter mechanism
+  have landed, while the production `subworkflow` PHASE1 allowlist flip remains
+  deferred to later runtime work. See
   [`internal/milestones/m10-workflow-first-runtime.md`](milestones/m10-workflow-first-runtime.md),
   [`internal/contracts/workflow-first-runtime.md`](contracts/workflow-first-runtime.md),
   [`internal/contracts/executor-loop.md`](contracts/executor-loop.md), and
@@ -188,10 +189,12 @@ the goal-loop executor adapter, the one-shot / script executor adapters, the
 no-mistakes executor mirror, durable gates / decisions, and phase-1 production
 dispatcher wiring for bounded managed `daemon start`. The workflow-first
 dogfood and M10 closeout marker have landed; RC-3 has since landed generalized
-`external-apply` daemon dispatch through the M6 safety contract, while
-`subworkflow` dispatch remains deferred until later runtime work. The runtime
-consolidation plan keeps the remaining fail-closed branch until a
-`subworkflow` daemon-dispatchable adapter lands.
+`external-apply` daemon dispatch through the M6 safety contract, and RC-4 has
+since landed the `subworkflow` adapter mechanism (child mirror mapping, async
+producer, daemon-lane factory, and real child-run integration proof). The runtime
+consolidation plan keeps the production `subworkflow` fail-closed branch until a
+separate PHASE1 dispatch-lane flip lands after the child-definition config
+decision.
 
 The post-M10 coding workflow ownership migration is accepted in
 [`internal/contracts/coding-workflow-ownership.md`](contracts/coding-workflow-ownership.md).

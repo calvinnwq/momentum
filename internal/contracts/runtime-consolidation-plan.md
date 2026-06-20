@@ -400,26 +400,39 @@ from the dispatchable set; a claimed step resolving to it fails closed with
 `needs_manual_recovery`, opens a `workflow_gates` row, releases the dispatch
 lease, and creates no executor rows.
 
-**Decision: external-apply narrowed; subworkflow deferred.** The former
-`external-apply` fail-closed branch has been replaced by the RC-3 safety-gated
-adapter wiring. M6 policy gating, audit-before-write, idempotency, and adapter
-refusals remain the safety contract; unsafe/unconfigured outcomes terminalize to
-manual recovery. `subworkflow` is deferred until first-class workflow start is
-stable (`workflow-first-gap-matrix.md`).
+**Decision: external-apply narrowed; RC-4 subworkflow adapter mechanism landed;
+production subworkflow remains fail-closed.** The former `external-apply`
+fail-closed branch has been replaced by the RC-3 safety-gated adapter wiring. M6
+policy gating, audit-before-write, idempotency, and adapter refusals remain the
+safety contract; unsafe/unconfigured outcomes terminalize to manual recovery. The
+RC-4 `subworkflow` mechanism has since landed: the pure child-run mirror, async
+producer, daemon-lane entry-point factory, and child-run integration proof map a
+started/attached child run into durable terminal executor evidence without
+weakening the parent/child ownership boundary. The production `subworkflow`
+branch remains absent from `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES` and continues
+to fail closed until a separate PHASE1 dispatch-lane flip lands after the
+child-definition config decision.
 
-**Prerequisite before removal of the fail-closed branch.** A landed
-daemon-dispatchable `subworkflow` adapter behind its safety contract, plus a test
-proving the family now dispatches durable evidence instead of gating. The
-fail-closed branch is removed only when an adapter replaces it — never as a bare
-deletion.
+**Prerequisite before removal of the fail-closed branch.** The landed
+RC-4 adapter mechanism is necessary but not sufficient: the production family
+allowlist still needs a separate PHASE1 dispatch-lane flip and daemon child-runner
+wiring that proves configured `subworkflow` steps dispatch durable evidence
+instead of gating. The fail-closed branch is removed only when that production
+replacement lands — never as a bare deletion.
 
 **Equivalent-behavior proof to preserve:** `test/workflow-dispatch.test.ts`
 (`external-apply` dispatchability and `subworkflow` fail-closed),
 `test/workflow-dispatch-execute.test.ts` (durable manual-recovery gate, lease
-released, zero invocations, vanished-run safety), and
+released, zero invocations, vanished-run safety),
 `test/workflow-dispatch-external-apply-run.test.ts` /
 `test/workflow-dispatch-external-apply-m6.test.ts` (family guard, daemon wrapper,
-M6 write-path reuse, and fail-closed M6 refusals).
+M6 write-path reuse, and fail-closed M6 refusals), and
+`test/workflow-dispatch-subworkflow.test.ts` /
+`test/workflow-dispatch-subworkflow-run.test.ts` /
+`test/workflow-subworkflow-dispatch.test.ts` /
+`test/workflow-dispatch-subworkflow-child-run.test.ts` (child mirror mapping,
+producer deferral / terminal mirroring, daemon wrapper fail-closed derivation,
+and real child-run start-or-attach integration).
 
 ### 6. Fake workflow-step executors shipped in `src/`
 
@@ -648,9 +661,9 @@ child-mirror mapping, the async run-path producer, and the daemon-lane entry-poi
 factory are in place and tested behind the child-run ownership boundary, while the
 production `subworkflow` branch stays fail-closed until a separate PHASE1
 dispatch-lane flip lands (deferred pending a child-definition config decision).
-The remaining capability-gated consolidation work is the RC-4 (`subworkflow`)
-PHASE1 flip and `NGX-404`, which stay deferred until that child-config decision /
-dogfood lands.
+The remaining capability-gated consolidation work is the `subworkflow` PHASE1
+flip after RC-4 and `NGX-404`, which stay deferred until that child-config
+decision / dogfood lands.
 
 ## Non-Goals
 

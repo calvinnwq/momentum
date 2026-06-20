@@ -369,9 +369,11 @@ The phase-1 production workflow dispatcher daemon-dispatches families with
 landed bounded adapters: `goal-loop`, `one-shot`, `script`, `no-mistakes`, and
 `external-apply`. The `external-apply` family routes through the existing
 external-apply safety contract and terminalizes refused/unsafe outcomes into
-manual recovery. `subworkflow` remains a valid executor family, but it fails
-closed to `manual_recovery_required` until its daemon-dispatchable adapter lands
-or the closeout explicitly keeps it deferred.
+manual recovery. `subworkflow` remains a valid executor family, and its RC-4
+adapter mechanism can start or attach to a child workflow run and mirror terminal
+child classification into parent executor evidence; the production dispatcher
+still fails the family closed to `manual_recovery_required` until the separate
+PHASE1 allowlist flip and child-runner config decision land.
 
 ## Non-Goals
 
@@ -386,4 +388,4 @@ This contract does not implement:
 - Replacement of GNHF or no-mistakes internals.
 - Remote git operations.
 
-M10 carried these as implementation slices: M10-01 landed definition migrations, M10-02 landed workflow run start, M10-03 landed executor-loop records, M10-04 landed the opt-in daemon workflow scheduler lane, M10-05 landed the goal-loop executor adapter, M10-06 landed the one-shot / script executor adapters, M10-07 landed the no-mistakes executor mirror, M10-08 landed durable workflow gates / decisions, M10-09a wired the phase-1 production dispatcher into bounded managed `daemon start`, and M10-09 dogfooded the workflow-first path. RC-5b later wired configured daemon-default live-wrapper profiles into the bounded daemon lane so dispatch scaffolds can be terminalized by real wrapper results and reconciled through RC-2. RC-3 has since landed generalized `external-apply` dispatch through the same terminal-evidence lane; `subworkflow` dispatch remains later runtime work.
+M10 carried these as implementation slices: M10-01 landed definition migrations, M10-02 landed workflow run start, M10-03 landed executor-loop records, M10-04 landed the opt-in daemon workflow scheduler lane, M10-05 landed the goal-loop executor adapter, M10-06 landed the one-shot / script executor adapters, M10-07 landed the no-mistakes executor mirror, M10-08 landed durable workflow gates / decisions, M10-09a wired the phase-1 production dispatcher into bounded managed `daemon start`, and M10-09 dogfooded the workflow-first path. RC-5b later wired configured daemon-default live-wrapper profiles into the bounded daemon lane so dispatch scaffolds can be terminalized by real wrapper results and reconciled through RC-2. RC-3 has since landed generalized `external-apply` dispatch through the same terminal-evidence lane, and RC-4 has since landed the `subworkflow` adapter mechanism while leaving the production family fail-closed until a separate PHASE1 dispatch-lane flip.

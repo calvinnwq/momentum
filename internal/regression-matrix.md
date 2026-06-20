@@ -533,8 +533,9 @@ that shipped workflow-first path.
   (`workflow_run_not_found`), it cannot write a run-scoped flag or gate without
   orphaning evidence, so it releases the lease and creates no executor rows. The
   phase-1 dispatchable set is exactly `goal-loop`, `one-shot`, `script`,
-  `no-mistakes`, and `external-apply`; `subworkflow` stays fail-closed until its
-  daemon-dispatchable adapter lands or closeout explicitly defers it.
+  `no-mistakes`, and `external-apply`; the RC-4 `subworkflow` adapter mechanism
+  has landed, but production `subworkflow` stays fail-closed until the separate
+  PHASE1 dispatch-lane flip and child-definition config decision land.
 - **Owner.** [`src/core/workflow/dispatch.ts`](../src/core/workflow/dispatch.ts) and
   [`src/core/workflow/dispatch-execute.ts`](../src/core/workflow/dispatch-execute.ts).
 - **Evidence.**

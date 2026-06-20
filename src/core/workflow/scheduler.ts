@@ -25,8 +25,10 @@
  * transaction and acquiring its `dispatch` lease (the lease kind the contract
  * reserves for the dispatcher layer). The *tick* primitive
  * ({@link runWorkflowSchedulerOnce}) composes the three into one per-cycle pass
- * — recover stale leases, scan, claim one step, then hand it to an injected
- * executor-dispatch seam — as the workflow-first analogue of `runWorkerOnce`.
+ * — recover stale leases, recheck any active deferred `subworkflow` dispatch
+ * that is due, otherwise scan and claim one runnable step, then hand it to an
+ * injected executor-dispatch seam — as the workflow-first analogue of
+ * `runWorkerOnce`.
  * Bounded `daemon start` now wires that seam with the production dispatcher,
  * which creates executor start scaffolds or fail-closed manual-recovery effects
  * (gates when the run row still exists, lease release when it vanished).
@@ -382,6 +384,11 @@ export type RecoverStaleWorkflowLeasesInput = {
  *     `needs_manual_recovery` flag and leave the lease outstanding as evidence;
  *     the reducer keeps the run blocked and an operator must resolve it via the
  *     guarded clear before the run is eligible again.
+ *   - A stale `dispatch` lease over terminal executor evidence is reconciled
+ *     before the lease is reported recovered. A stale non-terminal `subworkflow`
+ *     dispatch is released instead of parked, allowing a restarted daemon to
+ *     reacquire the parent lease and reattach to the same child run through the
+ *     injected child runner.
  *
  * Each lease is re-read and re-classified inside a `BEGIN IMMEDIATE`
  * transaction before acting, so a lease another worker heartbeated (extending
@@ -1364,18 +1371,23 @@ function dispatchClaim(
  *   1. Recover stale leases first, so a dead worker's `auto-release` lease is
  *      freed before the scan and its run becomes schedulable this same tick;
  *      a stale `manual-recovery-required` lease parks its run instead.
- *   2. Scan the post-recovery durable state for the next runnable step (one per
- *      eligible run, oldest run first).
- *   3. Claim the first candidate atomically. The scan is only a hint — the claim
+ *   2. Recheck any active, non-terminal `subworkflow` dispatch that is due for
+ *      a heartbeat: the same worker refreshes a fresh lease, while a restarted
+ *      daemon can reacquire a released parent dispatch lease and reattach to the
+ *      child run instead of parking the parent.
+ *   3. If no active `subworkflow` recheck is due, scan the post-recovery durable
+ *      state for the next runnable step (one per eligible run, oldest run first).
+ *   4. Claim the first candidate atomically. The scan is only a hint — the claim
  *      re-verifies under `BEGIN IMMEDIATE`, so a run that advanced or was taken
  *      by another worker between scan and claim yields `claim_contended` rather
  *      than a double dispatch.
- *   4. Dispatch the claimed step. On success the dispatcher owns the dispatch
+ *   5. Dispatch the claimed step. On success the dispatcher owns the dispatch
  *      lease; if it throws, the lane releases the lease and rethrows.
  *
- * Exactly one step is claimed per tick (mirroring `runWorkerOnce`); the daemon
- * loop drives throughput across runs over successive ticks. SQLite stays the
- * source of truth: no process handle, socket, or event is consulted.
+ * Exactly one claim is dispatched per tick (either an active `subworkflow`
+ * recheck or a newly runnable step, mirroring `runWorkerOnce`); the daemon loop
+ * drives throughput across runs over successive ticks. SQLite stays the source of
+ * truth: no process handle, socket, or event is consulted.
  */
 export function runWorkflowSchedulerOnce(
   input: RunWorkflowSchedulerOnceInput

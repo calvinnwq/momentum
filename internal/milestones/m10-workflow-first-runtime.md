@@ -197,8 +197,11 @@ The final closeout evidence for `ngx353-m10-closeout` is:
 That is the intended M10 boundary: the shipped daemon path can start and observe
 a workflow-first run through durable executor records. Driving the scaffolded
 round all the way through the real executor mechanisms, plus generalized
-`external-apply` and `subworkflow` dispatch, stays deferred to later runtime
-work.
+`external-apply` and `subworkflow` dispatch, stayed deferred to later runtime
+work at M10 closeout. Later RC slices have since wired configured live-wrapper
+profiles and `external-apply`, and have landed the `subworkflow` adapter
+mechanism while keeping the production family fail-closed pending the PHASE1
+allowlist flip.
 
 ## Post-Closeout Tightening (NGX-391)
 
