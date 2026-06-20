@@ -20,10 +20,10 @@ import { goalLoopRoundMechanismFromResultFile } from "../src/core/executors/goal
 import { runGoalLoopRound } from "../src/core/executors/goal-loop-orchestrator.js";
 import type { CommitIntent, RunnerResult } from "../src/core/executors/types.js";
 
-// Proves the goal-loop round *mechanism* bridge reuses the existing M9 goal /
-// iteration safety (the `finalizeLiveWorkflowStepFromResultFile` verify ->
-// commit / reset transaction with its moved-HEAD / result-document recovery)
-// rather than re-implementing it, projecting a finished round's durable result
+// Proves the goal-loop round *mechanism* bridge reuses the shared goal /
+// iteration safety (the `finalizeWorkflowStepFromResultFile` verify -> commit /
+// reset transaction with its moved-HEAD / result-document recovery) rather than
+// re-implementing it, projecting a finished round's durable result
 // document into the `{ result, finalize, artifacts }` the goal-loop driver
 // consumes — including the recovery / finalization boundaries the ticket
 // requires (NGX-349 "Reuse existing Goal / iteration safety where possible").

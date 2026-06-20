@@ -64,11 +64,13 @@ The `goal-loop` *executor family* is a different thing that shares a name. It is
 the workflow-first executor for bounded autonomous implementation rounds
 (`src/core/executors/goal-loop-executor.ts`, `src/core/executors/goal-loop-mechanism.ts`,
 `src/core/executors/goal-loop-orchestrator.ts`) and writes `executor_invocations` /
-`executor_rounds`, not goal-iteration job artifacts. The load-bearing cross-link:
-`src/core/executors/goal-loop-mechanism.ts:83` **reuses the M9
-`finalizeLiveWorkflowStepFromResultFile`** verify/commit/reset transaction. So
-"goal iteration paths back `goal-loop`" is true only at the
-*finalization-primitive* layer, not the `goal start` CLI layer.
+`executor_rounds`, not goal-iteration job artifacts. The former load-bearing
+cross-link has been resolved by NGX-494: `goal-loop-mechanism.ts` now reuses the
+neutral `finalizeWorkflowStepFromResultFile` seam in
+`src/core/executors/step-finalize.ts` instead of importing the M9
+`live-step-finalize.ts` ownership surface. So "goal iteration paths back
+`goal-loop`" is true only at the shared finalization-primitive layer, not the
+`goal start` CLI layer.
 
 **Decision: Deprecate-later.** Goal-first CLI stays a required compatibility
 surface (the audit "Keep" list and `workflow-first-gap-matrix.md` both keep
@@ -298,7 +300,8 @@ reconciliation seam. Unconfigured adapters still refuse honestly with
 (Path 4) is now gated on the remaining compatibility-lane migrations rather than
 on a missing production evidence producer.
 
-**Equivalent-behavior proof to preserve:** M9 — `test/live-step-orchestrator.test.ts`,
+**Equivalent-behavior proof to preserve:** shared finalization —
+`test/step-finalize.test.ts`; M9 — `test/live-step-orchestrator.test.ts`,
 `test/live-step-finalize.test.ts`, `test/live-step-run-recovery.test.ts`,
 `test/live-step-executor.test.ts`, `test/full-adapter-e2e.test.ts`. M10 —
 `test/executor-loop-contract.test.ts`, `test/single-shot-orchestrator.test.ts`,

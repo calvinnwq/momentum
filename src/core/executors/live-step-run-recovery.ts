@@ -2,8 +2,9 @@
  * Run-level durable recovery for live finalization and dispatch failures
  * (NGX-334, M9-03).
  *
- * `live-step-finalize.ts` is a pure transaction over git + verification: it
- * returns a rich in-memory outcome but owns no durable state. Process-level
+ * The shared `step-finalize.ts` transaction, re-exported through
+ * `live-step-finalize.ts` for this M9 lane, returns a rich in-memory outcome
+ * over git + verification but owns no durable state. Process-level
  * dispatch failures also return recovery evidence before any git transaction
  * runs: a precise wrapper `liveRecoveryCode` when the executor provides one,
  * otherwise the dispatch `code` itself may still be a live run-level

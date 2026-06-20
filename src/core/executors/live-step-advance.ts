@@ -8,8 +8,9 @@
  *     durable lease + step-state lifecycle around an executor. It is
  *     git-agnostic: it never touches the worktree.
  *   - {@link finalizeLiveWorkflowStepFromResultFile} (`live-step-finalize.ts`) is
- *     a pure git + verification transaction over the step's normalized result
- *     document. It owns no durable state.
+ *     the M9 alias for the shared `step-finalize.ts` pure git + verification
+ *     transaction over the step's normalized result document. It owns no durable
+ *     state.
  *   - `live-step-run-recovery.ts` durably enters manual recovery (the
  *     `needs_manual_recovery` flag + per-run `recovery.md`) when the finalize
  *     transaction or process-level dispatch surfaces a live recovery condition.

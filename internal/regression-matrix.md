@@ -334,14 +334,16 @@ M9 dogfood and live-resume slices add built-CLI smoke coverage.
   but Momentum could either trust that result without running verification or
   let the wrapper's own commit become the durable outcome.
 - **M9 invariant.** `advanceLiveWorkflowStep` finalizes only a normalized,
-  durably-finished dispatch. `finalizeLiveWorkflowStepFromResultFile` re-reads
-  the runner-result document for the explicit commit intent, runs the configured
-  verification commands, and creates the Momentum commit only while HEAD still
-  equals the recorded base. A live wrapper-created commit is classified as
-  `head_mismatch` and routed to manual recovery instead of being reset or
-  accepted silently.
-- **Owner.** [`src/core/executors/live-step-advance.ts`](../src/core/executors/live-step-advance.ts) and
-  [`src/core/executors/live-step-finalize.ts`](../src/core/executors/live-step-finalize.ts).
+  durably-finished dispatch. The `finalizeLiveWorkflowStepFromResultFile` alias
+  re-reads the runner-result document through the shared `step-finalize.ts` seam
+  for the explicit commit intent, runs the configured verification commands, and
+  creates the Momentum commit only while HEAD still equals the recorded base. A
+  live wrapper-created commit is classified as `head_mismatch` and routed to
+  manual recovery instead of being reset or accepted silently.
+- **Owner.** [`src/core/executors/live-step-advance.ts`](../src/core/executors/live-step-advance.ts),
+  [`src/core/executors/step-finalize.ts`](../src/core/executors/step-finalize.ts), and
+  [`src/core/executors/live-step-finalize.ts`](../src/core/executors/live-step-finalize.ts)
+  as the M9 back-compat alias.
 - **Evidence.**
   - Unit: `test/live-step-finalize.test.ts` — commits the live-step diff only
     after verification passes; resets when verification fails; preserves a
@@ -360,7 +362,9 @@ M9 dogfood and live-resume slices add built-CLI smoke coverage.
   mutates git. The run-level recovery seam sets `needs_manual_recovery` before
   attempting the per-run `recovery.md` artifact, so the durable flag and reason
   remain authoritative even if best-effort artifact rendering fails.
-- **Owner.** [`src/core/executors/live-step-finalize.ts`](../src/core/executors/live-step-finalize.ts),
+- **Owner.** [`src/core/executors/step-finalize.ts`](../src/core/executors/step-finalize.ts),
+  [`src/core/executors/live-step-finalize.ts`](../src/core/executors/live-step-finalize.ts)
+  as the M9 back-compat alias,
   [`src/core/executors/live-step-run-recovery.ts`](../src/core/executors/live-step-run-recovery.ts), and
   [`src/core/workflow/recovery-artifact.ts`](../src/core/workflow/recovery-artifact.ts).
 - **Evidence.**
