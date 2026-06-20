@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.6.0](https://github.com/calvinnwq/momentum/compare/v0.5.0...v0.6.0) (2026-06-20)
+
+
+### Features
+
+* **workflow:** Landed the async daemon-dispatchable external-apply producer for RC-3 (NGX-496): executeAndReconcileDispatchedExternalApplyStep runs the injected M6 write path, maps it via the landed pure mapping, records terminal executor evidence, and lets RC-2 finalize the step exactly once — with an idempotent-re-entry guard that never re-runs the external write. ([15a73c9](https://github.com/calvinnwq/momentum/commit/15a73c93fa72071480229c655f74c777c27a30aa))
+* **workflow:** Landed the pure, reusable core of RC-3 (NGX-496): a tested mapping from M6 external-apply outcomes into the dispatched-step executor evidence the existing terminalize/RC-2 seams consume, with applied→succeeded and every failure→fail-closed manual recovery. ([dd8f576](https://github.com/calvinnwq/momentum/commit/dd8f576cea99734b3d241ccfe667f0ebd96b8918))
+* **workflow:** make external-apply daemon-dispatchable ([008551e](https://github.com/calvinnwq/momentum/commit/008551e2cb8f56214fe81a650030b2141f1767bc))
+
 ## [0.5.0](https://github.com/calvinnwq/momentum/compare/v0.4.0...v0.5.0) (2026-06-19)
 
 
