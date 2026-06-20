@@ -55,6 +55,9 @@
  *     never a fabricated clean terminal.
  */
 
+import fs from "node:fs";
+import path from "node:path";
+
 import type { MomentumDb } from "../../adapters/db.js";
 import type { ExecuteExternalApplyResult } from "../intent/apply-execute.js";
 import { isTerminalExecutorInvocationState } from "../executors/loop-reducer.js";
@@ -181,6 +184,7 @@ export async function executeAndReconcileDispatchedExternalApplyStep(
   // vocabulary the terminalize bridge consumes — reusing the M6 path, never a
   // second write path.
   const externalApplyResult = await runExternalApply();
+  writeExternalApplyEvidence(evidence, externalApplyResult);
   const executorResult = mapExternalApplyResultToExecutorResult(
     externalApplyResult,
     evidence
@@ -244,4 +248,47 @@ function tryReconcileDispatchedWorkflowStep(input: {
       detail: error instanceof Error ? error.message : String(error)
     };
   }
+}
+
+function writeExternalApplyEvidence(
+  evidence: ExternalApplyExecutorEvidence,
+  result: ExecuteExternalApplyResult
+): void {
+  fs.mkdirSync(path.dirname(evidence.executorLogPath), { recursive: true });
+  fs.mkdirSync(path.dirname(evidence.resultJsonPath), { recursive: true });
+  fs.writeFileSync(evidence.executorLogPath, externalApplyLog(result), "utf8");
+  fs.writeFileSync(
+    evidence.resultJsonPath,
+    `${JSON.stringify(result, null, 2)}\n`,
+    "utf8"
+  );
+}
+
+function externalApplyLog(result: ExecuteExternalApplyResult): string {
+  if (result.ok) {
+    const target =
+      result.external.issueKey ??
+      result.external.issueId ??
+      result.context.target.externalKey ??
+      result.context.target.externalId ??
+      "unknown";
+    return [
+      "external-apply applied",
+      `intent: ${result.context.intentId}`,
+      `adapter: ${result.context.adapterKind}`,
+      `target: ${target}`,
+      `result: ${result.resultCode}`,
+      `alreadyApplied: ${String(result.external.alreadyApplied)}`,
+      `idempotencyMarker: ${result.external.idempotencyMarker}`,
+      ""
+    ].join("\n");
+  }
+  return [
+    "external-apply refused",
+    `code: ${result.code}`,
+    `message: ${result.message}`,
+    `intent: ${result.context.intentId}`,
+    `adapter: ${result.context.adapterKind}`,
+    ""
+  ].join("\n");
 }

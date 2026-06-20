@@ -158,7 +158,7 @@ async function dispatchStepThroughExternalApplyWrapper(
     deriveExternalApply: () => ({
       ok: true,
       runExternalApply: runner.run,
-      evidence: EVIDENCE
+      evidence: makeWritableEvidence()
     })
   });
   await dispatch(claim, { db, workerId: WORKER, now: DISPATCH_AT });
@@ -181,6 +181,13 @@ const EVIDENCE = {
   executorLogPath: "/repos/momentum/.agent-workflows/run-xa-001/external-apply.log",
   resultJsonPath: "/repos/momentum/.agent-workflows/run-xa-001/external-apply.json"
 } as const;
+
+function makeWritableEvidence(root = makeTempDir("momentum-xa-evidence-")) {
+  return {
+    executorLogPath: path.join(root, "nested", "external-apply.log"),
+    resultJsonPath: path.join(root, "nested", "external-apply.json")
+  };
+}
 
 const IDEMPOTENCY_MARKER = "momentum-apply:intent-001:abc123";
 
@@ -356,6 +363,7 @@ describe("executeAndReconcileDispatchedExternalApplyStep — clean applied", () 
   it("runs the M6 write once, records succeeded evidence, and RC-2 finalizes the step", async () => {
     const db = openSeededDb();
     dispatchStep(db);
+    const evidence = makeWritableEvidence();
     const runner = countingRunner(makeSuccess());
 
     const out = await executeAndReconcileDispatchedExternalApplyStep({
@@ -363,7 +371,7 @@ describe("executeAndReconcileDispatchedExternalApplyStep — clean applied", () 
       runId: RUN_ID,
       stepId: STEP_ID,
       runExternalApply: runner.run,
-      evidence: EVIDENCE,
+      evidence,
       now: EXECUTE_AT
     });
 
@@ -387,8 +395,8 @@ describe("executeAndReconcileDispatchedExternalApplyStep — clean applied", () 
     expect(rounds[0]?.state).toBe("succeeded");
     expect(rounds[0]?.summary).toContain("intent-001");
     expect(rounds[0]?.logPaths).toEqual([
-      EVIDENCE.executorLogPath,
-      EVIDENCE.resultJsonPath
+      evidence.executorLogPath,
+      evidence.resultJsonPath
     ]);
     // The idempotency marker is the durable digest tying evidence to the write.
     expect(rounds[0]?.resultDigest).toBe(IDEMPOTENCY_MARKER);
@@ -398,9 +406,38 @@ describe("executeAndReconcileDispatchedExternalApplyStep — clean applied", () 
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
   });
 
+  it("writes durable success evidence files before recording their paths", async () => {
+    const db = openSeededDb();
+    dispatchStep(db);
+    const evidence = makeWritableEvidence();
+    const runner = countingRunner(makeSuccess());
+
+    await executeAndReconcileDispatchedExternalApplyStep({
+      db,
+      runId: RUN_ID,
+      stepId: STEP_ID,
+      runExternalApply: runner.run,
+      evidence,
+      now: EXECUTE_AT
+    });
+
+    expect(fs.existsSync(evidence.executorLogPath)).toBe(true);
+    expect(fs.existsSync(evidence.resultJsonPath)).toBe(true);
+    expect(fs.readFileSync(evidence.executorLogPath, "utf8")).toContain(
+      "external-apply applied"
+    );
+    const snapshot = JSON.parse(
+      fs.readFileSync(evidence.resultJsonPath, "utf8")
+    ) as ExecuteExternalApplyResult;
+    expect(snapshot.ok).toBe(true);
+    if (!snapshot.ok) throw new Error("expected success snapshot");
+    expect(snapshot.context.intentId).toBe("intent-001");
+  });
+
   it("preserves an idempotent already-applied replay as a clean succeeded terminal", async () => {
     const db = openSeededDb();
     dispatchStep(db);
+    const evidence = makeWritableEvidence();
     const runner = countingRunner(makeSuccess({ alreadyApplied: true }));
 
     const out = await executeAndReconcileDispatchedExternalApplyStep({
@@ -408,7 +445,7 @@ describe("executeAndReconcileDispatchedExternalApplyStep — clean applied", () 
       runId: RUN_ID,
       stepId: STEP_ID,
       runExternalApply: runner.run,
-      evidence: EVIDENCE,
+      evidence,
       now: EXECUTE_AT
     });
 
@@ -424,6 +461,7 @@ describe("executeAndReconcileDispatchedExternalApplyStep — fail-closed on M6 r
   it("parks the run for manual recovery with operator-visible evidence", async () => {
     const db = openSeededDb();
     dispatchStep(db);
+    const evidence = makeWritableEvidence();
     const runner = countingRunner(
       makeFailure("policy_denied", "intent_apply_policy is create_intents_only")
     );
@@ -433,7 +471,7 @@ describe("executeAndReconcileDispatchedExternalApplyStep — fail-closed on M6 r
       runId: RUN_ID,
       stepId: STEP_ID,
       runExternalApply: runner.run,
-      evidence: EVIDENCE,
+      evidence,
       now: EXECUTE_AT
     });
 
@@ -469,12 +507,43 @@ describe("executeAndReconcileDispatchedExternalApplyStep — fail-closed on M6 r
       stepRunId: STEP_ID
     });
   });
+
+  it("writes durable refusal evidence files before recording their paths", async () => {
+    const db = openSeededDb();
+    dispatchStep(db);
+    const evidence = makeWritableEvidence();
+    const runner = countingRunner(
+      makeFailure("policy_denied", "intent_apply_policy is create_intents_only")
+    );
+
+    await executeAndReconcileDispatchedExternalApplyStep({
+      db,
+      runId: RUN_ID,
+      stepId: STEP_ID,
+      runExternalApply: runner.run,
+      evidence,
+      now: EXECUTE_AT
+    });
+
+    expect(fs.existsSync(evidence.executorLogPath)).toBe(true);
+    expect(fs.existsSync(evidence.resultJsonPath)).toBe(true);
+    expect(fs.readFileSync(evidence.executorLogPath, "utf8")).toContain(
+      "external-apply refused"
+    );
+    const snapshot = JSON.parse(
+      fs.readFileSync(evidence.resultJsonPath, "utf8")
+    ) as ExecuteExternalApplyResult;
+    expect(snapshot.ok).toBe(false);
+    if (snapshot.ok) throw new Error("expected refusal snapshot");
+    expect(snapshot.code).toBe("policy_denied");
+  });
 });
 
 describe("executeAndReconcileDispatchedExternalApplyStep — idempotent re-entry", () => {
   it("never re-runs the external write once the dispatch invocation is terminal", async () => {
     const db = openSeededDb();
     dispatchStep(db);
+    const evidence = makeWritableEvidence();
     const runner = countingRunner(makeSuccess());
 
     const first = await executeAndReconcileDispatchedExternalApplyStep({
@@ -482,7 +551,7 @@ describe("executeAndReconcileDispatchedExternalApplyStep — idempotent re-entry
       runId: RUN_ID,
       stepId: STEP_ID,
       runExternalApply: runner.run,
-      evidence: EVIDENCE,
+      evidence,
       now: EXECUTE_AT
     });
     expect(first.status).toBe(
@@ -497,7 +566,7 @@ describe("executeAndReconcileDispatchedExternalApplyStep — idempotent re-entry
       runId: RUN_ID,
       stepId: STEP_ID,
       runExternalApply: runner.run,
-      evidence: EVIDENCE,
+      evidence,
       now: EXECUTE_AT + 100
     });
     expect(second.status).toBe(
@@ -518,6 +587,7 @@ describe("executeAndReconcileDispatchedExternalApplyStep — reconcile deferral"
   it("keeps the dispatch lease held when reconciliation throws after evidence is recorded", async () => {
     const db = openSeededDb();
     dispatchStep(db);
+    const evidence = makeWritableEvidence();
     const runner = countingRunner(makeSuccess());
     db.exec(`
       CREATE TRIGGER test_block_reconcile_xa
@@ -533,7 +603,7 @@ describe("executeAndReconcileDispatchedExternalApplyStep — reconcile deferral"
       runId: RUN_ID,
       stepId: STEP_ID,
       runExternalApply: runner.run,
-      evidence: EVIDENCE,
+      evidence,
       now: EXECUTE_AT
     });
 

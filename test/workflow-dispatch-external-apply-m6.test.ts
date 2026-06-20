@@ -81,13 +81,6 @@ const EXECUTE_AT = NOW + 10;
 const STEP_ID = "preflight";
 const OPERATOR_REASON = "RC-3 daemon external-apply";
 
-const EVIDENCE = {
-  executorLogPath:
-    "/repos/momentum/.agent-workflows/run-xa-m6-001/external-apply.log",
-  resultJsonPath:
-    "/repos/momentum/.agent-workflows/run-xa-m6-001/external-apply.json"
-} as const;
-
 const tempRoots: string[] = [];
 
 afterEach(() => {
@@ -101,6 +94,13 @@ function makeTempDir(prefix = "momentum-xa-m6-"): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   tempRoots.push(dir);
   return fs.realpathSync(dir);
+}
+
+function makeWritableEvidence(root = makeTempDir("momentum-xa-m6-evidence-")) {
+  return {
+    executorLogPath: path.join(root, "nested", "external-apply.log"),
+    resultJsonPath: path.join(root, "nested", "external-apply.json")
+  };
 }
 
 /** Open a migrated DB seeded exactly as the CLI `workflow run start` leaves it. */
@@ -323,13 +323,14 @@ describe("external-apply producer × real M6 — applied through a mock Linear c
     const repoPath = makeRepo(externalApplyAllowedPolicy());
     const { idempotencyMarker } = seedPendingIntent(db);
     const spy = makeApplySpy(makeSuccessOutcome({ idempotencyMarker }));
+    const evidence = makeWritableEvidence();
 
     const out = await executeAndReconcileDispatchedExternalApplyStep({
       db,
       runId: RUN_ID,
       stepId: STEP_ID,
       runExternalApply: realM6Runner(db, repoPath, spy, idempotencyMarker),
-      evidence: EVIDENCE,
+      evidence,
       now: EXECUTE_AT
     });
 
@@ -359,9 +360,11 @@ describe("external-apply producer × real M6 — applied through a mock Linear c
     expect(round?.state).toBe("succeeded");
     expect(round?.summary).toContain(INTENT_ID);
     expect(round?.logPaths).toEqual([
-      EVIDENCE.executorLogPath,
-      EVIDENCE.resultJsonPath
+      evidence.executorLogPath,
+      evidence.resultJsonPath
     ]);
+    expect(fs.existsSync(evidence.executorLogPath)).toBe(true);
+    expect(fs.existsSync(evidence.resultJsonPath)).toBe(true);
     // The idempotency marker is the durable digest tying evidence to the write.
     expect(round?.resultDigest).toBe(idempotencyMarker);
 
@@ -376,13 +379,14 @@ describe("external-apply producer × real M6 — applied through a mock Linear c
     const { idempotencyMarker } = seedPendingIntent(db);
     const spy = makeApplySpy(makeSuccessOutcome({ idempotencyMarker }));
     const runExternalApply = realM6Runner(db, repoPath, spy, idempotencyMarker);
+    const evidence = makeWritableEvidence();
 
     const first = await executeAndReconcileDispatchedExternalApplyStep({
       db,
       runId: RUN_ID,
       stepId: STEP_ID,
       runExternalApply,
-      evidence: EVIDENCE,
+      evidence,
       now: EXECUTE_AT
     });
     expect(first.status).toBe(
@@ -397,7 +401,7 @@ describe("external-apply producer × real M6 — applied through a mock Linear c
       runId: RUN_ID,
       stepId: STEP_ID,
       runExternalApply,
-      evidence: EVIDENCE,
+      evidence,
       now: EXECUTE_AT + 100
     });
     expect(second.status).toBe(
@@ -420,13 +424,14 @@ describe("external-apply producer × real M6 — fail-closed on a real policy re
     const repoPath = makeRepo(createIntentsOnlyPolicy());
     const { idempotencyMarker } = seedPendingIntent(db);
     const spy = makeApplySpy(makeSuccessOutcome({ idempotencyMarker }));
+    const evidence = makeWritableEvidence();
 
     const out = await executeAndReconcileDispatchedExternalApplyStep({
       db,
       runId: RUN_ID,
       stepId: STEP_ID,
       runExternalApply: realM6Runner(db, repoPath, spy, idempotencyMarker),
-      evidence: EVIDENCE,
+      evidence,
       now: EXECUTE_AT
     });
 
