@@ -35,14 +35,14 @@ describe('release-please configuration', () => {
     });
   });
 
-  it('runs release-please on main with explicit write permissions and pinned action', async () => {
+  it('runs release-please on main with explicit write permissions and the current action major', async () => {
     const workflow = await readFile('.github/workflows/release-please.yml', 'utf8');
 
     expect(workflow).toContain('name: Release Please');
     expect(workflow).toMatch(/push:\n\s+branches:\n\s+- main/);
     expect(workflow).toContain('workflow_dispatch:');
     expect(workflow).toMatch(/permissions:\n\s+contents: write\n\s+issues: write\n\s+pull-requests: write/);
-    expect(workflow).toMatch(/uses: googleapis\/release-please-action@[0-9a-f]{40}/);
+    expect(workflow).toContain('uses: googleapis/release-please-action@v5');
     expect(workflow).toContain('config-file: release-please-config.json');
     expect(workflow).toContain('manifest-file: .release-please-manifest.json');
   });
