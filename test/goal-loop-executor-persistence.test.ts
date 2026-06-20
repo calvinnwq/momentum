@@ -16,7 +16,7 @@ import {
   planGoalLoopRoundStart,
   resolveGoalLoopRoundSelection
 } from "../src/core/executors/goal-loop-executor.js";
-import type { FinalizeLiveWorkflowStepFromResultFileResult } from "../src/core/executors/live-step-finalize.js";
+import type { FinalizeWorkflowStepFromResultFileResult } from "../src/core/executors/step-finalize.js";
 import type { RunnerResult } from "../src/core/executors/types.js";
 
 // This is the integration twin of the pure projections in
@@ -118,7 +118,7 @@ function runnerResult(overrides: Partial<RunnerResult> = {}): RunnerResult {
   };
 }
 
-const COMMITTED: FinalizeLiveWorkflowStepFromResultFileResult = {
+const COMMITTED: FinalizeWorkflowStepFromResultFileResult = {
   outcome: "committed",
   verification: {
     ok: true,
@@ -142,7 +142,7 @@ const COMMITTED: FinalizeLiveWorkflowStepFromResultFileResult = {
   head: SHA_A
 };
 
-const RESULT_MISSING: FinalizeLiveWorkflowStepFromResultFileResult = {
+const RESULT_MISSING: FinalizeWorkflowStepFromResultFileResult = {
   outcome: "result_missing",
   resultFilePath: "/tmp/result.json",
   error: "result file not found"

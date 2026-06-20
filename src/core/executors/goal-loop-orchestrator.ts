@@ -7,7 +7,7 @@
  * deterministic agent/model selection. This module is the stateful seam that
  * composes those projections with the *real* M10-03 executor-loop persistence
  * layer and round transition graph around the bounded mechanism, exactly the way
- * `live-step-orchestrator.ts` composes the pure `live-step-finalize.ts`
+ * `live-step-orchestrator.ts` composes the pure `step-finalize.ts`
  * transaction:
  *
  *   insert the round-start row  (running, agent/model/input frozen in)
@@ -33,9 +33,9 @@
  * The bounded mechanism is injected as a {@link GoalLoopRoundRunner} so the real
  * M9 goal iteration, a no-op, or a deterministic fake can all drive a round
  * through the identical durable lifecycle. The mechanism is *total*: it encodes
- * every failure as a {@link FinalizeLiveWorkflowStepFromResultFileResult} outcome
+ * every failure as a {@link FinalizeWorkflowStepFromResultFileResult} outcome
  * (and a `null` result for a missing/invalid result document) rather than
- * throwing, mirroring `finalizeLiveWorkflowStepFromResultFile`, which never
+ * throwing, mirroring `finalizeWorkflowStepFromResultFile`, which never
  * throws. The driver then routes each outcome through the pure decision so the
  * verification-authority and repo-safety boundaries hold end to end:
  *
@@ -95,7 +95,7 @@ import {
   type GoalLoopRoundSelection,
   type PlanGoalLoopRoundStartInput
 } from "./goal-loop-executor.js";
-import type { FinalizeLiveWorkflowStepFromResultFileResult } from "./live-step-finalize.js";
+import type { FinalizeWorkflowStepFromResultFileResult } from "./step-finalize.js";
 import type { RunnerResult } from "./types.js";
 
 /**
@@ -106,7 +106,7 @@ import type { RunnerResult } from "./types.js";
  */
 export type GoalLoopRoundMechanismResult = {
   result: RunnerResult | null;
-  finalize: FinalizeLiveWorkflowStepFromResultFileResult;
+  finalize: FinalizeWorkflowStepFromResultFileResult;
   /**
    * The content digest of the captured result document (the round-schema
    * `result_digest` reattach fingerprint), or `null` / omitted when the round
@@ -138,9 +138,9 @@ export type GoalLoopRoundMechanismResult = {
  * (its frozen agent/model/effort, input digest, artifact root, and identity) and
  * returns the round's normalized result + finalize outcome. It must be total —
  * encode failures as finalize outcomes rather than throwing — mirroring
- * `finalizeLiveWorkflowStepFromResultFile`. `goal-loop-mechanism.ts`'s
+ * `finalizeWorkflowStepFromResultFile`. `goal-loop-mechanism.ts`'s
  * `goalLoopRoundMechanismFromResultFile` is the concrete mechanism that reuses
- * that M9 finalize safety over a round's result document; the daemon wiring that
+ * that shared finalize safety over a round's result document; the daemon wiring that
  * runs the agent producing the document then calls it inside this closure. Tests
  * inject a deterministic fake.
  */

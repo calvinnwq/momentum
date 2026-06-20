@@ -7,17 +7,18 @@
  * finalization decision, and daemon classification." This module owns the
  * *daemon classification* half of one such round: given the executor's own
  * completion recommendation (projected from the bounded round's normalized
- * `RunnerResult`) and the repo-safety finalization outcome (the M9
- * `finalizeLiveWorkflowStep*` transaction's result), it decides the contract's
+ * `RunnerResult`) and the repo-safety finalization outcome (the shared
+ * `finalizeWorkflowStep*` transaction's result), it decides the contract's
  * "Completion Classification" for the round, the terminal round state, the
  * preserved recovery code, and any durable human gate.
  *
  * It is a pure function of its inputs: no SQLite, no file system, no git, no
  * executor invocation — exactly the discipline `loop-reducer.ts` and
- * `live-step-finalize.ts` follow. The durable orchestrator that creates the
+ * `step-finalize.ts` follow. The durable orchestrator that creates the
  * invocation, inserts the round, runs the bounded mechanism, runs finalization,
  * and persists this decision is layered on top in later M10-05 slices, the same
- * way `live-step-orchestrator.ts` composes `live-step-finalize.ts`.
+ * way `live-step-orchestrator.ts` composes the shared `step-finalize.ts`
+ * transaction (through its `live-step-finalize.ts` back-compat alias).
  *
  * Beyond the classification, this module also projects a finished round into the
  * durable {@link ExecutorRoundUpdate} patches the M10-03 persistence twin
@@ -81,16 +82,16 @@ import type {
   WorkflowExecutorFamily
 } from "./loop-reducer.js";
 import type { ExecutorRoundUpdate } from "./loop-persist.js";
-import type { FinalizeLiveWorkflowStepFromResultFileResult } from "./live-step-finalize.js";
+import type { FinalizeWorkflowStepFromResultFileResult } from "./step-finalize.js";
 import type { RunnerResult } from "./types.js";
 
 /**
  * The finalize outcomes a goal-loop round consumes: exactly the discriminant of
- * the M9 `finalizeLiveWorkflowStepFromResultFile` result, so the adapter and the
+ * the shared `finalizeWorkflowStepFromResultFile` result, so the adapter and the
  * finalization transaction can never drift out of sync.
  */
 export type GoalLoopFinalizeOutcome =
-  FinalizeLiveWorkflowStepFromResultFileResult["outcome"];
+  FinalizeWorkflowStepFromResultFileResult["outcome"];
 
 /**
  * The verification verdict a finished round records (contract "Round Schema":
@@ -161,7 +162,7 @@ export type PlanGoalLoopRoundPersistenceInput = {
    */
   result: RunnerResult | null;
   /** The full repo-safety outcome of the round's finalization transaction. */
-  finalize: FinalizeLiveWorkflowStepFromResultFileResult;
+  finalize: FinalizeWorkflowStepFromResultFileResult;
   /** 0-based index of the round that just finished. */
   roundIndex: number;
   /** Maximum rounds the executor definition allows, or null for unbounded. */
@@ -659,7 +660,7 @@ export function planGoalLoopRoundStartForInvocation(
  * otherwise the verdict is `null`.
  */
 export function goalLoopFinalizeEvidenceFromResult(
-  result: FinalizeLiveWorkflowStepFromResultFileResult
+  result: FinalizeWorkflowStepFromResultFileResult
 ): GoalLoopFinalizeEvidence {
   return {
     outcome: result.outcome,
@@ -1026,7 +1027,7 @@ function goalLoopArtifactRecord(
  * problems aborted finalize) carry no verdict.
  */
 function verificationStatusFromResult(
-  result: FinalizeLiveWorkflowStepFromResultFileResult
+  result: FinalizeWorkflowStepFromResultFileResult
 ): GoalLoopVerificationStatus | null {
   switch (result.outcome) {
     case "committed":

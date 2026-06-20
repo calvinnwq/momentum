@@ -29,7 +29,7 @@ import {
   type GoalLoopRoundSelection,
   type PlanGoalLoopRoundStartInput
 } from "../src/core/executors/goal-loop-executor.js";
-import type { FinalizeLiveWorkflowStepFromResultFileResult } from "../src/core/executors/live-step-finalize.js";
+import type { FinalizeWorkflowStepFromResultFileResult } from "../src/core/executors/step-finalize.js";
 import type { RunnerResult } from "../src/core/executors/types.js";
 
 const COMPLETION_SET = new Set<string>(EXECUTOR_COMPLETION_CLASSIFICATIONS);
@@ -315,7 +315,7 @@ function runnerResult(overrides: Partial<RunnerResult> = {}): RunnerResult {
   };
 }
 
-const COMMITTED: FinalizeLiveWorkflowStepFromResultFileResult = {
+const COMMITTED: FinalizeWorkflowStepFromResultFileResult = {
   outcome: "committed",
   verification: { ok: true, results: [verifyCmd(true)] },
   commit: {
@@ -327,7 +327,7 @@ const COMMITTED: FinalizeLiveWorkflowStepFromResultFileResult = {
   head: SHA_A
 };
 
-const COMMITTED_NO_VERIFY: FinalizeLiveWorkflowStepFromResultFileResult = {
+const COMMITTED_NO_VERIFY: FinalizeWorkflowStepFromResultFileResult = {
   outcome: "committed",
   verification: { ok: true, results: [] },
   commit: {
@@ -339,7 +339,7 @@ const COMMITTED_NO_VERIFY: FinalizeLiveWorkflowStepFromResultFileResult = {
   head: SHA_A
 };
 
-const RESET_VERIFICATION_FAILURE: FinalizeLiveWorkflowStepFromResultFileResult =
+const RESET_VERIFICATION_FAILURE: FinalizeWorkflowStepFromResultFileResult =
   {
     outcome: "reset_verification_failure",
     verification: {
@@ -351,18 +351,18 @@ const RESET_VERIFICATION_FAILURE: FinalizeLiveWorkflowStepFromResultFileResult =
     reset: { ok: true, head: SHA_B }
   };
 
-const RESET_STEP_FAILURE: FinalizeLiveWorkflowStepFromResultFileResult = {
+const RESET_STEP_FAILURE: FinalizeWorkflowStepFromResultFileResult = {
   outcome: "reset_step_failure",
   reset: { ok: true, head: SHA_B }
 };
 
-const COMMIT_FAILED: FinalizeLiveWorkflowStepFromResultFileResult = {
+const COMMIT_FAILED: FinalizeWorkflowStepFromResultFileResult = {
   outcome: "commit_failed",
   verification: { ok: true, results: [verifyCmd(true)] },
   commit: { ok: false, code: "git_failed", error: "git commit failed" }
 };
 
-const RESET_FAILED_WITH_VERIFY: FinalizeLiveWorkflowStepFromResultFileResult = {
+const RESET_FAILED_WITH_VERIFY: FinalizeWorkflowStepFromResultFileResult = {
   outcome: "reset_failed",
   trigger: "verification_failure",
   verification: {
@@ -374,14 +374,14 @@ const RESET_FAILED_WITH_VERIFY: FinalizeLiveWorkflowStepFromResultFileResult = {
   reset: { ok: false, code: "git_failed", error: "git reset failed" }
 };
 
-const RESET_FAILED_NO_VERIFY: FinalizeLiveWorkflowStepFromResultFileResult = {
+const RESET_FAILED_NO_VERIFY: FinalizeWorkflowStepFromResultFileResult = {
   outcome: "reset_failed",
   trigger: "runner_failure",
   verification: null,
   reset: { ok: false, code: "git_failed", error: "git reset failed" }
 };
 
-const MOVED_HEAD: FinalizeLiveWorkflowStepFromResultFileResult = {
+const MOVED_HEAD: FinalizeWorkflowStepFromResultFileResult = {
   outcome: "manual_recovery_required",
   recoveryCode: "head_mismatch",
   trigger: "pre_finalize",
@@ -390,7 +390,7 @@ const MOVED_HEAD: FinalizeLiveWorkflowStepFromResultFileResult = {
   reason: "HEAD moved before finalize"
 };
 
-const RESULT_MISSING: FinalizeLiveWorkflowStepFromResultFileResult = {
+const RESULT_MISSING: FinalizeWorkflowStepFromResultFileResult = {
   outcome: "result_missing",
   resultFilePath: "/tmp/result.json",
   error: "result file not found"
