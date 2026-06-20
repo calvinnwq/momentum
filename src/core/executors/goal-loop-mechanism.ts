@@ -8,7 +8,7 @@
  * asks for ("Reuse existing Goal / iteration safety where possible") rather than
  * re-implementing it: given the post-runner inputs (the repo, the base HEAD the
  * round started from, the normalized result document the round wrote, and the
- * verification config), it runs the M9 `finalizeLiveWorkflowStepFromResultFile`
+ * verification config), it runs the shared `finalizeWorkflowStepFromResultFile`
  * verify -> commit / reset transaction and projects the outcome into the
  * {@link GoalLoopRoundMechanismResult} the driver consumes.
  *
@@ -19,7 +19,7 @@
  * its `runRound` closure; the bridge stays free of agent spawning so it is fully
  * testable against a temp git repo + result document.
  *
- * Reusing `finalizeLiveWorkflowStepFromResultFile` keeps every M9 repo-safety
+ * Reusing `finalizeWorkflowStepFromResultFile` keeps every repo-safety
  * boundary intact end to end — a moved HEAD routes to `manual_recovery_required`
  * rather than a destructive reset, a lost repo lock surfaces `repo_lock_lost`, and
  * a missing / invalid result document refuses to mutate git — which is exactly the
@@ -56,32 +56,32 @@ import {
 } from "./goal-loop-executor.js";
 import type { GoalLoopRoundMechanismResult } from "./goal-loop-orchestrator.js";
 import {
-  finalizeLiveWorkflowStepFromResultFile,
-  type FinalizeLiveWorkflowStepFromResultFileInput,
-  type FinalizeLiveWorkflowStepFromResultFileResult
-} from "./live-step-finalize.js";
+  finalizeWorkflowStepFromResultFile,
+  type FinalizeWorkflowStepFromResultFileInput,
+  type FinalizeWorkflowStepFromResultFileResult
+} from "./step-finalize.js";
 import { parseRunnerResult } from "./runner-result.js";
 import type { RunnerResult } from "./types.js";
 
 /**
  * The inputs to {@link goalLoopRoundMechanismFromResultFile}: exactly the
- * {@link FinalizeLiveWorkflowStepFromResultFileInput} the M9 finalize seam takes
+ * {@link FinalizeWorkflowStepFromResultFileInput} the shared finalize seam takes
  * (repo, base HEAD, the result document path, and the verification config). The
  * round's external agent is responsible for having written the result document at
  * `resultFilePath` before this bridge runs.
  */
 export type GoalLoopRoundMechanismFromResultFileInput =
-  FinalizeLiveWorkflowStepFromResultFileInput;
+  FinalizeWorkflowStepFromResultFileInput;
 
 /**
- * Run the existing M9 goal / iteration finalize safety over a finished round's
+ * Run the existing shared goal / iteration finalize safety over a finished round's
  * result document and project the outcome into the {@link GoalLoopRoundMechanismResult}
  * the goal-loop driver consumes. See the module doc for the consistency rules.
  */
 export function goalLoopRoundMechanismFromResultFile(
   input: GoalLoopRoundMechanismFromResultFileInput
 ): GoalLoopRoundMechanismResult {
-  const finalize = finalizeLiveWorkflowStepFromResultFile(input);
+  const finalize = finalizeWorkflowStepFromResultFile(input);
   const captured = documentUnusable(finalize)
     ? { result: null, resultDigest: null }
     : readResultForCapture(input.resultFilePath);
@@ -108,7 +108,7 @@ export function goalLoopRoundMechanismFromResultFile(
  */
 function committedChangedFiles(
   input: GoalLoopRoundMechanismFromResultFileInput,
-  finalize: FinalizeLiveWorkflowStepFromResultFileResult
+  finalize: FinalizeWorkflowStepFromResultFileResult
 ): string[] {
   if (finalize.outcome !== "committed") return [];
   try {
@@ -129,7 +129,7 @@ function committedChangedFiles(
  * instead of capturing from a document the finalize seam refused to trust.
  */
 function documentUnusable(
-  finalize: FinalizeLiveWorkflowStepFromResultFileResult
+  finalize: FinalizeWorkflowStepFromResultFileResult
 ): boolean {
   return (
     finalize.outcome === "result_missing" ||
@@ -213,7 +213,7 @@ function verificationLogDigest(verificationLogPath: string): string | null {
  */
 function goalLoopMechanismArtifacts(
   input: GoalLoopRoundMechanismFromResultFileInput,
-  finalize: FinalizeLiveWorkflowStepFromResultFileResult,
+  finalize: FinalizeWorkflowStepFromResultFileResult,
   resultDigest: string | null
 ): GoalLoopRoundArtifacts {
   const evidence = goalLoopFinalizeEvidenceFromResult(finalize);

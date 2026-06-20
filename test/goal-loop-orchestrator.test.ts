@@ -29,7 +29,7 @@ import {
   runGoalLoopRound,
   runGoalLoopStep
 } from "../src/core/executors/goal-loop-orchestrator.js";
-import type { FinalizeLiveWorkflowStepFromResultFileResult } from "../src/core/executors/live-step-finalize.js";
+import type { FinalizeWorkflowStepFromResultFileResult } from "../src/core/executors/step-finalize.js";
 import type { RunnerResult } from "../src/core/executors/types.js";
 
 // Drives the single-round goal-loop executor step through the *real*
@@ -145,7 +145,7 @@ function runnerResult(overrides: Partial<RunnerResult> = {}): RunnerResult {
   };
 }
 
-const COMMITTED: FinalizeLiveWorkflowStepFromResultFileResult = {
+const COMMITTED: FinalizeWorkflowStepFromResultFileResult = {
   outcome: "committed",
   verification: { ok: true, results: [verifyCmd(true)] },
   commit: {
@@ -157,7 +157,7 @@ const COMMITTED: FinalizeLiveWorkflowStepFromResultFileResult = {
   head: SHA_A
 };
 
-const RESET_VERIFICATION_FAILURE: FinalizeLiveWorkflowStepFromResultFileResult =
+const RESET_VERIFICATION_FAILURE: FinalizeWorkflowStepFromResultFileResult =
   {
     outcome: "reset_verification_failure",
     verification: {
@@ -169,7 +169,7 @@ const RESET_VERIFICATION_FAILURE: FinalizeLiveWorkflowStepFromResultFileResult =
     reset: { ok: true, head: SHA_B }
   };
 
-const RESULT_MISSING: FinalizeLiveWorkflowStepFromResultFileResult = {
+const RESULT_MISSING: FinalizeWorkflowStepFromResultFileResult = {
   outcome: "result_missing",
   resultFilePath: "/tmp/result.json",
   error: "result file not found"

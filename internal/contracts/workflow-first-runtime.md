@@ -26,7 +26,7 @@ This pivot changes the future product model:
 
 - M9 wraps existing OpenClaw coding workflow engines by fixed step kinds.
 - The workflow-first runtime generalizes those ideas into configurable workflow definitions and pluggable step executors.
-- M9 primitives should be reused where possible: workflow run state, approvals, leases, live wrapper execution, result-file validation, verification / commit finalization, and recovery taxonomy.
+- M9 primitives should be reused where possible: workflow run state, approvals, leases, live wrapper execution, result-file validation, the shared verification / commit finalization seam extracted from M9, and recovery taxonomy.
 - M9 should not be stretched into a generic workflow product retroactively. M10 owns the workflow-first implementation sequence, starting with workflow / step definition primitives.
 
 The earlier M9 run-start preference of `goal start` plus a `WorkflowRun` link is superseded for future workflow-first work. M10-02 has landed the top-level workflow run start surface; it starts `WorkflowRun` rows from definitions rather than from the Goal loop. `goal start` remains a compatibility path for the old Goal loop until it is migrated or deprecated.
@@ -342,7 +342,7 @@ Current Momentum state:
 - Has M10-02 `workflow run start` materialization from persisted or built-in definitions, including definition provenance on `workflow_runs`.
 - Has M10-03 `ExecutorDefinition` / `ExecutorInvocation` / `ExecutorRound` schema and persistence below workflow steps, including round artifacts, checkpoints, findings, and decisions.
 - Has M10-04 opt-in daemon workflow scheduler lane (recover -> scan -> claim -> dispatch) that schedules runnable workflow steps alongside goal iteration draining, M10-09a production dispatcher wiring for bounded managed `daemon start`, and RC-5b configured daemon-default live-wrapper profile wiring that runs dispatched steps through real commands and feeds terminal executor evidence to the RC-2 reconciliation seam.
-- Has M10-05 `goal-loop` executor adapter that drives bounded autonomous rounds below a step run, reusing the M9 verify / commit / reset finalization and persisting per-round agent / model / input / result / verification / commit / artifact / checkpoint evidence.
+- Has M10-05 `goal-loop` executor adapter that drives bounded autonomous rounds below a step run, reusing the shared `step-finalize.ts` verify / commit / reset finalization seam and persisting per-round agent / model / input / result / verification / commit / artifact / checkpoint evidence.
 - Has M10-06 `one-shot` / `script` executor adapters for bounded single-invocation work, including result-bearing one-shot success and exit-code / bounded-log script success.
 - Has M10-07 no-mistakes executor mirror that records external no-mistakes run state, findings, decisions, PR / CI state, and completion below executor invocations / rounds.
 - Has M10-08 durable workflow gates and the `workflow run decide` operator / delegated-policy path.

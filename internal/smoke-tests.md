@@ -308,7 +308,7 @@ Coverage:
 Run locally via the targeted vitest command:
 
 ```
-pnpm vitest run test/live-step-finalize.test.ts test/live-step-run-recovery.test.ts test/live-step-advance.test.ts test/workflow-recovery-artifact.test.ts
+pnpm vitest run test/step-finalize.test.ts test/live-step-finalize.test.ts test/live-step-run-recovery.test.ts test/live-step-advance.test.ts test/workflow-recovery-artifact.test.ts
 ```
 
 ## Milestone 10 workflow-first runtime coverage (NGX-345 through NGX-353, NGX-391)

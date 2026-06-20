@@ -40,7 +40,7 @@ unreachable-branch audit below finds nothing safe to delete within scope.
 
 | # | Runtime path | Decision | Prerequisite before any narrowing | Follow-up |
 |---|---|---|---|---|
-| 1 | Goal-first CLI compatibility (`goal start` / `status` / `logs` / `handoff` / `recovery clear`) | Deprecate-later; **read-back/recovery parity landed (NGX-486)** | Workflow-first equivalents + migration coverage now landed; narrowing still waits on disentangling the shared iteration-finalization primitive the `goal-loop` executor reuses | RC-1 (parity landed, NGX-486) |
+| 1 | Goal-first CLI compatibility (`goal start` / `status` / `logs` / `handoff` / `recovery clear`) | Deprecate-later; **read-back/recovery parity landed (NGX-486)** | Workflow-first equivalents + migration coverage landed (NGX-486); the shared iteration-finalization primitive the `goal-loop` executor reused is now disentangled into the neutral `step-finalize.ts` seam (NGX-494); narrowing itself is the remaining work | RC-1 (parity, NGX-486) / RC-1b (NGX-494) |
 | 2 | Imported `.agent-workflows` / `cwfp-*` compatibility | Defer | `NGX-404` default-switch dogfood passes its `coding-workflow-ownership.md` gates | `NGX-404` (existing) |
 | 3 | M9 live-wrapper direct `workflow_steps` advancement vs M10 executor-loop finalization | Keep (coexist); boundary seam landed | A single reconciliation seam now finalizes dispatched steps from durable executor evidence with a no-double-finalize proof; narrowing still waits on compatibility-lane migrations | RC-2 (seam landed, NGX-480) |
 | 4 | Production dispatch phase-1 scaffold (no fabricated result evidence) | Keep | RC-2 replaced the seam-level terminal gap and RC-5b now feeds real terminal executor evidence from configured daemon profiles; narrowing the scaffold still waits on compatibility-lane migrations | RC-2 (seam landed, NGX-480), RC-5 |
@@ -64,11 +64,13 @@ The `goal-loop` *executor family* is a different thing that shares a name. It is
 the workflow-first executor for bounded autonomous implementation rounds
 (`src/core/executors/goal-loop-executor.ts`, `src/core/executors/goal-loop-mechanism.ts`,
 `src/core/executors/goal-loop-orchestrator.ts`) and writes `executor_invocations` /
-`executor_rounds`, not goal-iteration job artifacts. The load-bearing cross-link:
-`src/core/executors/goal-loop-mechanism.ts:83` **reuses the M9
-`finalizeLiveWorkflowStepFromResultFile`** verify/commit/reset transaction. So
-"goal iteration paths back `goal-loop`" is true only at the
-*finalization-primitive* layer, not the `goal start` CLI layer.
+`executor_rounds`, not goal-iteration job artifacts. The former load-bearing
+cross-link has been resolved by NGX-494: `goal-loop-mechanism.ts` now reuses the
+neutral `finalizeWorkflowStepFromResultFile` seam in
+`src/core/executors/step-finalize.ts` instead of importing the M9
+`live-step-finalize.ts` ownership surface. So "goal iteration paths back
+`goal-loop`" is true only at the shared finalization-primitive layer, not the
+`goal start` CLI layer.
 
 **Decision: Deprecate-later.** Goal-first CLI stays a required compatibility
 surface (the audit "Keep" list and `workflow-first-gap-matrix.md` both keep
@@ -86,11 +88,20 @@ operator read-back and recovery.
    workflow-first equivalent without dropping a JSON field, refusal code, or
    text-routing contract — the same byte-equivalence discipline NGX-432 applied
    to broad-CLI dedup.
-3. The shared iteration-finalization primitive is disentangled: narrowing
-   goal-first must not delete `finalizeLiveWorkflowStepFromResultFile` or its
-   verify/commit/reset helpers while the `goal-loop` executor
-   (`src/core/executors/goal-loop-mechanism.ts:83`) still depends on them. Either the executor keeps
-   the primitive or the primitive moves to a shared home first.
+3. The shared iteration-finalization primitive is disentangled — **landed
+   (NGX-494, RC-1b).** The verify/commit/reset transaction moved to the
+   neutrally-named `src/core/executors/step-finalize.ts` seam
+   (`finalizeWorkflowStep` / `finalizeWorkflowStepFromResultFile`), and the
+   `goal-loop` executor family (`goal-loop-mechanism.ts`,
+   `goal-loop-executor.ts`, `goal-loop-orchestrator.ts`) now depends on that
+   shared home instead of the M9-named `live-step-finalize.ts` module.
+   `live-step-finalize.ts` survives as a back-compat alias that re-exports the
+   seam under the original `*LiveWorkflowStep*` names for the M9 live wrappers
+   and the single-shot family, so narrowing goal-first no longer has to choose
+   between keeping the M9 primitive and moving it — the primitive already lives
+   in a shared, behavior-equivalent home (proven by `test/step-finalize.test.ts`,
+   an import-boundary guard, and the unchanged goal-loop / live-step finalize
+   suites).
 
 **Landed (NGX-486): read-back / recovery parity + migration coverage.**
 Prerequisites 1 and 2 are now satisfied. Every practical goal-first operator
@@ -126,9 +137,12 @@ does **not** narrow or remove any goal-first command. Goal-first
 `goal start` / `status` / `logs` / `handoff` / `recovery clear` stay fully in
 force as the compatibility surface, the gap-matrix keeps `goal start` as a
 compatibility/shorthand entry point, and the existing goal-first compatibility
-tests remain green. Prerequisite 3 (disentangling
-`finalizeLiveWorkflowStepFromResultFile` from the `goal-loop` executor) is
-unchanged future work and still gates any actual narrowing of the goal-first CLI.
+tests remain green. Prerequisite 3 (disentangling the shared finalization
+primitive from the `goal-loop` executor) has since **landed (NGX-494)**: the
+transaction moved to the neutral `step-finalize.ts` seam and the `goal-loop`
+executor now depends on that shared home, so the finalization disentanglement no
+longer gates the goal-first CLI narrowing — that narrowing itself stays the
+remaining future work.
 
 **Equivalent-behavior proof to preserve:** `test/cli.test.ts` (goal-first CLI
 envelopes), `test/goal-init.test.ts`, `test/goal-reducer.test.ts`,
@@ -286,7 +300,8 @@ reconciliation seam. Unconfigured adapters still refuse honestly with
 (Path 4) is now gated on the remaining compatibility-lane migrations rather than
 on a missing production evidence producer.
 
-**Equivalent-behavior proof to preserve:** M9 — `test/live-step-orchestrator.test.ts`,
+**Equivalent-behavior proof to preserve:** shared finalization —
+`test/step-finalize.test.ts`; M9 — `test/live-step-orchestrator.test.ts`,
 `test/live-step-finalize.test.ts`, `test/live-step-run-recovery.test.ts`,
 `test/live-step-executor.test.ts`, `test/full-adapter-e2e.test.ts`. M10 —
 `test/executor-loop-contract.test.ts`, `test/single-shot-orchestrator.test.ts`,
@@ -421,8 +436,9 @@ and add `RC-*` placeholders for the genuinely new consolidation work.
    `test/rc1-handoff-migration-parity.test.ts`,
    `test/rc1-recovery-migration-parity.test.ts`). This lands parity + coverage
    only; goal-first CLI stays the compatibility surface and is **not** narrowed
-   here — the actual narrowing still waits on disentangling the shared
-   iteration-finalization primitive (Path 1, prerequisite 3). (Path 1)
+   here — and the shared iteration-finalization primitive it reused has since
+   been disentangled (NGX-494; Path 1, prerequisite 3), so the actual narrowing
+   is the remaining open work. (Path 1)
 2. **RC-2 — M9/M10 step-finalization reconciliation seam. ✅ Landed (NGX-480).**
    The single idempotent seam that finalizes dispatched steps from terminal
    executor evidence now ships as `reconcileDispatchedWorkflowStep`
@@ -474,9 +490,12 @@ goal-first CLI stays the compatibility surface (no narrowing). RC-5b's reusable
 execution seams and bounded `daemon start` wiring have since **landed**
 (NGX-492): the terminalization bridge, execution-path producer, profile source
 resolver, live-wrapper dispatch composition, exec-context deriver, and
-daemon-default profile wiring are all in place and tested. The next remaining runtime
+daemon-default profile wiring are all in place and tested. RC-1b's shared
+finalization disentanglement has since **landed** (NGX-494): the
+verify/commit/reset transaction moved to the neutral `step-finalize.ts` seam and
+the goal-loop executor depends on that shared home. The next remaining runtime
 consolidation item in Path 1 is the goal-first CLI narrowing itself
-(gated on prerequisite 3, disentangling the shared finalization primitive).
+(its finalization prerequisite now cleared).
 RC-3 / RC-4 and `NGX-404` remain capability-gated and stay deferred until their
 adapters / dogfood land.
 

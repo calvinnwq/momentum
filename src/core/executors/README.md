@@ -20,7 +20,8 @@ importers still reference the concrete modules below.
 | Executor loop (M10) | `loop-reducer.ts`, `loop-persist.ts` |
 | Goal-loop executor | `goal-loop-executor.ts`, `goal-loop-mechanism.ts`, `goal-loop-orchestrator.ts` |
 | Single-shot executor | `single-shot-executor.ts`, `single-shot-mechanism.ts`, `single-shot-orchestrator.ts` |
-| Live-step executor (M9) | `live-step-executor.ts`, `live-step-advance.ts`, `live-step-orchestrator.ts`, `live-step-finalize.ts`, `live-step-run-recovery.ts` |
+| Live-step executor (M9) | `live-step-executor.ts`, `live-step-advance.ts`, `live-step-orchestrator.ts`, `live-step-run-recovery.ts` |
+| Shared step finalization | `step-finalize.ts` (neutral verify -> commit / reset seam), `live-step-finalize.ts` (M9 back-compat alias) |
 | No-mistakes mechanism | `no-mistakes-mechanism.ts` |
 | Runner support | `runner-profile.ts` |
 | Foreground iteration | `foreground-iteration.ts` |
@@ -31,12 +32,19 @@ importers still reference the concrete modules below.
 point; `loop-persist.ts` wraps it with persistence. The goal-loop and single-shot
 families build on `loop-reducer` / `loop-persist`.
 
-### M9 / M10 separation
+### Shared step finalization (M9 / M10 separation)
 
-`live-step-finalize.ts` is consumed both by the M9 live-step path
-(`live-step-advance` / `live-step-run-recovery`) and by the M10 executor-loop
-families (goal-loop and single-shot). The two paths intentionally stay separate
-modules: the M9 direct-finalize path is **not** collapsed into the M10
+The verify -> commit / reset finalization transaction lives in the neutrally-named
+`step-finalize.ts` seam (`finalizeWorkflowStep` /
+`finalizeWorkflowStepFromResultFile`). It is consumed by both the M9 live-step
+path (`live-step-advance` / `live-step-run-recovery`) and the M10 executor-loop
+families (goal-loop and single-shot). The goal-loop family imports the neutral
+seam directly (NGX-494, RC-1b); the M9 live wrappers and the single-shot family
+reach it through `live-step-finalize.ts`, a back-compat alias that re-exports the
+seam under the original `*LiveWorkflowStep*` names.
+
+The M9 direct-finalize path and the M10 executor-loop path intentionally stay
+separate composition lanes: the M9 path is **not** collapsed into the M10
 executor-loop path. Any unification is reconciliation work owned by a later slice
 (now landed as RC-2 / NGX-480: `dispatch-reconcile.ts` /
 `dispatch-reconcile-execute.ts`), not by this mechanical regrouping.
