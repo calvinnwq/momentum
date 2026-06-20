@@ -19,10 +19,10 @@ import {
   type WorkerRunResult
 } from "./worker-run.js";
 import {
-  runWorkflowSchedulerOnce,
-  type RunWorkflowSchedulerOnceInput,
+  runWorkflowSchedulerOnceAsync,
+  type RunWorkflowSchedulerOnceAsyncInput,
   type RunWorkflowSchedulerOnceResult,
-  type WorkflowStepDispatch
+  type AsyncWorkflowStepDispatch
 } from "../workflow/scheduler.js";
 import type { WorkflowLeaseStalePolicy } from "../workflow/run-reducer.js";
 
@@ -51,7 +51,7 @@ export type DaemonLoopRunWorker = (input: WorkerRunInput) => WorkerRunResult;
  */
 export type DaemonWorkflowLaneConfig = {
   /** Executor-dispatch seam handed each claimed workflow step. */
-  dispatch: WorkflowStepDispatch;
+  dispatch: AsyncWorkflowStepDispatch;
   /**
    * Dispatch-lease TTL stamped on a claimed step. Defaults to the tick's own
    * default ({@link runWorkflowSchedulerOnce} → `DEFAULT_WORKFLOW_DISPATCH_LEASE_MS`).
@@ -172,10 +172,10 @@ export async function runDaemonLoop(
   // heartbeat as it hands a claimed step to the executor seam — a long
   // synchronous dispatch must not make the daemon run look stale.
   const workflowLane = input.workflowLane;
-  const dispatchWithHeartbeat: WorkflowStepDispatch | undefined =
+  const dispatchWithHeartbeat: AsyncWorkflowStepDispatch | undefined =
     workflowLane === undefined
       ? undefined
-      : (claim, context) => {
+      : async (claim, context) => {
           setDaemonRunActiveJob(input.db, {
             runId: input.runId,
             jobId: `workflow:${claim.runId}:${claim.stepId}`,
@@ -187,7 +187,7 @@ export async function runDaemonLoop(
             now: context.now
           });
           try {
-            return workflowLane.dispatch(claim, context);
+            return await workflowLane.dispatch(claim, context);
           } finally {
             setDaemonRunActiveJob(input.db, {
               runId: input.runId,
@@ -372,7 +372,7 @@ export async function runDaemonLoop(
       // unless enabled, so the goal-iteration accounting above is unchanged.
       let workflowResult: RunWorkflowSchedulerOnceResult | undefined;
       if (workflowLane !== undefined && dispatchWithHeartbeat !== undefined) {
-        const schedulerInput: RunWorkflowSchedulerOnceInput = {
+        const schedulerInput: RunWorkflowSchedulerOnceAsyncInput = {
           db: input.db,
           workerId: input.workerId,
           dispatch: dispatchWithHeartbeat,
@@ -384,7 +384,7 @@ export async function runDaemonLoop(
         if (workflowLane.stalePolicy !== undefined) {
           schedulerInput.stalePolicy = workflowLane.stalePolicy;
         }
-        workflowResult = runWorkflowSchedulerOnce(schedulerInput);
+        workflowResult = await runWorkflowSchedulerOnceAsync(schedulerInput);
         lastWorkflowCode = workflowResult.code;
         if (workflowResult.code === "dispatched") {
           workflowStepsDispatched += 1;

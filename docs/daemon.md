@@ -89,12 +89,20 @@ is `dispatched`. `lastWorkflowCode` is the last scheduler-lane tick code
 (`idle`, `claim_contended`, `dispatched`, or `null` when the lane never ran).
 For a supported executor family, dispatch advances the step to `running` and
 creates durable executor invocation / round scaffold rows with deterministic
-dispatcher ids. When `MOMENTUM_LIVE_WRAPPER_PROFILE` points at a valid workflow
-step wrapper profile, the managed loop also runs a genuinely dispatched step's
-live wrapper in the same tick, records terminal executor evidence on the
-dispatch scaffold, and lets the reconciliation seam finalize the step or park it
-for manual recovery. When the variable is unset or blank, the default lane is
-unchanged: supported steps get the durable start scaffold only, while
+dispatcher ids. The built-in `linear-refresh` step uses the `external-apply`
+family: bounded `daemon start` matches exactly one pending Linear update intent
+for the run's issue scope, reuses the same policy-gated external-apply write path
+as `intent apply --external-apply`, writes `external-apply.log` /
+`external-apply.json` evidence under the run directory, and reconciles the step
+from that terminal evidence. Missing issue scope, no matching pending intent,
+ambiguous intents, missing credentials, policy denial, audit-incomplete, blocked,
+or other unsafe apply outcomes park the step for manual recovery rather than
+fabricating success. When `MOMENTUM_LIVE_WRAPPER_PROFILE` points at a valid
+workflow step wrapper profile, the managed loop also runs genuinely dispatched
+non-`external-apply` step wrappers in the same tick, records terminal executor
+evidence on the dispatch scaffold, and lets the reconciliation seam finalize the
+step or park it for manual recovery. When the variable is unset or blank,
+non-`external-apply` supported steps get the durable start scaffold only, while
 unconfigured wrapper kinds fail honestly with `runtime_unavailable` if a profile
 is configured but omits that step kind. If a claimed step cannot be resolved or
 uses an executor family the daemon cannot dispatch yet, the dispatcher parks the
@@ -102,7 +110,8 @@ run behind a `manual_recovery_required` workflow gate instead of silently
 dropping the claim; if the run row vanished before that gate can be written, it
 still releases the dispatch lease so no claim is stranded. Register-only
 `daemon start` exits before the managed loop and never runs the workflow
-scheduler lane or reads `MOMENTUM_LIVE_WRAPPER_PROFILE`.
+scheduler lane, reads `MOMENTUM_LIVE_WRAPPER_PROFILE`, or attempts external
+apply.
 
 ### Workflow live-wrapper profile
 
@@ -114,9 +123,11 @@ MOMENTUM_LIVE_WRAPPER_PROFILE=/path/to/live-wrapper-profile.json \
   momentum daemon start --max-idle-cycles 1 --json
 ```
 
-The profile has a non-empty `name` and a `wrappers` object keyed by workflow
-step kind (`preflight`, `implementation`, `postflight`, `no-mistakes`,
-`merge-cleanup`, or `linear-refresh`). Each wrapper requires:
+The profile has a non-empty `name` and a `wrappers` object keyed by
+non-`external-apply` workflow step kind (`preflight`, `implementation`,
+`postflight`, `no-mistakes`, or `merge-cleanup`). The built-in `linear-refresh`
+step is handled by the daemon's policy-gated `external-apply` adapter, not a
+live-wrapper command. Each wrapper requires:
 
 - `command` — absolute executable path.
 - `args` — array of strings or numbers; use `[]` when no arguments are needed.

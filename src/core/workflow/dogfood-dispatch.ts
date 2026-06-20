@@ -64,6 +64,8 @@ import type {
   WorkflowStepDispatchContext,
   WorkflowStepDispatchResult
 } from "./scheduler.js";
+import { loadExecutorInvocation } from "../executors/loop-persist.js";
+import { deriveDispatchInvocationId } from "./dispatch-execute.js";
 
 /**
  * `result_digest` stamped on a step this fixture terminalizes, so durable state
@@ -157,7 +159,13 @@ export function createTerminalizingWorkflowDispatch(
     context: WorkflowStepDispatchContext
   ): WorkflowStepDispatchResult => {
     const result = baseDispatch(claim, context);
-    if (shouldTerminalizeAfterDispatch(result.status)) {
+    if (
+      shouldTerminalizeAfterDispatch(result.status) &&
+      loadExecutorInvocation(
+        context.db,
+        deriveDispatchInvocationId(claim.runId, claim.stepId)
+      )?.executorFamily !== "external-apply"
+    ) {
       terminalizeDispatchedStep(context.db, claim, context.now);
     }
     return result;

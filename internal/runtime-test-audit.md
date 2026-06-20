@@ -468,8 +468,14 @@ Decisions at a glance (full evidence and prerequisites live in the plan):
 - **Phase-1 dispatch scaffold** — keep; its no-fabricated-evidence rule is a
   recovery safety feature, narrowable only once adapter finalization replaces its
   terminal gap.
-- **`external-apply` / `subworkflow`** — defer; fail-closed is a safety feature,
-  removed only when a daemon-dispatchable adapter lands per family.
+- **`external-apply` / `subworkflow`** — `external-apply` narrowed;
+  `subworkflow` deferred. RC-3's `external-apply` adapter has since landed
+  (NGX-496): the pure M6 → executor evidence mapping
+  (`src/core/workflow/dispatch-external-apply.ts`), async run-path producer
+  (`src/core/workflow/dispatch-external-apply-run.ts`), family guard, and daemon
+  dispatch composition reuse the single M6 `executeExternalApply` write path
+  under its full safety contract. RC-4 (`subworkflow`) stays fail-closed and
+  deferred.
 - **Fake `WorkflowStepExecutor` adapters shipped in `src/`** — deprecate-later;
   demote to a test-only seam once real adapters land, preserving substrate smoke.
 
@@ -528,9 +534,10 @@ proof issue:
 - Production dispatch scaffold rows are required to avoid fabricated terminal
   evidence. Deleting the scaffold before landed adapters replace it would
   weaken recovery.
-- `external-apply` and `subworkflow` are valid executor families that fail
-  closed until dispatchable adapters land. The current fail-closed behavior is
-  a product safety feature, not dead code.
+- `external-apply` and `subworkflow` are valid executor families. RC-3's
+  `external-apply` adapter has since landed (NGX-496) and is wired through the
+  production dispatch lane under the M6 safety contract; `subworkflow` (RC-4)
+  remains fail-closed and deferred.
 
 ### Defer: Removal Candidates Need New Contracts
 

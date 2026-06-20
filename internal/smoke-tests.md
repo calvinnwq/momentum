@@ -409,8 +409,8 @@ Coverage:
   same gate list in `test/cli-workflow-run-logs.test.ts`.
 - the pure workflow-dispatch decision domain in `test/workflow-dispatch.test.ts`:
   the phase-1 dispatchable allowlist (`goal-loop`, `one-shot`, `script`,
-  `no-mistakes`), unsupported `external-apply` / `subworkflow` fail-closed
-  routing, resolution-failure code mapping, and totality.
+  `no-mistakes`, `external-apply`), `subworkflow` fail-closed routing,
+  resolution-failure code mapping, and totality.
 - durable dispatch resolution in `test/workflow-dispatch-persist.test.ts`:
   run -> definition-link -> step-definition -> executor-family resolution,
   unknown or unlinked state failures, and composed dispatch-plan decisions.
@@ -426,6 +426,20 @@ Coverage:
   finalizes the owning workflow step, unclean terminals park the run for manual
   recovery with a step gate, non-terminal evidence defers without writes, and the
   bidirectional M9/M10 proof prevents double finalization.
+- RC-3 daemon-dispatchable `external-apply` adapter in
+  `test/workflow-dispatch-external-apply.test.ts`,
+  `test/workflow-dispatch-external-apply-run.test.ts`, and
+  `test/workflow-dispatch-external-apply-m6.test.ts` (NGX-496): the pure M6 →
+  executor-evidence mapping routes every `applied` (including idempotent
+  already-applied replay) to `succeeded` and every M6 failure to
+  `manual_recovery_required`; the async producer runs the injected M6 write once,
+  records succeeded evidence, and RC-2 finalizes the step, with idempotent
+  re-entry never re-running the write, reconcile deferral keeping the lease held,
+  and the M9 lane boundary refused without running the write; the M6 integration
+  proof binds the producer to the real `executeExternalApply` through a mock
+  Linear client (no real `api.linear.app` calls), with production daemon dispatch
+  wiring now composing the adapter and a scaffold-family guard preventing
+  non-`external-apply` writes.
 - shipped bounded `daemon start` workflow-lane wiring in
   `test/cli-daemon-workflow-dispatch.test.ts`: the managed loop dispatches an
   approved workflow step with no test-only injection, surfaces
@@ -642,15 +656,15 @@ Coverage:
   gate, and the lease released exactly at finalization, and proves the layer is
   distinct by asserting it mints **no** `executor_invocations` / `executor_rounds`
   rows. It records live-wrapper composition evidence.
-- **external-write policy gate held closed**: the real `linear-refresh`
-  (`external-apply`) step is claimed through the scheduler and dispatched; the
-  external-write family is not a phase-1 dispatchable family, so the dispatch
-  fails closed — zero executor rows, an operator-visible
-  `manual_recovery_required` gate hung from the step, the run flagged
-  `needs_manual_recovery`, and the dispatch lease released (not stranded). This
-  is the composed proof that real external **reads** stay separated from real
-  external **writes**, which remain disabled unless the separate M6 write policy
-  gate explicitly allows them.
+- **external-write policy gate held closed (historical NGX-372 proof)**: before
+  RC-3, the real `linear-refresh` (`external-apply`) step was claimed through the
+  scheduler and failed closed — zero executor rows, an operator-visible
+  `manual_recovery_required` gate, the run flagged `needs_manual_recovery`, and
+  the dispatch lease released. RC-3 supersedes that family-level closed proof with
+  focused external-apply adapter coverage above: the family is now
+  daemon-dispatchable, but real external **writes** still require the M6 write
+  policy gate, a matched pending Linear intent, credentials, and audit-before-write
+  evidence.
 
 Phase-1 boundary (honest scope): `executeWorkflowStepDispatch` stops at the start
 *scaffold*; the landed `runSingleShotStep` / `runGoalLoopStep` /

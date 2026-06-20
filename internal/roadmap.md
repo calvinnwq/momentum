@@ -115,7 +115,11 @@ that shared home directly. RC-1c's first goal-first narrowing slice has since
 landed (NGX-495): duplicate goal-first read-back logic now lives in
 `src/core/goal/read-back.ts` while the goal-first commands remain the
 compatibility surface and the domain-specific recovery guarded-clear dedup stays
-deferred.
+deferred. RC-3's daemon-dispatchable `external-apply` adapter has since landed
+(NGX-496): the pure M6 → executor-evidence mapping
+(`src/core/workflow/dispatch-external-apply.ts`) and the async run-path producer
+(`src/core/workflow/dispatch-external-apply-run.ts`) reuse the single M6
+`executeExternalApply` write path under its full safety contract, with `external-apply` now in the dispatchable family set and wired through daemon dispatch composition while `subworkflow` remains fail-closed.
 The `doctor` readiness marker tracks the **most recently closed** milestone. It currently reads `Milestone 11: CLI architecture refactor (NGX-411, NGX-412, NGX-413, NGX-414, NGX-415, NGX-416, NGX-417, NGX-418, NGX-419) complete`. The marker advanced from the M6 closeout string to `Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete` at the M7 closeout slice (NGX-319), stayed pinned to the M7 string through every M8 implementation slice, advanced to the M8 string at the M8 closeout slice (NGX-330), advanced again to `Milestone 10: workflow-first runtime (NGX-344, NGX-345, NGX-346, NGX-347, NGX-348, NGX-349, NGX-350, NGX-351, NGX-352, NGX-367, NGX-353) complete` at the M10 closeout slice (NGX-353), and advanced to the M11 string at the M11 closeout slice (NGX-419).
 
 ## Previously closed milestone: M8
@@ -256,7 +260,7 @@ The following remain explicitly deferred until a later milestone justifies them.
 
 - Inbound webhooks; source adapters stay pull / reconcile first.
 - Dashboards or any UI surface; the CLI remains the only interface. Discord delivery for approvals stays inside the `coding-workflow-pipeline` skill, not Momentum.
-- Autonomous or background external writes; M6 external apply stays operator-mediated and M8 does not introduce a new external-write path.
+- External writes outside the M6 safety contract; the RC-3 daemon path only reuses that policy-gated external-apply lifecycle for one matched pending Linear intent.
 - Non-Linear external write adapters (GitHub / Jira / etc.).
 - Per-source-item worktrees / parallel same-repo Goals; a `WorkflowRun` continues to use one shared repo lease.
 - Background runner supervision (forking, daemonization, restart-on-crash).
@@ -264,4 +268,4 @@ The following remain explicitly deferred until a later milestone justifies them.
 - Cooperative mid-job cancellation / signal handling beyond the existing `daemon stop` / `daemon stop --now` semantics.
 - Remote git operations (`fetch` / `pull` / `push` / `rebase`) driven from Momentum.
 - Replacing the GNHF / postflight / no-mistakes / merge-cleanup engines themselves; M7 is the substrate, M8 is the operator-control surface, and M9 wraps the executors — none of them reimplement the engines.
-- Generalizing the `WorkflowRun` substrate beyond OpenClaw coding workflows continues after M10. M10-01 landed reusable definition schema and persistence primitives, M10-02 added first-class run start, M10-03 persists executor-loop records below step runs, M10-04 added the opt-in scheduler lane, M10-05 added the goal-loop executor adapter, M10-06 added the one-shot / script executor adapters, M10-07 added the no-mistakes mirror, M10-08 added workflow gates and decisions, M10-09a wired production dispatcher scaffolds into bounded managed `daemon start`, and M10-09 dogfooded that shipped path. Generalized `external-apply` / `subworkflow` dispatch remains deferred. The accepted planning contracts for that pivot are [internal/contracts/workflow-first-runtime.md](contracts/workflow-first-runtime.md), [internal/contracts/executor-loop.md](contracts/executor-loop.md), and [internal/contracts/workflow-first-gap-matrix.md](contracts/workflow-first-gap-matrix.md).
+- Generalizing the `WorkflowRun` substrate beyond OpenClaw coding workflows continues after M10. M10-01 landed reusable definition schema and persistence primitives, M10-02 added first-class run start, M10-03 persists executor-loop records below step runs, M10-04 added the opt-in scheduler lane, M10-05 added the goal-loop executor adapter, M10-06 added the one-shot / script executor adapters, M10-07 added the no-mistakes mirror, M10-08 added workflow gates and decisions, M10-09a wired production dispatcher scaffolds into bounded managed `daemon start`, M10-09 dogfooded that shipped path, and RC-3 has since landed daemon-dispatchable `external-apply` under the M6 safety contract. Generalized `subworkflow` dispatch remains deferred. The accepted planning contracts for that pivot are [internal/contracts/workflow-first-runtime.md](contracts/workflow-first-runtime.md), [internal/contracts/executor-loop.md](contracts/executor-loop.md), and [internal/contracts/workflow-first-gap-matrix.md](contracts/workflow-first-gap-matrix.md).

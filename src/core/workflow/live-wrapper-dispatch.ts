@@ -53,7 +53,11 @@ import {
   recordUnresolvedDispatchedStepContext,
   type DispatchedStepExecutorContext
 } from "./dispatch-executor-run.js";
-import { WORKFLOW_DISPATCH_RESULT_STATUS } from "./dispatch-execute.js";
+import {
+  WORKFLOW_DISPATCH_RESULT_STATUS,
+  deriveDispatchInvocationId
+} from "./dispatch-execute.js";
+import { loadExecutorInvocation } from "../executors/loop-persist.js";
 import type {
   ClaimedWorkflowStep,
   WorkflowStepDispatch,
@@ -136,7 +140,13 @@ export function createLiveWrapperWorkflowDispatch(
     context: WorkflowStepDispatchContext
   ): WorkflowStepDispatchResult => {
     const result = baseDispatch(claim, context);
-    if (shouldRunDispatchedExecutor(result.status)) {
+    if (
+      shouldRunDispatchedExecutor(result.status) &&
+      loadExecutorInvocation(
+        context.db,
+        deriveDispatchInvocationId(claim.runId, claim.stepId)
+      )?.executorFamily !== "external-apply"
+    ) {
       const resolved = deps.deriveExec(claim, context);
       if (resolved.ok) {
         executeAndReconcileDispatchedWorkflowStep({
