@@ -121,14 +121,22 @@ function approveAndClaim(
  * Drive a (dispatchable) step through the production base dispatch so it lands
  * `running` with a `<run>::<step>::dispatch` invocation (`running`) + scaffold
  * round (`pending`) and a held dispatch lease — the exact substrate the
- * subworkflow producer runs against. The producer is family-agnostic at this
- * slice (it runs the injected child runner against any dispatched scaffold), so
- * the default `preflight` (one-shot) step provides a faithful scaffold while
- * `subworkflow` itself is still fail-closed in the base dispatcher.
+ * subworkflow producer runs against. The base dispatcher is still standing in for
+ * the family flip, so tests re-stamp the scaffold to `subworkflow` unless they
+ * are pinning the family guard.
  */
-function dispatchStep(db: MomentumDb, stepId: string = STEP_ID): void {
+function dispatchStep(
+  db: MomentumDb,
+  stepId: string = STEP_ID,
+  family: "subworkflow" | "one-shot" = "subworkflow"
+): void {
   const claim = approveAndClaim(db, stepId);
   executeWorkflowStepDispatch(claim, { db, workerId: WORKER, now: DISPATCH_AT });
+  if (family === "subworkflow") {
+    db.prepare(
+      "UPDATE executor_invocations SET executor_family = 'subworkflow' WHERE invocation_id = ?"
+    ).run(deriveDispatchInvocationId(RUN_ID, stepId));
+  }
 }
 
 function stepState(db: MomentumDb, stepId: string = STEP_ID): string {
@@ -554,5 +562,29 @@ describe("executeAndReconcileDispatchedSubworkflowStep — M9 lane boundary", ()
       loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
     ).toBeUndefined();
     expect(stepState(db)).toBe("pending");
+  });
+
+  it("refuses a non-subworkflow dispatch scaffold and never starts a child run", async () => {
+    const db = openSeededDb();
+    dispatchStep(db, STEP_ID, "one-shot");
+    const runner = countingChildRunner(observe("succeeded"));
+
+    const out = await executeAndReconcileDispatchedSubworkflowStep({
+      db,
+      runId: RUN_ID,
+      stepId: STEP_ID,
+      runSubworkflowChild: runner.run,
+      evidence: makeWritableEvidence(),
+      now: EXECUTE_AT
+    });
+
+    expect(out.status).toBe(WORKFLOW_EXECUTE_RECONCILE_STATUS.notDispatched);
+    expect(out.detail).toContain("one-shot");
+    expect(runner.calls()).toBe(0);
+    expect(
+      loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+        ?.state
+    ).toBe("running");
+    expect(stepState(db)).toBe("running");
   });
 });

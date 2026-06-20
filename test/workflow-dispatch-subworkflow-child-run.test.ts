@@ -86,11 +86,6 @@ const RUN_ID = "run-sub-child-001";
 const WORKER = "worker-1";
 const DISPATCH_AT = NOW + 1;
 const EXECUTE_AT = NOW + 10;
-/**
- * A dispatchable step provides a faithful `<run>::<step>::dispatch` scaffold; the
- * producer is family-agnostic and runs the injected child runner against it (the
- * `subworkflow`-family gate lives in the entry-point factory, separately tested).
- */
 const STEP_ID = "preflight";
 /**
  * The child run id the runner starts-or-attaches to. Deterministic from the
@@ -152,14 +147,15 @@ function approveAndClaim(db: MomentumDb): ClaimedWorkflowStep {
 }
 
 /**
- * Drive the (dispatchable one-shot) parent step through the production base
- * dispatch so it lands `running` with a `<run>::<step>::dispatch` invocation
- * (`running`) + scaffold round (`pending`) and a held dispatch lease — the exact
- * substrate the subworkflow producer runs against.
+ * Drive the parent step through the production base dispatch, then re-stamp the
+ * scaffold family to `subworkflow` while the base family flip is still staged.
  */
 function dispatchStep(db: MomentumDb): void {
   const claim = approveAndClaim(db);
   executeWorkflowStepDispatch(claim, { db, workerId: WORKER, now: DISPATCH_AT });
+  db.prepare(
+    "UPDATE executor_invocations SET executor_family = 'subworkflow' WHERE invocation_id = ?"
+  ).run(deriveDispatchInvocationId(RUN_ID, STEP_ID));
 }
 
 function stepState(db: MomentumDb): string {

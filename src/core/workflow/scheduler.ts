@@ -48,6 +48,7 @@ import path from "node:path";
 import {
   acquireWorkflowLeaseInTransaction,
   getWorkflowLease,
+  heartbeatWorkflowLease,
   releaseWorkflowLease
 } from "./leases.js";
 import { isTerminalExecutorInvocationState } from "../executors/loop-reducer.js";
@@ -1096,6 +1097,153 @@ export type RunWorkflowSchedulerOnceResult =
       dispatch: WorkflowStepDispatchResult;
     };
 
+function selectActiveSubworkflowDispatchRecheck(
+  db: MomentumDb,
+  input: { now: number; graceMs: number; holder: string }
+): ClaimedWorkflowStep | undefined {
+  const runs = db
+    .prepare(
+      `SELECT id, state, repo_path
+         FROM workflow_runs
+        WHERE needs_manual_recovery = 0
+          AND state NOT IN ('succeeded', 'failed', 'canceled')
+        ORDER BY created_at ASC, id ASC`
+    )
+    .all() as WorkflowRunScanRow[];
+
+  for (const run of runs) {
+    const lease = getWorkflowLease(db, run.id, WORKFLOW_DISPATCH_LEASE_KIND);
+    if (
+      lease === undefined ||
+      lease.holder !== input.holder ||
+      classifyWorkflowLease(lease, {
+        now: input.now,
+        graceMs: input.graceMs
+      }) !== "fresh"
+    ) {
+      continue;
+    }
+
+    const steps = loadStepRecords(db, run.id);
+    const runningStep = steps.find((step) => step.state === "running");
+    if (runningStep === undefined) continue;
+
+    const invocation = loadExecutorInvocation(
+      db,
+      deriveDispatchInvocationId(run.id, runningStep.stepId)
+    );
+    if (
+      invocation === undefined ||
+      invocation.executorFamily !== "subworkflow" ||
+      isTerminalExecutorInvocationState(invocation.state)
+    ) {
+      continue;
+    }
+
+    const leases = loadLeaseRecords(db, run.id);
+    return {
+      runId: run.id,
+      stepId: runningStep.stepId,
+      kind: runningStep.kind,
+      stepOrder: runningStep.order,
+      required: runningStep.required,
+      repoPath: run.repo_path,
+      runState: deriveWorkflowRunState(steps, {
+        leases,
+        now: input.now,
+        graceMs: input.graceMs
+      }),
+      lease
+    };
+  }
+
+  return undefined;
+}
+
+function heartbeatActiveDispatchClaim(
+  db: MomentumDb,
+  input: {
+    claim: ClaimedWorkflowStep;
+    now: number;
+    leaseDurationMs: number;
+  }
+): ClaimedWorkflowStep | undefined {
+  const { claim, now, leaseDurationMs } = input;
+  const heartbeated = heartbeatWorkflowLease(db, {
+    runId: claim.lease.runId,
+    leaseKind: claim.lease.leaseKind,
+    holder: claim.lease.holder,
+    acquiredAt: claim.lease.acquiredAt,
+    heartbeatAt: now,
+    expiresAt: now + leaseDurationMs
+  });
+  if (!heartbeated.ok) return undefined;
+  const lease = getWorkflowLease(db, claim.lease.runId, claim.lease.leaseKind);
+  if (lease === undefined || lease.releasedAt !== null) return undefined;
+  return { ...claim, lease };
+}
+
+function dispatchClaim(
+  input: {
+    db: MomentumDb;
+    workerId: string;
+    recovery: RecoverStaleWorkflowLeasesResult;
+    claim: ClaimedWorkflowStep;
+    tickNow: number;
+  },
+  dispatch: AsyncWorkflowStepDispatch
+): MaybePromise<RunWorkflowSchedulerOnceResult> {
+  const { db, workerId, recovery, claim, tickNow } = input;
+  let dispatchResult: MaybePromise<WorkflowStepDispatchResult>;
+  try {
+    dispatchResult = dispatch(claim, { db, workerId, now: tickNow });
+  } catch (error) {
+    try {
+      releaseWorkflowLease(db, {
+        runId: claim.lease.runId,
+        leaseKind: claim.lease.leaseKind,
+        holder: claim.lease.holder,
+        acquiredAt: claim.lease.acquiredAt,
+        now: tickNow
+      });
+    } catch {
+    }
+    throw error;
+  }
+
+  if (isPromiseLike(dispatchResult)) {
+    return dispatchResult
+      .then((resolvedDispatchResult) => ({
+        code: "dispatched" as const,
+        workerId,
+        recovery,
+        claim,
+        dispatch: resolvedDispatchResult
+      }))
+      .catch((error) => {
+        try {
+          releaseWorkflowLease(db, {
+            runId: claim.lease.runId,
+            leaseKind: claim.lease.leaseKind,
+            holder: claim.lease.holder,
+            acquiredAt: claim.lease.acquiredAt,
+            now: tickNow
+          });
+        } catch {
+        }
+        throw error;
+      });
+  }
+
+  return {
+    code: "dispatched",
+    workerId,
+    recovery,
+    claim,
+    dispatch: dispatchResult
+  };
+}
+
 /**
  * Run one workflow scheduler-lane tick: recover stale leases, scan for the next
  * runnable step, atomically claim it, and hand it to the executor-dispatch seam.
@@ -1174,6 +1322,25 @@ function runWorkflowSchedulerOnceCore(
 
   const recovery = recoverStaleLeases(db, { now: tickNow, graceMs });
 
+  const activeClaim = selectActiveSubworkflowDispatchRecheck(db, {
+    now: tickNow,
+    graceMs,
+    holder: workerId
+  });
+  if (activeClaim !== undefined) {
+    const refreshedClaim = heartbeatActiveDispatchClaim(db, {
+      claim: activeClaim,
+      now: tickNow,
+      leaseDurationMs
+    });
+    if (refreshedClaim !== undefined) {
+      return dispatchClaim(
+        { db, workerId, recovery, claim: refreshedClaim, tickNow },
+        dispatch
+      );
+    }
+  }
+
   const scan = selectRunnableWork(db, { now: tickNow, graceMs });
   const candidate = scan.runnable[0];
   if (candidate === undefined) {
@@ -1194,58 +1361,7 @@ function runWorkflowSchedulerOnceCore(
   }
 
   const claim = claimResult.claim;
-  let dispatchResult: MaybePromise<WorkflowStepDispatchResult>;
-  try {
-    dispatchResult = dispatch(claim, { db, workerId, now: tickNow });
-  } catch (error) {
-    try {
-      releaseWorkflowLease(db, {
-        runId: claim.lease.runId,
-        leaseKind: claim.lease.leaseKind,
-        holder: claim.lease.holder,
-        acquiredAt: claim.lease.acquiredAt,
-        now: tickNow
-      });
-    } catch {
-      // Best-effort release: surface the original dispatcher failure, not a
-      // secondary release error.
-    }
-    throw error;
-  }
-
-  if (isPromiseLike(dispatchResult)) {
-    return dispatchResult
-      .then((resolvedDispatchResult) => ({
-        code: "dispatched" as const,
-        workerId,
-        recovery,
-        claim,
-        dispatch: resolvedDispatchResult
-      }))
-      .catch((error) => {
-        try {
-          releaseWorkflowLease(db, {
-            runId: claim.lease.runId,
-            leaseKind: claim.lease.leaseKind,
-            holder: claim.lease.holder,
-            acquiredAt: claim.lease.acquiredAt,
-            now: tickNow
-          });
-        } catch {
-          // Best-effort release: surface the original dispatcher failure, not a
-          // secondary release error.
-        }
-        throw error;
-      });
-  }
-
-  return {
-    code: "dispatched",
-    workerId,
-    recovery,
-    claim,
-    dispatch: dispatchResult
-  };
+  return dispatchClaim({ db, workerId, recovery, claim, tickNow }, dispatch);
 }
 
 function isPromiseLike<T>(value: MaybePromise<T>): value is Promise<T> {

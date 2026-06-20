@@ -9,6 +9,7 @@ import { persistWorkflowDefinition } from "../src/core/workflow/definition-persi
 import { persistWorkflowRunStart } from "../src/core/workflow/run-start-persist.js";
 import {
   claimRunnableWorkflowStep,
+  runWorkflowSchedulerOnceAsync,
   type AsyncWorkflowStepDispatch,
   type ClaimedWorkflowStep,
   type WorkflowStepDispatchContext,
@@ -170,6 +171,26 @@ function countingChildRunner(observation: SubworkflowChildObservation): {
   };
 }
 
+function sequencedChildRunner(
+  states: readonly WorkflowRunState[],
+  childRunId = CHILD_RUN_ID
+): {
+  run: () => Promise<SubworkflowChildObservation>;
+  calls: () => number;
+} {
+  let index = 0;
+  let calls = 0;
+  return {
+    run: async () => {
+      calls += 1;
+      const childState = states[Math.min(index, states.length - 1)]!;
+      index += 1;
+      return { childRunId, childState };
+    },
+    calls: () => calls
+  };
+}
+
 const context = (db: MomentumDb): WorkflowStepDispatchContext => ({
   db,
   workerId: WORKER,
@@ -255,6 +276,69 @@ describe("createSubworkflowWorkflowDispatch — runs the producer for subworkflo
     expect(invocationState(db)).toBe("running");
     expect(stepState(db)).toBe("running");
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).toBeNull();
+  });
+
+  it("scheduler rechecks a deferred subworkflow dispatch and heartbeats its lease", async () => {
+    const db = openSeededDb();
+    db.prepare(
+      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?"
+    ).run(RUN_ID, STEP_ID);
+    const runner = sequencedChildRunner(["running", "running", "succeeded"]);
+    const dispatch = createSubworkflowWorkflowDispatch(
+      subworkflowScaffoldBaseDispatch(),
+      {
+        deriveSubworkflow: () => ({
+          ok: true,
+          runSubworkflowChild: runner.run,
+          evidence: makeWritableEvidence()
+        })
+      }
+    );
+    const leaseDurationMs = 5_000;
+
+    const tick1 = await runWorkflowSchedulerOnceAsync({
+      db,
+      workerId: WORKER,
+      dispatch,
+      leaseDurationMs,
+      now: () => NOW
+    });
+    expect(tick1.code).toBe("dispatched");
+    expect(runner.calls()).toBe(1);
+    expect(stepState(db)).toBe("running");
+
+    const tick2Now = NOW + 1_000;
+    const tick2 = await runWorkflowSchedulerOnceAsync({
+      db,
+      workerId: WORKER,
+      dispatch,
+      leaseDurationMs,
+      now: () => tick2Now
+    });
+    expect(tick2.code).toBe("dispatched");
+    if (tick2.code === "dispatched") {
+      expect(tick2.dispatch.status).toBe(
+        WORKFLOW_DISPATCH_RESULT_STATUS.alreadyDispatched
+      );
+    }
+    expect(runner.calls()).toBe(2);
+    const refreshedLease = getWorkflowLease(db, RUN_ID, "dispatch");
+    expect(refreshedLease?.expiresAt).toBe(tick2Now + leaseDurationMs);
+    expect(refreshedLease?.releasedAt).toBeNull();
+    expect(stepState(db)).toBe("running");
+
+    const tick3 = await runWorkflowSchedulerOnceAsync({
+      db,
+      workerId: WORKER,
+      dispatch,
+      leaseDurationMs,
+      now: () => tick2Now + 1_000
+    });
+    expect(tick3.code).toBe("dispatched");
+    expect(runner.calls()).toBe(3);
+    expect(invocationState(db)).toBe("succeeded");
+    expect(stepState(db)).toBe("succeeded");
+    expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
   });
 });
 
