@@ -136,6 +136,14 @@ export const WORKFLOW_EXECUTE_RECONCILE_STATUS = {
   /** Terminal evidence exists, but RC-2 reconciliation threw and must be retried. */
   reconcileDeferred: "execute_reconcile_deferred",
   /**
+   * An async dispatched producer observed its underlying work still in flight
+   * (e.g. a `subworkflow` child run that is non-terminal), so it produced NO
+   * terminal evidence and left the step running for a later tick to re-check —
+   * the structural guard against prematurely finalizing a parent over an
+   * unfinished child. See `dispatch-subworkflow-run.ts`.
+   */
+  childDeferred: "execute_child_deferred",
+  /**
    * The dispatched step's execution context could not be derived, so the run was
    * parked for manual recovery WITHOUT running an executor (no clean terminal was
    * fabricated). See {@link recordUnresolvedDispatchedStepContext}.
