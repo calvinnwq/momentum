@@ -337,6 +337,10 @@ describe("executeAndReconcileDispatchedExternalApplyStep — clean applied", () 
     expect(rounds).toHaveLength(1);
     expect(rounds[0]?.state).toBe("succeeded");
     expect(rounds[0]?.summary).toContain("intent-001");
+    expect(rounds[0]?.logPaths).toEqual([
+      EVIDENCE.executorLogPath,
+      EVIDENCE.resultJsonPath
+    ]);
     // The idempotency marker is the durable digest tying evidence to the write.
     expect(rounds[0]?.resultDigest).toBe(IDEMPOTENCY_MARKER);
 

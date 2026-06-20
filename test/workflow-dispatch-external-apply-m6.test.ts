@@ -353,6 +353,10 @@ describe("external-apply producer × real M6 — applied through a mock Linear c
     const round = dispatchRounds(db)[0];
     expect(round?.state).toBe("succeeded");
     expect(round?.summary).toContain(INTENT_ID);
+    expect(round?.logPaths).toEqual([
+      EVIDENCE.executorLogPath,
+      EVIDENCE.resultJsonPath
+    ]);
     // The idempotency marker is the durable digest tying evidence to the write.
     expect(round?.resultDigest).toBe(idempotencyMarker);
 

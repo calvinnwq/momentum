@@ -82,7 +82,10 @@ export function mapExternalApplyResultToExecutorResult(
         state: "succeeded",
         summary: buildAppliedSummary(result),
         checkpoints: [],
-        artifacts: [],
+        artifacts: [
+          { kind: "executor-log", path: evidence.executorLogPath },
+          { kind: "external-apply-result", path: evidence.resultJsonPath }
+        ],
         // The idempotency marker is the stable digest tying this terminal
         // evidence to the durable external write (and to any future replay).
         resultDigest: result.external.idempotencyMarker,

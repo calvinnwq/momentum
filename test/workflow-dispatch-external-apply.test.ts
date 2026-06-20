@@ -185,7 +185,10 @@ describe("mapExternalApplyResultToExecutorResult — pure mapping", () => {
     expect(mapped.result.retryHint).toBeNull();
     expect(mapped.result.recoveryHint).toBeNull();
     expect(mapped.result.checkpoints).toEqual([]);
-    expect(mapped.result.artifacts).toEqual([]);
+    expect(mapped.result.artifacts).toEqual([
+      { kind: "executor-log", path: EVIDENCE.executorLogPath },
+      { kind: "external-apply-result", path: EVIDENCE.resultJsonPath }
+    ]);
     // The idempotency marker is the stable digest tying the evidence to the
     // external write.
     expect(mapped.result.resultDigest).toBe(IDEMPOTENCY_MARKER);
