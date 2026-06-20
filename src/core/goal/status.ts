@@ -14,13 +14,15 @@ import {
   type DaemonRunState
 } from "../daemon/runs.js";
 import { DEFAULT_STALE_LEASE_GRACE_MS } from "../../config/daemon-defaults.js";
-import { resolveDataDir, type DataDirOptions } from "../../config/data-dir.js";
+import { type DataDirOptions } from "../../config/data-dir.js";
 import { openDb, type MomentumDb } from "../../adapters/db.js";
 import { QUEUE_EVENT_TYPES } from "../../shared/events.js";
 import { type GoalRow } from "./init.js";
 import {
   resolveGoalForReadBack,
+  resolveReadBackDataDir,
   toGoalEvidenceSummary,
+  validateGoalReadBackInput,
   type GoalEvidenceSummary
 } from "./read-back.js";
 import { GOAL_ITERATION_JOB_TYPE } from "../daemon/queue-jobs.js";
@@ -376,25 +378,12 @@ type EventRow = {
 };
 
 export function loadGoalStatus(input: LoadGoalStatusInput = {}): GoalStatusResult {
-  if (input.goalId !== undefined && input.goalId.trim().length === 0) {
-    return {
-      ok: false,
-      code: "invalid_input",
-      error: "goalId must be a non-empty string when provided."
-    };
-  }
+  const invalidInput = validateGoalReadBackInput(input.goalId);
+  if (invalidInput) return invalidInput;
 
-  let dataDir: string;
-  try {
-    dataDir = resolveDataDir(input.dataDirOptions ?? {});
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : "unknown error";
-    return {
-      ok: false,
-      code: "data_dir_failed",
-      error: `failed to resolve data directory: ${detail}`
-    };
-  }
+  const dataDirResolution = resolveReadBackDataDir(input.dataDirOptions);
+  if (!dataDirResolution.ok) return dataDirResolution;
+  const dataDir = dataDirResolution.dataDir;
 
   let db: MomentumDb | undefined;
   try {

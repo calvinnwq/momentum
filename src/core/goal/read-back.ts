@@ -3,22 +3,90 @@
  *
  * `loadGoalStatus` (`./status.ts`) and `loadGoalLogs` (`./logs.ts`) are the two
  * goal-first read-back loaders. Before this seam each owned a private, byte-for-byte
- * identical copy of three pieces of read-back logic: the "latest goal" lookup, the
+ * identical copy of the same read-back logic: the input preamble (validate the
+ * optional goal id, then resolve the data directory), the "latest goal" lookup, the
  * "resolve the goal under inspection or refuse" decision (`goal_not_found` /
  * `no_goals`), and the per-record evidence projection. This module is the single
  * home both compose, mirroring how the workflow-first read-back surfaces
  * (`workflow run logs` / `workflow handoff`) compose the one proven
  * `loadWorkflowRunDetail` foundation instead of re-deriving the substrate read.
  *
+ * The preamble stays two composable steps rather than one combined helper so each
+ * loader keeps its exact refusal precedence — `loadGoalLogs` validates its
+ * `iteration` argument *between* the goal-id and data-directory checks, which a
+ * single fused preamble could not preserve.
+ *
  * It owns no domain mutation and no db lifecycle: callers still open and close the
- * connection. The goal-resolution refusal messages are reproduced verbatim so the
- * goal-first read-back envelopes stay wire-stable for existing callers.
+ * connection. The goal-resolution and input-preamble refusal messages are
+ * reproduced verbatim so the goal-first read-back envelopes stay wire-stable for
+ * existing callers.
  *
  * No SQLite mutation, no file reads, no external writes.
  */
 import type { MomentumDb } from "../../adapters/db.js";
+import { resolveDataDir, type DataDirOptions } from "../../config/data-dir.js";
 import type { EvidenceRecord } from "../evidence/records.js";
 import { getGoal, type GoalRow } from "./init.js";
+
+/**
+ * The two refusal codes the goal-first read-back input preamble can emit before a
+ * goal is even resolved: a malformed explicit goal id (`invalid_input`) or a data
+ * directory that cannot be resolved (`data_dir_failed`). Both codes are a subset
+ * of every goal-first read-back error union (`GoalStatusErrorCode` /
+ * `GoalLogsErrorCode`), so a refusal of this shape is returnable directly from
+ * either loader without widening their error contracts.
+ */
+export type GoalReadBackInputError = {
+  ok: false;
+  code: "invalid_input" | "data_dir_failed";
+  error: string;
+};
+
+/**
+ * Validate the optional goal id shared by goal-first read-back commands: an
+ * explicitly-provided id must be a non-empty (non-whitespace) string, while an
+ * omitted id is accepted and defers to the latest-goal default target. Returns a
+ * ready-to-return `invalid_input` refusal on violation, or `undefined` when the
+ * id is acceptable. The message is reproduced verbatim from the two loaders so the
+ * read-back envelopes stay wire-stable.
+ */
+export function validateGoalReadBackInput(
+  goalId?: string
+): GoalReadBackInputError | undefined {
+  if (goalId !== undefined && goalId.trim().length === 0) {
+    return {
+      ok: false,
+      code: "invalid_input",
+      error: "goalId must be a non-empty string when provided."
+    };
+  }
+  return undefined;
+}
+
+export type GoalReadBackDataDirResolution =
+  | { ok: true; dataDir: string }
+  | GoalReadBackInputError;
+
+/**
+ * Resolve the data directory for a goal-first read-back command, mapping a
+ * resolution failure to the shared `data_dir_failed` refusal both loaders return.
+ * The mapping is preserved verbatim so the read-back envelopes stay wire-stable;
+ * the catch guards only the defensive `resolveDataDir` throw.
+ */
+export function resolveReadBackDataDir(
+  dataDirOptions?: DataDirOptions
+): GoalReadBackDataDirResolution {
+  try {
+    return { ok: true, dataDir: resolveDataDir(dataDirOptions ?? {}) };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "unknown error";
+    return {
+      ok: false,
+      code: "data_dir_failed",
+      error: `failed to resolve data directory: ${detail}`
+    };
+  }
+}
 
 /**
  * The most recently created goal, used as the implicit target when a read-back

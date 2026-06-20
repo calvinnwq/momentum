@@ -5,12 +5,14 @@ import {
   resolveGoalArtifactPaths,
   type GoalArtifactPaths
 } from "../evidence/artifacts.js";
-import { resolveDataDir, type DataDirOptions } from "../../config/data-dir.js";
+import { type DataDirOptions } from "../../config/data-dir.js";
 import { openDb, type MomentumDb } from "../../adapters/db.js";
 import { type GoalRow } from "./init.js";
 import {
   resolveGoalForReadBack,
+  resolveReadBackDataDir,
   toGoalEvidenceSummary,
+  validateGoalReadBackInput,
   type GoalEvidenceSummary
 } from "./read-back.js";
 import { parseRunnerResult } from "../executors/runner-result.js";
@@ -72,13 +74,9 @@ export type LoadGoalLogsInput = {
 };
 
 export function loadGoalLogs(input: LoadGoalLogsInput = {}): GoalLogsResult {
-  if (input.goalId !== undefined && input.goalId.trim().length === 0) {
-    return {
-      ok: false,
-      code: "invalid_input",
-      error: "goalId must be a non-empty string when provided."
-    };
-  }
+  const invalidInput = validateGoalReadBackInput(input.goalId);
+  if (invalidInput) return invalidInput;
+
   if (input.iteration !== undefined) {
     if (!Number.isInteger(input.iteration) || input.iteration < 1) {
       return {
@@ -89,17 +87,9 @@ export function loadGoalLogs(input: LoadGoalLogsInput = {}): GoalLogsResult {
     }
   }
 
-  let dataDir: string;
-  try {
-    dataDir = resolveDataDir(input.dataDirOptions ?? {});
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : "unknown error";
-    return {
-      ok: false,
-      code: "data_dir_failed",
-      error: `failed to resolve data directory: ${detail}`
-    };
-  }
+  const dataDirResolution = resolveReadBackDataDir(input.dataDirOptions);
+  if (!dataDirResolution.ok) return dataDirResolution;
+  const dataDir = dataDirResolution.dataDir;
 
   let db: MomentumDb | undefined;
   try {

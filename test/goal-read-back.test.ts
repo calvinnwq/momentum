@@ -17,7 +17,9 @@ import type { EvidenceRecord } from "../src/core/evidence/records.js";
 import {
   findLatestGoal,
   resolveGoalForReadBack,
-  toGoalEvidenceSummary
+  resolveReadBackDataDir,
+  toGoalEvidenceSummary,
+  validateGoalReadBackInput
 } from "../src/core/goal/read-back.js";
 
 const tempRoots: string[] = [];
@@ -207,5 +209,54 @@ describe("resolveGoalForReadBack", () => {
     } finally {
       db.close();
     }
+  });
+});
+
+describe("validateGoalReadBackInput", () => {
+  it("accepts an undefined goalId (the latest-goal default target)", () => {
+    expect(validateGoalReadBackInput(undefined)).toBeUndefined();
+  });
+
+  it("accepts a non-empty goalId", () => {
+    expect(validateGoalReadBackInput("goal-123")).toBeUndefined();
+  });
+
+  it("refuses an empty goalId with the shared invalid_input refusal", () => {
+    expect(validateGoalReadBackInput("")).toEqual({
+      ok: false,
+      code: "invalid_input",
+      error: "goalId must be a non-empty string when provided."
+    });
+  });
+
+  it("refuses a whitespace-only goalId with invalid_input", () => {
+    expect(validateGoalReadBackInput("   ")).toEqual({
+      ok: false,
+      code: "invalid_input",
+      error: "goalId must be a non-empty string when provided."
+    });
+  });
+});
+
+describe("resolveReadBackDataDir", () => {
+  it("resolves an explicit data dir", () => {
+    const dataDir = makeTempDir();
+    expect(resolveReadBackDataDir({ dataDir })).toEqual({ ok: true, dataDir });
+  });
+
+  it("resolves MOMENTUM_HOME from the provided env", () => {
+    const dataDir = makeTempDir();
+    expect(
+      resolveReadBackDataDir({ env: { MOMENTUM_HOME: dataDir } })
+    ).toEqual({ ok: true, dataDir });
+  });
+
+  it("falls through to a home-based default for empty options", () => {
+    // An explicit empty env makes this deterministic regardless of the ambient
+    // MOMENTUM_HOME; the `data_dir_failed` mapping guards only the defensive
+    // resolveDataDir throw, preserved verbatim from the two loaders.
+    const resolved = resolveReadBackDataDir({ env: {} });
+    expect(resolved.ok).toBe(true);
+    if (resolved.ok) expect(typeof resolved.dataDir).toBe("string");
   });
 });
