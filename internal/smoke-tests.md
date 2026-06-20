@@ -656,15 +656,15 @@ Coverage:
   gate, and the lease released exactly at finalization, and proves the layer is
   distinct by asserting it mints **no** `executor_invocations` / `executor_rounds`
   rows. It records live-wrapper composition evidence.
-- **external-write policy gate held closed**: the real `linear-refresh`
-  (`external-apply`) step is claimed through the scheduler and dispatched; the
-  external-write family is not a phase-1 dispatchable family, so the dispatch
-  fails closed — zero executor rows, an operator-visible
-  `manual_recovery_required` gate hung from the step, the run flagged
-  `needs_manual_recovery`, and the dispatch lease released (not stranded). This
-  is the composed proof that real external **reads** stay separated from real
-  external **writes**, which remain disabled unless the separate M6 write policy
-  gate explicitly allows them.
+- **external-write policy gate held closed (historical NGX-372 proof)**: before
+  RC-3, the real `linear-refresh` (`external-apply`) step was claimed through the
+  scheduler and failed closed — zero executor rows, an operator-visible
+  `manual_recovery_required` gate, the run flagged `needs_manual_recovery`, and
+  the dispatch lease released. RC-3 supersedes that family-level closed proof with
+  focused external-apply adapter coverage above: the family is now
+  daemon-dispatchable, but real external **writes** still require the M6 write
+  policy gate, a matched pending Linear intent, credentials, and audit-before-write
+  evidence.
 
 Phase-1 boundary (honest scope): `executeWorkflowStepDispatch` stops at the start
 *scaffold*; the landed `runSingleShotStep` / `runGoalLoopStep` /

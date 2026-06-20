@@ -6,7 +6,7 @@ Milestone 5 introduced durable intents while refusing external writes by default
 
 ## Scope
 
-This contract covers `intent apply --external-apply` for the Linear external-write path introduced in M6: the write-side adapter boundary starts in NGX-296 and the Linear mutation client follows in NGX-297. It does not cover M5's manual-mark `intent apply` (which records the operator decision locally without any external write), `intent skip`, or `intent cancel`. Those remain wire-stable and are not affected by this contract.
+This contract covers the Linear external-write path introduced in M6, surfaced by `intent apply --external-apply` and reused by the RC-3 workflow daemon `external-apply` adapter: the write-side adapter boundary starts in NGX-296 and the Linear mutation client follows in NGX-297. It does not cover M5's manual-mark `intent apply` (which records the operator decision locally without any external write), `intent skip`, or `intent cancel`. Those remain wire-stable and are not affected by this contract.
 
 ## Lifecycle: claim → audit → external write → finalize
 

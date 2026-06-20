@@ -10,8 +10,8 @@ A **source adapter** is the read / list / get / normalize boundary for an extern
 - Source adapters **do not** own Goal / Iteration / Job state, workflow-run / step / gate / lease state, executor-loop rows, evidence rows, update intents, or apply audits.
 - Source adapters **do not** touch git.
 - Source adapters **do not** write filesystem artifacts; their durable footprint is the local SQLite source tables above.
-- Source adapters **do not** perform automatic external writes. External writes are represented as durable, policy-gated `update_intents` rows. In M5 those intents are never applied externally. In M6 they may be applied through the two-phase apply path documented in `intent-apply.md`, gated by `MOMENTUM.md` `intent_apply_policy: external_apply_allowed`.
-- The read / write split is preserved through M6: M6's Linear write client is a **separate** code path layered on top of the read adapter. The read adapter stays read-only; the write client is the new surface and is invoked only through `intent apply --external-apply`.
+- Source adapters **do not** perform automatic external writes. External writes are represented as durable, policy-gated `update_intents` rows. In M5 those intents are never applied externally. In M6 they may be applied through the two-phase apply path documented in `intent-apply.md`, gated by `MOMENTUM.md` `intent_apply_policy: external_apply_allowed`; RC-3 reuses that same path from the workflow daemon only after matching one pending Linear intent to the run issue scope.
+- The read / write split is preserved through M6 and RC-3: the Linear write client is a **separate** code path layered on top of the read adapter. The read adapter stays read-only; the write client is invoked through the shared external-apply runtime used by `intent apply --external-apply` and the workflow daemon's `external-apply` adapter.
 
 ## Inputs the adapter is allowed to take
 

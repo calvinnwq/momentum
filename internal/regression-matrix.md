@@ -102,9 +102,10 @@ the NGX-353 marker advance.
   can never promote a terminal run back into a non-terminal state. The M5
   `evidence_records` ingest path (`evidence ingest --path`) keeps surfacing
   workflow-scoped artifacts that prove the terminal claim, and the M6 external
-  apply audit ledger (`intent apply --external-apply`) continues to be the only
-  mechanism that touches an external tracker, so external-side terminal state
-  is never overwritten by local drift.
+  apply audit ledger (through `intent apply --external-apply` or the RC-3 daemon
+  external-apply adapter that reuses the same execution path) continues to be the
+  only mechanism that touches an external tracker, so external-side terminal
+  state is never overwritten by local drift.
 - **Owner.** [`src/core/workflow/run-reducer.ts`](../src/core/workflow/run-reducer.ts)
   (`deriveWorkflowRunState`, `isTerminalRunState`) and
   [`src/core/workflow/monitor-state.ts`](../src/core/workflow/monitor-state.ts) (terminal

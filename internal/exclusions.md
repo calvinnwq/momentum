@@ -184,13 +184,14 @@ with M10 planning pinned in
 [`internal/milestones/m10-workflow-first-runtime.md`](milestones/m10-workflow-first-runtime.md),
 and M10 has landed reusable workflow / step definition schema, first-class
 workflow run start, executor-loop records, the opt-in daemon scheduler lane,
-the goal-loop executor adapter, the one-shot / script executor adapters, and the
+the goal-loop executor adapter, the one-shot / script executor adapters, the
 no-mistakes executor mirror, durable gates / decisions, and phase-1 production
 dispatcher wiring for bounded managed `daemon start`. The workflow-first
-dogfood and M10 closeout marker have landed; generalized `external-apply` /
-`subworkflow` dispatch remains deferred until later runtime work. The NGX-434
-runtime consolidation plan keeps those fail-closed branches until a
-daemon-dispatchable adapter lands per family.
+dogfood and M10 closeout marker have landed; RC-3 has since landed generalized
+`external-apply` daemon dispatch through the M6 safety contract, while
+`subworkflow` dispatch remains deferred until later runtime work. The runtime
+consolidation plan keeps the remaining fail-closed branch until a
+`subworkflow` daemon-dispatchable adapter lands.
 
 The post-M10 coding workflow ownership migration is accepted in
 [`internal/contracts/coding-workflow-ownership.md`](contracts/coding-workflow-ownership.md).
@@ -213,12 +214,13 @@ Automatic PR / GitHub / Linear automation, autonomous tracker writes,
 inbound webhooks, and other automation-driven external integrations are out of
 scope. M6 shipped policy-gated external apply for Linear via a two-phase
 claim / audit-before-write / external write / finalize flow (see
-[`internal/contracts/intent-apply.md`](contracts/intent-apply.md)), but every
-external write stays operator-mediated through `intent apply --external-apply`,
+[`internal/contracts/intent-apply.md`](contracts/intent-apply.md)); RC-3 reuses
+that exact lifecycle from bounded workflow daemon dispatch only after matching
+one pending Linear intent to the run issue scope. Every external write remains
 gated by `MOMENTUM.md` `intent_apply_policy`, scoped to the touched issue, and
 comment-only unless target status mutation is explicitly configured.
-Background / autonomous external writes, inbound webhooks, and non-Linear
-external write adapters remain deferred after M6 closeout.
+Background / autonomous writes outside that M6 lifecycle, inbound webhooks, and
+non-Linear external write adapters remain deferred.
 
 ## Dashboard or UI surface
 

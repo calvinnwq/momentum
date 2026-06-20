@@ -1,6 +1,6 @@
 # Intent commands
 
-Operator-facing CLI envelopes for the `intent list`, `intent get`, `intent apply`, `intent skip`, and `intent cancel` commands. Intents are durable update-intent rows that source adapters and evidence ingestion record locally; they never trigger automatic external tracker writes, but an operator can electively write to Linear via `intent apply --external-apply` (gated by `MOMENTUM.md` `intent_apply_policy`).
+Operator-facing CLI envelopes for the `intent list`, `intent get`, `intent apply`, `intent skip`, and `intent cancel` commands. Intents are durable update-intent rows that source adapters and evidence ingestion record locally; the CLI applies one explicitly selected intent via `intent apply --external-apply` (gated by `MOMENTUM.md` `intent_apply_policy`). Bounded workflow daemon execution reuses that same policy-gated apply path for a built-in `linear-refresh` / `external-apply` step only after matching exactly one pending Linear intent to the run issue scope.
 
 See also:
 

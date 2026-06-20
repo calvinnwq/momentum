@@ -245,13 +245,17 @@ paths remain.
 
 The workflow-first built-in coding definition is not identical to that legacy
 live-wrapper partition. It maps `merge-cleanup` to the dispatchable `script`
-executor family and `linear-refresh` to the non-dispatchable, fail-closed
+executor family and `linear-refresh` to the RC-3 daemon-dispatchable
 `external-apply` family (`src/core/workflow/definition.ts:306-355`). Therefore the
 boundary is by *execution lane*, not by step-name vocabulary: a `merge-cleanup`
 step in an imported/manual live-wrapper run can direct-finalize through M9, while
-a `merge-cleanup` step resolved from the built-in workflow definition enters the
-M10 dispatch lane as `script` and must be finalized by the future reconciliation
-seam.
+`merge-cleanup` (`script`) and `linear-refresh` (`external-apply`) steps resolved
+from the built-in workflow definition enter the M10/RC dispatch lane and are
+finalized by the RC-2 reconciliation seam from terminal executor evidence.
+Historically this same boundary was documented as mapping `linear-refresh` to the non-dispatchable, fail-closed
+`external-apply` family; RC-3 replaced that
+family-level closed branch with the safety-gated daemon adapter without changing
+the lane-based ownership rule.
 
 **M10 executor-loop adapters (nested evidence).** The scheduler-lane dispatcher
 `executeWorkflowStepDispatch` (`src/core/workflow/dispatch-execute.ts`) advances the
@@ -264,9 +268,11 @@ call `finishWorkflowStep`.
 **Why they cannot collide today.** Dispatch is partitioned by executor family in
 the pure decider `planWorkflowStepDispatch` (`src/core/workflow/dispatch.ts:186-210`):
 only `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES`
-(`src/core/workflow/dispatch.ts:58` = `goal-loop`, `one-shot`, `script`, `no-mistakes`) take
-the executor-loop path. `external-apply` and `subworkflow` fail closed before
-executor rows are created. Legacy live-wrapper execution enters through the
+(`src/core/workflow/dispatch.ts:58` = `goal-loop`, `one-shot`, `script`,
+`no-mistakes`, `external-apply`) take the executor-loop path. `subworkflow` fails
+closed before executor rows are created, while `external-apply` now enters the
+dispatch scaffold and is terminalized by the RC-3 M6-safety-gated adapter. Legacy
+live-wrapper execution enters through the
 `managed-step` lane instead, and the `managed-step` and `dispatch` leases are both
 in the scheduler's non-monitor blocking set, so a run holding either lease is not
 re-scanned. Mutual exclusion on the same step is structural by lease/lane, not by
