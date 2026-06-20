@@ -140,6 +140,16 @@ function stepState(db: MomentumDb, stepId: string = STEP_ID): string {
   return row.state;
 }
 
+function stepStateForRun(
+  db: MomentumDb,
+  runId: string,
+  stepId: string = STEP_ID
+): string {
+  const row = getWorkflowStep(db, runId, stepId);
+  if (!row) throw new Error(`step ${runId}/${stepId} not found`);
+  return row.state;
+}
+
 function invocationState(db: MomentumDb): string | undefined {
   return loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
     ?.state;
@@ -307,7 +317,7 @@ describe("createSubworkflowWorkflowDispatch — runs the producer for subworkflo
     expect(runner.calls()).toBe(1);
     expect(stepState(db)).toBe("running");
 
-    const tick2Now = NOW + 1_000;
+    const tick2Now = NOW + 3_000;
     const tick2 = await runWorkflowSchedulerOnceAsync({
       db,
       workerId: WORKER,
@@ -332,13 +342,124 @@ describe("createSubworkflowWorkflowDispatch — runs the producer for subworkflo
       workerId: WORKER,
       dispatch,
       leaseDurationMs,
-      now: () => tick2Now + 1_000
+      now: () => tick2Now + 3_000
     });
     expect(tick3.code).toBe("dispatched");
     expect(runner.calls()).toBe(3);
     expect(invocationState(db)).toBe("succeeded");
     expect(stepState(db)).toBe("succeeded");
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
+  });
+
+  it("does not recheck a fresh deferred subworkflow before the heartbeat cadence when other work is runnable", async () => {
+    const db = openSeededDb();
+    db.prepare(
+      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?"
+    ).run(RUN_ID, STEP_ID);
+    const runner = sequencedChildRunner(["running", "succeeded"]);
+    const dispatch = createSubworkflowWorkflowDispatch(
+      subworkflowScaffoldBaseDispatch(),
+      {
+        deriveSubworkflow: () => ({
+          ok: true,
+          runSubworkflowChild: runner.run,
+          evidence: makeWritableEvidence()
+        })
+      }
+    );
+    const leaseDurationMs = 5_000;
+
+    const tick1 = await runWorkflowSchedulerOnceAsync({
+      db,
+      workerId: WORKER,
+      dispatch,
+      leaseDurationMs,
+      now: () => NOW
+    });
+    expect(tick1.code).toBe("dispatched");
+    expect(runner.calls()).toBe(1);
+
+    const otherRunId = "run-subdisp-other";
+    persistWorkflowRunStart(db, {
+      definition: CODING_WORKFLOW_DEFINITION,
+      runId: otherRunId,
+      repoPath: "/repos/momentum",
+      objective: "Other runnable workflow",
+      now: NOW + 10
+    });
+    db.prepare(
+      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?"
+    ).run(otherRunId, STEP_ID);
+
+    const otherDispatchCalls: ClaimedWorkflowStep[] = [];
+    const tick2 = await runWorkflowSchedulerOnceAsync({
+      db,
+      workerId: WORKER,
+      dispatch: (claim) => {
+        otherDispatchCalls.push(claim);
+        return { status: "other_dispatched" };
+      },
+      leaseDurationMs,
+      now: () => NOW + 1_000
+    });
+
+    expect(tick2.code).toBe("dispatched");
+    if (tick2.code !== "dispatched") throw new Error("expected dispatch");
+    expect(tick2.claim.runId).toBe(otherRunId);
+    expect(otherDispatchCalls.map((claim) => claim.runId)).toEqual([otherRunId]);
+    expect(runner.calls()).toBe(1);
+    expect(stepState(db)).toBe("running");
+    expect(stepStateForRun(db, otherRunId)).toBe("approved");
+  });
+
+  it("reattaches a deferred subworkflow after a daemon restart instead of parking the parent", async () => {
+    const db = openSeededDb();
+    db.prepare(
+      "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?"
+    ).run(RUN_ID, STEP_ID);
+    const runner = sequencedChildRunner(["running", "running"]);
+    const dispatch = createSubworkflowWorkflowDispatch(
+      subworkflowScaffoldBaseDispatch(),
+      {
+        deriveSubworkflow: () => ({
+          ok: true,
+          runSubworkflowChild: runner.run,
+          evidence: makeWritableEvidence()
+        })
+      }
+    );
+    const leaseDurationMs = 5_000;
+
+    const tick1 = await runWorkflowSchedulerOnceAsync({
+      db,
+      workerId: "daemon-old",
+      dispatch,
+      leaseDurationMs,
+      now: () => NOW
+    });
+    expect(tick1.code).toBe("dispatched");
+    expect(runner.calls()).toBe(1);
+
+    const tick2 = await runWorkflowSchedulerOnceAsync({
+      db,
+      workerId: "daemon-new",
+      dispatch,
+      leaseDurationMs,
+      now: () => NOW + leaseDurationMs + 1
+    });
+
+    expect(tick2.code).toBe("dispatched");
+    if (tick2.code !== "dispatched") throw new Error("expected dispatch");
+    expect(tick2.claim.runId).toBe(RUN_ID);
+    expect(tick2.claim.lease.holder).toBe("daemon-new");
+    expect(tick2.claim.lease.expiresAt).toBe(
+      NOW + leaseDurationMs + 1 + leaseDurationMs
+    );
+    expect(runner.calls()).toBe(2);
+    expect(stepState(db)).toBe("running");
+    expect(
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+    ).toBe(false);
   });
 });
 

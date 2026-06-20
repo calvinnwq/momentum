@@ -632,6 +632,14 @@ function tryParkStaleRunningDispatchLease(
     );
     if (
       invocation !== undefined &&
+      invocation.executorFamily === "subworkflow" &&
+      !isTerminalExecutorInvocationState(invocation.state)
+    ) {
+      db.exec("ROLLBACK");
+      return undefined;
+    }
+    if (
+      invocation !== undefined &&
       isTerminalExecutorInvocationState(invocation.state)
     ) {
       db.exec("ROLLBACK");
@@ -1099,7 +1107,13 @@ export type RunWorkflowSchedulerOnceResult =
 
 function selectActiveSubworkflowDispatchRecheck(
   db: MomentumDb,
-  input: { now: number; graceMs: number; holder: string }
+  input: {
+    now: number;
+    graceMs: number;
+    holder: string;
+    leaseDurationMs: number;
+    stalePolicy: WorkflowLeaseStalePolicy;
+  }
 ): ClaimedWorkflowStep | undefined {
   const runs = db
     .prepare(
@@ -1113,51 +1127,144 @@ function selectActiveSubworkflowDispatchRecheck(
 
   for (const run of runs) {
     const lease = getWorkflowLease(db, run.id, WORKFLOW_DISPATCH_LEASE_KIND);
-    if (
-      lease === undefined ||
-      lease.holder !== input.holder ||
-      classifyWorkflowLease(lease, {
+    if (lease !== undefined && lease.releasedAt === null) {
+      const classification = classifyWorkflowLease(lease, {
         now: input.now,
         graceMs: input.graceMs
-      }) !== "fresh"
-    ) {
+      });
+      if (
+        classification !== "fresh" ||
+        lease.holder !== input.holder ||
+        !isActiveSubworkflowRecheckDue(lease, input)
+      ) {
+        continue;
+      }
+
+      const claim = buildActiveSubworkflowClaim(db, run, lease, input);
+      if (claim !== undefined) return claim;
       continue;
     }
 
-    const steps = loadStepRecords(db, run.id);
-    const runningStep = steps.find((step) => step.state === "running");
-    if (runningStep === undefined) continue;
-
-    const invocation = loadExecutorInvocation(
-      db,
-      deriveDispatchInvocationId(run.id, runningStep.stepId)
-    );
-    if (
-      invocation === undefined ||
-      invocation.executorFamily !== "subworkflow" ||
-      isTerminalExecutorInvocationState(invocation.state)
-    ) {
-      continue;
-    }
-
-    const leases = loadLeaseRecords(db, run.id);
-    return {
-      runId: run.id,
-      stepId: runningStep.stepId,
-      kind: runningStep.kind,
-      stepOrder: runningStep.order,
-      required: runningStep.required,
-      repoPath: run.repo_path,
-      runState: deriveWorkflowRunState(steps, {
-        leases,
-        now: input.now,
-        graceMs: input.graceMs
-      }),
-      lease
-    };
+    const acquired = acquireActiveSubworkflowDispatchClaim(db, run.id, input);
+    if (acquired !== undefined) return acquired;
   }
 
   return undefined;
+}
+
+function isActiveSubworkflowRecheckDue(
+  lease: WorkflowLeaseRecord,
+  input: { now: number; leaseDurationMs: number }
+): boolean {
+  const heartbeatIntervalMs = Math.max(1, Math.floor(input.leaseDurationMs / 2));
+  return input.now - lease.heartbeatAt >= heartbeatIntervalMs;
+}
+
+function buildActiveSubworkflowClaim(
+  db: MomentumDb,
+  run: WorkflowRunScanRow,
+  lease: WorkflowLeaseRecord,
+  input: { now: number; graceMs: number }
+): ClaimedWorkflowStep | undefined {
+  const steps = loadStepRecords(db, run.id);
+  const runningStep = steps.find((step) => step.state === "running");
+  if (runningStep === undefined) return undefined;
+
+  const invocation = loadExecutorInvocation(
+    db,
+    deriveDispatchInvocationId(run.id, runningStep.stepId)
+  );
+  if (
+    invocation === undefined ||
+    invocation.executorFamily !== "subworkflow" ||
+    isTerminalExecutorInvocationState(invocation.state)
+  ) {
+    return undefined;
+  }
+
+  const leases = loadLeaseRecords(db, run.id);
+  return {
+    runId: run.id,
+    stepId: runningStep.stepId,
+    kind: runningStep.kind,
+    stepOrder: runningStep.order,
+    required: runningStep.required,
+    repoPath: run.repo_path,
+    runState: deriveWorkflowRunState(steps, {
+      leases,
+      now: input.now,
+      graceMs: input.graceMs
+    }),
+    lease
+  };
+}
+
+function acquireActiveSubworkflowDispatchClaim(
+  db: MomentumDb,
+  runId: string,
+  input: {
+    now: number;
+    graceMs: number;
+    holder: string;
+    leaseDurationMs: number;
+    stalePolicy: WorkflowLeaseStalePolicy;
+  }
+): ClaimedWorkflowStep | undefined {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const run = db
+      .prepare(
+        `SELECT id, state, repo_path
+           FROM workflow_runs
+          WHERE id = ?
+            AND needs_manual_recovery = 0
+            AND state NOT IN ('succeeded', 'failed', 'canceled')`
+      )
+      .get(runId) as WorkflowRunScanRow | undefined;
+    if (run === undefined) {
+      db.exec("ROLLBACK");
+      return undefined;
+    }
+
+    const existing = getWorkflowLease(db, run.id, WORKFLOW_DISPATCH_LEASE_KIND);
+    if (existing !== undefined && existing.releasedAt === null) {
+      db.exec("ROLLBACK");
+      return undefined;
+    }
+
+    const acquired = acquireWorkflowLeaseInTransaction(
+      db,
+      {
+        runId: run.id,
+        leaseKind: WORKFLOW_DISPATCH_LEASE_KIND,
+        holder: input.holder,
+        expiresAt: input.now + input.leaseDurationMs,
+        stalePolicy: input.stalePolicy,
+        now: input.now
+      },
+      input.now,
+      input.stalePolicy
+    );
+    if (!acquired.ok) {
+      db.exec("ROLLBACK");
+      return undefined;
+    }
+
+    const claim = buildActiveSubworkflowClaim(db, run, acquired.lease, input);
+    if (claim === undefined) {
+      db.exec("ROLLBACK");
+      return undefined;
+    }
+
+    db.exec("COMMIT");
+    return claim;
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK");
+    } catch {
+    }
+    throw error;
+  }
 }
 
 function heartbeatActiveDispatchClaim(
@@ -1325,7 +1432,9 @@ function runWorkflowSchedulerOnceCore(
   const activeClaim = selectActiveSubworkflowDispatchRecheck(db, {
     now: tickNow,
     graceMs,
-    holder: workerId
+    holder: workerId,
+    leaseDurationMs,
+    stalePolicy
   });
   if (activeClaim !== undefined) {
     const refreshedClaim = heartbeatActiveDispatchClaim(db, {
