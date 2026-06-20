@@ -14,10 +14,17 @@ import {
   type DaemonRunState
 } from "../daemon/runs.js";
 import { DEFAULT_STALE_LEASE_GRACE_MS } from "../../config/daemon-defaults.js";
-import { resolveDataDir, type DataDirOptions } from "../../config/data-dir.js";
+import { type DataDirOptions } from "../../config/data-dir.js";
 import { openDb, type MomentumDb } from "../../adapters/db.js";
 import { QUEUE_EVENT_TYPES } from "../../shared/events.js";
-import { getGoal, type GoalRow } from "./init.js";
+import { type GoalRow } from "./init.js";
+import {
+  resolveGoalForReadBack,
+  resolveReadBackDataDir,
+  toGoalEvidenceSummary,
+  validateGoalReadBackInput,
+  type GoalEvidenceSummary
+} from "./read-back.js";
 import { GOAL_ITERATION_JOB_TYPE } from "../daemon/queue-jobs.js";
 import {
   buildRunnerProfile,
@@ -32,10 +39,7 @@ import {
   listSourceItemSummariesForGoal,
   type SourceItemSummary
 } from "../source/items.js";
-import {
-  listLatestEvidenceRecordsForGoal,
-  type EvidenceRecord
-} from "../evidence/records.js";
+import { listLatestEvidenceRecordsForGoal } from "../evidence/records.js";
 import { listUpdateIntents, type UpdateIntent } from "../intent/update-intents.js";
 import { DEFAULT_INTENT_STALE_THRESHOLD_MS } from "../repo/project-rollup.js";
 import {
@@ -242,16 +246,7 @@ export type GoalStatusPolicyError = {
   message: string;
 };
 
-export type GoalStatusEvidenceSummary = {
-  id: string;
-  source: string;
-  type: string;
-  formatVersion: number;
-  occurredAt: number;
-  summary: string;
-  artifactPath: string | null;
-  sourceItemId: string | null;
-};
+export type GoalStatusEvidenceSummary = GoalEvidenceSummary;
 
 /**
  * Per-goal pending external update intent summary surfaced through `status`
@@ -383,48 +378,22 @@ type EventRow = {
 };
 
 export function loadGoalStatus(input: LoadGoalStatusInput = {}): GoalStatusResult {
-  if (input.goalId !== undefined && input.goalId.trim().length === 0) {
-    return {
-      ok: false,
-      code: "invalid_input",
-      error: "goalId must be a non-empty string when provided."
-    };
-  }
+  const invalidInput = validateGoalReadBackInput(input.goalId);
+  if (invalidInput) return invalidInput;
 
-  let dataDir: string;
-  try {
-    dataDir = resolveDataDir(input.dataDirOptions ?? {});
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : "unknown error";
-    return {
-      ok: false,
-      code: "data_dir_failed",
-      error: `failed to resolve data directory: ${detail}`
-    };
-  }
+  const dataDirResolution = resolveReadBackDataDir(input.dataDirOptions);
+  if (!dataDirResolution.ok) return dataDirResolution;
+  const dataDir = dataDirResolution.dataDir;
 
   let db: MomentumDb | undefined;
   try {
     db = openDb(dataDir);
 
-    const goal = input.goalId !== undefined
-      ? getGoal(db, input.goalId)
-      : findLatestGoal(db);
-
-    if (!goal) {
-      if (input.goalId !== undefined) {
-        return {
-          ok: false,
-          code: "goal_not_found",
-          error: `Goal ${input.goalId} was not found in ${dataDir}.`
-        };
-      }
-      return {
-        ok: false,
-        code: "no_goals",
-        error: `No goals found in ${dataDir}.`
-      };
+    const resolved = resolveGoalForReadBack(db, dataDir, input.goalId);
+    if (!resolved.ok) {
+      return resolved;
     }
+    const goal = resolved.goal;
 
     const latestJob = findLatestJob(db, goal.id);
     const iteration = latestJob ? buildIterationSummary(db, goal.id, latestJob) : null;
@@ -465,7 +434,7 @@ export function loadGoalStatus(input: LoadGoalStatusInput = {}): GoalStatusResul
       db,
       goal.id,
       DEFAULT_GOAL_STATUS_EVIDENCE_LIMIT
-    ).map(toEvidenceSummary);
+    ).map(toGoalEvidenceSummary);
     const intentStaleThresholdMs = DEFAULT_INTENT_STALE_THRESHOLD_MS;
     const sourceItemIds = new Set(sourceItems.map((item) => item.id));
     const allPendingUpdateIntents = listUpdateIntents(db, {
@@ -621,19 +590,6 @@ function buildExternalApplyRollup(
     pendingAuditCounts,
     totalAttempts,
     latestAttempt
-  };
-}
-
-function toEvidenceSummary(record: EvidenceRecord): GoalStatusEvidenceSummary {
-  return {
-    id: record.id,
-    source: record.source,
-    type: record.type,
-    formatVersion: record.formatVersion,
-    occurredAt: record.occurredAt,
-    summary: record.summary,
-    artifactPath: record.artifactPath,
-    sourceItemId: record.sourceItemId
   };
 }
 
@@ -796,12 +752,6 @@ function toDaemonSummary(row: DaemonRunRow): GoalStatusDaemonSummary {
     cancelOutcome:
       row.cancel_outcome !== null ? { outcome: row.cancel_outcome } : null
   };
-}
-
-function findLatestGoal(db: MomentumDb): GoalRow | undefined {
-  return db
-    .prepare("SELECT * FROM goals ORDER BY created_at DESC, id ASC LIMIT 1")
-    .get() as GoalRow | undefined;
 }
 
 function findLatestJob(db: MomentumDb, goalId: string): JobRow | undefined {
