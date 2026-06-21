@@ -9,6 +9,7 @@
       "env_allow": [
         "PATH",
         "HOME",
+        "MOMENTUM_HOME",
         "MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG"
       ],
       "result_file": "result.json",
@@ -26,6 +27,7 @@
       "env_allow": [
         "PATH",
         "HOME",
+        "MOMENTUM_HOME",
         "MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG"
       ],
       "result_file": "result.json",
@@ -43,6 +45,7 @@
       "env_allow": [
         "PATH",
         "HOME",
+        "MOMENTUM_HOME",
         "MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG"
       ],
       "result_file": "result.json",
@@ -60,6 +63,7 @@
       "env_allow": [
         "PATH",
         "HOME",
+        "MOMENTUM_HOME",
         "MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG",
         "LINEAR_API_KEY"
       ],
@@ -78,6 +82,7 @@
       "env_allow": [
         "PATH",
         "HOME",
+        "MOMENTUM_HOME",
         "MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG",
         "LINEAR_API_KEY"
       ],
