@@ -3,7 +3,7 @@
   "wrappers": {
     "preflight": {
       "command": "/usr/bin/env",
-      "args": ["node", "dist/tools/coding-workflow-live-wrapper.js"],
+      "args": ["node", "dist/adapters/coding-workflow-live-wrapper-cli.js"],
       "cwd": "repo",
       "timeout_sec": 1800,
       "env_allow": [
@@ -21,7 +21,7 @@
     },
     "implementation": {
       "command": "/usr/bin/env",
-      "args": ["node", "dist/tools/coding-workflow-live-wrapper.js"],
+      "args": ["node", "dist/adapters/coding-workflow-live-wrapper-cli.js"],
       "cwd": "repo",
       "timeout_sec": 7200,
       "env_allow": [
@@ -39,7 +39,7 @@
     },
     "postflight": {
       "command": "/usr/bin/env",
-      "args": ["node", "dist/tools/coding-workflow-live-wrapper.js"],
+      "args": ["node", "dist/adapters/coding-workflow-live-wrapper-cli.js"],
       "cwd": "repo",
       "timeout_sec": 3600,
       "env_allow": [
@@ -57,7 +57,7 @@
     },
     "no-mistakes": {
       "command": "/usr/bin/env",
-      "args": ["node", "dist/tools/coding-workflow-live-wrapper.js"],
+      "args": ["node", "dist/adapters/coding-workflow-live-wrapper-cli.js"],
       "cwd": "repo",
       "timeout_sec": 7200,
       "env_allow": [
@@ -76,7 +76,7 @@
     },
     "merge-cleanup": {
       "command": "/usr/bin/env",
-      "args": ["node", "dist/tools/coding-workflow-live-wrapper.js"],
+      "args": ["node", "dist/adapters/coding-workflow-live-wrapper-cli.js"],
       "cwd": "repo",
       "timeout_sec": 7200,
       "env_allow": [

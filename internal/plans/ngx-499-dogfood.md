@@ -27,7 +27,7 @@ owned workflow steps through local commands. The profile covers:
 
 ## Wrapper command config
 
-The profile calls `dist/tools/coding-workflow-live-wrapper.js`. That wrapper
+The profile calls `dist/adapters/coding-workflow-live-wrapper-cli.js`. That wrapper
 loads `MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG`, selects the current step from
 `MOMENTUM_STEP_KIND`, runs the configured command, then writes the normalized
 `RunnerResult` JSON to `MOMENTUM_RESULT_PATH`.
