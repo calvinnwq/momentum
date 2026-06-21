@@ -36,6 +36,7 @@ const PARENT_RUN_ID = "run-parent-001";
 const PARENT_STEP_ID = "delegate";
 const PARENT_DEF_KEY = "parent-workflow";
 const CHILD_DEF_KEY = "child-workflow";
+const CHILD_DEF_VERSION = 1;
 
 function routeWithChild(
   child: unknown,
@@ -245,7 +246,10 @@ describe("planSubworkflowChildLaunchFromRoute — fail-closed refusals", () => {
     const plan = planSubworkflowChildLaunchFromRoute({
       parentRunId: PARENT_RUN_ID,
       parentStepId: PARENT_STEP_ID,
-      parentRoute: routeWithChild({ childDefinitionKey: "   " }),
+      parentRoute: routeWithChild({
+        childDefinitionKey: "   ",
+        childDefinitionVersion: CHILD_DEF_VERSION
+      }),
       parentDefinitionKey: PARENT_DEF_KEY
     });
     expect(plan.ok).toBe(false);
@@ -259,6 +263,7 @@ describe("planSubworkflowChildLaunchFromRoute — fail-closed refusals", () => {
       parentStepId: PARENT_STEP_ID,
       parentRoute: routeWithChild({
         childDefinitionKey: CHILD_DEF_KEY,
+        childDefinitionVersion: CHILD_DEF_VERSION,
         maxDepth: 0
       }),
       parentDefinitionKey: PARENT_DEF_KEY
@@ -268,12 +273,27 @@ describe("planSubworkflowChildLaunchFromRoute — fail-closed refusals", () => {
     expect(plan.refusal).toBe("max_depth_invalid");
   });
 
+  it("refuses a missing child definition version", () => {
+    const plan = planSubworkflowChildLaunchFromRoute({
+      parentRunId: PARENT_RUN_ID,
+      parentStepId: PARENT_STEP_ID,
+      parentRoute: routeWithChild({ childDefinitionKey: CHILD_DEF_KEY }),
+      parentDefinitionKey: PARENT_DEF_KEY
+    });
+    expect(plan.ok).toBe(false);
+    if (plan.ok) throw new Error("expected refusal");
+    expect(plan.refusal).toBe("child_definition_version_invalid");
+  });
+
   it("refuses a corrupt lineage before planning the launch", () => {
     const plan = planSubworkflowChildLaunchFromRoute({
       parentRunId: PARENT_RUN_ID,
       parentStepId: PARENT_STEP_ID,
       parentRoute: routeWithChild(
-        { childDefinitionKey: CHILD_DEF_KEY },
+        {
+          childDefinitionKey: CHILD_DEF_KEY,
+          childDefinitionVersion: CHILD_DEF_VERSION
+        },
         { lineage: "corrupt" }
       ),
       parentDefinitionKey: PARENT_DEF_KEY
@@ -287,7 +307,10 @@ describe("planSubworkflowChildLaunchFromRoute — fail-closed refusals", () => {
     const plan = planSubworkflowChildLaunchFromRoute({
       parentRunId: PARENT_RUN_ID,
       parentStepId: PARENT_STEP_ID,
-      parentRoute: routeWithChild({ childDefinitionKey: PARENT_DEF_KEY }),
+      parentRoute: routeWithChild({
+        childDefinitionKey: PARENT_DEF_KEY,
+        childDefinitionVersion: CHILD_DEF_VERSION
+      }),
       parentDefinitionKey: PARENT_DEF_KEY
     });
     expect(plan.ok).toBe(false);
@@ -300,7 +323,11 @@ describe("planSubworkflowChildLaunchFromRoute — fail-closed refusals", () => {
       parentRunId: PARENT_RUN_ID,
       parentStepId: PARENT_STEP_ID,
       parentRoute: routeWithChild(
-        { childDefinitionKey: CHILD_DEF_KEY, maxDepth: 5 },
+        {
+          childDefinitionKey: CHILD_DEF_KEY,
+          childDefinitionVersion: CHILD_DEF_VERSION,
+          maxDepth: 5
+        },
         {
           lineage: {
             parentRunId: "run-grandparent",
@@ -323,7 +350,10 @@ describe("planSubworkflowChildLaunchFromRoute — fail-closed refusals", () => {
       parentStepId: PARENT_STEP_ID,
       // Default maxDepth is 1, parent already nested one level deep => child depth 2.
       parentRoute: routeWithChild(
-        { childDefinitionKey: CHILD_DEF_KEY },
+        {
+          childDefinitionKey: CHILD_DEF_KEY,
+          childDefinitionVersion: CHILD_DEF_VERSION
+        },
         {
           lineage: {
             parentRunId: "run-grandparent",
@@ -346,12 +376,16 @@ describe("planSubworkflowChildLaunchFromRoute — launchable child", () => {
     const plan = planSubworkflowChildLaunchFromRoute({
       parentRunId: PARENT_RUN_ID,
       parentStepId: PARENT_STEP_ID,
-      parentRoute: routeWithChild({ childDefinitionKey: CHILD_DEF_KEY }),
+      parentRoute: routeWithChild({
+        childDefinitionKey: CHILD_DEF_KEY,
+        childDefinitionVersion: CHILD_DEF_VERSION
+      }),
       parentDefinitionKey: PARENT_DEF_KEY
     });
     expect(plan.ok).toBe(true);
     if (!plan.ok) throw new Error("expected ok");
     expect(plan.childDefinitionKey).toBe(CHILD_DEF_KEY);
+    expect(plan.childDefinitionVersion).toBe(CHILD_DEF_VERSION);
     expect(plan.childRunId).toBe(`${PARENT_RUN_ID}::${PARENT_STEP_ID}::child`);
     expect(plan.childDepth).toBe(1);
     expect(plan.maxDepth).toBe(1);
@@ -366,7 +400,11 @@ describe("planSubworkflowChildLaunchFromRoute — launchable child", () => {
       parentRunId: PARENT_RUN_ID,
       parentStepId: PARENT_STEP_ID,
       parentRoute: routeWithChild(
-        { childDefinitionKey: CHILD_DEF_KEY, maxDepth: 2 },
+        {
+          childDefinitionKey: CHILD_DEF_KEY,
+          childDefinitionVersion: CHILD_DEF_VERSION,
+          maxDepth: 2
+        },
         {
           lineage: {
             parentRunId: "run-grandparent",

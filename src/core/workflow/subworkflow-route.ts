@@ -110,6 +110,8 @@ export type SubworkflowRouteChildLaunchPlan =
       ok: true;
       /** The workflow definition key the child run launches. */
       childDefinitionKey: string;
+      /** The workflow definition version the child run launches. */
+      childDefinitionVersion: number;
       /** The deterministic child run id (start-or-attach idempotency anchor). */
       childRunId: string;
       /** The nesting depth the child run will occupy (1 = first nested level). */
@@ -284,6 +286,7 @@ export function planSubworkflowChildLaunchFromRoute(
   return {
     ok: true,
     childDefinitionKey: launchPlan.childDefinitionKey,
+    childDefinitionVersion: launchPlan.childDefinitionVersion,
     childRunId: deriveChildSubworkflowRunId(input.parentRunId, input.parentStepId),
     childDepth: launchPlan.childDepth,
     maxDepth: launchPlan.maxDepth,

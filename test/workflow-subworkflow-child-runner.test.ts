@@ -58,6 +58,21 @@ const CHILD_DEFINITION: WorkflowDefinition = {
   ]
 };
 
+const CHILD_DEFINITION_V2: WorkflowDefinition = {
+  ...CHILD_DEFINITION,
+  version: 2,
+  steps: [
+    ...CHILD_DEFINITION.steps,
+    {
+      key: "implementation",
+      kind: "implementation",
+      executor: "one-shot",
+      order: 1,
+      required: true
+    }
+  ]
+};
+
 const OTHER_DEFINITION: WorkflowDefinition = {
   ...CHILD_DEFINITION,
   key: "other-child-workflow",
@@ -124,12 +139,17 @@ function childRouteJson(db: MomentumDb): unknown {
 
 function buildRunner(
   db: MomentumDb,
-  overrides: { childDefinitionKey?: string; childRunId?: string } = {}
+  overrides: {
+    childDefinitionKey?: string;
+    childDefinitionVersion?: number;
+    childRunId?: string;
+  } = {}
 ) {
   return buildDispatchedSubworkflowChildRunner({
     db,
     childRunId: overrides.childRunId ?? CHILD_RUN_ID,
     childDefinitionKey: overrides.childDefinitionKey ?? CHILD_DEFINITION_KEY,
+    childDefinitionVersion: overrides.childDefinitionVersion ?? CHILD_DEFINITION.version,
     childRoute: CHILD_ROUTE,
     repoPath: "/repos/momentum",
     objective: "RC-4b child workflow run",
@@ -168,6 +188,24 @@ describe("buildDispatchedSubworkflowChildRunner — start a real child run from 
     await resolution.run();
 
     expect(childRouteJson(db)).toEqual(CHILD_ROUTE);
+  });
+
+  it("starts the child workflow run from the configured definition version", async () => {
+    const db = openSeededDb();
+    persistWorkflowDefinition(db, CHILD_DEFINITION_V2, { now: NOW + 1 });
+    const resolution = buildRunner(db, {
+      childDefinitionVersion: CHILD_DEFINITION.version
+    });
+    if (!resolution.ok) throw new Error(resolution.reason);
+
+    await resolution.run();
+
+    const child = loadWorkflowRunDetail(db, CHILD_RUN_ID);
+    expect(child?.steps).toHaveLength(CHILD_DEFINITION.steps.length);
+    const row = db
+      .prepare("SELECT workflow_definition_version FROM workflow_runs WHERE id = ?")
+      .get(CHILD_RUN_ID) as { workflow_definition_version: number | null };
+    expect(row.workflow_definition_version).toBe(CHILD_DEFINITION.version);
   });
 });
 
@@ -227,6 +265,28 @@ describe("buildDispatchedSubworkflowChildRunner — fail closed on unsupported a
     expect(resolution.reason).toContain(CHILD_RUN_ID);
     expect(resolution.reason).toContain(CHILD_DEFINITION_KEY);
     expect(resolution.reason).toContain(OTHER_DEFINITION.key);
+  });
+
+  it("refuses to attach when the deterministic child run id belongs to another version", () => {
+    const db = openSeededDb();
+    persistWorkflowDefinition(db, CHILD_DEFINITION_V2, { now: NOW + 1 });
+    persistWorkflowRunStart(db, {
+      definition: CHILD_DEFINITION_V2,
+      runId: CHILD_RUN_ID,
+      repoPath: "/repos/momentum",
+      objective: "Conflicting pre-existing child run",
+      now: NOW + 1
+    });
+
+    const resolution = buildRunner(db, {
+      childDefinitionVersion: CHILD_DEFINITION.version
+    });
+
+    expect(resolution.ok).toBe(false);
+    if (resolution.ok) return;
+    expect(resolution.reason).toContain(CHILD_RUN_ID);
+    expect(resolution.reason).toContain(`${CHILD_DEFINITION_KEY}@1`);
+    expect(resolution.reason).toContain(`${CHILD_DEFINITION_KEY}@2`);
   });
 });
 

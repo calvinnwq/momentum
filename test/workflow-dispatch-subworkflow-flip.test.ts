@@ -111,7 +111,12 @@ function seedParentRun(
       repoPath,
       objective: "Dogfood NGX-498 production subworkflow flip",
       route: {
-        subworkflow: { child: { childDefinitionKey: CHILD_DEFINITION.key } }
+        subworkflow: {
+          child: {
+            childDefinitionKey: CHILD_DEFINITION.key,
+            childDefinitionVersion: CHILD_DEFINITION.version
+          }
+        }
       },
       now: NOW
     });

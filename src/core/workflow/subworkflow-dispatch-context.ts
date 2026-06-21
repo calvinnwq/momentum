@@ -247,6 +247,7 @@ export function deriveDispatchedSubworkflowContext(
     db: context.db,
     childRunId: plan.childRunId,
     childDefinitionKey: plan.childDefinitionKey,
+    childDefinitionVersion: plan.childDefinitionVersion,
     childRoute: plan.childRoute,
     repoPath: execContext.exec.repoPath,
     objective: facts.facts.objective,

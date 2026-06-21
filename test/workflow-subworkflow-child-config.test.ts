@@ -33,17 +33,20 @@ import {
 describe("validateSubworkflowChildConfig — child-definition config shape", () => {
   it("accepts a minimal config and defaults maxDepth conservatively", () => {
     const result = validateSubworkflowChildConfig({
-      childDefinitionKey: "coding-workflow"
+      childDefinitionKey: "coding-workflow",
+      childDefinitionVersion: 1
     });
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("expected ok config");
     expect(result.config.childDefinitionKey).toBe("coding-workflow");
+    expect(result.config.childDefinitionVersion).toBe(1);
     expect(result.config.maxDepth).toBe(DEFAULT_SUBWORKFLOW_MAX_DEPTH);
   });
 
   it("preserves an explicit positive-integer maxDepth", () => {
     const result = validateSubworkflowChildConfig({
       childDefinitionKey: "coding-workflow",
+      childDefinitionVersion: 1,
       maxDepth: 3
     });
     expect(result.ok).toBe(true);
@@ -73,14 +76,20 @@ describe("validateSubworkflowChildConfig — child-definition config shape", () 
   });
 
   it("fails closed with child_definition_key_invalid for an empty key", () => {
-    const result = validateSubworkflowChildConfig({ childDefinitionKey: "   " });
+    const result = validateSubworkflowChildConfig({
+      childDefinitionKey: "   ",
+      childDefinitionVersion: 1
+    });
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("expected refusal");
     expect(result.refusal).toBe("child_definition_key_invalid");
   });
 
   it("fails closed with child_definition_key_invalid for a non-string key", () => {
-    const result = validateSubworkflowChildConfig({ childDefinitionKey: 42 });
+    const result = validateSubworkflowChildConfig({
+      childDefinitionKey: 42,
+      childDefinitionVersion: 1
+    });
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("expected refusal");
     expect(result.refusal).toBe("child_definition_key_invalid");
@@ -89,6 +98,7 @@ describe("validateSubworkflowChildConfig — child-definition config shape", () 
   it("fails closed with max_depth_invalid for a non-positive maxDepth", () => {
     const result = validateSubworkflowChildConfig({
       childDefinitionKey: "coding-workflow",
+      childDefinitionVersion: 1,
       maxDepth: 0
     });
     expect(result.ok).toBe(false);
@@ -99,17 +109,38 @@ describe("validateSubworkflowChildConfig — child-definition config shape", () 
   it("fails closed with max_depth_invalid for a non-integer maxDepth", () => {
     const result = validateSubworkflowChildConfig({
       childDefinitionKey: "coding-workflow",
+      childDefinitionVersion: 1,
       maxDepth: 2.5
     });
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("expected refusal");
     expect(result.refusal).toBe("max_depth_invalid");
   });
+
+  it("fails closed when childDefinitionVersion is missing", () => {
+    const result = validateSubworkflowChildConfig({
+      childDefinitionKey: "coding-workflow"
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected refusal");
+    expect(result.refusal).toBe("child_definition_version_invalid");
+  });
+
+  it("fails closed when childDefinitionVersion is not a positive integer", () => {
+    const result = validateSubworkflowChildConfig({
+      childDefinitionKey: "coding-workflow",
+      childDefinitionVersion: 1.5
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected refusal");
+    expect(result.refusal).toBe("child_definition_version_invalid");
+  });
 });
 
 describe("planSubworkflowChildLaunch — recursion / self-reference safety", () => {
   const config: SubworkflowChildDefinitionConfig = {
     childDefinitionKey: "child-workflow",
+    childDefinitionVersion: 1,
     maxDepth: DEFAULT_SUBWORKFLOW_MAX_DEPTH
   };
 
@@ -122,6 +153,7 @@ describe("planSubworkflowChildLaunch — recursion / self-reference safety", () 
     expect(plan.ok).toBe(true);
     if (!plan.ok) throw new Error("expected launchable plan");
     expect(plan.childDefinitionKey).toBe("child-workflow");
+    expect(plan.childDefinitionVersion).toBe(1);
     expect(plan.childDepth).toBe(1);
     expect(plan.maxDepth).toBe(DEFAULT_SUBWORKFLOW_MAX_DEPTH);
   });
@@ -144,7 +176,7 @@ describe("planSubworkflowChildLaunch — recursion / self-reference safety", () 
       ancestorDefinitionKeys: ["child-workflow"]
     };
     const plan = planSubworkflowChildLaunch(
-      { childDefinitionKey: "child-workflow", maxDepth: 5 },
+      { childDefinitionKey: "child-workflow", childDefinitionVersion: 1, maxDepth: 5 },
       lineage
     );
     expect(plan.ok).toBe(false);
@@ -172,7 +204,7 @@ describe("planSubworkflowChildLaunch — recursion / self-reference safety", () 
       ancestorDefinitionKeys: ["root-workflow"]
     };
     const plan = planSubworkflowChildLaunch(
-      { childDefinitionKey: "child-workflow", maxDepth: 2 },
+      { childDefinitionKey: "child-workflow", childDefinitionVersion: 1, maxDepth: 2 },
       lineage
     );
     expect(plan.ok).toBe(true);

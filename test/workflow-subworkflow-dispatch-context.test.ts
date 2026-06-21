@@ -168,7 +168,10 @@ function childRouteJson(db: MomentumDb): unknown {
 describe("deriveDispatchedSubworkflowContext — resolves a configured subworkflow step", () => {
   it("returns a runner + parent-run-dir evidence and starts the keyed child run on demand", async () => {
     const db = openSeededDb({
-      childConfig: { childDefinitionKey: CHILD_DEFINITION_KEY }
+      childConfig: {
+        childDefinitionKey: CHILD_DEFINITION_KEY,
+        childDefinitionVersion: CHILD_DEFINITION.version
+      }
     });
     const resolution = deriveDispatchedSubworkflowContext(claim(db), context(db));
     expect(resolution.ok).toBe(true);
@@ -197,7 +200,10 @@ describe("deriveDispatchedSubworkflowContext — resolves a configured subworkfl
 
   it("starts the child run with the propagated recursion lineage in its route", async () => {
     const db = openSeededDb({
-      childConfig: { childDefinitionKey: CHILD_DEFINITION_KEY }
+      childConfig: {
+        childDefinitionKey: CHILD_DEFINITION_KEY,
+        childDefinitionVersion: CHILD_DEFINITION.version
+      }
     });
     const resolution = deriveDispatchedSubworkflowContext(claim(db), context(db));
     if (!resolution.ok) throw new Error(resolution.reason);
@@ -229,7 +235,10 @@ describe("deriveDispatchedSubworkflowContext — fail closed", () => {
 
   it("refuses an unsafe self-referential child (child key === parent definition)", () => {
     const db = openSeededDb({
-      childConfig: { childDefinitionKey: CODING_WORKFLOW_DEFINITION_KEY }
+      childConfig: {
+        childDefinitionKey: CODING_WORKFLOW_DEFINITION_KEY,
+        childDefinitionVersion: CODING_WORKFLOW_DEFINITION.version
+      }
     });
     const resolution = deriveDispatchedSubworkflowContext(claim(db), context(db));
     expect(resolution.ok).toBe(false);
@@ -240,7 +249,10 @@ describe("deriveDispatchedSubworkflowContext — fail closed", () => {
 
   it("refuses a present-but-corrupt recursion lineage instead of resetting to top-level", () => {
     const db = openSeededDb({
-      childConfig: { childDefinitionKey: CHILD_DEFINITION_KEY },
+      childConfig: {
+        childDefinitionKey: CHILD_DEFINITION_KEY,
+        childDefinitionVersion: CHILD_DEFINITION.version
+      },
       lineage: { parentRunId: 42 }
     });
     const resolution = deriveDispatchedSubworkflowContext(claim(db), context(db));
@@ -252,7 +264,10 @@ describe("deriveDispatchedSubworkflowContext — fail closed", () => {
 
   it("refuses at build time when the configured child definition key does not resolve", () => {
     const db = openSeededDb({
-      childConfig: { childDefinitionKey: "no-such-definition" },
+      childConfig: {
+        childDefinitionKey: "no-such-definition",
+        childDefinitionVersion: CHILD_DEFINITION.version
+      },
       withChildDefinition: false
     });
     const resolution = deriveDispatchedSubworkflowContext(claim(db), context(db));
@@ -264,7 +279,10 @@ describe("deriveDispatchedSubworkflowContext — fail closed", () => {
 
   it("refuses when the parent run row does not exist", () => {
     const db = openSeededDb({
-      childConfig: { childDefinitionKey: CHILD_DEFINITION_KEY }
+      childConfig: {
+        childDefinitionKey: CHILD_DEFINITION_KEY,
+        childDefinitionVersion: CHILD_DEFINITION.version
+      }
     });
     const ghostClaim: ClaimedWorkflowStep = { ...claim(db), runId: "ghost-run-xyz" };
     const resolution = deriveDispatchedSubworkflowContext(ghostClaim, context(db));
@@ -275,7 +293,10 @@ describe("deriveDispatchedSubworkflowContext — fail closed", () => {
 
   it("refuses when the parent run has no repo path to host a child", () => {
     const db = openSeededDb({
-      childConfig: { childDefinitionKey: CHILD_DEFINITION_KEY }
+      childConfig: {
+        childDefinitionKey: CHILD_DEFINITION_KEY,
+        childDefinitionVersion: CHILD_DEFINITION.version
+      }
     });
     const theClaim = claim(db);
     db.prepare("UPDATE workflow_runs SET repo_path = NULL WHERE id = ?").run(
@@ -292,7 +313,12 @@ describe("deriveDispatchedSubworkflowContext — fail closed", () => {
 describe("resolveSubworkflowParentRunFacts — pure parent-fact validation", () => {
   const baseRow: SubworkflowParentRunRow = {
     routeJson: JSON.stringify({
-      subworkflow: { child: { childDefinitionKey: CHILD_DEFINITION_KEY } }
+      subworkflow: {
+        child: {
+          childDefinitionKey: CHILD_DEFINITION_KEY,
+          childDefinitionVersion: CHILD_DEFINITION.version
+        }
+      }
     }),
     definitionKey: CODING_WORKFLOW_DEFINITION_KEY,
     objective: "Parent objective",
@@ -308,7 +334,12 @@ describe("resolveSubworkflowParentRunFacts — pure parent-fact validation", () 
     expect(resolution.facts.objective).toBe("Parent objective");
     expect(resolution.facts.repoPath).toBe(REPO_PATH);
     expect(resolution.facts.route).toEqual({
-      subworkflow: { child: { childDefinitionKey: CHILD_DEFINITION_KEY } }
+      subworkflow: {
+        child: {
+          childDefinitionKey: CHILD_DEFINITION_KEY,
+          childDefinitionVersion: CHILD_DEFINITION.version
+        }
+      }
     });
   });
 
@@ -366,7 +397,10 @@ describe("resolveSubworkflowParentRunFacts — pure parent-fact validation", () 
 describe("loadSubworkflowParentRunRow — durable run-row IO", () => {
   it("loads the parent run's route / definition / objective / repo facts", () => {
     const db = openSeededDb({
-      childConfig: { childDefinitionKey: CHILD_DEFINITION_KEY }
+      childConfig: {
+        childDefinitionKey: CHILD_DEFINITION_KEY,
+        childDefinitionVersion: CHILD_DEFINITION.version
+      }
     });
     const row = loadSubworkflowParentRunRow(db, PARENT_RUN_ID);
     expect(row).toBeDefined();
@@ -374,7 +408,12 @@ describe("loadSubworkflowParentRunRow — durable run-row IO", () => {
     expect(row?.objective).toContain("Parent run");
     expect(row?.repoPath).toBe(REPO_PATH);
     expect(JSON.parse(row?.routeJson ?? "null")).toEqual({
-      subworkflow: { child: { childDefinitionKey: CHILD_DEFINITION_KEY } }
+      subworkflow: {
+        child: {
+          childDefinitionKey: CHILD_DEFINITION_KEY,
+          childDefinitionVersion: CHILD_DEFINITION.version
+        }
+      }
     });
   });
 

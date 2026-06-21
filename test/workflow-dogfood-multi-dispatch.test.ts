@@ -321,7 +321,12 @@ describe("dogfood terminalize leaves adapter-owned subworkflow steps to their ru
         repoPath: repoDir,
         objective: "Dogfood subworkflow adapter-owned dispatch proof",
         route: {
-          subworkflow: { child: { childDefinitionKey: childDefinition.key } }
+          subworkflow: {
+            child: {
+              childDefinitionKey: childDefinition.key,
+              childDefinitionVersion: childDefinition.version
+            }
+          }
         },
         now
       });

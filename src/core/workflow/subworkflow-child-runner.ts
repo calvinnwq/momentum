@@ -72,6 +72,8 @@ export type BuildDispatchedSubworkflowChildRunnerInput = {
   childRunId: string;
   /** The workflow definition key the child run launches (resolved here). */
   childDefinitionKey: string;
+  /** The workflow definition version the child run launches (resolved here). */
+  childDefinitionVersion: number;
   /** The `route` JSON the child run is started with (lineage propagated). */
   childRoute: Record<string, unknown>;
   /** The repo the child run operates on (inherited from the parent run). */
@@ -100,25 +102,31 @@ export type DispatchedSubworkflowChildRunnerResolution =
 export function buildDispatchedSubworkflowChildRunner(
   input: BuildDispatchedSubworkflowChildRunnerInput
 ): DispatchedSubworkflowChildRunnerResolution {
-  const definition = loadWorkflowDefinition(input.db, input.childDefinitionKey);
+  const definition = loadWorkflowDefinition(
+    input.db,
+    input.childDefinitionKey,
+    input.childDefinitionVersion
+  );
   if (definition === undefined) {
     return {
       ok: false,
-      reason: `Subworkflow child definition '${input.childDefinitionKey}' is not persisted; routing to manual recovery.`
+      reason: `Subworkflow child definition '${formatDefinitionRef(input.childDefinitionKey, input.childDefinitionVersion)}' is not persisted; routing to manual recovery.`
     };
   }
 
   const existingAttachment = loadChildRunAttachment(input.db, input.childRunId);
   if (
     existingAttachment !== undefined &&
-    existingAttachment.definitionKey !== input.childDefinitionKey
+    !matchesExpectedAttachment(existingAttachment, input)
   ) {
     return {
       ok: false,
       reason: unsupportedAttachmentReason(
         input.childRunId,
         input.childDefinitionKey,
-        existingAttachment.definitionKey
+        input.childDefinitionVersion,
+        existingAttachment.definitionKey,
+        existingAttachment.definitionVersion
       )
     };
   }
@@ -153,12 +161,14 @@ function startOrAttachAndObserveChildRun(
     // recovery rather than silently mis-observing.
     if (!(error instanceof WorkflowRunStartConflictError)) throw error;
     const attached = loadChildRunAttachment(db, childRunId);
-    if (attached?.definitionKey !== input.childDefinitionKey) {
+    if (attached === undefined || !matchesExpectedAttachment(attached, input)) {
       throw new Error(
         unsupportedAttachmentReason(
           childRunId,
           input.childDefinitionKey,
-          attached?.definitionKey ?? null
+          input.childDefinitionVersion,
+          attached?.definitionKey ?? null,
+          attached?.definitionVersion ?? null
         )
       );
     }
@@ -182,22 +192,53 @@ function startOrAttachAndObserveChildRun(
 function loadChildRunAttachment(
   db: MomentumDb,
   runId: string
-): { definitionKey: string | null } | undefined {
+): { definitionKey: string | null; definitionVersion: number | null } | undefined {
   const row = db
-    .prepare("SELECT workflow_definition_key FROM workflow_runs WHERE id = ?")
-    .get(runId) as { workflow_definition_key: string | null } | undefined;
+    .prepare(
+      "SELECT workflow_definition_key, workflow_definition_version FROM workflow_runs WHERE id = ?"
+    )
+    .get(runId) as
+    | {
+        workflow_definition_key: string | null;
+        workflow_definition_version: number | null;
+      }
+    | undefined;
   if (row === undefined) return undefined;
-  return { definitionKey: row.workflow_definition_key };
+  return {
+    definitionKey: row.workflow_definition_key,
+    definitionVersion: row.workflow_definition_version
+  };
+}
+
+function matchesExpectedAttachment(
+  attachment: { definitionKey: string | null; definitionVersion: number | null },
+  input: BuildDispatchedSubworkflowChildRunnerInput
+): boolean {
+  return (
+    attachment.definitionKey === input.childDefinitionKey &&
+    attachment.definitionVersion === input.childDefinitionVersion
+  );
 }
 
 function unsupportedAttachmentReason(
   childRunId: string,
   expectedDefinitionKey: string,
-  actualDefinitionKey: string | null
+  expectedDefinitionVersion: number,
+  actualDefinitionKey: string | null,
+  actualDefinitionVersion: number | null
 ): string {
   return (
     `Subworkflow child run ${childRunId} already exists for definition ` +
-    `'${actualDefinitionKey ?? "<unlinked>"}' instead of '${expectedDefinitionKey}'; ` +
+    `'${formatDefinitionRef(actualDefinitionKey, actualDefinitionVersion)}' instead of ` +
+    `'${formatDefinitionRef(expectedDefinitionKey, expectedDefinitionVersion)}'; ` +
     "routing to manual recovery."
   );
+}
+
+function formatDefinitionRef(
+  definitionKey: string | null,
+  definitionVersion: number | null
+): string {
+  if (definitionKey === null || definitionVersion === null) return "<unlinked>";
+  return `${definitionKey}@${definitionVersion}`;
 }

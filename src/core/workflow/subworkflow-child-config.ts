@@ -61,6 +61,8 @@ export const DEFAULT_SUBWORKFLOW_MAX_DEPTH = 1;
 export type SubworkflowChildDefinitionConfig = {
   /** The workflow definition key the child run launches. */
   childDefinitionKey: string;
+  /** The workflow definition version the child run launches. */
+  childDefinitionVersion: number;
   /** The resolved bounded nesting depth (a positive integer). */
   maxDepth: number;
 };
@@ -77,6 +79,7 @@ export type SubworkflowChildDefinitionConfig = {
 export const SUBWORKFLOW_CHILD_CONFIG_REFUSALS = [
   "missing_child_config",
   "child_definition_key_invalid",
+  "child_definition_version_invalid",
   "max_depth_invalid"
 ] as const;
 export type SubworkflowChildConfigRefusal =
@@ -123,6 +126,7 @@ export type SubworkflowChildLaunchPlan =
   | {
       ok: true;
       childDefinitionKey: string;
+      childDefinitionVersion: number;
       /** The nesting depth the child run will occupy (1 = first nested level). */
       childDepth: number;
       maxDepth: number;
@@ -178,10 +182,21 @@ export function validateSubworkflowChildConfig(
     };
   }
 
+  const childDefinitionVersion = value["childDefinitionVersion"];
+  if (!isPositiveInteger(childDefinitionVersion)) {
+    return {
+      ok: false,
+      refusal: "child_definition_version_invalid",
+      reason:
+        "Subworkflow child config childDefinitionVersion must be a positive integer; routing to manual recovery."
+    };
+  }
+
   return {
     ok: true,
     config: {
       childDefinitionKey: childDefinitionKey.trim(),
+      childDefinitionVersion,
       maxDepth: rawMaxDepth ?? DEFAULT_SUBWORKFLOW_MAX_DEPTH
     }
   };
@@ -198,7 +213,7 @@ export function planSubworkflowChildLaunch(
   config: SubworkflowChildDefinitionConfig,
   parentLineage: SubworkflowParentLineage
 ): SubworkflowChildLaunchPlan {
-  const { childDefinitionKey, maxDepth } = config;
+  const { childDefinitionKey, childDefinitionVersion, maxDepth } = config;
 
   if (childDefinitionKey === parentLineage.definitionKey) {
     return {
@@ -234,5 +249,11 @@ export function planSubworkflowChildLaunch(
     };
   }
 
-  return { ok: true, childDefinitionKey, childDepth, maxDepth };
+  return {
+    ok: true,
+    childDefinitionKey,
+    childDefinitionVersion,
+    childDepth,
+    maxDepth
+  };
 }
