@@ -16,9 +16,10 @@
  * injects must resolve that key against the durable definition store and fail
  * closed when it does not resolve. This module owns exactly that — the keystone IO
  * the entry-point factory's {@link DeriveDispatchedSubworkflowContext} composes —
- * and nothing else: it does NOT add `subworkflow` to
- * `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES` and does NOT wire any daemon lane, so
- * production `subworkflow` still fails closed until the wiring slice lands.
+ * and nothing else: it does not itself touch
+ * `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES` or wire any daemon lane; RC-4b
+ * (NGX-498) flipped `subworkflow` into that allowlist and wired the production
+ * lane that injects this runner once the configured lane was proven.
  *
  * Discipline (the same pure-decision / injected-IO split
  * `daemon-dispatch-exec-context.ts` uses for the live-wrapper lane):

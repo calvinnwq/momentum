@@ -53,11 +53,12 @@ import type { WorkflowRunState } from "../src/core/workflow/run-reducer.js";
  *   - it returns the base dispatch's result verbatim (finalization is a durable
  *     side effect layered after the dispatch).
  *
- * `subworkflow` is not yet in `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES`, so the real
- * base dispatcher still fail-closes it. To exercise the post-wiring substrate, a
- * test base dispatch drives the genuine one-shot scaffold and re-stamps the
- * invocation family to `subworkflow` — the exact row the PHASE1-wired base
- * dispatch will create once the family flip lands.
+ * These factory tests drive a canned base dispatch that re-stamps the invocation
+ * family to `subworkflow` to isolate the wrapper's branching from the base
+ * dispatcher. RC-4b (NGX-498) has since flipped `subworkflow` into
+ * `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES` so the real base dispatch creates that
+ * same row directly; the end-to-end production-flip proof lives in
+ * `test/workflow-dispatch-subworkflow-flip.test.ts`.
  */
 
 const NOW = 1_700_000_000_000;

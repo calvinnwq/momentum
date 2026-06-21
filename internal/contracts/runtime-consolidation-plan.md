@@ -44,7 +44,7 @@ unreachable-branch audit below finds nothing safe to delete within scope.
 | 2 | Imported `.agent-workflows` / `cwfp-*` compatibility | Defer | `NGX-404` default-switch dogfood passes its `coding-workflow-ownership.md` gates | `NGX-404` (existing) |
 | 3 | M9 live-wrapper direct `workflow_steps` advancement vs M10 executor-loop finalization | Keep (coexist); boundary seam landed | A single reconciliation seam now finalizes dispatched steps from durable executor evidence with a no-double-finalize proof; narrowing still waits on compatibility-lane migrations | RC-2 (seam landed, NGX-480) |
 | 4 | Production dispatch phase-1 scaffold (no fabricated result evidence) | Keep | RC-2 replaced the seam-level terminal gap and RC-5b now feeds real terminal executor evidence from configured daemon profiles; narrowing the scaffold still waits on compatibility-lane migrations | RC-2 (seam landed, NGX-480), RC-5 |
-| 5 | `external-apply` / `subworkflow` fail-closed executor families | `external-apply` narrowed; **RC-4 `subworkflow` adapter mechanism landed (NGX-497)**, production stays fail-closed | A landed daemon-dispatchable adapter per family, behind the existing safety contracts; RC-3 wires `external-apply` through the daemon dispatch lane, and the RC-4 `subworkflow` adapter mechanism (pure child-mirror mapping + async producer + daemon-lane entry-point factory + tests) has landed while the production `subworkflow` branch stays fail-closed until a separate PHASE1 dispatch-lane flip lands (deferred pending a child-definition config decision) | RC-3 (`external-apply` wired, NGX-496), RC-4 (`subworkflow` adapter landed, NGX-497) |
+| 5 | `external-apply` / `subworkflow` fail-closed executor families | `external-apply` narrowed; **`subworkflow` adapter mechanism + production flip landed (RC-4 NGX-497, RC-4b NGX-498)** | A landed daemon-dispatchable adapter per family, behind the existing safety contracts; RC-3 wires `external-apply` through the daemon dispatch lane, and RC-4 landed the `subworkflow` adapter mechanism (pure child-mirror mapping + async producer + daemon-lane entry-point factory) which RC-4b then flipped into production (child-definition config + bounded recursion safety, route-sourced launch plan, key-resolved start-or-attach child runner, daemon context deriver wired via `withSubworkflowDispatch`, `subworkflow` added to `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES`); the generic `unsupported_executor_family` fail-closed branch is retained defensively | RC-3 (`external-apply` wired, NGX-496), RC-4 (`subworkflow` adapter landed, NGX-497), RC-4b (`subworkflow` production flip, NGX-498) |
 | 6 | Fake workflow-step executors shipped in `src/` | Deprecate-later; **fake demotion landed (NGX-485); daemon-default live profile wiring landed (NGX-492)** | Real adapters now back the production default, fakes are a test-only injected seam, and configured daemon profiles now feed live executor evidence through bounded `daemon start` | RC-5 (fake demotion landed, NGX-485; daemon wiring landed, NGX-492) |
 
 ## Path-By-Path Decisions
@@ -389,39 +389,47 @@ idempotency cases).
 ### 5. `external-apply` and `subworkflow` fail-closed families
 
 **Current shape.** Both are valid members of `WORKFLOW_EXECUTOR_FAMILIES`
-(`src/core/workflow/definition.ts:44`). `external-apply` is now included in
-`PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES` and daemon dispatch composes the M6
-`executeExternalApply` path through `createExternalApplyWorkflowDispatch`,
-terminal executor evidence, and RC-2 reconciliation. The producer verifies the
-recorded scaffold family before any external write. `subworkflow` remains absent
-from the dispatchable set; a claimed step resolving to it fails closed with
+(`src/core/workflow/definition.ts:44`) and both are now included in
+`PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES`. `external-apply` (RC-3) composes the M6
+`executeExternalApply` path through `createExternalApplyWorkflowDispatch`;
+`subworkflow` (RC-4b/NGX-498) composes the child-run producer through
+`createSubworkflowWorkflowDispatch`, with the daemon context deriver sourcing the
+child-definition config + bounded recursion lineage from the parent run's
+`route`. Each producer verifies the recorded scaffold family before acting, and
+both layer terminal executor evidence + RC-2 reconciliation. A claimed step
+resolving to a family with no landed adapter still fails closed with
 `code: "unsupported_executor_family"` → `manual_recovery_required`, and
 `failClosedDispatch` (`src/core/workflow/dispatch-execute.ts`) sets
 `needs_manual_recovery`, opens a `workflow_gates` row, releases the dispatch
 lease, and creates no executor rows.
 
-**Decision: external-apply narrowed; RC-4 subworkflow adapter mechanism landed;
-production subworkflow remains fail-closed.** The former `external-apply`
-fail-closed branch has been replaced by the RC-3 safety-gated adapter wiring. M6
-policy gating, audit-before-write, idempotency, and adapter refusals remain the
-safety contract; unsafe/unconfigured outcomes terminalize to manual recovery. The
-RC-4 `subworkflow` mechanism has since landed: the pure child-run mirror, async
-producer, daemon-lane entry-point factory, and child-run integration proof map a
+**Decision: external-apply narrowed; subworkflow adapter mechanism + production
+flip landed (RC-4b/NGX-498).** The former `external-apply` and `subworkflow`
+fail-closed branches have both been replaced by safety-gated adapter wiring. For
+`external-apply`, M6 policy gating, audit-before-write, idempotency, and adapter
+refusals remain the safety contract; unsafe/unconfigured outcomes terminalize to
+manual recovery. For `subworkflow`, the child-definition config + bounded
+recursion-safety decider, the route-sourced launch plan, the key-resolved
+start-or-attach child runner, and the daemon context deriver compose the RC-4
+producer behind the base dispatch under a `subworkflow`-family gate, mapping a
 started/attached child run into durable terminal executor evidence without
-weakening the parent/child ownership boundary. The production `subworkflow`
-branch remains absent from `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES` and continues
-to fail closed until a separate PHASE1 dispatch-lane flip lands after the
-child-definition config decision.
+weakening the parent/child ownership boundary. Missing child config, unsafe
+recursion (self-reference / ancestry cycle / depth bound), an unresolved child
+definition, an invalid child state, or an ambiguous child terminal all
+terminalize to manual recovery.
 
-**Prerequisite before removal of the fail-closed branch.** The landed
-RC-4 adapter mechanism is necessary but not sufficient: the production family
-allowlist still needs a separate PHASE1 dispatch-lane flip and daemon child-runner
-wiring that proves configured `subworkflow` steps dispatch durable evidence
-instead of gating. The fail-closed branch is removed only when that production
-replacement lands — never as a bare deletion.
+**Prerequisite before removal of the fail-closed branch.** The generic
+`unsupported_executor_family` fail-closed branch is retained as a defensive guard
+for any future not-yet-landed family even though both currently-defined families
+(`external-apply`, `subworkflow`) now dispatch; it is removed only when no family
+can reach it, never as a bare deletion.
 
 **Equivalent-behavior proof to preserve:** `test/workflow-dispatch.test.ts`
-(`external-apply` dispatchability and `subworkflow` fail-closed),
+(`external-apply` / `subworkflow` dispatchability and the defensive
+unsupported-family fail-closed),
+`test/workflow-dispatch-subworkflow-flip.test.ts` (a configured `subworkflow`
+step dispatches through bounded `daemon start`; the terminal child mirrors back
+to the parent while a non-terminal child defers),
 `test/workflow-dispatch-execute.test.ts` (durable manual-recovery gate, lease
 released, zero invocations, vanished-run safety),
 `test/workflow-dispatch-external-apply-run.test.ts` /
@@ -567,8 +575,8 @@ and add `RC-*` placeholders for the genuinely new consolidation work.
    re-entry never re-writes, real `policy_denied` refusal → manual recovery
    with no write attempted). The production dispatch lane now includes
    `external-apply` in `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES` and composes the
-   landed adapter through bounded `daemon start`; `subworkflow` remains the
-   fail-closed family for Path 5. (Path 5)
+   landed adapter through bounded `daemon start`; `subworkflow`'s production flip
+   followed in RC-4b (NGX-498). (Path 5)
 4. **RC-4 — `subworkflow` daemon-dispatchable adapter. ✅ Adapter mechanism
    landed (NGX-497).** The pure, total mapping from a child workflow run's
    observed `WorkflowRunState` into the `WorkflowStepExecutorDispatchResult`
@@ -601,13 +609,25 @@ and add `RC-*` placeholders for the genuinely new consolidation work.
    lane boundary), `test/workflow-subworkflow-dispatch.test.ts` (entry-point
    factory composition + fail-closed-on-refusal), and
    `test/workflow-dispatch-subworkflow-child-run.test.ts` (the producer bound to a
-   real child workflow run through the existing run-start / status seams). **The
-   production `subworkflow` branch stays fail-closed** — `subworkflow` is not yet
-   in `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES` and the daemon lane still routes it
-   to `manual_recovery_required`; the PHASE1 dispatch-lane flip plus the daemon
-   child-runner are deferred pending a child-definition config decision (no
-   built-in workflow step declares the `subworkflow` family or its child
-   definition / recursion bounds yet). (Path 5)
+   real child workflow run through the existing run-start / status seams). (Path 5)
+4b. **RC-4b — `subworkflow` production dispatch-lane flip. ✅ Landed (NGX-498).**
+   The open child-definition config / recursion decision is resolved: a pure,
+   total child-config shape + bounded recursion-safety decider
+   (`subworkflow-child-config.ts`), route-sourced config + durable recursion
+   lineage (`subworkflow-route.ts`), a key-resolved start-or-attach child runner
+   (`subworkflow-child-runner.ts`), and the daemon context deriver
+   (`subworkflow-dispatch-context.ts`) compose the RC-4 producer. The daemon lane
+   wires that deriver through `withSubworkflowDispatch` in `cli.ts`, and
+   `subworkflow` is added to `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES`, so a
+   configured `subworkflow` step now dispatches through bounded `daemon start`.
+   Fail-closed/manual-recovery is preserved for missing child config, unsafe
+   recursion (self-reference / ancestry cycle / depth bound), an unresolved child
+   definition, an invalid child state, and an ambiguous child terminal. Coverage:
+   `test/workflow-subworkflow-child-config.test.ts`,
+   `test/workflow-subworkflow-route.test.ts`,
+   `test/workflow-subworkflow-child-runner.test.ts`,
+   `test/workflow-subworkflow-dispatch-context.test.ts`, and the bounded
+   dogfood/smoke proof `test/workflow-dispatch-subworkflow-flip.test.ts`. (Path 5)
 5. **RC-5 — Real `WorkflowStepExecutor` adapters + fake demotion. ✅ Fake demotion
    landed (NGX-485).** The shipped fake `ADAPTERS` map is replaced: the production
    default registry is now real adapters (honest `runtime_unavailable` when

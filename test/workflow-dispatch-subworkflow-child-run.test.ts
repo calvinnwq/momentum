@@ -151,7 +151,10 @@ function approveAndClaim(db: MomentumDb): ClaimedWorkflowStep {
 
 /**
  * Drive the parent step through the production base dispatch, then re-stamp the
- * scaffold family to `subworkflow` while the base family flip is still staged.
+ * scaffold family to `subworkflow`. This proof reuses CODING_WORKFLOW_DEFINITION
+ * (whose `preflight` step is `one-shot`), so the re-stamp stands in for a real
+ * `subworkflow`-family step; the end-to-end flip on a genuinely `subworkflow`
+ * step definition is proven in `test/workflow-dispatch-subworkflow-flip.test.ts`.
  */
 function dispatchStep(db: MomentumDb): void {
   const claim = approveAndClaim(db);

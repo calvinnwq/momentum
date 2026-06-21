@@ -21,16 +21,27 @@ function resolved(
 
 describe("phase-1 dispatchable executor families", () => {
   it("supports exactly the daemon-dispatchable bounded-adapter families", () => {
+    // RC-4b (NGX-498) flipped `subworkflow` in once its configured production lane
+    // was proven, so every landed adapter family is now dispatchable.
     expect([...PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES].sort()).toEqual(
-      ["external-apply", "goal-loop", "no-mistakes", "one-shot", "script"].sort()
+      [
+        "external-apply",
+        "goal-loop",
+        "no-mistakes",
+        "one-shot",
+        "script",
+        "subworkflow"
+      ].sort()
     );
   });
 
-  it("is a strict subset of the workflow executor families", () => {
+  it("is a subset of the workflow executor families", () => {
     for (const family of PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES) {
       expect(WORKFLOW_EXECUTOR_FAMILIES).toContain(family);
     }
-    expect(PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES.length).toBeLessThan(
+    // Post-NGX-498 the phase-1 set covers every executor family; it can never
+    // exceed the full vocabulary.
+    expect(PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES.length).toBeLessThanOrEqual(
       WORKFLOW_EXECUTOR_FAMILIES.length
     );
   });
@@ -41,7 +52,7 @@ describe("phase-1 dispatchable executor families", () => {
     expect(isPhase1DispatchableExecutorFamily("no-mistakes")).toBe(true);
     expect(isPhase1DispatchableExecutorFamily("script")).toBe(true);
     expect(isPhase1DispatchableExecutorFamily("external-apply")).toBe(true);
-    expect(isPhase1DispatchableExecutorFamily("subworkflow")).toBe(false);
+    expect(isPhase1DispatchableExecutorFamily("subworkflow")).toBe(true);
   });
 });
 
@@ -57,19 +68,32 @@ describe("planWorkflowStepDispatch — supported families", () => {
   }
 });
 
-describe("planWorkflowStepDispatch — unsupported families fail closed", () => {
-  for (const family of ["subworkflow"] as const) {
-    it(`fails ${family} closed to an operator-visible manual-recovery gate`, () => {
-      const plan = planWorkflowStepDispatch(resolved(family));
-      expect(plan.action).toBe("fail_closed");
-      if (plan.action === "fail_closed") {
-        expect(plan.code).toBe("unsupported_executor_family");
-        expect(plan.gateType).toBe("manual_recovery_required");
-        // The reason must name the offending family so the operator can see it.
-        expect(plan.reason).toContain(family);
-      }
+describe("planWorkflowStepDispatch — every executor family is now dispatchable (NGX-498)", () => {
+  it("has no remaining deferred executor family that fails closed", () => {
+    // RC-4b flipped the last deferred family (`subworkflow`); every member of the
+    // executor-family vocabulary now routes to a real dispatch.
+    for (const family of WORKFLOW_EXECUTOR_FAMILIES) {
+      expect(isPhase1DispatchableExecutorFamily(family)).toBe(true);
+      expect(planWorkflowStepDispatch(resolved(family)).action).toBe("dispatch");
+    }
+  });
+
+  it("still fails closed defensively for a family outside the phase-1 set", () => {
+    // No real WorkflowExecutorFamily is outside the phase-1 set after NGX-498, so
+    // this casts a hypothetical not-yet-landed family to confirm the defensive
+    // unsupported_executor_family branch remains an operator-visible manual-
+    // recovery gate rather than silently dispatching.
+    const plan = planWorkflowStepDispatch({
+      ok: true,
+      executorFamily: "future-unlanded-family" as WorkflowExecutorFamily
     });
-  }
+    expect(plan.action).toBe("fail_closed");
+    if (plan.action === "fail_closed") {
+      expect(plan.code).toBe("unsupported_executor_family");
+      expect(plan.gateType).toBe("manual_recovery_required");
+      expect(plan.reason).toContain("future-unlanded-family");
+    }
+  });
 });
 
 describe("planWorkflowStepDispatch — resolution failures fail closed", () => {

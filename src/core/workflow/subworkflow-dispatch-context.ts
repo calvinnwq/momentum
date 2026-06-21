@@ -46,10 +46,11 @@
  *     `{ ok: true }`. The child run itself is not started here — that is the
  *     returned runner's job on the first producer tick.
  *
- * Scope guard: this slice does NOT add `subworkflow` to
- * `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES` and does NOT wire any daemon dispatch
- * composition. The deriver is referenced only by its test, so production
- * `subworkflow` still fails closed until the wiring slice lands.
+ * Wiring: RC-4b (NGX-498) injects this deriver into the daemon dispatch
+ * composition (`withSubworkflowDispatch` in `cli.ts`, wrapping the base dispatch
+ * via {@link createSubworkflowWorkflowDispatch}) and flipped `subworkflow` into
+ * `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES`, so a configured `subworkflow` step now
+ * dispatches its child run through bounded `daemon start`.
  */
 
 import path from "node:path";

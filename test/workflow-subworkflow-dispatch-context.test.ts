@@ -44,10 +44,10 @@ import {
  * evidence paths — producing the {@link DispatchedSubworkflowContextResolution} the
  * factory forwards into the producer or routes to manual recovery on refusal.
  *
- * This slice does NOT wire the daemon lane: the deriver is referenced only by this
- * test, `subworkflow` stays absent from `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES`,
- * and no cli.ts dispatch composition changed, so production `subworkflow` still
- * fails closed.
+ * RC-4b (NGX-498) has since wired this deriver into the daemon lane
+ * (`withSubworkflowDispatch` in cli.ts) and flipped `subworkflow` into
+ * `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES`; the production-flip proof lives in
+ * `test/workflow-dispatch-subworkflow-flip.test.ts`.
  */
 
 const NOW = 1_700_000_000_000;

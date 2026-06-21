@@ -8,9 +8,10 @@
  * (`subworkflow-dispatch.ts`) — but production stayed fail-closed because the
  * "open decision" was unresolved: *what configures a production `subworkflow`
  * step's child run, and what keeps recursion bounded?* This module owns exactly
- * that keystone decision, and nothing else: it does NOT add `subworkflow` to
- * `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES` and does NOT wire any daemon lane, so
- * production `subworkflow` still fails closed until the wiring slice lands.
+ * that keystone decision. It does not itself touch
+ * `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES` or wire any daemon lane; RC-4b
+ * (NGX-498) flipped `subworkflow` into that allowlist and wired the production
+ * lane that composes this decision once the configured lane was proven.
  *
  * Two pure, total halves (no SQLite, no file system, no clock, no network — the
  * same discipline `planSubworkflowChildMirror` and `planWorkflowStepDispatch`
