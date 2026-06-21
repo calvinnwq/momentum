@@ -41,7 +41,7 @@ unreachable-branch audit below finds nothing safe to delete within scope.
 | # | Runtime path | Decision | Prerequisite before any narrowing | Follow-up |
 |---|---|---|---|---|
 | 1 | Goal-first CLI compatibility (`goal start` / `status` / `logs` / `handoff` / `recovery clear`) | Deprecate-later; **read-back/recovery parity landed (NGX-486); read-back dedup narrowing landed (NGX-495)** | Workflow-first equivalents + migration coverage landed (NGX-486); the shared iteration-finalization primitive the `goal-loop` executor reused is now disentangled into the neutral `step-finalize.ts` seam (NGX-494); the duplicate goal-first read-back logic is now owned once by the shared `read-back.ts` seam (NGX-495); the domain-specific recovery guarded-clear dedup stays deferred and no goal-first command is removed | RC-1 (parity, NGX-486) / RC-1b (NGX-494) / RC-1c (narrowing, NGX-495) |
-| 2 | Imported `.agent-workflows` / `cwfp-*` compatibility | Defer | `NGX-404` default-switch dogfood passes its `coding-workflow-ownership.md` gates | `NGX-404` (existing) |
+| 2 | Imported `.agent-workflows` / `cwfp-*` compatibility | Defer | `NGX-499` proves the opt-in Momentum-native dogfood profile, then `NGX-404` accepts the default-switch evidence under `coding-workflow-ownership.md` | `NGX-499` (dogfood proof) then `NGX-404` (existing default switch) |
 | 3 | M9 live-wrapper direct `workflow_steps` advancement vs M10 executor-loop finalization | Keep (coexist); boundary seam landed | A single reconciliation seam now finalizes dispatched steps from durable executor evidence with a no-double-finalize proof; narrowing still waits on compatibility-lane migrations | RC-2 (seam landed, NGX-480) |
 | 4 | Production dispatch phase-1 scaffold (no fabricated result evidence) | Keep | RC-2 replaced the seam-level terminal gap and RC-5b now feeds real terminal executor evidence from configured daemon profiles; narrowing the scaffold still waits on compatibility-lane migrations | RC-2 (seam landed, NGX-480), RC-5 |
 | 5 | `external-apply` / `subworkflow` fail-closed executor families | `external-apply` narrowed; **`subworkflow` adapter mechanism + production flip landed (RC-4 NGX-497, RC-4b NGX-498)** | A landed daemon-dispatchable adapter per family, behind the existing safety contracts; RC-3 wires `external-apply` through the daemon dispatch lane, and RC-4 landed the `subworkflow` adapter mechanism (pure child-mirror mapping + async producer + daemon-lane entry-point factory) which RC-4b then flipped into production (child-definition config + bounded recursion safety, route-sourced launch plan, key-resolved start-or-attach child runner, daemon context deriver wired via `withSubworkflowDispatch`, `subworkflow` added to `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES`); the generic `unsupported_executor_family` fail-closed branch is retained defensively | RC-3 (`external-apply` wired, NGX-496), RC-4 (`subworkflow` adapter landed, NGX-497), RC-4b (`subworkflow` production flip, NGX-498) |
@@ -215,8 +215,10 @@ default switch is `NGX-404`, which is explicitly deferred and "is not permission
 to remove or break the current `coding-workflow-pipeline` path." Momentum-native
 run IDs must stay distinct from `cwfp-*` IDs.
 
-**Prerequisite before any narrowing.** The `NGX-404` default-switch dogfood
-passes every migration gate in `coding-workflow-ownership.md` (start →
+**Prerequisite before any narrowing.** `NGX-499` first proves the opt-in
+Momentum-native dogfood profile through PR validation while CWFP remains the
+default rollback path. Only after that proof can the `NGX-404` default-switch
+decision accept the migration gates in `coding-workflow-ownership.md` (start →
 implementation → postflight → no-mistakes → merge cleanup → Linear refresh; no
 chat-only approvals; no duplicate primary state; recovery after process/chat
 loss; historical `cwfp-*` runs still readable; clear rollback). Even after the
@@ -646,9 +648,14 @@ and add `RC-*` placeholders for the genuinely new consolidation work.
    `createLiveWrapperWorkflowDispatch` for configured daemon-default profiles so
    dispatched steps run a live command in production and feed real terminal
    evidence to the RC-2 reconciliation seam. (Path 6)
-6. **`NGX-404` (existing, deferred) — coding-workflow default switch.** Owns the
-   `cwfp-*` default-route narrowing under `coding-workflow-ownership.md`; the
-   import/read path survives regardless. (Path 2)
+6. **`NGX-499` — opt-in Momentum-native coding workflow dogfood proof.** Adds
+   the checked-in live-wrapper profile and wrapper-command contract used to prove
+   one Momentum-owned coding workflow through PR validation while CWFP remains the
+   default rollback path. (Path 2)
+7. **`NGX-404` (existing, deferred) — coding-workflow default switch.** Owns the
+   `cwfp-*` default-route narrowing under `coding-workflow-ownership.md` only
+   after the `NGX-499` dogfood proof is accepted; the import/read path survives
+   regardless. (Path 2)
 
 Ordering note: RC-2 is the prerequisite for the most consolidation (Paths 3 and
 4) and led — its reconciliation seam has now **landed** (NGX-480). RC-5's fake

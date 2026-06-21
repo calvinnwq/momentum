@@ -118,7 +118,8 @@ until the Momentum-native path proves:
 ## Migration Gates
 
 Momentum-native coding workflow can become the default only after a real dogfood
-PR proves:
+PR proves the `NGX-499` opt-in profile path and then the later `NGX-404`
+default-switch decision accepts that evidence. The dogfood PR must prove:
 
 - start -> implementation -> postflight -> no-mistakes -> merge cleanup ->
   Linear refresh,
@@ -129,7 +130,9 @@ PR proves:
 - rollback is clear: route new work back to CWFP and leave existing Momentum
   rows inspectable.
 
-Until those gates pass, the default remains CWFP.
+Until those gates pass, the default remains CWFP. `NGX-499` may add and prove an
+opt-in Momentum-native wrapper profile, but it does not flip defaults, retire
+CWFP, or remove historical `cwfp-*` visibility.
 
 ## Issue Sequence
 
@@ -142,10 +145,14 @@ The active replacement track is:
 5. `NGX-401` — postflight executor adapter.
 6. `NGX-402` — no-mistakes executor adapter and gate mirror.
 7. `NGX-403` — merge cleanup and Linear refresh adapters.
-8. `NGX-404` — default switch / CWFP retirement for new runs after dogfood.
+8. `NGX-499` — opt-in Momentum-native dogfood profile proof through PR
+   validation while CWFP remains the rollback/default path.
+9. `NGX-404` — default switch / CWFP retirement for new runs after the dogfood
+   evidence is accepted.
 
-`NGX-404` is intentionally deferred. It is not permission to remove or break
-the current `coding-workflow-pipeline` path.
+`NGX-499` is proof only; it is not permission to remove or break the current
+`coding-workflow-pipeline` path. `NGX-404` is intentionally deferred until that
+proof exists and the default-switch decision is made separately.
 
 ## Relationship To Native No-Mistakes Decomposition
 

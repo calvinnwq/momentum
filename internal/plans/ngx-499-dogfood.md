@@ -27,10 +27,12 @@ owned workflow steps through local commands. The profile covers:
 
 ## Wrapper command config
 
-The profile calls `dist/adapters/coding-workflow-live-wrapper-cli.js`. That wrapper
-loads `MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG`, selects the current step from
-`MOMENTUM_STEP_KIND`, runs the configured command, then writes the normalized
-`RunnerResult` JSON to `MOMENTUM_RESULT_PATH`.
+The profile calls `dist/adapters/coding-workflow-live-wrapper-cli.js`. That
+wrapper loads `MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG`, selects the current step
+from `MOMENTUM_STEP_KIND`, runs the configured command, then synthesizes and
+writes normalized `RunnerResult` JSON to `MOMENTUM_RESULT_PATH`. The child
+command does **not** write the result file directly; it communicates success or
+failure through its exit status.
 
 Minimal config:
 
@@ -51,9 +53,37 @@ Minimal config:
 }
 ```
 
+Per-step config keys use snake_case:
+
+- `command` — optional non-empty executable path/name. If omitted, the selected
+  step writes `success: false` with `No command is configured...`.
+- `args` — argv string array, default `[]`; use an explicit shell such as
+  `bash -lc` when shell expansion is required.
+- `cwd` — `repo` (default, requires `MOMENTUM_REPO_PATH`) or `iteration`
+  (requires `MOMENTUM_ITERATION_DIR`).
+- `timeout_sec` — positive integer seconds, default `900`. Timeout kills the
+  configured command's process tree through the live-step process-group helper.
+- `env_allow` — daemon environment names forwarded to the child command, default
+  `[]`; the wrapper always forwards the Momentum runtime variables
+  (`MOMENTUM_RUN_ID`, `MOMENTUM_STEP_ID`, `MOMENTUM_STEP_KIND`,
+  `MOMENTUM_ATTEMPT`, `MOMENTUM_REPO_PATH`, `MOMENTUM_ITERATION_DIR`,
+  `MOMENTUM_PROMPT_PATH`, and `MOMENTUM_RESULT_PATH`) when present.
+- `success_summary` / `failure_summary` — optional summaries overriding the
+  default command-exit summaries.
+- `key_changes_made`, `key_learnings`, `remaining_work` — string arrays, each
+  defaulting to `[]`; failed commands replace `remaining_work` with the standard
+  fix-this-step message.
+- `commit` — optional normalized commit intent; omitted values default to
+  `test: complete <step>` for verification steps and `chore: complete <step>`
+  for implementation / cleanup / refresh steps.
+
 Command failures become a valid runner result with `success: false`. That gives
 Momentum durable failed-step evidence instead of a stranded process-level
-manual-recovery state. Missing wrapper config also writes `success: false`.
+manual-recovery state. Missing wrapper config is treated as an empty `steps` map,
+so the selected step also writes `success: false` for the missing command.
+`test/coding-workflow-live-wrapper.test.ts` pins the checked-in profile shape,
+config parsing, successful command execution, failure-result writing, missing
+command evidence, and process-tree timeout cleanup.
 
 ## Dogfood shape
 

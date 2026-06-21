@@ -442,6 +442,11 @@ that shipped workflow-first path.
   [`src/core/workflow/dispatch-executor-run.ts`](../src/core/workflow/dispatch-executor-run.ts),
   [`src/core/workflow/dispatch-executor-terminalize.ts`](../src/core/workflow/dispatch-executor-terminalize.ts), and
   [`src/core/workflow/daemon-dispatch-exec-context.ts`](../src/core/workflow/daemon-dispatch-exec-context.ts).
+  NGX-499's opt-in coding-workflow dogfood profile is owned by
+  [`profiles/ngx-499-coding-workflow-live-wrapper.profile.json`](../profiles/ngx-499-coding-workflow-live-wrapper.profile.json),
+  [`src/adapters/coding-workflow-live-wrapper-cli.ts`](../src/adapters/coding-workflow-live-wrapper-cli.ts),
+  and
+  [`src/core/workflow/coding-workflow-live-wrapper.ts`](../src/core/workflow/coding-workflow-live-wrapper.ts).
   NGX-496 RC-3 daemon-dispatchable `external-apply` is owned by
   [`src/core/workflow/dispatch-external-apply.ts`](../src/core/workflow/dispatch-external-apply.ts)
   (pure M6 → executor-evidence mapping) and
@@ -483,9 +488,10 @@ that shipped workflow-first path.
     `test/workflow-daemon-dispatch-exec-context.test.ts`,
     `test/workflow-dispatch-executor-terminalize.test.ts`,
     `test/workflow-dispatch-executor-run.test.ts`,
-    `test/workflow-live-wrapper-dispatch.test.ts`, and
+    `test/workflow-live-wrapper-dispatch.test.ts`,
+    `test/coding-workflow-live-wrapper.test.ts`, and
     `test/cli-daemon-workflow-dispatch.test.ts` prove configured daemon profiles
-    run real wrapper commands, terminalize evidence, reconcile through RC-2,
+    run real wrapper commands, parse the NGX-499 checked-in profile, terminalize evidence, reconcile through RC-2,
     fail unconfigured / unresolved contexts into manual recovery, preserve
     idempotent re-entry, and avoid stranded dispatch leases.
   - RC-3 unit / integration proof: `test/workflow-dispatch-external-apply.test.ts`
