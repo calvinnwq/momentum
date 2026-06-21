@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.0](https://github.com/calvinnwq/momentum/compare/v0.8.0...v0.9.0) (2026-06-21)
+
+
+### Features
+
+* **workflow:** add Momentum-native dogfood workflow profile ([af4f77f](https://github.com/calvinnwq/momentum/commit/af4f77f8b72b30cabd96ed4a71dec2969c5fb3c9))
+* **workflow:** add NGX-499 dogfood wrapper profile ([d39d74d](https://github.com/calvinnwq/momentum/commit/d39d74d8f4adb32d9e94f307dcc2ad171b8abaaa))
+
 ## [0.8.0](https://github.com/calvinnwq/momentum/compare/v0.7.0...v0.8.0) (2026-06-21)
 
 
