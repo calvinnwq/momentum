@@ -1,0 +1,92 @@
+{
+  "name": "ngx-499-coding-workflow-live-wrapper",
+  "wrappers": {
+    "preflight": {
+      "command": "/usr/bin/env",
+      "args": ["node", "dist/tools/coding-workflow-live-wrapper.js"],
+      "cwd": "repo",
+      "timeout_sec": 1800,
+      "env_allow": [
+        "PATH",
+        "HOME",
+        "MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG"
+      ],
+      "result_file": "result.json",
+      "probe": {
+        "command": "/usr/bin/env",
+        "args": ["node", "--version"],
+        "timeout_sec": 30
+      }
+    },
+    "implementation": {
+      "command": "/usr/bin/env",
+      "args": ["node", "dist/tools/coding-workflow-live-wrapper.js"],
+      "cwd": "repo",
+      "timeout_sec": 7200,
+      "env_allow": [
+        "PATH",
+        "HOME",
+        "MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG"
+      ],
+      "result_file": "result.json",
+      "probe": {
+        "command": "/usr/bin/env",
+        "args": ["node", "--version"],
+        "timeout_sec": 30
+      }
+    },
+    "postflight": {
+      "command": "/usr/bin/env",
+      "args": ["node", "dist/tools/coding-workflow-live-wrapper.js"],
+      "cwd": "repo",
+      "timeout_sec": 3600,
+      "env_allow": [
+        "PATH",
+        "HOME",
+        "MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG"
+      ],
+      "result_file": "result.json",
+      "probe": {
+        "command": "/usr/bin/env",
+        "args": ["node", "--version"],
+        "timeout_sec": 30
+      }
+    },
+    "no-mistakes": {
+      "command": "/usr/bin/env",
+      "args": ["node", "dist/tools/coding-workflow-live-wrapper.js"],
+      "cwd": "repo",
+      "timeout_sec": 7200,
+      "env_allow": [
+        "PATH",
+        "HOME",
+        "MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG",
+        "LINEAR_API_KEY"
+      ],
+      "result_file": "result.json",
+      "probe": {
+        "command": "/usr/bin/env",
+        "args": ["node", "--version"],
+        "timeout_sec": 30
+      }
+    },
+    "merge-cleanup": {
+      "command": "/usr/bin/env",
+      "args": ["node", "dist/tools/coding-workflow-live-wrapper.js"],
+      "cwd": "repo",
+      "timeout_sec": 7200,
+      "env_allow": [
+        "PATH",
+        "HOME",
+        "MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG",
+        "LINEAR_API_KEY"
+      ],
+      "result_file": "result.json",
+      "probe": {
+        "command": "/usr/bin/env",
+        "args": ["node", "--version"],
+        "timeout_sec": 30
+      }
+    }
+  }
+}
