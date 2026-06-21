@@ -5,15 +5,22 @@ import path from "node:path";
 
 import { runCli } from "../src/cli.js";
 import { openDb } from "../src/adapters/db.js";
+import type { WorkflowDefinition } from "../src/core/workflow/definition.js";
+import { persistWorkflowDefinition } from "../src/core/workflow/definition-persist.js";
+import { persistWorkflowRunStart } from "../src/core/workflow/run-start-persist.js";
 import { runDaemonLoop } from "../src/core/daemon/loop.js";
 import { startDaemonRun } from "../src/core/daemon/runs.js";
 import {
+  deriveDispatchInvocationId,
   executeWorkflowStepDispatch,
   WORKFLOW_DISPATCH_RESULT_STATUS
 } from "../src/core/workflow/dispatch-execute.js";
 import { createTerminalizingWorkflowDispatch } from "../src/core/workflow/dogfood-dispatch.js";
 import { claimRunnableWorkflowStep } from "../src/core/workflow/scheduler.js";
 import type { WorkflowStepDispatch } from "../src/core/workflow/scheduler.js";
+import { getWorkflowLease } from "../src/core/workflow/leases.js";
+import { getWorkflowStep } from "../src/core/workflow/step-transitions.js";
+import { loadExecutorInvocation } from "../src/core/executors/loop-persist.js";
 
 type RunResult = {
   code: number;
@@ -266,6 +273,98 @@ describe("dogfood single-process multi-dispatch terminalization (NGX-391)", () =
     );
     expect(handoffStepStates["preflight"]).toBe("succeeded");
     expect(handoffStepStates["implementation"]).toBe("succeeded");
+  });
+});
+
+describe("dogfood terminalize leaves adapter-owned subworkflow steps to their runner", () => {
+  const childDefinition: WorkflowDefinition = {
+    key: "dogfood-subworkflow-child",
+    title: "Dogfood subworkflow child",
+    version: 1,
+    steps: [
+      {
+        key: "preflight",
+        kind: "preflight",
+        executor: "one-shot",
+        order: 1,
+        required: true
+      }
+    ]
+  };
+  const parentDefinition: WorkflowDefinition = {
+    key: "dogfood-subworkflow-parent",
+    title: "Dogfood subworkflow parent",
+    version: 1,
+    steps: [
+      {
+        key: "implementation",
+        kind: "implementation",
+        executor: "subworkflow",
+        order: 1,
+        required: true
+      }
+    ]
+  };
+
+  it("does not prematurely succeed a dispatched subworkflow scaffold", () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const runId = "dogfood-subworkflow-skip";
+    const now = Date.now();
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowDefinition(db, childDefinition, { now });
+      persistWorkflowDefinition(db, parentDefinition, { now });
+      persistWorkflowRunStart(db, {
+        definition: parentDefinition,
+        runId,
+        repoPath: repoDir,
+        objective: "Dogfood subworkflow adapter-owned dispatch proof",
+        route: {
+          subworkflow: { child: { childDefinitionKey: childDefinition.key } }
+        },
+        now
+      });
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?"
+      ).run(runId, "implementation");
+      db.prepare("UPDATE workflow_runs SET state = 'approved' WHERE id = ?").run(
+        runId
+      );
+
+      const claim = claimRunnableWorkflowStep(db, {
+        runId,
+        stepId: "implementation",
+        holder: "dogfood-subworkflow",
+        leaseExpiresAt: now + 60_000,
+        now
+      });
+      expect(claim.ok).toBe(true);
+      if (!claim.ok) return;
+
+      const wrapped = createTerminalizingWorkflowDispatch(
+        executeWorkflowStepDispatch
+      );
+      const result = wrapped(claim.claim, {
+        db,
+        workerId: "dogfood-subworkflow",
+        now: now + 1
+      });
+
+      expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
+      expect(getWorkflowStep(db, runId, "implementation")?.state).toBe(
+        "running"
+      );
+      expect(getWorkflowLease(db, runId, "dispatch")?.releasedAt).toBeNull();
+      const invocation = loadExecutorInvocation(
+        db,
+        deriveDispatchInvocationId(runId, "implementation")
+      );
+      expect(invocation?.executorFamily).toBe("subworkflow");
+      expect(invocation?.state).toBe("running");
+    } finally {
+      db.close();
+    }
   });
 });
 
