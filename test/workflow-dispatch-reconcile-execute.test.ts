@@ -12,6 +12,7 @@ import {
   type ClaimedWorkflowStep
 } from "../src/core/workflow/scheduler.js";
 import {
+  acquireWorkflowLease,
   getWorkflowLease,
   releaseWorkflowLease
 } from "../src/core/workflow/leases.js";
@@ -318,6 +319,44 @@ describe("reconcileDispatchedWorkflowStep — idempotency", () => {
     const afterSecond = stepRow(db, "preflight");
     expect(afterSecond).toEqual(afterFirst);
     expect(afterSecond.finishedAt).toBe(RECONCILE_AT);
+  });
+
+  it("releases a reacquired dispatch lease for the same running step", () => {
+    const db = openSeededDb();
+    dispatchStep(db, "preflight");
+    db.prepare(
+      "UPDATE executor_invocations SET executor_family = 'subworkflow' WHERE invocation_id = ?"
+    ).run(dispatchInvocationId("preflight"));
+    driveInvocationTerminal(db, "preflight", "succeeded");
+    const oldLease = getWorkflowLease(db, RUN_ID, "dispatch");
+    if (!oldLease) throw new Error("test setup: missing dispatch lease");
+    releaseWorkflowLease(db, {
+      runId: oldLease.runId,
+      leaseKind: oldLease.leaseKind,
+      holder: oldLease.holder,
+      acquiredAt: oldLease.acquiredAt,
+      now: TERMINAL_AT
+    });
+    const reacquired = acquireWorkflowLease(db, {
+      runId: RUN_ID,
+      leaseKind: "dispatch",
+      holder: "worker-restarted",
+      expiresAt: RECONCILE_AT + 30_000,
+      now: RECONCILE_AT + 10
+    });
+    expect(reacquired.ok).toBe(true);
+
+    const result = reconcileDispatchedWorkflowStep({
+      db,
+      runId: RUN_ID,
+      stepId: "preflight",
+      now: RECONCILE_AT + 20
+    });
+
+    expect(result.status).toBe(WORKFLOW_RECONCILE_RESULT_STATUS.finalized);
+    const currentLease = getWorkflowLease(db, RUN_ID, "dispatch");
+    expect(currentLease?.holder).toBe("worker-restarted");
+    expect(currentLease?.releasedAt).toBe(RECONCILE_AT + 20);
   });
 
   it("does not release a newer dispatch lease while reconciling old terminal evidence", () => {
