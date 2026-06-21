@@ -1,7 +1,8 @@
-import { spawnSync, type SpawnSyncReturns } from "node:child_process";
+import type { SpawnSyncReturns } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
+import { runProcessGroupSync } from "../../adapters/live-step-wrapper.js";
 import { normalizeRunnerResult } from "../executors/runner-result.js";
 import type { CommitIntent, CommitType, RunnerResult } from "../executors/types.js";
 import {
@@ -80,7 +81,13 @@ export function defaultCodingWorkflowWrapperDeps(): CodingWorkflowWrapperDeps {
     readFile: (filePath) => fs.readFileSync(filePath, "utf8"),
     writeFile: (filePath, contents) => fs.writeFileSync(filePath, contents, "utf8"),
     mkdir: (dirPath) => fs.mkdirSync(dirPath, { recursive: true }),
-    spawn: (command, args, options) => spawnSync(command, args, options),
+    spawn: (command, args, options) =>
+      runProcessGroupSync(command, [...args], {
+        cwd: options.cwd,
+        env: options.env,
+        timeoutMs: options.timeout,
+        maxBuffer: options.maxBuffer
+      }),
     stdout: (chunk) => {
       fs.writeSync(1, chunk);
     },
