@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.8.0](https://github.com/calvinnwq/momentum/compare/v0.7.0...v0.8.0) (2026-06-21)
+
+
+### Features
+
+* **workflow:** enable production subworkflow dispatch ([491a456](https://github.com/calvinnwq/momentum/commit/491a45611ac7442892fa124074e36aac28671608))
+* **workflow:** Landed RC-4b slice (b)-IO for NGX-498: a production start-or-attach subworkflow child-run runner builder that resolves the child definition by key (replacing RC-4's test-only hardcoded runner) and observes the child run via the workflow-owned seams, with 5 TDD tests and all repo gates green while production subworkflow stays fail-closed. ([273b3cf](https://github.com/calvinnwq/momentum/commit/273b3cff7aaf121a71ebfdf64c3ac317f2360a4d))
+* **workflow:** Landed RC-4b slice (b2) for NGX-498: the daemon-lane subworkflow context deriver that reads parent run facts and composes iterations 1-3 (route-sourced recursion-safe launch plan + key-resolved child runner + parent-run-dir evidence) into the DispatchedSubworkflowContextResolution the RC-4 entry-point factory injects, with 16 TDD tests and all repo gates green while production subworkflow stays fail-closed. ([e750933](https://github.com/calvinnwq/momentum/commit/e750933ae0b0320160a2ee7663b289aac4180517))
+* **workflow:** Landed the keystone NGX-498 production flip: a configured subworkflow step now dispatches its child run through bounded daemon start, with a dogfood/smoke proof and all repo gates green. ([511dc81](https://github.com/calvinnwq/momentum/commit/511dc8197b4126fa1c807be6bdbc997c29cecf91))
+* **workflow:** Landed the keystone RC-4b slice for NGX-498: a pure, total child-definition config shape plus recursion/self-reference safety decider for production subworkflow steps, the "open decision" the production flip was deferred on, with 14 focused tests and all repo gates green while production subworkflow stays fail-closed. ([4e99e73](https://github.com/calvinnwq/momentum/commit/4e99e73af093f6aa5eff76b722edbc2504bbf025))
+* **workflow:** Landed the pure policy core of NGX-498's daemon-lane subworkflow deriver: a route-based child-config source plus durable recursion-lineage encoding/propagation that composes iteration 1's deciders, with 21 TDD tests and all repo gates green. ([21c3dfe](https://github.com/calvinnwq/momentum/commit/21c3dfe0e86443f4ee631db65fe59cace55a06c0))
+
+
+### Bug Fixes
+
+* **workflow:** harden subworkflow dispatch handoff ([ade9252](https://github.com/calvinnwq/momentum/commit/ade9252e41051169d52fca7def19a771ac05d6c6))
+
 ## [0.7.0](https://github.com/calvinnwq/momentum/compare/v0.6.0...v0.7.0) (2026-06-20)
 
 
