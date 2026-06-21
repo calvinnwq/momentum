@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.8.0](https://github.com/calvinnwq/momentum/compare/v0.7.0...v0.8.0) (2026-06-21)
+
+
+### Features
+
+* **workflow:** enable production subworkflow dispatch for configured steps through bounded daemon start, child-definition resolution, recursion-safe routing, terminal evidence mirroring, and dogfood proof ([491a456](https://github.com/calvinnwq/momentum/commit/491a45611ac7442892fa124074e36aac28671608))
+* **workflow:** add child-definition config, recursion lineage, and daemon-lane context derivation for production subworkflow dispatch ([4e99e73](https://github.com/calvinnwq/momentum/commit/4e99e73af093f6aa5eff76b722edbc2504bbf025), [21c3dfe](https://github.com/calvinnwq/momentum/commit/21c3dfe0e86443f4ee631db65fe59cace55a06c0), [e750933](https://github.com/calvinnwq/momentum/commit/e750933ae0b0320160a2ee7663b289aac4180517))
+* **workflow:** add a key-resolved start-or-attach child-runner for subworkflow dispatch through workflow-owned seams ([273b3cf](https://github.com/calvinnwq/momentum/commit/273b3cff7aaf121a71ebfdf64c3ac317f2360a4d), [511dc81](https://github.com/calvinnwq/momentum/commit/511dc8197b4126fa1c807be6bdbc997c29cecf91))
+
+
+### Bug Fixes
+
+* **workflow:** harden subworkflow dispatch handoff ([ade9252](https://github.com/calvinnwq/momentum/commit/ade9252e41051169d52fca7def19a771ac05d6c6))
+
 ## [0.7.0](https://github.com/calvinnwq/momentum/compare/v0.6.0...v0.7.0) (2026-06-20)
 
 
