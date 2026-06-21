@@ -142,14 +142,16 @@ artifact when dispatch or finalization cannot safely continue, preserving stable
 classifications such as `head_mismatch`, `result_missing`, `repo_lock_lost`,
 `auth_unavailable`, and `executor_threw`. The workflow scheduler dispatcher also
 uses this run-scoped surface when a claimed step cannot be resolved to a known
-definition step or uses an executor family the daemon cannot dispatch yet (for
-example `subworkflow`); that path opens a `manual_recovery_required` workflow
-gate instead of silently dropping the claim. The daemon-dispatchable
-`external-apply` path uses the same surface when issue scope, pending-intent
-matching, credentials, policy, audit, or adapter safety checks refuse the write.
-The configured live-wrapper dispatch lane uses the same surface when the wrapper
-is unconfigured for the claimed step kind, the step's repo/run directory cannot
-be derived, the run directory cannot be created, or a live wrapper returns a
+definition step or uses an executor family the daemon cannot dispatch yet; that
+path opens a `manual_recovery_required` workflow gate instead of silently dropping
+the claim. The daemon-dispatchable `external-apply` path uses the same surface
+when issue scope, pending-intent matching, credentials, policy, audit, or adapter
+safety checks refuse the write. The configured `subworkflow` path uses the same
+surface when child config is missing, recursion is unsafe, a child definition or
+attachment cannot be trusted, or child state cannot be mirrored safely. The
+configured live-wrapper dispatch lane uses the same surface when the wrapper is
+unconfigured for the claimed step kind, the step's repo/run directory cannot be
+derived, the run directory cannot be created, or a live wrapper returns a
 process-level failure such as `runtime_unavailable`. If
 the claimed run row has vanished, Momentum cannot write a run-scoped flag or
 gate without orphaning evidence, so it releases the lingering dispatch lease

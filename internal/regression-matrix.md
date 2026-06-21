@@ -515,8 +515,14 @@ that shipped workflow-first path.
     `test/workflow-dispatch-subworkflow-child-run.test.ts` binds the producer to a
     real child workflow run through the existing run-start / status seams (no
     duplicate child run, parent finalized only from durable terminal child
-    evidence, fail-closed on an ambiguous canceled child). RC-4b adds the configured
-    production flip proof for route-sourced child config and bounded daemon dispatch.
+    evidence, fail-closed on an ambiguous canceled child). RC-4b adds
+    `test/workflow-subworkflow-child-config.test.ts`,
+    `test/workflow-subworkflow-route.test.ts`,
+    `test/workflow-subworkflow-child-runner.test.ts`,
+    `test/workflow-subworkflow-dispatch-context.test.ts`, and
+    `test/workflow-dispatch-subworkflow-flip.test.ts` for route-sourced child
+    config, bounded recursion, key-resolved child-run attachment, and bounded
+    daemon dispatch.
   - Real closeout dogfood: `ngx353-m10-closeout` in `/Users/ngxcalvin/.momentum`
     reached `preflight = running` with executor invocation / round scaffold rows
     and `workflow run monitor` reported `monitorDrift.drifted = false`.
