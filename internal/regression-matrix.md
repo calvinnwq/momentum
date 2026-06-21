@@ -455,10 +455,14 @@ that shipped workflow-first path.
   [`src/core/workflow/dispatch-subworkflow-run.ts`](../src/core/workflow/dispatch-subworkflow-run.ts)
   (async run-path producer), and
   [`src/core/workflow/subworkflow-dispatch.ts`](../src/core/workflow/subworkflow-dispatch.ts)
-  (daemon-lane entry-point factory); the production `subworkflow` branch in
-  [`src/core/workflow/dispatch.ts`](../src/core/workflow/dispatch.ts) stays
-  fail-closed (`subworkflow` is not yet in `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES`)
-  until a separate PHASE1 dispatch-lane flip lands.
+  (daemon-lane entry-point factory). NGX-498 RC-4b flipped configured
+  production dispatch through
+  [`src/core/workflow/subworkflow-child-config.ts`](../src/core/workflow/subworkflow-child-config.ts),
+  [`src/core/workflow/subworkflow-route.ts`](../src/core/workflow/subworkflow-route.ts),
+  [`src/core/workflow/subworkflow-child-runner.ts`](../src/core/workflow/subworkflow-child-runner.ts),
+  [`src/core/workflow/subworkflow-dispatch-context.ts`](../src/core/workflow/subworkflow-dispatch-context.ts),
+  [`src/core/workflow/dispatch.ts`](../src/core/workflow/dispatch.ts), and
+  [`src/cli.ts`](../src/cli.ts).
 - **Evidence.**
   - Unit / CLI: `test/workflow-dispatch.test.ts`,
     `test/workflow-dispatch-persist.test.ts`,
@@ -496,7 +500,7 @@ that shipped workflow-first path.
     binds the producer to the real `executeExternalApply` through a mock Linear
     client (applied → succeeded + RC-2 finalize, idempotent re-entry never
     re-writes, real `policy_denied` refusal → manual recovery with no write
-    attempted). `external-apply` is now in the dispatchable family set and wired through daemon dispatch composition; `subworkflow` remains fail-closed.
+    attempted). `external-apply` is now in the dispatchable family set and wired through daemon dispatch composition; `subworkflow` followed in RC-4/RC-4b.
   - RC-4 unit / integration proof: `test/workflow-dispatch-subworkflow.test.ts`
     pins the pure child-run → executor-evidence mapping (non-terminal child
     defers, `succeeded` / `failed` mirror to clean terminals, `canceled` /
@@ -511,8 +515,8 @@ that shipped workflow-first path.
     `test/workflow-dispatch-subworkflow-child-run.test.ts` binds the producer to a
     real child workflow run through the existing run-start / status seams (no
     duplicate child run, parent finalized only from durable terminal child
-    evidence, fail-closed on an ambiguous canceled child). `subworkflow` stays
-    fail-closed in production until a separate PHASE1 dispatch-lane flip.
+    evidence, fail-closed on an ambiguous canceled child). RC-4b adds the configured
+    production flip proof for route-sourced child config and bounded daemon dispatch.
   - Real closeout dogfood: `ngx353-m10-closeout` in `/Users/ngxcalvin/.momentum`
     reached `preflight = running` with executor invocation / round scaffold rows
     and `workflow run monitor` reported `monitorDrift.drifted = false`.
@@ -533,9 +537,9 @@ that shipped workflow-first path.
   (`workflow_run_not_found`), it cannot write a run-scoped flag or gate without
   orphaning evidence, so it releases the lease and creates no executor rows. The
   phase-1 dispatchable set is exactly `goal-loop`, `one-shot`, `script`,
-  `no-mistakes`, and `external-apply`; the RC-4 `subworkflow` adapter mechanism
-  has landed, but production `subworkflow` stays fail-closed until the separate
-  PHASE1 dispatch-lane flip and child-definition config decision land.
+  `no-mistakes`, `external-apply`, and `subworkflow`; RC-4/RC-4b landed the
+  configured `subworkflow` adapter lane, while the generic unsupported-family
+  branch remains defensive for future families.
 - **Owner.** [`src/core/workflow/dispatch.ts`](../src/core/workflow/dispatch.ts) and
   [`src/core/workflow/dispatch-execute.ts`](../src/core/workflow/dispatch-execute.ts).
 - **Evidence.**

@@ -518,6 +518,40 @@ describe("createLiveWrapperWorkflowDispatch — does not execute over a non-star
   });
 });
 
+describe("createLiveWrapperWorkflowDispatch — family-owned lanes", () => {
+  it("leaves subworkflow scaffolds for the dedicated subworkflow dispatch wrapper", () => {
+    const db = openSeededDb();
+    db.prepare(
+      `UPDATE step_definitions SET executor = 'subworkflow'
+         WHERE definition_key = ? AND definition_version = ? AND step_key = ?`
+    ).run(CODING_WORKFLOW_DEFINITION.key, CODING_WORKFLOW_DEFINITION.version, "preflight");
+    const claim = approveAndClaim(db, "preflight");
+    const { registry, calls } = countingRegistry(succeededResult);
+    const dispatch = createLiveWrapperWorkflowDispatch(
+      executeWorkflowStepDispatch,
+      {
+        registry,
+        deriveExec: () => {
+          throw new Error("deriveExec must not run for a subworkflow scaffold");
+        }
+      }
+    );
+
+    const result = dispatch(claim, tickContext(db));
+
+    expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
+    expect(calls()).toBe(0);
+    expect(stepState(db, "preflight")).toBe("running");
+    const invocation = loadExecutorInvocation(
+      db,
+      deriveDispatchInvocationId(RUN_ID, "preflight")
+    );
+    expect(invocation?.executorFamily).toBe("subworkflow");
+    expect(invocation?.state).toBe("running");
+    expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).toBeNull();
+  });
+});
+
 describe("createLiveWrapperWorkflowDispatch — M9 direct-finalize lane preserved", () => {
   it("a real fail-closed base dispatch over an unlinked run finalizes nothing through this lane", () => {
     const db = openSeededDb();

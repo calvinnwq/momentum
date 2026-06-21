@@ -409,7 +409,7 @@ Coverage:
   same gate list in `test/cli-workflow-run-logs.test.ts`.
 - the pure workflow-dispatch decision domain in `test/workflow-dispatch.test.ts`:
   the phase-1 dispatchable allowlist (`goal-loop`, `one-shot`, `script`,
-  `no-mistakes`, `external-apply`), `subworkflow` fail-closed routing,
+  `no-mistakes`, `external-apply`, `subworkflow`), defensive unsupported-family routing,
   resolution-failure code mapping, and totality.
 - durable dispatch resolution in `test/workflow-dispatch-persist.test.ts`:
   run -> definition-link -> step-definition -> executor-family resolution,
@@ -455,9 +455,9 @@ Coverage:
   child-context derivation in manual recovery; and the child-run integration test
   binds the producer to a real child workflow run through the existing run-start /
   status seams (no duplicate child run, parent finalized only from durable
-  terminal child evidence). The production `subworkflow` branch stays fail-closed
-  (not yet in `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES`) until a separate PHASE1
-  dispatch-lane flip.
+  terminal child evidence). RC-4b adds configured production-lane coverage for
+  route-sourced child config / lineage, key-resolved child-run attachment, and
+  bounded daemon dispatch through `test/workflow-dispatch-subworkflow-flip.test.ts`.
 - shipped bounded `daemon start` workflow-lane wiring in
   `test/cli-daemon-workflow-dispatch.test.ts`: the managed loop dispatches an
   approved workflow step with no test-only injection, surfaces

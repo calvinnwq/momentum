@@ -33,10 +33,11 @@
  *   - On success it returns a start-or-attach {@link DispatchedSubworkflowChildRunner}.
  *     The first tick durably starts the child run from the resolved definition with
  *     the propagated child route; a later tick hits the run-start conflict guard and
- *     *attaches* to the SAME child run rather than starting a duplicate — the
- *     start-or-attach idempotency the producer's contract places in the injected
- *     runner. Each tick re-observes the child's real state through the status
- *     read-back seam and mirrors its needs-manual-recovery flags onto the
+ *     *attaches* to the SAME child run only after verifying the existing row is the
+ *     expected child definition. A conflicting row at the deterministic child id is
+ *     an unsupported attachment and fails closed instead of silently observing an
+ *     unrelated run. Each tick re-observes the child's real state through the
+ *     status read-back seam and mirrors its needs-manual-recovery flags onto the
  *     observation the producer's mirror mapping consumes.
  *   - It never reaches into the child run's steps / gates / terminal state: the
  *     child run is a first-class `workflow_runs` row that owns its own lifecycle,
@@ -107,6 +108,21 @@ export function buildDispatchedSubworkflowChildRunner(
     };
   }
 
+  const existingAttachment = loadChildRunAttachment(input.db, input.childRunId);
+  if (
+    existingAttachment !== undefined &&
+    existingAttachment.definitionKey !== input.childDefinitionKey
+  ) {
+    return {
+      ok: false,
+      reason: unsupportedAttachmentReason(
+        input.childRunId,
+        input.childDefinitionKey,
+        existingAttachment.definitionKey
+      )
+    };
+  }
+
   const run: DispatchedSubworkflowChildRunner = async () =>
     startOrAttachAndObserveChildRun(input, definition);
 
@@ -130,11 +146,22 @@ function startOrAttachAndObserveChildRun(
     });
   } catch (error) {
     // Attach: a prior tick already started this child run. Idempotent re-entry —
-    // never start a second child run; fall through to observe the existing run.
+    // never start a second child run; verify the existing row is the expected
+    // child definition, then fall through to observe it.
     // Any other failure (e.g. an invalid run-start the parent facts should have
     // precluded) propagates so the entry-point factory parks the step for manual
     // recovery rather than silently mis-observing.
     if (!(error instanceof WorkflowRunStartConflictError)) throw error;
+    const attached = loadChildRunAttachment(db, childRunId);
+    if (attached?.definitionKey !== input.childDefinitionKey) {
+      throw new Error(
+        unsupportedAttachmentReason(
+          childRunId,
+          input.childDefinitionKey,
+          attached?.definitionKey ?? null
+        )
+      );
+    }
   }
 
   const detail = loadWorkflowRunDetail(db, childRunId);
@@ -150,4 +177,27 @@ function startOrAttachAndObserveChildRun(
     childNeedsManualRecovery: detail.run.needsManualRecovery,
     childManualRecoveryReason: detail.run.manualRecoveryReason
   };
+}
+
+function loadChildRunAttachment(
+  db: MomentumDb,
+  runId: string
+): { definitionKey: string | null } | undefined {
+  const row = db
+    .prepare("SELECT workflow_definition_key FROM workflow_runs WHERE id = ?")
+    .get(runId) as { workflow_definition_key: string | null } | undefined;
+  if (row === undefined) return undefined;
+  return { definitionKey: row.workflow_definition_key };
+}
+
+function unsupportedAttachmentReason(
+  childRunId: string,
+  expectedDefinitionKey: string,
+  actualDefinitionKey: string | null
+): string {
+  return (
+    `Subworkflow child run ${childRunId} already exists for definition ` +
+    `'${actualDefinitionKey ?? "<unlinked>"}' instead of '${expectedDefinitionKey}'; ` +
+    "routing to manual recovery."
+  );
 }

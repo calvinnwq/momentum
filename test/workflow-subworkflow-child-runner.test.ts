@@ -58,6 +58,12 @@ const CHILD_DEFINITION: WorkflowDefinition = {
   ]
 };
 
+const OTHER_DEFINITION: WorkflowDefinition = {
+  ...CHILD_DEFINITION,
+  key: "other-child-workflow",
+  title: "Other Child Workflow"
+};
+
 /** A propagated child route, as iteration 2's `deriveChildSubworkflowRoute` builds. */
 const CHILD_ROUTE = {
   subworkflow: {
@@ -199,6 +205,28 @@ describe("buildDispatchedSubworkflowChildRunner — fail closed on a missing chi
     if (resolution.ok) return;
     expect(resolution.reason).toContain("no-such-definition");
     expect(countRuns(db)).toBe(1); // only the parent — no child fabricated
+  });
+});
+
+describe("buildDispatchedSubworkflowChildRunner — fail closed on unsupported attachment", () => {
+  it("refuses to attach when the deterministic child run id already belongs to another definition", () => {
+    const db = openSeededDb();
+    persistWorkflowDefinition(db, OTHER_DEFINITION, { now: NOW });
+    persistWorkflowRunStart(db, {
+      definition: OTHER_DEFINITION,
+      runId: CHILD_RUN_ID,
+      repoPath: "/repos/momentum",
+      objective: "Conflicting pre-existing child run",
+      now: NOW + 1
+    });
+
+    const resolution = buildRunner(db);
+
+    expect(resolution.ok).toBe(false);
+    if (resolution.ok) return;
+    expect(resolution.reason).toContain(CHILD_RUN_ID);
+    expect(resolution.reason).toContain(CHILD_DEFINITION_KEY);
+    expect(resolution.reason).toContain(OTHER_DEFINITION.key);
   });
 });
 

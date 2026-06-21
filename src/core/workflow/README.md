@@ -44,7 +44,7 @@ Other domains reach workflow behavior through these modules:
 - **CLI renderers** (`src/renderers/workflow.ts`): the same run/gate/monitor/
   status/handoff/logs shapes, imported **type-only** (renderers format, they
   do not mutate state).
-- **Top-level dispatch** (`src/cli.ts`): `dispatch-execute`, `dogfood-dispatch`, `external-apply-dispatch`; future `subworkflow` production wiring composes `subworkflow-dispatch` after the child-definition config decision and PHASE1 allowlist flip.
+- **Top-level dispatch** (`src/cli.ts`): `dispatch-execute`, `dogfood-dispatch`, `external-apply-dispatch`, and `subworkflow-dispatch`; configured `subworkflow` steps compose the child-run producer after the base scaffold while live-wrapper-owned families stay on the live-wrapper lane.
 - **Dispatched-step reconciliation**: `dispatch-reconcile` /
   `dispatch-reconcile-execute` own the RC-2 pure/effect seam that finalizes a
   dispatched step from terminal executor evidence.
@@ -119,12 +119,14 @@ RC-3 (NGX-496) added the daemon-dispatchable `external-apply` adapter:
 through RC-2, and `external-apply-dispatch.ts` gates the producer by scaffold
 family after the base dispatcher creates the durable start rows.
 
-RC-4 (NGX-497) added the `subworkflow` adapter mechanism without flipping the
-production family allowlist: `dispatch-subworkflow.ts` maps a child workflow
-run's observed state into defer / mirror evidence,
+RC-4 (NGX-497) added the `subworkflow` adapter mechanism, and RC-4b (NGX-498)
+flipped the configured production lane: `dispatch-subworkflow.ts` maps a child
+workflow run's observed state into defer / mirror evidence,
 `dispatch-subworkflow-run.ts` starts or attaches to the child through an injected
 runner and reconciles the parent only after terminal child evidence,
 `subworkflow-dispatch.ts` provides the daemon-lane entry-point factory, and
 `scheduler.ts` can recheck a deferred child run by heartbeating or reacquiring
-the parent dispatch lease. Production `subworkflow` dispatch remains fail-closed
-until the separate PHASE1 flip and child-definition config decision land.
+the parent dispatch lease. The production deriver sources child config and
+lineage from `route.subworkflow`, resolves the child definition by key, refuses
+unsafe recursion / unsupported attachment, and keeps manual-recovery behavior for
+missing or ambiguous child state.

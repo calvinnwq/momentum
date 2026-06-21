@@ -92,7 +92,7 @@ import type { RunnerResult } from "../src/core/executors/types.js";
  *   -> workflow run start (built-in coding workflow definition)
  *   -> production dispatch seam -> phase-1 executor start scaffold
  *   -> landed executor adapter -> terminal finalization + passing verification
- *   -> external-write family stays policy-gated closed (manual-recovery gate)
+ *   -> external-write family stays policy-gated closed (scaffold only here)
  *
  * Faithfulness / phase-1 boundary: `executeWorkflowStepDispatch` is the shipped
  * production dispatch path and stops at the start *scaffold* (invocation
@@ -1146,7 +1146,7 @@ describe("NGX-372 full adapter E2E proof", () => {
     }
   });
 
-  it("keeps the external-write family policy-gated closed: the real linear-refresh step fails closed into operator recovery", () => {
+  it("keeps the external-write family policy-gated closed: the real linear-refresh step creates only the base scaffold", () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir("momentum-ngx-372-e2e-repo-");
     const db = openDb(dataDir);
@@ -1155,7 +1155,7 @@ describe("NGX-372 full adapter E2E proof", () => {
       seedCodingWorkflowRun(db, {
         runId,
         repoPath: repoDir,
-        objective: "Prove the external-write step stays policy-gated closed"
+        objective: "Prove the external-write step scaffolds without a policy-gated write"
       });
 
       // Advance every step before `linear-refresh` to terminal success so the real
@@ -1187,28 +1187,20 @@ describe("NGX-372 full adapter E2E proof", () => {
         now: NOW + 3
       });
 
-      // The external-write family is not a phase-1 dispatchable family: external
-      // writes stay disabled. The dispatch fails closed, creating NO executor rows
-      // and instead parking the run behind an operator-visible manual-recovery gate
-      // (the M6 write policy is the only thing that may ever open the write path).
-      expect(dispatch.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.failClosed);
-      expect(countRows(db, "executor_invocations")).toBe(0);
-      expect(countRows(db, "executor_rounds")).toBe(0);
+      // The base dispatcher now scaffolds the external-apply family for its
+      // dedicated daemon adapter. This proof still keeps external writes closed:
+      // no policy-gated adapter execution runs here, so only the empty scaffold
+      // exists and the dispatch lease remains held for the adapter lane.
+      expect(dispatch.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
+      expect(countRows(db, "executor_invocations")).toBe(1);
+      expect(countRows(db, "executor_rounds")).toBe(1);
 
       const gates = listWorkflowGatesForRun(db, runId);
-      expect(gates).toHaveLength(1);
-      expect(gates[0]).toMatchObject({
-        gateType: "manual_recovery_required",
-        targetScope: "step",
-        stepRunId: "linear-refresh",
-        resolvedAt: null
-      });
-      expect(gates[0]?.reason).toContain("external-apply");
+      expect(gates).toHaveLength(0);
       expect(
         getWorkflowRunManualRecoveryState(db, runId)?.needsManualRecovery
-      ).toBe(true);
-      // The dispatch lease is released, not stranded.
-      expect(getWorkflowLease(db, runId, "dispatch")?.releasedAt).not.toBeNull();
+      ).toBe(false);
+      expect(getWorkflowLease(db, runId, "dispatch")?.releasedAt).toBeNull();
 
       // Record the policy-gate evidence alongside the happy-path composition.
       const evidencePath = recordCompositionEvidence(dataDir, "policy-gate", {
@@ -1230,9 +1222,9 @@ describe("NGX-372 full adapter E2E proof", () => {
       const recorded = JSON.parse(fs.readFileSync(evidencePath, "utf8")) as {
         externalWriteStep: { executorRows: number; dispatchStatus: string };
       };
-      expect(recorded.externalWriteStep.executorRows).toBe(0);
+      expect(recorded.externalWriteStep.executorRows).toBe(2);
       expect(recorded.externalWriteStep.dispatchStatus).toBe(
-        WORKFLOW_DISPATCH_RESULT_STATUS.failClosed
+        WORKFLOW_DISPATCH_RESULT_STATUS.dispatched
       );
     } finally {
       db.close();

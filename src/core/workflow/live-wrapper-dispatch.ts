@@ -21,9 +21,12 @@
  * Boundary discipline (so RC-2 stays the single finalization owner):
  *
  *   - The executor runs only after a dispatch that genuinely started (or re-entered)
- *     a scaffold ({@link shouldRunDispatchedExecutor}). A fail-closed / not-startable
- *     base dispatch already released its lease and either parked the run or wrote
- *     nothing, so this wrapper leaves it untouched and echoes the base result.
+ *     a scaffold ({@link shouldRunDispatchedExecutor}) AND the scaffold belongs to
+ *     a live-wrapper-owned family. A fail-closed / not-startable base dispatch
+ *     already released its lease and either parked the run or wrote nothing, so
+ *     this wrapper leaves it untouched and echoes the base result. Adapter-owned
+ *     families such as `external-apply` and `subworkflow` are left for their
+ *     dedicated dispatch wrappers.
  *   - It returns the base dispatch's result verbatim. Step finalization is a durable
  *     side effect layered after the dispatch, exactly as the dogfood wrapper layers
  *     its terminalization — daemon telemetry still reports the dispatch outcome.
@@ -140,12 +143,15 @@ export function createLiveWrapperWorkflowDispatch(
     context: WorkflowStepDispatchContext
   ): WorkflowStepDispatchResult => {
     const result = baseDispatch(claim, context);
+    if (!shouldRunDispatchedExecutor(result.status)) return result;
+    const invocation = loadExecutorInvocation(
+      context.db,
+      deriveDispatchInvocationId(claim.runId, claim.stepId)
+    );
     if (
-      shouldRunDispatchedExecutor(result.status) &&
-      loadExecutorInvocation(
-        context.db,
-        deriveDispatchInvocationId(claim.runId, claim.stepId)
-      )?.executorFamily !== "external-apply"
+      invocation?.executorFamily !== undefined &&
+      invocation.executorFamily !== "external-apply" &&
+      invocation.executorFamily !== "subworkflow"
     ) {
       const resolved = deps.deriveExec(claim, context);
       if (resolved.ok) {

@@ -42,7 +42,7 @@ describe("adapter test coverage matrix", () => {
       "One-shot and script executor adapters",
       "No-mistakes executor mirror",
       "M9 live coding workflow wrappers",
-      "Unsupported executor families: subworkflow; external-apply dispatch adapter",
+      "Unsupported executor families; external-apply / subworkflow dispatch adapters",
     ]) {
       expect(matrix, `matrix should cover ${family}`).toContain(family);
     }

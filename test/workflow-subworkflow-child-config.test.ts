@@ -18,10 +18,8 @@ import {
  * Both halves are pure and total (no SQLite, no file system, no clock), the same
  * discipline `planSubworkflowChildMirror` (RC-4) and `planWorkflowStepDispatch`
  * follow, so the fail-closed contract for missing child config and unsafe
- * recursion is exhaustively testable on its own — before any production allowlist
- * flip or daemon wiring lands. This slice does NOT add `subworkflow` to
- * `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES`; production `subworkflow` stays
- * fail-closed.
+ * recursion is exhaustively testable on its own. Later RC-4b slices compose this
+ * pure decision into the production allowlist flip and daemon wiring.
  *
  * These tests pin:
  *   - validation: a well-formed config resolves a concrete `maxDepth` (defaulting

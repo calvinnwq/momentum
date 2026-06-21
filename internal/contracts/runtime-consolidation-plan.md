@@ -269,9 +269,10 @@ call `finishWorkflowStep`.
 the pure decider `planWorkflowStepDispatch` (`src/core/workflow/dispatch.ts:186-210`):
 only `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES`
 (`src/core/workflow/dispatch.ts:58` = `goal-loop`, `one-shot`, `script`,
-`no-mistakes`, `external-apply`) take the executor-loop path. `subworkflow` fails
-closed before executor rows are created, while `external-apply` now enters the
-dispatch scaffold and is terminalized by the RC-3 M6-safety-gated adapter. Legacy
+`no-mistakes`, `external-apply`, `subworkflow`) take the executor-loop path.
+`external-apply` enters the dispatch scaffold and is terminalized by the RC-3
+M6-safety-gated adapter; configured `subworkflow` steps enter the same scaffold
+and are terminalized from RC-4b child-run evidence. Legacy
 live-wrapper execution enters through the
 `managed-step` lane instead, and the `managed-step` and `dispatch` leases are both
 in the scheduler's non-monitor blocking set, so a run holding either lease is not
@@ -679,11 +680,11 @@ now wired through the daemon dispatch lane. RC-4's daemon-dispatchable
 `subworkflow` adapter mechanism has since **landed** (NGX-497): the pure
 child-mirror mapping, the async run-path producer, and the daemon-lane entry-point
 factory are in place and tested behind the child-run ownership boundary, while the
-production `subworkflow` branch stays fail-closed until a separate PHASE1
-dispatch-lane flip lands (deferred pending a child-definition config decision).
-The remaining capability-gated consolidation work is the `subworkflow` PHASE1
-flip after RC-4 and `NGX-404`, which stay deferred until that child-config
-decision / dogfood lands.
+production `subworkflow` branch has since been flipped by RC-4b (NGX-498):
+configured steps dispatch through bounded `daemon start` with child-definition
+config, bounded recursion, and key-resolved child-run attachment. The remaining
+capability-gated consolidation work stays limited to later compatibility-path
+narrowing and any future broader recursive orchestration decisions.
 
 ## Non-Goals
 

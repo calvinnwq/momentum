@@ -268,7 +268,7 @@ describe("NGX-371 stubbed adapter integration smoke", () => {
       seedCodingWorkflowRun(db, {
         runId,
         repoPath: repoDir,
-        objective: "Prove unsupported fake dispatch is operator-visible"
+        objective: "Prove external-apply scaffold stays local"
       });
       db.prepare(
         `UPDATE step_definitions SET executor = 'external-apply'
@@ -282,23 +282,16 @@ describe("NGX-371 stubbed adapter integration smoke", () => {
         now: NOW + 11
       });
 
-      expect(dispatch.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.failClosed);
-      expect(countRows(db, "executor_invocations")).toBe(0);
-      expect(countRows(db, "executor_rounds")).toBe(0);
+      expect(dispatch.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
+      expect(countRows(db, "executor_invocations")).toBe(1);
+      expect(countRows(db, "executor_rounds")).toBe(1);
 
       const gates = listWorkflowGatesForRun(db, runId);
-      expect(gates).toHaveLength(1);
-      expect(gates[0]).toMatchObject({
-        gateType: "manual_recovery_required",
-        targetScope: "step",
-        stepRunId: "preflight",
-        resolvedAt: null
-      });
-      expect(gates[0]?.reason).toContain("external-apply");
+      expect(gates).toHaveLength(0);
       expect(getWorkflowRunManualRecoveryState(db, runId)?.needsManualRecovery).toBe(
-        true
+        false
       );
-      expect(getWorkflowLease(db, runId, "dispatch")?.releasedAt).not.toBeNull();
+      expect(getWorkflowLease(db, runId, "dispatch")?.releasedAt).toBeNull();
     } finally {
       db.close();
     }

@@ -67,7 +67,7 @@ Current product surface:
 Current limitation:
 
 ```text
-WorkflowRun is durable and can start from definitions, executor records now persist below step runs, the daemon can recover, scan, and claim runnable workflow steps through an opt-in scheduler lane, the goal-loop executor adapter drives bounded autonomous rounds below a step run, the one-shot / script adapters drive bounded single-invocation work, and the no-mistakes executor mirror records external review state into executor rounds. M10-08 attached durable workflow gates and the `workflow run decide` operator path, M10-09a wired the production workflow-lane dispatcher into bounded managed `daemon start`, and NGX-353 dogfooded the workflow-first start / approval / bounded dispatch path through real Momentum state. RC-5b later wired configured daemon-default live-wrapper profiles into that bounded daemon lane so dispatched steps can produce terminal executor evidence and reconcile through RC-2, RC-3 later added daemon-dispatchable `external-apply` through the same terminal-evidence reconciliation lane, and RC-4 later added the `subworkflow` child-run mirror mechanism while leaving the production family fail-closed pending a separate PHASE1 flip.
+WorkflowRun is durable and can start from definitions, executor records now persist below step runs, the daemon can recover, scan, and claim runnable workflow steps through an opt-in scheduler lane, the goal-loop executor adapter drives bounded autonomous rounds below a step run, the one-shot / script adapters drive bounded single-invocation work, and the no-mistakes executor mirror records external review state into executor rounds. M10-08 attached durable workflow gates and the `workflow run decide` operator path, M10-09a wired the production workflow-lane dispatcher into bounded managed `daemon start`, and NGX-353 dogfooded the workflow-first start / approval / bounded dispatch path through real Momentum state. RC-5b later wired configured daemon-default live-wrapper profiles into that bounded daemon lane so dispatched steps can produce terminal executor evidence and reconcile through RC-2, RC-3 later added daemon-dispatchable `external-apply` through the same terminal-evidence reconciliation lane, and RC-4 later added the `subworkflow` child-run mirror mechanism, and RC-4b flipped configured `subworkflow` dispatch into that bounded daemon lane.
 ```
 
 ## Target Inventory
@@ -106,7 +106,7 @@ Future product surface:
 | Area | Current Shape | Target Shape | Migration Direction |
 |---|---|---|---|
 | Product root | Goal-first execution plus imported workflow runs | WorkflowDefinition / WorkflowRun | Introduce workflow definitions before deprecating goal-first UX |
-| Run start | `goal start`; `workflow import` for external plans; persisted workflow definitions; `workflow run start` materialization with executor records, scheduler-lane eligibility, gates, phase-1 daemon dispatch scaffolds, NGX-353 dogfood evidence, RC-3 external-apply daemon dispatch evidence, and RC-4 child-run mirror proof | `workflow run start` connected to execution scheduling | Keep the first-class start command as the workflow-first entry point; production `subworkflow` attachment still waits on the PHASE1 allowlist flip and child-definition config decision |
+| Run start | `goal start`; `workflow import` for external plans; persisted workflow definitions; `workflow run start` materialization with executor records, scheduler-lane eligibility, gates, phase-1 daemon dispatch scaffolds, NGX-353 dogfood evidence, RC-3 external-apply daemon dispatch evidence, and RC-4/RC-4b subworkflow child-run proof | `workflow run start` connected to execution scheduling | Keep the first-class start command as the workflow-first entry point; broader recursive orchestration remains a future decision beyond the configured `subworkflow` lane |
 | Step model | Fixed coding workflow step kinds | Configurable StepDefinition list | Keep canonical coding workflow as one built-in definition |
 | Executor model | Runner profiles, M9 wrapper registry, and landed goal-loop / one-shot / script adapter modules plus the no-mistakes mirror | Per-step ExecutorDefinition and executor config | Wire persisted executor config into dispatch while reusing wrapper config as executor config input |
 | Loop state | Goal iteration jobs/artifacts; external GNHF/no-mistakes state | ExecutorInvocation / ExecutorRound records | Goal-loop adapter landed (M10-05), one-shot / script adapters landed (M10-06), and no-mistakes mirror landed (M10-07): bounded rounds and mirrored external state persist common loop evidence in Momentum SQLite |
@@ -119,7 +119,7 @@ Future product surface:
 | GNHF | External/in-process implementation loop | `goal-loop` executor behavior | Copy bounded round pattern, not state store |
 | Evidence | Evidence records with optional run/step linkage | Evidence linked to run, step, invocation, and round | Add invocation/round evidence pointers |
 | External writes | M6 external-apply | `external-apply` executor | Keep existing safety contract |
-| Subworkflows | RC-4 child-run mirror mechanism: pure mapping, async producer, daemon-lane factory, active recheck scheduling, and child-run integration proof; production family still fail-closed | `subworkflow` executor | Keep production dispatch deferred until the PHASE1 allowlist flip and child-definition config decision land |
+| Subworkflows | RC-4/RC-4b child-run mirror mechanism plus configured production lane: pure mapping, async producer, daemon-lane factory, route-sourced child config / lineage, active recheck scheduling, real child-run integration proof, and bounded daemon dispatch proof | `subworkflow` executor | Keep broader recursive orchestration and richer child-run config as future scoped decisions |
 
 ## What Survives
 
@@ -188,11 +188,9 @@ it; it does not run the actual dogfood or flip the milestone marker.
 - **A phase-1 dispatchable executor-family allowlist** — at M10-09a, exactly the
   families with a landed bounded adapter: `goal-loop` (M10-05), `one-shot` /
   `script` (M10-06), and `no-mistakes` (M10-07). RC-3 later widened this set to
-  include `external-apply` through the M6-safety-gated daemon adapter; RC-4 later
-  landed the `subworkflow` adapter mechanism, but `subworkflow` (recurses into
-  another run) remains intentionally excluded from the production allowlist until
-  its child-definition config decision and PHASE1 dispatch-lane flip land, so it
-  fails closed rather than silently no-op.
+  include `external-apply` through the M6-safety-gated daemon adapter and
+  `subworkflow` through the RC-4b configured child-run adapter; any future family
+  without a landed adapter still fails closed rather than silently no-op.
 - **Bounded managed `daemon start` now supplies a production `workflowLane` to
   `runDaemonLoop`**, so the shipped `daemon start --max-*` path claims and
   dispatches approved workflow steps with no test-only dependency injection.
@@ -247,9 +245,9 @@ Remaining runtime work after M10 originally included driving scaffolded rounds
 through real adapter mechanisms as the default production loop; RC-5b later
 landed that path for configured daemon-default live-wrapper profiles, RC-3 later
 landed `external-apply` dispatch through the M6-safety-gated daemon adapter, and
-RC-4 later landed the `subworkflow` adapter mechanism. The remaining
-`subworkflow` production decision is narrower: the family stays fail-closed until
-the PHASE1 allowlist flip and child-definition config decision land.
+RC-4 later landed the `subworkflow` adapter mechanism, and RC-4b flipped the
+configured production lane. Remaining subworkflow decisions are narrower: broader
+recursive orchestration and richer child-run configuration stay future-scoped.
 
 ## Risks
 
@@ -274,4 +272,4 @@ This gap matrix does not implement:
 - Public UI.
 - Replacement of external engine internals.
 
-It is the implementation bridge between the accepted workflow-first pivot, the landed M10-01 definition persistence, M10-02 run start, M10-03 executor-record, M10-04 scheduler-lane, M10-05 goal-loop-adapter, M10-06 one-shot / script adapter, M10-07 no-mistakes mirror, M10-08 workflow-gates / decide, M10-09a production-dispatcher-wiring, and M10-09 closeout dogfood slices. RC-3 has since landed generalized `external-apply` dispatch; RC-4 has since landed the `subworkflow` adapter mechanism while leaving production `subworkflow` dispatch fail-closed until the separate PHASE1 flip.
+It is the implementation bridge between the accepted workflow-first pivot, the landed M10-01 definition persistence, M10-02 run start, M10-03 executor-record, M10-04 scheduler-lane, M10-05 goal-loop-adapter, M10-06 one-shot / script adapter, M10-07 no-mistakes mirror, M10-08 workflow-gates / decide, M10-09a production-dispatcher-wiring, and M10-09 closeout dogfood slices. RC-3 has since landed generalized `external-apply` dispatch; RC-4 has since landed the `subworkflow` adapter mechanism; RC-4b has since flipped configured `subworkflow` dispatch through bounded daemon start.

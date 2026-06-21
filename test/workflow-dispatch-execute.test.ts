@@ -306,9 +306,9 @@ describe("executeWorkflowStepDispatch — supported family", () => {
 });
 
 describe("executeWorkflowStepDispatch — fail closed", () => {
-  it("routes an unsupported resolved family to a durable manual-recovery gate", () => {
+  it("scaffolds an external-apply family step for its dedicated adapter lane", () => {
     const db = openSeededDb();
-    // Force preflight to resolve to a family with no landed daemon adapter.
+    // Force preflight to resolve to a family with a dedicated daemon adapter.
     db.prepare(
       `UPDATE step_definitions SET executor = 'external-apply'
          WHERE definition_key = ? AND definition_version = ? AND step_key = ?`
@@ -325,30 +325,20 @@ describe("executeWorkflowStepDispatch — fail closed", () => {
       now: NOW + 1
     });
 
-    expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.failClosed);
+    expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
 
-    // An open, operator-visible manual-recovery gate hangs from the step.
-    const gates = listWorkflowGatesForRun(db, RUN_ID);
-    expect(gates).toHaveLength(1);
-    expect(gates[0]).toMatchObject({
-      gateType: "manual_recovery_required",
-      targetScope: "step",
-      stepRunId: "preflight",
-      resolvedAt: null
-    });
-    expect(gates[0]?.reason).toContain("external-apply");
-
-    // The run is durably parked for manual recovery.
+    // The base dispatcher creates only the scaffold; the dedicated adapter lane
+    // owns policy-gated external-write evidence and manual-recovery outcomes.
+    expect(listWorkflowGatesForRun(db, RUN_ID)).toHaveLength(0);
     const recovery = getWorkflowRunManualRecoveryState(db, RUN_ID);
-    expect(recovery?.needsManualRecovery).toBe(true);
+    expect(recovery?.needsManualRecovery).toBe(false);
 
-    // The dispatch lease is released, not stranded.
+    // The dispatch lease is held while the adapter lane owns terminalization.
     const lease = getWorkflowLease(db, RUN_ID, "dispatch");
-    expect(lease?.releasedAt).not.toBeNull();
+    expect(lease?.releasedAt).toBeNull();
 
-    // No executor rows were created and the step was not advanced.
-    expect(countInvocations(db, RUN_ID)).toBe(0);
-    expect(stepState(db, RUN_ID, "preflight")).toBe("approved");
+    expect(countInvocations(db, RUN_ID)).toBe(1);
+    expect(stepState(db, RUN_ID, "preflight")).toBe("running");
   });
 
   it("routes a resolution failure (definition unlinked) to manual recovery", () => {
