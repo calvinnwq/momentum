@@ -21,6 +21,15 @@ const DURABLE_ROOT_SRC_ALLOWLIST = [
   "src/node-shims.d.ts"
 ] as const;
 
+const TAXONOMY_SRC_DIR_ALLOWLIST = [
+  "src/adapters",
+  "src/commands",
+  "src/config",
+  "src/core",
+  "src/renderers",
+  "src/shared"
+] as const;
+
 type RootSrcException = {
   ownerIssue: "NGX-447" | "NGX-448" | "NGX-449" | "NGX-450";
   targetHome: `src/${string}.ts`;
@@ -515,6 +524,34 @@ describe("M11 CLI import boundaries", () => {
     );
     // Empty now that NGX-450 drained the last transitional root module.
     expect([...documentedTargetPrefixes].sort()).toEqual([]);
+  });
+
+  it("keeps top-level source directories inside the approved taxonomy", () => {
+    expect(TAXONOMY_SRC_DIR_ALLOWLIST).toEqual([
+      "src/adapters",
+      "src/commands",
+      "src/config",
+      "src/core",
+      "src/renderers",
+      "src/shared"
+    ]);
+
+    const unexpectedSourceDirs = fs
+      .readdirSync(srcRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => path.join("src", entry.name))
+      .filter(
+        (dir) =>
+          !TAXONOMY_SRC_DIR_ALLOWLIST.includes(
+            dir as (typeof TAXONOMY_SRC_DIR_ALLOWLIST)[number]
+          )
+      )
+      .sort();
+
+    expect(
+      unexpectedSourceDirs,
+      "New src/<directory> roots must use the approved taxonomy: src/core/<domain>, src/config, src/shared, src/adapters, src/commands, or src/renderers."
+    ).toEqual([]);
   });
 
   it("keeps core/domain modules independent from commands and renderers", () => {

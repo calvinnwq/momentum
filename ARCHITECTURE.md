@@ -32,7 +32,8 @@ Infrastructure-facing clients and runtime adapters that used to sit as flat
 opening helpers, git transactions, Linear HTTP / source / external-update
 adapters and refresh clients, fake / trusted-shell / ACP runner adapters and
 configs, live wrapper / harness-probe adapters for OpenClaw-facing execution,
-and no-mistakes executor / orchestrator wrappers.
+the opt-in coding-workflow live-wrapper CLI adapter, and no-mistakes executor /
+orchestrator wrappers.
 
 ## Deeper Contracts
 

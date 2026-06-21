@@ -22,6 +22,7 @@ in place; importers still reference the concrete modules below.
 | Leases | `leases.ts` |
 | Scheduling | `scheduler.ts` |
 | Dispatch | `dispatch.ts`, `dispatch-persist.ts`, `dispatch-execute.ts`, `dispatch-executor-run.ts`, `dispatch-executor-terminalize.ts`, `dispatch-external-apply.ts`, `dispatch-external-apply-run.ts`, `external-apply-dispatch.ts`, `dispatch-subworkflow.ts`, `dispatch-subworkflow-run.ts`, `subworkflow-dispatch.ts`, `subworkflow-child-config.ts`, `subworkflow-route.ts`, `subworkflow-child-runner.ts`, `subworkflow-dispatch-context.ts`, `dispatch-reconcile.ts`, `dispatch-reconcile-execute.ts`, `daemon-live-wrapper-profile.ts`, `daemon-dispatch-exec-context.ts`, `live-wrapper-dispatch.ts`, `dogfood-dispatch.ts` |
+| Live-wrapper dogfood | `coding-workflow-live-wrapper.ts` |
 | Recovery & monitor | `recovery-artifact.ts`, `recovery-reconcile.ts`, `monitor-state.ts`, `monitor-envelope.ts` |
 | Handoff | `handoff.ts` |
 
@@ -52,8 +53,10 @@ Other domains reach workflow behavior through these modules:
   reduction), `runtime-state` (cached run-state / monitor refresh after a
   caller-owned mutation), `step-executor` (registry/dispatch boundary),
   `step-executor-real-adapters` (RC-5 production registry builder backed by
-  live wrappers or honest `runtime_unavailable` adapters), `step-transitions`,
-  `leases`, `definition`, `recovery-artifact`, `scheduler`.
+  live wrappers or honest `runtime_unavailable` adapters),
+  `coding-workflow-live-wrapper` (the NGX-499 wrapper-command seam used by the
+  checked-in dogfood live-wrapper profile), `step-transitions`, `leases`,
+  `definition`, `recovery-artifact`, `scheduler`.
 
 ## Boundaries
 
@@ -130,3 +133,12 @@ the parent dispatch lease. The production deriver sources child config and
 lineage from `route.subworkflow`, resolves the child definition by key, refuses
 unsafe recursion / unsupported attachment, and keeps manual-recovery behavior for
 missing or ambiguous child state.
+
+NGX-499 adds `coding-workflow-live-wrapper.ts` as an opt-in dogfood helper for
+`profiles/ngx-499-coding-workflow-live-wrapper.profile.json`: the daemon live
+profile still owns process supervision and result-file placement, while this
+helper loads `MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG`, selects the configured
+command for `MOMENTUM_STEP_KIND`, and writes normalized `RunnerResult` evidence
+so command failures become durable `success: false` results rather than stranded
+manual recovery. It is not a default-route switch and does not change CWFP
+compatibility.
