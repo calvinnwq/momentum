@@ -97,21 +97,28 @@ as `intent apply --external-apply`, writes `external-apply.log` /
 from that terminal evidence. Missing issue scope, no matching pending intent,
 ambiguous intents, missing credentials, policy denial, audit-incomplete, blocked,
 or other unsafe apply outcomes park the step for manual recovery rather than
-fabricating success. When `MOMENTUM_LIVE_WRAPPER_PROFILE` points at a valid
-workflow step wrapper profile, the managed loop also runs genuinely dispatched
-non-`external-apply` step wrappers in the same tick, records terminal executor
-evidence on the dispatch scaffold, and lets the reconciliation seam finalize the
-step or park it for manual recovery. When the variable is unset or blank,
-non-`external-apply` supported steps get the durable start scaffold only, while
-unconfigured wrapper kinds fail honestly with `runtime_unavailable` if a profile
-is configured but omits that step kind. If a claimed step cannot be resolved or
-uses an executor family the daemon cannot dispatch yet, the dispatcher parks the
-run behind a `manual_recovery_required` workflow gate instead of silently
-dropping the claim; if the run row vanished before that gate can be written, it
-still releases the dispatch lease so no claim is stranded. Register-only
-`daemon start` exits before the managed loop and never runs the workflow
-scheduler lane, reads `MOMENTUM_LIVE_WRAPPER_PROFILE`, or attempts external
-apply.
+fabricating success. Configured `subworkflow` steps are also handled by the
+managed daemon: the parent run's `route.subworkflow.child` config selects the
+child workflow definition, bounded lineage in `route.subworkflow.lineage` prevents
+unsafe recursion, and the parent step mirrors terminal child-run evidence only
+after the child reaches a terminal state. Missing child config, unsafe recursion,
+unresolved child definitions, unsupported child attachments, invalid child state,
+or ambiguous child terminals park the parent run for manual recovery. When
+`MOMENTUM_LIVE_WRAPPER_PROFILE` points at a valid workflow step wrapper profile,
+the managed loop also runs genuinely dispatched live-wrapper-owned step wrappers
+in the same tick, records terminal executor evidence on the dispatch scaffold,
+and lets the reconciliation seam finalize the step or park it for manual
+recovery. When the variable is unset or blank, supported live-wrapper-owned steps
+get the durable start scaffold only, while unconfigured wrapper kinds fail
+honestly with `runtime_unavailable` if a profile is configured but omits that
+step kind. If a claimed step cannot be resolved or uses an executor family the
+daemon cannot dispatch yet, the dispatcher parks the run behind a
+`manual_recovery_required` workflow gate instead of silently dropping the claim;
+if the run row vanished before that gate can be written, it still releases the
+dispatch lease so no claim is stranded. Register-only `daemon start` exits before
+the managed loop and never runs the workflow scheduler lane, reads
+`MOMENTUM_LIVE_WRAPPER_PROFILE`, attempts external apply, or dispatches
+subworkflow children.
 
 ### Workflow live-wrapper profile
 
@@ -167,11 +174,12 @@ Momentum injects `MOMENTUM_RUN_ID`, `MOMENTUM_STEP_ID`,
 `MOMENTUM_ITERATION_DIR`, `MOMENTUM_PROMPT_PATH` when available, and
 `MOMENTUM_RESULT_PATH` for every wrapper. The wrapper must write the same
 normalized runner result JSON documented in [`runners.md`](runners.md) at
-`$MOMENTUM_RESULT_PATH`. A valid profile may configure only the step kinds it
-can run; a dispatched kind missing from the profile routes to manual recovery
-rather than fake success. An unreadable, invalid JSON, or schema-invalid profile
-causes `daemon start` managed-loop mode to fail before registering a daemon run
-with `code: "daemon_live_wrapper_profile_invalid"`.
+`$MOMENTUM_RESULT_PATH`. A valid profile may configure only the
+live-wrapper-owned step kinds it can run; a dispatched live-wrapper-owned kind
+missing from the profile routes to manual recovery rather than fake success. An
+unreadable, invalid JSON, or schema-invalid profile causes `daemon start`
+managed-loop mode to fail before registering a daemon run with
+`code: "daemon_live_wrapper_profile_invalid"`.
 
 JSON envelope shape (managed loop):
 

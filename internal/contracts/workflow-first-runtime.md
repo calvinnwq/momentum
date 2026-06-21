@@ -133,7 +133,7 @@ Initial executor families:
 - `no-mistakes` — specialist review gate mirroring no-mistakes daemon state.
 - `script` — deterministic local command execution with exit-code/log result semantics.
 - `external-apply` — operator-mediated external write using the M6 external apply contract.
-- `subworkflow` — nested workflow execution through the RC-4 child-run mirror mechanism; production dispatch remains fail-closed until the separate PHASE1 allowlist flip lands.
+- `subworkflow` — nested workflow execution through the RC-4 child-run mirror mechanism plus the RC-4b configured production lane: route-sourced child config / lineage, bounded recursion, key-resolved child-run start-or-attach, and parent mirroring after terminal child evidence.
 
 The current OpenClaw coding workflow maps naturally:
 
@@ -377,4 +377,4 @@ This planning contract does not implement:
 - Public UI.
 - Replacement of GNHF or no-mistakes internals.
 
-M10 has implemented these as concrete slices: M10-01 landed definition schema / validation / persistence, M10-02 landed CLI run start, M10-03 landed executor state schema / persistence, M10-04 landed the opt-in daemon workflow scheduler lane, M10-05 landed the goal-loop executor adapter, M10-06 landed the one-shot / script executor adapters, M10-07 landed the no-mistakes executor mirror, M10-08 landed durable workflow gates and decisions, M10-09a landed phase-1 production dispatcher wiring, and M10-09 dogfooded the workflow-first start / approval / bounded dispatch path. RC-3 has since landed generalized `external-apply` dispatch through the M6 safety contract; RC-4 has since landed the `subworkflow` adapter mechanism while leaving the production family fail-closed until a separate PHASE1 allowlist flip.
+M10 has implemented these as concrete slices: M10-01 landed definition schema / validation / persistence, M10-02 landed CLI run start, M10-03 landed executor state schema / persistence, M10-04 landed the opt-in daemon workflow scheduler lane, M10-05 landed the goal-loop executor adapter, M10-06 landed the one-shot / script executor adapters, M10-07 landed the no-mistakes executor mirror, M10-08 landed durable workflow gates and decisions, M10-09a landed phase-1 production dispatcher wiring, and M10-09 dogfooded the workflow-first start / approval / bounded dispatch path. RC-3 has since landed generalized `external-apply` dispatch through the M6 safety contract; RC-4 has since landed the `subworkflow` adapter mechanism, and RC-4b has flipped configured `subworkflow` dispatch through the bounded daemon lane.

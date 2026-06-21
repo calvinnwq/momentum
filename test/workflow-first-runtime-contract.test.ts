@@ -112,6 +112,6 @@ describe("workflow-first runtime pivot contract", () => {
     expect(exclusions).toContain("internal/contracts/workflow-first-runtime.md");
     expect(exclusions).toMatch(/accepted planning contract/i);
     expect(exclusions).toMatch(/workflow-first\s+dogfood and M10 closeout marker have landed/i);
-    expect(exclusions).toMatch(/external-apply[\s\S]*subworkflow[\s\S]*deferred/i);
+    expect(exclusions).toMatch(/external-apply[\s\S]*subworkflow[\s\S]*production flip have landed/i);
   });
 });

@@ -21,12 +21,11 @@
  * Classification", internal/contracts/workflow-first-gap-matrix.md, and
  * internal/contracts/runtime-consolidation-plan.md):
  *
- *   - The phase-1 dispatchable set is exactly the executor families that already
- *     have a landed production adapter in the base allowlist (`goal-loop` M10-05,
- *     `one-shot` / `script` M10-06, `no-mistakes` M10-07, `external-apply` RC-3).
- *     RC-4 landed the `subworkflow` child-run mirror mechanism, but the production
- *     base allowlist still excludes `subworkflow` until the child-definition config
- *     decision and PHASE1 dispatch-lane flip land, so it fails closed rather than
+ *   - The phase-1 dispatchable set is exactly the executor families that have a
+ *     landed production adapter in the base allowlist (`goal-loop` M10-05,
+ *     `one-shot` / `script` M10-06, `no-mistakes` M10-07, `external-apply` RC-3,
+ *     and `subworkflow` RC-4b/NGX-498 once its configured production lane was
+ *     proven). A family with no landed adapter still fails closed rather than
  *     silently no-op or strand a lease.
  *   - Every non-dispatch outcome routes to the contract's
  *     `manual_recovery_required` human gate: "Momentum cannot safely proceed
@@ -53,15 +52,20 @@ import type { WorkflowGateType } from "./gate.js";
 /**
  * Executor families the production workflow lane can genuinely dispatch through
  * the base PHASE1 allowlist. Anything outside this set fails closed (see the
- * module doc), including `subworkflow` until its separate production lane flip
- * lands. The order mirrors the adapter landing order.
+ * module doc). RC-4b (NGX-498) flipped `subworkflow` into the allowlist once its
+ * configured production lane — child-definition config, route-sourced bounded
+ * recursion safety, key-resolved start-or-attach child runner, and the daemon
+ * context deriver — was proven; the `unsupported_executor_family` fail-closed
+ * branch is retained as a defensive guard for any future not-yet-landed family.
+ * The order mirrors the adapter landing order.
  */
 export const PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES = [
   "goal-loop",
   "one-shot",
   "script",
   "no-mistakes",
-  "external-apply"
+  "external-apply",
+  "subworkflow"
 ] as const;
 export type Phase1DispatchableExecutorFamily =
   (typeof PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES)[number];

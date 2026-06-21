@@ -116,6 +116,8 @@ import {
   createExternalApplyWorkflowDispatch,
   type DispatchedExternalApplyContextResolution
 } from "./core/workflow/external-apply-dispatch.js";
+import { createSubworkflowWorkflowDispatch } from "./core/workflow/subworkflow-dispatch.js";
+import { deriveDispatchedSubworkflowContext } from "./core/workflow/subworkflow-dispatch-context.js";
 import { buildRealWorkflowStepExecutorRegistry } from "./core/workflow/step-executor-real-adapters.js";
 import type { LiveWrapperProfile } from "./adapters/live-wrapper-registry.js";
 import type {
@@ -600,10 +602,12 @@ function resolveDaemonStartWorkflowDispatch(
   if (profile.status === "not_configured") {
     return {
       ok: true,
-      dispatch: withExternalApplyDispatch(
-        resolveDaemonWorkflowDispatch(env, baseDispatch),
-        env,
-        deps
+      dispatch: withSubworkflowDispatch(
+        withExternalApplyDispatch(
+          resolveDaemonWorkflowDispatch(env, baseDispatch),
+          env,
+          deps
+        )
       )
     };
   }
@@ -613,43 +617,45 @@ function resolveDaemonStartWorkflowDispatch(
   });
   return {
     ok: true,
-    dispatch: withExternalApplyDispatch(
-      createLiveWrapperWorkflowDispatch(baseDispatch, {
-        registry,
-        deriveExec: (claim, context) => {
-          const provenance = loadDispatchedStepRunProvenance(
-            context.db,
-            claim.runId
-          );
-          if (provenance === undefined) {
-            return { ok: false, reason: "run_not_found" };
-          }
-          const resolved = resolveDispatchedStepExecutorContext(
-            claim.runId,
-            provenance
-          );
-          if (resolved.ok) {
-            try {
-              fs.mkdirSync(resolved.exec.runDir, { recursive: true });
-            } catch (error) {
+    dispatch: withSubworkflowDispatch(
+      withExternalApplyDispatch(
+        createLiveWrapperWorkflowDispatch(baseDispatch, {
+          registry,
+          deriveExec: (claim, context) => {
+            const provenance = loadDispatchedStepRunProvenance(
+              context.db,
+              claim.runId
+            );
+            if (provenance === undefined) {
+              return { ok: false, reason: "run_not_found" };
+            }
+            const resolved = resolveDispatchedStepExecutorContext(
+              claim.runId,
+              provenance
+            );
+            if (resolved.ok) {
+              try {
+                fs.mkdirSync(resolved.exec.runDir, { recursive: true });
+              } catch (error) {
+                return {
+                  ok: false,
+                  reason: `run_dir_unavailable: ${error instanceof Error ? error.message : String(error)}`
+                };
+              }
               return {
-                ok: false,
-                reason: `run_dir_unavailable: ${error instanceof Error ? error.message : String(error)}`
+                ok: true,
+                exec: {
+                  ...resolved.exec,
+                  env
+                }
               };
             }
-            return {
-              ok: true,
-              exec: {
-                ...resolved.exec,
-                env
-              }
-            };
+            return resolved;
           }
-          return resolved;
-        }
-      }),
-      env,
-      deps
+        }),
+        env,
+        deps
+      )
     ),
     leaseDurationMs: maxDaemonLiveWrapperProfileTimeoutMs(profile.profile)
   };
@@ -669,6 +675,24 @@ function withExternalApplyDispatch(
         env,
         deps
       )
+  });
+}
+
+/**
+ * Wrap the daemon-lane dispatch so a configured `subworkflow` step's child run is
+ * started/attached and reconciled in the same tick (RC-4b, NGX-498). The deriver
+ * sources the child-definition config + recursion lineage from the parent run's
+ * durable `route`, resolves the child definition by key, and builds the
+ * start-or-attach runner from the existing workflow-owned run-start / status
+ * seams — so this lane needs no env / deps, unlike the external-apply lane. A
+ * refused or thrown derivation routes the step to manual recovery rather than
+ * stranding a `running` step (see {@link createSubworkflowWorkflowDispatch}).
+ */
+function withSubworkflowDispatch(
+  baseDispatch: AsyncWorkflowStepDispatch
+): AsyncWorkflowStepDispatch {
+  return createSubworkflowWorkflowDispatch(baseDispatch, {
+    deriveSubworkflow: deriveDispatchedSubworkflowContext
   });
 }
 

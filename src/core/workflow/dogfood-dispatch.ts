@@ -99,12 +99,17 @@ export function shouldTerminalizeAfterDispatch(status: string): boolean {
  * isolated data dir to prove single-process multi-dispatch. Mirrors the
  * `MOMENTUM_REAL_SMOKE_*` opt-in convention.
  *
- * WARNING: when enabled, the lane marks every dispatched local step `succeeded`
+ * WARNING: when enabled, the lane marks dogfood-owned local steps `succeeded`
  * without running a real executor. Only ever set it for an isolated dogfood data
  * dir, never against production workflow state.
  */
 export const DOGFOOD_TERMINALIZE_DISPATCH_ENV_VAR =
   "MOMENTUM_DOGFOOD_TERMINALIZE_DISPATCH";
+
+const DOGFOOD_TERMINALIZE_ADAPTER_OWNED_EXECUTOR_FAMILIES = new Set([
+  "external-apply",
+  "subworkflow"
+]);
 
 /** Truthy opt-in spellings, matching the repo's other env-flag gates. */
 const TRUTHY_ENV_VALUES: ReadonlySet<string> = new Set([
@@ -159,12 +164,15 @@ export function createTerminalizingWorkflowDispatch(
     context: WorkflowStepDispatchContext
   ): WorkflowStepDispatchResult => {
     const result = baseDispatch(claim, context);
+    const executorFamily = loadExecutorInvocation(
+      context.db,
+      deriveDispatchInvocationId(claim.runId, claim.stepId)
+    )?.executorFamily;
     if (
       shouldTerminalizeAfterDispatch(result.status) &&
-      loadExecutorInvocation(
-        context.db,
-        deriveDispatchInvocationId(claim.runId, claim.stepId)
-      )?.executorFamily !== "external-apply"
+      !DOGFOOD_TERMINALIZE_ADAPTER_OWNED_EXECUTOR_FAMILIES.has(
+        executorFamily ?? ""
+      )
     ) {
       terminalizeDispatchedStep(context.db, claim, context.now);
     }

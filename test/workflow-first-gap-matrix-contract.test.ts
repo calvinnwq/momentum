@@ -155,18 +155,23 @@ describe("M10-09a production workflow-lane dispatcher boundary (NGX-367)", () =>
     expect(contract).toContain("NGX-353");
   });
 
-  it("pins the phase-1 dispatchable executor-family allowlist and the deferred families", () => {
+  it("pins the phase-1 dispatchable executor-family allowlist and defensive unsupported-family posture", () => {
     const contract = readDoc(contractPath);
 
-    for (const family of ["goal-loop", "one-shot", "script", "no-mistakes"]) {
+    for (const family of [
+      "goal-loop",
+      "one-shot",
+      "script",
+      "no-mistakes",
+      "external-apply",
+      "subworkflow"
+    ]) {
       expect(
         contract,
         `dispatcher boundary should name dispatchable family ${family}`
       ).toContain(family);
     }
-    // external-apply and subworkflow have no landed adapter this phase; they fail closed.
-    expect(contract).toContain("external-apply");
-    expect(contract).toContain("subworkflow");
+    expect(contract).toMatch(/future family[\s\S]*fails closed/i);
   });
 
   it("states the production daemon wiring and the register-only invariant", () => {

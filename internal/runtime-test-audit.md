@@ -469,7 +469,7 @@ Decisions at a glance (full evidence and prerequisites live in the plan):
   recovery safety feature, narrowable only once adapter finalization replaces its
   terminal gap.
 - **`external-apply` / `subworkflow`** — `external-apply` narrowed;
-  `subworkflow` deferred. RC-3's `external-apply` adapter has since landed
+  `subworkflow` adapter mechanism and configured production flip landed. RC-3's `external-apply` adapter has since landed
   (NGX-496): the pure M6 → executor evidence mapping
   (`src/core/workflow/dispatch-external-apply.ts`), async run-path producer
   (`src/core/workflow/dispatch-external-apply-run.ts`), family guard, and daemon
@@ -480,9 +480,9 @@ Decisions at a glance (full evidence and prerequisites live in the plan):
   (`src/core/workflow/dispatch-subworkflow-run.ts`), and the daemon-lane
   entry-point factory (`src/core/workflow/subworkflow-dispatch.ts`) mirror a child
   run's terminal classification to the parent step behind the parent/child
-  ownership boundary, while the production `subworkflow` branch stays fail-closed
-  until a separate PHASE1 dispatch-lane flip lands (deferred pending a
-  child-definition config decision).
+  ownership boundary. RC-4b has since flipped the configured production branch
+  through route-sourced child config / lineage, bounded recursion, key-resolved
+  child-run attachment, and bounded daemon dispatch.
 - **Fake `WorkflowStepExecutor` adapters shipped in `src/`** — deprecate-later;
   demote to a test-only seam once real adapters land, preserving substrate smoke.
 
@@ -544,9 +544,8 @@ proof issue:
 - `external-apply` and `subworkflow` are valid executor families. RC-3's
   `external-apply` adapter has since landed (NGX-496) and is wired through the
   production dispatch lane under the M6 safety contract; RC-4's `subworkflow`
-  adapter mechanism has since landed (NGX-497) but the production `subworkflow`
-  branch stays fail-closed until a separate PHASE1 dispatch-lane flip lands
-  (deferred pending a child-definition config decision).
+  adapter mechanism has since landed (NGX-497), and RC-4b (NGX-498) has flipped
+  configured `subworkflow` dispatch through the bounded daemon lane.
 
 ### Defer: Removal Candidates Need New Contracts
 

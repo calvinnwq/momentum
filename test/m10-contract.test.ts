@@ -178,13 +178,13 @@ describe("M10 workflow-first runtime planning contract", () => {
   });
 
   describe("internal/exclusions.md", () => {
-    it("states that M10 closeout landed while later runtime behavior remains deferred", () => {
+    it("states that M10 closeout landed while later runtime behavior narrowed after RC follow-ups", () => {
       const e = readDoc("internal/exclusions.md");
 
       expect(e).toMatch(/M10 planning pinned/i);
       expect(e).toContain("internal/milestones/m10-workflow-first-runtime.md");
       expect(e).toMatch(/workflow-first\s+dogfood and M10 closeout marker have landed/i);
-      expect(e).toMatch(/external-apply[\s\S]*subworkflow[\s\S]*deferred/i);
+      expect(e).toMatch(/external-apply[\s\S]*subworkflow[\s\S]*production flip have landed/i);
     });
   });
 
