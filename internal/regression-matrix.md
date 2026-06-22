@@ -439,6 +439,7 @@ that shipped workflow-first path.
   NGX-492 daemon-default live-wrapper execution is owned by
   [`src/core/workflow/daemon-live-wrapper-profile.ts`](../src/core/workflow/daemon-live-wrapper-profile.ts),
   [`src/core/workflow/live-wrapper-dispatch.ts`](../src/core/workflow/live-wrapper-dispatch.ts),
+  [`src/core/workflow/dispatch-retry.ts`](../src/core/workflow/dispatch-retry.ts),
   [`src/core/workflow/dispatch-executor-run.ts`](../src/core/workflow/dispatch-executor-run.ts),
   [`src/core/workflow/dispatch-executor-terminalize.ts`](../src/core/workflow/dispatch-executor-terminalize.ts), and
   [`src/core/workflow/daemon-dispatch-exec-context.ts`](../src/core/workflow/daemon-dispatch-exec-context.ts).
@@ -493,7 +494,12 @@ that shipped workflow-first path.
     `test/cli-daemon-workflow-dispatch.test.ts` prove configured daemon profiles
     run real wrapper commands, parse the NGX-499 checked-in profile, terminalize evidence, reconcile through RC-2,
     fail unconfigured / unresolved contexts into manual recovery, preserve
-    idempotent re-entry, and avoid stranded dispatch leases.
+    idempotent re-entry, prepare repaired `runtime_unavailable` live-wrapper
+    bootstrap failures for a new attempt without duplicating invocation evidence
+    or rerunning already-terminal steps, and avoid stranded dispatch leases.
+    `test/live-step-wrapper.test.ts` pins the missing-Node-entrypoint
+    `runtime_unavailable` classification while keeping dependency
+    `MODULE_NOT_FOUND` failures as ordinary command failures.
   - RC-3 unit / integration proof: `test/workflow-dispatch-external-apply.test.ts`
     pins the pure M6 → executor-evidence mapping (every `applied` → `succeeded`,
     every M6 failure → `manual_recovery_required`, idempotency marker preserved,

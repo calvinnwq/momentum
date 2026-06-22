@@ -77,6 +77,7 @@ Explicit, auditable clear path for the run-scoped manual-recovery flag. For moni
 
 - Refuses with `not_flagged` when the run exists but is not currently flagged.
 - Refuses with `recovery_clear_refused` while a blocking monitor-derived recovery classification still applies, and includes the recovery code plus blocking step id when known.
+- For retryable dispatched live-wrapper bootstrap failures (`runtime_unavailable` before clean runner evidence on `no-mistakes` or `merge-cleanup`), a successful clear may also move the same step back to `approved` so the scheduler can create a new executor round on the existing invocation. The success envelope includes `retryPrepared: { stepId, recoveryCode }` only when this preparation happened.
 - Never auto-clears from elapsed time alone, never repairs the underlying run, never spawns or kills a process, and leaves `.agent-workflows/<runId>/recovery.md` on disk as audit evidence when present.
 
 ### `workflow run monitor` (NGX-328)
@@ -136,7 +137,7 @@ A non-exhaustive seed list of fields the M8 envelopes pin:
 - `nextAction` (object with `code` plus optional `stepId`, `boundary`, or `runId`), `monitor.recovery` (object with `code` plus optional `stepId`).
 - `evidence` (array of typed evidence pointers with `evidenceRecordId`, `source`, `type`, `artifactPath`, `occurredAt`, `summary`, nullable `runId`, and nullable `stepId`).
 - `needsManualRecovery` (boolean), plus `manualRecoveryReason` / `manualRecoveryAt` on run-bearing envelopes, mirror the durable run-scoped recovery flag. Command-specific `recovery` objects surface the classification only when that command derives one (for example import / clear / monitor); live dispatch / finalization recovery may set the durable fields and render `recovery.md` while those command-specific objects remain null. Scheduler-lane stale `manual-recovery-required` workflow leases remain outstanding and can still surface through monitor-derived `manual_recovery_lease`.
-- `previousReason`, `previousMarkedAt`, and `clearedAt` on the `workflow run clear-recovery` success envelope.
+- `previousReason`, `previousMarkedAt`, `clearedAt`, and optional `retryPrepared` on the `workflow run clear-recovery` success envelope.
 - `schemaVersion` (on `workflow run monitor` only; M8 lands version 1).
 
 Field renames are not allowed during M8. Field additions are additive only.
