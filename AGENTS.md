@@ -32,6 +32,9 @@ Historical internal planning docs were externalized to Obsidian
 shipped behavior, operator truth, source architecture anchors, and executable
 checks.
 
+There are no standing exceptions for repo-local `internal/` docs.
+Any future exception must be explicit, reviewed, and protected by the docs-boundary tests rather than introduced as an ad hoc file.
+
 Root [`ARCHITECTURE.md`](ARCHITECTURE.md) is the source of truth for the current
 repo architecture contract and import boundaries. [`SPEC.md`](SPEC.md) is the
 current runtime/spec anchor.
@@ -67,7 +70,8 @@ TypeScript on Node.js with Vitest tests, managed by pnpm. See [README.md](README
   the existing architecture tests.
 
 ## CLI expectations
-The full public CLI surface lives in [README.md](README.md); per-command JSON envelopes, refusal codes, and idempotency semantics live in `docs/` (linked from [`docs/index.md`](docs/index.md)). The operational-safety surfaces — `daemon start`, `daemon stop`, `daemon status`, `recovery clear`, and `doctor` — remain wire-stable.
+The full public CLI surface lives in [README.md](README.md); per-command JSON envelopes, refusal codes, and idempotency semantics live in `docs/` (linked from [`docs/index.md`](docs/index.md)).
+The operational-safety surfaces - `daemon start`, `daemon stop`, `daemon status`, `recovery clear`, and `doctor` - remain wire-stable.
 
 - Preserve stable CLI behavior across both JSON and text outputs.
 - When changing user-facing output, update tests and verify callers that rely on stable formatting.
@@ -94,5 +98,4 @@ State (`<data-dir>/momentum.db` SQLite plus per-goal `goals/<goal-id>/` artifact
 ## Public docs hygiene
 - `docs/` and `README.md` are public-facing. Do not add NGX/Linear issue IDs, milestone planning, internal sequencing, or M-version language there. Put long-form internal detail in Obsidian `/Workspaces/Momentum`.
 - The `test/public-docs-hygiene.test.ts` guard enforces this on every test run.
-- The `test/internal-docs-shape.test.ts` guard enforces that repo `internal/`
-  does not return.
+- The `test/internal-docs-shape.test.ts` guard enforces that repo `internal/` does not return and that any future exception would require an explicit test change.
