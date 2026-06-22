@@ -41,16 +41,19 @@ Use these docs for detailed behavior:
 
 - [README.md](README.md) and [docs/index.md](docs/index.md): public command
   usage and operator documentation.
-- [internal/README.md](internal/README.md): internal map for current truth,
-  active contracts, milestone provenance, and accepted future plans.
+- [internal/README.md](internal/README.md): temporary internal anchor map for
+  current truth, active contracts, milestone provenance, and accepted future
+  plans while DOCS-02/DOCS-03 complete.
 - [internal/contracts/README.md](internal/contracts/README.md): active contract
   index.
-- [internal/milestones/README.md](internal/milestones/README.md): historical
-  milestone narrative index.
-- [internal/plans/README.md](internal/plans/README.md): accepted future plan
-  queue, including RC-1..RC-5 discovery.
-- [internal/roadmap.md](internal/roadmap.md): milestone timeline and current
-  sequencing.
+- [internal/milestones/README.md](internal/milestones/README.md): temporary
+  historical milestone anchor index. Long-form provenance lives in Obsidian
+  `/Workspaces/Momentum`.
+- [internal/plans/README.md](internal/plans/README.md): temporary accepted
+  future plan anchor, including RC-1..RC-5 discovery. Long-form planning lives
+  in Obsidian `/Workspaces/Momentum`.
+- [internal/roadmap.md](internal/roadmap.md): temporary milestone timeline
+  anchor. Long-form sequencing lives in Obsidian `/Workspaces/Momentum`.
 - [internal/contracts/workflow-first-runtime.md](internal/contracts/workflow-first-runtime.md):
   workflow-first runtime model.
 - [internal/contracts/executor-loop.md](internal/contracts/executor-loop.md):
@@ -186,7 +189,8 @@ advancement, and docs cleanup.
 - `src/cli.ts` intentionally retains top-level parsing plus daemon, recovery,
   worker, and doctor compatibility surfaces; broad extraction of those surfaces
   belongs to a future scoped issue.
-- Public docs stay in `docs/`; milestone sequencing and NGX detail stay in
-  `internal/` or this architecture contract when the detail is structural.
+- Public docs stay in `docs/`; milestone sequencing, NGX detail, dogfood
+  evidence, and planning rationale live in Obsidian `/Workspaces/Momentum` by
+  default. Keep only short repo anchors when the source tree needs a pointer.
 - Every extraction should leave the repo valid with focused tests, typecheck,
   and build passing.

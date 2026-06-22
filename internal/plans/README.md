@@ -1,48 +1,15 @@
-# Internal Plans
+# Runtime Plan Anchors
 
-Accepted future implementation plans live here when a contract names a sequence
-that is not ready to execute immediately. Plans here may reference milestones,
-NGX / ARCH / RC issue IDs, and internal sequencing because this tree is not
-public operator documentation.
+Long-form runtime plans moved to Obsidian during DOCS-02.
 
-Use this directory for plan artifacts such as RC-1 through RC-5 after their
-owning contract has defined the scope and prerequisites. Do not put public CLI
-usage docs here; those belong under `docs/`.
+Canonical external docs:
 
-## Accepted Future Runtime Queue
+- `/Workspaces/Momentum/Specs/2026-06-22-runtime-queue-and-dogfood-evidence.md`
+- `/Workspaces/Momentum/Archive/2026-06-22-docs-02-migration-ledger.md`
 
-The RC sequence is defined by
-[`../contracts/runtime-consolidation-plan.md`](../contracts/runtime-consolidation-plan.md).
-That contract authorizes no production deletion by itself; each RC item needs its
-own implementation issue and proof.
+This repo path remains temporarily for link/test compatibility until DOCS-03
+removes `internal/` fully.
 
-| Item | Plan source | What it unlocks |
-| --- | --- | --- |
-| RC-1 — landed (NGX-486); RC-1b finalization disentangle landed (NGX-494); RC-1c read-back dedup narrowing landed (NGX-495) | [`runtime-consolidation-plan.md`](../contracts/runtime-consolidation-plan.md#follow-up-issue-sequence) | Goal-first status / logs / handoff / recovery parity now has workflow-first equivalents and migration proofs; the shared finalization primitive the goal-loop executor reused is disentangled into the neutral `step-finalize.ts` seam (NGX-494); RC-1c (NGX-495) narrowed the duplicate goal-first read-back logic into the shared `src/core/goal/read-back.ts` seam while keeping the goal-first commands as the compatibility surface and deferring the domain-specific recovery guarded-clear dedup. |
-| RC-2 — landed (NGX-480) | [`runtime-consolidation-plan.md`](../contracts/runtime-consolidation-plan.md#follow-up-issue-sequence) | Single M9/M10 step-finalization reconciliation seam and no-double-write proof — seam shipped as `reconcileDispatchedWorkflowStep`; narrowing Paths 3/4 still gated on compatibility-lane migration. |
-| RC-3 — external-apply dispatch wiring landed (NGX-496) | [`runtime-consolidation-plan.md`](../contracts/runtime-consolidation-plan.md#follow-up-issue-sequence) | Daemon-dispatchable `external-apply` adapter behind M6 safety gates. The pure M6 → executor-evidence mapping (`dispatch-external-apply.ts`), async run-path producer (`dispatch-external-apply-run.ts`), family guard, and daemon dispatch composition reuse the single M6 `executeExternalApply` write path under its full safety contract; `subworkflow` followed in RC-4/RC-4b. |
-| RC-4 — adapter mechanism landed (NGX-497); RC-4b production flip landed (NGX-498) | [`runtime-consolidation-plan.md`](../contracts/runtime-consolidation-plan.md#follow-up-issue-sequence) | Daemon-dispatchable `subworkflow` adapter. The pure child-mirror mapping (`dispatch-subworkflow.ts`), the async run-path producer (`dispatch-subworkflow-run.ts`), the daemon-lane entry-point factory (`subworkflow-dispatch.ts`), route-sourced child config / lineage, key-resolved child runner, and daemon context deriver ship and are tested behind the parent/child ownership boundary; configured `subworkflow` steps now dispatch through bounded `daemon start`. |
-| RC-5 — fake demotion landed (NGX-485); RC-5b seams + daemon-start wiring landed (NGX-492) | [`runtime-consolidation-plan.md`](../contracts/runtime-consolidation-plan.md#follow-up-issue-sequence) | Production default now uses real `WorkflowStepExecutor` adapters and the fakes are test-only. RC-5b landed the reusable execution seams (terminalize bridge, execution-path producer, profile source resolver, live-wrapper dispatch composition, exec-context deriver) plus bounded `daemon start` wiring for configured daemon-default profiles. |
-| NGX-499 — opt-in Momentum-native coding workflow dogfood | [`ngx-499-dogfood.md`](ngx-499-dogfood.md) | Proves one Momentum-owned coding workflow through the live-wrapper profile path before NGX-404 can change defaults. CWFP remains the production default and rollback path until this proof passes. |
-
-## Repo Architecture Queue
-
-The ARCH sequence is defined by
-[`../contracts/repo-architecture-standard.md`](../contracts/repo-architecture-standard.md#migration-sequence).
-ARCH-07 / NGX-451 completed the docs IA cleanup. **ARCH-08 / NGX-452** added
-`src/core/workflow/runtime-state.ts` as the smallest useful workflow-owned seam
-around mechanical finalization/status/monitor refresh coordination: callers that
-already mutated durable step / lease rows can re-read reducer rows and refresh
-cached `workflow_runs` state / monitor columns without duplicating SQL. The full
-RC-2 single-finalization owner has since landed separately (NGX-480; see the
-runtime-consolidation plan), as has RC-5's fake demotion (NGX-485: real adapters
-back the production executor default, fakes are a test-only injected seam).
-RC-5b's reusable execution seams have since landed (NGX-492: terminalize bridge,
-execution-path producer, profile source resolver, live-wrapper dispatch
-composition, exec-context deriver) and the bounded `daemon start` workflow lane
-now wires them for configured daemon-default profiles. RC-1b (NGX-494) has since
-disentangled the shared finalization primitive the goal-loop executor reused into
-the neutral `step-finalize.ts` seam, and RC-1c (NGX-495) has since narrowed the
-duplicate goal-first read-back logic into the shared `src/core/goal/read-back.ts`
-seam (commands unchanged; the domain-specific recovery guarded-clear dedup stays
-deferred).
+Current landed queue anchors: RC-1, RC-2, RC-3, RC-4, RC-5, ARCH-08 / NGX-452,
+NGX-480, NGX-485, NGX-492, NGX-494, NGX-495, NGX-496, NGX-497, NGX-498,
+NGX-499.

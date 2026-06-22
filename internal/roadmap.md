@@ -1,271 +1,50 @@
-# Momentum Roadmap
+# Momentum Roadmap Anchor
 
-Momentum is built milestone by milestone. Each milestone has a single durable
-shape that lands in code, in docs, and in the `doctor` readiness marker before
-the next one starts. The roadmap below is the canonical timeline; deeper detail
-lives in each milestone doc under `internal/milestones/` and each
-cross-milestone contract under `internal/contracts/`.
+Long-form roadmap sequencing moved to Obsidian during DOCS-02:
+`/Workspaces/Momentum/Specs/2026-06-22-momentum-runtime-milestone-provenance.md`.
 
-For navigation, start with the internal documentation map
-([`internal/README.md`](README.md)), active contract index
-([`internal/contracts/README.md`](contracts/README.md)), and historical
-milestone index ([`internal/milestones/README.md`](milestones/README.md)).
+For current source architecture use [ARCHITECTURE.md](../ARCHITECTURE.md).
 
 ## Timeline
 
 | Milestone | Theme | Status | Detail |
 |---|---|---|---|
-| Milestone 1 | Foreground Proof Loop | Complete | See [README](../README.md) and milestone bullets in [AGENTS.md](../AGENTS.md) |
-| Milestone 2 | Queue and Worker Model | Complete | See [README](../README.md) and milestone bullets in [AGENTS.md](../AGENTS.md) |
-| Milestone 3 | Operational Safety | Complete | [m3-operational-safety.md](milestones/m3-operational-safety.md) |
-| Milestone 4 | Real Runner Profiles | Complete | [m4-real-runners.md](milestones/m4-real-runners.md) |
-| Milestone 5 | Source Adapters and Evidence Sync | Complete | [m5-source-adapters.md](milestones/m5-source-adapters.md) |
-| Milestone 6 | Policy-Gated External Apply | Complete | [m6-external-apply.md](milestones/m6-external-apply.md) |
-| Milestone 7 | OpenClaw Coding Workflow Backend | Complete | [m7-openclaw-coding-workflow-backend.md](milestones/m7-openclaw-coding-workflow-backend.md) |
-| Milestone 8 | Workflow Run Operator Controls | Complete | [m8-workflow-run-operator-controls.md](milestones/m8-workflow-run-operator-controls.md) |
-| Milestone 9 | Live Workflow Execution | Foundation in force | [m9-live-workflow-execution.md](milestones/m9-live-workflow-execution.md) |
-| Milestone 10 | Workflow-First Runtime | Complete | [m10-workflow-first-runtime.md](milestones/m10-workflow-first-runtime.md) |
-| Milestone 11 | CLI Architecture Refactor | Complete | [../ARCHITECTURE.md](../ARCHITECTURE.md) |
+| Milestone 3 | Operational Safety | Complete | milestones/m3-operational-safety.md |
+| Milestone 4 | Real Runner Profiles | Complete | milestones/m4-real-runners.md |
+| Milestone 5 | Source Adapters and Evidence Sync | Complete | milestones/m5-source-adapters.md |
+| Milestone 6 | Policy-Gated External Apply | Complete | milestones/m6-external-apply.md |
+| Milestone 7 | OpenClaw Coding Workflow Backend | Complete | milestones/m7-openclaw-coding-workflow-backend.md |
+| Milestone 8 | Workflow Run Operator Controls | Complete | milestones/m8-workflow-run-operator-controls.md |
+| Milestone 9 | Live Workflow Execution | Foundation in force | milestones/m9-live-workflow-execution.md |
+| Milestone 10 | Workflow-First Runtime | Complete | milestones/m10-workflow-first-runtime.md |
+| Milestone 11 | CLI Architecture Refactor | Complete | ../ARCHITECTURE.md |
 
-Accepted planning for the next runtime direction lives in
-[internal/contracts/workflow-first-runtime.md](contracts/workflow-first-runtime.md).
-It records the workflow-first runtime pivot: `WorkflowDefinition` is the
-top-level product recipe, `WorkflowRun` is one execution, `StepDefinition` /
-`StepRun` own per-step configuration and state, and executors such as
-`goal-loop`, `one-shot`, `no-mistakes`, `script`, `external-apply`, and
-`subworkflow` perform the work inside steps. This contract keeps M9 as
-foundation work and does not flip the doctor marker by itself.
-The executor-loop layer for that pivot is pinned in
-[internal/contracts/executor-loop.md](contracts/executor-loop.md), covering
-executor states, round schema, artifacts, reattach / heartbeat rules,
-completion classification, human gates, and agent / model selection precedence.
-The current-to-target planning bridge is pinned in
-[internal/contracts/workflow-first-gap-matrix.md](contracts/workflow-first-gap-matrix.md),
-including what survives from M7/M8/M9, what changes, and the M10 slice order.
-M10 is complete: M10-00 promoted those planning contracts into the
-milestone narrative, M10-01 lands workflow / step definition schema,
-validation, and persistence primitives, M10-02 lands workflow run start,
-M10-03 lands executor-loop schema / persistence, M10-04 lands the opt-in
-daemon workflow scheduler lane, M10-05 lands the goal-loop executor
-adapter, M10-06 lands the one-shot / script executor adapters, M10-07 lands
-the no-mistakes executor mirror, M10-08 lands workflow gates and decisions, and
-M10-09a lands production workflow-lane dispatcher wiring for bounded managed
-`daemon start`. M10-09 dogfoods the workflow-first start / approval / bounded
-daemon dispatch path and closes the milestone. The M10 milestone narrative is
-[internal/milestones/m10-workflow-first-runtime.md](milestones/m10-workflow-first-runtime.md).
+Workflow-first runtime pivot contract links: internal/contracts/workflow-first-runtime.md,
+internal/contracts/executor-loop.md, internal/contracts/workflow-first-gap-matrix.md,
+internal/contracts/coding-workflow-ownership.md, internal/contracts/runtime-consolidation-plan.md,
+internal/contracts/repo-architecture-standard.md, contracts/live-workflow-execution.md,
+contracts/workflow-runs.md.
 
-The post-M10 coding workflow ownership migration is pinned in
-[internal/contracts/coding-workflow-ownership.md](contracts/coding-workflow-ownership.md).
-That contract keeps the current OpenClaw `coding-workflow-pipeline` as the
-stable production path while Momentum builds an opt-in Momentum-native coding
-workflow route. New Momentum-native runs must start from Momentum state; the
-OpenClaw skill boundary is client, rendering, delivery, and compatibility.
+M8 issues: NGX-323, NGX-324, NGX-325, NGX-326, NGX-327, NGX-328, NGX-329,
+NGX-330.
 
-Milestone 11 is the closed CLI structure refactor. Its final contract is root
-[ARCHITECTURE.md](../ARCHITECTURE.md): `src/cli.ts` remains the stable parser,
-top-level dispatch surface, and daemon / recovery / worker / doctor
-compatibility home; command-family orchestration lives under `src/commands/`;
-reusable JSON/text/help/diagnostic output contracts live under
-`src/renderers/`; infrastructure-facing clients and runtime adapters live under
-`src/adapters/`; structural guardrails enforce those import boundaries. M11 is a
-structure migration; Momentum command semantics stay frozen unless a later issue
-explicitly changes behavior.
+M9 sequence: NGX-331, NGX-332, NGX-333, NGX-334, NGX-335, NGX-336, NGX-337,
+NGX-338.
 
-Post-M11 runtime/test cleanup planning is tracked in
-[internal/runtime-test-audit.md](runtime-test-audit.md). Its NGX-434 capstone
-landed
-[internal/contracts/runtime-consolidation-plan.md](contracts/runtime-consolidation-plan.md),
-which authorizes no production deletion by itself and records the keep /
-deprecate-later / defer decisions, prerequisite proofs, M9/M10 step-finalization
-boundary, and `RC-*` follow-up sequence for historical runtime paths.
+M10 sequence: M10-00, M10-01, M10-02, M10-03, M10-04, M10-05, M10-06, M10-07,
+M10-08, M10-09a, M10-09; NGX-344, NGX-345, NGX-346, NGX-347, NGX-348,
+NGX-349, NGX-350, NGX-351, NGX-352, NGX-367, NGX-353.
 
-Post-M11 repo architecture planning is tracked in
-[internal/contracts/repo-architecture-standard.md](contracts/repo-architecture-standard.md).
-It defines the target source taxonomy, type placement, docs taxonomy, root
-`src/*.ts` policy, and `ARCH-02` through `ARCH-08` migration order. ARCH-02
-pins the first enforceable source-layout guardrails: allowed root files,
-transitional exception metadata, placeholder-free pending homes, and renderer /
-core import boundaries. ARCH-03 mechanically regrouped the workflow runtime
-under `src/core/workflow/`, ARCH-04 regrouped the executor runtime under
-`src/core/executors/`, and ARCH-05 regrouped the remaining pseudo-domains under
-`src/core/<domain>/` plus `src/config/` and `src/adapters/db/`, leaving command
-and renderer seams in place. ARCH-06 normalized TypeScript type placement by
-draining the three guard-tracked root type modules into their owning seams
-(`src/shared/events.ts`, `src/core/goal/types.ts`, `src/core/executors/types.ts`)
-and auditing the remaining exported types as already owned. ARCH-07 reconciled
-the human and agent documentation information architecture by adding internal
-indexes for current truth, active contracts, historical milestone provenance,
-and accepted future queues. ARCH-08 added `src/core/workflow/runtime-state.ts`
-as the workflow-runtime ownership home for mechanical step/lease row loading and
-cached run-state / monitor refresh after caller-owned durable mutations. It does
-not choose the M9/M10 finalization owner; that landed separately as `RC-2`
-(NGX-480) with `dispatch-reconcile.ts` /
-`dispatch-reconcile-execute.ts`. Accepted future runtime slices are indexed in
-[`internal/plans/README.md`](plans/README.md). `RC-5`'s fake demotion has since
-landed (NGX-485: the production executor default is real adapters, the fakes are
-a test-only injected seam); `RC-5b`'s reusable execution seams have since landed
-(NGX-492: the terminalize bridge, execution-path producer, profile source
-resolver, live-wrapper dispatch composition, and exec-context deriver are in
-place and tested) and the bounded `daemon start` workflow lane now wires them
-for configured daemon-default profiles. RC-1b's shared finalization
-disentanglement has since landed (NGX-494): the
-verify/commit/reset transaction now lives in the neutral
-`src/core/executors/step-finalize.ts` seam and the goal-loop executor imports
-that shared home directly. RC-1c's first goal-first narrowing slice has since
-landed (NGX-495): duplicate goal-first read-back logic now lives in
-`src/core/goal/read-back.ts` while the goal-first commands remain the
-compatibility surface and the domain-specific recovery guarded-clear dedup stays
-deferred. RC-3's daemon-dispatchable `external-apply` adapter has since landed
-(NGX-496): the pure M6 → executor-evidence mapping
-(`src/core/workflow/dispatch-external-apply.ts`) and the async run-path producer
-(`src/core/workflow/dispatch-external-apply-run.ts`) reuse the single M6
-`executeExternalApply` write path under its full safety contract, with `external-apply` now in the dispatchable family set and wired through daemon dispatch composition. RC-4's daemon-dispatchable `subworkflow` adapter mechanism has since landed (NGX-497), and RC-4b (NGX-498) flipped its configured production lane: the pure child-mirror mapping (`src/core/workflow/dispatch-subworkflow.ts`), the async run-path producer (`src/core/workflow/dispatch-subworkflow-run.ts`), the daemon-lane entry-point factory (`src/core/workflow/subworkflow-dispatch.ts`), route-sourced child config / lineage, and a key-resolved child runner observe a child workflow run through the existing run-start / status seams and mirror its terminal classification to the parent step behind the parent/child ownership boundary.
-The `doctor` readiness marker tracks the **most recently closed** milestone. It currently reads `Milestone 11: CLI architecture refactor (NGX-411, NGX-412, NGX-413, NGX-414, NGX-415, NGX-416, NGX-417, NGX-418, NGX-419) complete`. The marker advanced from the M6 closeout string to `Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete` at the M7 closeout slice (NGX-319), stayed pinned to the M7 string through every M8 implementation slice, advanced to the M8 string at the M8 closeout slice (NGX-330), advanced again to `Milestone 10: workflow-first runtime (NGX-344, NGX-345, NGX-346, NGX-347, NGX-348, NGX-349, NGX-350, NGX-351, NGX-352, NGX-367, NGX-353) complete` at the M10 closeout slice (NGX-353), and advanced to the M11 string at the M11 closeout slice (NGX-419).
+M11 sequence: NGX-411, NGX-412, NGX-413, NGX-414, NGX-415, NGX-416, NGX-417,
+NGX-418, NGX-419.
 
-## Previously closed milestone: M8
+Doctor marker history includes:
 
-Milestone 8 layers operator-control CLI envelopes (`workflow run list`, `workflow run approve`, `workflow run update-step`, `workflow run clear-recovery`, `workflow run monitor`) plus the per-run `recovery.md` / `needs_manual_recovery` artifact, additive `workflow_runs` monitor-advisory columns, and typed `runId` / `stepId` evidence linkage on top of the M7 OpenClaw coding-workflow backend substrate. The M7 substrate stays wire-stable; M8 does not rename the M7 `workflow import` / `workflow status` / `workflow handoff` envelopes, and does not move executor invocation, Discord delivery, or monitor cron scheduling out of the `coding-workflow-pipeline` skill.
+- Milestone 7: openclaw coding workflow backend (NGX-312, NGX-313, NGX-314, NGX-315, NGX-316, NGX-317, NGX-318, NGX-319) complete
+- Milestone 10: workflow-first runtime (NGX-344, NGX-345, NGX-346, NGX-347, NGX-348, NGX-349, NGX-350, NGX-351, NGX-352, NGX-367, NGX-353) complete
+- Milestone 11: CLI architecture refactor (NGX-411, NGX-412, NGX-413, NGX-414, NGX-415, NGX-416, NGX-417, NGX-418, NGX-419) complete
 
-The M8 milestone narrative and the issue order live in [internal/milestones/m8-workflow-run-operator-controls.md](milestones/m8-workflow-run-operator-controls.md); the cross-milestone operator-control invariants live in [internal/contracts/workflow-operator-controls.md](contracts/workflow-operator-controls.md). The underlying substrate contract stays [internal/contracts/workflow-runs.md](contracts/workflow-runs.md), wire-stable through M8.
-
-### Shipped M8 implementation order
-
-The Linear milestone "Milestone 8: Workflow Run Operator Controls" shipped the work in the following order (all closed). Each ticket left `main` valid:
-
-1. **NGX-323 — M8-00 Contract, roadmap, and docs setup**: pinned the M8 milestone narrative, the operator-control contract, the CLI envelope names, the refusal taxonomy, the compatibility rules, and the M8 non-goals. No runtime behavior changed; the doctor marker stayed on the M7 closeout string.
-2. **NGX-324 — M8-01 workflow run list and query surface**: shipped the read-only filterable `workflow run list` envelope. Reuses the M7 storage / query helpers; no mutation, no external refresh, no filesystem directory scan as the source of truth when durable rows are available.
-3. **NGX-325 — M8-02 workflow run approve durable approval CLI**: shipped the explicit-approval `workflow run approve` envelope. Validates against the stable boundary phrase set, persists the durable `workflow_approvals` row, verifies the on-disk approval artifact digest where provided, and surfaces through `workflow status` / `workflow handoff` / `workflow run list`.
-4. **NGX-326 — M8-03 workflow run update-step transition surface**: shipped the operator-driven `workflow run update-step` envelope. Drives the M7 reducer / state machine for `succeeded` / `skipped` / `failed` / `blocked` transitions with ledger / evidence pointers and an operator-supplied reason. Illegal transitions refuse without partial durable mutation.
-5. **NGX-327 — M8-04 run-scoped recovery artifact and durable flag**: persisted `WorkflowRun.needs_manual_recovery`, rendered `.agent-workflows/<runId>/recovery.md` from the M7 monitor reducer's recovery view, blocked claims / non-resolving transitions that would make recovery worse, and added the explicit `workflow run clear-recovery` path.
-6. **NGX-328 — M8-05 workflow run monitor machine envelope**: shipped the read-only `workflow run monitor` envelope emitting a stable JSON shape (`schemaVersion`, run identity, current state, next-action code, recovery classification, evidence pointers, reportability / terminal flags).
-7. **NGX-329 — M8-06 typed workflow evidence linkage**: added additive, backwards-compatible `runId` / `stepId` linkage on `evidence_records`. Existing M5 evidence ingest semantics stay wire-stable.
-8. **NGX-330 — M8-07 M8 closeout smoke, docs, and doctor marker**: closed the milestone. Extended the fake workflow smoke to cover list / approve / update-step / recovery / monitor / evidence linkage composing. Extended the regression matrix with M8 operator-control failure modes. Flipped the `doctor --json` milestone marker forward to the M8 closeout string after M8-00..M8-06 merged and verified.
-
-Live executor wrappers (around `gnhf-runner`, `gnhf-postflight`, `harness-delegate`, `no-mistakes-pipeline`, `model-evidence`, `project-progress-refresh`) stayed deferred past M8 closeout until the M9-00 decision gate (NGX-331) promoted Milestone 9, which now owns them; M9 wraps those engines without rewriting them.
-
-## M9 foundation work
-
-Milestone 9 remains valid foundation work after the M9-00 decision gate (NGX-331). Its milestone narrative lives in [internal/milestones/m9-live-workflow-execution.md](milestones/m9-live-workflow-execution.md); its contract lives in [internal/contracts/live-workflow-execution.md](contracts/live-workflow-execution.md).
-
-M9 owns the first Momentum-side live executor wrappers around the existing OpenClaw engines, the live step lease / heartbeat / result-file contract, verification and commit transaction wiring, recovery behavior for live failures, and a real dogfood run. M9 wraps the existing engines; it does not rewrite GNHF, postflight, no-mistakes, model-evidence, or project-refresh internals.
-
-The accepted workflow-first runtime pivot does not invalidate this work. It
-reframes M9 as foundation: the live wrappers, leases, finalization, and
-recovery primitives become building blocks for a configurable workflow runtime.
-M10-02 has since landed the workflow-first `workflow run start` surface,
-M10-04 has landed the opt-in scheduler lane for those runs, M10-05 has
-landed the goal-loop executor adapter, M10-06 has landed the one-shot /
-script executor adapters, M10-07 has landed the no-mistakes mirror, M10-08 has
-landed workflow gates and decisions, M10-09a has wired the production
-workflow-lane dispatcher into bounded managed `daemon start`, and M10-09 has
-dogfooded that workflow-first path through the real `ngx353-m10-closeout`
-run. `goal start` remains the
-compatibility path for the older Goal loop.
-
-### Pinned M9 implementation sequence
-
-The M9-00 decision gate (NGX-331) pins the slice order; each slice is a concrete Linear issue that must leave `main` valid:
-
-1. **NGX-331 — M9-00 Contract and decision gate** — promote the draft; pin the architecture, non-goals, and this sequence; update this roadmap and the doctor-marker policy. No runtime change.
-2. **NGX-332 — M9-01 Live wrapper config and registry.**
-3. **NGX-333 — M9-02 Live implementation step wrapper.**
-4. **NGX-334 — M9-03 Verification and commit transaction.**
-5. **NGX-335 — M9-04 Postflight and no-mistakes wrappers.**
-6. **NGX-336 — M9-05 Merge cleanup and Linear refresh boundaries.**
-7. **NGX-337 — M9-06 Live recovery and resume smoke.**
-8. **NGX-338 — M9-07 Dogfood run and closeout** — run the dogfood gate and capture regression updates; M10 closeout later advanced the `doctor --json` marker, and M11 closeout advanced it again.
-
-The `doctor --json` marker stayed pinned to the M8 closeout string above
-through M9 foundation work; M9 did not flip it.
-
-## M10 implementation progress
-
-Milestone 10 is the workflow-first runtime implementation milestone. Its
-narrative lives in
-[internal/milestones/m10-workflow-first-runtime.md](milestones/m10-workflow-first-runtime.md).
-M10 promotes the workflow-first runtime planning contracts into an executable
-milestone while keeping M9 as foundation work.
-
-M10's target product shape is:
-
-```text
-WorkflowDefinition -> StepDefinition[]
-WorkflowRun -> StepRun[]
-StepRun -> ExecutorInvocation -> ExecutorRound[]
-```
-
-M10 makes workflow definitions and workflow runs the product root; `goal-loop`
-becomes an executor family inside a workflow step.
-
-### M10 implementation sequence
-
-1. **NGX-344 — M10-00 Workflow-first contract and milestone setup.** *(done)*
-2. **NGX-345 — M10-01 WorkflowDefinition and StepDefinition schema.** *(done)*
-3. **NGX-346 — M10-02 Workflow run start.** *(done)*
-4. **NGX-347 — M10-03 ExecutorDefinition / Invocation / Round schema.** *(done)*
-5. **NGX-348 — M10-04 Daemon workflow scheduler lane.** *(done)*
-6. **NGX-349 — M10-05 Goal-loop executor adapter.** *(done)*
-7. **NGX-350 — M10-06 One-shot and script executor adapters.** *(done)*
-8. **NGX-351 — M10-07 no-mistakes executor mirror.** *(done)*
-9. **NGX-352 — M10-08 Workflow gates and decisions CLI.** *(done)*
-10. **NGX-367 — M10-09a Production workflow-lane dispatcher prep.** *(done)*
-11. **NGX-353 — M10-09 Workflow-first dogfood and closeout.** *(done)*
-
-The `doctor --json` marker reported the M10 closeout string after the
-workflow-first dogfood gate passed, until the M11 closeout advanced it again.
-
-## Previously closed milestone: M7
-
-Milestone 7 shipped the **durable run substrate for OpenClaw coding workflows**. The `coding-workflow-pipeline` skill keeps composing the executors (preflight → GNHF → postflight → no-mistakes → merge cleanup → Linear refresh) and the Discord / monitor cron UX; M7 owns the durable `WorkflowRun` record, step-state lifecycle, approval persistence, lease coordination, and path-based evidence pointer substrate that those engines previously kept in ad-hoc artifacts plus in-memory shell sessions. M8 adds the typed `runId` / `stepId` evidence linkage on top of that substrate.
-
-M7 is **not** a replacement for `gnhf-runner`, `gnhf-postflight`, `harness-delegate`, `no-mistakes-pipeline`, `model-evidence`, or `project-progress-refresh`. The ownership boundary, the old monitor failure modes M7 eliminates, compatibility with `plan.json` / `ledger.jsonl` / `approval-*.json` / `monitor.json`, and M7 non-goals live in [internal/milestones/m7-openclaw-coding-workflow-backend.md](milestones/m7-openclaw-coding-workflow-backend.md); the cross-milestone invariants live in [internal/contracts/workflow-runs.md](contracts/workflow-runs.md); the closeout regression matrix lives in [internal/regression-matrix.md](regression-matrix.md).
-
-### Shipped M7 implementation order
-
-The Linear milestone "Milestone 7: OpenClaw Coding Workflow Backend" shipped the work in the following order (all closed):
-
-1. **NGX-312 — M7-00 Contract, roadmap, and docs setup**: pinned the M7 contract, ownership boundary, old monitor failure modes, compatibility list, and non-goals.
-2. **NGX-313 — M7-01 WorkflowRun substrate schema and state model**: shipped the `workflow_runs` / `workflow_steps` / `workflow_approvals` / `workflow_leases` schema migration, the `WorkflowRun` identity columns, the pure run / step state vocabulary plus transition reducer, the lease-aware `deriveWorkflowRunState`, and the `classifyWorkflowLease` freshness classifier.
-3. **NGX-314 — M7-02 Import current agent-workflow plans**: shipped the `.agent-workflows/<runId>/` normalizer, the SQLite persistence layer for the M7 substrate tables, the `workflow import` CLI envelope, and built-CLI smoke coverage for import edge cases.
-4. **NGX-315 — M7-03 Step execution adapter boundary**: shipped the pure `WorkflowStepExecutor` boundary, the typed input / result / checkpoint / artifact / error shapes, the registry / resolver keyed by `WorkflowStepKind`, original deterministic fake executors per kind (now test-only after NGX-485), and focused unit tests pumping a full required-step chain through the state machine.
-5. **NGX-316 — M7-04 Momentum-owned monitor and recovery state**: shipped the pure `deriveWorkflowMonitorState` reducer, the per-lease freshness view, monitor-advisory drift classification, deterministic `nextAction` codes, and the recovery taxonomy (`stale_running_step`, `ghost_active_no_lease`, `manual_recovery_lease`, `monitor_drift_stale`, `failed_required_step`).
-6. **NGX-317 — M7-05 Workflow status and handoff CLI surfaces**: shipped the read-only `workflow status` and `workflow handoff` CLI envelopes with stable JSON field names, refusal taxonomy, and text rendering composed on top of the monitor reducer.
-7. **NGX-318 — M7-06 End-to-end coding workflow smoke**: shipped the end-to-end built-CLI smoke driving a fresh `.agent-workflows/<runId>/` fixture through the injected deterministic fake executors, covering happy-path completion, evidence linkage through `workflow handoff`, and a failure path that proves no ghost active / blocked run remains.
-8. **NGX-319 — M7-07 Docs, regression matrix, and milestone closeout**: closed the milestone, added [internal/regression-matrix.md](regression-matrix.md), aligned the contract tests, and flipped the `doctor --json` milestone marker to the M7 closeout string.
-
-## Previously closed milestone: M6
-
-Milestone 6 shipped **policy-gated external apply**: a single concrete adapter (Linear) gained a two-phase external write path behind operator-mediated configuration. M5 already recorded durable update intents; M6 lets an operator turn an intent into a real external write while preserving every M3/M4/M5 safety contract.
-
-The full M6 contract — runtime invariants, the two-phase apply flow, audit ordering, and the comment-only default — lives in [internal/contracts/intent-apply.md](contracts/intent-apply.md). The milestone-level scope, shipped sequencing, and post-M6 deferrals live in [internal/milestones/m6-external-apply.md](milestones/m6-external-apply.md).
-
-### Shipped M6 implementation order
-
-The Linear milestone "Milestone 6: Policy-Gated External Apply" shipped the work in the following order (all closed):
-
-1. **NGX-295 — M6-00 M6 contract, roadmap, and docs setup**: reshaped the public docs surface so README is the OSS front door, AGENTS is a compact agent contract, and the M6 invariants live in `internal/`.
-2. **NGX-296 — M6-01 ExternalUpdateAdapter boundary and result taxonomy**: added the write-side adapter boundary, registry, input/result types, deterministic dry-run preview shape, idempotency marker helper, and stable adapter/write error taxonomy. No real Linear mutations or CLI external apply integration in this slice.
-3. **NGX-297 — M6-02 Linear external update client**: introduced the credential-handling Linear GraphQL mutation client behind the adapter boundary. Tests used mock fetch/endpoints; no real `api.linear.app` calls in tests.
-4. **NGX-299 — M6-03 Apply audit ledger and operator surfaces**: landed durable audit/claim storage, the per-intent CAS guard with `intent_apply_in_progress`, blocked/audit-incomplete state representation, and operator-visible surfaces **before** any CLI external write could mutate Linear.
-5. **NGX-298 — M6-04 External apply execution**: wired the two-phase external write behind `intent apply --external-apply` gated by `intent_apply_policy: external_apply_allowed`. Comment-only by default; status mutation only when explicitly configured.
-6. **NGX-300 — M6-05 Post-apply reconciliation and mismatch resolution**: refreshed/reconciled the touched Linear issue after a successful external write and surfaced stable reconciliation warning/result codes without broad project reconciliation.
-7. **NGX-301 — M6-06 External apply safety smoke and failure matrix**: added built-CLI smoke coverage for the complete safe external-apply path, including policy-denied/default-safe behavior, auth failure, concurrency, idempotent replay, blocked/audit-finalize failure, comment-only mode, and mock-Linear guards.
-8. **NGX-302 — M6-07 M6 docs, contract tests, and milestone closeout**: closed the milestone, preserved older contracts, and flipped the `doctor` milestone marker to M6 complete.
-
-NGX-299 landed before NGX-298 — audit surfaces shipped first so operators could see what an external apply would write before any real write could happen.
-
-## Post-M8 deferred work
-
-The following remain explicitly deferred until a later milestone justifies them. Live execution itself is no longer deferred: Milestone 9 foundation work owns the Momentum-side live executor wrappers, the live step lease / heartbeat / result-file contract, verification / commit transaction wiring, and the dogfood run. M7 shipped the OpenClaw coding workflow backend substrate and M8 shipped the operator-control surfaces; the items below stay out of scope:
-
-- Inbound webhooks; source adapters stay pull / reconcile first.
-- Dashboards or any UI surface; the CLI remains the only interface. Discord delivery for approvals stays inside the `coding-workflow-pipeline` skill, not Momentum.
-- External writes outside the M6 safety contract; the RC-3 daemon path only reuses that policy-gated external-apply lifecycle for one matched pending Linear intent.
-- Non-Linear external write adapters (GitHub / Jira / etc.).
-- Per-source-item worktrees / parallel same-repo Goals; a `WorkflowRun` continues to use one shared repo lease.
-- Background runner supervision (forking, daemonization, restart-on-crash).
-- Strong sandboxing (container / VM / seccomp) for runner adapters; `trusted-shell` and `acp` remain explicitly trusted.
-- Cooperative mid-job cancellation / signal handling beyond the existing `daemon stop` / `daemon stop --now` semantics.
-- Remote git operations (`fetch` / `pull` / `push` / `rebase`) driven from Momentum.
-- Replacing the GNHF / postflight / no-mistakes / merge-cleanup engines themselves; M7 is the substrate, M8 is the operator-control surface, and M9 wraps the executors — none of them reimplement the engines.
-- Generalizing the `WorkflowRun` substrate beyond OpenClaw coding workflows continues after M10. M10-01 landed reusable definition schema and persistence primitives, M10-02 added first-class run start, M10-03 persists executor-loop records below step runs, M10-04 added the opt-in scheduler lane, M10-05 added the goal-loop executor adapter, M10-06 added the one-shot / script executor adapters, M10-07 added the no-mistakes mirror, M10-08 added workflow gates and decisions, M10-09a wired production dispatcher scaffolds into bounded managed `daemon start`, M10-09 dogfooded that shipped path, RC-3 has since landed daemon-dispatchable `external-apply` under the M6 safety contract, RC-4 has landed the `subworkflow` adapter mechanism, and RC-4b has flipped configured `subworkflow` dispatch into the bounded daemon lane. The accepted planning contracts for that pivot are [internal/contracts/workflow-first-runtime.md](contracts/workflow-first-runtime.md), [internal/contracts/executor-loop.md](contracts/executor-loop.md), and [internal/contracts/workflow-first-gap-matrix.md](contracts/workflow-first-gap-matrix.md).
+Runtime notes: M9 remains valid foundation work. M10 is complete. external-apply
+and subworkflow production flip have landed. RC-5 fake demotion, RC-5b reusable
+execution seams, RC-1b finalization disentanglement, RC-1c read-back narrowing,
+and RC-3/RC-4 dispatchable adapters have landed.

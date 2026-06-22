@@ -15,39 +15,47 @@ Typical loop:
 4. Emit handoff artifacts for continuity.
 
 ## Where docs live
-Two trees:
+Two repo trees plus one external internal-docs home:
 
 - `docs/` — **public-facing** GitHub Pages content (install, commands, recovery, runners, walkthrough). Do not leak roadmap, milestone, NGX/Linear, or sequencing material into here.
-- `internal/` — internal-only planning context: roadmap, per-milestone narratives, cross-milestone contracts, smoke-test coverage map, and deferred-feature exclusions. Treat this as the source of truth for milestone scope and sequencing.
+- `internal/` — temporary source-level anchors retained during DOCS-02/DOCS-03 for compatibility with existing contract links and tests. Do not add long-form planning, milestone, roadmap, dogfood, readiness, or migration narrative here.
+- Obsidian `/Workspaces/Momentum` — canonical internal home for long-form plans, milestone provenance, roadmap sequencing, dogfood evidence, readiness notes, and docs-boundary decisions.
 
-Quick map of `internal/`:
+Historical internal planning docs began moving to Obsidian
+`/Workspaces/Momentum` during DOCS-02; DOCS-03 continues the contract/internal
+cleanup. Do not recreate long-form `internal/` docs; keep repo docs focused on
+shipped behavior, operator truth, source architecture anchors, and executable
+checks.
 
-- [`internal/README.md`](internal/README.md) — internal documentation map for
-  current truth, active contracts, historical milestone provenance, and accepted
-  future plans.
+Temporary map of `internal/`:
+
+- [`internal/README.md`](internal/README.md) — temporary documentation anchor
+  map for current truth, active contracts, historical milestone provenance, and
+  accepted future plans.
 - [`internal/contracts/README.md`](internal/contracts/README.md) — active
   contract index. Start here for runtime invariants, repo architecture rules,
   and RC-1..RC-5 consolidation scope.
 - [`internal/milestones/README.md`](internal/milestones/README.md) —
-  historical milestone narrative index. Preserve shipped order and provenance;
-  do not treat superseded milestone prose as current instructions without the
-  matching active contract. It points to `m3-operational-safety.md`,
+  temporary historical milestone anchor index. Preserve shipped order and
+  provenance from Obsidian; do not treat superseded milestone prose as current
+  instructions without the matching active contract. It points to
+  `m3-operational-safety.md`,
   `m4-real-runners.md`, `m5-source-adapters.md`, `m6-external-apply.md`,
   `m7-openclaw-coding-workflow-backend.md`,
   `m8-workflow-run-operator-controls.md`,
   `m9-live-workflow-execution.md`, and `m10-workflow-first-runtime.md`.
-- [`internal/roadmap.md`](internal/roadmap.md) — milestone timeline and current
-  sequencing.
+- [`internal/roadmap.md`](internal/roadmap.md) — temporary milestone timeline
+  anchor. Long-form sequencing lives in Obsidian.
 - [`internal/contracts/repo-architecture-standard.md`](internal/contracts/repo-architecture-standard.md)
   — post-M11 source taxonomy, docs taxonomy, type placement, root `src/*.ts`
   policy, and ARCH migration sequence.
-- [`internal/plans/README.md`](internal/plans/README.md) — accepted future plan
-  queue and RC-1..RC-5 discovery.
+- [`internal/plans/README.md`](internal/plans/README.md) — temporary accepted
+  future plan anchor and RC-1..RC-5 discovery pointer.
 - [`internal/smoke-tests.md`](internal/smoke-tests.md),
   [`internal/exclusions.md`](internal/exclusions.md),
   [`internal/regression-matrix.md`](internal/regression-matrix.md), and
-  [`internal/runtime-test-audit.md`](internal/runtime-test-audit.md) — durable
-  audit and closeout evidence.
+  [`internal/runtime-test-audit.md`](internal/runtime-test-audit.md) —
+  temporary audit/evidence anchors. Long-form evidence lives in Obsidian.
 
 Root [`ARCHITECTURE.md`](ARCHITECTURE.md) is the source of truth for the current
 repo architecture contract and import boundaries; it links deeper contracts when
