@@ -1,7 +1,7 @@
 /**
  * Single-shot executor adapter — decision brain and identity (M10-06, NGX-350).
  *
- * The executor-loop contract (internal/contracts/executor-loop.md) pins two
+ * The executor-loop contract (SPEC.md) pins two
  * single-invocation executor families that this module serves together:
  *
  *   - `one-shot` "runs a single result-bearing command or agent wrapper.

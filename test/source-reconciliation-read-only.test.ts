@@ -14,7 +14,7 @@ import {
 /**
  * NGX-369 read-only invariant proof for the Linear source reconciliation adapter.
  *
- * The source-adapters contract (internal/contracts/source-adapters.md) requires
+ * The source-adapters contract (SPEC.md) requires
  * that source adapters write ONLY to Momentum's local durable source tables and
  * never own Goal / Iteration / Job state, never touch git, and never perform or
  * queue automatic external writes. The existing source-reconciliation tests

@@ -3,7 +3,7 @@
  *
  * This module owns only the canonical vocabulary and the transition reducer
  * for `WorkflowRun` / `workflow_steps` records described in
- * internal/contracts/workflow-runs.md. It does not touch SQLite, the file
+ * SPEC.md. It does not touch SQLite, the file
  * system, or any executor. Schema migrations, ingest paths, and CLI envelopes
  * are layered on top of these primitives in follow-up M7 slices.
  */

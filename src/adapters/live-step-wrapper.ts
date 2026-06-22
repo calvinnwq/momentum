@@ -36,7 +36,7 @@
  * acquire/heartbeat/release durable `workflow_leases`, persist `workflow_steps`
  * start/terminal state, reconcile run-level recovery artifacts, and own
  * verification/commit transactions. Per
- * internal/contracts/live-workflow-execution.md, distinct failure causes map
+ * SPEC.md, distinct failure causes map
  * to distinct stable recovery codes rather than generic failure text.
  */
 
@@ -56,7 +56,7 @@ import type { WorkflowStepKind } from "../core/workflow/run-reducer.js";
 /**
  * Stable recovery vocabulary for live-wrapper *execution* failures. This is the
  * process-execution subset of the M9 run-level recovery taxonomy in
- * internal/contracts/live-workflow-execution.md. Caller layers add durable
+ * SPEC.md. Caller layers add durable
  * run-level classifications for lease, dispatch, verification, git, reset,
  * repo-lock, commit, invalid-input, executor-throw, and manual-recovery
  * outcomes; a single process run only emits the codes below.

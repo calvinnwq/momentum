@@ -72,7 +72,7 @@ import type { RunnerResult } from "../src/core/executors/types.js";
  * NGX-372 full adapter E2E proof (Adapter Test Coverage milestone).
  *
  * This is the capstone of the layered adapter-test strategy
- * (internal/contracts/adapter-test-coverage.md): isolated contract tests
+ * (SPEC.md): isolated contract tests
  * (NGX-369 / NGX-370) and a stubbed integration smoke (NGX-371) are green, so
  * this CI-safe proof composes the *real* adapter layers through the intended
  * operator flow and records evidence of the composition. It is the test that

@@ -1,7 +1,7 @@
 /**
  * Goal-loop executor adapter — round decision brain (M10-05, NGX-349).
  *
- * The executor-loop contract (internal/contracts/executor-loop.md) pins the
+ * The executor-loop contract (SPEC.md) pins the
  * `goal-loop` family as "bounded autonomous implementation rounds. It may
  * continue across multiple rounds, but each round must have a normalized result,
  * finalization decision, and daemon classification." This module owns the

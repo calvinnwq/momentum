@@ -21,7 +21,7 @@
  * layers; this module is the gate, not the runner.
  *
  * Safety posture (mirrors the read smoke, per
- * internal/contracts/adapter-test-coverage.md):
+ * SPEC.md):
  *   - The smoke is **skipped unless explicitly opted in**, so default CI never
  *     spawns an expensive external agent.
  *   - Real external **reads** stay separated from real external **writes**: the

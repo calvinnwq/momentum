@@ -726,11 +726,11 @@ describe("M11 CLI import boundaries", () => {
   });
 
   it("documents how to add future source modules without creating root junk", () => {
-    const standard = readFile("internal/contracts/repo-architecture-standard.md");
+    const standard = readFile("ARCHITECTURE.md");
 
-    expect(standard).toContain("## Adding Source Modules During ARCH Migration");
+    expect(standard).toContain("## Adding Source Modules");
     expect(standard).toMatch(/Do not add new root `src\/\*\.ts` modules/i);
     expect(standard).toMatch(/src\/core\/<domain>/);
-    expect(standard).toMatch(/transitional exception/i);
+    expect(standard).toMatch(/Transitional exceptions/i);
   });
 });

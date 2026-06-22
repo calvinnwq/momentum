@@ -53,7 +53,7 @@ export const WORKFLOW_RECOVERY_ARTIFACT_SCHEMA_VERSION = 1;
  * `command_failed`, `command_timed_out`, `output_overflow`), trapped executor
  * throws (`executor_threw`), and wrapper-reported `manual_recovery_required` outcomes
  * rendered into the same per-run `recovery.md`. Extending the recovery taxonomy
- * here is explicitly sanctioned by internal/contracts/live-workflow-execution.md
+ * here is explicitly sanctioned by SPEC.md
  * ("M9 can extend the M8 taxonomy, but it cannot collapse distinct failure
  * causes into generic failure text"). The monitor reducer's emitted-code type
  * stays untouched so the substrate never claims to produce a code it cannot.

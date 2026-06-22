@@ -5,7 +5,7 @@
  * `coding-workflow-pipeline` skill (and any future trusted runtime binding)
  * for driving a single `workflow_steps` row from `approved` → `running` →
  * terminal. Momentum core continues to own the durable run / step / approval /
- * lease rows pinned by internal/contracts/workflow-runs.md; executors only
+ * lease rows pinned by SPEC.md; executors only
  * perform the step's work and report a normalized result. Executors do not
  * mutate the durable substrate, do not perform external apply, and do not
  * decide approval boundary advancement.

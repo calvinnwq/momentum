@@ -1,7 +1,7 @@
 /**
  * no-mistakes executor mirror — decision brain and identity (M10-07, NGX-351).
  *
- * The executor-loop contract (internal/contracts/executor-loop.md) pins the
+ * The executor-loop contract (SPEC.md) pins the
  * `no-mistakes` family as a *mirror*, not a runner: it "mirrors no-mistakes
  * daemon state and turns review findings into durable Momentum gates, findings,
  * and decisions." Momentum does not own or re-run the no-mistakes pipeline; it

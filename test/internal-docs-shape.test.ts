@@ -10,188 +10,81 @@ function readDoc(rel: string): string {
   return fs.readFileSync(path.join(repoRoot, rel), "utf8");
 }
 
-const REQUIRED_FILES = [
-  "internal/README.md",
-  "internal/roadmap.md",
-  "internal/exclusions.md",
-  "internal/smoke-tests.md",
-  "internal/contracts/README.md",
-  "internal/milestones/README.md",
-  "internal/plans/README.md",
-  "internal/milestones/m3-operational-safety.md",
-  "internal/milestones/m4-real-runners.md",
-  "internal/milestones/m5-source-adapters.md",
-  "internal/milestones/m6-external-apply.md",
-  "internal/milestones/m7-openclaw-coding-workflow-backend.md",
-  "internal/milestones/m8-workflow-run-operator-controls.md",
-  "internal/milestones/m9-live-workflow-execution.md",
-  "internal/contracts/intent-apply.md",
-  "internal/contracts/source-adapters.md",
-  "internal/contracts/workflow-runs.md",
-  "internal/contracts/workflow-operator-controls.md",
-  "internal/contracts/live-workflow-execution.md",
-] as const;
-
-describe("internal planning docs shape", () => {
-  for (const rel of REQUIRED_FILES) {
-    it(`${rel} exists and is non-empty`, () => {
-      const p = path.join(repoRoot, rel);
-      expect(fs.existsSync(p), `${rel} should exist after the public-docs cleanup`).toBe(true);
-      const body = fs.readFileSync(p, "utf8");
-      expect(body.trim().length, `${rel} should not be empty`).toBeGreaterThan(0);
-    });
+function listMarkdown(dir: string): string[] {
+  if (!fs.existsSync(dir)) return [];
+  const out: string[] = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      out.push(...listMarkdown(full));
+    } else if (entry.isFile() && entry.name.endsWith(".md")) {
+      out.push(full);
+    }
   }
+  return out;
+}
 
-  it("internal/roadmap.md still names the M3..M6 milestones", () => {
-    const roadmap = readDoc("internal/roadmap.md");
-    for (const tag of ["Milestone 3", "Milestone 4", "Milestone 5", "Milestone 6"]) {
-      expect(roadmap, `internal/roadmap.md should still reference ${tag}`).toContain(tag);
-    }
+describe("repo internal docs boundary", () => {
+  it("does not keep an internal/ documentation tree", () => {
+    expect(fs.existsSync(path.join(repoRoot, "internal"))).toBe(false);
   });
 
-  it("internal/milestones/m6-external-apply.md still lists the planned M6 NGX order", () => {
-    const m6 = readDoc("internal/milestones/m6-external-apply.md");
-    for (const id of [
-      "NGX-295",
-      "NGX-296",
-      "NGX-297",
-      "NGX-298",
-      "NGX-299",
-      "NGX-300",
-      "NGX-301",
-      "NGX-302",
-    ]) {
-      expect(m6, `internal/milestones/m6-external-apply.md should still reference ${id}`).toContain(id);
+  it("keeps compact source-truth anchors in living repo docs", () => {
+    for (const rel of ["AGENTS.md", "ARCHITECTURE.md", "SPEC.md"]) {
+      const body = readDoc(rel);
+      expect(body.trim().length, `${rel} should not be empty`).toBeGreaterThan(0);
+      expect(body, `${rel} should route long-form docs to Obsidian`).toContain(
+        "/Workspaces/Momentum"
+      );
     }
-  });
 
-  it("internal/contracts/intent-apply.md still names the two-phase external apply invariants", () => {
-    const contract = readDoc("internal/contracts/intent-apply.md");
+    const spec = readDoc("SPEC.md");
     for (const phrase of [
-      "two-phase",
-      "intent_apply_in_progress",
-      "idempotency",
+      "WorkflowDefinition",
+      "ExecutorInvocation",
+      "external-apply",
+      "subworkflow",
+      "coding workflow runtime",
+      "Runtime Consolidation",
       "api.linear.app",
     ]) {
-      expect(contract, `internal/contracts/intent-apply.md should mention ${phrase}`).toMatch(
-        new RegExp(phrase, "i")
-      );
+      expect(spec, `SPEC.md should preserve current contract term ${phrase}`).toContain(phrase);
     }
   });
 
-  it("indexes current truth, active contracts, historical milestones, and accepted plans", () => {
-    const internalIndex = readDoc("internal/README.md");
-    for (const phrase of [
-      "Current Truth",
-      "Active Contracts",
-      "Historical Milestone Provenance",
-      "Accepted Future Plans",
-    ]) {
-      expect(internalIndex, `internal/README.md should include ${phrase}`).toContain(phrase);
+  it("does not link to internal/*.md from repo markdown", () => {
+    const docs = [
+      path.join(repoRoot, "README.md"),
+      path.join(repoRoot, "AGENTS.md"),
+      path.join(repoRoot, "ARCHITECTURE.md"),
+      path.join(repoRoot, "SPEC.md"),
+      ...listMarkdown(path.join(repoRoot, "docs")),
+    ];
+
+    const hits: string[] = [];
+    for (const doc of docs) {
+      const rel = path.relative(repoRoot, doc).split(path.sep).join("/");
+      const body = fs.readFileSync(doc, "utf8");
+      const matches = body.match(/\binternal\/[A-Za-z0-9./_-]+/g) ?? [];
+      hits.push(...matches.map((match) => `${rel}: ${match}`));
     }
 
-    const contractsIndex = readDoc("internal/contracts/README.md");
-    expect(contractsIndex).toContain("runtime-consolidation-plan.md");
-    expect(contractsIndex).toContain("repo-architecture-standard.md");
-
-    const plansIndex = readDoc("internal/plans/README.md");
-    for (const item of ["RC-1", "RC-2", "RC-3", "RC-4", "RC-5", "ARCH-08 / NGX-452"]) {
-      expect(plansIndex, `internal/plans/README.md should mention ${item}`).toContain(item);
-    }
+    expect(hits, `repo markdown must not reference internal paths: ${hits.join("; ")}`).toEqual([]);
   });
 
-  it("milestone narratives are marked as historical provenance", () => {
-    for (const rel of REQUIRED_FILES.filter(
-      (rel) => rel.startsWith("internal/milestones/") && rel !== "internal/milestones/README.md"
-    )) {
-      const body = readDoc(rel);
-      expect(body, `${rel} should identify itself as historical/provenance material`).toContain(
-        "Historical/provenance note"
-      );
-    }
-  });
-});
+  it("keeps public docs free of Obsidian-only internal routing details", () => {
+    const publicDocs = [
+      path.join(repoRoot, "README.md"),
+      ...listMarkdown(path.join(repoRoot, "docs")),
+    ];
 
-describe("AGENTS.md points agents at internal/", () => {
-  const agents = readDoc("AGENTS.md");
-
-  it("declares the docs/ vs internal/ split", () => {
-    expect(agents).toMatch(/Where docs live/i);
-    expect(agents).toContain("internal/");
-    expect(agents).toContain("docs/");
-  });
-
-  it("links to internal/roadmap.md and the per-milestone narratives", () => {
-    expect(agents).toMatch(/internal\/roadmap\.md/);
-    expect(agents).toMatch(/internal\/milestones\//);
-    expect(agents).toMatch(/internal\/contracts\//);
-  });
-
-  it("names the current architecture and most recently closed milestone compactly", () => {
-    expect(agents).toMatch(/Milestone 11/);
-    expect(agents).toMatch(/src\/core\/<domain>/);
-    expect(agents).toMatch(/internal\/contracts\/README\.md/);
-  });
-
-  it("stays compact (under 200 lines)", () => {
-    const lineCount = agents.split("\n").length;
-    expect(lineCount, `AGENTS.md should stay compact (was ${lineCount} lines)`).toBeLessThan(200);
-  });
-
-  it("references the public-docs hygiene guard", () => {
-    expect(agents).toMatch(/test\/public-docs-hygiene\.test\.ts/);
-  });
-
-  it("every internal/*.md link in AGENTS.md targets a file that exists", () => {
-    const matches = agents.match(/internal\/[A-Za-z0-9./_-]+\.md/g) ?? [];
-    const unique = Array.from(new Set(matches));
-    expect(unique.length, "AGENTS.md should reference internal planning docs").toBeGreaterThan(0);
-
-    const missing = unique.filter((rel) => !fs.existsSync(path.join(repoRoot, rel)));
-    expect(
-      missing,
-      `AGENTS.md references internal/*.md paths that do not exist on disk: ${missing.join(", ")}`
-    ).toEqual([]);
-  });
-});
-
-describe("internal markdown links", () => {
-  it("every relative .md link inside internal/*.md targets a file that exists", () => {
-    const internalDir = path.join(repoRoot, "internal");
-    const allDocs: string[] = [];
-    function walk(dir: string): void {
-      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-        const full = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-          walk(full);
-        } else if (entry.isFile() && entry.name.endsWith(".md")) {
-          allDocs.push(full);
-        }
-      }
-    }
-    walk(internalDir);
-
-    const broken: string[] = [];
-    const linkRe = /\]\(([^)\s]+\.md)(?:#[^)]*)?\)/g;
-    for (const docPath of allDocs) {
-      const body = fs.readFileSync(docPath, "utf8");
-      const sourceDir = path.dirname(docPath);
-      const relSource = path.relative(repoRoot, docPath).split(path.sep).join("/");
-      let match: RegExpExecArray | null;
-      while ((match = linkRe.exec(body)) !== null) {
-        const target = match[1]!;
-        if (/^https?:/i.test(target)) continue;
-        const resolved = path.resolve(sourceDir, target);
-        if (!fs.existsSync(resolved)) {
-          const relResolved = path.relative(repoRoot, resolved).split(path.sep).join("/");
-          broken.push(`${relSource} -> ${target} (resolves to ${relResolved})`);
-        }
-      }
+    const hits: string[] = [];
+    for (const doc of publicDocs) {
+      const rel = path.relative(repoRoot, doc).split(path.sep).join("/");
+      const body = fs.readFileSync(doc, "utf8");
+      if (body.includes("/Workspaces/Momentum")) hits.push(rel);
     }
 
-    expect(
-      broken,
-      `internal/*.md files contain markdown links to .md targets that do not exist on disk: ${broken.join("; ")}`
-    ).toEqual([]);
+    expect(hits, "public docs should not mention the private Obsidian workspace").toEqual([]);
   });
 });
