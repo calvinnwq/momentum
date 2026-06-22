@@ -1,53 +1,27 @@
 # Milestone 4: Real Runner Profiles
 
 **Status:** Complete (NGX-279 through NGX-286).
-
-**Historical/provenance note:** This file preserves milestone scope, shipped order, and closeout evidence. For current repo architecture start with [`../../ARCHITECTURE.md`](../../ARCHITECTURE.md); for active runtime invariants start with [`../contracts/README.md`](../contracts/README.md).
-
-Milestone 4 landed real runner profiles behind the existing Goal / Iteration / verification / handoff contract, then a runtime `MOMENTUM.md` policy loader, while keeping external tracker automation deferred. M4 introduced a `RunnerAdapter` boundary so Momentum can execute Goals through more than the in-process `fake` runner without changing the Goal / Iteration / Job contract or the M3 daemon / recovery surfaces. The first real profile is a `trusted-shell` runner; an `acp` ACP/acpx-style runtime smoke profile lands alongside it. Runtime `MOMENTUM.md` policy loading provides repo-owned defaults between goal frontmatter and built-in defaults. External tracker automation (Linear / GitHub / Jira writes, webhooks) remains deferred and is **not** part of M4.
+**Historical/provenance note:** Long-form narrative moved to Obsidian:
+`/Workspaces/Momentum/Specs/2026-06-22-momentum-runtime-milestone-provenance.md`.
 
 ## M4 architecture: Momentum core vs runner adapters
 
-- **Momentum core** owns the durable Goal / Iteration / Job state machine, Momentum-owned verification, the git transaction (commit / reset on the Momentum branch), the on-disk artifact layout, and the queue / daemon / recovery surfaces shipped in M2 and M3.
-- **`RunnerAdapter` implementations** execute the iteration prompt against an external runtime (shell, agent, ACP backend), capture runner output in the adapter-specific manner and write it to `runner.log`, and report a normalized `RunnerResult` containing `success`, `summary`, change / learning / work arrays, `goal_complete`, and commit intent. Adapters do not touch git, do not own verification, do not own the queue, and do not write to external trackers.
-- The boundary stays single-process and trust-explicit for v0; sandbox / isolation hardening is out of scope for M4.
+Momentum core owns durable orchestration; `RunnerAdapter` owns execution profile
+integration.
 
 ## M4 runner family
 
-- **`fake`** — existing in-process runner (Milestone 1 / 2 baseline). Kept as the default for tests and smoke coverage.
-- **`trusted-shell`** — operator-trusted executable / argv profile (NGX-282). A goal frontmatter `trusted_shell` block configures the executable `command`, argv `args`, `cwd` (`repo` default or `iteration`), `env_allow` / `env`, `timeout_sec`, and `result_file`. The runner executes `command` with `args` directly (no implicit shell), with no sandbox, records command / cwd / result metadata in `runner.log`, captures stdout / stderr after the command exits, and reads the normalized `RunnerResult` from the configured result file. Stable error codes cover `invalid_input`, `runner_threw`, `spawn_failed`, `command_failed`, `command_timed_out`, `result_missing`, `result_invalid`, and `output_overflow`.
-- **`acp`** — ACP/acpx-style runtime smoke profile (NGX-283). A goal frontmatter `acp` block configures the executable `command`, argv `args`, `cwd`, `env_allow` / `env`, `timeout_sec`, `result_file`, and an optional `probe` sub-block with its own `command` / `args` / `timeout_sec` (default `30`). The runner performs a pre-flight availability check on absolute `acp.command` paths, runs the probe (if configured) before the main command so missing runtime or auth is caught early, then spawns the configured command via `spawnSync` with no implicit shell and reads the normalized `RunnerResult` from `acp.result_file`. Failure codes inherit the `trusted-shell` taxonomy and add `runtime_unavailable` (missing runtime binary, missing probe binary, probe non-zero exit, probe timeout, or main spawn ENOENT) and `startup_failed` (non-ENOENT spawn errors on the main command or the probe), keeping missing prerequisites distinct from `command_failed` and from verification failures. Live ACP/acpx smoke is opt-in: when the configured runtime or its auth is missing, the runner returns `runtime_unavailable` without modifying repo state instead of corrupting the Goal.
-
-External writes remain adapter-mediated and policy-gated (Linear / GitHub / Jira adapters or workflow steps). M4 does **not** implement any external tracker writes.
+Initial profiles: `fake`, `trusted-shell`, ACP/acpx.
 
 ## Planned M4 issue order
 
-The Linear milestone "Milestone 4: Real Runner Profiles" sequenced the work as (all closed):
-
-1. **NGX-279 — M4-00 M4 contract, roadmap, and docs setup** *(done)*.
-2. **NGX-280 — M4-01 Runner profile model and resolver** *(done)*: `src/core/executors/runner-profile.ts` with the built-in registry, `parseRunnerProfile`, `resolveRunnerProfile` (precedence `cli_override > goal_frontmatter > builtin_default`), and `safeRunnerProfileSummary`; `goal start` validates the runner profile at init time and persists the resolved name to `goals.runner`; `runnerProfile` and `runnerProfileSource` surface on `goal start` JSON, `status` JSON / text, `handoff` JSON / markdown, and a `runners` block on `doctor`.
-3. **NGX-281 — M4-02 RunnerAdapter boundary and fake-runner migration** *(done)*: `src/adapters/runner-adapter.ts` ships `RunnerAdapter`, `RunnerAdapterInput`, `RunnerAdapterResult`, and `RunnerAdapterError` types; an adapter registry with `getRunnerAdapter`, `listRunnerAdapterKinds`, `listExecutingRunnerAdapterKinds`; `dispatchRunnerAdapter` validates input, resolves the adapter by kind, checks `executes`, and calls `execute`; the `fake` adapter wraps `runFakeRunner` behind the boundary; `src/core/executors/foreground-iteration.ts` replaces the direct `runFakeRunner` call with `dispatchRunnerAdapter`; both foreground and queued paths share the same dispatch.
-4. **NGX-282 — M4-03 Trusted-shell runner profile** *(done)*: `src/adapters/trusted-shell-config.ts` parses the goal-frontmatter `trusted_shell` block with stable error codes; `src/adapters/trusted-shell-runner.ts` spawns the configured executable plus argv via `spawnSync` with no shell, applies `env_allow` filtering, supports `cwd=repo|iteration`, and parses the normalized `RunnerResult` from the configured result file; `runForegroundIteration` resets the worktree to base HEAD when an executing adapter fails after attempting execution without moving HEAD, and surfaces `runner_changed_head` / `head_mismatch` manual-recovery metadata when the runner or finalization sees HEAD movement.
-5. **NGX-283 — M4-04 ACP/acpx runtime smoke runner** *(done)*: `src/adapters/acp-config.ts` parses the goal-frontmatter `acp` block with stable `acp_config_missing` / `acp_config_invalid` codes; `src/adapters/acp-runner.ts` ships `runAcpRunner` and the stable `ACP_ENV_VARS` contract, performs pre-flight availability checks and an optional probe spawn, and maps spawn outcomes to `runtime_unavailable` / `startup_failed` / `command_failed` / `command_timed_out` / `result_missing` / `result_invalid`.
-6. **NGX-284 — M4-05 Runtime MOMENTUM.md policy loader** *(done)*: `src/core/intent/policy.ts` ships `loadMomentumPolicy` / `parseMomentumPolicy` / `resolvePolicyEffectiveValues` with stable error codes and a minimal schema of `runner`, `verification`, `verification_timeout_sec` plus a free-form notes body; discovery is repo-root only (no walk-up); precedence is CLI overrides > goal frontmatter > `MOMENTUM.md` > built-in defaults; the iteration prompt renderer emits a `## Policy notes (from MOMENTUM.md)` section that reminds runners policy notes are context-only and cannot override Momentum safety contracts; `goal start --json`, `status`, `handoff`, and `doctor` all surface a `policy` block, and `doctor --repo <path>` inspects a repo's policy in isolation.
-7. **NGX-285 — M4-06 Real-runner status, logs, and recovery hardening** *(done)*: mapped real-runner adapter error codes to stable `ForegroundIterationErrorCode` values (`command_failed`, `command_timed_out`, `result_missing`, `result_invalid`, `runtime_unavailable`, `startup_failed`, `spawn_failed`, `output_overflow`) so `status` and other operator surfaces preserve command / runtime / result taxonomy; added `runnerResultError` / `parseError` to `handoff` and `logs`; added `resultJson` to `logs --json` and text output; hardened `recovery.md` artifacts with a Runner/profile summary section (runner, command, args, cwd, timeout, result file) and prompt path.
-8. **NGX-286 — M4-07 M4 smoke, docs, and milestone closeout** *(done)*: built-CLI smoke coverage for the trusted-shell happy path, the trusted-shell failure-and-reset path, and `MOMENTUM.md` policy precedence; flipped the `doctor` milestone string from the M3 closeout marker to the M4 closeout marker (later moved to M5 by NGX-294); updated README, AGENTS, and the M4 contract docs test to name Milestone 4 complete; re-stated the post-M4 deferral set.
-
-NGX-286 introduced the M4 closeout marker on `doctor --json` / text. NGX-294 later superseded it with the M5 closeout marker, NGX-302 flipped it forward again to the M6 closeout marker, NGX-319 (M7-07) flipped it forward to the M7 closeout marker, NGX-330 (M8-07) advanced the marker to the M8 closeout string, NGX-353 (M10-09) advanced it to the M10 closeout string, and NGX-419 (M11 closeout) advanced the current marker to the M11 closeout string; `test/m4-contract.test.ts` now only preserves the post-M3 marker invariant, `test/m5-contract.test.ts` preserves the post-M4 marker invariant, `test/m6-contract.test.ts` preserves the post-M5 marker invariant, `test/m7-contract.test.ts` preserves the post-M6/M7 marker-transition invariant, and `test/cli.test.ts` / `test/m1-smoke.test.ts` assert the current marker.
+NGX-279, NGX-280, NGX-281, NGX-282, NGX-283, NGX-284, NGX-285, NGX-286.
 
 ## M4 non-goals (explicit)
 
-The following are **explicitly out of scope** for Milestone 4 and remain deferred regardless of how far M4 advanced:
-
-- **External tracker writes** — Linear / GitHub / Jira / etc. issue / PR creation, comments, status changes, label edits driven from Momentum.
-- **Inbound webhooks** — adapters stay pull / reconcile first; Momentum does not expose an HTTP listener in M4.
-- **Worktrees / per-source-item workspaces** — a Goal still uses one shared repo lease.
-- **Background runner supervision** — forking, daemonization, restart-on-crash; the M3 single-process managed loop remains the supervision contract.
-- **Dashboard or UI surface** — CLI JSON / text remains the only interface in M4.
-- **Strong sandboxing** — `trusted-shell` and `acp` are exactly that: explicitly trusted. Container / VM / seccomp isolation is not part of M4.
-- **Cooperative mid-job cancellation / signal handling** — stop semantics stay observation-only as in M3.
-- **Remote git operations** — no `fetch` / `pull` / `push` / `rebase` driven from Momentum.
+External tracker writes; Inbound webhooks; Worktrees / per-source-item workspaces; Background runner supervision; Dashboard or UI surface; Strong sandboxing; Cooperative mid-job cancellation / signal handling; Remote git operations.
 
 ## M3 contracts preserved
 
-M4 did not break or rename any M3 surfaces. Specifically: the `daemon start` / `daemon stop` / `daemon status` / `recovery clear` CLI shapes, the `daemon_runs` / `repo_locks` / `goals.needs_manual_recovery` schema, the stale-lease detection / startup-recovery pass, the manual-recovery `recovery.md` artifact + flag, and the `status` / `handoff` / `doctor` daemon and recovery fields all remain wire-stable. The Milestone 3 daemon drain, graceful stop, stop-now, stale recovery, and manual recovery smoke coverage (now in `test/m3-smoke.test.ts`) continues to pass alongside the M4 smoke additions (`test/m4-smoke.test.ts`). NGX-286 intentionally flipped the `doctor` milestone string from the M3 closeout marker to the M4 closeout marker as part of M4 closeout; NGX-294 later moved the current marker to M5 while `test/m4-contract.test.ts` keeps asserting that the M3 closeout marker is no longer pinned.
+`daemon start`, `daemon stop`, `daemon status`, and `recovery clear` stay
+wire-stable.

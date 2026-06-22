@@ -1,41 +1,34 @@
-# Internal Documentation Map
+# Internal Documentation Anchors
 
-This tree is the internal index for milestone, contract, architecture, and
-future-plan context. It may name NGX / ARCH / RC sequencing; public operator
-docs stay in [`../docs/`](../docs/index.md) and [`../README.md`](../README.md).
+Long-form internal docs are being externalized under DOCS-02/DOCS-03.
+
+Canonical external home:
+
+- `/Workspaces/Momentum/Decisions/2026-06-22-repo-docs-boundary.md`
+- `/Workspaces/Momentum/Specs/2026-06-22-momentum-runtime-milestone-provenance.md`
+- `/Workspaces/Momentum/Specs/2026-06-22-runtime-queue-and-dogfood-evidence.md`
+- `/Workspaces/Momentum/Archive/2026-06-22-docs-02-migration-ledger.md`
 
 ## Current Truth
 
-- [`../ARCHITECTURE.md`](../ARCHITECTURE.md) — current repo architecture,
-  import boundaries, source taxonomy, and compact links to deeper contracts.
-- [`../AGENTS.md`](../AGENTS.md) — future-agent operating guide: where docs,
-  code, and tests belong, plus required verification.
-- [`../docs/index.md`](../docs/index.md) — public operator command index.
-- [`roadmap.md`](roadmap.md) — milestone timeline and current sequencing.
+Use root `ARCHITECTURE.md`, `AGENTS.md`, public `docs/`, and executable tests.
 
 ## Active Contracts
 
-Start with [`contracts/README.md`](contracts/README.md). Contracts describe
-invariants that remain true after milestone closeout; milestone files preserve
-provenance and shipped order.
+Use `internal/contracts/README.md` until DOCS-03 migrates long-form contracts.
 
 ## Historical Milestone Provenance
 
-Use [`milestones/README.md`](milestones/README.md) to find milestone narratives.
-Those files are historical unless they explicitly point to an active contract.
+Use Obsidian runtime milestone provenance. Temporary anchors remain under
+`internal/milestones/`.
 
 ## Accepted Future Plans
 
-Use [`plans/README.md`](plans/README.md) for accepted future plan queues. The
-runtime consolidation RC-1..RC-5 sequence is defined by
-[`contracts/runtime-consolidation-plan.md`](contracts/runtime-consolidation-plan.md);
-the repo-architecture ARCH sequence is defined by
-[`contracts/repo-architecture-standard.md`](contracts/repo-architecture-standard.md).
+Use Obsidian runtime queue and dogfood evidence. Temporary anchors remain under
+`internal/plans/`.
 
 ## Durable Audit / Evidence Docs
 
-- [`runtime-test-audit.md`](runtime-test-audit.md) — runtime/test path audit and
-  classifications that fed the runtime consolidation plan.
-- [`smoke-tests.md`](smoke-tests.md) — smoke coverage map.
-- [`regression-matrix.md`](regression-matrix.md) — closeout regression matrix.
-- [`exclusions.md`](exclusions.md) — explicitly deferred or excluded scope.
+Use Obsidian runtime queue and dogfood evidence plus executable tests. Temporary
+anchors remain for regression, smoke, runtime-test audit, and exclusions until
+DOCS-03/DOCS-04/DOCS-05 complete.
