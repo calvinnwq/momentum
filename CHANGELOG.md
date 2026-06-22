@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.1](https://github.com/calvinnwq/momentum/compare/v0.9.0...v0.9.1) (2026-06-22)
+
+
+### Bug Fixes
+
+* harden workflow dispatch recovery retry ([b8b3e4c](https://github.com/calvinnwq/momentum/commit/b8b3e4c01c5f293250093da5004147f56f7a3aea))
+* **workflow:** harden dispatch recovery retry ([fa39901](https://github.com/calvinnwq/momentum/commit/fa39901898696d3e3e114899a61baefd530fd4e2))
+
 ## [0.9.0](https://github.com/calvinnwq/momentum/compare/v0.8.0...v0.9.0) (2026-06-21)
 
 
