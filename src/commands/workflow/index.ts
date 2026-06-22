@@ -371,12 +371,17 @@ function runWorkflowStartCommand(
 
   const db = openDb(dataDir);
   try {
-    const definition = resolveWorkflowRunStartDefinition(
-      db,
-      definitionKey,
-      parsed.definitionVersion,
-      now
-    );
+    const definition = options.coding
+      ? resolveBuiltInWorkflowRunStartDefinition(
+          definitionKey,
+          parsed.definitionVersion
+        )
+      : resolveWorkflowRunStartDefinition(
+          db,
+          definitionKey,
+          parsed.definitionVersion,
+          now
+        );
     if (definition === undefined) {
       return emitWorkflowRunStartFailure(parsed, io, {
         command,
@@ -476,6 +481,20 @@ function resolveWorkflowRunStartDefinition(
     return undefined;
   }
   persistWorkflowDefinition(db, builtIn, { now });
+  return builtIn;
+}
+
+function resolveBuiltInWorkflowRunStartDefinition(
+  key: string,
+  version: number | undefined
+): WorkflowDefinition | undefined {
+  const builtIn = getBuiltInWorkflowDefinition(key);
+  if (builtIn === undefined) {
+    return undefined;
+  }
+  if (version !== undefined && builtIn.version !== version) {
+    return undefined;
+  }
   return builtIn;
 }
 

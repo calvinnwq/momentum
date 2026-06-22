@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 
 import { runCli } from "../src/cli.js";
 import { openDb } from "../src/adapters/db.js";
+import { persistWorkflowDefinition } from "../src/core/workflow/definition-persist.js";
+import type { WorkflowDefinition } from "../src/core/workflow/definition.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -134,6 +136,157 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
     } finally {
       db.close();
     }
+  });
+
+  it("ignores persisted coding-workflow overrides and starts the built-in six-step definition", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const overrideDefinition: WorkflowDefinition = {
+      key: "coding-workflow",
+      title: "Persisted Coding Override",
+      version: 2,
+      steps: [
+        {
+          key: "preflight",
+          kind: "preflight",
+          executor: "one-shot",
+          order: 0,
+          required: true
+        },
+        {
+          key: "implementation",
+          kind: "implementation",
+          executor: "goal-loop",
+          order: 1,
+          required: false
+        }
+      ]
+    };
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowDefinition(db, overrideDefinition, {
+        now: 1_730_000_000_000
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run(
+      startCodingArgs({
+        dataDir,
+        repoDir,
+        runId: "ngx-508-persisted-override",
+        objective: "Bypass persisted definition overrides"
+      })
+    );
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      command: "workflow run start-coding",
+      definitionKey: "coding-workflow",
+      definitionVersion: 1
+    });
+    expect((payload["counts"] as { steps: number }).steps).toBe(6);
+
+    const verifyDb = openDb(dataDir);
+    try {
+      const steps = verifyDb
+        .prepare(
+          `SELECT step_id, required FROM workflow_steps
+             WHERE run_id = ? ORDER BY step_order`
+        )
+        .all("ngx-508-persisted-override") as Array<{
+        step_id: string;
+        required: number;
+      }>;
+      expect(steps).toEqual([
+        { step_id: "preflight", required: 1 },
+        { step_id: "implementation", required: 1 },
+        { step_id: "postflight", required: 1 },
+        { step_id: "no-mistakes", required: 1 },
+        { step_id: "merge-cleanup", required: 1 },
+        { step_id: "linear-refresh", required: 1 }
+      ]);
+    } finally {
+      verifyDb.close();
+    }
+  });
+
+  it("leaves persisted coding-workflow definitions available to the generic start route", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const overrideDefinition: WorkflowDefinition = {
+      key: "coding-workflow",
+      title: "Persisted Coding Override",
+      version: 1,
+      steps: [
+        {
+          key: "preflight",
+          kind: "preflight",
+          executor: "one-shot",
+          order: 0,
+          required: true
+        },
+        {
+          key: "implementation",
+          kind: "implementation",
+          executor: "goal-loop",
+          order: 1,
+          required: false
+        }
+      ]
+    };
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowDefinition(db, overrideDefinition, {
+        now: 1_730_000_000_000
+      });
+    } finally {
+      db.close();
+    }
+
+    const nativeResult = await run(
+      startCodingArgs({
+        dataDir,
+        repoDir,
+        runId: "ngx-508-native-before-generic",
+        objective: "Use the built-in definition"
+      })
+    );
+    expect(nativeResult.code).toBe(0);
+    const nativePayload = JSON.parse(nativeResult.stdout) as Record<
+      string,
+      unknown
+    >;
+    expect((nativePayload["counts"] as { steps: number }).steps).toBe(6);
+
+    const genericResult = await run([
+      "workflow",
+      "run",
+      "start",
+      "--run-id",
+      "generic-after-native",
+      "--repo",
+      repoDir,
+      "--objective",
+      "Use the persisted definition",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(genericResult.code).toBe(0);
+    const genericPayload = JSON.parse(genericResult.stdout) as Record<
+      string,
+      unknown
+    >;
+    expect(genericPayload).toMatchObject({
+      ok: true,
+      command: "workflow run start",
+      definitionKey: "coding-workflow",
+      definitionVersion: 1
+    });
+    expect((genericPayload["counts"] as { steps: number }).steps).toBe(2);
   });
 
   it("promotes approval-covered steps and opens approved with a boundary", async () => {

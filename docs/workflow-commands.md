@@ -168,7 +168,9 @@ Optional arguments:
 - `--skill-revision <text>` - record the skill revision that started the run.
 - `--issue-scope <identifier>` - record an issue-scope identifier on the run.
 - `--profile <name>` - record the selected runtime/profile on the run's durable `route.profile`, so status, handoff, monitor, and logs can explain which runtime/profile the Momentum-native run was started for from durable state alone. This captures intent only; the executing live-wrapper profile is still resolved by the daemon from `MOMENTUM_LIVE_WRAPPER_PROFILE` at run time.
-- `--definition-version <n>` - pin a specific `coding-workflow` version. When omitted, the latest persisted (or built-in) version is used.
+- `--definition-version <n>` - require a specific built-in `coding-workflow` version.
+  When omitted, the current built-in version is used.
+  Persisted `coding-workflow` definitions never override this door.
 
 Behaviour:
 
