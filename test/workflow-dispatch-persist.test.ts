@@ -7,6 +7,7 @@ import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition.js";
 import { persistWorkflowDefinition } from "../src/core/workflow/definition-persist.js";
 import { persistWorkflowRunStart } from "../src/core/workflow/run-start-persist.js";
+import { MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE } from "../src/core/workflow/run-start.js";
 import {
   resolveClaimedWorkflowStepFamily,
   resolveWorkflowStepDispatchPlan
@@ -118,6 +119,39 @@ describe("resolveClaimedWorkflowStepFamily — durable resolution", () => {
       expect(resolution.failure).toBe("step_definition_not_found");
       // The detail names the offending identity so an operator can see it.
       expect(resolution.detail).toContain("ghost-step");
+    }
+  });
+
+  it("fails closed when a native coding run references an unavailable built-in version", () => {
+    const db = openSeededDb();
+    persistWorkflowDefinition(
+      db,
+      {
+        ...CODING_WORKFLOW_DEFINITION,
+        version: 999,
+        steps: CODING_WORKFLOW_DEFINITION.steps.map((step) =>
+          step.key === "implementation"
+            ? { ...step, executor: "external-apply" }
+            : { ...step }
+        )
+      },
+      { now: NOW + 1 }
+    );
+    db.prepare(
+      `UPDATE workflow_runs
+         SET source = ?, workflow_definition_version = ?
+       WHERE id = ?`
+    ).run(MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE, 999, RUN_ID);
+
+    const resolution = resolveClaimedWorkflowStepFamily(db, {
+      runId: RUN_ID,
+      stepId: "implementation"
+    });
+
+    expect(resolution.ok).toBe(false);
+    if (!resolution.ok) {
+      expect(resolution.failure).toBe("step_definition_not_found");
+      expect(resolution.detail).toBe("coding-workflow@999 step 'implementation'");
     }
   });
 

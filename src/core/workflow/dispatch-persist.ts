@@ -121,6 +121,11 @@ export function resolveClaimedWorkflowStepFamily(
       }
       return { ok: true, executorFamily: builtInStep.executor };
     }
+    return {
+      ok: false,
+      failure: "step_definition_not_found",
+      detail: `${definitionKey}@${definitionVersion} step '${target.stepId}'`
+    };
   }
 
   const stepDefinition = db
