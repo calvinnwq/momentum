@@ -14,9 +14,9 @@
  * materializer does not run the landed goal-loop / one-shot / script /
  * no-mistakes mirror adapters.
  *
- * Scope decisions pinned here, grounded in the accepted planning contracts
- * (SPEC.md "Run start" gap row and
- * SPEC.md):
+ * Scope decisions pinned here, grounded in the compact Runtime Model and
+ * Workflow Safety anchors in SPEC.md plus the long-form planning contracts
+ * externalized to Obsidian:
  *
  *   - A run's durable step rows mirror the definition graph exactly: one
  *     {@link WorkflowStepRecord} per {@link StepDefinition}, materialized in
