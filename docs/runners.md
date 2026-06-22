@@ -147,7 +147,9 @@ Supported frontmatter keys (all optional, strict types when present):
 - `verification_timeout_sec` — positive integer.
 - `intent_apply_policy` — policy for how update intents are applied. Valid values: `create_intents_only` (default, Momentum records intents but does not perform external writes) or `external_apply_allowed` (`intent apply --external-apply`, and the bounded workflow daemon's `linear-refresh` / `external-apply` step after it matches one pending Linear intent to the run issue scope, may perform a policy-gated external tracker write through the adapter's external update client; the write is two-phase audit-before-write and idempotent under replay). Without `--external-apply`, `intent apply` always records a manual operator mark regardless of this setting.
 
-A `MOMENTUM.md` with no frontmatter at all is also valid: the entire body becomes policy notes and no config defaults are set. Parse / schema errors map to stable codes (`policy_path_invalid`, `policy_file_unreadable`, `policy_parse_invalid`, `policy_schema_invalid`) and are surfaced through `goal start --json`, `status --json` / text, `handoff` JSON / markdown, and `doctor --json` / text. `workflow run start --json` also loads the repo policy and refuses a malformed policy as `policy_invalid` without writing the run.
+A `MOMENTUM.md` with no frontmatter at all is also valid: the entire body becomes policy notes and no config defaults are set.
+Parse / schema errors map to stable codes (`policy_path_invalid`, `policy_file_unreadable`, `policy_parse_invalid`, `policy_schema_invalid`) and are surfaced through `goal start --json`, `status --json` / text, `handoff` JSON / markdown, and `doctor --json` / text.
+`workflow run start --json` and `workflow run start-coding --json` also load the repo policy and refuse a malformed policy as `policy_invalid` without writing the run.
 
 **Precedence (highest first):**
 

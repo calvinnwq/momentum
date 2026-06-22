@@ -87,8 +87,9 @@ source so durable status/handoff/monitor/logs show it as Momentum-owned. It
 captures the run's isolation inputs in durable state: repo, objective, issue
 scope, approval boundary, skill revision, and the selected runtime/profile
 (`route.profile`); the daemon still resolves the executing live-wrapper profile
-from `MOMENTUM_LIVE_WRAPPER_PROFILE` at run time. CWFP remains the default
-coding-workflow start and rollback route; the default switch stays NGX-404.
+from `MOMENTUM_LIVE_WRAPPER_PROFILE` at run time.
+Native coding dispatch resolves executor families from the built-in `coding-workflow` definition for that source, even if a persisted definition with the same key/version exists.
+CWFP remains the default coding-workflow start and rollback route; the default switch stays NGX-404.
 
 ## Runtime Consolidation
 
