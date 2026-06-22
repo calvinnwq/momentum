@@ -4,7 +4,7 @@
  * The M7 executor boundary (`step-executor.ts`) shipped a fake `ADAPTERS` map:
  * `getWorkflowStepExecutor` / `dispatchWorkflowStepExecutor` resolved to a
  * deterministic fake for every `WorkflowStepExecutorKind`. The runtime
- * consolidation plan (`internal/contracts/runtime-consolidation-plan.md`, Path 6)
+ * consolidation plan (`SPEC.md`, Path 6)
  * classifies that fake map as *deprecate-later*: useful substrate coverage, but
  * not production executor support. RC-5 lands the real per-kind adapters so the
  * fakes can move behind a test-only seam.

@@ -12,8 +12,8 @@
  * `definition.ts`.
  *
  * Scope decisions pinned here, grounded in the accepted planning contracts
- * (internal/contracts/executor-loop.md "Human Gates" and
- * internal/contracts/workflow-first-runtime.md "Human Gates"):
+ * (SPEC.md "Human Gates" and
+ * SPEC.md "Human Gates"):
  *
  *   - Gate types are the contract's nine durable human-gate classes. They are
  *     re-exported from `src/core/executors/loop-reducer.ts` so a workflow gate and an

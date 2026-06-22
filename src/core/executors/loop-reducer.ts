@@ -4,7 +4,7 @@
  *
  * This module owns only the canonical vocabulary, the transition reducers, and
  * the record *shapes* for the `ExecutorDefinition` / `ExecutorInvocation` /
- * `ExecutorRound` layer described in internal/contracts/executor-loop.md. It
+ * `ExecutorRound` layer described in SPEC.md. It
  * follows the same discipline as `src/core/workflow/run-reducer.ts` and
  * `src/core/workflow/definition.ts`: no SQLite, no file system, no executor invocation.
  * Durable `executor_*` tables and the persistence twin layer on top of these
@@ -16,7 +16,7 @@
  *
  *   StepRun -> ExecutorInvocation -> ExecutorRound[]
  *
- * Scope decisions pinned here, grounded in internal/contracts/executor-loop.md:
+ * Scope decisions pinned here, grounded in SPEC.md:
  *
  *   - The invocation/round *state* `blocked` is terminal (contract "Executor
  *     States": "Terminal invocation states are `manual_recovery_required`,

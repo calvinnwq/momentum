@@ -17,8 +17,8 @@
  * and the reducers.
  *
  * Scope decisions pinned here, grounded in
- * internal/contracts/runtime-consolidation-plan.md ("The M9 / M10
- * step-finalization boundary") and internal/contracts/executor-loop.md
+ * SPEC.md ("The M9 / M10
+ * step-finalization boundary") and SPEC.md
  * ("Executor States" / "Core Boundary: the daemon, not the executor, decides
  * step progress"):
  *

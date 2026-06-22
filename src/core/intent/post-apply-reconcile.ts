@@ -10,7 +10,7 @@
  * Invariants the orchestrator must preserve:
  *
  *  - Scope is single-issue. The orchestrator never triggers project- or
- *    milestone-wide reconciliation (`internal/contracts/intent-apply.md`).
+ *    milestone-wide reconciliation (`SPEC.md`).
  *  - Reconcile is best-effort and never reverts the external apply. The Linear
  *    write is already authoritative — local audit/SourceItem state is the
  *    durable trace.

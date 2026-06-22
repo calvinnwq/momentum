@@ -4,7 +4,7 @@
  * Takes the pure {@link WorkflowRunImport} shape produced by
  * `parseWorkflowRunImport` and writes it into the durable
  * `workflow_runs` / `workflow_steps` / `workflow_approvals` tables pinned by
- * internal/contracts/workflow-runs.md.
+ * SPEC.md.
  *
  * Stable contracts this slice locks in:
  *   - Upsert is keyed on the durable identity: `workflow_runs.id = runId`,

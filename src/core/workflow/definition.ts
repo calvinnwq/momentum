@@ -14,8 +14,8 @@
  * adapters stay outside this primitive module.
  *
  * Scope decisions pinned here, grounded in the accepted planning contracts
- * (internal/contracts/workflow-first-runtime.md and
- * internal/contracts/executor-loop.md):
+ * (SPEC.md and
+ * SPEC.md):
  *
  *   - `StepDefinition.executor` names an executor *family* only. The rich
  *     per-step executor configuration (agent / model / effort / policy) is the
@@ -37,7 +37,7 @@ import {
 } from "./run-reducer.js";
 
 /**
- * Executor families pinned by internal/contracts/executor-loop.md ("Executor
+ * Executor families pinned by SPEC.md ("Executor
  * Families"). A `StepDefinition` selects one family; the full executor config
  * record arrives with M10-03.
  */
@@ -296,7 +296,7 @@ export const CODING_WORKFLOW_DEFINITION_KEY = "coding-workflow";
  * The canonical OpenClaw coding workflow expressed as a built-in
  * {@link WorkflowDefinition}. Steps mirror the M7 `WorkflowStepKind` order;
  * executor families follow the `step -> executor` mapping in
- * internal/contracts/workflow-first-runtime.md, choosing one option where the
+ * SPEC.md, choosing one option where the
  * contract offers a pair:
  *
  *   - preflight      -> one-shot      (a single bounded prep invocation)

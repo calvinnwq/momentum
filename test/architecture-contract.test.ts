@@ -20,22 +20,12 @@ describe("root ARCHITECTURE.md contract", () => {
     expect(architecture.split("\n").length).toBeLessThan(205);
   });
 
-  it("links deeper internal contracts instead of restating the whole runtime", () => {
-    for (const rel of [
-      "internal/roadmap.md",
-      "internal/README.md",
-      "internal/contracts/README.md",
-      "internal/milestones/README.md",
-      "internal/plans/README.md",
-      "internal/contracts/workflow-first-runtime.md",
-      "internal/contracts/executor-loop.md",
-      "internal/contracts/coding-workflow-ownership.md",
-      "internal/contracts/intent-apply.md",
-      "internal/contracts/source-adapters.md",
-    ]) {
-      expect(architecture, `ARCHITECTURE.md should link ${rel}`).toContain(rel);
-      expect(fs.existsSync(path.join(repoRoot, rel)), `${rel} should exist`).toBe(true);
-    }
+  it("links compact repo contracts and routes long-form internal docs to Obsidian", () => {
+    expect(architecture).toContain("SPEC.md");
+    expect(fs.existsSync(path.join(repoRoot, "SPEC.md")), "SPEC.md should exist").toBe(true);
+    expect(architecture).toContain("/Workspaces/Momentum");
+    expect(architecture).toMatch(/no `internal\/` documentation tree/i);
+    expect(fs.existsSync(path.join(repoRoot, "internal")), "internal/ should not exist").toBe(false);
   });
 
   it("defines the M11 import direction and boundaries", () => {
@@ -70,9 +60,9 @@ describe("root ARCHITECTURE.md contract", () => {
     expect(architecture).toMatch(/NGX-413.*NGX-414/s);
   });
 
-  it("is linked from AGENTS.md and the internal roadmap", () => {
+  it("is linked from AGENTS.md and SPEC.md", () => {
     expect(readFile("AGENTS.md")).toContain("ARCHITECTURE.md");
-    expect(readFile("internal/roadmap.md")).toContain("../ARCHITECTURE.md");
+    expect(readFile("SPEC.md")).toContain("ARCHITECTURE.md");
   });
 
 });

@@ -17,9 +17,9 @@
  * `gate-persist.ts` is the storage twin of `gate.ts`.
  *
  * Scope decisions pinned here, grounded in the accepted planning contracts
- * (internal/contracts/executor-loop.md "Executor Families" / "Completion
- * Classification", internal/contracts/workflow-first-gap-matrix.md, and
- * internal/contracts/runtime-consolidation-plan.md):
+ * (SPEC.md "Executor Families" / "Completion
+ * Classification", SPEC.md, and
+ * SPEC.md):
  *
  *   - The phase-1 dispatchable set is exactly the executor families that have a
  *     landed production adapter in the base allowlist (`goal-loop` M10-05,

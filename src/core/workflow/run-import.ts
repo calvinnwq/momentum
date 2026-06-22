@@ -6,7 +6,7 @@
  * artifacts (`plan.json`, `ledger.jsonl`, `approval-*.json`, advisory
  * `monitor.json`) into the M7 `WorkflowRun` / `workflow_steps` /
  * `workflow_approvals` / `workflow_leases` shape pinned by
- * internal/contracts/workflow-runs.md.
+ * SPEC.md.
  *
  * This module is pure: it does not touch SQLite, does not mutate the source
  * directory, and does not call external services. Persistence and the CLI

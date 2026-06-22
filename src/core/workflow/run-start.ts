@@ -15,8 +15,8 @@
  * no-mistakes mirror adapters.
  *
  * Scope decisions pinned here, grounded in the accepted planning contracts
- * (internal/contracts/workflow-first-runtime.md "Run start" gap row and
- * internal/contracts/executor-loop.md):
+ * (SPEC.md "Run start" gap row and
+ * SPEC.md):
  *
  *   - A run's durable step rows mirror the definition graph exactly: one
  *     {@link WorkflowStepRecord} per {@link StepDefinition}, materialized in

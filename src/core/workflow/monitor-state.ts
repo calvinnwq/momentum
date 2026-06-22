@@ -4,7 +4,7 @@
  * Derives a normalized monitor / recovery view from the durable substrate
  * (steps, leases, advisory monitor snapshot, last checkpoint) without touching
  * SQLite, the file system, or executors. The reducer encodes the contract
- * invariant pinned in internal/contracts/workflow-runs.md and the M7 milestone
+ * invariant pinned in SPEC.md and the M7 milestone
  * doc: **terminal ledger / imported evidence beats stale monitor snapshots**,
  * and a workflow may not be reported as active without a live lease or
  * checkpoint.

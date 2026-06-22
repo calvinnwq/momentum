@@ -4,7 +4,7 @@
  * The M7 executor boundary (`src/core/workflow/step-executor.ts`) originally
  * shipped this fake as the production `ADAPTERS` map default: every
  * `WorkflowStepExecutorKind` resolved to a deterministic fake. The runtime
- * consolidation plan (`internal/contracts/runtime-consolidation-plan.md`, Path 6)
+ * consolidation plan (`SPEC.md`, Path 6)
  * classified that as *deprecate-later* — valuable substrate coverage, but not
  * production executor support. RC-5 flipped the production default to real
  * adapters (`step-executor-real-adapters.ts`, honest `runtime_unavailable` when

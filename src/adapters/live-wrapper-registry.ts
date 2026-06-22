@@ -31,7 +31,7 @@ import {
  * persistence, result-file capture, and verification/commit transactions are
  * composed by the live step wrapper / executor / orchestrator layers. Missing
  * or malformed configuration refuses here, before any workflow state is
- * mutated, per internal/contracts/live-workflow-execution.md.
+ * mutated, per SPEC.md.
  */
 
 export type LiveWrapperCwd = "repo" | "iteration";

@@ -41,33 +41,16 @@ Use these docs for detailed behavior:
 
 - [README.md](README.md) and [docs/index.md](docs/index.md): public command
   usage and operator documentation.
-- [internal/README.md](internal/README.md): temporary internal anchor map for
-  current truth, active contracts, milestone provenance, and accepted future
-  plans while DOCS-02/DOCS-03 complete.
-- [internal/contracts/README.md](internal/contracts/README.md): active contract
-  index.
-- [internal/milestones/README.md](internal/milestones/README.md): temporary
-  historical milestone anchor index. Long-form provenance lives in Obsidian
-  `/Workspaces/Momentum`.
-- [internal/plans/README.md](internal/plans/README.md): temporary accepted
-  future plan anchor, including RC-1..RC-5 discovery. Long-form planning lives
-  in Obsidian `/Workspaces/Momentum`.
-- [internal/roadmap.md](internal/roadmap.md): temporary milestone timeline
-  anchor. Long-form sequencing lives in Obsidian `/Workspaces/Momentum`.
-- [internal/contracts/workflow-first-runtime.md](internal/contracts/workflow-first-runtime.md):
-  workflow-first runtime model.
-- [internal/contracts/executor-loop.md](internal/contracts/executor-loop.md):
-  executor invocation and round model.
-- [internal/contracts/coding-workflow-ownership.md](internal/contracts/coding-workflow-ownership.md):
-  Momentum-owned coding workflow boundary.
-- [internal/contracts/runtime-consolidation-plan.md](internal/contracts/runtime-consolidation-plan.md):
-  post-M11 runtime keep / deprecate-later / defer decisions and RC follow-ups.
-- [internal/contracts/repo-architecture-standard.md](internal/contracts/repo-architecture-standard.md):
-  post-M11 source, type, docs, tests, exception, and ARCH migration standard.
-- [internal/contracts/intent-apply.md](internal/contracts/intent-apply.md):
-  policy-gated external apply.
-- [internal/contracts/source-adapters.md](internal/contracts/source-adapters.md):
-  source adapter and evidence-sync boundaries.
+- [SPEC.md](SPEC.md): compact current runtime, workflow, external-apply,
+  source-adapter, coding-workflow ownership, runtime-consolidation, and
+  adapter-test contracts.
+- Obsidian `/Workspaces/Momentum`: long-form internal plans, contracts,
+  milestone provenance, roadmap sequencing, dogfood evidence, readiness notes,
+  and migration rationale.
+
+The repo intentionally has no `internal/` documentation tree. Historical
+internal planning docs were externalized to Obsidian during DOCS-02/DOCS-03; do
+not recreate `internal/`.
 
 ## M11 Final Shape
 
@@ -94,7 +77,8 @@ placeholder-free pending homes, and import guards; ARCH-03 populated
 `src/shared/events.ts`, `src/core/goal/{spec,types}.ts`, and
 `src/core/executors/{runner-result,types}.ts`; transitional root exceptions are
 now empty. Each core domain carries a local `README.md` module map. Detailed
-rules live in [repo-architecture-standard.md](internal/contracts/repo-architecture-standard.md).
+current rules live in this file and [SPEC.md](SPEC.md); long-form architecture
+migration rationale lives in Obsidian `/Workspaces/Momentum`.
 
 The import direction is fixed:
 
@@ -172,6 +156,18 @@ Do not import sibling command families for JSON or text render shapes. If two
 commands need the same shape, move it to `src/renderers/` first. Do not let
 domain modules import commands or renderers, and do not read or write
 `process.stdout` / `process.stderr` outside the CLI or rendering layers.
+
+## Adding Source Modules
+
+Do not add new root `src/*.ts` modules. Place new runtime behavior under the
+narrowest owner: command orchestration in `src/commands/`, output contracts in
+`src/renderers/`, infrastructure adapters in `src/adapters/`, environment and
+path defaults in `src/config/`, cross-cutting helpers in `src/shared/`, and
+domain behavior in `src/core/<domain>/`.
+
+Transitional exceptions require an explicit owner, exit condition, and guard
+test. Prefer moving the type or helper into an existing domain over creating a
+new shared bucket.
 
 ## M11 Closeout
 
