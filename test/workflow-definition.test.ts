@@ -8,6 +8,7 @@ import {
   getBuiltInWorkflowDefinition,
   isWorkflowExecutorFamily,
   listBuiltInWorkflowDefinitionKeys,
+  selectBuiltInWorkflowDefinition,
   validateWorkflowDefinition,
   type WorkflowDefinition
 } from "../src/core/workflow/definition.js";
@@ -282,7 +283,45 @@ describe("built-in workflow definition registry", () => {
     expect(getBuiltInWorkflowDefinition("coding-workflow")).toEqual(
       CODING_WORKFLOW_DEFINITION
     );
+    expect(getBuiltInWorkflowDefinition("coding-workflow", 1)).toEqual(
+      CODING_WORKFLOW_DEFINITION
+    );
     expect(getBuiltInWorkflowDefinition("missing")).toBeUndefined();
+    expect(getBuiltInWorkflowDefinition("coding-workflow", 999)).toBeUndefined();
+  });
+
+  it("can select an older built-in version when the latest version changes", () => {
+    const v1: WorkflowDefinition = {
+      ...CODING_WORKFLOW_DEFINITION,
+      version: 1,
+      steps: CODING_WORKFLOW_DEFINITION.steps.map((step) => ({ ...step }))
+    };
+    const v2: WorkflowDefinition = {
+      ...CODING_WORKFLOW_DEFINITION,
+      version: 2,
+      steps: [
+        {
+          ...CODING_WORKFLOW_DEFINITION.steps[0]!,
+          executor: "script"
+        },
+        ...CODING_WORKFLOW_DEFINITION.steps
+          .slice(1)
+          .map((step) => ({ ...step }))
+      ]
+    };
+
+    expect(selectBuiltInWorkflowDefinition([v1, v2], "coding-workflow")).toEqual(
+      v2
+    );
+    expect(
+      selectBuiltInWorkflowDefinition([v1, v2], "coding-workflow", 1)
+    ).toEqual(v1);
+    expect(
+      selectBuiltInWorkflowDefinition([v1, v2], "coding-workflow", 2)
+    ).toEqual(v2);
+    expect(
+      selectBuiltInWorkflowDefinition([v1, v2], "coding-workflow", 3)
+    ).toBeUndefined();
   });
 
   it("ships only definitions that pass validation", () => {

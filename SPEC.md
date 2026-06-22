@@ -89,6 +89,7 @@ scope, approval boundary, skill revision, and the selected runtime/profile
 (`route.profile`); the daemon still resolves the executing live-wrapper profile
 from `MOMENTUM_LIVE_WRAPPER_PROFILE` at run time.
 Native coding dispatch resolves executor families from the built-in `coding-workflow` definition for that source, even if a persisted definition with the same key/version exists.
+Built-in workflow definitions are resolved by key and version; native runs must keep resolving the built-in version recorded on the run, even after a later built-in recipe becomes current.
 CWFP remains the default coding-workflow start and rollback route; the default switch stays NGX-404.
 
 ## Runtime Consolidation

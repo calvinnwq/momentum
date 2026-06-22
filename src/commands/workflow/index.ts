@@ -488,14 +488,7 @@ function resolveBuiltInWorkflowRunStartDefinition(
   key: string,
   version: number | undefined
 ): WorkflowDefinition | undefined {
-  const builtIn = getBuiltInWorkflowDefinition(key);
-  if (builtIn === undefined) {
-    return undefined;
-  }
-  if (version !== undefined && builtIn.version !== version) {
-    return undefined;
-  }
-  return builtIn;
+  return getBuiltInWorkflowDefinition(key, version);
 }
 
 function workflowImport(parsed: ParsedFlags, io: CliIo): number {

@@ -178,7 +178,8 @@ Optional arguments:
 - `--profile <name>` - record the selected runtime/profile on the run's durable `route.profile`, so status, handoff, monitor, and logs can explain which runtime/profile the Momentum-native run was started for from durable state alone.
   This captures intent only; the executing live-wrapper profile is still resolved by the daemon from `MOMENTUM_LIVE_WRAPPER_PROFILE` at run time.
 - `--definition-version <n>` - require a specific built-in `coding-workflow` version.
-  When omitted, the current built-in version is used.
+  When omitted, the latest known built-in version is used.
+  Existing native runs continue resolving the built-in version recorded on the run after future built-in versions are added.
   Persisted `coding-workflow` definitions never override this door.
 
 Behaviour:

@@ -104,8 +104,11 @@ export function resolveClaimedWorkflowStepFamily(
     run.source === MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE &&
     definitionKey === CODING_WORKFLOW_DEFINITION_KEY
   ) {
-    const builtIn = getBuiltInWorkflowDefinition(definitionKey);
-    if (builtIn !== undefined && builtIn.version === definitionVersion) {
+    const builtIn = getBuiltInWorkflowDefinition(
+      definitionKey,
+      definitionVersion
+    );
+    if (builtIn !== undefined) {
       const builtInStep = builtIn.steps.find(
         (step) => step.key === target.stepId
       );
