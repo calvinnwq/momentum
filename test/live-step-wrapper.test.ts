@@ -156,6 +156,57 @@ describe("runLiveStepWrapper — success path", () => {
       "RUN=wfrun-deadbeef|STEP=implementation-step|KIND=implementation|ATTEMPT=1"
     );
   });
+
+  it("classifies a missing Node wrapper module as runtime unavailable before retry", () => {
+    const repoPath = makeTempDir("momentum-live-step-repo-");
+    const input = setup({
+      repoPath,
+      env: { PATH: process.env.PATH },
+      config: {
+        command: "/usr/bin/env",
+        args: ["node", "dist/adapters/missing-wrapper.js"],
+        cwd: "repo",
+        envAllow: ["PATH"]
+      }
+    });
+
+    const out = runLiveStepWrapper(input);
+
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.code).toBe("runtime_unavailable");
+    expect(out.error).toContain("wrapper bootstrap failed");
+    const log = readLog(input);
+    expect(log).toContain("MODULE_NOT_FOUND");
+    expect(log).toContain("[live-step] recovery: runtime_unavailable");
+  });
+
+  it("keeps dependency MODULE_NOT_FOUND failures as command_failed", () => {
+    const repoPath = makeTempDir("momentum-live-step-repo-");
+    const scriptPath = path.join(repoPath, "dist", "adapters", "wrapper.js");
+    fs.mkdirSync(path.dirname(scriptPath), { recursive: true });
+    fs.writeFileSync(scriptPath, "require('missing-project-dependency');\n", "utf8");
+    const input = setup({
+      repoPath,
+      env: { PATH: process.env.PATH },
+      config: {
+        command: "/usr/bin/env",
+        args: ["node", "dist/adapters/wrapper.js"],
+        cwd: "repo",
+        envAllow: ["PATH"]
+      }
+    });
+
+    const out = runLiveStepWrapper(input);
+
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.code).toBe("command_failed");
+    expect(out.error).toContain("command exited with code");
+    const log = readLog(input);
+    expect(log).toContain("missing-project-dependency");
+    expect(log).not.toContain("[live-step] recovery: runtime_unavailable");
+  });
 });
 
 describe("runLiveStepWrapper — env allowlist", () => {

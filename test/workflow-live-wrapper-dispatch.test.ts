@@ -15,7 +15,10 @@ import {
 } from "../src/core/workflow/scheduler.js";
 import { getWorkflowLease } from "../src/core/workflow/leases.js";
 import { listWorkflowGatesForRun } from "../src/core/workflow/gate-persist.js";
-import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run-recovery.js";
+import {
+  clearWorkflowRunManualRecoveryGuarded,
+  getWorkflowRunManualRecoveryState
+} from "../src/core/workflow/run-recovery.js";
 import { getWorkflowStep } from "../src/core/workflow/step-transitions.js";
 import {
   loadExecutorInvocation,
@@ -211,6 +214,18 @@ function failedResult(
   };
 }
 
+function wrapperBootstrapFailure(
+  input: WorkflowStepExecutorInput
+): WorkflowStepExecutorDispatchResult {
+  return {
+    ok: false,
+    code: "runtime_unavailable",
+    error: `live step runtime is unavailable: ${input.kind} wrapper dist path is stale`,
+    executorLogPath: input.executorLogPath,
+    resultJsonPath: input.resultJsonPath
+  };
+}
+
 const VALID_RESULT_JSON = JSON.stringify({
   success: true,
   summary: "live preflight succeeded",
@@ -397,6 +412,103 @@ describe("createLiveWrapperWorkflowDispatch — idempotent re-entry", () => {
     expect(calls()).toBe(1);
     expect(dispatchRounds(db, "preflight")).toHaveLength(1);
     expect(stepState(db, "preflight")).toBe("succeeded");
+  });
+});
+
+describe("createLiveWrapperWorkflowDispatch — recovery retry after repaired wrapper path", () => {
+  it("lets merge-cleanup retry after clearing a retryable stale wrapper failure without duplicating the first attempt", () => {
+    const db = openSeededDb();
+    db.prepare(
+      `UPDATE workflow_steps
+          SET state = 'succeeded', started_at = ?, finished_at = ?, result_digest = ?
+        WHERE run_id = ? AND step_order < 4`
+    ).run(NOW, NOW, "test-predecessor", RUN_ID);
+    const firstClaim = approveAndClaim(db, "merge-cleanup");
+    let repaired = false;
+    const attempts: number[] = [];
+    const { registry, calls } = countingRegistry((input) => {
+      attempts.push(input.attempt);
+      return repaired ? succeededResult(input) : wrapperBootstrapFailure(input);
+    });
+    const dispatch = createLiveWrapperWorkflowDispatch(
+      executeWorkflowStepDispatch,
+      { registry, deriveExec: () => ({ ok: true, exec: EXEC_CONTEXT }) }
+    );
+
+    const first = dispatch(firstClaim, tickContext(db, TICK_AT));
+
+    expect(first.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
+    expect(calls()).toBe(1);
+    expect(stepState(db, "merge-cleanup")).toBe("running");
+    expect(
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+    ).toBe(true);
+    expect(dispatchRounds(db, "merge-cleanup")).toHaveLength(1);
+    expect(listWorkflowGatesForRun(db, RUN_ID)).toHaveLength(1);
+
+    repaired = true;
+    const cleared = clearWorkflowRunManualRecoveryGuarded(db, {
+      runId: RUN_ID,
+      now: TICK_AT + 100
+    });
+
+    expect(cleared.ok).toBe(true);
+    if (!cleared.ok) throw new Error("clear failed");
+    expect(cleared.retryPrepared).toEqual({
+      stepId: "merge-cleanup",
+      recoveryCode: "runtime_unavailable"
+    });
+    expect(stepState(db, "merge-cleanup")).toBe("approved");
+    const retryClaim = claimRunnableWorkflowStep(db, {
+      runId: RUN_ID,
+      stepId: "merge-cleanup",
+      holder: WORKER,
+      leaseExpiresAt: TICK_AT + 30_000,
+      now: TICK_AT + 101
+    });
+    expect(retryClaim.ok).toBe(true);
+    if (!retryClaim.ok) throw new Error("retry claim failed");
+
+    const second = dispatch(retryClaim.claim, tickContext(db, TICK_AT + 102));
+
+    expect(second.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
+    expect(calls()).toBe(2);
+    expect(attempts).toEqual([1, 2]);
+    expect(stepState(db, "merge-cleanup")).toBe("succeeded");
+    expect(
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+    ).toBe(false);
+    const rounds = dispatchRounds(db, "merge-cleanup");
+    expect(rounds).toHaveLength(2);
+    expect(rounds[0]?.logPaths[0]).toBe(EXEC_CONTEXT.executorLogPath);
+    expect(rounds[1]?.logPaths[0]).toContain("attempt-2/executor.log");
+    expect(rounds[1]?.logPaths[0]).not.toBe(rounds[0]?.logPaths[0]);
+    expect(listWorkflowGatesForRun(db, RUN_ID)).toHaveLength(1);
+  });
+
+  it("reattaches to already-terminal merge-cleanup evidence without rerunning side effects", () => {
+    const db = openSeededDb();
+    db.prepare(
+      `UPDATE workflow_steps
+          SET state = 'succeeded', started_at = ?, finished_at = ?, result_digest = ?
+        WHERE run_id = ? AND step_order < 4`
+    ).run(NOW, NOW, "test-predecessor", RUN_ID);
+    const claim = approveAndClaim(db, "merge-cleanup");
+    const { registry, calls } = countingRegistry(succeededResult);
+    const dispatch = createLiveWrapperWorkflowDispatch(
+      executeWorkflowStepDispatch,
+      { registry, deriveExec: () => ({ ok: true, exec: EXEC_CONTEXT }) }
+    );
+
+    dispatch(claim, tickContext(db, TICK_AT));
+    const reentered = dispatch(claim, tickContext(db, TICK_AT + 100));
+
+    expect(reentered.status).toBe(
+      WORKFLOW_DISPATCH_RESULT_STATUS.alreadyDispatched
+    );
+    expect(calls()).toBe(1);
+    expect(stepState(db, "merge-cleanup")).toBe("succeeded");
+    expect(dispatchRounds(db, "merge-cleanup")).toHaveLength(1);
   });
 });
 

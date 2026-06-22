@@ -21,7 +21,7 @@ in place; importers still reference the concrete modules below.
 | Gates | `gate.ts`, `gate-persist.ts` |
 | Leases | `leases.ts` |
 | Scheduling | `scheduler.ts` |
-| Dispatch | `dispatch.ts`, `dispatch-persist.ts`, `dispatch-execute.ts`, `dispatch-executor-run.ts`, `dispatch-executor-terminalize.ts`, `dispatch-external-apply.ts`, `dispatch-external-apply-run.ts`, `external-apply-dispatch.ts`, `dispatch-subworkflow.ts`, `dispatch-subworkflow-run.ts`, `subworkflow-dispatch.ts`, `subworkflow-child-config.ts`, `subworkflow-route.ts`, `subworkflow-child-runner.ts`, `subworkflow-dispatch-context.ts`, `dispatch-reconcile.ts`, `dispatch-reconcile-execute.ts`, `daemon-live-wrapper-profile.ts`, `daemon-dispatch-exec-context.ts`, `live-wrapper-dispatch.ts`, `dogfood-dispatch.ts` |
+| Dispatch | `dispatch.ts`, `dispatch-persist.ts`, `dispatch-execute.ts`, `dispatch-retry.ts`, `dispatch-executor-run.ts`, `dispatch-executor-terminalize.ts`, `dispatch-external-apply.ts`, `dispatch-external-apply-run.ts`, `external-apply-dispatch.ts`, `dispatch-subworkflow.ts`, `dispatch-subworkflow-run.ts`, `subworkflow-dispatch.ts`, `subworkflow-child-config.ts`, `subworkflow-route.ts`, `subworkflow-child-runner.ts`, `subworkflow-dispatch-context.ts`, `dispatch-reconcile.ts`, `dispatch-reconcile-execute.ts`, `daemon-live-wrapper-profile.ts`, `daemon-dispatch-exec-context.ts`, `live-wrapper-dispatch.ts`, `dogfood-dispatch.ts` |
 | Live-wrapper dogfood | `coding-workflow-live-wrapper.ts` |
 | Recovery & monitor | `recovery-artifact.ts`, `recovery-reconcile.ts`, `monitor-state.ts`, `monitor-envelope.ts` |
 | Handoff | `handoff.ts` |

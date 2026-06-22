@@ -532,7 +532,7 @@ export function emitWorkflowRunClearRecovery(
     return 1;
   }
 
-  const payload = {
+  const payload: Record<string, unknown> = {
     ok: true,
     command: "workflow run clear-recovery",
     runId: result.runId,
@@ -541,6 +541,9 @@ export function emitWorkflowRunClearRecovery(
     previousMarkedAt: result.previousMarkedAt,
     clearedAt: result.clearedAt
   };
+  if (result.retryPrepared !== undefined) {
+    payload["retryPrepared"] = result.retryPrepared;
+  }
 
   if (parsed.json) {
     writeJson(io.stdout, payload);
@@ -552,6 +555,11 @@ export function emitWorkflowRunClearRecovery(
     `Previous reason: ${result.previousReason ?? "(unset)"}`,
     `Previous marked at: ${result.previousMarkedAt ?? "(unset)"}`,
     `Cleared at: ${result.clearedAt}`,
+    ...(result.retryPrepared !== undefined
+      ? [
+          `Retry prepared: ${result.retryPrepared.stepId} (${result.retryPrepared.recoveryCode})`
+        ]
+      : []),
     `Data dir: ${dataDir}`,
     ""
   ];

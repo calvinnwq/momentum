@@ -467,6 +467,7 @@ Behaviour:
 - Re-derives the monitor view from the durable substrate inside a single immediate transaction and clears the flag only when no monitor-derived blocking recovery condition remains. The check and the clear are atomic: the monitor condition that is checked is the condition that is cleared.
 - Refuses with `recovery_clear_refused` while a monitor-derived blocking recovery classification (`manual_recovery_lease`, `ghost_active_no_lease`, `stale_running_step`, or `failed_required_step`) still applies; the refusal carries the `recoveryCode` and, when known, the `blockingStepId`, and the flag stays set.
 - For live dispatch / finalization recovery, the durable flag and `run.manualRecoveryReason` / `run.manualRecoveryAt` fields are authoritative for non-monitor recovery reasons such as `head_mismatch`, `result_missing`, `repo_lock_lost`, or `auth_unavailable`. The `recovery.md` artifact is best-effort and may be absent after an artifact write failure; resolve the captured reason and any artifact context before clearing. The command still performs the atomic monitor recheck above, but it cannot independently prove that external live-recovery work was completed.
+- For retryable live-wrapper bootstrap failures on dispatched `no-mistakes` or `merge-cleanup` steps (for example a stale wrapper/build path reported as `runtime_unavailable` before clean runner evidence exists), clearing recovery also prepares the same step for one safe scheduler retry. The JSON envelope includes `retryPrepared`, and text output prints `Retry prepared: <step> (<code>)`. The previous failed executor round remains durable; the retry creates a new round and does not rerun an already-terminal successful step.
 - For scheduler-lane stale workflow lease recovery, stale `manual-recovery-required` leases are left outstanding as durable evidence with the `stale_workflow_lease_manual_recovery_required` reason prefix. Because the monitor reducer can still classify that lease as `manual_recovery_lease`, guarded clear refuses until the lease condition is resolved.
 - Refuses with `not_flagged` when the run is not currently flagged, so a stale clear cannot mutate anything.
 - Never auto-clears from elapsed time alone, never repairs the underlying run, and never issues an external write. The `recovery.md` artifact is intentionally left on disk as durable audit; remove it after capturing the context elsewhere.
@@ -481,7 +482,11 @@ Behaviour:
   "dataDir": "/path/to/data",
   "previousReason": "ghost active step recovered by operator",
   "previousMarkedAt": 1730000000000,
-  "clearedAt": 1730000600000
+  "clearedAt": 1730000600000,
+  "retryPrepared": {
+    "stepId": "merge-cleanup",
+    "recoveryCode": "runtime_unavailable"
+  }
 }
 ```
 
@@ -492,6 +497,7 @@ Manual recovery cleared for run: cwfp-abc123
 Previous reason: ghost active step recovered by operator
 Previous marked at: 1730000000000
 Cleared at: 1730000600000
+Retry prepared: merge-cleanup (runtime_unavailable)
 Data dir: /path/to/data
 ```
 

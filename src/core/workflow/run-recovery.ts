@@ -23,6 +23,7 @@
  */
 
 import type { MomentumDb } from "../../adapters/db.js";
+import { prepareRetryableDispatchedStepForRecoveryClear } from "./dispatch-retry.js";
 import { loadWorkflowRunDetail } from "./status.js";
 import type { WorkflowMonitorRecoveryCode } from "./monitor-state.js";
 
@@ -209,6 +210,10 @@ export type ClearWorkflowRunManualRecoveryGuardedResult =
       previousReason: string | null;
       previousMarkedAt: number | null;
       clearedAt: number;
+      retryPrepared?: {
+        stepId: string;
+        recoveryCode: string;
+      };
     }
   | {
       ok: false;
@@ -280,7 +285,23 @@ export function clearWorkflowRunManualRecoveryGuarded(
       };
     }
 
-    const recovery = detail.monitor.recovery;
+    const preparedRetry = prepareRetryableDispatchedStepForRecoveryClear(db, {
+      runId: input.runId,
+      now
+    });
+    const recoveryDetail = preparedRetry.prepared
+      ? loadWorkflowRunDetail(db, input.runId, detailOptions)
+      : detail;
+    if (!recoveryDetail) {
+      db.exec("ROLLBACK");
+      return {
+        ok: false,
+        reason: "run_not_found",
+        message: `Workflow run ${input.runId} disappeared during retry preparation.`
+      };
+    }
+
+    const recovery = recoveryDetail.monitor.recovery;
     if (recovery !== null && isBlockingWorkflowRecoveryCode(recovery.code)) {
       db.exec("ROLLBACK");
       return {
@@ -315,7 +336,15 @@ export function clearWorkflowRunManualRecoveryGuarded(
       runId: input.runId,
       previousReason,
       previousMarkedAt,
-      clearedAt: now
+      clearedAt: now,
+      ...(preparedRetry.prepared
+        ? {
+            retryPrepared: {
+              stepId: preparedRetry.stepId,
+              recoveryCode: preparedRetry.recoveryCode
+            }
+          }
+        : {})
     };
   } catch (error) {
     try {
