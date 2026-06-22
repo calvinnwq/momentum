@@ -3,6 +3,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+import { LINEAR_SOURCE_ADAPTER_KIND } from "../src/adapters/linear-source-adapter.js";
+import {
+  BUILTIN_SOURCE_ADAPTER_KINDS,
+  type SourceAdapterErrorCode
+} from "../src/adapters/source-adapter.js";
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");
 
@@ -13,10 +19,22 @@ function readDoc(filename: string): string {
 describe("M5 provenance anchor", () => {
   const spec = readDoc("SPEC.md");
 
-  it("preserves the M5 issue range and source-adapter boundary", () => {
+  it("preserves the compact M5 provenance anchor", () => {
     expect(spec).toContain("M5: NGX-287 through NGX-294");
-    expect(spec).toMatch(/Source adapters are read-only/i);
-    expect(spec).toMatch(/local update intents/i);
+  });
+
+  it("pins source adapter identity and error vocabulary in code", () => {
+    expect(LINEAR_SOURCE_ADAPTER_KIND).toBe("linear");
+    expect([...BUILTIN_SOURCE_ADAPTER_KINDS]).toEqual(["local-fixture", "linear"]);
+    const errorCodes: SourceAdapterErrorCode[] = [
+      "unsupported_source_adapter",
+      "source_adapter_threw",
+      "source_item_not_found",
+      "source_item_invalid",
+      "source_auth_unavailable",
+      "source_config_invalid",
+    ];
+    expect(errorCodes).toContain("source_auth_unavailable");
   });
 
   it("keeps source adapter planning detail out of public docs", () => {

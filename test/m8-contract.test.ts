@@ -3,6 +3,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+import { WORKFLOW_GATE_TYPES } from "../src/core/workflow/gate.js";
+import { WORKFLOW_APPROVAL_BOUNDARIES } from "../src/core/workflow/run-reducer.js";
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");
 
@@ -13,11 +16,17 @@ function readDoc(filename: string): string {
 describe("M8 operator controls contract", () => {
   const spec = readDoc("SPEC.md");
 
-  it("preserves M8 provenance and human-gate vocabulary", () => {
+  it("preserves the compact M8 provenance anchor", () => {
     expect(spec).toContain("M8: NGX-323 through NGX-330");
-    for (const term of ["approval_required", "operator_decision_required", "manual_recovery_required"]) {
-      expect(spec).toContain(term);
-    }
+  });
+
+  it("pins operator gate and approval boundary vocabularies in code", () => {
+    expect([...WORKFLOW_GATE_TYPES]).toContain("approval_required");
+    expect([...WORKFLOW_GATE_TYPES]).toContain("operator_decision_required");
+    expect([...WORKFLOW_GATE_TYPES]).toContain("manual_recovery_required");
+    expect([...WORKFLOW_GATE_TYPES]).toContain("destructive_action_requested");
+    expect([...WORKFLOW_APPROVAL_BOUNDARIES]).toContain("through-merge-cleanup");
+    expect([...WORKFLOW_APPROVAL_BOUNDARIES]).toContain("full");
   });
 
   it("keeps operator-control surfaces documented", () => {

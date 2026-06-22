@@ -3,6 +3,15 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+import {
+  LIVE_STEP_WRAPPER_OUTPUT_MAX_BYTES,
+  LIVE_STEP_WRAPPER_RECOVERY_CODES
+} from "../src/adapters/live-step-wrapper.js";
+import {
+  WORKFLOW_LEASE_FRESHNESS_CLASSIFICATIONS,
+  WORKFLOW_LEASE_STALE_POLICIES
+} from "../src/core/workflow/run-reducer.js";
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");
 
@@ -13,10 +22,31 @@ function readDoc(filename: string): string {
 describe("M9 live workflow execution contract", () => {
   const spec = readDoc("SPEC.md");
 
-  it("preserves M9 provenance and live-wrapper safety terms", () => {
+  it("preserves the compact M9 provenance anchor", () => {
     expect(spec).toContain("M9: NGX-331 through NGX-338");
-    expect(spec).toMatch(/normalized result evidence/i);
-    expect(spec).toMatch(/manual_recovery_required/i);
+  });
+
+  it("pins live-wrapper recovery and lease safety vocabularies in code", () => {
+    expect([...LIVE_STEP_WRAPPER_RECOVERY_CODES]).toEqual([
+      "runtime_unavailable",
+      "auth_unavailable",
+      "command_failed",
+      "command_timed_out",
+      "output_overflow",
+      "result_missing",
+      "result_invalid",
+    ]);
+    expect(LIVE_STEP_WRAPPER_OUTPUT_MAX_BYTES).toBe(256 * 1024 * 1024);
+    expect([...WORKFLOW_LEASE_STALE_POLICIES]).toEqual([
+      "auto-release",
+      "manual-recovery-required",
+    ]);
+    expect([...WORKFLOW_LEASE_FRESHNESS_CLASSIFICATIONS]).toEqual([
+      "released",
+      "fresh",
+      "stale-auto-release",
+      "stale-manual-recovery-required",
+    ]);
   });
 
   it("keeps live-wrapper operator profile documented", () => {

@@ -1,37 +1,73 @@
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(here, "..");
-
-function readDoc(relative: string): string {
-  return fs.readFileSync(path.join(repoRoot, relative), "utf8");
-}
+import { planWorkflowStepReconciliation } from "../src/core/workflow/dispatch-reconcile.js";
+import {
+  PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES,
+  WORKFLOW_DISPATCH_FAIL_CLOSED_CODES,
+  planWorkflowStepDispatch
+} from "../src/core/workflow/dispatch.js";
+import { expectSpecSection, readRepoFile } from "./helpers/repo-docs.js";
 
 describe("runtime consolidation contract", () => {
-  const spec = readDoc("SPEC.md");
+  const spec = readRepoFile("SPEC.md");
 
-  it("uses explicit keep / deprecate-later / defer vocabulary", () => {
-    for (const term of ["**Keep**", "**Deprecate-later**", "**Defer**"]) {
-      expect(spec, `SPEC.md should define ${term}`).toContain(term);
-    }
-
-    expect(spec).toMatch(/No consolidation plan authorizes production deletion by itself/i);
+  it("keeps a compact runtime consolidation anchor", () => {
+    expectSpecSection(spec, "Runtime Consolidation");
+    expect(spec).toContain("RC-2");
+    expect(spec).toContain("RC-4b");
   });
 
-  it("records the landed RC sequence and RC-2 finalization owner", () => {
-    for (const id of ["RC-1", "RC-1b", "RC-1c", "RC-2", "RC-3", "RC-4", "RC-4b", "RC-5", "RC-5b"]) {
-      expect(spec, `SPEC.md should list ${id}`).toContain(id);
-    }
+  it("pins the phase-1 dispatchable families in code", () => {
+    expect([...PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES]).toEqual([
+      "goal-loop",
+      "one-shot",
+      "script",
+      "no-mistakes",
+      "external-apply",
+      "subworkflow",
+    ]);
+    expect([...WORKFLOW_DISPATCH_FAIL_CLOSED_CODES]).toEqual([
+      "workflow_run_not_found",
+      "workflow_definition_unlinked",
+      "step_definition_not_found",
+      "unknown_executor_family",
+      "unsupported_executor_family",
+    ]);
+  });
 
-    expect(spec).toMatch(/RC-2[\s\S]*single production owner/i);
-    expect(spec).toMatch(/double-finalize and double-write/i);
+  it("keeps unsupported or unresolved dispatch fail-closed", () => {
+    expect(
+      planWorkflowStepDispatch({
+        ok: false,
+        failure: "definition_unlinked",
+      })
+    ).toMatchObject({
+      action: "fail_closed",
+      code: "workflow_definition_unlinked",
+      gateType: "manual_recovery_required",
+    });
+    expect(planWorkflowStepDispatch({ ok: true, executorFamily: "subworkflow" })).toEqual({
+      action: "dispatch",
+      executorFamily: "subworkflow",
+    });
+  });
+
+  it("keeps RC-2 reconciliation as the finalization decision seam", () => {
+    expect(planWorkflowStepReconciliation("running")).toEqual({
+      action: "not_terminal",
+    });
+    expect(planWorkflowStepReconciliation("succeeded")).toMatchObject({
+      action: "finalize",
+      stepState: "succeeded",
+    });
+    expect(planWorkflowStepReconciliation("manual_recovery_required")).toMatchObject({
+      action: "manual_recovery",
+      invocationState: "manual_recovery_required",
+    });
   });
 
   it("keeps runtime-consolidation guidance out of the public docs front door", () => {
-    expect(readDoc("README.md")).not.toMatch(/runtime-consolidation|RC-2|RC-4b/);
-    expect(readDoc("docs/index.md")).not.toMatch(/runtime-consolidation|RC-2|RC-4b/);
+    expect(readRepoFile("README.md")).not.toMatch(/runtime-consolidation|RC-2|RC-4b/);
+    expect(readRepoFile("docs/index.md")).not.toMatch(/runtime-consolidation|RC-2|RC-4b/);
   });
 });

@@ -3,6 +3,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+import { WORKFLOW_EXECUTOR_FAMILIES } from "../src/core/workflow/definition.js";
+import { WORKFLOW_RUN_STATES, WORKFLOW_STEP_STATES } from "../src/core/workflow/run-reducer.js";
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");
 
@@ -27,30 +30,26 @@ const M10_LINEAR_IDS = [
 describe("M10 workflow-first runtime provenance", () => {
   const spec = readDoc("SPEC.md");
 
-  it("preserves the M10 issue range and workflow-first product shape", () => {
+  it("preserves the compact M10 issue-range anchor", () => {
     for (const issueId of M10_LINEAR_IDS) {
       expect(spec, `SPEC.md should preserve ${issueId}`).toContain(issueId);
     }
-
-    for (const term of [
-      "WorkflowDefinition",
-      "WorkflowRun",
-      "StepDefinition",
-      "StepRun",
-      "ExecutorInvocation",
-      "ExecutorRound",
-      "goal-loop",
-    ]) {
-      expect(spec, `SPEC.md should name ${term}`).toContain(term);
-    }
   });
 
-  it("preserves current M10 follow-up state without keeping old internal prose", () => {
-    for (const family of ["external-apply", "subworkflow"]) {
-      expect(spec).toContain(family);
-    }
-    expect(spec).toMatch(/RC-3/);
-    expect(spec).toMatch(/RC-4b/);
+  it("pins workflow-first product shape in runtime constants", () => {
+    expect([...WORKFLOW_EXECUTOR_FAMILIES]).toEqual([
+      "goal-loop",
+      "one-shot",
+      "no-mistakes",
+      "script",
+      "external-apply",
+      "subworkflow",
+    ]);
+    expect([...WORKFLOW_RUN_STATES]).toContain("running");
+    expect([...WORKFLOW_STEP_STATES]).toContain("approved");
+  });
+
+  it("keeps old internal prose out of the repo", () => {
     expect(fs.existsSync(path.join(repoRoot, "internal"))).toBe(false);
   });
 

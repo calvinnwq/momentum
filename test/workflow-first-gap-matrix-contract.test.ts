@@ -3,6 +3,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+import { WORKFLOW_EXECUTOR_FAMILIES } from "../src/core/workflow/definition.js";
+import { PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES } from "../src/core/workflow/dispatch.js";
+import { expectSpecSection } from "./helpers/repo-docs.js";
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");
 
@@ -13,27 +17,29 @@ function readDoc(relative: string): string {
 describe("workflow-first gap matrix anchor", () => {
   const spec = readDoc("SPEC.md");
 
-  it("states the model shift without preserving the old matrix prose in repo", () => {
-    expect(spec).toMatch(/Goal` remains a compatibility surface/i);
-    expect(spec).toMatch(/workflow-first runtime/i);
-    expect(spec).toContain("WorkflowDefinition");
-    expect(spec).toContain("workflow runs");
+  it("keeps compact workflow-first and runtime consolidation anchors", () => {
+    expectSpecSection(spec, "Runtime Model");
+    expectSpecSection(spec, "Runtime Consolidation");
     expect(fs.existsSync(path.join(repoRoot, "internal"))).toBe(false);
   });
 
-  it("pins phase-1 dispatch families and fail-closed posture", () => {
-    for (const family of [
+  it("pins phase-1 dispatch families in code", () => {
+    expect([...WORKFLOW_EXECUTOR_FAMILIES]).toEqual([
+      "goal-loop",
+      "one-shot",
+      "no-mistakes",
+      "script",
+      "external-apply",
+      "subworkflow",
+    ]);
+    expect([...PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES]).toEqual([
       "goal-loop",
       "one-shot",
       "script",
       "no-mistakes",
       "external-apply",
       "subworkflow",
-    ]) {
-      expect(spec, `SPEC.md should name dispatch family ${family}`).toContain(family);
-    }
-
-    expect(spec).toMatch(/must fail closed/i);
+    ]);
   });
 
   it("keeps M10 issue provenance in the compact milestone anchor", () => {

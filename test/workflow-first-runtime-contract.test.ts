@@ -1,50 +1,54 @@
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(here, "..");
-
-function readDoc(relative: string): string {
-  return fs.readFileSync(path.join(repoRoot, relative), "utf8");
-}
+import {
+  CODING_WORKFLOW_DEFINITION,
+  WORKFLOW_EXECUTOR_FAMILIES,
+  listBuiltInWorkflowDefinitionKeys
+} from "../src/core/workflow/definition.js";
+import { readRepoFile, expectSpecSection } from "./helpers/repo-docs.js";
 
 describe("workflow-first runtime contract", () => {
-  const spec = readDoc("SPEC.md");
+  const spec = readRepoFile("SPEC.md");
 
-  it("records the workflow-first product model", () => {
-    for (const term of [
-      "WorkflowDefinition",
-      "StepDefinition",
-      "WorkflowRun",
-      "StepRun",
-      "ExecutorInvocation",
-      "ExecutorRound",
-      "Goal",
-      "goal-loop",
-    ]) {
-      expect(spec, `SPEC.md should define ${term}`).toContain(term);
-    }
-
-    expect(spec).toMatch(/workflow-first runtime/i);
+  it("keeps a compact runtime-model anchor in SPEC.md", () => {
+    expectSpecSection(spec, "Runtime Model");
+    expectSpecSection(spec, "Workflow Safety");
+    expect(spec).toMatch(/\bworkflow-first runtime\b/i);
   });
 
-  it("pins the executor families", () => {
-    for (const family of [
+  it("pins the executor families from runtime constants", () => {
+    expect([...WORKFLOW_EXECUTOR_FAMILIES]).toEqual([
       "goal-loop",
       "one-shot",
-      "script",
       "no-mistakes",
+      "script",
       "external-apply",
       "subworkflow",
-    ]) {
-      expect(spec, `SPEC.md should name ${family}`).toContain(family);
-    }
+    ]);
+  });
+
+  it("keeps coding-workflow registered as a workflow definition", () => {
+    expect(listBuiltInWorkflowDefinitionKeys()).toContain("coding-workflow");
+    expect(CODING_WORKFLOW_DEFINITION.steps.map((step) => step.key)).toEqual([
+      "preflight",
+      "implementation",
+      "postflight",
+      "no-mistakes",
+      "merge-cleanup",
+      "linear-refresh",
+    ]);
+    expect(CODING_WORKFLOW_DEFINITION.steps.map((step) => step.executor)).toEqual([
+      "one-shot",
+      "goal-loop",
+      "one-shot",
+      "no-mistakes",
+      "script",
+      "external-apply",
+    ]);
   });
 
   it("keeps public docs free of workflow-first planning vocabulary", () => {
-    expect(readDoc("README.md")).not.toMatch(/\bM10\b|Workflow-First Runtime/);
-    expect(readDoc("docs/index.md")).not.toMatch(/\bM10\b|Workflow-First Runtime/);
+    expect(readRepoFile("README.md")).not.toMatch(/\bM10\b|Workflow-First Runtime/);
+    expect(readRepoFile("docs/index.md")).not.toMatch(/\bM10\b|Workflow-First Runtime/);
   });
 });
