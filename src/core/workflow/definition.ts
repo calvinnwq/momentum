@@ -28,6 +28,10 @@
  *   - The built-in coding workflow definition is shipped as data/config, not a
  *     fixed product boundary: its per-step executor families are editable
  *     defaults chosen from the contract's `step -> executor` mapping.
+ *   - Built-in definitions are registered by `(key, version)`: unversioned
+ *     lookup selects the latest known version for new starts, while versioned
+ *     lookup preserves dispatch against the version recorded on an existing
+ *     run.
  */
 
 import {
@@ -364,16 +368,95 @@ export const BUILT_IN_WORKFLOW_DEFINITIONS: readonly WorkflowDefinition[] = [
   CODING_WORKFLOW_DEFINITION
 ];
 
-const BUILT_IN_BY_KEY: ReadonlyMap<string, WorkflowDefinition> = new Map(
-  BUILT_IN_WORKFLOW_DEFINITIONS.map((def) => [def.key, def])
+const BUILT_IN_BY_KEY_AND_VERSION: ReadonlyMap<string, WorkflowDefinition> =
+  new Map(
+    BUILT_IN_WORKFLOW_DEFINITIONS.map((def) => [
+      builtInDefinitionIdentity(def.key, def.version),
+      def
+    ])
+  );
+
+const BUILT_IN_LATEST_BY_KEY: ReadonlyMap<string, WorkflowDefinition> = new Map(
+  uniqueBuiltInDefinitionKeys(BUILT_IN_WORKFLOW_DEFINITIONS).map((key) => [
+    key,
+    latestBuiltInWorkflowDefinitionForKey(key)
+  ])
 );
 
+/**
+ * Return a built-in workflow definition by key.
+ *
+ * When `version` is omitted, this selects the latest known built-in version for
+ * the key. When `version` is supplied, this resolves only that exact key/version
+ * pair so existing runs keep dispatching through the version they recorded at
+ * start time.
+ */
 export function getBuiltInWorkflowDefinition(
-  key: string
+  key: string,
+  version?: number
 ): WorkflowDefinition | undefined {
-  return BUILT_IN_BY_KEY.get(key);
+  if (version !== undefined) {
+    return BUILT_IN_BY_KEY_AND_VERSION.get(
+      builtInDefinitionIdentity(key, version)
+    );
+  }
+  return BUILT_IN_LATEST_BY_KEY.get(key);
 }
 
+/**
+ * List the distinct built-in workflow definition keys currently shipped.
+ */
 export function listBuiltInWorkflowDefinitionKeys(): readonly string[] {
-  return BUILT_IN_WORKFLOW_DEFINITIONS.map((def) => def.key);
+  return uniqueBuiltInDefinitionKeys(BUILT_IN_WORKFLOW_DEFINITIONS);
+}
+
+/**
+ * Select a built-in workflow definition from an injected registry.
+ *
+ * This mirrors {@link getBuiltInWorkflowDefinition} for tests and future
+ * registry callers: exact version when pinned, latest known version for the key
+ * when unpinned.
+ */
+export function selectBuiltInWorkflowDefinition(
+  definitions: readonly WorkflowDefinition[],
+  key: string,
+  version?: number
+): WorkflowDefinition | undefined {
+  if (version !== undefined) {
+    return definitions.find((def) => def.key === key && def.version === version);
+  }
+  return selectLatestBuiltInWorkflowDefinition(
+    definitions.filter((def) => def.key === key)
+  );
+}
+
+function selectLatestBuiltInWorkflowDefinition(
+  definitions: readonly WorkflowDefinition[]
+): WorkflowDefinition | undefined {
+  return definitions.reduce<WorkflowDefinition | undefined>((latest, def) => {
+    if (latest === undefined || def.version > latest.version) {
+      return def;
+    }
+    return latest;
+  }, undefined);
+}
+
+function latestBuiltInWorkflowDefinitionForKey(key: string): WorkflowDefinition {
+  const latest = selectLatestBuiltInWorkflowDefinition(
+    BUILT_IN_WORKFLOW_DEFINITIONS.filter((def) => def.key === key)
+  );
+  if (latest === undefined) {
+    throw new Error(`Missing built-in workflow definition for key: ${key}`);
+  }
+  return latest;
+}
+
+function uniqueBuiltInDefinitionKeys(
+  definitions: readonly WorkflowDefinition[]
+): readonly string[] {
+  return [...new Set(definitions.map((def) => def.key))];
+}
+
+function builtInDefinitionIdentity(key: string, version: number): string {
+  return `${key}@${version}`;
 }

@@ -460,8 +460,9 @@ function runWorkflowStartCommand(
 
 /**
  * Resolve the {@link WorkflowDefinition} a run start should materialize from.
- * Persisted definitions win; the built-in coding workflow is the fallback so a
- * fresh database (no seeded definitions) can still start the canonical recipe.
+ * Persisted definitions win; the latest known built-in coding workflow is the
+ * fallback so a fresh database (no seeded definitions) can still start the
+ * canonical recipe.
  */
 function resolveWorkflowRunStartDefinition(
   db: MomentumDb,
@@ -484,18 +485,16 @@ function resolveWorkflowRunStartDefinition(
   return builtIn;
 }
 
+/**
+ * Resolve the built-in workflow definition for the Momentum-native coding door.
+ * Versioned starts require the exact built-in key/version pair; unversioned
+ * starts select the latest known built-in version.
+ */
 function resolveBuiltInWorkflowRunStartDefinition(
   key: string,
   version: number | undefined
 ): WorkflowDefinition | undefined {
-  const builtIn = getBuiltInWorkflowDefinition(key);
-  if (builtIn === undefined) {
-    return undefined;
-  }
-  if (version !== undefined && builtIn.version !== version) {
-    return undefined;
-  }
-  return builtIn;
+  return getBuiltInWorkflowDefinition(key, version);
 }
 
 function workflowImport(parsed: ParsedFlags, io: CliIo): number {
