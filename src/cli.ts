@@ -219,6 +219,7 @@ type ParsedFlags = {
   objective?: string;
   runId?: string;
   skillRevision?: string;
+  profile?: string;
   error?: string;
 };
 
@@ -1324,6 +1325,7 @@ function parseFlags(argv: string[]): ParsedFlags {
   let objectiveFlag: string | undefined;
   let runIdFlag: string | undefined;
   let skillRevisionFlag: string | undefined;
+  let profileFlag: string | undefined;
   let error: string | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -1814,6 +1816,17 @@ function parseFlags(argv: string[]): ParsedFlags {
       continue;
     }
 
+    if (arg === "--profile") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --profile.";
+      } else {
+        profileFlag = value;
+        index += 1;
+      }
+      continue;
+    }
+
     if (arg === "--updated-since") {
       const value = readFlagValue(argv, index);
       if (value === undefined) {
@@ -2019,6 +2032,7 @@ function parseFlags(argv: string[]): ParsedFlags {
   if (objectiveFlag !== undefined) parsed.objective = objectiveFlag;
   if (runIdFlag !== undefined) parsed.runId = runIdFlag;
   if (skillRevisionFlag !== undefined) parsed.skillRevision = skillRevisionFlag;
+  if (profileFlag !== undefined) parsed.profile = profileFlag;
   if (error !== undefined) parsed.error = error;
 
   return parsed;

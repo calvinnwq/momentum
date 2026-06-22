@@ -5,7 +5,10 @@ import { usageError, type CliIo } from "../../renderers/cli-output.js";
 import { isUniqueViolation, openDb, type MomentumDb } from "../../adapters/db.js";
 import { resolveDataDir, type DataDirOptions } from "../../config/data-dir.js";
 import { loadMomentumPolicy } from "../../core/intent/policy.js";
-import { parseWorkflowRunImport } from "../../core/workflow/run-import.js";
+import {
+  isReservedCompatibilityRunId,
+  parseWorkflowRunImport
+} from "../../core/workflow/run-import.js";
 import {
   persistWorkflowRunImport,
   type PersistWorkflowRunImportSummary
@@ -69,8 +72,9 @@ import {
   loadWorkflowDefinition,
   persistWorkflowDefinition
 } from "../../core/workflow/definition-persist.js";
-import type {
-  WorkflowRunStartInput
+import {
+  MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
+  type WorkflowRunStartInput
 } from "../../core/workflow/run-start.js";
 import {
   InvalidWorkflowRunStartError,
@@ -111,7 +115,8 @@ import {
   emitWorkflowRunUpdateStepSuccess,
   emitWorkflowStatusDetail,
   emitWorkflowStatusFailure,
-  emitWorkflowStatusList
+  emitWorkflowStatusList,
+  type WorkflowRunStartCommand
 } from "../../renderers/workflow.js";
 
 type ParsedFlags = {
@@ -143,6 +148,7 @@ type ParsedFlags = {
   objective?: string;
   runId?: string;
   skillRevision?: string;
+  profile?: string;
   error?: string;
 };
 
@@ -174,13 +180,16 @@ function workflowRun(parsed: ParsedFlags, io: CliIo): number {
   const subcommand = parsed.args[2];
   if (!subcommand) {
     return usageError(
-      "Missing required subcommand for workflow run. Expected: start, list, approve, decide, update-step, clear-recovery, monitor, logs.",
+      "Missing required subcommand for workflow run. Expected: start, start-coding, list, approve, decide, update-step, clear-recovery, monitor, logs.",
       parsed,
       io
     );
   }
   if (subcommand === "start") {
     return workflowRunStart(parsed, io);
+  }
+  if (subcommand === "start-coding") {
+    return workflowRunStartCoding(parsed, io);
   }
   if (subcommand === "logs") {
     return workflowRunLogs(parsed, io);
@@ -219,10 +228,59 @@ function workflowRun(parsed: ParsedFlags, io: CliIo): number {
  * the old Goal loop and is untouched by this command.
  */
 function workflowRunStart(parsed: ParsedFlags, io: CliIo): number {
+  return runWorkflowStartCommand(parsed, io, {
+    command: "workflow run start",
+    coding: false
+  });
+}
+
+/**
+ * `momentum workflow run start-coding` - the explicit Momentum-native coding
+ * workflow start door (NGX-508). It is a thin, unmistakable selector over the
+ * same durable {@link persistWorkflowRunStart} machinery as `workflow run
+ * start`, adding three coding-specific guarantees:
+ *
+ *   - it always materializes the built-in `coding-workflow` definition (a
+ *     conflicting `--definition` is refused with `definition_not_allowed`);
+ *   - it refuses run ids reserved for CWFP/overnight compatibility imports
+ *     (`reserved_run_id`) so a fresh native run is never confused with imported
+ *     `cwfp-*` primary state; and
+ *   - it records the run with the {@link MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE}
+ *     provenance so status / handoff / monitor / logs surface it as
+ *     Momentum-owned.
+ *
+ * The ordinary `workflow run start` path and the imported CWFP read/compat paths
+ * are left exactly as they were.
+ */
+function workflowRunStartCoding(parsed: ParsedFlags, io: CliIo): number {
+  return runWorkflowStartCommand(parsed, io, {
+    command: "workflow run start-coding",
+    coding: true
+  });
+}
+
+type WorkflowStartCommandOptions = {
+  command: WorkflowRunStartCommand;
+  coding: boolean;
+};
+
+/**
+ * Shared implementation for the two run-start surfaces. `workflow run start` is
+ * the generic definition-sourced start; `workflow run start-coding` is the
+ * explicit Momentum-native coding door. The `coding` option toggles the
+ * coding-specific guards (forced definition, reserved-run-id refusal, native
+ * source provenance) while keeping the durable persistence path identical.
+ */
+function runWorkflowStartCommand(
+  parsed: ParsedFlags,
+  io: CliIo,
+  options: WorkflowStartCommandOptions
+): number {
+  const { command } = options;
   const positional = parsed.args.slice(3);
   if (positional.length > 0) {
     return usageError(
-      `Unexpected argument for workflow run start: ${positional[0]}`,
+      `Unexpected argument for ${command}: ${positional[0]}`,
       parsed,
       io
     );
@@ -231,27 +289,55 @@ function workflowRunStart(parsed: ParsedFlags, io: CliIo): number {
   const runId = parsed.runId;
   if (runId === undefined || runId.length === 0) {
     return emitWorkflowRunStartFailure(parsed, io, {
+      command,
       code: "run_id_required",
-      message: "Missing required --run-id <id> for workflow run start."
+      message: `Missing required --run-id <id> for ${command}.`
     });
   }
   if (parsed.repo === undefined || parsed.repo.length === 0) {
     return emitWorkflowRunStartFailure(parsed, io, {
+      command,
       code: "repo_required",
-      message: "Missing required --repo <path> for workflow run start.",
+      message: `Missing required --repo <path> for ${command}.`,
       runId
     });
   }
   if (parsed.objective === undefined || parsed.objective.length === 0) {
     return emitWorkflowRunStartFailure(parsed, io, {
+      command,
       code: "objective_required",
-      message: "Missing required --objective <text> for workflow run start.",
+      message: `Missing required --objective <text> for ${command}.`,
       runId
     });
   }
+
+  if (
+    options.coding &&
+    parsed.definition !== undefined &&
+    parsed.definition !== CODING_WORKFLOW_DEFINITION_KEY
+  ) {
+    return emitWorkflowRunStartFailure(parsed, io, {
+      command,
+      code: "definition_not_allowed",
+      message: `${command} always uses the built-in ${CODING_WORKFLOW_DEFINITION_KEY} definition; drop --definition or use \`workflow run start\` to start a different definition.`,
+      runId
+    });
+  }
+
+  if (options.coding && isReservedCompatibilityRunId(runId)) {
+    return emitWorkflowRunStartFailure(parsed, io, {
+      command,
+      code: "reserved_run_id",
+      message: `Run id "${runId}" is reserved for CWFP/overnight compatibility imports; choose a Momentum-native run id for ${command}.`,
+      runId
+    });
+  }
+
   const repoPath = path.resolve(parsed.repo);
   const objective = parsed.objective;
-  const definitionKey = parsed.definition ?? CODING_WORKFLOW_DEFINITION_KEY;
+  const definitionKey = options.coding
+    ? CODING_WORKFLOW_DEFINITION_KEY
+    : parsed.definition ?? CODING_WORKFLOW_DEFINITION_KEY;
   const now = Date.now();
 
   const dataDirOptions: DataDirOptions = {};
@@ -263,6 +349,7 @@ function workflowRunStart(parsed: ParsedFlags, io: CliIo): number {
     dataDir = resolveDataDir(dataDirOptions);
   } catch (err) {
     return emitWorkflowRunStartFailure(parsed, io, {
+      command,
       code: "data_dir_failed",
       message: err instanceof Error ? err.message : String(err),
       runId
@@ -274,6 +361,7 @@ function workflowRunStart(parsed: ParsedFlags, io: CliIo): number {
   const policy = loadMomentumPolicy(repoPath);
   if (!policy.ok) {
     return emitWorkflowRunStartFailure(parsed, io, {
+      command,
       code: "policy_invalid",
       message: `Repo policy is invalid (${policy.code}): ${policy.error}`,
       dataDir,
@@ -291,6 +379,7 @@ function workflowRunStart(parsed: ParsedFlags, io: CliIo): number {
     );
     if (definition === undefined) {
       return emitWorkflowRunStartFailure(parsed, io, {
+        command,
         code: "definition_not_found",
         message:
           parsed.definitionVersion === undefined
@@ -308,6 +397,9 @@ function workflowRunStart(parsed: ParsedFlags, io: CliIo): number {
       objective,
       now
     };
+    if (options.coding) {
+      input.source = MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE;
+    }
     if (parsed.approvalBoundary !== undefined) {
       input.approvalBoundary = parsed.approvalBoundary;
     }
@@ -317,6 +409,9 @@ function workflowRunStart(parsed: ParsedFlags, io: CliIo): number {
     if (parsed.issueScope !== undefined) {
       input.issueScope = { identifier: parsed.issueScope };
     }
+    if (parsed.profile !== undefined) {
+      input.route = { profile: parsed.profile };
+    }
 
     let summary: PersistWorkflowRunStartSummary;
     try {
@@ -324,6 +419,7 @@ function workflowRunStart(parsed: ParsedFlags, io: CliIo): number {
     } catch (error) {
       if (error instanceof InvalidWorkflowRunStartError) {
         return emitWorkflowRunStartFailure(parsed, io, {
+          command,
           code: "invalid_run_start",
           message: error.message,
           dataDir,
@@ -333,6 +429,7 @@ function workflowRunStart(parsed: ParsedFlags, io: CliIo): number {
       }
       if (error instanceof WorkflowRunStartConflictError) {
         return emitWorkflowRunStartFailure(parsed, io, {
+          command,
           code: "run_exists",
           message: `Workflow run already exists: ${runId}.`,
           dataDir,
@@ -343,6 +440,7 @@ function workflowRunStart(parsed: ParsedFlags, io: CliIo): number {
     }
 
     return emitWorkflowRunStartSuccess(parsed, io, {
+      command,
       dataDir,
       repoPath,
       objective,

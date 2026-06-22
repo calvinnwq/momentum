@@ -1,8 +1,9 @@
 # Workflow commands
 
-Operator-facing CLI envelopes for the `workflow run start`, `workflow import`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run approve`, `workflow run decide`, `workflow run update-step`, `workflow run clear-recovery`, `workflow run monitor`, and `workflow run logs` commands.
+Operator-facing CLI envelopes for the `workflow run start`, `workflow run start-coding`, `workflow import`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run approve`, `workflow run decide`, `workflow run update-step`, `workflow run clear-recovery`, `workflow run monitor`, and `workflow run logs` commands.
 
 - `workflow run start` starts a first-class workflow run from a validated workflow definition: it resolves the definition (a persisted definition, or the built-in `coding-workflow` recipe), loads repo policy, and durably materializes a `workflow_runs` row plus one ordered `workflow_steps` row per definition step, with an approval row when an approval boundary is supplied. `goal start` remains the compatibility path for the older Goal loop.
+- `workflow run start-coding` is the explicit Momentum-native coding-workflow start door: a thin selector over `workflow run start` that always uses the built-in `coding-workflow` definition, refuses run ids reserved for compatibility imports, and records the run with a Momentum-native source so it is unmistakably Momentum-owned. Use it to intentionally choose Momentum orchestration for a new coding workflow; the ordinary definition-sourced start and the imported compatibility runs are unchanged.
 - `workflow import` reads local `.agent-workflows/<run-id>/` directories and persists normalized rows into the `workflow_runs`, `workflow_steps`, and `workflow_approvals` tables.
 - `workflow status` is a read-only surface that lists workflow runs (with state / filter selectors) or returns the full detail of a single run.
 - `workflow handoff` is a read-only surface that emits a machine-readable next-action envelope for one run.
@@ -24,24 +25,25 @@ See also:
 ## `workflow run start`
 
 ```text
-momentum workflow run start --run-id <id> --repo <path> --objective <text> [--definition <key>] [--definition-version <n>] [--approval-boundary <boundary>] [--skill-revision <text>] [--issue-scope <identifier>] [--data-dir <path>] [--json]
+momentum workflow run start --run-id <id> --repo <path> --objective <text> [--definition <key>] [--definition-version <n>] [--approval-boundary <boundary>] [--skill-revision <text>] [--issue-scope <identifier>] [--profile <name>] [--data-dir <path>] [--json]
 ```
 
 Starts a first-class workflow run from a validated workflow definition and emits a stable JSON/text envelope. This is the definition-sourced start surface; `goal start` is left intact as the compatibility path for the older Goal loop.
 
 Required arguments:
 
-- `--run-id <id>` — the new run's identifier. Must be unique; a duplicate refuses with `run_exists` and leaves the existing run untouched.
-- `--repo <path>` — the repository the run operates on.
-- `--objective <text>` — the run objective recorded on the `workflow_runs` row.
+- `--run-id <id>` - the new run's identifier. Must be unique; a duplicate refuses with `run_exists` and leaves the existing run untouched.
+- `--repo <path>` - the repository the run operates on.
+- `--objective <text>` - the run objective recorded on the `workflow_runs` row.
 
 Optional arguments:
 
-- `--definition <key>` — the workflow definition key to start from. Defaults to `coding-workflow`.
-- `--definition-version <n>` — pin a specific definition version. When omitted, the latest persisted version (or the built-in version) is used.
-- `--approval-boundary <boundary>` — promote the steps the boundary covers to `approved` and open the run in `approved` rather than `pending` (same boundary coverage as [`workflow run approve`](#workflow-run-approve)).
-- `--skill-revision <text>` — record the skill revision that started the run.
-- `--issue-scope <identifier>` — record an issue-scope identifier on the run.
+- `--definition <key>` - the workflow definition key to start from. Defaults to `coding-workflow`.
+- `--definition-version <n>` - pin a specific definition version. When omitted, the latest persisted version (or the built-in version) is used.
+- `--approval-boundary <boundary>` - promote the steps the boundary covers to `approved` and open the run in `approved` rather than `pending` (same boundary coverage as [`workflow run approve`](#workflow-run-approve)).
+- `--skill-revision <text>` - record the skill revision that started the run.
+- `--issue-scope <identifier>` - record an issue-scope identifier on the run.
+- `--profile <name>` - record the selected runtime/profile on the run's durable `route.profile` so status, handoff, and monitor can report which profile the run was started for. This captures the operator's intent in durable state; the daemon still resolves the live-wrapper profile it actually executes from `MOMENTUM_LIVE_WRAPPER_PROFILE` at run time.
 
 Behaviour:
 
@@ -143,6 +145,46 @@ The `Approval boundary` line prints the boundary when one was supplied. The `Pol
 ```text
 Workflow run already exists: run-1.
 ```
+
+Exit code 0 on success, 1 on structured refusal, 2 on usage error.
+
+## `workflow run start-coding`
+
+```text
+momentum workflow run start-coding --run-id <id> --repo <path> --objective <text> [--approval-boundary <boundary>] [--skill-revision <text>] [--issue-scope <identifier>] [--profile <name>] [--definition-version <n>] [--data-dir <path>] [--json]
+```
+
+The explicit Momentum-native coding-workflow start door. It is a thin selector over [`workflow run start`](#workflow-run-start) that intentionally chooses Momentum orchestration for a new coding workflow, while the ordinary definition-sourced start stays the default and the imported compatibility runs remain readable. It reuses the same durable materialization, repo-policy loading, approval-boundary promotion, and refusal taxonomy, and adds three coding-specific guarantees.
+
+Required arguments:
+
+- `--run-id <id>` - the new run's identifier. Must be unique and must not begin with a reserved compatibility prefix (`cwfp-`, `cwfb-`, `overnight-`).
+- `--repo <path>` - the repository the run operates on.
+- `--objective <text>` - the run objective recorded on the `workflow_runs` row.
+
+Optional arguments:
+
+- `--approval-boundary <boundary>` - promote the steps the boundary covers to `approved` and open the run `approved` rather than `pending` (same coverage as [`workflow run approve`](#workflow-run-approve)).
+- `--skill-revision <text>` - record the skill revision that started the run.
+- `--issue-scope <identifier>` - record an issue-scope identifier on the run.
+- `--profile <name>` - record the selected runtime/profile on the run's durable `route.profile`, so status, handoff, monitor, and logs can explain which runtime/profile the Momentum-native run was started for from durable state alone. This captures intent only; the executing live-wrapper profile is still resolved by the daemon from `MOMENTUM_LIVE_WRAPPER_PROFILE` at run time.
+- `--definition-version <n>` - pin a specific `coding-workflow` version. When omitted, the latest persisted (or built-in) version is used.
+
+Behaviour:
+
+- **Forced definition**: the run always materializes the built-in `coding-workflow` recipe and its six ordered steps (`preflight`, `implementation`, `postflight`, `no-mistakes`, `merge-cleanup`, `linear-refresh`). Passing `--definition coding-workflow` is an accepted no-op selector; passing any other `--definition` value refuses with `definition_not_allowed`.
+- **Reserved run ids**: a `--run-id` that begins with a reserved compatibility prefix refuses with `reserved_run_id` and writes nothing, so a fresh Momentum-native run can never be confused with an imported `cwfp-*` compatibility run.
+- **Native source**: on success the `workflow_runs.source` is `momentum-native-coding` (rather than the generic `workflow-definition`), so status, handoff, monitor, and logs can show the run as Momentum-owned primary state from durable rows alone.
+- **Shared persistence**: everything else - durable run/step/approval rows, the no-clobber duplicate-run refusal, repo-policy refusal, and the `invalid_run_start` materialization taxonomy - matches `workflow run start`. The success and failure envelopes are identical except that `command` is `workflow run start-coding`.
+
+### Error codes
+
+In addition to every [`workflow run start`](#error-codes) refusal code (`run_id_required`, `repo_required`, `objective_required`, `data_dir_failed`, `definition_not_found`, `policy_invalid`, `invalid_run_start`, `run_exists`):
+
+| Code | Meaning |
+|------|---------|
+| `reserved_run_id` | `--run-id` begins with a reserved compatibility prefix (`cwfp-`, `cwfb-`, `overnight-`); refused so native runs are not confused with imported compatibility state. |
+| `definition_not_allowed` | A `--definition` other than `coding-workflow` was supplied; this door always uses the built-in coding workflow. |
 
 Exit code 0 on success, 1 on structured refusal, 2 on usage error.
 

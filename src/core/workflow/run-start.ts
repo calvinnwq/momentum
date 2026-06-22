@@ -58,6 +58,17 @@ import {
  */
 export const WORKFLOW_RUN_START_SOURCE = "workflow-definition" as const;
 
+/**
+ * `workflow_runs.source` value for a run started through the explicit
+ * Momentum-native coding-workflow door (`workflow run start-coding`). It marks
+ * the run as unmistakably Momentum-owned primary state in durable rows, so
+ * status / handoff / monitor / logs can distinguish it from both the generic
+ * definition-sourced start (`workflow-definition`) and imported CWFP
+ * compatibility runs (`agent-workflow`).
+ */
+export const MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE =
+  "momentum-native-coding" as const;
+
 export const WORKFLOW_RUN_START_ERROR_CODES = [
   "definition_invalid",
   "run_id_invalid",

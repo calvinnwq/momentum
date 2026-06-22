@@ -79,6 +79,17 @@ The NGX-499 opt-in dogfood proved a Momentum-owned coding workflow through
 implementation, postflight, no-mistakes, merge cleanup, and Linear refresh.
 NGX-404/default switching remains separate and must preserve rollback.
 
+`workflow run start-coding` (NGX-508) is the explicit Momentum-native start
+door: a named opt-in selector over `workflow run start` that always materializes
+the built-in `coding-workflow` definition, refuses reserved `cwfp-*` / `cwfb-*` /
+`overnight-*` run ids, and records the run with the `momentum-native-coding`
+source so durable status/handoff/monitor/logs show it as Momentum-owned. It
+captures the run's isolation inputs in durable state: repo, objective, issue
+scope, approval boundary, skill revision, and the selected runtime/profile
+(`route.profile`); the daemon still resolves the executing live-wrapper profile
+from `MOMENTUM_LIVE_WRAPPER_PROFILE` at run time. CWFP remains the default
+coding-workflow start and rollback route; the default switch stays NGX-404.
+
 ## Runtime Consolidation
 
 Runtime consolidation uses explicit decisions:

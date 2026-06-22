@@ -38,6 +38,10 @@ type WorkflowRendererFailure = {
   errors?: readonly WorkflowRunStartError[];
 };
 
+export type WorkflowRunStartCommand =
+  | "workflow run start"
+  | "workflow run start-coding";
+
 export function emitWorkflowRunStartSuccess(
   parsed: { json: boolean },
   io: CliIo,
@@ -48,12 +52,13 @@ export function emitWorkflowRunStartSuccess(
     summary: PersistWorkflowRunStartSummary;
     policyPresent: boolean;
     policyPath: string;
+    command?: WorkflowRunStartCommand;
   }
 ): number {
   const { summary } = result;
   const payload = {
     ok: true,
-    command: "workflow run start",
+    command: result.command ?? "workflow run start",
     dataDir: result.dataDir,
     runId: summary.runId,
     source: summary.source,
@@ -92,12 +97,12 @@ export function emitWorkflowRunStartFailure(
   parsed: { json: boolean },
   io: CliIo,
   failure: Omit<WorkflowRendererFailure, "command"> & {
-    command?: "workflow run start";
+    command?: WorkflowRunStartCommand;
   }
 ): number {
   return emitWorkflowFailure(parsed, io, {
     ...failure,
-    command: "workflow run start"
+    command: failure.command ?? "workflow run start"
   });
 }
 
