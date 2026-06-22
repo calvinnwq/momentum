@@ -152,6 +152,10 @@ internal docs live in Obsidian `/Workspaces/Momentum`; repo anchors stay short
 and live only in `README.md`, `AGENTS.md`, `ARCHITECTURE.md`, `SPEC.md`, or
 narrowly scoped operator docs under `docs/`.
 
+There are no standing exceptions for repo-local `internal/` docs. If a future
+exception is ever needed, it must be explicit, reviewed, and protected by the
+docs-boundary tests.
+
 If a future note grows into planning, contract narrative, milestone provenance,
 readiness evidence, dogfood evidence, or migration rationale, move it to
 Obsidian and keep at most a compact repo anchor.

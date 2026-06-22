@@ -24,9 +24,48 @@ function listMarkdown(dir: string): string[] {
   return out;
 }
 
+const approvedInternalDocExceptions: string[] = [];
+
+function normalizeRel(rel: string): string {
+  return rel.split(path.sep).join("/");
+}
+
+function isInternalDocPath(rel: string): boolean {
+  const normalized = normalizeRel(rel);
+  return normalized === "internal" || normalized.startsWith("internal/");
+}
+
+function findInternalDocBoundaryViolations(paths: string[]): string[] {
+  return paths
+    .map(normalizeRel)
+    .filter(isInternalDocPath)
+    .filter((rel) => !approvedInternalDocExceptions.includes(rel))
+    .map((rel) => `${rel}: repo-local internal docs are not allowed`);
+}
+
 describe("repo internal docs boundary", () => {
   it("does not keep an internal/ documentation tree", () => {
     expect(fs.existsSync(path.join(repoRoot, "internal"))).toBe(false);
+  });
+
+  it("has no standing internal-doc exceptions", () => {
+    expect(approvedInternalDocExceptions).toEqual([]);
+  });
+
+  it("rejects simulated internal docs instead of allowing hidden anchors", () => {
+    expect(
+      findInternalDocBoundaryViolations([
+        "internal/README.md",
+        "internal/contracts/runtime.md",
+        "internal/milestones/m10.md",
+        "SPEC.md",
+        "docs/recovery.md",
+      ])
+    ).toEqual([
+      "internal/README.md: repo-local internal docs are not allowed",
+      "internal/contracts/runtime.md: repo-local internal docs are not allowed",
+      "internal/milestones/m10.md: repo-local internal docs are not allowed",
+    ]);
   });
 
   it("keeps compact source-truth anchors in living repo docs", () => {
@@ -49,6 +88,21 @@ describe("repo internal docs boundary", () => {
       "api.linear.app",
     ]) {
       expect(spec, `SPEC.md should preserve current contract term ${phrase}`).toContain(phrase);
+    }
+  });
+
+  it("documents where internal docs go and how exceptions are reviewed", () => {
+    for (const rel of ["AGENTS.md", "SPEC.md"]) {
+      const body = readDoc(rel);
+      expect(body, `${rel} should keep Obsidian as the durable internal home`).toContain(
+        "/Workspaces/Momentum"
+      );
+      expect(body, `${rel} should make internal-doc exceptions explicit`).toContain(
+        "There are no standing exceptions for repo-local `internal/` docs"
+      );
+      expect(body, `${rel} should require tests for any future exception`).toContain(
+        "docs-boundary tests"
+      );
     }
   });
 
