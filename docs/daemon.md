@@ -181,6 +181,16 @@ unreadable, invalid JSON, or schema-invalid profile causes `daemon start`
 managed-loop mode to fail before registering a daemon run with
 `code: "daemon_live_wrapper_profile_invalid"`.
 
+On retried dispatch attempts, `MOMENTUM_ATTEMPT` is incremented and attempt
+evidence is kept separate: attempt 1 uses the configured run directory paths,
+while later attempts write result and executor-log files under `attempt-<n>/`.
+If a wrapper command is `node` (or `/usr/bin/env node`) and the configured
+script entrypoint itself is missing, the failure is classified as
+`runtime_unavailable`; module failures from inside an existing wrapper script
+remain ordinary command failures. For retryable `no-mistakes` and
+`merge-cleanup` bootstrap failures, `workflow run clear-recovery` can prepare a
+new scheduler attempt after the operator repairs the wrapper path.
+
 JSON envelope shape (managed loop):
 
 ```json

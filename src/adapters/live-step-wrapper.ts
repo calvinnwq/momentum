@@ -370,6 +370,15 @@ export function runLiveStepWrapper(
         logHandle,
         `[live-step] summary: command exited with code ${exitCode === null ? "null" : String(exitCode)}`
       );
+      if (isNodeBootstrapModuleFailure(spawn.stderr, config, cwd)) {
+        writeLine(logHandle, "[live-step] recovery: runtime_unavailable");
+        return wrapperError(
+          executorLogPath,
+          resultJsonPath,
+          "runtime_unavailable",
+          `live step wrapper bootstrap failed before runner evidence was produced: ${config.command}`
+        );
+      }
       return wrapperError(
         executorLogPath,
         resultJsonPath,
@@ -577,6 +586,54 @@ function validateRuntimeTimeouts(
     );
   }
   return { ok: true };
+}
+
+function isNodeBootstrapModuleFailure(
+  stderr: string,
+  config: LiveWrapperConfig,
+  cwd: string
+): boolean {
+  if (
+    !/\b(?:ERR_)?MODULE_NOT_FOUND\b/.test(stderr) &&
+    !/Cannot find module/.test(stderr)
+  ) {
+    return false;
+  }
+  const entrypoint = configuredNodeEntrypoint(config);
+  if (entrypoint === null) return false;
+  const expectedPath = path.isAbsolute(entrypoint)
+    ? path.normalize(entrypoint)
+    : path.normalize(path.resolve(cwd, entrypoint));
+  const normalizedStderr = path.normalize(stderr);
+  return (
+    normalizedStderr.includes(`Cannot find module '${expectedPath}'`) ||
+    normalizedStderr.includes(`Cannot find module "${expectedPath}"`) ||
+    normalizedStderr.includes(`Cannot find module ${expectedPath}`) ||
+    normalizedStderr.includes(`Cannot find module '${entrypoint}'`) ||
+    normalizedStderr.includes(`Cannot find module "${entrypoint}"`)
+  );
+}
+
+function configuredNodeEntrypoint(config: LiveWrapperConfig): string | null {
+  const commandBase = path.basename(config.command);
+  if (commandBase === "node") {
+    return firstNodeScriptArg(config.args);
+  }
+  if (commandBase === "env" && config.args[0] === "node") {
+    return firstNodeScriptArg(config.args.slice(1));
+  }
+  return null;
+}
+
+function firstNodeScriptArg(args: readonly string[]): string | null {
+  for (const arg of args) {
+    if (arg === "-e" || arg === "--eval" || arg === "-p" || arg === "--print") {
+      return null;
+    }
+    if (arg.startsWith("-")) continue;
+    return arg;
+  }
+  return null;
 }
 
 function validateInputPaths(

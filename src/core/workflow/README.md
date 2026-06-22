@@ -21,7 +21,7 @@ in place; importers still reference the concrete modules below.
 | Gates | `gate.ts`, `gate-persist.ts` |
 | Leases | `leases.ts` |
 | Scheduling | `scheduler.ts` |
-| Dispatch | `dispatch.ts`, `dispatch-persist.ts`, `dispatch-execute.ts`, `dispatch-executor-run.ts`, `dispatch-executor-terminalize.ts`, `dispatch-external-apply.ts`, `dispatch-external-apply-run.ts`, `external-apply-dispatch.ts`, `dispatch-subworkflow.ts`, `dispatch-subworkflow-run.ts`, `subworkflow-dispatch.ts`, `subworkflow-child-config.ts`, `subworkflow-route.ts`, `subworkflow-child-runner.ts`, `subworkflow-dispatch-context.ts`, `dispatch-reconcile.ts`, `dispatch-reconcile-execute.ts`, `daemon-live-wrapper-profile.ts`, `daemon-dispatch-exec-context.ts`, `live-wrapper-dispatch.ts`, `dogfood-dispatch.ts` |
+| Dispatch | `dispatch.ts`, `dispatch-persist.ts`, `dispatch-execute.ts`, `dispatch-retry.ts`, `dispatch-executor-run.ts`, `dispatch-executor-terminalize.ts`, `dispatch-external-apply.ts`, `dispatch-external-apply-run.ts`, `external-apply-dispatch.ts`, `dispatch-subworkflow.ts`, `dispatch-subworkflow-run.ts`, `subworkflow-dispatch.ts`, `subworkflow-child-config.ts`, `subworkflow-route.ts`, `subworkflow-child-runner.ts`, `subworkflow-dispatch-context.ts`, `dispatch-reconcile.ts`, `dispatch-reconcile-execute.ts`, `daemon-live-wrapper-profile.ts`, `daemon-dispatch-exec-context.ts`, `live-wrapper-dispatch.ts`, `dogfood-dispatch.ts` |
 | Live-wrapper dogfood | `coding-workflow-live-wrapper.ts` |
 | Recovery & monitor | `recovery-artifact.ts`, `recovery-reconcile.ts`, `monitor-state.ts`, `monitor-envelope.ts` |
 | Handoff | `handoff.ts` |
@@ -97,7 +97,12 @@ dispatch with that producer into a `WorkflowStepDispatch`
 `createTerminalizingWorkflowDispatch`, it starts the scaffold via the base dispatch
 and — only for a genuinely-started dispatch — runs the executor + RC-2 reconcile in
 the same tick, taking the registry and the per-step exec-context deriver by
-injection and leaving RC-2 the single finalization owner.
+injection and leaving RC-2 the single finalization owner. `dispatch-retry.ts`
+keeps the retry path explicit for stale live-wrapper bootstrap failures: after
+guarded recovery clear prepares a retryable `no-mistakes` or `merge-cleanup`
+step, the next dispatch reopens the same deterministic invocation id with the
+next attempt / round while `live-wrapper-dispatch.ts` scopes attempt > 1 evidence
+paths under `attempt-<n>/`.
 `daemon-dispatch-exec-context.ts` has since added that per-step exec-context
 **deriver**: a pure resolver (plus its injected run-row loader) that maps a run's
 provenance to the bounded session's working directory — a native run runs under

@@ -209,7 +209,10 @@ export function terminalizeDispatchedExecutorInvocation(
 
   db.exec("BEGIN IMMEDIATE");
   try {
-    const round = listExecutorRoundsForInvocation(db, invocationId)[0];
+    const rounds = listExecutorRoundsForInvocation(db, invocationId);
+    const round =
+      rounds.find((candidate) => !isTerminalExecutorRoundState(candidate.state)) ??
+      rounds[0];
     if (round !== undefined) {
       terminalizeRound(db, round, plan, evidence, now);
     }

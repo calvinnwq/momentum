@@ -51,6 +51,8 @@
  * this reusable, registry-agnostic dispatch-lane composition.
  */
 
+import path from "node:path";
+
 import {
   executeAndReconcileDispatchedWorkflowStep,
   recordUnresolvedDispatchedStepContext,
@@ -155,12 +157,13 @@ export function createLiveWrapperWorkflowDispatch(
     ) {
       const resolved = deps.deriveExec(claim, context);
       if (resolved.ok) {
+        const attempt = resolved.exec.attempt ?? invocation.attempt;
         executeAndReconcileDispatchedWorkflowStep({
           db: context.db,
           runId: claim.runId,
           stepId: claim.stepId,
           registry: deps.registry,
-          exec: resolved.exec,
+          exec: withAttemptScopedEvidencePaths(resolved.exec, attempt),
           now: context.now
         });
       } else {
@@ -178,5 +181,22 @@ export function createLiveWrapperWorkflowDispatch(
       }
     }
     return result;
+  };
+}
+
+function withAttemptScopedEvidencePaths(
+  exec: DispatchedStepExecutorContext,
+  attempt: number
+): DispatchedStepExecutorContext {
+  if (attempt <= 1) {
+    return { ...exec, attempt };
+  }
+  const runDir = path.join(exec.runDir, `attempt-${attempt}`);
+  return {
+    ...exec,
+    attempt,
+    runDir,
+    resultJsonPath: path.join(runDir, path.basename(exec.resultJsonPath)),
+    executorLogPath: path.join(runDir, path.basename(exec.executorLogPath))
   };
 }

@@ -352,7 +352,10 @@ resolves to shipped fake successes by default. RC-5b has also landed (NGX-492):
 configured daemon-default live-wrapper profiles now run dispatched steps through
 real commands, terminalize executor evidence, and feed that evidence to the RC-2
 reconciliation seam. Unconfigured adapters still refuse honestly with
-`runtime_unavailable`. Narrowing the coexistence (Path 3) and dispatch scaffold
+`runtime_unavailable`; stale Node wrapper entrypoint failures on retryable
+`no-mistakes` / `merge-cleanup` dispatches can be operator-cleared into a new
+attempt on the same invocation without overwriting prior round evidence.
+Narrowing the coexistence (Path 3) and dispatch scaffold
 (Path 4) is now gated on the remaining compatibility-lane migrations rather than
 on a missing production evidence producer.
 

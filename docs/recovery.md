@@ -181,6 +181,13 @@ workflow leases are left outstanding as durable evidence, so the monitor
 reducer can still surface `manual_recovery_lease` and guarded clear continues
 to refuse until that lease condition is resolved.
 
+When a dispatched `no-mistakes` or `merge-cleanup` live-wrapper attempt failed
+before clean runner evidence existed because the wrapper/build path was stale or
+unavailable, `workflow run clear-recovery` prepares the step for a scheduler
+retry after the operator repairs the environment. The clear output includes
+`retryPrepared`; the previous failed executor round remains durable, and an
+already-terminal successful step is only reattached/reconciled, not rerun.
+
 The generated run-scoped `recovery.md` artifact is schema-versioned and
 includes the run ID, step ID, recovery classification, repo path, classified-at
 timestamp, reason, recommended next action, evidence pointers,

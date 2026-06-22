@@ -474,7 +474,11 @@ Coverage:
   cover `MOMENTUM_LIVE_WRAPPER_PROFILE`: configured live-wrapper execution,
   durable terminal executor evidence, RC-2 reconciliation, configured
   dispatch-lease sizing, env forwarding, run-dir creation failure recovery, and
-  no stranded dispatch lease.
+  no stranded dispatch lease. NGX-500 adds focused coverage for missing Node
+  wrapper entrypoints mapping to `runtime_unavailable`, dependency
+  `MODULE_NOT_FOUND` failures staying ordinary command failures, and repaired
+  `no-mistakes` / `merge-cleanup` bootstrap failures retrying with incremented
+  attempts plus attempt-scoped result / log evidence.
 - terminalize-and-continue dispatch fixture in
   `test/workflow-dogfood-dispatch.test.ts` (NGX-391): `shouldTerminalizeAfterDispatch`
   safety gate — `dispatched` / `alreadyDispatched` → terminalize; `failClosed` /

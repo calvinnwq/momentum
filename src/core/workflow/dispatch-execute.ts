@@ -74,6 +74,7 @@ import { releaseWorkflowLease } from "./leases.js";
 import { markWorkflowRunNeedsManualRecovery } from "./run-recovery.js";
 import { resolveWorkflowStepDispatchPlan } from "./dispatch-persist.js";
 import type { WorkflowDispatchFailClosedCode } from "./dispatch.js";
+import { reopenRetryableDispatchInvocationForAttempt } from "./dispatch-retry.js";
 import { refreshWorkflowRunRuntimeState } from "./runtime-state.js";
 import {
   startWorkflowStep,
@@ -149,6 +150,13 @@ function dispatchExecutorScaffold(
 ): WorkflowStepDispatchResult {
   const invocationId = deriveDispatchInvocationId(claim.runId, claim.stepId);
   if (loadExecutorInvocation(db, invocationId) !== undefined) {
+    const reopened = dispatchRetryScaffold(db, claim, now);
+    if (reopened.reopened) {
+      return {
+        status: WORKFLOW_DISPATCH_RESULT_STATUS.dispatched,
+        detail: `${family} ${reopened.invocationId} attempt ${reopened.attempt}`
+      };
+    }
     return {
       status: WORKFLOW_DISPATCH_RESULT_STATUS.alreadyDispatched,
       detail: invocationId
@@ -195,6 +203,41 @@ function dispatchExecutorScaffold(
     status: WORKFLOW_DISPATCH_RESULT_STATUS.dispatched,
     detail: `${family} ${invocationId}`
   };
+}
+
+function dispatchRetryScaffold(
+  db: MomentumDb,
+  claim: ClaimedWorkflowStep,
+  now: number
+): ReturnType<typeof reopenRetryableDispatchInvocationForAttempt> {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const started = startWorkflowStep(db, {
+      runId: claim.runId,
+      stepId: claim.stepId,
+      now
+    });
+    if (!started.ok) {
+      db.exec("ROLLBACK");
+      return { reopened: false };
+    }
+    const reopened = reopenRetryableDispatchInvocationForAttempt(db, {
+      runId: claim.runId,
+      stepId: claim.stepId,
+      now,
+      stepState: "running"
+    });
+    if (!reopened.reopened) {
+      db.exec("ROLLBACK");
+      return reopened;
+    }
+    refreshWorkflowRunStateAfterDispatch(db, claim.runId, now);
+    db.exec("COMMIT");
+    return reopened;
+  } catch (error) {
+    safeRollback(db);
+    throw error;
+  }
 }
 
 /**
