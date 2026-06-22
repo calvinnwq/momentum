@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.10.0](https://github.com/calvinnwq/momentum/compare/v0.9.1...v0.10.0) (2026-06-22)
+
+
+### Features
+
+* **workflow:** add explicit Momentum-native coding-workflow start door ([a6babc4](https://github.com/calvinnwq/momentum/commit/a6babc454bd7781452737c452992814a727ca75a))
+* **workflow:** add native coding start command ([f4157fe](https://github.com/calvinnwq/momentum/commit/f4157feff0ae7e15730fc05d9f9f4760d7a1fec7))
+
+
+### Bug Fixes
+
+* **workflow:** harden built-in definition version dispatch ([bd07ea4](https://github.com/calvinnwq/momentum/commit/bd07ea4030cd002f10be2ae8efd2f79f5b5dd47c))
+
 ## [0.9.1](https://github.com/calvinnwq/momentum/compare/v0.9.0...v0.9.1) (2026-06-22)
 
 
