@@ -52,6 +52,9 @@ The repo intentionally has no `internal/` documentation tree. Historical
 internal planning docs were externalized to Obsidian during DOCS-02/DOCS-03; do
 not recreate `internal/`.
 
+There are no standing exceptions for repo-local `internal/` docs.
+Any future exception must be explicit, reviewed, and protected by the docs-boundary tests instead of introduced as an ad hoc file.
+
 ## M11 Final Shape
 
 M11 changed structure, not semantics. The final shape is:
