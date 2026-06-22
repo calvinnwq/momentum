@@ -41,7 +41,8 @@ Required arguments:
 Optional arguments:
 
 - `--definition <key>` - the workflow definition key to start from. Defaults to `coding-workflow`.
-- `--definition-version <n>` - pin a specific definition version. When omitted, the latest persisted version (or the built-in version) is used.
+- `--definition-version <n>` - pin a specific definition version.
+  When omitted, the latest persisted version, or the latest known built-in version when fallback is used, is selected.
 - `--approval-boundary <boundary>` - promote the steps the boundary covers to `approved` and open the run in `approved` rather than `pending` (same boundary coverage as [`workflow run approve`](#workflow-run-approve)).
 - `--skill-revision <text>` - record the skill revision that started the run.
 - `--issue-scope <identifier>` - record an issue-scope identifier on the run.
@@ -184,11 +185,13 @@ Optional arguments:
 
 Behaviour:
 
-- **Forced definition**: the run always materializes the built-in `coding-workflow` recipe and its six ordered steps (`preflight`, `implementation`, `postflight`, `no-mistakes`, `merge-cleanup`, `linear-refresh`).
+- **Forced definition**: the run always materializes the selected built-in `coding-workflow` recipe, using the latest known built-in version unless `--definition-version` pins one.
+  The current built-in version has six ordered steps (`preflight`, `implementation`, `postflight`, `no-mistakes`, `merge-cleanup`, `linear-refresh`).
   Passing `--definition coding-workflow` is an accepted no-op selector; passing any other `--definition` value refuses with `definition_not_allowed`.
 - **Reserved run ids**: a `--run-id` that begins with a reserved compatibility prefix refuses with `reserved_run_id` and writes nothing, so a fresh Momentum-native run can never be confused with an imported `cwfp-*` compatibility run.
 - **Native source**: on success the `workflow_runs.source` is `momentum-native-coding` (rather than the generic `workflow-definition`), so status, handoff, monitor, and logs can show the run as Momentum-owned primary state from durable rows alone.
-- **Built-in dispatch provenance**: native coding dispatch resolves executor families from the built-in `coding-workflow` definition for this source, even if a persisted `coding-workflow` definition with the same key/version exists.
+- **Built-in dispatch provenance**: native coding dispatch resolves executor families from the built-in `coding-workflow` definition recorded on the run by key and version, even if a persisted `coding-workflow` definition with the same key/version exists.
+  If the recorded built-in version is unavailable, dispatch fails closed with `step_definition_not_found` instead of substituting persisted rows or a later built-in version.
 - **Shared persistence**: everything else - durable run/step/approval rows, the no-clobber duplicate-run refusal, repo-policy refusal, and the `invalid_run_start` materialization taxonomy - matches `workflow run start`.
   The success and failure envelopes are identical except that `command` is `workflow run start-coding`.
 

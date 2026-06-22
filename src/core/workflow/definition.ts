@@ -28,6 +28,10 @@
  *   - The built-in coding workflow definition is shipped as data/config, not a
  *     fixed product boundary: its per-step executor families are editable
  *     defaults chosen from the contract's `step -> executor` mapping.
+ *   - Built-in definitions are registered by `(key, version)`: unversioned
+ *     lookup selects the latest known version for new starts, while versioned
+ *     lookup preserves dispatch against the version recorded on an existing
+ *     run.
  */
 
 import {
@@ -379,6 +383,14 @@ const BUILT_IN_LATEST_BY_KEY: ReadonlyMap<string, WorkflowDefinition> = new Map(
   ])
 );
 
+/**
+ * Return a built-in workflow definition by key.
+ *
+ * When `version` is omitted, this selects the latest known built-in version for
+ * the key. When `version` is supplied, this resolves only that exact key/version
+ * pair so existing runs keep dispatching through the version they recorded at
+ * start time.
+ */
 export function getBuiltInWorkflowDefinition(
   key: string,
   version?: number
@@ -391,10 +403,20 @@ export function getBuiltInWorkflowDefinition(
   return BUILT_IN_LATEST_BY_KEY.get(key);
 }
 
+/**
+ * List the distinct built-in workflow definition keys currently shipped.
+ */
 export function listBuiltInWorkflowDefinitionKeys(): readonly string[] {
   return uniqueBuiltInDefinitionKeys(BUILT_IN_WORKFLOW_DEFINITIONS);
 }
 
+/**
+ * Select a built-in workflow definition from an injected registry.
+ *
+ * This mirrors {@link getBuiltInWorkflowDefinition} for tests and future
+ * registry callers: exact version when pinned, latest known version for the key
+ * when unpinned.
+ */
 export function selectBuiltInWorkflowDefinition(
   definitions: readonly WorkflowDefinition[],
   key: string,

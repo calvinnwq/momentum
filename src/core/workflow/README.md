@@ -59,7 +59,8 @@ Other domains reach workflow behavior through these modules:
   `definition`, `recovery-artifact`, `scheduler`.
 
 `workflow run start-coding` records explicit Momentum-native coding runs with `source = "momentum-native-coding"` and the built-in `coding-workflow` definition metadata.
-For that source, `dispatch-persist.ts` resolves executor families from the built-in definition rather than any persisted definition rows with the same key/version, so the native door remains stable even when generic definition starts are using persisted overrides.
+For that source, `dispatch-persist.ts` resolves executor families from the built-in definition recorded on the run by key and version rather than any persisted definition rows with the same key/version, so the native door remains stable even when generic definition starts are using persisted overrides.
+If the recorded built-in version is unavailable, dispatch fails closed instead of substituting persisted rows or a later built-in version.
 
 ## Boundaries
 

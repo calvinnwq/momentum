@@ -13,14 +13,18 @@
  * Resolution walks the same chain the workflow-first runtime materializes a run
  * from, in reverse: a claimed step is identified by `(runId, stepId)`; the run
  * carries the `(workflow_definition_key, workflow_definition_version)` link
- * recorded at `workflow run start`; and the step's executor family lives on the
- * matching `step_definitions` row (`stepId` is the definition step's stable
- * `step_key`). Each durable-state shortfall maps to one
+ * recorded at `workflow run start`; and the step's executor family normally
+ * lives on the matching `step_definitions` row (`stepId` is the definition
+ * step's stable `step_key`). Momentum-native coding runs are the source-specific
+ * exception: they resolve from the built-in registry by the recorded key/version
+ * and never from persisted rows, so an old native run keeps using its recorded
+ * built-in version after a later built-in recipe becomes current. Each
+ * durable-state shortfall maps to one
  * {@link WorkflowStepResolutionFailure}:
  *
  *   - the `workflow_runs` row is gone               → `run_not_found`
  *   - the run has no (or a partial) definition link → `definition_unlinked`
- *   - no `step_definitions` row matches the step    → `step_definition_not_found`
+ *   - no `step_definitions` row or built-in step matches the step → `step_definition_not_found`
  *   - the step's `executor` is not a known family   → `unknown_executor_family`
  *
  * The reads are non-mutating: resolution never writes a row, opens a gate, or
