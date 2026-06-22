@@ -152,7 +152,35 @@ const STEP_KIND_BY_BARE_NAME: ReadonlyMap<string, WorkflowStepKind> = new Map(
   WORKFLOW_STEP_KINDS.map((kind) => [kind, kind])
 );
 
-const RUN_ID_PATTERN = /^(cwfp|cwfb|overnight)-[A-Za-z0-9]+$/;
+/**
+ * Run-id prefixes reserved for historical compatibility imports
+ * (`.agent-workflows/<prefix>-*` runs). These are the only prefixes the import
+ * basename fallback recognizes, and the explicit Momentum-native start path
+ * (`workflow run start-coding`) refuses them so a fresh native run can never be
+ * confused with imported CWFP/overnight compatibility state.
+ */
+export const COMPATIBILITY_RUN_ID_PREFIXES = [
+  "cwfp",
+  "cwfb",
+  "overnight"
+] as const;
+
+const RUN_ID_PATTERN = new RegExp(
+  `^(${COMPATIBILITY_RUN_ID_PREFIXES.join("|")})-[A-Za-z0-9]+$`
+);
+
+/**
+ * True when `runId` begins with a reserved compatibility prefix
+ * ({@link COMPATIBILITY_RUN_ID_PREFIXES}) followed by a hyphen. Intentionally
+ * stricter than {@link RUN_ID_PATTERN}: any id whose first hyphen-delimited
+ * segment is a reserved prefix is treated as compatibility-reserved, even when
+ * the suffix would not pass strict import-basename parsing.
+ */
+export function isReservedCompatibilityRunId(runId: string): boolean {
+  return COMPATIBILITY_RUN_ID_PREFIXES.some((prefix) =>
+    runId.startsWith(`${prefix}-`)
+  );
+}
 
 const KNOWN_SIBLING_FILES: ReadonlySet<string> = new Set([
   "plan.json",

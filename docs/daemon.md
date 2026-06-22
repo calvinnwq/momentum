@@ -181,6 +181,10 @@ unreadable, invalid JSON, or schema-invalid profile causes `daemon start`
 managed-loop mode to fail before registering a daemon run with
 `code: "daemon_live_wrapper_profile_invalid"`.
 
+The `--profile <name>` option on `workflow run start` and `workflow run start-coding` only records the operator-selected profile name in the run's durable `route.profile`.
+It does not load or select the executable wrapper profile for the daemon.
+Managed-loop execution still uses the JSON profile file pointed to by `MOMENTUM_LIVE_WRAPPER_PROFILE`.
+
 On retried dispatch attempts, `MOMENTUM_ATTEMPT` is incremented and attempt
 evidence is kept separate: attempt 1 uses the configured run directory paths,
 while later attempts write result and executor-log files under `attempt-<n>/`.

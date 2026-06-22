@@ -4,9 +4,13 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
-import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition.js";
+import {
+  CODING_WORKFLOW_DEFINITION,
+  type WorkflowDefinition
+} from "../src/core/workflow/definition.js";
 import { persistWorkflowDefinition } from "../src/core/workflow/definition-persist.js";
 import { persistWorkflowRunStart } from "../src/core/workflow/run-start-persist.js";
+import { MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE } from "../src/core/workflow/run-start.js";
 import {
   claimRunnableWorkflowStep,
   type ClaimedWorkflowStep,
@@ -58,6 +62,47 @@ function openSeededDb(runId: string = RUN_ID): MomentumDb {
     now: NOW
   });
   return db;
+}
+
+function openNativeCodingDbWithoutPersistedDefinition(
+  runId: string = RUN_ID
+): MomentumDb {
+  const db = openDb(makeTempDir());
+  persistWorkflowRunStart(db, {
+    definition: CODING_WORKFLOW_DEFINITION,
+    runId,
+    repoPath: "/repos/momentum",
+    objective: "Dogfood NGX-508",
+    now: NOW,
+    source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE
+  });
+  return db;
+}
+
+function persistedCodingOverride(
+  executor: "script" | "external-apply"
+): WorkflowDefinition {
+  return {
+    key: "coding-workflow",
+    title: "Persisted Coding Override",
+    version: 1,
+    steps: [
+      {
+        key: "preflight",
+        kind: "preflight",
+        executor,
+        order: 0,
+        required: true
+      },
+      {
+        key: "implementation",
+        kind: "implementation",
+        executor: "goal-loop",
+        order: 1,
+        required: false
+      }
+    ]
+  };
 }
 
 /**
@@ -133,6 +178,58 @@ function monitorAdvisory(db: MomentumDb, runId: string): {
 }
 
 describe("executeWorkflowStepDispatch — supported family", () => {
+  it("dispatches native coding runs through the built-in definition without persisted rows", () => {
+    const db = openNativeCodingDbWithoutPersistedDefinition();
+    const claim = approveAndClaim(db, "preflight");
+
+    const result = executeWorkflowStepDispatch(claim, {
+      db,
+      workerId: WORKER,
+      now: NOW + 1
+    });
+
+    expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
+    const invocation = db
+      .prepare(
+        `SELECT executor_family
+           FROM executor_invocations WHERE workflow_run_id = ?`
+      )
+      .get(RUN_ID) as { executor_family: string };
+    expect(invocation.executor_family).toBe("one-shot");
+    expect(stepState(db, RUN_ID, "preflight")).toBe("running");
+  });
+
+  it("ignores persisted coding overrides when dispatching native coding runs", () => {
+    const db = openDb(makeTempDir());
+    persistWorkflowDefinition(db, persistedCodingOverride("script"), {
+      now: NOW
+    });
+    persistWorkflowRunStart(db, {
+      definition: CODING_WORKFLOW_DEFINITION,
+      runId: RUN_ID,
+      repoPath: "/repos/momentum",
+      objective: "Dogfood NGX-508",
+      now: NOW,
+      source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE
+    });
+    const claim = approveAndClaim(db, "preflight");
+
+    const result = executeWorkflowStepDispatch(claim, {
+      db,
+      workerId: WORKER,
+      now: NOW + 1
+    });
+
+    expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
+    const invocation = db
+      .prepare(
+        `SELECT executor_family
+           FROM executor_invocations WHERE workflow_run_id = ?`
+      )
+      .get(RUN_ID) as { executor_family: string };
+    expect(invocation.executor_family).toBe("one-shot");
+  });
+
   it("creates the executor invocation + round scaffold and advances the step", () => {
     const db = openSeededDb();
     const claim = approveAndClaim(db, "preflight");

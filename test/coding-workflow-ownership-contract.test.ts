@@ -16,6 +16,11 @@ describe("Momentum-owned coding workflow contract", () => {
     expect(spec).toContain("NGX-404");
   });
 
+  it("anchors the explicit Momentum-native coding-workflow start door", () => {
+    expect(spec).toContain("workflow run start-coding");
+    expect(spec).toContain("momentum-native-coding");
+  });
+
   it("pins the built-in coding workflow steps and executor ownership", () => {
     expect(CODING_WORKFLOW_DEFINITION.key).toBe("coding-workflow");
     expect(

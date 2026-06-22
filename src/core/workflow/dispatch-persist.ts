@@ -33,12 +33,17 @@
  */
 
 import type { MomentumDb } from "../../adapters/db.js";
-import { isWorkflowExecutorFamily } from "./definition.js";
+import {
+  CODING_WORKFLOW_DEFINITION_KEY,
+  getBuiltInWorkflowDefinition,
+  isWorkflowExecutorFamily
+} from "./definition.js";
 import {
   planWorkflowStepDispatch,
   type WorkflowStepDispatchPlan,
   type WorkflowStepDispatchResolution
 } from "./dispatch.js";
+import { MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE } from "./run-start.js";
 
 /**
  * The durable identity of a claimed workflow step the dispatcher must resolve.
@@ -51,6 +56,7 @@ export type WorkflowStepDispatchTarget = {
 };
 
 type WorkflowRunDefinitionLinkRow = {
+  source: string;
   workflow_definition_key: string | null;
   workflow_definition_version: number | null;
 };
@@ -72,7 +78,7 @@ export function resolveClaimedWorkflowStepFamily(
 ): WorkflowStepDispatchResolution {
   const run = db
     .prepare(
-      `SELECT workflow_definition_key, workflow_definition_version
+      `SELECT source, workflow_definition_key, workflow_definition_version
          FROM workflow_runs
         WHERE id = ?`
     )
@@ -92,6 +98,26 @@ export function resolveClaimedWorkflowStepFamily(
     definitionVersion === null
   ) {
     return { ok: false, failure: "definition_unlinked" };
+  }
+
+  if (
+    run.source === MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE &&
+    definitionKey === CODING_WORKFLOW_DEFINITION_KEY
+  ) {
+    const builtIn = getBuiltInWorkflowDefinition(definitionKey);
+    if (builtIn !== undefined && builtIn.version === definitionVersion) {
+      const builtInStep = builtIn.steps.find(
+        (step) => step.key === target.stepId
+      );
+      if (builtInStep === undefined) {
+        return {
+          ok: false,
+          failure: "step_definition_not_found",
+          detail: `${definitionKey}@${definitionVersion} step '${target.stepId}'`
+        };
+      }
+      return { ok: true, executorFamily: builtInStep.executor };
+    }
   }
 
   const stepDefinition = db

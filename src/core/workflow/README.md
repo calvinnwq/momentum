@@ -58,6 +58,9 @@ Other domains reach workflow behavior through these modules:
   checked-in dogfood live-wrapper profile), `step-transitions`, `leases`,
   `definition`, `recovery-artifact`, `scheduler`.
 
+`workflow run start-coding` records explicit Momentum-native coding runs with `source = "momentum-native-coding"` and the built-in `coding-workflow` definition metadata.
+For that source, `dispatch-persist.ts` resolves executor families from the built-in definition rather than any persisted definition rows with the same key/version, so the native door remains stable even when generic definition starts are using persisted overrides.
+
 ## Boundaries
 
 - Core modules here must not import `src/commands/*` or `src/renderers/*`
@@ -147,3 +150,6 @@ command for `MOMENTUM_STEP_KIND`, and writes normalized `RunnerResult` evidence
 so command failures become durable `success: false` results rather than stranded
 manual recovery. It is not a default-route switch and does not change CWFP
 compatibility.
+
+NGX-508 adds the explicit Momentum-native `workflow run start-coding` door.
+It reuses `run-start` / `run-start-persist` for durable rows, reserves the historical `cwfp-`, `cwfb-`, and `overnight-` prefixes for compatibility imports, stores any selected profile under `route.profile`, and keeps CWFP/default switching separate.
