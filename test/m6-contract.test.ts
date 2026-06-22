@@ -3,6 +3,16 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+import {
+  DEFAULT_INTENT_APPLY_POLICY,
+  UPDATE_INTENT_APPLY_POLICIES,
+  isExternalApplyAllowedByPolicy
+} from "../src/core/intent/policy.js";
+import {
+  INTENT_APPLY_LIFECYCLE_STATES,
+  INTENT_APPLY_STATES
+} from "../src/core/intent/apply-audits.js";
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");
 
@@ -13,11 +23,40 @@ function readDoc(filename: string): string {
 describe("M6 external-apply contract", () => {
   const spec = readDoc("SPEC.md");
 
-  it("preserves M6 provenance and two-phase external-apply invariants", () => {
+  it("preserves the compact M6 provenance anchor", () => {
     expect(spec).toContain("M6: NGX-295 through NGX-302");
-    for (const phrase of ["claim one pending update intent", "audit before write", "idempotency marker", "fail closed"]) {
-      expect(spec, `SPEC.md should mention ${phrase}`).toContain(phrase);
-    }
+  });
+
+  it("pins external-apply policy and audit state vocabularies in code", () => {
+    expect(DEFAULT_INTENT_APPLY_POLICY).toBe("create_intents_only");
+    expect([...UPDATE_INTENT_APPLY_POLICIES]).toEqual([
+      "create_intents_only",
+      "external_apply_allowed",
+    ]);
+    expect(
+      isExternalApplyAllowedByPolicy({
+        runner: undefined,
+        verification: undefined,
+        verificationTimeoutSec: undefined,
+        intentApplyPolicy: "create_intents_only",
+      })
+    ).toBe(false);
+    expect(
+      isExternalApplyAllowedByPolicy({
+        runner: undefined,
+        verification: undefined,
+        verificationTimeoutSec: undefined,
+        intentApplyPolicy: "external_apply_allowed",
+      })
+    ).toBe(true);
+    expect([...INTENT_APPLY_STATES]).toEqual(["idle", "in_flight", "blocked"]);
+    expect([...INTENT_APPLY_LIFECYCLE_STATES]).toEqual([
+      "claimed",
+      "succeeded",
+      "failed",
+      "blocked",
+      "audit_incomplete",
+    ]);
   });
 
   it("keeps external-apply documented as an operator-facing command", () => {

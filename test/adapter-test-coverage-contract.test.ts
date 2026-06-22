@@ -3,32 +3,43 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+import {
+  BUILTIN_EXTERNAL_UPDATE_ADAPTER_KINDS,
+  EXTERNAL_UPDATE_MUTATION_KINDS,
+  listExternalUpdateAdapterKinds
+} from "../src/adapters/external-update-adapter.js";
+import { DEFAULT_LINEAR_EXTERNAL_UPDATE_ENDPOINT } from "../src/adapters/linear-external-update-client.js";
+import { SOURCE_RECONCILIATION_RUN_STATES } from "../src/core/source/reconciliation-runs.js";
+import { expectSpecSection, readRepoFile } from "./helpers/repo-docs.js";
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");
 
 function readDoc(relative: string): string {
-  return fs.readFileSync(path.join(repoRoot, relative), "utf8");
+  return readRepoFile(relative);
 }
 
 describe("adapter test coverage contract", () => {
   const spec = readDoc("SPEC.md");
 
-  it("keeps adapter coverage layered before full E2E proof", () => {
-    for (const layer of [
-      "isolated contract tests",
-      "stubbed integration tests",
-      "opt-in real smoke tests",
-      "full end-to-end composition proofs",
-    ]) {
-      expect(spec, `SPEC.md should define ${layer}`).toContain(layer);
-    }
+  it("keeps compact adapter boundary anchors in SPEC.md", () => {
+    expectSpecSection(spec, "Source And Adapter Boundaries");
+    expect(spec).toContain("Default CI must not call real `api.linear.app`");
   });
 
-  it("keeps external adapter safety explicit", () => {
-    expect(spec).toContain("Default CI must not call real `api.linear.app`");
-    expect(spec).toMatch(/Source adapters are read-only/i);
-    expect(spec).toMatch(/policy-gated and two-phase/i);
-    expect(spec).toMatch(/must fail closed/i);
+  it("pins external adapter and mutation vocabularies in code", () => {
+    expect([...BUILTIN_EXTERNAL_UPDATE_ADAPTER_KINDS]).toEqual(["linear"]);
+    expect(listExternalUpdateAdapterKinds()).toEqual(["linear"]);
+    expect([...EXTERNAL_UPDATE_MUTATION_KINDS]).toEqual(["comment", "status_transition"]);
+    expect(DEFAULT_LINEAR_EXTERNAL_UPDATE_ENDPOINT).toBe("https://api.linear.app/graphql");
+  });
+
+  it("keeps source reconciliation states explicit", () => {
+    expect([...SOURCE_RECONCILIATION_RUN_STATES]).toEqual([
+      "running",
+      "succeeded",
+      "failed",
+    ]);
   });
 
   it("continues to prove adapter composition with executable tests", () => {

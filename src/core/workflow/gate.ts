@@ -11,9 +11,8 @@
  * as `definition-persist.ts` is the storage twin of
  * `definition.ts`.
  *
- * Scope decisions pinned here, grounded in the accepted planning contracts
- * (SPEC.md "Human Gates" and
- * SPEC.md "Human Gates"):
+ * Scope decisions pinned here, grounded in the compact Workflow Safety anchor in
+ * SPEC.md plus the long-form planning contracts externalized to Obsidian:
  *
  *   - Gate types are the contract's nine durable human-gate classes. They are
  *     re-exported from `src/core/executors/loop-reducer.ts` so a workflow gate and an

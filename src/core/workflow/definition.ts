@@ -13,9 +13,8 @@
  * are layered on later modules. Closeout dogfood and deferred executor-family
  * adapters stay outside this primitive module.
  *
- * Scope decisions pinned here, grounded in the accepted planning contracts
- * (SPEC.md and
- * SPEC.md):
+ * Scope decisions pinned here, grounded in the compact runtime anchors in
+ * SPEC.md and the long-form planning contracts externalized to Obsidian:
  *
  *   - `StepDefinition.executor` names an executor *family* only. The rich
  *     per-step executor configuration (agent / model / effort / policy) is the
@@ -37,9 +36,9 @@ import {
 } from "./run-reducer.js";
 
 /**
- * Executor families pinned by SPEC.md ("Executor
- * Families"). A `StepDefinition` selects one family; the full executor config
- * record arrives with M10-03.
+ * Executor families pinned by SPEC.md's Runtime Model anchor. A
+ * `StepDefinition` selects one family; the full executor config record arrives
+ * with M10-03.
  */
 export const WORKFLOW_EXECUTOR_FAMILIES = [
   "goal-loop",
