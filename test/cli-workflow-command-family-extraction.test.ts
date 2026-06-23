@@ -69,6 +69,15 @@ describe("workflow command family extraction", () => {
     expect(result.stderr).toBe("");
   });
 
+  it("prints top-level help for workflow run start-coding --help", async () => {
+    const result = await run(["workflow", "run", "start-coding", "--help"]);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout.startsWith("Momentum\n\nUsage:\n")).toBe(true);
+    expect(result.stdout).toContain("momentum workflow run start-coding");
+    expect(result.stderr).toBe("");
+  });
+
   it("prints top-level help for workflow run preview-coding --help", async () => {
     const result = await run(["workflow", "run", "preview-coding", "--help"]);
 
