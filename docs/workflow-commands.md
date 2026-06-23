@@ -662,7 +662,8 @@ Behaviour:
 - For live dispatch / finalization recovery, the durable flag and `run.manualRecoveryReason` / `run.manualRecoveryAt` fields are authoritative for non-monitor recovery reasons such as `head_mismatch`, `result_missing`, `repo_lock_lost`, or `auth_unavailable`. The `recovery.md` artifact is best-effort and may be absent after an artifact write failure; resolve the captured reason and any artifact context before clearing. The command still performs the atomic monitor recheck above, but it cannot independently prove that external live-recovery work was completed.
 - For retryable live-wrapper bootstrap failures on dispatched `no-mistakes` or `merge-cleanup` steps (for example a stale wrapper/build path reported as `runtime_unavailable` before clean runner evidence exists), clearing recovery also prepares the same step for one safe scheduler retry. The JSON envelope includes `retryPrepared`, and text output prints `Retry prepared: <step> (<code>)`. The previous failed executor round remains durable; the retry creates a new round and does not rerun an already-terminal successful step.
 - For scheduler-lane stale workflow lease recovery, stale `manual-recovery-required` leases are left outstanding as durable evidence with the `stale_workflow_lease_manual_recovery_required` reason prefix. Because the monitor reducer can still classify that lease as `manual_recovery_lease`, guarded clear refuses until the lease condition is resolved.
-- Refuses with `not_flagged` when the run is not currently flagged, so a stale clear cannot mutate anything.
+- Refuses with `not_flagged` when the run is not currently flagged, so a stale clear cannot mutate anything, except for the evidence-backed `failed_external_side_effect_step` reconciliation path above.
+  In that exception, `clear-recovery --evidence-pointer <ref>` can reconcile the failed external tail step even if the durable manual-recovery flag was never set.
 - Never auto-clears from elapsed time alone, never repairs the underlying run, and never issues an external write. The `recovery.md` artifact is intentionally left on disk as durable audit; remove it after capturing the context elsewhere.
 
 ### JSON envelope
@@ -708,7 +709,7 @@ Data dir: /path/to/data
 | `data_dir_failed` | Data directory resolution failed. |
 | `run_id_required` | `<run-id>` was not supplied. |
 | `run_not_found` | `<run-id>` does not exist in `workflow_runs`. |
-| `not_flagged` | The run is not currently flagged for manual recovery; nothing to clear. |
+| `not_flagged` | The run is not currently flagged for manual recovery and no evidence-backed `failed_external_side_effect_step` reconciliation applies. |
 | `recovery_clear_refused` | A monitor-derived blocking recovery condition still applies; resolve it before clearing. Carries `recoveryCode` and optional `blockingStepId`. |
 
 Exit code 0 on success, 1 on structured refusal, 2 on usage error.

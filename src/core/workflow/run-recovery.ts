@@ -244,8 +244,9 @@ export type ClearWorkflowRunManualRecoveryGuardedResult =
  * Operator-facing guarded clear: the explicit, auditable path that re-derives
  * the M7 monitor state and only clears the durable manual-recovery flag when no
  * monitor-derived blocking condition remains. Refuses safely when the run is
- * missing (`run_not_found`), not flagged (`not_flagged`), or still classified
- * with a blocking monitor recovery code (`recovery_clear_refused`). Live
+ * missing (`run_not_found`), unflagged without an evidence-backed external
+ * tail reconciliation (`not_flagged`), or still classified with a blocking
+ * monitor recovery code (`recovery_clear_refused`). Live
  * dispatch / finalization recovery uses the same flag but has no monitor
  * blocker to re-derive here, so clearing those entries is an operator assertion
  * that the captured reason and any rendered artifact or context have been
