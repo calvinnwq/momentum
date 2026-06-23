@@ -7,6 +7,7 @@ import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition.js";
 import { persistWorkflowDefinition } from "../src/core/workflow/definition-persist.js";
 import { persistWorkflowRunStart } from "../src/core/workflow/run-start-persist.js";
+import { MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE } from "../src/core/workflow/run-start.js";
 import {
   claimRunnableWorkflowStep,
   type ClaimedWorkflowStep,
@@ -94,6 +95,20 @@ function openSeededDb(runId: string = RUN_ID): MomentumDb {
     repoPath: "/repos/momentum",
     objective: "Dogfood NGX-492",
     now: NOW
+  });
+  return db;
+}
+
+function openNativeCodingDbWithRoute(route: Record<string, unknown>): MomentumDb {
+  const db = openDb(makeTempDir());
+  persistWorkflowRunStart(db, {
+    definition: CODING_WORKFLOW_DEFINITION,
+    runId: RUN_ID,
+    repoPath: "/repos/momentum",
+    objective: "Dogfood route retry",
+    now: NOW,
+    source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
+    route
   });
   return db;
 }
@@ -484,6 +499,113 @@ describe("createLiveWrapperWorkflowDispatch — recovery retry after repaired wr
     expect(rounds[1]?.logPaths[0]).toContain("attempt-2/executor.log");
     expect(rounds[1]?.logPaths[0]).not.toBe(rounds[0]?.logPaths[0]);
     expect(listWorkflowGatesForRun(db, RUN_ID)).toHaveLength(1);
+  });
+
+  it("preserves persisted route selection when retrying merge-cleanup after clearing recovery", () => {
+    const db = openNativeCodingDbWithRoute({
+      steps: {
+        "merge-cleanup": {
+          harness: "codex",
+          model: "gpt-5.1",
+          effort: "high"
+        }
+      }
+    });
+    db.prepare(
+      `UPDATE workflow_steps
+          SET state = 'succeeded', started_at = ?, finished_at = ?, result_digest = ?
+        WHERE run_id = ? AND step_order < 4`
+    ).run(NOW, NOW, "test-predecessor", RUN_ID);
+    const firstClaim = approveAndClaim(db, "merge-cleanup");
+    let repaired = false;
+    const { registry } = countingRegistry((input) =>
+      repaired ? succeededResult(input) : wrapperBootstrapFailure(input)
+    );
+    const dispatch = createLiveWrapperWorkflowDispatch(
+      executeWorkflowStepDispatch,
+      { registry, deriveExec: () => ({ ok: true, exec: EXEC_CONTEXT }) }
+    );
+
+    dispatch(firstClaim, tickContext(db, TICK_AT));
+
+    let rounds = dispatchRounds(db, "merge-cleanup");
+    expect(rounds).toHaveLength(1);
+    expect(rounds[0]).toMatchObject({
+      agentProvider: "codex",
+      model: "gpt-5.1",
+      effort: "high"
+    });
+
+    repaired = true;
+    const cleared = clearWorkflowRunManualRecoveryGuarded(db, {
+      runId: RUN_ID,
+      now: TICK_AT + 100
+    });
+    expect(cleared.ok).toBe(true);
+    const retryClaim = claimRunnableWorkflowStep(db, {
+      runId: RUN_ID,
+      stepId: "merge-cleanup",
+      holder: WORKER,
+      leaseExpiresAt: TICK_AT + 30_000,
+      now: TICK_AT + 101
+    });
+    expect(retryClaim.ok).toBe(true);
+    if (!retryClaim.ok) throw new Error("retry claim failed");
+
+    dispatch(retryClaim.claim, tickContext(db, TICK_AT + 102));
+
+    rounds = dispatchRounds(db, "merge-cleanup");
+    expect(rounds).toHaveLength(2);
+    expect(rounds[1]).toMatchObject({
+      agentProvider: "codex",
+      model: "gpt-5.1",
+      effort: "high"
+    });
+  });
+
+  it("passes persisted route selection into live-wrapper executor input", () => {
+    const db = openNativeCodingDbWithRoute({
+      steps: {
+        "merge-cleanup": {
+          harness: "codex",
+          model: "gpt-5.1",
+          effort: "high"
+        }
+      }
+    });
+    db.prepare(
+      `UPDATE workflow_steps
+          SET state = 'succeeded', started_at = ?, finished_at = ?, result_digest = ?
+        WHERE run_id = ? AND step_order < 4`
+    ).run(NOW, NOW, "test-predecessor", RUN_ID);
+    const claim = approveAndClaim(db, "merge-cleanup");
+    const observed: Array<{
+      agentProvider: unknown;
+      model: unknown;
+      effort: unknown;
+    }> = [];
+    const { registry } = countingRegistry((input) => {
+      observed.push({
+        agentProvider: input.agentProvider,
+        model: input.model,
+        effort: input.effort
+      });
+      return succeededResult(input);
+    });
+    const dispatch = createLiveWrapperWorkflowDispatch(
+      executeWorkflowStepDispatch,
+      { registry, deriveExec: () => ({ ok: true, exec: EXEC_CONTEXT }) }
+    );
+
+    dispatch(claim, tickContext(db, TICK_AT));
+
+    expect(observed).toEqual([
+      {
+        agentProvider: "codex",
+        model: "gpt-5.1",
+        effort: "high"
+      }
+    ]);
   });
 
   it("reattaches to already-terminal merge-cleanup evidence without rerunning side effects", () => {

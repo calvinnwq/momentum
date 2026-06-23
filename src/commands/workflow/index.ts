@@ -83,6 +83,13 @@ import {
   type WorkflowRunStartInput
 } from "../../core/workflow/run-start.js";
 import {
+  formatCodingRouteStepSelectionLines,
+  resolveCodingRouteStepSelections,
+  validateCodingStepRouteOverrides,
+  writeCodingStepRouteOverrides,
+  type CodingStepRouteOverrides
+} from "../../core/workflow/coding-route-config.js";
+import {
   InvalidWorkflowRunStartError,
   WorkflowRunStartConflictError,
   persistWorkflowRunStart,
@@ -156,6 +163,7 @@ type ParsedFlags = {
   runId?: string;
   skillRevision?: string;
   profile?: string;
+  stepsJson?: string;
   error?: string;
 };
 
@@ -258,6 +266,8 @@ function workflowRunStart(parsed: ParsedFlags, io: CliIo): number {
  *   - it records the run with the {@link MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE}
  *     provenance so status / handoff / monitor / logs surface it as
  *     Momentum-owned.
+ *   - it accepts the coding-only `--steps-json` route override and records
+ *     validated per-step harness/model/effort selections under `route.steps`.
  *
  * The ordinary `workflow run start` path and the imported CWFP read/compat paths
  * are left exactly as they were.
@@ -276,8 +286,9 @@ function workflowRunStartCoding(parsed: ParsedFlags, io: CliIo): number {
  * instead of persisting a run it materializes a frozen
  * {@link materializeWorkflowCodingPlanPreview} projection and emits it so an
  * operator can inspect the proposed run - run id, repo, objective, issue scope,
- * approval boundary, route/profile, definition key/version, and every step with
- * its executor family - before approving or executing it. The preview is a pure
+ * approval boundary, route/profile and per-step route selections, definition
+ * key/version, and every step with its executor family - before approving or
+ * executing it. The preview is a pure
  * projection of the version-pinned built-in definition plus inputs, so the
  * durable run a later `start-coding` persists matches it exactly.
  */
@@ -301,7 +312,8 @@ type WorkflowStartCommandOptions = {
  * explicit Momentum-native coding door; and `workflow run preview-coding` shares
  * the coding preconditions but returns a read-only plan before the durable
  * persistence point. The `coding` option toggles the coding-specific guards
- * (forced definition, reserved-run-id refusal, native source provenance) while
+ * (forced definition, reserved-run-id refusal, native source provenance,
+ * `--steps-json` support) while
  * `preview` keeps the materialized plan on the read-only path.
  */
 function runWorkflowStartCommand(
@@ -364,6 +376,51 @@ function runWorkflowStartCommand(
       message: `Run id "${runId}" is reserved for CWFP/overnight compatibility imports; choose a Momentum-native run id for ${command}.`,
       runId
     });
+  }
+
+  // Native per-step coding route reconfiguration (NGX-510): an operator can adjust
+  // the planned harness/model/effort selections per step before kickoff via
+  // --steps-json. The validated, normalized overrides are embedded durably under
+  // route.steps so status/handoff/logs can audit the selection and so execution can
+  // read it (or fail closed). The per-step namespace is coding-door specific, so the
+  // generic `workflow run start` refuses it rather than silently dropping a
+  // coding-only selection; a malformed or unsupported selection fails closed before
+  // any durable write.
+  let stepRouteOverrides: CodingStepRouteOverrides = {};
+  if (parsed.stepsJson !== undefined) {
+    if (!options.coding) {
+      return emitWorkflowRunStartFailure(parsed, io, {
+        command,
+        code: "route_config_not_allowed",
+        message: `--steps-json is only supported on the coding doors (\`workflow run start-coding\` / \`workflow run preview-coding\`); the generic \`workflow run start\` does not accept per-step coding route overrides.`,
+        runId
+      });
+    }
+    let rawStepRouteConfig: unknown;
+    try {
+      rawStepRouteConfig = JSON.parse(parsed.stepsJson);
+    } catch (parseError) {
+      return emitWorkflowRunStartFailure(parsed, io, {
+        command,
+        code: "route_config_invalid",
+        message: `--steps-json is not valid JSON: ${
+          parseError instanceof Error ? parseError.message : String(parseError)
+        }`,
+        runId
+      });
+    }
+    const validated = validateCodingStepRouteOverrides(rawStepRouteConfig);
+    if (!validated.ok) {
+      return emitWorkflowRunStartFailure(parsed, io, {
+        command,
+        code: "route_config_invalid",
+        message: `--steps-json is invalid (${validated.refusal}${
+          validated.path === undefined ? "" : ` at ${validated.path}`
+        }): ${validated.reason}`,
+        runId
+      });
+    }
+    stepRouteOverrides = validated.overrides;
   }
 
   const repoPath = path.resolve(parsed.repo);
@@ -429,7 +486,8 @@ function runWorkflowStartCommand(
       objective,
       now,
       coding: options.coding,
-      parsed
+      parsed,
+      stepRouteOverrides
     });
     const previewResult = materializeWorkflowCodingPlanPreview(input);
     if (!previewResult.ok) {
@@ -457,7 +515,12 @@ function runWorkflowStartCommand(
       dataDir,
       preview: previewResult.preview,
       policyPresent: policy.present === true,
-      policyPath: policy.path
+      policyPath: policy.path,
+      // Humanize the same validated per-step overrides that built the preview
+      // route so the default (non-JSON) preview can audit the selection.
+      stepRouteLines: formatCodingRouteStepSelectionLines(
+        resolveCodingRouteStepSelections(stepRouteOverrides)
+      )
     });
   }
 
@@ -494,7 +557,8 @@ function runWorkflowStartCommand(
       objective,
       now,
       coding: options.coding,
-      parsed
+      parsed,
+      stepRouteOverrides
     });
 
     let summary: PersistWorkflowRunStartSummary;
@@ -613,8 +677,18 @@ function buildWorkflowRunStartInput(args: {
   now: number;
   coding: boolean;
   parsed: ParsedFlags;
+  stepRouteOverrides: CodingStepRouteOverrides;
 }): WorkflowRunStartInput {
-  const { definition, runId, repoPath, objective, now, coding, parsed } = args;
+  const {
+    definition,
+    runId,
+    repoPath,
+    objective,
+    now,
+    coding,
+    parsed,
+    stepRouteOverrides
+  } = args;
   const input: WorkflowRunStartInput = {
     definition,
     runId,
@@ -634,8 +708,17 @@ function buildWorkflowRunStartInput(args: {
   if (parsed.issueScope !== undefined) {
     input.issueScope = { identifier: parsed.issueScope };
   }
+  // Compose the durable run route from the recorded operator profile (route.profile)
+  // and the validated per-step overrides (route.steps). The steps namespace is only
+  // embedded when at least one override is present, so a run with neither input keeps
+  // an empty route, exactly as before NGX-510.
+  let route: Record<string, unknown> = {};
   if (parsed.profile !== undefined) {
-    input.route = { profile: parsed.profile };
+    route.profile = parsed.profile;
+  }
+  route = writeCodingStepRouteOverrides(route, stepRouteOverrides);
+  if (Object.keys(route).length > 0) {
+    input.route = route;
   }
   return input;
 }

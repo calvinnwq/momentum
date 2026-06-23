@@ -82,14 +82,18 @@ export const LIVE_STEP_WRAPPER_RESULT_MAX_BYTES = 1024 * 1024;
 /**
  * Workflow-context env vars injected into every live step process. Unlike the
  * M4 runners (which carry goal-iteration context), live wrappers carry the
- * workflow run / step identity. These are injected unconditionally and are not
- * subject to the `env_allow` allowlist.
+ * workflow run / step identity plus optional per-step agent/model/effort
+ * selections. Present values are injected by Momentum and are not subject to the
+ * `env_allow` allowlist.
  */
 export const LIVE_STEP_WRAPPER_ENV_VARS = {
   RUN_ID: "MOMENTUM_RUN_ID",
   STEP_ID: "MOMENTUM_STEP_ID",
   STEP_KIND: "MOMENTUM_STEP_KIND",
   ATTEMPT: "MOMENTUM_ATTEMPT",
+  AGENT_PROVIDER: "MOMENTUM_AGENT_PROVIDER",
+  MODEL: "MOMENTUM_MODEL",
+  EFFORT: "MOMENTUM_EFFORT",
   REPO_PATH: "MOMENTUM_REPO_PATH",
   ITERATION_DIR: "MOMENTUM_ITERATION_DIR",
   PROMPT_PATH: "MOMENTUM_PROMPT_PATH",
@@ -102,6 +106,9 @@ export type LiveStepWrapperInput = {
   runId: string;
   stepId: string;
   attempt: number;
+  agentProvider?: string | null;
+  model?: string | null;
+  effort?: string | null;
   /** Absolute repo root; the cwd when `config.cwd` is "repo". */
   repoPath: string;
   /** Absolute iteration artifact directory; the cwd when `config.cwd` is
@@ -1074,6 +1081,15 @@ function resolveEnv(
   env[LIVE_STEP_WRAPPER_ENV_VARS.STEP_ID] = input.stepId;
   env[LIVE_STEP_WRAPPER_ENV_VARS.STEP_KIND] = input.kind;
   env[LIVE_STEP_WRAPPER_ENV_VARS.ATTEMPT] = String(input.attempt);
+  if (input.agentProvider !== undefined && input.agentProvider !== null) {
+    env[LIVE_STEP_WRAPPER_ENV_VARS.AGENT_PROVIDER] = input.agentProvider;
+  }
+  if (input.model !== undefined && input.model !== null) {
+    env[LIVE_STEP_WRAPPER_ENV_VARS.MODEL] = input.model;
+  }
+  if (input.effort !== undefined && input.effort !== null) {
+    env[LIVE_STEP_WRAPPER_ENV_VARS.EFFORT] = input.effort;
+  }
   env[LIVE_STEP_WRAPPER_ENV_VARS.REPO_PATH] = input.repoPath;
   env[LIVE_STEP_WRAPPER_ENV_VARS.ITERATION_DIR] = input.iterationDir;
   if (input.promptPath !== undefined) {

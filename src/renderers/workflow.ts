@@ -114,11 +114,11 @@ export function emitWorkflowRunStartFailure(
  * Emit the frozen, pre-execution preview of a Momentum-native coding workflow
  * (`workflow run preview-coding`). The envelope mirrors the fields a
  * `workflow run start-coding` would durably persist - run id, repo, objective,
- * issue scope, route/profile, approval boundary, definition key/version, and the
- * ordered steps each with its executor family and on-start state - but carries an
- * explicit `preview: true` marker and writes nothing. It contains no wall-clock
- * fields, so repeated previews of the same inputs are byte-stable and safe to
- * show before approval.
+ * issue scope, route/profile and per-step route selections, approval boundary,
+ * definition key/version, and the ordered steps each with its executor family
+ * and on-start state - but carries an explicit `preview: true` marker and writes
+ * nothing. It contains no wall-clock fields, so repeated previews of the same
+ * inputs are byte-stable and safe to show before approval.
  */
 export function emitWorkflowRunPreviewCodingSuccess(
   parsed: { json: boolean },
@@ -128,6 +128,7 @@ export function emitWorkflowRunPreviewCodingSuccess(
     preview: WorkflowCodingPlanPreview;
     policyPresent: boolean;
     policyPath: string;
+    stepRouteLines: string[];
   }
 ): number {
   const { preview } = result;
@@ -169,6 +170,12 @@ export function emitWorkflowRunPreviewCodingSuccess(
     typeof preview.route["profile"] === "string"
       ? preview.route["profile"]
       : "(none)";
+  // The per-step route.steps selections (NGX-510) are surfaced alongside the
+  // run-level profile so an operator reading the default (non-JSON) preview can
+  // audit which per-step harness/model/effort selections are default and which were
+  // changed before approving. The lines are computed by the command from the same
+  // validated overrides that built the preview route (renderers accept computed
+  // results rather than importing the core route-config projection).
   const lines = [
     `Coding workflow plan preview (not started): ${preview.runId}`,
     `Definition: ${preview.definitionKey} v${preview.definitionVersion}`,
@@ -176,6 +183,7 @@ export function emitWorkflowRunPreviewCodingSuccess(
     `State on start: ${preview.state}`,
     `Approval boundary: ${preview.approvalBoundary ?? "(none)"}`,
     `Profile: ${profile}`,
+    ...result.stepRouteLines,
     `Repo: ${preview.repoPath}`,
     `Objective: ${preview.objective}`,
     `Policy: ${result.policyPresent ? result.policyPath : "(none)"}`,

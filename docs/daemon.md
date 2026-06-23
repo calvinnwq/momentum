@@ -172,7 +172,12 @@ Example:
 Momentum injects `MOMENTUM_RUN_ID`, `MOMENTUM_STEP_ID`,
 `MOMENTUM_STEP_KIND`, `MOMENTUM_ATTEMPT`, `MOMENTUM_REPO_PATH`,
 `MOMENTUM_ITERATION_DIR`, `MOMENTUM_PROMPT_PATH` when available, and
-`MOMENTUM_RESULT_PATH` for every wrapper. The wrapper must write the same
+`MOMENTUM_RESULT_PATH` for every wrapper.
+When a dispatched executor round has selected values, Momentum also injects
+`MOMENTUM_AGENT_PROVIDER`, `MOMENTUM_MODEL`, and `MOMENTUM_EFFORT`; for native
+coding runs those values come from persisted `route.steps` overrides when the
+operator supplied `--steps-json`, otherwise they are omitted.
+The wrapper must write the same
 normalized runner result JSON documented in [`runners.md`](runners.md) at
 `$MOMENTUM_RESULT_PATH`. A valid profile may configure only the
 live-wrapper-owned step kinds it can run; a dispatched live-wrapper-owned kind
@@ -183,7 +188,8 @@ managed-loop mode to fail before registering a daemon run with
 
 The `--profile <name>` option on `workflow run start` and `workflow run start-coding` only records the operator-selected profile name in the run's durable `route.profile`.
 `workflow run preview-coding --profile <name>` reports that same projected `route.profile` in its frozen read-only plan but does not persist a run.
-None of these command-line profile selectors load or select the executable wrapper profile for the daemon.
+The `--steps-json <json>` option on `workflow run start-coding` records per-step harness/model/effort selections in `route.steps`, and `workflow run preview-coding --steps-json <json>` reports the same selection in its frozen read-only plan without persisting it.
+The command-line profile selector does not load or select the executable wrapper profile for the daemon.
 Managed-loop execution still uses the JSON profile file pointed to by `MOMENTUM_LIVE_WRAPPER_PROFILE`.
 
 On retried dispatch attempts, `MOMENTUM_ATTEMPT` is incremented and attempt

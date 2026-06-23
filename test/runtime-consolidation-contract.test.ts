@@ -32,6 +32,7 @@ describe("runtime consolidation contract", () => {
       "step_definition_not_found",
       "unknown_executor_family",
       "unsupported_executor_family",
+      "route_config_invalid",
     ]);
   });
 

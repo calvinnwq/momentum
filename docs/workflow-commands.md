@@ -7,7 +7,7 @@ Operator-facing CLI envelopes for the `workflow run start`, `workflow run start-
 - `workflow run start-coding` is the explicit Momentum-native coding-workflow start door: a thin selector over `workflow run start` that always uses the built-in `coding-workflow` definition, refuses run ids reserved for compatibility imports, and records the run with a Momentum-native source so it is unmistakably Momentum-owned.
   Use it to intentionally choose Momentum orchestration for a new coding workflow; the ordinary definition-sourced start and the imported compatibility runs are unchanged.
 - `workflow run preview-coding` is the read-only plan preview for the Momentum-native coding workflow: it runs the same precondition checks and built-in definition resolution as `workflow run start-coding` but stops before any durable write, emitting a frozen plan an operator can inspect before approval or execution.
-  It writes nothing and surfaces the run id, repo, objective, issue scope, approval boundary, route/profile, definition key/version, repo policy, and every step with its executor family.
+  It writes nothing and surfaces the run id, repo, objective, issue scope, approval boundary, route/profile and per-step route selections, definition key/version, repo policy, and every step with its executor family.
 - `workflow import` reads local `.agent-workflows/<run-id>/` directories and persists normalized rows into the `workflow_runs`, `workflow_steps`, and `workflow_approvals` tables.
 - `workflow status` is a read-only surface that lists workflow runs (with state / filter selectors) or returns the full detail of a single run.
 - `workflow handoff` is a read-only surface that emits a machine-readable next-action envelope for one run.
@@ -60,7 +60,14 @@ Behaviour:
 - **Repo policy loading**: `<repo>/MOMENTUM.md` is loaded and validated. A present-but-malformed policy refuses the start with `policy_invalid` and writes nothing; an absent policy is allowed and reported as `policy.present: false`.
 - **Materialization**: on success the command durably writes one `workflow_runs` row plus one ordered `workflow_steps` row per definition step, linking the run to the definition it started from (`workflow_definition_key` / `workflow_definition_version`). The run `source` is `workflow-definition`.
 - **Approval boundary**: when `--approval-boundary` is supplied, the pending steps the boundary covers are persisted as `approved`, a `workflow_approvals` row is recorded with synthetic `workflow-run-start://<run-id>/<boundary>` provenance, and the run state is derived as `approved`; otherwise every step is `pending` and the run state is `pending`.
-- **Execution**: `workflow run start` only materializes durable run state. Approved steps are claimed by bounded `daemon start --max-*`, which dispatches supported executor families into durable `executor_invocations` / `executor_rounds` scaffold rows with deterministic dispatcher ids and leaves register-only `daemon start` inert. The initial scaffold is ownership evidence only; result, artifact, verification, commit, and recovery fields remain empty until an executor fills them. The `external-apply` family is filled by the daemon itself for the built-in `linear-refresh` step: it matches a single pending Linear update intent for the run issue scope, reuses the policy-gated `intent apply --external-apply` write path, records terminal evidence, and reconciles the step; missing/ambiguous context or any unsafe apply refusal routes to manual recovery. Configured `subworkflow` steps are also filled by the daemon itself: child config comes from the parent run's `route.subworkflow.child`, recursion lineage is bounded through `route.subworkflow.lineage`, the child run starts or attaches by workflow definition key, and terminal child evidence is mirrored back to the parent step; missing config, unsafe recursion, unresolved child definitions, unsupported attachment, invalid child state, or ambiguous child terminals route to manual recovery. When `MOMENTUM_LIVE_WRAPPER_PROFILE` points managed-loop `daemon start` at a valid workflow live-wrapper profile, the daemon runs configured live-wrapper-owned step wrappers after the scaffold is created, records terminal executor evidence, and reconciles the step from that evidence. With no profile, supported live-wrapper-owned steps keep the start scaffold and wait for a later executor path; a configured profile that omits the dispatched kind routes that step to manual recovery rather than reporting fake success.
+- **Execution**: `workflow run start` only materializes durable run state.
+  Approved steps are claimed by bounded `daemon start --max-*`, which dispatches supported executor families into durable `executor_invocations` / `executor_rounds` scaffold rows with deterministic dispatcher ids and leaves register-only `daemon start` inert.
+  The initial scaffold is ownership evidence only; result, artifact, verification, commit, and recovery fields remain empty until an executor fills them.
+  Native coding runs with `route.steps` freeze the selected per-step harness/model/effort on the dispatcher-created round as agent/model/effort metadata before execution; a corrupt persisted `route.steps` namespace routes to manual recovery with `route_config_invalid` instead of silently falling back.
+  The `external-apply` family is filled by the daemon itself for the built-in `linear-refresh` step: it matches a single pending Linear update intent for the run issue scope, reuses the policy-gated `intent apply --external-apply` write path, records terminal evidence, and reconciles the step; missing/ambiguous context or any unsafe apply refusal routes to manual recovery.
+  Configured `subworkflow` steps are also filled by the daemon itself: child config comes from the parent run's `route.subworkflow.child`, recursion lineage is bounded through `route.subworkflow.lineage`, the child run starts or attaches by workflow definition key, and terminal child evidence is mirrored back to the parent step; missing config, unsafe recursion, unresolved child definitions, unsupported attachment, invalid child state, or ambiguous child terminals route to manual recovery.
+  When `MOMENTUM_LIVE_WRAPPER_PROFILE` points managed-loop `daemon start` at a valid workflow live-wrapper profile, the daemon runs configured live-wrapper-owned step wrappers after the scaffold is created, records terminal executor evidence, and reconciles the step from that evidence.
+  With no profile, supported live-wrapper-owned steps keep the start scaffold and wait for a later executor path; a configured profile that omits the dispatched kind routes that step to manual recovery rather than reporting fake success.
 - **No clobber**: a duplicate `--run-id` refuses with `run_exists` and never overwrites the existing run.
 
 ### JSON envelope (success)
@@ -130,6 +137,7 @@ Behaviour:
 | `policy_invalid` | `<repo>/MOMENTUM.md` is present but malformed; the start is refused and nothing is written. |
 | `invalid_run_start` | Run-start materialization rejected the inputs; carries an `errors` array. |
 | `run_exists` | A workflow run with `--run-id` already exists; the existing run is left untouched. |
+| `route_config_not_allowed` | `--steps-json` was supplied to the generic start; per-step coding route overrides are only accepted on `workflow run start-coding` / `workflow run preview-coding`. |
 
 The `invalid_run_start` `errors[]` use the run-start materialization taxonomy: `definition_invalid`, `run_id_invalid`, `repo_path_invalid`, `objective_invalid`, `approval_boundary_invalid`, `issue_scope_invalid`, `route_invalid`.
 
@@ -160,7 +168,7 @@ Exit code 0 on success, 1 on structured refusal, 2 on usage error.
 ## `workflow run start-coding`
 
 ```text
-momentum workflow run start-coding --run-id <id> --repo <path> --objective <text> [--approval-boundary <boundary>] [--skill-revision <text>] [--issue-scope <identifier>] [--profile <name>] [--definition-version <n>] [--data-dir <path>] [--json]
+momentum workflow run start-coding --run-id <id> --repo <path> --objective <text> [--approval-boundary <boundary>] [--skill-revision <text>] [--issue-scope <identifier>] [--profile <name>] [--steps-json <json>] [--definition-version <n>] [--data-dir <path>] [--json]
 ```
 
 The explicit Momentum-native coding-workflow start door.
@@ -180,6 +188,11 @@ Optional arguments:
 - `--issue-scope <identifier>` - record an issue-scope identifier on the run.
 - `--profile <name>` - record the selected runtime/profile on the run's durable `route.profile`, so status, handoff, monitor, and logs can explain which runtime/profile the Momentum-native run was started for from durable state alone.
   This captures intent only; the executing live-wrapper profile is still resolved by the daemon from `MOMENTUM_LIVE_WRAPPER_PROFILE` at run time.
+- `--steps-json <json>` - reconfigure the planned per-step harness/model/effort selections before the run starts, recorded on the run's durable `route.steps` so status, handoff, monitor, and logs can audit which selection the run was started with.
+  The value is a JSON object keyed by the operationally meaningful coding steps (`implementation`, `postflight`, `no-mistakes`, `merge-cleanup`), each mapping to any of the `harness`, `model`, and `effort` string fields; an omitted step or field keeps the default (inherit at execution time).
+  Selections are validated and normalized to a canonical, byte-stable shape before they are recorded; an unsupported step, unknown field, blank value, or malformed JSON fails closed with `route_config_invalid` and writes nothing.
+  During daemon dispatch, the persisted selection is mapped to executor-round `agentProvider`, `model`, and `effort` fields and then forwarded to live wrappers through `MOMENTUM_AGENT_PROVIDER`, `MOMENTUM_MODEL`, and `MOMENTUM_EFFORT` when those values are present.
+  `route.steps` (the per-step selection) stays distinct from `route.profile` (the recorded operator profile) and from the daemon's `MOMENTUM_LIVE_WRAPPER_PROFILE` execution profile.
 - `--definition-version <n>` - require a specific built-in `coding-workflow` version.
   When omitted, the latest known built-in version is used.
   Existing native runs continue resolving the built-in version recorded on the run after future built-in versions are added.
@@ -205,20 +218,22 @@ In addition to every [`workflow run start`](#error-codes) refusal code (`run_id_
 |------|---------|
 | `reserved_run_id` | `--run-id` begins with a reserved compatibility prefix (`cwfp-`, `cwfb-`, `overnight-`); refused so native runs are not confused with imported compatibility state. |
 | `definition_not_allowed` | A `--definition` other than `coding-workflow` was supplied; this door always uses the built-in coding workflow. |
+| `route_config_invalid` | `--steps-json` is malformed JSON, names an unsupported step, carries an unknown field, or has a blank value; the run is refused and nothing is written. |
 
 Exit code 0 on success, 1 on structured refusal, 2 on usage error.
 
 ## `workflow run preview-coding`
 
 ```text
-momentum workflow run preview-coding --run-id <id> --repo <path> --objective <text> [--approval-boundary <boundary>] [--skill-revision <text>] [--issue-scope <identifier>] [--profile <name>] [--definition-version <n>] [--data-dir <path>] [--json]
+momentum workflow run preview-coding --run-id <id> --repo <path> --objective <text> [--approval-boundary <boundary>] [--skill-revision <text>] [--issue-scope <identifier>] [--profile <name>] [--steps-json <json>] [--definition-version <n>] [--data-dir <path>] [--json]
 ```
 
 The read-only plan preview for the Momentum-native coding workflow.
 It runs the exact same precondition checks and built-in definition resolution as [`workflow run start-coding`](#workflow-run-start-coding) - required inputs, the reserved-run-id and conflicting-`--definition` refusals, data-directory resolution, and repo-policy loading - but stops before any durable write.
 Instead of persisting a run it emits a frozen plan an operator can inspect before approving or executing it.
 
-It takes the same required and optional arguments as [`workflow run start-coding`](#workflow-run-start-coding), including `--profile <name>` as a read-only route/profile preview and `--approval-boundary <boundary>` as the projected initial approval state.
+It takes the same required and optional arguments as [`workflow run start-coding`](#workflow-run-start-coding), including `--profile <name>` as a read-only route/profile preview, `--steps-json <json>` as a read-only preview of the reconfigured per-step `route.steps` selection, and `--approval-boundary <boundary>` as the projected initial approval state.
+A `--steps-json` selection is validated and projected into the previewed `route` exactly as `workflow run start-coding` would record it, so an operator can preview the default route, change it, and start the same frozen selection.
 
 Behaviour:
 
@@ -263,7 +278,8 @@ Success JSON adds a `preview: true` marker, the run header (`runId`, `source`, `
 
 ### Text output (success)
 
-Text output is a human-readable preview of the same frozen plan and includes the command's no-write status, definition key/version, source, projected run state, approval boundary, profile, repo, objective, policy path or `(none)`, data directory, and every step with order, step id, kind, executor family, required/optional marker, and projected state:
+Text output is a human-readable preview of the same frozen plan and includes the command's no-write status, definition key/version, source, projected run state, approval boundary, profile, per-step route selections, repo, objective, policy path or `(none)`, data directory, and every step with order, step id, kind, executor family, required/optional marker, and projected state.
+The per-step route block lists every configurable step (implementation, postflight, no-mistakes, merge-cleanup) with its harness/model/effort selection, showing `(default)` where the operator did not override the field, so an operator can audit the default selections and any `--steps-json` changes before approval:
 
 ```text
 Coding workflow plan preview (not started): native-coding-1
@@ -272,6 +288,11 @@ Source: momentum-native-coding
 State on start: pending
 Approval boundary: (none)
 Profile: live-wrapper
+Per-step route:
+  implementation: harness=(default), model=(default), effort=(default)
+  postflight: harness=(default), model=(default), effort=(default)
+  no-mistakes: harness=(default), model=(default), effort=(default)
+  merge-cleanup: harness=(default), model=(default), effort=(default)
 Repo: /path/to/repo
 Objective: Ship the slice
 Policy: (none)
@@ -295,7 +316,7 @@ Workflow run already exists: native-coding-1.
 
 ### Error codes
 
-The preview shares the [`workflow run start-coding`](#error-codes-1) refusal taxonomy: `run_id_required`, `repo_required`, `objective_required`, `data_dir_failed`, `reserved_run_id`, `definition_not_allowed`, `definition_not_found`, `policy_invalid`, `invalid_run_start` (with its `errors` array), and `run_exists`.
+The preview shares the [`workflow run start-coding`](#error-codes-1) refusal taxonomy: `run_id_required`, `repo_required`, `objective_required`, `data_dir_failed`, `reserved_run_id`, `definition_not_allowed`, `route_config_invalid`, `definition_not_found`, `policy_invalid`, `invalid_run_start` (with its `errors` array), and `run_exists`.
 It checks an existing SQLite store read-only for duplicate run ids and still creates no durable run.
 
 Exit code 0 on success, 1 on structured refusal, 2 on usage error.
@@ -913,6 +934,7 @@ The detail envelope flattens the per-run view at the top level (`run`, `steps`, 
 
 `run.source` is one of `agent-workflow`, `workflow-definition`, or `momentum-native-coding`.
 `run.route.profile` is present when a run was started with `--profile`; it records the operator-selected runtime/profile for status, handoff, monitor, and logs, but daemon execution still resolves the live-wrapper profile from `MOMENTUM_LIVE_WRAPPER_PROFILE`.
+`run.route.steps` is present when a coding run was started with `--steps-json`; it records the per-step harness/model/effort selections the run was started with (only the steps and fields the operator overrode), so the selected route can be audited from durable state.
 
 ### State / next-action vocabulary
 
@@ -1282,7 +1304,9 @@ Exit code 0 on success, 1 on failure, 2 on usage error.
 momentum workflow run logs <run-id> [--data-dir <path>] [--json]
 ```
 
-Read-back of one workflow run's durable logs and evidence, for operators inspecting what each step actually ran and produced. It is the workflow-first equivalent of goal-first `logs <goal-id>`: it wraps the same detail loader as `workflow status <run-id>` / `workflow handoff` (run, steps, approvals, leases, monitor, evidence, gates) and adds the per-round executor evidence that the detail loader does not carry — executor family / agent / model, log paths, summaries, key changes, changed files, verification status, commit SHA, recovery codes, and the child artifacts / checkpoints / findings / decisions emitted below each round. Read-only: no SQLite mutation, no file reads, no external writes.
+Read-back of one workflow run's durable logs and evidence, for operators inspecting what each step actually ran and produced.
+It is the workflow-first equivalent of goal-first `logs <goal-id>`: it wraps the same detail loader as `workflow status <run-id>` / `workflow handoff` (run, steps, approvals, leases, monitor, evidence, gates) and adds the per-round executor evidence that the detail loader does not carry - executor family / agent / model / effort, log paths, summaries, key changes, changed files, verification status, commit SHA, recovery codes, and the child artifacts / checkpoints / findings / decisions emitted below each round.
+Read-only: no SQLite mutation, no file reads, no external writes.
 
 Rounds are returned across every invocation in the run, ordered by step key, then invocation attempt, then invocation id, then round index, then round id.
 
