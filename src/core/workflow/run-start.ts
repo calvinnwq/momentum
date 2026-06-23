@@ -12,7 +12,9 @@
  * calls that persistence layer. Executor records, the opt-in daemon scheduler
  * lane, and executor adapter dispatch are layered separately; this pure
  * materializer does not run the landed goal-loop / one-shot / script /
- * no-mistakes mirror adapters.
+ * no-mistakes mirror adapters. The coding plan preview in this module enriches
+ * the projected steps with definition executor families for operator inspection,
+ * but it still does not invoke any executor or write durable state.
  *
  * Scope decisions pinned here, grounded in the compact Runtime Model and
  * Workflow Safety anchors in SPEC.md plus the long-form planning contracts
@@ -30,10 +32,10 @@
  *     The run state is then derived from those step rows with the existing
  *     reducer, so a fresh run with an approval boundary opens `approved` and an
  *     unapproved run opens `pending`.
- *   - The executor *loop* is out of scope for this slice (NGX-346 non-goal): a
- *     materialized step carries only the canonical `WorkflowStepRecord` fields
- *     the M7 substrate already persists. Per-step executor selection arrives
- *     with `ExecutorDefinition` in M10-03 (NGX-347).
+ *   - Durable run-start materialization carries only the canonical
+ *     `WorkflowStepRecord` fields the substrate persists; the coding preview
+ *     separately joins the executor family from the validated definition so the
+ *     no-write plan can show how each step would dispatch.
  */
 
 import { isSafeWorkflowRunPathSegment } from "./recovery-artifact.js";
@@ -62,10 +64,11 @@ export const WORKFLOW_RUN_START_SOURCE = "workflow-definition" as const;
 
 /**
  * `workflow_runs.source` value for a run started through the explicit
- * Momentum-native coding-workflow door (`workflow run start-coding`). It marks
- * the run as unmistakably Momentum-owned primary state in durable rows, so
- * status / handoff / monitor / logs can distinguish it from both the generic
- * definition-sourced start (`workflow-definition`) and imported CWFP
+ * Momentum-native coding-workflow door (`workflow run start-coding`), and the
+ * matching source marker shown by the read-only `workflow run preview-coding`
+ * plan. It marks durable native runs as unmistakably Momentum-owned primary
+ * state, so status / handoff / monitor / logs can distinguish them from both the
+ * generic definition-sourced start (`workflow-definition`) and imported CWFP
  * compatibility runs (`agent-workflow`).
  */
 export const MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE =

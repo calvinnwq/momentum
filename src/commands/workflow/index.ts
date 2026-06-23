@@ -276,7 +276,7 @@ function workflowRunStartCoding(parsed: ParsedFlags, io: CliIo): number {
  * instead of persisting a run it materializes a frozen
  * {@link materializeWorkflowCodingPlanPreview} projection and emits it so an
  * operator can inspect the proposed run - run id, repo, objective, issue scope,
- * approval boundary, profile/runtime, definition key/version, and every step with
+ * approval boundary, route/profile, definition key/version, and every step with
  * its executor family - before approving or executing it. The preview is a pure
  * projection of the version-pinned built-in definition plus inputs, so the
  * durable run a later `start-coding` persists matches it exactly.
@@ -296,11 +296,13 @@ type WorkflowStartCommandOptions = {
 };
 
 /**
- * Shared implementation for the two run-start surfaces. `workflow run start` is
- * the generic definition-sourced start; `workflow run start-coding` is the
- * explicit Momentum-native coding door. The `coding` option toggles the
- * coding-specific guards (forced definition, reserved-run-id refusal, native
- * source provenance) while keeping the durable persistence path identical.
+ * Shared implementation for the three run-start surfaces. `workflow run start`
+ * is the generic definition-sourced start; `workflow run start-coding` is the
+ * explicit Momentum-native coding door; and `workflow run preview-coding` shares
+ * the coding preconditions but returns a read-only plan before the durable
+ * persistence point. The `coding` option toggles the coding-specific guards
+ * (forced definition, reserved-run-id refusal, native source provenance) while
+ * `preview` keeps the materialized plan on the read-only path.
  */
 function runWorkflowStartCommand(
   parsed: ParsedFlags,

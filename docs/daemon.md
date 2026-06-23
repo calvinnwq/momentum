@@ -182,7 +182,8 @@ managed-loop mode to fail before registering a daemon run with
 `code: "daemon_live_wrapper_profile_invalid"`.
 
 The `--profile <name>` option on `workflow run start` and `workflow run start-coding` only records the operator-selected profile name in the run's durable `route.profile`.
-It does not load or select the executable wrapper profile for the daemon.
+`workflow run preview-coding --profile <name>` reports that same projected `route.profile` in its frozen read-only plan but does not persist a run.
+None of these command-line profile selectors load or select the executable wrapper profile for the daemon.
 Managed-loop execution still uses the JSON profile file pointed to by `MOMENTUM_LIVE_WRAPPER_PROFILE`.
 
 On retried dispatch attempts, `MOMENTUM_ATTEMPT` is incremented and attempt

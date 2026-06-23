@@ -7,7 +7,7 @@ Operator-facing CLI envelopes for the `workflow run start`, `workflow run start-
 - `workflow run start-coding` is the explicit Momentum-native coding-workflow start door: a thin selector over `workflow run start` that always uses the built-in `coding-workflow` definition, refuses run ids reserved for compatibility imports, and records the run with a Momentum-native source so it is unmistakably Momentum-owned.
   Use it to intentionally choose Momentum orchestration for a new coding workflow; the ordinary definition-sourced start and the imported compatibility runs are unchanged.
 - `workflow run preview-coding` is the read-only plan preview for the Momentum-native coding workflow: it runs the same precondition checks and built-in definition resolution as `workflow run start-coding` but stops before any durable write, emitting a frozen plan an operator can inspect before approval or execution.
-  It writes nothing and surfaces the run id, repo, objective, issue scope, approval boundary, profile/runtime, definition key/version, and every step with its executor family.
+  It writes nothing and surfaces the run id, repo, objective, issue scope, approval boundary, route/profile, definition key/version, repo policy, and every step with its executor family.
 - `workflow import` reads local `.agent-workflows/<run-id>/` directories and persists normalized rows into the `workflow_runs`, `workflow_steps`, and `workflow_approvals` tables.
 - `workflow status` is a read-only surface that lists workflow runs (with state / filter selectors) or returns the full detail of a single run.
 - `workflow handoff` is a read-only surface that emits a machine-readable next-action envelope for one run.
@@ -218,7 +218,7 @@ The read-only plan preview for the Momentum-native coding workflow.
 It runs the exact same precondition checks and built-in definition resolution as [`workflow run start-coding`](#workflow-run-start-coding) - required inputs, the reserved-run-id and conflicting-`--definition` refusals, data-directory resolution, and repo-policy loading - but stops before any durable write.
 Instead of persisting a run it emits a frozen plan an operator can inspect before approving or executing it.
 
-It takes the same required and optional arguments as [`workflow run start-coding`](#workflow-run-start-coding).
+It takes the same required and optional arguments as [`workflow run start-coding`](#workflow-run-start-coding), including `--profile <name>` as a read-only route/profile preview and `--approval-boundary <boundary>` as the projected initial approval state.
 
 Behaviour:
 
@@ -259,6 +259,38 @@ Success JSON adds a `preview: true` marker, the run header (`runId`, `source`, `
   "counts": { "steps": 6 },
   "policy": { "present": false, "path": "/path/to/repo/MOMENTUM.md" }
 }
+```
+
+### Text output (success)
+
+Text output is a human-readable preview of the same frozen plan and includes the command's no-write status, definition key/version, source, projected run state, approval boundary, profile, repo, objective, policy path or `(none)`, data directory, and every step with order, step id, kind, executor family, required/optional marker, and projected state:
+
+```text
+Coding workflow plan preview (not started): native-coding-1
+Definition: coding-workflow v1
+Source: momentum-native-coding
+State on start: pending
+Approval boundary: (none)
+Profile: live-wrapper
+Repo: /path/to/repo
+Objective: Ship the slice
+Policy: (none)
+Data dir: /path/to/data
+Steps (6):
+  0. preflight (preflight) -> one-shot [required, pending]
+  1. implementation (implementation) -> goal-loop [required, pending]
+  2. postflight (postflight) -> one-shot [required, pending]
+  3. no-mistakes (no-mistakes) -> no-mistakes [required, pending]
+  4. merge-cleanup (merge-cleanup) -> script [required, pending]
+  5. linear-refresh (linear-refresh) -> external-apply [required, pending]
+```
+
+### Text output (failure)
+
+Structured refusals render the same message text as `workflow run start-coding`, with `command` set to `workflow run preview-coding` in JSON mode.
+
+```text
+Workflow run already exists: native-coding-1.
 ```
 
 ### Error codes
