@@ -160,6 +160,8 @@ function readStepState(
   operator_reason: string | null;
   operator_actor: string | null;
   operator_transition_at: number | null;
+  operator_evidence_pointer: string | null;
+  operator_ledger_pointer: string | null;
   error_code: string | null;
   error_message: string | null;
 } {
@@ -168,6 +170,7 @@ function readStepState(
     return db
       .prepare(
         `SELECT state, operator_reason, operator_actor, operator_transition_at,
+                operator_evidence_pointer, operator_ledger_pointer,
                 error_code, error_message
            FROM workflow_steps WHERE run_id = ? AND step_id = ?`
       )
@@ -176,6 +179,8 @@ function readStepState(
       operator_reason: string | null;
       operator_actor: string | null;
       operator_transition_at: number | null;
+      operator_evidence_pointer: string | null;
+      operator_ledger_pointer: string | null;
       error_code: string | null;
       error_message: string | null;
     };
@@ -334,6 +339,56 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
     expect(readRecoveryState(dataDir, runId).needs_manual_recovery).toBe(1);
   });
 
+
+  it("refuses to reconcile an external-side-effect tail step without evidence", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-external-tail-no-evidence";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, {
+        runId,
+        state: "failed",
+        needsManualRecovery: true,
+        manualRecoveryReason: "failed_external_side_effect_step"
+      });
+      seedStep(db, {
+        runId,
+        stepId: "merge-cleanup",
+        kind: "merge-cleanup",
+        state: "failed",
+        order: 0
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "clear-recovery",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "workflow run clear-recovery",
+      code: "recovery_clear_refused",
+      runId,
+      recoveryCode: "failed_external_side_effect_step"
+    });
+    expect(payload["message"]).toContain("--evidence-pointer");
+    expect(readRecoveryState(dataDir, runId).needs_manual_recovery).toBe(1);
+    expect(readStepState(dataDir, runId, "merge-cleanup")).toMatchObject({
+      state: "failed",
+      error_code: null,
+      error_message: null
+    });
+  });
+
   it("reconciles a failed external-side-effect tail step from clear-recovery", async () => {
     const dataDir = makeTempDir();
     const runId = "cwfp-external-tail-clear";
@@ -389,6 +444,10 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       "run",
       "clear-recovery",
       runId,
+      "--evidence-pointer",
+      "github://pulls/123#merged",
+      "--ledger-pointer",
+      ".agent-workflows/cwfp-external-tail-clear/ledger.jsonl#offset=42",
       "--data-dir",
       dataDir,
       "--json"
@@ -403,7 +462,9 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       reconciledStep: {
         stepId: "merge-cleanup",
         recoveryCode: "failed_external_side_effect_step",
-        state: "succeeded"
+        state: "succeeded",
+        evidencePointer: "github://pulls/123#merged",
+        ledgerPointer: ".agent-workflows/cwfp-external-tail-clear/ledger.jsonl#offset=42"
       }
     });
     expect(readRecoveryState(dataDir, runId).needs_manual_recovery).toBe(0);
@@ -411,6 +472,9 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       state: "succeeded",
       operator_reason: "failed_external_side_effect_step",
       operator_actor: "workflow run clear-recovery",
+      operator_evidence_pointer: "github://pulls/123#merged",
+      operator_ledger_pointer:
+        ".agent-workflows/cwfp-external-tail-clear/ledger.jsonl#offset=42",
       error_code: null,
       error_message: null
     });

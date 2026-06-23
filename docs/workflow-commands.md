@@ -347,7 +347,7 @@ Reads the `.agent-workflows/<run-id>/` directory at `<run-dir>` and normalizes t
 - **Manual-recovery auto-set**: after persisting the rows, import re-derives the run's monitor view.
   When it classifies a blocking recovery condition (`manual_recovery_lease`, `ghost_active_no_lease`, `stale_running_step`, `failed_required_step`, or `failed_external_side_effect_step`), import sets the durable `needs_manual_recovery` flag and renders `<run-dir>/recovery.md`.
   The flag blocks `workflow run approve` and any `workflow run update-step` transition that would leave a blocking recovery condition in place; a resolving update-step can land so the operator can then clear the flag with `workflow run clear-recovery`.
-  For `failed_external_side_effect_step`, `clear-recovery` is the resolving operator action after the external push, pull request, and tracker state are verified.
+  For `failed_external_side_effect_step`, `clear-recovery --evidence-pointer <ref>` is the resolving operator action after the external push, pull request, and tracker state are verified.
   The auto-set only ever sets the flag: re-importing a run whose blocking condition is now resolved leaves any existing flag in place, so clearing stays explicit and operator-driven.
 
 ### JSON envelope (success)
@@ -637,7 +637,7 @@ Exit code 0 on success, 1 on structured refusal, 2 on usage error.
 ## `workflow run clear-recovery`
 
 ```text
-momentum workflow run clear-recovery <run-id> [--data-dir <path>] [--json]
+momentum workflow run clear-recovery <run-id> [--evidence-pointer <ref>] [--ledger-pointer <ref>] [--data-dir <path>] [--json]
 ```
 
 Explicit, auditable clear for a run's durable manual-recovery flag. The flag blocks `workflow run approve` and non-resolving `workflow run update-step` transitions until an operator clears it here.
@@ -646,13 +646,19 @@ Required arguments:
 
 - `<run-id>` — the flagged run to clear.
 
+Options:
+
+- `--evidence-pointer <ref>` — required when reconciling `failed_external_side_effect_step`; stores the verified external success evidence on the reconciled step row.
+- `--ledger-pointer <ref>` — optional ledger or local-artifact pointer stored alongside the evidence pointer when an external tail step is reconciled.
+
 Behaviour:
 
 - Re-derives the monitor view from the durable substrate inside a single immediate transaction and clears the flag only when no monitor-derived blocking recovery condition remains.
   The check and the clear are atomic: the monitor condition that is checked is the condition that is cleared.
 - Refuses with `recovery_clear_refused` while a monitor-derived blocking recovery classification (`manual_recovery_lease`, `ghost_active_no_lease`, `stale_running_step`, or `failed_required_step`) still applies; the refusal carries the `recoveryCode` and, when known, the `blockingStepId`, and the flag stays set.
-- For `failed_external_side_effect_step`, clear first reconciles the failed `merge-cleanup` or `linear-refresh` tail step to `succeeded`, stamps operator audit fields, refreshes the run state, and then clears the flag.
+- For `failed_external_side_effect_step`, clear requires `--evidence-pointer <ref>` before reconciling the failed `merge-cleanup` or `linear-refresh` tail step to `succeeded`, stamping operator audit fields, refreshing the run state, and clearing the flag.
   Operators should use this only after confirming the external push, pull request, and tracker state are consistent, because re-running the tail step could repeat those side effects.
+  A missing evidence pointer refuses with `recovery_clear_refused`, leaving the flag and failed step intact.
 - For live dispatch / finalization recovery, the durable flag and `run.manualRecoveryReason` / `run.manualRecoveryAt` fields are authoritative for non-monitor recovery reasons such as `head_mismatch`, `result_missing`, `repo_lock_lost`, or `auth_unavailable`. The `recovery.md` artifact is best-effort and may be absent after an artifact write failure; resolve the captured reason and any artifact context before clearing. The command still performs the atomic monitor recheck above, but it cannot independently prove that external live-recovery work was completed.
 - For retryable live-wrapper bootstrap failures on dispatched `no-mistakes` or `merge-cleanup` steps (for example a stale wrapper/build path reported as `runtime_unavailable` before clean runner evidence exists), clearing recovery also prepares the same step for one safe scheduler retry. The JSON envelope includes `retryPrepared`, and text output prints `Retry prepared: <step> (<code>)`. The previous failed executor round remains durable; the retry creates a new round and does not rerun an already-terminal successful step.
 - For scheduler-lane stale workflow lease recovery, stale `manual-recovery-required` leases are left outstanding as durable evidence with the `stale_workflow_lease_manual_recovery_required` reason prefix. Because the monitor reducer can still classify that lease as `manual_recovery_lease`, guarded clear refuses until the lease condition is resolved.
@@ -673,6 +679,13 @@ Behaviour:
   "retryPrepared": {
     "stepId": "merge-cleanup",
     "recoveryCode": "runtime_unavailable"
+  },
+  "reconciledStep": {
+    "stepId": "merge-cleanup",
+    "recoveryCode": "failed_external_side_effect_step",
+    "state": "succeeded",
+    "evidencePointer": "github://pulls/123#merged",
+    "ledgerPointer": ".agent-workflows/cwfp-abc123/ledger.jsonl#offset=42"
   }
 }
 ```

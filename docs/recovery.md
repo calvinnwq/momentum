@@ -167,7 +167,7 @@ while the flag remains set so the operator has a safe path to resolve the run
 and then clear the flag explicitly.
 
 Operators clear run-scoped recovery with
-`momentum workflow run clear-recovery <run-id> [--data-dir <path>] [--json]`.
+`momentum workflow run clear-recovery <run-id> [--evidence-pointer <ref>] [--ledger-pointer <ref>] [--data-dir <path>] [--json]`.
 The clear re-checks the durable monitor view in the same transaction and
 refuses with `recovery_clear_refused` while a monitor-derived blocking condition
 remains, or `not_flagged` when the run is not currently flagged. The command
@@ -195,7 +195,8 @@ When the failed required step is an external-side-effect tail step
 and the recommended next action is `clear_recovery` instead of
 `rerun_failed_step`.
 These tail steps can push a branch, merge a pull request, or write the tracker before exiting non-zero.
-After the operator verifies the remote, pull request, and tracker state, `workflow run clear-recovery` marks the tail step `succeeded`, records the operator reconciliation on the step row, refreshes the run state, and clears the durable manual-recovery flag.
+After the operator verifies the remote, pull request, and tracker state, `workflow run clear-recovery --evidence-pointer <ref>` marks the tail step `succeeded`, records the operator reconciliation and evidence pointer on the step row, refreshes the run state, and clears the durable manual-recovery flag.
+Without `--evidence-pointer`, clear refuses and leaves the failed step plus recovery flag intact.
 That reconciles from external success evidence rather than re-running the step, which could double-merge the pull request or re-write the tracker.
 
 The generated run-scoped `recovery.md` artifact is schema-versioned and

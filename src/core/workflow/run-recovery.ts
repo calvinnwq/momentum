@@ -200,6 +200,8 @@ export function isBlockingWorkflowRecoveryCode(
 export type ClearWorkflowRunManualRecoveryGuardedInput = {
   runId: string;
   now?: number;
+  externalSideEffectEvidencePointer?: string;
+  externalSideEffectLedgerPointer?: string;
   /** Lease-freshness grace window forwarded to the monitor re-derivation. */
   graceMs?: number;
   /** Running-step checkpoint staleness window forwarded to the re-derivation. */
@@ -226,6 +228,8 @@ export type ClearWorkflowRunManualRecoveryGuardedResult =
         stepId: string;
         recoveryCode: "failed_external_side_effect_step";
         state: "succeeded";
+        evidencePointer: string;
+        ledgerPointer: string | null;
       };
     }
   | {
@@ -319,6 +323,8 @@ export function clearWorkflowRunManualRecoveryGuarded(
           stepId: string;
           recoveryCode: "failed_external_side_effect_step";
           state: "succeeded";
+          evidencePointer: string;
+          ledgerPointer: string | null;
         }
       | undefined;
     const recoveryBeforeClear = recoveryDetail.monitor.recovery;
@@ -326,10 +332,25 @@ export function clearWorkflowRunManualRecoveryGuarded(
       recoveryBeforeClear?.code === "failed_external_side_effect_step" &&
       recoveryBeforeClear.stepId !== null
     ) {
+      const evidencePointer = input.externalSideEffectEvidencePointer?.trim();
+      if (!evidencePointer) {
+        db.exec("ROLLBACK");
+        return {
+          ok: false,
+          reason: "recovery_clear_refused",
+          message:
+            `Workflow run ${input.runId} still has a failed external-side-effect tail step ` +
+            `(${recoveryBeforeClear.stepId}); pass --evidence-pointer after verifying external state before clearing manual recovery.`,
+          recoveryCode: recoveryBeforeClear.code,
+          blockingStepId: recoveryBeforeClear.stepId
+        };
+      }
       reconciledStep = reconcileExternalSideEffectTailStepForRecoveryClear(db, {
         runId: input.runId,
         stepId: recoveryBeforeClear.stepId,
-        now
+        now,
+        evidencePointer,
+        ledgerPointer: input.externalSideEffectLedgerPointer ?? null
       });
       recoveryDetail = loadWorkflowRunDetail(db, input.runId, detailOptions);
       if (!recoveryDetail) {
@@ -400,12 +421,20 @@ export function clearWorkflowRunManualRecoveryGuarded(
 
 function reconcileExternalSideEffectTailStepForRecoveryClear(
   db: MomentumDb,
-  input: { runId: string; stepId: string; now: number }
+  input: {
+    runId: string;
+    stepId: string;
+    now: number;
+    evidencePointer: string;
+    ledgerPointer: string | null;
+  }
 ):
   | {
       stepId: string;
       recoveryCode: "failed_external_side_effect_step";
       state: "succeeded";
+      evidencePointer: string;
+      ledgerPointer: string | null;
     }
   | undefined {
   const row = db
@@ -434,8 +463,8 @@ function reconcileExternalSideEffectTailStepForRecoveryClear(
               result_digest = NULL,
               operator_reason = 'failed_external_side_effect_step',
               operator_actor = 'workflow run clear-recovery',
-              operator_evidence_pointer = NULL,
-              operator_ledger_pointer = NULL,
+              operator_evidence_pointer = ?,
+              operator_ledger_pointer = ?,
               operator_transition_at = ?,
               finished_at = ?,
               updated_at = ?
@@ -443,13 +472,23 @@ function reconcileExternalSideEffectTailStepForRecoveryClear(
           AND step_id = ?
           AND state = 'failed'`
     )
-    .run(input.now, input.now, input.now, input.runId, input.stepId);
+    .run(
+      input.evidencePointer,
+      input.ledgerPointer,
+      input.now,
+      input.now,
+      input.now,
+      input.runId,
+      input.stepId
+    );
   if (Number(updated.changes) === 0) return undefined;
 
   refreshWorkflowRunRuntimeState(db, { runId: input.runId, now: input.now });
   return {
     stepId: input.stepId,
     recoveryCode: "failed_external_side_effect_step",
-    state: "succeeded"
+    state: "succeeded",
+    evidencePointer: input.evidencePointer,
+    ledgerPointer: input.ledgerPointer
   };
 }
