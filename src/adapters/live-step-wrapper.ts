@@ -82,8 +82,9 @@ export const LIVE_STEP_WRAPPER_RESULT_MAX_BYTES = 1024 * 1024;
 /**
  * Workflow-context env vars injected into every live step process. Unlike the
  * M4 runners (which carry goal-iteration context), live wrappers carry the
- * workflow run / step identity. These are injected unconditionally and are not
- * subject to the `env_allow` allowlist.
+ * workflow run / step identity plus optional per-step agent/model/effort
+ * selections. Present values are injected by Momentum and are not subject to the
+ * `env_allow` allowlist.
  */
 export const LIVE_STEP_WRAPPER_ENV_VARS = {
   RUN_ID: "MOMENTUM_RUN_ID",

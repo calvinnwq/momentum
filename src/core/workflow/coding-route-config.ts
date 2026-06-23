@@ -14,12 +14,12 @@
  * file system, no clock, no network), the same discipline
  * `validateSubworkflowChildConfig` (`subworkflow-child-config.ts`) and
  * `readSubworkflowParentLineage` (`subworkflow-route.ts`) follow, so the
- * fail-closed contract is exhaustively testable on its own. Later slices wire it
- * into the CLI start/preview doors (build overrides from flags), the
- * status/handoff/logs surfaces (render the selected config), and the daemon
- * executor selection (feed the per-step config into the highest-precedence
- * `stepConfig` level of `resolveSingleShotRoundSelection` /
- * `resolveGoalLoopRoundSelection`, or fail closed when it cannot).
+ * fail-closed contract is exhaustively testable on its own. The CLI
+ * start/preview doors build overrides from `--steps-json`, the detail/read-back
+ * surfaces expose the selected config through the durable run route and executor
+ * rounds, and daemon dispatch consumes the same namespace when it freezes
+ * per-step agent/model/effort selection for execution or fails closed when the
+ * namespace is corrupt.
  *
  * Home and namespace. A {@link import("./definition.js").StepDefinition} carries
  * only an executor *family*, never per-step config, so - exactly as
@@ -33,15 +33,15 @@
  *
  * Field mapping. Each per-step override carries the operator-facing
  * harness/model/effort vocabulary (the same `harness`/`model` keys the workflow
- * evidence metadata already uses). When the executor-selection wiring slice lands,
- * `harness` maps to the executor's `agentProvider` selection field and
- * `model`/`effort` map directly, feeding the highest-precedence layer of the
- * single-shot / goal-loop selection resolver. Momentum holds no built-in
- * harness/model/effort opinion (the selection floor is all-`null`), so this module
- * deliberately does not enum-constrain values - it validates structure (supported
- * step, known field, non-blank string) and leaves the concrete agent/model/effort
- * vocabulary to repo/run config, mirroring the executors' free-form `string | null`
- * treatment.
+ * evidence metadata already uses). `harness` maps to the executor's
+ * `agentProvider` selection field and `model`/`effort` map directly; those values
+ * are persisted on executor rounds and forwarded to live wrappers as
+ * `MOMENTUM_AGENT_PROVIDER`, `MOMENTUM_MODEL`, and `MOMENTUM_EFFORT`. Momentum
+ * holds no built-in harness/model/effort opinion (the selection floor is
+ * all-`null`), so this module deliberately does not enum-constrain values - it
+ * validates structure (supported step, known field, non-blank string) and leaves
+ * the concrete agent/model/effort vocabulary to repo/run config, mirroring the
+ * executors' free-form `string | null` treatment.
  */
 
 /** The run-`route` namespace that carries per-step coding route/config overrides. */

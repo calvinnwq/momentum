@@ -114,11 +114,11 @@ export function emitWorkflowRunStartFailure(
  * Emit the frozen, pre-execution preview of a Momentum-native coding workflow
  * (`workflow run preview-coding`). The envelope mirrors the fields a
  * `workflow run start-coding` would durably persist - run id, repo, objective,
- * issue scope, route/profile, approval boundary, definition key/version, and the
- * ordered steps each with its executor family and on-start state - but carries an
- * explicit `preview: true` marker and writes nothing. It contains no wall-clock
- * fields, so repeated previews of the same inputs are byte-stable and safe to
- * show before approval.
+ * issue scope, route/profile and per-step route selections, approval boundary,
+ * definition key/version, and the ordered steps each with its executor family
+ * and on-start state - but carries an explicit `preview: true` marker and writes
+ * nothing. It contains no wall-clock fields, so repeated previews of the same
+ * inputs are byte-stable and safe to show before approval.
  */
 export function emitWorkflowRunPreviewCodingSuccess(
   parsed: { json: boolean },

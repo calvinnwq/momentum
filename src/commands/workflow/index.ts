@@ -266,6 +266,8 @@ function workflowRunStart(parsed: ParsedFlags, io: CliIo): number {
  *   - it records the run with the {@link MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE}
  *     provenance so status / handoff / monitor / logs surface it as
  *     Momentum-owned.
+ *   - it accepts the coding-only `--steps-json` route override and records
+ *     validated per-step harness/model/effort selections under `route.steps`.
  *
  * The ordinary `workflow run start` path and the imported CWFP read/compat paths
  * are left exactly as they were.
@@ -284,8 +286,9 @@ function workflowRunStartCoding(parsed: ParsedFlags, io: CliIo): number {
  * instead of persisting a run it materializes a frozen
  * {@link materializeWorkflowCodingPlanPreview} projection and emits it so an
  * operator can inspect the proposed run - run id, repo, objective, issue scope,
- * approval boundary, route/profile, definition key/version, and every step with
- * its executor family - before approving or executing it. The preview is a pure
+ * approval boundary, route/profile and per-step route selections, definition
+ * key/version, and every step with its executor family - before approving or
+ * executing it. The preview is a pure
  * projection of the version-pinned built-in definition plus inputs, so the
  * durable run a later `start-coding` persists matches it exactly.
  */
@@ -309,7 +312,8 @@ type WorkflowStartCommandOptions = {
  * explicit Momentum-native coding door; and `workflow run preview-coding` shares
  * the coding preconditions but returns a read-only plan before the durable
  * persistence point. The `coding` option toggles the coding-specific guards
- * (forced definition, reserved-run-id refusal, native source provenance) while
+ * (forced definition, reserved-run-id refusal, native source provenance,
+ * `--steps-json` support) while
  * `preview` keeps the materialized plan on the read-only path.
  */
 function runWorkflowStartCommand(
