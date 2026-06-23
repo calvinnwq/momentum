@@ -943,6 +943,43 @@ describe("momentum workflow run monitor (NGX-328)", () => {
     expect(secondPayload.progress.emit).toBe(false);
   });
 
+  it("surfaces durable manual-recovery reason in monitor progress", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-progress-manual-reason";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, {
+        runId,
+        state: "running",
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
+        needsManualRecovery: true,
+        manualRecoveryReason: "repo lock was lost"
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      manualRecoveryReason: string | null;
+      progress: { phase: string; blockerReason: string | null };
+    };
+    expect(payload.manualRecoveryReason).toBe("repo lock was lost");
+    expect(payload.progress).toMatchObject({
+      phase: "blocked",
+      blockerReason: "repo lock was lost"
+    });
+  });
+
   it("marks a terminally succeeded run with an explicit release cleanup (NGX-511)", async () => {
     const dataDir = makeTempDir();
     const runId = "cwfp-progress-terminal";

@@ -161,6 +161,9 @@ function deriveBlockerReason(
   if (phase !== "blocked") return null;
   if (envelope.recovery !== null) return envelope.recovery.message;
   if (envelope.needsManualRecovery) {
+    if (envelope.manualRecoveryReason !== null) {
+      return envelope.manualRecoveryReason;
+    }
     return "Run is flagged for manual recovery.";
   }
   if (envelope.blocked) return "Run is blocked.";
@@ -195,6 +198,7 @@ function computeDigest(
     terminal: envelope.terminal,
     blocked: envelope.blocked,
     needsManualRecovery: envelope.needsManualRecovery,
+    manualRecoveryReason: envelope.manualRecoveryReason,
     disposition: envelope.disposition,
     reportReason: envelope.reportReason,
     activeStepId: envelope.activeStep?.stepId ?? null,

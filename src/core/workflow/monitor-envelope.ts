@@ -101,6 +101,7 @@ export type WorkflowMonitorEnvelope = {
   terminal: boolean;
   blocked: boolean;
   needsManualRecovery: boolean;
+  manualRecoveryReason: string | null;
   disposition: WorkflowMonitorDisposition;
   reportable: boolean;
   reportReason: WorkflowMonitorReportReason;
@@ -210,6 +211,7 @@ export function buildWorkflowMonitorEnvelope(
     terminal: monitor.terminal,
     blocked: monitor.blocked,
     needsManualRecovery: detail.run.needsManualRecovery,
+    manualRecoveryReason: detail.run.manualRecoveryReason,
     disposition: report.disposition,
     reportable: report.reportable,
     reportReason: report.reportReason,

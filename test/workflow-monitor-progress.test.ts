@@ -56,6 +56,7 @@ function makeEnvelope(
     terminal: false,
     blocked: false,
     needsManualRecovery: false,
+    manualRecoveryReason: null,
     disposition: "wait",
     reportable: false,
     reportReason: "in_progress",
@@ -376,6 +377,55 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
     expect(tick.blockerReason).toBe(
       "An outstanding manual-recovery-required lease is blocking."
     );
+  });
+
+  it("uses durable manual-recovery reason when no monitor recovery exists", () => {
+    const tick = deriveWorkflowMonitorProgress(
+      makeEnvelope({
+        runState: "running",
+        needsManualRecovery: true,
+        manualRecoveryReason: "head mismatch requires operator recovery",
+        disposition: "recover",
+        reportable: true,
+        reportReason: "recovery_required",
+        recovery: null,
+        nextAction: {
+          code: "clear_recovery",
+          stepId: "implementation",
+          leaseKind: null,
+          detail: "Run is blocked. Clear the manual recovery once resolved."
+        }
+      })
+    );
+    expect(tick.phase).toBe<WorkflowMonitorProgressPhase>("blocked");
+    expect(tick.blockerReason).toBe(
+      "head mismatch requires operator recovery"
+    );
+  });
+
+  it("emits when the durable manual-recovery reason changes", () => {
+    const first = deriveWorkflowMonitorProgress(
+      makeEnvelope({
+        needsManualRecovery: true,
+        manualRecoveryReason: "head mismatch requires operator recovery",
+        disposition: "recover",
+        reportable: true,
+        reportReason: "recovery_required"
+      })
+    );
+    const second = deriveWorkflowMonitorProgress(
+      makeEnvelope({
+        needsManualRecovery: true,
+        manualRecoveryReason: "repo lock was lost",
+        disposition: "recover",
+        reportable: true,
+        reportReason: "recovery_required"
+      }),
+      { priorDigest: first.digest }
+    );
+    expect(second.digest).not.toBe(first.digest);
+    expect(second.changed).toBe(true);
+    expect(second.emit).toBe(true);
   });
 
   it("classifies a succeeded run as terminal with explicit release cleanup", () => {

@@ -701,6 +701,7 @@ export function emitWorkflowRunMonitor(
     terminal: envelope.terminal,
     blocked: envelope.blocked,
     needsManualRecovery: envelope.needsManualRecovery,
+    manualRecoveryReason: envelope.manualRecoveryReason,
     disposition: envelope.disposition,
     reportable: envelope.reportable,
     reportReason: envelope.reportReason,
@@ -1394,6 +1395,9 @@ export function renderWorkflowMonitorText(
   lines.push(`Terminal: ${envelope.terminal}`);
   lines.push(`Blocked: ${envelope.blocked}`);
   lines.push(`Needs manual recovery: ${envelope.needsManualRecovery}`);
+  if (envelope.manualRecoveryReason !== null) {
+    lines.push(`Manual recovery reason: ${envelope.manualRecoveryReason}`);
+  }
   lines.push(`Disposition: ${envelope.disposition}`);
   lines.push(`Reportable: ${envelope.reportable}`);
   lines.push(`Report reason: ${envelope.reportReason}`);

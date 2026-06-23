@@ -339,6 +339,7 @@ describe("buildWorkflowMonitorEnvelope", () => {
     expect(envelope.terminal).toBe(false);
     expect(envelope.blocked).toBe(false);
     expect(envelope.needsManualRecovery).toBe(false);
+    expect(envelope.manualRecoveryReason).toBeNull();
     expect(envelope.disposition).toBe("wait");
     expect(envelope.reportReason).toBe("in_progress");
     expect(envelope.nextAction.code).toBe("resume_running");
@@ -353,6 +354,20 @@ describe("buildWorkflowMonitorEnvelope", () => {
     expect(envelope.disposition).toBe("recover");
     expect(envelope.reportReason).toBe("recovery_required");
     expect(envelope.reportable).toBe(true);
+  });
+
+  it("threads the durable manual-recovery reason into the monitor envelope", () => {
+    const envelope = buildWorkflowMonitorEnvelope(
+      detailFrom({
+        run: runRow({
+          needsManualRecovery: true,
+          manualRecoveryReason: "repo lock was lost"
+        })
+      }),
+      { generatedAt: 7 }
+    );
+    expect(envelope.needsManualRecovery).toBe(true);
+    expect(envelope.manualRecoveryReason).toBe("repo lock was lost");
   });
 
   it("summarizes counts and passes through typed evidence pointers", () => {
