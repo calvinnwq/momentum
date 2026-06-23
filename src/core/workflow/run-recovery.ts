@@ -293,22 +293,18 @@ export function clearWorkflowRunManualRecoveryGuarded(
         message: `Workflow run ${input.runId} does not exist.`
       };
     }
-    if (!detail.run.needsManualRecovery) {
-      db.exec("ROLLBACK");
-      return {
-        ok: false,
-        reason: "not_flagged",
-        message: `Workflow run ${input.runId} is not flagged for manual recovery; nothing to clear.`
-      };
-    }
+    const wasMarked = detail.run.needsManualRecovery;
 
-    const preparedRetry = prepareRetryableDispatchedStepForRecoveryClear(db, {
-      runId: input.runId,
-      now
-    });
-    let recoveryDetail = preparedRetry.prepared
-      ? loadWorkflowRunDetail(db, input.runId, detailOptions)
-      : detail;
+    const preparedRetry = wasMarked
+      ? prepareRetryableDispatchedStepForRecoveryClear(db, {
+          runId: input.runId,
+          now
+        })
+      : { prepared: false as const };
+    let recoveryDetail =
+      preparedRetry.prepared || !wasMarked
+        ? loadWorkflowRunDetail(db, input.runId, detailOptions)
+        : detail;
     if (!recoveryDetail) {
       db.exec("ROLLBACK");
       return {
@@ -361,6 +357,15 @@ export function clearWorkflowRunManualRecoveryGuarded(
           message: `Workflow run ${input.runId} disappeared during external-side-effect reconciliation.`
         };
       }
+    }
+
+    if (!wasMarked && reconciledStep === undefined) {
+      db.exec("ROLLBACK");
+      return {
+        ok: false,
+        reason: "not_flagged",
+        message: `Workflow run ${input.runId} is not flagged for manual recovery; nothing to clear.`
+      };
     }
 
     const recovery = recoveryDetail.monitor.recovery;

@@ -386,6 +386,80 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
     }
   });
 
+  it("reconciles an unflagged failed external-side-effect tail step with evidence", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, "run-1");
+      seedStep(db, "run-1", "preflight", "succeeded", {
+        kind: "preflight",
+        order: 0
+      });
+      seedStep(db, "run-1", "implementation", "succeeded", {
+        kind: "implementation",
+        order: 1
+      });
+      seedStep(db, "run-1", "postflight", "succeeded", {
+        kind: "postflight",
+        order: 2
+      });
+      seedStep(db, "run-1", "no-mistakes", "succeeded", {
+        kind: "no-mistakes",
+        order: 3
+      });
+      seedStep(db, "run-1", "merge-cleanup", "failed", {
+        kind: "merge-cleanup",
+        order: 4
+      });
+
+      const out = clearWorkflowRunManualRecoveryGuarded(db, {
+        runId: "run-1",
+        now: 1_730_000_900_000,
+        externalSideEffectEvidencePointer: "github://pulls/123#merged",
+        externalSideEffectLedgerPointer: "ledger://merge-cleanup#42"
+      });
+
+      expect(out).toEqual({
+        ok: true,
+        runId: "run-1",
+        previousReason: null,
+        previousMarkedAt: null,
+        clearedAt: 1_730_000_900_000,
+        reconciledStep: {
+          stepId: "merge-cleanup",
+          recoveryCode: "failed_external_side_effect_step",
+          state: "succeeded",
+          evidencePointer: "github://pulls/123#merged",
+          ledgerPointer: "ledger://merge-cleanup#42"
+        }
+      });
+      expect(getWorkflowRunManualRecoveryState(db, "run-1")).toMatchObject({
+        needsManualRecovery: false,
+        reason: null,
+        markedAt: null
+      });
+      const step = db
+        .prepare(
+          `SELECT state, operator_reason, operator_evidence_pointer, operator_ledger_pointer
+             FROM workflow_steps WHERE run_id = ? AND step_id = ?`
+        )
+        .get("run-1", "merge-cleanup") as {
+        state: string;
+        operator_reason: string | null;
+        operator_evidence_pointer: string | null;
+        operator_ledger_pointer: string | null;
+      };
+      expect(step).toEqual({
+        state: "succeeded",
+        operator_reason: "failed_external_side_effect_step",
+        operator_evidence_pointer: "github://pulls/123#merged",
+        operator_ledger_pointer: "ledger://merge-cleanup#42"
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   it("refuses with not_flagged when the run exists but is not flagged", () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);
