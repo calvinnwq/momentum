@@ -1195,7 +1195,11 @@ Exit code 0 on success, 1 on failure, 2 on usage error.
 momentum workflow run monitor <run-id> [--advance] [--data-dir <path>] [--json]
 ```
 
-Read-only-by-default machine envelope for a monitor runner. Wraps the same durable detail loader as `workflow status <run-id>`, runs the monitor reducer, and adds a `disposition` decision view so a caller can act on one stable JSON shape per tick instead of parsing prose or scraping `.agent-workflows/<run-id>/`. Without `--advance` it never writes SQLite or files, never schedules cron, and never delivers notifications. The opt-in `--advance` flag persists only the progress suppression baseline (the `monitor_last_emitted_digest` / `monitor_last_seen_digest` advisory columns); it never touches run, step, lease, or gate state.
+Read-only-by-default machine envelope for a monitor runner.
+Wraps the same durable detail loader as `workflow status <run-id>`, runs the monitor reducer, and adds a `disposition` decision view so a caller can act on one stable JSON shape per tick instead of parsing prose or scraping `.agent-workflows/<run-id>/`.
+Without `--advance` it never writes SQLite or files, never schedules cron, and never delivers notifications.
+The opt-in `--advance` flag is only supported for runs whose source is `momentum-native-coding`.
+When supported, it persists only the progress suppression baseline (the `monitor_last_emitted_digest` / `monitor_last_seen_digest` advisory columns); it never touches run, step, lease, or gate state.
 
 Required arguments:
 
@@ -1203,7 +1207,8 @@ Required arguments:
 
 Options:
 
-- `--advance` — persist this tick's digest as the durable progress suppression baseline so a cron loop polling the command repeatedly suppresses unchanged ticks across invocations. See the [progress digest tick](#progress-digest-tick) section.
+- `--advance` - for `momentum-native-coding` runs only, persist this tick's digest as the durable progress suppression baseline so a cron loop polling the command repeatedly suppresses unchanged ticks across invocations.
+  See the [progress digest tick](#progress-digest-tick) section.
 
 ### Disposition and report reason
 
@@ -1289,7 +1294,10 @@ Live dispatch / finalization recovery can also set the durable manual-recovery f
 - `phase` is the coarse progress state: `advancing` (a step is running or progressing), `idle` (no actionable step yet), `awaiting_approval` (a step is paused on an approval boundary), `blocked` (operator recovery is required), or `terminal` (a clean succeeded / canceled outcome). A failed run surfaces as `blocked`, not `terminal`, because it needs recovery.
 - `digest` is a stable `sha256:` hash of only the meaningful operator-facing state. Volatile fields (`generatedAt`, lease heartbeat / expiry timestamps, evidence ordering) are excluded, so two ticks over identical state hash equal.
 - `changed` / `emit` compare `digest` against the run's last emitted digest (the `monitor_last_emitted_digest` advisory). On a first observation, or whenever the meaningful state changes, both are `true`; a repeated unchanged tick reports both `false` so a caller can suppress a duplicate update. By default `workflow run monitor` reads this baseline without advancing it, so the command stays read-only.
-- `advanced` reports whether this tick persisted the suppression baseline. It is `false` for a plain read; it is `true` only when `--advance` was passed and the tick actually emitted (a first observation or a meaningful change). Passing `--advance` lets a cron loop poll the command repeatedly and suppress unchanged ticks across invocations from durable state alone: the first tick emits and advances the baseline, identical follow-up ticks report `emit: false` / `advanced: false`, and the baseline re-arms automatically on the next meaningful change. An unchanged `--advance` tick refreshes only `monitor_last_seen_digest`; it leaves the emitted baseline untouched.
+- `advanced` reports whether this tick persisted the suppression baseline.
+  It is `false` for a plain read; it is `true` only when `--advance` was passed and the tick actually emitted (a first observation or a meaningful change).
+  For a supported `momentum-native-coding` run, passing `--advance` lets a cron loop poll the command repeatedly and suppress unchanged ticks across invocations from durable state alone: the first tick emits and advances the baseline, identical follow-up ticks report `emit: false` / `advanced: false`, and the baseline re-arms automatically on the next meaningful change.
+  An unchanged `--advance` tick refreshes only `monitor_last_seen_digest`; it leaves the emitted baseline untouched.
 - `terminal` and `cleanup` make end-of-run handling explicit: a clean terminal outcome reports `cleanup: "release"` (release the monitor lease and stop ticking); every other phase reports `cleanup: "none"`. `cleanup` and `terminal` are reported even on a suppressed (`emit: false`) tick.
 - `currentStep`, `lastEvent`, `nextAction` (the next-action code), and `blockerReason` are the snapshot fields an operator reads at a glance; `blockerReason` is `null` unless `phase` is `blocked`.
 
@@ -1300,6 +1308,7 @@ Live dispatch / finalization recovery can also set the durable manual-recovery f
 | `run_id_required` | `<run-id>` was not supplied. |
 | `data_dir_failed` | Data directory resolution failed. |
 | `run_not_found` | `<run-id>` does not exist in `workflow_runs`. |
+| `advance_unsupported_source` | `--advance` was requested for a run whose source is not `momentum-native-coding`. |
 
 ### Text output
 
