@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.0](https://github.com/calvinnwq/momentum/compare/v0.10.0...v0.11.0) (2026-06-23)
+
+
+### Features
+
+* **workflow:** add native coding plan preview ([0f11c61](https://github.com/calvinnwq/momentum/commit/0f11c61ed22786737da54e21777649859d61f7e0))
+* **workflow:** add read-only workflow run preview-coding plan door ([3ff0626](https://github.com/calvinnwq/momentum/commit/3ff0626d1b881e684c75f9bca8494a1ba99b81cd))
+
 ## [0.10.0](https://github.com/calvinnwq/momentum/compare/v0.9.1...v0.10.0) (2026-06-22)
 
 
