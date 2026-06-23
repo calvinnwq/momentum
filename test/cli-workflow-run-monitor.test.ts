@@ -1067,6 +1067,75 @@ describe("momentum workflow run monitor (NGX-328)", () => {
     expect(digests.seen).toBe(payload.progress.digest);
   });
 
+  it("does not surface digest-only advance baselines as monitor drift advisories (NGX-511)", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-advance-no-ghost-drift";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, {
+        runId,
+        state: "running",
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE
+      });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "running",
+        order: 1
+      });
+      seedLease(db, {
+        runId,
+        leaseKind: "managed-step",
+        expiresAt: FRESH_EXPIRY
+      });
+    } finally {
+      db.close();
+    }
+
+    const advance = await run([
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--advance",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(advance.code).toBe(0);
+    expect(readMonitorDigests(dataDir, runId).emitted).not.toBeNull();
+
+    const monitor = await run([
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(monitor.code).toBe(0);
+    const monitorPayload = JSON.parse(monitor.stdout) as {
+      monitorDrift: unknown;
+    };
+    expect(monitorPayload.monitorDrift).toBeNull();
+
+    const status = await run([
+      "workflow",
+      "status",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(status.code).toBe(0);
+    const statusPayload = JSON.parse(status.stdout) as {
+      monitor: { monitorDrift: unknown };
+    };
+    expect(statusPayload.monitor.monitorDrift).toBeNull();
+  });
+
   it("refuses --advance for non-native workflow runs without mutating digests (NGX-511)", async () => {
     const dataDir = makeTempDir();
     const runId = "cwfp-advance-imported";
