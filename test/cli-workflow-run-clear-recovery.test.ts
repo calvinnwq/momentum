@@ -151,6 +151,39 @@ function readRecoveryState(
   }
 }
 
+function readStepState(
+  dataDir: string,
+  runId: string,
+  stepId: string
+): {
+  state: string;
+  operator_reason: string | null;
+  operator_actor: string | null;
+  operator_transition_at: number | null;
+  error_code: string | null;
+  error_message: string | null;
+} {
+  const db = openDb(dataDir);
+  try {
+    return db
+      .prepare(
+        `SELECT state, operator_reason, operator_actor, operator_transition_at,
+                error_code, error_message
+           FROM workflow_steps WHERE run_id = ? AND step_id = ?`
+      )
+      .get(runId, stepId) as {
+      state: string;
+      operator_reason: string | null;
+      operator_actor: string | null;
+      operator_transition_at: number | null;
+      error_code: string | null;
+      error_message: string | null;
+    };
+  } finally {
+    db.close();
+  }
+}
+
 function readRunMonitor(dataDir: string, runId: string): {
   monitor_last_seen_state: string | null;
   monitor_terminal: number | null;
@@ -299,6 +332,93 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
     });
     // The durable flag stays set so transitions remain blocked.
     expect(readRecoveryState(dataDir, runId).needs_manual_recovery).toBe(1);
+  });
+
+  it("reconciles a failed external-side-effect tail step from clear-recovery", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-external-tail-clear";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, {
+        runId,
+        state: "failed",
+        needsManualRecovery: true,
+        manualRecoveryReason: "failed_external_side_effect_step"
+      });
+      seedStep(db, {
+        runId,
+        stepId: "preflight",
+        kind: "preflight",
+        state: "succeeded",
+        order: 0
+      });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "succeeded",
+        order: 1
+      });
+      seedStep(db, {
+        runId,
+        stepId: "postflight",
+        kind: "postflight",
+        state: "succeeded",
+        order: 2
+      });
+      seedStep(db, {
+        runId,
+        stepId: "no-mistakes",
+        kind: "no-mistakes",
+        state: "succeeded",
+        order: 3
+      });
+      seedStep(db, {
+        runId,
+        stepId: "merge-cleanup",
+        kind: "merge-cleanup",
+        state: "failed",
+        order: 4
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "clear-recovery",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      command: "workflow run clear-recovery",
+      runId,
+      previousReason: "failed_external_side_effect_step",
+      reconciledStep: {
+        stepId: "merge-cleanup",
+        recoveryCode: "failed_external_side_effect_step",
+        state: "succeeded"
+      }
+    });
+    expect(readRecoveryState(dataDir, runId).needs_manual_recovery).toBe(0);
+    expect(readStepState(dataDir, runId, "merge-cleanup")).toMatchObject({
+      state: "succeeded",
+      operator_reason: "failed_external_side_effect_step",
+      operator_actor: "workflow run clear-recovery",
+      error_code: null,
+      error_message: null
+    });
+    expect(readRunMonitor(dataDir, runId)).toMatchObject({
+      monitor_last_seen_state: "succeeded",
+      monitor_terminal: 1,
+      monitor_step: null
+    });
   });
 
   it("clears the durable flag once the blocking condition is resolved", async () => {

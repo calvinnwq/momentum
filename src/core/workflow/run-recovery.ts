@@ -26,6 +26,11 @@ import type { MomentumDb } from "../../adapters/db.js";
 import { prepareRetryableDispatchedStepForRecoveryClear } from "./dispatch-retry.js";
 import { loadWorkflowRunDetail } from "./status.js";
 import type { WorkflowMonitorRecoveryCode } from "./monitor-state.js";
+import { refreshWorkflowRunRuntimeState } from "./runtime-state.js";
+import {
+  isExternalSideEffectTailStepKind,
+  type WorkflowStepKind
+} from "./run-reducer.js";
 
 export type MarkWorkflowRunNeedsManualRecoveryInput = {
   runId: string;
@@ -217,6 +222,11 @@ export type ClearWorkflowRunManualRecoveryGuardedResult =
         stepId: string;
         recoveryCode: string;
       };
+      reconciledStep?: {
+        stepId: string;
+        recoveryCode: "failed_external_side_effect_step";
+        state: "succeeded";
+      };
     }
   | {
       ok: false;
@@ -292,7 +302,7 @@ export function clearWorkflowRunManualRecoveryGuarded(
       runId: input.runId,
       now
     });
-    const recoveryDetail = preparedRetry.prepared
+    let recoveryDetail = preparedRetry.prepared
       ? loadWorkflowRunDetail(db, input.runId, detailOptions)
       : detail;
     if (!recoveryDetail) {
@@ -302,6 +312,34 @@ export function clearWorkflowRunManualRecoveryGuarded(
         reason: "run_not_found",
         message: `Workflow run ${input.runId} disappeared during retry preparation.`
       };
+    }
+
+    let reconciledStep:
+      | {
+          stepId: string;
+          recoveryCode: "failed_external_side_effect_step";
+          state: "succeeded";
+        }
+      | undefined;
+    const recoveryBeforeClear = recoveryDetail.monitor.recovery;
+    if (
+      recoveryBeforeClear?.code === "failed_external_side_effect_step" &&
+      recoveryBeforeClear.stepId !== null
+    ) {
+      reconciledStep = reconcileExternalSideEffectTailStepForRecoveryClear(db, {
+        runId: input.runId,
+        stepId: recoveryBeforeClear.stepId,
+        now
+      });
+      recoveryDetail = loadWorkflowRunDetail(db, input.runId, detailOptions);
+      if (!recoveryDetail) {
+        db.exec("ROLLBACK");
+        return {
+          ok: false,
+          reason: "run_not_found",
+          message: `Workflow run ${input.runId} disappeared during external-side-effect reconciliation.`
+        };
+      }
     }
 
     const recovery = recoveryDetail.monitor.recovery;
@@ -347,7 +385,8 @@ export function clearWorkflowRunManualRecoveryGuarded(
               recoveryCode: preparedRetry.recoveryCode
             }
           }
-        : {})
+        : {}),
+      ...(reconciledStep !== undefined ? { reconciledStep } : {})
     };
   } catch (error) {
     try {
@@ -357,4 +396,60 @@ export function clearWorkflowRunManualRecoveryGuarded(
     }
     throw error;
   }
+}
+
+function reconcileExternalSideEffectTailStepForRecoveryClear(
+  db: MomentumDb,
+  input: { runId: string; stepId: string; now: number }
+):
+  | {
+      stepId: string;
+      recoveryCode: "failed_external_side_effect_step";
+      state: "succeeded";
+    }
+  | undefined {
+  const row = db
+    .prepare(
+      `SELECT kind, state, required
+         FROM workflow_steps WHERE run_id = ? AND step_id = ?`
+    )
+    .get(input.runId, input.stepId) as
+    | { kind: string; state: string; required: number }
+    | undefined;
+  if (
+    row === undefined ||
+    row.state !== "failed" ||
+    row.required !== 1 ||
+    !isExternalSideEffectTailStepKind(row.kind as WorkflowStepKind)
+  ) {
+    return undefined;
+  }
+
+  const updated = db
+    .prepare(
+      `UPDATE workflow_steps
+          SET state = 'succeeded',
+              error_code = NULL,
+              error_message = NULL,
+              result_digest = NULL,
+              operator_reason = 'failed_external_side_effect_step',
+              operator_actor = 'workflow run clear-recovery',
+              operator_evidence_pointer = NULL,
+              operator_ledger_pointer = NULL,
+              operator_transition_at = ?,
+              finished_at = ?,
+              updated_at = ?
+        WHERE run_id = ?
+          AND step_id = ?
+          AND state = 'failed'`
+    )
+    .run(input.now, input.now, input.now, input.runId, input.stepId);
+  if (Number(updated.changes) === 0) return undefined;
+
+  refreshWorkflowRunRuntimeState(db, { runId: input.runId, now: input.now });
+  return {
+    stepId: input.stepId,
+    recoveryCode: "failed_external_side_effect_step",
+    state: "succeeded"
+  };
 }

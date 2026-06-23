@@ -193,12 +193,10 @@ When the failed required step is an external-side-effect tail step
 (`merge-cleanup` or `linear-refresh`), the monitor view classifies it as
 `failed_external_side_effect_step` rather than the generic `failed_required_step`,
 and the recommended next action is `clear_recovery` instead of
-`rerun_failed_step`. These tail steps can push a branch, merge a pull request, or
-write the tracker before exiting non-zero, so the run stays terminal `failed` but
-the recovery guidance steers operators to verify the remote, pull request, and
-tracker state and reconcile from that external success evidence rather than
-re-running the step, which could double-merge the pull request or re-write the
-tracker.
+`rerun_failed_step`.
+These tail steps can push a branch, merge a pull request, or write the tracker before exiting non-zero.
+After the operator verifies the remote, pull request, and tracker state, `workflow run clear-recovery` marks the tail step `succeeded`, records the operator reconciliation on the step row, refreshes the run state, and clears the durable manual-recovery flag.
+That reconciles from external success evidence rather than re-running the step, which could double-merge the pull request or re-write the tracker.
 
 The generated run-scoped `recovery.md` artifact is schema-versioned and
 includes the run ID, step ID, recovery classification, repo path, classified-at

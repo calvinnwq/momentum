@@ -645,6 +645,9 @@ export function emitWorkflowRunClearRecovery(
   if (result.retryPrepared !== undefined) {
     payload["retryPrepared"] = result.retryPrepared;
   }
+  if (result.reconciledStep !== undefined) {
+    payload["reconciledStep"] = result.reconciledStep;
+  }
 
   if (parsed.json) {
     writeJson(io.stdout, payload);
@@ -659,6 +662,11 @@ export function emitWorkflowRunClearRecovery(
     ...(result.retryPrepared !== undefined
       ? [
           `Retry prepared: ${result.retryPrepared.stepId} (${result.retryPrepared.recoveryCode})`
+        ]
+      : []),
+    ...(result.reconciledStep !== undefined
+      ? [
+          `Reconciled step: ${result.reconciledStep.stepId} (${result.reconciledStep.recoveryCode} -> ${result.reconciledStep.state})`
         ]
       : []),
     `Data dir: ${dataDir}`,
