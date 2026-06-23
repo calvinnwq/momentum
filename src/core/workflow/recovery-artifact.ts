@@ -145,6 +145,11 @@ const SAFE_NEXT_STEPS: Record<
     "Decide whether to retry the step or keep the run blocked for manual handling.",
     "Do not approve past the failed step until the failure is understood."
   ],
+  failed_external_side_effect_step: [
+    "Verify the external side effects the tail step may have already landed: the pushed branch, the merged pull request, and the tracker / Linear intent state.",
+    "Reconcile from that external success evidence rather than re-running the step; a blind re-run could double-merge the pull request or re-write the tracker.",
+    "Clear recovery with `momentum workflow run clear-recovery <run-id>` only once the external state is confirmed consistent."
+  ],
   head_mismatch: [
     "Inspect the unexpected HEAD against the recorded base SHA with `git -C <repo> log`.",
     "Momentum refused a destructive reset: a non-Momentum commit on HEAD must be preserved, not discarded.",

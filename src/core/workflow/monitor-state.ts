@@ -10,7 +10,14 @@
  * checkpoint.
  *
  * Recovery codes: `stale_running_step`, `ghost_active_no_lease`,
- * `manual_recovery_lease`, `monitor_drift_stale`, `failed_required_step`.
+ * `manual_recovery_lease`, `monitor_drift_stale`, `failed_required_step`,
+ * `failed_external_side_effect_step`. The last splits off the subset of
+ * `failed_required_step` where the failed required step is an external-side-
+ * effect tail step (merge-cleanup / linear-refresh): its child may already have
+ * pushed a branch, merged a PR, or written the tracker before exiting non-zero,
+ * so the recovery steers operators to verify external state and reconcile via
+ * `clear-recovery` rather than the `rerun_failed_step` that an ordinary failed
+ * step gets - a naive re-run there could double-merge or re-write.
  * `ghost_active_no_lease` vs `stale_running_step` is discriminated on whether
  * any non-monitor (`managed-step` / `dispatch`) lease has ever been recorded
  * for the run — a workflow that only has a monitor lease has never dispatched
@@ -32,6 +39,7 @@
 import {
   classifyWorkflowLease,
   deriveWorkflowRunState,
+  isExternalSideEffectTailStepKind,
   isTerminalRunState,
   type WorkflowLeaseFreshnessClassification,
   type WorkflowLeaseKind,
@@ -59,7 +67,8 @@ export const WORKFLOW_MONITOR_RECOVERY_CODES = [
   "ghost_active_no_lease",
   "manual_recovery_lease",
   "monitor_drift_stale",
-  "failed_required_step"
+  "failed_required_step",
+  "failed_external_side_effect_step"
 ] as const;
 export type WorkflowMonitorRecoveryCode =
   (typeof WORKFLOW_MONITOR_RECOVERY_CODES)[number];
@@ -373,6 +382,14 @@ function classifyRecovery(input: RecoveryInput): WorkflowMonitorRecovery | null 
     const failed = input.steps.find(
       (s) => s.state === "failed" && s.required
     );
+    if (failed && isExternalSideEffectTailStepKind(failed.kind)) {
+      return {
+        code: "failed_external_side_effect_step",
+        message:
+          "A required external-side-effect tail step finalized in failed state after it may have already pushed a branch, merged a pull request, or written the tracker. Verify the remote, pull request, and tracker state, then reconcile via `momentum workflow run clear-recovery <run-id>` - do not blindly re-run the step, which could double-merge or re-write.",
+        stepId: failed.stepId
+      };
+    }
     return {
       code: "failed_required_step",
       message:
@@ -460,6 +477,15 @@ function decideNextAction(input: NextActionInput): WorkflowMonitorNextAction {
   if (input.runState === "failed") {
     const failedStep =
       input.steps.find((s) => s.state === "failed" && s.required) ?? null;
+    if (failedStep && isExternalSideEffectTailStepKind(failedStep.kind)) {
+      return {
+        code: "clear_recovery",
+        stepId: failedStep.stepId,
+        leaseKind: null,
+        detail:
+          "An external-side-effect tail step failed after it may have already merged the pull request or written the tracker. Verify the remote, pull request, and tracker state, then clear recovery to reconcile - do not re-run the step blindly."
+      };
+    }
     return {
       code: "rerun_failed_step",
       stepId: failedStep?.stepId ?? null,

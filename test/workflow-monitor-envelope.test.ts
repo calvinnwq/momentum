@@ -154,6 +154,25 @@ describe("classifyWorkflowMonitorReport", () => {
     });
   });
 
+  // A failed external-side-effect tail step (merge-cleanup / linear-refresh) may
+  // have already pushed a branch or merged a PR before failing. The operator-
+  // facing report must surface it as a recoverable ask - not mask it behind the
+  // generic failed-required-step rerun guidance and not present it as a clean
+  // terminal failure - even before the durable manual-recovery flag is set.
+  it("asks for operator recovery when an external-side-effect tail step failed", () => {
+    const monitor = monitorFrom({
+      steps: [step("merge-cleanup", "merge-cleanup", "failed", 0)]
+    });
+    expect(monitor.runState).toBe("failed");
+    expect(monitor.recovery?.code).toBe("failed_external_side_effect_step");
+    const report = classifyWorkflowMonitorReport(monitor, false);
+    expect(report).toEqual({
+      disposition: "recover",
+      reportable: true,
+      reportReason: "recovery_required"
+    });
+  });
+
   it("asks for operator recovery on a stale running step", () => {
     const monitor = monitorFrom({
       steps: [step("implementation", "implementation", "running", 0)],
@@ -368,6 +387,26 @@ describe("buildWorkflowMonitorEnvelope", () => {
     );
     expect(envelope.needsManualRecovery).toBe(true);
     expect(envelope.manualRecoveryReason).toBe("repo lock was lost");
+  });
+
+  it("surfaces a failed external-side-effect tail step as a recoverable envelope, not a clean terminal failure", () => {
+    const monitor = monitorFrom({
+      steps: [step("linear-refresh", "linear-refresh", "failed", 0)]
+    });
+    expect(monitor.recovery?.code).toBe("failed_external_side_effect_step");
+    const envelope = buildWorkflowMonitorEnvelope(
+      detailFrom({ run: runRow({ state: "failed" }), monitor }),
+      { generatedAt: 11 }
+    );
+    // The substrate is terminally failed, yet the operator-facing envelope must
+    // present a recoverable ask (reconcile from external success evidence), not a
+    // misleading clean terminal failure after a PR may already have merged.
+    expect(envelope.runState).toBe("failed");
+    expect(envelope.terminal).toBe(true);
+    expect(envelope.disposition).toBe("recover");
+    expect(envelope.reportReason).toBe("recovery_required");
+    expect(envelope.reportable).toBe(true);
+    expect(envelope.recovery?.code).toBe("failed_external_side_effect_step");
   });
 
   it("summarizes counts and passes through typed evidence pointers", () => {

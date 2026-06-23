@@ -166,9 +166,11 @@ export function getWorkflowRunManualRecoveryState(
 /**
  * The monitor-reducer recovery codes that represent a hard blocking condition:
  * a manual-recovery lease holding the run blocked, a ghost / stale running step
- * with no live evidence, or a failed required step. While any of these is still
- * classified by `deriveWorkflowMonitorState`, clearing the durable flag would
- * re-open transitions that make recovery worse, so the guarded clear refuses.
+ * with no live evidence, or a failed required step (including the external-side-
+ * effect tail-step variant that still needs operator reconciliation before the
+ * run can be cleared). While any of these is still classified by
+ * `deriveWorkflowMonitorState`, clearing the durable flag would re-open
+ * transitions that make recovery worse, so the guarded clear refuses.
  *
  * `monitor_drift_stale` is deliberately excluded: it is an advisory drift
  * between a (possibly stale) monitor snapshot and the substrate, not a hard
@@ -180,7 +182,8 @@ export const BLOCKING_WORKFLOW_RECOVERY_CODES: ReadonlySet<WorkflowMonitorRecove
     "manual_recovery_lease",
     "ghost_active_no_lease",
     "stale_running_step",
-    "failed_required_step"
+    "failed_required_step",
+    "failed_external_side_effect_step"
   ]);
 
 export function isBlockingWorkflowRecoveryCode(

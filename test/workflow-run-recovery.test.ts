@@ -292,11 +292,20 @@ describe("getWorkflowRunManualRecoveryState", () => {
 });
 
 describe("isBlockingWorkflowRecoveryCode", () => {
-  it("treats the four hard recovery codes as blocking", () => {
+  it("treats the hard recovery codes as blocking", () => {
     expect(isBlockingWorkflowRecoveryCode("manual_recovery_lease")).toBe(true);
     expect(isBlockingWorkflowRecoveryCode("ghost_active_no_lease")).toBe(true);
     expect(isBlockingWorkflowRecoveryCode("stale_running_step")).toBe(true);
     expect(isBlockingWorkflowRecoveryCode("failed_required_step")).toBe(true);
+  });
+
+  it("treats a failed external-side-effect tail step as blocking", () => {
+    // The PR may have already merged before the tail step exited non-zero, so
+    // the run must stay blocked for operator reconciliation rather than being
+    // cleared as if nothing landed.
+    expect(
+      isBlockingWorkflowRecoveryCode("failed_external_side_effect_step")
+    ).toBe(true);
   });
 
   it("treats the advisory monitor_drift_stale code as non-blocking", () => {

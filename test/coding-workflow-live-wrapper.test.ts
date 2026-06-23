@@ -258,6 +258,55 @@ describe("runCodingWorkflowLiveWrapper", () => {
     ]);
   });
 
+  it.each(["merge-cleanup", "linear-refresh"] as const)(
+    "guides %s failures toward external-state verification and clear-recovery",
+    (stepKind) => {
+      const dir = makeTempDir();
+      const repo = path.join(dir, "repo");
+      const iteration = path.join(dir, "run");
+      const resultPath = path.join(iteration, "result.json");
+      fs.mkdirSync(repo);
+      const configPath = path.join(dir, "wrapper-config.json");
+      writeJson(configPath, {
+        steps: {
+          [stepKind]: {
+            command: "/bin/sh",
+            args: ["-c", "exit 1"],
+            cwd: "repo",
+            timeout_sec: 30,
+            env_allow: ["PATH"],
+            commit: { type: "chore", subject: `complete ${stepKind}` }
+          }
+        }
+      });
+
+      const outcome = runCodingWorkflowLiveWrapper(
+        deps({
+          MOMENTUM_STEP_KIND: stepKind,
+          MOMENTUM_REPO_PATH: repo,
+          MOMENTUM_ITERATION_DIR: iteration,
+          MOMENTUM_RESULT_PATH: resultPath,
+          [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
+          PATH: process.env.PATH
+        })
+      );
+
+      expect(outcome.success).toBe(false);
+      const result = readResult(resultPath);
+      expect(result.success).toBe(false);
+      // A tail step that performs external work (push / merge / tracker write)
+      // may have already merged a PR before failing, so the durable guidance must
+      // not imply a naive re-run and must point at the safe recovery path.
+      expect(result.remaining_work).not.toContain(
+        `Fix ${stepKind} command failure before advancing the workflow.`
+      );
+      const guidance = result.remaining_work.join("\n");
+      expect(guidance).toContain(stepKind);
+      expect(guidance).toContain("external side effects");
+      expect(guidance).toContain("clear-recovery");
+    }
+  );
+
   it("kills the full configured command tree on timeout", () => {
     if (process.platform === "win32") return;
 

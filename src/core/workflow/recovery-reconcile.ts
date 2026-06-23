@@ -9,7 +9,8 @@
  * monitor state and *sets* the durable flag (and renders the per-run
  * `recovery.md` artifact) when `deriveWorkflowMonitorState` classifies a
  * blocking recovery code (`manual_recovery_lease` / `ghost_active_no_lease` /
- * `stale_running_step` / `failed_required_step`).
+ * `stale_running_step` / `failed_required_step` /
+ * `failed_external_side_effect_step`).
  *
  * This is a composition seam, not new policy. The monitor reducer stays the
  * single source of truth for the recovery code, message, and recommended next

@@ -135,7 +135,8 @@ Workflow runs have a sibling manual-recovery surface scoped to
 `.agent-workflows/<run-id>/`. `workflow import` re-derives the run's monitor
 view after persisting rows; when the durable substrate still has a blocking
 condition (`manual_recovery_lease`, `ghost_active_no_lease`,
-`stale_running_step`, or `failed_required_step`), Momentum sets
+`stale_running_step`, `failed_required_step`, or
+`failed_external_side_effect_step`), Momentum sets
 `workflow_runs.needs_manual_recovery` and renders
 `<run-dir>/recovery.md`. Live workflow execution uses the same durable flag and
 artifact when dispatch or finalization cannot safely continue, preserving stable
@@ -187,6 +188,17 @@ unavailable, `workflow run clear-recovery` prepares the step for a scheduler
 retry after the operator repairs the environment. The clear output includes
 `retryPrepared`; the previous failed executor round remains durable, and an
 already-terminal successful step is only reattached/reconciled, not rerun.
+
+When the failed required step is an external-side-effect tail step
+(`merge-cleanup` or `linear-refresh`), the monitor view classifies it as
+`failed_external_side_effect_step` rather than the generic `failed_required_step`,
+and the recommended next action is `clear_recovery` instead of
+`rerun_failed_step`. These tail steps can push a branch, merge a pull request, or
+write the tracker before exiting non-zero, so the run stays terminal `failed` but
+the recovery guidance steers operators to verify the remote, pull request, and
+tracker state and reconcile from that external success evidence rather than
+re-running the step, which could double-merge the pull request or re-write the
+tracker.
 
 The generated run-scoped `recovery.md` artifact is schema-versioned and
 includes the run ID, step ID, recovery classification, repo path, classified-at

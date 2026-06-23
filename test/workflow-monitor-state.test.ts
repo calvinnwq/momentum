@@ -79,6 +79,7 @@ describe("workflow-monitor-state constants", () => {
     expect([...WORKFLOW_MONITOR_RECOVERY_CODES].sort()).toEqual(
       [
         "failed_required_step",
+        "failed_external_side_effect_step",
         "ghost_active_no_lease",
         "manual_recovery_lease",
         "monitor_drift_stale",
@@ -455,6 +456,49 @@ describe("deriveWorkflowMonitorState: failed required step suggests rerun_failed
     expect(result.nextAction.code).toBe("rerun_failed_step");
     expect(result.nextAction.stepId).toBe("implementation");
   });
+});
+
+describe("deriveWorkflowMonitorState: failed external-side-effect tail step steers to clear_recovery", () => {
+  it.each([
+    ["merge-cleanup"] as const,
+    ["linear-refresh"] as const
+  ])(
+    "classifies a failed required %s step as failed_external_side_effect_step with a clear_recovery nextAction",
+    (kind) => {
+      const steps: WorkflowStepRecord[] = [
+        step("preflight", "preflight", "succeeded", 0),
+        step("implementation", "implementation", "succeeded", 1),
+        step("postflight", "postflight", "succeeded", 2),
+        step("no-mistakes", "no-mistakes", "succeeded", 3),
+        step(kind, kind, "failed", 4)
+      ];
+      const result = deriveWorkflowMonitorState(
+        buildInput({
+          steps,
+          leases: [
+            lease({
+              leaseKind: "managed-step",
+              releasedAt: 9_500,
+              expiresAt: 5_000
+            })
+          ],
+          now: 100_000
+        })
+      );
+
+      // The run is still terminal failed (a required step finalized failed),
+      // but the recovery guidance must steer toward reconcile, not a naive
+      // rerun that could double-merge a PR or re-write the tracker.
+      expect(result.runState).toBe("failed");
+      expect(result.terminal).toBe(true);
+      expect(result.recovery?.code).toBe("failed_external_side_effect_step");
+      expect(result.recovery?.stepId).toBe(kind);
+      expect(result.recovery?.message ?? "").toContain("clear-recovery");
+      expect(result.nextAction.code).toBe("clear_recovery");
+      expect(result.nextAction.stepId).toBe(kind);
+      expect(result.nextAction.code).not.toBe("rerun_failed_step");
+    }
+  );
 });
 
 describe("deriveWorkflowMonitorState: live evidence wins over stale lease for resume_running", () => {
