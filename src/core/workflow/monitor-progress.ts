@@ -180,8 +180,8 @@ function deriveLastEvent(envelope: WorkflowMonitorEnvelope): string {
 
 /**
  * The meaningful-state projection. Deliberately excludes `generatedAt`, the
- * lease views (heartbeat / expiry churn every tick), evidence, and the full
- * gate list — only the structural signals that an operator would act on are
+ * lease views (heartbeat / expiry churn every tick), the evidence list, and
+ * resolved gates. Only the structural signals that an operator would act on are
  * folded into the digest, so steady-state heartbeats compare equal.
  */
 function computeDigest(
@@ -204,6 +204,22 @@ function computeDigest(
     recoveryCode: envelope.recovery?.code ?? null,
     monitorDriftReason: envelope.monitorDrift?.reason ?? null,
     gatesOpen: envelope.counts.gatesOpen,
+    openGates: envelope.gates
+      .filter((gate) => gate.resolvedAt === null)
+      .map((gate) => ({
+        gateId: gate.gateId,
+        stepRunId: gate.stepRunId,
+        invocationId: gate.invocationId,
+        roundId: gate.roundId,
+        targetScope: gate.targetScope,
+        gateType: gate.gateType,
+        reason: gate.reason,
+        evidence: gate.evidence,
+        allowedActions: [...gate.allowedActions],
+        recommendedAction: gate.recommendedAction,
+        policyEnvelope: [...gate.policyEnvelope]
+      }))
+      .sort((a, b) => (a.gateId < b.gateId ? -1 : a.gateId > b.gateId ? 1 : 0)),
     stepsByState: envelope.counts.stepsByState,
     lastCheckpointStepId: envelope.lastCheckpoint?.stepId ?? null,
     lastCheckpointSource: envelope.lastCheckpoint?.source ?? null,

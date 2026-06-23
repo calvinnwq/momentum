@@ -104,6 +104,65 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
     expect(second.emit).toBe(false);
   });
 
+  it("emits when the open gate identity changes without changing the open count", () => {
+    const first = deriveWorkflowMonitorProgress(
+      makeEnvelope({
+        gates: [
+          {
+            gateId: "gate-approval",
+            workflowRunId: "cwfp-run",
+            stepRunId: "implementation",
+            invocationId: null,
+            roundId: null,
+            targetScope: "step",
+            gateType: "approval_required",
+            reason: "Review the implementation.",
+            evidence: "goals/cwfp-run/gates/gate-approval.json",
+            allowedActions: ["approve", "reject"],
+            recommendedAction: "approve",
+            policyEnvelope: ["approve"],
+            resolvedAt: null,
+            resolvedBy: null,
+            resolutionMode: null,
+            chosenAction: null,
+            resolution: null
+          }
+        ],
+        counts: makeCounts({ gates: 1, gatesOpen: 1 })
+      })
+    );
+    const second = deriveWorkflowMonitorProgress(
+      makeEnvelope({
+        gates: [
+          {
+            gateId: "gate-recovery",
+            workflowRunId: "cwfp-run",
+            stepRunId: "implementation",
+            invocationId: null,
+            roundId: null,
+            targetScope: "step",
+            gateType: "manual_recovery_required",
+            reason: "Resolve the failed verifier.",
+            evidence: "goals/cwfp-run/gates/gate-recovery.json",
+            allowedActions: ["retry", "skip"],
+            recommendedAction: "retry",
+            policyEnvelope: ["retry"],
+            resolvedAt: null,
+            resolvedBy: null,
+            resolutionMode: null,
+            chosenAction: null,
+            resolution: null
+          }
+        ],
+        counts: makeCounts({ gates: 1, gatesOpen: 1 })
+      }),
+      { priorDigest: first.digest }
+    );
+    expect(second.digest).not.toBe(first.digest);
+    expect(second.changed).toBe(true);
+    expect(second.emit).toBe(true);
+  });
+
   it("excludes volatile timestamps and lease heartbeats from the digest", () => {
     const lease = {
       leaseKind: "managed-step" as const,
