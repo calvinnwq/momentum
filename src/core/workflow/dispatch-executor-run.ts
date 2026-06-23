@@ -51,7 +51,10 @@
 
 import type { MomentumDb } from "../../adapters/db.js";
 import { isTerminalExecutorInvocationState } from "../executors/loop-reducer.js";
-import { loadExecutorInvocation } from "../executors/loop-persist.js";
+import {
+  listExecutorRoundsForInvocation,
+  loadExecutorInvocation
+} from "../executors/loop-persist.js";
 import { deriveDispatchInvocationId } from "./dispatch-execute.js";
 import {
   terminalizeDispatchedExecutorInvocation,
@@ -90,6 +93,18 @@ export type DispatchedStepExecutorContext = {
   config?: Record<string, unknown>;
 };
 
+type DispatchedStepExecutorSelection = {
+  agentProvider: string | null;
+  model: string | null;
+  effort: string | null;
+};
+
+const DEFAULT_DISPATCHED_STEP_EXECUTOR_SELECTION: DispatchedStepExecutorSelection = {
+  agentProvider: null,
+  model: null,
+  effort: null
+};
+
 /**
  * Build the {@link WorkflowStepExecutorInput} for a dispatched step from its
  * durable `kind` plus the per-run execution context. Optional fields are
@@ -99,13 +114,18 @@ export function buildDispatchedStepExecutorInput(
   kind: WorkflowStepExecutorKind,
   runId: string,
   stepId: string,
-  exec: DispatchedStepExecutorContext
+  exec: DispatchedStepExecutorContext,
+  selection: DispatchedStepExecutorSelection =
+    DEFAULT_DISPATCHED_STEP_EXECUTOR_SELECTION
 ): WorkflowStepExecutorInput {
   return {
     runId,
     stepId,
     kind,
     attempt: exec.attempt ?? 1,
+    agentProvider: selection.agentProvider,
+    model: selection.model,
+    effort: selection.effort,
     repoPath: exec.repoPath,
     runDir: exec.runDir,
     resultJsonPath: exec.resultJsonPath,
@@ -249,7 +269,8 @@ export function executeAndReconcileDispatchedWorkflowStep(
     step.kind,
     runId,
     stepId,
-    exec
+    exec,
+    readDispatchedStepExecutorSelection(db, invocationId)
   );
   const executorResult = dispatchWorkflowStepExecutor(
     step.kind,
@@ -287,6 +308,20 @@ export function executeAndReconcileDispatchedWorkflowStep(
     executorResult,
     terminalize,
     reconcile: reconciled.reconcile
+  };
+}
+
+function readDispatchedStepExecutorSelection(
+  db: MomentumDb,
+  invocationId: string
+): DispatchedStepExecutorSelection {
+  const rounds = listExecutorRoundsForInvocation(db, invocationId);
+  const latest = rounds.at(-1);
+  if (latest === undefined) return DEFAULT_DISPATCHED_STEP_EXECUTOR_SELECTION;
+  return {
+    agentProvider: latest.agentProvider,
+    model: latest.model,
+    effort: latest.effort
   };
 }
 

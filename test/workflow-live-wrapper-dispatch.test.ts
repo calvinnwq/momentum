@@ -563,6 +563,51 @@ describe("createLiveWrapperWorkflowDispatch — recovery retry after repaired wr
     });
   });
 
+  it("passes persisted route selection into live-wrapper executor input", () => {
+    const db = openNativeCodingDbWithRoute({
+      steps: {
+        "merge-cleanup": {
+          harness: "codex",
+          model: "gpt-5.1",
+          effort: "high"
+        }
+      }
+    });
+    db.prepare(
+      `UPDATE workflow_steps
+          SET state = 'succeeded', started_at = ?, finished_at = ?, result_digest = ?
+        WHERE run_id = ? AND step_order < 4`
+    ).run(NOW, NOW, "test-predecessor", RUN_ID);
+    const claim = approveAndClaim(db, "merge-cleanup");
+    const observed: Array<{
+      agentProvider: unknown;
+      model: unknown;
+      effort: unknown;
+    }> = [];
+    const { registry } = countingRegistry((input) => {
+      observed.push({
+        agentProvider: input.agentProvider,
+        model: input.model,
+        effort: input.effort
+      });
+      return succeededResult(input);
+    });
+    const dispatch = createLiveWrapperWorkflowDispatch(
+      executeWorkflowStepDispatch,
+      { registry, deriveExec: () => ({ ok: true, exec: EXEC_CONTEXT }) }
+    );
+
+    dispatch(claim, tickContext(db, TICK_AT));
+
+    expect(observed).toEqual([
+      {
+        agentProvider: "codex",
+        model: "gpt-5.1",
+        effort: "high"
+      }
+    ]);
+  });
+
   it("reattaches to already-terminal merge-cleanup evidence without rerunning side effects", () => {
     const db = openSeededDb();
     db.prepare(

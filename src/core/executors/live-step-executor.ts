@@ -124,6 +124,11 @@ export function buildLiveStepWrapperInput(
     repoPath: input.repoPath,
     iterationDir: input.runDir,
     executorLogPath: input.executorLogPath,
+    ...(input.agentProvider !== undefined
+      ? { agentProvider: input.agentProvider }
+      : {}),
+    ...(input.model !== undefined ? { model: input.model } : {}),
+    ...(input.effort !== undefined ? { effort: input.effort } : {}),
     ...(input.promptPath !== undefined ? { promptPath: input.promptPath } : {}),
     ...(input.env !== undefined ? { env: input.env } : {}),
     ...(options?.outputMaxBytes !== undefined

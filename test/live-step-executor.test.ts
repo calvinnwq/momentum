@@ -292,6 +292,35 @@ describe("createLiveWorkflowStepExecutor", () => {
     expect(fs.existsSync(path.join(runDir, "executor.log"))).toBe(true);
   });
 
+  it("injects selected route fields into the live wrapper process environment", () => {
+    const repoPath = makeTempDir("momentum-live-exec-repo-");
+    const runDir = makeTempDir("momentum-live-exec-run-");
+    const assertSelectionAndWriteResult = [
+      'test "$MOMENTUM_AGENT_PROVIDER" = codex',
+      'test "$MOMENTUM_MODEL" = gpt-5.1',
+      'test "$MOMENTUM_EFFORT" = high',
+      WRITE_VALID_RESULT
+    ].join(" && ");
+    const executor = createLiveWorkflowStepExecutor(
+      "implementation",
+      makeConfig({ args: ["-c", assertSelectionAndWriteResult] })
+    );
+    const out = executor.execute(
+      makeExecutorInput({
+        repoPath,
+        runDir,
+        executorLogPath: path.join(runDir, "executor.log"),
+        resultJsonPath: path.join(runDir, "result.json"),
+        agentProvider: "codex",
+        model: "gpt-5.1",
+        effort: "high"
+      })
+    );
+    expect(out.ok).toBe(true);
+    if (!out.ok) return;
+    expect(out.result.state).toBe("succeeded");
+  });
+
   it("maps a failing live command to an ok:false command_failed dispatch error", () => {
     const repoPath = makeTempDir("momentum-live-exec-repo-");
     const runDir = makeTempDir("momentum-live-exec-run-");

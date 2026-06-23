@@ -90,6 +90,9 @@ export const LIVE_STEP_WRAPPER_ENV_VARS = {
   STEP_ID: "MOMENTUM_STEP_ID",
   STEP_KIND: "MOMENTUM_STEP_KIND",
   ATTEMPT: "MOMENTUM_ATTEMPT",
+  AGENT_PROVIDER: "MOMENTUM_AGENT_PROVIDER",
+  MODEL: "MOMENTUM_MODEL",
+  EFFORT: "MOMENTUM_EFFORT",
   REPO_PATH: "MOMENTUM_REPO_PATH",
   ITERATION_DIR: "MOMENTUM_ITERATION_DIR",
   PROMPT_PATH: "MOMENTUM_PROMPT_PATH",
@@ -102,6 +105,9 @@ export type LiveStepWrapperInput = {
   runId: string;
   stepId: string;
   attempt: number;
+  agentProvider?: string | null;
+  model?: string | null;
+  effort?: string | null;
   /** Absolute repo root; the cwd when `config.cwd` is "repo". */
   repoPath: string;
   /** Absolute iteration artifact directory; the cwd when `config.cwd` is
@@ -1074,6 +1080,15 @@ function resolveEnv(
   env[LIVE_STEP_WRAPPER_ENV_VARS.STEP_ID] = input.stepId;
   env[LIVE_STEP_WRAPPER_ENV_VARS.STEP_KIND] = input.kind;
   env[LIVE_STEP_WRAPPER_ENV_VARS.ATTEMPT] = String(input.attempt);
+  if (input.agentProvider !== undefined && input.agentProvider !== null) {
+    env[LIVE_STEP_WRAPPER_ENV_VARS.AGENT_PROVIDER] = input.agentProvider;
+  }
+  if (input.model !== undefined && input.model !== null) {
+    env[LIVE_STEP_WRAPPER_ENV_VARS.MODEL] = input.model;
+  }
+  if (input.effort !== undefined && input.effort !== null) {
+    env[LIVE_STEP_WRAPPER_ENV_VARS.EFFORT] = input.effort;
+  }
   env[LIVE_STEP_WRAPPER_ENV_VARS.REPO_PATH] = input.repoPath;
   env[LIVE_STEP_WRAPPER_ENV_VARS.ITERATION_DIR] = input.iterationDir;
   if (input.promptPath !== undefined) {

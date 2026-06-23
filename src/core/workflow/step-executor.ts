@@ -119,6 +119,9 @@ export type WorkflowStepExecutorInput = {
   stepId: string;
   kind: WorkflowStepExecutorKind;
   attempt: number;
+  agentProvider?: string | null;
+  model?: string | null;
+  effort?: string | null;
   repoPath: string;
   runDir: string;
   promptPath?: string;

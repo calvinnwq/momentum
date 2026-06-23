@@ -172,6 +172,51 @@ describe("runCodingWorkflowLiveWrapper", () => {
     expect(result.key_changes_made).toEqual(["Verified repo path."]);
   });
 
+  it("forwards selected route fields to the configured child command", () => {
+    const dir = makeTempDir();
+    const repo = path.join(dir, "repo");
+    const iteration = path.join(dir, "run");
+    const resultPath = path.join(iteration, "result.json");
+    fs.mkdirSync(repo);
+    const configPath = path.join(dir, "wrapper-config.json");
+    writeJson(configPath, {
+      steps: {
+        implementation: {
+          command: "/bin/sh",
+          args: [
+            "-c",
+            'test "$MOMENTUM_AGENT_PROVIDER" = codex && test "$MOMENTUM_MODEL" = gpt-5.1 && test "$MOMENTUM_EFFORT" = high'
+          ],
+          cwd: "repo",
+          timeout_sec: 30,
+          env_allow: [],
+          success_summary: "route selection reached child command",
+          commit: { type: "chore", subject: "complete implementation" }
+        }
+      }
+    });
+
+    const outcome = runCodingWorkflowLiveWrapper(
+      deps({
+        MOMENTUM_STEP_KIND: "implementation",
+        MOMENTUM_AGENT_PROVIDER: "codex",
+        MOMENTUM_MODEL: "gpt-5.1",
+        MOMENTUM_EFFORT: "high",
+        MOMENTUM_REPO_PATH: repo,
+        MOMENTUM_ITERATION_DIR: iteration,
+        MOMENTUM_RESULT_PATH: resultPath,
+        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath
+      })
+    );
+
+    expect(outcome).toMatchObject({
+      exitCode: 0,
+      success: true,
+      summary: "route selection reached child command"
+    });
+    expect(readResult(resultPath).success).toBe(true);
+  });
+
   it("records command failures as success=false runner evidence", () => {
     const dir = makeTempDir();
     const repo = path.join(dir, "repo");
