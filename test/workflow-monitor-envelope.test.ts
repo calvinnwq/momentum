@@ -339,6 +339,7 @@ describe("buildWorkflowMonitorEnvelope", () => {
     expect(envelope.terminal).toBe(false);
     expect(envelope.blocked).toBe(false);
     expect(envelope.needsManualRecovery).toBe(false);
+    expect(envelope.manualRecoveryReason).toBeNull();
     expect(envelope.disposition).toBe("wait");
     expect(envelope.reportReason).toBe("in_progress");
     expect(envelope.nextAction.code).toBe("resume_running");
@@ -353,6 +354,20 @@ describe("buildWorkflowMonitorEnvelope", () => {
     expect(envelope.disposition).toBe("recover");
     expect(envelope.reportReason).toBe("recovery_required");
     expect(envelope.reportable).toBe(true);
+  });
+
+  it("threads the durable manual-recovery reason into the monitor envelope", () => {
+    const envelope = buildWorkflowMonitorEnvelope(
+      detailFrom({
+        run: runRow({
+          needsManualRecovery: true,
+          manualRecoveryReason: "repo lock was lost"
+        })
+      }),
+      { generatedAt: 7 }
+    );
+    expect(envelope.needsManualRecovery).toBe(true);
+    expect(envelope.manualRecoveryReason).toBe("repo lock was lost");
   });
 
   it("summarizes counts and passes through typed evidence pointers", () => {
@@ -444,5 +459,22 @@ describe("buildWorkflowMonitorEnvelope", () => {
     expect(envelope.gates).toEqual([]);
     expect(envelope.counts.gates).toBe(0);
     expect(envelope.counts.gatesOpen).toBe(0);
+  });
+
+  it("surfaces the durable last-emitted digest as the progress suppression baseline (NGX-511)", () => {
+    const envelope = buildWorkflowMonitorEnvelope(
+      detailFrom({
+        run: runRow({ monitorLastEmittedDigest: "sha256:prior-baseline" })
+      }),
+      { generatedAt: 13 }
+    );
+    expect(envelope.monitorLastEmittedDigest).toBe("sha256:prior-baseline");
+  });
+
+  it("defaults the last-emitted digest to null when never persisted (NGX-511)", () => {
+    const envelope = buildWorkflowMonitorEnvelope(detailFrom(), {
+      generatedAt: 14
+    });
+    expect(envelope.monitorLastEmittedDigest).toBeNull();
   });
 });

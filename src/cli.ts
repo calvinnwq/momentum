@@ -172,6 +172,7 @@ type ParsedFlags = {
   now: boolean;
   dryRun: boolean;
   externalApply: boolean;
+  advance: boolean;
   repo?: string;
   runner?: string;
   workerId?: string;
@@ -253,6 +254,21 @@ export async function runCli(
   if (parsed.externalApply && !(command === "intent" && subcommand === "apply")) {
     return usageError(
       "--external-apply is only supported by `momentum intent apply`.",
+      parsed,
+      io
+    );
+  }
+
+  if (
+    parsed.advance &&
+    !(
+      command === "workflow" &&
+      subcommand === "run" &&
+      parsed.args[2] === "monitor"
+    )
+  ) {
+    return usageError(
+      "--advance is only supported by `momentum workflow run monitor`.",
       parsed,
       io
     );
@@ -1279,6 +1295,7 @@ function parseFlags(argv: string[]): ParsedFlags {
   let now = false;
   let dryRun = false;
   let externalApply = false;
+  let advance = false;
   let repo: string | undefined;
   let runner: string | undefined;
   let workerId: string | undefined;
@@ -1358,6 +1375,11 @@ function parseFlags(argv: string[]): ParsedFlags {
 
     if (arg === "--external-apply") {
       externalApply = true;
+      continue;
+    }
+
+    if (arg === "--advance") {
+      advance = true;
       continue;
     }
 
@@ -1987,7 +2009,15 @@ function parseFlags(argv: string[]): ParsedFlags {
     args.push(arg);
   }
 
-  const parsed: ParsedFlags = { args, json, foreground, now, dryRun, externalApply };
+  const parsed: ParsedFlags = {
+    args,
+    json,
+    foreground,
+    now,
+    dryRun,
+    externalApply,
+    advance
+  };
   if (repo !== undefined) parsed.repo = repo;
   if (runner !== undefined) parsed.runner = runner;
   if (dataDir !== undefined) parsed.dataDir = dataDir;

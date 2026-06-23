@@ -623,9 +623,7 @@ function monitorAdvisoryFromRun(run: WorkflowRunRow): WorkflowMonitorAdvisory | 
   if (
     run.monitorLastSeenState === null &&
     run.monitorTerminal === null &&
-    run.monitorStep === null &&
-    run.monitorLastSeenDigest === null &&
-    run.monitorLastEmittedDigest === null
+    run.monitorStep === null
   ) {
     return null;
   }

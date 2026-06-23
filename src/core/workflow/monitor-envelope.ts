@@ -7,7 +7,9 @@
  * substrate detail loader ({@link loadWorkflowRunDetail}) with the pure M7
  * monitor reducer ({@link deriveWorkflowMonitorState}) and a small
  * reportability classifier so the runner can decide whether to **report**,
- * **wait**, or ask an operator to **recover** from a single envelope.
+ * **wait**, or ask an operator to **recover** from a single envelope. The same
+ * envelope also carries the durable emitted-digest advisory used by the native
+ * progress reducer to suppress repeated unchanged ticks.
  *
  * The envelope is derived entirely from durable rows — never from the on-disk
  * `monitor.json` prose. It never mutates run / step / approval / lease state,
@@ -95,11 +97,13 @@ export type WorkflowMonitorEnvelope = {
   schemaVersion: number;
   generatedAt: number;
   runId: string;
+  source: string;
   runState: WorkflowRunState;
   stepState: WorkflowStepState | null;
   terminal: boolean;
   blocked: boolean;
   needsManualRecovery: boolean;
+  manualRecoveryReason: string | null;
   disposition: WorkflowMonitorDisposition;
   reportable: boolean;
   reportReason: WorkflowMonitorReportReason;
@@ -119,6 +123,15 @@ export type WorkflowMonitorEnvelope = {
    */
   gates: readonly WorkflowGateRecord[];
   counts: WorkflowMonitorEnvelopeCounts;
+  /**
+   * The digest of the last *emitted* native progress tick for this run, read
+   * verbatim from the durable `monitor_last_emitted_digest` advisory column
+   * (NGX-511). It is the suppression baseline the {@link deriveWorkflowMonitorProgress}
+   * reducer compares against: an equal digest means the operator-facing state
+   * has not changed since the last surfaced tick. `null` means no tick has been
+   * emitted yet (a first observation always emits).
+   */
+  monitorLastEmittedDigest: string | null;
 };
 
 export type BuildWorkflowMonitorEnvelopeOptions = {
@@ -194,11 +207,13 @@ export function buildWorkflowMonitorEnvelope(
     schemaVersion: WORKFLOW_MONITOR_SCHEMA_VERSION,
     generatedAt: options.generatedAt ?? Date.now(),
     runId: monitor.runId,
+    source: detail.run.source,
     runState: monitor.runState,
     stepState: monitor.activeStep?.state ?? null,
     terminal: monitor.terminal,
     blocked: monitor.blocked,
     needsManualRecovery: detail.run.needsManualRecovery,
+    manualRecoveryReason: detail.run.manualRecoveryReason,
     disposition: report.disposition,
     reportable: report.reportable,
     reportReason: report.reportReason,
@@ -210,7 +225,8 @@ export function buildWorkflowMonitorEnvelope(
     recovery: monitor.recovery,
     evidence: detail.evidence,
     gates: detail.gates,
-    counts: countsFromDetail(detail)
+    counts: countsFromDetail(detail),
+    monitorLastEmittedDigest: detail.run.monitorLastEmittedDigest
   };
 }
 

@@ -49,6 +49,7 @@ import {
   loadWorkflowMonitorEnvelope,
   type WorkflowMonitorEnvelope
 } from "../../core/workflow/monitor-envelope.js";
+import { deriveWorkflowMonitorProgress } from "../../core/workflow/monitor-progress.js";
 import {
   deriveWorkflowMonitorState,
   type WorkflowMonitorState
@@ -136,6 +137,7 @@ import {
 type ParsedFlags = {
   args: string[];
   json: boolean;
+  advance?: boolean;
   dataDir?: string;
   repo?: string;
   reason?: string;
@@ -1864,8 +1866,61 @@ function workflowRunMonitor(parsed: ParsedFlags, io: CliIo): number {
       runId
     });
   }
+  if (
+    parsed.advance &&
+    envelope.source !== MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE
+  ) {
+    return emitWorkflowRunMonitorFailure(parsed, io, {
+      code: "advance_unsupported_source",
+      message:
+        "`--advance` is only supported for Momentum-native coding workflow runs.",
+      dataDir,
+      runId
+    });
+  }
 
-  return emitWorkflowRunMonitor(parsed, io, dataDir, envelope);
+  // Project the durable envelope into a native progress tick (NGX-511),
+  // suppressing against the last emitted digest. The default read stays
+  // read-only: the emitted digest is read as the baseline but not advanced.
+  const progress = deriveWorkflowMonitorProgress(envelope, {
+    priorDigest: envelope.monitorLastEmittedDigest
+  });
+
+  // Opt-in activation writer: `--advance` persists this tick's digest as the
+  // durable suppression baseline so a cheap cron loop polling `monitor`
+  // repeatedly can suppress unchanged ticks across invocations. The emitted
+  // baseline only moves when the tick actually emits (first observation or a
+  // meaningful state change); the seen digest always records the observation.
+  let advanced = false;
+  if (parsed.advance) {
+    const emittedDigest = progress.emit
+      ? progress.digest
+      : envelope.monitorLastEmittedDigest;
+    let writeDb: MomentumDb | undefined;
+    try {
+      writeDb = openDb(dataDir);
+      writeDb
+        .prepare(
+          `UPDATE workflow_runs
+             SET monitor_last_seen_digest = ?,
+                 monitor_last_emitted_digest = ?
+           WHERE id = ?`
+        )
+        .run(progress.digest, emittedDigest, runId);
+    } catch (err) {
+      return emitWorkflowRunMonitorFailure(parsed, io, {
+        code: "data_dir_failed",
+        message: err instanceof Error ? err.message : String(err),
+        dataDir,
+        runId
+      });
+    } finally {
+      writeDb?.close();
+    }
+    advanced = progress.emit;
+  }
+
+  return emitWorkflowRunMonitor(parsed, io, dataDir, envelope, progress, advanced);
 }
 
 function workflowRunLogs(parsed: ParsedFlags, io: CliIo): number {

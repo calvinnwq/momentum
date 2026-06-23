@@ -16,10 +16,12 @@ Operator-facing CLI envelopes for the `workflow run start`, `workflow run start-
 - `workflow run update-step` drives operator-initiated step transitions (`approved` / `succeeded` / `skipped` / `failed` / `blocked` / `canceled`) through the existing state machine, persisting an audit record with operator reason and optional evidence or ledger pointers.
 - `workflow run clear-recovery` explicitly clears a run's durable manual-recovery flag after the blocking condition is resolved.
 - `workflow run decide` resolves a durable workflow / step / executor gate by routing an operator or delegated-policy decision through the gate brain: an operator may pick any allowed action, while `--mode delegated` may only auto-apply an action inside the gate's policy envelope.
-- `workflow run monitor` is a read-only machine envelope that emits one stable JSON shape per run — derived from durable rows and the monitor reducer — so a monitor runner can decide whether to report, wait, or ask an operator to recover without parsing prose or scraping artifacts.
+- `workflow run monitor` is read-only by default and emits one stable JSON shape per run, derived from durable rows and the monitor reducer, so a monitor runner can decide whether to report, wait, or ask an operator to recover without parsing prose or scraping artifacts.
+  Its opt-in `--advance` mode is restricted to Momentum-native coding runs and writes only digest baselines for progress suppression.
 - `workflow run logs` is a read-only run-scoped log and evidence reader that reuses the workflow detail shape and attaches executor rounds plus their child artifacts, checkpoints, findings, and decisions.
 
-`workflow run preview-coding`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run monitor`, and `workflow run logs` are read-only: they never write SQLite or files.
+`workflow run preview-coding`, `workflow status`, `workflow handoff`, `workflow run list`, and `workflow run logs` are read-only: they never write SQLite or files.
+`workflow run monitor` is also read-only unless `--advance` is passed, in which case supported Momentum-native coding runs persist only `monitor_last_seen_digest` and `monitor_last_emitted_digest` progress baselines.
 
 See also:
 
@@ -1192,14 +1194,23 @@ Exit code 0 on success, 1 on failure, 2 on usage error.
 ## `workflow run monitor`
 
 ```text
-momentum workflow run monitor <run-id> [--data-dir <path>] [--json]
+momentum workflow run monitor <run-id> [--advance] [--data-dir <path>] [--json]
 ```
 
-Read-only machine envelope for a monitor runner. Wraps the same durable detail loader as `workflow status <run-id>`, runs the monitor reducer, and adds a `disposition` decision view so a caller can act on one stable JSON shape per tick instead of parsing prose or scraping `.agent-workflows/<run-id>/`. It never writes SQLite or files, never schedules cron, and never delivers notifications.
+Read-only-by-default machine envelope for a monitor runner.
+Wraps the same durable detail loader as `workflow status <run-id>`, runs the monitor reducer, and adds a `disposition` decision view so a caller can act on one stable JSON shape per tick instead of parsing prose or scraping `.agent-workflows/<run-id>/`.
+Without `--advance` it never writes SQLite or files, never schedules cron, and never delivers notifications.
+The opt-in `--advance` flag is only supported for runs whose source is `momentum-native-coding`.
+When supported, it persists only the progress suppression baseline (the `monitor_last_emitted_digest` / `monitor_last_seen_digest` advisory columns); it never touches run, step, lease, or gate state.
 
 Required arguments:
 
 - `<run-id>` — the run to inspect.
+
+Options:
+
+- `--advance` - for `momentum-native-coding` runs only, persist this tick's digest as the durable progress suppression baseline so a cron loop polling the command repeatedly suppresses unchanged ticks across invocations.
+  See the [progress digest tick](#progress-digest-tick) section.
 
 ### Disposition and report reason
 
@@ -1213,7 +1224,11 @@ Required arguments:
 
 The hard recovery classifications (`recovery.code`) are the same monitor-derived taxonomy as `workflow status`: `stale_running_step`, `ghost_active_no_lease`, `manual_recovery_lease`, `monitor_drift_stale`, `failed_required_step`. A failed required step and a blocked run both resolve to `disposition: "recover"`; `monitor_drift_stale` on an otherwise-progressing run resolves to `disposition: "report"`.
 
-Live dispatch / finalization recovery can also set the durable manual-recovery flag and drive `needsManualRecovery: true`, `disposition: "recover"`, and `reportReason: "recovery_required"` even when `recovery` is null, because `recovery` only carries monitor-derived classifications. Scheduler-lane stale `manual-recovery-required` workflow leases remain outstanding and can instead surface through `recovery.code = "manual_recovery_lease"`. The monitor envelope does not include a nested `run` object or the stored reason fields; consumers that need a non-monitor reason should call `workflow status` / `workflow handoff` or inspect the durable run record. `.agent-workflows/<run-id>/recovery.md` is best-effort operator guidance and may be absent if artifact rendering failed.
+Live dispatch / finalization recovery can also set the durable manual-recovery flag and drive `needsManualRecovery: true`, `manualRecoveryReason: <reason>`, `disposition: "recover"`, and `reportReason: "recovery_required"` even when `recovery` is null, because `recovery` only carries monitor-derived classifications.
+Scheduler-lane stale `manual-recovery-required` workflow leases remain outstanding and can instead surface through `recovery.code = "manual_recovery_lease"`.
+The monitor envelope does not include a nested `run` object, but it does carry `manualRecoveryReason` so a progress tick can show and digest durable non-monitor recovery reasons.
+Consumers that need full run metadata should call `workflow status` / `workflow handoff` or inspect the durable run record.
+`.agent-workflows/<run-id>/recovery.md` is best-effort operator guidance and may be absent if artifact rendering failed.
 
 ### JSON envelope
 
@@ -1230,6 +1245,7 @@ Live dispatch / finalization recovery can also set the durable manual-recovery f
   "terminal": false,
   "blocked": false,
   "needsManualRecovery": false,
+  "manualRecoveryReason": null,
   "disposition": "wait",
   "reportable": false,
   "reportReason": "in_progress",
@@ -1259,11 +1275,41 @@ Live dispatch / finalization recovery can also set the durable manual-recovery f
     "leases": 1,
     "gates": 1,
     "gatesOpen": 1
+  },
+  "progress": {
+    "phase": "advancing",
+    "changed": true,
+    "emit": true,
+    "advanced": false,
+    "terminal": false,
+    "cleanup": "none",
+    "currentStep": "implementation",
+    "lastEvent": "step:implementation:running",
+    "nextAction": "resume_running",
+    "blockerReason": null,
+    "digest": "sha256:7abb560d717661265f609b02107bd6fce701de831d42a28bd1f7af344aa52ad5"
   }
 }
 ```
 
 `schemaVersion` is `1`. `nextAction`, `recovery`, `monitorDrift`, `leases`, `lastCheckpoint`, `evidence`, and `gates` reuse the same field shapes as `workflow status`. `stepState` is the active step's state (or `null` when there is no active step). `counts.gates` is the total gate count for the run; `counts.gatesOpen` is the count of unresolved gates.
+
+### Progress digest tick
+
+`progress` is a lightweight, deterministic projection of the tick for a cheap cron monitor loop that wants to surface a concise update only when meaningful state changes, without a per-heartbeat agent call:
+
+- `phase` is the coarse progress state: `advancing` (a step is running or progressing), `idle` (no actionable step yet), `awaiting_approval` (a step is paused on an approval boundary), `blocked` (operator recovery is required), or `terminal` (a clean succeeded / canceled outcome). A failed run surfaces as `blocked`, not `terminal`, because it needs recovery.
+- `digest` is a stable `sha256:` hash of only the meaningful operator-facing state.
+  Volatile fields (`generatedAt`, lease heartbeat / expiry timestamps, evidence ordering) are excluded, so two ticks over identical state hash equal.
+  Durable `manualRecoveryReason` is included so a changed non-monitor recovery reason re-emits.
+- `changed` / `emit` compare `digest` against the run's last emitted digest (the `monitor_last_emitted_digest` advisory). On a first observation, or whenever the meaningful state changes, both are `true`; a repeated unchanged tick reports both `false` so a caller can suppress a duplicate update. By default `workflow run monitor` reads this baseline without advancing it, so the command stays read-only.
+- `advanced` reports whether this tick persisted the suppression baseline.
+  It is `false` for a plain read; it is `true` only when `--advance` was passed and the tick actually emitted (a first observation or a meaningful change).
+  For a supported `momentum-native-coding` run, passing `--advance` lets a cron loop poll the command repeatedly and suppress unchanged ticks across invocations from durable state alone: the first tick emits and advances the baseline, identical follow-up ticks report `emit: false` / `advanced: false`, and the baseline re-arms automatically on the next meaningful change.
+  An unchanged `--advance` tick refreshes only `monitor_last_seen_digest`; it leaves the emitted baseline untouched.
+- `terminal` and `cleanup` make end-of-run handling explicit: a clean terminal outcome reports `cleanup: "release"` (release the monitor lease and stop ticking); every other phase reports `cleanup: "none"`. `cleanup` and `terminal` are reported even on a suppressed (`emit: false`) tick.
+- `currentStep`, `lastEvent`, `nextAction` (the next-action code), and `blockerReason` are the snapshot fields an operator reads at a glance; `blockerReason` is `null` unless `phase` is `blocked`.
+  For durable manual-recovery-only blocks, `blockerReason` uses `manualRecoveryReason` when present.
 
 ### Error codes
 
@@ -1272,6 +1318,7 @@ Live dispatch / finalization recovery can also set the durable manual-recovery f
 | `run_id_required` | `<run-id>` was not supplied. |
 | `data_dir_failed` | Data directory resolution failed. |
 | `run_not_found` | `<run-id>` does not exist in `workflow_runs`. |
+| `advance_unsupported_source` | `--advance` was requested for a run whose source is not `momentum-native-coding`. |
 
 ### Text output
 
@@ -1291,10 +1338,19 @@ Active step: implementation [running]
 Steps: 5 approvals=1 leases=1
 Gates: 1 (open: 1)
 - gate-nm-1 [step/operator_decision_required] OPEN allowed=fix,skip,approve_as_is recommended=fix
+Progress phase: advancing
+Progress changed: true (emit: true)
+Progress advanced: false
+Last event: step:implementation:running
+Cleanup: none
+Progress digest: sha256:7abb560d717661265f609b02107bd6fce701de831d42a28bd1f7af344aa52ad5
 Data dir: /path/to/data
 ```
 
-A `Recovery: <code>` line is added when a recovery classification is present. Open gates print inline after the `Gates:` count; resolved gates are omitted from text output.
+A `Manual recovery reason: <reason>` line is added when the durable run-scoped reason is present.
+A `Recovery: <code>` line is added when a recovery classification is present.
+Open gates print inline after the `Gates:` count; resolved gates are omitted from text output.
+A `Blocker: <reason>` line is added between `Last event` and `Cleanup` when the run is in the `blocked` phase.
 
 Exit code 0 on success, 1 on failure, 2 on usage error.
 

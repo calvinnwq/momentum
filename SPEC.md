@@ -96,6 +96,11 @@ The preview is a pure projection of the version-pinned built-in definition plus 
 NGX-510 adds native per-step coding route/config overrides to the coding doors: `workflow run start-coding` / `workflow run preview-coding` accept `--steps-json <json>`, a sparse object keyed by the configurable coding steps (`implementation`, `postflight`, `no-mistakes`, `merge-cleanup`) carrying `harness`/`model`/`effort` string fields.
 Selections are validated and normalized to a byte-stable `route.steps` namespace on the durable run route, parallel to `route.profile` and `route.subworkflow`; absent steps/fields defer to defaults, and an unsupported step, unknown field, blank value, or malformed JSON fails closed with `route_config_invalid` (and writes nothing), while the generic `workflow run start` refuses the flag with `route_config_not_allowed`.
 `route.steps` records the operator's per-step selection for durable audit by status/handoff/monitor/logs and for dispatcher-created executor-round selection; it stays distinct from the daemon's `MOMENTUM_LIVE_WRAPPER_PROFILE` execution profile.
+NGX-511 adds a native progress-monitor projection to `workflow run monitor` for explicit `momentum-native-coding` runs.
+The monitor envelope derives from durable rows, exposes `manualRecoveryReason`, and includes `progress` fields for phase, digest, changed/emit suppression, current step, last event, next action, blocker reason, terminal status, and cleanup.
+The deterministic digest excludes volatile timestamps, lease heartbeat / expiry churn, and evidence ordering while including durable manual-recovery reasons and open gate identity so repeated unchanged ticks can be suppressed.
+Plain monitor reads do not write.
+`--advance` is accepted only for `momentum-native-coding` runs and persists only `monitor_last_seen_digest` plus `monitor_last_emitted_digest` when the tick emits; generic workflow starts, imported `cwfp-*` compatibility runs, and fallback CWFP behavior remain unchanged.
 CWFP remains the default coding-workflow start and rollback route; the default switch stays NGX-404.
 
 ## Runtime Consolidation
