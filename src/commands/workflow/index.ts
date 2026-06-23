@@ -1,7 +1,11 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { usageError, type CliIo } from "../../renderers/cli-output.js";
+import {
+  emitHelp,
+  usageError,
+  type CliIo
+} from "../../renderers/cli-output.js";
 import {
   isUniqueViolation,
   openDb,
@@ -194,6 +198,10 @@ export function workflow(parsed: ParsedFlags, io: CliIo): number {
 }
 
 function workflowRun(parsed: ParsedFlags, io: CliIo): number {
+  if (parsed.args.includes("--help") || parsed.args.includes("-h")) {
+    return emitHelp(io);
+  }
+
   const subcommand = parsed.args[2];
   if (!subcommand) {
     return usageError(

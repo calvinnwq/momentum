@@ -23,6 +23,9 @@ Operator-facing CLI envelopes for the `workflow run start`, `workflow run start-
 `workflow run preview-coding`, `workflow status`, `workflow handoff`, `workflow run list`, and `workflow run logs` are read-only: they never write SQLite or files.
 `workflow run monitor` is also read-only unless `--advance` is passed, in which case supported Momentum-native coding runs persist only `monitor_last_seen_digest` and `monitor_last_emitted_digest` progress baselines.
 
+`workflow run --help` and any nested `workflow run ... --help` or `workflow run ... -h` invocation print the shared top-level CLI help to stdout and exit 0 before selecting or validating a run subcommand.
+This help path ignores `--json`, reads no data directory, and performs no durable writes.
+
 See also:
 
 - [docs/data-directory.md](data-directory.md) — the workflow, gate, executor invocation / round, and executor child-evidence table schemas.

@@ -33,6 +33,11 @@ export function usageError(
   return 2;
 }
 
+export function emitHelp(io: CliIo): number {
+  write(io.stdout, renderHelp());
+  return 0;
+}
+
 export function renderHelp(): string {
   return [
     "Momentum",
