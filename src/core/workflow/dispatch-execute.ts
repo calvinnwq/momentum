@@ -174,7 +174,7 @@ function dispatchExecutorScaffold(
 ): WorkflowStepDispatchResult {
   const invocationId = deriveDispatchInvocationId(claim.runId, claim.stepId);
   if (loadExecutorInvocation(db, invocationId) !== undefined) {
-    const reopened = dispatchRetryScaffold(db, claim, now);
+    const reopened = dispatchRetryScaffold(db, claim, now, selection);
     if (reopened.reopened) {
       return {
         status: WORKFLOW_DISPATCH_RESULT_STATUS.dispatched,
@@ -232,7 +232,8 @@ function dispatchExecutorScaffold(
 function dispatchRetryScaffold(
   db: MomentumDb,
   claim: ClaimedWorkflowStep,
-  now: number
+  now: number,
+  selection: CodingStepExecutorSelection
 ): ReturnType<typeof reopenRetryableDispatchInvocationForAttempt> {
   db.exec("BEGIN IMMEDIATE");
   try {
@@ -249,7 +250,8 @@ function dispatchRetryScaffold(
       runId: claim.runId,
       stepId: claim.stepId,
       now,
-      stepState: "running"
+      stepState: "running",
+      selection
     });
     if (!reopened.reopened) {
       db.exec("ROLLBACK");

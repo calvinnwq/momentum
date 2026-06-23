@@ -18,6 +18,18 @@ const RETRYABLE_DISPATCH_RECOVERY_CODES: ReadonlySet<string> = new Set([
 
 type RetryableStepState = "approved" | "running";
 
+type RetryRoundSelection = {
+  agentProvider: string | null;
+  model: string | null;
+  effort: string | null;
+};
+
+const DEFAULT_RETRY_ROUND_SELECTION: RetryRoundSelection = {
+  agentProvider: null,
+  model: null,
+  effort: null
+};
+
 export type RetryableDispatchedStepRecovery = {
   runId: string;
   stepId: string;
@@ -167,6 +179,7 @@ export function reopenRetryableDispatchInvocationForAttempt(
     stepId: string;
     now: number;
     stepState?: RetryableStepState;
+    selection?: RetryRoundSelection;
   }
 ): ReopenRetryableDispatchInvocationResult {
   const retryable = findRetryableDispatchedStepRecovery(db, {
@@ -202,9 +215,16 @@ export function reopenRetryableDispatchInvocationForAttempt(
     );
   if (Number(updated.changes) === 0) return { reopened: false };
 
-  insertExecutorRound(db, buildRetryRound(retryable, nextAttempt, nextRoundIndex), {
-    now: input.now
-  });
+  insertExecutorRound(
+    db,
+    buildRetryRound(
+      retryable,
+      nextAttempt,
+      nextRoundIndex,
+      input.selection ?? DEFAULT_RETRY_ROUND_SELECTION
+    ),
+    { now: input.now }
+  );
 
   return {
     reopened: true,
@@ -258,7 +278,8 @@ function parseRetryableDispatchRow(
 function buildRetryRound(
   retryable: RetryableDispatchedStepRecovery,
   attempt: number,
-  roundIndex: number
+  roundIndex: number,
+  selection: RetryRoundSelection
 ): ExecutorRoundRecord {
   return {
     roundId: `${retryable.invocationId}::round-${roundIndex}`,
@@ -274,9 +295,9 @@ function buildRetryRound(
     startedAt: null,
     heartbeatAt: null,
     finishedAt: null,
-    agentProvider: null,
-    model: null,
-    effort: null,
+    agentProvider: selection.agentProvider,
+    model: selection.model,
+    effort: selection.effort,
     inputDigest: null,
     resultDigest: null,
     artifactRoot: null,
