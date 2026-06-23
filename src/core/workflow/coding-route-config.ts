@@ -108,6 +108,12 @@ export type CodingRouteStepSelections = Record<
   CodingStepRouteSelection
 >;
 
+export type CodingStepExecutorSelection = {
+  agentProvider: string | null;
+  model: string | null;
+  effort: string | null;
+};
+
 /**
  * The default selection for a step the operator did not reconfigure: every field
  * `null`, meaning "inherit from repo/run/global config at execution time".
@@ -324,6 +330,21 @@ export function resolveCodingRouteStepSelections(
     };
   }
   return selections;
+}
+
+export function resolveCodingStepExecutorSelection(
+  overrides: CodingStepRouteOverrides,
+  stepKey: string
+): CodingStepExecutorSelection {
+  if (!isConfigurableCodingStepKey(stepKey)) {
+    return { agentProvider: null, model: null, effort: null };
+  }
+  const override = overrides[stepKey];
+  return {
+    agentProvider: override?.harness ?? null,
+    model: override?.model ?? null,
+    effort: override?.effort ?? null
+  };
 }
 
 /** The label a human audit surface prints for a field the operator did not set. */

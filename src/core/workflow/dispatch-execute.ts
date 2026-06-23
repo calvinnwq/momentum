@@ -65,6 +65,12 @@ import type {
   ExecutorRoundRecord,
   WorkflowExecutorFamily
 } from "../executors/loop-reducer.js";
+import { CODING_WORKFLOW_DEFINITION_KEY } from "./definition.js";
+import {
+  readCodingStepRouteOverrides,
+  resolveCodingStepExecutorSelection,
+  type CodingStepExecutorSelection
+} from "./coding-route-config.js";
 import {
   insertWorkflowGate,
   loadWorkflowGate
@@ -74,6 +80,7 @@ import { releaseWorkflowLease } from "./leases.js";
 import { markWorkflowRunNeedsManualRecovery } from "./run-recovery.js";
 import { resolveWorkflowStepDispatchPlan } from "./dispatch-persist.js";
 import type { WorkflowDispatchFailClosedCode } from "./dispatch.js";
+import { MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE } from "./run-start.js";
 import { reopenRetryableDispatchInvocationForAttempt } from "./dispatch-retry.js";
 import { refreshWorkflowRunRuntimeState } from "./runtime-state.js";
 import {
@@ -134,7 +141,23 @@ export function executeWorkflowStepDispatch(
     });
   }
 
-  return dispatchExecutorScaffold(db, claim, plan.executorFamily, now);
+  const selection = resolveDispatchRoundSelection(db, claim);
+  if (!selection.ok) {
+    return failClosedDispatch(db, claim, {
+      code: "route_config_invalid",
+      gateType: "manual_recovery_required",
+      reason: selection.reason,
+      now
+    });
+  }
+
+  return dispatchExecutorScaffold(
+    db,
+    claim,
+    plan.executorFamily,
+    now,
+    selection.selection
+  );
 }
 
 /**
@@ -146,7 +169,8 @@ function dispatchExecutorScaffold(
   db: MomentumDb,
   claim: ClaimedWorkflowStep,
   family: WorkflowExecutorFamily,
-  now: number
+  now: number,
+  selection: CodingStepExecutorSelection
 ): WorkflowStepDispatchResult {
   const invocationId = deriveDispatchInvocationId(claim.runId, claim.stepId);
   if (loadExecutorInvocation(db, invocationId) !== undefined) {
@@ -189,7 +213,7 @@ function dispatchExecutorScaffold(
     );
     insertExecutorRound(
       db,
-      buildRoundScaffold(claim, family, invocationId, now),
+      buildRoundScaffold(claim, family, invocationId, now, selection),
       { now }
     );
     refreshWorkflowRunStateAfterDispatch(db, claim.runId, now);
@@ -325,7 +349,8 @@ function buildRoundScaffold(
   claim: ClaimedWorkflowStep,
   family: WorkflowExecutorFamily,
   invocationId: string,
-  _now: number
+  _now: number,
+  selection: CodingStepExecutorSelection
 ): ExecutorRoundRecord {
   return {
     roundId: deriveDispatchRoundId(invocationId),
@@ -344,9 +369,9 @@ function buildRoundScaffold(
     startedAt: null,
     heartbeatAt: null,
     finishedAt: null,
-    agentProvider: null,
-    model: null,
-    effort: null,
+    agentProvider: selection.agentProvider,
+    model: selection.model,
+    effort: selection.effort,
     inputDigest: null,
     resultDigest: null,
     artifactRoot: null,
@@ -360,6 +385,92 @@ function buildRoundScaffold(
     recoveryCode: null,
     humanGate: null
   };
+}
+
+type DispatchRouteSelectionResolution =
+  | { ok: true; selection: CodingStepExecutorSelection }
+  | { ok: false; reason: string };
+
+type DispatchRouteRow = {
+  source: string;
+  workflow_definition_key: string | null;
+  route_json: string | null;
+};
+
+const DEFAULT_DISPATCH_SELECTION: CodingStepExecutorSelection = {
+  agentProvider: null,
+  model: null,
+  effort: null
+};
+
+function resolveDispatchRoundSelection(
+  db: MomentumDb,
+  claim: ClaimedWorkflowStep
+): DispatchRouteSelectionResolution {
+  const row = db
+    .prepare(
+      `SELECT source, workflow_definition_key, route_json
+         FROM workflow_runs
+        WHERE id = ?`
+    )
+    .get(claim.runId) as DispatchRouteRow | undefined;
+  if (row === undefined) {
+    return { ok: true, selection: DEFAULT_DISPATCH_SELECTION };
+  }
+  if (
+    row.source !== MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE ||
+    row.workflow_definition_key !== CODING_WORKFLOW_DEFINITION_KEY
+  ) {
+    return { ok: true, selection: DEFAULT_DISPATCH_SELECTION };
+  }
+
+  const route = parseRouteJson(claim.runId, row.route_json);
+  if (!route.ok) {
+    return { ok: false, reason: route.reason };
+  }
+  const overrides = readCodingStepRouteOverrides(route.route);
+  if (!overrides.ok) {
+    return {
+      ok: false,
+      reason: `Native coding run ${claim.runId} route.steps is invalid (${overrides.refusal}${
+        overrides.path === undefined ? "" : ` at ${overrides.path}`
+      }): ${overrides.reason}`
+    };
+  }
+  return {
+    ok: true,
+    selection: resolveCodingStepExecutorSelection(
+      overrides.overrides,
+      claim.stepId
+    )
+  };
+}
+
+function parseRouteJson(
+  runId: string,
+  routeJson: string | null
+): { ok: true; route: Record<string, unknown> } | { ok: false; reason: string } {
+  if (routeJson === null) return { ok: true, route: {} };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(routeJson);
+  } catch {
+    return {
+      ok: false,
+      reason: `Native coding run ${runId} route is corrupt; routing to manual recovery.`
+    };
+  }
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    Array.isArray(parsed)
+  ) {
+    return {
+      ok: false,
+      reason: `Native coding run ${runId} route is not an object; routing to manual recovery.`
+    };
+  }
+  return { ok: true, route: parsed as Record<string, unknown> };
 }
 
 /**

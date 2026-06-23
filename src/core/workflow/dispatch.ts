@@ -127,7 +127,8 @@ export const WORKFLOW_DISPATCH_FAIL_CLOSED_CODES = [
   "workflow_definition_unlinked",
   "step_definition_not_found",
   "unknown_executor_family",
-  "unsupported_executor_family"
+  "unsupported_executor_family",
+  "route_config_invalid"
 ] as const;
 export type WorkflowDispatchFailClosedCode =
   (typeof WORKFLOW_DISPATCH_FAIL_CLOSED_CODES)[number];

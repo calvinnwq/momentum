@@ -79,6 +79,23 @@ function openNativeCodingDbWithoutPersistedDefinition(
   return db;
 }
 
+function openNativeCodingDbWithRoute(
+  route: Record<string, unknown>,
+  runId: string = RUN_ID
+): MomentumDb {
+  const db = openDb(makeTempDir());
+  persistWorkflowRunStart(db, {
+    definition: CODING_WORKFLOW_DEFINITION,
+    runId,
+    repoPath: "/repos/momentum",
+    objective: "Dogfood NGX-510",
+    now: NOW,
+    source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
+    route
+  });
+  return db;
+}
+
 function persistedCodingOverride(
   executor: "script" | "external-apply"
 ): WorkflowDefinition {
@@ -116,6 +133,17 @@ function approveAndClaim(
   stepId: string,
   runId: string = RUN_ID
 ): ClaimedWorkflowStep {
+  const target = db
+    .prepare(
+      "SELECT step_order FROM workflow_steps WHERE run_id = ? AND step_id = ?"
+    )
+    .get(runId, stepId) as { step_order: number } | undefined;
+  if (target === undefined) {
+    throw new Error(`test setup: missing step ${stepId}`);
+  }
+  db.prepare(
+    "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_order < ?"
+  ).run(runId, target.step_order);
   db.prepare(
     "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = ?"
   ).run(runId, stepId);
@@ -367,6 +395,43 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     });
   });
 
+  it("dispatches persisted coding route overrides into the round selection", () => {
+    const db = openNativeCodingDbWithRoute({
+      steps: {
+        implementation: {
+          harness: "codex",
+          model: "gpt-5.1",
+          effort: "high"
+        }
+      }
+    });
+    const claim = approveAndClaim(db, "implementation");
+
+    const result = executeWorkflowStepDispatch(claim, {
+      db,
+      workerId: WORKER,
+      now: NOW + 1
+    });
+
+    expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
+    const round = db
+      .prepare(
+        `SELECT agent_provider AS agentProvider, model, effort
+           FROM executor_rounds
+          WHERE workflow_run_id = ? AND step_run_id = ?`
+      )
+      .get(RUN_ID, "implementation") as {
+      agentProvider: string | null;
+      model: string | null;
+      effort: string | null;
+    };
+    expect(round).toEqual({
+      agentProvider: "codex",
+      model: "gpt-5.1",
+      effort: "high"
+    });
+  });
+
   it("holds the dispatch lease on a successful dispatch (owns the lifecycle)", () => {
     const db = openSeededDb();
     const claim = approveAndClaim(db, "preflight");
@@ -547,6 +612,39 @@ describe("executeWorkflowStepDispatch — fail closed", () => {
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
     expect(countInvocations(db, RUN_ID)).toBe(0);
     expect(stepState(db, RUN_ID, "preflight")).toBe("approved");
+  });
+
+  it("routes corrupt native coding route overrides to manual recovery", () => {
+    const db = openNativeCodingDbWithRoute({
+      steps: {
+        preflight: { model: "opus" }
+      }
+    });
+    const claim = approveAndClaim(db, "implementation");
+
+    const result = executeWorkflowStepDispatch(claim, {
+      db,
+      workerId: WORKER,
+      now: NOW + 1
+    });
+
+    expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.failClosed);
+    const gates = listWorkflowGatesForRun(db, RUN_ID);
+    expect(gates).toHaveLength(1);
+    expect(gates[0]).toMatchObject({
+      gateType: "manual_recovery_required",
+      targetScope: "step",
+      stepRunId: "implementation",
+      evidence: "route_config_invalid",
+      resolvedAt: null
+    });
+    expect(gates[0]?.reason).toContain("preflight");
+    expect(
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+    ).toBe(true);
+    expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
+    expect(countInvocations(db, RUN_ID)).toBe(0);
+    expect(stepState(db, RUN_ID, "implementation")).toBe("approved");
   });
 
   it("routes a vanished run to manual recovery without stranding the lease or opening a gate", () => {
