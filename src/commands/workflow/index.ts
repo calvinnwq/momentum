@@ -83,6 +83,8 @@ import {
   type WorkflowRunStartInput
 } from "../../core/workflow/run-start.js";
 import {
+  formatCodingRouteStepSelectionLines,
+  resolveCodingRouteStepSelections,
   validateCodingStepRouteOverrides,
   writeCodingStepRouteOverrides,
   type CodingStepRouteOverrides
@@ -509,7 +511,12 @@ function runWorkflowStartCommand(
       dataDir,
       preview: previewResult.preview,
       policyPresent: policy.present === true,
-      policyPath: policy.path
+      policyPath: policy.path,
+      // Humanize the same validated per-step overrides that built the preview
+      // route so the default (non-JSON) preview can audit the selection.
+      stepRouteLines: formatCodingRouteStepSelectionLines(
+        resolveCodingRouteStepSelections(stepRouteOverrides)
+      )
     });
   }
 

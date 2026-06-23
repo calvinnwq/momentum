@@ -5,6 +5,7 @@ import {
   CODING_ROUTE_STEPS_KEY,
   CODING_STEP_ROUTE_FIELDS,
   DEFAULT_CODING_STEP_ROUTE_SELECTION,
+  formatCodingRouteStepSelectionLines,
   readCodingStepRouteOverrides,
   resolveCodingRouteStepSelections,
   validateCodingStepRouteOverrides,
@@ -309,5 +310,52 @@ describe("resolveCodingRouteStepSelections — effective preview projection", ()
       model: null,
       effort: "low"
     });
+  });
+});
+
+describe("formatCodingRouteStepSelectionLines - human audit surface", () => {
+  it("renders a header and every configurable step with the (default) sentinel when empty", () => {
+    const lines = formatCodingRouteStepSelectionLines(
+      resolveCodingRouteStepSelections({})
+    );
+    expect(lines).toEqual([
+      "Per-step route:",
+      "  implementation: harness=(default), model=(default), effort=(default)",
+      "  postflight: harness=(default), model=(default), effort=(default)",
+      "  no-mistakes: harness=(default), model=(default), effort=(default)",
+      "  merge-cleanup: harness=(default), model=(default), effort=(default)"
+    ]);
+  });
+
+  it("shows operator values where overridden and (default) elsewhere, in canonical order", () => {
+    const lines = formatCodingRouteStepSelectionLines(
+      resolveCodingRouteStepSelections({
+        "merge-cleanup": { effort: "low" },
+        implementation: { harness: "gnhf", model: "opus" }
+      })
+    );
+    expect(lines).toEqual([
+      "Per-step route:",
+      "  implementation: harness=gnhf, model=opus, effort=(default)",
+      "  postflight: harness=(default), model=(default), effort=(default)",
+      "  no-mistakes: harness=(default), model=(default), effort=(default)",
+      "  merge-cleanup: harness=(default), model=(default), effort=low"
+    ]);
+  });
+
+  it("is byte-stable across repeated calls for the same selections", () => {
+    const overrides: CodingStepRouteOverrides = {
+      postflight: { harness: "claude", effort: "high" }
+    };
+    const first = formatCodingRouteStepSelectionLines(
+      resolveCodingRouteStepSelections(overrides)
+    );
+    const second = formatCodingRouteStepSelectionLines(
+      resolveCodingRouteStepSelections(overrides)
+    );
+    expect(first).toEqual(second);
+    expect(first).toContain(
+      "  postflight: harness=claude, model=(default), effort=high"
+    );
   });
 });

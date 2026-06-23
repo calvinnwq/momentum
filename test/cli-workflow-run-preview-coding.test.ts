@@ -261,6 +261,41 @@ describe("momentum workflow run preview-coding", () => {
     expect(result.stdout).toContain("external-apply");
   });
 
+  it("surfaces per-step route selections in the human preview text (NGX-510)", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const result = await run(
+      previewCodingArgs({
+        dataDir,
+        repoDir,
+        runId: "preview-steps-text",
+        objective: "Audit per-step route in text",
+        json: false,
+        extra: [
+          "--steps-json",
+          JSON.stringify({
+            implementation: { harness: "gnhf", model: "opus" },
+            "merge-cleanup": { effort: "low" }
+          })
+        ]
+      })
+    );
+    expect(result.code).toBe(0);
+    // The run-level profile line stays, and the per-step selections are now
+    // auditable in the default (non-JSON) preview alongside it.
+    expect(result.stdout).toContain("Per-step route:");
+    expect(result.stdout).toContain(
+      "implementation: harness=gnhf, model=opus, effort=(default)"
+    );
+    expect(result.stdout).toContain(
+      "merge-cleanup: harness=(default), model=(default), effort=low"
+    );
+    // Unconfigured steps still render so defaults are visible before approval.
+    expect(result.stdout).toContain(
+      "postflight: harness=(default), model=(default), effort=(default)"
+    );
+  });
+
   it("surfaces per-step route overrides in the preview route (NGX-510)", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();

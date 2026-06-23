@@ -325,3 +325,34 @@ export function resolveCodingRouteStepSelections(
   }
   return selections;
 }
+
+/** The label a human audit surface prints for a field the operator did not set. */
+export const CODING_STEP_ROUTE_DEFAULT_LABEL = "(default)";
+
+/**
+ * Render the effective per-step coding route selections as human-readable text
+ * lines for an audit surface, parallel to the run-level `Profile:` line the coding
+ * plan preview already prints. Pure and byte-stable: a header line followed by
+ * every configurable step in {@link CONFIGURABLE_CODING_STEP_KEYS} order, each
+ * field in {@link CODING_STEP_ROUTE_FIELDS} order showing the operator's value or
+ * the {@link CODING_STEP_ROUTE_DEFAULT_LABEL} sentinel where it was not overridden.
+ * This is the text-mode counterpart to the JSON `route.steps` projection, so an
+ * operator reading the default (non-JSON) preview can audit "these are the default
+ * per-step selections, these I changed" before approving execution. The command
+ * layer calls this and hands the lines to the renderer (renderers accept computed
+ * results rather than importing this projection).
+ */
+export function formatCodingRouteStepSelectionLines(
+  selections: CodingRouteStepSelections
+): string[] {
+  const lines = ["Per-step route:"];
+  for (const stepKey of CONFIGURABLE_CODING_STEP_KEYS) {
+    const selection = selections[stepKey];
+    const fields = CODING_STEP_ROUTE_FIELDS.map(
+      (field) =>
+        `${field}=${selection[field] ?? CODING_STEP_ROUTE_DEFAULT_LABEL}`
+    ).join(", ");
+    lines.push(`  ${stepKey}: ${fields}`);
+  }
+  return lines;
+}

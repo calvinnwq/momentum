@@ -270,7 +270,8 @@ Success JSON adds a `preview: true` marker, the run header (`runId`, `source`, `
 
 ### Text output (success)
 
-Text output is a human-readable preview of the same frozen plan and includes the command's no-write status, definition key/version, source, projected run state, approval boundary, profile, repo, objective, policy path or `(none)`, data directory, and every step with order, step id, kind, executor family, required/optional marker, and projected state:
+Text output is a human-readable preview of the same frozen plan and includes the command's no-write status, definition key/version, source, projected run state, approval boundary, profile, per-step route selections, repo, objective, policy path or `(none)`, data directory, and every step with order, step id, kind, executor family, required/optional marker, and projected state.
+The per-step route block lists every configurable step (implementation, postflight, no-mistakes, merge-cleanup) with its harness/model/effort selection, showing `(default)` where the operator did not override the field, so an operator can audit the default selections and any `--steps-json` changes before approval:
 
 ```text
 Coding workflow plan preview (not started): native-coding-1
@@ -279,6 +280,11 @@ Source: momentum-native-coding
 State on start: pending
 Approval boundary: (none)
 Profile: live-wrapper
+Per-step route:
+  implementation: harness=(default), model=(default), effort=(default)
+  postflight: harness=(default), model=(default), effort=(default)
+  no-mistakes: harness=(default), model=(default), effort=(default)
+  merge-cleanup: harness=(default), model=(default), effort=(default)
 Repo: /path/to/repo
 Objective: Ship the slice
 Policy: (none)
