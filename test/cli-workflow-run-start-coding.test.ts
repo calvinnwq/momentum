@@ -572,6 +572,187 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
   });
 });
 
+describe("momentum workflow run start-coding route reconfiguration (NGX-510)", () => {
+  it("captures per-step route overrides into the durable run route", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const result = await run(
+      startCodingArgs({
+        dataDir,
+        repoDir,
+        runId: "ngx-510-steps",
+        objective: "Reconfigure per-step route before kickoff",
+        extra: [
+          "--steps-json",
+          JSON.stringify({
+            "no-mistakes": { effort: "high" },
+            implementation: { model: "  claude-opus-4-8  ", harness: "gnhf" }
+          })
+        ]
+      })
+    );
+    expect(result.code).toBe(0);
+
+    const db = openDb(dataDir);
+    try {
+      const runRow = db
+        .prepare(`SELECT route_json FROM workflow_runs WHERE id = ?`)
+        .get("ngx-510-steps") as { route_json: string };
+      // Trimmed, and normalized to canonical step + field order (byte-stable).
+      expect(JSON.parse(runRow.route_json)).toEqual({
+        steps: {
+          implementation: { harness: "gnhf", model: "claude-opus-4-8" },
+          "no-mistakes": { effort: "high" }
+        }
+      });
+      expect(runRow.route_json).toContain(
+        '"steps":{"implementation":{"harness":"gnhf","model":"claude-opus-4-8"},"no-mistakes":{"effort":"high"}}'
+      );
+    } finally {
+      db.close();
+    }
+
+    // The selected per-step config is explainable from Momentum state alone.
+    const status = await run([
+      "workflow",
+      "status",
+      "ngx-510-steps",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(status.code).toBe(0);
+    expect(JSON.stringify(JSON.parse(status.stdout))).toContain(
+      '"harness":"gnhf"'
+    );
+  });
+
+  it("combines --profile and --steps-json into a single durable route", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const result = await run(
+      startCodingArgs({
+        dataDir,
+        repoDir,
+        runId: "ngx-510-profile-steps",
+        objective: "Profile plus per-step overrides",
+        extra: [
+          "--profile",
+          "ngx-499-coding-workflow-live-wrapper",
+          "--steps-json",
+          JSON.stringify({ postflight: { harness: "claude" } })
+        ]
+      })
+    );
+    expect(result.code).toBe(0);
+
+    const db = openDb(dataDir);
+    try {
+      const runRow = db
+        .prepare(`SELECT route_json FROM workflow_runs WHERE id = ?`)
+        .get("ngx-510-profile-steps") as { route_json: string };
+      expect(JSON.parse(runRow.route_json)).toEqual({
+        profile: "ngx-499-coding-workflow-live-wrapper",
+        steps: { postflight: { harness: "claude" } }
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("fails closed on a misconfigured --steps-json and writes nothing", async () => {
+    const cases = [
+      {
+        label: "unsupported step",
+        json: JSON.stringify({ preflight: { model: "opus" } })
+      },
+      {
+        label: "unknown field",
+        json: JSON.stringify({ implementation: { temperature: "hot" } })
+      },
+      {
+        label: "blank value",
+        json: JSON.stringify({ implementation: { model: "   " } })
+      },
+      {
+        label: "non-object step",
+        json: JSON.stringify({ implementation: "opus" })
+      },
+      { label: "malformed json", json: "{ not json" }
+    ];
+    for (const [index, testCase] of cases.entries()) {
+      const dataDir = makeTempDir();
+      const repoDir = makeTempDir();
+      const runId = `ngx-510-bad-${index}`;
+      const result = await run(
+        startCodingArgs({
+          dataDir,
+          repoDir,
+          runId,
+          objective: testCase.label,
+          extra: ["--steps-json", testCase.json]
+        })
+      );
+      expect(result.code, testCase.label).toBe(1);
+      const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+      expect(payload, testCase.label).toMatchObject({
+        ok: false,
+        command: "workflow run start-coding",
+        code: "route_config_invalid",
+        runId
+      });
+
+      const db = openDb(dataDir);
+      try {
+        const runRow = db
+          .prepare("SELECT id FROM workflow_runs WHERE id = ?")
+          .get(runId);
+        expect(runRow, testCase.label).toBeUndefined();
+      } finally {
+        db.close();
+      }
+    }
+  });
+
+  it("refuses --steps-json on the generic workflow run start door", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const result = await run([
+      "workflow",
+      "run",
+      "start",
+      "--run-id",
+      "generic-steps-refused",
+      "--repo",
+      repoDir,
+      "--objective",
+      "Generic start refuses per-step coding overrides",
+      "--data-dir",
+      dataDir,
+      "--json",
+      "--steps-json",
+      JSON.stringify({ implementation: { model: "opus" } })
+    ]);
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "workflow run start",
+      code: "route_config_not_allowed"
+    });
+
+    const db = openDb(dataDir);
+    try {
+      const runRow = db
+        .prepare("SELECT id FROM workflow_runs WHERE id = ?")
+        .get("generic-steps-refused");
+      expect(runRow).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+});
+
 describe("default workflow run start is unchanged by the explicit door (NGX-508)", () => {
   it("still records the generic workflow-definition source and command", async () => {
     const dataDir = makeTempDir();
@@ -645,5 +826,11 @@ describe("workflow run start-coding public docs (NGX-508)", () => {
   it("documents the --profile runtime/profile capture and its route.profile target", () => {
     expect(doc).toContain("`--profile <name>`");
     expect(doc).toContain("`route.profile`");
+  });
+
+  it("documents the --steps-json per-step route override capture and its route.steps target", () => {
+    expect(doc).toContain("`--steps-json <json>`");
+    expect(doc).toContain("`route.steps`");
+    expect(doc).toContain("route_config_invalid");
   });
 });

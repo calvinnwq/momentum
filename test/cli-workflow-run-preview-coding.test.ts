@@ -261,6 +261,75 @@ describe("momentum workflow run preview-coding", () => {
     expect(result.stdout).toContain("external-apply");
   });
 
+  it("surfaces per-step route overrides in the preview route (NGX-510)", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const result = await run(
+      previewCodingArgs({
+        dataDir,
+        repoDir,
+        runId: "preview-steps",
+        objective: "Preview reconfigured per-step route",
+        extra: [
+          "--steps-json",
+          JSON.stringify({
+            "merge-cleanup": { effort: "low" },
+            implementation: { harness: "gnhf", model: "opus" }
+          })
+        ]
+      })
+    );
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      command: "workflow run preview-coding",
+      preview: true,
+      route: {
+        steps: {
+          implementation: { harness: "gnhf", model: "opus" },
+          "merge-cleanup": { effort: "low" }
+        }
+      }
+    });
+
+    // A preview still writes nothing durable.
+    const db = openDb(dataDir);
+    try {
+      const runRow = db
+        .prepare("SELECT id FROM workflow_runs WHERE id = ?")
+        .get("preview-steps");
+      expect(runRow).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("fails closed on a misconfigured --steps-json before previewing (NGX-510)", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const result = await run(
+      previewCodingArgs({
+        dataDir,
+        repoDir,
+        runId: "preview-bad-steps",
+        objective: "Reject unsupported step",
+        extra: ["--steps-json", JSON.stringify({ preflight: { model: "opus" } })]
+      })
+    );
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "workflow run preview-coding",
+      code: "route_config_invalid",
+      runId: "preview-bad-steps"
+    });
+    // The refusal is actionable: it names the offending step and the supported set.
+    expect(payload["message"]).toContain("preflight");
+    expect(payload["message"]).toContain("supported steps");
+  });
+
   it("refuses a run id that already exists before previewing", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();

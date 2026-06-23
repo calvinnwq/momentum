@@ -83,6 +83,11 @@ import {
   type WorkflowRunStartInput
 } from "../../core/workflow/run-start.js";
 import {
+  validateCodingStepRouteOverrides,
+  writeCodingStepRouteOverrides,
+  type CodingStepRouteOverrides
+} from "../../core/workflow/coding-route-config.js";
+import {
   InvalidWorkflowRunStartError,
   WorkflowRunStartConflictError,
   persistWorkflowRunStart,
@@ -156,6 +161,7 @@ type ParsedFlags = {
   runId?: string;
   skillRevision?: string;
   profile?: string;
+  stepsJson?: string;
   error?: string;
 };
 
@@ -366,6 +372,51 @@ function runWorkflowStartCommand(
     });
   }
 
+  // Native per-step coding route reconfiguration (NGX-510): an operator can adjust
+  // the planned harness/model/effort selections per step before kickoff via
+  // --steps-json. The validated, normalized overrides are embedded durably under
+  // route.steps so status/handoff/logs can audit the selection and so execution can
+  // read it (or fail closed). The per-step namespace is coding-door specific, so the
+  // generic `workflow run start` refuses it rather than silently dropping a
+  // coding-only selection; a malformed or unsupported selection fails closed before
+  // any durable write.
+  let stepRouteOverrides: CodingStepRouteOverrides = {};
+  if (parsed.stepsJson !== undefined) {
+    if (!options.coding) {
+      return emitWorkflowRunStartFailure(parsed, io, {
+        command,
+        code: "route_config_not_allowed",
+        message: `--steps-json is only supported on the coding doors (\`workflow run start-coding\` / \`workflow run preview-coding\`); the generic \`workflow run start\` does not accept per-step coding route overrides.`,
+        runId
+      });
+    }
+    let rawStepRouteConfig: unknown;
+    try {
+      rawStepRouteConfig = JSON.parse(parsed.stepsJson);
+    } catch (parseError) {
+      return emitWorkflowRunStartFailure(parsed, io, {
+        command,
+        code: "route_config_invalid",
+        message: `--steps-json is not valid JSON: ${
+          parseError instanceof Error ? parseError.message : String(parseError)
+        }`,
+        runId
+      });
+    }
+    const validated = validateCodingStepRouteOverrides(rawStepRouteConfig);
+    if (!validated.ok) {
+      return emitWorkflowRunStartFailure(parsed, io, {
+        command,
+        code: "route_config_invalid",
+        message: `--steps-json is invalid (${validated.refusal}${
+          validated.path === undefined ? "" : ` at ${validated.path}`
+        }): ${validated.reason}`,
+        runId
+      });
+    }
+    stepRouteOverrides = validated.overrides;
+  }
+
   const repoPath = path.resolve(parsed.repo);
   const objective = parsed.objective;
   const definitionKey = options.coding
@@ -429,7 +480,8 @@ function runWorkflowStartCommand(
       objective,
       now,
       coding: options.coding,
-      parsed
+      parsed,
+      stepRouteOverrides
     });
     const previewResult = materializeWorkflowCodingPlanPreview(input);
     if (!previewResult.ok) {
@@ -494,7 +546,8 @@ function runWorkflowStartCommand(
       objective,
       now,
       coding: options.coding,
-      parsed
+      parsed,
+      stepRouteOverrides
     });
 
     let summary: PersistWorkflowRunStartSummary;
@@ -613,8 +666,18 @@ function buildWorkflowRunStartInput(args: {
   now: number;
   coding: boolean;
   parsed: ParsedFlags;
+  stepRouteOverrides: CodingStepRouteOverrides;
 }): WorkflowRunStartInput {
-  const { definition, runId, repoPath, objective, now, coding, parsed } = args;
+  const {
+    definition,
+    runId,
+    repoPath,
+    objective,
+    now,
+    coding,
+    parsed,
+    stepRouteOverrides
+  } = args;
   const input: WorkflowRunStartInput = {
     definition,
     runId,
@@ -634,8 +697,17 @@ function buildWorkflowRunStartInput(args: {
   if (parsed.issueScope !== undefined) {
     input.issueScope = { identifier: parsed.issueScope };
   }
+  // Compose the durable run route from the recorded operator profile (route.profile)
+  // and the validated per-step overrides (route.steps). The steps namespace is only
+  // embedded when at least one override is present, so a run with neither input keeps
+  // an empty route, exactly as before NGX-510.
+  let route: Record<string, unknown> = {};
   if (parsed.profile !== undefined) {
-    input.route = { profile: parsed.profile };
+    route.profile = parsed.profile;
+  }
+  route = writeCodingStepRouteOverrides(route, stepRouteOverrides);
+  if (Object.keys(route).length > 0) {
+    input.route = route;
   }
   return input;
 }
