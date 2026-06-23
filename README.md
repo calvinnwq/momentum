@@ -78,7 +78,7 @@ momentum intent list|get|apply|skip|cancel [options]
 momentum workflow import --path <run-dir> [--data-dir <path>] [--json]
 momentum workflow status [<run-id>] [options]
 momentum workflow handoff <run-id> [--data-dir <path>] [--json]
-momentum workflow run start|start-coding|approve|decide|list|update-step|clear-recovery|monitor|logs [options]
+momentum workflow run start|start-coding|preview-coding|approve|decide|list|update-step|clear-recovery|monitor|logs [options]
 momentum doctor [--repo <path>] [--data-dir <path>] [--json]
 ```
 

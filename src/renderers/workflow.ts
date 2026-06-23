@@ -10,7 +10,10 @@ import type { WorkflowRunImport, WorkflowRunImportDiagnostic } from "../core/wor
 import type { PersistWorkflowRunImportSummary } from "../core/workflow/run-import-persist.js";
 import type { WorkflowRunManualRecoveryState } from "../core/workflow/run-recovery.js";
 import type { PersistWorkflowRunStartSummary } from "../core/workflow/run-start-persist.js";
-import type { WorkflowRunStartError } from "../core/workflow/run-start.js";
+import type {
+  WorkflowCodingPlanPreview,
+  WorkflowRunStartError
+} from "../core/workflow/run-start.js";
 import type {
   WorkflowApprovalRow,
   WorkflowEvidenceLink,
@@ -40,7 +43,8 @@ type WorkflowRendererFailure = {
 
 export type WorkflowRunStartCommand =
   | "workflow run start"
-  | "workflow run start-coding";
+  | "workflow run start-coding"
+  | "workflow run preview-coding";
 
 export function emitWorkflowRunStartSuccess(
   parsed: { json: boolean },
@@ -104,6 +108,89 @@ export function emitWorkflowRunStartFailure(
     ...failure,
     command: failure.command ?? "workflow run start"
   });
+}
+
+/**
+ * Emit the frozen, pre-execution preview of a Momentum-native coding workflow
+ * (`workflow run preview-coding`). The envelope mirrors the fields a
+ * `workflow run start-coding` would durably persist - run id, repo, objective,
+ * issue scope, route/profile, approval boundary, definition key/version, and the
+ * ordered steps each with its executor family and on-start state - but carries an
+ * explicit `preview: true` marker and writes nothing. It contains no wall-clock
+ * fields, so repeated previews of the same inputs are byte-stable and safe to
+ * show before approval.
+ */
+export function emitWorkflowRunPreviewCodingSuccess(
+  parsed: { json: boolean },
+  io: CliIo,
+  result: {
+    dataDir: string;
+    preview: WorkflowCodingPlanPreview;
+    policyPresent: boolean;
+    policyPath: string;
+  }
+): number {
+  const { preview } = result;
+  const steps = preview.steps.map((step) => ({
+    stepId: step.stepId,
+    kind: step.kind,
+    executor: step.executor,
+    order: step.order,
+    required: step.required,
+    state: step.state
+  }));
+  const payload = {
+    ok: true,
+    command: "workflow run preview-coding" as const,
+    preview: true,
+    dataDir: result.dataDir,
+    runId: preview.runId,
+    source: preview.source,
+    state: preview.state,
+    approvalBoundary: preview.approvalBoundary,
+    definitionKey: preview.definitionKey,
+    definitionVersion: preview.definitionVersion,
+    repoPath: preview.repoPath,
+    objective: preview.objective,
+    issueScope: preview.issueScope,
+    route: preview.route,
+    skillRevision: preview.skillRevision,
+    steps,
+    counts: { steps: steps.length },
+    policy: { present: result.policyPresent, path: result.policyPath }
+  };
+
+  if (parsed.json) {
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  const profile =
+    typeof preview.route["profile"] === "string"
+      ? preview.route["profile"]
+      : "(none)";
+  const lines = [
+    `Coding workflow plan preview (not started): ${preview.runId}`,
+    `Definition: ${preview.definitionKey} v${preview.definitionVersion}`,
+    `Source: ${preview.source}`,
+    `State on start: ${preview.state}`,
+    `Approval boundary: ${preview.approvalBoundary ?? "(none)"}`,
+    `Profile: ${profile}`,
+    `Repo: ${preview.repoPath}`,
+    `Objective: ${preview.objective}`,
+    `Policy: ${result.policyPresent ? result.policyPath : "(none)"}`,
+    `Data dir: ${result.dataDir}`,
+    `Steps (${steps.length}):`,
+    ...steps.map(
+      (step) =>
+        `  ${step.order}. ${step.stepId} (${step.kind}) -> ${step.executor} [${
+          step.required ? "required" : "optional"
+        }, ${step.state}]`
+    ),
+    ""
+  ];
+  write(io.stdout, lines.join("\n"));
+  return 0;
 }
 
 export function emitWorkflowImportSuccess(

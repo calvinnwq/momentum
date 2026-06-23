@@ -154,3 +154,6 @@ compatibility.
 
 NGX-508 adds the explicit Momentum-native `workflow run start-coding` door.
 It reuses `run-start` / `run-start-persist` for durable rows, reserves the historical `cwfp-`, `cwfb-`, and `overnight-` prefixes for compatibility imports, stores any selected profile under `route.profile`, and keeps CWFP/default switching separate.
+
+NGX-509 adds the read-only `workflow run preview-coding` door.
+It shares the `start-coding` preconditions and built-in definition resolution but writes nothing, materializing a frozen plan via `materializeWorkflowCodingPlanPreview` in `run-start.ts` - a pure projection of the version-pinned built-in definition plus inputs, so a later `start-coding` from the same inputs persists a matching run.

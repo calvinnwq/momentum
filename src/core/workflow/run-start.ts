@@ -39,7 +39,8 @@
 import { isSafeWorkflowRunPathSegment } from "./recovery-artifact.js";
 import {
   validateWorkflowDefinition,
-  type WorkflowDefinition
+  type WorkflowDefinition,
+  type WorkflowExecutorFamily
 } from "./definition.js";
 import {
   deriveWorkflowRunState,
@@ -48,7 +49,8 @@ import {
   type WorkflowApprovalBoundary,
   type WorkflowRunState,
   type WorkflowStepKind,
-  type WorkflowStepRecord
+  type WorkflowStepRecord,
+  type WorkflowStepState
 } from "./run-reducer.js";
 
 /**
@@ -261,4 +263,101 @@ export function materializeWorkflowRunStart(
   };
 
   return { ok: true, plan: { run, steps } };
+}
+
+/**
+ * One step of a frozen coding-workflow plan preview. It carries the canonical
+ * {@link WorkflowStepRecord} fields plus the step's {@link WorkflowExecutorFamily}
+ * joined from the definition, so an operator can read which executor family will
+ * power each step before the run is approved or executed.
+ */
+export type WorkflowCodingPlanStep = {
+  stepId: string;
+  kind: WorkflowStepKind;
+  executor: WorkflowExecutorFamily;
+  order: number;
+  required: boolean;
+  state: WorkflowStepState;
+};
+
+/**
+ * A frozen, pre-execution preview of the coding workflow a native start would
+ * materialize. It is a pure projection of the version-pinned
+ * {@link WorkflowDefinition} plus the run-start parameters: the same definition
+ * key/version, repo, objective, issue scope, route, and approval boundary a
+ * `workflow run start-coding` would durably persist. Because the projection is
+ * deterministic and the built-in definition is immutable per version, the same
+ * preview can be reconstructed from the durable run later for approval/dispatch
+ * to reference - the preview never carries wall-clock fields, so it is stable
+ * enough to show before approval.
+ */
+export type WorkflowCodingPlanPreview = {
+  runId: string;
+  source: string;
+  state: WorkflowRunState;
+  repoPath: string;
+  objective: string;
+  issueScope: Record<string, unknown>;
+  route: Record<string, unknown>;
+  approvalBoundary: WorkflowApprovalBoundary | null;
+  skillRevision: string | null;
+  definitionKey: string;
+  definitionVersion: number;
+  steps: WorkflowCodingPlanStep[];
+};
+
+export type WorkflowCodingPlanPreviewResult =
+  | { ok: true; preview: WorkflowCodingPlanPreview }
+  | { ok: false; errors: WorkflowRunStartError[] };
+
+/**
+ * Materialize a {@link WorkflowCodingPlanPreview} from the same
+ * {@link WorkflowRunStartInput} a native coding start would use, without touching
+ * any durable state. It reuses {@link materializeWorkflowRunStart} for the run /
+ * step shape (so the preview matches exactly what a start would persist) and
+ * enriches each step with the executor family declared on the definition. Invalid
+ * inputs surface the same refusal taxonomy as a start.
+ */
+export function materializeWorkflowCodingPlanPreview(
+  input: WorkflowRunStartInput
+): WorkflowCodingPlanPreviewResult {
+  const result = materializeWorkflowRunStart(input);
+  if (!result.ok) {
+    return { ok: false, errors: result.errors };
+  }
+
+  // `materializeWorkflowRunStart` succeeded, so `input.definition` is a valid
+  // `WorkflowDefinition`; build the executor lookup from it by stable step key.
+  const definition = input.definition as WorkflowDefinition;
+  const executorByStepKey = new Map<string, WorkflowExecutorFamily>(
+    definition.steps.map((step) => [step.key, step.executor])
+  );
+
+  const { run } = result.plan;
+  const steps: WorkflowCodingPlanStep[] = result.plan.steps.map((step) => ({
+    stepId: step.stepId,
+    kind: step.kind,
+    executor: executorByStepKey.get(step.stepId) as WorkflowExecutorFamily,
+    order: step.order,
+    required: step.required,
+    state: step.state
+  }));
+
+  return {
+    ok: true,
+    preview: {
+      runId: run.runId,
+      source: run.source,
+      state: run.state,
+      repoPath: run.repoPath,
+      objective: run.objective,
+      issueScope: run.issueScope,
+      route: run.route,
+      approvalBoundary: run.approvalBoundary,
+      skillRevision: run.skillRevision,
+      definitionKey: run.definitionKey,
+      definitionVersion: run.definitionVersion,
+      steps
+    }
+  };
 }
