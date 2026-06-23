@@ -1259,11 +1259,33 @@ Live dispatch / finalization recovery can also set the durable manual-recovery f
     "leases": 1,
     "gates": 1,
     "gatesOpen": 1
+  },
+  "progress": {
+    "phase": "advancing",
+    "changed": true,
+    "emit": true,
+    "terminal": false,
+    "cleanup": "none",
+    "currentStep": "implementation",
+    "lastEvent": "step:implementation:running",
+    "nextAction": "resume_running",
+    "blockerReason": null,
+    "digest": "sha256:7abb560d717661265f609b02107bd6fce701de831d42a28bd1f7af344aa52ad5"
   }
 }
 ```
 
 `schemaVersion` is `1`. `nextAction`, `recovery`, `monitorDrift`, `leases`, `lastCheckpoint`, `evidence`, and `gates` reuse the same field shapes as `workflow status`. `stepState` is the active step's state (or `null` when there is no active step). `counts.gates` is the total gate count for the run; `counts.gatesOpen` is the count of unresolved gates.
+
+### Progress digest tick
+
+`progress` is a lightweight, deterministic projection of the tick for a cheap cron monitor loop that wants to surface a concise update only when meaningful state changes, without a per-heartbeat agent call:
+
+- `phase` is the coarse progress state: `advancing` (a step is running or progressing), `idle` (no actionable step yet), `awaiting_approval` (a step is paused on an approval boundary), `blocked` (operator recovery is required), or `terminal` (a clean succeeded / canceled outcome). A failed run surfaces as `blocked`, not `terminal`, because it needs recovery.
+- `digest` is a stable `sha256:` hash of only the meaningful operator-facing state. Volatile fields (`generatedAt`, lease heartbeat / expiry timestamps, evidence ordering) are excluded, so two ticks over identical state hash equal.
+- `changed` / `emit` compare `digest` against the run's last emitted digest (the `monitor_last_emitted_digest` advisory). On a first observation, or whenever the meaningful state changes, both are `true`; a repeated unchanged tick reports both `false` so a caller can suppress a duplicate update. `workflow run monitor` reads this baseline but does not advance it, so the command stays read-only.
+- `terminal` and `cleanup` make end-of-run handling explicit: a clean terminal outcome reports `cleanup: "release"` (release the monitor lease and stop ticking); every other phase reports `cleanup: "none"`. `cleanup` and `terminal` are reported even on a suppressed (`emit: false`) tick.
+- `currentStep`, `lastEvent`, `nextAction` (the next-action code), and `blockerReason` are the snapshot fields an operator reads at a glance; `blockerReason` is `null` unless `phase` is `blocked`.
 
 ### Error codes
 
@@ -1291,10 +1313,15 @@ Active step: implementation [running]
 Steps: 5 approvals=1 leases=1
 Gates: 1 (open: 1)
 - gate-nm-1 [step/operator_decision_required] OPEN allowed=fix,skip,approve_as_is recommended=fix
+Progress phase: advancing
+Progress changed: true (emit: true)
+Last event: step:implementation:running
+Cleanup: none
+Progress digest: sha256:7abb560d717661265f609b02107bd6fce701de831d42a28bd1f7af344aa52ad5
 Data dir: /path/to/data
 ```
 
-A `Recovery: <code>` line is added when a recovery classification is present. Open gates print inline after the `Gates:` count; resolved gates are omitted from text output.
+A `Recovery: <code>` line is added when a recovery classification is present. Open gates print inline after the `Gates:` count; resolved gates are omitted from text output. A `Blocker: <reason>` line is added between `Last event` and `Cleanup` when the run is in the `blocked` phase.
 
 Exit code 0 on success, 1 on failure, 2 on usage error.
 

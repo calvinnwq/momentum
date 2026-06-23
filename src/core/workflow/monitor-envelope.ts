@@ -119,6 +119,15 @@ export type WorkflowMonitorEnvelope = {
    */
   gates: readonly WorkflowGateRecord[];
   counts: WorkflowMonitorEnvelopeCounts;
+  /**
+   * The digest of the last *emitted* native progress tick for this run, read
+   * verbatim from the durable `monitor_last_emitted_digest` advisory column
+   * (NGX-511). It is the suppression baseline the {@link deriveWorkflowMonitorProgress}
+   * reducer compares against: an equal digest means the operator-facing state
+   * has not changed since the last surfaced tick. `null` means no tick has been
+   * emitted yet (a first observation always emits).
+   */
+  monitorLastEmittedDigest: string | null;
 };
 
 export type BuildWorkflowMonitorEnvelopeOptions = {
@@ -210,7 +219,8 @@ export function buildWorkflowMonitorEnvelope(
     recovery: monitor.recovery,
     evidence: detail.evidence,
     gates: detail.gates,
-    counts: countsFromDetail(detail)
+    counts: countsFromDetail(detail),
+    monitorLastEmittedDigest: detail.run.monitorLastEmittedDigest
   };
 }
 

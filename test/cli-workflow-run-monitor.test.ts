@@ -792,6 +792,208 @@ describe("momentum workflow run monitor (NGX-328)", () => {
     expect(readStepState(dataDir, runId, "implementation")).toBe(before);
   });
 
+  it("includes a native progress digest tick that emits on first observation (NGX-511)", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-progress";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "running" });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "running",
+        order: 1
+      });
+      seedLease(db, {
+        runId,
+        leaseKind: "managed-step",
+        expiresAt: FRESH_EXPIRY
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      progress: {
+        phase: string;
+        changed: boolean;
+        emit: boolean;
+        terminal: boolean;
+        cleanup: string;
+        currentStep: string | null;
+        lastEvent: string;
+        nextAction: string;
+        blockerReason: string | null;
+        digest: string;
+      };
+    };
+    expect(payload.progress).toMatchObject({
+      phase: "advancing",
+      changed: true,
+      emit: true,
+      terminal: false,
+      cleanup: "none",
+      currentStep: "implementation",
+      lastEvent: "step:implementation:running",
+      nextAction: "resume_running",
+      blockerReason: null
+    });
+    expect(payload.progress.digest.startsWith("sha256:")).toBe(true);
+  });
+
+  it("suppresses an unchanged repeat progress tick against the persisted emitted digest (NGX-511)", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-progress-suppress";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "running" });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "running",
+        order: 1
+      });
+      seedLease(db, {
+        runId,
+        leaseKind: "managed-step",
+        expiresAt: FRESH_EXPIRY
+      });
+    } finally {
+      db.close();
+    }
+
+    const first = await run([
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(first.code).toBe(0);
+    const firstPayload = JSON.parse(first.stdout) as {
+      progress: { digest: string; emit: boolean; changed: boolean };
+    };
+    expect(firstPayload.progress.emit).toBe(true);
+
+    // Persist the emitted digest as the suppression baseline (the activation
+    // writer is a follow-up slice; here we assert the read-side suppression).
+    const persistDb = openDb(dataDir);
+    try {
+      persistDb
+        .prepare(
+          "UPDATE workflow_runs SET monitor_last_emitted_digest = ? WHERE id = ?"
+        )
+        .run(firstPayload.progress.digest, runId);
+    } finally {
+      persistDb.close();
+    }
+
+    const second = await run([
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(second.code).toBe(0);
+    const secondPayload = JSON.parse(second.stdout) as {
+      progress: { digest: string; emit: boolean; changed: boolean };
+    };
+    expect(secondPayload.progress.digest).toBe(firstPayload.progress.digest);
+    expect(secondPayload.progress.changed).toBe(false);
+    expect(secondPayload.progress.emit).toBe(false);
+  });
+
+  it("marks a terminally succeeded run with an explicit release cleanup (NGX-511)", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-progress-terminal";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "succeeded" });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "succeeded",
+        order: 1
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      progress: { phase: string; terminal: boolean; cleanup: string };
+    };
+    expect(payload.progress).toMatchObject({
+      phase: "terminal",
+      terminal: true,
+      cleanup: "release"
+    });
+  });
+
+  it("renders the native progress phase and cleanup in the text monitor summary (NGX-511)", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-progress-text";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "running" });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "running",
+        order: 1
+      });
+      seedLease(db, {
+        runId,
+        leaseKind: "managed-step",
+        expiresAt: FRESH_EXPIRY
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--data-dir",
+      dataDir
+    ]);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("Progress phase: advancing");
+    expect(result.stdout).toContain("Progress changed: true (emit: true)");
+    expect(result.stdout).toContain("Last event: step:implementation:running");
+    expect(result.stdout).toContain("Cleanup: none");
+  });
+
   it("rejects an unexpected extra positional argument", async () => {
     const dataDir = makeTempDir();
     const result = await run([

@@ -5,6 +5,7 @@ import type {
   WorkflowRunLogsEnvelope
 } from "../core/workflow/logs.js";
 import type { WorkflowMonitorEnvelope } from "../core/workflow/monitor-envelope.js";
+import type { WorkflowMonitorProgressTick } from "../core/workflow/monitor-progress.js";
 import type { WorkflowMonitorState } from "../core/workflow/monitor-state.js";
 import type { WorkflowRunImport, WorkflowRunImportDiagnostic } from "../core/workflow/run-import.js";
 import type { PersistWorkflowRunImportSummary } from "../core/workflow/run-import-persist.js";
@@ -684,7 +685,8 @@ export function emitWorkflowRunMonitor(
   parsed: { json: boolean },
   io: CliIo,
   dataDir: string,
-  envelope: WorkflowMonitorEnvelope
+  envelope: WorkflowMonitorEnvelope,
+  progress: WorkflowMonitorProgressTick
 ): number {
   const payload = {
     ok: true,
@@ -757,6 +759,18 @@ export function emitWorkflowRunMonitor(
       leases: envelope.counts.leases,
       gates: envelope.counts.gates,
       gatesOpen: envelope.counts.gatesOpen
+    },
+    progress: {
+      phase: progress.phase,
+      changed: progress.changed,
+      emit: progress.emit,
+      terminal: progress.terminal,
+      cleanup: progress.cleanup,
+      currentStep: progress.currentStep,
+      lastEvent: progress.lastEvent,
+      nextAction: progress.nextAction,
+      blockerReason: progress.blockerReason,
+      digest: progress.digest
     }
   };
 
@@ -765,7 +779,7 @@ export function emitWorkflowRunMonitor(
     return 0;
   }
 
-  write(io.stdout, renderWorkflowMonitorText(dataDir, envelope));
+  write(io.stdout, renderWorkflowMonitorText(dataDir, envelope, progress));
   return 0;
 }
 
@@ -1363,7 +1377,8 @@ export function renderWorkflowHandoffText(
 
 export function renderWorkflowMonitorText(
   dataDir: string,
-  envelope: WorkflowMonitorEnvelope
+  envelope: WorkflowMonitorEnvelope,
+  progress: WorkflowMonitorProgressTick
 ): string {
   const lines: string[] = [];
   lines.push(`Workflow run monitor: ${envelope.runId}`);
@@ -1402,6 +1417,14 @@ export function renderWorkflowMonitorText(
           : "")
     );
   }
+  lines.push(`Progress phase: ${progress.phase}`);
+  lines.push(`Progress changed: ${progress.changed} (emit: ${progress.emit})`);
+  lines.push(`Last event: ${progress.lastEvent}`);
+  if (progress.blockerReason !== null) {
+    lines.push(`Blocker: ${progress.blockerReason}`);
+  }
+  lines.push(`Cleanup: ${progress.cleanup}`);
+  lines.push(`Progress digest: ${progress.digest}`);
   lines.push(`Data dir: ${dataDir}`);
   lines.push("");
   return lines.join("\n");

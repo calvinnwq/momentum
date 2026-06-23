@@ -24,7 +24,7 @@ export const COMMANDS = [
   "momentum workflow run list [--state <state>] [--filter <active|blocked|completed|imported>] [--approval-boundary <boundary>] [--repo <path>] [--issue-scope <identifier>] [--updated-since <ms>] [--updated-until <ms>] [--limit <n>] [--data-dir <path>] [--json]",
   "momentum workflow run update-step <run-id> --step <step-id> --state <approved|succeeded|skipped|failed|blocked|canceled> --reason <text> [--actor <name>] [--evidence-pointer <ref>] [--ledger-pointer <ref>] [--data-dir <path>] [--json]",
   "momentum workflow run clear-recovery <run-id> [--data-dir <path>] [--json]",
-  "momentum workflow run monitor <run-id> [--data-dir <path>] [--json]",
+  "momentum workflow run monitor <run-id> [--advance] [--data-dir <path>] [--json]",
   "momentum workflow run logs <run-id> [--data-dir <path>] [--json]",
   "momentum workflow run start --run-id <id> --repo <path> --objective <text> [--definition <key>] [--definition-version <n>] [--approval-boundary <boundary>] [--skill-revision <text>] [--issue-scope <identifier>] [--profile <name>] [--data-dir <path>] [--json]",
   "momentum workflow run start-coding --run-id <id> --repo <path> --objective <text> [--approval-boundary <boundary>] [--skill-revision <text>] [--issue-scope <identifier>] [--profile <name>] [--steps-json <json>] [--definition-version <n>] [--data-dir <path>] [--json]",

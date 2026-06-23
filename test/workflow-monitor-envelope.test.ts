@@ -445,4 +445,21 @@ describe("buildWorkflowMonitorEnvelope", () => {
     expect(envelope.counts.gates).toBe(0);
     expect(envelope.counts.gatesOpen).toBe(0);
   });
+
+  it("surfaces the durable last-emitted digest as the progress suppression baseline (NGX-511)", () => {
+    const envelope = buildWorkflowMonitorEnvelope(
+      detailFrom({
+        run: runRow({ monitorLastEmittedDigest: "sha256:prior-baseline" })
+      }),
+      { generatedAt: 13 }
+    );
+    expect(envelope.monitorLastEmittedDigest).toBe("sha256:prior-baseline");
+  });
+
+  it("defaults the last-emitted digest to null when never persisted (NGX-511)", () => {
+    const envelope = buildWorkflowMonitorEnvelope(detailFrom(), {
+      generatedAt: 14
+    });
+    expect(envelope.monitorLastEmittedDigest).toBeNull();
+  });
 });

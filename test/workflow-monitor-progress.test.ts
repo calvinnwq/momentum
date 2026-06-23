@@ -78,6 +78,7 @@ function makeEnvelope(
     evidence: [],
     gates: [],
     counts: makeCounts(),
+    monitorLastEmittedDigest: null,
     ...overrides
   };
 }

@@ -49,6 +49,7 @@ import {
   loadWorkflowMonitorEnvelope,
   type WorkflowMonitorEnvelope
 } from "../../core/workflow/monitor-envelope.js";
+import { deriveWorkflowMonitorProgress } from "../../core/workflow/monitor-progress.js";
 import {
   deriveWorkflowMonitorState,
   type WorkflowMonitorState
@@ -1865,7 +1866,14 @@ function workflowRunMonitor(parsed: ParsedFlags, io: CliIo): number {
     });
   }
 
-  return emitWorkflowRunMonitor(parsed, io, dataDir, envelope);
+  // Project the durable envelope into a native progress tick (NGX-511),
+  // suppressing against the last emitted digest. This stays read-only: the
+  // emitted digest is read as the baseline but not advanced here.
+  const progress = deriveWorkflowMonitorProgress(envelope, {
+    priorDigest: envelope.monitorLastEmittedDigest
+  });
+
+  return emitWorkflowRunMonitor(parsed, io, dataDir, envelope, progress);
 }
 
 function workflowRunLogs(parsed: ParsedFlags, io: CliIo): number {
