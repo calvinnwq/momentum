@@ -386,7 +386,7 @@ function classifyRecovery(input: RecoveryInput): WorkflowMonitorRecovery | null 
       return {
         code: "failed_external_side_effect_step",
         message:
-          "A required external-side-effect tail step finalized in failed state after it may have already pushed a branch, merged a pull request, or written the tracker. Verify the remote, pull request, and tracker state, then reconcile via `momentum workflow run clear-recovery <run-id>` - do not blindly re-run the step, which could double-merge or re-write.",
+          "A required external-side-effect tail step finalized in failed state after it may have already pushed a branch, merged a pull request, or written the tracker. Verify the remote, pull request, and tracker state, then reconcile via `momentum workflow run clear-recovery <run-id> --evidence-pointer <ref>` - do not blindly re-run the step, which could double-merge or re-write.",
         stepId: failed.stepId
       };
     }

@@ -150,6 +150,15 @@ describe("buildWorkflowRecoveryMarkdown", () => {
     }
   });
 
+  it("renders the evidence-backed clear command for failed external side effect steps", () => {
+    const body = buildWorkflowRecoveryMarkdown(
+      makeFullInput({ classification: "failed_external_side_effect_step" })
+    );
+    expect(body).toContain(
+      "momentum workflow run clear-recovery <run-id> --evidence-pointer <ref>"
+    );
+  });
+
   it("renders the shared safety and rollback notes", () => {
     const body = buildWorkflowRecoveryMarkdown(makeFullInput());
     expect(body).toContain("## Safety and rollback notes");

@@ -494,6 +494,7 @@ describe("deriveWorkflowMonitorState: failed external-side-effect tail step stee
       expect(result.recovery?.code).toBe("failed_external_side_effect_step");
       expect(result.recovery?.stepId).toBe(kind);
       expect(result.recovery?.message ?? "").toContain("clear-recovery");
+      expect(result.recovery?.message ?? "").toContain("--evidence-pointer <ref>");
       expect(result.nextAction.code).toBe("clear_recovery");
       expect(result.nextAction.stepId).toBe(kind);
       expect(result.nextAction.code).not.toBe("rerun_failed_step");
