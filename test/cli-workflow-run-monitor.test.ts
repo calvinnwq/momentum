@@ -11,6 +11,9 @@ import {
 } from "../src/core/workflow/gate-persist.js";
 import { parseWorkflowRunImport } from "../src/core/workflow/run-import.js";
 import { persistWorkflowRunImport } from "../src/core/workflow/run-import-persist.js";
+import {
+  MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE
+} from "../src/core/workflow/run-start.js";
 
 type RunResult = {
   code: number;
@@ -80,6 +83,7 @@ function seedRun(
   input: {
     runId: string;
     state: string;
+    source?: string;
     needsManualRecovery?: boolean;
     manualRecoveryReason?: string | null;
   }
@@ -96,7 +100,7 @@ function seedRun(
   ).run(
     input.runId,
     input.state,
-    "agent-workflow",
+    input.source ?? "agent-workflow",
     null,
     "{}",
     null,
@@ -1018,7 +1022,11 @@ describe("momentum workflow run monitor (NGX-328)", () => {
     const runId = "cwfp-advance-first";
     const db = openDb(dataDir);
     try {
-      seedRun(db, { runId, state: "running" });
+      seedRun(db, {
+        runId,
+        state: "running",
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE
+      });
       seedStep(db, {
         runId,
         stepId: "implementation",
@@ -1059,12 +1067,68 @@ describe("momentum workflow run monitor (NGX-328)", () => {
     expect(digests.seen).toBe(payload.progress.digest);
   });
 
+  it("refuses --advance for non-native workflow runs without mutating digests (NGX-511)", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-advance-imported";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "running" });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "running",
+        order: 1
+      });
+      seedLease(db, {
+        runId,
+        leaseKind: "managed-step",
+        expiresAt: FRESH_EXPIRY
+      });
+      db.prepare(
+        `UPDATE workflow_runs
+            SET monitor_last_seen_digest = ?,
+                monitor_last_emitted_digest = ?
+          WHERE id = ?`
+      ).run("sha256:seen-baseline", "sha256:emitted-baseline", runId);
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--advance",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "workflow run monitor",
+      code: "advance_unsupported_source",
+      runId
+    });
+    expect(readMonitorDigests(dataDir, runId)).toEqual({
+      seen: "sha256:seen-baseline",
+      emitted: "sha256:emitted-baseline"
+    });
+  });
+
   it("suppresses a second unchanged --advance tick end-to-end from durable state (NGX-511)", async () => {
     const dataDir = makeTempDir();
     const runId = "cwfp-advance-suppress";
     const db = openDb(dataDir);
     try {
-      seedRun(db, { runId, state: "running" });
+      seedRun(db, {
+        runId,
+        state: "running",
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE
+      });
       seedStep(db, {
         runId,
         stepId: "implementation",
@@ -1129,7 +1193,11 @@ describe("momentum workflow run monitor (NGX-328)", () => {
     const runId = "cwfp-advance-rearm";
     const db = openDb(dataDir);
     try {
-      seedRun(db, { runId, state: "running" });
+      seedRun(db, {
+        runId,
+        state: "running",
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE
+      });
       seedStep(db, {
         runId,
         stepId: "implementation",
@@ -1240,7 +1308,11 @@ describe("momentum workflow run monitor (NGX-328)", () => {
     const runId = "cwfp-advance-text";
     const db = openDb(dataDir);
     try {
-      seedRun(db, { runId, state: "running" });
+      seedRun(db, {
+        runId,
+        state: "running",
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE
+      });
       seedStep(db, {
         runId,
         stepId: "implementation",

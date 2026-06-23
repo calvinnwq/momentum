@@ -50,6 +50,7 @@ function makeEnvelope(
     schemaVersion: 1,
     generatedAt: 1_730_000_000_000,
     runId: "cwfp-run",
+    source: "momentum-native-coding",
     runState: "running",
     stepState: "running",
     terminal: false,

@@ -95,6 +95,7 @@ export type WorkflowMonitorEnvelope = {
   schemaVersion: number;
   generatedAt: number;
   runId: string;
+  source: string;
   runState: WorkflowRunState;
   stepState: WorkflowStepState | null;
   terminal: boolean;
@@ -203,6 +204,7 @@ export function buildWorkflowMonitorEnvelope(
     schemaVersion: WORKFLOW_MONITOR_SCHEMA_VERSION,
     generatedAt: options.generatedAt ?? Date.now(),
     runId: monitor.runId,
+    source: detail.run.source,
     runState: monitor.runState,
     stepState: monitor.activeStep?.state ?? null,
     terminal: monitor.terminal,

@@ -1866,6 +1866,18 @@ function workflowRunMonitor(parsed: ParsedFlags, io: CliIo): number {
       runId
     });
   }
+  if (
+    parsed.advance &&
+    envelope.source !== MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE
+  ) {
+    return emitWorkflowRunMonitorFailure(parsed, io, {
+      code: "advance_unsupported_source",
+      message:
+        "`--advance` is only supported for Momentum-native coding workflow runs.",
+      dataDir,
+      runId
+    });
+  }
 
   // Project the durable envelope into a native progress tick (NGX-511),
   // suppressing against the last emitted digest. The default read stays
