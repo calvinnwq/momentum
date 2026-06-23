@@ -686,7 +686,8 @@ export function emitWorkflowRunMonitor(
   io: CliIo,
   dataDir: string,
   envelope: WorkflowMonitorEnvelope,
-  progress: WorkflowMonitorProgressTick
+  progress: WorkflowMonitorProgressTick,
+  advanced = false
 ): number {
   const payload = {
     ok: true,
@@ -764,6 +765,7 @@ export function emitWorkflowRunMonitor(
       phase: progress.phase,
       changed: progress.changed,
       emit: progress.emit,
+      advanced,
       terminal: progress.terminal,
       cleanup: progress.cleanup,
       currentStep: progress.currentStep,
@@ -779,7 +781,10 @@ export function emitWorkflowRunMonitor(
     return 0;
   }
 
-  write(io.stdout, renderWorkflowMonitorText(dataDir, envelope, progress));
+  write(
+    io.stdout,
+    renderWorkflowMonitorText(dataDir, envelope, progress, advanced)
+  );
   return 0;
 }
 
@@ -1378,7 +1383,8 @@ export function renderWorkflowHandoffText(
 export function renderWorkflowMonitorText(
   dataDir: string,
   envelope: WorkflowMonitorEnvelope,
-  progress: WorkflowMonitorProgressTick
+  progress: WorkflowMonitorProgressTick,
+  advanced = false
 ): string {
   const lines: string[] = [];
   lines.push(`Workflow run monitor: ${envelope.runId}`);
@@ -1419,6 +1425,7 @@ export function renderWorkflowMonitorText(
   }
   lines.push(`Progress phase: ${progress.phase}`);
   lines.push(`Progress changed: ${progress.changed} (emit: ${progress.emit})`);
+  lines.push(`Progress advanced: ${advanced}`);
   lines.push(`Last event: ${progress.lastEvent}`);
   if (progress.blockerReason !== null) {
     lines.push(`Blocker: ${progress.blockerReason}`);

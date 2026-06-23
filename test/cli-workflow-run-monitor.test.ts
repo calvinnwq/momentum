@@ -197,6 +197,25 @@ function readStepState(
   }
 }
 
+function readMonitorDigests(
+  dataDir: string,
+  runId: string
+): { seen: string | null; emitted: string | null } {
+  const db = openDb(dataDir);
+  try {
+    const row = db
+      .prepare(
+        `SELECT monitor_last_seen_digest AS seen,
+                monitor_last_emitted_digest AS emitted
+           FROM workflow_runs WHERE id = ?`
+      )
+      .get(runId) as { seen: string | null; emitted: string | null } | undefined;
+    return { seen: row?.seen ?? null, emitted: row?.emitted ?? null };
+  } finally {
+    db.close();
+  }
+}
+
 function parseImportOrThrow(runDir: string) {
   const parsed = parseWorkflowRunImport(runDir);
   if (!parsed.ok) {
@@ -992,6 +1011,280 @@ describe("momentum workflow run monitor (NGX-328)", () => {
     expect(result.stdout).toContain("Progress changed: true (emit: true)");
     expect(result.stdout).toContain("Last event: step:implementation:running");
     expect(result.stdout).toContain("Cleanup: none");
+  });
+
+  it("persists the emitted digest as the suppression baseline under --advance (NGX-511)", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-advance-first";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "running" });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "running",
+        order: 1
+      });
+      seedLease(db, {
+        runId,
+        leaseKind: "managed-step",
+        expiresAt: FRESH_EXPIRY
+      });
+    } finally {
+      db.close();
+    }
+
+    expect(readMonitorDigests(dataDir, runId).emitted).toBeNull();
+
+    const result = await run([
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--advance",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      progress: { emit: boolean; advanced: boolean; digest: string };
+    };
+    expect(payload.progress.emit).toBe(true);
+    expect(payload.progress.advanced).toBe(true);
+
+    const digests = readMonitorDigests(dataDir, runId);
+    expect(digests.emitted).toBe(payload.progress.digest);
+    expect(digests.seen).toBe(payload.progress.digest);
+  });
+
+  it("suppresses a second unchanged --advance tick end-to-end from durable state (NGX-511)", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-advance-suppress";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "running" });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "running",
+        order: 1
+      });
+      seedLease(db, {
+        runId,
+        leaseKind: "managed-step",
+        expiresAt: FRESH_EXPIRY
+      });
+    } finally {
+      db.close();
+    }
+
+    const first = await run([
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--advance",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(first.code).toBe(0);
+    const firstPayload = JSON.parse(first.stdout) as {
+      progress: { emit: boolean; advanced: boolean; digest: string };
+    };
+    expect(firstPayload.progress.emit).toBe(true);
+    expect(firstPayload.progress.advanced).toBe(true);
+
+    // No manual SQL seeding here: the first --advance already persisted the
+    // baseline, so a second identical tick must suppress purely from durable
+    // state.
+    const second = await run([
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--advance",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(second.code).toBe(0);
+    const secondPayload = JSON.parse(second.stdout) as {
+      progress: { changed: boolean; emit: boolean; advanced: boolean; digest: string };
+    };
+    expect(secondPayload.progress.digest).toBe(firstPayload.progress.digest);
+    expect(secondPayload.progress.changed).toBe(false);
+    expect(secondPayload.progress.emit).toBe(false);
+    expect(secondPayload.progress.advanced).toBe(false);
+    expect(readMonitorDigests(dataDir, runId).emitted).toBe(
+      firstPayload.progress.digest
+    );
+  });
+
+  it("re-emits and re-advances the baseline after meaningful state changes (NGX-511)", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-advance-rearm";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "running" });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "running",
+        order: 1
+      });
+      seedLease(db, {
+        runId,
+        leaseKind: "managed-step",
+        expiresAt: FRESH_EXPIRY
+      });
+    } finally {
+      db.close();
+    }
+
+    const first = await run([
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--advance",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(first.code).toBe(0);
+    const firstDigest = (
+      JSON.parse(first.stdout) as { progress: { digest: string } }
+    ).progress.digest;
+
+    // Durable state advances: the running step completes.
+    const mutateDb = openDb(dataDir);
+    try {
+      mutateDb
+        .prepare(
+          "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_id = ?"
+        )
+        .run(runId, "implementation");
+    } finally {
+      mutateDb.close();
+    }
+
+    const second = await run([
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--advance",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(second.code).toBe(0);
+    const secondPayload = JSON.parse(second.stdout) as {
+      progress: { changed: boolean; emit: boolean; advanced: boolean; digest: string };
+    };
+    expect(secondPayload.progress.digest).not.toBe(firstDigest);
+    expect(secondPayload.progress.changed).toBe(true);
+    expect(secondPayload.progress.emit).toBe(true);
+    expect(secondPayload.progress.advanced).toBe(true);
+    expect(readMonitorDigests(dataDir, runId).emitted).toBe(
+      secondPayload.progress.digest
+    );
+  });
+
+  it("does not advance the baseline without --advance, staying read-only (NGX-511)", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-advance-readonly";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "running" });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "running",
+        order: 1
+      });
+      seedLease(db, {
+        runId,
+        leaseKind: "managed-step",
+        expiresAt: FRESH_EXPIRY
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      progress: { advanced: boolean };
+    };
+    expect(payload.progress.advanced).toBe(false);
+    expect(readMonitorDigests(dataDir, runId).emitted).toBeNull();
+  });
+
+  it("reports the advanced flag in the text monitor summary under --advance (NGX-511)", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-advance-text";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "running" });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "running",
+        order: 1
+      });
+      seedLease(db, {
+        runId,
+        leaseKind: "managed-step",
+        expiresAt: FRESH_EXPIRY
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--advance",
+      "--data-dir",
+      dataDir
+    ]);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("Progress advanced: true");
+  });
+
+  it("rejects --advance outside workflow run monitor (NGX-511)", async () => {
+    const result = await run(["status", "--advance"]);
+    expect(result.code).toBe(2);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain(
+      "--advance is only supported by `momentum workflow run monitor`."
+    );
+  });
+
+  it("rejects --advance on an unrelated workflow subcommand (NGX-511)", async () => {
+    const result = await run(["workflow", "status", "--advance"]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain(
+      "--advance is only supported by `momentum workflow run monitor`."
+    );
   });
 
   it("rejects an unexpected extra positional argument", async () => {
