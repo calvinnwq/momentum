@@ -20,7 +20,10 @@ async function run(args: string[]): Promise<CliResult> {
   const code = await runCli(args, {
     stdout: { write: (chunk: string) => ((stdout += chunk), true) },
     stderr: { write: (chunk: string) => ((stderr += chunk), true) },
-    env: { ...process.env, HOME: fs.mkdtempSync(path.join(os.tmpdir(), "momentum-workflow-cmd-home-")) }
+    env: {
+      ...process.env,
+      HOME: fs.mkdtempSync(path.join(os.tmpdir(), "momentum-workflow-cmd-home-"))
+    }
   });
   return { code, stdout, stderr };
 }
@@ -55,6 +58,24 @@ describe("workflow command family extraction", () => {
       code: "run_id_required",
       message: "Missing required --run-id <id> for workflow run start."
     });
+  });
+
+  it("prints top-level help for workflow run --help", async () => {
+    const result = await run(["workflow", "run", "--help"]);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout.startsWith("Momentum\n\nUsage:\n")).toBe(true);
+    expect(result.stdout).toContain("momentum workflow run start");
+    expect(result.stderr).toBe("");
+  });
+
+  it("prints top-level help for workflow run preview-coding --help", async () => {
+    const result = await run(["workflow", "run", "preview-coding", "--help"]);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout.startsWith("Momentum\n\nUsage:\n")).toBe(true);
+    expect(result.stdout).toContain("momentum workflow run preview-coding");
+    expect(result.stderr).toBe("");
   });
 
   it("preserves workflow gate decision validation before storage access", async () => {
