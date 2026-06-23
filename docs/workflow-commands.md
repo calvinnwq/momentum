@@ -1,11 +1,13 @@
 # Workflow commands
 
-Operator-facing CLI envelopes for the `workflow run start`, `workflow run start-coding`, `workflow import`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run approve`, `workflow run decide`, `workflow run update-step`, `workflow run clear-recovery`, `workflow run monitor`, and `workflow run logs` commands.
+Operator-facing CLI envelopes for the `workflow run start`, `workflow run start-coding`, `workflow run preview-coding`, `workflow import`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run approve`, `workflow run decide`, `workflow run update-step`, `workflow run clear-recovery`, `workflow run monitor`, and `workflow run logs` commands.
 
 - `workflow run start` starts a first-class workflow run from a validated workflow definition: it resolves the definition (a persisted definition, or the built-in `coding-workflow` recipe), loads repo policy, and durably materializes a `workflow_runs` row plus one ordered `workflow_steps` row per definition step, with an approval row when an approval boundary is supplied.
   `goal start` remains the compatibility path for the older Goal loop.
 - `workflow run start-coding` is the explicit Momentum-native coding-workflow start door: a thin selector over `workflow run start` that always uses the built-in `coding-workflow` definition, refuses run ids reserved for compatibility imports, and records the run with a Momentum-native source so it is unmistakably Momentum-owned.
   Use it to intentionally choose Momentum orchestration for a new coding workflow; the ordinary definition-sourced start and the imported compatibility runs are unchanged.
+- `workflow run preview-coding` is the read-only plan preview for the Momentum-native coding workflow: it runs the same precondition checks and built-in definition resolution as `workflow run start-coding` but stops before any durable write, emitting a frozen plan an operator can inspect before approval or execution.
+  It writes nothing and surfaces the run id, repo, objective, issue scope, approval boundary, route/profile, definition key/version, repo policy, and every step with its executor family.
 - `workflow import` reads local `.agent-workflows/<run-id>/` directories and persists normalized rows into the `workflow_runs`, `workflow_steps`, and `workflow_approvals` tables.
 - `workflow status` is a read-only surface that lists workflow runs (with state / filter selectors) or returns the full detail of a single run.
 - `workflow handoff` is a read-only surface that emits a machine-readable next-action envelope for one run.
@@ -17,7 +19,7 @@ Operator-facing CLI envelopes for the `workflow run start`, `workflow run start-
 - `workflow run monitor` is a read-only machine envelope that emits one stable JSON shape per run — derived from durable rows and the monitor reducer — so a monitor runner can decide whether to report, wait, or ask an operator to recover without parsing prose or scraping artifacts.
 - `workflow run logs` is a read-only run-scoped log and evidence reader that reuses the workflow detail shape and attaches executor rounds plus their child artifacts, checkpoints, findings, and decisions.
 
-`workflow status`, `workflow handoff`, `workflow run list`, `workflow run monitor`, and `workflow run logs` are read-only: they never write SQLite or files.
+`workflow run preview-coding`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run monitor`, and `workflow run logs` are read-only: they never write SQLite or files.
 
 See also:
 
@@ -203,6 +205,98 @@ In addition to every [`workflow run start`](#error-codes) refusal code (`run_id_
 |------|---------|
 | `reserved_run_id` | `--run-id` begins with a reserved compatibility prefix (`cwfp-`, `cwfb-`, `overnight-`); refused so native runs are not confused with imported compatibility state. |
 | `definition_not_allowed` | A `--definition` other than `coding-workflow` was supplied; this door always uses the built-in coding workflow. |
+
+Exit code 0 on success, 1 on structured refusal, 2 on usage error.
+
+## `workflow run preview-coding`
+
+```text
+momentum workflow run preview-coding --run-id <id> --repo <path> --objective <text> [--approval-boundary <boundary>] [--skill-revision <text>] [--issue-scope <identifier>] [--profile <name>] [--definition-version <n>] [--data-dir <path>] [--json]
+```
+
+The read-only plan preview for the Momentum-native coding workflow.
+It runs the exact same precondition checks and built-in definition resolution as [`workflow run start-coding`](#workflow-run-start-coding) - required inputs, the reserved-run-id and conflicting-`--definition` refusals, data-directory resolution, and repo-policy loading - but stops before any durable write.
+Instead of persisting a run it emits a frozen plan an operator can inspect before approving or executing it.
+
+It takes the same required and optional arguments as [`workflow run start-coding`](#workflow-run-start-coding), including `--profile <name>` as a read-only route/profile preview and `--approval-boundary <boundary>` as the projected initial approval state.
+
+Behaviour:
+
+- **No durable write**: the preview never opens the run for a durable write; no `workflow_runs`, `workflow_steps`, or `workflow_approvals` row is created.
+  It is read-only apart from reading `<repo>/MOMENTUM.md` to report repo policy.
+- **Frozen projection**: the preview is a pure projection of the version-pinned built-in `coding-workflow` definition plus the supplied inputs, so the durable run a later `workflow run start-coding` materializes from the same inputs matches the preview exactly.
+  Because the built-in definition is immutable per version, the same plan can be reconstructed from the run's recorded `(definition key, version)` for approval and dispatch to reference later.
+- **Stable output**: the envelope carries no wall-clock fields, so repeated previews of the same inputs are byte-stable and safe to show before approval.
+- **Step detail**: each step carries its `kind`, executor family, `order`, `required` flag, and on-start `state` (`pending`, or `approved` for the steps an `--approval-boundary` covers).
+
+Success JSON adds a `preview: true` marker, the run header (`runId`, `source`, `state`, `approvalBoundary`, `definitionKey`, `definitionVersion`, `repoPath`, `objective`, `issueScope`, `route`, `skillRevision`), a `steps` array, `counts.steps`, and `policy`:
+
+```json
+{
+  "ok": true,
+  "command": "workflow run preview-coding",
+  "preview": true,
+  "dataDir": "/path/to/data",
+  "runId": "native-coding-1",
+  "source": "momentum-native-coding",
+  "state": "pending",
+  "approvalBoundary": null,
+  "definitionKey": "coding-workflow",
+  "definitionVersion": 1,
+  "repoPath": "/path/to/repo",
+  "objective": "Ship the slice",
+  "issueScope": {},
+  "route": {},
+  "skillRevision": null,
+  "steps": [
+    { "stepId": "preflight", "kind": "preflight", "executor": "one-shot", "order": 0, "required": true, "state": "pending" },
+    { "stepId": "implementation", "kind": "implementation", "executor": "goal-loop", "order": 1, "required": true, "state": "pending" },
+    { "stepId": "postflight", "kind": "postflight", "executor": "one-shot", "order": 2, "required": true, "state": "pending" },
+    { "stepId": "no-mistakes", "kind": "no-mistakes", "executor": "no-mistakes", "order": 3, "required": true, "state": "pending" },
+    { "stepId": "merge-cleanup", "kind": "merge-cleanup", "executor": "script", "order": 4, "required": true, "state": "pending" },
+    { "stepId": "linear-refresh", "kind": "linear-refresh", "executor": "external-apply", "order": 5, "required": true, "state": "pending" }
+  ],
+  "counts": { "steps": 6 },
+  "policy": { "present": false, "path": "/path/to/repo/MOMENTUM.md" }
+}
+```
+
+### Text output (success)
+
+Text output is a human-readable preview of the same frozen plan and includes the command's no-write status, definition key/version, source, projected run state, approval boundary, profile, repo, objective, policy path or `(none)`, data directory, and every step with order, step id, kind, executor family, required/optional marker, and projected state:
+
+```text
+Coding workflow plan preview (not started): native-coding-1
+Definition: coding-workflow v1
+Source: momentum-native-coding
+State on start: pending
+Approval boundary: (none)
+Profile: live-wrapper
+Repo: /path/to/repo
+Objective: Ship the slice
+Policy: (none)
+Data dir: /path/to/data
+Steps (6):
+  0. preflight (preflight) -> one-shot [required, pending]
+  1. implementation (implementation) -> goal-loop [required, pending]
+  2. postflight (postflight) -> one-shot [required, pending]
+  3. no-mistakes (no-mistakes) -> no-mistakes [required, pending]
+  4. merge-cleanup (merge-cleanup) -> script [required, pending]
+  5. linear-refresh (linear-refresh) -> external-apply [required, pending]
+```
+
+### Text output (failure)
+
+Structured refusals render the same message text as `workflow run start-coding`, with `command` set to `workflow run preview-coding` in JSON mode.
+
+```text
+Workflow run already exists: native-coding-1.
+```
+
+### Error codes
+
+The preview shares the [`workflow run start-coding`](#error-codes-1) refusal taxonomy: `run_id_required`, `repo_required`, `objective_required`, `data_dir_failed`, `reserved_run_id`, `definition_not_allowed`, `definition_not_found`, `policy_invalid`, `invalid_run_start` (with its `errors` array), and `run_exists`.
+It checks an existing SQLite store read-only for duplicate run ids and still creates no durable run.
 
 Exit code 0 on success, 1 on structured refusal, 2 on usage error.
 

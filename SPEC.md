@@ -91,6 +91,8 @@ from `MOMENTUM_LIVE_WRAPPER_PROFILE` at run time.
 Native coding dispatch resolves executor families from the built-in `coding-workflow` definition for that source, even if a persisted definition with the same key/version exists.
 Built-in workflow definitions are resolved by key and version; native runs must keep resolving the built-in version recorded on the run, even after a later built-in recipe becomes current.
 If the recorded built-in version is unavailable, native dispatch must fail closed instead of substituting persisted rows or a later built-in version.
+`workflow run preview-coding` (NGX-509) is the read-only native plan-preview door: it shares the `start-coding` preconditions and built-in definition resolution but writes nothing, emitting a frozen plan (run id, repo, objective, issue scope, approval boundary, `route.profile`, definition key/version, and every step with its executor family and on-start state) so an operator can inspect the proposed run before approval or execution.
+The preview is a pure projection of the version-pinned built-in definition plus inputs, so a later `start-coding` from the same inputs persists a matching run, and the frozen plan can be reconstructed from the run's recorded `(definition key, version)` for approval/dispatch to reference.
 CWFP remains the default coding-workflow start and rollback route; the default switch stays NGX-404.
 
 ## Runtime Consolidation

@@ -56,6 +56,14 @@ export function openDb(dataDir: string): MomentumDb {
   return db;
 }
 
+export function openExistingDbReadOnly(dataDir: string): MomentumDb | undefined {
+  const dbPath = path.join(dataDir, "momentum.db");
+  if (!fs.existsSync(dbPath)) {
+    return undefined;
+  }
+  return new DatabaseSync(dbPath, { readOnly: true });
+}
+
 const SQLITE_CONSTRAINT_UNIQUE = 2067;
 
 type SqliteError = Error & { errcode?: number };

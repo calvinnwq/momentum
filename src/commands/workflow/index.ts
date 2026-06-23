@@ -2,7 +2,12 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { usageError, type CliIo } from "../../renderers/cli-output.js";
-import { isUniqueViolation, openDb, type MomentumDb } from "../../adapters/db.js";
+import {
+  isUniqueViolation,
+  openDb,
+  openExistingDbReadOnly,
+  type MomentumDb
+} from "../../adapters/db.js";
 import { resolveDataDir, type DataDirOptions } from "../../config/data-dir.js";
 import { loadMomentumPolicy } from "../../core/intent/policy.js";
 import {
@@ -74,6 +79,7 @@ import {
 } from "../../core/workflow/definition-persist.js";
 import {
   MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
+  materializeWorkflowCodingPlanPreview,
   type WorkflowRunStartInput
 } from "../../core/workflow/run-start.js";
 import {
@@ -109,6 +115,7 @@ import {
   emitWorkflowRunListFailure,
   emitWorkflowRunMonitor,
   emitWorkflowRunMonitorFailure,
+  emitWorkflowRunPreviewCodingSuccess,
   emitWorkflowRunStartFailure,
   emitWorkflowRunStartSuccess,
   emitWorkflowRunUpdateStepFailure,
@@ -180,7 +187,7 @@ function workflowRun(parsed: ParsedFlags, io: CliIo): number {
   const subcommand = parsed.args[2];
   if (!subcommand) {
     return usageError(
-      "Missing required subcommand for workflow run. Expected: start, start-coding, list, approve, decide, update-step, clear-recovery, monitor, logs.",
+      "Missing required subcommand for workflow run. Expected: start, start-coding, preview-coding, list, approve, decide, update-step, clear-recovery, monitor, logs.",
       parsed,
       io
     );
@@ -190,6 +197,9 @@ function workflowRun(parsed: ParsedFlags, io: CliIo): number {
   }
   if (subcommand === "start-coding") {
     return workflowRunStartCoding(parsed, io);
+  }
+  if (subcommand === "preview-coding") {
+    return workflowRunPreviewCoding(parsed, io);
   }
   if (subcommand === "logs") {
     return workflowRunLogs(parsed, io);
@@ -259,17 +269,40 @@ function workflowRunStartCoding(parsed: ParsedFlags, io: CliIo): number {
   });
 }
 
+/**
+ * `momentum workflow run preview-coding` - the native plan-preview door
+ * (NGX-509). It runs the exact same precondition checks and built-in definition
+ * resolution as `workflow run start-coding` but stops before any durable write:
+ * instead of persisting a run it materializes a frozen
+ * {@link materializeWorkflowCodingPlanPreview} projection and emits it so an
+ * operator can inspect the proposed run - run id, repo, objective, issue scope,
+ * approval boundary, route/profile, definition key/version, and every step with
+ * its executor family - before approving or executing it. The preview is a pure
+ * projection of the version-pinned built-in definition plus inputs, so the
+ * durable run a later `start-coding` persists matches it exactly.
+ */
+function workflowRunPreviewCoding(parsed: ParsedFlags, io: CliIo): number {
+  return runWorkflowStartCommand(parsed, io, {
+    command: "workflow run preview-coding",
+    coding: true,
+    preview: true
+  });
+}
+
 type WorkflowStartCommandOptions = {
   command: WorkflowRunStartCommand;
   coding: boolean;
+  preview?: boolean;
 };
 
 /**
- * Shared implementation for the two run-start surfaces. `workflow run start` is
- * the generic definition-sourced start; `workflow run start-coding` is the
- * explicit Momentum-native coding door. The `coding` option toggles the
- * coding-specific guards (forced definition, reserved-run-id refusal, native
- * source provenance) while keeping the durable persistence path identical.
+ * Shared implementation for the three run-start surfaces. `workflow run start`
+ * is the generic definition-sourced start; `workflow run start-coding` is the
+ * explicit Momentum-native coding door; and `workflow run preview-coding` shares
+ * the coding preconditions but returns a read-only plan before the durable
+ * persistence point. The `coding` option toggles the coding-specific guards
+ * (forced definition, reserved-run-id refusal, native source provenance) while
+ * `preview` keeps the materialized plan on the read-only path.
  */
 function runWorkflowStartCommand(
   parsed: ParsedFlags,
@@ -369,6 +402,65 @@ function runWorkflowStartCommand(
     });
   }
 
+  // Preview mode (coding door only) shares every precondition above but stops
+  // before any durable write: it resolves the built-in definition, materializes
+  // a frozen plan projection, and emits it without opening the database for writes.
+  if (options.preview === true) {
+    const definition = resolveBuiltInWorkflowRunStartDefinition(
+      definitionKey,
+      parsed.definitionVersion
+    );
+    if (definition === undefined) {
+      return emitWorkflowRunStartFailure(parsed, io, {
+        command,
+        code: "definition_not_found",
+        message:
+          parsed.definitionVersion === undefined
+            ? `No workflow definition found for key: ${definitionKey}.`
+            : `No workflow definition found for key ${definitionKey} version ${parsed.definitionVersion}.`,
+        dataDir,
+        runId
+      });
+    }
+    const input = buildWorkflowRunStartInput({
+      definition,
+      runId,
+      repoPath,
+      objective,
+      now,
+      coding: options.coding,
+      parsed
+    });
+    const previewResult = materializeWorkflowCodingPlanPreview(input);
+    if (!previewResult.ok) {
+      return emitWorkflowRunStartFailure(parsed, io, {
+        command,
+        code: "invalid_run_start",
+        message: `Invalid workflow run start: ${previewResult.errors
+          .map((error) => error.code)
+          .join(", ")}`,
+        dataDir,
+        runId,
+        errors: previewResult.errors
+      });
+    }
+    if (workflowRunExistsReadOnly(dataDir, runId)) {
+      return emitWorkflowRunStartFailure(parsed, io, {
+        command,
+        code: "run_exists",
+        message: `Workflow run already exists: ${runId}.`,
+        dataDir,
+        runId
+      });
+    }
+    return emitWorkflowRunPreviewCodingSuccess(parsed, io, {
+      dataDir,
+      preview: previewResult.preview,
+      policyPresent: policy.present === true,
+      policyPath: policy.path
+    });
+  }
+
   const db = openDb(dataDir);
   try {
     const definition = options.coding
@@ -395,28 +487,15 @@ function runWorkflowStartCommand(
       });
     }
 
-    const input: WorkflowRunStartInput = {
+    const input = buildWorkflowRunStartInput({
       definition,
       runId,
       repoPath,
       objective,
-      now
-    };
-    if (options.coding) {
-      input.source = MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE;
-    }
-    if (parsed.approvalBoundary !== undefined) {
-      input.approvalBoundary = parsed.approvalBoundary;
-    }
-    if (parsed.skillRevision !== undefined) {
-      input.skillRevision = parsed.skillRevision;
-    }
-    if (parsed.issueScope !== undefined) {
-      input.issueScope = { identifier: parsed.issueScope };
-    }
-    if (parsed.profile !== undefined) {
-      input.route = { profile: parsed.profile };
-    }
+      now,
+      coding: options.coding,
+      parsed
+    });
 
     let summary: PersistWorkflowRunStartSummary;
     try {
@@ -495,6 +574,70 @@ function resolveBuiltInWorkflowRunStartDefinition(
   version: number | undefined
 ): WorkflowDefinition | undefined {
   return getBuiltInWorkflowDefinition(key, version);
+}
+
+function workflowRunExistsReadOnly(dataDir: string, runId: string): boolean {
+  const db = openExistingDbReadOnly(dataDir);
+  if (db === undefined) {
+    return false;
+  }
+  try {
+    const hasWorkflowRuns = db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workflow_runs'"
+      )
+      .get();
+    if (hasWorkflowRuns === undefined) {
+      return false;
+    }
+    return (
+      db
+        .prepare("SELECT 1 FROM workflow_runs WHERE id = ? LIMIT 1")
+        .get(runId) !== undefined
+    );
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Build the {@link WorkflowRunStartInput} shared by the durable start path and
+ * the non-durable preview path. Keeping a single builder guarantees a preview
+ * reflects exactly the inputs a `workflow run start[-coding]` would persist.
+ */
+function buildWorkflowRunStartInput(args: {
+  definition: WorkflowDefinition;
+  runId: string;
+  repoPath: string;
+  objective: string;
+  now: number;
+  coding: boolean;
+  parsed: ParsedFlags;
+}): WorkflowRunStartInput {
+  const { definition, runId, repoPath, objective, now, coding, parsed } = args;
+  const input: WorkflowRunStartInput = {
+    definition,
+    runId,
+    repoPath,
+    objective,
+    now
+  };
+  if (coding) {
+    input.source = MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE;
+  }
+  if (parsed.approvalBoundary !== undefined) {
+    input.approvalBoundary = parsed.approvalBoundary;
+  }
+  if (parsed.skillRevision !== undefined) {
+    input.skillRevision = parsed.skillRevision;
+  }
+  if (parsed.issueScope !== undefined) {
+    input.issueScope = { identifier: parsed.issueScope };
+  }
+  if (parsed.profile !== undefined) {
+    input.route = { profile: parsed.profile };
+  }
+  return input;
 }
 
 function workflowImport(parsed: ParsedFlags, io: CliIo): number {

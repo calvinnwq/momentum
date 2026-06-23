@@ -149,7 +149,8 @@ Supported frontmatter keys (all optional, strict types when present):
 
 A `MOMENTUM.md` with no frontmatter at all is also valid: the entire body becomes policy notes and no config defaults are set.
 Parse / schema errors map to stable codes (`policy_path_invalid`, `policy_file_unreadable`, `policy_parse_invalid`, `policy_schema_invalid`) and are surfaced through `goal start --json`, `status --json` / text, `handoff` JSON / markdown, and `doctor --json` / text.
-`workflow run start --json` and `workflow run start-coding --json` also load the repo policy and refuse a malformed policy as `policy_invalid` without writing the run.
+`workflow run start --json`, `workflow run start-coding --json`, and `workflow run preview-coding --json` also load the repo policy and refuse a malformed policy as `policy_invalid`.
+The preview door is read-only and never writes a run; the start doors refuse before writing when policy is malformed.
 
 **Precedence (highest first):**
 
