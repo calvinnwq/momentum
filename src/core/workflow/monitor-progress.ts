@@ -27,10 +27,10 @@
  *   lease and stop ticking; a failed run is `blocked` (needs recovery), not a
  *   clean terminal, so it reports `cleanup: "none"`.
  *
- * This module owns the classification + digest only. Wiring it into the
- * `workflow run monitor` CLI surface, persisting the emitted digest into the
- * `monitor_last_emitted_digest` advisory column, and any OpenClaw-facing wrapper
- * are follow-up slices that build on this keystone.
+ * This module owns only the pure classification + digest projection. The
+ * `workflow run monitor` CLI passes the durable emitted-digest baseline into
+ * this reducer and, when `--advance` is used on a Momentum-native coding run,
+ * persists the returned digest into advisory columns outside this module.
  */
 
 import crypto from "node:crypto";

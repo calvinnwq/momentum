@@ -7,7 +7,9 @@
  * substrate detail loader ({@link loadWorkflowRunDetail}) with the pure M7
  * monitor reducer ({@link deriveWorkflowMonitorState}) and a small
  * reportability classifier so the runner can decide whether to **report**,
- * **wait**, or ask an operator to **recover** from a single envelope.
+ * **wait**, or ask an operator to **recover** from a single envelope. The same
+ * envelope also carries the durable emitted-digest advisory used by the native
+ * progress reducer to suppress repeated unchanged ticks.
  *
  * The envelope is derived entirely from durable rows — never from the on-disk
  * `monitor.json` prose. It never mutates run / step / approval / lease state,

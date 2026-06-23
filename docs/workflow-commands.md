@@ -1347,7 +1347,10 @@ Progress digest: sha256:7abb560d717661265f609b02107bd6fce701de831d42a28bd1f7af34
 Data dir: /path/to/data
 ```
 
-A `Recovery: <code>` line is added when a recovery classification is present. Open gates print inline after the `Gates:` count; resolved gates are omitted from text output. A `Blocker: <reason>` line is added between `Last event` and `Cleanup` when the run is in the `blocked` phase.
+A `Manual recovery reason: <reason>` line is added when the durable run-scoped reason is present.
+A `Recovery: <code>` line is added when a recovery classification is present.
+Open gates print inline after the `Gates:` count; resolved gates are omitted from text output.
+A `Blocker: <reason>` line is added between `Last event` and `Cleanup` when the run is in the `blocked` phase.
 
 Exit code 0 on success, 1 on failure, 2 on usage error.
 
