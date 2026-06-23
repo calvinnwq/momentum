@@ -263,8 +263,8 @@ Success JSON adds a `preview: true` marker, the run header (`runId`, `source`, `
 
 ### Error codes
 
-The preview shares the [`workflow run start-coding`](#error-codes-1) refusal taxonomy: `run_id_required`, `repo_required`, `objective_required`, `data_dir_failed`, `reserved_run_id`, `definition_not_allowed`, `definition_not_found`, `policy_invalid`, and `invalid_run_start` (with its `errors` array).
-It cannot return `run_exists`: a preview never checks for or creates a durable run.
+The preview shares the [`workflow run start-coding`](#error-codes-1) refusal taxonomy: `run_id_required`, `repo_required`, `objective_required`, `data_dir_failed`, `reserved_run_id`, `definition_not_allowed`, `definition_not_found`, `policy_invalid`, `invalid_run_start` (with its `errors` array), and `run_exists`.
+It checks an existing SQLite store read-only for duplicate run ids and still creates no durable run.
 
 Exit code 0 on success, 1 on structured refusal, 2 on usage error.
 

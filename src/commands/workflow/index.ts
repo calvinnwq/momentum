@@ -2,7 +2,12 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { usageError, type CliIo } from "../../renderers/cli-output.js";
-import { isUniqueViolation, openDb, type MomentumDb } from "../../adapters/db.js";
+import {
+  isUniqueViolation,
+  openDb,
+  openExistingDbReadOnly,
+  type MomentumDb
+} from "../../adapters/db.js";
 import { resolveDataDir, type DataDirOptions } from "../../config/data-dir.js";
 import { loadMomentumPolicy } from "../../core/intent/policy.js";
 import {
@@ -397,7 +402,7 @@ function runWorkflowStartCommand(
 
   // Preview mode (coding door only) shares every precondition above but stops
   // before any durable write: it resolves the built-in definition, materializes
-  // a frozen plan projection, and emits it without opening the database.
+  // a frozen plan projection, and emits it without opening the database for writes.
   if (options.preview === true) {
     const definition = resolveBuiltInWorkflowRunStartDefinition(
       definitionKey,
@@ -435,6 +440,15 @@ function runWorkflowStartCommand(
         dataDir,
         runId,
         errors: previewResult.errors
+      });
+    }
+    if (workflowRunExistsReadOnly(dataDir, runId)) {
+      return emitWorkflowRunStartFailure(parsed, io, {
+        command,
+        code: "run_exists",
+        message: `Workflow run already exists: ${runId}.`,
+        dataDir,
+        runId
       });
     }
     return emitWorkflowRunPreviewCodingSuccess(parsed, io, {
@@ -558,6 +572,30 @@ function resolveBuiltInWorkflowRunStartDefinition(
   version: number | undefined
 ): WorkflowDefinition | undefined {
   return getBuiltInWorkflowDefinition(key, version);
+}
+
+function workflowRunExistsReadOnly(dataDir: string, runId: string): boolean {
+  const db = openExistingDbReadOnly(dataDir);
+  if (db === undefined) {
+    return false;
+  }
+  try {
+    const hasWorkflowRuns = db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workflow_runs'"
+      )
+      .get();
+    if (hasWorkflowRuns === undefined) {
+      return false;
+    }
+    return (
+      db
+        .prepare("SELECT 1 FROM workflow_runs WHERE id = ? LIMIT 1")
+        .get(runId) !== undefined
+    );
+  } finally {
+    db.close();
+  }
 }
 
 /**

@@ -261,6 +261,43 @@ describe("momentum workflow run preview-coding", () => {
     expect(result.stdout).toContain("external-apply");
   });
 
+  it("refuses a run id that already exists before previewing", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const started = await run([
+      "workflow",
+      "run",
+      "start-coding",
+      "--run-id",
+      "preview-existing",
+      "--repo",
+      repoDir,
+      "--objective",
+      "Existing run",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(started.code).toBe(0);
+
+    const result = await run(
+      previewCodingArgs({
+        dataDir,
+        repoDir,
+        runId: "preview-existing",
+        objective: "Preview duplicate"
+      })
+    );
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "workflow run preview-coding",
+      code: "run_exists",
+      runId: "preview-existing"
+    });
+  });
+
   it("matches the durable run a start-coding would persist from the same inputs", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
