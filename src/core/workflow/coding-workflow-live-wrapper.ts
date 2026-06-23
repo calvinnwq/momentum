@@ -185,8 +185,8 @@ function commandFailureRemainingWork(kind: WorkflowStepKind): string[] {
     return [`Fix ${kind} command failure before advancing the workflow.`];
   }
   return [
-    `${kind} may have completed external side effects (such as a pushed branch, a merged pull request, or a tracker write) before failing; verify the remote, pull request, and tracker state before retrying.`,
-    `Do not blindly re-run ${kind}: use \`momentum workflow run clear-recovery <run-id>\` to prepare a safe scheduler retry or to reconcile the run from external success evidence.`
+    `${kind} may have completed external side effects (such as a pushed branch, a merged pull request, or a tracker write) before failing; verify the remote, pull request, and tracker state before taking further action.`,
+    `Do not blindly re-run ${kind}: after confirming external success, use \`momentum workflow run clear-recovery <run-id> --evidence-pointer <ref>\` to reconcile the run from external evidence.`
   ];
 }
 

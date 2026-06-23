@@ -259,7 +259,7 @@ describe("runCodingWorkflowLiveWrapper", () => {
   });
 
   it.each(["merge-cleanup", "linear-refresh"] as const)(
-    "guides %s failures toward external-state verification and clear-recovery",
+    "guides %s failures toward evidence-backed external-state reconciliation",
     (stepKind) => {
       const dir = makeTempDir();
       const repo = path.join(dir, "repo");
@@ -304,6 +304,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
       expect(guidance).toContain(stepKind);
       expect(guidance).toContain("external side effects");
       expect(guidance).toContain("clear-recovery");
+      expect(guidance).toContain("--evidence-pointer");
+      expect(guidance).not.toContain("retry");
     }
   );
 
