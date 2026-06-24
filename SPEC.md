@@ -44,8 +44,9 @@ External tracker writes are policy-gated and two-phase:
 3. perform the external write only when repo policy allows it
 4. finalize and reconcile the touched issue
 
-The default policy is local intent creation only. The Linear path is
-comment-only unless explicitly configured otherwise, carries a stable
+The default policy is local intent creation only. The Linear path supports
+comment-only `source_satisfied` intents and explicit `status_update` intents
+whose payload supplies the target state (`state` or `stateId`), carries a stable
 idempotency marker, and must fail closed without losing the M6 refusal reason.
 
 ## Source And Adapter Boundaries

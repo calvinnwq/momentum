@@ -92,12 +92,13 @@ creates durable executor invocation / round scaffold rows with deterministic
 dispatcher ids. The built-in `linear-refresh` step uses the `external-apply`
 family: bounded `daemon start` matches exactly one pending Linear update intent
 for the run's issue scope, reuses the same policy-gated external-apply write path
-as `intent apply --external-apply`, writes `external-apply.log` /
-`external-apply.json` evidence under the run directory, and reconciles the step
-from that terminal evidence. Missing issue scope, no matching pending intent,
-ambiguous intents, missing credentials, policy denial, audit-incomplete, blocked,
-or other unsafe apply outcomes park the step for manual recovery rather than
-fabricating success. Configured `subworkflow` steps are also handled by the
+as `intent apply --external-apply`, including `status_update` payloads that move
+the Linear issue to a configured `state` / `stateId`, writes
+`external-apply.log` / `external-apply.json` evidence under the run directory,
+and reconciles the step from that terminal evidence. Missing issue scope, no
+matching pending intent, ambiguous intents, missing credentials, policy denial,
+audit-incomplete, blocked, or other unsafe apply outcomes park the step for
+manual recovery rather than fabricating success. Configured `subworkflow` steps are also handled by the
 managed daemon: the parent run's `route.subworkflow.child` config selects the
 child workflow definition, bounded lineage in `route.subworkflow.lineage` prevents
 unsafe recursion, and the parent step mirrors terminal child-run evidence only

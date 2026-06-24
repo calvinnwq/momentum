@@ -384,6 +384,169 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     }
   });
 
+  it("applies Linear status_update intents for the linear-refresh step", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    fs.writeFileSync(
+      path.join(repoDir, "MOMENTUM.md"),
+      "---\nintent_apply_policy: external_apply_allowed\n---\n",
+      "utf8"
+    );
+    const runId = "ngx522-linear-status-update";
+
+    const startResult = await run([
+      "workflow",
+      "run",
+      "start",
+      "--run-id",
+      runId,
+      "--repo",
+      repoDir,
+      "--objective",
+      "Apply Linear status refresh",
+      "--issue-scope",
+      "NGX-522",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(startResult.code).toBe(0);
+
+    const db = openDb(dataDir);
+    try {
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_order < 5"
+      ).run(runId);
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'linear-refresh'"
+      ).run(runId);
+      db.prepare("UPDATE workflow_runs SET state = 'approved' WHERE id = ?").run(
+        runId
+      );
+      db.prepare(
+        `INSERT INTO source_items
+           (id, adapter_kind, external_id, external_key, url, title, status,
+            metadata_json, last_observed_at, goal_id, created_at, updated_at)
+         VALUES ('source_ngx522', 'linear', 'linear-issue-522', 'NGX-522',
+                 'https://linear.app/example/issue/NGX-522', 'Status issue',
+                 'In Review', '{}', 1, NULL, 1, 1)`
+      ).run();
+      db.prepare(
+        `INSERT INTO update_intents
+           (id, adapter_kind, target_external_id, intent_type, payload_json,
+            reason, source_item_id, status, idempotency_key, created_at,
+            updated_at, applied_at, skipped_at, canceled_at, decision_reason)
+         VALUES ('intent_ngx522', 'linear', 'linear-issue-522',
+                 'status_update',
+                 '{"state":"Done","comment":"Native workflow finished."}',
+                 'close issue after native workflow',
+                 'source_ngx522', 'pending', 'idemp:intent_ngx522', 1, 1,
+                 NULL, NULL, NULL, NULL)`
+      ).run();
+    } finally {
+      db.close();
+    }
+
+    let marker = "";
+    let applyCalls = 0;
+    let statusMutation: unknown = null;
+    const deps = {
+      buildLinearExternalUpdateClient: () => ({
+        async apply(input: {
+          preview: { idempotencyMarker: string; commentBody: string };
+          statusMutation?: unknown;
+        }) {
+          applyCalls += 1;
+          marker = input.preview.idempotencyMarker;
+          statusMutation = input.statusMutation;
+          expect(input.preview.commentBody).toContain(
+            "Native workflow finished."
+          );
+          return {
+            ok: true as const,
+            alreadyApplied: false,
+            issue: {
+              id: "linear-issue-522",
+              key: "NGX-522",
+              url: "https://linear.app/example/issue/NGX-522"
+            },
+            comment: {
+              id: "comment-ngx522",
+              url: "https://linear.app/example/comment/NGX-522"
+            },
+            status: {
+              transitioned: true as const,
+              previousStateId: "state-review",
+              previousStateName: "In Review",
+              nextStateId: "state-done",
+              nextStateName: "Done"
+            },
+            idempotencyMarker: marker
+          };
+        }
+      }),
+      buildLinearIssueRefreshClient: () => ({
+        async refresh() {
+          return {
+            ok: true as const,
+            issue: {
+              id: "linear-issue-522",
+              identifier: "NGX-522",
+              title: "Status issue",
+              url: "https://linear.app/example/issue/NGX-522",
+              updatedAt: "2026-06-24T00:00:00.000Z",
+              state: { id: "state-done", name: "Done" }
+            },
+            comments: [
+              {
+                id: "comment-ngx522",
+                body: `Applied ${marker}`,
+                url: "https://linear.app/example/comment/NGX-522"
+              }
+            ]
+          };
+        }
+      })
+    };
+
+    const result = await run(
+      [
+        "daemon",
+        "start",
+        "--max-loop-iterations",
+        "1",
+        "--poll-interval-ms",
+        "0",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      { LINEAR_API_KEY: "test-key" },
+      deps
+    );
+
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(applyCalls).toBe(1);
+    expect(statusMutation).toEqual({ kind: "by_name", stateName: "Done" });
+
+    const verifyDb = openDb(dataDir);
+    try {
+      const intent = verifyDb
+        .prepare("SELECT status FROM update_intents WHERE id = 'intent_ngx522'")
+        .get() as { status: string } | undefined;
+      expect(intent).toEqual({ status: "applied" });
+      const step = verifyDb
+        .prepare(
+          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = 'linear-refresh'"
+        )
+        .get(runId) as { state: string } | undefined;
+      expect(step).toEqual({ state: "succeeded" });
+    } finally {
+      verifyDb.close();
+    }
+  });
+
   it("sizes the dispatch lease for the configured live-wrapper timeout", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();

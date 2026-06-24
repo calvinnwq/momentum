@@ -169,7 +169,8 @@ export function getExternalUpdateAdapter(
  * Resolve the adapter that would handle the given intent, or undefined if the
  * intent's adapter kind is not registered or the intent type is not supported
  * by that adapter. The first eligible adapter wins; in M6 the only registered
- * external update adapter is Linear with `source_satisfied` support.
+ * external update adapter is Linear with `source_satisfied` and `status_update`
+ * support.
  */
 export function resolveExternalUpdateAdapterForIntent(
   intent: Pick<UpdateIntent, "adapterKind" | "intentType">,
@@ -237,7 +238,7 @@ export function previewExternalUpdate(
 function buildLinearExternalUpdateAdapter(): ExternalUpdateAdapter {
   return {
     kind: "linear",
-    supportedIntentTypes: Object.freeze(["source_satisfied"]),
+    supportedIntentTypes: Object.freeze(["source_satisfied", "status_update"]),
     preview: linearPreview
   };
 }
@@ -281,6 +282,11 @@ function linearPreview(
       error: "External update preview requires a non-empty operator reason."
     };
   }
+  const statusPayload =
+    input.intent.intentType === "status_update"
+      ? parseLinearStatusUpdatePayload(input.intent.payload)
+      : null;
+  if (statusPayload?.ok === false) return statusPayload.error;
 
   const idempotencyMarker = buildIdempotencyMarker({
     adapterKind: "linear",
@@ -303,9 +309,17 @@ function linearPreview(
       intentId: input.intent.id,
       intentType: input.intent.intentType,
       target,
-      mutationKind: "comment",
+      mutationKind:
+        input.intent.intentType === "status_update"
+          ? "status_transition"
+          : "comment",
       summary: renderLinearSummary(input, target),
-      commentBody: renderLinearCommentBody(input, target, idempotencyMarker),
+      commentBody: renderLinearCommentBody(
+        input,
+        target,
+        idempotencyMarker,
+        statusPayload?.ok === true ? statusPayload.comment : null
+      ),
       idempotencyMarker
     }
   };
@@ -316,27 +330,82 @@ function renderLinearSummary(
   target: ExternalUpdateAdapterTarget
 ): string {
   const label = target.externalKey ?? target.externalId;
+  if (input.intent.intentType === "status_update") {
+    const statusPayload = parseLinearStatusUpdatePayload(input.intent.payload);
+    const destination =
+      statusPayload?.ok === true
+        ? (statusPayload.stateName ?? statusPayload.stateId)
+        : "unknown";
+    return `Linear status update on ${label}: ${destination}`;
+  }
   return `Linear comment on ${label}: ${input.intent.intentType}`;
 }
 
 function renderLinearCommentBody(
   input: ExternalUpdateAdapterInput,
   target: ExternalUpdateAdapterTarget,
-  idempotencyMarker: string
+  idempotencyMarker: string,
+  payloadComment: string | null = null
 ): string {
   const actor = (input.operator.actor ?? "").trim();
   const actorLine = actor.length > 0 ? actor : "operator";
   const label = target.externalKey ?? target.externalId;
+  const bodyReason = payloadComment ?? input.intent.reason;
   const lines = [
     `Momentum: ${input.intent.intentType} for ${label}`,
     "",
-    input.intent.reason,
+    bodyReason,
     "",
     `Operator (${actorLine}): ${input.operator.reason.trim()}`,
     "",
     `idempotency: ${idempotencyMarker}`
   ];
   return lines.join("\n");
+}
+
+type LinearStatusUpdatePayload =
+  | { ok: true; stateName: string | null; stateId: string | null; comment: string | null }
+  | { ok: false; error: ExternalUpdateAdapterError };
+
+function parseLinearStatusUpdatePayload(
+  payload: Record<string, unknown>
+): LinearStatusUpdatePayload {
+  const stateName = optionalNonEmptyString(payload["state"]);
+  const stateId = optionalNonEmptyString(payload["stateId"]);
+  if (stateName === null && stateId === null) {
+    return {
+      ok: false,
+      error: {
+        ok: false,
+        code: "validation_failed",
+        error:
+          'Linear status_update payload requires a non-empty "state" or "stateId".'
+      }
+    };
+  }
+  if (stateName !== null && stateId !== null) {
+    return {
+      ok: false,
+      error: {
+        ok: false,
+        code: "validation_failed",
+        error:
+          'Linear status_update payload must not include both "state" and "stateId".'
+      }
+    };
+  }
+  return {
+    ok: true,
+    stateName,
+    stateId,
+    comment: optionalNonEmptyString(payload["comment"])
+  };
+}
+
+function optionalNonEmptyString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 function isBuiltinExternalUpdateAdapterKind(

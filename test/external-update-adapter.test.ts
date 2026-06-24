@@ -82,7 +82,10 @@ describe("external update adapter registry", () => {
   it("lists adapter summaries with their supported intent types", () => {
     const summaries = listExternalUpdateAdapters();
     expect(summaries).toEqual([
-      { kind: "linear", supportedIntentTypes: ["source_satisfied"] }
+      {
+        kind: "linear",
+        supportedIntentTypes: ["source_satisfied", "status_update"]
+      }
     ]);
   });
 
@@ -91,6 +94,7 @@ describe("external update adapter registry", () => {
     expect(adapter).toBeDefined();
     expect(adapter?.kind).toBe("linear");
     expect(adapter?.supportedIntentTypes).toContain("source_satisfied");
+    expect(adapter?.supportedIntentTypes).toContain("status_update");
   });
 
   it("returns undefined for unknown adapter kinds", () => {
@@ -101,6 +105,14 @@ describe("external update adapter registry", () => {
     const adapter = resolveExternalUpdateAdapterForIntent({
       adapterKind: "linear",
       intentType: "source_satisfied"
+    });
+    expect(adapter?.kind).toBe("linear");
+  });
+
+  it("resolves the linear adapter for an eligible status_update intent", () => {
+    const adapter = resolveExternalUpdateAdapterForIntent({
+      adapterKind: "linear",
+      intentType: "status_update"
     });
     expect(adapter?.kind).toBe("linear");
   });
@@ -234,6 +246,68 @@ describe("previewExternalUpdate", () => {
     expect(result.preview.commentBody).toContain(expectedMarker);
     expect(result.preview.commentBody).toContain("Operator (calvin)");
     expect(result.preview.commentBody).toContain("Operator confirmed Goal completion.");
+  });
+
+  it("returns a status-transition preview for an eligible status_update intent", () => {
+    const intent = buildIntent({
+      intentType: "status_update",
+      payload: {
+        state: "Done",
+        comment: "Native workflow finished and should close the tracker."
+      },
+      reason: "Close the tracker after workflow success."
+    });
+    const result = previewExternalUpdate(
+      buildInput({
+        intent,
+        policy: {
+          intentApplyPolicy: "external_apply_allowed",
+          allowStatusMutation: true
+        }
+      })
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.preview).toMatchObject({
+      intentType: "status_update",
+      mutationKind: "status_transition",
+      summary: "Linear status update on NGX-1: Done"
+    });
+    expect(result.preview.commentBody).toContain(
+      "Native workflow finished and should close the tracker."
+    );
+    expect(result.preview.commentBody).toContain(result.preview.idempotencyMarker);
+  });
+
+  it("returns validation_failed when status_update payload has no target state", () => {
+    const result = previewExternalUpdate(
+      buildInput({
+        intent: buildIntent({
+          intentType: "status_update",
+          payload: { comment: "missing state" }
+        })
+      })
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe("validation_failed");
+    expect(result.error).toContain('"state" or "stateId"');
+  });
+
+  it("returns validation_failed when status_update payload has ambiguous state selectors", () => {
+    const result = previewExternalUpdate(
+      buildInput({
+        intent: buildIntent({
+          intentType: "status_update",
+          payload: { state: "Done", stateId: "state-done" }
+        })
+      })
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe("validation_failed");
+    expect(result.error).toContain("must not include both");
   });
 
   it("returns the same preview text and marker when called twice (no side effects)", () => {
