@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.12.0](https://github.com/calvinnwq/momentum/compare/v0.11.0...v0.12.0) (2026-06-24)
+
+
+### Features
+
+* **workflow:** add --advance progress suppression writer to run monitor (NGX-511) ([f594874](https://github.com/calvinnwq/momentum/commit/f5948746b007e17678e5f4c3c44fbfe9a7c52083))
+* **workflow:** add native progress monitor digest ([2b4ea8a](https://github.com/calvinnwq/momentum/commit/2b4ea8aca56d9a489773df1dbbeaca23011ef42d))
+* **workflow:** add per-step coding route configuration ([a5b99c4](https://github.com/calvinnwq/momentum/commit/a5b99c4878beba9cddacc55691e008ab64b8e5d0))
+* **workflow:** add pure native progress-monitor digest keystone (NGX-511) ([f62f6f8](https://github.com/calvinnwq/momentum/commit/f62f6f892ef3cc2eb3767ca5215785addcc2c590))
+* **workflow:** add pure per-step coding route-config keystone module ([54db337](https://github.com/calvinnwq/momentum/commit/54db337e0d08b7f0b6226c893c7282de0bfd0748))
+* **workflow:** render per-step route selections in preview-coding text ([336fc00](https://github.com/calvinnwq/momentum/commit/336fc008cda3137ae7adc74f7239265fb4eb8a3f))
+* **workflow:** wire --steps-json per-step route overrides into coding doors ([460aa43](https://github.com/calvinnwq/momentum/commit/460aa43c849e02397b92ccee499f06a62375869f))
+* **workflow:** wire progress-digest reducer into workflow run monitor (NGX-511) ([59a849f](https://github.com/calvinnwq/momentum/commit/59a849f3af27408c0a0d47deb87e6d41e18eb24b))
+
+
+### Bug Fixes
+
+* **cli:** handle nested workflow run help ([e7298c5](https://github.com/calvinnwq/momentum/commit/e7298c567e8747f5967eefb986270fa88cb65e57))
+* **workflow:** reconcile external tail recovery with evidence ([c24ea48](https://github.com/calvinnwq/momentum/commit/c24ea48f1886196ae8ec4c2302566ea75d60494a))
+
 ## [0.11.0](https://github.com/calvinnwq/momentum/compare/v0.10.0...v0.11.0) (2026-06-23)
 
 
