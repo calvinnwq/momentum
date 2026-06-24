@@ -281,8 +281,9 @@ function refuse(
 /**
  * Normalize provider-specific model aliases into the exact command-ready string
  * the live wrapper should receive. The mapping is provider-qualified: a bare
- * alias such as `sonnet` is meaningful only when the same step also selects the
- * `claude` harness, so unrelated harnesses keep their model strings untouched.
+ * alias such as `sonnet`, `spark`, or `glm-5.2` is meaningful only when the same
+ * step also selects its mapped harness, so unrelated harnesses keep their model
+ * strings untouched.
  */
 export function resolveCodingRouteModelAlias(
   harness: string | undefined,

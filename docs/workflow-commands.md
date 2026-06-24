@@ -973,7 +973,8 @@ The detail envelope flattens the per-run view at the top level (`run`, `steps`, 
 `run.source` is one of `agent-workflow`, `workflow-definition`, or `momentum-native-coding`.
 `run.route.profile` is present when a run was started with `--profile`; it records the operator-selected runtime/profile for status, handoff, monitor, and logs, but daemon execution still resolves the live-wrapper profile from `MOMENTUM_LIVE_WRAPPER_PROFILE`.
 `run.route.steps` is present when a coding run was started with `--steps-json`; it records the per-step harness/model/effort selections the run was started with (only the steps and fields the operator overrode), so the selected route can be audited from durable state.
-Provider-specific model aliases have already been normalized here when the step supplied the matching harness, so status, handoff, monitor, logs, and dispatch read the same command-ready model string.
+Provider-specific model aliases have already been normalized here when the step supplied a known mapped harness (`claude`, `codex`, or `opencode`), so status, handoff, monitor, logs, and dispatch read the same command-ready model string.
+Unknown or non-agent harness/model values remain pass-through values in these read surfaces.
 
 ### State / next-action vocabulary
 

@@ -267,16 +267,16 @@ function workflowRunStart(parsed: ParsedFlags, io: CliIo): number {
  * `momentum workflow run start-coding` - the explicit Momentum-native coding
  * workflow start door (NGX-508). It is a thin, unmistakable selector over the
  * same durable {@link persistWorkflowRunStart} machinery as `workflow run
- * start`, adding three coding-specific guarantees:
+ * start`, adding four coding-specific guarantees:
  *
  *   - it always materializes the built-in `coding-workflow` definition (a
  *     conflicting `--definition` is refused with `definition_not_allowed`);
  *   - it refuses run ids reserved for CWFP/overnight compatibility imports
  *     (`reserved_run_id`) so a fresh native run is never confused with imported
- *     `cwfp-*` primary state; and
+ *     `cwfp-*` primary state;
  *   - it records the run with the {@link MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE}
  *     provenance so status / handoff / monitor / logs surface it as
- *     Momentum-owned.
+ *     Momentum-owned; and
  *   - it accepts the coding-only `--steps-json` route override and records
  *     validated per-step harness/model/effort selections under `route.steps`,
  *     with provider-aware model aliases normalized before persistence.
@@ -325,8 +325,8 @@ type WorkflowStartCommandOptions = {
  * the coding preconditions but returns a read-only plan before the durable
  * persistence point. The `coding` option toggles the coding-specific guards
  * (forced definition, reserved-run-id refusal, native source provenance,
- * `--steps-json` support) while
- * `preview` keeps the materialized plan on the read-only path.
+ * `--steps-json` support) while `preview` keeps the materialized plan on the
+ * read-only path.
  */
 function runWorkflowStartCommand(
   parsed: ParsedFlags,
@@ -393,12 +393,12 @@ function runWorkflowStartCommand(
   // Native per-step coding route reconfiguration (NGX-510): an operator can adjust
   // the planned harness/model/effort selections per step before kickoff via
   // --steps-json. The validated, normalized overrides, including provider-aware
-  // model alias rewrites when harness context is present, are embedded durably under
-  // route.steps so status/handoff/logs can audit the selection and so execution can
-  // read it (or fail closed). The per-step namespace is coding-door specific, so the
-  // generic `workflow run start` refuses it rather than silently dropping a
-  // coding-only selection; a malformed or unsupported selection fails closed before
-  // any durable write.
+  // model alias rewrites for known harness mappings, are embedded durably under
+  // route.steps so status/handoff/logs can audit the selection and so execution
+  // can read it (or fail closed). The per-step namespace is coding-door specific,
+  // so the generic `workflow run start` refuses it rather than silently dropping
+  // a coding-only selection; a malformed or unsupported selection fails closed
+  // before any durable write.
   let stepRouteOverrides: CodingStepRouteOverrides = {};
   if (parsed.stepsJson !== undefined) {
     if (!options.coding) {
