@@ -151,6 +151,8 @@ command for `MOMENTUM_STEP_KIND`, and writes normalized `RunnerResult` evidence
 so command failures become durable `success: false` results rather than stranded
 manual recovery. It is not a default-route switch and does not change CWFP
 compatibility.
+The checked-in dogfood profile runs the wrapper CLI from `src/` through the TypeScript source loader/register shims in `src/adapters/`, so cleanup of generated `dist/` files after test or no-mistakes work does not strand merge-cleanup or tracker-refresh tail work.
+External-side-effect tail failures (`merge-cleanup` / `linear-refresh`) use the shared step-kind set in `run-reducer.ts`, classify through the monitor as `failed_external_side_effect_step`, and steer operators to evidence-backed `workflow run clear-recovery --evidence-pointer <ref>` reconciliation instead of a blind re-run that could repeat the external write.
 
 NGX-508 adds the explicit Momentum-native `workflow run start-coding` door.
 It reuses `run-start` / `run-start-persist` for durable rows, reserves the historical `cwfp-`, `cwfb-`, and `overnight-` prefixes for compatibility imports, stores any selected profile under `route.profile`, and keeps CWFP/default switching separate.

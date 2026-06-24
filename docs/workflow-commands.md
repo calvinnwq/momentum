@@ -655,7 +655,7 @@ Behaviour:
 
 - Re-derives the monitor view from the durable substrate inside a single immediate transaction and clears the flag only when no monitor-derived blocking recovery condition remains.
   The check and the clear are atomic: the monitor condition that is checked is the condition that is cleared.
-- Refuses with `recovery_clear_refused` while a monitor-derived blocking recovery classification (`manual_recovery_lease`, `ghost_active_no_lease`, `stale_running_step`, or `failed_required_step`) still applies; the refusal carries the `recoveryCode` and, when known, the `blockingStepId`, and the flag stays set.
+- Refuses with `recovery_clear_refused` while an ordinary monitor-derived blocking recovery classification (`manual_recovery_lease`, `ghost_active_no_lease`, `stale_running_step`, or `failed_required_step`) still applies; the refusal carries the `recoveryCode` and, when known, the `blockingStepId`, and the flag stays set.
 - For `failed_external_side_effect_step`, clear requires `--evidence-pointer <ref>` before reconciling the failed `merge-cleanup` or `linear-refresh` tail step to `succeeded`, stamping operator audit fields, refreshing the run state, and clearing the flag.
   Operators should use this only after confirming the external push, pull request, and tracker state are consistent, because re-running the tail step could repeat those side effects.
   A missing evidence pointer refuses with `recovery_clear_refused`, leaving the flag and failed step intact.
@@ -699,6 +699,7 @@ Previous reason: ghost active step recovered by operator
 Previous marked at: 1730000000000
 Cleared at: 1730000600000
 Retry prepared: merge-cleanup (runtime_unavailable)
+Reconciled step: merge-cleanup (failed_external_side_effect_step -> succeeded)
 Data dir: /path/to/data
 ```
 

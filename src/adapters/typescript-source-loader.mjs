@@ -1,3 +1,11 @@
+/**
+ * Minimal Node loader for the checked-in workflow live-wrapper dogfood profile.
+ *
+ * The profile must keep working after generated `dist/` output is cleaned up, so
+ * it imports the TypeScript wrapper CLI from `src/` and lets this loader strip
+ * erasable TypeScript syntax at runtime. It also maps local `.js` import
+ * specifiers emitted by the source tree back to sibling `.ts` files.
+ */
 import { readFile, access } from "node:fs/promises";
 import { stripTypeScriptTypes } from "node:module";
 import { fileURLToPath } from "node:url";
