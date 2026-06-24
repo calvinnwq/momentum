@@ -20,6 +20,7 @@ import { normalizeRunnerResult } from "../executors/runner-result.js";
 import type { CommitIntent, CommitType, RunnerResult } from "../executors/types.js";
 import {
   WORKFLOW_STEP_KINDS,
+  isExternalSideEffectTailStepKind,
   type WorkflowStepKind
 } from "./run-reducer.js";
 
@@ -173,10 +174,20 @@ export function runCodingWorkflowLiveWrapper(
     key_learnings: stepConfig.keyLearnings,
     remaining_work: success
       ? stepConfig.remainingWork
-      : [`Fix ${stepKind} command failure before advancing the workflow.`],
+      : commandFailureRemainingWork(stepKind),
     goal_complete: false,
     commit: stepConfig.commit
   });
+}
+
+function commandFailureRemainingWork(kind: WorkflowStepKind): string[] {
+  if (!isExternalSideEffectTailStepKind(kind)) {
+    return [`Fix ${kind} command failure before advancing the workflow.`];
+  }
+  return [
+    `${kind} may have completed external side effects (such as a pushed branch, a merged pull request, or a tracker write) before failing; verify the remote, pull request, and tracker state before taking further action.`,
+    `Do not blindly re-run ${kind}: after confirming external success, use \`momentum workflow run clear-recovery <run-id> --evidence-pointer <ref>\` to reconcile the run from external evidence.`
+  ];
 }
 
 type ConfigLoadResult =

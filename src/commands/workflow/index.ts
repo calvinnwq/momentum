@@ -66,6 +66,7 @@ import {
   clearWorkflowRunManualRecoveryGuarded,
   getWorkflowRunManualRecoveryState,
   isBlockingWorkflowRecoveryCode,
+  type ClearWorkflowRunManualRecoveryGuardedInput,
   type ClearWorkflowRunManualRecoveryGuardedResult,
   type WorkflowRunManualRecoveryState
 } from "../../core/workflow/run-recovery.js";
@@ -1807,7 +1808,14 @@ function workflowRunClearRecovery(parsed: ParsedFlags, io: CliIo): number {
   const db = openDb(dataDir);
   let result: ClearWorkflowRunManualRecoveryGuardedResult;
   try {
-    result = clearWorkflowRunManualRecoveryGuarded(db, { runId });
+    const clearInput: ClearWorkflowRunManualRecoveryGuardedInput = { runId };
+    if (parsed.evidencePointer !== undefined) {
+      clearInput.externalSideEffectEvidencePointer = parsed.evidencePointer;
+    }
+    if (parsed.ledgerPointer !== undefined) {
+      clearInput.externalSideEffectLedgerPointer = parsed.ledgerPointer;
+    }
+    result = clearWorkflowRunManualRecoveryGuarded(db, clearInput);
     if (result.ok) {
       refreshWorkflowRunMonitorAdvisory(db, runId, result.clearedAt);
     }

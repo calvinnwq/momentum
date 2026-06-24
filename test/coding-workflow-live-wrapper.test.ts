@@ -78,6 +78,61 @@ describe("NGX-499 coding workflow live wrapper profile", () => {
       "preflight"
     ]);
   });
+
+  it("keeps merge-cleanup executable independent of generated dist", () => {
+    const profilePath = path.join(
+      process.cwd(),
+      "profiles/ngx-499-coding-workflow-live-wrapper.profile.json"
+    );
+    const parsed = parseLiveWrapperProfile(
+      JSON.parse(fs.readFileSync(profilePath, "utf8"))
+    );
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+
+    const wrapper = parsed.profile.wrappers.get("merge-cleanup");
+    expect(wrapper).toBeDefined();
+    if (wrapper === undefined) return;
+    expect(wrapper.args.join(" ")).not.toContain("dist/");
+
+    const dir = makeTempDir();
+    const configPath = path.join(dir, "wrapper-config.json");
+    const resultPath = path.join(dir, "result.json");
+    writeJson(configPath, {
+      steps: {
+        "merge-cleanup": {
+          command: "/bin/sh",
+          args: ["-c", "true"],
+          cwd: "repo",
+          timeout_sec: 30,
+          env_allow: ["PATH"],
+          success_summary: "merge-cleanup source wrapper passed",
+          commit: { type: "chore", subject: "complete merge-cleanup" }
+        }
+      }
+    });
+
+    const spawned = spawnSync(wrapper.command, [...wrapper.args], {
+      cwd: process.cwd(),
+      env: {
+        HOME: process.env.HOME,
+        PATH: process.env.PATH,
+        MOMENTUM_STEP_KIND: "merge-cleanup",
+        MOMENTUM_REPO_PATH: process.cwd(),
+        MOMENTUM_ITERATION_DIR: dir,
+        MOMENTUM_RESULT_PATH: resultPath,
+        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath
+      },
+      encoding: "utf8",
+      timeout: 30_000
+    });
+
+    expect(spawned.stderr).toBe("");
+    expect(spawned.status).toBe(0);
+    const result = readResult(resultPath);
+    expect(result.success).toBe(true);
+    expect(result.summary).toBe("merge-cleanup source wrapper passed");
+  });
 });
 
 describe("loadCodingWorkflowWrapperConfig", () => {
@@ -257,6 +312,57 @@ describe("runCodingWorkflowLiveWrapper", () => {
       "Fix postflight command failure before advancing the workflow."
     ]);
   });
+
+  it.each(["merge-cleanup", "linear-refresh"] as const)(
+    "guides %s failures toward evidence-backed external-state reconciliation",
+    (stepKind) => {
+      const dir = makeTempDir();
+      const repo = path.join(dir, "repo");
+      const iteration = path.join(dir, "run");
+      const resultPath = path.join(iteration, "result.json");
+      fs.mkdirSync(repo);
+      const configPath = path.join(dir, "wrapper-config.json");
+      writeJson(configPath, {
+        steps: {
+          [stepKind]: {
+            command: "/bin/sh",
+            args: ["-c", "exit 1"],
+            cwd: "repo",
+            timeout_sec: 30,
+            env_allow: ["PATH"],
+            commit: { type: "chore", subject: `complete ${stepKind}` }
+          }
+        }
+      });
+
+      const outcome = runCodingWorkflowLiveWrapper(
+        deps({
+          MOMENTUM_STEP_KIND: stepKind,
+          MOMENTUM_REPO_PATH: repo,
+          MOMENTUM_ITERATION_DIR: iteration,
+          MOMENTUM_RESULT_PATH: resultPath,
+          [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
+          PATH: process.env.PATH
+        })
+      );
+
+      expect(outcome.success).toBe(false);
+      const result = readResult(resultPath);
+      expect(result.success).toBe(false);
+      // A tail step that performs external work (push / merge / tracker write)
+      // may have already merged a PR before failing, so the durable guidance must
+      // not imply a naive re-run and must point at the safe recovery path.
+      expect(result.remaining_work).not.toContain(
+        `Fix ${stepKind} command failure before advancing the workflow.`
+      );
+      const guidance = result.remaining_work.join("\n");
+      expect(guidance).toContain(stepKind);
+      expect(guidance).toContain("external side effects");
+      expect(guidance).toContain("clear-recovery");
+      expect(guidance).toContain("--evidence-pointer");
+      expect(guidance).not.toContain("retry");
+    }
+  );
 
   it("kills the full configured command tree on timeout", () => {
     if (process.platform === "win32") return;

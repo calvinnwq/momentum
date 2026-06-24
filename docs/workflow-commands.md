@@ -344,7 +344,11 @@ Reads the `.agent-workflows/<run-id>/` directory at `<run-dir>` and normalizes t
 - **Unknown siblings**: unrecognized files produce `evidence_format_unknown` diagnostics but do not drop the valid records around them. The generated `recovery.md` artifact is a known sibling and is ignored by import.
 - **Malformed artifacts**: invalid `plan.json`, `ledger.jsonl` lines, or `approval-*.json` files produce `evidence_format_invalid` diagnostics. Valid siblings are still imported.
 - **Durable approvals merge forward**: existing database approvals, the current `approval_boundary`, and imported `approval-*.json` artifacts are merged. The highest boundary is preserved; same-rank boundaries prefer the newer recorded approval. Stale same-boundary artifacts do not overwrite newer durable approval rows. On fresh imports and re-imports, pending steps covered by any preserved approval are persisted as `approved`, and a non-terminal pending run can be persisted as `approved`.
-- **Manual-recovery auto-set**: after persisting the rows, import re-derives the run's monitor view. When it classifies a blocking recovery condition (`manual_recovery_lease`, `ghost_active_no_lease`, `stale_running_step`, or `failed_required_step`), import sets the durable `needs_manual_recovery` flag and renders `<run-dir>/recovery.md`. The flag blocks `workflow run approve` and any `workflow run update-step` transition that would leave a blocking recovery condition in place; a resolving update-step can land so the operator can then clear the flag with `workflow run clear-recovery`. The auto-set only ever sets the flag: re-importing a run whose blocking condition is now resolved leaves any existing flag in place, so clearing stays explicit and operator-driven.
+- **Manual-recovery auto-set**: after persisting the rows, import re-derives the run's monitor view.
+  When it classifies a blocking recovery condition (`manual_recovery_lease`, `ghost_active_no_lease`, `stale_running_step`, `failed_required_step`, or `failed_external_side_effect_step`), import sets the durable `needs_manual_recovery` flag and renders `<run-dir>/recovery.md`.
+  The flag blocks `workflow run approve` and any `workflow run update-step` transition that would leave a blocking recovery condition in place; a resolving update-step can land so the operator can then clear the flag with `workflow run clear-recovery`.
+  For `failed_external_side_effect_step`, `clear-recovery --evidence-pointer <ref>` is the resolving operator action after the external push, pull request, and tracker state are verified.
+  The auto-set only ever sets the flag: re-importing a run whose blocking condition is now resolved leaves any existing flag in place, so clearing stays explicit and operator-driven.
 
 ### JSON envelope (success)
 
@@ -633,7 +637,7 @@ Exit code 0 on success, 1 on structured refusal, 2 on usage error.
 ## `workflow run clear-recovery`
 
 ```text
-momentum workflow run clear-recovery <run-id> [--data-dir <path>] [--json]
+momentum workflow run clear-recovery <run-id> [--evidence-pointer <ref>] [--ledger-pointer <ref>] [--data-dir <path>] [--json]
 ```
 
 Explicit, auditable clear for a run's durable manual-recovery flag. The flag blocks `workflow run approve` and non-resolving `workflow run update-step` transitions until an operator clears it here.
@@ -642,14 +646,24 @@ Required arguments:
 
 - `<run-id>` — the flagged run to clear.
 
+Options:
+
+- `--evidence-pointer <ref>` - required when reconciling `failed_external_side_effect_step`; stores the verified external success evidence on the reconciled step row.
+- `--ledger-pointer <ref>` - optional ledger or local-artifact pointer stored alongside the evidence pointer when an external tail step is reconciled.
+
 Behaviour:
 
-- Re-derives the monitor view from the durable substrate inside a single immediate transaction and clears the flag only when no monitor-derived blocking recovery condition remains. The check and the clear are atomic: the monitor condition that is checked is the condition that is cleared.
-- Refuses with `recovery_clear_refused` while a monitor-derived blocking recovery classification (`manual_recovery_lease`, `ghost_active_no_lease`, `stale_running_step`, or `failed_required_step`) still applies; the refusal carries the `recoveryCode` and, when known, the `blockingStepId`, and the flag stays set.
+- Re-derives the monitor view from the durable substrate inside a single immediate transaction and clears the flag only when no monitor-derived blocking recovery condition remains.
+  The check and the clear are atomic: the monitor condition that is checked is the condition that is cleared.
+- Refuses with `recovery_clear_refused` while an ordinary monitor-derived blocking recovery classification (`manual_recovery_lease`, `ghost_active_no_lease`, `stale_running_step`, or `failed_required_step`) still applies; the refusal carries the `recoveryCode` and, when known, the `blockingStepId`, and the flag stays set.
+- For `failed_external_side_effect_step`, clear requires `--evidence-pointer <ref>` before reconciling the failed `merge-cleanup` or `linear-refresh` tail step to `succeeded`, stamping operator audit fields, refreshing the run state, and clearing the flag.
+  Operators should use this only after confirming the external push, pull request, and tracker state are consistent, because re-running the tail step could repeat those side effects.
+  A missing evidence pointer refuses with `recovery_clear_refused`, leaving the flag and failed step intact.
 - For live dispatch / finalization recovery, the durable flag and `run.manualRecoveryReason` / `run.manualRecoveryAt` fields are authoritative for non-monitor recovery reasons such as `head_mismatch`, `result_missing`, `repo_lock_lost`, or `auth_unavailable`. The `recovery.md` artifact is best-effort and may be absent after an artifact write failure; resolve the captured reason and any artifact context before clearing. The command still performs the atomic monitor recheck above, but it cannot independently prove that external live-recovery work was completed.
 - For retryable live-wrapper bootstrap failures on dispatched `no-mistakes` or `merge-cleanup` steps (for example a stale wrapper/build path reported as `runtime_unavailable` before clean runner evidence exists), clearing recovery also prepares the same step for one safe scheduler retry. The JSON envelope includes `retryPrepared`, and text output prints `Retry prepared: <step> (<code>)`. The previous failed executor round remains durable; the retry creates a new round and does not rerun an already-terminal successful step.
 - For scheduler-lane stale workflow lease recovery, stale `manual-recovery-required` leases are left outstanding as durable evidence with the `stale_workflow_lease_manual_recovery_required` reason prefix. Because the monitor reducer can still classify that lease as `manual_recovery_lease`, guarded clear refuses until the lease condition is resolved.
-- Refuses with `not_flagged` when the run is not currently flagged, so a stale clear cannot mutate anything.
+- Refuses with `not_flagged` when the run is not currently flagged, so a stale clear cannot mutate anything, except for the evidence-backed `failed_external_side_effect_step` reconciliation path above.
+  In that exception, `clear-recovery --evidence-pointer <ref>` can reconcile the failed external tail step even if the durable manual-recovery flag was never set.
 - Never auto-clears from elapsed time alone, never repairs the underlying run, and never issues an external write. The `recovery.md` artifact is intentionally left on disk as durable audit; remove it after capturing the context elsewhere.
 
 ### JSON envelope
@@ -666,6 +680,13 @@ Behaviour:
   "retryPrepared": {
     "stepId": "merge-cleanup",
     "recoveryCode": "runtime_unavailable"
+  },
+  "reconciledStep": {
+    "stepId": "merge-cleanup",
+    "recoveryCode": "failed_external_side_effect_step",
+    "state": "succeeded",
+    "evidencePointer": "github://pulls/123#merged",
+    "ledgerPointer": ".agent-workflows/cwfp-abc123/ledger.jsonl#offset=42"
   }
 }
 ```
@@ -678,6 +699,7 @@ Previous reason: ghost active step recovered by operator
 Previous marked at: 1730000000000
 Cleared at: 1730000600000
 Retry prepared: merge-cleanup (runtime_unavailable)
+Reconciled step: merge-cleanup (failed_external_side_effect_step -> succeeded)
 Data dir: /path/to/data
 ```
 
@@ -688,7 +710,7 @@ Data dir: /path/to/data
 | `data_dir_failed` | Data directory resolution failed. |
 | `run_id_required` | `<run-id>` was not supplied. |
 | `run_not_found` | `<run-id>` does not exist in `workflow_runs`. |
-| `not_flagged` | The run is not currently flagged for manual recovery; nothing to clear. |
+| `not_flagged` | The run is not currently flagged for manual recovery and no evidence-backed `failed_external_side_effect_step` reconciliation applies. |
 | `recovery_clear_refused` | A monitor-derived blocking recovery condition still applies; resolve it before clearing. Carries `recoveryCode` and optional `blockingStepId`. |
 
 Exit code 0 on success, 1 on structured refusal, 2 on usage error.
@@ -959,10 +981,11 @@ verification / git finalization failures reconciled after the executor result.
 - `await_approval` — a pending step needs approval before it can run.
 - `resume_running` — a running step has fresh evidence; let it continue.
 - `investigate_stale` — a running step is stale (no fresh lease, no recent checkpoint) or an orphan lease is holding a finalized run open.
-- `clear_recovery` — the run is blocked (manual-recovery-required lease or blocked step); clear the recovery once the cause is resolved.
-- `rerun_failed_step` — a required step failed; decide whether to retry or mark for manual recovery.
+- `clear_recovery` - the run is blocked (manual-recovery-required lease or blocked step), or a failed external-side-effect tail step (`merge-cleanup` / `linear-refresh`) needs operator reconciliation; verify external state and clear the recovery once the cause is resolved rather than re-running the step.
+  For a failed external-side-effect tail step, clearing recovery reconciles that step to `succeeded` before clearing the durable flag.
+- `rerun_failed_step` - an ordinary required step failed; decide whether to retry or mark for manual recovery. (A failed external-side-effect tail step routes to `clear_recovery` instead, since a naive re-run could double-merge a pull request or re-write the tracker.)
 
-`monitor.recovery.code`, when present, is one of: `stale_running_step`, `ghost_active_no_lease`, `manual_recovery_lease`, `monitor_drift_stale`, `failed_required_step`.
+`monitor.recovery.code`, when present, is one of: `stale_running_step`, `ghost_active_no_lease`, `manual_recovery_lease`, `monitor_drift_stale`, `failed_required_step`, `failed_external_side_effect_step`. `failed_external_side_effect_step` is the subset of `failed_required_step` where the failed required step is an external-side-effect tail step (`merge-cleanup` / `linear-refresh`) that may already have pushed a branch, merged a pull request, or written the tracker before failing.
 
 `run.needsManualRecovery`, `run.manualRecoveryReason`, and `run.manualRecoveryAt` mirror the durable run-scoped recovery flag. Monitor-derived blockers populate `monitor.recovery`; stale scheduler-lane `manual-recovery-required` workflow leases remain outstanding and can populate it as `manual_recovery_lease`. Live dispatch / finalization recovery can set the durable run fields while `monitor.recovery` remains `null`. The stored reason and timestamp are authoritative for those non-monitor classifications; `.agent-workflows/<run-id>/recovery.md` is best-effort operator guidance and may be absent if artifact rendering failed.
 
@@ -1225,7 +1248,7 @@ Options:
 
 `reportReason` is one of `terminal_succeeded`, `terminal_canceled`, `recovery_required`, `monitor_drift`, `awaiting_approval`, `in_progress`, `idle`. `reportable` is always `disposition != "wait"`.
 
-The hard recovery classifications (`recovery.code`) are the same monitor-derived taxonomy as `workflow status`: `stale_running_step`, `ghost_active_no_lease`, `manual_recovery_lease`, `monitor_drift_stale`, `failed_required_step`. A failed required step and a blocked run both resolve to `disposition: "recover"`; `monitor_drift_stale` on an otherwise-progressing run resolves to `disposition: "report"`.
+The hard recovery classifications (`recovery.code`) are the same monitor-derived taxonomy as `workflow status`: `stale_running_step`, `ghost_active_no_lease`, `manual_recovery_lease`, `monitor_drift_stale`, `failed_required_step`, `failed_external_side_effect_step`. A failed required step (including the external-side-effect tail-step variant) and a blocked run both resolve to `disposition: "recover"`; `monitor_drift_stale` on an otherwise-progressing run resolves to `disposition: "report"`.
 
 Live dispatch / finalization recovery can also set the durable manual-recovery flag and drive `needsManualRecovery: true`, `manualRecoveryReason: <reason>`, `disposition: "recover"`, and `reportReason: "recovery_required"` even when `recovery` is null, because `recovery` only carries monitor-derived classifications.
 Scheduler-lane stale `manual-recovery-required` workflow leases remain outstanding and can instead surface through `recovery.code = "manual_recovery_lease"`.

@@ -3,7 +3,13 @@
   "wrappers": {
     "preflight": {
       "command": "/usr/bin/env",
-      "args": ["node", "dist/adapters/coding-workflow-live-wrapper-cli.js"],
+      "args": [
+        "node",
+        "--no-warnings=ExperimentalWarning",
+        "--import",
+        "./src/adapters/typescript-source-register.mjs",
+        "./src/adapters/coding-workflow-live-wrapper-cli.ts"
+      ],
       "cwd": "repo",
       "timeout_sec": 1800,
       "env_allow": [
@@ -21,7 +27,13 @@
     },
     "implementation": {
       "command": "/usr/bin/env",
-      "args": ["node", "dist/adapters/coding-workflow-live-wrapper-cli.js"],
+      "args": [
+        "node",
+        "--no-warnings=ExperimentalWarning",
+        "--import",
+        "./src/adapters/typescript-source-register.mjs",
+        "./src/adapters/coding-workflow-live-wrapper-cli.ts"
+      ],
       "cwd": "repo",
       "timeout_sec": 7200,
       "env_allow": [
@@ -39,7 +51,13 @@
     },
     "postflight": {
       "command": "/usr/bin/env",
-      "args": ["node", "dist/adapters/coding-workflow-live-wrapper-cli.js"],
+      "args": [
+        "node",
+        "--no-warnings=ExperimentalWarning",
+        "--import",
+        "./src/adapters/typescript-source-register.mjs",
+        "./src/adapters/coding-workflow-live-wrapper-cli.ts"
+      ],
       "cwd": "repo",
       "timeout_sec": 3600,
       "env_allow": [
@@ -57,7 +75,13 @@
     },
     "no-mistakes": {
       "command": "/usr/bin/env",
-      "args": ["node", "dist/adapters/coding-workflow-live-wrapper-cli.js"],
+      "args": [
+        "node",
+        "--no-warnings=ExperimentalWarning",
+        "--import",
+        "./src/adapters/typescript-source-register.mjs",
+        "./src/adapters/coding-workflow-live-wrapper-cli.ts"
+      ],
       "cwd": "repo",
       "timeout_sec": 7200,
       "env_allow": [
@@ -76,7 +100,13 @@
     },
     "merge-cleanup": {
       "command": "/usr/bin/env",
-      "args": ["node", "dist/adapters/coding-workflow-live-wrapper-cli.js"],
+      "args": [
+        "node",
+        "--no-warnings=ExperimentalWarning",
+        "--import",
+        "./src/adapters/typescript-source-register.mjs",
+        "./src/adapters/coding-workflow-live-wrapper-cli.ts"
+      ],
       "cwd": "repo",
       "timeout_sec": 7200,
       "env_allow": [

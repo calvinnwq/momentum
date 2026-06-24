@@ -26,6 +26,11 @@ import type { MomentumDb } from "../../adapters/db.js";
 import { prepareRetryableDispatchedStepForRecoveryClear } from "./dispatch-retry.js";
 import { loadWorkflowRunDetail } from "./status.js";
 import type { WorkflowMonitorRecoveryCode } from "./monitor-state.js";
+import { refreshWorkflowRunRuntimeState } from "./runtime-state.js";
+import {
+  isExternalSideEffectTailStepKind,
+  type WorkflowStepKind
+} from "./run-reducer.js";
 
 export type MarkWorkflowRunNeedsManualRecoveryInput = {
   runId: string;
@@ -166,9 +171,11 @@ export function getWorkflowRunManualRecoveryState(
 /**
  * The monitor-reducer recovery codes that represent a hard blocking condition:
  * a manual-recovery lease holding the run blocked, a ghost / stale running step
- * with no live evidence, or a failed required step. While any of these is still
- * classified by `deriveWorkflowMonitorState`, clearing the durable flag would
- * re-open transitions that make recovery worse, so the guarded clear refuses.
+ * with no live evidence, or a failed required step (including the external-side-
+ * effect tail-step variant that still needs operator reconciliation before the
+ * run can be cleared). While any of these is still classified by
+ * `deriveWorkflowMonitorState`, clearing the durable flag would re-open
+ * transitions that make recovery worse, so the guarded clear refuses.
  *
  * `monitor_drift_stale` is deliberately excluded: it is an advisory drift
  * between a (possibly stale) monitor snapshot and the substrate, not a hard
@@ -180,7 +187,8 @@ export const BLOCKING_WORKFLOW_RECOVERY_CODES: ReadonlySet<WorkflowMonitorRecove
     "manual_recovery_lease",
     "ghost_active_no_lease",
     "stale_running_step",
-    "failed_required_step"
+    "failed_required_step",
+    "failed_external_side_effect_step"
   ]);
 
 export function isBlockingWorkflowRecoveryCode(
@@ -192,6 +200,8 @@ export function isBlockingWorkflowRecoveryCode(
 export type ClearWorkflowRunManualRecoveryGuardedInput = {
   runId: string;
   now?: number;
+  externalSideEffectEvidencePointer?: string;
+  externalSideEffectLedgerPointer?: string;
   /** Lease-freshness grace window forwarded to the monitor re-derivation. */
   graceMs?: number;
   /** Running-step checkpoint staleness window forwarded to the re-derivation. */
@@ -214,6 +224,13 @@ export type ClearWorkflowRunManualRecoveryGuardedResult =
         stepId: string;
         recoveryCode: string;
       };
+      reconciledStep?: {
+        stepId: string;
+        recoveryCode: "failed_external_side_effect_step";
+        state: "succeeded";
+        evidencePointer: string;
+        ledgerPointer: string | null;
+      };
     }
   | {
       ok: false;
@@ -227,8 +244,9 @@ export type ClearWorkflowRunManualRecoveryGuardedResult =
  * Operator-facing guarded clear: the explicit, auditable path that re-derives
  * the M7 monitor state and only clears the durable manual-recovery flag when no
  * monitor-derived blocking condition remains. Refuses safely when the run is
- * missing (`run_not_found`), not flagged (`not_flagged`), or still classified
- * with a blocking monitor recovery code (`recovery_clear_refused`). Live
+ * missing (`run_not_found`), unflagged without an evidence-backed external
+ * tail reconciliation (`not_flagged`), or still classified with a blocking
+ * monitor recovery code (`recovery_clear_refused`). Live
  * dispatch / finalization recovery uses the same flag but has no monitor
  * blocker to re-derive here, so clearing those entries is an operator assertion
  * that the captured reason and any rendered artifact or context have been
@@ -276,28 +294,78 @@ export function clearWorkflowRunManualRecoveryGuarded(
         message: `Workflow run ${input.runId} does not exist.`
       };
     }
-    if (!detail.run.needsManualRecovery) {
-      db.exec("ROLLBACK");
-      return {
-        ok: false,
-        reason: "not_flagged",
-        message: `Workflow run ${input.runId} is not flagged for manual recovery; nothing to clear.`
-      };
-    }
+    const wasMarked = detail.run.needsManualRecovery;
 
-    const preparedRetry = prepareRetryableDispatchedStepForRecoveryClear(db, {
-      runId: input.runId,
-      now
-    });
-    const recoveryDetail = preparedRetry.prepared
-      ? loadWorkflowRunDetail(db, input.runId, detailOptions)
-      : detail;
+    const preparedRetry = wasMarked
+      ? prepareRetryableDispatchedStepForRecoveryClear(db, {
+          runId: input.runId,
+          now
+        })
+      : { prepared: false as const };
+    let recoveryDetail =
+      preparedRetry.prepared || !wasMarked
+        ? loadWorkflowRunDetail(db, input.runId, detailOptions)
+        : detail;
     if (!recoveryDetail) {
       db.exec("ROLLBACK");
       return {
         ok: false,
         reason: "run_not_found",
         message: `Workflow run ${input.runId} disappeared during retry preparation.`
+      };
+    }
+
+    let reconciledStep:
+      | {
+          stepId: string;
+          recoveryCode: "failed_external_side_effect_step";
+          state: "succeeded";
+          evidencePointer: string;
+          ledgerPointer: string | null;
+        }
+      | undefined;
+    const recoveryBeforeClear = recoveryDetail.monitor.recovery;
+    if (
+      recoveryBeforeClear?.code === "failed_external_side_effect_step" &&
+      recoveryBeforeClear.stepId !== null
+    ) {
+      const evidencePointer = input.externalSideEffectEvidencePointer?.trim();
+      if (!evidencePointer) {
+        db.exec("ROLLBACK");
+        return {
+          ok: false,
+          reason: "recovery_clear_refused",
+          message:
+            `Workflow run ${input.runId} still has a failed external-side-effect tail step ` +
+            `(${recoveryBeforeClear.stepId}); pass --evidence-pointer after verifying external state before clearing manual recovery.`,
+          recoveryCode: recoveryBeforeClear.code,
+          blockingStepId: recoveryBeforeClear.stepId
+        };
+      }
+      reconciledStep = reconcileExternalSideEffectTailStepForRecoveryClear(db, {
+        runId: input.runId,
+        stepId: recoveryBeforeClear.stepId,
+        now,
+        evidencePointer,
+        ledgerPointer: input.externalSideEffectLedgerPointer ?? null
+      });
+      recoveryDetail = loadWorkflowRunDetail(db, input.runId, detailOptions);
+      if (!recoveryDetail) {
+        db.exec("ROLLBACK");
+        return {
+          ok: false,
+          reason: "run_not_found",
+          message: `Workflow run ${input.runId} disappeared during external-side-effect reconciliation.`
+        };
+      }
+    }
+
+    if (!wasMarked && reconciledStep === undefined) {
+      db.exec("ROLLBACK");
+      return {
+        ok: false,
+        reason: "not_flagged",
+        message: `Workflow run ${input.runId} is not flagged for manual recovery; nothing to clear.`
       };
     }
 
@@ -344,7 +412,8 @@ export function clearWorkflowRunManualRecoveryGuarded(
               recoveryCode: preparedRetry.recoveryCode
             }
           }
-        : {})
+        : {}),
+      ...(reconciledStep !== undefined ? { reconciledStep } : {})
     };
   } catch (error) {
     try {
@@ -354,4 +423,78 @@ export function clearWorkflowRunManualRecoveryGuarded(
     }
     throw error;
   }
+}
+
+function reconcileExternalSideEffectTailStepForRecoveryClear(
+  db: MomentumDb,
+  input: {
+    runId: string;
+    stepId: string;
+    now: number;
+    evidencePointer: string;
+    ledgerPointer: string | null;
+  }
+):
+  | {
+      stepId: string;
+      recoveryCode: "failed_external_side_effect_step";
+      state: "succeeded";
+      evidencePointer: string;
+      ledgerPointer: string | null;
+    }
+  | undefined {
+  const row = db
+    .prepare(
+      `SELECT kind, state, required
+         FROM workflow_steps WHERE run_id = ? AND step_id = ?`
+    )
+    .get(input.runId, input.stepId) as
+    | { kind: string; state: string; required: number }
+    | undefined;
+  if (
+    row === undefined ||
+    row.state !== "failed" ||
+    row.required !== 1 ||
+    !isExternalSideEffectTailStepKind(row.kind as WorkflowStepKind)
+  ) {
+    return undefined;
+  }
+
+  const updated = db
+    .prepare(
+      `UPDATE workflow_steps
+          SET state = 'succeeded',
+              error_code = NULL,
+              error_message = NULL,
+              result_digest = NULL,
+              operator_reason = 'failed_external_side_effect_step',
+              operator_actor = 'workflow run clear-recovery',
+              operator_evidence_pointer = ?,
+              operator_ledger_pointer = ?,
+              operator_transition_at = ?,
+              finished_at = ?,
+              updated_at = ?
+        WHERE run_id = ?
+          AND step_id = ?
+          AND state = 'failed'`
+    )
+    .run(
+      input.evidencePointer,
+      input.ledgerPointer,
+      input.now,
+      input.now,
+      input.now,
+      input.runId,
+      input.stepId
+    );
+  if (Number(updated.changes) === 0) return undefined;
+
+  refreshWorkflowRunRuntimeState(db, { runId: input.runId, now: input.now });
+  return {
+    stepId: input.stepId,
+    recoveryCode: "failed_external_side_effect_step",
+    state: "succeeded",
+    evidencePointer: input.evidencePointer,
+    ledgerPointer: input.ledgerPointer
+  };
 }

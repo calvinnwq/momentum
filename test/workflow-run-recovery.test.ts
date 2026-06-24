@@ -292,11 +292,20 @@ describe("getWorkflowRunManualRecoveryState", () => {
 });
 
 describe("isBlockingWorkflowRecoveryCode", () => {
-  it("treats the four hard recovery codes as blocking", () => {
+  it("treats the hard recovery codes as blocking", () => {
     expect(isBlockingWorkflowRecoveryCode("manual_recovery_lease")).toBe(true);
     expect(isBlockingWorkflowRecoveryCode("ghost_active_no_lease")).toBe(true);
     expect(isBlockingWorkflowRecoveryCode("stale_running_step")).toBe(true);
     expect(isBlockingWorkflowRecoveryCode("failed_required_step")).toBe(true);
+  });
+
+  it("treats a failed external-side-effect tail step as blocking", () => {
+    // The PR may have already merged before the tail step exited non-zero, so
+    // the run must stay blocked for operator reconciliation rather than being
+    // cleared as if nothing landed.
+    expect(
+      isBlockingWorkflowRecoveryCode("failed_external_side_effect_step")
+    ).toBe(true);
   });
 
   it("treats the advisory monitor_drift_stale code as non-blocking", () => {
@@ -372,6 +381,80 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
       expect(row.needs_manual_recovery).toBe(1);
       expect(row.manual_recovery_reason).toBe("failed_required_step");
       expect(row.manual_recovery_at).toBe(1_730_000_500_000);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("reconciles an unflagged failed external-side-effect tail step with evidence", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, "run-1");
+      seedStep(db, "run-1", "preflight", "succeeded", {
+        kind: "preflight",
+        order: 0
+      });
+      seedStep(db, "run-1", "implementation", "succeeded", {
+        kind: "implementation",
+        order: 1
+      });
+      seedStep(db, "run-1", "postflight", "succeeded", {
+        kind: "postflight",
+        order: 2
+      });
+      seedStep(db, "run-1", "no-mistakes", "succeeded", {
+        kind: "no-mistakes",
+        order: 3
+      });
+      seedStep(db, "run-1", "merge-cleanup", "failed", {
+        kind: "merge-cleanup",
+        order: 4
+      });
+
+      const out = clearWorkflowRunManualRecoveryGuarded(db, {
+        runId: "run-1",
+        now: 1_730_000_900_000,
+        externalSideEffectEvidencePointer: "github://pulls/123#merged",
+        externalSideEffectLedgerPointer: "ledger://merge-cleanup#42"
+      });
+
+      expect(out).toEqual({
+        ok: true,
+        runId: "run-1",
+        previousReason: null,
+        previousMarkedAt: null,
+        clearedAt: 1_730_000_900_000,
+        reconciledStep: {
+          stepId: "merge-cleanup",
+          recoveryCode: "failed_external_side_effect_step",
+          state: "succeeded",
+          evidencePointer: "github://pulls/123#merged",
+          ledgerPointer: "ledger://merge-cleanup#42"
+        }
+      });
+      expect(getWorkflowRunManualRecoveryState(db, "run-1")).toMatchObject({
+        needsManualRecovery: false,
+        reason: null,
+        markedAt: null
+      });
+      const step = db
+        .prepare(
+          `SELECT state, operator_reason, operator_evidence_pointer, operator_ledger_pointer
+             FROM workflow_steps WHERE run_id = ? AND step_id = ?`
+        )
+        .get("run-1", "merge-cleanup") as {
+        state: string;
+        operator_reason: string | null;
+        operator_evidence_pointer: string | null;
+        operator_ledger_pointer: string | null;
+      };
+      expect(step).toEqual({
+        state: "succeeded",
+        operator_reason: "failed_external_side_effect_step",
+        operator_evidence_pointer: "github://pulls/123#merged",
+        operator_ledger_pointer: "ledger://merge-cleanup#42"
+      });
     } finally {
       db.close();
     }

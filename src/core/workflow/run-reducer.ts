@@ -18,6 +18,27 @@ export const WORKFLOW_STEP_KINDS = [
 ] as const;
 export type WorkflowStepKind = (typeof WORKFLOW_STEP_KINDS)[number];
 
+/**
+ * Tail steps whose child command performs irreversible external side effects -
+ * a pushed branch, a merged pull request, or a tracker write - as it runs. When
+ * one of these fails, the merge / push / write may already have landed before
+ * the failure (the NGX-512 native dogfood case: the PR merged, then a later
+ * command exited non-zero). That makes a naive re-run dangerous: it could
+ * double-merge or re-write. Recovery surfaces (the live-wrapper guidance and the
+ * monitor reducer) consult this set so a failed tail step steers operators to
+ * verify external state and reconcile via `clear-recovery` rather than retrying
+ * the step. Owned here, in the canonical step-kind vocabulary, so every surface
+ * shares one definition.
+ */
+export const EXTERNAL_SIDE_EFFECT_TAIL_STEP_KINDS: ReadonlySet<WorkflowStepKind> =
+  new Set<WorkflowStepKind>(["merge-cleanup", "linear-refresh"]);
+
+export function isExternalSideEffectTailStepKind(
+  kind: WorkflowStepKind
+): boolean {
+  return EXTERNAL_SIDE_EFFECT_TAIL_STEP_KINDS.has(kind);
+}
+
 export const WORKFLOW_STEP_STATES = [
   "pending",
   "approved",

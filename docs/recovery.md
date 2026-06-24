@@ -135,7 +135,8 @@ Workflow runs have a sibling manual-recovery surface scoped to
 `.agent-workflows/<run-id>/`. `workflow import` re-derives the run's monitor
 view after persisting rows; when the durable substrate still has a blocking
 condition (`manual_recovery_lease`, `ghost_active_no_lease`,
-`stale_running_step`, or `failed_required_step`), Momentum sets
+`stale_running_step`, `failed_required_step`, or
+`failed_external_side_effect_step`), Momentum sets
 `workflow_runs.needs_manual_recovery` and renders
 `<run-dir>/recovery.md`. Live workflow execution uses the same durable flag and
 artifact when dispatch or finalization cannot safely continue, preserving stable
@@ -166,11 +167,12 @@ while the flag remains set so the operator has a safe path to resolve the run
 and then clear the flag explicitly.
 
 Operators clear run-scoped recovery with
-`momentum workflow run clear-recovery <run-id> [--data-dir <path>] [--json]`.
+`momentum workflow run clear-recovery <run-id> [--evidence-pointer <ref>] [--ledger-pointer <ref>] [--data-dir <path>] [--json]`.
 The clear re-checks the durable monitor view in the same transaction and
 refuses with `recovery_clear_refused` while a monitor-derived blocking condition
-remains, or `not_flagged` when the run is not currently flagged. The command
-leaves the run's `recovery.md` artifact on disk as audit evidence.
+remains, or `not_flagged` when the run is not currently flagged and no
+evidence-backed external-tail reconciliation applies.
+The command leaves the run's `recovery.md` artifact on disk as audit evidence.
 
 For live dispatch / finalization recovery, the same flag and artifact may hold
 non-monitor classifications. `workflow run clear-recovery` still rechecks and
@@ -187,6 +189,16 @@ unavailable, `workflow run clear-recovery` prepares the step for a scheduler
 retry after the operator repairs the environment. The clear output includes
 `retryPrepared`; the previous failed executor round remains durable, and an
 already-terminal successful step is only reattached/reconciled, not rerun.
+
+When the failed required step is an external-side-effect tail step
+(`merge-cleanup` or `linear-refresh`), the monitor view classifies it as
+`failed_external_side_effect_step` rather than the generic `failed_required_step`,
+and the recommended next action is `clear_recovery` instead of
+`rerun_failed_step`.
+These tail steps can push a branch, merge a pull request, or write the tracker before exiting non-zero.
+After the operator verifies the remote, pull request, and tracker state, `workflow run clear-recovery --evidence-pointer <ref>` marks the tail step `succeeded`, records the operator reconciliation, evidence pointer, and optional `--ledger-pointer` on the step row, refreshes the run state, and clears the durable manual-recovery flag when it was set.
+Without `--evidence-pointer`, clear refuses and leaves the failed step plus any recovery flag intact.
+That reconciles from external success evidence rather than re-running the step, which could double-merge the pull request or re-write the tracker.
 
 The generated run-scoped `recovery.md` artifact is schema-versioned and
 includes the run ID, step ID, recovery classification, repo path, classified-at
