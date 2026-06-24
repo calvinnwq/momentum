@@ -659,8 +659,13 @@ Required arguments:
 
 Options:
 
-- `--evidence-pointer <ref>` - required when reconciling `failed_external_side_effect_step`; stores the verified external success evidence on the reconciled step row.
+- `--evidence-pointer <ref>` - required when reconciling `failed_external_side_effect_step`; stores the operator-supplied proof that the external side effect landed successfully.
+  For a failed `merge-cleanup` step, supply the merged pull request URL (e.g. `https://github.com/org/repo/pull/123` or `github://pulls/123#merged`).
+  For a failed `linear-refresh` step, supply the Linear issue URL (e.g. `https://linear.app/team/issue/KEY-123` or `linear://issues/KEY-123#updated`).
+  Without `--evidence-pointer`, the command refuses with `recovery_clear_refused` and leaves the failed step and any recovery flag intact.
 - `--ledger-pointer <ref>` - optional ledger or local-artifact pointer stored alongside the evidence pointer when an external tail step is reconciled.
+  Use this to reference the specific ledger entry where the tail step's partial execution stopped (e.g. `.agent-workflows/<run-id>/ledger.jsonl#offset=42`).
+  The ledger pointer does not affect the reconciliation outcome; it is stored on the step row as durable audit context alongside the evidence pointer.
 
 Behaviour:
 
@@ -676,6 +681,8 @@ Behaviour:
 - Refuses with `not_flagged` when the run is not currently flagged, so a stale clear cannot mutate anything, except for the evidence-backed `failed_external_side_effect_step` reconciliation path above.
   In that exception, `clear-recovery --evidence-pointer <ref>` can reconcile the failed external tail step even if the durable manual-recovery flag was never set.
 - Never auto-clears from elapsed time alone, never repairs the underlying run, and never issues an external write. The `recovery.md` artifact is intentionally left on disk as durable audit; remove it after capturing the context elsewhere.
+- Before clearing recovery for `failed_external_side_effect_step`, `workflow run monitor <run-id> --json` reports `disposition: "recover"`, `reportReason: "recovery_required"`, `nextAction.code: "clear_recovery"`, and `recovery.code: "failed_external_side_effect_step"`.
+  After a successful reconciliation clear, the same command reports `disposition: "report"`, `reportReason: "terminal_succeeded"`, `nextAction.code: "no_action"`, and `recovery: null`.
 
 ### JSON envelope
 
