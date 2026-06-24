@@ -196,9 +196,52 @@ When the failed required step is an external-side-effect tail step
 and the recommended next action is `clear_recovery` instead of
 `rerun_failed_step`.
 These tail steps can push a branch, merge a pull request, or write the tracker before exiting non-zero.
-After the operator verifies the remote, pull request, and tracker state, `workflow run clear-recovery --evidence-pointer <ref>` marks the tail step `succeeded`, records the operator reconciliation, evidence pointer, and optional `--ledger-pointer` on the step row, refreshes the run state, and clears the durable manual-recovery flag when it was set.
+After the operator verifies the canonical external state for the failed tail step, `workflow run clear-recovery --evidence-pointer <ref>` marks the tail step `succeeded`, records the operator reconciliation, evidence pointer, and optional `--ledger-pointer` on the step row, refreshes the run state, and clears the durable manual-recovery flag when it was set.
 Without `--evidence-pointer`, clear refuses and leaves the failed step plus any recovery flag intact.
 That reconciles from external success evidence rather than re-running the step, which could double-merge the pull request or re-write the tracker.
+
+### Operator checklist: external-side-effect tail step recovery
+
+Before running `workflow run clear-recovery <run-id> --evidence-pointer <ref>` for a `failed_external_side_effect_step` classification, verify the state of each tail step that may have landed side effects.
+
+**`merge-cleanup` (pushes branch, merges pull request)**
+
+1. Confirm the pull request state on the hosting service (GitHub, etc.) first: check whether the PR is merged, closed, or still open.
+2. Treat the PR merge or close state as canonical, because a successful merge can legitimately delete the remote branch.
+3. If the PR is still open or the host still lists a head branch, confirm the current remote branch ref with `git -C <repo> ls-remote --heads origin <branch>`.
+4. If the PR is merged, use a GitHub PR URL as the evidence pointer: `github://pulls/<number>#merged` or the HTTPS URL.
+5. If the PR is not merged and no remote branch or PR update exists, the tail step failed cleanly before any external write; treat it like a retryable failure rather than a reconciliation.
+6. Do not re-run `merge-cleanup` if the PR is already merged; that would attempt to push and merge again.
+
+**`linear-refresh` (writes Linear tracker)**
+
+1. Open the Linear issue identified by the run's `--issue-scope` identifier.
+2. Confirm whether the issue state, labels, or comments were updated by the step.
+3. If the tracker was updated, use the Linear issue URL or a stable snapshot as the evidence pointer.
+4. If no Linear update landed, the step failed before any external write; treat it like a retryable failure.
+5. Do not re-run `linear-refresh` if the tracker is already consistent; that would attempt a duplicate write.
+
+**Evidence pointer**
+
+`--evidence-pointer <ref>` is **required** for `failed_external_side_effect_step` reconciliation.
+Its value is a free-form stable reference to the external artifact that proves the side effect landed successfully.
+For a failed `merge-cleanup` step, supply the merged pull request URL (e.g. `https://github.com/org/repo/pull/123` or `github://pulls/123#merged`).
+For a failed `linear-refresh` step, supply the Linear issue URL (e.g. `https://linear.app/team/issue/KEY-123` or `linear://issues/KEY-123#updated`).
+Without `--evidence-pointer`, `clear-recovery` refuses with `recovery_clear_refused` and leaves the failed step and any recovery flag intact.
+
+**Ledger pointer**
+
+`--ledger-pointer <ref>` is optional.
+Use it when the local `.agent-workflows/<run-id>/ledger.jsonl` contains the entry that shows where the step's partial execution stopped, for example `.agent-workflows/<run-id>/ledger.jsonl#offset=42`.
+The ledger pointer does not affect the reconciliation outcome; it is stored on the step row as durable audit context alongside the evidence pointer.
+
+**Monitor state before and after recovery**
+
+Before clearing recovery, `workflow run monitor <run-id> --json` reports `disposition: "recover"`, `reportReason: "recovery_required"`, `nextAction.code: "clear_recovery"`, and `recovery.code: "failed_external_side_effect_step"`.
+
+After a successful `workflow run clear-recovery --evidence-pointer <ref>`, re-run the monitor command to verify the next durable state.
+When the reconciled tail step was the last remaining required work, the monitor reports `disposition: "report"`, `reportReason: "terminal_succeeded"`, `nextAction.code: "no_action"`, and `recovery: null`.
+When downstream required work remains, such as `linear-refresh` after a reconciled `merge-cleanup` in a full workflow, the monitor reports that pending or approved next step instead of terminal success.
 
 The generated run-scoped `recovery.md` artifact is schema-versioned and
 includes the run ID, step ID, recovery classification, repo path, classified-at

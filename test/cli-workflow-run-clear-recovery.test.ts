@@ -485,6 +485,214 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
     });
   });
 
+  it("reconciles a failed linear-refresh external-side-effect tail step from clear-recovery", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-linear-refresh-clear";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, {
+        runId,
+        state: "failed",
+        needsManualRecovery: true,
+        manualRecoveryReason: "failed_external_side_effect_step"
+      });
+      seedStep(db, { runId, stepId: "preflight", kind: "preflight", state: "succeeded", order: 0 });
+      seedStep(db, { runId, stepId: "implementation", kind: "implementation", state: "succeeded", order: 1 });
+      seedStep(db, { runId, stepId: "postflight", kind: "postflight", state: "succeeded", order: 2 });
+      seedStep(db, { runId, stepId: "no-mistakes", kind: "no-mistakes", state: "succeeded", order: 3 });
+      seedStep(db, { runId, stepId: "merge-cleanup", kind: "merge-cleanup", state: "succeeded", order: 4 });
+      seedStep(db, { runId, stepId: "linear-refresh", kind: "linear-refresh", state: "failed", order: 5 });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "clear-recovery",
+      runId,
+      "--evidence-pointer",
+      "https://linear.app/team/issue/KEY-123",
+      "--ledger-pointer",
+      ".agent-workflows/cwfp-linear-refresh-clear/ledger.jsonl#offset=7",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      command: "workflow run clear-recovery",
+      runId,
+      previousReason: "failed_external_side_effect_step",
+      reconciledStep: {
+        stepId: "linear-refresh",
+        recoveryCode: "failed_external_side_effect_step",
+        state: "succeeded",
+        evidencePointer: "https://linear.app/team/issue/KEY-123",
+        ledgerPointer: ".agent-workflows/cwfp-linear-refresh-clear/ledger.jsonl#offset=7"
+      }
+    });
+    expect(readRecoveryState(dataDir, runId).needs_manual_recovery).toBe(0);
+    expect(readStepState(dataDir, runId, "linear-refresh")).toMatchObject({
+      state: "succeeded",
+      operator_reason: "failed_external_side_effect_step",
+      operator_actor: "workflow run clear-recovery",
+      operator_evidence_pointer: "https://linear.app/team/issue/KEY-123",
+      operator_ledger_pointer: ".agent-workflows/cwfp-linear-refresh-clear/ledger.jsonl#offset=7",
+      error_code: null,
+      error_message: null
+    });
+  });
+
+  it("monitor reports recover disposition before clear-recovery for failed_external_side_effect_step", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-ext-tail-monitor-before";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, {
+        runId,
+        state: "failed",
+        needsManualRecovery: true,
+        manualRecoveryReason: "failed_external_side_effect_step"
+      });
+      seedStep(db, {
+        runId,
+        stepId: "merge-cleanup",
+        kind: "merge-cleanup",
+        state: "failed",
+        order: 0
+      });
+    } finally {
+      db.close();
+    }
+
+    const monitorResult = await run([
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(monitorResult.code).toBe(0);
+    const payload = JSON.parse(monitorResult.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      command: "workflow run monitor",
+      runId,
+      disposition: "recover",
+      reportReason: "recovery_required",
+      reportable: true,
+      needsManualRecovery: true,
+      nextAction: { code: "clear_recovery" },
+      recovery: { code: "failed_external_side_effect_step", stepId: "merge-cleanup" }
+    });
+  });
+
+  it("monitor reports terminal_succeeded after clear-recovery reconciles the final required external tail step", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-ext-tail-monitor-after";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, {
+        runId,
+        state: "failed",
+        needsManualRecovery: true,
+        manualRecoveryReason: "failed_external_side_effect_step"
+      });
+      seedStep(db, { runId, stepId: "preflight", kind: "preflight", state: "succeeded", order: 0 });
+      seedStep(db, { runId, stepId: "implementation", kind: "implementation", state: "succeeded", order: 1 });
+      seedStep(db, { runId, stepId: "postflight", kind: "postflight", state: "succeeded", order: 2 });
+      seedStep(db, { runId, stepId: "no-mistakes", kind: "no-mistakes", state: "succeeded", order: 3 });
+      seedStep(db, { runId, stepId: "merge-cleanup", kind: "merge-cleanup", state: "failed", order: 4 });
+    } finally {
+      db.close();
+    }
+
+    // Before: monitor must report recover.
+    const beforeResult = await run([
+      "workflow", "run", "monitor", runId, "--data-dir", dataDir, "--json"
+    ]);
+    expect(beforeResult.code).toBe(0);
+    const before = JSON.parse(beforeResult.stdout) as Record<string, unknown>;
+    expect(before).toMatchObject({
+      disposition: "recover",
+      reportReason: "recovery_required",
+      recovery: { code: "failed_external_side_effect_step" }
+    });
+
+    // Clear recovery with evidence pointer.
+    const clearResult = await run([
+      "workflow", "run", "clear-recovery", runId,
+      "--evidence-pointer", "github://pulls/99#merged",
+      "--data-dir", dataDir, "--json"
+    ]);
+    expect(clearResult.code).toBe(0);
+
+    // After: monitor must report terminal_succeeded.
+    const afterResult = await run([
+      "workflow", "run", "monitor", runId, "--data-dir", dataDir, "--json"
+    ]);
+    expect(afterResult.code).toBe(0);
+    const after = JSON.parse(afterResult.stdout) as Record<string, unknown>;
+    expect(after).toMatchObject({
+      disposition: "report",
+      reportReason: "terminal_succeeded",
+      reportable: true,
+      needsManualRecovery: false,
+      nextAction: { code: "no_action" },
+      recovery: null
+    });
+  });
+
+  it("monitor surfaces downstream required work after clear-recovery reconciles merge-cleanup", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-ext-tail-monitor-downstream";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, {
+        runId,
+        state: "failed",
+        needsManualRecovery: true,
+        manualRecoveryReason: "failed_external_side_effect_step"
+      });
+      seedStep(db, { runId, stepId: "preflight", kind: "preflight", state: "succeeded", order: 0 });
+      seedStep(db, { runId, stepId: "implementation", kind: "implementation", state: "succeeded", order: 1 });
+      seedStep(db, { runId, stepId: "postflight", kind: "postflight", state: "succeeded", order: 2 });
+      seedStep(db, { runId, stepId: "no-mistakes", kind: "no-mistakes", state: "succeeded", order: 3 });
+      seedStep(db, { runId, stepId: "merge-cleanup", kind: "merge-cleanup", state: "failed", order: 4 });
+      seedStep(db, { runId, stepId: "linear-refresh", kind: "linear-refresh", state: "pending", order: 5 });
+    } finally {
+      db.close();
+    }
+
+    const clearResult = await run([
+      "workflow", "run", "clear-recovery", runId,
+      "--evidence-pointer", "github://pulls/99#merged",
+      "--data-dir", dataDir, "--json"
+    ]);
+    expect(clearResult.code).toBe(0);
+
+    const afterResult = await run([
+      "workflow", "run", "monitor", runId, "--data-dir", dataDir, "--json"
+    ]);
+    expect(afterResult.code).toBe(0);
+    const after = JSON.parse(afterResult.stdout) as Record<string, unknown>;
+    expect(after).toMatchObject({
+      disposition: "report",
+      reportReason: "awaiting_approval",
+      reportable: true,
+      needsManualRecovery: false,
+      runState: "pending",
+      activeStep: { stepId: "linear-refresh", state: "pending" },
+      nextAction: { code: "await_approval", stepId: "linear-refresh" },
+      recovery: null
+    });
+  });
+
   it("clears the durable flag once the blocking condition is resolved", async () => {
     const dataDir = makeTempDir();
     const runId = "cwfp-cleared";
