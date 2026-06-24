@@ -78,6 +78,61 @@ describe("NGX-499 coding workflow live wrapper profile", () => {
       "preflight"
     ]);
   });
+
+  it("keeps merge-cleanup executable independent of generated dist", () => {
+    const profilePath = path.join(
+      process.cwd(),
+      "profiles/ngx-499-coding-workflow-live-wrapper.profile.json"
+    );
+    const parsed = parseLiveWrapperProfile(
+      JSON.parse(fs.readFileSync(profilePath, "utf8"))
+    );
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+
+    const wrapper = parsed.profile.wrappers.get("merge-cleanup");
+    expect(wrapper).toBeDefined();
+    if (wrapper === undefined) return;
+    expect(wrapper.args.join(" ")).not.toContain("dist/");
+
+    const dir = makeTempDir();
+    const configPath = path.join(dir, "wrapper-config.json");
+    const resultPath = path.join(dir, "result.json");
+    writeJson(configPath, {
+      steps: {
+        "merge-cleanup": {
+          command: "/bin/sh",
+          args: ["-c", "true"],
+          cwd: "repo",
+          timeout_sec: 30,
+          env_allow: ["PATH"],
+          success_summary: "merge-cleanup source wrapper passed",
+          commit: { type: "chore", subject: "complete merge-cleanup" }
+        }
+      }
+    });
+
+    const spawned = spawnSync(wrapper.command, [...wrapper.args], {
+      cwd: process.cwd(),
+      env: {
+        HOME: process.env.HOME,
+        PATH: process.env.PATH,
+        MOMENTUM_STEP_KIND: "merge-cleanup",
+        MOMENTUM_REPO_PATH: process.cwd(),
+        MOMENTUM_ITERATION_DIR: dir,
+        MOMENTUM_RESULT_PATH: resultPath,
+        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath
+      },
+      encoding: "utf8",
+      timeout: 30_000
+    });
+
+    expect(spawned.stderr).toBe("");
+    expect(spawned.status).toBe(0);
+    const result = readResult(resultPath);
+    expect(result.success).toBe(true);
+    expect(result.summary).toBe("merge-cleanup source wrapper passed");
+  });
 });
 
 describe("loadCodingWorkflowWrapperConfig", () => {
