@@ -676,6 +676,15 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
               harness: "claude",
               model: "sonnet",
               effort: "high"
+            },
+            postflight: {
+              harness: "opencode",
+              model: "gpt-5.5"
+            },
+            "no-mistakes": {
+              harness: "codex",
+              model: "openai/gpt-5.5",
+              effort: "high"
             }
           })
         ]
@@ -693,6 +702,15 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
           implementation: {
             harness: "claude",
             model: "claude-sonnet-4-6",
+            effort: "high"
+          },
+          postflight: {
+            harness: "opencode",
+            model: "openai/gpt-5.5"
+          },
+          "no-mistakes": {
+            harness: "codex",
+            model: "gpt-5.5",
             effort: "high"
           }
         }

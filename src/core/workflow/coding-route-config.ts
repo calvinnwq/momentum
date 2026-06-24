@@ -39,10 +39,11 @@
  * `MOMENTUM_AGENT_PROVIDER`, `MOMENTUM_MODEL`, and `MOMENTUM_EFFORT`. Momentum
  * still holds no default harness/model/effort opinion (the selection floor is
  * all-`null`) and deliberately does not enum-constrain values. It validates
- * structure (supported step, known field, non-blank string), applies only small
- * provider-qualified model alias rewrites when a step supplies enough harness
- * context, and otherwise leaves the concrete agent/model/effort vocabulary to
- * repo/run config, mirroring the executors' free-form `string | null` treatment.
+ * structure (supported step, known field, non-blank string), applies
+ * provider-qualified command-ready model alias rewrites when a step supplies
+ * enough harness context, and otherwise leaves the concrete agent/model/effort
+ * vocabulary to repo/run config, mirroring the executors' free-form
+ * `string | null` treatment.
  */
 
 /** The run-`route` namespace that carries per-step coding route/config overrides. */
@@ -115,14 +116,75 @@ export type CodingStepExecutorSelection = {
   effort: string | null;
 };
 
+function aliasMap(entries: readonly (readonly [string, string])[]): ReadonlyMap<string, string> {
+  return new Map(entries.map(([alias, canonical]) => [alias.toLowerCase(), canonical]));
+}
+
+/**
+ * Provider-qualified command model aliases for the native coding route surface.
+ *
+ * This is intentionally not a supported-model enum. Unknown model strings remain
+ * free-form so newer provider models and repo-local wrappers can be used before
+ * Momentum knows about them. Entries here only cover aliases where Momentum
+ * already knows the command-ready form for a supported harness surface:
+ *
+ *   - `claude` uses Claude Code's `--model` argument and current pinned
+ *     full-name strings for Opus/Sonnet.
+ *   - `codex` uses Codex CLI's `-m` argument and un-namespaced OpenAI model ids.
+ *   - `opencode` uses OpenCode provider-qualified model ids.
+ *
+ * Non-agent harnesses such as `trusted-shell`, `gh-cli`, `deterministic`, and
+ * `auto` intentionally have no aliases here and pass through unchanged.
+ */
 const MODEL_ALIASES_BY_HARNESS: ReadonlyMap<string, ReadonlyMap<string, string>> =
   new Map([
     [
       "claude",
-      new Map([
+      aliasMap([
+        ["opus", "claude-opus-4-8"],
+        ["opus-4.8", "claude-opus-4-8"],
+        ["opus-4-8", "claude-opus-4-8"],
+        ["claude-opus-4.8", "claude-opus-4-8"],
+        ["claude-opus-4-8", "claude-opus-4-8"],
         ["sonnet", "claude-sonnet-4-6"],
         ["sonnet-4.6", "claude-sonnet-4-6"],
-        ["claude-sonnet-4.6", "claude-sonnet-4-6"]
+        ["sonnet-4-6", "claude-sonnet-4-6"],
+        ["claude-sonnet-4.6", "claude-sonnet-4-6"],
+        ["claude-sonnet-4-6", "claude-sonnet-4-6"]
+      ])
+    ],
+    [
+      "codex",
+      aliasMap([
+        ["spark", "gpt-5.3-codex-spark"],
+        ["codex-spark", "gpt-5.3-codex-spark"],
+        ["gpt-5.3-spark", "gpt-5.3-codex-spark"],
+        ["gpt-5.3-codex", "gpt-5.3-codex-spark"],
+        ["gpt-5.3-codex-spark", "gpt-5.3-codex-spark"],
+        ["openai/gpt-5.3-codex-spark", "gpt-5.3-codex-spark"],
+        ["openai/gpt-5.5", "gpt-5.5"],
+        ["gpt-5.5", "gpt-5.5"]
+      ])
+    ],
+    [
+      "opencode",
+      aliasMap([
+        ["gpt-5.3-codex-spark", "openai/gpt-5.3-codex-spark"],
+        ["openai/gpt-5.3-codex-spark", "openai/gpt-5.3-codex-spark"],
+        ["gpt-5.4", "openai/gpt-5.4"],
+        ["gpt-5.4-fast", "openai/gpt-5.4-fast"],
+        ["gpt-5.4-mini", "openai/gpt-5.4-mini"],
+        ["gpt-5.4-mini-fast", "openai/gpt-5.4-mini-fast"],
+        ["gpt-5.5", "openai/gpt-5.5"],
+        ["gpt-5.5-fast", "openai/gpt-5.5-fast"],
+        ["gpt-5.5-pro", "openai/gpt-5.5-pro"],
+        ["openai/gpt-5.5", "openai/gpt-5.5"],
+        ["glm-5.2", "opencode-go/glm-5.2"],
+        ["opencode-go/glm-5.2", "opencode-go/glm-5.2"],
+        ["qwen3.7-plus", "opencode-go/qwen3.7-plus"],
+        ["opencode-go/qwen3.7-plus", "opencode-go/qwen3.7-plus"],
+        ["qwen3.7-max", "opencode-go/qwen3.7-max"],
+        ["opencode-go/qwen3.7-max", "opencode-go/qwen3.7-max"]
       ])
     ]
   ]);
@@ -195,10 +257,9 @@ function refuse(
 
 /**
  * Normalize provider-specific model aliases into the exact command-ready string
- * the live wrapper should receive. The mapping is intentionally small and
- * provider-qualified: a bare alias such as `sonnet` is meaningful only when the
- * same step also selects the `claude` harness, so unrelated harnesses keep their
- * model strings untouched.
+ * the live wrapper should receive. The mapping is provider-qualified: a bare
+ * alias such as `sonnet` is meaningful only when the same step also selects the
+ * `claude` harness, so unrelated harnesses keep their model strings untouched.
  */
 export function resolveCodingRouteModelAlias(
   harness: string | undefined,

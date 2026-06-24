@@ -357,6 +357,15 @@ describe("momentum workflow run preview-coding", () => {
               harness: "claude",
               model: "sonnet",
               effort: "high"
+            },
+            "no-mistakes": {
+              harness: "codex",
+              model: "openai/gpt-5.5",
+              effort: "high"
+            },
+            postflight: {
+              harness: "opencode",
+              model: "glm-5.2"
             }
           })
         ]
@@ -368,6 +377,12 @@ describe("momentum workflow run preview-coding", () => {
     );
     expect(result.stdout).not.toContain(
       "implementation: harness=claude, model=sonnet, effort=high"
+    );
+    expect(result.stdout).toContain(
+      "postflight: harness=opencode, model=opencode-go/glm-5.2, effort=(default)"
+    );
+    expect(result.stdout).toContain(
+      "no-mistakes: harness=codex, model=gpt-5.5, effort=high"
     );
 
     const jsonResult = await run(
@@ -383,6 +398,15 @@ describe("momentum workflow run preview-coding", () => {
               harness: "claude",
               model: "sonnet",
               effort: "high"
+            },
+            "no-mistakes": {
+              harness: "codex",
+              model: "openai/gpt-5.5",
+              effort: "high"
+            },
+            postflight: {
+              harness: "opencode",
+              model: "glm-5.2"
             }
           })
         ]
@@ -396,6 +420,15 @@ describe("momentum workflow run preview-coding", () => {
           implementation: {
             harness: "claude",
             model: "claude-sonnet-4-6",
+            effort: "high"
+          },
+          postflight: {
+            harness: "opencode",
+            model: "opencode-go/glm-5.2"
+          },
+          "no-mistakes": {
+            harness: "codex",
+            model: "gpt-5.5",
             effort: "high"
           }
         }

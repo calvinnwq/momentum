@@ -196,7 +196,8 @@ Optional arguments:
 - `--steps-json <json>` - reconfigure the planned per-step harness/model/effort selections before the run starts, recorded on the run's durable `route.steps` so status, handoff, monitor, and logs can audit which selection the run was started with.
   The value is a JSON object keyed by the operationally meaningful coding steps (`implementation`, `postflight`, `no-mistakes`, `merge-cleanup`), each mapping to any of the `harness`, `model`, and `effort` string fields; an omitted step or field keeps the default (inherit at execution time).
   Selections are validated and normalized to a canonical, byte-stable shape before they are recorded; an unsupported step, unknown field, blank value, or malformed JSON fails closed with `route_config_invalid` and writes nothing.
-  Provider-specific model aliases are normalized when the step also supplies the matching harness; for example `{"harness":"claude","model":"sonnet"}` records and previews `model=claude-sonnet-4-6`.
+  Provider-specific model aliases are normalized when the step also supplies the matching harness; for example `{"harness":"claude","model":"sonnet"}` records and previews `model=claude-sonnet-4-6`, `{"harness":"codex","model":"openai/gpt-5.5"}` records `model=gpt-5.5`, and `{"harness":"opencode","model":"glm-5.2"}` records `model=opencode-go/glm-5.2`.
+  Unknown harness/model values remain free-form after structural validation, so future provider model ids can still be passed through before Momentum learns a shorthand for them.
   During daemon dispatch, the persisted selection is mapped to executor-round `agentProvider`, `model`, and `effort` fields and then forwarded to live wrappers through `MOMENTUM_AGENT_PROVIDER`, `MOMENTUM_MODEL`, and `MOMENTUM_EFFORT` when those values are present.
   `route.steps` (the per-step selection) stays distinct from `route.profile` (the recorded operator profile) and from the daemon's `MOMENTUM_LIVE_WRAPPER_PROFILE` execution profile.
 - `--definition-version <n>` - require a specific built-in `coding-workflow` version.
@@ -313,10 +314,12 @@ Steps (6):
   5. linear-refresh (linear-refresh) -> external-apply [required, pending]
 ```
 
-With a provider-specific alias such as `{"implementation":{"harness":"claude","model":"sonnet","effort":"high"}}`, the preview prints the normalized command-ready value:
+With provider-specific aliases such as `{"implementation":{"harness":"claude","model":"sonnet","effort":"high"},"postflight":{"harness":"opencode","model":"glm-5.2"},"no-mistakes":{"harness":"codex","model":"openai/gpt-5.5","effort":"high"}}`, the preview prints the normalized command-ready values:
 
 ```text
   implementation: harness=claude, model=claude-sonnet-4-6, effort=high
+  postflight: harness=opencode, model=opencode-go/glm-5.2, effort=(default)
+  no-mistakes: harness=codex, model=gpt-5.5, effort=high
 ```
 
 ### Text output (failure)

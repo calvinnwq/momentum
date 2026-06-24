@@ -177,7 +177,7 @@ When a dispatched executor round has selected values, Momentum also injects
 `MOMENTUM_AGENT_PROVIDER`, `MOMENTUM_MODEL`, and `MOMENTUM_EFFORT`; for native
 coding runs those values come from persisted `route.steps` overrides when the
 operator supplied `--steps-json`, otherwise they are omitted.
-Provider-aware alias normalization happens before persistence, so a native coding step supplied as `harness=claude` with `model=sonnet` injects `MOMENTUM_MODEL=claude-sonnet-4-6`.
+Provider-aware alias normalization happens before persistence, so a native coding step supplied as `harness=claude` with `model=sonnet` injects `MOMENTUM_MODEL=claude-sonnet-4-6`; known Codex aliases inject un-namespaced Codex CLI model ids, and known OpenCode aliases inject provider-qualified OpenCode model ids.
 The wrapper must write the same
 normalized runner result JSON documented in [`runners.md`](runners.md) at
 `$MOMENTUM_RESULT_PATH`. A valid profile may configure only the
