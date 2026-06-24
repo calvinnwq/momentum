@@ -682,7 +682,8 @@ Behaviour:
   In that exception, `clear-recovery --evidence-pointer <ref>` can reconcile the failed external tail step even if the durable manual-recovery flag was never set.
 - Never auto-clears from elapsed time alone, never repairs the underlying run, and never issues an external write. The `recovery.md` artifact is intentionally left on disk as durable audit; remove it after capturing the context elsewhere.
 - Before clearing recovery for `failed_external_side_effect_step`, `workflow run monitor <run-id> --json` reports `disposition: "recover"`, `reportReason: "recovery_required"`, `nextAction.code: "clear_recovery"`, and `recovery.code: "failed_external_side_effect_step"`.
-  After a successful reconciliation clear, the same command reports `disposition: "report"`, `reportReason: "terminal_succeeded"`, `nextAction.code: "no_action"`, and `recovery: null`.
+  After a successful reconciliation clear, the same command reports `disposition: "report"`, `reportReason: "terminal_succeeded"`, `nextAction.code: "no_action"`, and `recovery: null` only when no downstream required work remains.
+  If a full workflow still has `linear-refresh` pending or approved after a reconciled `merge-cleanup`, monitor surfaces that next step instead of terminal success.
 
 ### JSON envelope
 

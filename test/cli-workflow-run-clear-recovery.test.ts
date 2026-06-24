@@ -592,7 +592,7 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
     });
   });
 
-  it("monitor reports terminal_succeeded after clear-recovery reconciles failed_external_side_effect_step", async () => {
+  it("monitor reports terminal_succeeded after clear-recovery reconciles the final required external tail step", async () => {
     const dataDir = makeTempDir();
     const runId = "cwfp-ext-tail-monitor-after";
     const db = openDb(dataDir);
@@ -644,6 +644,51 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       reportable: true,
       needsManualRecovery: false,
       nextAction: { code: "no_action" },
+      recovery: null
+    });
+  });
+
+  it("monitor surfaces downstream required work after clear-recovery reconciles merge-cleanup", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-ext-tail-monitor-downstream";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, {
+        runId,
+        state: "failed",
+        needsManualRecovery: true,
+        manualRecoveryReason: "failed_external_side_effect_step"
+      });
+      seedStep(db, { runId, stepId: "preflight", kind: "preflight", state: "succeeded", order: 0 });
+      seedStep(db, { runId, stepId: "implementation", kind: "implementation", state: "succeeded", order: 1 });
+      seedStep(db, { runId, stepId: "postflight", kind: "postflight", state: "succeeded", order: 2 });
+      seedStep(db, { runId, stepId: "no-mistakes", kind: "no-mistakes", state: "succeeded", order: 3 });
+      seedStep(db, { runId, stepId: "merge-cleanup", kind: "merge-cleanup", state: "failed", order: 4 });
+      seedStep(db, { runId, stepId: "linear-refresh", kind: "linear-refresh", state: "pending", order: 5 });
+    } finally {
+      db.close();
+    }
+
+    const clearResult = await run([
+      "workflow", "run", "clear-recovery", runId,
+      "--evidence-pointer", "github://pulls/99#merged",
+      "--data-dir", dataDir, "--json"
+    ]);
+    expect(clearResult.code).toBe(0);
+
+    const afterResult = await run([
+      "workflow", "run", "monitor", runId, "--data-dir", dataDir, "--json"
+    ]);
+    expect(afterResult.code).toBe(0);
+    const after = JSON.parse(afterResult.stdout) as Record<string, unknown>;
+    expect(after).toMatchObject({
+      disposition: "report",
+      reportReason: "awaiting_approval",
+      reportable: true,
+      needsManualRecovery: false,
+      runState: "pending",
+      activeStep: { stepId: "linear-refresh", state: "pending" },
+      nextAction: { code: "await_approval", stepId: "linear-refresh" },
       recovery: null
     });
   });

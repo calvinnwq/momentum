@@ -238,7 +238,9 @@ The ledger pointer does not affect the reconciliation outcome; it is stored on t
 
 Before clearing recovery, `workflow run monitor <run-id> --json` reports `disposition: "recover"`, `reportReason: "recovery_required"`, `nextAction.code: "clear_recovery"`, and `recovery.code: "failed_external_side_effect_step"`.
 
-After a successful `workflow run clear-recovery --evidence-pointer <ref>`, re-running the monitor command reports `disposition: "report"`, `reportReason: "terminal_succeeded"`, `nextAction.code: "no_action"`, and `recovery: null`.
+After a successful `workflow run clear-recovery --evidence-pointer <ref>`, re-run the monitor command to verify the next durable state.
+When the reconciled tail step was the last remaining required work, the monitor reports `disposition: "report"`, `reportReason: "terminal_succeeded"`, `nextAction.code: "no_action"`, and `recovery: null`.
+When downstream required work remains, such as `linear-refresh` after a reconciled `merge-cleanup` in a full workflow, the monitor reports that pending or approved next step instead of terminal success.
 
 The generated run-scoped `recovery.md` artifact is schema-versioned and
 includes the run ID, step ID, recovery classification, repo path, classified-at
