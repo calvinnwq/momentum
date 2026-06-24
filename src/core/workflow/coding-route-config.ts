@@ -37,11 +37,12 @@
  * `agentProvider` selection field and `model`/`effort` map directly; those values
  * are persisted on executor rounds and forwarded to live wrappers as
  * `MOMENTUM_AGENT_PROVIDER`, `MOMENTUM_MODEL`, and `MOMENTUM_EFFORT`. Momentum
- * holds no built-in harness/model/effort opinion (the selection floor is
- * all-`null`), so this module deliberately does not enum-constrain values - it
- * validates structure (supported step, known field, non-blank string) and leaves
- * the concrete agent/model/effort vocabulary to repo/run config, mirroring the
- * executors' free-form `string | null` treatment.
+ * still holds no default harness/model/effort opinion (the selection floor is
+ * all-`null`) and deliberately does not enum-constrain values. It validates
+ * structure (supported step, known field, non-blank string), applies only small
+ * provider-qualified model alias rewrites when a step supplies enough harness
+ * context, and otherwise leaves the concrete agent/model/effort vocabulary to
+ * repo/run config, mirroring the executors' free-form `string | null` treatment.
  */
 
 /** The run-`route` namespace that carries per-step coding route/config overrides. */
@@ -221,8 +222,9 @@ export function resolveCodingRouteModelAlias(
  *
  * Normalization makes the output byte-stable: steps are emitted in
  * {@link CONFIGURABLE_CODING_STEP_KEYS} order, fields in
- * {@link CODING_STEP_ROUTE_FIELDS} order, values trimmed, and a step whose
- * override object resolves to no recognized fields is dropped entirely.
+ * {@link CODING_STEP_ROUTE_FIELDS} order, values trimmed, provider-specific
+ * model aliases resolved when matching harness context is present, and a step
+ * whose override object resolves to no recognized fields is dropped entirely.
  */
 export function validateCodingStepRouteOverrides(
   value: unknown

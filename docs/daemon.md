@@ -177,6 +177,7 @@ When a dispatched executor round has selected values, Momentum also injects
 `MOMENTUM_AGENT_PROVIDER`, `MOMENTUM_MODEL`, and `MOMENTUM_EFFORT`; for native
 coding runs those values come from persisted `route.steps` overrides when the
 operator supplied `--steps-json`, otherwise they are omitted.
+Provider-aware alias normalization happens before persistence, so a native coding step supplied as `harness=claude` with `model=sonnet` injects `MOMENTUM_MODEL=claude-sonnet-4-6`.
 The wrapper must write the same
 normalized runner result JSON documented in [`runners.md`](runners.md) at
 `$MOMENTUM_RESULT_PATH`. A valid profile may configure only the
@@ -189,6 +190,7 @@ managed-loop mode to fail before registering a daemon run with
 The `--profile <name>` option on `workflow run start` and `workflow run start-coding` only records the operator-selected profile name in the run's durable `route.profile`.
 `workflow run preview-coding --profile <name>` reports that same projected `route.profile` in its frozen read-only plan but does not persist a run.
 The `--steps-json <json>` option on `workflow run start-coding` records per-step harness/model/effort selections in `route.steps`, and `workflow run preview-coding --steps-json <json>` reports the same selection in its frozen read-only plan without persisting it.
+Provider-aware model aliases are normalized in both paths when the step supplies the matching harness, so the previewed value is the same command-ready value later stored and injected.
 The command-line profile selector does not load or select the executable wrapper profile for the daemon.
 Managed-loop execution still uses the JSON profile file pointed to by `MOMENTUM_LIVE_WRAPPER_PROFILE`.
 
