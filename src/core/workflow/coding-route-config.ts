@@ -37,11 +37,12 @@
  * `agentProvider` selection field and `model`/`effort` map directly; those values
  * are persisted on executor rounds and forwarded to live wrappers as
  * `MOMENTUM_AGENT_PROVIDER`, `MOMENTUM_MODEL`, and `MOMENTUM_EFFORT`. Momentum
- * holds no built-in harness/model/effort opinion (the selection floor is
- * all-`null`), so this module deliberately does not enum-constrain values - it
- * validates structure (supported step, known field, non-blank string) and leaves
- * the concrete agent/model/effort vocabulary to repo/run config, mirroring the
- * executors' free-form `string | null` treatment.
+ * still holds no default harness/model/effort opinion (the selection floor is
+ * all-`null`) and deliberately does not enum-constrain values. It validates
+ * structure (supported step, known field, non-blank string), applies only small
+ * provider-qualified model alias rewrites when a step supplies enough harness
+ * context, and otherwise leaves the concrete agent/model/effort vocabulary to
+ * repo/run config, mirroring the executors' free-form `string | null` treatment.
  */
 
 /** The run-`route` namespace that carries per-step coding route/config overrides. */
@@ -114,6 +115,18 @@ export type CodingStepExecutorSelection = {
   effort: string | null;
 };
 
+const MODEL_ALIASES_BY_HARNESS: ReadonlyMap<string, ReadonlyMap<string, string>> =
+  new Map([
+    [
+      "claude",
+      new Map([
+        ["sonnet", "claude-sonnet-4-6"],
+        ["sonnet-4.6", "claude-sonnet-4-6"],
+        ["claude-sonnet-4.6", "claude-sonnet-4-6"]
+      ])
+    ]
+  ]);
+
 /**
  * The default selection for a step the operator did not reconfigure: every field
  * `null`, meaning "inherit from repo/run/global config at execution time".
@@ -181,6 +194,24 @@ function refuse(
 }
 
 /**
+ * Normalize provider-specific model aliases into the exact command-ready string
+ * the live wrapper should receive. The mapping is intentionally small and
+ * provider-qualified: a bare alias such as `sonnet` is meaningful only when the
+ * same step also selects the `claude` harness, so unrelated harnesses keep their
+ * model strings untouched.
+ */
+export function resolveCodingRouteModelAlias(
+  harness: string | undefined,
+  model: string
+): string {
+  if (harness === undefined) {
+    return model;
+  }
+  const harnessAliases = MODEL_ALIASES_BY_HARNESS.get(harness.toLowerCase());
+  return harnessAliases?.get(model.toLowerCase()) ?? model;
+}
+
+/**
  * Validate and normalize untrusted per-step coding route overrides into a
  * {@link CodingStepRouteOverrides} map. Pure and total: never throws, always
  * returns a result. Absent overrides (`undefined` / `null`) are a legitimate
@@ -191,8 +222,9 @@ function refuse(
  *
  * Normalization makes the output byte-stable: steps are emitted in
  * {@link CONFIGURABLE_CODING_STEP_KEYS} order, fields in
- * {@link CODING_STEP_ROUTE_FIELDS} order, values trimmed, and a step whose
- * override object resolves to no recognized fields is dropped entirely.
+ * {@link CODING_STEP_ROUTE_FIELDS} order, values trimmed, provider-specific
+ * model aliases resolved when matching harness context is present, and a step
+ * whose override object resolves to no recognized fields is dropped entirely.
  */
 export function validateCodingStepRouteOverrides(
   value: unknown
@@ -247,6 +279,13 @@ export function validateCodingStepRouteOverrides(
         );
       }
       normalizedFields[fieldKey] = rawFieldValue.trim();
+    }
+
+    if (normalizedFields.model !== undefined) {
+      normalizedFields.model = resolveCodingRouteModelAlias(
+        normalizedFields.harness,
+        normalizedFields.model
+      );
     }
 
     // A step whose override resolves to no recognized fields contributes nothing.

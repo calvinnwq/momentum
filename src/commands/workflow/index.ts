@@ -278,7 +278,8 @@ function workflowRunStart(parsed: ParsedFlags, io: CliIo): number {
  *     provenance so status / handoff / monitor / logs surface it as
  *     Momentum-owned.
  *   - it accepts the coding-only `--steps-json` route override and records
- *     validated per-step harness/model/effort selections under `route.steps`.
+ *     validated per-step harness/model/effort selections under `route.steps`,
+ *     with provider-aware model aliases normalized before persistence.
  *
  * The ordinary `workflow run start` path and the imported CWFP read/compat paths
  * are left exactly as they were.
@@ -391,7 +392,8 @@ function runWorkflowStartCommand(
 
   // Native per-step coding route reconfiguration (NGX-510): an operator can adjust
   // the planned harness/model/effort selections per step before kickoff via
-  // --steps-json. The validated, normalized overrides are embedded durably under
+  // --steps-json. The validated, normalized overrides, including provider-aware
+  // model alias rewrites when harness context is present, are embedded durably under
   // route.steps so status/handoff/logs can audit the selection and so execution can
   // read it (or fail closed). The per-step namespace is coding-door specific, so the
   // generic `workflow run start` refuses it rather than silently dropping a
