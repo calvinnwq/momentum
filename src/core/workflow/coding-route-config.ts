@@ -40,11 +40,12 @@
  * still holds no default harness/model/effort opinion (the selection floor is
  * all-`null`) and deliberately does not enum-constrain values. It validates
  * structure (supported step, known field, non-blank string), applies
- * provider-qualified command-ready model alias rewrites when a step supplies
- * enough harness context, and otherwise leaves the concrete agent/model/effort
+ * shared provider-qualified command-ready model alias rewrites when a step
+ * supplies enough harness context, and otherwise leaves the concrete agent/model/effort
  * vocabulary to repo/run config, mirroring the executors' free-form
  * `string | null` treatment.
  */
+import { resolveCommandModelAlias } from "../model-aliases.js";
 
 /** The run-`route` namespace that carries per-step coding route/config overrides. */
 export const CODING_ROUTE_STEPS_KEY = "steps";
@@ -115,102 +116,6 @@ export type CodingStepExecutorSelection = {
   model: string | null;
   effort: string | null;
 };
-
-type AliasEntry = readonly [string, string];
-
-function aliasMap(entries: readonly AliasEntry[]): ReadonlyMap<string, string> {
-  return new Map(
-    entries.map(([alias, canonical]) => [alias.toLowerCase(), canonical])
-  );
-}
-
-const OPENAI_MODEL_IDS = [
-  "gpt-5.1",
-  "gpt-5.3-codex-spark",
-  "gpt-5.4",
-  "gpt-5.4-fast",
-  "gpt-5.4-mini",
-  "gpt-5.4-mini-fast",
-  "gpt-5.5",
-  "gpt-5.5-fast",
-  "gpt-5.5-pro"
-] as const;
-
-function codexOpenAiAliases(modelIds: readonly string[]): AliasEntry[] {
-  const entries: AliasEntry[] = [];
-  for (const modelId of modelIds) {
-    entries.push([modelId, modelId], [`openai/${modelId}`, modelId]);
-  }
-  return entries;
-}
-
-function opencodeOpenAiAliases(modelIds: readonly string[]): AliasEntry[] {
-  const entries: AliasEntry[] = [];
-  for (const modelId of modelIds) {
-    entries.push(
-      [modelId, `openai/${modelId}`],
-      [`openai/${modelId}`, `openai/${modelId}`]
-    );
-  }
-  return entries;
-}
-
-/**
- * Provider-qualified command model aliases for the native coding route surface.
- *
- * This is intentionally not a supported-model enum. Unknown model strings remain
- * free-form so newer provider models and repo-local wrappers can be used before
- * Momentum knows about them. Entries here only cover aliases where Momentum
- * already knows the command-ready form for a supported harness surface:
- *
- *   - `claude` uses Claude Code's `--model` argument and current pinned
- *     full-name strings for Opus/Sonnet.
- *   - `codex` uses Codex CLI's `-m` argument and un-namespaced OpenAI model ids.
- *   - `opencode` uses OpenCode provider-qualified model ids.
- *
- * Non-agent harnesses such as `trusted-shell`, `gh-cli`, `deterministic`, and
- * `auto` intentionally have no aliases here and pass through unchanged.
- */
-const MODEL_ALIASES_BY_HARNESS: ReadonlyMap<string, ReadonlyMap<string, string>> =
-  new Map([
-    [
-      "claude",
-      aliasMap([
-        ["opus", "claude-opus-4-8"],
-        ["opus-4.8", "claude-opus-4-8"],
-        ["opus-4-8", "claude-opus-4-8"],
-        ["claude-opus-4.8", "claude-opus-4-8"],
-        ["claude-opus-4-8", "claude-opus-4-8"],
-        ["sonnet", "claude-sonnet-4-6"],
-        ["sonnet-4.6", "claude-sonnet-4-6"],
-        ["sonnet-4-6", "claude-sonnet-4-6"],
-        ["claude-sonnet-4.6", "claude-sonnet-4-6"],
-        ["claude-sonnet-4-6", "claude-sonnet-4-6"]
-      ])
-    ],
-    [
-      "codex",
-      aliasMap([
-        ["spark", "gpt-5.3-codex-spark"],
-        ["codex-spark", "gpt-5.3-codex-spark"],
-        ["gpt-5.3-spark", "gpt-5.3-codex-spark"],
-        ["gpt-5.3-codex", "gpt-5.3-codex-spark"],
-        ...codexOpenAiAliases(OPENAI_MODEL_IDS)
-      ])
-    ],
-    [
-      "opencode",
-      aliasMap([
-        ...opencodeOpenAiAliases(OPENAI_MODEL_IDS),
-        ["glm-5.2", "opencode-go/glm-5.2"],
-        ["opencode-go/glm-5.2", "opencode-go/glm-5.2"],
-        ["qwen3.7-plus", "opencode-go/qwen3.7-plus"],
-        ["opencode-go/qwen3.7-plus", "opencode-go/qwen3.7-plus"],
-        ["qwen3.7-max", "opencode-go/qwen3.7-max"],
-        ["opencode-go/qwen3.7-max", "opencode-go/qwen3.7-max"]
-      ])
-    ]
-  ]);
 
 /**
  * The default selection for a step the operator did not reconfigure: every field
@@ -289,11 +194,7 @@ export function resolveCodingRouteModelAlias(
   harness: string | undefined,
   model: string
 ): string {
-  if (harness === undefined) {
-    return model;
-  }
-  const harnessAliases = MODEL_ALIASES_BY_HARNESS.get(harness.toLowerCase());
-  return harnessAliases?.get(model.toLowerCase()) ?? model;
+  return resolveCommandModelAlias(harness, model);
 }
 
 /**
