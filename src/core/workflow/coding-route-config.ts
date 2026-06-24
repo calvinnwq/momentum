@@ -114,6 +114,18 @@ export type CodingStepExecutorSelection = {
   effort: string | null;
 };
 
+const MODEL_ALIASES_BY_HARNESS: ReadonlyMap<string, ReadonlyMap<string, string>> =
+  new Map([
+    [
+      "claude",
+      new Map([
+        ["sonnet", "claude-sonnet-4-6"],
+        ["sonnet-4.6", "claude-sonnet-4-6"],
+        ["claude-sonnet-4.6", "claude-sonnet-4-6"]
+      ])
+    ]
+  ]);
+
 /**
  * The default selection for a step the operator did not reconfigure: every field
  * `null`, meaning "inherit from repo/run/global config at execution time".
@@ -178,6 +190,24 @@ function refuse(
   return path === undefined
     ? { ok: false, refusal, reason }
     : { ok: false, refusal, reason, path };
+}
+
+/**
+ * Normalize provider-specific model aliases into the exact command-ready string
+ * the live wrapper should receive. The mapping is intentionally small and
+ * provider-qualified: a bare alias such as `sonnet` is meaningful only when the
+ * same step also selects the `claude` harness, so unrelated harnesses keep their
+ * model strings untouched.
+ */
+export function resolveCodingRouteModelAlias(
+  harness: string | undefined,
+  model: string
+): string {
+  if (harness === undefined) {
+    return model;
+  }
+  const harnessAliases = MODEL_ALIASES_BY_HARNESS.get(harness.toLowerCase());
+  return harnessAliases?.get(model.toLowerCase()) ?? model;
 }
 
 /**
@@ -247,6 +277,13 @@ export function validateCodingStepRouteOverrides(
         );
       }
       normalizedFields[fieldKey] = rawFieldValue.trim();
+    }
+
+    if (normalizedFields.model !== undefined) {
+      normalizedFields.model = resolveCodingRouteModelAlias(
+        normalizedFields.harness,
+        normalizedFields.model
+      );
     }
 
     // A step whose override resolves to no recognized fields contributes nothing.

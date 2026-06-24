@@ -660,6 +660,48 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
     }
   });
 
+  it("persists provider-normalized model strings in route.steps", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const result = await run(
+      startCodingArgs({
+        dataDir,
+        repoDir,
+        runId: "ngx-510-model-alias",
+        objective: "Normalize model aliases before dispatch",
+        extra: [
+          "--steps-json",
+          JSON.stringify({
+            implementation: {
+              harness: "claude",
+              model: "sonnet",
+              effort: "high"
+            }
+          })
+        ]
+      })
+    );
+    expect(result.code).toBe(0);
+
+    const db = openDb(dataDir);
+    try {
+      const runRow = db
+        .prepare(`SELECT route_json FROM workflow_runs WHERE id = ?`)
+        .get("ngx-510-model-alias") as { route_json: string };
+      expect(JSON.parse(runRow.route_json)).toEqual({
+        steps: {
+          implementation: {
+            harness: "claude",
+            model: "claude-sonnet-4-6",
+            effort: "high"
+          }
+        }
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   it("fails closed on a misconfigured --steps-json and writes nothing", async () => {
     const cases = [
       {

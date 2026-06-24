@@ -7,6 +7,7 @@ import {
   DEFAULT_CODING_STEP_ROUTE_SELECTION,
   formatCodingRouteStepSelectionLines,
   readCodingStepRouteOverrides,
+  resolveCodingRouteModelAlias,
   resolveCodingRouteStepSelections,
   validateCodingStepRouteOverrides,
   writeCodingStepRouteOverrides,
@@ -132,6 +133,36 @@ describe("validateCodingStepRouteOverrides — shape and normalization", () => {
     expect(result.overrides.implementation).toEqual({ model: "opus" });
   });
 
+  it("normalizes Claude Sonnet aliases to the exact CLI model string", () => {
+    const result = validateCodingStepRouteOverrides({
+      implementation: { harness: "claude", model: "sonnet", effort: "high" },
+      postflight: { harness: "claude", model: "sonnet-4.6" }
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.overrides).toEqual({
+      implementation: {
+        harness: "claude",
+        model: "claude-sonnet-4-6",
+        effort: "high"
+      },
+      postflight: { harness: "claude", model: "claude-sonnet-4-6" }
+    });
+  });
+
+  it("leaves a bare model alias untouched when the harness is not provider-specific", () => {
+    const result = validateCodingStepRouteOverrides({
+      implementation: { model: "sonnet" },
+      postflight: { harness: "codex", model: "sonnet" }
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected ok");
+    expect(result.overrides).toEqual({
+      implementation: { model: "sonnet" },
+      postflight: { harness: "codex", model: "sonnet" }
+    });
+  });
+
   it("drops a step whose override object has no recognized fields", () => {
     const result = validateCodingStepRouteOverrides({
       implementation: {},
@@ -194,6 +225,19 @@ describe("validateCodingStepRouteOverrides — shape and normalization", () => {
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("expected refusal");
     expect(result.refusal).toBe("value_invalid");
+  });
+});
+
+describe("resolveCodingRouteModelAlias — provider-aware command strings", () => {
+  it("maps Claude aliases only when the harness selects Claude", () => {
+    expect(resolveCodingRouteModelAlias("claude", "sonnet")).toBe(
+      "claude-sonnet-4-6"
+    );
+    expect(resolveCodingRouteModelAlias("Claude", "sonnet-4.6")).toBe(
+      "claude-sonnet-4-6"
+    );
+    expect(resolveCodingRouteModelAlias("codex", "sonnet")).toBe("sonnet");
+    expect(resolveCodingRouteModelAlias(undefined, "sonnet")).toBe("sonnet");
   });
 });
 

@@ -340,6 +340,69 @@ describe("momentum workflow run preview-coding", () => {
     }
   });
 
+  it("shows provider-normalized model strings in preview output", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const result = await run(
+      previewCodingArgs({
+        dataDir,
+        repoDir,
+        runId: "preview-model-alias",
+        objective: "Preview exact model strings",
+        json: false,
+        extra: [
+          "--steps-json",
+          JSON.stringify({
+            implementation: {
+              harness: "claude",
+              model: "sonnet",
+              effort: "high"
+            }
+          })
+        ]
+      })
+    );
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(
+      "implementation: harness=claude, model=claude-sonnet-4-6, effort=high"
+    );
+    expect(result.stdout).not.toContain(
+      "implementation: harness=claude, model=sonnet, effort=high"
+    );
+
+    const jsonResult = await run(
+      previewCodingArgs({
+        dataDir,
+        repoDir,
+        runId: "preview-model-alias-json",
+        objective: "Preview exact model strings",
+        extra: [
+          "--steps-json",
+          JSON.stringify({
+            implementation: {
+              harness: "claude",
+              model: "sonnet",
+              effort: "high"
+            }
+          })
+        ]
+      })
+    );
+    expect(jsonResult.code).toBe(0);
+    const payload = JSON.parse(jsonResult.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      route: {
+        steps: {
+          implementation: {
+            harness: "claude",
+            model: "claude-sonnet-4-6",
+            effort: "high"
+          }
+        }
+      }
+    });
+  });
+
   it("fails closed on a misconfigured --steps-json before previewing (NGX-510)", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();

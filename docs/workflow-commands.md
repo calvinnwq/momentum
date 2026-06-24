@@ -196,6 +196,7 @@ Optional arguments:
 - `--steps-json <json>` - reconfigure the planned per-step harness/model/effort selections before the run starts, recorded on the run's durable `route.steps` so status, handoff, monitor, and logs can audit which selection the run was started with.
   The value is a JSON object keyed by the operationally meaningful coding steps (`implementation`, `postflight`, `no-mistakes`, `merge-cleanup`), each mapping to any of the `harness`, `model`, and `effort` string fields; an omitted step or field keeps the default (inherit at execution time).
   Selections are validated and normalized to a canonical, byte-stable shape before they are recorded; an unsupported step, unknown field, blank value, or malformed JSON fails closed with `route_config_invalid` and writes nothing.
+  Provider-specific model aliases are normalized when the step also supplies the matching harness; for example `{"harness":"claude","model":"sonnet"}` records and previews `model=claude-sonnet-4-6`.
   During daemon dispatch, the persisted selection is mapped to executor-round `agentProvider`, `model`, and `effort` fields and then forwarded to live wrappers through `MOMENTUM_AGENT_PROVIDER`, `MOMENTUM_MODEL`, and `MOMENTUM_EFFORT` when those values are present.
   `route.steps` (the per-step selection) stays distinct from `route.profile` (the recorded operator profile) and from the daemon's `MOMENTUM_LIVE_WRAPPER_PROFILE` execution profile.
 - `--definition-version <n>` - require a specific built-in `coding-workflow` version.
@@ -239,6 +240,7 @@ Instead of persisting a run it emits a frozen plan an operator can inspect befor
 
 It takes the same required and optional arguments as [`workflow run start-coding`](#workflow-run-start-coding), including `--profile <name>` as a read-only route/profile preview, `--steps-json <json>` as a read-only preview of the reconfigured per-step `route.steps` selection, and `--approval-boundary <boundary>` as the projected initial approval state.
 A `--steps-json` selection is validated and projected into the previewed `route` exactly as `workflow run start-coding` would record it, so an operator can preview the default route, change it, and start the same frozen selection.
+Provider-aware model alias normalization is part of that projection, so the preview shows the exact model string the later run would persist and forward to the live wrapper.
 
 Behaviour:
 
@@ -309,6 +311,12 @@ Steps (6):
   3. no-mistakes (no-mistakes) -> no-mistakes [required, pending]
   4. merge-cleanup (merge-cleanup) -> script [required, pending]
   5. linear-refresh (linear-refresh) -> external-apply [required, pending]
+```
+
+With a provider-specific alias such as `{"implementation":{"harness":"claude","model":"sonnet","effort":"high"}}`, the preview prints the normalized command-ready value:
+
+```text
+  implementation: harness=claude, model=claude-sonnet-4-6, effort=high
 ```
 
 ### Text output (failure)
