@@ -358,7 +358,7 @@ Reads the `.agent-workflows/<run-id>/` directory at `<run-dir>` and normalizes t
 - **Manual-recovery auto-set**: after persisting the rows, import re-derives the run's monitor view.
   When it classifies a blocking recovery condition (`manual_recovery_lease`, `ghost_active_no_lease`, `stale_running_step`, `failed_required_step`, or `failed_external_side_effect_step`), import sets the durable `needs_manual_recovery` flag and renders `<run-dir>/recovery.md`.
   The flag blocks `workflow run approve` and any `workflow run update-step` transition that would leave a blocking recovery condition in place; a resolving update-step can land so the operator can then clear the flag with `workflow run clear-recovery`.
-  For `failed_external_side_effect_step`, `clear-recovery --evidence-pointer <ref>` is the resolving operator action after the external push, pull request, and tracker state are verified.
+  For `failed_external_side_effect_step`, `clear-recovery --evidence-pointer <ref>` is the resolving operator action after the canonical external state is verified: the pull request merge or close state and any surviving remote branch ref for `merge-cleanup`, or tracker state for `linear-refresh`.
   The auto-set only ever sets the flag: re-importing a run whose blocking condition is now resolved leaves any existing flag in place, so clearing stays explicit and operator-driven.
 
 ### JSON envelope (success)
