@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.13.0](https://github.com/calvinnwq/momentum/compare/v0.12.0...v0.13.0) (2026-06-24)
+
+
+### Features
+
+* **workflow:** expand native route model alias coverage ([66ad910](https://github.com/calvinnwq/momentum/commit/66ad9102429bcd019a281054d3e90053828308ad))
+* **workflow:** normalize Claude coding route model aliases ([fdd9e50](https://github.com/calvinnwq/momentum/commit/fdd9e50179d9a940ae47f9e160cfd7501627f243))
+
 ## [0.12.0](https://github.com/calvinnwq/momentum/compare/v0.11.0...v0.12.0) (2026-06-24)
 
 
