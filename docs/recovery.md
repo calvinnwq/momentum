@@ -196,7 +196,7 @@ When the failed required step is an external-side-effect tail step
 and the recommended next action is `clear_recovery` instead of
 `rerun_failed_step`.
 These tail steps can push a branch, merge a pull request, or write the tracker before exiting non-zero.
-After the operator verifies the remote, pull request, and tracker state, `workflow run clear-recovery --evidence-pointer <ref>` marks the tail step `succeeded`, records the operator reconciliation, evidence pointer, and optional `--ledger-pointer` on the step row, refreshes the run state, and clears the durable manual-recovery flag when it was set.
+After the operator verifies the canonical external state for the failed tail step, `workflow run clear-recovery --evidence-pointer <ref>` marks the tail step `succeeded`, records the operator reconciliation, evidence pointer, and optional `--ledger-pointer` on the step row, refreshes the run state, and clears the durable manual-recovery flag when it was set.
 Without `--evidence-pointer`, clear refuses and leaves the failed step plus any recovery flag intact.
 That reconciles from external success evidence rather than re-running the step, which could double-merge the pull request or re-write the tracker.
 

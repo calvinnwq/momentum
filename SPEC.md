@@ -103,8 +103,8 @@ The deterministic digest excludes volatile timestamps, lease heartbeat / expiry 
 Plain monitor reads do not write.
 `--advance` is accepted only for `momentum-native-coding` runs and persists only `monitor_last_seen_digest` plus `monitor_last_emitted_digest` when the tick emits; generic workflow starts, imported `cwfp-*` compatibility runs, and fallback CWFP behavior remain unchanged.
 NGX-521 hardens native dogfood tail recovery without changing the default route.
-Failed required `merge-cleanup` and `linear-refresh` steps classify as `failed_external_side_effect_step` so operators verify external push, pull request, and tracker state, then reconcile through `workflow run clear-recovery --evidence-pointer <ref>` instead of blindly re-running side-effecting tail work.
-The checked-in live-wrapper dogfood profile executes the wrapper from source through the TypeScript source loader so cleanup of generated `dist/` artifacts does not break merge-cleanup or tracker-refresh tail work.
+Failed required `merge-cleanup` and `linear-refresh` steps classify as `failed_external_side_effect_step` so operators verify the canonical external state - pull request merge or close state and any surviving remote branch ref for `merge-cleanup`, or tracker state for `linear-refresh` - then reconcile through `workflow run clear-recovery --evidence-pointer <ref>` instead of blindly re-running side-effecting tail work.
+The checked-in live-wrapper dogfood profile executes the wrapper from source through the TypeScript source loader so cleanup of generated `dist/` artifacts does not break `merge-cleanup` or `linear-refresh` tail work.
 CWFP remains the default coding-workflow start and rollback route; the default switch stays NGX-404.
 
 ## Runtime Consolidation
