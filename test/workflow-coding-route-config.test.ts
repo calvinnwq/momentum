@@ -133,33 +133,41 @@ describe("validateCodingStepRouteOverrides — shape and normalization", () => {
     expect(result.overrides.implementation).toEqual({ model: "opus" });
   });
 
-  it("normalizes Claude Sonnet aliases to the exact CLI model string", () => {
+  it("normalizes supported agent model aliases to command-ready strings", () => {
     const result = validateCodingStepRouteOverrides({
-      implementation: { harness: "claude", model: "sonnet", effort: "high" },
-      postflight: { harness: "claude", model: "sonnet-4.6" }
+      implementation: { harness: "claude", model: "opus", effort: "max" },
+      postflight: { harness: "claude", model: "sonnet-4.6" },
+      "no-mistakes": { harness: "codex", model: "openai/gpt-5.5" },
+      "merge-cleanup": { harness: "opencode", model: "glm-5.2" }
     });
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("expected ok");
     expect(result.overrides).toEqual({
       implementation: {
         harness: "claude",
-        model: "claude-sonnet-4-6",
-        effort: "high"
+        model: "claude-opus-4-8",
+        effort: "max"
       },
-      postflight: { harness: "claude", model: "claude-sonnet-4-6" }
+      postflight: { harness: "claude", model: "claude-sonnet-4-6" },
+      "no-mistakes": { harness: "codex", model: "gpt-5.5" },
+      "merge-cleanup": { harness: "opencode", model: "opencode-go/glm-5.2" }
     });
   });
 
-  it("leaves a bare model alias untouched when the harness is not provider-specific", () => {
+  it("leaves model aliases untouched when the harness has no provider mapping", () => {
     const result = validateCodingStepRouteOverrides({
       implementation: { model: "sonnet" },
-      postflight: { harness: "codex", model: "sonnet" }
+      postflight: { harness: "auto", model: "opus" },
+      "no-mistakes": { harness: "trusted-shell", model: "gpt-5.5" },
+      "merge-cleanup": { harness: "gh-cli", model: "glm-5.2" }
     });
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("expected ok");
     expect(result.overrides).toEqual({
       implementation: { model: "sonnet" },
-      postflight: { harness: "codex", model: "sonnet" }
+      postflight: { harness: "auto", model: "opus" },
+      "no-mistakes": { harness: "trusted-shell", model: "gpt-5.5" },
+      "merge-cleanup": { harness: "gh-cli", model: "glm-5.2" }
     });
   });
 
@@ -236,8 +244,58 @@ describe("resolveCodingRouteModelAlias — provider-aware command strings", () =
     expect(resolveCodingRouteModelAlias("Claude", "sonnet-4.6")).toBe(
       "claude-sonnet-4-6"
     );
+    expect(resolveCodingRouteModelAlias("claude", "opus")).toBe(
+      "claude-opus-4-8"
+    );
+    expect(resolveCodingRouteModelAlias("claude", "claude-opus-4.8")).toBe(
+      "claude-opus-4-8"
+    );
     expect(resolveCodingRouteModelAlias("codex", "sonnet")).toBe("sonnet");
     expect(resolveCodingRouteModelAlias(undefined, "sonnet")).toBe("sonnet");
+  });
+
+  it("maps Codex aliases to un-namespaced Codex CLI model ids", () => {
+    expect(resolveCodingRouteModelAlias("codex", "spark")).toBe(
+      "gpt-5.3-codex-spark"
+    );
+    expect(resolveCodingRouteModelAlias("codex", "openai/gpt-5.1")).toBe(
+      "gpt-5.1"
+    );
+    expect(resolveCodingRouteModelAlias("codex", "openai/gpt-5.3-codex-spark")).toBe(
+      "gpt-5.3-codex-spark"
+    );
+    expect(resolveCodingRouteModelAlias("codex", "openai/gpt-5.4-fast")).toBe(
+      "gpt-5.4-fast"
+    );
+    expect(resolveCodingRouteModelAlias("codex", "openai/gpt-5.5")).toBe(
+      "gpt-5.5"
+    );
+    expect(resolveCodingRouteModelAlias("codex", "openai/gpt-5.5-pro")).toBe(
+      "gpt-5.5-pro"
+    );
+  });
+
+  it("maps OpenCode aliases to provider-qualified OpenCode model ids", () => {
+    expect(resolveCodingRouteModelAlias("opencode", "gpt-5.5")).toBe(
+      "openai/gpt-5.5"
+    );
+    expect(resolveCodingRouteModelAlias("opencode", "glm-5.2")).toBe(
+      "opencode-go/glm-5.2"
+    );
+    expect(resolveCodingRouteModelAlias("opencode", "qwen3.7-plus")).toBe(
+      "opencode-go/qwen3.7-plus"
+    );
+  });
+
+  it("keeps unsupported or non-agent harness model strings free-form", () => {
+    expect(resolveCodingRouteModelAlias("trusted-shell", "gpt-5.5")).toBe(
+      "gpt-5.5"
+    );
+    expect(resolveCodingRouteModelAlias("gh-cli", "glm-5.2")).toBe("glm-5.2");
+    expect(resolveCodingRouteModelAlias("deterministic", "opus")).toBe("opus");
+    expect(resolveCodingRouteModelAlias("codex", "future-model")).toBe(
+      "future-model"
+    );
   });
 });
 
