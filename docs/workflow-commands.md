@@ -648,8 +648,8 @@ Required arguments:
 
 Options:
 
-- `--evidence-pointer <ref>` — required when reconciling `failed_external_side_effect_step`; stores the verified external success evidence on the reconciled step row.
-- `--ledger-pointer <ref>` — optional ledger or local-artifact pointer stored alongside the evidence pointer when an external tail step is reconciled.
+- `--evidence-pointer <ref>` - required when reconciling `failed_external_side_effect_step`; stores the verified external success evidence on the reconciled step row.
+- `--ledger-pointer <ref>` - optional ledger or local-artifact pointer stored alongside the evidence pointer when an external tail step is reconciled.
 
 Behaviour:
 
@@ -983,7 +983,7 @@ verification / git finalization failures reconciled after the executor result.
 - `investigate_stale` — a running step is stale (no fresh lease, no recent checkpoint) or an orphan lease is holding a finalized run open.
 - `clear_recovery` - the run is blocked (manual-recovery-required lease or blocked step), or a failed external-side-effect tail step (`merge-cleanup` / `linear-refresh`) needs operator reconciliation; verify external state and clear the recovery once the cause is resolved rather than re-running the step.
   For a failed external-side-effect tail step, clearing recovery reconciles that step to `succeeded` before clearing the durable flag.
-- `rerun_failed_step` — an ordinary required step failed; decide whether to retry or mark for manual recovery. (A failed external-side-effect tail step routes to `clear_recovery` instead, since a naive re-run could double-merge a pull request or re-write the tracker.)
+- `rerun_failed_step` - an ordinary required step failed; decide whether to retry or mark for manual recovery. (A failed external-side-effect tail step routes to `clear_recovery` instead, since a naive re-run could double-merge a pull request or re-write the tracker.)
 
 `monitor.recovery.code`, when present, is one of: `stale_running_step`, `ghost_active_no_lease`, `manual_recovery_lease`, `monitor_drift_stale`, `failed_required_step`, `failed_external_side_effect_step`. `failed_external_side_effect_step` is the subset of `failed_required_step` where the failed required step is an external-side-effect tail step (`merge-cleanup` / `linear-refresh`) that may already have pushed a branch, merged a pull request, or written the tracker before failing.
 
