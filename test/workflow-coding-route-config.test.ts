@@ -258,11 +258,20 @@ describe("resolveCodingRouteModelAlias — provider-aware command strings", () =
     expect(resolveCodingRouteModelAlias("codex", "spark")).toBe(
       "gpt-5.3-codex-spark"
     );
+    expect(resolveCodingRouteModelAlias("codex", "openai/gpt-5.1")).toBe(
+      "gpt-5.1"
+    );
     expect(resolveCodingRouteModelAlias("codex", "openai/gpt-5.3-codex-spark")).toBe(
       "gpt-5.3-codex-spark"
     );
+    expect(resolveCodingRouteModelAlias("codex", "openai/gpt-5.4-fast")).toBe(
+      "gpt-5.4-fast"
+    );
     expect(resolveCodingRouteModelAlias("codex", "openai/gpt-5.5")).toBe(
       "gpt-5.5"
+    );
+    expect(resolveCodingRouteModelAlias("codex", "openai/gpt-5.5-pro")).toBe(
+      "gpt-5.5-pro"
     );
   });
 

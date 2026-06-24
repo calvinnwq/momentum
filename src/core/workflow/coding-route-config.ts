@@ -116,8 +116,43 @@ export type CodingStepExecutorSelection = {
   effort: string | null;
 };
 
-function aliasMap(entries: readonly (readonly [string, string])[]): ReadonlyMap<string, string> {
-  return new Map(entries.map(([alias, canonical]) => [alias.toLowerCase(), canonical]));
+type AliasEntry = readonly [string, string];
+
+function aliasMap(entries: readonly AliasEntry[]): ReadonlyMap<string, string> {
+  return new Map(
+    entries.map(([alias, canonical]) => [alias.toLowerCase(), canonical])
+  );
+}
+
+const OPENAI_MODEL_IDS = [
+  "gpt-5.1",
+  "gpt-5.3-codex-spark",
+  "gpt-5.4",
+  "gpt-5.4-fast",
+  "gpt-5.4-mini",
+  "gpt-5.4-mini-fast",
+  "gpt-5.5",
+  "gpt-5.5-fast",
+  "gpt-5.5-pro"
+] as const;
+
+function codexOpenAiAliases(modelIds: readonly string[]): AliasEntry[] {
+  const entries: AliasEntry[] = [];
+  for (const modelId of modelIds) {
+    entries.push([modelId, modelId], [`openai/${modelId}`, modelId]);
+  }
+  return entries;
+}
+
+function opencodeOpenAiAliases(modelIds: readonly string[]): AliasEntry[] {
+  const entries: AliasEntry[] = [];
+  for (const modelId of modelIds) {
+    entries.push(
+      [modelId, `openai/${modelId}`],
+      [`openai/${modelId}`, `openai/${modelId}`]
+    );
+  }
+  return entries;
 }
 
 /**
@@ -160,25 +195,13 @@ const MODEL_ALIASES_BY_HARNESS: ReadonlyMap<string, ReadonlyMap<string, string>>
         ["codex-spark", "gpt-5.3-codex-spark"],
         ["gpt-5.3-spark", "gpt-5.3-codex-spark"],
         ["gpt-5.3-codex", "gpt-5.3-codex-spark"],
-        ["gpt-5.3-codex-spark", "gpt-5.3-codex-spark"],
-        ["openai/gpt-5.3-codex-spark", "gpt-5.3-codex-spark"],
-        ["openai/gpt-5.5", "gpt-5.5"],
-        ["gpt-5.5", "gpt-5.5"]
+        ...codexOpenAiAliases(OPENAI_MODEL_IDS)
       ])
     ],
     [
       "opencode",
       aliasMap([
-        ["gpt-5.3-codex-spark", "openai/gpt-5.3-codex-spark"],
-        ["openai/gpt-5.3-codex-spark", "openai/gpt-5.3-codex-spark"],
-        ["gpt-5.4", "openai/gpt-5.4"],
-        ["gpt-5.4-fast", "openai/gpt-5.4-fast"],
-        ["gpt-5.4-mini", "openai/gpt-5.4-mini"],
-        ["gpt-5.4-mini-fast", "openai/gpt-5.4-mini-fast"],
-        ["gpt-5.5", "openai/gpt-5.5"],
-        ["gpt-5.5-fast", "openai/gpt-5.5-fast"],
-        ["gpt-5.5-pro", "openai/gpt-5.5-pro"],
-        ["openai/gpt-5.5", "openai/gpt-5.5"],
+        ...opencodeOpenAiAliases(OPENAI_MODEL_IDS),
         ["glm-5.2", "opencode-go/glm-5.2"],
         ["opencode-go/glm-5.2", "opencode-go/glm-5.2"],
         ["qwen3.7-plus", "opencode-go/qwen3.7-plus"],
