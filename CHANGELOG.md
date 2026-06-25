@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/calvinnwq/momentum/compare/v0.13.0...v0.14.0) (2026-06-25)
+
+
+### Features
+
+* **intent:** support Linear status update external apply ([#157](https://github.com/calvinnwq/momentum/issues/157)) ([05bf906](https://github.com/calvinnwq/momentum/commit/05bf906b472cdc51e2078ebd53a9899917e9724c))
+
 ## [0.13.0](https://github.com/calvinnwq/momentum/compare/v0.12.0...v0.13.0) (2026-06-24)
 
 
