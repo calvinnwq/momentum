@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.14.4](https://github.com/calvinnwq/momentum/compare/v0.14.3...v0.14.4) (2026-06-25)
+
+
+### Bug Fixes
+
+* **workflow:** ignore stale recovery flag for terminal monitor progress ([e6b4905](https://github.com/calvinnwq/momentum/commit/e6b4905751816c378b5e045f8f2531f24a24e6df))
+* **workflow:** ignore stale terminal monitor recovery flags ([3515277](https://github.com/calvinnwq/momentum/commit/3515277f9355969e2f05d5fccbaae26a8f3566d7))
+* **workflow:** keep reconciled terminal monitor progress clean ([64aa497](https://github.com/calvinnwq/momentum/commit/64aa4976671f8d78e35258cbfcfb2f9ffb19244d))
+* **workflow:** keep terminal monitor progress clean ([7a86687](https://github.com/calvinnwq/momentum/commit/7a86687d84d1253c638a0be1b265f3db81af0726))
+
 ## [0.14.3](https://github.com/calvinnwq/momentum/compare/v0.14.2...v0.14.3) (2026-06-25)
 
 
