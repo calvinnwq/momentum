@@ -100,6 +100,7 @@ Provider-specific model aliases are part of that normalization when the same ste
 `route.steps` records the operator's per-step selection for durable audit by status/handoff/monitor/logs and for dispatcher-created executor-round selection; it stays distinct from the daemon's `MOMENTUM_LIVE_WRAPPER_PROFILE` execution profile.
 NGX-511 adds a native progress-monitor projection to `workflow run monitor` for explicit `momentum-native-coding` runs.
 The monitor envelope derives from durable rows, exposes `manualRecoveryReason`, and includes `progress` fields for phase, digest, changed/emit suppression, current step, last event, next action, blocker reason, terminal status, and cleanup.
+Clean terminal progress requires terminal durable state, no recovery object, no durable manual-recovery flag, and `nextAction.code: "no_action"`, so an operator-reconciled succeeded run releases the monitor after `workflow run clear-recovery`.
 The deterministic digest excludes volatile timestamps, lease heartbeat / expiry churn, and evidence ordering while including durable manual-recovery reasons and open gate identity so repeated unchanged ticks can be suppressed.
 Plain monitor reads do not write.
 `--advance` is accepted only for `momentum-native-coding` runs and persists only `monitor_last_seen_digest` plus `monitor_last_emitted_digest` when the tick emits; generic workflow starts, imported `cwfp-*` compatibility runs, and fallback CWFP behavior remain unchanged.
