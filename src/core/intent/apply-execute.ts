@@ -429,7 +429,24 @@ export async function executeExternalApply(
     });
   }
 
-  const allowStatusMutation = input.statusMutation != null;
+  const statusMutationResolution = resolveStatusMutationConfig({
+    intent,
+    explicitStatusMutation: input.statusMutation ?? null
+  });
+  if (!statusMutationResolution.ok) {
+    return earlyFailure({
+      code: "validation_failed",
+      message: statusMutationResolution.message,
+      intent,
+      contextBase: {
+        ...enrichedContextBase,
+        applyPolicy: policyResolution.applyPolicy
+      }
+    });
+  }
+
+  const statusMutation = statusMutationResolution.statusMutation;
+  const allowStatusMutation = statusMutation != null;
   const adapterInput: ExternalUpdateAdapterInput = {
     intent,
     target,
@@ -509,7 +526,7 @@ export async function executeExternalApply(
     : null;
   const applyInput: LinearExternalUpdateInput = {
     preview,
-    statusMutation: input.statusMutation ?? null
+    statusMutation
   };
 
   let externalResult: LinearExternalUpdateResult;
@@ -794,6 +811,47 @@ export async function executeExternalApply(
   };
 }
 
+function resolveStatusMutationConfig(input: {
+  intent: UpdateIntent;
+  explicitStatusMutation: LinearStatusMutationConfig | null;
+}):
+  | { ok: true; statusMutation: LinearStatusMutationConfig | null }
+  | { ok: false; message: string } {
+  if (input.explicitStatusMutation !== null) {
+    return { ok: true, statusMutation: input.explicitStatusMutation };
+  }
+  if (
+    input.intent.adapterKind !== "linear" ||
+    input.intent.intentType !== "status_update"
+  ) {
+    return { ok: true, statusMutation: null };
+  }
+
+  const stateName = optionalNonEmptyString(input.intent.payload["state"]);
+  const stateId = optionalNonEmptyString(input.intent.payload["stateId"]);
+  if (stateName === null && stateId === null) {
+    return {
+      ok: false,
+      message:
+        'Linear status_update payload requires a non-empty "state" or "stateId".'
+    };
+  }
+  if (stateName !== null && stateId !== null) {
+    return {
+      ok: false,
+      message:
+        'Linear status_update payload must not include both "state" and "stateId".'
+    };
+  }
+  if (stateId !== null) {
+    return { ok: true, statusMutation: { kind: "by_id", stateId } };
+  }
+  return {
+    ok: true,
+    statusMutation: { kind: "by_name", stateName: stateName as string }
+  };
+}
+
 function buildExternalSuccess(args: {
   intent: UpdateIntent;
   adapter: ExternalUpdateAdapter;
@@ -941,6 +999,12 @@ function readEndpointOverride(
   const raw = env[name];
   if (typeof raw !== "string") return null;
   const trimmed = raw.trim();
+  return trimmed.length === 0 ? null : trimmed;
+}
+
+function optionalNonEmptyString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
   return trimmed.length === 0 ? null : trimmed;
 }
 

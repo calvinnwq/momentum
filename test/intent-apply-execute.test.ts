@@ -575,6 +575,147 @@ describe("executeExternalApply two-phase happy path", () => {
     }
   });
 
+  it("infers a Linear status transition from a status_update intent payload", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const externalId = "linear_issue_id_status";
+      const sourceItemId = "source_item_status";
+      insertSourceItem(db, {
+        id: sourceItemId,
+        adapterKind: "linear",
+        externalId,
+        externalKey: "NGX-522",
+        url: "https://linear.app/example/issue/NGX-522",
+        title: "Status issue"
+      });
+      const payload = {
+        state: "Done",
+        comment: "Native workflow finished and should close the tracker."
+      };
+      insertIntent(db, {
+        id: "intent_status_update",
+        intentType: "status_update",
+        targetExternalId: externalId,
+        sourceItemId,
+        payload
+      });
+      const repoPath = makeRepo(externalApplyAllowedPolicy());
+      const idempotencyMarker = expectedIdempotencyMarker(
+        "intent_status_update",
+        payload
+      );
+      const spy = makeApplySpy((input) => ({
+        ok: true,
+        alreadyApplied: false,
+        issue: {
+          id: externalId,
+          key: "NGX-522",
+          url: "https://linear.app/example/issue/NGX-522"
+        },
+        comment: {
+          id: "comment_status_update",
+          url: "https://linear.app/example/comment/status"
+        },
+        status: {
+          transitioned: true,
+          previousStateId: "state-started",
+          previousStateName: "In Review",
+          nextStateId: "state-done",
+          nextStateName: input.statusMutation?.kind === "by_name"
+            ? input.statusMutation.stateName
+            : null
+        },
+        idempotencyMarker
+      }));
+
+      const result = await executeExternalApply(
+        baseInput(db, {
+          intentId: "intent_status_update",
+          repoPath,
+          deps: {
+            buildLinearClient: () => spy.client,
+            buildLinearRefreshClient: () =>
+              makeRefreshClient({
+                marker: idempotencyMarker,
+                issueId: externalId,
+                issueKey: "NGX-522",
+                status: "Done",
+                comments: [
+                  {
+                    id: "comment_status_update",
+                    body: `Momentum applied ${idempotencyMarker}`,
+                    url: "https://linear.app/example/comment/status"
+                  }
+                ]
+              }),
+            now: () => 1000
+          }
+        })
+      );
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) throw new Error(`expected ok, got ${result.code}`);
+      expect(result.context.intentType).toBe("status_update");
+      expect(result.context.allowStatusMutation).toBe(true);
+      expect(result.context.mutationKind).toBe("status_transition");
+      expect(result.external.statusTransitioned).toBe(true);
+      expect(result.external.nextStateName).toBe("Done");
+      expect(getUpdateIntentById(db, "intent_status_update")?.status).toBe(
+        "applied"
+      );
+
+      expect(spy.calls).toHaveLength(1);
+      const sent = spy.calls[0]!;
+      expect(sent.statusMutation).toEqual({
+        kind: "by_name",
+        stateName: "Done"
+      });
+      expect(sent.preview.commentBody).toContain(
+        "Native workflow finished and should close the tracker."
+      );
+      expect(sent.preview.idempotencyMarker).toBe(idempotencyMarker);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses malformed status_update payloads before claiming an audit", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      insertIntent(db, {
+        id: "intent_status_update_bad",
+        intentType: "status_update",
+        targetExternalId: "linear_issue_id_status",
+        payload: { comment: "missing state" }
+      });
+      const repoPath = makeRepo(externalApplyAllowedPolicy());
+      const spy = makeApplySpy(
+        makeErrorOutcome("validation_failed", "must not call")
+      );
+
+      const result = await executeExternalApply(
+        baseInput(db, {
+          intentId: "intent_status_update_bad",
+          repoPath,
+          deps: { buildLinearClient: () => spy.client }
+        })
+      );
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("expected refusal");
+      expect(result.code).toBe("validation_failed");
+      expect(result.message).toContain('"state" or "stateId"');
+      expect(spy.calls).toHaveLength(0);
+      expect(
+        listIntentApplyAudits(db, { intentId: "intent_status_update_bad" })
+      ).toHaveLength(0);
+    } finally {
+      db.close();
+    }
+  });
+
   it("treats alreadyApplied replay as success without creating a duplicate Linear mutation", async () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);

@@ -14,10 +14,11 @@ async function run(args: string[]): Promise<CliResult> {
   let stdout = "";
   let stderr = "";
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "momentum-family-cmd-home-"));
+  const dataDir = path.join(home, ".momentum");
   const code = await runCli(args, {
     stdout: { write: (chunk: string) => ((stdout += chunk), true) },
     stderr: { write: (chunk: string) => ((stderr += chunk), true) },
-    env: { ...process.env, HOME: home }
+    env: { ...process.env, HOME: home, MOMENTUM_HOME: dataDir }
   });
   return { code, stdout, stderr };
 }
