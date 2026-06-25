@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.2](https://github.com/calvinnwq/momentum/compare/v0.14.1...v0.14.2) (2026-06-25)
+
+
+### Bug Fixes
+
+* **workflow:** park no-mistakes lifecycle failures ([0d6850c](https://github.com/calvinnwq/momentum/commit/0d6850c065415d50326b8cfc660bb84d39b48b06))
+
 ## [0.14.1](https://github.com/calvinnwq/momentum/compare/v0.14.0...v0.14.1) (2026-06-25)
 
 
