@@ -247,6 +247,7 @@ Before clearing recovery, `workflow run monitor <run-id> --json` reports `dispos
 
 After a successful `workflow run clear-recovery --evidence-pointer <ref>`, re-run the monitor command to verify the next durable state.
 When the reconciled tail step was the last remaining required work, the monitor reports `disposition: "report"`, `reportReason: "terminal_succeeded"`, `nextAction.code: "no_action"`, and `recovery: null`.
+Its progress tick reports `phase: "terminal"`, `terminal: true`, `cleanup: "release"`, and `blockerReason: null`, so monitor delivery can stop instead of retaining the earlier recovery tick.
 When downstream required work remains, such as `linear-refresh` after a reconciled `merge-cleanup` in a full workflow, the monitor reports that pending or approved next step instead of terminal success.
 
 The generated run-scoped `recovery.md` artifact is schema-versioned and

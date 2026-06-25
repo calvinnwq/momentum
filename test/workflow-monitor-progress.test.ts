@@ -512,6 +512,50 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
     expect(second.terminal).toBe(true);
   });
 
+  it("keeps an operator-reconciled succeeded run terminal despite stale recovery disposition (NGX-543)", () => {
+    const tick = deriveWorkflowMonitorProgress(
+      makeEnvelope({
+        runState: "succeeded",
+        terminal: true,
+        disposition: "recover",
+        reportable: true,
+        reportReason: "recovery_required",
+        activeStep: null,
+        stepState: null,
+        recovery: null,
+        nextAction: {
+          code: "no_action",
+          stepId: null,
+          leaseKind: null,
+          detail: "Run is terminally succeeded. No further action required."
+        },
+        counts: makeCounts({
+          steps: 6,
+          stepsByState: {
+            pending: 0,
+            approved: 0,
+            running: 0,
+            succeeded: 6,
+            failed: 0,
+            skipped: 0,
+            blocked: 0,
+            canceled: 0
+          }
+        }),
+        lastCheckpoint: {
+          stepId: "linear-refresh",
+          at: 1_730_000_000_000,
+          source: "ledger",
+          digest: "rc2-reconcile::linear-refresh::succeeded"
+        }
+      })
+    );
+    expect(tick.phase).toBe<WorkflowMonitorProgressPhase>("terminal");
+    expect(tick.blockerReason).toBeNull();
+    expect(tick.cleanup).toBe("release");
+    expect(tick.terminal).toBe(true);
+  });
+
   it("derives lastEvent from the durable checkpoint when present", () => {
     const tick = deriveWorkflowMonitorProgress(
       makeEnvelope({
