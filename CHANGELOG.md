@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.1](https://github.com/calvinnwq/momentum/compare/v0.14.0...v0.14.1) (2026-06-25)
+
+
+### Bug Fixes
+
+* **workflow:** recover missing native wrapper config ([6bbf157](https://github.com/calvinnwq/momentum/commit/6bbf157232b0ba93db41f0a3ebebf30f9ef76afe))
+
 ## [0.14.0](https://github.com/calvinnwq/momentum/compare/v0.13.0...v0.14.0) (2026-06-25)
 
 
