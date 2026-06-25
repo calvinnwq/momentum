@@ -520,6 +520,9 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
         disposition: "recover",
         reportable: true,
         reportReason: "recovery_required",
+        needsManualRecovery: true,
+        manualRecoveryReason:
+          "Dispatch invocation ended `manual_recovery_required` before operator reconciliation.",
         activeStep: null,
         stepState: null,
         recovery: null,
