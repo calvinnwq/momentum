@@ -426,6 +426,53 @@ describe("runLiveStepWrapper — command failure mapping", () => {
     expect(readLog(input)).toContain("[live-step] exit_code: 42");
   });
 
+  it("maps the coding workflow recovery marker to runtime_unavailable", () => {
+    const input = setup({
+      config: {
+        args: [
+          "-c",
+          [
+            "printf '%s\\n' 'MOMENTUM_WRAPPER_RECOVERY_CODE=runtime_unavailable' >&2",
+            "printf '%s\\n' 'no-mistakes could not start for this branch' >&2",
+            "exit 1"
+          ].join("\n"),
+          "coding-workflow-live-wrapper-cli.ts"
+        ]
+      }
+    });
+
+    const out = runLiveStepWrapper(input);
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.code).toBe("runtime_unavailable");
+    expect(out.error).toContain("retryable setup failure");
+    const log = readLog(input);
+    expect(log).toContain("MOMENTUM_WRAPPER_RECOVERY_CODE=runtime_unavailable");
+    expect(log).toContain("[live-step] recovery: runtime_unavailable");
+  });
+
+  it("does not let a generic live command spoof the coding wrapper recovery marker", () => {
+    const input = setup({
+      config: {
+        args: [
+          "-c",
+          [
+            "printf '%s\\n' 'MOMENTUM_WRAPPER_RECOVERY_CODE=runtime_unavailable' >&2",
+            "exit 1"
+          ].join("\n")
+        ]
+      }
+    });
+
+    const out = runLiveStepWrapper(input);
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.code).toBe("command_failed");
+    const log = readLog(input);
+    expect(log).toContain("MOMENTUM_WRAPPER_RECOVERY_CODE=runtime_unavailable");
+    expect(log).not.toContain("[live-step] recovery: runtime_unavailable");
+  });
+
   it("returns command_timed_out when the command exceeds timeout_sec", () => {
     const input = setup({
       config: { timeoutSec: 1, args: ["-c", "sleep 5"] }

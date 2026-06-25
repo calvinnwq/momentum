@@ -26,6 +26,8 @@ import {
 
 export const CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR =
   "MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG";
+export const CODING_WORKFLOW_WRAPPER_RECOVERY_MARKER =
+  "MOMENTUM_WRAPPER_RECOVERY_CODE=runtime_unavailable";
 
 export const CODING_WORKFLOW_WRAPPER_ENV_VARS = [
   "MOMENTUM_RUN_ID",
@@ -172,6 +174,13 @@ export function runCodingWorkflowLiveWrapper(
 
   const success =
     result.error === undefined && result.signal === null && result.status === 0;
+  const recoverableNoMistakesFailure = classifyRecoverableNoMistakesRunnerFailure(
+    stepKind,
+    result
+  );
+  if (!success && recoverableNoMistakesFailure !== null) {
+    return processSetupFailure(deps, recoverableNoMistakesFailure);
+  }
   const summary = summarizeCommandResult(stepKind, stepConfig, result, success);
   return writeRunnerResult(deps, resultPath, {
     success,
@@ -196,6 +205,32 @@ function commandFailureRemainingWork(kind: WorkflowStepKind): string[] {
   ];
 }
 
+export function classifyRecoverableNoMistakesRunnerFailure(
+  kind: WorkflowStepKind,
+  result: Pick<SpawnSyncReturns<string>, "stdout" | "stderr" | "error" | "signal">
+): string | null {
+  if (kind !== "no-mistakes") return null;
+  if (result.error !== undefined || result.signal !== null) return null;
+
+  const output = `${result.stdout}\n${result.stderr}`.toLowerCase();
+  if (output.includes("no previous run for branch")) {
+    return [
+      "no-mistakes could not start for this branch because its external gate state has no previous run.",
+      "Repair or re-seed the no-mistakes branch/gate state, then clear recovery to retry the no-mistakes step."
+    ].join(" ");
+  }
+  if (
+    output.includes("outcome: cancelled") &&
+    output.includes("aborted by user")
+  ) {
+    return [
+      "no-mistakes was cancelled before producing a reliable successful result.",
+      "Inspect the external no-mistakes run for review/fixer state, repair the blocker, then clear recovery to retry the no-mistakes step."
+    ].join(" ");
+  }
+  return null;
+}
+
 type ConfigLoadResult =
   | { ok: true; config: CodingWorkflowWrapperConfig }
   | { ok: false; error: string };
@@ -204,6 +239,7 @@ function processSetupFailure(
   deps: Pick<CodingWorkflowWrapperDeps, "stderr">,
   summary: string
 ): CodingWorkflowWrapperOutcome {
+  deps.stderr(`${CODING_WORKFLOW_WRAPPER_RECOVERY_MARKER}\n`);
   deps.stderr(`${summary}\n`);
   return {
     exitCode: 1,

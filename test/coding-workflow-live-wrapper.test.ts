@@ -313,6 +313,65 @@ describe("runCodingWorkflowLiveWrapper", () => {
     ]);
   });
 
+  it.each([
+    {
+      name: "missing external branch-start state",
+      stdout:
+        'error: "no run started for \\"feat/example\\": no previous run for branch feat/example"',
+      expected: "external gate state has no previous run"
+    },
+    {
+      name: "cancelled external no-mistakes run",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: cancelled",
+        "outcome: cancelled",
+        'error: "cancelled: aborted by user"'
+      ].join("\n"),
+      expected: "cancelled before producing a reliable successful result"
+    }
+  ])(
+    "parks no-mistakes runner lifecycle failure as process setup recovery: $name",
+    ({ stdout, expected }) => {
+      const dir = makeTempDir();
+      const repo = path.join(dir, "repo");
+      const iteration = path.join(dir, "run");
+      const resultPath = path.join(iteration, "result.json");
+      fs.mkdirSync(repo);
+      const configPath = path.join(dir, "wrapper-config.json");
+      writeJson(configPath, {
+        steps: {
+          "no-mistakes": {
+            command: "/bin/sh",
+            args: ["-c", `printf '%s\\n' ${JSON.stringify(stdout)}; exit 1`],
+            cwd: "repo",
+            timeout_sec: 30,
+            env_allow: ["PATH"],
+            commit: { type: "test", subject: "run no mistakes" }
+          }
+        }
+      });
+
+      const outcome = runCodingWorkflowLiveWrapper(
+        deps({
+          MOMENTUM_STEP_KIND: "no-mistakes",
+          MOMENTUM_REPO_PATH: repo,
+          MOMENTUM_ITERATION_DIR: iteration,
+          MOMENTUM_RESULT_PATH: resultPath,
+          [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
+          PATH: process.env.PATH
+        })
+      );
+
+      expect(outcome.exitCode).toBe(1);
+      expect(outcome.success).toBe(false);
+      expect(outcome.summary).toContain(expected);
+      expect(outcome.summary).toContain("clear recovery to retry");
+      expect(fs.existsSync(resultPath)).toBe(false);
+    }
+  );
+
   it.each(["merge-cleanup", "linear-refresh"] as const)(
     "guides %s failures toward evidence-backed external-state reconciliation",
     (stepKind) => {
