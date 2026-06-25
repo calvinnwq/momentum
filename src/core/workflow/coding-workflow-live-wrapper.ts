@@ -132,18 +132,24 @@ export function runCodingWorkflowLiveWrapper(
     return writeFailureResult(deps, resultPath, "Unknown or missing MOMENTUM_STEP_KIND.");
   }
 
+  const configPath = deps.env[CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]?.trim();
+  if (configPath === undefined || configPath.length === 0) {
+    return processSetupFailure(
+      deps,
+      `MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG is required when the daemon live-wrapper profile uses the coding workflow wrapper for "${stepKind}".`
+    );
+  }
+
   const configLoad = loadCodingWorkflowWrapperConfig(deps);
   if (!configLoad.ok) {
-    return writeFailureResult(deps, resultPath, configLoad.error, stepKind);
+    return processSetupFailure(deps, configLoad.error);
   }
 
   const stepConfig = configLoad.config.steps[stepKind];
   if (stepConfig?.command === undefined) {
-    return writeFailureResult(
+    return processSetupFailure(
       deps,
-      resultPath,
-      `No command is configured for workflow step "${stepKind}".`,
-      stepKind
+      `No command is configured for workflow step "${stepKind}" in ${CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR}.`
     );
   }
 
@@ -193,6 +199,18 @@ function commandFailureRemainingWork(kind: WorkflowStepKind): string[] {
 type ConfigLoadResult =
   | { ok: true; config: CodingWorkflowWrapperConfig }
   | { ok: false; error: string };
+
+function processSetupFailure(
+  deps: Pick<CodingWorkflowWrapperDeps, "stderr">,
+  summary: string
+): CodingWorkflowWrapperOutcome {
+  deps.stderr(`${summary}\n`);
+  return {
+    exitCode: 1,
+    success: false,
+    summary
+  };
+}
 
 export function loadCodingWorkflowWrapperConfig(
   deps: Pick<CodingWorkflowWrapperDeps, "env" | "readFile">

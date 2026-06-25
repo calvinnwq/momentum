@@ -1359,6 +1359,34 @@ Consumers that need full run metadata should call `workflow status` / `workflow 
 - `currentStep`, `lastEvent`, `nextAction` (the next-action code), and `blockerReason` are the snapshot fields an operator reads at a glance; `blockerReason` is `null` unless `phase` is `blocked`.
   For durable manual-recovery-only blocks, `blockerReason` uses `manualRecoveryReason` when present.
 
+### Monitor delivery wrappers
+
+`workflow run monitor` is the durable projection; delivery is intentionally
+external. A chat, cron, or supervisor wrapper should call:
+
+```sh
+momentum workflow run monitor <run-id> --advance --json
+```
+
+Then branch on the JSON instead of scraping text:
+
+- Suppress the tick when `progress.emit` is `false`, `blocked` is `false`,
+  `needsManualRecovery` is `false`, and `terminal` is `false`.
+- Send a concise operator update when `progress.emit`, `blocked`,
+  `needsManualRecovery`, or `terminal` is `true`.
+- Include `runId`, `runState`, `activeStep` / `progress.currentStep`,
+  `progress.phase`, `nextAction.code`, succeeded/total step counts, and any
+  recovery or open-gate detail.
+- Stop and clean up the wrapper only when `progress.cleanup` is `"release"`,
+  `runState` is `canceled`, or `nextAction.code` is `no_action`.
+- Keep polling recoverable terminal failures (`disposition: "recover"` or
+  `progress.phase: "blocked"`) so a later repair, retry, or clear-recovery emits
+  the next meaningful state.
+
+The eligibility check for `--advance` is the durable run source
+`momentum-native-coding`. A `mwf-*` run id is a useful operator convention for
+explicit Momentum-native workflow runs, not the semantic contract.
+
 ### Error codes
 
 | Code | Meaning |

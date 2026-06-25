@@ -155,6 +155,39 @@ JSON`;
   return profilePath;
 }
 
+function writeCodingWorkflowWrapperPreflightProfile(dir: string): string {
+  const profilePath = path.join(dir, "coding-wrapper-profile.json");
+  fs.writeFileSync(
+    profilePath,
+    JSON.stringify({
+      name: "daemon-coding-wrapper-test",
+      wrappers: {
+        preflight: {
+          command: process.execPath,
+          args: [
+            "--no-warnings=ExperimentalWarning",
+            "--import",
+            path.join(
+              process.cwd(),
+              "src/adapters/typescript-source-register.mjs"
+            ),
+            path.join(
+              process.cwd(),
+              "src/adapters/coding-workflow-live-wrapper-cli.ts"
+            )
+          ],
+          cwd: "repo",
+          timeout_sec: 30,
+          env_allow: ["PATH"],
+          result_file: "result.json"
+        }
+      }
+    }),
+    "utf8"
+  );
+  return profilePath;
+}
+
 describe("daemon start production workflow lane (NGX-367)", () => {
   it("uses a configured daemon live-wrapper profile to execute and reconcile a dispatched step", async () => {
     const dataDir = makeTempDir();
@@ -714,6 +747,67 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         )
         .all(runId) as Array<{ lease_kind: string }>;
       expect(openLeases).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("parks the run for manual recovery when the coding workflow wrapper config is missing", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = process.cwd();
+    const profileDir = makeTempDir();
+    const profilePath = writeCodingWorkflowWrapperPreflightProfile(profileDir);
+    const runId = "ngx544-missing-wrapper-config";
+    await startApprovedCodingRun(dataDir, repoDir, runId);
+
+    const result = await run(
+      [
+        "daemon",
+        "start",
+        "--max-loop-iterations",
+        "1",
+        "--poll-interval-ms",
+        "0",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath }
+    );
+
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    const db = openDb(dataDir);
+    try {
+      const step = db
+        .prepare(
+          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?"
+        )
+        .get(runId, "preflight") as { state: string } | undefined;
+      expect(step).toEqual({ state: "running" });
+
+      const runRow = db
+        .prepare(
+          "SELECT needs_manual_recovery, manual_recovery_reason FROM workflow_runs WHERE id = ?"
+        )
+        .get(runId) as
+        | { needs_manual_recovery: number; manual_recovery_reason: string | null }
+        | undefined;
+      expect(runRow?.needs_manual_recovery).toBe(1);
+      expect(runRow?.manual_recovery_reason).toContain(
+        "manual_recovery_required"
+      );
+
+      const round = db
+        .prepare(
+          "SELECT state, recovery_code, summary FROM executor_rounds WHERE workflow_run_id = ? AND step_key = ?"
+        )
+        .get(runId, "preflight") as
+        | { state: string; recovery_code: string | null; summary: string | null }
+        | undefined;
+      expect(round?.state).toBe("manual_recovery_required");
+      expect(round?.recovery_code).toBe("command_failed");
+      expect(round?.summary).toContain("live step command exited with code 1");
     } finally {
       db.close();
     }

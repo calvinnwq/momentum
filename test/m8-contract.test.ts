@@ -35,4 +35,14 @@ describe("M8 operator controls contract", () => {
       expect(workflowDocs).toContain(cmd);
     }
   });
+
+  it("keeps native monitor delivery cleanup semantics documented", () => {
+    const workflowDocs = readDoc("docs/workflow-commands.md");
+    expect(workflowDocs).toContain("Monitor delivery wrappers");
+    expect(workflowDocs).toContain("progress.emit");
+    expect(workflowDocs).toContain("recoverable terminal failures");
+    expect(workflowDocs).toContain("source\n`momentum-native-coding`");
+    expect(workflowDocs).toContain("mwf-*");
+    expect(workflowDocs).toContain("operator convention");
+  });
 });
