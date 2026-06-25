@@ -1294,6 +1294,81 @@ describe("momentum workflow run monitor (NGX-328)", () => {
     );
   });
 
+  it("keeps an unchanged volatile lease heartbeat suppressed under --advance (NGX-543)", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-advance-lease-volatility";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, {
+        runId,
+        state: "running",
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE
+      });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "running",
+        order: 1
+      });
+      seedLease(db, {
+        runId,
+        leaseKind: "managed-step",
+        expiresAt: FRESH_EXPIRY
+      });
+    } finally {
+      db.close();
+    }
+
+    const first = await run([
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--advance",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(first.code).toBe(0);
+    const firstPayload = JSON.parse(first.stdout) as {
+      progress: { digest: string; emit: boolean; changed: boolean; advanced: boolean };
+    };
+    expect(firstPayload.progress.emit).toBe(true);
+    expect(firstPayload.progress.changed).toBe(true);
+    expect(firstPayload.progress.advanced).toBe(true);
+
+    const mutateDb = openDb(dataDir);
+    try {
+      mutateDb
+        .prepare(
+          "UPDATE workflow_leases SET heartbeat_at = heartbeat_at + 9000, expires_at = expires_at + 9000 WHERE run_id = ? AND lease_kind = ?"
+        )
+        .run(runId, "managed-step");
+    } finally {
+      mutateDb.close();
+    }
+
+    const second = await run([
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--advance",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(second.code).toBe(0);
+    const secondPayload = JSON.parse(second.stdout) as {
+      progress: { digest: string; emit: boolean; changed: boolean; advanced: boolean };
+    };
+    expect(secondPayload.progress.digest).toBe(firstPayload.progress.digest);
+    expect(secondPayload.progress.changed).toBe(false);
+    expect(secondPayload.progress.emit).toBe(false);
+    expect(secondPayload.progress.advanced).toBe(false);
+  });
+
   it("re-emits and re-advances the baseline after meaningful state changes (NGX-511)", async () => {
     const dataDir = makeTempDir();
     const runId = "cwfp-advance-rearm";
