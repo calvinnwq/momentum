@@ -372,6 +372,2537 @@ describe("runCodingWorkflowLiveWrapper", () => {
     }
   );
 
+  it.each([
+    {
+      name: "checks-passed outcome",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "outcome: checks-passed",
+        "ci: running"
+      ].join("\n"),
+      expected: "reached checks-passed"
+    },
+    {
+      name: "compact JSON checks-passed outcome",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        '{"outcome":"checks-passed"}',
+        "ci: running"
+      ].join("\n"),
+      expected: "reached checks-passed"
+    },
+    {
+      name: "equals checks-passed outcome",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "outcome=checks-passed",
+        "ci: running"
+      ].join("\n"),
+      expected: "reached checks-passed"
+    },
+    {
+      name: "arrow checks-passed outcome",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "outcome=>checks-passed",
+        "ci: running"
+      ].join("\n"),
+      expected: "reached checks-passed"
+    },
+    {
+      name: "running no-mistakes with a clean green PR",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "ci/running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed"
+      ].join("\n"),
+      expected: "pull request is clean and checks are green"
+    },
+    {
+      name: "running no-mistakes with resolved decision evidence",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "ci/running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "decisions[0]: resolved"
+      ].join("\n"),
+      expected: "pull request is clean and checks are green"
+    },
+    {
+      name: "running no-mistakes with scoped clean PR status",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "ci/running",
+        "PR status: clean",
+        "GitHub checks passed"
+      ].join("\n"),
+      expected: "pull request is clean and checks are green"
+    },
+    {
+      name: "running no-mistakes with resolved JSON decision history",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "ci/running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '{"decisions":[{"status":"resolved"}]}'
+      ].join("\n"),
+      expected: "pull request is clean and checks are green"
+    },
+    {
+      name: "running no-mistakes with approved JSON decision history",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "ci/running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '{"decisions":[{"resolution":"approved"}]}'
+      ].join("\n"),
+      expected: "pull request is clean and checks are green"
+    },
+    {
+      name: "running no-mistakes with no checks reported",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "ci/running",
+        "PR #42 mergeStateStatus CLEAN",
+        "no checks reported"
+      ].join("\n"),
+      expected: "pull request is clean and checks are green"
+    },
+    {
+      name: "running no-mistakes with passed external CI state",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "ci/running",
+        "PR #42 mergeStateStatus CLEAN",
+        "ciState: passed"
+      ].join("\n"),
+      expected: "pull request is clean and checks are green"
+    },
+    {
+      name: "running no-mistakes with no-checks external CI state",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "ci/running",
+        "PR #42 mergeStateStatus CLEAN",
+        "ci_state: none"
+      ].join("\n"),
+      expected: "pull request is clean and checks are green"
+    },
+    {
+      name: "running no-mistakes with JSON step status and no-checks external CI state",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        '"stepStatus": "running"',
+        "PR #42 mergeStateStatus CLEAN",
+        "ciState: none"
+      ].join("\n"),
+      expected: "pull request is clean and checks are green"
+    },
+    {
+      name: "running no-mistakes with snake case clean merge state",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "ci/running",
+        "merge_state_status: clean",
+        "GitHub checks passed"
+      ].join("\n"),
+      expected: "pull request is clean and checks are green"
+    },
+    {
+      name: "running no-mistakes with snake case clean mergeable state",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "ci/running",
+        "mergeable_state: clean",
+        "GitHub checks passed"
+      ].join("\n"),
+      expected: "pull request is clean and checks are green"
+    },
+    {
+      name: "running no-mistakes with clean mergeable state",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "ci/running",
+        "mergeable state: clean",
+        "GitHub checks passed"
+      ].join("\n"),
+      expected: "pull request is clean and checks are green"
+    },
+    {
+      name: "running no-mistakes with false required approval flag",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "ci/running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "approvalRequired: false"
+      ].join("\n"),
+      expected: "pull request is clean and checks are green"
+    },
+    {
+      name: "running no-mistakes with false operator decision flag",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "ci/running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "operatorDecisionRequired: false"
+      ].join("\n"),
+      expected: "pull request is clean and checks are green"
+    },
+    {
+      name: "running no-mistakes with false decision required label",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "ci/running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "decision required: false"
+      ].join("\n"),
+      expected: "pull request is clean and checks are green"
+    },
+    {
+      name: "running no-mistakes with pretty JSON false approval required flag",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "ci/running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '"approvalRequired": false,'
+      ].join("\n"),
+      expected: "pull request is clean and checks are green"
+    },
+    {
+      name: "running no-mistakes with compact JSON false required flags",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "ci/running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '{"approvalRequired":false,"decisionRequired":false}'
+      ].join("\n"),
+      expected: "pull request is clean and checks are green"
+    },
+    {
+      name: "running no-mistakes with object external state container",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "externalState: {\"stepStatus\":\"running\",\"ciState\":\"none\"}",
+        "PR #42 mergeStateStatus CLEAN"
+      ].join("\n"),
+      expected: "pull request is clean and checks are green"
+    },
+    {
+      name: "running no-mistakes with pretty external state container",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "externalState:",
+        "  stepStatus: running",
+        "  ciState: none",
+        "PR #42 mergeStateStatus CLEAN"
+      ].join("\n"),
+      expected: "pull request is clean and checks are green"
+    },
+    {
+      name: "running no-mistakes with pretty object external state container",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "externalState: {",
+        "  stepStatus: running",
+        "  ciState: none",
+        "}",
+        "PR #42 mergeStateStatus CLEAN"
+      ].join("\n"),
+      expected: "pull request is clean and checks are green"
+    },
+    {
+      name: "running no-mistakes with compact object external state container",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        '{"externalState":{"stepStatus":"running","ciState":"none"}}',
+        "PR #42 mergeStateStatus CLEAN"
+      ].join("\n"),
+      expected: "pull request is clean and checks are green"
+    },
+    {
+      name: "running no-mistakes with nested identity text containing gate words",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        '{"externalState":{"stepStatus":"running","ciState":"none","branch":"feat/approval-required-copy"}}',
+        "PR #42 mergeStateStatus CLEAN"
+      ].join("\n"),
+      expected: "pull request is clean and checks are green"
+    },
+    {
+      name: "running no-mistakes with keyed no-conflict evidence",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "merge conflicts: none",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed"
+      ].join("\n"),
+      expected: "pull request is clean and checks are green"
+    },
+    {
+      name: "running no-mistakes with keyed resolved conflict evidence",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "merge conflict: resolved",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed"
+      ].join("\n"),
+      expected: "pull request is clean and checks are green"
+    },
+    {
+      name: "running no-mistakes with not-required approval label",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "ci/running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "approval: not required"
+      ].join("\n"),
+      expected: "pull request is clean and checks are green"
+    },
+    {
+      name: "running no-mistakes with not-required operator decision label",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "ci/running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "operator decision: not-required"
+      ].join("\n"),
+      expected: "pull request is clean and checks are green"
+    },
+    {
+      name: "running no-mistakes with inactive JSON approval marker",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "ci/running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '{"approvalRequired":false,"message":"no approval required"}'
+      ].join("\n"),
+      expected: "pull request is clean and checks are green"
+    },
+    {
+      name: "running no-mistakes with identity text containing gate words",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "ci/running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '{"branch":"feat/approval-required-copy","prUrl":"https://example.test/pulls/1"}'
+      ].join("\n"),
+      expected: "pull request is clean and checks are green"
+    },
+    {
+      name: "running no-mistakes with raw branch identity containing gate words",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "ci/running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "branch: feat/approval-required-copy"
+      ].join("\n"),
+      expected: "pull request is clean and checks are green"
+    },
+    {
+      name: "running no-mistakes with no approval required label",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "ci/running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "approval: no approval required"
+      ].join("\n"),
+      expected: "pull request is clean and checks are green"
+    },
+    {
+      name: "running no-mistakes with no decision required label",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "ci/running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "operator decision: no decision required"
+      ].join("\n"),
+      expected: "pull request is clean and checks are green"
+    },
+    {
+      name: "running no-mistakes with historical failed checks before current clean green evidence",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "previous checks failed",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed"
+      ].join("\n"),
+      expected: "pull request is clean and checks are green"
+    },
+    {
+      name: "running no-mistakes with current clean PR and history note",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "current PR mergeStateStatus CLEAN (previously dirty)",
+        "GitHub checks passed"
+      ].join("\n"),
+      expected: "pull request is clean and checks are green"
+    },
+    {
+      name: "running no-mistakes with current no-checks CI state and history note",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "current ciState: none (previously pending)"
+      ].join("\n"),
+      expected: "pull request is clean and checks are green"
+    },
+    {
+      name: "running no-mistakes with continue classification",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "classification: continue",
+        "PR #42 mergeStateStatus CLEAN",
+        "ciState: none"
+      ].join("\n"),
+      expected: "pull request is clean and checks are green"
+    }
+  ])(
+    "treats no-mistakes $name as terminal success for the workflow",
+    ({ stdout, expected }) => {
+      const dir = makeTempDir();
+      const repo = path.join(dir, "repo");
+      const iteration = path.join(dir, "run");
+      const resultPath = path.join(iteration, "result.json");
+      fs.mkdirSync(repo);
+      const configPath = path.join(dir, "wrapper-config.json");
+      writeJson(configPath, {
+        steps: {
+          "no-mistakes": {
+            command: "/bin/sh",
+            args: ["-c", `printf '%s\\n' ${JSON.stringify(stdout)}; exit 1`],
+            cwd: "repo",
+            timeout_sec: 30,
+            env_allow: ["PATH"],
+            key_changes_made: ["Verified no-mistakes readiness."],
+            key_learnings: ["no-mistakes keeps monitoring open PRs."],
+            commit: { type: "test", subject: "run no mistakes" }
+          }
+        }
+      });
+
+      const outcome = runCodingWorkflowLiveWrapper(
+        deps({
+          MOMENTUM_STEP_KIND: "no-mistakes",
+          MOMENTUM_REPO_PATH: repo,
+          MOMENTUM_ITERATION_DIR: iteration,
+          MOMENTUM_RESULT_PATH: resultPath,
+          [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
+          PATH: process.env.PATH
+        })
+      );
+
+      expect(outcome.exitCode).toBe(0);
+      expect(outcome.success).toBe(true);
+      expect(outcome.summary).toContain(expected);
+      const result = readResult(resultPath);
+      expect(result.success).toBe(true);
+      expect(result.summary).toContain(expected);
+      expect(result.key_changes_made).toEqual([
+        "Verified no-mistakes readiness."
+      ]);
+      expect(result.key_learnings).toEqual([
+        "no-mistakes keeps monitoring open PRs."
+      ]);
+    }
+  );
+
+  it.each([
+    {
+      name: "running output with only historical clean and green evidence",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "previous PR mergeStateStatus CLEAN",
+        "previous GitHub checks passed"
+      ].join("\n")
+    },
+    {
+      name: "running output with only prefixed historical clean and green evidence",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "- previous PR mergeStateStatus CLEAN",
+        "- previous GitHub checks passed"
+      ].join("\n")
+    },
+    {
+      name: "running output with only suffixed historical clean and green evidence",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR mergeStateStatus CLEAN from previous run",
+        "GitHub checks passed in previous run"
+      ].join("\n")
+    },
+    {
+      name: "stale running output followed by failed outcome",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "outcome: failed"
+      ].join("\n")
+    },
+    {
+      name: "stale running output followed by blocked status",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "status: blocked"
+      ].join("\n")
+    },
+    {
+      name: "stale running output followed by awaiting approval status",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "status: awaiting_approval"
+      ].join("\n")
+    },
+    {
+      name: "stale running output followed by awaiting approval stepStatus",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "stepStatus: awaiting_approval"
+      ].join("\n")
+    },
+    {
+      name: "stale running output followed by current failed outcome",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "current outcome: failed"
+      ].join("\n")
+    },
+    {
+      name: "stale running output followed by pending status",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "status: pending"
+      ].join("\n")
+    },
+    {
+      name: "stale running output followed by failed classification",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "classification: failed"
+      ].join("\n")
+    },
+    {
+      name: "stale running output followed by compact JSON blocked classification",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '{"classification":"blocked"}'
+      ].join("\n")
+    },
+    {
+      name: "stale running output followed by blocked recovery code",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "recoveryCode: external_state_blocked"
+      ].join("\n")
+    },
+    {
+      name: "stale running output followed by unknown recovery code",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "recoveryCode: runtime_unavailable"
+      ].join("\n")
+    },
+    {
+      name: "stale running output followed by failed recovery code",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "recovery code: external_run_failed"
+      ].join("\n")
+    },
+    {
+      name: "stale running output followed by compact JSON recovery code",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '{"recoveryCode":"external_state_blocked"}'
+      ].join("\n")
+    },
+    {
+      name: "stale running output followed by compact JSON unknown recovery code",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '{"recoveryCode":"runtime_unavailable"}'
+      ].join("\n")
+    },
+    {
+      name: "stale running output followed by checks failed outcome",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "outcome: checks_failed"
+      ].join("\n")
+    },
+    {
+      name: "stale running output followed by compact JSON pending status",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '{"status":"pending"}'
+      ].join("\n")
+    },
+    {
+      name: "stale running output followed by null JSON step status",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '{"stepStatus":null}'
+      ].join("\n")
+    },
+    {
+      name: "stale running output followed by array JSON status",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '{"status":[]}'
+      ].join("\n")
+    },
+    {
+      name: "stale running output followed by equals failed outcome",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "outcome=failed"
+      ].join("\n")
+    },
+    {
+      name: "stale running output followed by arrow awaiting approval step status",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "stepStatus=>awaiting_approval"
+      ].join("\n")
+    },
+    {
+      name: "stale running output followed by current blocked status",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "current status: blocked"
+      ].join("\n")
+    },
+    {
+      name: "stale running output followed by JSON awaiting approval stepStatus",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '"stepStatus": "awaiting_approval"'
+      ].join("\n")
+    },
+    {
+      name: "stale running output followed by compact JSON gate state",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '{"stepStatus":"awaiting_approval","decisions":[{}]}'
+      ].join("\n")
+    },
+    {
+      name: "stale running output followed by compact JSON running status before blocked step status",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '{"status":"running","stepStatus":"awaiting_approval"}'
+      ].join("\n")
+    },
+    {
+      name: "stale running output followed by nested JSON awaiting approval status",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '{"status":"running","state":{"stepStatus":"awaiting_approval"}}'
+      ].join("\n")
+    },
+    {
+      name: "stale running output followed by comma separated blocked step status",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "status: running, stepStatus: awaiting_approval"
+      ].join("\n")
+    },
+    {
+      name: "stale running output followed by blocked step status",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "step status: blocked"
+      ].join("\n")
+    },
+    {
+      name: "stale running output followed by current blocked step status",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "current step status: awaiting_approval"
+      ].join("\n")
+    },
+    {
+      name: "historical checks-passed outcome with active gate",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "previous outcome: checks-passed",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "gate: operator_decision_required"
+      ].join("\n")
+    },
+    {
+      name: "historical checks-passed outcome suffix",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "outcome: checks-passed, previous run"
+      ].join("\n")
+    },
+    {
+      name: "historical checks-passed outcome parenthetical",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "outcome: checks-passed (previous run)"
+      ].join("\n")
+    },
+    {
+      name: "historical nested JSON checks-passed outcome",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        '{"previous":{"outcome":"checks-passed"}}'
+      ].join("\n")
+    },
+    {
+      name: "unscoped nested JSON checks-passed message",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        '{"message":{"outcome":"checks-passed"}}'
+      ].join("\n")
+    },
+    {
+      name: "unscoped prose checks-passed outcome message",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "message: outcome: checks-passed"
+      ].join("\n")
+    },
+    {
+      name: "prefixed historical JSON checks-passed outcome",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        'previous: {"outcome":"checks-passed"}'
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by dirty PR",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "current PR state: dirty"
+      ].join("\n")
+    },
+    {
+      name: "stale green evidence followed by copular false clean PR",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "GitHub checks passed",
+        "PR clean is false"
+      ].join("\n")
+    },
+    {
+      name: "stale green evidence followed by copular no clean PR",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "GitHub checks passed",
+        "pull request clean was no"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by unstable merge state",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "current mergeStateStatus UNSTABLE"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by behind merge state",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "current mergeStateStatus BEHIND"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by unknown merge state",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "current mergeStateStatus UNKNOWN"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by draft merge state",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "current mergeStateStatus DRAFT"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by draft boolean",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "isDraft: true"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by draft field",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "draft: true"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by JSON draft field",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '{"draft":true}'
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by draft PR prose",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "PR is draft"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by false mergeable value",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "mergeable: false"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by separatorless false mergeable value",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "mergeable false"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by separatorless no mergeable value",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "mergeable no"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by conflicting mergeable enum",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "mergeable: CONFLICTING"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by non-mergeable prose",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "PR is not mergeable"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by cannot-merge prose",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "pull request cannot be merged"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by snake case behind merge state",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "merge_state_status: behind"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by snake case dirty mergeable state",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "mergeable_state: dirty"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by failed checks",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "current checks failed"
+      ].join("\n")
+    },
+    {
+      name: "stale clean PR followed by copular false passed checks",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "checks passed is false"
+      ].join("\n")
+    },
+    {
+      name: "stale clean PR followed by copular skipped passed checks",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "ci passed was skipped"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by running checks",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "current checks running"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by running CI",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "ci is running"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by colon running CI status",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "ci status: running"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by equals queued CI status",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "ci status=queued"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by colon waiting CI status",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "ci status: waiting"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by in-progress checks",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "checks are in progress"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by awaiting checks",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "awaiting checks"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by checks awaiting",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "checks awaiting"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by blocked checks",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "checks blocked"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by gated CI",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "ci gated"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by negated checks",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "not all checks passed"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by pending checks",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "pending checks"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by failed checks",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "failed checks"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by red CI",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "red CI"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by merge conflict prose",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "merge conflicts detected"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by failed external CI state",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "ciState: failed"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by current failed external CI state with historical note",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "current ciState: failed (previously passed)"
+      ].join("\n")
+    },
+    {
+      name: "stale historical CI state followed by current failed external CI state",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "previous ciState: passed; current ciState: failed"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by failed check conclusion",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "checkConclusion: failure"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by JSON action-required check conclusion",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '{"conclusion":"action_required"}'
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by pending external CI state",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "ci_state: pending"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by error external CI state",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "ciState: error"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by cancelled external CI state",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "ciState: cancelled"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by running external CI state",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "ci_state: running"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by skipped checks",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "checks skipped"
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by action-required CI status",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "ci status: action_required"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with unknown checks-passed value",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "checks passed: unknown"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with skipped CI-passed value",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "ci passed: skipped"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with false no-checks value",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "no checks reported: false"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with transient no-checks value",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "no checks reported yet"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with pending no-checks value",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "no checks reported: pending"
+      ].join("\n")
+    },
+    {
+      name: "vague running output",
+      stdout: "status: running"
+    },
+    {
+      name: "unclean PR with passed checks",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "pull request is not clean",
+        "GitHub checks passed"
+      ].join("\n")
+    },
+    {
+      name: "false PR clean value with passed checks",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR clean: false",
+        "GitHub checks passed"
+      ].join("\n")
+    },
+    {
+      name: "JSON false clean value with passed checks",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '"clean": false',
+        "GitHub checks passed"
+      ].join("\n")
+    },
+    {
+      name: "no pull request clean value with passed checks",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "pull request clean: no",
+        "GitHub checks passed"
+      ].join("\n")
+    },
+    {
+      name: "trailing no pull request clean value with passed checks",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "pull request clean no",
+        "GitHub checks passed"
+      ].join("\n")
+    },
+    {
+      name: "trailing false PR clean value with passed checks",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR clean false",
+        "GitHub checks passed"
+      ].join("\n")
+    },
+    {
+      name: "comma trailing false PR clean value with passed checks",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR clean false,",
+        "GitHub checks passed"
+      ].join("\n")
+    },
+    {
+      name: "unknown PR clean value with passed checks",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR clean: unknown",
+        "GitHub checks passed"
+      ].join("\n")
+    },
+    {
+      name: "pending pull request clean value with passed checks",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "pull request clean: pending",
+        "GitHub checks passed"
+      ].join("\n")
+    },
+    {
+      name: "repeated clean field with pending current value and passed checks",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR clean: true, current clean: pending",
+        "GitHub checks passed"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with not all checks passed",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "not all checks passed"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with false checks passed value",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "checks passed: false"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with JSON false checks passed value",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        '"passed": false'
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by JSON false mergeable value",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '"mergeable": false'
+      ].join("\n")
+    },
+    {
+      name: "stale clean green evidence followed by repeated conflicting mergeable value",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "mergeable: true, current mergeable: conflicting"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with no checks passed value",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "checks passed: no"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with trailing no checks passed value",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "checks passed no"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with trailing false checks passed value",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "checks passed false"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with comma trailing false checks passed value",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "checks passed false,"
+      ].join("\n")
+    },
+    {
+      name: "stale green checks followed by separatorless failed external CI state",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "ciState failed"
+      ].join("\n")
+    },
+    {
+      name: "stale green checks followed by separatorless running external CI state",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "ci state running"
+      ].join("\n")
+    },
+    {
+      name: "stale green checks followed by repeated failed external CI state",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "ciState: passed, current ciState: failed"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with CI not green",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "ci is not green"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with CI contraction not green",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "ci isn't green"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with CI never passed",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "ci never passed"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with CI hasnt passed",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "ci hasn't passed"
+      ].join("\n")
+    },
+    {
+      name: "current clean green output with only historical running marker",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "previous ci/running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with GitHub checks havent passed",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "github checks haven't passed"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and active gate",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "gate: operator_decision_required"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and operator decision required prose",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "operator decision is required"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and approval required prose",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "approval is required"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and awaiting approval prose",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "awaiting approval"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and waiting for approval prose",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "waiting for approval"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and requires approval prose",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "requires approval"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and manual recovery is required prose",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "manual recovery is required"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and external state is required prose",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "external state is required"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and requires manual recovery prose",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "requires manual recovery"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and requires external state prose",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "requires external state"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and awaiting operator decision prose",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "awaiting operator decision"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and finding table",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "findings[0]: security review required"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and decision-required marker",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "decision required: choose a reviewer action"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and camel decision required flag",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "decisionRequired: true"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and snake decision required flag",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "decision_required: true"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and camel human gate required flag",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "humanGateRequired: true"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and spaced human gate required prose",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "human gate required"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and compact JSON decision required flag",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '{"decisionRequired":true}'
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and prefixed compact JSON gate state",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        'state: {"stepStatus":"awaiting_approval","decisions":[{}]}'
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and bullet-prefixed compact JSON gate state",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '- state: {"decisions":[{"action":"approve_or_retry"}]}'
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and bullet-prefixed compact JSON findings",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '- {"findings":[{}]}'
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and inactive required flag plus compact JSON gate",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '{"approvalRequired":false,"humanGate":"operator_decision_required"}'
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and human gate label",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "humanGate: open"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and same-line status then human gate",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "status: running, humanGate: open",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and same-line inactive required flag before human gate",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "approvalRequired: false, humanGate: open"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and same-line inactive required flag after human gate",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "humanGate: open, approvalRequired: false"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and same-line inactive required flag after operator decision prose",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "operator decision is required; approvalRequired: false"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and current human gate label",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "current human gate: open"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and required operator decision label",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "operator decision: required"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and required approval label",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "approval: required"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and required manual recovery label",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "manual recovery: required"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and compact JSON required operator decision label",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '{"operatorDecision":"required"}'
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and pretty JSON human gate label",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '"humanGate": "open",'
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and inactive required flag plus JSON prose gate marker",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '{"approvalRequired":false,"message":"requires operator decision"}'
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and inactive required flag plus JSON operator decision prose",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '{"approvalRequired":false,"message":"operator decision is required"}'
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and inactive required flag plus JSON approval marker",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '{"approvalRequired":false,"message":"approval required"}'
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and mixed inactive and active gate prose",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "no approval required; operator decision required"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and inactive required flag plus mixed gate prose",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '{"approvalRequired":false,"message":"no approval required; operator decision required"}'
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and inactive required flag plus JSON snake decision marker",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '{"approvalRequired":false,"message":"decision_required"}'
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and inactive required flag plus classification gate",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '{"approvalRequired":false,"classification":"operator_decision_required"}'
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and decision table",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "decisions[0]: approve or retry"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and not resolved decision",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "decision: not resolved"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and missing approval gate",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "gate: no approval received"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and nonempty decisions label",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "decisions: approve or retry"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and scoped findings label",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "current findings: security review required"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and scoped decision label",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "current decision: approve or retry"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and equals gate label",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "gate=open"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and equals decisions label",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        'decisions=[{"action":"approve_or_retry"}]'
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and arrow decisions label",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        'decisions=>[{"action":"approve_or_retry"}]'
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and YAML decisions section",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "decisions:",
+        "  - approve or retry"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and YAML decisions mapping",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "decisions:",
+        "  action: approve or retry"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and YAML findings section",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "findings:",
+        "  - security review required"
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and JSON decisions array",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '"decisions": [{"action":"approve_or_retry"}]'
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and JSON findings array",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '"findings": [{"severity":"error"}]'
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and compact JSON decisions array",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '{"decisions":[{"action":"approve_or_retry"}]}'
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and malformed JSON decisions array",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '{"decisions":[null]}'
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and nested compact JSON decisions array",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '{"state":{"decisions":[{"action":"approve_or_retry"}]}}'
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and escaped JSON decision details",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '{"decisions":[{"action":"approve_or_retry","details":"line one\\nline two"}]}'
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and null JSON decision resolution",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '{"decisions":[{"resolution":null}]}'
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and empty JSON decision resolution",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '{"decisions":[{"resolution":""}]}'
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and string false resolved JSON decision",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '{"decisions":[{"resolved":"false"}]}'
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and compact JSON findings array",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '{"findings":[{"severity":"error"}]}'
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and selected finding IDs",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '{"selectedFindingIds":["F-1"]}'
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and malformed selected finding IDs",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        '{"selectedFindingIds":[null]}'
+      ].join("\n")
+    },
+    {
+      name: "clean PR with green checks and current selected finding IDs",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "PR #42 mergeStateStatus CLEAN",
+        "GitHub checks passed",
+        "current selected finding ids: [F-1]"
+      ].join("\n")
+    }
+  ])("does not treat no-mistakes $name as workflow success", ({ stdout }) => {
+    const dir = makeTempDir();
+    const repo = path.join(dir, "repo");
+    const iteration = path.join(dir, "run");
+    const resultPath = path.join(iteration, "result.json");
+    fs.mkdirSync(repo);
+    const configPath = path.join(dir, "wrapper-config.json");
+    writeJson(configPath, {
+      steps: {
+        "no-mistakes": {
+          command: "/bin/sh",
+          args: [
+            "-c",
+            `cat <<'MOMENTUM_TEST_OUTPUT'\n${stdout}\nMOMENTUM_TEST_OUTPUT\nexit 1`
+          ],
+          cwd: "repo",
+          timeout_sec: 30,
+          env_allow: ["PATH"],
+          commit: { type: "test", subject: "run no mistakes" }
+        }
+      }
+    });
+
+    const outcome = runCodingWorkflowLiveWrapper(
+      deps({
+        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_REPO_PATH: repo,
+        MOMENTUM_ITERATION_DIR: iteration,
+        MOMENTUM_RESULT_PATH: resultPath,
+        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
+        PATH: process.env.PATH
+      })
+    );
+
+    expect(outcome.exitCode).toBe(0);
+    expect(outcome.success).toBe(false);
+    const result = readResult(resultPath);
+    expect(result.success).toBe(false);
+    expect(result.remaining_work).toEqual([
+      "Fix no-mistakes command failure before advancing the workflow."
+    ]);
+  });
+
   it.each(["merge-cleanup", "linear-refresh"] as const)(
     "guides %s failures toward evidence-backed external-state reconciliation",
     (stepKind) => {
