@@ -189,6 +189,11 @@ unavailable, `workflow run clear-recovery` prepares the step for a scheduler
 retry after the operator repairs the environment. The clear output includes
 `retryPrepared`; the previous failed executor round remains durable, and an
 already-terminal successful step is only reattached/reconciled, not rerun.
+For `no-mistakes`, the coding-workflow wrapper also parks known external runner
+lifecycle failures in this same retryable recovery lane: missing branch-start /
+gate state and cancellation before reliable completion. These are not trusted as
+verification failures because the external no-mistakes runner did not produce
+reliable pass/fail evidence.
 
 When the failed required step is an external-side-effect tail step
 (`merge-cleanup` or `linear-refresh`), the monitor view classifies it as

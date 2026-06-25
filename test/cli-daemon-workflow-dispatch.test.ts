@@ -806,8 +806,8 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         | { state: string; recovery_code: string | null; summary: string | null }
         | undefined;
       expect(round?.state).toBe("manual_recovery_required");
-      expect(round?.recovery_code).toBe("command_failed");
-      expect(round?.summary).toContain("live step command exited with code 1");
+      expect(round?.recovery_code).toBe("runtime_unavailable");
+      expect(round?.summary).toContain("retryable setup failure");
     } finally {
       db.close();
     }

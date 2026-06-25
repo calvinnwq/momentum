@@ -78,6 +78,8 @@ export type LiveStepWrapperRecoveryCode =
 export const LIVE_STEP_WRAPPER_OUTPUT_MAX_BYTES = 256 * 1024 * 1024;
 
 export const LIVE_STEP_WRAPPER_RESULT_MAX_BYTES = 1024 * 1024;
+const CODING_WORKFLOW_WRAPPER_RUNTIME_UNAVAILABLE_MARKER =
+  "MOMENTUM_WRAPPER_RECOVERY_CODE=runtime_unavailable";
 
 /**
  * Workflow-context env vars injected into every live step process. Unlike the
@@ -384,6 +386,18 @@ export function runLiveStepWrapper(
           resultJsonPath,
           "runtime_unavailable",
           `live step wrapper bootstrap failed before runner evidence was produced: ${config.command}`
+        );
+      }
+      if (
+        isCodingWorkflowWrapperInvocation(config) &&
+        spawn.stderr.includes(CODING_WORKFLOW_WRAPPER_RUNTIME_UNAVAILABLE_MARKER)
+      ) {
+        writeLine(logHandle, "[live-step] recovery: runtime_unavailable");
+        return wrapperError(
+          executorLogPath,
+          resultJsonPath,
+          "runtime_unavailable",
+          `live step wrapper reported a retryable setup failure before runner evidence was produced: ${config.command}`
         );
       }
       return wrapperError(
@@ -1252,4 +1266,10 @@ function wrapperError(
   error: string
 ): LiveStepWrapperError {
   return { ok: false, code, error, resultJsonPath, executorLogPath };
+}
+
+function isCodingWorkflowWrapperInvocation(config: LiveWrapperConfig): boolean {
+  return config.args.some((arg) =>
+    arg.includes("coding-workflow-live-wrapper-cli")
+  );
 }

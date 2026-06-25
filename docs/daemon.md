@@ -214,6 +214,13 @@ script entrypoint itself is missing, the failure is classified as
 remain ordinary command failures. For retryable `no-mistakes` and
 `merge-cleanup` bootstrap failures, `workflow run clear-recovery` can prepare a
 new scheduler attempt after the operator repairs the wrapper path.
+The coding-workflow wrapper also treats known no-mistakes runner lifecycle
+failures as recovery setup failures rather than ordinary failed runner evidence:
+missing external branch-start state, cancelled no-mistakes runs before a
+reliable result, and similarly concrete no-result runner lifecycle failures.
+Those cases leave no normalized runner result, so the daemon parks the step for
+operator repair and a guarded retry instead of terminalizing the workflow as if
+verification itself failed.
 
 JSON envelope shape (managed loop):
 
