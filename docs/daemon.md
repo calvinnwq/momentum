@@ -221,6 +221,8 @@ reliable result, and similarly concrete no-result runner lifecycle failures.
 Those cases leave no normalized runner result, so the daemon parks the step for
 operator repair and a guarded retry instead of terminalizing the workflow as if
 verification itself failed.
+When upstream no-mistakes reports `checks-passed`, or keeps reporting a running monitor state while the pull request evidence is clean and checks are green or explicitly absent, the wrapper writes successful runner evidence for the workflow step and leaves upstream no-mistakes to continue its own PR-lifecycle monitoring.
+Current blocking outcomes, active findings, unresolved gates, dirty / draft pull requests, and failed, pending, skipped, running, or otherwise non-successful checks suppress that successful classification.
 
 JSON envelope shape (managed loop):
 

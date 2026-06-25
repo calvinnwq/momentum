@@ -194,6 +194,7 @@ lifecycle failures in this same retryable recovery lane: missing branch-start /
 gate state and cancellation before reliable completion. These are not trusted as
 verification failures because the external no-mistakes runner did not produce
 reliable pass/fail evidence.
+When no-mistakes instead reports `checks-passed`, or is still monitoring while current pull request evidence is clean and checks are green or explicitly absent, the wrapper writes successful runner evidence instead of entering this recovery lane, unless current output also shows a blocking outcome, active finding, unresolved gate, dirty / draft pull request, or non-successful check state.
 
 When the failed required step is an external-side-effect tail step
 (`merge-cleanup` or `linear-refresh`), the monitor view classifies it as
