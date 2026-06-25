@@ -132,14 +132,23 @@ export function deriveWorkflowMonitorProgress(
 }
 
 /**
- * Phase precedence: recovery first (so a healthy-looking next action never masks
- * a blocking condition), then clean terminal outcomes, then the approval gate,
- * then forward progress, then idle. The recover-before-terminal order matters
- * because a `failed` run is durably terminal yet must surface as `blocked`.
+ * Phase precedence: clean terminal outcomes first, then recovery, then the
+ * approval gate, then forward progress, then idle. The clean-terminal check is
+ * deliberately narrow: failed terminal runs still surface as `blocked`, while
+ * a run that was operator-reconciled to succeeded/no_action must not inherit a
+ * stale manual-recovery round as its progress phase.
  */
 function derivePhase(
   envelope: WorkflowMonitorEnvelope
 ): WorkflowMonitorProgressPhase {
+  if (
+    envelope.terminal &&
+    envelope.recovery === null &&
+    !envelope.needsManualRecovery &&
+    envelope.nextAction.code === "no_action"
+  ) {
+    return "terminal";
+  }
   if (envelope.disposition === "recover") return "blocked";
   if (envelope.terminal) return "terminal";
   if (envelope.reportReason === "awaiting_approval") return "awaiting_approval";
