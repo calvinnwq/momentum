@@ -106,6 +106,7 @@ Plain monitor reads do not write.
 NGX-521 hardens native dogfood tail recovery without changing the default route.
 Failed required `merge-cleanup` and `linear-refresh` steps classify as `failed_external_side_effect_step` so operators verify the canonical external state - pull request merge or close state and any surviving remote branch ref for `merge-cleanup`, or tracker state for `linear-refresh` - then reconcile through `workflow run clear-recovery --evidence-pointer <ref>` instead of blindly re-running side-effecting tail work.
 The checked-in live-wrapper dogfood profile executes the wrapper from source through the TypeScript source loader so cleanup of generated `dist/` artifacts does not break `merge-cleanup` or `linear-refresh` tail work.
+For the `no-mistakes` step, the same live-wrapper treats a reported `checks-passed` outcome, or an otherwise-still-monitoring run with current clean pull request evidence and green or explicitly absent checks, as terminal Momentum success only when no current blocking outcome, active finding, unresolved gate, dirty / draft pull request, or non-successful check state is present.
 CWFP remains the default coding-workflow start and rollback route; the default switch stays NGX-404.
 
 ## Runtime Consolidation
