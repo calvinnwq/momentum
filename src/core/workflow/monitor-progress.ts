@@ -136,7 +136,7 @@ export function deriveWorkflowMonitorProgress(
  * approval gate, then forward progress, then idle. The clean-terminal check is
  * deliberately narrow: failed terminal runs still surface as `blocked`, while
  * a run that was operator-reconciled to succeeded/no_action must not inherit a
- * stale manual-recovery round as its progress phase.
+ * stale manual-recovery round or sticky recovery flag as its progress phase.
  */
 function derivePhase(
   envelope: WorkflowMonitorEnvelope
@@ -144,7 +144,6 @@ function derivePhase(
   if (
     envelope.terminal &&
     envelope.recovery === null &&
-    !envelope.needsManualRecovery &&
     envelope.nextAction.code === "no_action"
   ) {
     return "terminal";

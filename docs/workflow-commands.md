@@ -1348,7 +1348,8 @@ Consumers that need full run metadata should call `workflow status` / `workflow 
 `progress` is a lightweight, deterministic projection of the tick for a cheap cron monitor loop that wants to surface a concise update only when meaningful state changes, without a per-heartbeat agent call:
 
 - `phase` is the coarse progress state: `advancing` (a step is running or progressing), `idle` (no actionable step yet), `awaiting_approval` (a step is paused on an approval boundary), `blocked` (operator recovery is required), or `terminal` (a clean succeeded / canceled outcome).
-  A clean terminal phase requires terminal durable state, no recovery object, no durable manual-recovery flag, and `nextAction.code: "no_action"`, so an operator-reconciled succeeded run releases the monitor after `clear-recovery`.
+  A clean terminal phase requires terminal durable state, no recovery object, and `nextAction.code: "no_action"`.
+  A stale durable manual-recovery flag by itself does not keep an operator-reconciled succeeded run in `blocked`, so the monitor releases after `clear-recovery`.
   A failed run surfaces as `blocked`, not `terminal`, because it needs recovery.
 - `digest` is a stable `sha256:` hash of only the meaningful operator-facing state.
   Volatile fields (`generatedAt`, lease heartbeat / expiry timestamps, evidence ordering) are excluded, so two ticks over identical state hash equal.
@@ -1382,9 +1383,9 @@ Then branch on the JSON instead of scraping text:
   recovery or open-gate detail.
 - Stop and clean up the wrapper only when `progress.cleanup` is `"release"`,
   `runState` is `canceled`, or `nextAction.code` is `no_action`.
-- Keep polling recoverable terminal failures (`disposition: "recover"` or
-  `progress.phase: "blocked"`) so a later repair, retry, or clear-recovery emits
-  the next meaningful state.
+- Keep polling recoverable failures only when `progress.cleanup` is `"none"`
+  and either `disposition` is `"recover"` or `progress.phase` is `"blocked"`,
+  so a later repair, retry, or clear-recovery emits the next meaningful state.
 
 The eligibility check for `--advance` is the durable run source
 `momentum-native-coding`. A `mwf-*` run id is a useful operator convention for
