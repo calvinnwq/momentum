@@ -1173,6 +1173,86 @@ describe("momentum workflow run monitor (NGX-328)", () => {
     expect(statusPayload.monitor.monitorDrift).toBeNull();
   });
 
+  it("suppresses unchanged terminal native monitor ticks with --advance (NGX-543)", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-advance-terminal";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, {
+        runId,
+        state: "succeeded",
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE
+      });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "succeeded",
+        order: 1
+      });
+    } finally {
+      db.close();
+    }
+
+    const first = await run([
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--advance",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(first.code).toBe(0);
+    const firstPayload = JSON.parse(first.stdout) as {
+      nextAction: { code: string };
+      progress: {
+        emit: boolean;
+        changed: boolean;
+        advanced: boolean;
+        digest: string;
+      };
+    };
+    expect(firstPayload.nextAction.code).toBe("no_action");
+    expect(firstPayload.progress.emit).toBe(true);
+    expect(firstPayload.progress.changed).toBe(true);
+    expect(firstPayload.progress.advanced).toBe(true);
+    const firstDigests = readMonitorDigests(dataDir, runId);
+    expect(firstDigests.emitted).toBe(firstPayload.progress.digest);
+    expect(firstDigests.seen).toBe(firstPayload.progress.digest);
+
+    const second = await run([
+      "workflow",
+      "run",
+      "monitor",
+      runId,
+      "--advance",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(second.code).toBe(0);
+    const secondPayload = JSON.parse(second.stdout) as {
+      nextAction: { code: string };
+      progress: {
+        emit: boolean;
+        changed: boolean;
+        advanced: boolean;
+        digest: string;
+      };
+    };
+    expect(secondPayload.nextAction.code).toBe("no_action");
+    expect(secondPayload.progress.digest).toBe(firstPayload.progress.digest);
+    expect(secondPayload.progress.changed).toBe(false);
+    expect(secondPayload.progress.emit).toBe(false);
+    expect(secondPayload.progress.advanced).toBe(false);
+    expect(readMonitorDigests(dataDir, runId)).toEqual({
+      seen: firstPayload.progress.digest,
+      emitted: firstPayload.progress.digest
+    });
+  });
+
   it("refuses --advance for non-native workflow runs without mutating digests (NGX-511)", async () => {
     const dataDir = makeTempDir();
     const runId = "cwfp-advance-imported";
