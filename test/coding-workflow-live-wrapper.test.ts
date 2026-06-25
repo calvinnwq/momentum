@@ -419,7 +419,7 @@ describe("runCodingWorkflowLiveWrapper", () => {
     expect(fs.existsSync(sentinelPath)).toBe(false);
   });
 
-  it("writes failure evidence when no command is configured for the step", () => {
+  it("refuses missing wrapper config as process setup failure", () => {
     const dir = makeTempDir();
     const resultPath = path.join(dir, "result.json");
 
@@ -432,11 +432,33 @@ describe("runCodingWorkflowLiveWrapper", () => {
       })
     );
 
-    expect(outcome.exitCode).toBe(0);
+    expect(outcome.exitCode).toBe(1);
     expect(outcome.success).toBe(false);
-    const result = readResult(resultPath);
-    expect(result.summary).toBe(
-      'No command is configured for workflow step "implementation".'
+    expect(outcome.summary).toContain("MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG");
+    expect(fs.existsSync(resultPath)).toBe(false);
+  });
+
+  it("refuses a configured wrapper file that omits the current step before writing runner evidence", () => {
+    const dir = makeTempDir();
+    const configPath = path.join(dir, "wrapper-config.json");
+    const resultPath = path.join(dir, "result.json");
+    writeJson(configPath, { steps: {} });
+
+    const outcome = runCodingWorkflowLiveWrapper(
+      deps({
+        MOMENTUM_STEP_KIND: "implementation",
+        MOMENTUM_REPO_PATH: dir,
+        MOMENTUM_ITERATION_DIR: dir,
+        MOMENTUM_RESULT_PATH: resultPath,
+        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath
+      })
     );
+
+    expect(outcome.exitCode).toBe(1);
+    expect(outcome.success).toBe(false);
+    expect(outcome.summary).toBe(
+      'No command is configured for workflow step "implementation" in MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG.'
+    );
+    expect(fs.existsSync(resultPath)).toBe(false);
   });
 });

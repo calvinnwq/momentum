@@ -52,6 +52,8 @@ describe("M9 live workflow execution contract", () => {
   it("keeps live-wrapper operator profile documented", () => {
     const daemonDocs = readDoc("docs/daemon.md");
     expect(daemonDocs).toContain("MOMENTUM_LIVE_WRAPPER_PROFILE");
+    expect(daemonDocs).toContain("MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG");
     expect(daemonDocs).toContain("MOMENTUM_RESULT_PATH");
+    expect(daemonDocs).toMatch(/operator\s+setup failure/);
   });
 });
