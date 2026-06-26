@@ -110,6 +110,8 @@ Computes the project rollup from local SQLite state only; it does not call sourc
 `--source` filters by adapter kind, while `--project` and `--milestone` match the structured `id` or `name` stored in SourceItem metadata.
 For compatibility with older SourceItem rows, a non-empty scalar `project` or `milestone` metadata value also satisfies either the matching id or name filter.
 The same filter scope applies to source items, mismatch counts, reconciliation warnings, and pending update intents.
+For duplicate `linear` rows that share the same `externalKey` (for example legacy key-only and UUID-backed records),
+project status keeps a single effective row by preferring UUID-backed rows and otherwise choosing the freshest `lastObservedAt` row.
 
 `--stale-threshold-hours` controls when a last reconciliation run is reported as stale (default 24 hours).
 `--intent-stale-threshold-days` controls when a pending update intent is flagged as stale (default 30 days).

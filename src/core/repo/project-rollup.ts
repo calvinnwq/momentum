@@ -224,15 +224,21 @@ export function buildProjectRollup(
     db,
     filters.adapterKind === undefined ? {} : { adapterKind: filters.adapterKind }
   );
-  const items = allItems.filter((item) => matchesProjectMilestoneFilters(item, filters));
+  const items = allItems.filter((item) =>
+    matchesProjectMilestoneFilters(item, filters)
+  );
+  const rollupItems = dedupeLinearSourceItemsForRollup(items);
 
-  const linkedGoalIds = collectLinkedGoalIds(items);
+  const linkedGoalIds = collectLinkedGoalIds(rollupItems);
   const goals = linkedGoalIds.size === 0 ? new Map<string, GoalSnapshot>() : loadGoalSnapshots(db, linkedGoalIds);
-  const goalsWithEvidence = goals.size === 0 ? new Set<string>() : loadGoalsWithEvidence(db, goals, items);
-  const evidenceTotal = goals.size === 0 ? 0 : countEvidenceRecordsForGoals(db, goals, items);
+  const goalsWithEvidence = goals.size === 0
+    ? new Set<string>()
+    : loadGoalsWithEvidence(db, goals, rollupItems);
+  const evidenceTotal =
+    goals.size === 0 ? 0 : countEvidenceRecordsForGoals(db, goals, rollupItems);
 
-  const summaries = buildSourceItemSummaries(items, goals);
-  const mismatches = buildMismatches(items, goals, goalsWithEvidence);
+  const summaries = buildSourceItemSummaries(rollupItems, goals);
+  const mismatches = buildMismatches(rollupItems, goals, goalsWithEvidence);
   const pendingIntents = buildPendingIntentSummaries(
     db,
     filters,
@@ -242,7 +248,7 @@ export function buildProjectRollup(
     intentStaleThresholdMs
   );
   const counts = computeCounts(
-    items,
+    rollupItems,
     goals,
     goalsWithEvidence,
     mismatches,
@@ -590,6 +596,74 @@ function buildSourceItemSummaries(
         goalState: goal?.state ?? null
       };
     });
+}
+
+function dedupeLinearSourceItemsForRollup(items: readonly SourceItem[]): SourceItem[] {
+  if (items.length <= 1) {
+    return [...items].sort(sourceItemOrder);
+  }
+
+  const groupedByAdapterAndKey = new Map<string, SourceItem[]>();
+  const noKeyItems: SourceItem[] = [];
+  for (const item of items) {
+    if (item.externalKey === null) {
+      noKeyItems.push(item);
+      continue;
+    }
+    const key = `${item.adapterKind}\u0000${item.externalKey}`;
+    const bucket = groupedByAdapterAndKey.get(key);
+    if (bucket === undefined) {
+      groupedByAdapterAndKey.set(key, [item]);
+    } else {
+      bucket.push(item);
+    }
+  }
+
+  const deduped: SourceItem[] = [...noKeyItems];
+  for (const bucket of groupedByAdapterAndKey.values()) {
+    if (bucket.length === 1) {
+      deduped.push(bucket[0]!);
+      continue;
+    }
+    const canonicalCandidates = bucket.filter(
+      (item) => isCanonicalLinearUuidRow(item)
+    );
+    const candidates =
+      canonicalCandidates.length > 0 ? canonicalCandidates : bucket;
+    deduped.push(selectPreferredSourceItem(candidates));
+  }
+
+  return deduped.sort(sourceItemOrder);
+}
+
+const LINEAR_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isCanonicalLinearUuidRow(item: SourceItem): boolean {
+  return (
+    item.adapterKind === "linear" &&
+    item.externalKey !== null &&
+    item.externalId !== item.externalKey &&
+    LINEAR_UUID_RE.test(item.externalId)
+  );
+}
+
+function selectPreferredSourceItem(items: readonly SourceItem[]): SourceItem {
+  let best = items[0];
+  if (best === undefined) {
+    throw new Error("selectPreferredSourceItem requires at least one source item.");
+  }
+
+  for (const candidate of items.slice(1)) {
+    if (candidate.lastObservedAt !== best.lastObservedAt) {
+      best = candidate.lastObservedAt > best.lastObservedAt ? candidate : best;
+      continue;
+    }
+    if (sourceItemOrder(candidate, best) < 0) {
+      best = candidate;
+    }
+  }
+  return best;
 }
 
 function sourceItemOrder(a: SourceItem, b: SourceItem): number {

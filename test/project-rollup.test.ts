@@ -921,6 +921,104 @@ describe("buildProjectRollup", () => {
     }
   });
 
+  it("prefers canonical UUID-backed Linear rows when key matches legacy key-only rows", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedSourceItem(db, {
+        externalId: "NGX-522",
+        externalKey: "NGX-522",
+        title: "Legacy stale issue",
+        status: "In Review",
+        observedAt: 1_000,
+        projectName: "Momentum"
+      });
+      seedSourceItem(db, {
+        externalId: "00000000-0000-4000-8000-000000000001",
+        externalKey: "NGX-522",
+        title: "Canonical issue",
+        status: "Done",
+        observedAt: 2_000,
+        projectName: "Momentum"
+      });
+
+      const rollup = buildProjectRollup(db, {
+        filters: { adapterKind: "linear", projectName: "Momentum" },
+        now: 3_000
+      });
+      expect(rollup.sourceItems).toHaveLength(1);
+      expect(rollup.sourceItems[0]?.externalId).toBe("00000000-0000-4000-8000-000000000001");
+      expect(rollup.sourceItems[0]?.status).toBe("Done");
+      expect(rollup.counts.sourceItems.total).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("uses freshest row when both matching rows are canonical", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedSourceItem(db, {
+        externalId: "11111111-1111-1111-1111-111111111111",
+        externalKey: "NGX-901",
+        title: "Canonical older",
+        status: "Todo",
+        observedAt: 2_000,
+        projectName: "Momentum"
+      });
+      seedSourceItem(db, {
+        externalId: "22222222-2222-2222-2222-222222222222",
+        externalKey: "NGX-901",
+        title: "Canonical newer",
+        status: "Done",
+        observedAt: 4_000,
+        projectName: "Momentum"
+      });
+
+      const rollup = buildProjectRollup(db, {
+        filters: { adapterKind: "linear", projectName: "Momentum" },
+        now: 5_000
+      });
+      expect(rollup.sourceItems).toHaveLength(1);
+      expect(rollup.sourceItems[0]?.externalId).toBe("22222222-2222-2222-2222-222222222222");
+      expect(rollup.sourceItems[0]?.status).toBe("Done");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("uses freshest row when matching rows are legacy key-only duplicates", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedSourceItem(db, {
+        externalId: "legacy-issue-a",
+        externalKey: "NGX-902",
+        title: "Legacy stale",
+        status: "In Review",
+        observedAt: 3_000,
+        projectName: "Momentum"
+      });
+      seedSourceItem(db, {
+        externalId: "legacy-issue-b",
+        externalKey: "NGX-902",
+        title: "Legacy fresh",
+        status: "Done",
+        observedAt: 6_000,
+        projectName: "Momentum"
+      });
+
+      const rollup = buildProjectRollup(db, {
+        filters: { adapterKind: "linear", projectName: "Momentum" },
+        now: 7_000
+      });
+      expect(rollup.sourceItems).toHaveLength(1);
+      expect(rollup.sourceItems[0]?.externalId).toBe("legacy-issue-b");
+      expect(rollup.sourceItems[0]?.status).toBe("Done");
+      expect(rollup.counts.sourceItems.total).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
   it("picks manual recovery as the highest-priority next action when present", () => {
     const db = openDb(makeTempDir());
     try {

@@ -5723,6 +5723,84 @@ describe("momentum project status", () => {
     });
   });
 
+  it("dedupes duplicate Linear rows by externalKey in project status JSON output", async () => {
+    const dataDir = makeTempDir("momentum-cli-project-");
+    const { openDb } = await import("../src/adapters/db.js");
+    const { upsertSourceItem } = await import("../src/core/source/items.js");
+    const db = openDb(dataDir);
+    try {
+      upsertSourceItem(
+        db,
+        {
+          adapterKind: "linear",
+          externalId: "NGX-543",
+          externalKey: "NGX-543",
+          title: "Legacy stale issue",
+          status: "In Review",
+          metadata: {
+            project: { id: "proj-momentum", name: "Momentum" }
+          },
+          observedAt: 1_700_000_000_000,
+          goalId: null
+        },
+        { now: () => 1_700_000_000_100 }
+      );
+      upsertSourceItem(
+        db,
+        {
+          adapterKind: "linear",
+          externalId: "00000000-0000-4000-8000-000000000003",
+          externalKey: "NGX-543",
+          title: "Canonical fresh issue",
+          status: "Done",
+          metadata: {
+            project: { id: "proj-momentum", name: "Momentum" }
+          },
+          observedAt: 1_700_000_000_200,
+          goalId: null
+        },
+        { now: () => 1_700_000_000_200 }
+      );
+      upsertSourceItem(
+        db,
+        {
+          adapterKind: "linear",
+          externalId: "00000000-0000-4000-8000-000000000004",
+          externalKey: "NGX-543",
+          title: "Canonical newer issue",
+          status: "Todo",
+          metadata: {
+            project: { id: "proj-momentum", name: "Momentum" }
+          },
+          observedAt: 1_700_000_000_400,
+          goalId: null
+        },
+        { now: () => 1_700_000_000_400 }
+      );
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "project", "status",
+      "--source", "linear",
+      "--project", "Momentum",
+      "--intent-stale-threshold-days", "0",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    const sourceItems = payload["sourceItems"] as Array<Record<string, unknown>>;
+    expect(sourceItems).toHaveLength(1);
+    expect(sourceItems[0]?.["externalId"]).toBe("00000000-0000-4000-8000-000000000004");
+    expect(sourceItems[0]?.["status"]).toBe("Todo");
+    expect((payload["counts"] as Record<string, unknown>)["sourceItems"]).toMatchObject({
+      total: 1
+    });
+  });
+
   it("matches --project and --milestone against non-UUID metadata ids", async () => {
     const dataDir = makeTempDir("momentum-cli-project-");
     const { openDb } = await import("../src/adapters/db.js");
