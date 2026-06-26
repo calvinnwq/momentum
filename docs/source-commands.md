@@ -106,9 +106,13 @@ Text output shows the run state, run ID, page count, observed / created / update
 momentum project status [--source <adapter>] [--project <id-or-name>] [--milestone <id-or-name>] [--stale-threshold-hours <n>] [--intent-stale-threshold-days <n>] [--data-dir <path>] [--json]
 ```
 
-Computes the project rollup from local SQLite state only; it does not call source adapters or external APIs. `--source` filters by adapter kind, while `--project` and `--milestone` match either the `id` or `name` stored in SourceItem metadata.
+Computes the project rollup from local SQLite state only; it does not call source adapters or external APIs.
+`--source` filters by adapter kind, while `--project` and `--milestone` match the structured `id` or `name` stored in SourceItem metadata.
+For compatibility with older SourceItem rows, a non-empty scalar `project` or `milestone` metadata value also satisfies either the matching id or name filter.
+The same filter scope applies to source items, mismatch counts, reconciliation warnings, and pending update intents.
 
-`--stale-threshold-hours` controls when a last reconciliation run is reported as stale (default 24 hours). `--intent-stale-threshold-days` controls when a pending update intent is flagged as stale (default 30 days).
+`--stale-threshold-hours` controls when a last reconciliation run is reported as stale (default 24 hours).
+`--intent-stale-threshold-days` controls when a pending update intent is flagged as stale (default 30 days).
 
 JSON output includes:
 

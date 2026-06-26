@@ -6048,6 +6048,72 @@ describe("momentum project status", () => {
     expect(payload["truncatedPendingUpdateIntents"]).toBe(false);
   });
 
+  it("surfaces pending intents for legacy scalar project and milestone metadata", async () => {
+    const dataDir = makeTempDir("momentum-cli-project-");
+    const { openDb } = await import("../src/adapters/db.js");
+    const { upsertSourceItem } = await import("../src/core/source/items.js");
+    const { createUpdateIntent } = await import("../src/core/intent/update-intents.js");
+    const db = openDb(dataDir);
+    const recentNow = Date.now();
+    try {
+      const item = upsertSourceItem(
+        db,
+        {
+          adapterKind: "linear",
+          externalId: "issue-cli-legacy-metadata",
+          externalKey: "NGX-LEGACY-META",
+          title: "Legacy metadata pending intent",
+          status: "In Progress",
+          metadata: {
+            project: "Momentum",
+            milestone: "Momentum-Native Coding Workflow Adoption"
+          },
+          observedAt: recentNow,
+          goalId: null
+        },
+        { now: () => recentNow }
+      );
+      createUpdateIntent(
+        db,
+        {
+          adapterKind: "linear",
+          intentType: "source_satisfied",
+          reason: "Legacy metadata should still be surfaced",
+          targetExternalId: "NGX-LEGACY-META",
+          sourceItemId: item.id,
+          idempotencyKey:
+            "linear:issue-cli-legacy-metadata:source_satisfied:legacy"
+        },
+        { now: () => recentNow }
+      );
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "project", "status",
+      "--source", "linear",
+      "--project", "Momentum",
+      "--milestone", "Momentum-Native Coding Workflow Adoption",
+      "--intent-stale-threshold-days", "0",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    const intents = payload["pendingUpdateIntents"] as Array<Record<string, unknown>>;
+    expect(intents).toHaveLength(1);
+    expect(payload["filters"]).toMatchObject({
+      source: "linear",
+      projectName: "Momentum",
+      milestoneName: "Momentum-Native Coding Workflow Adoption"
+    });
+    expect((payload["counts"] as Record<string, unknown>)["pendingUpdateIntents"]).toBe(1);
+    expect((payload["nextAction"] as Record<string, unknown>)["kind"]).toBe(
+      "review_pending_intents"
+    );
+  });
+
   it("surfaces an empty external apply rollup when no audits exist", async () => {
     const dataDir = makeTempDir("momentum-cli-project-");
     const { openDb } = await import("../src/adapters/db.js");
