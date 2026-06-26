@@ -1383,7 +1383,7 @@ Then branch on the JSON instead of scraping text:
   recovery or open-gate detail.
 - Stop and clean up the wrapper only when `progress.cleanup` is `"release"`,
   `runState` is `canceled`, or `nextAction.code` is `no_action`.
-- Keep polling recoverable failures only when `progress.cleanup` is `"none"`
+- Keep polling recoverable terminal failures only when `progress.cleanup` is `"none"`
   and either `disposition` is `"recover"` or `progress.phase` is `"blocked"`,
   so a later repair, retry, or clear-recovery emits the next meaningful state.
 
