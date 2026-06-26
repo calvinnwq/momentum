@@ -112,6 +112,8 @@ For compatibility with older SourceItem rows, a non-empty scalar `project` or `m
 The same filter scope applies to source items, mismatch counts, reconciliation warnings, and pending update intents.
 For duplicate `linear` rows that share the same `externalKey` (for example legacy key-only and UUID-backed records),
 project status keeps a single effective row by preferring UUID-backed rows and otherwise choosing the freshest `lastObservedAt` row.
+That duplicate selection runs before `--project` and `--milestone` filters, so those filters evaluate the effective row's metadata.
+Goal links, source-item evidence, and source-item pending intents from every collapsed duplicate row still contribute to the project rollup counts, mismatches, evidence totals, and pending-intent scope.
 
 `--stale-threshold-hours` controls when a last reconciliation run is reported as stale (default 24 hours).
 `--intent-stale-threshold-days` controls when a pending update intent is flagged as stale (default 30 days).

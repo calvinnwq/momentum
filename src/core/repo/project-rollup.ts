@@ -4,7 +4,15 @@
  * Computes an operator-facing summary of SourceItem / Goal / evidence /
  * reconciliation state from local durable records only. Never calls source
  * adapters or runs external API requests. Filter scope is source-centric:
- * goals are included if they are linked to a SourceItem matching the filters.
+ * goals are included when they are linked to the effective rollup item after
+ * Linear external-key dedupe and project / milestone filters.
+ *
+ * Duplicate Linear rows that share an externalKey collapse to one effective item
+ * before project / milestone filters run. UUID-backed rows win over legacy
+ * key-only rows, with freshest lastObservedAt used inside the chosen candidate
+ * set. Goal links, source-item evidence, and source-item pending intents from
+ * every collapsed row remain in scope for rollup counts, mismatches, evidence,
+ * and pending intents.
  *
  * Pending external update intents are read from local durable state and
  * scoped to the same SourceItem / Goal set so the rollup never widens past
