@@ -669,6 +669,44 @@ describe("buildProjectRollup", () => {
     }
   });
 
+  it("matches run filter names against scalar source metadata values", () => {
+    const db = openDb(makeTempDir());
+    try {
+      upsertSourceItem(db, {
+        externalId: "issue-scalar-run-id",
+        adapterKind: "linear",
+        title: "Scalar run metadata issue",
+        metadata: {
+          project: "Momentum"
+        },
+        observedAt: 1_000
+      });
+      const run = startSourceReconciliationRun(
+        db,
+        { adapterKind: "linear", metadata: { filters: { projectName: "Momentum" } } },
+        { now: () => 1_000 }
+      );
+      finishSourceReconciliationRun(
+        db,
+        {
+          runId: run.id,
+          state: "succeeded",
+          itemsSeen: 1,
+          itemsUpserted: 1
+        },
+        { now: () => 2_000 }
+      );
+
+      const rollup = buildProjectRollup(db, {
+        filters: { projectName: "Momentum" },
+        now: 3_000
+      });
+      expect(rollup.reconciliationWarnings).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("matches reconciliation filter ids against rollup filter names through source metadata", () => {
     const db = openDb(makeTempDir());
     try {
@@ -1151,6 +1189,56 @@ describe("buildProjectRollup", () => {
 
       const allRollup = buildProjectRollup(db, { now: 2_000 });
       expect(allRollup.counts.pendingUpdateIntents).toBe(3);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("matches legacy scalar project and milestone metadata in pending intent scope filters", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedGoal(db, { id: "goal-legacy", state: "completed" });
+      const sourceItem = upsertSourceItem(db, {
+        adapterKind: "linear",
+        externalId: "legacy-metadata",
+        externalKey: "NGX-LEGACY",
+        title: "Legacy metadata issue",
+        status: "In Progress",
+        metadata: {
+          project: "Momentum",
+          milestone: "Momentum-Native Coding Workflow Adoption"
+        },
+        observedAt: 1_000,
+        goalId: "goal-legacy"
+      });
+      createUpdateIntent(
+        db,
+        {
+          adapterKind: "linear",
+          intentType: "source_satisfied",
+          reason: "Legacy metadata should still be surfaced",
+          goalId: "goal-legacy",
+          sourceItemId: sourceItem.id,
+          idempotencyKey:
+            "linear:legacy-metadata:source_satisfied:goal-legacy"
+        },
+        { now: () => 1_050 }
+      );
+
+      const rollup = buildProjectRollup(db, {
+        filters: {
+          projectName: "Momentum",
+          milestoneName: "Momentum-Native Coding Workflow Adoption"
+        },
+        now: 2_000
+      });
+      expect(rollup.counts.sourceItems.total).toBe(1);
+      expect(rollup.counts.pendingUpdateIntents).toBe(1);
+      expect(rollup.pendingUpdateIntents[0]).toMatchObject({
+        goalId: "goal-legacy",
+        sourceItemId: sourceItem.id
+      });
+      expect(rollup.nextAction.kind).toBe("review_pending_intents");
     } finally {
       db.close();
     }

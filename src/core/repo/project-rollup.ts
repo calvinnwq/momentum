@@ -366,34 +366,58 @@ function matchesProjectMilestoneFilters(
   ) {
     return true;
   }
-  const project = readNested(item.metadata, "project");
-  const milestone = readNested(item.metadata, "milestone");
-  if (!matchesIdOrNameFilter(project, filters.projectId, filters.projectName)) {
+  const projectValues = readMetadataValues(item.metadata, "project");
+  if (!matchesValueFilters(projectValues, filters.projectId, filters.projectName)) {
     return false;
   }
-  if (!matchesIdOrNameFilter(milestone, filters.milestoneId, filters.milestoneName)) {
+  const milestoneValues = readMetadataValues(item.metadata, "milestone");
+  if (
+    !matchesValueFilters(milestoneValues, filters.milestoneId, filters.milestoneName)
+  ) {
     return false;
   }
   return true;
 }
 
-function matchesIdOrNameFilter(
-  record: Record<string, unknown> | null,
+function matchesValueFilters(
+  values: readonly string[],
   idFilter: string | undefined,
   nameFilter: string | undefined
 ): boolean {
   if (idFilter === undefined && nameFilter === undefined) return true;
-  const id = readString(record, "id");
-  const name = readString(record, "name");
-  if (idFilter !== undefined && id === idFilter) return true;
-  if (nameFilter !== undefined && name === nameFilter) return true;
+  if (idFilter !== undefined && values.includes(idFilter)) return true;
+  if (nameFilter !== undefined && values.includes(nameFilter)) return true;
   return false;
+}
+
+function readMetadataValues(
+  metadata: Record<string, unknown>,
+  key: "project" | "milestone"
+): string[] {
+  const value = metadata[key];
+  if (typeof value === "string") {
+    return readCompactStringArray([value]);
+  }
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value)
+  ) {
+    return [];
+  }
+  const objectValue = value as Record<string, unknown>;
+  return readCompactStringArray([readString(objectValue, "id"), readString(objectValue, "name")]);
 }
 
 function readNested(metadata: Record<string, unknown>, key: string): Record<string, unknown> | null {
   const value = metadata[key];
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   return value as Record<string, unknown>;
+}
+
+function readCompactStringArray(values: Array<string | null>): string[] {
+  const compact = values.filter((value): value is string => value !== null);
+  return [...new Set(compact)];
 }
 
 function readString(record: Record<string, unknown> | null, key: string): string | null {
@@ -837,10 +861,7 @@ function itemDimensionMatchesRunFilter(
   dimension: "project" | "milestone",
   runValues: readonly string[]
 ): boolean {
-  const record = readNested(item.metadata, dimension);
-  const itemValues = [readString(record, "id"), readString(record, "name")].filter(
-    (value): value is string => value !== null
-  );
+  const itemValues = readMetadataValues(item.metadata, dimension);
   return itemValues.some((itemValue) => runValues.includes(itemValue));
 }
 
