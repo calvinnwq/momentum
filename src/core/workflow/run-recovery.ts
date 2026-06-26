@@ -541,11 +541,9 @@ function reconcileInterruptedNoMistakesStepForRecoveryClear(
     runId: input.runId,
     now: input.now
   });
-  if (!monitorState.terminal) {
-    db.prepare(
-      "UPDATE workflow_runs SET finished_at = NULL, updated_at = ? WHERE id = ?"
-    ).run(input.now, input.runId);
-  }
+  db.prepare(
+    "UPDATE workflow_runs SET finished_at = ?, updated_at = ? WHERE id = ?"
+  ).run(monitorState.terminal ? input.now : null, input.now, input.runId);
 
   return {
     stepId: input.stepId,
@@ -558,10 +556,7 @@ function reconcileInterruptedNoMistakesStepForRecoveryClear(
 
 function isNoMistakesChecksPassedEvidencePointer(value: string): boolean {
   const normalized = value.trim().toLowerCase();
-  return (
-    normalized.startsWith("no-mistakes:") &&
-    normalized.includes("#checks-passed")
-  );
+  return /^no-mistakes:[^#\s]+#checks-passed$/.test(normalized);
 }
 
 function reconcileExternalSideEffectTailStepForRecoveryClear(
