@@ -490,6 +490,50 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
     }
   });
 
+  it("replaces a stale failure finished_at when external reconciliation terminally succeeds the run", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRunWithState(db, "run-1", "failed", {
+        finishedAt: 1_730_000_800_000
+      });
+      seedStep(db, "run-1", "preflight", "succeeded", {
+        kind: "preflight",
+        order: 0
+      });
+      seedStep(db, "run-1", "implementation", "succeeded", {
+        kind: "implementation",
+        order: 1
+      });
+      seedStep(db, "run-1", "postflight", "succeeded", {
+        kind: "postflight",
+        order: 2
+      });
+      seedStep(db, "run-1", "no-mistakes", "succeeded", {
+        kind: "no-mistakes",
+        order: 3
+      });
+      seedStep(db, "run-1", "merge-cleanup", "failed", {
+        kind: "merge-cleanup",
+        order: 4
+      });
+
+      const out = clearWorkflowRunManualRecoveryGuarded(db, {
+        runId: "run-1",
+        now: 1_730_000_900_000,
+        externalSideEffectEvidencePointer: "github://pulls/123#merged"
+      });
+
+      expect(out.ok).toBe(true);
+      expect(readRunRuntimeRow(db, "run-1")).toEqual({
+        state: "succeeded",
+        finished_at: 1_730_000_900_000
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   it("reconciles an interrupted no-mistakes terminal failure from checks-passed evidence", () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);

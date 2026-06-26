@@ -623,15 +623,17 @@ function reconcileExternalSideEffectTailStepForRecoveryClear(
     );
   if (Number(updated.changes) === 0) return undefined;
 
-  refreshWorkflowRunRuntimeState(db, { runId: input.runId, now: input.now });
-  const run = db
-    .prepare("SELECT state FROM workflow_runs WHERE id = ?")
-    .get(input.runId) as { state: string } | undefined;
-  if (run !== undefined && run.state !== "succeeded" && run.state !== "canceled") {
-    db.prepare(
-      "UPDATE workflow_runs SET finished_at = NULL, updated_at = ? WHERE id = ?"
-    ).run(input.now, input.runId);
-  }
+  const monitorState = refreshWorkflowRunRuntimeState(db, {
+    runId: input.runId,
+    now: input.now
+  });
+  db.prepare(
+    "UPDATE workflow_runs SET finished_at = ?, updated_at = ? WHERE id = ?"
+  ).run(
+    monitorState.terminal ? input.now : null,
+    input.now,
+    input.runId
+  );
   return {
     stepId: input.stepId,
     recoveryCode: "failed_external_side_effect_step",
