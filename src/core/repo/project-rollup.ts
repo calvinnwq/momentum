@@ -4,7 +4,15 @@
  * Computes an operator-facing summary of SourceItem / Goal / evidence /
  * reconciliation state from local durable records only. Never calls source
  * adapters or runs external API requests. Filter scope is source-centric:
- * goals are included if they are linked to a SourceItem matching the filters.
+ * goals are included when they are linked to the effective rollup item after
+ * Linear external-key dedupe and project / milestone filters.
+ *
+ * Duplicate Linear rows that share an externalKey collapse to one effective item
+ * before project / milestone filters run. UUID-backed rows win over legacy
+ * key-only rows, with freshest lastObservedAt used inside the chosen candidate
+ * set. Goal links, source-item evidence, and source-item pending intents from
+ * every collapsed row remain in scope for rollup counts, mismatches, evidence,
+ * and pending intents.
  *
  * Pending external update intents are read from local durable state and
  * scoped to the same SourceItem / Goal set so the rollup never widens past
@@ -203,6 +211,17 @@ type GoalSnapshot = {
   needsManualRecovery: boolean;
 };
 
+type RollupSourceItemGoalLink = {
+  sourceItemId: string;
+  goalId: string;
+};
+
+type RollupSourceItem = SourceItem & {
+  rollupSourceItemIds: readonly string[];
+  rollupGoalIds: readonly string[];
+  rollupSourceItemGoalLinks: readonly RollupSourceItemGoalLink[];
+};
+
 export function buildProjectRollup(
   db: MomentumDb,
   options: ProjectRollupOptions = {}
@@ -224,25 +243,30 @@ export function buildProjectRollup(
     db,
     filters.adapterKind === undefined ? {} : { adapterKind: filters.adapterKind }
   );
-  const items = allItems.filter((item) => matchesProjectMilestoneFilters(item, filters));
+  const rollupItems = dedupeLinearSourceItemsForRollup(allItems).filter((item) =>
+    matchesProjectMilestoneFilters(item, filters)
+  );
 
-  const linkedGoalIds = collectLinkedGoalIds(items);
+  const linkedGoalIds = collectLinkedGoalIds(rollupItems);
   const goals = linkedGoalIds.size === 0 ? new Map<string, GoalSnapshot>() : loadGoalSnapshots(db, linkedGoalIds);
-  const goalsWithEvidence = goals.size === 0 ? new Set<string>() : loadGoalsWithEvidence(db, goals, items);
-  const evidenceTotal = goals.size === 0 ? 0 : countEvidenceRecordsForGoals(db, goals, items);
+  const goalsWithEvidence = goals.size === 0
+    ? new Set<string>()
+    : loadGoalsWithEvidence(db, goals, rollupItems);
+  const evidenceTotal =
+    goals.size === 0 ? 0 : countEvidenceRecordsForGoals(db, goals, rollupItems);
 
-  const summaries = buildSourceItemSummaries(items, goals);
-  const mismatches = buildMismatches(items, goals, goalsWithEvidence);
+  const summaries = buildSourceItemSummaries(rollupItems, goals);
+  const mismatches = buildMismatches(rollupItems, goals, goalsWithEvidence);
   const pendingIntents = buildPendingIntentSummaries(
     db,
     filters,
-    items,
+    rollupItems,
     goals,
     generatedAt,
     intentStaleThresholdMs
   );
   const counts = computeCounts(
-    items,
+    rollupItems,
     goals,
     goalsWithEvidence,
     mismatches,
@@ -255,7 +279,7 @@ export function buildProjectRollup(
     filters,
     generatedAt,
     reconciliationStaleThresholdMs,
-    items
+    rollupItems
   );
   const nextAction = pickNextAction(
     counts,
@@ -452,10 +476,12 @@ function readString(record: Record<string, unknown> | null, key: string): string
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
-function collectLinkedGoalIds(items: readonly SourceItem[]): Set<string> {
+function collectLinkedGoalIds(items: readonly RollupSourceItem[]): Set<string> {
   const ids = new Set<string>();
   for (const item of items) {
-    if (item.goalId) ids.add(item.goalId);
+    for (const goalId of item.rollupGoalIds) {
+      ids.add(goalId);
+    }
   }
   return ids;
 }
@@ -493,7 +519,7 @@ function loadGoalSnapshots(
 function loadGoalsWithEvidence(
   db: MomentumDb,
   goals: Map<string, GoalSnapshot>,
-  items: readonly SourceItem[]
+  items: readonly RollupSourceItem[]
 ): Set<string> {
   if (goals.size === 0) return new Set();
   const goalIds = [...goals.keys()];
@@ -520,8 +546,10 @@ function loadGoalsWithEvidence(
   for (const row of rows) {
     if (row.goal_id !== null && goals.has(row.goal_id)) ids.add(row.goal_id);
     if (row.source_item_id !== null) {
-      const linkedGoalId = sourceItemGoalIds.get(row.source_item_id);
-      if (linkedGoalId !== undefined) ids.add(linkedGoalId);
+      const linkedGoalIds = sourceItemGoalIds.get(row.source_item_id) ?? [];
+      for (const linkedGoalId of linkedGoalIds) {
+        ids.add(linkedGoalId);
+      }
     }
   }
   return ids;
@@ -530,7 +558,7 @@ function loadGoalsWithEvidence(
 function countEvidenceRecordsForGoals(
   db: MomentumDb,
   goals: Map<string, GoalSnapshot>,
-  items: readonly SourceItem[]
+  items: readonly RollupSourceItem[]
 ): number {
   if (goals.size === 0) return 0;
   const goalIds = [...goals.keys()];
@@ -556,20 +584,24 @@ function countEvidenceRecordsForGoals(
 }
 
 function collectLinkedSourceItemGoalIds(
-  items: readonly SourceItem[],
+  items: readonly RollupSourceItem[],
   goals: Map<string, GoalSnapshot>
-): Map<string, string> {
-  const map = new Map<string, string>();
+): Map<string, string[]> {
+  const map = new Map<string, string[]>();
   for (const item of items) {
-    if (item.goalId && goals.has(item.goalId)) {
-      map.set(item.id, item.goalId);
+    for (const link of item.rollupSourceItemGoalLinks) {
+      if (!goals.has(link.goalId)) continue;
+      const linkedGoalIds = map.get(link.sourceItemId) ?? [];
+      if (linkedGoalIds.includes(link.goalId)) continue;
+      linkedGoalIds.push(link.goalId);
+      map.set(link.sourceItemId, linkedGoalIds);
     }
   }
   return map;
 }
 
 function buildSourceItemSummaries(
-  items: readonly SourceItem[],
+  items: readonly RollupSourceItem[],
   goals: Map<string, GoalSnapshot>
 ): ProjectRollupSourceItemSummary[] {
   return items
@@ -592,6 +624,113 @@ function buildSourceItemSummaries(
     });
 }
 
+function dedupeLinearSourceItemsForRollup(items: readonly SourceItem[]): RollupSourceItem[] {
+  if (items.length <= 1) {
+    return items.map((item) => toRollupSourceItem(item)).sort(sourceItemOrder);
+  }
+
+  const groupedByAdapterAndKey = new Map<string, SourceItem[]>();
+  const passthroughItems: SourceItem[] = [];
+  for (const item of items) {
+    if (item.adapterKind !== "linear" || item.externalKey === null) {
+      passthroughItems.push(item);
+      continue;
+    }
+    const key = `${item.adapterKind}\u0000${item.externalKey}`;
+    const bucket = groupedByAdapterAndKey.get(key);
+    if (bucket === undefined) {
+      groupedByAdapterAndKey.set(key, [item]);
+    } else {
+      bucket.push(item);
+    }
+  }
+
+  const deduped: RollupSourceItem[] = passthroughItems.map((item) =>
+    toRollupSourceItem(item)
+  );
+  for (const bucket of groupedByAdapterAndKey.values()) {
+    if (bucket.length === 1) {
+      deduped.push(toRollupSourceItem(bucket[0]!));
+      continue;
+    }
+    const canonicalCandidates = bucket.filter(
+      (item) => isCanonicalLinearUuidRow(item)
+    );
+    const candidates =
+      canonicalCandidates.length > 0 ? canonicalCandidates : bucket;
+    deduped.push(toRollupSourceItem(selectPreferredSourceItem(candidates), bucket));
+  }
+
+  return deduped.sort(sourceItemOrder);
+}
+
+function toRollupSourceItem(
+  item: SourceItem,
+  bucket: readonly SourceItem[] = [item]
+): RollupSourceItem {
+  const sourceItemGoalLinks = readRollupSourceItemGoalLinks(bucket);
+  const linkedGoalIds = readRollupGoalIds(sourceItemGoalLinks);
+  return {
+    ...item,
+    goalId: item.goalId,
+    rollupSourceItemIds: readRollupSourceItemIds(bucket),
+    rollupGoalIds: linkedGoalIds,
+    rollupSourceItemGoalLinks: sourceItemGoalLinks
+  };
+}
+
+function readRollupSourceItemIds(items: readonly SourceItem[]): string[] {
+  return [...new Set(items.map((item) => item.id))].sort();
+}
+
+function readRollupSourceItemGoalLinks(
+  items: readonly SourceItem[]
+): RollupSourceItemGoalLink[] {
+  const links = new Map<string, RollupSourceItemGoalLink>();
+  for (const item of items.slice().sort(sourceItemOrder)) {
+    if (item.goalId === null) continue;
+    const key = `${item.id}\u0000${item.goalId}`;
+    links.set(key, { sourceItemId: item.id, goalId: item.goalId });
+  }
+  return [...links.values()];
+}
+
+function readRollupGoalIds(
+  links: readonly RollupSourceItemGoalLink[]
+): string[] {
+  return [...new Set(links.map((link) => link.goalId))];
+}
+
+const LINEAR_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isCanonicalLinearUuidRow(item: SourceItem): boolean {
+  return (
+    item.adapterKind === "linear" &&
+    item.externalKey !== null &&
+    item.externalId !== item.externalKey &&
+    LINEAR_UUID_RE.test(item.externalId)
+  );
+}
+
+function selectPreferredSourceItem(items: readonly SourceItem[]): SourceItem {
+  let best = items[0];
+  if (best === undefined) {
+    throw new Error("selectPreferredSourceItem requires at least one source item.");
+  }
+
+  for (const candidate of items.slice(1)) {
+    if (candidate.lastObservedAt !== best.lastObservedAt) {
+      best = candidate.lastObservedAt > best.lastObservedAt ? candidate : best;
+      continue;
+    }
+    if (sourceItemOrder(candidate, best) < 0) {
+      best = candidate;
+    }
+  }
+  return best;
+}
+
 function sourceItemOrder(a: SourceItem, b: SourceItem): number {
   if (a.adapterKind !== b.adapterKind) {
     return a.adapterKind < b.adapterKind ? -1 : 1;
@@ -603,7 +742,7 @@ function sourceItemOrder(a: SourceItem, b: SourceItem): number {
 }
 
 function buildMismatches(
-  items: readonly SourceItem[],
+  items: readonly RollupSourceItem[],
   goals: Map<string, GoalSnapshot>,
   goalsWithEvidence: Set<string>
 ): ProjectRollupMismatch[] {
@@ -611,24 +750,26 @@ function buildMismatches(
   const reportedManualRecovery = new Set<string>();
   const reportedMissingEvidence = new Set<string>();
   for (const item of items.slice().sort(sourceItemOrder)) {
-    const goal = item.goalId ? goals.get(item.goalId) ?? null : null;
-    if (!goal) continue;
-    const sourceDone = isSourceStatusTerminal(item.status);
-    const goalDone = goal.state === COMPLETED_GOAL_STATE;
-    const goalTerminal = TERMINAL_GOAL_STATES.has(goal.state);
-    if (sourceDone && !goalTerminal) {
-      mismatches.push(buildMismatch("source_done_goal_not_terminal", item, goal));
-    }
-    if (goalDone && !sourceDone) {
-      mismatches.push(buildMismatch("goal_done_source_not_done", item, goal));
-    }
-    if (goalDone && !goalsWithEvidence.has(goal.id) && !reportedMissingEvidence.has(goal.id)) {
-      mismatches.push(buildMismatch("evidence_missing_after_completion", item, goal));
-      reportedMissingEvidence.add(goal.id);
-    }
-    if (goal.needsManualRecovery && !reportedManualRecovery.has(goal.id)) {
-      mismatches.push(buildMismatch("manual_recovery_required", item, goal));
-      reportedManualRecovery.add(goal.id);
+    for (const goalId of item.rollupGoalIds) {
+      const goal = goals.get(goalId) ?? null;
+      if (!goal) continue;
+      const sourceDone = isSourceStatusTerminal(item.status);
+      const goalDone = goal.state === COMPLETED_GOAL_STATE;
+      const goalTerminal = TERMINAL_GOAL_STATES.has(goal.state);
+      if (sourceDone && !goalTerminal) {
+        mismatches.push(buildMismatch("source_done_goal_not_terminal", item, goal));
+      }
+      if (goalDone && !sourceDone) {
+        mismatches.push(buildMismatch("goal_done_source_not_done", item, goal));
+      }
+      if (goalDone && !goalsWithEvidence.has(goal.id) && !reportedMissingEvidence.has(goal.id)) {
+        mismatches.push(buildMismatch("evidence_missing_after_completion", item, goal));
+        reportedMissingEvidence.add(goal.id);
+      }
+      if (goal.needsManualRecovery && !reportedManualRecovery.has(goal.id)) {
+        mismatches.push(buildMismatch("manual_recovery_required", item, goal));
+        reportedManualRecovery.add(goal.id);
+      }
     }
   }
   return mismatches;
@@ -636,7 +777,7 @@ function buildMismatches(
 
 function buildMismatch(
   kind: ProjectRollupMismatchKind,
-  item: SourceItem,
+  item: RollupSourceItem,
   goal: GoalSnapshot
 ): ProjectRollupMismatch {
   return {
@@ -656,7 +797,7 @@ function isSourceStatusTerminal(status: string | null): boolean {
 }
 
 function computeCounts(
-  items: readonly SourceItem[],
+  items: readonly RollupSourceItem[],
   goals: Map<string, GoalSnapshot>,
   goalsWithEvidence: Set<string>,
   mismatches: readonly ProjectRollupMismatch[],
@@ -669,7 +810,7 @@ function computeCounts(
   for (const item of items) {
     const key = item.status ?? "(none)";
     byStatus[key] = (byStatus[key] ?? 0) + 1;
-    if (item.goalId) linkedToGoal += 1;
+    if (item.rollupGoalIds.length > 0) linkedToGoal += 1;
     else unlinked += 1;
   }
   const byGoalState: Record<string, number> = {};
@@ -894,13 +1035,13 @@ function itemDimensionMatchesRunFilter(
 function buildPendingIntentSummaries(
   db: MomentumDb,
   filters: ProjectRollupFilters,
-  items: readonly SourceItem[],
+  items: readonly RollupSourceItem[],
   goals: Map<string, GoalSnapshot>,
   now: number,
   staleThresholdMs: number
 ): ProjectRollupPendingIntentSummary[] {
   const filtersScoped = isRollupScoped(filters);
-  const itemIds = new Set(items.map((item) => item.id));
+  const itemIds = new Set(items.flatMap((item) => item.rollupSourceItemIds));
   const goalIds = new Set(goals.keys());
 
   const listOptions: Parameters<typeof listUpdateIntents>[1] = { status: "pending" };
