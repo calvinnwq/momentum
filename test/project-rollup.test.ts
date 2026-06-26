@@ -1244,6 +1244,79 @@ describe("buildProjectRollup", () => {
     }
   });
 
+  it("does not cross-match object project ids and names when scoping pending intents", () => {
+    const db = openDb(makeTempDir());
+    try {
+      const alphaItem = upsertSourceItem(db, {
+        adapterKind: "linear",
+        externalId: "project-alpha-id",
+        externalKey: null,
+        title: "Alpha project",
+        status: "Todo",
+        metadata: {
+          project: { id: "project-alpha-id", name: "Shared Label" },
+          milestone: { id: "milestone-alpha-id", name: "Alpha Milestone" }
+        },
+        observedAt: 1_000,
+        goalId: null
+      });
+      createUpdateIntent(
+        db,
+        {
+          adapterKind: "linear",
+          intentType: "source_satisfied",
+          reason: "Alpha project intent",
+          sourceItemId: alphaItem.id,
+          idempotencyKey: "linear:alpha-object:source_satisfied"
+        },
+        { now: () => 1_000 }
+      );
+
+      const betaItem = upsertSourceItem(db, {
+        adapterKind: "linear",
+        externalId: "project-beta-id",
+        externalKey: null,
+        title: "Beta project",
+        status: "Todo",
+        metadata: {
+          project: { id: "Shared Label", name: "Beta Project" },
+          milestone: { id: "milestone-beta-id", name: "Beta Milestone" }
+        },
+        observedAt: 1_100,
+        goalId: null
+      });
+      createUpdateIntent(
+        db,
+        {
+          adapterKind: "linear",
+          intentType: "source_satisfied",
+          reason: "Beta project intent",
+          sourceItemId: betaItem.id,
+          idempotencyKey: "linear:beta-object:source_satisfied"
+        },
+        { now: () => 1_100 }
+      );
+
+      const byProjectName = buildProjectRollup(db, {
+        filters: { projectName: "Shared Label" },
+        now: 2_000
+      });
+      expect(byProjectName.pendingUpdateIntents.map((intent) => intent.sourceItemId)).toEqual([
+        alphaItem.id
+      ]);
+
+      const byProjectId = buildProjectRollup(db, {
+        filters: { projectId: "Shared Label" },
+        now: 2_000
+      });
+      expect(byProjectId.pendingUpdateIntents.map((intent) => intent.sourceItemId)).toEqual([
+        betaItem.id
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   it("scopes pending intents by adapterKind filter", () => {
     const db = openDb(makeTempDir());
     try {

@@ -366,27 +366,53 @@ function matchesProjectMilestoneFilters(
   ) {
     return true;
   }
-  const projectValues = readMetadataValues(item.metadata, "project");
-  if (!matchesValueFilters(projectValues, filters.projectId, filters.projectName)) {
+  if (
+    !matchesMetadataFilter(
+      item.metadata,
+      "project",
+      filters.projectId,
+      filters.projectName
+    )
+  ) {
     return false;
   }
-  const milestoneValues = readMetadataValues(item.metadata, "milestone");
   if (
-    !matchesValueFilters(milestoneValues, filters.milestoneId, filters.milestoneName)
+    !matchesMetadataFilter(
+      item.metadata,
+      "milestone",
+      filters.milestoneId,
+      filters.milestoneName
+    )
   ) {
     return false;
   }
   return true;
 }
 
-function matchesValueFilters(
-  values: readonly string[],
+function matchesMetadataFilter(
+  metadata: Record<string, unknown>,
+  key: "project" | "milestone",
   idFilter: string | undefined,
   nameFilter: string | undefined
 ): boolean {
   if (idFilter === undefined && nameFilter === undefined) return true;
-  if (idFilter !== undefined && values.includes(idFilter)) return true;
-  if (nameFilter !== undefined && values.includes(nameFilter)) return true;
+
+  const value = metadata[key];
+  if (typeof value === "string" && value.length > 0) {
+    return value === idFilter || value === nameFilter;
+  }
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value)
+  ) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  if (idFilter !== undefined && readString(record, "id") === idFilter) return true;
+  if (nameFilter !== undefined && readString(record, "name") === nameFilter) {
+    return true;
+  }
   return false;
 }
 
