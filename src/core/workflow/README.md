@@ -152,6 +152,7 @@ so command failures become durable `success: false` results rather than stranded
 manual recovery. It is not a default-route switch and does not change CWFP
 compatibility.
 For `no-mistakes`, the helper also normalizes upstream terminal-success evidence: `checks-passed`, or a still-monitoring upstream run with current clean pull request evidence and green or explicitly absent checks, becomes successful runner evidence only when current blockers, active findings, unresolved gates, dirty / draft pull request state, and non-successful checks are absent.
+If the wrapper is interrupted before writing that evidence but the external no-mistakes run later proves `checks-passed`, guarded `clear-recovery` can reconcile only the failed required `no-mistakes` step with `no-mistakes:<run-id>#checks-passed` evidence and then re-derive the run so downstream work can continue.
 The checked-in dogfood profile runs the wrapper CLI from `src/` through the TypeScript source loader/register shims in `src/adapters/`, so cleanup of generated `dist/` files after test or no-mistakes work does not strand `merge-cleanup` or `linear-refresh` tail work.
 External-side-effect tail failures (`merge-cleanup` / `linear-refresh`) use the shared step-kind set in `run-reducer.ts`, classify through the monitor as `failed_external_side_effect_step`, and steer operators to evidence-backed `workflow run clear-recovery --evidence-pointer <ref>` reconciliation instead of a blind re-run that could repeat the external write.
 

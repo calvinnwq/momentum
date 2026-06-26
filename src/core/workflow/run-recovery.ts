@@ -202,6 +202,8 @@ export type ClearWorkflowRunManualRecoveryGuardedInput = {
   now?: number;
   externalSideEffectEvidencePointer?: string;
   externalSideEffectLedgerPointer?: string;
+  successfulNoMistakesEvidencePointer?: string;
+  successfulNoMistakesLedgerPointer?: string;
   /** Lease-freshness grace window forwarded to the monitor re-derivation. */
   graceMs?: number;
   /** Running-step checkpoint staleness window forwarded to the re-derivation. */
@@ -226,7 +228,9 @@ export type ClearWorkflowRunManualRecoveryGuardedResult =
       };
       reconciledStep?: {
         stepId: string;
-        recoveryCode: "failed_external_side_effect_step";
+        recoveryCode:
+          | "failed_external_side_effect_step"
+          | "interrupted_no_mistakes_checks_passed";
         state: "succeeded";
         evidencePointer: string;
         ledgerPointer: string | null;
@@ -318,7 +322,9 @@ export function clearWorkflowRunManualRecoveryGuarded(
     let reconciledStep:
       | {
           stepId: string;
-          recoveryCode: "failed_external_side_effect_step";
+          recoveryCode:
+            | "failed_external_side_effect_step"
+            | "interrupted_no_mistakes_checks_passed";
           state: "succeeded";
           evidencePointer: string;
           ledgerPointer: string | null;
@@ -357,6 +363,43 @@ export function clearWorkflowRunManualRecoveryGuarded(
           reason: "run_not_found",
           message: `Workflow run ${input.runId} disappeared during external-side-effect reconciliation.`
         };
+      }
+    }
+
+    if (
+      recoveryBeforeClear?.code === "failed_required_step" &&
+      recoveryBeforeClear.stepId !== null
+    ) {
+      const evidencePointer = input.successfulNoMistakesEvidencePointer?.trim();
+      if (evidencePointer !== undefined && evidencePointer.length > 0) {
+        reconciledStep = reconcileInterruptedNoMistakesStepForRecoveryClear(db, {
+          runId: input.runId,
+          stepId: recoveryBeforeClear.stepId,
+          now,
+          evidencePointer,
+          ledgerPointer: input.successfulNoMistakesLedgerPointer ?? null
+        });
+        if (reconciledStep === undefined) {
+          db.exec("ROLLBACK");
+          return {
+            ok: false,
+            reason: "recovery_clear_refused",
+            message:
+              `Workflow run ${input.runId} cannot reconcile failed step ` +
+              `${recoveryBeforeClear.stepId} from no-mistakes evidence. The step must be a failed required no-mistakes step and the evidence pointer must prove checks-passed.`,
+            recoveryCode: recoveryBeforeClear.code,
+            blockingStepId: recoveryBeforeClear.stepId
+          };
+        }
+        recoveryDetail = loadWorkflowRunDetail(db, input.runId, detailOptions);
+        if (!recoveryDetail) {
+          db.exec("ROLLBACK");
+          return {
+            ok: false,
+            reason: "run_not_found",
+            message: `Workflow run ${input.runId} disappeared during no-mistakes reconciliation.`
+          };
+        }
       }
     }
 
@@ -425,6 +468,102 @@ export function clearWorkflowRunManualRecoveryGuarded(
   }
 }
 
+function reconcileInterruptedNoMistakesStepForRecoveryClear(
+  db: MomentumDb,
+  input: {
+    runId: string;
+    stepId: string;
+    now: number;
+    evidencePointer: string;
+    ledgerPointer: string | null;
+  }
+):
+  | {
+      stepId: string;
+      recoveryCode: "interrupted_no_mistakes_checks_passed";
+      state: "succeeded";
+      evidencePointer: string;
+      ledgerPointer: string | null;
+    }
+  | undefined {
+  if (!isNoMistakesChecksPassedEvidencePointer(input.evidencePointer)) {
+    return undefined;
+  }
+
+  const row = db
+    .prepare(
+      `SELECT kind, state, required
+         FROM workflow_steps WHERE run_id = ? AND step_id = ?`
+    )
+    .get(input.runId, input.stepId) as
+    | { kind: string; state: string; required: number }
+    | undefined;
+  if (
+    row === undefined ||
+    row.kind !== "no-mistakes" ||
+    row.state !== "failed" ||
+    row.required !== 1
+  ) {
+    return undefined;
+  }
+
+  const updated = db
+    .prepare(
+      `UPDATE workflow_steps
+          SET state = 'succeeded',
+              error_code = NULL,
+              error_message = NULL,
+              result_digest = NULL,
+              operator_reason = 'interrupted_no_mistakes_checks_passed',
+              operator_actor = 'workflow run clear-recovery',
+              operator_evidence_pointer = ?,
+              operator_ledger_pointer = ?,
+              operator_transition_at = ?,
+              finished_at = ?,
+              updated_at = ?
+        WHERE run_id = ?
+          AND step_id = ?
+          AND kind = 'no-mistakes'
+          AND state = 'failed'`
+    )
+    .run(
+      input.evidencePointer,
+      input.ledgerPointer,
+      input.now,
+      input.now,
+      input.now,
+      input.runId,
+      input.stepId
+    );
+  if (Number(updated.changes) === 0) return undefined;
+
+  const monitorState = refreshWorkflowRunRuntimeState(db, {
+    runId: input.runId,
+    now: input.now
+  });
+  if (!monitorState.terminal) {
+    db.prepare(
+      "UPDATE workflow_runs SET finished_at = NULL, updated_at = ? WHERE id = ?"
+    ).run(input.now, input.runId);
+  }
+
+  return {
+    stepId: input.stepId,
+    recoveryCode: "interrupted_no_mistakes_checks_passed",
+    state: "succeeded",
+    evidencePointer: input.evidencePointer,
+    ledgerPointer: input.ledgerPointer
+  };
+}
+
+function isNoMistakesChecksPassedEvidencePointer(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return (
+    normalized.startsWith("no-mistakes:") &&
+    normalized.includes("#checks-passed")
+  );
+}
+
 function reconcileExternalSideEffectTailStepForRecoveryClear(
   db: MomentumDb,
   input: {
@@ -490,6 +629,14 @@ function reconcileExternalSideEffectTailStepForRecoveryClear(
   if (Number(updated.changes) === 0) return undefined;
 
   refreshWorkflowRunRuntimeState(db, { runId: input.runId, now: input.now });
+  const run = db
+    .prepare("SELECT state FROM workflow_runs WHERE id = ?")
+    .get(input.runId) as { state: string } | undefined;
+  if (run !== undefined && run.state !== "succeeded" && run.state !== "canceled") {
+    db.prepare(
+      "UPDATE workflow_runs SET finished_at = NULL, updated_at = ? WHERE id = ?"
+    ).run(input.now, input.runId);
+  }
   return {
     stepId: input.stepId,
     recoveryCode: "failed_external_side_effect_step",

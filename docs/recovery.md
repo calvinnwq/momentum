@@ -195,6 +195,15 @@ gate state and cancellation before reliable completion. These are not trusted as
 verification failures because the external no-mistakes runner did not produce
 reliable pass/fail evidence.
 When no-mistakes instead reports `checks-passed`, or is still monitoring while current pull request evidence is clean and checks are green or explicitly absent, the wrapper writes successful runner evidence instead of entering this recovery lane, unless current output also shows a blocking outcome, active finding, unresolved gate, dirty / draft pull request, or non-successful check state.
+If the wrapper process is interrupted after the external no-mistakes run later
+proves `checks-passed`, operators may reconcile the failed `no-mistakes` step
+with `workflow run clear-recovery --evidence-pointer
+no-mistakes:<run-id>#checks-passed`. This path is intentionally narrower than
+generic `update-step`: it only accepts a failed required `no-mistakes` step,
+stamps operator evidence on that row, clears the stale terminal `finished_at`
+when downstream steps remain, and re-derives the run so merge cleanup can
+continue. Ordinary failed implementation/postflight steps still refuse guarded
+clear and must be retried or investigated.
 
 When the failed required step is an external-side-effect tail step
 (`merge-cleanup` or `linear-refresh`), the monitor view classifies it as
@@ -233,6 +242,8 @@ Before running `workflow run clear-recovery <run-id> --evidence-pointer <ref>` f
 Its value is a free-form stable reference to the external artifact that proves the side effect landed successfully.
 For a failed `merge-cleanup` step, supply the merged pull request URL (e.g. `https://github.com/org/repo/pull/123` or `github://pulls/123#merged`).
 For a failed `linear-refresh` step, supply the Linear issue URL (e.g. `https://linear.app/team/issue/KEY-123` or `linear://issues/KEY-123#updated`).
+For an interrupted failed `no-mistakes` step whose external no-mistakes run
+later proved success, supply `no-mistakes:<run-id>#checks-passed`.
 Without `--evidence-pointer`, `clear-recovery` refuses with `recovery_clear_refused` and leaves the failed step and any recovery flag intact.
 
 **Ledger pointer**
