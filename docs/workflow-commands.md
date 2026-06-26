@@ -359,6 +359,7 @@ Reads the `.agent-workflows/<run-id>/` directory at `<run-dir>` and normalizes t
   When it classifies a blocking recovery condition (`manual_recovery_lease`, `ghost_active_no_lease`, `stale_running_step`, `failed_required_step`, or `failed_external_side_effect_step`), import sets the durable `needs_manual_recovery` flag and renders `<run-dir>/recovery.md`.
   The flag blocks `workflow run approve` and any `workflow run update-step` transition that would leave a blocking recovery condition in place; a resolving update-step can land so the operator can then clear the flag with `workflow run clear-recovery`.
   For `failed_external_side_effect_step`, `clear-recovery --evidence-pointer <ref>` is the resolving operator action after the canonical external state is verified: the pull request merge or close state and any surviving remote branch ref for `merge-cleanup`, or tracker state for `linear-refresh`.
+  For an interrupted failed required `no-mistakes` step, `clear-recovery --evidence-pointer no-mistakes:<run-id>#checks-passed` is the narrow resolving action after the external no-mistakes run proves success.
   The auto-set only ever sets the flag: re-importing a run whose blocking condition is now resolved leaves any existing flag in place, so clearing stays explicit and operator-driven.
 
 ### JSON envelope (success)
@@ -659,11 +660,12 @@ Required arguments:
 
 Options:
 
-- `--evidence-pointer <ref>` - required when reconciling `failed_external_side_effect_step`; stores the operator-supplied proof that the external side effect landed successfully.
+- `--evidence-pointer <ref>` - required when reconciling `failed_external_side_effect_step` or interrupted no-mistakes success; stores the operator-supplied proof that the external state landed successfully.
   For a failed `merge-cleanup` step, supply the merged pull request URL (e.g. `https://github.com/org/repo/pull/123` or `github://pulls/123#merged`).
   For a failed `linear-refresh` step, supply the Linear issue URL (e.g. `https://linear.app/team/issue/KEY-123` or `linear://issues/KEY-123#updated`).
+  For an interrupted failed `no-mistakes` step whose external no-mistakes run later proved success, supply `no-mistakes:<run-id>#checks-passed`.
   Without `--evidence-pointer`, the command refuses with `recovery_clear_refused` and leaves the failed step and any recovery flag intact.
-- `--ledger-pointer <ref>` - optional ledger or local-artifact pointer stored alongside the evidence pointer when an external tail step is reconciled.
+- `--ledger-pointer <ref>` - optional ledger or local-artifact pointer stored alongside the evidence pointer when an evidence-backed step is reconciled.
   Use this to reference the specific ledger entry where the tail step's partial execution stopped (e.g. `.agent-workflows/<run-id>/ledger.jsonl#offset=42`).
   The ledger pointer does not affect the reconciliation outcome; it is stored on the step row as durable audit context alongside the evidence pointer.
 
@@ -672,17 +674,19 @@ Behaviour:
 - Re-derives the monitor view from the durable substrate inside a single immediate transaction and clears the flag only when no monitor-derived blocking recovery condition remains.
   The check and the clear are atomic: the monitor condition that is checked is the condition that is cleared.
 - Refuses with `recovery_clear_refused` while an ordinary monitor-derived blocking recovery classification (`manual_recovery_lease`, `ghost_active_no_lease`, `stale_running_step`, or `failed_required_step`) still applies; the refusal carries the `recoveryCode` and, when known, the `blockingStepId`, and the flag stays set.
-- For `failed_external_side_effect_step`, clear requires `--evidence-pointer <ref>` before reconciling the failed `merge-cleanup` or `linear-refresh` tail step to `succeeded`, stamping operator audit fields, refreshing the run state, and clearing the flag.
+  The only `failed_required_step` exception is a failed required `no-mistakes` step with explicit `no-mistakes:<run-id>#checks-passed` evidence, used when the wrapper was interrupted after the external no-mistakes run had already proved the PR gate.
+- For `failed_external_side_effect_step`, clear requires `--evidence-pointer <ref>` before reconciling the failed `merge-cleanup` or `linear-refresh` tail step to `succeeded`, stamping operator audit fields, refreshing the run state and `finished_at` from the re-derived terminal or non-terminal state, and clearing the flag.
   Operators should use this only after confirming the canonical external state is consistent: pull request merge or close state and any surviving remote branch ref for `merge-cleanup`, or tracker state for `linear-refresh`.
   Re-running the tail step could repeat those side effects.
   A missing evidence pointer refuses with `recovery_clear_refused`, leaving the flag and failed step intact.
 - For live dispatch / finalization recovery, the durable flag and `run.manualRecoveryReason` / `run.manualRecoveryAt` fields are authoritative for non-monitor recovery reasons such as `head_mismatch`, `result_missing`, `repo_lock_lost`, or `auth_unavailable`. The `recovery.md` artifact is best-effort and may be absent after an artifact write failure; resolve the captured reason and any artifact context before clearing. The command still performs the atomic monitor recheck above, but it cannot independently prove that external live-recovery work was completed.
 - For retryable live-wrapper bootstrap failures on dispatched `no-mistakes` or `merge-cleanup` steps (for example a stale wrapper/build path reported as `runtime_unavailable` before clean runner evidence exists), clearing recovery also prepares the same step for one safe scheduler retry. The JSON envelope includes `retryPrepared`, and text output prints `Retry prepared: <step> (<code>)`. The previous failed executor round remains durable; the retry creates a new round and does not rerun an already-terminal successful step.
 - For scheduler-lane stale workflow lease recovery, stale `manual-recovery-required` leases are left outstanding as durable evidence with the `stale_workflow_lease_manual_recovery_required` reason prefix. Because the monitor reducer can still classify that lease as `manual_recovery_lease`, guarded clear refuses until the lease condition is resolved.
-- Refuses with `not_flagged` when the run is not currently flagged, so a stale clear cannot mutate anything, except for the evidence-backed `failed_external_side_effect_step` reconciliation path above.
-  In that exception, `clear-recovery --evidence-pointer <ref>` can reconcile the failed external tail step even if the durable manual-recovery flag was never set.
+- Refuses with `not_flagged` when the run is not currently flagged, so a stale clear cannot mutate anything, except for the evidence-backed `failed_external_side_effect_step` and interrupted `no-mistakes` reconciliation paths above.
+  In that exception, `clear-recovery --evidence-pointer <ref>` can reconcile the failed external tail step, or a failed `no-mistakes` step with `no-mistakes:<run-id>#checks-passed` evidence, even if the durable manual-recovery flag was never set.
 - Never auto-clears from elapsed time alone, never repairs the underlying run, and never issues an external write. The `recovery.md` artifact is intentionally left on disk as durable audit; remove it after capturing the context elsewhere.
 - Before clearing recovery for `failed_external_side_effect_step`, `workflow run monitor <run-id> --json` reports `disposition: "recover"`, `reportReason: "recovery_required"`, `nextAction.code: "clear_recovery"`, and `recovery.code: "failed_external_side_effect_step"`.
+  Before interrupted no-mistakes reconciliation, monitor still reports `recovery.code: "failed_required_step"`; the `no-mistakes:<run-id>#checks-passed` evidence pointer narrows the clear to that failed required `no-mistakes` row.
   After a successful reconciliation clear, the same command reports `disposition: "report"`, `reportReason: "terminal_succeeded"`, `nextAction.code: "no_action"`, and `recovery: null` only when no downstream required work remains.
   Its progress tick then reports `phase: "terminal"`, `terminal: true`, `cleanup: "release"`, and `blockerReason: null` so a delivery wrapper can stop instead of carrying forward the pre-clear recovery phase.
   If a full workflow still has `linear-refresh` pending or approved after a reconciled `merge-cleanup`, monitor surfaces that next step instead of terminal success.
@@ -731,7 +735,7 @@ Data dir: /path/to/data
 | `data_dir_failed` | Data directory resolution failed. |
 | `run_id_required` | `<run-id>` was not supplied. |
 | `run_not_found` | `<run-id>` does not exist in `workflow_runs`. |
-| `not_flagged` | The run is not currently flagged for manual recovery and no evidence-backed `failed_external_side_effect_step` reconciliation applies. |
+| `not_flagged` | The run is not currently flagged for manual recovery and no evidence-backed external-tail or interrupted no-mistakes reconciliation applies. |
 | `recovery_clear_refused` | A monitor-derived blocking recovery condition still applies; resolve it before clearing. Carries `recoveryCode` and optional `blockingStepId`. |
 
 Exit code 0 on success, 1 on structured refusal, 2 on usage error.

@@ -1813,9 +1813,11 @@ function workflowRunClearRecovery(parsed: ParsedFlags, io: CliIo): number {
     const clearInput: ClearWorkflowRunManualRecoveryGuardedInput = { runId };
     if (parsed.evidencePointer !== undefined) {
       clearInput.externalSideEffectEvidencePointer = parsed.evidencePointer;
+      clearInput.successfulNoMistakesEvidencePointer = parsed.evidencePointer;
     }
     if (parsed.ledgerPointer !== undefined) {
       clearInput.externalSideEffectLedgerPointer = parsed.ledgerPointer;
+      clearInput.successfulNoMistakesLedgerPointer = parsed.ledgerPointer;
     }
     result = clearWorkflowRunManualRecoveryGuarded(db, clearInput);
     if (result.ok) {

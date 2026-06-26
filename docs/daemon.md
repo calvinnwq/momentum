@@ -222,6 +222,7 @@ Those cases leave no normalized runner result, so the daemon parks the step for
 operator repair and a guarded retry instead of terminalizing the workflow as if
 verification itself failed.
 When upstream no-mistakes reports `checks-passed`, or keeps reporting a running monitor state while the pull request evidence is clean and checks are green or explicitly absent, the wrapper writes successful runner evidence for the workflow step and leaves upstream no-mistakes to continue its own PR-lifecycle monitoring.
+If the wrapper is interrupted before writing that evidence but the external no-mistakes run later proves `checks-passed`, `workflow run clear-recovery --evidence-pointer no-mistakes:<run-id>#checks-passed` can reconcile only that failed required `no-mistakes` step and re-derive the run for downstream work.
 Current blocking outcomes, active findings, unresolved gates, dirty / draft pull requests, and failed, pending, skipped, running, or otherwise non-successful checks suppress that successful classification.
 
 JSON envelope shape (managed loop):

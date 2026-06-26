@@ -36,6 +36,27 @@ function seedRun(db: MomentumDb, id: string, updatedAt = 1_730_000_000_000): voi
   ).run(id, "agent-workflow", updatedAt, updatedAt);
 }
 
+function seedRunWithState(
+  db: MomentumDb,
+  id: string,
+  state: string,
+  options: { updatedAt?: number; finishedAt?: number | null } = {}
+): void {
+  const updatedAt = options.updatedAt ?? 1_730_000_000_000;
+  db.prepare(
+    `INSERT INTO workflow_runs (
+       id, source, state, finished_at, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(
+    id,
+    "momentum-native-coding",
+    state,
+    options.finishedAt ?? null,
+    updatedAt,
+    updatedAt
+  );
+}
+
 function seedStep(
   db: MomentumDb,
   runId: string,
@@ -81,6 +102,15 @@ function readRunRow(
     manual_recovery_at: number | null;
     updated_at: number;
   };
+}
+
+function readRunRuntimeRow(
+  db: MomentumDb,
+  id: string
+): { state: string; finished_at: number | null } {
+  return db
+    .prepare("SELECT state, finished_at FROM workflow_runs WHERE id = ?")
+    .get(id) as { state: string; finished_at: number | null };
 }
 
 describe("markWorkflowRunNeedsManualRecovery", () => {
@@ -455,6 +485,267 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
         operator_evidence_pointer: "github://pulls/123#merged",
         operator_ledger_pointer: "ledger://merge-cleanup#42"
       });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("replaces a stale failure finished_at when external reconciliation terminally succeeds the run", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRunWithState(db, "run-1", "failed", {
+        finishedAt: 1_730_000_800_000
+      });
+      seedStep(db, "run-1", "preflight", "succeeded", {
+        kind: "preflight",
+        order: 0
+      });
+      seedStep(db, "run-1", "implementation", "succeeded", {
+        kind: "implementation",
+        order: 1
+      });
+      seedStep(db, "run-1", "postflight", "succeeded", {
+        kind: "postflight",
+        order: 2
+      });
+      seedStep(db, "run-1", "no-mistakes", "succeeded", {
+        kind: "no-mistakes",
+        order: 3
+      });
+      seedStep(db, "run-1", "merge-cleanup", "failed", {
+        kind: "merge-cleanup",
+        order: 4
+      });
+
+      const out = clearWorkflowRunManualRecoveryGuarded(db, {
+        runId: "run-1",
+        now: 1_730_000_900_000,
+        externalSideEffectEvidencePointer: "github://pulls/123#merged"
+      });
+
+      expect(out.ok).toBe(true);
+      expect(readRunRuntimeRow(db, "run-1")).toEqual({
+        state: "succeeded",
+        finished_at: 1_730_000_900_000
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("reconciles an interrupted no-mistakes terminal failure from checks-passed evidence", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRunWithState(db, "run-1", "failed", {
+        finishedAt: 1_730_000_800_000
+      });
+      seedStep(db, "run-1", "preflight", "succeeded", {
+        kind: "preflight",
+        order: 0
+      });
+      seedStep(db, "run-1", "implementation", "succeeded", {
+        kind: "implementation",
+        order: 1
+      });
+      seedStep(db, "run-1", "postflight", "succeeded", {
+        kind: "postflight",
+        order: 2
+      });
+      seedStep(db, "run-1", "no-mistakes", "failed", {
+        kind: "no-mistakes",
+        order: 3
+      });
+      seedStep(db, "run-1", "merge-cleanup", "approved", {
+        kind: "merge-cleanup",
+        order: 4
+      });
+      seedStep(db, "run-1", "linear-refresh", "approved", {
+        kind: "linear-refresh",
+        order: 5
+      });
+
+      const out = clearWorkflowRunManualRecoveryGuarded(db, {
+        runId: "run-1",
+        now: 1_730_000_900_000,
+        successfulNoMistakesEvidencePointer:
+          "no-mistakes:01KW18T2ZP97FGGYTX7MSWV573#checks-passed",
+        successfulNoMistakesLedgerPointer:
+          ".agent-workflows/run-1/daemon-no-mistakes.json#interrupted-wrapper"
+      });
+
+      expect(out).toEqual({
+        ok: true,
+        runId: "run-1",
+        previousReason: null,
+        previousMarkedAt: null,
+        clearedAt: 1_730_000_900_000,
+        reconciledStep: {
+          stepId: "no-mistakes",
+          recoveryCode: "interrupted_no_mistakes_checks_passed",
+          state: "succeeded",
+          evidencePointer:
+            "no-mistakes:01KW18T2ZP97FGGYTX7MSWV573#checks-passed",
+          ledgerPointer:
+            ".agent-workflows/run-1/daemon-no-mistakes.json#interrupted-wrapper"
+        }
+      });
+
+      expect(readRunRuntimeRow(db, "run-1")).toEqual({
+        state: "approved",
+        finished_at: null
+      });
+      const step = db
+        .prepare(
+          `SELECT state, operator_reason, operator_evidence_pointer,
+                  operator_ledger_pointer, finished_at
+             FROM workflow_steps WHERE run_id = ? AND step_id = ?`
+        )
+        .get("run-1", "no-mistakes") as {
+        state: string;
+        operator_reason: string | null;
+        operator_evidence_pointer: string | null;
+        operator_ledger_pointer: string | null;
+        finished_at: number | null;
+      };
+      expect(step).toEqual({
+        state: "succeeded",
+        operator_reason: "interrupted_no_mistakes_checks_passed",
+        operator_evidence_pointer:
+          "no-mistakes:01KW18T2ZP97FGGYTX7MSWV573#checks-passed",
+        operator_ledger_pointer:
+          ".agent-workflows/run-1/daemon-no-mistakes.json#interrupted-wrapper",
+        finished_at: 1_730_000_900_000
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses no-mistakes reconciliation for non-checks-passed evidence", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRunWithState(db, "run-1", "failed", {
+        finishedAt: 1_730_000_800_000
+      });
+      seedStep(db, "run-1", "no-mistakes", "failed", {
+        kind: "no-mistakes",
+        order: 3
+      });
+
+      const out = clearWorkflowRunManualRecoveryGuarded(db, {
+        runId: "run-1",
+        now: 1_730_000_900_000,
+        successfulNoMistakesEvidencePointer:
+          "no-mistakes:01KW18T2ZP97FGGYTX7MSWV573#failed"
+      });
+
+      expect(out.ok).toBe(false);
+      if (out.ok) throw new Error("expected refusal");
+      expect(out.reason).toBe("recovery_clear_refused");
+      expect(out.recoveryCode).toBe("failed_required_step");
+      expect(readRunRuntimeRow(db, "run-1")).toEqual({
+        state: "failed",
+        finished_at: 1_730_000_800_000
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses malformed no-mistakes checks-passed evidence without a run id", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRunWithState(db, "run-1", "failed", {
+        finishedAt: 1_730_000_800_000
+      });
+      seedStep(db, "run-1", "no-mistakes", "failed", {
+        kind: "no-mistakes",
+        order: 3
+      });
+
+      const out = clearWorkflowRunManualRecoveryGuarded(db, {
+        runId: "run-1",
+        now: 1_730_000_900_000,
+        successfulNoMistakesEvidencePointer: "no-mistakes:#checks-passed"
+      });
+
+      expect(out.ok).toBe(false);
+      if (out.ok) throw new Error("expected refusal");
+      expect(out.reason).toBe("recovery_clear_refused");
+      expect(out.recoveryCode).toBe("failed_required_step");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("replaces the stale failure finished_at when no-mistakes reconciliation terminally succeeds the run", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRunWithState(db, "run-1", "failed", {
+        finishedAt: 1_730_000_800_000
+      });
+      seedStep(db, "run-1", "preflight", "succeeded", {
+        kind: "preflight",
+        order: 0
+      });
+      seedStep(db, "run-1", "implementation", "succeeded", {
+        kind: "implementation",
+        order: 1
+      });
+      seedStep(db, "run-1", "postflight", "succeeded", {
+        kind: "postflight",
+        order: 2
+      });
+      seedStep(db, "run-1", "no-mistakes", "failed", {
+        kind: "no-mistakes",
+        order: 3
+      });
+
+      const out = clearWorkflowRunManualRecoveryGuarded(db, {
+        runId: "run-1",
+        now: 1_730_000_900_000,
+        successfulNoMistakesEvidencePointer:
+          "no-mistakes:01KW18T2ZP97FGGYTX7MSWV573#checks-passed"
+      });
+
+      expect(out.ok).toBe(true);
+      expect(readRunRuntimeRow(db, "run-1")).toEqual({
+        state: "succeeded",
+        finished_at: 1_730_000_900_000
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("refuses no-mistakes evidence for ordinary failed required steps", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRunWithState(db, "run-1", "failed", {
+        finishedAt: 1_730_000_800_000
+      });
+      seedStep(db, "run-1", "implementation", "failed", {
+        kind: "implementation",
+        order: 1
+      });
+
+      const out = clearWorkflowRunManualRecoveryGuarded(db, {
+        runId: "run-1",
+        now: 1_730_000_900_000,
+        successfulNoMistakesEvidencePointer:
+          "no-mistakes:01KW18T2ZP97FGGYTX7MSWV573#checks-passed"
+      });
+
+      expect(out.ok).toBe(false);
+      if (out.ok) throw new Error("expected refusal");
+      expect(out.reason).toBe("recovery_clear_refused");
+      expect(out.blockingStepId).toBe("implementation");
     } finally {
       db.close();
     }
