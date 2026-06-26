@@ -203,9 +203,15 @@ type GoalSnapshot = {
   needsManualRecovery: boolean;
 };
 
+type RollupSourceItemGoalLink = {
+  sourceItemId: string;
+  goalId: string;
+};
+
 type RollupSourceItem = SourceItem & {
   rollupSourceItemIds: readonly string[];
   rollupGoalIds: readonly string[];
+  rollupSourceItemGoalLinks: readonly RollupSourceItemGoalLink[];
 };
 
 export function buildProjectRollup(
@@ -575,12 +581,12 @@ function collectLinkedSourceItemGoalIds(
 ): Map<string, string[]> {
   const map = new Map<string, string[]>();
   for (const item of items) {
-    const linkedGoalIds = item.rollupGoalIds.filter((goalId) =>
-      goals.has(goalId)
-    );
-    if (linkedGoalIds.length === 0) continue;
-    for (const sourceItemId of item.rollupSourceItemIds) {
-      map.set(sourceItemId, linkedGoalIds);
+    for (const link of item.rollupSourceItemGoalLinks) {
+      if (!goals.has(link.goalId)) continue;
+      const linkedGoalIds = map.get(link.sourceItemId) ?? [];
+      if (linkedGoalIds.includes(link.goalId)) continue;
+      linkedGoalIds.push(link.goalId);
+      map.set(link.sourceItemId, linkedGoalIds);
     }
   }
   return map;
@@ -654,12 +660,14 @@ function toRollupSourceItem(
   item: SourceItem,
   bucket: readonly SourceItem[] = [item]
 ): RollupSourceItem {
-  const linkedGoalIds = readRollupGoalIds(bucket);
+  const sourceItemGoalLinks = readRollupSourceItemGoalLinks(bucket);
+  const linkedGoalIds = readRollupGoalIds(sourceItemGoalLinks);
   return {
     ...item,
-    goalId: item.goalId ?? linkedGoalIds[0] ?? null,
+    goalId: item.goalId,
     rollupSourceItemIds: readRollupSourceItemIds(bucket),
-    rollupGoalIds: linkedGoalIds
+    rollupGoalIds: linkedGoalIds,
+    rollupSourceItemGoalLinks: sourceItemGoalLinks
   };
 }
 
@@ -667,16 +675,22 @@ function readRollupSourceItemIds(items: readonly SourceItem[]): string[] {
   return [...new Set(items.map((item) => item.id))].sort();
 }
 
-function readRollupGoalIds(items: readonly SourceItem[]): string[] {
-  return [
-    ...new Set(
-      items
-        .slice()
-        .sort(sourceItemOrder)
-        .map((item) => item.goalId)
-        .filter((goalId): goalId is string => goalId !== null)
-    )
-  ];
+function readRollupSourceItemGoalLinks(
+  items: readonly SourceItem[]
+): RollupSourceItemGoalLink[] {
+  const links = new Map<string, RollupSourceItemGoalLink>();
+  for (const item of items.slice().sort(sourceItemOrder)) {
+    if (item.goalId === null) continue;
+    const key = `${item.id}\u0000${item.goalId}`;
+    links.set(key, { sourceItemId: item.id, goalId: item.goalId });
+  }
+  return [...links.values()];
+}
+
+function readRollupGoalIds(
+  links: readonly RollupSourceItemGoalLink[]
+): string[] {
+  return [...new Set(links.map((link) => link.goalId))];
 }
 
 const LINEAR_UUID_RE =

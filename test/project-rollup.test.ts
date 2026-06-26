@@ -1024,7 +1024,7 @@ describe("buildProjectRollup", () => {
       expect(rollup.sourceItems[0]?.externalId).toBe(
         "00000000-0000-4000-8000-000000000924"
       );
-      expect(rollup.sourceItems[0]?.goalId).toBe("goal-linked-legacy");
+      expect(rollup.sourceItems[0]?.goalId).toBeNull();
       expect(rollup.counts.sourceItems.linkedToGoal).toBe(1);
       expect(rollup.counts.goals.total).toBe(1);
       expect(rollup.counts.evidence.totalRecords).toBe(1);
@@ -1032,6 +1032,61 @@ describe("buildProjectRollup", () => {
       expect(
         rollup.mismatches.filter((m) => m.kind === "evidence_missing_after_completion")
       ).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("preserves source-item evidence on the linked duplicate goal only", () => {
+    const db = openDb(makeTempDir());
+    try {
+      seedGoal(db, { id: "goal-with-evidence", state: "completed" });
+      seedGoal(db, { id: "goal-without-evidence", state: "completed" });
+      const legacySourceItemId = seedSourceItem(db, {
+        externalId: "NGX-925",
+        externalKey: "NGX-925",
+        title: "Legacy linked issue",
+        status: "Done",
+        goalId: "goal-with-evidence",
+        observedAt: 1_000,
+        projectName: "Momentum"
+      });
+      seedSourceItem(db, {
+        externalId: "00000000-0000-4000-8000-000000000925",
+        externalKey: "NGX-925",
+        title: "Canonical linked issue",
+        status: "Done",
+        goalId: "goal-without-evidence",
+        observedAt: 2_000,
+        projectName: "Momentum"
+      });
+      ingestEvidenceRecord(db, {
+        source: "workflow",
+        type: "verification",
+        occurredAt: 1_500,
+        summary: "verification passed",
+        sourceItemId: legacySourceItemId,
+        ingestKey: "ingest-legacy-only-evidence"
+      });
+
+      const rollup = buildProjectRollup(db, {
+        filters: { adapterKind: "linear", projectName: "Momentum" },
+        now: 3_000
+      });
+      expect(rollup.sourceItems).toHaveLength(1);
+      expect(rollup.sourceItems[0]?.externalId).toBe(
+        "00000000-0000-4000-8000-000000000925"
+      );
+      expect(rollup.sourceItems[0]?.goalId).toBe("goal-without-evidence");
+      expect(rollup.counts.goals.total).toBe(2);
+      expect(rollup.counts.evidence.totalRecords).toBe(1);
+      expect(rollup.counts.evidence.goalsWithEvidence).toBe(1);
+      expect(rollup.counts.evidence.goalsWithoutEvidence).toBe(1);
+      const missingEvidence = rollup.mismatches.filter(
+        (mismatch) => mismatch.kind === "evidence_missing_after_completion"
+      );
+      expect(missingEvidence).toHaveLength(1);
+      expect(missingEvidence[0]?.goalId).toBe("goal-without-evidence");
     } finally {
       db.close();
     }
