@@ -200,9 +200,13 @@ export function isBlockingWorkflowRecoveryCode(
 export type ClearWorkflowRunManualRecoveryGuardedInput = {
   runId: string;
   now?: number;
+  /** Evidence that a failed external-side-effect tail step landed externally. */
   externalSideEffectEvidencePointer?: string;
+  /** Optional ledger pointer stored with external-side-effect reconciliation. */
   externalSideEffectLedgerPointer?: string;
+  /** `no-mistakes:<run-id>#checks-passed` proof for interrupted success. */
   successfulNoMistakesEvidencePointer?: string;
+  /** Optional ledger pointer stored with interrupted no-mistakes reconciliation. */
   successfulNoMistakesLedgerPointer?: string;
   /** Lease-freshness grace window forwarded to the monitor re-derivation. */
   graceMs?: number;
@@ -248,10 +252,10 @@ export type ClearWorkflowRunManualRecoveryGuardedResult =
  * Operator-facing guarded clear: the explicit, auditable path that re-derives
  * the M7 monitor state and only clears the durable manual-recovery flag when no
  * monitor-derived blocking condition remains. Refuses safely when the run is
- * missing (`run_not_found`), unflagged without an evidence-backed external
- * tail reconciliation (`not_flagged`), or still classified with a blocking
- * monitor recovery code (`recovery_clear_refused`). Live
- * dispatch / finalization recovery uses the same flag but has no monitor
+ * missing (`run_not_found`), unflagged without evidence-backed external-tail
+ * or interrupted no-mistakes reconciliation (`not_flagged`), or still
+ * classified with a blocking monitor recovery code (`recovery_clear_refused`).
+ * Live dispatch / finalization recovery uses the same flag but has no monitor
  * blocker to re-derive here, so clearing those entries is an operator assertion
  * that the captured reason and any rendered artifact or context have been
  * resolved. Scheduler-lane `manual-recovery-required` lease recovery also uses
