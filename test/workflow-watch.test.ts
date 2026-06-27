@@ -440,6 +440,76 @@ describe("momentum workflow run watch", () => {
     }
   });
 
+  it("releases the dispatch lease when the watch dispatcher tick throws", async () => {
+    const dataDir = makeTempDir();
+    const runId = "mwf-watch-dispatch-throws";
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunStart(db, {
+        definition: CODING_WORKFLOW_DEFINITION,
+        runId,
+        repoPath: "/repos/momentum",
+        objective: "Exercise watch dispatcher throw cleanup",
+        now: SEED_NOW,
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE
+      });
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_order < 1"
+      ).run(runId);
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'implementation'"
+      ).run(runId);
+      db.exec(
+        `CREATE TRIGGER fail_watch_round_insert
+           BEFORE INSERT ON executor_rounds
+           BEGIN
+             SELECT RAISE(ABORT, 'watch round insert failed');
+           END`
+      );
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "watch",
+      runId,
+      "--once",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as {
+      code: string;
+      message: string;
+    };
+    expect(payload).toMatchObject({
+      code: "data_dir_failed",
+      message: "watch round insert failed"
+    });
+
+    const after = openDb(dataDir);
+    try {
+      const lease = after
+        .prepare(
+          "SELECT released_at AS releasedAt FROM workflow_leases WHERE run_id = ? AND lease_kind = 'dispatch'"
+        )
+        .get(runId) as { releasedAt: number | null };
+      expect(lease.releasedAt).not.toBeNull();
+      const step = after
+        .prepare(
+          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = 'implementation'"
+        )
+        .get(runId) as { state: string };
+      expect(step.state).toBe("approved");
+    } finally {
+      after.close();
+    }
+  });
+
   it("does not dispatch an approved step while an operator gate is open", async () => {
     const dataDir = makeTempDir();
     const runId = "mwf-watch-open-gate";
@@ -595,6 +665,112 @@ describe("momentum workflow run watch", () => {
       quietForSeconds: 0,
       stuckRisk: "high",
       cleanup: "none"
+    });
+  });
+
+  it("does not emit a recovery command for soft monitor drift", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-watch-monitor-drift";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "running" });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "running",
+        order: 1
+      });
+      seedLease(db, {
+        runId,
+        leaseKind: "managed-step",
+        expiresAt: FRESH_EXPIRY
+      });
+      db.prepare(
+        `UPDATE workflow_runs
+            SET monitor_last_seen_state = 'succeeded',
+                monitor_terminal = 1,
+                monitor_step = 'implementation'
+          WHERE id = ?`
+      ).run(runId);
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "watch",
+      runId,
+      "--once",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      disposition: string;
+      phase: string;
+      nextAction: { code: string };
+      humanAction: unknown;
+      recommendedAction: string;
+      stuckRisk: string;
+    };
+    expect(payload).toMatchObject({
+      disposition: "report",
+      phase: "advancing",
+      nextAction: { code: "resume_running" },
+      humanAction: null,
+      recommendedAction: "poll",
+      stuckRisk: "low"
+    });
+  });
+
+  it("does not emit a clear-recovery command for an ordinary failed step", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-watch-failed-required-step";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "failed" });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "failed",
+        order: 1
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "watch",
+      runId,
+      "--once",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      disposition: string;
+      phase: string;
+      nextAction: { code: string; stepId?: string | null };
+      humanAction: unknown;
+      recommendedAction: string;
+      stuckRisk: string;
+    };
+    expect(payload).toMatchObject({
+      disposition: "recover",
+      phase: "blocked",
+      nextAction: { code: "rerun_failed_step", stepId: "implementation" },
+      humanAction: null,
+      recommendedAction: "operator_decision",
+      stuckRisk: "high"
     });
   });
 

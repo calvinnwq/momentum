@@ -1503,7 +1503,8 @@ Options:
 Before deriving that tick, `workflow run watch --once` may claim and dispatch exactly one approved next step for the target run.
 It does not resolve gates, approvals, or recovery decisions by itself, and it does not scan or claim work from other runs.
 `activeStep` is `null` when no step is active.
-`humanAction` is `null` when no operator command is required, points to `workflow run approve` for approval waits, points to `workflow run decide` for open gates, and points to `workflow run clear-recovery` for recovery states.
+`humanAction` is `null` when no operator command is required, points to `workflow run approve` for approval waits, points to `workflow run decide` for open gates, and points to `workflow run clear-recovery` only for recovery states that can be cleared directly or with an explicit evidence pointer.
+Soft `monitor_drift_stale` reports and ordinary `failed_required_step` failures do not emit a clear-recovery command.
 `recommendedAction` is one of `poll`, `approve`, `operator_decision`, `recover`, or `release`.
 `nextPollSeconds` is `0` for release, `30` for blocked or approval waits, and `15` while work can keep progressing.
 `quietForSeconds` mirrors the poll interval on suppressed ticks and is `0` when this tick emits.

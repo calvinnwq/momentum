@@ -59,6 +59,7 @@ import {
   type WorkflowMonitorState
 } from "../../core/workflow/monitor-state.js";
 import { executeWorkflowStepDispatch } from "../../core/workflow/dispatch-execute.js";
+import { releaseWorkflowLease } from "../../core/workflow/leases.js";
 import {
   claimRunnableWorkflowStep,
   DEFAULT_WORKFLOW_DISPATCH_LEASE_MS
@@ -2089,11 +2090,25 @@ function runWorkflowWatchDispatcherTick(
   });
   if (!claim.ok) return;
 
-  executeWorkflowStepDispatch(claim.claim, {
-    db,
-    workerId,
-    now
-  });
+  try {
+    executeWorkflowStepDispatch(claim.claim, {
+      db,
+      workerId,
+      now
+    });
+  } catch (error) {
+    try {
+      releaseWorkflowLease(db, {
+        runId: claim.claim.lease.runId,
+        leaseKind: claim.claim.lease.leaseKind,
+        holder: claim.claim.lease.holder,
+        acquiredAt: claim.claim.lease.acquiredAt,
+        now
+      });
+    } catch {
+    }
+    throw error;
+  }
 }
 
 function workflowRunLogs(parsed: ParsedFlags, io: CliIo): number {

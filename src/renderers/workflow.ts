@@ -881,6 +881,24 @@ function buildWorkflowWatchHumanAction(
   if (isWorkflowWatchCleanTerminal(envelope)) {
     return null;
   }
+  if (envelope.recovery?.code === "failed_required_step") {
+    return null;
+  }
+  if (
+    envelope.recovery?.code === "monitor_drift_stale" &&
+    !envelope.needsManualRecovery
+  ) {
+    return null;
+  }
+  if (envelope.recovery?.code === "failed_external_side_effect_step") {
+    return {
+      code: "clear_recovery",
+      command:
+        `momentum workflow run clear-recovery ${envelope.runId} ` +
+        "--evidence-pointer <ref>",
+      detail: envelope.recovery.message
+    };
+  }
   if (envelope.needsManualRecovery) {
     return {
       code: "clear_recovery",
@@ -962,6 +980,14 @@ function buildWorkflowWatchNextAction(envelope: WorkflowMonitorEnvelope): {
     };
   }
   if (envelope.needsManualRecovery) {
+    if (envelope.recovery?.code === "failed_required_step") {
+      return {
+        code: envelope.nextAction.code,
+        stepId: envelope.nextAction.stepId,
+        leaseKind: envelope.nextAction.leaseKind,
+        detail: envelope.nextAction.detail
+      };
+    }
     return {
       code: "clear_recovery",
       stepId:
@@ -996,6 +1022,17 @@ function recommendWorkflowWatchAction(
   progress: WorkflowMonitorProgressTick
 ): string {
   if (progress.cleanup === "release") return "release";
+  if (envelope.recovery?.code === "failed_required_step") {
+    return "operator_decision";
+  }
+  if (
+    envelope.recovery?.code === "monitor_drift_stale" &&
+    !envelope.needsManualRecovery
+  ) {
+    return envelope.gates.some((gate) => gate.resolvedAt === null)
+      ? "operator_decision"
+      : "poll";
+  }
   if (envelope.needsManualRecovery || envelope.recovery !== null) {
     return "recover";
   }
@@ -1026,6 +1063,12 @@ function classifyWorkflowWatchStuckRisk(
   envelope: WorkflowMonitorEnvelope,
   progress: WorkflowMonitorProgressTick
 ): "low" | "medium" | "high" {
+  if (
+    envelope.recovery?.code === "monitor_drift_stale" &&
+    progress.phase === "advancing"
+  ) {
+    return "low";
+  }
   if (progress.phase === "blocked" || envelope.recovery !== null) return "high";
   if (progress.phase === "idle" || progress.phase === "awaiting_approval") {
     return "medium";
