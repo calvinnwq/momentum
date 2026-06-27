@@ -452,7 +452,13 @@ describe("workflow run watch supervisor envelope contract", () => {
       stuckRisk: "medium",
       cleanup: "none"
     });
-    expect(payload["humanAction"]).toMatchObject({ code: "approve" });
+    expect(payload["humanAction"]).toMatchObject({
+      code: "approve",
+      command:
+        `momentum workflow run approve ${runId} ` +
+        `--approval-boundary through-implementation ` +
+        `--phrase "approve plan ${runId} through-implementation"`
+    });
   });
 
   it("recovery required: a durable manual-recovery tick recommends clear-recovery", async () => {

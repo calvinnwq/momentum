@@ -1596,7 +1596,7 @@ Approval required - the next step is gated on operator approval:
   "cleanup": "none",
   "humanAction": {
     "code": "approve",
-    "command": "momentum workflow run approve mwf-abc123 --approval-boundary <boundary> --actor <name>",
+    "command": "momentum workflow run approve mwf-abc123 --approval-boundary through-implementation --phrase \"approve plan mwf-abc123 through-implementation\"",
     "detail": "Step implementation is waiting for approval."
   }
 }
