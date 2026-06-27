@@ -150,6 +150,19 @@ export function classifyWorkflowMonitorReport(
   monitor: WorkflowMonitorState,
   needsManualRecovery: boolean
 ): WorkflowMonitorReport {
+  // Clean terminal substrate evidence wins over stale durable recovery flags.
+  // `clear-recovery` is not actionable once the reducer has no recovery object
+  // and the durable next action is already `no_action`.
+  if (
+    monitor.terminal &&
+    monitor.recovery === null &&
+    monitor.nextAction.code === "no_action"
+  ) {
+    return monitor.runState === "canceled"
+      ? reportOf("report", "terminal_canceled")
+      : reportOf("report", "terminal_succeeded");
+  }
+
   // 1. Hard operator-recovery conditions take precedence over everything else.
   if (needsManualRecovery || monitor.blocked) {
     return reportOf("recover", "recovery_required");

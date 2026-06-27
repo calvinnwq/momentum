@@ -38,6 +38,17 @@ const publicSurfaces: { label: string; file: string; body: string }[] = [
 ];
 
 describe("public docs hygiene", () => {
+  describe("README command surface", () => {
+    it("lists workflow run watch in the workflow run command summary", () => {
+      const workflowRunCommand = publicSurfaces
+        .find((surface) => surface.file === "README.md")
+        ?.body.split("\n")
+        .find((line) => line.startsWith("momentum workflow run "));
+
+      expect(workflowRunCommand).toContain("monitor|watch|logs");
+    });
+  });
+
   describe("no NGX/Linear issue identifiers", () => {
     for (const surface of publicSurfaces) {
       it(`${surface.label} must not reference NGX-* issue identifiers`, () => {

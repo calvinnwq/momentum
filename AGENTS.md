@@ -48,7 +48,7 @@ coverage contracts are compactly anchored in [`SPEC.md`](SPEC.md). Long-form
 contract rationale lives in Obsidian `/Workspaces/Momentum`.
 
 ## Stack and workflow commands
-TypeScript on Node.js with Vitest tests, managed by pnpm. See [README.md](README.md)'s `## Development` block for `pnpm install`, `pnpm test`, `pnpm typecheck`, `pnpm build`, `node dist/index.js --help`, `node dist/index.js doctor`.
+TypeScript on Node.js with Vitest tests, managed by pnpm. See [README.md](README.md)'s `## Development` block for `pnpm install`, `pnpm test`, `pnpm test:integration`, `pnpm test:full`, `pnpm typecheck`, `pnpm lint`, `pnpm build`, `pnpm format:check`, `node dist/index.js --help`, `node dist/index.js doctor`.
 
 ## Coding discipline
 - Follow existing code patterns and naming in `src/` and `test/`.

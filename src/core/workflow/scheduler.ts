@@ -128,6 +128,8 @@ export type WorkflowSchedulerScan = {
 export type SelectRunnableWorkflowWorkInput = {
   /** Absolute ms timestamp used for lease freshness classification. */
   now: number;
+  /** Optional run scope for supervisor ticks that must not mutate other runs. */
+  runId?: string;
   /** Clock-skew tolerance forwarded to `classifyWorkflowLease`. Defaults to 0. */
   graceMs?: number;
 };
@@ -160,15 +162,27 @@ export function selectRunnableWorkflowWork(
   // produce runnable work or relevant stale leases. `pending` runs (no approval
   // yet) are scanned too so a stray lease on them is still surfaced, but they
   // never derive to `approved` and so never produce a runnable step.
-  const runs = db
-    .prepare(
-      `SELECT id, state, repo_path
-         FROM workflow_runs
-        WHERE needs_manual_recovery = 0
-          AND state NOT IN ('succeeded', 'failed', 'canceled')
-        ORDER BY created_at ASC, id ASC`
-    )
-    .all() as WorkflowRunScanRow[];
+  const runs =
+    input.runId === undefined
+      ? (db
+          .prepare(
+            `SELECT id, state, repo_path
+               FROM workflow_runs
+              WHERE needs_manual_recovery = 0
+                AND state NOT IN ('succeeded', 'failed', 'canceled')
+              ORDER BY created_at ASC, id ASC`
+          )
+          .all() as WorkflowRunScanRow[])
+      : (db
+          .prepare(
+            `SELECT id, state, repo_path
+               FROM workflow_runs
+              WHERE id = ?
+                AND needs_manual_recovery = 0
+                AND state NOT IN ('succeeded', 'failed', 'canceled')
+              ORDER BY created_at ASC, id ASC`
+          )
+          .all(input.runId) as WorkflowRunScanRow[]);
 
   const runnable: RunnableWorkflowStep[] = [];
   const staleLeases: StaleWorkflowLease[] = [];
@@ -369,6 +383,8 @@ export type RecoverStaleWorkflowLeasesResult = {
 export type RecoverStaleWorkflowLeasesInput = {
   /** Absolute ms timestamp used for lease freshness classification. */
   now: number;
+  /** Optional run scope for supervisor ticks that must not mutate other runs. */
+  runId?: string;
   /** Clock-skew tolerance forwarded to `classifyWorkflowLease`. Defaults to 0. */
   graceMs?: number;
 };
@@ -1064,6 +1080,8 @@ export type RunWorkflowSchedulerOnceInput = {
   db: MomentumDb;
   /** Lease holder identity for any dispatch lease this tick acquires. */
   workerId: string;
+  /** Optional run scope for supervisor ticks that must not mutate other runs. */
+  runId?: string;
   /** The executor-dispatch seam invoked with a successfully claimed step. */
   dispatch: WorkflowStepDispatch;
   /** Tick clock. Defaults to `Date.now`. */
@@ -1120,17 +1138,30 @@ function selectActiveSubworkflowDispatchRecheck(
     holder: string;
     leaseDurationMs: number;
     stalePolicy: WorkflowLeaseStalePolicy;
+    runId?: string;
   }
 ): ClaimedWorkflowStep | undefined {
-  const runs = db
-    .prepare(
-      `SELECT id, state, repo_path
-         FROM workflow_runs
-        WHERE needs_manual_recovery = 0
-          AND state NOT IN ('succeeded', 'failed', 'canceled')
-        ORDER BY created_at ASC, id ASC`
-    )
-    .all() as WorkflowRunScanRow[];
+  const runs =
+    input.runId === undefined
+      ? (db
+          .prepare(
+            `SELECT id, state, repo_path
+               FROM workflow_runs
+              WHERE needs_manual_recovery = 0
+                AND state NOT IN ('succeeded', 'failed', 'canceled')
+              ORDER BY created_at ASC, id ASC`
+          )
+          .all() as WorkflowRunScanRow[])
+      : (db
+          .prepare(
+            `SELECT id, state, repo_path
+               FROM workflow_runs
+              WHERE id = ?
+                AND needs_manual_recovery = 0
+                AND state NOT IN ('succeeded', 'failed', 'canceled')
+              ORDER BY created_at ASC, id ASC`
+          )
+          .all(input.runId) as WorkflowRunScanRow[]);
 
   for (const run of runs) {
     const lease = getWorkflowLease(db, run.id, WORKFLOW_DISPATCH_LEASE_KIND);
@@ -1438,15 +1469,21 @@ function runWorkflowSchedulerOnceCore(
   // A single tick timestamp keeps recovery, scan, and claim classifying lease
   // freshness against one consistent clock. (recover / scan validate now/graceMs.)
   const tickNow = now();
+  const runScope = input.runId === undefined ? {} : { runId: input.runId };
 
-  const recovery = recoverStaleLeases(db, { now: tickNow, graceMs });
+  const recovery = recoverStaleLeases(db, {
+    now: tickNow,
+    graceMs,
+    ...runScope
+  });
 
   const activeClaim = selectActiveSubworkflowDispatchRecheck(db, {
     now: tickNow,
     graceMs,
     holder: workerId,
     leaseDurationMs,
-    stalePolicy
+    stalePolicy,
+    ...runScope
   });
   if (activeClaim !== undefined) {
     const refreshedClaim = heartbeatActiveDispatchClaim(db, {
@@ -1462,7 +1499,7 @@ function runWorkflowSchedulerOnceCore(
     }
   }
 
-  const scan = selectRunnableWork(db, { now: tickNow, graceMs });
+  const scan = selectRunnableWork(db, { now: tickNow, graceMs, ...runScope });
   const candidate = scan.runnable[0];
   if (candidate === undefined) {
     return { code: "idle", workerId, recovery };

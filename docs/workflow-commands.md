@@ -1,6 +1,6 @@
 # Workflow commands
 
-Operator-facing CLI envelopes for the `workflow run start`, `workflow run start-coding`, `workflow run preview-coding`, `workflow import`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run approve`, `workflow run decide`, `workflow run update-step`, `workflow run clear-recovery`, `workflow run monitor`, and `workflow run logs` commands.
+Operator-facing CLI envelopes for the `workflow run start`, `workflow run start-coding`, `workflow run preview-coding`, `workflow import`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run approve`, `workflow run decide`, `workflow run update-step`, `workflow run clear-recovery`, `workflow run monitor`, `workflow run watch`, and `workflow run logs` commands.
 
 - `workflow run start` starts a first-class workflow run from a validated workflow definition: it resolves the definition (a persisted definition, or the built-in `coding-workflow` recipe), loads repo policy, and durably materializes a `workflow_runs` row plus one ordered `workflow_steps` row per definition step, with an approval row when an approval boundary is supplied.
   `goal start` remains the compatibility path for the older Goal loop.
@@ -18,10 +18,13 @@ Operator-facing CLI envelopes for the `workflow run start`, `workflow run start-
 - `workflow run decide` resolves a durable workflow / step / executor gate by routing an operator or delegated-policy decision through the gate brain: an operator may pick any allowed action, while `--mode delegated` may only auto-apply an action inside the gate's policy envelope.
 - `workflow run monitor` is read-only by default and emits one stable JSON shape per run, derived from durable rows and the monitor reducer, so a monitor runner can decide whether to report, wait, or ask an operator to recover without parsing prose or scraping artifacts.
   Its opt-in `--advance` mode is restricted to Momentum-native coding runs and writes only digest baselines for progress suppression.
+- `workflow run watch` emits a one-shot supervisor envelope for a Momentum-native coding run.
+  `--once` safely runs at most one run-scoped dispatcher tick when the target run has one approved next step or one active step eligible for recheck, then persists the same digest suppression baseline as a monitor advance tick and gives external pollers one recommended next action.
 - `workflow run logs` is a read-only run-scoped log and evidence reader that reuses the workflow detail shape and attaches executor rounds plus their child artifacts, checkpoints, findings, and decisions.
 
 `workflow run preview-coding`, `workflow status`, `workflow handoff`, `workflow run list`, and `workflow run logs` are read-only: they never write SQLite or files.
 `workflow run monitor` is also read-only unless `--advance` is passed, in which case supported Momentum-native coding runs persist only `monitor_last_seen_digest` and `monitor_last_emitted_digest` progress baselines.
+`workflow run watch --once` is write-limited to the target run's safe dispatcher tick and the same digest baseline columns for supported Momentum-native coding runs.
 
 `workflow run --help` and any nested `workflow run ... --help` or `workflow run ... -h` invocation print the shared top-level CLI help to stdout and exit 0 before selecting or validating a run subcommand.
 This help path ignores `--json`, reads no data directory, and performs no durable writes.
@@ -1376,6 +1379,10 @@ external. A chat, cron, or supervisor wrapper should call:
 momentum workflow run monitor <run-id> --advance --json
 ```
 
+Use `workflow run watch <run-id> --once --json` instead when the supervisor
+should also run one bounded target-run dispatcher tick before reading the same
+projection.
+
 Then branch on the JSON instead of scraping text:
 
 - Suppress the tick when `progress.emit` is `false`, `blocked` is `false`,
@@ -1435,6 +1442,109 @@ A `Manual recovery reason: <reason>` line is added when the durable run-scoped r
 A `Recovery: <code>` line is added when a recovery classification is present.
 Open gates print inline after the `Gates:` count; resolved gates are omitted from text output.
 A `Blocker: <reason>` line is added between `Last event` and `Cleanup` when the run is in the `blocked` phase.
+
+Exit code 0 on success, 1 on failure, 2 on usage error.
+
+## `workflow run watch`
+
+```text
+momentum workflow run watch <run-id> --once [--data-dir <path>] [--json]
+```
+
+Emits a one-shot supervisor tick for a Momentum-native coding workflow run.
+The command reads the durable monitor projection, persists this tick's digest baseline, and returns a compact next-action envelope for cron, OpenClaw, or GUI pollers.
+It does not resolve approvals, gates, manual recovery, or other operator decisions.
+
+Required arguments:
+
+- `<run-id>` - the run to inspect.
+
+Options:
+
+- `--once` - required for the MVP one-shot mode.
+  Stream mode is not available.
+
+### JSON envelope
+
+```json
+{
+  "ok": true,
+  "command": "workflow run watch",
+  "mode": "once",
+  "dataDir": "/path/to/data",
+  "schemaVersion": 1,
+  "generatedAt": 1730000600000,
+  "runId": "mwf-abc123",
+  "runState": "running",
+  "emit": true,
+  "reason": "in_progress",
+  "disposition": "wait",
+  "phase": "advancing",
+  "activeStep": {
+    "stepId": "implementation",
+    "kind": "implementation",
+    "state": "running",
+    "order": 1,
+    "required": true
+  },
+  "nextAction": {
+    "code": "resume_running",
+    "stepId": "implementation",
+    "leaseKind": "managed-step",
+    "detail": "Step is running with a fresh dispatch lease and recent checkpoint evidence. Allow it to continue."
+  },
+  "humanAction": null,
+  "recommendedAction": "poll",
+  "nextPollSeconds": 15,
+  "quietForSeconds": 0,
+  "stuckRisk": "low",
+  "cleanup": "none",
+  "digest": "sha256:7abb560d717661265f609b02107bd6fce701de831d42a28bd1f7af344aa52ad5"
+}
+```
+
+`emit`, `reason`, `disposition`, `phase`, `cleanup`, and `digest` are derived from the same monitor progress tick as `workflow run monitor --advance`.
+Before deriving that tick, `workflow run watch --once` may run one target-run dispatcher tick, either to claim and dispatch one approved next step or to recheck one active running step that the scheduler can safely revisit.
+It does not resolve gates, approvals, or recovery decisions by itself, recover stale leases, or scan or claim work from other runs.
+`activeStep` is `null` when no step is active.
+`humanAction` is `null` when no operator command is required, points to `workflow run approve` for approval waits, points to `workflow run decide` for open gates, and points to `workflow run clear-recovery` only for recovery states that can be cleared directly or with an explicit evidence pointer.
+Soft `monitor_drift_stale` reports and ordinary `failed_required_step` failures do not emit a clear-recovery command.
+`recommendedAction` is one of `poll`, `approve`, `operator_decision`, `recover`, or `release`.
+`nextPollSeconds` is `0` for release, `30` for blocked or approval waits, and `15` otherwise.
+`quietForSeconds` mirrors the poll interval on suppressed ticks and is `0` when this tick emits.
+`stuckRisk` is `low` for progressing work, `medium` for idle or approval waits, and `high` for blocked or recovery states.
+
+### Error codes
+
+| Code | Meaning |
+|------|---------|
+| `run_id_required` | `<run-id>` was not supplied. |
+| `once_required` | `--once` was not supplied. |
+| `data_dir_failed` | Data directory resolution, SQLite access, or the bounded dispatch tick failed. |
+| `daemon_live_wrapper_profile_invalid` | The shared daemon live-wrapper profile was configured but unreadable or invalid when the bounded dispatch tick resolved it. |
+| `run_not_found` | `<run-id>` does not exist in `workflow_runs`. |
+| `watch_unsupported_source` | The run source is not `momentum-native-coding`. |
+
+### Text output
+
+```text
+Workflow run watch: mwf-abc123
+Mode: once
+Emit: true
+Reason: in_progress
+Disposition: wait
+Phase: advancing
+Next action: resume_running
+Recommended action: poll
+Next poll seconds: 15
+Quiet for seconds: 0
+Stuck risk: low
+Cleanup: none
+Digest: sha256:7abb560d717661265f609b02107bd6fce701de831d42a28bd1f7af344aa52ad5
+Data dir: /path/to/data
+```
+
+A human action line is included when the tick requires an operator command.
 
 Exit code 0 on success, 1 on failure, 2 on usage error.
 

@@ -810,6 +810,326 @@ export function emitWorkflowRunMonitorFailure(
   });
 }
 
+export function emitWorkflowRunWatch(
+  parsed: { json: boolean },
+  io: CliIo,
+  dataDir: string,
+  envelope: WorkflowMonitorEnvelope,
+  progress: WorkflowMonitorProgressTick
+): number {
+  const nextAction = buildWorkflowWatchNextAction(envelope);
+  const payload = {
+    ok: true,
+    command: "workflow run watch",
+    mode: "once",
+    dataDir,
+    schemaVersion: envelope.schemaVersion,
+    generatedAt: envelope.generatedAt,
+    runId: envelope.runId,
+    runState: envelope.runState,
+    emit: progress.emit,
+    reason: progress.reportReason,
+    disposition: progress.disposition,
+    phase: progress.phase,
+    activeStep: envelope.activeStep
+      ? {
+          stepId: envelope.activeStep.stepId,
+          kind: envelope.activeStep.kind,
+          state: envelope.activeStep.state,
+          order: envelope.activeStep.order,
+          required: envelope.activeStep.required
+        }
+      : null,
+    nextAction,
+    humanAction: buildWorkflowWatchHumanAction(envelope),
+    recommendedAction: recommendWorkflowWatchAction(envelope, progress),
+    nextPollSeconds: recommendWorkflowWatchPollSeconds(progress),
+    quietForSeconds: progress.emit ? 0 : recommendWorkflowWatchPollSeconds(progress),
+    stuckRisk: classifyWorkflowWatchStuckRisk(envelope, progress),
+    cleanup: progress.cleanup,
+    digest: progress.digest
+  };
+
+  if (parsed.json) {
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  write(
+    io.stdout,
+    renderWorkflowWatchText(dataDir, envelope, progress, payload)
+  );
+  return 0;
+}
+
+export function emitWorkflowRunWatchFailure(
+  parsed: { json: boolean },
+  io: CliIo,
+  failure: Omit<WorkflowRendererFailure, "command"> & {
+    command?: "workflow run watch";
+  }
+): number {
+  return emitWorkflowFailure(parsed, io, {
+    ...failure,
+    command: "workflow run watch"
+  });
+}
+
+function buildWorkflowWatchHumanAction(
+  envelope: WorkflowMonitorEnvelope
+): { code: string; command: string; detail: string | null } | null {
+  if (isWorkflowWatchCleanTerminal(envelope)) {
+    return null;
+  }
+  if (envelope.recovery?.code === "failed_required_step") {
+    return null;
+  }
+  if (workflowWatchRecoveryHasNoDirectClearCommand(envelope.recovery?.code)) {
+    return null;
+  }
+  if (
+    envelope.recovery?.code === "monitor_drift_stale" &&
+    !envelope.needsManualRecovery
+  ) {
+    return null;
+  }
+  if (envelope.recovery?.code === "failed_external_side_effect_step") {
+    return {
+      code: "clear_recovery",
+      command:
+        `momentum workflow run clear-recovery ${envelope.runId} ` +
+        "--evidence-pointer <ref>",
+      detail: envelope.recovery.message
+    };
+  }
+  if (envelope.needsManualRecovery) {
+    return {
+      code: "clear_recovery",
+      command: `momentum workflow run clear-recovery ${envelope.runId}`,
+      detail:
+        envelope.manualRecoveryReason ??
+        envelope.recovery?.message ??
+        envelope.nextAction.detail
+    };
+  }
+  if (envelope.recovery !== null) {
+    return null;
+  }
+  const openGate = envelope.gates.find((gate) => gate.resolvedAt === null);
+  if (openGate !== undefined) {
+    return {
+      code: "resolve_gate",
+      command: `momentum workflow run decide ${openGate.gateId} --action <action> --actor <name>`,
+      detail: openGate.reason
+    };
+  }
+  if (
+    envelope.nextAction.code === "await_approval" &&
+    envelope.activeStep !== null
+  ) {
+    const boundary = workflowWatchApprovalBoundaryForStepKind(
+      envelope.activeStep.kind
+    );
+    if (boundary !== null) {
+      return {
+        code: "approve",
+        command:
+          `momentum workflow run approve ${envelope.runId} ` +
+          `--approval-boundary ${boundary} ` +
+          `--phrase "approve plan ${envelope.runId} ${boundary}"`,
+        detail: envelope.nextAction.detail
+      };
+    }
+  }
+  return null;
+}
+
+function workflowWatchApprovalBoundaryForStepKind(
+  kind: NonNullable<WorkflowMonitorEnvelope["activeStep"]>["kind"]
+): string | null {
+  switch (kind) {
+    case "preflight":
+    case "implementation":
+      return "through-implementation";
+    case "postflight":
+      return "through-postflight";
+    case "no-mistakes":
+      return "through-no-mistakes";
+    case "merge-cleanup":
+      return "through-merge-cleanup";
+    case "linear-refresh":
+      return "full";
+    default:
+      return null;
+  }
+}
+
+function buildWorkflowWatchNextAction(envelope: WorkflowMonitorEnvelope): {
+  code: string;
+  stepId: string | null;
+  leaseKind: string | null;
+  detail: string | null;
+} {
+  if (isWorkflowWatchCleanTerminal(envelope)) {
+    return {
+      code: envelope.nextAction.code,
+      stepId: envelope.nextAction.stepId,
+      leaseKind: envelope.nextAction.leaseKind,
+      detail: envelope.nextAction.detail
+    };
+  }
+  if (envelope.needsManualRecovery) {
+    if (
+      envelope.recovery?.code === "failed_required_step" ||
+      workflowWatchRecoveryHasNoDirectClearCommand(envelope.recovery?.code)
+    ) {
+      return {
+        code: envelope.nextAction.code,
+        stepId: envelope.nextAction.stepId,
+        leaseKind: envelope.nextAction.leaseKind,
+        detail: envelope.nextAction.detail
+      };
+    }
+    return {
+      code: "clear_recovery",
+      stepId:
+        envelope.recovery?.stepId ??
+        envelope.activeStep?.stepId ??
+        envelope.nextAction.stepId,
+      leaseKind: null,
+      detail:
+        envelope.manualRecoveryReason ??
+        envelope.recovery?.message ??
+        "Run is flagged for manual recovery. Clear recovery after resolving the underlying cause."
+    };
+  }
+  return {
+    code: envelope.nextAction.code,
+    stepId: envelope.nextAction.stepId,
+    leaseKind: envelope.nextAction.leaseKind,
+    detail: envelope.nextAction.detail
+  };
+}
+
+function workflowWatchRecoveryHasNoDirectClearCommand(
+  recoveryCode: string | undefined
+): boolean {
+  return (
+    recoveryCode === "stale_running_step" ||
+    recoveryCode === "ghost_active_no_lease" ||
+    recoveryCode === "manual_recovery_lease"
+  );
+}
+
+function isWorkflowWatchCleanTerminal(envelope: WorkflowMonitorEnvelope): boolean {
+  return (
+    envelope.terminal &&
+    envelope.recovery === null &&
+    envelope.nextAction.code === "no_action"
+  );
+}
+
+function recommendWorkflowWatchAction(
+  envelope: WorkflowMonitorEnvelope,
+  progress: WorkflowMonitorProgressTick
+): string {
+  if (progress.cleanup === "release") return "release";
+  if (envelope.recovery?.code === "failed_required_step") {
+    return "operator_decision";
+  }
+  if (
+    envelope.recovery?.code === "monitor_drift_stale" &&
+    !envelope.needsManualRecovery
+  ) {
+    return envelope.gates.some((gate) => gate.resolvedAt === null)
+      ? "operator_decision"
+      : "poll";
+  }
+  if (envelope.needsManualRecovery || envelope.recovery !== null) {
+    return "recover";
+  }
+  if (envelope.gates.some((gate) => gate.resolvedAt === null)) {
+    return "operator_decision";
+  }
+  if (
+    progress.phase === "awaiting_approval" &&
+    envelope.nextAction.code === "await_approval" &&
+    envelope.activeStep !== null
+  ) {
+    return "approve";
+  }
+  return "poll";
+}
+
+function recommendWorkflowWatchPollSeconds(
+  progress: WorkflowMonitorProgressTick
+): number {
+  if (progress.cleanup === "release") return 0;
+  if (progress.phase === "blocked" || progress.phase === "awaiting_approval") {
+    return 30;
+  }
+  return 15;
+}
+
+function classifyWorkflowWatchStuckRisk(
+  envelope: WorkflowMonitorEnvelope,
+  progress: WorkflowMonitorProgressTick
+): "low" | "medium" | "high" {
+  if (
+    envelope.recovery?.code === "monitor_drift_stale" &&
+    progress.phase === "advancing"
+  ) {
+    return "low";
+  }
+  if (progress.phase === "blocked" || envelope.recovery !== null) return "high";
+  if (progress.phase === "idle" || progress.phase === "awaiting_approval") {
+    return "medium";
+  }
+  return "low";
+}
+
+type WorkflowWatchTextPayload = {
+  emit: boolean;
+  reason: string;
+  nextAction: { code: string };
+  recommendedAction: string;
+  nextPollSeconds: number;
+  quietForSeconds: number;
+  stuckRisk: string;
+  humanAction: { command: string; detail: string | null } | null;
+};
+
+function renderWorkflowWatchText(
+  dataDir: string,
+  envelope: WorkflowMonitorEnvelope,
+  progress: WorkflowMonitorProgressTick,
+  payload: WorkflowWatchTextPayload
+): string {
+  const lines: string[] = [];
+  lines.push(`Workflow run watch: ${envelope.runId}`);
+  lines.push(`Mode: once`);
+  lines.push(`Emit: ${payload.emit}`);
+  lines.push(`Reason: ${payload.reason}`);
+  lines.push(`Disposition: ${progress.disposition}`);
+  lines.push(`Phase: ${progress.phase}`);
+  lines.push(`Next action: ${payload.nextAction.code}`);
+  lines.push(`Recommended action: ${payload.recommendedAction}`);
+  lines.push(`Next poll seconds: ${payload.nextPollSeconds}`);
+  lines.push(`Quiet for seconds: ${payload.quietForSeconds}`);
+  lines.push(`Stuck risk: ${payload.stuckRisk}`);
+  if (payload.humanAction !== null) {
+    lines.push(`Human action: ${payload.humanAction.command}`);
+    if (payload.humanAction.detail !== null) {
+      lines.push(`Human action detail: ${payload.humanAction.detail}`);
+    }
+  }
+  lines.push(`Cleanup: ${progress.cleanup}`);
+  lines.push(`Digest: ${progress.digest}`);
+  lines.push(`Data dir: ${dataDir}`);
+  lines.push("");
+  return lines.join("\n");
+}
+
 export function emitWorkflowHandoff(
   parsed: { json: boolean },
   io: CliIo,

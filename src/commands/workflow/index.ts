@@ -58,6 +58,15 @@ import {
   deriveWorkflowMonitorState,
   type WorkflowMonitorState
 } from "../../core/workflow/monitor-state.js";
+import { executeWorkflowStepDispatch } from "../../core/workflow/dispatch-execute.js";
+import {
+  resolveDaemonWorkflowStepDispatch,
+  type DaemonWorkflowDispatchDeps
+} from "../../core/daemon/workflow-dispatch.js";
+import {
+  runWorkflowSchedulerOnceAsync,
+  type RecoverStaleWorkflowLeasesResult
+} from "../../core/workflow/scheduler.js";
 import {
   loadWorkflowRuntimeStateRows,
   refreshWorkflowRunRuntimeState
@@ -128,6 +137,8 @@ import {
   emitWorkflowRunListFailure,
   emitWorkflowRunMonitor,
   emitWorkflowRunMonitorFailure,
+  emitWorkflowRunWatch,
+  emitWorkflowRunWatchFailure,
   emitWorkflowRunPreviewCodingSuccess,
   emitWorkflowRunStartFailure,
   emitWorkflowRunStartSuccess,
@@ -143,6 +154,7 @@ type ParsedFlags = {
   args: string[];
   json: boolean;
   advance?: boolean;
+  once?: boolean;
   dataDir?: string;
   repo?: string;
   reason?: string;
@@ -174,7 +186,13 @@ type ParsedFlags = {
   error?: string;
 };
 
-export function workflow(parsed: ParsedFlags, io: CliIo): number {
+export type CliDeps = DaemonWorkflowDispatchDeps;
+
+export function workflow(
+  parsed: ParsedFlags,
+  io: CliIo,
+  deps: CliDeps = {}
+): number | Promise<number> {
   const subcommand = parsed.args[1];
   if (!subcommand) {
     return usageError(
@@ -193,12 +211,16 @@ export function workflow(parsed: ParsedFlags, io: CliIo): number {
     return workflowHandoff(parsed, io);
   }
   if (subcommand === "run") {
-    return workflowRun(parsed, io);
+    return workflowRun(parsed, io, deps);
   }
   return usageError(`Unknown workflow subcommand: ${subcommand}`, parsed, io);
 }
 
-function workflowRun(parsed: ParsedFlags, io: CliIo): number {
+function workflowRun(
+  parsed: ParsedFlags,
+  io: CliIo,
+  deps: CliDeps
+): number | Promise<number> {
   if (parsed.args.includes("--help") || parsed.args.includes("-h")) {
     return emitHelp(io);
   }
@@ -206,7 +228,7 @@ function workflowRun(parsed: ParsedFlags, io: CliIo): number {
   const subcommand = parsed.args[2];
   if (!subcommand) {
     return usageError(
-      "Missing required subcommand for workflow run. Expected: start, start-coding, preview-coding, list, approve, decide, update-step, clear-recovery, monitor, logs.",
+      "Missing required subcommand for workflow run. Expected: start, start-coding, preview-coding, list, approve, decide, update-step, clear-recovery, monitor, watch, logs.",
       parsed,
       io
     );
@@ -240,6 +262,9 @@ function workflowRun(parsed: ParsedFlags, io: CliIo): number {
   }
   if (subcommand === "monitor") {
     return workflowRunMonitor(parsed, io);
+  }
+  if (subcommand === "watch") {
+    return workflowRunWatch(parsed, io, deps);
   }
   return usageError(
     `Unknown workflow run subcommand: ${subcommand}`,
@@ -1941,6 +1966,223 @@ function workflowRunMonitor(parsed: ParsedFlags, io: CliIo): number {
   }
 
   return emitWorkflowRunMonitor(parsed, io, dataDir, envelope, progress, advanced);
+}
+
+async function workflowRunWatch(
+  parsed: ParsedFlags,
+  io: CliIo,
+  deps: CliDeps
+): Promise<number> {
+  const positional = parsed.args.slice(3);
+  if (positional.length === 0 || !positional[0]) {
+    return emitWorkflowRunWatchFailure(parsed, io, {
+      code: "run_id_required",
+      message: "Missing required <run-id> for workflow run watch."
+    });
+  }
+  if (positional.length > 1) {
+    return usageError(
+      `Unexpected argument for workflow run watch: ${positional[1]}`,
+      parsed,
+      io
+    );
+  }
+  if (!parsed.once) {
+    return emitWorkflowRunWatchFailure(parsed, io, {
+      code: "once_required",
+      message: "workflow run watch currently requires --once."
+    });
+  }
+  const runId = positional[0];
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return emitWorkflowRunWatchFailure(parsed, io, {
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err),
+      runId
+    });
+  }
+
+  let envelope: WorkflowMonitorEnvelope | null;
+  let db: MomentumDb | undefined;
+  try {
+    db = openDb(dataDir);
+    envelope = loadWorkflowMonitorEnvelope(db, runId);
+    if (envelope !== null) {
+      const tickFailure = await runWorkflowWatchDispatcherTick(
+        db,
+        envelope,
+        io.env ?? {},
+        deps
+      );
+      if (tickFailure !== null) {
+        return emitWorkflowRunWatchFailure(parsed, io, {
+          ...tickFailure,
+          dataDir,
+          runId
+        });
+      }
+      envelope = loadWorkflowMonitorEnvelope(db, runId);
+    }
+  } catch (err) {
+    return emitWorkflowRunWatchFailure(parsed, io, {
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err),
+      dataDir,
+      runId
+    });
+  } finally {
+    db?.close();
+  }
+
+  if (envelope === null) {
+    return emitWorkflowRunWatchFailure(parsed, io, {
+      code: "run_not_found",
+      message: `Workflow run not found: ${runId}`,
+      dataDir,
+      runId
+    });
+  }
+  if (envelope.source !== MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE) {
+    return emitWorkflowRunWatchFailure(parsed, io, {
+      code: "watch_unsupported_source",
+      message:
+        "`workflow run watch --once` is only supported for Momentum-native coding workflow runs.",
+      dataDir,
+      runId
+    });
+  }
+
+  const progress = deriveWorkflowMonitorProgress(envelope, {
+    priorDigest: envelope.monitorLastEmittedDigest
+  });
+  const emittedDigest = progress.emit
+    ? progress.digest
+    : envelope.monitorLastEmittedDigest;
+
+  let writeDb: MomentumDb | undefined;
+  try {
+    writeDb = openDb(dataDir);
+    writeDb
+      .prepare(
+        `UPDATE workflow_runs
+           SET monitor_last_seen_digest = ?,
+               monitor_last_emitted_digest = ?
+         WHERE id = ?`
+      )
+      .run(progress.digest, emittedDigest, runId);
+  } catch (err) {
+    return emitWorkflowRunWatchFailure(parsed, io, {
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err),
+      dataDir,
+      runId
+    });
+  } finally {
+    writeDb?.close();
+  }
+
+  return emitWorkflowRunWatch(parsed, io, dataDir, envelope, progress);
+}
+
+type WorkflowWatchDispatchFailure = {
+  code: string;
+  message: string;
+};
+
+class WorkflowWatchDispatchConfigError extends Error {
+  readonly failure: WorkflowWatchDispatchFailure;
+
+  constructor(failure: WorkflowWatchDispatchFailure) {
+    super(failure.message);
+    this.failure = failure;
+  }
+}
+
+async function runWorkflowWatchDispatcherTick(
+  db: MomentumDb,
+  envelope: WorkflowMonitorEnvelope,
+  env: Record<string, string | undefined>,
+  deps: CliDeps
+): Promise<WorkflowWatchDispatchFailure | null> {
+  const stepId = envelope.nextAction.stepId;
+  const canDispatchNextStep =
+    envelope.nextAction.code === "advance_to_step" && stepId !== null;
+  const canRecheckActiveStep = envelope.activeStep?.state === "running";
+  if (
+    envelope.source !== MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE ||
+    envelope.needsManualRecovery ||
+    envelope.recovery !== null ||
+    envelope.gates.some((gate) => gate.resolvedAt === null) ||
+    (!canDispatchNextStep && !canRecheckActiveStep)
+  ) {
+    return null;
+  }
+
+  const now = Date.now();
+  const workerId = `workflow-watch:${envelope.runId}`;
+  let dispatchResolution: ReturnType<
+    typeof resolveDaemonWorkflowStepDispatch
+  > | null = null;
+  if (canDispatchNextStep) {
+    dispatchResolution = resolveDaemonWorkflowStepDispatch(
+      env,
+      executeWorkflowStepDispatch,
+      deps
+    );
+    if (!dispatchResolution.ok) {
+      return {
+        code: "daemon_live_wrapper_profile_invalid",
+        message: dispatchResolution.message
+      };
+    }
+  }
+  const recovery: RecoverStaleWorkflowLeasesResult = {
+    recovered: [],
+    skipped: []
+  };
+  try {
+    await runWorkflowSchedulerOnceAsync({
+      db,
+      runId: envelope.runId,
+      workerId,
+      dispatch: (claim, context) => {
+        dispatchResolution ??= resolveDaemonWorkflowStepDispatch(
+          env,
+          executeWorkflowStepDispatch,
+          deps
+        );
+        if (!dispatchResolution.ok) {
+          throw new WorkflowWatchDispatchConfigError({
+            code: "daemon_live_wrapper_profile_invalid",
+            message: dispatchResolution.message
+          });
+        }
+        return dispatchResolution.dispatch(claim, context);
+      },
+      now: () => now,
+      ...(dispatchResolution?.ok &&
+      dispatchResolution.leaseDurationMs !== undefined
+        ? { leaseDurationMs: dispatchResolution.leaseDurationMs }
+        : {}),
+      deps: {
+        recoverStaleLeases: () => recovery
+      }
+    });
+  } catch (error) {
+    if (error instanceof WorkflowWatchDispatchConfigError) {
+      return error.failure;
+    }
+    throw error;
+  }
+  return null;
 }
 
 function workflowRunLogs(parsed: ParsedFlags, io: CliIo): number {
