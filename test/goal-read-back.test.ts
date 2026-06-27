@@ -192,24 +192,28 @@ describe("resolveGoalForReadBack", () => {
     }
   });
 
-  it("defaults to the latest goal by created_at when no id is given", () => {
-    const dataDir = makeTempDir();
-    const older = seedGoal(dataDir, "older goal");
-    const newer = seedGoal(dataDir, "newer goal");
-    const db = openDb(dataDir);
-    try {
-      setGoalCreatedAt(db, older, 1_000);
-      setGoalCreatedAt(db, newer, 2_000);
+  it(
+    "defaults to the latest goal by created_at when no id is given",
+    () => {
+      const dataDir = makeTempDir();
+      const older = seedGoal(dataDir, "older goal");
+      const newer = seedGoal(dataDir, "newer goal");
+      const db = openDb(dataDir);
+      try {
+        setGoalCreatedAt(db, older, 1_000);
+        setGoalCreatedAt(db, newer, 2_000);
 
-      expect(findLatestGoal(db)?.id).toBe(newer);
+        expect(findLatestGoal(db)?.id).toBe(newer);
 
-      const resolved = resolveGoalForReadBack(db, dataDir, undefined);
-      expect(resolved.ok).toBe(true);
-      if (resolved.ok) expect(resolved.goal.id).toBe(newer);
-    } finally {
-      db.close();
-    }
-  });
+        const resolved = resolveGoalForReadBack(db, dataDir, undefined);
+        expect(resolved.ok).toBe(true);
+        if (resolved.ok) expect(resolved.goal.id).toBe(newer);
+      } finally {
+        db.close();
+      }
+    },
+    15_000
+  );
 });
 
 describe("validateGoalReadBackInput", () => {

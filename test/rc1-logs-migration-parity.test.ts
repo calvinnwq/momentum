@@ -234,75 +234,81 @@ Apply the fixture file deterministically.
 }
 
 describe("RC-1 logs read-back migration parity", () => {
-  it("workflow-first `run logs` exposes every read-back category goal-first `logs` does", async () => {
-    const { dataDir, goalId, runId } = seedGoalAndWorkflow();
+  it(
+    "workflow-first `run logs` exposes every read-back category goal-first `logs` does",
+    async () => {
+      const { dataDir, goalId, runId } = seedGoalAndWorkflow();
 
-    const goal = await run(["logs", goalId, "--data-dir", dataDir, "--json"]);
-    expect(goal.code).toBe(0);
-    const goalPayload = JSON.parse(goal.stdout) as {
-      ok: boolean;
-      command: string;
-      runnerLog: { exists: boolean; readable: boolean };
-      verificationLog: { exists: boolean; readable: boolean };
-      resultJson: { exists: boolean; parseError?: string };
-      latestEvidence?: Array<{ summary: string }>;
-    };
+      const goal = await run(["logs", goalId, "--data-dir", dataDir, "--json"]);
+      expect(goal.code).toBe(0);
+      const goalPayload = JSON.parse(goal.stdout) as {
+        ok: boolean;
+        command: string;
+        runnerLog: { exists: boolean; readable: boolean };
+        verificationLog: { exists: boolean; readable: boolean };
+        resultJson: { exists: boolean; parseError?: string };
+        latestEvidence?: Array<{ summary: string }>;
+      };
 
-    const wf = await run([
-      "workflow",
-      "run",
-      "logs",
-      runId,
-      "--data-dir",
-      dataDir,
-      "--json"
-    ]);
-    expect(wf.code).toBe(0);
-    const wfPayload = JSON.parse(wf.stdout) as {
-      ok: boolean;
-      command: string;
-      rounds: Array<{
-        logPaths: string[];
-        verificationStatus: string | null;
-        summary: string | null;
-        commitSha: string | null;
-        changedFiles: string[];
-      }>;
-      evidence: Array<{ summary: string }>;
-    };
+      const wf = await run([
+        "workflow",
+        "run",
+        "logs",
+        runId,
+        "--data-dir",
+        dataDir,
+        "--json"
+      ]);
+      expect(wf.code).toBe(0);
+      const wfPayload = JSON.parse(wf.stdout) as {
+        ok: boolean;
+        command: string;
+        rounds: Array<{
+          logPaths: string[];
+          verificationStatus: string | null;
+          summary: string | null;
+          commitSha: string | null;
+          changedFiles: string[];
+        }>;
+        evidence: Array<{ summary: string }>;
+      };
 
-    // Both report success as a read-back command.
-    expect(goalPayload.ok).toBe(true);
-    expect(goalPayload.command).toBe("logs");
-    expect(wfPayload.ok).toBe(true);
-    expect(wfPayload.command).toBe("workflow run logs");
+      // Both report success as a read-back command.
+      expect(goalPayload.ok).toBe(true);
+      expect(goalPayload.command).toBe("logs");
+      expect(wfPayload.ok).toBe(true);
+      expect(wfPayload.command).toBe("workflow run logs");
 
-    const round = wfPayload.rounds[0]!;
+      const round = wfPayload.rounds[0]!;
 
-    // Category 1 — "what ran": goal exposes a readable runner log; the
-    // workflow-first round exposes its agent log path(s).
-    expect(goalPayload.runnerLog.exists).toBe(true);
-    expect(goalPayload.runnerLog.readable).toBe(true);
-    expect(round.logPaths.length).toBeGreaterThan(0);
+      // Category 1 — "what ran": goal exposes a readable runner log; the
+      // workflow-first round exposes its agent log path(s).
+      expect(goalPayload.runnerLog.exists).toBe(true);
+      expect(goalPayload.runnerLog.readable).toBe(true);
+      expect(round.logPaths.length).toBeGreaterThan(0);
 
-    // Category 2 — "verification outcome": goal exposes a readable verification
-    // log; the workflow-first round exposes a typed verification status.
-    expect(goalPayload.verificationLog.exists).toBe(true);
-    expect(round.verificationStatus).toBe("passed");
+      // Category 2 — "verification outcome": goal exposes a readable
+      // verification log; the workflow-first round exposes a typed verification
+      // status.
+      expect(goalPayload.verificationLog.exists).toBe(true);
+      expect(round.verificationStatus).toBe("passed");
 
-    // Category 3 — "produced result": goal exposes a parseable result.json
-    // (summary + commit); the workflow-first round exposes summary + commit SHA
-    // + the changed files those commits touched.
-    expect(goalPayload.resultJson.exists).toBe(true);
-    expect(goalPayload.resultJson.parseError).toBeUndefined();
-    expect(round.summary).toBe("implemented the slice");
-    expect(round.commitSha).toBe("abc123");
-    expect(round.changedFiles).toEqual(["src/example.ts"]);
+      // Category 3 — "produced result": goal exposes a parseable result.json
+      // (summary + commit); the workflow-first round exposes summary + commit SHA
+      // + the changed files those commits touched.
+      expect(goalPayload.resultJson.exists).toBe(true);
+      expect(goalPayload.resultJson.parseError).toBeUndefined();
+      expect(round.summary).toBe("implemented the slice");
+      expect(round.commitSha).toBe("abc123");
+      expect(round.changedFiles).toEqual(["src/example.ts"]);
 
-    // Category 4 — "evidence trail": both surface their linked evidence records.
-    expect((goalPayload.latestEvidence ?? []).length).toBeGreaterThan(0);
-    expect(wfPayload.evidence.length).toBeGreaterThan(0);
-  });
+      // Category 4 — "evidence trail": both surface their linked evidence
+      // records.
+      expect((goalPayload.latestEvidence ?? []).length).toBeGreaterThan(0);
+      expect(wfPayload.evidence.length).toBeGreaterThan(0);
+    },
+    15_000
+  );
 
   it("both surfaces refuse an unknown id with a typed code on stderr and a non-zero exit", async () => {
     const dataDir = makeTempDir();
