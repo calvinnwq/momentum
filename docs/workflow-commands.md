@@ -1383,7 +1383,8 @@ Use `workflow run watch <run-id> --once --json` instead when the supervisor
 should also run one bounded target-run dispatcher tick before reading the same
 projection.
 
-Then branch on the JSON instead of scraping text:
+Then branch on the JSON instead of scraping text.
+For `workflow run monitor --advance --json`, use the nested `progress` projection:
 
 - Suppress the tick when `progress.emit` is `false`, `blocked` is `false`,
   `needsManualRecovery` is `false`, and `terminal` is `false`.
@@ -1398,9 +1399,24 @@ Then branch on the JSON instead of scraping text:
   and either `disposition` is `"recover"` or `progress.phase` is `"blocked"`,
   so a later repair, retry, or clear-recovery emits the next meaningful state.
 
-The eligibility check for `--advance` is the durable run source
-`momentum-native-coding`. A `mwf-*` run id is a useful operator convention for
-explicit Momentum-native workflow runs, not the semantic contract.
+For `workflow run watch --once --json`, use the frozen top-level supervisor envelope described below:
+
+- Suppress the human update when `emit` is `false`; the tick still carries the
+  same `reason`, `phase`, and `digest` for machine dedupe.
+- Branch on `recommendedAction` (`poll`, `approve`, `operator_decision`,
+  `recover`, or `release`) and use `nextPollSeconds`, `quietForSeconds`,
+  `stuckRisk`, and `cleanup` directly.
+- Render concise human text from `reason`, `activeStep`, `nextAction.detail`,
+  and `humanAction.command` / `humanAction.detail` when `humanAction` is present.
+- Stop and clean up the wrapper when `recommendedAction` is `"release"` and
+  `cleanup` is `"release"`; keep polling recoverable failures while
+  `recommendedAction` is `"operator_decision"` or `"recover"`.
+
+The source eligibility check for `workflow run monitor --advance` and
+`workflow run watch --once` is the durable run source
+`momentum-native-coding`.
+A `mwf-*` run id is a useful operator convention for explicit Momentum-native
+workflow runs, not the semantic contract.
 
 ### Error codes
 
