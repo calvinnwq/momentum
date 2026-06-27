@@ -884,6 +884,9 @@ function buildWorkflowWatchHumanAction(
   if (envelope.recovery?.code === "failed_required_step") {
     return null;
   }
+  if (workflowWatchRecoveryHasNoDirectClearCommand(envelope.recovery?.code)) {
+    return null;
+  }
   if (
     envelope.recovery?.code === "monitor_drift_stale" &&
     !envelope.needsManualRecovery
@@ -910,11 +913,7 @@ function buildWorkflowWatchHumanAction(
     };
   }
   if (envelope.recovery !== null) {
-    return {
-      code: envelope.nextAction.code,
-      command: `momentum workflow run clear-recovery ${envelope.runId}`,
-      detail: envelope.recovery.message
-    };
+    return null;
   }
   const openGate = envelope.gates.find((gate) => gate.resolvedAt === null);
   if (openGate !== undefined) {
@@ -980,7 +979,10 @@ function buildWorkflowWatchNextAction(envelope: WorkflowMonitorEnvelope): {
     };
   }
   if (envelope.needsManualRecovery) {
-    if (envelope.recovery?.code === "failed_required_step") {
+    if (
+      envelope.recovery?.code === "failed_required_step" ||
+      workflowWatchRecoveryHasNoDirectClearCommand(envelope.recovery?.code)
+    ) {
       return {
         code: envelope.nextAction.code,
         stepId: envelope.nextAction.stepId,
@@ -1007,6 +1009,16 @@ function buildWorkflowWatchNextAction(envelope: WorkflowMonitorEnvelope): {
     leaseKind: envelope.nextAction.leaseKind,
     detail: envelope.nextAction.detail
   };
+}
+
+function workflowWatchRecoveryHasNoDirectClearCommand(
+  recoveryCode: string | undefined
+): boolean {
+  return (
+    recoveryCode === "stale_running_step" ||
+    recoveryCode === "ghost_active_no_lease" ||
+    recoveryCode === "manual_recovery_lease"
+  );
 }
 
 function isWorkflowWatchCleanTerminal(envelope: WorkflowMonitorEnvelope): boolean {

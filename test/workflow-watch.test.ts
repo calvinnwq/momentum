@@ -774,6 +774,87 @@ describe("momentum workflow run watch", () => {
     });
   });
 
+  it.each([
+    {
+      label: "stale running step",
+      runId: "cwfp-watch-stale-running-step",
+      runState: "running",
+      leaseKind: "managed-step"
+    },
+    {
+      label: "ghost active step",
+      runId: "cwfp-watch-ghost-active-step",
+      runState: "running",
+      leaseKind: null
+    },
+    {
+      label: "manual recovery lease blocker",
+      runId: "cwfp-watch-manual-recovery-lease",
+      runState: "blocked",
+      leaseKind: "managed-step",
+      needsManualRecovery: true
+    }
+  ])(
+    "does not emit a clear-recovery command for a $label",
+    async ({ runId, runState, leaseKind, needsManualRecovery }) => {
+      const dataDir = makeTempDir();
+      const db = openDb(dataDir);
+      try {
+        seedRun(db, {
+          runId,
+          state: runState,
+          needsManualRecovery: needsManualRecovery ?? false,
+          manualRecoveryReason: needsManualRecovery
+            ? "lease blocker requires investigation"
+            : null
+        });
+        seedStep(db, {
+          runId,
+          stepId: "implementation",
+          kind: "implementation",
+          state: "running",
+          order: 1
+        });
+        if (leaseKind !== null) {
+          seedLease(db, {
+            runId,
+            leaseKind,
+            expiresAt: 1_000
+          });
+        }
+      } finally {
+        db.close();
+      }
+
+      const result = await run([
+        "workflow",
+        "run",
+        "watch",
+        runId,
+        "--once",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ]);
+
+      expect(result.code).toBe(0);
+      const payload = JSON.parse(result.stdout) as {
+        humanAction: unknown;
+        reason: string;
+        disposition: string;
+        nextAction: { code: string };
+        recommendedAction: string;
+        stuckRisk: string;
+      };
+      expect(payload.reason).toBe("recovery_required");
+      expect(payload.disposition).toBe("recover");
+      expect(payload.nextAction.code).not.toBe("clear_recovery");
+      expect(payload.humanAction).toBeNull();
+      expect(payload.recommendedAction).toBe("recover");
+      expect(payload.stuckRisk).toBe("high");
+    }
+  );
+
   it("prints the supervisor recovery command in text mode for a durable manual-recovery watch tick", async () => {
     const dataDir = makeTempDir();
     const runId = "cwfp-watch-manual-recovery-text";
