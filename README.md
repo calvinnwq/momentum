@@ -78,7 +78,7 @@ momentum intent list|get|apply|skip|cancel [options]
 momentum workflow import --path <run-dir> [--data-dir <path>] [--json]
 momentum workflow status [<run-id>] [options]
 momentum workflow handoff <run-id> [--data-dir <path>] [--json]
-momentum workflow run start|start-coding|preview-coding|approve|decide|list|update-step|clear-recovery|monitor|logs [options]
+momentum workflow run start|start-coding|preview-coding|approve|decide|list|update-step|clear-recovery|monitor|watch|logs [options]
 momentum doctor [--repo <path>] [--data-dir <path>] [--json]
 ```
 
@@ -94,11 +94,16 @@ pnpm test
 pnpm test:integration
 pnpm test:full
 pnpm typecheck
+pnpm lint
 pnpm build
+pnpm format:check
 node dist/index.js --help
 ```
 
-`pnpm test` runs the fast default lane for everyday development. `pnpm test:integration` runs the heavier repo/git/process and smoke coverage, and `pnpm test:full` runs both lanes. The suite covers foreground goals, queued workers, daemon/recovery, runner profiles, source/evidence/intent commands, CLI import-boundary and renderer-output contracts, and a public-docs hygiene guard.
+`pnpm test` runs the fast default lane for everyday development.
+`pnpm test:integration` runs the heavier repo/git/process and smoke coverage, and `pnpm test:full` runs both lanes.
+`pnpm lint` uses the TypeScript test-project check as the current no-extra-dependency lint lane, and `pnpm format:check` runs Git whitespace checks against `HEAD`.
+The suite covers foreground goals, queued workers, daemon/recovery, runner profiles, source/evidence/intent commands, CLI import-boundary and renderer-output contracts, and a public-docs hygiene guard.
 
 Releases are managed by Release Please on pushes to `main` or manual workflow dispatch. It opens or updates the release PR, keeps `CHANGELOG.md` current, and creates the GitHub release when that PR is merged; Momentum is still not published to npm.
 

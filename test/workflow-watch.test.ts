@@ -1,0 +1,788 @@
+import { afterEach, describe, expect, it } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+import { runCli } from "../src/cli.js";
+import { openDb, type MomentumDb } from "../src/adapters/db.js";
+import {
+  MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE
+} from "../src/core/workflow/run-start.js";
+import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition.js";
+import { persistWorkflowRunStart } from "../src/core/workflow/run-start-persist.js";
+import { insertWorkflowGate } from "../src/core/workflow/gate-persist.js";
+
+type RunResult = {
+  code: number;
+  stdout: string;
+  stderr: string;
+};
+
+const tempRoots: string[] = [];
+
+const SEED_NOW = 1_730_000_000_000;
+const FRESH_EXPIRY = 9_999_999_999_999;
+
+afterEach(() => {
+  while (tempRoots.length > 0) {
+    const dir = tempRoots.pop();
+    if (dir) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+function makeTempDir(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "momentum-workflow-watch-"));
+  tempRoots.push(dir);
+  return fs.realpathSync(dir);
+}
+
+async function run(argv: string[]): Promise<RunResult> {
+  let stdout = "";
+  let stderr = "";
+  const code = await runCli(argv, {
+    stdout: {
+      write(chunk: string) {
+        stdout += chunk;
+        return true;
+      }
+    },
+    stderr: {
+      write(chunk: string) {
+        stderr += chunk;
+        return true;
+      }
+    },
+    env: {}
+  });
+  return { code, stdout, stderr };
+}
+
+function seedRun(
+  db: MomentumDb,
+  input: {
+    runId: string;
+    state: string;
+    source?: string;
+    needsManualRecovery?: boolean;
+    manualRecoveryReason?: string | null;
+  }
+): void {
+  db.prepare(
+    `INSERT INTO workflow_runs
+       (id, state, source, source_artifact_path, plan_json,
+        repo_path, objective, issue_scope_json, route_json,
+        approval_boundary, skill_revision,
+        needs_manual_recovery, manual_recovery_reason, manual_recovery_at,
+        started_at, finished_at,
+        created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    input.runId,
+    input.state,
+    input.source ?? MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
+    null,
+    "{}",
+    null,
+    null,
+    "{}",
+    "{}",
+    null,
+    null,
+    input.needsManualRecovery ? 1 : 0,
+    input.manualRecoveryReason ?? null,
+    input.needsManualRecovery ? SEED_NOW : null,
+    null,
+    null,
+    SEED_NOW,
+    SEED_NOW
+  );
+}
+
+function seedStep(
+  db: MomentumDb,
+  input: {
+    runId: string;
+    stepId: string;
+    kind: string;
+    state?: string;
+    order: number;
+    required?: boolean;
+  }
+): void {
+  db.prepare(
+    `INSERT INTO workflow_steps
+       (run_id, step_id, kind, state, step_order, required,
+        ledger_offset, result_digest, error_code, error_message,
+        started_at, finished_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    input.runId,
+    input.stepId,
+    input.kind,
+    input.state ?? "pending",
+    input.order,
+    input.required === false ? 0 : 1,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    SEED_NOW,
+    SEED_NOW
+  );
+}
+
+function seedLease(
+  db: MomentumDb,
+  input: { runId: string; leaseKind: string; expiresAt: number }
+): void {
+  db.prepare(
+    `INSERT INTO workflow_leases
+       (run_id, lease_kind, holder, acquired_at, expires_at, heartbeat_at,
+        released_at, stale_policy, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    input.runId,
+    input.leaseKind,
+    `holder:${input.runId}`,
+    1_000,
+    input.expiresAt,
+    1_000,
+    null,
+    "auto-release",
+    SEED_NOW,
+    SEED_NOW
+  );
+}
+
+describe("momentum workflow run watch", () => {
+  it("returns a one-shot JSON supervisor envelope for a running native workflow", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-watch-running";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "running" });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "running",
+        order: 1
+      });
+      seedLease(db, {
+        runId,
+        leaseKind: "managed-step",
+        expiresAt: FRESH_EXPIRY
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "watch",
+      runId,
+      "--once",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      command: string;
+      runId: string;
+      emit: boolean;
+      reason: string;
+      disposition: string;
+      phase: string;
+      activeStep: { stepId: string; state: string } | null;
+      nextAction: { code: string; stepId?: string | null };
+      humanAction: unknown;
+      recommendedAction: string;
+      nextPollSeconds: number;
+      quietForSeconds: number;
+      stuckRisk: string;
+      cleanup: string;
+      digest: string;
+    };
+    expect(payload).toMatchObject({
+      command: "workflow run watch",
+      runId,
+      emit: true,
+      reason: "in_progress",
+      disposition: "wait",
+      phase: "advancing",
+      activeStep: { stepId: "implementation", state: "running" },
+      nextAction: { code: "resume_running", stepId: "implementation" },
+      humanAction: null,
+      recommendedAction: "poll",
+      nextPollSeconds: 15,
+      quietForSeconds: 0,
+      stuckRisk: "low",
+      cleanup: "none"
+    });
+    expect(payload.digest.startsWith("sha256:")).toBe(true);
+  });
+
+  it("returns a pollable idle supervisor envelope when no step is active yet", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-watch-idle";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "running" });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "watch",
+      runId,
+      "--once",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      emit: boolean;
+      reason: string;
+      disposition: string;
+      phase: string;
+      activeStep: unknown;
+      nextAction: { code: string; stepId?: string | null };
+      humanAction: unknown;
+      recommendedAction: string;
+      nextPollSeconds: number;
+      quietForSeconds: number;
+      stuckRisk: string;
+      cleanup: string;
+      digest: string;
+    };
+    expect(payload).toMatchObject({
+      emit: true,
+      reason: "idle",
+      disposition: "wait",
+      phase: "idle",
+      activeStep: null,
+      nextAction: { code: "await_approval", stepId: null },
+      humanAction: null,
+      recommendedAction: "poll",
+      nextPollSeconds: 15,
+      quietForSeconds: 0,
+      stuckRisk: "medium",
+      cleanup: "none"
+    });
+    expect(payload.digest.startsWith("sha256:")).toBe(true);
+  });
+
+  it("persists the digest baseline and suppresses an unchanged repeat watch tick", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-watch-repeat-unchanged";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "running" });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "running",
+        order: 1
+      });
+      seedLease(db, {
+        runId,
+        leaseKind: "managed-step",
+        expiresAt: FRESH_EXPIRY
+      });
+    } finally {
+      db.close();
+    }
+
+    const args = [
+      "workflow",
+      "run",
+      "watch",
+      runId,
+      "--once",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ];
+
+    const first = await run(args);
+    const second = await run(args);
+
+    expect(first.code).toBe(0);
+    expect(second.code).toBe(0);
+    const firstPayload = JSON.parse(first.stdout) as {
+      emit: boolean;
+      quietForSeconds: number;
+      digest: string;
+    };
+    const secondPayload = JSON.parse(second.stdout) as {
+      emit: boolean;
+      quietForSeconds: number;
+      digest: string;
+    };
+    expect(firstPayload).toMatchObject({
+      emit: true,
+      quietForSeconds: 0
+    });
+    expect(secondPayload).toMatchObject({
+      emit: false,
+      quietForSeconds: 15
+    });
+    expect(secondPayload.digest).toBe(firstPayload.digest);
+
+    const after = openDb(dataDir);
+    try {
+      const baseline = after
+        .prepare(
+          `SELECT monitor_last_seen_digest AS lastSeen,
+                  monitor_last_emitted_digest AS lastEmitted
+             FROM workflow_runs
+            WHERE id = ?`
+        )
+        .get(runId) as { lastSeen: string | null; lastEmitted: string | null };
+      expect(baseline).toEqual({
+        lastSeen: firstPayload.digest,
+        lastEmitted: firstPayload.digest
+      });
+    } finally {
+      after.close();
+    }
+  });
+
+  it("dispatches at most one approved step before returning the supervisor envelope", async () => {
+    const dataDir = makeTempDir();
+    const runId = "mwf-watch-dispatch-approved";
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunStart(db, {
+        definition: CODING_WORKFLOW_DEFINITION,
+        runId,
+        repoPath: "/repos/momentum",
+        objective: "Exercise one watch dispatcher tick",
+        now: SEED_NOW,
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE
+      });
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_order < 1"
+      ).run(runId);
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'implementation'"
+      ).run(runId);
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "watch",
+      runId,
+      "--once",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      emit: boolean;
+      phase: string;
+      activeStep: { stepId: string; state: string } | null;
+      nextAction: { code: string; stepId?: string | null };
+      humanAction: unknown;
+      recommendedAction: string;
+      cleanup: string;
+    };
+    expect(payload).toMatchObject({
+      emit: true,
+      phase: "advancing",
+      activeStep: { stepId: "implementation", state: "running" },
+      nextAction: { code: "resume_running", stepId: "implementation" },
+      humanAction: null,
+      recommendedAction: "poll",
+      cleanup: "none"
+    });
+
+    const after = openDb(dataDir);
+    try {
+      const steps = after
+        .prepare(
+          "SELECT step_id AS stepId, state FROM workflow_steps WHERE run_id = ? ORDER BY step_order"
+        )
+        .all(runId) as Array<{ stepId: string; state: string }>;
+      expect(steps).toEqual([
+        { stepId: "preflight", state: "succeeded" },
+        { stepId: "implementation", state: "running" },
+        { stepId: "postflight", state: "pending" },
+        { stepId: "no-mistakes", state: "pending" },
+        { stepId: "merge-cleanup", state: "pending" },
+        { stepId: "linear-refresh", state: "pending" }
+      ]);
+      const invocationCount = after
+        .prepare(
+          "SELECT COUNT(*) AS count FROM executor_invocations WHERE workflow_run_id = ?"
+        )
+        .get(runId) as { count: number };
+      expect(invocationCount.count).toBe(1);
+    } finally {
+      after.close();
+    }
+  });
+
+  it("does not dispatch an approved step while an operator gate is open", async () => {
+    const dataDir = makeTempDir();
+    const runId = "mwf-watch-open-gate";
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunStart(db, {
+        definition: CODING_WORKFLOW_DEFINITION,
+        runId,
+        repoPath: "/repos/momentum",
+        objective: "Exercise gated watch supervisor tick",
+        now: SEED_NOW,
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE
+      });
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_order < 1"
+      ).run(runId);
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'implementation'"
+      ).run(runId);
+      insertWorkflowGate(
+        db,
+        {
+          gateId: "gate-watch-decision",
+          workflowRunId: runId,
+          stepRunId: "implementation",
+          targetScope: "step",
+          gateType: "operator_decision_required",
+          reason: "Implementation needs operator direction before dispatch.",
+          evidence: "goals/mwf-watch-open-gate/gates/gate-watch-decision.json",
+          allowedActions: ["fix", "skip", "approve_as_is"],
+          recommendedAction: "fix",
+          policyEnvelope: ["fix"]
+        },
+        { now: SEED_NOW }
+      );
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "watch",
+      runId,
+      "--once",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      humanAction: { code: string; command: string; detail: string | null } | null;
+      recommendedAction: string;
+      nextPollSeconds: number;
+      cleanup: string;
+    };
+    expect(payload).toMatchObject({
+      humanAction: {
+        code: "resolve_gate",
+        command:
+          "momentum workflow run decide gate-watch-decision --action <action> --actor <name>",
+        detail: "Implementation needs operator direction before dispatch."
+      },
+      recommendedAction: "operator_decision",
+      nextPollSeconds: 15,
+      cleanup: "none"
+    });
+
+    const after = openDb(dataDir);
+    try {
+      const step = after
+        .prepare(
+          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = 'implementation'"
+        )
+        .get(runId) as { state: string };
+      expect(step.state).toBe("approved");
+      const invocationCount = after
+        .prepare(
+          "SELECT COUNT(*) AS count FROM executor_invocations WHERE workflow_run_id = ?"
+        )
+        .get(runId) as { count: number };
+      expect(invocationCount.count).toBe(0);
+    } finally {
+      after.close();
+    }
+  });
+
+  it("returns a recovery command for a durable manual-recovery watch tick", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-watch-manual-recovery";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, {
+        runId,
+        state: "running",
+        needsManualRecovery: true,
+        manualRecoveryReason: "dispatch lease requires operator recovery"
+      });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "approved",
+        order: 1
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "watch",
+      runId,
+      "--once",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      emit: boolean;
+      reason: string;
+      disposition: string;
+      phase: string;
+      nextAction: { code: string; stepId?: string | null };
+      humanAction: {
+        code: string;
+        command: string;
+        detail: string | null;
+      } | null;
+      recommendedAction: string;
+      nextPollSeconds: number;
+      quietForSeconds: number;
+      stuckRisk: string;
+      cleanup: string;
+    };
+    expect(payload).toMatchObject({
+      emit: true,
+      reason: "recovery_required",
+      disposition: "recover",
+      phase: "blocked",
+      nextAction: { code: "clear_recovery", stepId: "implementation" },
+      humanAction: {
+        code: "clear_recovery",
+        command: `momentum workflow run clear-recovery ${runId}`,
+        detail: "dispatch lease requires operator recovery"
+      },
+      recommendedAction: "recover",
+      nextPollSeconds: 30,
+      quietForSeconds: 0,
+      stuckRisk: "high",
+      cleanup: "none"
+    });
+  });
+
+  it("prints the supervisor recovery command in text mode for a durable manual-recovery watch tick", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-watch-manual-recovery-text";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, {
+        runId,
+        state: "running",
+        needsManualRecovery: true,
+        manualRecoveryReason: "dispatch lease requires operator recovery"
+      });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "approved",
+        order: 1
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "watch",
+      runId,
+      "--once",
+      "--data-dir",
+      dataDir
+    ]);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(`Workflow run watch: ${runId}`);
+    expect(result.stdout).toContain("Reason: recovery_required");
+    expect(result.stdout).toContain("Disposition: recover");
+    expect(result.stdout).toContain("Phase: blocked");
+    expect(result.stdout).toContain("Next action: clear_recovery");
+    expect(result.stdout).toContain("Recommended action: recover");
+    expect(result.stdout).toContain(
+      `Human action: momentum workflow run clear-recovery ${runId}`
+    );
+    expect(result.stdout).toContain(
+      "Human action detail: dispatch lease requires operator recovery"
+    );
+  });
+
+  it("returns release cleanup for a terminal run with a stale manual-recovery flag", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-watch-terminal-stale-recovery";
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunStart(db, {
+        definition: CODING_WORKFLOW_DEFINITION,
+        runId,
+        repoPath: "/repos/momentum",
+        objective: "Exercise terminal watch cleanup",
+        now: SEED_NOW,
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE
+      });
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'succeeded', started_at = ?, finished_at = ? WHERE run_id = ?"
+      ).run(SEED_NOW, SEED_NOW + 1, runId);
+      db.prepare(
+        `UPDATE workflow_runs
+            SET state = 'succeeded',
+                needs_manual_recovery = 1,
+                manual_recovery_reason = ?,
+                manual_recovery_at = ?,
+                finished_at = ?
+          WHERE id = ?`
+      ).run(
+        "Stale manual-recovery flag after operator reconciliation.",
+        SEED_NOW,
+        SEED_NOW + 1,
+        runId
+      );
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "watch",
+      runId,
+      "--once",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      emit: boolean;
+      reason: string;
+      disposition: string;
+      phase: string;
+      activeStep: unknown;
+      nextAction: { code: string; stepId?: string | null };
+      humanAction: unknown;
+      recommendedAction: string;
+      nextPollSeconds: number;
+      quietForSeconds: number;
+      stuckRisk: string;
+      cleanup: string;
+    };
+    expect(payload).toMatchObject({
+      emit: true,
+      reason: "terminal_succeeded",
+      disposition: "report",
+      phase: "terminal",
+      activeStep: null,
+      nextAction: { code: "no_action", stepId: null },
+      humanAction: null,
+      recommendedAction: "release",
+      nextPollSeconds: 0,
+      quietForSeconds: 0,
+      stuckRisk: "low",
+      cleanup: "release"
+    });
+  });
+
+  it("returns an approval command for an approval-gated watch tick", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-watch-awaiting-approval";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "pending" });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "pending",
+        order: 1
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "watch",
+      runId,
+      "--once",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      emit: boolean;
+      reason: string;
+      disposition: string;
+      phase: string;
+      nextAction: { code: string; stepId?: string | null };
+      humanAction: {
+        code: string;
+        command: string;
+        detail: string | null;
+      } | null;
+      recommendedAction: string;
+      nextPollSeconds: number;
+      quietForSeconds: number;
+      stuckRisk: string;
+      cleanup: string;
+    };
+    expect(payload).toMatchObject({
+      emit: true,
+      reason: "awaiting_approval",
+      disposition: "report",
+      phase: "awaiting_approval",
+      nextAction: { code: "await_approval", stepId: "implementation" },
+      humanAction: {
+        code: "approve",
+        command: `momentum workflow run approve ${runId} --approval-boundary through-implementation --phrase "approve plan ${runId} through-implementation"`,
+        detail: 'Step "implementation" is pending approval before it can advance.'
+      },
+      recommendedAction: "approve",
+      nextPollSeconds: 30,
+      quietForSeconds: 0,
+      stuckRisk: "medium",
+      cleanup: "none"
+    });
+  });
+});

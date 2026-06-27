@@ -66,6 +66,9 @@ describe("workflow command family extraction", () => {
     expect(result.code).toBe(0);
     expect(result.stdout.startsWith("Momentum\n\nUsage:\n")).toBe(true);
     expect(result.stdout).toContain("momentum workflow run start");
+    expect(result.stdout).toContain(
+      "momentum workflow run watch <run-id> --once [--data-dir <path>] [--json]"
+    );
     expect(result.stderr).toBe("");
   });
 

@@ -173,6 +173,7 @@ type ParsedFlags = {
   dryRun: boolean;
   externalApply: boolean;
   advance: boolean;
+  once: boolean;
   repo?: string;
   runner?: string;
   workerId?: string;
@@ -1296,6 +1297,7 @@ function parseFlags(argv: string[]): ParsedFlags {
   let dryRun = false;
   let externalApply = false;
   let advance = false;
+  let once = false;
   let repo: string | undefined;
   let runner: string | undefined;
   let workerId: string | undefined;
@@ -1380,6 +1382,11 @@ function parseFlags(argv: string[]): ParsedFlags {
 
     if (arg === "--advance") {
       advance = true;
+      continue;
+    }
+
+    if (arg === "--once") {
+      once = true;
       continue;
     }
 
@@ -2016,7 +2023,8 @@ function parseFlags(argv: string[]): ParsedFlags {
     now,
     dryRun,
     externalApply,
-    advance
+    advance,
+    once
   };
   if (repo !== undefined) parsed.repo = repo;
   if (runner !== undefined) parsed.runner = runner;
