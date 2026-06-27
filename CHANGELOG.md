@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.15.0](https://github.com/calvinnwq/momentum/compare/v0.14.4...v0.15.0) (2026-06-27)
+
+
+### Features
+
+* **ngx-546:** dedupe duplicate linear source rows in project status ([5f17267](https://github.com/calvinnwq/momentum/commit/5f172678d3d2eec85f739cf154816456f5261c31))
+* **workflow:** add quiet watch advisories ([fc9b2d8](https://github.com/calvinnwq/momentum/commit/fc9b2d87b2343b2426ab119d509458d5b588c430))
+* **workflow:** add quiet watch stuck-risk advisories ([6ca9894](https://github.com/calvinnwq/momentum/commit/6ca98943a827161fd680833c4a1a8fc63d7f269a))
+* **workflow:** add workflow run watch --once supervisor tick ([ede228a](https://github.com/calvinnwq/momentum/commit/ede228afb51b878979b798dd53253c330f49ab72))
+* **workflow:** add workflow run watch once supervisor tick ([7ca8fda](https://github.com/calvinnwq/momentum/commit/7ca8fda36c6f3e7a2beac894807dbf4130e23f7b))
+* **workflow:** freeze supervisor envelope contract ([82276a2](https://github.com/calvinnwq/momentum/commit/82276a21b45106db65d0ba1e0fb95c273c689dec))
+
+
+### Bug Fixes
+
+* **project:** handle legacy Linear metadata in project status ([715da25](https://github.com/calvinnwq/momentum/commit/715da25d77df56204dbfa70c1ed4cf3d66d9408b))
+* **project:** NGX-545 handle legacy scalar project milestone metadata ([55ac4e3](https://github.com/calvinnwq/momentum/commit/55ac4e31484d694a4832552aff2f4d7b1c32f479))
+* **project:** preserve source alias evidence links ([e873a48](https://github.com/calvinnwq/momentum/commit/e873a488c30885a288464967e80e9dc9e5ffe8a7))
+* **project:** preserve typed metadata filter matching ([4bb6d09](https://github.com/calvinnwq/momentum/commit/4bb6d09cbf8aef4138feb075b59f07a6740e6f44))
+* **repo:** dedupe Linear project status sources ([0ea0460](https://github.com/calvinnwq/momentum/commit/0ea04609914476b700f68b022b512863f2034b91))
+* **workflow:** reconcile interrupted no-mistakes recovery ([51595b8](https://github.com/calvinnwq/momentum/commit/51595b8db22693cd2a385f0de5010ff693cd7990))
+* **workflow:** reconcile interrupted no-mistakes success ([2d97cc9](https://github.com/calvinnwq/momentum/commit/2d97cc90c5d52a777c73f9c5dd85c2b76a9d581b))
+* **workflow:** tighten no-mistakes recovery evidence ([0fe8783](https://github.com/calvinnwq/momentum/commit/0fe8783ad174b3b07740daead95a8474683f3dfb))
+
 ## [0.14.4](https://github.com/calvinnwq/momentum/compare/v0.14.3...v0.14.4) (2026-06-25)
 
 
