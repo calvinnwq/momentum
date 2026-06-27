@@ -38,7 +38,10 @@ function makeTempDir(): string {
   return fs.realpathSync(dir);
 }
 
-async function run(argv: string[]): Promise<RunResult> {
+async function run(
+  argv: string[],
+  env: Record<string, string | undefined> = {}
+): Promise<RunResult> {
   let stdout = "";
   let stderr = "";
   const code = await runCli(argv, {
@@ -54,9 +57,47 @@ async function run(argv: string[]): Promise<RunResult> {
         return true;
       }
     },
-    env: {}
+    env
   });
   return { code, stdout, stderr };
+}
+
+const VALID_WRAPPER_RESULT_JSON = JSON.stringify({
+  success: true,
+  summary: "watch live-wrapper step succeeded",
+  key_changes_made: ["ran the configured wrapper"],
+  key_learnings: [],
+  remaining_work: [],
+  goal_complete: false,
+  commit: {
+    type: "chore",
+    subject: "run watch wrapper",
+    body: "",
+    breaking: false
+  }
+});
+
+const WRITE_VALID_WRAPPER_RESULT = `printf '%s' '${VALID_WRAPPER_RESULT_JSON}' > "$MOMENTUM_RESULT_PATH"`;
+
+function writeLiveWrapperProfile(root: string, stepKind: string): string {
+  const profilePath = path.join(root, "watch-live-wrapper-profile.json");
+  fs.writeFileSync(
+    profilePath,
+    JSON.stringify({
+      name: "watch-live-wrapper",
+      wrappers: {
+        [stepKind]: {
+          command: "/bin/sh",
+          args: ["-c", WRITE_VALID_WRAPPER_RESULT],
+          cwd: "iteration",
+          timeout_sec: 30,
+          env_allow: [],
+          result_file: "result.json"
+        }
+      }
+    })
+  );
+  return profilePath;
 }
 
 function seedRun(
@@ -435,6 +476,76 @@ describe("momentum workflow run watch", () => {
         )
         .get(runId) as { count: number };
       expect(invocationCount.count).toBe(1);
+    } finally {
+      after.close();
+    }
+  });
+
+  it("uses the daemon live-wrapper dispatch chain for a watch tick", async () => {
+    const dataDir = makeTempDir();
+    const repoPath = path.join(dataDir, "repo");
+    fs.mkdirSync(repoPath, { recursive: true });
+    const profilePath = writeLiveWrapperProfile(dataDir, "implementation");
+    const runId = "mwf-watch-live-wrapper";
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunStart(db, {
+        definition: CODING_WORKFLOW_DEFINITION,
+        runId,
+        repoPath,
+        objective: "Exercise watch production dispatcher tick",
+        now: SEED_NOW,
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE
+      });
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_order < 1"
+      ).run(runId);
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'implementation'"
+      ).run(runId);
+    } finally {
+      db.close();
+    }
+
+    const result = await run(
+      [
+        "workflow",
+        "run",
+        "watch",
+        runId,
+        "--once",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      { MOMENTUM_LIVE_WRAPPER_PROFILE: profilePath }
+    );
+
+    expect(result.code, `stderr: ${result.stderr}`).toBe(0);
+
+    const after = openDb(dataDir);
+    try {
+      const step = after
+        .prepare(
+          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = 'implementation'"
+        )
+        .get(runId) as { state: string };
+      expect(step.state).toBe("succeeded");
+      const invocation = after
+        .prepare(
+          `SELECT state
+           FROM executor_invocations
+            WHERE workflow_run_id = ?
+              AND step_run_id = 'implementation'`
+        )
+        .get(runId) as { state: string } | undefined;
+      expect(invocation?.state).toBe("succeeded");
+      const lease = after
+        .prepare(
+          "SELECT released_at AS releasedAt FROM workflow_leases WHERE run_id = ? AND lease_kind = 'dispatch'"
+        )
+        .get(runId) as { releasedAt: number | null };
+      expect(lease.releasedAt).not.toBeNull();
     } finally {
       after.close();
     }

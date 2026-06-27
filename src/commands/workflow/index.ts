@@ -59,10 +59,13 @@ import {
   type WorkflowMonitorState
 } from "../../core/workflow/monitor-state.js";
 import { executeWorkflowStepDispatch } from "../../core/workflow/dispatch-execute.js";
-import { releaseWorkflowLease } from "../../core/workflow/leases.js";
 import {
-  claimRunnableWorkflowStep,
-  DEFAULT_WORKFLOW_DISPATCH_LEASE_MS
+  resolveDaemonWorkflowStepDispatch,
+  type DaemonWorkflowDispatchDeps
+} from "../../core/daemon/workflow-dispatch.js";
+import {
+  runWorkflowSchedulerOnceAsync,
+  type RecoverStaleWorkflowLeasesResult
 } from "../../core/workflow/scheduler.js";
 import {
   loadWorkflowRuntimeStateRows,
@@ -183,7 +186,13 @@ type ParsedFlags = {
   error?: string;
 };
 
-export function workflow(parsed: ParsedFlags, io: CliIo): number {
+export type CliDeps = DaemonWorkflowDispatchDeps;
+
+export function workflow(
+  parsed: ParsedFlags,
+  io: CliIo,
+  deps: CliDeps = {}
+): number | Promise<number> {
   const subcommand = parsed.args[1];
   if (!subcommand) {
     return usageError(
@@ -202,12 +211,16 @@ export function workflow(parsed: ParsedFlags, io: CliIo): number {
     return workflowHandoff(parsed, io);
   }
   if (subcommand === "run") {
-    return workflowRun(parsed, io);
+    return workflowRun(parsed, io, deps);
   }
   return usageError(`Unknown workflow subcommand: ${subcommand}`, parsed, io);
 }
 
-function workflowRun(parsed: ParsedFlags, io: CliIo): number {
+function workflowRun(
+  parsed: ParsedFlags,
+  io: CliIo,
+  deps: CliDeps
+): number | Promise<number> {
   if (parsed.args.includes("--help") || parsed.args.includes("-h")) {
     return emitHelp(io);
   }
@@ -251,7 +264,7 @@ function workflowRun(parsed: ParsedFlags, io: CliIo): number {
     return workflowRunMonitor(parsed, io);
   }
   if (subcommand === "watch") {
-    return workflowRunWatch(parsed, io);
+    return workflowRunWatch(parsed, io, deps);
   }
   return usageError(
     `Unknown workflow run subcommand: ${subcommand}`,
@@ -1955,7 +1968,11 @@ function workflowRunMonitor(parsed: ParsedFlags, io: CliIo): number {
   return emitWorkflowRunMonitor(parsed, io, dataDir, envelope, progress, advanced);
 }
 
-function workflowRunWatch(parsed: ParsedFlags, io: CliIo): number {
+async function workflowRunWatch(
+  parsed: ParsedFlags,
+  io: CliIo,
+  deps: CliDeps
+): Promise<number> {
   const positional = parsed.args.slice(3);
   if (positional.length === 0 || !positional[0]) {
     return emitWorkflowRunWatchFailure(parsed, io, {
@@ -1999,7 +2016,19 @@ function workflowRunWatch(parsed: ParsedFlags, io: CliIo): number {
     db = openDb(dataDir);
     envelope = loadWorkflowMonitorEnvelope(db, runId);
     if (envelope !== null) {
-      runWorkflowWatchDispatcherTick(db, envelope);
+      const tickFailure = await runWorkflowWatchDispatcherTick(
+        db,
+        envelope,
+        io.env ?? {},
+        deps
+      );
+      if (tickFailure !== null) {
+        return emitWorkflowRunWatchFailure(parsed, io, {
+          ...tickFailure,
+          dataDir,
+          runId
+        });
+      }
       envelope = loadWorkflowMonitorEnvelope(db, runId);
     }
   } catch (err) {
@@ -2063,52 +2092,97 @@ function workflowRunWatch(parsed: ParsedFlags, io: CliIo): number {
   return emitWorkflowRunWatch(parsed, io, dataDir, envelope, progress);
 }
 
-function runWorkflowWatchDispatcherTick(
+type WorkflowWatchDispatchFailure = {
+  code: string;
+  message: string;
+};
+
+class WorkflowWatchDispatchConfigError extends Error {
+  readonly failure: WorkflowWatchDispatchFailure;
+
+  constructor(failure: WorkflowWatchDispatchFailure) {
+    super(failure.message);
+    this.failure = failure;
+  }
+}
+
+async function runWorkflowWatchDispatcherTick(
   db: MomentumDb,
-  envelope: WorkflowMonitorEnvelope
-): void {
+  envelope: WorkflowMonitorEnvelope,
+  env: Record<string, string | undefined>,
+  deps: CliDeps
+): Promise<WorkflowWatchDispatchFailure | null> {
   const stepId = envelope.nextAction.stepId;
+  const canDispatchNextStep =
+    envelope.nextAction.code === "advance_to_step" && stepId !== null;
+  const canRecheckActiveStep = envelope.activeStep?.state === "running";
   if (
     envelope.source !== MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE ||
     envelope.needsManualRecovery ||
     envelope.recovery !== null ||
     envelope.gates.some((gate) => gate.resolvedAt === null) ||
-    envelope.nextAction.code !== "advance_to_step" ||
-    stepId === null
+    (!canDispatchNextStep && !canRecheckActiveStep)
   ) {
-    return;
+    return null;
   }
 
   const now = Date.now();
   const workerId = `workflow-watch:${envelope.runId}`;
-  const claim = claimRunnableWorkflowStep(db, {
-    runId: envelope.runId,
-    stepId,
-    holder: workerId,
-    leaseExpiresAt: now + DEFAULT_WORKFLOW_DISPATCH_LEASE_MS,
-    now
-  });
-  if (!claim.ok) return;
-
+  let dispatchResolution: ReturnType<
+    typeof resolveDaemonWorkflowStepDispatch
+  > | null = null;
+  if (canDispatchNextStep) {
+    dispatchResolution = resolveDaemonWorkflowStepDispatch(
+      env,
+      executeWorkflowStepDispatch,
+      deps
+    );
+    if (!dispatchResolution.ok) {
+      return {
+        code: "daemon_live_wrapper_profile_invalid",
+        message: dispatchResolution.message
+      };
+    }
+  }
+  const recovery: RecoverStaleWorkflowLeasesResult = {
+    recovered: [],
+    skipped: []
+  };
   try {
-    executeWorkflowStepDispatch(claim.claim, {
+    await runWorkflowSchedulerOnceAsync({
       db,
+      runId: envelope.runId,
       workerId,
-      now
+      dispatch: (claim, context) => {
+        dispatchResolution ??= resolveDaemonWorkflowStepDispatch(
+          env,
+          executeWorkflowStepDispatch,
+          deps
+        );
+        if (!dispatchResolution.ok) {
+          throw new WorkflowWatchDispatchConfigError({
+            code: "daemon_live_wrapper_profile_invalid",
+            message: dispatchResolution.message
+          });
+        }
+        return dispatchResolution.dispatch(claim, context);
+      },
+      now: () => now,
+      ...(dispatchResolution?.ok &&
+      dispatchResolution.leaseDurationMs !== undefined
+        ? { leaseDurationMs: dispatchResolution.leaseDurationMs }
+        : {}),
+      deps: {
+        recoverStaleLeases: () => recovery
+      }
     });
   } catch (error) {
-    try {
-      releaseWorkflowLease(db, {
-        runId: claim.claim.lease.runId,
-        leaseKind: claim.claim.lease.leaseKind,
-        holder: claim.claim.lease.holder,
-        acquiredAt: claim.claim.lease.acquiredAt,
-        now
-      });
-    } catch {
+    if (error instanceof WorkflowWatchDispatchConfigError) {
+      return error.failure;
     }
     throw error;
   }
+  return null;
 }
 
 function workflowRunLogs(parsed: ParsedFlags, io: CliIo): number {

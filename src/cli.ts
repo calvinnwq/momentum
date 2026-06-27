@@ -1,6 +1,4 @@
-import fs from "node:fs";
 import os from "node:os";
-import path from "node:path";
 import process from "node:process";
 import {
   renderHelp,
@@ -81,17 +79,6 @@ import {
   resolveIntentApplyPolicy
 } from "./core/intent/policy.js";
 import {
-  LINEAR_API_KEY_ENV_VAR,
-  defaultBuildLinearRefreshClient,
-  executeExternalApply,
-  type ExecuteExternalApplyDeps
-} from "./core/intent/apply-execute.js";
-import {
-  listUpdateIntents,
-  type UpdateIntent
-} from "./core/intent/update-intents.js";
-import { getSourceItemById } from "./core/source/items.js";
-import {
   listSourceReconciliationRuns,
   type SourceReconciliationRun
 } from "./core/source/reconciliation-runs.js";
@@ -101,29 +88,10 @@ import {
   type EvidenceRecordsSummary
 } from "./core/evidence/records.js";
 import { executeWorkflowStepDispatch } from "./core/workflow/dispatch-execute.js";
-import { resolveDaemonWorkflowDispatch } from "./core/workflow/dogfood-dispatch.js";
 import {
-  readDaemonLiveWrapperProfileSource,
-  resolveDaemonLiveWrapperProfile,
-  DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR
-} from "./core/workflow/daemon-live-wrapper-profile.js";
-import {
-  loadDispatchedStepRunProvenance,
-  resolveDispatchedStepExecutorContext
-} from "./core/workflow/daemon-dispatch-exec-context.js";
-import { createLiveWrapperWorkflowDispatch } from "./core/workflow/live-wrapper-dispatch.js";
-import {
-  createExternalApplyWorkflowDispatch,
-  type DispatchedExternalApplyContextResolution
-} from "./core/workflow/external-apply-dispatch.js";
-import { createSubworkflowWorkflowDispatch } from "./core/workflow/subworkflow-dispatch.js";
-import { deriveDispatchedSubworkflowContext } from "./core/workflow/subworkflow-dispatch-context.js";
-import { buildRealWorkflowStepExecutorRegistry } from "./core/workflow/step-executor-real-adapters.js";
-import type { LiveWrapperProfile } from "./adapters/live-wrapper-registry.js";
-import type {
-  AsyncWorkflowStepDispatch,
-  WorkflowStepDispatch
-} from "./core/workflow/scheduler.js";
+  resolveDaemonWorkflowStepDispatch,
+  type DaemonWorkflowDispatchResolution
+} from "./core/daemon/workflow-dispatch.js";
 import {
   countIntentApplyAuditsByLifecycleState,
   countIntentsByApplyState,
@@ -509,12 +477,12 @@ async function daemonStart(
       });
     }
 
-    let workflowDispatchResolution: DaemonStartWorkflowDispatchResolution = {
+    let workflowDispatchResolution: DaemonWorkflowDispatchResolution = {
       ok: true,
       dispatch: executeWorkflowStepDispatch
     };
     if (loopRequested) {
-      workflowDispatchResolution = resolveDaemonStartWorkflowDispatch(
+      workflowDispatchResolution = resolveDaemonWorkflowStepDispatch(
         io.env ?? {},
         executeWorkflowStepDispatch,
         deps
@@ -596,275 +564,6 @@ async function daemonStart(
   } finally {
     db.close();
   }
-}
-
-type DaemonStartWorkflowDispatchResolution =
-  | { ok: true; dispatch: AsyncWorkflowStepDispatch; leaseDurationMs?: number }
-  | { ok: false; message: string };
-
-function resolveDaemonStartWorkflowDispatch(
-  env: Record<string, string | undefined>,
-  baseDispatch: WorkflowStepDispatch,
-  deps: CliDeps
-): DaemonStartWorkflowDispatchResolution {
-  const profile = resolveDaemonLiveWrapperProfile(env, {
-    loadSource: readDaemonLiveWrapperProfileSource
-  });
-
-  if (profile.status === "invalid") {
-    return {
-      ok: false,
-      message: `Invalid ${DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR} (${profile.source}): ${profile.code}: ${profile.error}`
-    };
-  }
-
-  if (profile.status === "not_configured") {
-    return {
-      ok: true,
-      dispatch: withSubworkflowDispatch(
-        withExternalApplyDispatch(
-          resolveDaemonWorkflowDispatch(env, baseDispatch),
-          env,
-          deps
-        )
-      )
-    };
-  }
-
-  const registry = buildRealWorkflowStepExecutorRegistry({
-    profile: profile.profile
-  });
-  return {
-    ok: true,
-    dispatch: withSubworkflowDispatch(
-      withExternalApplyDispatch(
-        createLiveWrapperWorkflowDispatch(baseDispatch, {
-          registry,
-          deriveExec: (claim, context) => {
-            const provenance = loadDispatchedStepRunProvenance(
-              context.db,
-              claim.runId
-            );
-            if (provenance === undefined) {
-              return { ok: false, reason: "run_not_found" };
-            }
-            const resolved = resolveDispatchedStepExecutorContext(
-              claim.runId,
-              provenance
-            );
-            if (resolved.ok) {
-              try {
-                fs.mkdirSync(resolved.exec.runDir, { recursive: true });
-              } catch (error) {
-                return {
-                  ok: false,
-                  reason: `run_dir_unavailable: ${error instanceof Error ? error.message : String(error)}`
-                };
-              }
-              return {
-                ok: true,
-                exec: {
-                  ...resolved.exec,
-                  env
-                }
-              };
-            }
-            return resolved;
-          }
-        }),
-        env,
-        deps
-      )
-    ),
-    leaseDurationMs: maxDaemonLiveWrapperProfileTimeoutMs(profile.profile)
-  };
-}
-
-function withExternalApplyDispatch(
-  baseDispatch: AsyncWorkflowStepDispatch,
-  env: Record<string, string | undefined>,
-  deps: CliDeps
-): AsyncWorkflowStepDispatch {
-  return createExternalApplyWorkflowDispatch(baseDispatch, {
-    deriveExternalApply: (claim, context) =>
-      resolveDaemonExternalApplyContext(
-        claim.runId,
-        claim.stepId,
-        context,
-        env,
-        deps
-      )
-  });
-}
-
-/**
- * Wrap the daemon-lane dispatch so a configured `subworkflow` step's child run is
- * started/attached and reconciled in the same tick (RC-4b, NGX-498). The deriver
- * sources the child-definition config + recursion lineage from the parent run's
- * durable `route`, resolves the child definition by key, and builds the
- * start-or-attach runner from the existing workflow-owned run-start / status
- * seams — so this lane needs no env / deps, unlike the external-apply lane. A
- * refused or thrown derivation routes the step to manual recovery rather than
- * stranding a `running` step (see {@link createSubworkflowWorkflowDispatch}).
- */
-function withSubworkflowDispatch(
-  baseDispatch: AsyncWorkflowStepDispatch
-): AsyncWorkflowStepDispatch {
-  return createSubworkflowWorkflowDispatch(baseDispatch, {
-    deriveSubworkflow: deriveDispatchedSubworkflowContext
-  });
-}
-
-function resolveDaemonExternalApplyContext(
-  runId: string,
-  stepId: string,
-  context: { db: MomentumDb },
-  env: Record<string, string | undefined>,
-  deps: CliDeps
-): DispatchedExternalApplyContextResolution {
-  const provenance = loadDispatchedStepRunProvenance(context.db, runId);
-  if (provenance === undefined) {
-    return { ok: false, reason: "run_not_found" };
-  }
-  const resolved = resolveDispatchedStepExecutorContext(runId, provenance);
-  if (!resolved.ok) return resolved;
-
-  try {
-    fs.mkdirSync(resolved.exec.runDir, { recursive: true });
-  } catch (error) {
-    return {
-      ok: false,
-      reason: `run_dir_unavailable: ${error instanceof Error ? error.message : String(error)}`
-    };
-  }
-
-  const issueScopeIdentifier = loadWorkflowRunIssueScopeIdentifier(
-    context.db,
-    runId
-  );
-  if (issueScopeIdentifier === null) {
-    return { ok: false, reason: "external_apply_issue_scope_missing" };
-  }
-
-  const pending = findPendingLinearExternalApplyIntents(
-    context.db,
-    issueScopeIdentifier
-  );
-  if (pending.length === 0) {
-    return { ok: false, reason: "external_apply_intent_not_found" };
-  }
-  if (pending.length > 1) {
-    return { ok: false, reason: "external_apply_intent_ambiguous" };
-  }
-
-  const intentId = pending[0]!.id;
-  const executeDeps: ExecuteExternalApplyDeps = {};
-  const factory = deps.buildLinearExternalUpdateClient;
-  if (factory) {
-    executeDeps.buildLinearClient = (clientEnv) => {
-      const apiKey = readLinearApiKey(clientEnv);
-      return factory({ apiKey, env: env as NodeJS.ProcessEnv });
-    };
-  }
-  const refreshFactory =
-    deps.buildLinearIssueRefreshClient ??
-    ((input: LinearIssueRefreshClientFactoryInput) =>
-      defaultBuildLinearRefreshClient(input.env));
-  executeDeps.buildLinearRefreshClient = (clientEnv) => {
-    const apiKey = readLinearApiKey(clientEnv);
-    return refreshFactory({ apiKey, env: env as NodeJS.ProcessEnv });
-  };
-
-  return {
-    ok: true,
-    evidence: {
-      executorLogPath: path.join(resolved.exec.runDir, "external-apply.log"),
-      resultJsonPath: path.join(resolved.exec.runDir, "external-apply.json")
-    },
-    runExternalApply: () =>
-      executeExternalApply({
-        db: context.db,
-        intentId,
-        operatorReason: `daemon external-apply for workflow ${runId}/${stepId}`,
-        repoPath: resolved.exec.repoPath,
-        env,
-        statusMutation: null,
-        deps: executeDeps
-      })
-  };
-}
-
-function findPendingLinearExternalApplyIntents(
-  db: MomentumDb,
-  issueScopeIdentifier: string
-): UpdateIntent[] {
-  return listUpdateIntents(db, {
-    status: "pending",
-    adapterKind: "linear"
-  }).filter((intent) =>
-    pendingLinearIntentMatchesIssueScope(db, intent, issueScopeIdentifier)
-  );
-}
-
-function pendingLinearIntentMatchesIssueScope(
-  db: MomentumDb,
-  intent: UpdateIntent,
-  issueScopeIdentifier: string
-): boolean {
-  if (intent.targetExternalId === issueScopeIdentifier) return true;
-  if (intent.sourceItemId === null) return false;
-
-  const sourceItem = getSourceItemById(db, intent.sourceItemId);
-  if (sourceItem === null || sourceItem.adapterKind !== "linear") return false;
-  return (
-    sourceItem.externalId === issueScopeIdentifier ||
-    sourceItem.externalKey === issueScopeIdentifier
-  );
-}
-
-function readLinearApiKey(
-  env: Record<string, string | undefined>
-): string | null {
-  const raw = env[LINEAR_API_KEY_ENV_VAR] ?? null;
-  return typeof raw === "string" && raw.trim().length > 0 ? raw : null;
-}
-
-function loadWorkflowRunIssueScopeIdentifier(
-  db: MomentumDb,
-  runId: string
-): string | null {
-  const row = db
-    .prepare("SELECT issue_scope_json FROM workflow_runs WHERE id = ?")
-    .get(runId) as { issue_scope_json: string | null } | undefined;
-  if (row?.issue_scope_json === undefined || row.issue_scope_json === null) {
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(row.issue_scope_json) as unknown;
-    if (
-      typeof parsed === "object" &&
-      parsed !== null &&
-      "identifier" in parsed &&
-      typeof (parsed as { identifier?: unknown }).identifier === "string"
-    ) {
-      const value = (parsed as { identifier: string }).identifier.trim();
-      return value.length > 0 ? value : null;
-    }
-  } catch {
-    return null;
-  }
-  return null;
-}
-
-function maxDaemonLiveWrapperProfileTimeoutMs(profile: LiveWrapperProfile): number {
-  let maxSeconds = 0;
-  for (const wrapper of profile.wrappers.values()) {
-    maxSeconds = Math.max(
-      maxSeconds,
-      wrapper.timeoutSec + (wrapper.probe?.timeoutSec ?? 0)
-    );
-  }
-  return maxSeconds * 1000 + DEFAULT_DAEMON_STARTUP_RECOVERY_GRACE_MS;
 }
 
 const DEFAULT_DAEMON_STOP_REASON = "operator-requested";

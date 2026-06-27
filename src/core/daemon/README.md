@@ -24,4 +24,5 @@ renderer no longer takes a runtime import on inspector internals.
 | Run / status state | `runs.ts`, `status.ts` |
 | Queue jobs | `queue-jobs.ts` |
 | Stale recovery | `stale-recovery.ts` |
+| Workflow dispatch composition | `workflow-dispatch.ts` |
 | Worker run | `worker-run.ts` |
