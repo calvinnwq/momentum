@@ -1383,7 +1383,8 @@ Use `workflow run watch <run-id> --once --json` instead when the supervisor
 should also run one bounded target-run dispatcher tick before reading the same
 projection.
 
-Then branch on the JSON instead of scraping text:
+Then branch on the JSON instead of scraping text.
+For `workflow run monitor --advance --json`, use the nested `progress` projection:
 
 - Suppress the tick when `progress.emit` is `false`, `blocked` is `false`,
   `needsManualRecovery` is `false`, and `terminal` is `false`.
@@ -1398,9 +1399,24 @@ Then branch on the JSON instead of scraping text:
   and either `disposition` is `"recover"` or `progress.phase` is `"blocked"`,
   so a later repair, retry, or clear-recovery emits the next meaningful state.
 
-The eligibility check for `--advance` is the durable run source
-`momentum-native-coding`. A `mwf-*` run id is a useful operator convention for
-explicit Momentum-native workflow runs, not the semantic contract.
+For `workflow run watch --once --json`, use the frozen top-level supervisor envelope described below:
+
+- Suppress the human update when `emit` is `false`; the tick still carries the
+  same `reason`, `phase`, and `digest` for machine dedupe.
+- Branch on `recommendedAction` (`poll`, `approve`, `operator_decision`,
+  `recover`, or `release`) and use `nextPollSeconds`, `quietForSeconds`,
+  `stuckRisk`, and `cleanup` directly.
+- Render concise human text from `reason`, `activeStep`, `nextAction.detail`,
+  and `humanAction.command` / `humanAction.detail` when `humanAction` is present.
+- Stop and clean up the wrapper when `recommendedAction` is `"release"` and
+  `cleanup` is `"release"`; keep polling recoverable failures while
+  `recommendedAction` is `"operator_decision"` or `"recover"`.
+
+The source eligibility check for `workflow run monitor --advance` and
+`workflow run watch --once` is the durable run source
+`momentum-native-coding`.
+A `mwf-*` run id is a useful operator convention for explicit Momentum-native
+workflow runs, not the semantic contract.
 
 ### Error codes
 
@@ -1509,10 +1525,190 @@ It does not resolve gates, approvals, or recovery decisions by itself, recover s
 `activeStep` is `null` when no step is active.
 `humanAction` is `null` when no operator command is required, points to `workflow run approve` for approval waits, points to `workflow run decide` for open gates, and points to `workflow run clear-recovery` only for recovery states that can be cleared directly or with an explicit evidence pointer.
 Soft `monitor_drift_stale` reports and ordinary `failed_required_step` failures do not emit a clear-recovery command.
-`recommendedAction` is one of `poll`, `approve`, `operator_decision`, `recover`, or `release`.
-`nextPollSeconds` is `0` for release, `30` for blocked or approval waits, and `15` otherwise.
-`quietForSeconds` mirrors the poll interval on suppressed ticks and is `0` when this tick emits.
-`stuckRisk` is `low` for progressing work, `medium` for idle or approval waits, and `high` for blocked or recovery states.
+
+### Field meanings
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `ok` | boolean | Always `true` for a rendered tick; failures use the error envelope below. |
+| `command` | string | Always `"workflow run watch"`. |
+| `mode` | string | Always `"once"`; stream mode is not part of the contract. |
+| `dataDir` | string | Resolved data directory the tick read. |
+| `schemaVersion` | number | Envelope schema version; currently `1`. |
+| `generatedAt` | number | Epoch-millisecond time the tick was rendered. |
+| `runId` | string | The inspected run id. |
+| `runState` | string | Durable run state (`pending`, `running`, `succeeded`, `failed`, `canceled`). |
+| `emit` | boolean | Machine-polling signal: `true` when this tick differs from the last emitted digest, `false` to suppress a duplicate update. |
+| `reason` | enum | Human-facing classification: `terminal_succeeded`, `terminal_canceled`, `recovery_required`, `monitor_drift`, `awaiting_approval`, `in_progress`, or `idle`. |
+| `disposition` | enum | Machine action class: `wait`, `report`, or `recover`. |
+| `phase` | enum | Progress phase: `advancing`, `idle`, `awaiting_approval`, `blocked`, or `terminal`. |
+| `activeStep` | object \| null | The step in flight, or `null` when no step is active. |
+| `nextAction` | object | Machine next-step pointer derived from the monitor projection. |
+| `humanAction` | object \| null | The single operator command that unblocks the run, or `null` when no operator command is required. |
+| `recommendedAction` | enum | What the poller should do: `poll`, `approve`, `operator_decision`, `recover`, or `release`. |
+| `nextPollSeconds` | number | Suggested wait before the next tick: `0` for release, `30` for blocked or approval waits, `15` otherwise. |
+| `quietForSeconds` | number | Mirrors `nextPollSeconds` on a suppressed tick (`emit: false`) and is `0` when this tick emits. |
+| `stuckRisk` | enum | `low` for progressing work, `medium` for idle or approval waits, `high` for blocked or recovery states. |
+| `cleanup` | enum | `release` once the wrapper can stop polling, otherwise `none`. |
+| `digest` | string | Deterministic `sha256:` progress digest; unchanged across identical ticks so consumers can dedupe. |
+
+`activeStep`, when present, carries `stepId`, `kind`, `state`, `order`, and `required`.
+`nextAction` always carries `code`, `stepId`, `leaseKind`, and `detail`; `detail` is a ready-to-read sentence for the common path.
+`humanAction`, when present, carries `code` (`approve`, `resolve_gate`, or `clear_recovery`), `command` (the exact CLI to run), and `detail` (the reason or evidence sentence).
+
+### Supervisor scenarios
+
+The same envelope shape covers every tick; these are the seven contract scenarios a poller branches on.
+Only the distinguishing fields are shown.
+
+Progress tick - a step is advancing under a fresh lease, so keep polling quietly:
+
+```json
+{
+  "emit": true,
+  "reason": "in_progress",
+  "disposition": "wait",
+  "phase": "advancing",
+  "activeStep": { "stepId": "implementation", "state": "running" },
+  "nextAction": { "code": "resume_running", "stepId": "implementation" },
+  "humanAction": null,
+  "recommendedAction": "poll",
+  "nextPollSeconds": 15,
+  "quietForSeconds": 0,
+  "stuckRisk": "low",
+  "cleanup": "none"
+}
+```
+
+Unchanged tick - a repeated identical poll suppresses `emit` while `reason` and `digest` hold steady, so a consumer skips a duplicate update:
+
+```json
+{
+  "emit": false,
+  "reason": "in_progress",
+  "disposition": "wait",
+  "phase": "advancing",
+  "recommendedAction": "poll",
+  "nextPollSeconds": 15,
+  "quietForSeconds": 15,
+  "stuckRisk": "low",
+  "cleanup": "none",
+  "humanAction": null
+}
+```
+
+Approval required - the next step is gated on operator approval:
+
+```json
+{
+  "emit": true,
+  "reason": "awaiting_approval",
+  "disposition": "report",
+  "phase": "awaiting_approval",
+  "recommendedAction": "approve",
+  "nextPollSeconds": 30,
+  "quietForSeconds": 0,
+  "stuckRisk": "medium",
+  "cleanup": "none",
+  "humanAction": {
+    "code": "approve",
+    "command": "momentum workflow run approve mwf-abc123 --approval-boundary through-implementation --phrase \"approve plan mwf-abc123 through-implementation\"",
+    "detail": "Step implementation is waiting for approval."
+  }
+}
+```
+
+Recovery required - the run is flagged for manual recovery and can be cleared directly:
+
+```json
+{
+  "emit": true,
+  "reason": "recovery_required",
+  "disposition": "recover",
+  "phase": "blocked",
+  "recommendedAction": "recover",
+  "nextPollSeconds": 30,
+  "quietForSeconds": 0,
+  "stuckRisk": "high",
+  "cleanup": "none",
+  "nextAction": { "code": "clear_recovery", "stepId": "implementation" },
+  "humanAction": {
+    "code": "clear_recovery",
+    "command": "momentum workflow run clear-recovery mwf-abc123",
+    "detail": "dispatch lease requires operator recovery"
+  }
+}
+```
+
+Stuck risk - the run is `running` but exposes no active step, so the tick keeps polling at a raised `stuckRisk`:
+
+```json
+{
+  "emit": true,
+  "reason": "idle",
+  "disposition": "wait",
+  "phase": "idle",
+  "activeStep": null,
+  "recommendedAction": "poll",
+  "nextPollSeconds": 15,
+  "quietForSeconds": 0,
+  "stuckRisk": "medium",
+  "cleanup": "none",
+  "humanAction": null
+}
+```
+
+Terminal success - the run finished cleanly, so the wrapper reports once and stops polling:
+
+```json
+{
+  "emit": true,
+  "reason": "terminal_succeeded",
+  "disposition": "report",
+  "phase": "terminal",
+  "activeStep": null,
+  "nextAction": { "code": "no_action", "stepId": null },
+  "humanAction": null,
+  "recommendedAction": "release",
+  "nextPollSeconds": 0,
+  "quietForSeconds": 0,
+  "stuckRisk": "low",
+  "cleanup": "release"
+}
+```
+
+Recoverable failure - a required step failed, so an operator must inspect and decide; there is no single canned command, so `humanAction` is `null`:
+
+```json
+{
+  "emit": true,
+  "reason": "recovery_required",
+  "disposition": "recover",
+  "phase": "blocked",
+  "nextAction": { "code": "rerun_failed_step", "stepId": "implementation" },
+  "humanAction": null,
+  "recommendedAction": "operator_decision",
+  "nextPollSeconds": 30,
+  "quietForSeconds": 0,
+  "stuckRisk": "high",
+  "cleanup": "none"
+}
+```
+
+### Consumer branching rules
+
+A cron, OpenClaw, or GUI poller branches on the envelope instead of scraping text:
+
+- Suppress the update when `emit` is `false`.
+  A suppressed tick repeats the prior `reason`, `phase`, and `digest`, so no new human update is warranted.
+- Otherwise branch on `recommendedAction`:
+  - `poll` - work is advancing or idle; wait `nextPollSeconds` and tick again.
+  - `approve` - run `humanAction.command` (a `workflow run approve` call) to release the approval gate.
+  - `operator_decision` - a required step failed or a gate is open; an operator inspects and chooses via `workflow run decide` or a rerun, so `humanAction` may be `null`.
+  - `recover` - run `humanAction.command` (a `workflow run clear-recovery` call, with `--evidence-pointer` for external-side-effect steps) after resolving the underlying cause.
+  - `release` - the run reached a clean terminal state (`cleanup: "release"`, `nextAction.code: "no_action"`); report once and stop polling.
+- `emit` is the machine-polling signal and `reason` / `humanAction` are the human-facing content: decide whether to speak from `emit`, and what to say from `reason`, `activeStep`, `nextAction.detail`, and `humanAction`.
+- The envelope carries enough to render a concise human update for the common path - `reason`, `activeStep`, and `nextAction.detail`, plus `humanAction.command` / `detail` when an action is required - without a follow-up `workflow status` read.
 
 ### Error codes
 

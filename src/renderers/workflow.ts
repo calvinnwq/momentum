@@ -810,6 +810,38 @@ export function emitWorkflowRunMonitorFailure(
   });
 }
 
+/**
+ * Frozen supervisor-envelope enums for `workflow run watch` (NGX-549 / SUP-02).
+ *
+ * `reason`, `disposition`, `phase`, `cleanup`, and `nextAction.code` reuse the
+ * monitor vocabularies (`WORKFLOW_MONITOR_*`); these three are the watch-only
+ * additions a downstream supervisor (OpenClaw, cron, a future GUI) branches on.
+ * They are declared as closed `as const` tuples - and pinned by
+ * `test/workflow-watch-contract.test.ts` - so a new value cannot drift into the
+ * wire contract without a deliberate, reviewed change.
+ */
+export const WORKFLOW_WATCH_RECOMMENDED_ACTIONS = [
+  "poll",
+  "approve",
+  "operator_decision",
+  "recover",
+  "release"
+] as const;
+export type WorkflowWatchRecommendedAction =
+  (typeof WORKFLOW_WATCH_RECOMMENDED_ACTIONS)[number];
+
+export const WORKFLOW_WATCH_STUCK_RISKS = ["low", "medium", "high"] as const;
+export type WorkflowWatchStuckRisk =
+  (typeof WORKFLOW_WATCH_STUCK_RISKS)[number];
+
+export const WORKFLOW_WATCH_HUMAN_ACTION_CODES = [
+  "approve",
+  "resolve_gate",
+  "clear_recovery"
+] as const;
+export type WorkflowWatchHumanActionCode =
+  (typeof WORKFLOW_WATCH_HUMAN_ACTION_CODES)[number];
+
 export function emitWorkflowRunWatch(
   parsed: { json: boolean },
   io: CliIo,
@@ -877,7 +909,11 @@ export function emitWorkflowRunWatchFailure(
 
 function buildWorkflowWatchHumanAction(
   envelope: WorkflowMonitorEnvelope
-): { code: string; command: string; detail: string | null } | null {
+): {
+  code: WorkflowWatchHumanActionCode;
+  command: string;
+  detail: string | null;
+} | null {
   if (isWorkflowWatchCleanTerminal(envelope)) {
     return null;
   }
@@ -1032,7 +1068,7 @@ function isWorkflowWatchCleanTerminal(envelope: WorkflowMonitorEnvelope): boolea
 function recommendWorkflowWatchAction(
   envelope: WorkflowMonitorEnvelope,
   progress: WorkflowMonitorProgressTick
-): string {
+): WorkflowWatchRecommendedAction {
   if (progress.cleanup === "release") return "release";
   if (envelope.recovery?.code === "failed_required_step") {
     return "operator_decision";
@@ -1074,7 +1110,7 @@ function recommendWorkflowWatchPollSeconds(
 function classifyWorkflowWatchStuckRisk(
   envelope: WorkflowMonitorEnvelope,
   progress: WorkflowMonitorProgressTick
-): "low" | "medium" | "high" {
+): WorkflowWatchStuckRisk {
   if (
     envelope.recovery?.code === "monitor_drift_stale" &&
     progress.phase === "advancing"
