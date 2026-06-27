@@ -42,6 +42,7 @@ export type WorkflowWatchAdvisory = {
 };
 
 export type DeriveWorkflowWatchAdvisoryOptions = {
+  dataDir: string;
   now?: number;
   lastEmittedAt?: number | null;
   thresholds?: WorkflowWatchQuietThresholdsSeconds;
@@ -50,7 +51,7 @@ export type DeriveWorkflowWatchAdvisoryOptions = {
 export function deriveWorkflowWatchAdvisory(
   envelope: WorkflowMonitorEnvelope,
   progress: WorkflowMonitorProgressTick,
-  options: DeriveWorkflowWatchAdvisoryOptions = {}
+  options: DeriveWorkflowWatchAdvisoryOptions
 ): WorkflowWatchAdvisory {
   const now = options.now ?? envelope.generatedAt;
   const thresholds =
@@ -99,7 +100,7 @@ export function deriveWorkflowWatchAdvisory(
       quietThresholdSeconds,
       stuckRisk: raiseStuckRisk(baseStuckRisk),
       activeStepId: progress.currentStep,
-      inspectionCommand: buildInspectionCommand(envelope.runId)
+      inspectionCommand: buildInspectionCommand(envelope.runId, options.dataDir)
     };
   }
 
@@ -180,8 +181,8 @@ function raiseStuckRisk(
   return stuckRisk === "low" ? "medium" : stuckRisk;
 }
 
-function buildInspectionCommand(runId: string): string {
-  return `momentum workflow run monitor ${shellQuote(runId)} --advance --json`;
+function buildInspectionCommand(runId: string, dataDir: string): string {
+  return `momentum workflow run monitor ${shellQuote(runId)} --data-dir ${shellQuote(dataDir)} --advance --json`;
 }
 
 function shellQuote(value: string): string {

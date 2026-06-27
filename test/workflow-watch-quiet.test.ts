@@ -24,6 +24,7 @@ import { MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE } from "../src/core/workflow/run
 const NOW = 1_730_000_900_000;
 const SEED_NOW = 1_730_000_000_000;
 const FRESH_EXPIRY = 9_999_999_999_999;
+const ADVISORY_DATA_DIR = "/tmp/momentum watch data";
 const tempRoots: string[] = [];
 
 type RunResult = {
@@ -260,6 +261,7 @@ describe("workflow watch quiet heartbeat and stuck-risk advisory", () => {
     const progress = unchangedProgress(envelope);
 
     const advisory = deriveWorkflowWatchAdvisory(envelope, progress, {
+      dataDir: ADVISORY_DATA_DIR,
       now: NOW,
       lastEmittedAt: NOW - 14 * 60 * 1000
     });
@@ -279,10 +281,12 @@ describe("workflow watch quiet heartbeat and stuck-risk advisory", () => {
     const progress = unchangedProgress(envelope);
 
     const due = deriveWorkflowWatchAdvisory(envelope, progress, {
+      dataDir: ADVISORY_DATA_DIR,
       now: NOW,
       lastEmittedAt: NOW - 15 * 60 * 1000
     });
     const throttledAgain = deriveWorkflowWatchAdvisory(envelope, progress, {
+      dataDir: ADVISORY_DATA_DIR,
       now: NOW + 30 * 1000,
       lastEmittedAt: NOW
     });
@@ -295,7 +299,7 @@ describe("workflow watch quiet heartbeat and stuck-risk advisory", () => {
       stuckRisk: "medium",
       activeStepId: "implementation",
       inspectionCommand:
-        "momentum workflow run monitor 'mwf-watch-quiet' --advance --json"
+        "momentum workflow run monitor 'mwf-watch-quiet' --data-dir '/tmp/momentum watch data' --advance --json"
     });
     expect(throttledAgain).toMatchObject({
       emit: false,
@@ -312,13 +316,14 @@ describe("workflow watch quiet heartbeat and stuck-risk advisory", () => {
       envelope,
       unchangedProgress(envelope),
       {
+        dataDir: "/tmp/momentum data;'$(touch nope)'",
         now: NOW,
         lastEmittedAt: NOW - 15 * 60 * 1000
       }
     );
 
     expect(advisory.inspectionCommand).toBe(
-      "momentum workflow run monitor 'mwf-watch quiet;'\\''$(touch nope)'\\''' --advance --json"
+      "momentum workflow run monitor 'mwf-watch quiet;'\\''$(touch nope)'\\''' --data-dir '/tmp/momentum data;'\\''$(touch nope)'\\''' --advance --json"
     );
   });
 
@@ -350,6 +355,7 @@ describe("workflow watch quiet heartbeat and stuck-risk advisory", () => {
         envelope,
         unchangedProgress(envelope),
         {
+          dataDir: ADVISORY_DATA_DIR,
           now: NOW,
           lastEmittedAt: NOW - thresholdSeconds * 1000
         }
@@ -384,6 +390,7 @@ describe("workflow watch quiet heartbeat and stuck-risk advisory", () => {
       envelope,
       unchangedProgress(envelope),
       {
+        dataDir: ADVISORY_DATA_DIR,
         now: NOW,
         lastEmittedAt: NOW - 15 * 60 * 1000
       }
@@ -421,6 +428,7 @@ describe("workflow watch quiet heartbeat and stuck-risk advisory", () => {
 
     expect(
       deriveWorkflowWatchAdvisory(envelope, progress, {
+        dataDir: ADVISORY_DATA_DIR,
         now: NOW,
         lastEmittedAt: NOW - 29 * 60 * 1000
       })
@@ -431,6 +439,7 @@ describe("workflow watch quiet heartbeat and stuck-risk advisory", () => {
     });
     expect(
       deriveWorkflowWatchAdvisory(envelope, progress, {
+        dataDir: ADVISORY_DATA_DIR,
         now: NOW,
         lastEmittedAt: NOW - 30 * 60 * 1000
       })
@@ -468,6 +477,7 @@ describe("workflow watch quiet heartbeat and stuck-risk advisory", () => {
 
     expect(
       deriveWorkflowWatchAdvisory(envelope, progress, {
+        dataDir: ADVISORY_DATA_DIR,
         now: NOW,
         lastEmittedAt: NOW - 59 * 60 * 1000
       })
@@ -478,6 +488,7 @@ describe("workflow watch quiet heartbeat and stuck-risk advisory", () => {
     });
     expect(
       deriveWorkflowWatchAdvisory(envelope, progress, {
+        dataDir: ADVISORY_DATA_DIR,
         now: NOW,
         lastEmittedAt: NOW - 60 * 60 * 1000
       })
@@ -535,7 +546,7 @@ describe("workflow watch quiet heartbeat and stuck-risk advisory", () => {
       stuckRisk: "medium",
       activeStep: { stepId: "implementation", state: "running" },
       inspectionCommand:
-        "momentum workflow run monitor 'mwf-watch-persisted-quiet' --advance --json"
+        `momentum workflow run monitor 'mwf-watch-persisted-quiet' --data-dir '${dataDir}' --advance --json`
     });
     expect(second["quietForSeconds"] as number).toBeGreaterThanOrEqual(15 * 60);
 

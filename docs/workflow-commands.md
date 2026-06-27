@@ -1553,7 +1553,7 @@ Soft `monitor_drift_stale` reports and ordinary `failed_required_step` failures 
 | `quietForSeconds` | number | Elapsed seconds since the last surfaced tick for this run. It is `0` on a first observation or meaningful state change, grows across suppressed unchanged polls, and is included on throttled `quiet_heartbeat` / `stuck_risk` emissions. |
 | `quietThresholdSeconds` | number | Current quiet advisory threshold for the run phase or active step kind. Defaults: implementation `900`, postflight `600`, no-mistakes `900`, merge-cleanup `300`, linear-refresh `300`, approval reminders `1800`, recovery reminders `3600`, idle `900`. |
 | `stuckRisk` | enum | `low` for progressing work, `medium` for idle or approval waits, `high` for blocked or recovery states. |
-| `inspectionCommand` | string \| null | Suggested inspection command when `reason` is `stuck_risk`; otherwise `null`. The CLI never performs diagnosis itself. |
+| `inspectionCommand` | string \| null | Suggested inspection command when `reason` is `stuck_risk`; otherwise `null`. The command includes the resolved `--data-dir` so follow-up inspection reads the same state. The CLI never performs diagnosis itself. |
 | `cleanup` | enum | `release` once the wrapper can stop polling, otherwise `none`. |
 | `digest` | string | Deterministic `sha256:` progress digest; unchanged across identical ticks so consumers can dedupe. |
 
@@ -1620,7 +1620,7 @@ Stuck risk - a repeated identical active-execution poll reaches the active step'
   "quietForSeconds": 900,
   "quietThresholdSeconds": 900,
   "stuckRisk": "medium",
-  "inspectionCommand": "momentum workflow run monitor 'mwf-abc123' --advance --json",
+  "inspectionCommand": "momentum workflow run monitor 'mwf-abc123' --data-dir '/path/to/momentum-data' --advance --json",
   "cleanup": "none",
   "humanAction": null
 }

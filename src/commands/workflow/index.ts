@@ -2071,7 +2071,9 @@ async function workflowRunWatch(
   const progress = deriveWorkflowMonitorProgress(envelope, {
     priorDigest: envelope.monitorLastEmittedDigest
   });
-  const advisory = deriveWorkflowWatchAdvisory(envelope, progress);
+  const advisory = deriveWorkflowWatchAdvisory(envelope, progress, {
+    dataDir
+  });
   const emittedDigest = advisory.emit
     ? progress.digest
     : envelope.monitorLastEmittedDigest;
