@@ -816,10 +816,11 @@ export function emitWorkflowRunMonitorFailure(
 /**
  * Frozen supervisor-envelope enums for `workflow run watch` (NGX-549 / SUP-02).
  *
- * `reason`, `disposition`, `phase`, `cleanup`, and `nextAction.code` reuse the
- * monitor vocabularies (`WORKFLOW_MONITOR_*`); these three are the watch-only
- * additions a downstream supervisor (OpenClaw, cron, a future GUI) branches on.
- * They are declared as closed `as const` tuples - and pinned by
+ * `disposition`, `phase`, `cleanup`, and `nextAction.code` reuse the monitor
+ * vocabularies (`WORKFLOW_MONITOR_*`). The watch-only renderer enums below are
+ * the additional closed vocabularies a downstream supervisor (OpenClaw, cron,
+ * a future GUI) branches on; watch-specific reasons live with the advisory
+ * reducer. They are declared as closed `as const` tuples - and pinned by
  * `test/workflow-watch-contract.test.ts` - so a new value cannot drift into the
  * wire contract without a deliberate, reviewed change.
  */

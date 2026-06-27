@@ -1934,11 +1934,12 @@ function workflowRunMonitor(parsed: ParsedFlags, io: CliIo): number {
     priorDigest: envelope.monitorLastEmittedDigest
   });
 
-  // Opt-in activation writer: `--advance` persists this tick's digest as the
-  // durable suppression baseline so a cheap cron loop polling `monitor`
-  // repeatedly can suppress unchanged ticks across invocations. The emitted
-  // baseline only moves when the tick actually emits (first observation or a
-  // meaningful state change); the seen digest always records the observation.
+  // Opt-in activation writer: `--advance` persists this tick's digest and
+  // observation timestamp as the durable suppression baseline so a cheap cron
+  // loop polling `monitor` repeatedly can suppress unchanged ticks across
+  // invocations. The emitted baseline only moves when the tick actually emits
+  // (first observation or a meaningful state change); the seen digest and
+  // timestamp always record the observation.
   let advanced = false;
   if (parsed.advance) {
     const emittedDigest = progress.emit

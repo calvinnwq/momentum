@@ -1265,7 +1265,7 @@ Required arguments:
 
 Options:
 
-- `--advance` - for `momentum-native-coding` runs only, persist this tick's digest as the durable progress suppression baseline so a cron loop polling the command repeatedly suppresses unchanged ticks across invocations.
+- `--advance` - for `momentum-native-coding` runs only, persist this tick's digest / timestamp advisory baseline so a cron loop polling the command repeatedly suppresses unchanged ticks across invocations.
   See the [progress digest tick](#progress-digest-tick) section.
 
 ### Disposition and report reason
@@ -1522,7 +1522,7 @@ Options:
 }
 ```
 
-`emit`, `reason`, `disposition`, `phase`, `cleanup`, and `digest` are derived from the same monitor progress tick as `workflow run monitor --advance`.
+`disposition`, `phase`, `cleanup`, and `digest` are derived from the same monitor progress tick as `workflow run monitor --advance`; `emit` and `reason` can also reflect watch-only quiet-heartbeat or stuck-risk advisories when an unchanged tick reaches its quiet threshold.
 Before deriving that tick, `workflow run watch --once` may run one target-run dispatcher tick, either to claim and dispatch one approved next step or to recheck one active running step that the scheduler can safely revisit.
 It does not resolve gates, approvals, or recovery decisions by itself, recover stale leases, or scan or claim work from other runs.
 `activeStep` is `null` when no step is active.
@@ -1541,7 +1541,7 @@ Soft `monitor_drift_stale` reports and ordinary `failed_required_step` failures 
 | `generatedAt` | number | Epoch-millisecond time the tick was rendered. |
 | `runId` | string | The inspected run id. |
 | `runState` | string | Durable run state (`pending`, `running`, `succeeded`, `failed`, `canceled`). |
-| `emit` | boolean | Machine-polling signal: `true` when this tick differs from the last emitted digest, `false` to suppress a duplicate update. |
+| `emit` | boolean | Machine-polling signal: `true` when this tick differs from the last emitted digest or a quiet-heartbeat / stuck-risk advisory is due, `false` to suppress a duplicate unchanged update below the quiet threshold. |
 | `reason` | enum | Human-facing classification: `terminal_succeeded`, `terminal_canceled`, `recovery_required`, `monitor_drift`, `awaiting_approval`, `in_progress`, `idle`, `quiet_heartbeat`, or `stuck_risk`. |
 | `disposition` | enum | Machine action class: `wait`, `report`, or `recover`. |
 | `phase` | enum | Progress phase: `advancing`, `idle`, `awaiting_approval`, `blocked`, or `terminal`. |
@@ -1552,7 +1552,7 @@ Soft `monitor_drift_stale` reports and ordinary `failed_required_step` failures 
 | `nextPollSeconds` | number | Suggested wait before the next tick: `0` for release, `30` for blocked or approval waits, `15` otherwise. |
 | `quietForSeconds` | number | Elapsed seconds since the last surfaced tick for this run. It is `0` on a first observation or meaningful state change, grows across suppressed unchanged polls, and is included on throttled `quiet_heartbeat` / `stuck_risk` emissions. |
 | `quietThresholdSeconds` | number | Current quiet advisory threshold for the run phase or active step kind. Defaults: implementation `900`, postflight `600`, no-mistakes `900`, merge-cleanup `300`, linear-refresh `300`, approval reminders `1800`, recovery reminders `3600`, idle `900`. |
-| `stuckRisk` | enum | `low` for progressing work, `medium` for idle or approval waits, `high` for blocked or recovery states. |
+| `stuckRisk` | enum | `low` for ordinary progressing work, `medium` for idle or approval waits and active-execution stuck-risk advisories, `high` for blocked or recovery states. |
 | `inspectionCommand` | string \| null | Suggested inspection command when `reason` is `stuck_risk`; otherwise `null`. The command includes the resolved `--data-dir` so follow-up inspection reads the same state. The CLI never performs diagnosis itself. |
 | `cleanup` | enum | `release` once the wrapper can stop polling, otherwise `none`. |
 | `digest` | string | Deterministic `sha256:` progress digest; unchanged across identical ticks so consumers can dedupe. |
@@ -1774,6 +1774,7 @@ Next action: resume_running
 Recommended action: poll
 Next poll seconds: 15
 Quiet for seconds: 0
+Quiet threshold seconds: 900
 Stuck risk: low
 Cleanup: none
 Digest: sha256:7abb560d717661265f609b02107bd6fce701de831d42a28bd1f7af344aa52ad5
@@ -1781,6 +1782,7 @@ Data dir: /path/to/data
 ```
 
 A human action line is included when the tick requires an operator command.
+An inspection command line is included when a stuck-risk advisory recommends a follow-up monitor inspection.
 
 Exit code 0 on success, 1 on failure, 2 on usage error.
 
