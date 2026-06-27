@@ -58,6 +58,7 @@ import {
   deriveWorkflowMonitorState,
   type WorkflowMonitorState
 } from "../../core/workflow/monitor-state.js";
+import { deriveWorkflowWatchAdvisory } from "../../core/workflow/watch-advisory.js";
 import { executeWorkflowStepDispatch } from "../../core/workflow/dispatch-execute.js";
 import {
   resolveDaemonWorkflowStepDispatch,
@@ -1788,7 +1789,9 @@ function refreshWorkflowRunMonitorAdvisory(
            monitor_terminal = ?,
            monitor_step = ?,
            monitor_last_seen_digest = NULL,
-           monitor_last_emitted_digest = NULL
+           monitor_last_emitted_digest = NULL,
+           monitor_last_seen_at = NULL,
+           monitor_last_emitted_at = NULL
      WHERE id = ?`
   ).run(
     now,
@@ -1941,6 +1944,9 @@ function workflowRunMonitor(parsed: ParsedFlags, io: CliIo): number {
     const emittedDigest = progress.emit
       ? progress.digest
       : envelope.monitorLastEmittedDigest;
+    const emittedAt = progress.emit
+      ? envelope.generatedAt
+      : seedMissingMonitorEmittedAt(envelope);
     let writeDb: MomentumDb | undefined;
     try {
       writeDb = openDb(dataDir);
@@ -1948,10 +1954,12 @@ function workflowRunMonitor(parsed: ParsedFlags, io: CliIo): number {
         .prepare(
           `UPDATE workflow_runs
              SET monitor_last_seen_digest = ?,
-                 monitor_last_emitted_digest = ?
+                 monitor_last_emitted_digest = ?,
+                 monitor_last_seen_at = ?,
+                 monitor_last_emitted_at = ?
            WHERE id = ?`
         )
-        .run(progress.digest, emittedDigest, runId);
+        .run(progress.digest, emittedDigest, envelope.generatedAt, emittedAt, runId);
     } catch (err) {
       return emitWorkflowRunMonitorFailure(parsed, io, {
         code: "data_dir_failed",
@@ -2063,9 +2071,13 @@ async function workflowRunWatch(
   const progress = deriveWorkflowMonitorProgress(envelope, {
     priorDigest: envelope.monitorLastEmittedDigest
   });
-  const emittedDigest = progress.emit
+  const advisory = deriveWorkflowWatchAdvisory(envelope, progress);
+  const emittedDigest = advisory.emit
     ? progress.digest
     : envelope.monitorLastEmittedDigest;
+  const emittedAt = advisory.emit
+    ? envelope.generatedAt
+    : seedMissingMonitorEmittedAt(envelope);
 
   let writeDb: MomentumDb | undefined;
   try {
@@ -2074,10 +2086,12 @@ async function workflowRunWatch(
       .prepare(
         `UPDATE workflow_runs
            SET monitor_last_seen_digest = ?,
-               monitor_last_emitted_digest = ?
+               monitor_last_emitted_digest = ?,
+               monitor_last_seen_at = ?,
+               monitor_last_emitted_at = ?
          WHERE id = ?`
       )
-      .run(progress.digest, emittedDigest, runId);
+      .run(progress.digest, emittedDigest, envelope.generatedAt, emittedAt, runId);
   } catch (err) {
     return emitWorkflowRunWatchFailure(parsed, io, {
       code: "data_dir_failed",
@@ -2089,7 +2103,19 @@ async function workflowRunWatch(
     writeDb?.close();
   }
 
-  return emitWorkflowRunWatch(parsed, io, dataDir, envelope, progress);
+  return emitWorkflowRunWatch(parsed, io, dataDir, envelope, progress, advisory);
+}
+
+function seedMissingMonitorEmittedAt(
+  envelope: WorkflowMonitorEnvelope
+): number | null {
+  if (envelope.monitorLastEmittedAt !== null) {
+    return envelope.monitorLastEmittedAt;
+  }
+  if (envelope.monitorLastEmittedDigest !== null) {
+    return envelope.generatedAt;
+  }
+  return null;
 }
 
 type WorkflowWatchDispatchFailure = {

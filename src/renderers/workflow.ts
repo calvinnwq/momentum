@@ -7,6 +7,9 @@ import type {
 import type { WorkflowMonitorEnvelope } from "../core/workflow/monitor-envelope.js";
 import type { WorkflowMonitorProgressTick } from "../core/workflow/monitor-progress.js";
 import type { WorkflowMonitorState } from "../core/workflow/monitor-state.js";
+import type {
+  WorkflowWatchAdvisory
+} from "../core/workflow/watch-advisory.js";
 import type { WorkflowRunImport, WorkflowRunImportDiagnostic } from "../core/workflow/run-import.js";
 import type { PersistWorkflowRunImportSummary } from "../core/workflow/run-import-persist.js";
 import type { WorkflowRunManualRecoveryState } from "../core/workflow/run-recovery.js";
@@ -847,7 +850,8 @@ export function emitWorkflowRunWatch(
   io: CliIo,
   dataDir: string,
   envelope: WorkflowMonitorEnvelope,
-  progress: WorkflowMonitorProgressTick
+  progress: WorkflowMonitorProgressTick,
+  advisory: WorkflowWatchAdvisory
 ): number {
   const nextAction = buildWorkflowWatchNextAction(envelope);
   const payload = {
@@ -859,8 +863,8 @@ export function emitWorkflowRunWatch(
     generatedAt: envelope.generatedAt,
     runId: envelope.runId,
     runState: envelope.runState,
-    emit: progress.emit,
-    reason: progress.reportReason,
+    emit: advisory.emit,
+    reason: advisory.reason,
     disposition: progress.disposition,
     phase: progress.phase,
     activeStep: envelope.activeStep
@@ -876,8 +880,10 @@ export function emitWorkflowRunWatch(
     humanAction: buildWorkflowWatchHumanAction(envelope),
     recommendedAction: recommendWorkflowWatchAction(envelope, progress),
     nextPollSeconds: recommendWorkflowWatchPollSeconds(progress),
-    quietForSeconds: progress.emit ? 0 : recommendWorkflowWatchPollSeconds(progress),
-    stuckRisk: classifyWorkflowWatchStuckRisk(envelope, progress),
+    quietForSeconds: advisory.quietForSeconds,
+    quietThresholdSeconds: advisory.quietThresholdSeconds,
+    stuckRisk: advisory.stuckRisk,
+    inspectionCommand: advisory.inspectionCommand,
     cleanup: progress.cleanup,
     digest: progress.digest
   };
@@ -1107,23 +1113,6 @@ function recommendWorkflowWatchPollSeconds(
   return 15;
 }
 
-function classifyWorkflowWatchStuckRisk(
-  envelope: WorkflowMonitorEnvelope,
-  progress: WorkflowMonitorProgressTick
-): WorkflowWatchStuckRisk {
-  if (
-    envelope.recovery?.code === "monitor_drift_stale" &&
-    progress.phase === "advancing"
-  ) {
-    return "low";
-  }
-  if (progress.phase === "blocked" || envelope.recovery !== null) return "high";
-  if (progress.phase === "idle" || progress.phase === "awaiting_approval") {
-    return "medium";
-  }
-  return "low";
-}
-
 type WorkflowWatchTextPayload = {
   emit: boolean;
   reason: string;
@@ -1131,7 +1120,9 @@ type WorkflowWatchTextPayload = {
   recommendedAction: string;
   nextPollSeconds: number;
   quietForSeconds: number;
+  quietThresholdSeconds: number;
   stuckRisk: string;
+  inspectionCommand: string | null;
   humanAction: { command: string; detail: string | null } | null;
 };
 
@@ -1152,7 +1143,11 @@ function renderWorkflowWatchText(
   lines.push(`Recommended action: ${payload.recommendedAction}`);
   lines.push(`Next poll seconds: ${payload.nextPollSeconds}`);
   lines.push(`Quiet for seconds: ${payload.quietForSeconds}`);
+  lines.push(`Quiet threshold seconds: ${payload.quietThresholdSeconds}`);
   lines.push(`Stuck risk: ${payload.stuckRisk}`);
+  if (payload.inspectionCommand !== null) {
+    lines.push(`Inspection command: ${payload.inspectionCommand}`);
+  }
   if (payload.humanAction !== null) {
     lines.push(`Human action: ${payload.humanAction.command}`);
     if (payload.humanAction.detail !== null) {

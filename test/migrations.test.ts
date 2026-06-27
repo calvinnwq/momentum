@@ -759,6 +759,8 @@ describe("applyQueueMigrations", () => {
           "monitor_step",
           "monitor_last_seen_digest",
           "monitor_last_emitted_digest",
+          "monitor_last_seen_at",
+          "monitor_last_emitted_at",
           "batch_group",
           "batch_role",
           "needs_manual_recovery",
@@ -1155,7 +1157,8 @@ describe("applyQueueMigrations", () => {
             `SELECT repo_path, objective, issue_scope_json, route_json,
                     approval_boundary, skill_revision,
                     monitor_last_seen_state, monitor_terminal, monitor_step,
-                    monitor_last_seen_digest, monitor_last_emitted_digest
+                    monitor_last_seen_digest, monitor_last_emitted_digest,
+                    monitor_last_seen_at, monitor_last_emitted_at
                FROM workflow_runs WHERE id = 'cwfp-defaults'`
           )
           .get() as Record<string, unknown>;
@@ -1170,6 +1173,8 @@ describe("applyQueueMigrations", () => {
         expect(row["monitor_step"]).toBeNull();
         expect(row["monitor_last_seen_digest"]).toBeNull();
         expect(row["monitor_last_emitted_digest"]).toBeNull();
+        expect(row["monitor_last_seen_at"]).toBeNull();
+        expect(row["monitor_last_emitted_at"]).toBeNull();
       } finally {
         db.close();
       }
@@ -1235,7 +1240,9 @@ describe("applyQueueMigrations", () => {
           "monitor_terminal",
           "monitor_step",
           "monitor_last_seen_digest",
-          "monitor_last_emitted_digest"
+          "monitor_last_emitted_digest",
+          "monitor_last_seen_at",
+          "monitor_last_emitted_at"
         ]) {
           expect(cols).toContain(col);
         }

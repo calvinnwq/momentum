@@ -378,7 +378,7 @@ describe("momentum workflow run watch", () => {
     });
     expect(secondPayload).toMatchObject({
       emit: false,
-      quietForSeconds: 15
+      quietForSeconds: 0
     });
     expect(secondPayload.digest).toBe(firstPayload.digest);
 

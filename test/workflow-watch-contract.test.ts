@@ -20,6 +20,7 @@ import {
   WORKFLOW_WATCH_RECOMMENDED_ACTIONS,
   WORKFLOW_WATCH_STUCK_RISKS
 } from "../src/renderers/workflow.js";
+import { WORKFLOW_WATCH_REASONS } from "../src/core/workflow/watch-advisory.js";
 
 /**
  * Frozen supervisor-envelope contract for `workflow run watch --once --json`
@@ -33,9 +34,9 @@ import {
  *   (or an undocumented field appearing) fails the build;
  * - every enum-typed field is constrained to its frozen value set, so an enum
  *   value drifting silently fails the build;
- * - the seven contract scenarios named by the ticket (unchanged tick, progress
- *   tick, approval required, recovery required, stuck risk, terminal success,
- *   and terminal/recoverable failure) are pinned to their machine-facing
+ * - the core contract scenarios (unchanged tick, progress tick, approval
+ *   required, recovery required, idle risk, terminal success, and
+ *   terminal/recoverable failure) are pinned to their machine-facing
  *   disposition and human-facing action.
  *
  * Behavioural coverage of the dispatcher tick itself lives in
@@ -73,7 +74,9 @@ const WATCH_ENVELOPE_KEYS = [
   "recommendedAction",
   "nextPollSeconds",
   "quietForSeconds",
+  "quietThresholdSeconds",
   "stuckRisk",
+  "inspectionCommand",
   "cleanup",
   "digest"
 ].sort();
@@ -269,9 +272,7 @@ function assertWatchEnvelopeContract(
   expect(typeof payload["runState"]).toBe("string");
   expect(typeof payload["emit"]).toBe("boolean");
 
-  expect(isMember(WORKFLOW_MONITOR_REPORT_REASONS, payload["reason"])).toBe(
-    true
-  );
+  expect(isMember(WORKFLOW_WATCH_REASONS, payload["reason"])).toBe(true);
   expect(isMember(WORKFLOW_MONITOR_DISPOSITIONS, payload["disposition"])).toBe(
     true
   );
@@ -287,7 +288,12 @@ function assertWatchEnvelopeContract(
   expect(isMember(WORKFLOW_WATCH_STUCK_RISKS, payload["stuckRisk"])).toBe(true);
 
   expect([0, 15, 30]).toContain(payload["nextPollSeconds"]);
-  expect([0, 15, 30]).toContain(payload["quietForSeconds"]);
+  expect(typeof payload["quietForSeconds"]).toBe("number");
+  expect(typeof payload["quietThresholdSeconds"]).toBe("number");
+  expect(
+    payload["inspectionCommand"] === null ||
+      typeof payload["inspectionCommand"] === "string"
+  ).toBe(true);
   expect(typeof payload["digest"]).toBe("string");
   expect((payload["digest"] as string).startsWith("sha256:")).toBe(true);
 
@@ -351,6 +357,17 @@ describe("workflow run watch supervisor envelope contract", () => {
       "approve",
       "resolve_gate",
       "clear_recovery"
+    ]);
+    expect([...WORKFLOW_WATCH_REASONS]).toEqual([
+      "terminal_succeeded",
+      "terminal_canceled",
+      "recovery_required",
+      "monitor_drift",
+      "awaiting_approval",
+      "in_progress",
+      "idle",
+      "quiet_heartbeat",
+      "stuck_risk"
     ]);
   });
 
@@ -416,7 +433,7 @@ describe("workflow run watch supervisor envelope contract", () => {
     assertWatchEnvelopeContract(second, runId);
 
     expect(first).toMatchObject({ emit: true, quietForSeconds: 0 });
-    expect(second).toMatchObject({ emit: false, quietForSeconds: 15 });
+    expect(second).toMatchObject({ emit: false, quietForSeconds: 0 });
     expect(second["digest"]).toBe(first["digest"]);
     // The machine-polling signal (emit) flips while the human-facing reason is
     // unchanged, so a consumer suppresses a duplicate update without re-reading.
