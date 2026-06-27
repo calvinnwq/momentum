@@ -26,3 +26,5 @@ renderer no longer takes a runtime import on inspector internals.
 | Stale recovery | `stale-recovery.ts` |
 | Workflow dispatch composition | `workflow-dispatch.ts` |
 | Worker run | `worker-run.ts` |
+
+`workflow-dispatch.ts` composes the same production workflow dispatcher for bounded daemon cycles and for `workflow run watch --once` supervisor ticks.

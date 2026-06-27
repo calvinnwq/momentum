@@ -195,6 +195,7 @@ The `--steps-json <json>` option on `workflow run start-coding` records per-step
 Provider-aware model aliases are normalized in both paths when the step supplies a known mapped harness (`claude`, `codex`, or `opencode`), so the previewed value is the same command-ready value later stored and injected.
 The command-line profile selector does not load or select the executable wrapper profile for the daemon.
 Managed-loop execution still uses the JSON profile file pointed to by `MOMENTUM_LIVE_WRAPPER_PROFILE`.
+`workflow run watch --once` resolves the same profile for its bounded run-scoped dispatcher tick, so an invalid profile can also fail that supervisor command with `daemon_live_wrapper_profile_invalid`.
 The checked-in coding-workflow live-wrapper profile runs the shared coding
 workflow wrapper for `preflight`, `implementation`, `postflight`,
 `no-mistakes`, and `merge-cleanup`. That wrapper also requires

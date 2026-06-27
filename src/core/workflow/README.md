@@ -45,7 +45,7 @@ Other domains reach workflow behavior through these modules:
 - **CLI renderers** (`src/renderers/workflow.ts`): the same run/gate/monitor/
   status/handoff/logs shapes, imported **type-only** (renderers format, they
   do not mutate state).
-- **Top-level dispatch** (`src/cli.ts`): `dispatch-execute`, `dogfood-dispatch`, `external-apply-dispatch`, and `subworkflow-dispatch`; configured `subworkflow` steps compose the child-run producer after the base scaffold while live-wrapper-owned families stay on the live-wrapper lane.
+- **Daemon and supervisor dispatch** (`src/core/daemon/workflow-dispatch.ts`): `dispatch-execute`, `dogfood-dispatch`, `external-apply-dispatch`, `subworkflow-dispatch`, `live-wrapper-dispatch`, and `daemon-live-wrapper-profile`; configured `subworkflow` steps compose the child-run producer after the base scaffold while live-wrapper-owned families stay on the live-wrapper lane for both bounded daemon cycles and `workflow run watch --once` ticks.
 - **Dispatched-step reconciliation**: `dispatch-reconcile` /
   `dispatch-reconcile-execute` own the RC-2 pure/effect seam that finalizes a
   dispatched step from terminal executor evidence.

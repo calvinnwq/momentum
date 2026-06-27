@@ -19,7 +19,7 @@ Operator-facing CLI envelopes for the `workflow run start`, `workflow run start-
 - `workflow run monitor` is read-only by default and emits one stable JSON shape per run, derived from durable rows and the monitor reducer, so a monitor runner can decide whether to report, wait, or ask an operator to recover without parsing prose or scraping artifacts.
   Its opt-in `--advance` mode is restricted to Momentum-native coding runs and writes only digest baselines for progress suppression.
 - `workflow run watch` emits a one-shot supervisor envelope for a Momentum-native coding run.
-  `--once` safely runs at most one run-scoped dispatcher tick when the target run has one approved next step, then persists the same digest suppression baseline as a monitor advance tick and gives external pollers one recommended next action.
+  `--once` safely runs at most one run-scoped dispatcher tick when the target run has one approved next step or one active step eligible for recheck, then persists the same digest suppression baseline as a monitor advance tick and gives external pollers one recommended next action.
 - `workflow run logs` is a read-only run-scoped log and evidence reader that reuses the workflow detail shape and attaches executor rounds plus their child artifacts, checkpoints, findings, and decisions.
 
 `workflow run preview-coding`, `workflow status`, `workflow handoff`, `workflow run list`, and `workflow run logs` are read-only: they never write SQLite or files.
@@ -1379,6 +1379,10 @@ external. A chat, cron, or supervisor wrapper should call:
 momentum workflow run monitor <run-id> --advance --json
 ```
 
+Use `workflow run watch <run-id> --once --json` instead when the supervisor
+should also run one bounded target-run dispatcher tick before reading the same
+projection.
+
 Then branch on the JSON instead of scraping text:
 
 - Suppress the tick when `progress.emit` is `false`, `blocked` is `false`,
@@ -1500,13 +1504,13 @@ Options:
 ```
 
 `emit`, `reason`, `disposition`, `phase`, `cleanup`, and `digest` are derived from the same monitor progress tick as `workflow run monitor --advance`.
-Before deriving that tick, `workflow run watch --once` may claim and dispatch exactly one approved next step for the target run.
-It does not resolve gates, approvals, or recovery decisions by itself, and it does not scan or claim work from other runs.
+Before deriving that tick, `workflow run watch --once` may run one target-run dispatcher tick, either to claim and dispatch one approved next step or to recheck one active running step that the scheduler can safely revisit.
+It does not resolve gates, approvals, or recovery decisions by itself, recover stale leases, or scan or claim work from other runs.
 `activeStep` is `null` when no step is active.
 `humanAction` is `null` when no operator command is required, points to `workflow run approve` for approval waits, points to `workflow run decide` for open gates, and points to `workflow run clear-recovery` only for recovery states that can be cleared directly or with an explicit evidence pointer.
 Soft `monitor_drift_stale` reports and ordinary `failed_required_step` failures do not emit a clear-recovery command.
 `recommendedAction` is one of `poll`, `approve`, `operator_decision`, `recover`, or `release`.
-`nextPollSeconds` is `0` for release, `30` for blocked or approval waits, and `15` while work can keep progressing.
+`nextPollSeconds` is `0` for release, `30` for blocked or approval waits, and `15` otherwise.
 `quietForSeconds` mirrors the poll interval on suppressed ticks and is `0` when this tick emits.
 `stuckRisk` is `low` for progressing work, `medium` for idle or approval waits, and `high` for blocked or recovery states.
 
@@ -1516,7 +1520,8 @@ Soft `monitor_drift_stale` reports and ordinary `failed_required_step` failures 
 |------|---------|
 | `run_id_required` | `<run-id>` was not supplied. |
 | `once_required` | `--once` was not supplied. |
-| `data_dir_failed` | Data directory resolution failed. |
+| `data_dir_failed` | Data directory resolution, SQLite access, or the bounded dispatch tick failed. |
+| `daemon_live_wrapper_profile_invalid` | The shared daemon live-wrapper profile was configured but unreadable or invalid when the bounded dispatch tick resolved it. |
 | `run_not_found` | `<run-id>` does not exist in `workflow_runs`. |
 | `watch_unsupported_source` | The run source is not `momentum-native-coding`. |
 
