@@ -174,6 +174,7 @@ type ParsedFlags = {
   issueScope?: string;
   updatedSince?: number;
   updatedUntil?: number;
+  since?: string;
   phrase?: string;
   actor?: string;
   approvalPath?: string;
@@ -1029,6 +1030,7 @@ function parseFlags(argv: string[]): ParsedFlags {
   let issueScopeFlag: string | undefined;
   let updatedSinceFlag: number | undefined;
   let updatedUntilFlag: number | undefined;
+  let sinceFlag: string | undefined;
   let actorFlag: string | undefined;
   let approvalPathFlag: string | undefined;
   let approvalDigestFlag: string | undefined;
@@ -1604,6 +1606,17 @@ function parseFlags(argv: string[]): ParsedFlags {
       continue;
     }
 
+    if (arg === "--since") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --since.";
+      } else {
+        sinceFlag = value;
+        index += 1;
+      }
+      continue;
+    }
+
     if (arg === "--stale-threshold-hours") {
       const value = readFlagValue(argv, index);
       if (value === undefined) {
@@ -1763,6 +1776,7 @@ function parseFlags(argv: string[]): ParsedFlags {
   if (issueScopeFlag !== undefined) parsed.issueScope = issueScopeFlag;
   if (updatedSinceFlag !== undefined) parsed.updatedSince = updatedSinceFlag;
   if (updatedUntilFlag !== undefined) parsed.updatedUntil = updatedUntilFlag;
+  if (sinceFlag !== undefined) parsed.since = sinceFlag;
   if (actorFlag !== undefined) parsed.actor = actorFlag;
   if (approvalPathFlag !== undefined) parsed.approvalPath = approvalPathFlag;
   if (approvalDigestFlag !== undefined) parsed.approvalDigest = approvalDigestFlag;

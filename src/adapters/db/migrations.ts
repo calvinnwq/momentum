@@ -708,6 +708,21 @@ CREATE INDEX IF NOT EXISTS idx_workflow_gates_open
   ON workflow_gates(workflow_run_id) WHERE resolved_at IS NULL;
 `;
 
+const WORKFLOW_EVENTS_DDL = `
+CREATE TABLE IF NOT EXISTS workflow_events (
+  event_id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL REFERENCES workflow_runs(id),
+  step_id TEXT,
+  occurred_at INTEGER NOT NULL,
+  type TEXT NOT NULL,
+  payload_json TEXT NOT NULL DEFAULT '{}',
+  created_at INTEGER NOT NULL
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS idx_workflow_events_run_cursor
+  ON workflow_events(run_id, occurred_at, event_id);
+`;
+
 export function applyQueueMigrations(db: MomentumDb): void {
   db.exec("BEGIN");
   try {
@@ -770,6 +785,7 @@ export function applyQueueMigrations(db: MomentumDb): void {
       }
     }
     db.exec(WORKFLOW_GATES_DDL);
+    db.exec(WORKFLOW_EVENTS_DDL);
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");

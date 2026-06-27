@@ -1,6 +1,6 @@
 # Workflow commands
 
-Operator-facing CLI envelopes for the `workflow run start`, `workflow run start-coding`, `workflow run preview-coding`, `workflow import`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run approve`, `workflow run decide`, `workflow run update-step`, `workflow run clear-recovery`, `workflow run monitor`, `workflow run watch`, and `workflow run logs` commands.
+Operator-facing CLI envelopes for the `workflow run start`, `workflow run start-coding`, `workflow run preview-coding`, `workflow import`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run approve`, `workflow run decide`, `workflow run update-step`, `workflow run clear-recovery`, `workflow run monitor`, `workflow run watch`, `workflow run events`, and `workflow run logs` commands.
 
 - `workflow run start` starts a first-class workflow run from a validated workflow definition: it resolves the definition (a persisted definition, or the built-in `coding-workflow` recipe), loads repo policy, and durably materializes a `workflow_runs` row plus one ordered `workflow_steps` row per definition step, with an approval row when an approval boundary is supplied.
   `goal start` remains the compatibility path for the older Goal loop.
@@ -20,9 +20,11 @@ Operator-facing CLI envelopes for the `workflow run start`, `workflow run start-
   Its opt-in `--advance` mode is restricted to Momentum-native coding runs and writes only advisory digest / timestamp baselines for progress suppression.
 - `workflow run watch` emits a one-shot supervisor envelope for a Momentum-native coding run.
   `--once` safely runs at most one run-scoped dispatcher tick when the target run has one approved next step or one active step eligible for recheck, then persists the same advisory suppression baseline as a monitor advance tick and gives external pollers one recommended next action.
+- `workflow run events` is a read-only replay surface for supervisors and app clients that need semantic run changes after reconnecting.
+  It returns ordered event records from durable workflow state and append-only workflow event rows without reading stdout scrollback or running dispatch.
 - `workflow run logs` is a read-only run-scoped log and evidence reader that reuses the workflow detail shape and attaches executor rounds plus their child artifacts, checkpoints, findings, and decisions.
 
-`workflow run preview-coding`, `workflow status`, `workflow handoff`, `workflow run list`, and `workflow run logs` are read-only: they never write SQLite or files.
+`workflow run preview-coding`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run events`, and `workflow run logs` are read-only: they never write SQLite or files.
 `workflow run monitor` is also read-only unless `--advance` is passed, in which case supported Momentum-native coding runs persist only `monitor_last_seen_digest` / `monitor_last_seen_at` and `monitor_last_emitted_digest` / `monitor_last_emitted_at` progress baselines.
 `workflow run watch --once` is write-limited to the target run's safe dispatcher tick and the same advisory baseline columns for supported Momentum-native coding runs.
 
@@ -1785,6 +1787,66 @@ A human action line is included when the tick requires an operator command.
 An inspection command line is included when a stuck-risk advisory recommends a follow-up monitor inspection.
 
 Exit code 0 on success, 1 on failure, 2 on usage error.
+
+## `workflow run events`
+
+```text
+momentum workflow run events <run-id> [--since <cursor>] [--data-dir <path>] [--json]
+```
+
+Replay one workflow run's durable semantic event projection. This command is for supervisors and app clients that may lose process state and need to catch up from the last event they handled. It is not a streaming API: each invocation reads the current durable database state once, returns the events after `--since`, and exits.
+
+The event stream is built from two durable sources:
+
+- Reproducible workflow rows: step start / terminal states, approvals, gates, and terminal run state.
+- Append-only workflow event rows for transitions that would otherwise be overwritten, such as manual-recovery mark / clear and throttled monitor advisories.
+
+Cursor semantics:
+
+- Every event carries a stable `id` and an opaque replay `cursor`.
+- The response `cursor` is the highest returned replay cursor, or the supplied `since` cursor when no higher cursor exists.
+- Repeating the same `--since` against unchanged durable state is deterministic and idempotent.
+- To continue, pass the previous response `cursor` as the next `--since` value.
+- A `null` / omitted cursor means "replay from the beginning".
+
+Event records are ordered by event timestamp, then deterministic replay cursor. Event ids are stable identities for the durable facts that produced them; clients should store `id` for dedupe and use only `cursor` / response `cursor` with the command's `--since` contract.
+
+### JSON envelope
+
+```json
+{
+  "ok": true,
+  "command": "workflow run events",
+  "dataDir": "/path/to/data",
+  "runId": "mwf-abc123",
+  "since": "0001730000500000:step_started:...",
+  "cursor": "0001730000600000:step_succeeded:...",
+  "events": [
+    {
+      "id": "0001730000600000:step_succeeded:...",
+      "cursor": "0001730000600000:step_succeeded:...",
+      "timestamp": 1730000600000,
+      "type": "step_succeeded",
+      "stepId": "implementation",
+      "payload": {
+        "kind": "implementation",
+        "order": 1,
+        "required": true,
+        "resultDigest": "sha256:..."
+      }
+    }
+  ],
+  "counts": { "events": 1 }
+}
+```
+
+`type` is one of `step_started`, `step_succeeded`, `step_failed`, `step_skipped`, `step_canceled`, `step_blocked`, `approval_required`, `approval_resolved`, `recovery_required`, `recovery_cleared`, `gate_opened`, `gate_resolved`, `terminal_state`, `monitor_stuck_risk`, or `monitor_quiet_heartbeat`.
+
+`payload` is intentionally concise and type-specific. Step events carry step kind/order/required plus result or error fields when present. Approval and gate events carry the boundary or gate identity and decision metadata. Recovery events carry the reason or previous recovery reason. Monitor advisory events are throttled semantic advisories, not ordinary heartbeat spam.
+
+### Boundary with stream mode
+
+`workflow run events` is replay-only. It does not hold a connection open, emit JSONL, or watch for filesystem/database changes after the read. A caller that wants live behavior should poll this command with the last returned cursor until a streaming command exists.
 
 ## `workflow run logs`
 

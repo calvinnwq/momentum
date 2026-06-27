@@ -24,6 +24,7 @@
 
 import type { MomentumDb } from "../../adapters/db.js";
 import { prepareRetryableDispatchedStepForRecoveryClear } from "./dispatch-retry.js";
+import { appendWorkflowEvent } from "./events.js";
 import { loadWorkflowRunDetail } from "./status.js";
 import type { WorkflowMonitorRecoveryCode } from "./monitor-state.js";
 import { refreshWorkflowRunRuntimeState } from "./runtime-state.js";
@@ -64,8 +65,17 @@ export function markWorkflowRunNeedsManualRecovery(
   }
 
   const before = db
-    .prepare("SELECT needs_manual_recovery FROM workflow_runs WHERE id = ?")
-    .get(input.runId) as { needs_manual_recovery: number } | undefined;
+    .prepare(
+      `SELECT needs_manual_recovery, manual_recovery_reason, manual_recovery_at
+         FROM workflow_runs WHERE id = ?`
+    )
+    .get(input.runId) as
+    | {
+        needs_manual_recovery: number;
+        manual_recovery_reason: string | null;
+        manual_recovery_at: number | null;
+      }
+    | undefined;
   if (!before) {
     return { ok: false, reason: "run_not_found" };
   }
@@ -78,6 +88,23 @@ export function markWorkflowRunNeedsManualRecovery(
            updated_at = ?
      WHERE id = ?`
   ).run(input.reason, now, now, input.runId);
+
+  if (
+    before.needs_manual_recovery !== 1 ||
+    before.manual_recovery_reason !== input.reason ||
+    before.manual_recovery_at !== now
+  ) {
+    appendWorkflowEvent(db, {
+      runId: input.runId,
+      type: "recovery_required",
+      occurredAt: now,
+      payload: {
+        reason: input.reason,
+        previousReason: before.manual_recovery_reason,
+        previousMarkedAt: before.manual_recovery_at
+      }
+    });
+  }
 
   return { ok: true, previouslyMarked: before.needs_manual_recovery === 1 };
 }
@@ -112,8 +139,17 @@ export function clearWorkflowRunManualRecovery(
   }
 
   const before = db
-    .prepare("SELECT needs_manual_recovery FROM workflow_runs WHERE id = ?")
-    .get(input.runId) as { needs_manual_recovery: number } | undefined;
+    .prepare(
+      `SELECT needs_manual_recovery, manual_recovery_reason, manual_recovery_at
+         FROM workflow_runs WHERE id = ?`
+    )
+    .get(input.runId) as
+    | {
+        needs_manual_recovery: number;
+        manual_recovery_reason: string | null;
+        manual_recovery_at: number | null;
+      }
+    | undefined;
   if (!before) {
     return { ok: false, reason: "run_not_found" };
   }
@@ -126,6 +162,18 @@ export function clearWorkflowRunManualRecovery(
            updated_at = ?
      WHERE id = ?`
   ).run(now, input.runId);
+
+  if (before.needs_manual_recovery === 1) {
+    appendWorkflowEvent(db, {
+      runId: input.runId,
+      type: "recovery_cleared",
+      occurredAt: now,
+      payload: {
+        previousReason: before.manual_recovery_reason,
+        previousMarkedAt: before.manual_recovery_at
+      }
+    });
+  }
 
   return { ok: true, wasMarked: before.needs_manual_recovery === 1 };
 }
