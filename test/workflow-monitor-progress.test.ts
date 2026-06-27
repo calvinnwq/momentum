@@ -81,6 +81,8 @@ function makeEnvelope(
     gates: [],
     counts: makeCounts(),
     monitorLastEmittedDigest: null,
+    monitorLastSeenAt: null,
+    monitorLastEmittedAt: null,
     ...overrides
   };
 }

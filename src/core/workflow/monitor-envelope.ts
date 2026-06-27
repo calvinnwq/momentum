@@ -132,6 +132,17 @@ export type WorkflowMonitorEnvelope = {
    * emitted yet (a first observation always emits).
    */
   monitorLastEmittedDigest: string | null;
+  /**
+   * Advisory timestamp for the last observed monitor/watch tick. This is not a
+   * lifecycle state transition; it lets bounded pollers measure quiet duration
+   * across separate `--once` invocations without mutating run / step state.
+   */
+  monitorLastSeenAt: number | null;
+  /**
+   * Advisory timestamp for the last surfaced monitor/watch tick. Quiet
+   * heartbeat and stuck-risk throttling measure elapsed silence from this value.
+   */
+  monitorLastEmittedAt: number | null;
 };
 
 export type BuildWorkflowMonitorEnvelopeOptions = {
@@ -239,7 +250,9 @@ export function buildWorkflowMonitorEnvelope(
     evidence: detail.evidence,
     gates: detail.gates,
     counts: countsFromDetail(detail),
-    monitorLastEmittedDigest: detail.run.monitorLastEmittedDigest
+    monitorLastEmittedDigest: detail.run.monitorLastEmittedDigest,
+    monitorLastSeenAt: detail.run.monitorLastSeenAt,
+    monitorLastEmittedAt: detail.run.monitorLastEmittedAt
   };
 }
 

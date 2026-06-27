@@ -313,6 +313,8 @@ function runRow(overrides: Partial<WorkflowRunRow> = {}): WorkflowRunRow {
     monitorStep: null,
     monitorLastSeenDigest: null,
     monitorLastEmittedDigest: null,
+    monitorLastSeenAt: null,
+    monitorLastEmittedAt: null,
     goalId: null,
     batchGroup: null,
     batchRole: null,

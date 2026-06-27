@@ -51,7 +51,9 @@ const WORKFLOW_RUN_MONITOR_ADVISORY_COLUMNS: ColumnSpec[] = [
   { name: "monitor_terminal", type: "INTEGER" },
   { name: "monitor_step", type: "TEXT" },
   { name: "monitor_last_seen_digest", type: "TEXT" },
-  { name: "monitor_last_emitted_digest", type: "TEXT" }
+  { name: "monitor_last_emitted_digest", type: "TEXT" },
+  { name: "monitor_last_seen_at", type: "INTEGER" },
+  { name: "monitor_last_emitted_at", type: "INTEGER" }
 ];
 
 // M10-02 (NGX-346): link a workflow run back to the WorkflowDefinition recipe it
@@ -352,6 +354,8 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
   monitor_step TEXT,
   monitor_last_seen_digest TEXT,
   monitor_last_emitted_digest TEXT,
+  monitor_last_seen_at INTEGER,
+  monitor_last_emitted_at INTEGER,
   batch_group TEXT,
   batch_role TEXT,
   needs_manual_recovery INTEGER NOT NULL DEFAULT 0,

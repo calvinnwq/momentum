@@ -30,7 +30,8 @@
  * This module owns only the pure classification + digest projection. The
  * `workflow run monitor` CLI passes the durable emitted-digest baseline into
  * this reducer and, when `--advance` is used on a Momentum-native coding run,
- * persists the returned digest into advisory columns outside this module.
+ * persists the returned digest plus observation timestamps into advisory
+ * columns outside this module.
  */
 
 import crypto from "node:crypto";

@@ -101,6 +101,8 @@ export function refreshWorkflowRunRuntimeState(
              monitor_step = ?,
              monitor_last_seen_digest = NULL,
              monitor_last_emitted_digest = NULL,
+             monitor_last_seen_at = NULL,
+             monitor_last_emitted_at = NULL,
              updated_at = ?
        WHERE id = ?`
     ).run(
@@ -125,6 +127,8 @@ export function refreshWorkflowRunRuntimeState(
            monitor_step = ?,
            monitor_last_seen_digest = NULL,
            monitor_last_emitted_digest = NULL,
+           monitor_last_seen_at = NULL,
+           monitor_last_emitted_at = NULL,
            updated_at = ?
      WHERE id = ?`
   ).run(

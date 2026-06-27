@@ -55,6 +55,8 @@ export type WorkflowRunRow = {
   monitorStep: string | null;
   monitorLastSeenDigest: string | null;
   monitorLastEmittedDigest: string | null;
+  monitorLastSeenAt: number | null;
+  monitorLastEmittedAt: number | null;
   goalId: string | null;
   batchGroup: string | null;
   batchRole: string | null;
@@ -441,6 +443,8 @@ type RunRow = {
   monitor_step: string | null;
   monitor_last_seen_digest: string | null;
   monitor_last_emitted_digest: string | null;
+  monitor_last_seen_at: number | null;
+  monitor_last_emitted_at: number | null;
   goal_id: string | null;
   batch_group: string | null;
   batch_role: string | null;
@@ -515,6 +519,8 @@ function parseRunRow(row: RunRow): WorkflowRunRow {
     monitorStep: row.monitor_step,
     monitorLastSeenDigest: row.monitor_last_seen_digest,
     monitorLastEmittedDigest: row.monitor_last_emitted_digest,
+    monitorLastSeenAt: row.monitor_last_seen_at,
+    monitorLastEmittedAt: row.monitor_last_emitted_at,
     goalId: row.goal_id,
     batchGroup: row.batch_group,
     batchRole: row.batch_role,

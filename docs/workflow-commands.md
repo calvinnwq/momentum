@@ -17,14 +17,14 @@ Operator-facing CLI envelopes for the `workflow run start`, `workflow run start-
 - `workflow run clear-recovery` explicitly clears a run's durable manual-recovery flag after the blocking condition is resolved.
 - `workflow run decide` resolves a durable workflow / step / executor gate by routing an operator or delegated-policy decision through the gate brain: an operator may pick any allowed action, while `--mode delegated` may only auto-apply an action inside the gate's policy envelope.
 - `workflow run monitor` is read-only by default and emits one stable JSON shape per run, derived from durable rows and the monitor reducer, so a monitor runner can decide whether to report, wait, or ask an operator to recover without parsing prose or scraping artifacts.
-  Its opt-in `--advance` mode is restricted to Momentum-native coding runs and writes only digest baselines for progress suppression.
+  Its opt-in `--advance` mode is restricted to Momentum-native coding runs and writes only advisory digest / timestamp baselines for progress suppression.
 - `workflow run watch` emits a one-shot supervisor envelope for a Momentum-native coding run.
-  `--once` safely runs at most one run-scoped dispatcher tick when the target run has one approved next step or one active step eligible for recheck, then persists the same digest suppression baseline as a monitor advance tick and gives external pollers one recommended next action.
+  `--once` safely runs at most one run-scoped dispatcher tick when the target run has one approved next step or one active step eligible for recheck, then persists the same advisory suppression baseline as a monitor advance tick and gives external pollers one recommended next action.
 - `workflow run logs` is a read-only run-scoped log and evidence reader that reuses the workflow detail shape and attaches executor rounds plus their child artifacts, checkpoints, findings, and decisions.
 
 `workflow run preview-coding`, `workflow status`, `workflow handoff`, `workflow run list`, and `workflow run logs` are read-only: they never write SQLite or files.
-`workflow run monitor` is also read-only unless `--advance` is passed, in which case supported Momentum-native coding runs persist only `monitor_last_seen_digest` and `monitor_last_emitted_digest` progress baselines.
-`workflow run watch --once` is write-limited to the target run's safe dispatcher tick and the same digest baseline columns for supported Momentum-native coding runs.
+`workflow run monitor` is also read-only unless `--advance` is passed, in which case supported Momentum-native coding runs persist only `monitor_last_seen_digest` / `monitor_last_seen_at` and `monitor_last_emitted_digest` / `monitor_last_emitted_at` progress baselines.
+`workflow run watch --once` is write-limited to the target run's safe dispatcher tick and the same advisory baseline columns for supported Momentum-native coding runs.
 
 `workflow run --help` and any nested `workflow run ... --help` or `workflow run ... -h` invocation print the shared top-level CLI help to stdout and exit 0 before selecting or validating a run subcommand.
 This help path ignores `--json`, reads no data directory, and performs no durable writes.
@@ -353,7 +353,7 @@ Reads the `.agent-workflows/<run-id>/` directory at `<run-dir>` and normalizes t
 ### Processing rules
 
 - **Idempotent re-import**: running `workflow import` on the same directory twice produces no duplicate rows. `created_at` is preserved on upsert; `updated_at` is bumped.
-- **Terminal ledger wins**: `monitor.json` is advisory. Step and run state are derived from `ledger.jsonl` and `plan.json`; a stale monitor does not override completed ledger evidence. Its advisory snapshot is persisted on `workflow_runs` (`monitor_last_seen_state`, `monitor_terminal`, `monitor_step`, `monitor_last_seen_digest`, `monitor_last_emitted_digest`) so status / handoff / monitor / logs drift views can compare durable substrate state against the last imported or operator-refreshed advisory snapshot. Successful `workflow run approve`, `workflow run update-step`, and `workflow run clear-recovery` mutations refresh the same columns from durable rows and clear the digest fields, so later views do not report drift against a stale pre-mutation monitor tick.
+- **Terminal ledger wins**: `monitor.json` is advisory. Step and run state are derived from `ledger.jsonl` and `plan.json`; a stale monitor does not override completed ledger evidence. Its advisory snapshot is persisted on `workflow_runs` (`monitor_last_seen_state`, `monitor_terminal`, `monitor_step`, `monitor_last_seen_digest`, `monitor_last_emitted_digest`, `monitor_last_seen_at`, `monitor_last_emitted_at`) so status / handoff / monitor / logs drift views can compare durable substrate state against the last imported or operator-refreshed advisory snapshot. Successful `workflow run approve`, `workflow run update-step`, and `workflow run clear-recovery` mutations refresh the same state columns from durable rows and clear the digest / timestamp fields, so later views do not report drift against a stale pre-mutation monitor tick.
 - **Lost managed-task markers**: `managed-*.pid`, `managed-*.log`, and `locks/` sibling entries are ignored without diagnostics. They do not force a failed step state.
 - **Unknown siblings**: unrecognized files produce `evidence_format_unknown` diagnostics but do not drop the valid records around them. The generated `recovery.md` artifact is a known sibling and is ignored by import.
 - **Malformed artifacts**: invalid `plan.json`, `ledger.jsonl` lines, or `approval-*.json` files produce `evidence_format_invalid` diagnostics. Valid siblings are still imported.
@@ -1257,7 +1257,7 @@ Read-only-by-default machine envelope for a monitor runner.
 Wraps the same durable detail loader as `workflow status <run-id>`, runs the monitor reducer, and adds a `disposition` decision view so a caller can act on one stable JSON shape per tick instead of parsing prose or scraping `.agent-workflows/<run-id>/`.
 Without `--advance` it never writes SQLite or files, never schedules cron, and never delivers notifications.
 The opt-in `--advance` flag is only supported for runs whose source is `momentum-native-coding`.
-When supported, it persists only the progress suppression baseline (the `monitor_last_emitted_digest` / `monitor_last_seen_digest` advisory columns); it never touches run, step, lease, or gate state.
+When supported, it persists only the progress suppression baseline (the `monitor_last_emitted_digest` / `monitor_last_seen_digest` and `monitor_last_emitted_at` / `monitor_last_seen_at` advisory columns); it never touches run, step, lease, or gate state.
 
 Required arguments:
 
@@ -1265,7 +1265,7 @@ Required arguments:
 
 Options:
 
-- `--advance` - for `momentum-native-coding` runs only, persist this tick's digest as the durable progress suppression baseline so a cron loop polling the command repeatedly suppresses unchanged ticks across invocations.
+- `--advance` - for `momentum-native-coding` runs only, persist this tick's digest / timestamp advisory baseline so a cron loop polling the command repeatedly suppresses unchanged ticks across invocations.
   See the [progress digest tick](#progress-digest-tick) section.
 
 ### Disposition and report reason
@@ -1365,7 +1365,7 @@ Consumers that need full run metadata should call `workflow status` / `workflow 
 - `advanced` reports whether this tick persisted the suppression baseline.
   It is `false` for a plain read; it is `true` only when `--advance` was passed and the tick actually emitted (a first observation or a meaningful change).
   For a supported `momentum-native-coding` run, passing `--advance` lets a cron loop poll the command repeatedly and suppress unchanged ticks across invocations from durable state alone: the first tick emits and advances the baseline, identical follow-up ticks report `emit: false` / `advanced: false`, and the baseline re-arms automatically on the next meaningful change.
-  An unchanged `--advance` tick refreshes only `monitor_last_seen_digest`; it leaves the emitted baseline untouched.
+  An unchanged `--advance` tick refreshes only `monitor_last_seen_digest` and `monitor_last_seen_at`; it leaves the emitted baseline untouched.
 - `terminal` and `cleanup` make end-of-run handling explicit: a clean terminal outcome reports `cleanup: "release"` (release the monitor lease and stop ticking); every other phase reports `cleanup: "none"`. `cleanup` and `terminal` are reported even on a suppressed (`emit: false`) tick.
 - `currentStep`, `lastEvent`, `nextAction` (the next-action code), and `blockerReason` are the snapshot fields an operator reads at a glance; `blockerReason` is `null` unless `phase` is `blocked`.
   For durable manual-recovery-only blocks, `blockerReason` uses `manualRecoveryReason` when present.
@@ -1405,7 +1405,8 @@ For `workflow run watch --once --json`, use the frozen top-level supervisor enve
   same `reason`, `phase`, and `digest` for machine dedupe.
 - Branch on `recommendedAction` (`poll`, `approve`, `operator_decision`,
   `recover`, or `release`) and use `nextPollSeconds`, `quietForSeconds`,
-  `stuckRisk`, and `cleanup` directly.
+  `quietThresholdSeconds`, `stuckRisk`, `inspectionCommand`, and `cleanup`
+  directly.
 - Render concise human text from `reason`, `activeStep`, `nextAction.detail`,
   and `humanAction.command` / `humanAction.detail` when `humanAction` is present.
 - Stop and clean up the wrapper when `recommendedAction` is `"release"` and
@@ -1468,7 +1469,7 @@ momentum workflow run watch <run-id> --once [--data-dir <path>] [--json]
 ```
 
 Emits a one-shot supervisor tick for a Momentum-native coding workflow run.
-The command reads the durable monitor projection, persists this tick's digest baseline, and returns a compact next-action envelope for cron, OpenClaw, or GUI pollers.
+The command reads the durable monitor projection, persists this tick's advisory digest / timestamp baseline, and returns a compact next-action envelope for cron, OpenClaw, or GUI pollers.
 It does not resolve approvals, gates, manual recovery, or other operator decisions.
 
 Required arguments:
@@ -1513,13 +1514,15 @@ Options:
   "recommendedAction": "poll",
   "nextPollSeconds": 15,
   "quietForSeconds": 0,
+  "quietThresholdSeconds": 900,
   "stuckRisk": "low",
+  "inspectionCommand": null,
   "cleanup": "none",
   "digest": "sha256:7abb560d717661265f609b02107bd6fce701de831d42a28bd1f7af344aa52ad5"
 }
 ```
 
-`emit`, `reason`, `disposition`, `phase`, `cleanup`, and `digest` are derived from the same monitor progress tick as `workflow run monitor --advance`.
+`disposition`, `phase`, `cleanup`, and `digest` are derived from the same monitor progress tick as `workflow run monitor --advance`; `emit` and `reason` can also reflect watch-only quiet-heartbeat or stuck-risk advisories when an unchanged tick reaches its quiet threshold.
 Before deriving that tick, `workflow run watch --once` may run one target-run dispatcher tick, either to claim and dispatch one approved next step or to recheck one active running step that the scheduler can safely revisit.
 It does not resolve gates, approvals, or recovery decisions by itself, recover stale leases, or scan or claim work from other runs.
 `activeStep` is `null` when no step is active.
@@ -1538,8 +1541,8 @@ Soft `monitor_drift_stale` reports and ordinary `failed_required_step` failures 
 | `generatedAt` | number | Epoch-millisecond time the tick was rendered. |
 | `runId` | string | The inspected run id. |
 | `runState` | string | Durable run state (`pending`, `running`, `succeeded`, `failed`, `canceled`). |
-| `emit` | boolean | Machine-polling signal: `true` when this tick differs from the last emitted digest, `false` to suppress a duplicate update. |
-| `reason` | enum | Human-facing classification: `terminal_succeeded`, `terminal_canceled`, `recovery_required`, `monitor_drift`, `awaiting_approval`, `in_progress`, or `idle`. |
+| `emit` | boolean | Machine-polling signal: `true` when this tick differs from the last emitted digest or a quiet-heartbeat / stuck-risk advisory is due, `false` to suppress a duplicate unchanged update below the quiet threshold. |
+| `reason` | enum | Human-facing classification: `terminal_succeeded`, `terminal_canceled`, `recovery_required`, `monitor_drift`, `awaiting_approval`, `in_progress`, `idle`, `quiet_heartbeat`, or `stuck_risk`. |
 | `disposition` | enum | Machine action class: `wait`, `report`, or `recover`. |
 | `phase` | enum | Progress phase: `advancing`, `idle`, `awaiting_approval`, `blocked`, or `terminal`. |
 | `activeStep` | object \| null | The step in flight, or `null` when no step is active. |
@@ -1547,8 +1550,10 @@ Soft `monitor_drift_stale` reports and ordinary `failed_required_step` failures 
 | `humanAction` | object \| null | The single operator command that unblocks the run, or `null` when no operator command is required. |
 | `recommendedAction` | enum | What the poller should do: `poll`, `approve`, `operator_decision`, `recover`, or `release`. |
 | `nextPollSeconds` | number | Suggested wait before the next tick: `0` for release, `30` for blocked or approval waits, `15` otherwise. |
-| `quietForSeconds` | number | Mirrors `nextPollSeconds` on a suppressed tick (`emit: false`) and is `0` when this tick emits. |
-| `stuckRisk` | enum | `low` for progressing work, `medium` for idle or approval waits, `high` for blocked or recovery states. |
+| `quietForSeconds` | number | Elapsed seconds since the last surfaced tick for this run. It is `0` on a first observation or meaningful state change, grows across suppressed unchanged polls, and is included on throttled `quiet_heartbeat` / `stuck_risk` emissions. |
+| `quietThresholdSeconds` | number | Current quiet advisory threshold for the run phase or active step kind. Defaults: implementation `900`, postflight `600`, no-mistakes `900`, merge-cleanup `300`, linear-refresh `300`, approval reminders `1800`, recovery reminders `3600`, idle `900`. |
+| `stuckRisk` | enum | `low` for ordinary progressing work, `medium` for idle or approval waits and active-execution stuck-risk advisories, `high` for blocked or recovery states. |
+| `inspectionCommand` | string \| null | Suggested inspection command when `reason` is `stuck_risk`; otherwise `null`. The command includes the resolved `--data-dir` so follow-up inspection reads the same state. The CLI never performs diagnosis itself. |
 | `cleanup` | enum | `release` once the wrapper can stop polling, otherwise `none`. |
 | `digest` | string | Deterministic `sha256:` progress digest; unchanged across identical ticks so consumers can dedupe. |
 
@@ -1558,7 +1563,7 @@ Soft `monitor_drift_stale` reports and ordinary `failed_required_step` failures 
 
 ### Supervisor scenarios
 
-The same envelope shape covers every tick; these are the seven contract scenarios a poller branches on.
+The same envelope shape covers every tick; these are the common contract scenarios a poller branches on.
 Only the distinguishing fields are shown.
 
 Progress tick - a step is advancing under a fresh lease, so keep polling quietly:
@@ -1575,12 +1580,14 @@ Progress tick - a step is advancing under a fresh lease, so keep polling quietly
   "recommendedAction": "poll",
   "nextPollSeconds": 15,
   "quietForSeconds": 0,
+  "quietThresholdSeconds": 900,
   "stuckRisk": "low",
+  "inspectionCommand": null,
   "cleanup": "none"
 }
 ```
 
-Unchanged tick - a repeated identical poll suppresses `emit` while `reason` and `digest` hold steady, so a consumer skips a duplicate update:
+Unchanged tick - a repeated identical poll below the quiet threshold suppresses `emit` while `reason` and `digest` hold steady, so a consumer skips a duplicate update:
 
 ```json
 {
@@ -1590,8 +1597,30 @@ Unchanged tick - a repeated identical poll suppresses `emit` while `reason` and 
   "phase": "advancing",
   "recommendedAction": "poll",
   "nextPollSeconds": 15,
-  "quietForSeconds": 15,
+  "quietForSeconds": 24,
+  "quietThresholdSeconds": 900,
   "stuckRisk": "low",
+  "inspectionCommand": null,
+  "cleanup": "none",
+  "humanAction": null
+}
+```
+
+Stuck risk - a repeated identical active-execution poll reaches the active step's quiet threshold, so the CLI emits an advisory only and recommends an inspection command:
+
+```json
+{
+  "emit": true,
+  "reason": "stuck_risk",
+  "disposition": "wait",
+  "phase": "advancing",
+  "activeStep": { "stepId": "implementation", "state": "running" },
+  "recommendedAction": "poll",
+  "nextPollSeconds": 15,
+  "quietForSeconds": 900,
+  "quietThresholdSeconds": 900,
+  "stuckRisk": "medium",
+  "inspectionCommand": "momentum workflow run monitor 'mwf-abc123' --data-dir '/path/to/momentum-data' --advance --json",
   "cleanup": "none",
   "humanAction": null
 }
@@ -1608,7 +1637,9 @@ Approval required - the next step is gated on operator approval:
   "recommendedAction": "approve",
   "nextPollSeconds": 30,
   "quietForSeconds": 0,
+  "quietThresholdSeconds": 1800,
   "stuckRisk": "medium",
+  "inspectionCommand": null,
   "cleanup": "none",
   "humanAction": {
     "code": "approve",
@@ -1629,7 +1660,9 @@ Recovery required - the run is flagged for manual recovery and can be cleared di
   "recommendedAction": "recover",
   "nextPollSeconds": 30,
   "quietForSeconds": 0,
+  "quietThresholdSeconds": 3600,
   "stuckRisk": "high",
+  "inspectionCommand": null,
   "cleanup": "none",
   "nextAction": { "code": "clear_recovery", "stepId": "implementation" },
   "humanAction": {
@@ -1640,7 +1673,7 @@ Recovery required - the run is flagged for manual recovery and can be cleared di
 }
 ```
 
-Stuck risk - the run is `running` but exposes no active step, so the tick keeps polling at a raised `stuckRisk`:
+Idle risk - the run is `running` but exposes no active step, so the tick keeps polling at a raised `stuckRisk`:
 
 ```json
 {
@@ -1652,7 +1685,9 @@ Stuck risk - the run is `running` but exposes no active step, so the tick keeps 
   "recommendedAction": "poll",
   "nextPollSeconds": 15,
   "quietForSeconds": 0,
+  "quietThresholdSeconds": 900,
   "stuckRisk": "medium",
+  "inspectionCommand": null,
   "cleanup": "none",
   "humanAction": null
 }
@@ -1672,7 +1707,9 @@ Terminal success - the run finished cleanly, so the wrapper reports once and sto
   "recommendedAction": "release",
   "nextPollSeconds": 0,
   "quietForSeconds": 0,
+  "quietThresholdSeconds": 0,
   "stuckRisk": "low",
+  "inspectionCommand": null,
   "cleanup": "release"
 }
 ```
@@ -1690,7 +1727,9 @@ Recoverable failure - a required step failed, so an operator must inspect and de
   "recommendedAction": "operator_decision",
   "nextPollSeconds": 30,
   "quietForSeconds": 0,
+  "quietThresholdSeconds": 3600,
   "stuckRisk": "high",
+  "inspectionCommand": null,
   "cleanup": "none"
 }
 ```
@@ -1701,6 +1740,7 @@ A cron, OpenClaw, or GUI poller branches on the envelope instead of scraping tex
 
 - Suppress the update when `emit` is `false`.
   A suppressed tick repeats the prior `reason`, `phase`, and `digest`, so no new human update is warranted.
+- Treat `reason: "quiet_heartbeat"` and `reason: "stuck_risk"` as throttled advisory updates only. They do not mean the run or step failed; inspect with `inspectionCommand` when present and keep polling unless another field asks for operator action or release.
 - Otherwise branch on `recommendedAction`:
   - `poll` - work is advancing or idle; wait `nextPollSeconds` and tick again.
   - `approve` - run `humanAction.command` (a `workflow run approve` call) to release the approval gate.
@@ -1734,6 +1774,7 @@ Next action: resume_running
 Recommended action: poll
 Next poll seconds: 15
 Quiet for seconds: 0
+Quiet threshold seconds: 900
 Stuck risk: low
 Cleanup: none
 Digest: sha256:7abb560d717661265f609b02107bd6fce701de831d42a28bd1f7af344aa52ad5
@@ -1741,6 +1782,7 @@ Data dir: /path/to/data
 ```
 
 A human action line is included when the tick requires an operator command.
+An inspection command line is included when a stuck-risk advisory recommends a follow-up monitor inspection.
 
 Exit code 0 on success, 1 on failure, 2 on usage error.
 
