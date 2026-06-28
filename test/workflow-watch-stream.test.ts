@@ -1006,6 +1006,46 @@ describe("workflow run watch --stream --jsonl (CLI)", () => {
     expect(result.stderr).toContain("--jsonl");
   });
 
+  it("reports missing run id as JSON when --stream --jsonl is present", async () => {
+    const result = await runStreamCli([
+      "workflow",
+      "run",
+      "watch",
+      "--stream",
+      "--jsonl"
+    ]);
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(JSON.parse(result.stderr)).toMatchObject({
+      ok: false,
+      command: "workflow run watch",
+      code: "run_id_required",
+      message: "Missing required <run-id> for workflow run watch."
+    });
+  });
+
+  it("reports unexpected stream arguments as JSON when --jsonl is present", async () => {
+    const result = await runStreamCli([
+      "workflow",
+      "run",
+      "watch",
+      "stream-run",
+      "extra",
+      "--stream",
+      "--jsonl"
+    ]);
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(JSON.parse(result.stderr)).toMatchObject({
+      ok: false,
+      command: "workflow run watch",
+      code: "usage_error",
+      message: "Unexpected argument for workflow run watch: extra"
+    });
+  });
+
   it("reports run_not_found as a JSON refusal for an unknown run", async () => {
     const dataDir = makeStreamSourceTempDir();
     const db = openDb(dataDir);

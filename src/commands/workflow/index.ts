@@ -2102,13 +2102,21 @@ async function workflowRunWatch(
   deps: CliDeps
 ): Promise<number> {
   const positional = parsed.args.slice(3);
+  const streamJsonFailureParsed =
+    parsed.stream === true && parsed.jsonl === true ? { json: true } : parsed;
   if (positional.length === 0 || !positional[0]) {
-    return emitWorkflowRunWatchFailure(parsed, io, {
+    return emitWorkflowRunWatchFailure(streamJsonFailureParsed, io, {
       code: "run_id_required",
       message: "Missing required <run-id> for workflow run watch."
     });
   }
   if (positional.length > 1) {
+    if (parsed.stream === true && parsed.jsonl === true) {
+      return emitWorkflowRunWatchFailure(streamJsonFailureParsed, io, {
+        code: "usage_error",
+        message: `Unexpected argument for workflow run watch: ${positional[1]}`
+      });
+    }
     return usageError(
       `Unexpected argument for workflow run watch: ${positional[1]}`,
       parsed,
