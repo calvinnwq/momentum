@@ -608,6 +608,46 @@ describe("workflow run events", () => {
     expect(result.stdout).toBe("");
   });
 
+  it("returns not-found instead of crashing for pre-workflow databases", async () => {
+    const root = makeTempDir();
+    const dataDir = path.join(root, "legacy-data");
+    fs.mkdirSync(dataDir);
+    const db = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      db.exec(`
+        CREATE TABLE events (
+          id INTEGER PRIMARY KEY,
+          goal_id TEXT NOT NULL,
+          type TEXT NOT NULL,
+          payload TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        ) STRICT;
+      `);
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "events",
+      "missing-run",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(1);
+    expect(JSON.parse(result.stderr)).toMatchObject({
+      ok: false,
+      command: "workflow run events",
+      code: "run_not_found",
+      dataDir,
+      runId: "missing-run"
+    });
+    expect(result.stdout).toBe("");
+  });
+
   it("does not create a missing data directory on read-only misses", async () => {
     const root = makeTempDir();
     const dataDir = path.join(root, "missing-data-dir");

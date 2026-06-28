@@ -85,6 +85,7 @@ export function loadWorkflowRunEvents(
   runId: string,
   options: LoadWorkflowRunEventsOptions = {}
 ): WorkflowRunEvents | null {
+  if (!tableExists(db, "workflow_runs")) return null;
   const run = db
     .prepare(
       `SELECT id, state, finished_at
@@ -119,6 +120,7 @@ function projectStepEvents(
   db: MomentumDb,
   runId: string
 ): WorkflowSemanticEvent[] {
+  if (!tableExists(db, "workflow_steps")) return [];
   const storedBlockedAtByStep = loadStoredStepBlockedAtByStep(db, runId);
   const rows = db
     .prepare(
@@ -208,6 +210,7 @@ function projectApprovalEvents(
   db: MomentumDb,
   runId: string
 ): WorkflowSemanticEvent[] {
+  if (!tableExists(db, "workflow_approvals")) return [];
   const rows = db
     .prepare(
       `SELECT boundary, actor, artifact_path, artifact_digest, recorded_at

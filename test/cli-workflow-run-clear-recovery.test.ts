@@ -483,6 +483,38 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       monitor_terminal: 1,
       monitor_step: null
     });
+
+    const eventsResult = await run([
+      "workflow",
+      "run",
+      "events",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(eventsResult.code).toBe(0);
+    const eventsPayload = JSON.parse(eventsResult.stdout) as {
+      events: Array<{
+        type: string;
+        stepId: string | null;
+        payload: Record<string, unknown>;
+      }>;
+    };
+    const mergeCleanupEvents = eventsPayload.events.filter(
+      (event) =>
+        event.stepId === "merge-cleanup" &&
+        (event.type === "step_failed" || event.type === "step_succeeded")
+    );
+    expect(mergeCleanupEvents.map((event) => event.type)).toEqual([
+      "step_failed",
+      "step_succeeded"
+    ]);
+    expect(mergeCleanupEvents[0]?.payload).toMatchObject({
+      kind: "merge-cleanup",
+      order: 4,
+      required: true
+    });
   });
 
   it("reconciles a failed linear-refresh external-side-effect tail step from clear-recovery", async () => {

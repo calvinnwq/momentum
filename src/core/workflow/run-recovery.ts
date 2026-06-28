@@ -544,11 +544,12 @@ function reconcileInterruptedNoMistakesStepForRecoveryClear(
 
   const row = db
     .prepare(
-      `SELECT kind, state, required
+      `SELECT kind, state, required, step_order, result_digest, error_code,
+              error_message, finished_at, updated_at
          FROM workflow_steps WHERE run_id = ? AND step_id = ?`
     )
     .get(input.runId, input.stepId) as
-    | { kind: string; state: string; required: number }
+    | FailedStepBeforeReconcileRow
     | undefined;
   if (
     row === undefined ||
@@ -558,6 +559,12 @@ function reconcileInterruptedNoMistakesStepForRecoveryClear(
   ) {
     return undefined;
   }
+
+  appendFailedStepEventBeforeReconcile(db, {
+    runId: input.runId,
+    stepId: input.stepId,
+    row
+  });
 
   const updated = db
     .prepare(
@@ -631,11 +638,12 @@ function reconcileExternalSideEffectTailStepForRecoveryClear(
   | undefined {
   const row = db
     .prepare(
-      `SELECT kind, state, required
+      `SELECT kind, state, required, step_order, result_digest, error_code,
+              error_message, finished_at, updated_at
          FROM workflow_steps WHERE run_id = ? AND step_id = ?`
     )
     .get(input.runId, input.stepId) as
-    | { kind: string; state: string; required: number }
+    | FailedStepBeforeReconcileRow
     | undefined;
   if (
     row === undefined ||
@@ -645,6 +653,12 @@ function reconcileExternalSideEffectTailStepForRecoveryClear(
   ) {
     return undefined;
   }
+
+  appendFailedStepEventBeforeReconcile(db, {
+    runId: input.runId,
+    stepId: input.stepId,
+    row
+  });
 
   const updated = db
     .prepare(
@@ -693,4 +707,48 @@ function reconcileExternalSideEffectTailStepForRecoveryClear(
     evidencePointer: input.evidencePointer,
     ledgerPointer: input.ledgerPointer
   };
+}
+
+type FailedStepBeforeReconcileRow = {
+  kind: string;
+  state: string;
+  required: number;
+  step_order: number;
+  result_digest: string | null;
+  error_code: string | null;
+  error_message: string | null;
+  finished_at: number | null;
+  updated_at: number;
+};
+
+function appendFailedStepEventBeforeReconcile(
+  db: MomentumDb,
+  input: {
+    runId: string;
+    stepId: string;
+    row: FailedStepBeforeReconcileRow;
+  }
+): void {
+  appendWorkflowEvent(db, {
+    runId: input.runId,
+    type: "step_failed",
+    occurredAt: input.row.finished_at ?? input.row.updated_at,
+    stepId: input.stepId,
+    payload: compactWorkflowEventPayload({
+      kind: input.row.kind,
+      order: input.row.step_order,
+      required: input.row.required === 1,
+      resultDigest: input.row.result_digest,
+      errorCode: input.row.error_code,
+      errorMessage: input.row.error_message
+    })
+  });
+}
+
+function compactWorkflowEventPayload(
+  payload: Record<string, unknown>
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(payload).filter(([, value]) => value !== null)
+  );
 }
