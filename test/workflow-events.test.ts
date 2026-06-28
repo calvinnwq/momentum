@@ -399,6 +399,42 @@ describe("workflow run events", () => {
     });
   });
 
+  it("does not replay idempotent recovery re-marks as new semantic events", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    seedRun(db, { runId: "run-recovery-idempotent", state: "blocked" });
+    expect(
+      markWorkflowRunNeedsManualRecovery(db, {
+        runId: "run-recovery-idempotent",
+        reason: "same recovery reason",
+        now: 100
+      })
+    ).toEqual({ ok: true, previouslyMarked: false });
+    db.close();
+
+    const first = await readEvents(dataDir, "run-recovery-idempotent");
+    expect(first.events.map((event) => event.type)).toEqual([
+      "recovery_required"
+    ]);
+
+    const writeDb = openDb(dataDir);
+    expect(
+      markWorkflowRunNeedsManualRecovery(writeDb, {
+        runId: "run-recovery-idempotent",
+        reason: "same recovery reason",
+        now: 200
+      })
+    ).toEqual({ ok: true, previouslyMarked: true });
+    writeDb.close();
+
+    const next = await readEvents(
+      dataDir,
+      "run-recovery-idempotent",
+      first.cursor
+    );
+    expect(next.events).toEqual([]);
+  });
+
   it("replays a blocked step transition after the step is approved again", async () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);

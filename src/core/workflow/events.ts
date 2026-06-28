@@ -49,6 +49,7 @@ export type AppendWorkflowEventInput = {
   occurredAt: number;
   stepId?: string | null;
   payload?: Record<string, unknown>;
+  eventId?: string;
 };
 
 export function appendWorkflowEvent(
@@ -56,7 +57,9 @@ export function appendWorkflowEvent(
   input: AppendWorkflowEventInput
 ): WorkflowSemanticEvent {
   const event: WorkflowSemanticEvent = {
-    id: `${padTimestamp(input.occurredAt)}:${input.type}:${crypto.randomUUID()}`,
+    id:
+      input.eventId ??
+      `${padTimestamp(input.occurredAt)}:${input.type}:${crypto.randomUUID()}`,
     cursor: "",
     timestamp: input.occurredAt,
     type: input.type,
@@ -78,6 +81,25 @@ export function appendWorkflowEvent(
     event.timestamp
   );
   return event;
+}
+
+export function buildWorkflowEventId(input: {
+  runId: string;
+  type: WorkflowEventType;
+  timestamp: number;
+  stepId: string | null;
+  payload: Record<string, unknown>;
+  source: string;
+}): string {
+  const identity = canonicalStringify({
+    runId: input.runId,
+    type: input.type,
+    stepId: input.stepId,
+    payload: input.payload,
+    source: input.source
+  });
+  const digest = crypto.createHash("sha256").update(identity).digest("hex");
+  return `${padTimestamp(input.timestamp)}:${input.type}:${digest.slice(0, 16)}`;
 }
 
 export function loadWorkflowRunEvents(
@@ -362,15 +384,7 @@ function buildEvent(input: {
   payload: Record<string, unknown>;
   source: string;
 }): WorkflowSemanticEvent {
-  const identity = canonicalStringify({
-    runId: input.runId,
-    type: input.type,
-    stepId: input.stepId,
-    payload: input.payload,
-    source: input.source
-  });
-  const digest = crypto.createHash("sha256").update(identity).digest("hex");
-  const id = `${padTimestamp(input.timestamp)}:${input.type}:${digest.slice(0, 16)}`;
+  const id = buildWorkflowEventId(input);
   return {
     id,
     cursor: id,

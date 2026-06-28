@@ -439,6 +439,32 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       db.close();
     }
 
+    const beforeClearEventsResult = await run([
+      "workflow",
+      "run",
+      "events",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(beforeClearEventsResult.code).toBe(0);
+    const beforeClearEventsPayload = JSON.parse(
+      beforeClearEventsResult.stdout
+    ) as {
+      cursor: string | null;
+      events: Array<{
+        id: string;
+        type: string;
+        stepId: string | null;
+      }>;
+    };
+    const beforeClearFailedEvent = beforeClearEventsPayload.events.find(
+      (event) =>
+        event.stepId === "merge-cleanup" && event.type === "step_failed"
+    );
+    expect(beforeClearFailedEvent).toBeDefined();
+
     const result = await run([
       "workflow",
       "run",
@@ -496,6 +522,7 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
     expect(eventsResult.code).toBe(0);
     const eventsPayload = JSON.parse(eventsResult.stdout) as {
       events: Array<{
+        id: string;
         type: string;
         stepId: string | null;
         payload: Record<string, unknown>;
@@ -510,11 +537,37 @@ describe("momentum workflow run clear-recovery (NGX-327)", () => {
       "step_failed",
       "step_succeeded"
     ]);
+    expect(mergeCleanupEvents[0]?.id).toBe(beforeClearFailedEvent?.id);
     expect(mergeCleanupEvents[0]?.payload).toMatchObject({
       kind: "merge-cleanup",
       order: 4,
       required: true
     });
+
+    const catchupResult = await run([
+      "workflow",
+      "run",
+      "events",
+      runId,
+      "--since",
+      beforeClearEventsPayload.cursor ?? "",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(catchupResult.code).toBe(0);
+    const catchupPayload = JSON.parse(catchupResult.stdout) as {
+      events: Array<{
+        type: string;
+        stepId: string | null;
+      }>;
+    };
+    expect(
+      catchupPayload.events.some(
+        (event) =>
+          event.stepId === "merge-cleanup" && event.type === "step_failed"
+      )
+    ).toBe(false);
   });
 
   it("reconciles a failed linear-refresh external-side-effect tail step from clear-recovery", async () => {

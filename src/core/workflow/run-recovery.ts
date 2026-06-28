@@ -24,7 +24,7 @@
 
 import type { MomentumDb } from "../../adapters/db.js";
 import { prepareRetryableDispatchedStepForRecoveryClear } from "./dispatch-retry.js";
-import { appendWorkflowEvent } from "./events.js";
+import { appendWorkflowEvent, buildWorkflowEventId } from "./events.js";
 import { loadWorkflowRunDetail } from "./status.js";
 import type { WorkflowMonitorRecoveryCode } from "./monitor-state.js";
 import { refreshWorkflowRunRuntimeState } from "./runtime-state.js";
@@ -91,8 +91,7 @@ export function markWorkflowRunNeedsManualRecovery(
 
   if (
     before.needs_manual_recovery !== 1 ||
-    before.manual_recovery_reason !== input.reason ||
-    before.manual_recovery_at !== now
+    before.manual_recovery_reason !== input.reason
   ) {
     appendWorkflowEvent(db, {
       runId: input.runId,
@@ -729,18 +728,28 @@ function appendFailedStepEventBeforeReconcile(
     row: FailedStepBeforeReconcileRow;
   }
 ): void {
+  const occurredAt = input.row.finished_at ?? input.row.updated_at;
+  const payload = compactWorkflowEventPayload({
+    kind: input.row.kind,
+    order: input.row.step_order,
+    required: input.row.required === 1,
+    resultDigest: input.row.result_digest,
+    errorCode: input.row.error_code,
+    errorMessage: input.row.error_message
+  });
   appendWorkflowEvent(db, {
     runId: input.runId,
     type: "step_failed",
-    occurredAt: input.row.finished_at ?? input.row.updated_at,
+    occurredAt,
     stepId: input.stepId,
-    payload: compactWorkflowEventPayload({
-      kind: input.row.kind,
-      order: input.row.step_order,
-      required: input.row.required === 1,
-      resultDigest: input.row.result_digest,
-      errorCode: input.row.error_code,
-      errorMessage: input.row.error_message
+    payload,
+    eventId: buildWorkflowEventId({
+      runId: input.runId,
+      type: "step_failed",
+      timestamp: occurredAt,
+      stepId: input.stepId,
+      payload,
+      source: "step"
     })
   });
 }
