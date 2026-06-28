@@ -143,6 +143,32 @@ export function loadWorkflowRunEvents(
   runId: string,
   options: LoadWorkflowRunEventsOptions = {}
 ): WorkflowRunEvents | null {
+  return loadWorkflowRunEventsInternal(db, runId, options, false);
+}
+
+/**
+ * Load one run's replayable semantic event stream with timestamp prefiltering.
+ *
+ * This keeps long-lived watch streams bounded by asking each projection source
+ * only for facts at or after the resume cursor timestamp before the final cursor
+ * filter runs. It preserves the same public cursor semantics as
+ * {@link loadWorkflowRunEvents}; callers still pass opaque `wfcur1.` tokens and
+ * receive the next durable replay cursor.
+ */
+export function loadWorkflowRunEventsIncremental(
+  db: MomentumDb,
+  runId: string,
+  options: LoadWorkflowRunEventsOptions = {}
+): WorkflowRunEvents | null {
+  return loadWorkflowRunEventsInternal(db, runId, options, true);
+}
+
+function loadWorkflowRunEventsInternal(
+  db: MomentumDb,
+  runId: string,
+  options: LoadWorkflowRunEventsOptions,
+  incremental: boolean
+): WorkflowRunEvents | null {
   if (!tableExists(db, "workflow_runs")) return null;
   const run = db
     .prepare(
@@ -160,15 +186,16 @@ export function loadWorkflowRunEvents(
   if (run === undefined) return null;
 
   const since = normalizeCursor(options.since);
+  const cursorState = decodeReplayCursor(since);
+  const minTimestamp = incremental ? (cursorState?.timestamp ?? null) : null;
   const candidates = [
-    ...projectStepEvents(db, runId),
-    ...projectApprovalEvents(db, runId),
-    ...projectGateEvents(db, runId),
-    ...projectTerminalRunEvent(run),
-    ...loadStoredWorkflowEvents(db, runId)
+    ...projectStepEvents(db, runId, minTimestamp),
+    ...projectApprovalEvents(db, runId, minTimestamp),
+    ...projectGateEvents(db, runId, minTimestamp),
+    ...projectTerminalRunEvent(run, minTimestamp),
+    ...loadStoredWorkflowEvents(db, runId, minTimestamp)
   ].sort(compareEvents);
 
-  const cursorState = decodeReplayCursor(since);
   const filtered = filterEventsAfterCursor(candidates, since, cursorState);
   const events = attachReplayCursors(filtered, cursorState);
   const cursor = events.at(-1)?.cursor ?? since;
@@ -177,11 +204,29 @@ export function loadWorkflowRunEvents(
 
 function projectStepEvents(
   db: MomentumDb,
-  runId: string
+  runId: string,
+  minTimestamp: number | null = null
 ): WorkflowSemanticEvent[] {
   if (!tableExists(db, "workflow_steps")) return [];
-  const storedBlockedAtByStep = loadStoredStepBlockedAtByStep(db, runId);
   const stepColumns = workflowStepProjectionColumns(db);
+  const operatorTransitionAtExpression =
+    stepColumns.operatorTransitionAt === "operator_transition_at"
+      ? "operator_transition_at"
+      : "NULL";
+  const minClause =
+    minTimestamp === null
+      ? ""
+      : ` AND (
+            started_at >= ?
+            OR (state IN ('succeeded', 'failed', 'skipped', 'canceled')
+                AND COALESCE(finished_at, updated_at) >= ?)
+            OR (state = 'blocked'
+                AND COALESCE(${operatorTransitionAtExpression}, updated_at) >= ?)
+          )`;
+  const params =
+    minTimestamp === null
+      ? [runId]
+      : [runId, minTimestamp, minTimestamp, minTimestamp];
   const rows = db
     .prepare(
       `SELECT step_id, kind, state, step_order, required, result_digest,
@@ -191,10 +236,15 @@ function projectStepEvents(
               ${stepColumns.operatorLedgerPointer},
               ${stepColumns.operatorTransitionAt}, updated_at
          FROM workflow_steps
-        WHERE run_id = ?
+        WHERE run_id = ?${minClause}
         ORDER BY step_order, step_id`
     )
-    .all(runId) as StepRow[];
+    .all(...params) as StepRow[];
+  const storedBlockedAtByStep = loadStoredStepBlockedAtByStep(
+    db,
+    runId,
+    rows.map((row) => row.step_id)
+  );
   const events: WorkflowSemanticEvent[] = [];
   for (const row of rows) {
     const basePayload = {
@@ -262,35 +312,47 @@ function projectStepEvents(
 
 function loadStoredStepBlockedAtByStep(
   db: MomentumDb,
-  runId: string
+  runId: string,
+  stepIds?: string[]
 ): Map<string, number> {
   if (!tableExists(db, "workflow_events")) return new Map();
+  if (stepIds !== undefined && stepIds.length === 0) return new Map();
+  const stepClause =
+    stepIds === undefined
+      ? ""
+      : ` AND step_id IN (${stepIds.map(() => "?").join(", ")})`;
   const rows = db
     .prepare(
       `SELECT step_id, MAX(occurred_at) AS occurred_at
          FROM workflow_events
         WHERE run_id = ?
           AND type = 'step_blocked'
-          AND step_id IS NOT NULL
+          AND step_id IS NOT NULL${stepClause}
         GROUP BY step_id`
     )
-    .all(runId) as { step_id: string; occurred_at: number }[];
+    .all(...(stepIds === undefined ? [runId] : [runId, ...stepIds])) as {
+    step_id: string;
+    occurred_at: number;
+  }[];
   return new Map(rows.map((row) => [row.step_id, row.occurred_at]));
 }
 
 function projectApprovalEvents(
   db: MomentumDb,
-  runId: string
+  runId: string,
+  minTimestamp: number | null = null
 ): WorkflowSemanticEvent[] {
   if (!tableExists(db, "workflow_approvals")) return [];
+  const minClause = minTimestamp === null ? "" : " AND recorded_at >= ?";
+  const params = minTimestamp === null ? [runId] : [runId, minTimestamp];
   const rows = db
     .prepare(
       `SELECT boundary, actor, artifact_path, artifact_digest, recorded_at
          FROM workflow_approvals
-        WHERE run_id = ?
+        WHERE run_id = ?${minClause}
         ORDER BY recorded_at, boundary`
     )
-    .all(runId) as ApprovalRow[];
+    .all(...params) as ApprovalRow[];
   return rows.map((row) =>
     buildEvent({
       runId,
@@ -310,19 +372,26 @@ function projectApprovalEvents(
 
 function projectGateEvents(
   db: MomentumDb,
-  runId: string
+  runId: string,
+  minTimestamp: number | null = null
 ): WorkflowSemanticEvent[] {
   if (!tableExists(db, "workflow_gates")) return [];
+  const minClause =
+    minTimestamp === null
+      ? ""
+      : " AND (created_at >= ? OR resolved_at >= ?)";
+  const params =
+    minTimestamp === null ? [runId] : [runId, minTimestamp, minTimestamp];
   const rows = db
     .prepare(
       `SELECT gate_id, step_run_id, target_scope, gate_type, reason, evidence,
               allowed_actions, recommended_action, resolved_at, resolved_by,
               resolution_mode, chosen_action, resolution, created_at
          FROM workflow_gates
-        WHERE workflow_run_id = ?
+        WHERE workflow_run_id = ?${minClause}
         ORDER BY created_at, gate_id`
     )
-    .all(runId) as GateRow[];
+    .all(...params) as GateRow[];
   const events: WorkflowSemanticEvent[] = [];
   for (const row of rows) {
     const openedPayload = compactPayload({
@@ -385,11 +454,12 @@ function projectTerminalRunEvent(run: {
   state: string;
   finished_at: number | null;
   updated_at: number;
-}): WorkflowSemanticEvent[] {
+}, minTimestamp: number | null = null): WorkflowSemanticEvent[] {
   if (!(WORKFLOW_RUN_TERMINAL_STATES as readonly string[]).includes(run.state)) {
     return [];
   }
   const timestamp = run.finished_at ?? run.updated_at;
+  if (minTimestamp !== null && timestamp < minTimestamp) return [];
   return [
     buildEvent({
       runId: run.id,
@@ -404,17 +474,20 @@ function projectTerminalRunEvent(run: {
 
 function loadStoredWorkflowEvents(
   db: MomentumDb,
-  runId: string
+  runId: string,
+  minTimestamp: number | null = null
 ): WorkflowSemanticEvent[] {
   if (!tableExists(db, "workflow_events")) return [];
+  const minClause = minTimestamp === null ? "" : " AND occurred_at >= ?";
+  const params = minTimestamp === null ? [runId] : [runId, minTimestamp];
   const rows = db
     .prepare(
       `SELECT rowid AS event_rowid, event_id, step_id, occurred_at, type, payload_json
          FROM workflow_events
-        WHERE run_id = ?
+        WHERE run_id = ?${minClause}
         ORDER BY occurred_at, event_id`
     )
-    .all(runId) as StoredEventRow[];
+    .all(...params) as StoredEventRow[];
   return rows.map((row) => ({
     id: row.event_id,
     cursor: storedEventCursor(row),

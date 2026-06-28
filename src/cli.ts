@@ -142,6 +142,8 @@ type ParsedFlags = {
   externalApply: boolean;
   advance: boolean;
   once: boolean;
+  stream: boolean;
+  jsonl: boolean;
   repo?: string;
   runner?: string;
   workerId?: string;
@@ -202,7 +204,7 @@ export async function runCli(
 ): Promise<number> {
   const parsed = parseFlags(argv);
   if (parsed.error) {
-    return usageError(parsed.error, parsed, io);
+    return usageError(parsed.error, { json: parsed.json || parsed.jsonl }, io);
   }
 
   const [command, subcommand] = parsed.args;
@@ -998,6 +1000,8 @@ function parseFlags(argv: string[]): ParsedFlags {
   let externalApply = false;
   let advance = false;
   let once = false;
+  let stream = false;
+  let jsonl = false;
   let repo: string | undefined;
   let runner: string | undefined;
   let workerId: string | undefined;
@@ -1088,6 +1092,16 @@ function parseFlags(argv: string[]): ParsedFlags {
 
     if (arg === "--once") {
       once = true;
+      continue;
+    }
+
+    if (arg === "--stream") {
+      stream = true;
+      continue;
+    }
+
+    if (arg === "--jsonl") {
+      jsonl = true;
       continue;
     }
 
@@ -1736,7 +1750,9 @@ function parseFlags(argv: string[]): ParsedFlags {
     dryRun,
     externalApply,
     advance,
-    once
+    once,
+    stream,
+    jsonl
   };
   if (repo !== undefined) parsed.repo = repo;
   if (runner !== undefined) parsed.runner = runner;

@@ -130,6 +130,11 @@ import {
   loadWorkflowRunEvents,
   type WorkflowEventType
 } from "../../core/workflow/events.js";
+import { runWorkflowWatchStream } from "../../core/workflow/watch-stream.js";
+import {
+  createWorkflowWatchStreamDbPoll,
+  WorkflowWatchStreamRunNotFoundError
+} from "../../core/workflow/watch-stream-source.js";
 import {
   emitWorkflowHandoff,
   emitWorkflowHandoffFailure,
@@ -151,6 +156,7 @@ import {
   emitWorkflowRunMonitorFailure,
   emitWorkflowRunWatch,
   emitWorkflowRunWatchFailure,
+  emitWorkflowRunWatchStreamRecord,
   emitWorkflowRunPreviewCodingSuccess,
   emitWorkflowRunStartFailure,
   emitWorkflowRunStartSuccess,
@@ -167,6 +173,8 @@ type ParsedFlags = {
   json: boolean;
   advance?: boolean;
   once?: boolean;
+  stream?: boolean;
+  jsonl?: boolean;
   dataDir?: string;
   repo?: string;
   reason?: string;
@@ -2094,18 +2102,32 @@ async function workflowRunWatch(
   deps: CliDeps
 ): Promise<number> {
   const positional = parsed.args.slice(3);
+  const streamJsonFailureParsed =
+    parsed.stream === true && parsed.jsonl === true ? { json: true } : parsed;
   if (positional.length === 0 || !positional[0]) {
-    return emitWorkflowRunWatchFailure(parsed, io, {
+    return emitWorkflowRunWatchFailure(streamJsonFailureParsed, io, {
       code: "run_id_required",
       message: "Missing required <run-id> for workflow run watch."
     });
   }
   if (positional.length > 1) {
+    if (parsed.stream === true && parsed.jsonl === true) {
+      return emitWorkflowRunWatchFailure(streamJsonFailureParsed, io, {
+        code: "usage_error",
+        message: `Unexpected argument for workflow run watch: ${positional[1]}`,
+        exitCode: 2
+      });
+    }
     return usageError(
       `Unexpected argument for workflow run watch: ${positional[1]}`,
       parsed,
       io
     );
+  }
+  const runId = positional[0];
+
+  if (parsed.stream) {
+    return workflowRunWatchStream(parsed, io, runId);
   }
   if (!parsed.once) {
     return emitWorkflowRunWatchFailure(parsed, io, {
@@ -2113,7 +2135,6 @@ async function workflowRunWatch(
       message: "workflow run watch currently requires --once."
     });
   }
-  const runId = positional[0];
 
   const dataDirOptions: DataDirOptions = {};
   if (io.env !== undefined) dataDirOptions.env = io.env;
@@ -2219,6 +2240,114 @@ async function workflowRunWatch(
   }
 
   return emitWorkflowRunWatch(parsed, io, dataDir, envelope, progress, advisory);
+}
+
+/**
+ * `momentum workflow run watch <run-id> --stream --jsonl` (SUP-05 / NGX-552).
+ *
+ * The durable, replay-safe streaming counterpart to `--once`: it drives
+ * {@link runWorkflowWatchStream} over {@link createWorkflowWatchStreamDbPoll} and
+ * writes each record as one newline-delimited JSON line to stdout. The stream is
+ * an optimisation over durable state, never the source of truth - it resumes from
+ * a durable `--since` cursor, stays memory-bounded for the lifetime of the run
+ * (only the cursor and counters are retained between polls), and exits cleanly
+ * once the run row is terminal. SIGINT aborts the loop between polls so an
+ * operator can detach without losing durable history; the durable cursor/event
+ * API is always there to reconnect from.
+ */
+async function workflowRunWatchStream(
+  parsed: ParsedFlags,
+  io: CliIo,
+  runId: string
+): Promise<number> {
+  const failureJson = parsed.json === true || parsed.jsonl === true;
+  const emitStreamFailure = (
+    failure: Parameters<typeof emitWorkflowRunWatchFailure>[2]
+  ): number => emitWorkflowRunWatchFailure({ json: failureJson }, io, failure);
+
+  if (parsed.once) {
+    return emitStreamFailure({
+      code: "stream_once_conflict",
+      message:
+        "workflow run watch cannot combine --stream with --once; choose one mode.",
+      runId
+    });
+  }
+  if (!parsed.jsonl) {
+    return emitStreamFailure({
+      code: "jsonl_required",
+      message: "workflow run watch --stream currently requires --jsonl.",
+      runId
+    });
+  }
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return emitStreamFailure({
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err),
+      runId
+    });
+  }
+
+  const controller = new AbortController();
+  const onSigint = (): void => controller.abort();
+  const signalCapable =
+    typeof process !== "undefined" && typeof process.on === "function";
+  if (signalCapable) process.on("SIGINT", onSigint);
+
+  let db: MomentumDb | undefined;
+  try {
+    db = openExistingDbReadOnly(dataDir);
+    if (db === undefined) {
+      return emitStreamFailure({
+        code: "run_not_found",
+        message: `Workflow run not found: ${runId}`,
+        dataDir,
+        runId
+      });
+    }
+    const streamInput: Parameters<typeof runWorkflowWatchStream>[0] = {
+      poll: createWorkflowWatchStreamDbPoll(db, runId),
+      write: (record) => emitWorkflowRunWatchStreamRecord(io, record),
+      signal: controller.signal
+    };
+    if (parsed.since !== undefined) streamInput.since = parsed.since;
+    await runWorkflowWatchStream(streamInput);
+    return 0;
+  } catch (err) {
+    if (err instanceof WorkflowWatchStreamRunNotFoundError) {
+      return emitStreamFailure({
+        code: err.code,
+        message: err.message,
+        dataDir,
+        runId
+      });
+    }
+    if (err instanceof InvalidWorkflowEventCursorError) {
+      return emitStreamFailure({
+        code: err.code,
+        message: err.message,
+        dataDir,
+        runId
+      });
+    }
+    return emitStreamFailure({
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err),
+      dataDir,
+      runId
+    });
+  } finally {
+    if (signalCapable) process.removeListener("SIGINT", onSigint);
+    db?.close();
+  }
 }
 
 function appendWorkflowWatchAdvisoryEvent(
