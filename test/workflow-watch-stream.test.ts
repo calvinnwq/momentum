@@ -192,6 +192,32 @@ describe("buildWorkflowWatchStreamTick", () => {
     });
   });
 
+  it("marks the final event terminal when the run row is already terminal", () => {
+    const envelope = eventsEnvelope({
+      events: [
+        event({ type: "monitor_quiet_heartbeat", cursor: "wfcur1.after-terminal-1" }),
+        event({ type: "recovery_cleared", cursor: "wfcur1.after-terminal-2" })
+      ]
+    });
+
+    const tick = buildWorkflowWatchStreamTick(envelope, {
+      now: NOW,
+      runTerminal: true
+    });
+
+    expect(tick.terminal).toBe(true);
+    expect(tick.records).toHaveLength(2);
+    expect(tick.records[0]).toMatchObject({
+      kind: "event",
+      terminal: false
+    });
+    expect(tick.records[1]).toMatchObject({
+      kind: "event",
+      terminal: true,
+      event: { type: "recovery_cleared" }
+    });
+  });
+
   it("advances the tick cursor to the last event's durable cursor", () => {
     const envelope = eventsEnvelope({
       since: "wfcur1.start",

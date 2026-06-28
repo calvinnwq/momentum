@@ -86,15 +86,22 @@ export function buildWorkflowWatchStreamTick(
 ): WorkflowWatchStreamTick {
   const heartbeatEnabled = options.heartbeat ?? true;
   const cursor = events.cursor ?? events.since ?? null;
+  const runTerminal = options.runTerminal ?? false;
+  const terminalEventIndex = events.events.findIndex(
+    (event) => event.type === "terminal_state"
+  );
+  const sawTerminalEvent = terminalEventIndex !== -1;
+  const lastEventIndex = events.events.length - 1;
 
-  let sawTerminalEvent = false;
-  const records: WorkflowWatchStreamRecord[] = events.events.map((event) => {
+  const records: WorkflowWatchStreamRecord[] = events.events.map((event, index) => {
     const isTerminal = event.type === "terminal_state";
-    if (isTerminal) sawTerminalEvent = true;
-    return buildEventRecord(events.runId, event, isTerminal);
+    const terminal =
+      isTerminal ||
+      (runTerminal && !sawTerminalEvent && index === lastEventIndex);
+    return buildEventRecord(events.runId, event, terminal);
   });
 
-  const terminal = sawTerminalEvent || (options.runTerminal ?? false);
+  const terminal = sawTerminalEvent || runTerminal;
 
   if (records.length === 0 && heartbeatEnabled) {
     records.push({
