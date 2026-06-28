@@ -2,7 +2,7 @@
 
 Workflow runtime domain. This folder owns the durable workflow runtime:
 definitions, run lifecycle, steps, gates, leases, scheduling, dispatch planning,
-recovery, monitor state, and workflow handoff. It holds business/runtime
+recovery, monitor state, workflow events, and workflow handoff. It holds business/runtime
 behavior only — reducers, state machines, persistence policies, and runtime
 decisions. It does not parse CLI arguments or format output.
 
@@ -15,7 +15,7 @@ in place; importers still reference the concrete modules below.
 | Concern | Modules |
 | --- | --- |
 | Definition | `definition.ts`, `definition-persist.ts` |
-| Run lifecycle | `run-start.ts`, `run-start-persist.ts`, `run-import.ts`, `run-import-persist.ts`, `run-reducer.ts`, `run-recovery.ts`, `status.ts`, `logs.ts` |
+| Run lifecycle | `run-start.ts`, `run-start-persist.ts`, `run-import.ts`, `run-import-persist.ts`, `run-reducer.ts`, `run-recovery.ts`, `status.ts`, `events.ts`, `logs.ts` |
 | Runtime state refresh | `runtime-state.ts` |
 | Steps | `step-executor.ts`, `step-executor-real-adapters.ts`, `step-transitions.ts` |
 | Gates | `gate.ts`, `gate-persist.ts` |
@@ -40,10 +40,10 @@ Other domains reach workflow behavior through these modules:
 - **CLI command family** (`src/commands/workflow/`): `definition` /
   `definition-persist`, `gate` / `gate-persist`, `run-start` /
   `run-start-persist`, `run-import` / `run-import-persist`, `run-recovery`,
-  `run-reducer`, `status`, `monitor-state` / `monitor-envelope`,
+  `run-reducer`, `status`, `events`, `monitor-state` / `monitor-envelope`,
   `runtime-state`, `recovery-reconcile`, `handoff`, `logs`.
 - **CLI renderers** (`src/renderers/workflow.ts`): the same run/gate/monitor/
-  status/handoff/logs shapes, imported **type-only** (renderers format, they
+  status/handoff/events/logs shapes, imported **type-only** (renderers format, they
   do not mutate state).
 - **Daemon and supervisor dispatch** (`src/core/daemon/workflow-dispatch.ts`): `dispatch-execute`, `dogfood-dispatch`, `external-apply-dispatch`, `subworkflow-dispatch`, `live-wrapper-dispatch`, and `daemon-live-wrapper-profile`; configured `subworkflow` steps compose the child-run producer after the base scaffold while live-wrapper-owned families stay on the live-wrapper lane for both bounded daemon cycles and `workflow run watch --once` ticks.
 - **Dispatched-step reconciliation**: `dispatch-reconcile` /
@@ -166,3 +166,6 @@ NGX-510 adds the pure `coding-route-config.ts` keystone for native per-step codi
 The `workflow run start-coding` / `workflow run preview-coding` doors accept a `--steps-json` flag that builds overrides via this module and embeds them in the durable run route (or the frozen preview route, which also projects a human-readable per-step selection block); the generic `workflow run start` refuses the flag with `route_config_not_allowed`, and a misconfigured selection fails closed with `route_config_invalid` before any write.
 Provider-specific model aliases are normalized during the same pure route pass when enough context is present, so known Claude, Codex, and OpenCode aliases preview, persist, and dispatch the command-ready model string for that harness instead of the bare alias; unknown or non-agent harness/model values remain free-form.
 Status, handoff, monitor, and logs expose the selected `route.steps` through durable run detail, dispatcher-created executor rounds freeze the mapped agent/model/effort values, and live-wrapper execution forwards them as `MOMENTUM_AGENT_PROVIDER`, `MOMENTUM_MODEL`, and `MOMENTUM_EFFORT`; a corrupt persisted `route.steps` namespace fails closed to manual recovery instead of silently falling back.
+
+NGX-551 adds `events.ts` as the durable workflow event replay seam behind `workflow run events`.
+It projects stable semantic events from workflow rows, combines them with append-only `workflow_events` rows for overwritten transitions and supervisor advisories, and returns opaque replay cursors so reconnecting clients can continue from the previous response cursor without relying on stdout or process state.

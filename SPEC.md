@@ -29,7 +29,7 @@ transitions from durable evidence.
 
 Human gates are first-class durable rows. Approval, operator decision, and manual
 recovery boundaries must be visible through status, handoff, monitor, watch,
-recovery, and logs surfaces. Autonomy is allowed only inside the approved envelope.
+events, recovery, and logs surfaces. Autonomy is allowed only inside the approved envelope.
 
 Every dispatched step must produce normalized result evidence or mirrored
 external state before final classification. Process handles, hook events,
@@ -69,7 +69,7 @@ Default CI must not call real `api.linear.app`.
 
 Momentum owns the future durable coding workflow runtime: workflow definitions,
 workflow runs, step runs, gates, leases, executor state, evidence, recovery,
-status, monitor, handoff, and logs.
+status, monitor, handoff, events, and logs.
 
 OpenClaw remains the user-facing skill, Discord delivery layer, renderer,
 compatibility surface, and fallback route while replacement behavior is proven.
@@ -113,6 +113,10 @@ NGX-550 extends the supervisor envelope with quiet-duration and stuck-risk hints
 The quiet thresholds are centralized in the watch advisory reducer: implementation 15m, postflight 10m, no-mistakes 15m, merge-cleanup 5m, linear-refresh 5m, approval reminders 30m, recovery reminders 60m, and idle 15m.
 An unchanged tick remains `emit: false` until its threshold window is reached; threshold emissions use `reason: "quiet_heartbeat"` for approval / recovery / idle reminders or `reason: "stuck_risk"` for active execution, include elapsed `quietForSeconds`, the applied `quietThresholdSeconds`, and an inspection command when active execution may be stuck.
 These hints are advisory only: they never mark a run or step failed, never mutate execution lifecycle state, and never trigger LLM diagnosis in the CLI.
+NGX-551 adds `workflow run events` as the durable semantic replay API for supervisors and app clients that reconnect after process loss.
+It combines reproducible facts from workflow runs, steps, approvals, gates, and terminal run state with append-only `workflow_events` rows for overwritten or advisory transitions, including manual-recovery mark / clear, blocked-step metadata, retry / reconciliation preservation, and throttled quiet or stuck-risk watch advisories.
+Returned cursors are opaque replay tokens, not event identities; clients persist the response `cursor` for the next `--since` call and use event `id` only for dedupe.
+The API is replay-only and read-only: it does not stream, hold a connection open, dispatch work, or change monitor/watch delivery semantics.
 NGX-521 hardens native dogfood tail recovery without changing the default route.
 Failed required `merge-cleanup` and `linear-refresh` steps classify as `failed_external_side_effect_step` so operators verify the canonical external state - pull request merge or close state and any surviving remote branch ref for `merge-cleanup`, or tracker state for `linear-refresh` - then reconcile through `workflow run clear-recovery --evidence-pointer <ref>` instead of blindly re-running side-effecting tail work.
 The checked-in live-wrapper dogfood profile executes the wrapper from source through the TypeScript source loader so cleanup of generated `dist/` artifacts does not break `merge-cleanup` or `linear-refresh` tail work.

@@ -22,11 +22,12 @@ Operator-facing CLI envelopes for the `workflow run start`, `workflow run start-
   `--once` safely runs at most one run-scoped dispatcher tick when the target run has one approved next step or one active step eligible for recheck, then persists the same advisory suppression baseline as a monitor advance tick and gives external pollers one recommended next action.
 - `workflow run events` is a read-only replay surface for supervisors and app clients that need semantic run changes after reconnecting.
   It returns ordered event records from durable workflow state and append-only workflow event rows without reading stdout scrollback or running dispatch.
+  It is the catch-up companion to `workflow run watch --once`, not a replacement for live polling.
 - `workflow run logs` is a read-only run-scoped log and evidence reader that reuses the workflow detail shape and attaches executor rounds plus their child artifacts, checkpoints, findings, and decisions.
 
 `workflow run preview-coding`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run events`, and `workflow run logs` are read-only: they never write SQLite or files.
 `workflow run monitor` is also read-only unless `--advance` is passed, in which case supported Momentum-native coding runs persist only `monitor_last_seen_digest` / `monitor_last_seen_at` and `monitor_last_emitted_digest` / `monitor_last_emitted_at` progress baselines.
-`workflow run watch --once` is write-limited to the target run's safe dispatcher tick and the same advisory baseline columns for supported Momentum-native coding runs.
+`workflow run watch --once` is write-limited to the target run's safe dispatcher tick, the same advisory baseline columns, and append-only quiet-heartbeat / stuck-risk event rows for supported Momentum-native coding runs.
 
 `workflow run --help` and any nested `workflow run ... --help` or `workflow run ... -h` invocation print the shared top-level CLI help to stdout and exit 0 before selecting or validating a run subcommand.
 This help path ignores `--json`, reads no data directory, and performs no durable writes.
@@ -599,6 +600,7 @@ Behaviour:
 - Illegal transitions (e.g. finalizing a `pending` step, transitioning from a terminal state to a different terminal state) refuse with `invalid_transition` and write no durable state.
 - A byte-equal repeat of an existing finalize (same `--state`, `--reason`, `--actor`, `--evidence-pointer`, and `--ledger-pointer`) returns successfully with `idempotent: true` and does not update the stored audit record.
 - A repeat with a different reason, actor, or pointers refuses with `invalid_transition`; the existing audit record is preserved.
+- A blocked transition also appends a `step_blocked` semantic event so `workflow run events` can replay the operator metadata even if later transitions overwrite the step row.
 - After a successful step transition the run state is re-derived from the full step chain; if the derived state differs from the stored one, `workflow_runs.state` is updated in the same transaction.
 - The command is local-only: it never spawns an executor, schedules cron, or issues an external write.
 - If the run has `needs_manual_recovery` set, transitions that would leave a blocking recovery condition in place refuse with `manual_recovery_required`; transitions that resolve the blocking condition can land so the flag can be cleared explicitly afterward.
@@ -686,6 +688,7 @@ Behaviour:
   A missing evidence pointer refuses with `recovery_clear_refused`, leaving the flag and failed step intact.
 - For live dispatch / finalization recovery, the durable flag and `run.manualRecoveryReason` / `run.manualRecoveryAt` fields are authoritative for non-monitor recovery reasons such as `head_mismatch`, `result_missing`, `repo_lock_lost`, or `auth_unavailable`. The `recovery.md` artifact is best-effort and may be absent after an artifact write failure; resolve the captured reason and any artifact context before clearing. The command still performs the atomic monitor recheck above, but it cannot independently prove that external live-recovery work was completed.
 - For retryable live-wrapper bootstrap failures on dispatched `no-mistakes` or `merge-cleanup` steps (for example a stale wrapper/build path reported as `runtime_unavailable` before clean runner evidence exists), clearing recovery also prepares the same step for one safe scheduler retry. The JSON envelope includes `retryPrepared`, and text output prints `Retry prepared: <step> (<code>)`. The previous failed executor round remains durable; the retry creates a new round and does not rerun an already-terminal successful step.
+  Before the step row is reopened, the prior `step_started` or `step_failed` transition is preserved as a workflow event so cursor replay does not lose the overwritten state.
 - For scheduler-lane stale workflow lease recovery, stale `manual-recovery-required` leases are left outstanding as durable evidence with the `stale_workflow_lease_manual_recovery_required` reason prefix. Because the monitor reducer can still classify that lease as `manual_recovery_lease`, guarded clear refuses until the lease condition is resolved.
 - Refuses with `not_flagged` when the run is not currently flagged, so a stale clear cannot mutate anything, except for the evidence-backed `failed_external_side_effect_step` and interrupted `no-mistakes` reconciliation paths above.
   In that exception, `clear-recovery --evidence-pointer <ref>` can reconcile the failed external tail step, or a failed `no-mistakes` step with `no-mistakes:<run-id>#checks-passed` evidence, even if the durable manual-recovery flag was never set.
@@ -1525,6 +1528,7 @@ Options:
 ```
 
 `disposition`, `phase`, `cleanup`, and `digest` are derived from the same monitor progress tick as `workflow run monitor --advance`; `emit` and `reason` can also reflect watch-only quiet-heartbeat or stuck-risk advisories when an unchanged tick reaches its quiet threshold.
+When a quiet-heartbeat or stuck-risk advisory emits, the command appends a matching workflow event row so disconnected clients can later catch up through `workflow run events`.
 Before deriving that tick, `workflow run watch --once` may run one target-run dispatcher tick, either to claim and dispatch one approved next step or to recheck one active running step that the scheduler can safely revisit.
 It does not resolve gates, approvals, or recovery decisions by itself, recover stale leases, or scan or claim work from other runs.
 `activeStep` is `null` when no step is active.
@@ -1799,7 +1803,9 @@ Replay one workflow run's durable semantic event projection. This command is for
 The event stream is built from two durable sources:
 
 - Reproducible workflow rows: step start / terminal states, approvals, gates, and terminal run state.
-- Append-only workflow event rows for transitions that would otherwise be overwritten, such as manual-recovery mark / clear and throttled monitor advisories.
+- Append-only workflow event rows for transitions that would otherwise be overwritten, such as manual-recovery mark / clear, blocked-step metadata, guarded clear retry / reconciliation preservation, and throttled supervisor advisories.
+
+Imported compatibility runs and databases created before `workflow_events` existed still replay the reproducible events available from their durable workflow rows.
 
 Cursor semantics:
 
@@ -1808,8 +1814,9 @@ Cursor semantics:
 - Repeating the same `--since` against unchanged durable state is deterministic and idempotent.
 - To continue, pass the previous response `cursor` as the next `--since` value.
 - A `null` / omitted cursor means "replay from the beginning".
+- Cursors are opaque `wfcur1...` replay tokens and may encode all event ids already seen at the current timestamp so later inserted same-timestamp events are still returned.
 
-Event records are ordered by event timestamp, then deterministic replay cursor. Event ids are stable identities for the durable facts that produced them; clients should store `id` for dedupe and use only `cursor` / response `cursor` with the command's `--since` contract.
+Event records are ordered by event timestamp, lifecycle rank, then deterministic replay cursor. Event ids are stable identities for the durable facts that produced them; clients should store `id` for dedupe and use only `cursor` / response `cursor` with the command's `--since` contract.
 
 ### JSON envelope
 
@@ -1819,12 +1826,12 @@ Event records are ordered by event timestamp, then deterministic replay cursor. 
   "command": "workflow run events",
   "dataDir": "/path/to/data",
   "runId": "mwf-abc123",
-  "since": "0001730000500000:step_started:...",
-  "cursor": "0001730000600000:step_succeeded:...",
+  "since": "wfcur1.eyJ0IjoxNzMwMDAwNTAwMDAwLCJpZHMiOlsiMDAwMTczMDAwMDUwMDAwMDpzdGVwX3N0YXJ0ZWQ6Li4uIl19",
+  "cursor": "wfcur1.eyJ0IjoxNzMwMDAwNjAwMDAwLCJpZHMiOlsiMDAwMTczMDAwMDYwMDAwMDpzdGVwX3N1Y2NlZWRlZDphYmMxMjMiXX0",
   "events": [
     {
       "id": "0001730000600000:step_succeeded:...",
-      "cursor": "0001730000600000:step_succeeded:...",
+      "cursor": "wfcur1.eyJ0IjoxNzMwMDAwNjAwMDAwLCJpZHMiOlsiMDAwMTczMDAwMDYwMDAwMDpzdGVwX3N1Y2NlZWRlZDphYmMxMjMiXX0",
       "timestamp": 1730000600000,
       "type": "step_succeeded",
       "stepId": "implementation",
@@ -1842,7 +1849,29 @@ Event records are ordered by event timestamp, then deterministic replay cursor. 
 
 `type` is one of `step_started`, `step_succeeded`, `step_failed`, `step_skipped`, `step_canceled`, `step_blocked`, `approval_required`, `approval_resolved`, `recovery_required`, `recovery_cleared`, `gate_opened`, `gate_resolved`, `terminal_state`, `monitor_stuck_risk`, or `monitor_quiet_heartbeat`.
 
-`payload` is intentionally concise and type-specific. Step events carry step kind/order/required plus result or error fields when present. Approval and gate events carry the boundary or gate identity and decision metadata. Recovery events carry the reason or previous recovery reason. Monitor advisory events are throttled semantic advisories, not ordinary heartbeat spam.
+`payload` is intentionally concise and type-specific. Step events carry step kind/order/required plus result or error fields when present, and blocked-step events carry the operator reason / actor / evidence / ledger pointers when available. Approval and gate events carry the boundary or gate identity and decision metadata. Recovery events carry the reason or previous recovery reason. Monitor advisory events are throttled semantic advisories, not ordinary heartbeat spam.
+
+### Error codes
+
+| Code | Meaning |
+|------|---------|
+| `run_id_required` | `<run-id>` was not supplied. |
+| `data_dir_failed` | Data directory resolution or SQLite access failed. |
+| `run_not_found` | `<run-id>` does not exist in `workflow_runs`. |
+| `invalid_cursor` | `--since` was a malformed workflow event replay cursor. |
+
+### Text output
+
+```text
+Workflow events for run: mwf-abc123
+Since: (start)
+Cursor: wfcur1.eyJ0IjoxNzMwMDAwNjAwMDAwLCJpZHMiOlsiMDAwMTczMDAwMDYwMDAwMDpzdGVwX3N1Y2NlZWRlZDphYmMxMjMiXX0
+Events: 1
+  1730000600000 step_succeeded step=implementation cursor=wfcur1.eyJ0IjoxNzMwMDAwNjAwMDAwLCJpZHMiOlsiMDAwMTczMDAwMDYwMDAwMDpzdGVwX3N1Y2NlZWRlZDphYmMxMjMiXX0
+Data dir: /path/to/data
+```
+
+Exit code 0 on success, 1 on structured refusal, 2 on usage error.
 
 ### Boundary with stream mode
 
