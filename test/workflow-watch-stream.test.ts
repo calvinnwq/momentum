@@ -6,6 +6,9 @@ import type {
 } from "../src/core/workflow/events.js";
 import {
   buildWorkflowWatchStreamTick,
+  runWorkflowWatchStream,
+  type RunWorkflowWatchStreamResult,
+  type WorkflowWatchStreamPollResult,
   type WorkflowWatchStreamRecord
 } from "../src/core/workflow/watch-stream.js";
 
@@ -243,5 +246,323 @@ describe("buildWorkflowWatchStreamTick", () => {
       expect(line.split("\n")).toHaveLength(1);
       expect(() => JSON.parse(line)).not.toThrow();
     }
+  });
+});
+
+/**
+ * SUP-05 (NGX-552) JSONL stream-session driver.
+ *
+ * `runWorkflowWatchStream` is the loop layer between the per-tick reducer and the
+ * CLI: it threads the durable resume cursor across polls, writes each record as
+ * the reducer produces it, sleeps between non-terminal polls, exits cleanly on a
+ * terminal run, and stays memory-bounded by retaining only the cursor (never the
+ * event history) between ticks. Every collaborator (poll, write, now, sleep, the
+ * abort signal) is injected so the loop is deterministic and free of timers, a
+ * database, or process I/O.
+ */
+
+type PollStep = {
+  events: WorkflowSemanticEvent[];
+  runTerminal?: boolean;
+};
+
+function scriptedPoll(steps: PollStep[]): {
+  poll: (since: string | null) => WorkflowWatchStreamPollResult;
+  seenSince: (string | null)[];
+} {
+  const seenSince: (string | null)[] = [];
+  let index = 0;
+  const poll = (since: string | null): WorkflowWatchStreamPollResult => {
+    seenSince.push(since);
+    const step = steps[Math.min(index, steps.length - 1)] ?? { events: [] };
+    index += 1;
+    return {
+      events: eventsEnvelope({
+        since,
+        cursor: step.events.at(-1)?.cursor ?? since,
+        events: step.events
+      }),
+      runTerminal: step.runTerminal ?? false
+    };
+  };
+  return { poll, seenSince };
+}
+
+describe("runWorkflowWatchStream", () => {
+  it("writes a JSONL record per semantic event then advances the cursor", async () => {
+    const written: WorkflowWatchStreamRecord[] = [];
+    const { poll, seenSince } = scriptedPoll([
+      {
+        events: [
+          event({ type: "step_started", cursor: "wfcur1.a", stepId: "impl" }),
+          event({ type: "step_succeeded", cursor: "wfcur1.b", stepId: "impl" })
+        ]
+      },
+      { events: [] }
+    ]);
+
+    const result: RunWorkflowWatchStreamResult = await runWorkflowWatchStream({
+      poll,
+      write: (record) => written.push(record),
+      now: () => NOW,
+      sleep: async () => {},
+      maxTicks: 2
+    });
+
+    expect(written).toHaveLength(3);
+    expect(written.slice(0, 2)).toMatchObject([
+      { kind: "event", emit: true, event: { cursor: "wfcur1.a" } },
+      { kind: "event", emit: true, event: { cursor: "wfcur1.b" } }
+    ]);
+    expect(written[2]).toMatchObject({ kind: "heartbeat", emit: false });
+    for (const record of written) {
+      expect(JSON.stringify(record)).not.toContain("\n");
+    }
+    expect(seenSince).toEqual([null, "wfcur1.b"]);
+    expect(result.cursor).toBe("wfcur1.b");
+    expect(result.ticks).toBe(2);
+    expect(result.exitReason).toBe("max_ticks");
+    expect(result.terminal).toBe(false);
+  });
+
+  it("resumes from the provided since cursor on reconnect", async () => {
+    const { poll, seenSince } = scriptedPoll([
+      { events: [event({ type: "step_succeeded", cursor: "wfcur1.next" })] }
+    ]);
+
+    await runWorkflowWatchStream({
+      poll,
+      write: () => {},
+      since: "wfcur1.start",
+      now: () => NOW,
+      sleep: async () => {},
+      maxTicks: 1
+    });
+
+    expect(seenSince[0]).toBe("wfcur1.start");
+  });
+
+  it("exits on the terminal event and stops polling", async () => {
+    const written: WorkflowWatchStreamRecord[] = [];
+    const sleeps: number[] = [];
+    const { poll, seenSince } = scriptedPoll([
+      {
+        events: [
+          event({ type: "step_succeeded", cursor: "wfcur1.a", stepId: "merge" }),
+          event({
+            type: "terminal_state",
+            cursor: "wfcur1.z",
+            payload: { state: "succeeded" }
+          })
+        ]
+      },
+      { events: [] }
+    ]);
+
+    const result = await runWorkflowWatchStream({
+      poll,
+      write: (record) => written.push(record),
+      now: () => NOW,
+      sleep: async (ms) => {
+        sleeps.push(ms);
+      }
+    });
+
+    expect(result.exitReason).toBe("terminal");
+    expect(result.terminal).toBe(true);
+    expect(seenSince).toHaveLength(1);
+    expect(sleeps).toHaveLength(0);
+    expect(written.at(-1)).toMatchObject({
+      kind: "event",
+      emit: true,
+      terminal: true,
+      event: { type: "terminal_state" }
+    });
+  });
+
+  it("recognizes an already-terminal run on reconnect and exits via heartbeat", async () => {
+    const written: WorkflowWatchStreamRecord[] = [];
+    const { poll, seenSince } = scriptedPoll([
+      { events: [], runTerminal: true }
+    ]);
+
+    const result = await runWorkflowWatchStream({
+      poll,
+      write: (record) => written.push(record),
+      since: "wfcur1.done",
+      now: () => NOW,
+      sleep: async () => {}
+    });
+
+    expect(result.exitReason).toBe("terminal");
+    expect(result.terminal).toBe(true);
+    expect(seenSince).toEqual(["wfcur1.done"]);
+    expect(written).toHaveLength(1);
+    expect(written[0]).toMatchObject({
+      kind: "heartbeat",
+      emit: false,
+      terminal: true
+    });
+  });
+
+  it("suppresses heartbeats when disabled while still bounding the loop", async () => {
+    const written: WorkflowWatchStreamRecord[] = [];
+    const { poll } = scriptedPoll([{ events: [] }]);
+
+    const result = await runWorkflowWatchStream({
+      poll,
+      write: (record) => written.push(record),
+      heartbeat: false,
+      now: () => NOW,
+      sleep: async () => {},
+      maxTicks: 3
+    });
+
+    expect(written).toEqual([]);
+    expect(result.ticks).toBe(3);
+    expect(result.exitReason).toBe("max_ticks");
+  });
+
+  it("stays memory-bounded across many ticks by retaining only the cursor", async () => {
+    let written = 0;
+    const seenSince: (string | null)[] = [];
+    const poll = (since: string | null): WorkflowWatchStreamPollResult => {
+      seenSince.push(since);
+      const n = seenSince.length;
+      return {
+        events: eventsEnvelope({
+          since,
+          events: [event({ type: "step_started", cursor: `wfcur1.${n}` })]
+        }),
+        runTerminal: false
+      };
+    };
+
+    const result = await runWorkflowWatchStream({
+      poll,
+      write: () => {
+        written += 1;
+      },
+      now: () => NOW,
+      sleep: async () => {},
+      maxTicks: 500
+    });
+
+    expect(written).toBe(500);
+    expect(result.ticks).toBe(500);
+    expect(result.recordsWritten).toBe(500);
+    expect(result.cursor).toBe("wfcur1.500");
+    // The driver streams forward: each poll resumes from the prior tick's
+    // cursor rather than replaying history.
+    expect(seenSince[0]).toBeNull();
+    expect(seenSince[1]).toBe("wfcur1.1");
+    expect(seenSince[499]).toBe("wfcur1.499");
+    // The result is a bounded summary, never an accumulated record array.
+    expect(Object.keys(result).sort()).toEqual([
+      "cursor",
+      "exitReason",
+      "recordsWritten",
+      "terminal",
+      "ticks"
+    ]);
+  });
+
+  it("stops before polling when the abort signal is already aborted", async () => {
+    let polled = 0;
+    const controller = new AbortController();
+    controller.abort();
+
+    const result = await runWorkflowWatchStream({
+      poll: () => {
+        polled += 1;
+        return {
+          events: eventsEnvelope({ events: [] }),
+          runTerminal: false
+        };
+      },
+      write: () => {},
+      now: () => NOW,
+      sleep: async () => {},
+      signal: controller.signal
+    });
+
+    expect(polled).toBe(0);
+    expect(result.ticks).toBe(0);
+    expect(result.exitReason).toBe("aborted");
+  });
+
+  it("stops after the current tick when aborted between polls", async () => {
+    const controller = new AbortController();
+    const seenSince: (string | null)[] = [];
+    const poll = (since: string | null): WorkflowWatchStreamPollResult => {
+      seenSince.push(since);
+      const n = seenSince.length;
+      return {
+        events: eventsEnvelope({
+          since,
+          events: [event({ type: "step_started", cursor: `wfcur1.${n}` })]
+        }),
+        runTerminal: false
+      };
+    };
+
+    const result = await runWorkflowWatchStream({
+      poll,
+      write: () => {},
+      now: () => NOW,
+      sleep: async () => {
+        controller.abort();
+      },
+      signal: controller.signal
+    });
+
+    expect(result.ticks).toBe(1);
+    expect(result.exitReason).toBe("aborted");
+    expect(seenSince).toHaveLength(1);
+  });
+
+  it("keeps streaming past a terminal run when exitOnTerminal is disabled", async () => {
+    const { poll } = scriptedPoll([
+      {
+        events: [
+          event({
+            type: "terminal_state",
+            cursor: "wfcur1.z",
+            payload: { state: "succeeded" }
+          })
+        ]
+      },
+      { events: [], runTerminal: true }
+    ]);
+
+    const result = await runWorkflowWatchStream({
+      poll,
+      write: () => {},
+      exitOnTerminal: false,
+      now: () => NOW,
+      sleep: async () => {},
+      maxTicks: 3
+    });
+
+    expect(result.terminal).toBe(true);
+    expect(result.ticks).toBe(3);
+    expect(result.exitReason).toBe("max_ticks");
+  });
+
+  it("rejects a negative poll interval before polling", async () => {
+    let polled = 0;
+    await expect(
+      runWorkflowWatchStream({
+        poll: () => {
+          polled += 1;
+          return { events: eventsEnvelope({ events: [] }), runTerminal: false };
+        },
+        write: () => {},
+        pollIntervalMs: -1,
+        now: () => NOW,
+        sleep: async () => {}
+      })
+    ).rejects.toThrow(/pollIntervalMs/);
+    expect(polled).toBe(0);
   });
 });

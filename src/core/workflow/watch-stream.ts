@@ -137,3 +137,159 @@ function buildEventRecord(
     }
   };
 }
+
+/** Default sleep between non-terminal stream polls. */
+export const DEFAULT_WORKFLOW_WATCH_STREAM_POLL_INTERVAL_MS = 1_000;
+
+type MaybePromise<T> = T | Promise<T>;
+
+/**
+ * One durable poll observed by the stream driver: the events after the resume
+ * cursor plus whether the durable run row is already terminal. The terminal flag
+ * lets a reconnecting stream recognize a finished run even when it resumes from a
+ * cursor at or past the terminal event (so no `terminal_state` event reappears).
+ */
+export type WorkflowWatchStreamPollResult = {
+  events: WorkflowRunEvents;
+  runTerminal: boolean;
+};
+
+export type WorkflowWatchStreamPoll = (
+  since: string | null
+) => MaybePromise<WorkflowWatchStreamPollResult>;
+
+export type WorkflowWatchStreamWrite = (
+  record: WorkflowWatchStreamRecord
+) => void;
+
+export type WorkflowWatchStreamNow = () => number;
+export type WorkflowWatchStreamSleep = (ms: number) => Promise<void>;
+
+export type WorkflowWatchStreamExitReason = "terminal" | "max_ticks" | "aborted";
+
+export type RunWorkflowWatchStreamInput = {
+  /** Durable event poll keyed by the caller's resume cursor (SUP-04). */
+  poll: WorkflowWatchStreamPoll;
+  /** Sink for each newline-delimited record, called as it is produced. */
+  write: WorkflowWatchStreamWrite;
+  /** Resume cursor; `null`/omitted starts from the run's first durable event. */
+  since?: string | null;
+  /** Emit `emit:false` heartbeats on no-change polls. Defaults to `true`. */
+  heartbeat?: boolean;
+  /** Exit once the run is terminal, after emitting its record. Defaults `true`. */
+  exitOnTerminal?: boolean;
+  /** Sleep between non-terminal polls. Defaults to the module default. */
+  pollIntervalMs?: number;
+  /** Safety bound on poll ticks. Defaults to `Infinity`. */
+  maxTicks?: number;
+  /** Cancellation signal checked between ticks. */
+  signal?: AbortSignal;
+  now?: WorkflowWatchStreamNow;
+  sleep?: WorkflowWatchStreamSleep;
+};
+
+export type RunWorkflowWatchStreamResult = {
+  /** Durable resume cursor after the final poll. */
+  cursor: string | null;
+  /** Number of polls performed. */
+  ticks: number;
+  /** Number of records written across the session. */
+  recordsWritten: number;
+  /** Whether the run reached (or was already in) a terminal state. */
+  terminal: boolean;
+  exitReason: WorkflowWatchStreamExitReason;
+};
+
+/**
+ * Drive a long-running JSONL watch stream over the durable event cursor API.
+ *
+ * The driver is the loop layer above {@link buildWorkflowWatchStreamTick}: each
+ * tick polls events after the current resume cursor, writes every record the
+ * reducer produces, advances the cursor, and sleeps before the next poll. It
+ * exits on a terminal run (emitting that tick's records first) unless
+ * `exitOnTerminal` is disabled, honours an abort signal between ticks, and is
+ * bounded by `maxTicks`. Memory stays flat for the lifetime of the stream: only
+ * the resume cursor and counters are retained between ticks - records are handed
+ * to `write` and released, never accumulated.
+ */
+export async function runWorkflowWatchStream(
+  input: RunWorkflowWatchStreamInput
+): Promise<RunWorkflowWatchStreamResult> {
+  const now = input.now ?? (() => Date.now());
+  const sleep = input.sleep ?? defaultStreamSleep;
+  const heartbeat = input.heartbeat ?? true;
+  const exitOnTerminal = input.exitOnTerminal ?? true;
+  const maxTicks = input.maxTicks ?? Infinity;
+  const pollIntervalMs = normalizePositive(
+    input.pollIntervalMs ?? DEFAULT_WORKFLOW_WATCH_STREAM_POLL_INTERVAL_MS,
+    "pollIntervalMs"
+  );
+
+  const aborted = (): boolean => input.signal?.aborted === true;
+
+  let cursor: string | null = input.since ?? null;
+  let ticks = 0;
+  let recordsWritten = 0;
+  let terminal = false;
+  let exitReason: WorkflowWatchStreamExitReason | null = null;
+
+  while (exitReason === null) {
+    if (aborted()) {
+      exitReason = "aborted";
+      break;
+    }
+    if (ticks >= maxTicks) {
+      exitReason = "max_ticks";
+      break;
+    }
+
+    const { events, runTerminal } = await input.poll(cursor);
+    const tick = buildWorkflowWatchStreamTick(events, {
+      now: now(),
+      heartbeat,
+      runTerminal
+    });
+    for (const record of tick.records) {
+      input.write(record);
+      recordsWritten += 1;
+    }
+    cursor = tick.cursor;
+    ticks += 1;
+    if (tick.terminal) terminal = true;
+
+    if (terminal && exitOnTerminal) {
+      exitReason = "terminal";
+      break;
+    }
+    // Re-check the bounds before sleeping so a satisfied `maxTicks` or a signal
+    // that fired during the poll exits immediately rather than after a wasted
+    // poll-interval sleep.
+    if (ticks >= maxTicks) {
+      exitReason = "max_ticks";
+      break;
+    }
+    if (aborted()) {
+      exitReason = "aborted";
+      break;
+    }
+    await sleep(pollIntervalMs);
+  }
+
+  return { cursor, ticks, recordsWritten, terminal, exitReason };
+}
+
+function defaultStreamSleep(ms: number): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function normalizePositive(value: number, name: string): number {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(
+      `runWorkflowWatchStream: ${name} must be a non-negative finite number`
+    );
+  }
+  return value;
+}
