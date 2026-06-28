@@ -354,6 +354,31 @@ describe("workflow run events", () => {
     expect(next.cursor).toBe(next.events[0]?.cursor);
   });
 
+  it("orders same-timestamp step starts before terminal step events", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    seedRun(db, { runId: "run-same-timestamp-step", state: "failed", updatedAt: 10 });
+    seedStep(db, {
+      runId: "run-same-timestamp-step",
+      stepId: "implementation",
+      kind: "implementation",
+      state: "failed",
+      order: 1,
+      startedAt: 10,
+      finishedAt: 10,
+      errorCode: "runner_failed",
+      errorMessage: "runner exited non-zero"
+    });
+    db.close();
+
+    const envelope = await readEvents(dataDir, "run-same-timestamp-step");
+
+    expect(envelope.events.map((event) => event.type)).toEqual([
+      "step_started",
+      "step_failed"
+    ]);
+  });
+
   it("replays recovery reason changes while the run remains marked", async () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);
@@ -587,8 +612,8 @@ describe("workflow run events", () => {
 
     const first = await readEvents(dataDir, "run-same-response");
     expect(first.events.map((event) => event.type)).toEqual([
-      "terminal_state",
-      "monitor_stuck_risk"
+      "monitor_stuck_risk",
+      "terminal_state"
     ]);
 
     const next = await readEvents(dataDir, "run-same-response", first.cursor);

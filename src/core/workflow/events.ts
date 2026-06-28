@@ -507,7 +507,36 @@ function decodeReplayCursor(cursor: string | null): ReplayCursorState | null {
 
 function compareEvents(a: WorkflowSemanticEvent, b: WorkflowSemanticEvent): number {
   if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp;
+  const rankDelta = eventTypeRank(a.type) - eventTypeRank(b.type);
+  if (rankDelta !== 0) return rankDelta;
   return a.cursor < b.cursor ? -1 : a.cursor > b.cursor ? 1 : 0;
+}
+
+function eventTypeRank(type: WorkflowEventType): number {
+  switch (type) {
+    case "step_started":
+      return 10;
+    case "approval_required":
+    case "gate_opened":
+      return 20;
+    case "step_blocked":
+      return 30;
+    case "step_succeeded":
+    case "step_failed":
+    case "step_skipped":
+    case "step_canceled":
+      return 40;
+    case "approval_resolved":
+    case "gate_resolved":
+    case "recovery_required":
+    case "recovery_cleared":
+      return 50;
+    case "monitor_stuck_risk":
+    case "monitor_quiet_heartbeat":
+      return 60;
+    case "terminal_state":
+      return 70;
+  }
 }
 
 function padTimestamp(timestamp: number): string {
