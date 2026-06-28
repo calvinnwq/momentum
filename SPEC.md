@@ -116,7 +116,10 @@ These hints are advisory only: they never mark a run or step failed, never mutat
 NGX-551 adds `workflow run events` as the durable semantic replay API for supervisors and app clients that reconnect after process loss.
 It combines reproducible facts from workflow runs, steps, approvals, gates, and terminal run state with append-only `workflow_events` rows for overwritten or advisory transitions, including manual-recovery mark / clear, blocked-step metadata, retry / reconciliation preservation, and throttled quiet or stuck-risk watch advisories.
 Returned cursors are opaque replay tokens, not event identities; clients persist the response `cursor` for the next `--since` call and use event `id` only for dedupe.
-The API is replay-only and read-only: it does not stream, hold a connection open, dispatch work, or change monitor/watch delivery semantics.
+The API is replay-only and read-only: it does not hold a connection open, dispatch work, or change monitor/watch delivery semantics.
+NGX-552 adds `workflow run watch <run-id> --stream --jsonl` as the long-lived JSONL stream over that durable event cursor API.
+The stream is read-only, resumes from `--since`, emits `event` records with `emit: true` only for durable human-worthy semantic events, emits `heartbeat` records with `emit: false` for liveness, retains only the cursor and counters between polls, and exits cleanly once the run row is terminal.
+It never runs the bounded watch dispatcher tick, writes monitor advisory baselines, delivers to OpenClaw, or invokes an LLM; durable events remain the source of truth for disconnected clients.
 NGX-521 hardens native dogfood tail recovery without changing the default route.
 Failed required `merge-cleanup` and `linear-refresh` steps classify as `failed_external_side_effect_step` so operators verify the canonical external state - pull request merge or close state and any surviving remote branch ref for `merge-cleanup`, or tracker state for `linear-refresh` - then reconcile through `workflow run clear-recovery --evidence-pointer <ref>` instead of blindly re-running side-effecting tail work.
 The checked-in live-wrapper dogfood profile executes the wrapper from source through the TypeScript source loader so cleanup of generated `dist/` artifacts does not break `merge-cleanup` or `linear-refresh` tail work.

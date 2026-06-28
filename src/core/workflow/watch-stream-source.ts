@@ -34,12 +34,12 @@ export type WorkflowWatchStreamDbPoll = (
  *
  * Each poll performs two durable reads against the same {@link MomentumDb}: the
  * replayable semantic events after the caller's resume cursor
- * ({@link loadWorkflowRunEvents}), and the run row's current state so the driver
- * recognises an already-terminal run even when it reconnects from a cursor at or
- * past the projected `terminal_state` event. That event is filtered out of the
- * envelope once consumed, so the run row is the only terminal signal left to a
- * reconnecting stream; reading it out-of-band per poll is what keeps a resumed
- * stream behaviourally specified. The source retains no event history - it reads,
+ * ({@link loadWorkflowRunEventsIncremental}), and the run row's current state so
+ * the driver recognises an already-terminal run even when it reconnects from a
+ * cursor at or past the projected `terminal_state` event. That event is filtered
+ * out of the envelope once consumed, so the run row is the only terminal signal
+ * left to a reconnecting stream; reading it out-of-band per poll is what keeps a
+ * resumed stream behaviourally specified. The source retains no event history - it reads,
  * returns, and forgets - so the driver stays memory-bounded for the lifetime of
  * the stream.
  */

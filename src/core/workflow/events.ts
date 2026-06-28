@@ -146,6 +146,15 @@ export function loadWorkflowRunEvents(
   return loadWorkflowRunEventsInternal(db, runId, options, false);
 }
 
+/**
+ * Load one run's replayable semantic event stream with timestamp prefiltering.
+ *
+ * This keeps long-lived watch streams bounded by asking each projection source
+ * only for facts at or after the resume cursor timestamp before the final cursor
+ * filter runs. It preserves the same public cursor semantics as
+ * {@link loadWorkflowRunEvents}; callers still pass opaque `wfcur1.` tokens and
+ * receive the next durable replay cursor.
+ */
 export function loadWorkflowRunEventsIncremental(
   db: MomentumDb,
   runId: string,

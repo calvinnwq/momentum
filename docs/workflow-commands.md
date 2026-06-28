@@ -23,13 +23,13 @@ Operator-facing CLI envelopes for the `workflow run start`, `workflow run start-
   `--stream --jsonl` instead opens a read-only, long-lived JSONL event stream over the durable event cursor API for a TUI, GUI, or sidecar, resumable from a `--since` cursor and bounded in memory.
 - `workflow run events` is a read-only replay surface for supervisors and app clients that need semantic run changes after reconnecting.
   It returns ordered event records from durable workflow state and append-only workflow event rows without reading stdout scrollback or running dispatch.
-  It is the catch-up companion to `workflow run watch --once`, not a replacement for live polling.
+  It is the catch-up substrate for stream mode and discrete pollers, not a replacement for live polling by itself.
 - `workflow run logs` is a read-only run-scoped log and evidence reader that reuses the workflow detail shape and attaches executor rounds plus their child artifacts, checkpoints, findings, and decisions.
 
 `workflow run preview-coding`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run events`, and `workflow run logs` are read-only: they never write SQLite or files.
 `workflow run monitor` is also read-only unless `--advance` is passed, in which case supported Momentum-native coding runs persist only `monitor_last_seen_digest` / `monitor_last_seen_at` and `monitor_last_emitted_digest` / `monitor_last_emitted_at` progress baselines.
 `workflow run watch --once` is write-limited to the target run's safe dispatcher tick, the same advisory baseline columns, and append-only quiet-heartbeat / stuck-risk event rows for supported Momentum-native coding runs.
-`workflow run watch --stream` is read-only: it replays durable events and reads the run's terminal state without writing SQLite or files or running dispatch.
+`workflow run watch --stream` is read-only: it replays durable events and reads the run's terminal state without writing SQLite or files, running dispatch, delivering to OpenClaw, or invoking an LLM.
 
 `workflow run --help` and any nested `workflow run ... --help` or `workflow run ... -h` invocation print the shared top-level CLI help to stdout and exit 0 before selecting or validating a run subcommand.
 This help path ignores `--json`, reads no data directory, and performs no durable writes.
@@ -1481,7 +1481,7 @@ The command reads the durable monitor projection, persists this tick's advisory 
 It does not resolve approvals, gates, manual recovery, or other operator decisions.
 
 `--stream --jsonl` opens a long-lived JSONL stream over the same durable event cursor API as `workflow run events`.
-It emits one newline-delimited JSON record per durable semantic event, plus optional machine heartbeats, and exits cleanly once the run is terminal.
+It emits one newline-delimited JSON record per durable semantic event, plus machine heartbeats, and exits cleanly once the run is terminal.
 The stream is an optimization over durable state, never the source of truth: a disconnected client reconnects with `--since <cursor>` and loses nothing.
 See [Stream mode](#stream-mode) below.
 
@@ -1634,7 +1634,8 @@ A heartbeat record:
 }
 ```
 
-Stream-mode failures (`--stream` without `--jsonl`, an unknown run, an invalid `--since` cursor, or `--stream` combined with `--once`) are reported on stderr through the shared workflow error envelope with status `1`, not as stream records.
+Stream-mode failures (`--stream` without `--jsonl`, an unknown run, an invalid `--since` cursor, or `--stream` combined with `--once`) are reported on stderr with status `1`, not as stream records.
+When `--jsonl` or `--json` is active, failures use the shared workflow JSON error envelope.
 See [Error codes](#error-codes).
 
 ### Supervisor scenarios
@@ -1835,7 +1836,7 @@ A cron, OpenClaw, or GUI poller branches on the envelope instead of scraping tex
 | `jsonl_required` | `--stream` was supplied without `--jsonl`. |
 | `stream_once_conflict` | `--stream` and `--once` were supplied together. |
 | `invalid_cursor` | The `--since` value is not a valid durable event cursor. |
-| `data_dir_failed` | Data directory resolution, SQLite access, or the bounded dispatch tick failed. |
+| `data_dir_failed` | Data directory resolution, SQLite access, the bounded `--once` dispatch tick, or stream polling failed. |
 | `daemon_live_wrapper_profile_invalid` | The shared daemon live-wrapper profile was configured but unreadable or invalid when the bounded dispatch tick resolved it. |
 | `run_not_found` | `<run-id>` does not exist in `workflow_runs`. |
 | `watch_unsupported_source` | The run source is not `momentum-native-coding` (`--once` mode only). |

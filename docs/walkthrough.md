@@ -68,12 +68,8 @@ node dist/index.js daemon status --data-dir "$DATA" --json
 
 Pick `worker run` when you want a one-shot iteration claim with no
 orchestrator-run record; pick `daemon start --max-*` when you want to drain
-multiple chained iterations under a single `daemon_runs` row that
-`daemon status`, `status --json`, and `handoff` can surface. Goal queue work
-still uses the same queue and artifacts as `worker run`; workflow run work uses
-the separate workflow tables and is surfaced through `workflow status`,
-`workflow handoff`, `workflow run monitor`, `workflow run watch --once`,
-`workflow run events`, and `workflow run logs`.
+multiple chained iterations under a single `daemon_runs` row that `daemon status`, `status --json`, and `handoff` can surface.
+Goal queue work still uses the same queue and artifacts as `worker run`; workflow run work uses the separate workflow tables and is surfaced through `workflow status`, `workflow handoff`, `workflow run monitor`, `workflow run watch --once`, `workflow run watch --stream --jsonl`, `workflow run events`, and `workflow run logs`.
 
 ## Foreground debug path
 
