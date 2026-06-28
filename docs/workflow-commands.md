@@ -1814,7 +1814,7 @@ Cursor semantics:
 - Repeating the same `--since` against unchanged durable state is deterministic and idempotent.
 - To continue, pass the previous response `cursor` as the next `--since` value.
 - A `null` / omitted cursor means "replay from the beginning".
-- Cursors are opaque `wfcur1...` replay tokens and may encode all event ids already seen at the current timestamp so later inserted same-timestamp events are still returned. Non-empty `--since` values that are not valid `wfcur1...` replay tokens are rejected with `invalid_cursor`.
+- Cursors are opaque `wfcur1.` replay tokens and may encode all event ids already seen at the current timestamp so later inserted same-timestamp events are still returned. Non-empty `--since` values that are not valid `wfcur1.` replay tokens are rejected with `invalid_cursor`.
 
 Event records are ordered by event timestamp, lifecycle rank, then deterministic replay cursor. Event ids are stable identities for the durable facts that produced them; clients should store `id` for dedupe and use only `cursor` / response `cursor` with the command's `--since` contract.
 
@@ -1858,7 +1858,7 @@ Event records are ordered by event timestamp, lifecycle rank, then deterministic
 | `run_id_required` | `<run-id>` was not supplied. |
 | `data_dir_failed` | Data directory resolution or SQLite access failed. |
 | `run_not_found` | `<run-id>` does not exist in `workflow_runs`. |
-| `invalid_cursor` | `--since` was not a valid `wfcur1...` workflow event replay cursor. |
+| `invalid_cursor` | `--since` was not a valid `wfcur1.` workflow event replay cursor. |
 
 ### Text output
 

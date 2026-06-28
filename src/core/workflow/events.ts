@@ -4,6 +4,13 @@ import { Buffer } from "node:buffer";
 import type { MomentumDb } from "../../adapters/db.js";
 import { WORKFLOW_RUN_TERMINAL_STATES } from "./run-reducer.js";
 
+/**
+ * Durable semantic workflow event types exposed by `workflow run events`.
+ *
+ * Projected events describe facts recoverable from current workflow rows.
+ * Append-only events preserve transitions that could otherwise be overwritten
+ * by recovery, retry, reconciliation, or throttled supervisor-advisory writes.
+ */
 export const WORKFLOW_EVENT_TYPES = [
   "step_started",
   "step_succeeded",
@@ -43,6 +50,9 @@ export type LoadWorkflowRunEventsOptions = {
   since?: string | null | undefined;
 };
 
+/**
+ * Raised when a non-empty replay cursor is not a valid opaque `wfcur1.` token.
+ */
 export class InvalidWorkflowEventCursorError extends Error {
   readonly code = "invalid_cursor";
 
@@ -61,6 +71,13 @@ export type AppendWorkflowEventInput = {
   eventId?: string;
 };
 
+/**
+ * Append one non-reproducible semantic workflow event.
+ *
+ * Use this only for transitions that cannot be replayed from current workflow
+ * rows after later in-place updates, such as recovery mark / clear transitions,
+ * blocked-step metadata, retry preservation, or watch advisories.
+ */
 export function appendWorkflowEvent(
   db: MomentumDb,
   input: AppendWorkflowEventInput
@@ -92,6 +109,9 @@ export function appendWorkflowEvent(
   return event;
 }
 
+/**
+ * Build a stable identity for a reproducible projected workflow event.
+ */
 export function buildWorkflowEventId(input: {
   runId: string;
   type: WorkflowEventType;
@@ -111,6 +131,13 @@ export function buildWorkflowEventId(input: {
   return `${padTimestamp(input.timestamp)}:${input.type}:${digest.slice(0, 16)}`;
 }
 
+/**
+ * Load one run's replayable semantic event stream.
+ *
+ * The stream combines reproducible facts from workflow rows with append-only
+ * `workflow_events` rows, validates any non-empty `since` cursor, and returns
+ * opaque continuation cursors for disconnected supervisors and app clients.
+ */
 export function loadWorkflowRunEvents(
   db: MomentumDb,
   runId: string,

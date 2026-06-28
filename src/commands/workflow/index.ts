@@ -289,6 +289,12 @@ function workflowRun(
   );
 }
 
+/**
+ * `momentum workflow run events` - read-only semantic replay for one run.
+ *
+ * Supervisors and app clients pass the prior response cursor through `--since`
+ * to catch up without stdout scrollback or a live process connection.
+ */
 function workflowRunEvents(parsed: ParsedFlags, io: CliIo): number {
   const positional = parsed.args.slice(3);
   if (positional.length === 0 || !positional[0]) {

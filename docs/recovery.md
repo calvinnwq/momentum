@@ -165,6 +165,8 @@ The run-scoped flag blocks `workflow run approve` and any
 condition in place. A resolving `workflow run update-step` transition can land
 while the flag remains set so the operator has a safe path to resolve the run
 and then clear the flag explicitly.
+Marking a run for manual recovery appends a `recovery_required` workflow event when the durable recovery reason changes.
+Clearing an active run-scoped recovery flag appends a `recovery_cleared` workflow event with the previous reason and timestamp so reconnecting clients can replay the operator boundary through `workflow run events`.
 
 Operators clear run-scoped recovery with
 `momentum workflow run clear-recovery <run-id> [--evidence-pointer <ref>] [--ledger-pointer <ref>] [--data-dir <path>] [--json]`.
@@ -189,6 +191,7 @@ unavailable, `workflow run clear-recovery` prepares the step for a scheduler
 retry after the operator repairs the environment. The clear output includes
 `retryPrepared`; the previous failed executor round remains durable, and an
 already-terminal successful step is only reattached/reconciled, not rerun.
+Before the step row is reopened for retry, Momentum preserves the previous `step_started` or `step_failed` transition as a workflow event so cursor replay does not lose the overwritten state.
 For `no-mistakes`, the coding-workflow wrapper also parks known external runner
 lifecycle failures in this same retryable recovery lane: missing branch-start /
 gate state and cancellation before reliable completion. These are not trusted as
