@@ -1,5 +1,5 @@
 import type { MomentumDb } from "../../adapters/db.js";
-import { loadWorkflowRunEvents } from "./events.js";
+import { loadWorkflowRunEventsIncremental } from "./events.js";
 import { WORKFLOW_RUN_TERMINAL_STATES } from "./run-reducer.js";
 import type { WorkflowWatchStreamPollResult } from "./watch-stream.js";
 
@@ -48,11 +48,12 @@ export function createWorkflowWatchStreamDbPoll(
   runId: string
 ): WorkflowWatchStreamDbPoll {
   return (since): WorkflowWatchStreamPollResult => {
-    const events = loadWorkflowRunEvents(db, runId, { since });
+    const runTerminal = isWorkflowRunRowTerminal(db, runId);
+    const events = loadWorkflowRunEventsIncremental(db, runId, { since });
     if (events === null) {
       throw new WorkflowWatchStreamRunNotFoundError(runId);
     }
-    return { events, runTerminal: isWorkflowRunRowTerminal(db, runId) };
+    return { events, runTerminal };
   };
 }
 

@@ -741,6 +741,103 @@ describe("createWorkflowWatchStreamDbPoll", () => {
     }
   });
 
+  it("still returns terminal_state when the run becomes terminal during a poll", () => {
+    const dataDir = makeStreamSourceTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedStreamRun(db, {
+        runId: "run-race",
+        state: "running",
+        startedAt: 5,
+        updatedAt: 60
+      });
+
+      let flipped = false;
+      const raceDb = {
+        prepare(sql: string) {
+          if (
+            !flipped &&
+            sql.includes("SELECT state FROM workflow_runs WHERE id = ?")
+          ) {
+            flipped = true;
+            db.prepare(
+              `UPDATE workflow_runs
+                  SET state = 'succeeded', finished_at = 80, updated_at = 80
+                WHERE id = ?`
+            ).run("run-race");
+          }
+          return db.prepare(sql);
+        }
+      } as MomentumDb;
+
+      const result = createWorkflowWatchStreamDbPoll(raceDb, "run-race")(null);
+
+      expect(result.runTerminal).toBe(true);
+      expect(result.events.events.map((event) => event.type)).toContain(
+        "terminal_state"
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("does not replay old stored event rows when resuming from a cursor", () => {
+    const dataDir = makeStreamSourceTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedStreamRun(db, { runId: "run-bounded", state: "running" });
+      for (let i = 1; i <= 1000; i += 1) {
+        seedStreamEvent(db, {
+          eventId: `${String(i).padStart(12, "0")}:recovery_required:run-bounded`,
+          runId: "run-bounded",
+          type: "recovery_required",
+          timestamp: i
+        });
+      }
+
+      const first = createWorkflowWatchStreamDbPoll(db, "run-bounded")(null);
+      seedStreamEvent(db, {
+        eventId: "000000001001:recovery_required:run-bounded",
+        runId: "run-bounded",
+        type: "recovery_required",
+        timestamp: 1001
+      });
+
+      let storedRowsRead = 0;
+      const boundedDb = {
+        prepare(sql: string) {
+          const statement = db.prepare(sql);
+          if (
+            sql.includes("FROM workflow_events") &&
+            sql.includes("ORDER BY occurred_at, event_id")
+          ) {
+            return {
+              ...statement,
+              all(...args: Parameters<typeof statement.all>) {
+                const rows = statement.all(...args);
+                storedRowsRead = rows.length;
+                return rows;
+              }
+            };
+          }
+          return statement;
+        }
+      } as MomentumDb;
+
+      const second = createWorkflowWatchStreamDbPoll(
+        boundedDb,
+        "run-bounded"
+      )(first.events.cursor);
+
+      expect(second.events.events.map((event) => event.timestamp)).toEqual([
+        1001
+      ]);
+      expect(storedRowsRead).toBeLessThanOrEqual(2);
+    } finally {
+      db.close();
+    }
+  });
+
   it("throws WorkflowWatchStreamRunNotFoundError for an unknown run", () => {
     const dataDir = makeStreamSourceTempDir();
     const db = openDb(dataDir);
@@ -935,6 +1032,33 @@ describe("workflow run watch --stream --jsonl (CLI)", () => {
     expect(payload["command"]).toBe("workflow run watch");
     expect(payload["code"]).toBe("run_not_found");
     expect(payload["runId"]).toBe("missing-run");
+  });
+
+  it("does not create a missing data directory on read-only stream misses", async () => {
+    const root = makeStreamSourceTempDir();
+    const dataDir = path.join(root, "missing-stream-data");
+
+    const result = await runStreamCli([
+      "workflow",
+      "run",
+      "watch",
+      "missing-run",
+      "--stream",
+      "--jsonl",
+      "--data-dir",
+      dataDir
+    ]);
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(JSON.parse(result.stderr)).toMatchObject({
+      ok: false,
+      command: "workflow run watch",
+      code: "run_not_found",
+      dataDir,
+      runId: "missing-run"
+    });
+    expect(fs.existsSync(dataDir)).toBe(false);
   });
 
   it("resumes from a --since cursor and does not re-emit consumed events", async () => {

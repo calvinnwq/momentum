@@ -2295,7 +2295,15 @@ async function workflowRunWatchStream(
 
   let db: MomentumDb | undefined;
   try {
-    db = openDb(dataDir);
+    db = openExistingDbReadOnly(dataDir);
+    if (db === undefined) {
+      return emitStreamFailure({
+        code: "run_not_found",
+        message: `Workflow run not found: ${runId}`,
+        dataDir,
+        runId
+      });
+    }
     const streamInput: Parameters<typeof runWorkflowWatchStream>[0] = {
       poll: createWorkflowWatchStreamDbPoll(db, runId),
       write: (record) => emitWorkflowRunWatchStreamRecord(io, record),
