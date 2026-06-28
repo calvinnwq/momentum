@@ -43,6 +43,15 @@ export type LoadWorkflowRunEventsOptions = {
   since?: string | null | undefined;
 };
 
+export class InvalidWorkflowEventCursorError extends Error {
+  readonly code = "invalid_cursor";
+
+  constructor(cursor: string) {
+    super(`Invalid workflow event cursor: ${cursor}`);
+    this.name = "InvalidWorkflowEventCursorError";
+  }
+}
+
 export type AppendWorkflowEventInput = {
   runId: string;
   type: WorkflowEventType;
@@ -145,10 +154,15 @@ function projectStepEvents(
 ): WorkflowSemanticEvent[] {
   if (!tableExists(db, "workflow_steps")) return [];
   const storedBlockedAtByStep = loadStoredStepBlockedAtByStep(db, runId);
+  const stepColumns = workflowStepProjectionColumns(db);
   const rows = db
     .prepare(
       `SELECT step_id, kind, state, step_order, required, result_digest,
-              error_code, error_message, started_at, finished_at, updated_at
+              error_code, error_message, started_at, finished_at,
+              ${stepColumns.operatorReason}, ${stepColumns.operatorActor},
+              ${stepColumns.operatorEvidencePointer},
+              ${stepColumns.operatorLedgerPointer},
+              ${stepColumns.operatorTransitionAt}, updated_at
          FROM workflow_steps
         WHERE run_id = ?
         ORDER BY step_order, step_id`
@@ -194,15 +208,23 @@ function projectStepEvents(
       );
     } else if (
       row.state === "blocked" &&
-      (storedBlockedAtByStep.get(row.step_id) ?? -1) < row.updated_at
+      (storedBlockedAtByStep.get(row.step_id) ?? -1) <
+        (row.operator_transition_at ?? row.updated_at)
     ) {
+      const payload = compactPayload({
+        ...basePayload,
+        reason: row.operator_reason,
+        actor: row.operator_actor,
+        evidencePointer: row.operator_evidence_pointer,
+        ledgerPointer: row.operator_ledger_pointer
+      });
       events.push(
         buildEvent({
           runId,
           type: "step_blocked",
-          timestamp: row.updated_at,
+          timestamp: row.operator_transition_at ?? row.updated_at,
           stepId: row.step_id,
-          payload: basePayload,
+          payload,
           source: "step"
         })
       );
@@ -402,6 +424,59 @@ function tableExists(db: MomentumDb, name: string): boolean {
   return row !== undefined;
 }
 
+function tableColumnExists(db: MomentumDb, tableName: string, columnName: string): boolean {
+  const rows = db.prepare(`PRAGMA table_info(${tableName})`).all() as {
+    name: string;
+  }[];
+  return rows.some((row) => row.name === columnName);
+}
+
+function workflowStepProjectionColumns(db: MomentumDb): {
+  operatorReason: string;
+  operatorActor: string;
+  operatorEvidencePointer: string;
+  operatorLedgerPointer: string;
+  operatorTransitionAt: string;
+} {
+  return {
+    operatorReason: nullableColumnProjection(
+      db,
+      "workflow_steps",
+      "operator_reason"
+    ),
+    operatorActor: nullableColumnProjection(
+      db,
+      "workflow_steps",
+      "operator_actor"
+    ),
+    operatorEvidencePointer: nullableColumnProjection(
+      db,
+      "workflow_steps",
+      "operator_evidence_pointer"
+    ),
+    operatorLedgerPointer: nullableColumnProjection(
+      db,
+      "workflow_steps",
+      "operator_ledger_pointer"
+    ),
+    operatorTransitionAt: nullableColumnProjection(
+      db,
+      "workflow_steps",
+      "operator_transition_at"
+    )
+  };
+}
+
+function nullableColumnProjection(
+  db: MomentumDb,
+  tableName: string,
+  columnName: string
+): string {
+  return tableColumnExists(db, tableName, columnName)
+    ? columnName
+    : `NULL AS ${columnName}`;
+}
+
 function stepTerminalEventType(state: string): WorkflowEventType | null {
   switch (state) {
     case "succeeded":
@@ -492,16 +567,25 @@ function decodeReplayCursor(cursor: string | null): ReplayCursorState | null {
       "utf8"
     );
     const parsed = JSON.parse(raw) as unknown;
-    if (parsed === null || typeof parsed !== "object") return null;
+    if (parsed === null || typeof parsed !== "object") {
+      throw new InvalidWorkflowEventCursorError(cursor);
+    }
     const record = parsed as { t?: unknown; ids?: unknown };
-    if (typeof record.t !== "number" || !Array.isArray(record.ids)) return null;
-    const ids = record.ids.filter((id): id is string => typeof id === "string");
+    if (
+      typeof record.t !== "number" ||
+      !Number.isFinite(record.t) ||
+      !Array.isArray(record.ids) ||
+      record.ids.some((id) => typeof id !== "string")
+    ) {
+      throw new InvalidWorkflowEventCursorError(cursor);
+    }
+    const ids = record.ids as string[];
     return {
-      timestamp: record.t as number,
+      timestamp: record.t,
       seenIds: new Set(ids)
     };
   } catch {
-    return null;
+    throw new InvalidWorkflowEventCursorError(cursor);
   }
 }
 
@@ -596,6 +680,11 @@ type StepRow = {
   error_message: string | null;
   started_at: number | null;
   finished_at: number | null;
+  operator_reason: string | null;
+  operator_actor: string | null;
+  operator_evidence_pointer: string | null;
+  operator_ledger_pointer: string | null;
+  operator_transition_at: number | null;
   updated_at: number;
 };
 

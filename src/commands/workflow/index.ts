@@ -125,6 +125,7 @@ import {
   resolveWorkflowGate
 } from "../../core/workflow/gate-persist.js";
 import {
+  InvalidWorkflowEventCursorError,
   appendWorkflowEvent,
   loadWorkflowRunEvents,
   type WorkflowEventType
@@ -342,6 +343,16 @@ function workflowRunEvents(parsed: ParsedFlags, io: CliIo): number {
       });
     }
     return emitWorkflowRunEvents(parsed, io, dataDir, envelope);
+  } catch (error) {
+    if (error instanceof InvalidWorkflowEventCursorError) {
+      return emitWorkflowRunEventsFailure(parsed, io, {
+        code: error.code,
+        message: error.message,
+        dataDir,
+        runId
+      });
+    }
+    throw error;
   } finally {
     db.close();
   }

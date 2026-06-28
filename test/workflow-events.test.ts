@@ -551,6 +551,50 @@ describe("workflow run events", () => {
     });
   });
 
+  it("projects blocked rows with persisted operator metadata", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    seedRun(db, { runId: "run-projected-blocked", state: "blocked" });
+    seedStep(db, {
+      runId: "run-projected-blocked",
+      stepId: "implementation",
+      kind: "implementation",
+      state: "blocked",
+      order: 1,
+      updatedAt: 120
+    });
+    db.prepare(
+      `UPDATE workflow_steps
+          SET operator_reason = 'waiting on external state',
+              operator_actor = 'calvin',
+              operator_evidence_pointer = 'evidence://blocked',
+              operator_ledger_pointer = 'ledger://blocked',
+              operator_transition_at = 120
+        WHERE run_id = 'run-projected-blocked'
+          AND step_id = 'implementation'`
+    ).run();
+    db.close();
+
+    const envelope = await readEvents(dataDir, "run-projected-blocked");
+
+    expect(envelope.events.map((event) => event.type)).toEqual([
+      "step_blocked"
+    ]);
+    expect(envelope.events[0]).toMatchObject({
+      stepId: "implementation",
+      timestamp: 120,
+      payload: {
+        kind: "implementation",
+        order: 1,
+        required: true,
+        reason: "waiting on external state",
+        actor: "calvin",
+        evidencePointer: "evidence://blocked",
+        ledgerPointer: "ledger://blocked"
+      }
+    });
+  });
+
   it("preserves a retry-cleared step start with stable identity", async () => {
     const dataDir = makeTempDir();
     const runId = "run-retry-start-preserved";
@@ -770,6 +814,43 @@ describe("workflow run events", () => {
 
     expect(reread.cursor).toBe(first.cursor);
     expect(reread.events).toEqual(first.events);
+  });
+
+  it("rejects malformed current replay cursors", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    seedRun(db, { runId: "run-malformed-cursor", state: "running" });
+    seedStep(db, {
+      runId: "run-malformed-cursor",
+      stepId: "implementation",
+      kind: "implementation",
+      state: "running",
+      order: 1,
+      startedAt: 10
+    });
+    db.close();
+
+    const result = await run([
+      "workflow",
+      "run",
+      "events",
+      "run-malformed-cursor",
+      "--since",
+      "wfcur1.not-json",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(1);
+    expect(JSON.parse(result.stderr)).toMatchObject({
+      ok: false,
+      command: "workflow run events",
+      code: "invalid_cursor",
+      dataDir,
+      runId: "run-malformed-cursor"
+    });
+    expect(result.stdout).toBe("");
   });
 
   it("returns a compact not-found error for missing workflow runs", async () => {
