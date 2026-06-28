@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { runCli } from "../src/cli.js";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import type {
   WorkflowRunEvents,
@@ -789,3 +790,238 @@ describe("createWorkflowWatchStreamDbPoll", () => {
     }
   });
 });
+
+/**
+ * CLI surface for `workflow run watch <run-id> --stream --jsonl`.
+ *
+ * This is the operator-facing wiring over the reducer/driver/poll-source: the
+ * command opens the durable database, drives {@link runWorkflowWatchStream} over
+ * {@link createWorkflowWatchStreamDbPoll}, writes each record as a single JSONL
+ * line to stdout, and exits cleanly once the run is terminal. Looping behaviours
+ * (heartbeat suppression, mid-stream reconnect, abort) are covered by the driver
+ * and reducer suites above; these tests own the CLI envelope: record validity on
+ * stdout, terminal exit, the `--jsonl` requirement, durable resume, and the
+ * run-not-found refusal.
+ */
+
+type StreamCliResult = { code: number; stdout: string; stderr: string };
+
+async function runStreamCli(argv: string[]): Promise<StreamCliResult> {
+  let stdout = "";
+  let stderr = "";
+  const code = await runCli(argv, {
+    stdout: {
+      write(chunk: string) {
+        stdout += chunk;
+        return true;
+      }
+    },
+    stderr: {
+      write(chunk: string) {
+        stderr += chunk;
+        return true;
+      }
+    },
+    env: {}
+  });
+  return { code, stdout, stderr };
+}
+
+function parseJsonlLines(stdout: string): Record<string, unknown>[] {
+  return stdout
+    .split("\n")
+    .filter((line) => line.trim().length > 0)
+    .map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+describe("workflow run watch --stream --jsonl (CLI)", () => {
+  it("streams durable events as one-line JSONL records and exits on a terminal run", async () => {
+    const dataDir = makeStreamSourceTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedStreamRun(db, {
+        runId: "stream-cli-terminal",
+        state: "succeeded",
+        startedAt: 5,
+        finishedAt: 80,
+        updatedAt: 80
+      });
+      seedStreamEvent(db, {
+        eventId: "000000000040:monitor_quiet_heartbeat:stream-cli-terminal",
+        runId: "stream-cli-terminal",
+        type: "monitor_quiet_heartbeat",
+        timestamp: 40
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await runStreamCli([
+      "workflow",
+      "run",
+      "watch",
+      "stream-cli-terminal",
+      "--stream",
+      "--jsonl",
+      "--data-dir",
+      dataDir
+    ]);
+
+    expect(result.code, `stderr: ${result.stderr}`).toBe(0);
+
+    // Every stdout line parses as a single self-contained JSON object.
+    for (const line of result.stdout.split("\n").filter((l) => l.length > 0)) {
+      expect(() => JSON.parse(line)).not.toThrow();
+    }
+
+    const records = parseJsonlLines(result.stdout);
+    expect(records.length).toBeGreaterThanOrEqual(1);
+    for (const record of records) {
+      expect(record["ok"]).toBe(true);
+      expect(record["command"]).toBe("workflow run watch");
+      expect(record["mode"]).toBe("stream");
+      expect(record["runId"]).toBe("stream-cli-terminal");
+    }
+
+    const last = records.at(-1) as Record<string, unknown>;
+    expect(last["kind"]).toBe("event");
+    expect(last["terminal"]).toBe(true);
+    expect((last["event"] as Record<string, unknown>)["type"]).toBe(
+      "terminal_state"
+    );
+  });
+
+  it("refuses --stream without --jsonl", async () => {
+    const dataDir = makeStreamSourceTempDir();
+    const result = await runStreamCli([
+      "workflow",
+      "run",
+      "watch",
+      "any-run",
+      "--stream",
+      "--data-dir",
+      dataDir
+    ]);
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("--jsonl");
+  });
+
+  it("reports run_not_found as a JSON refusal for an unknown run", async () => {
+    const dataDir = makeStreamSourceTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedStreamRun(db, { runId: "present-run", state: "running" });
+    } finally {
+      db.close();
+    }
+
+    const result = await runStreamCli([
+      "workflow",
+      "run",
+      "watch",
+      "missing-run",
+      "--stream",
+      "--jsonl",
+      "--data-dir",
+      dataDir
+    ]);
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload["ok"]).toBe(false);
+    expect(payload["command"]).toBe("workflow run watch");
+    expect(payload["code"]).toBe("run_not_found");
+    expect(payload["runId"]).toBe("missing-run");
+  });
+
+  it("resumes from a --since cursor and does not re-emit consumed events", async () => {
+    const dataDir = makeStreamSourceTempDir();
+    seedTerminalRunWithEvent(dataDir, "stream-cli-resume");
+
+    let firstCursor: string;
+    const probe = openDb(dataDir);
+    try {
+      const first = createWorkflowWatchStreamDbPoll(
+        probe,
+        "stream-cli-resume"
+      )(null);
+      const heartbeat = first.events.events.find(
+        (e) => e.type === "monitor_quiet_heartbeat"
+      );
+      expect(heartbeat).toBeDefined();
+      firstCursor = heartbeat!.cursor;
+    } finally {
+      probe.close();
+    }
+
+    const result = await runStreamCli([
+      "workflow",
+      "run",
+      "watch",
+      "stream-cli-resume",
+      "--stream",
+      "--jsonl",
+      "--since",
+      firstCursor,
+      "--data-dir",
+      dataDir
+    ]);
+
+    expect(result.code, `stderr: ${result.stderr}`).toBe(0);
+    const records = parseJsonlLines(result.stdout);
+    const emittedEventCursors = records
+      .filter((r) => r["kind"] === "event")
+      .map((r) => (r["event"] as Record<string, unknown>)["cursor"]);
+    expect(emittedEventCursors).not.toContain(firstCursor);
+    expect(
+      records.some(
+        (r) =>
+          r["kind"] === "event" &&
+          (r["event"] as Record<string, unknown>)["type"] === "terminal_state"
+      )
+    ).toBe(true);
+  });
+
+  it("refuses combining --stream with --once", async () => {
+    const dataDir = makeStreamSourceTempDir();
+    const result = await runStreamCli([
+      "workflow",
+      "run",
+      "watch",
+      "any-run",
+      "--stream",
+      "--jsonl",
+      "--once",
+      "--data-dir",
+      dataDir
+    ]);
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr.length).toBeGreaterThan(0);
+  });
+});
+
+function seedTerminalRunWithEvent(dataDir: string, runId: string): void {
+  const db = openDb(dataDir);
+  try {
+    seedStreamRun(db, {
+      runId,
+      state: "succeeded",
+      startedAt: 5,
+      finishedAt: 90,
+      updatedAt: 90
+    });
+    seedStreamEvent(db, {
+      eventId: `000000000040:monitor_quiet_heartbeat:${runId}`,
+      runId,
+      type: "monitor_quiet_heartbeat",
+      timestamp: 40
+    });
+  } finally {
+    db.close();
+  }
+}

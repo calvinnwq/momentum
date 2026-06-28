@@ -18,8 +18,9 @@ Operator-facing CLI envelopes for the `workflow run start`, `workflow run start-
 - `workflow run decide` resolves a durable workflow / step / executor gate by routing an operator or delegated-policy decision through the gate brain: an operator may pick any allowed action, while `--mode delegated` may only auto-apply an action inside the gate's policy envelope.
 - `workflow run monitor` is read-only by default and emits one stable JSON shape per run, derived from durable rows and the monitor reducer, so a monitor runner can decide whether to report, wait, or ask an operator to recover without parsing prose or scraping artifacts.
   Its opt-in `--advance` mode is restricted to Momentum-native coding runs and writes only advisory digest / timestamp baselines for progress suppression.
-- `workflow run watch` emits a one-shot supervisor envelope for a Momentum-native coding run.
-  `--once` safely runs at most one run-scoped dispatcher tick when the target run has one approved next step or one active step eligible for recheck, then persists the same advisory suppression baseline as a monitor advance tick and gives external pollers one recommended next action.
+- `workflow run watch` watches a run two ways.
+  `--once` emits a one-shot supervisor envelope for a Momentum-native coding run: it safely runs at most one run-scoped dispatcher tick when the target run has one approved next step or one active step eligible for recheck, then persists the same advisory suppression baseline as a monitor advance tick and gives external pollers one recommended next action.
+  `--stream --jsonl` instead opens a read-only, long-lived JSONL event stream over the durable event cursor API for a TUI, GUI, or sidecar, resumable from a `--since` cursor and bounded in memory.
 - `workflow run events` is a read-only replay surface for supervisors and app clients that need semantic run changes after reconnecting.
   It returns ordered event records from durable workflow state and append-only workflow event rows without reading stdout scrollback or running dispatch.
   It is the catch-up companion to `workflow run watch --once`, not a replacement for live polling.
@@ -28,6 +29,7 @@ Operator-facing CLI envelopes for the `workflow run start`, `workflow run start-
 `workflow run preview-coding`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run events`, and `workflow run logs` are read-only: they never write SQLite or files.
 `workflow run monitor` is also read-only unless `--advance` is passed, in which case supported Momentum-native coding runs persist only `monitor_last_seen_digest` / `monitor_last_seen_at` and `monitor_last_emitted_digest` / `monitor_last_emitted_at` progress baselines.
 `workflow run watch --once` is write-limited to the target run's safe dispatcher tick, the same advisory baseline columns, and append-only quiet-heartbeat / stuck-risk event rows for supported Momentum-native coding runs.
+`workflow run watch --stream` is read-only: it replays durable events and reads the run's terminal state without writing SQLite or files or running dispatch.
 
 `workflow run --help` and any nested `workflow run ... --help` or `workflow run ... -h` invocation print the shared top-level CLI help to stdout and exit 0 before selecting or validating a run subcommand.
 This help path ignores `--json`, reads no data directory, and performs no durable writes.
@@ -1471,11 +1473,17 @@ Exit code 0 on success, 1 on failure, 2 on usage error.
 
 ```text
 momentum workflow run watch <run-id> --once [--data-dir <path>] [--json]
+momentum workflow run watch <run-id> --stream --jsonl [--since <cursor>] [--data-dir <path>]
 ```
 
-Emits a one-shot supervisor tick for a Momentum-native coding workflow run.
+`--once` emits a one-shot supervisor tick for a Momentum-native coding workflow run.
 The command reads the durable monitor projection, persists this tick's advisory digest / timestamp baseline, and returns a compact next-action envelope for cron, OpenClaw, or GUI pollers.
 It does not resolve approvals, gates, manual recovery, or other operator decisions.
+
+`--stream --jsonl` opens a long-lived JSONL stream over the same durable event cursor API as `workflow run events`.
+It emits one newline-delimited JSON record per durable semantic event, plus optional machine heartbeats, and exits cleanly once the run is terminal.
+The stream is an optimization over durable state, never the source of truth: a disconnected client reconnects with `--since <cursor>` and loses nothing.
+See [Stream mode](#stream-mode) below.
 
 Required arguments:
 
@@ -1483,8 +1491,10 @@ Required arguments:
 
 Options:
 
-- `--once` - required for the MVP one-shot mode.
-  Stream mode is not available.
+- `--once` - run the one-shot supervisor tick. Mutually exclusive with `--stream`.
+- `--stream` - open the long-lived JSONL event stream. Requires `--jsonl`. Mutually exclusive with `--once`.
+- `--jsonl` - emit newline-delimited JSON records (stream mode only).
+- `--since <cursor>` - resume the stream from a durable cursor returned by a prior record or by `workflow run events` (stream mode only).
 
 ### JSON envelope
 
@@ -1541,7 +1551,7 @@ Soft `monitor_drift_stale` reports and ordinary `failed_required_step` failures 
 |-------|------|---------|
 | `ok` | boolean | Always `true` for a rendered tick; failures use the error envelope below. |
 | `command` | string | Always `"workflow run watch"`. |
-| `mode` | string | Always `"once"`; stream mode is not part of the contract. |
+| `mode` | string | `"once"` for the one-shot envelope below. Stream-mode records carry `"stream"` instead; see [Stream mode](#stream-mode). |
 | `dataDir` | string | Resolved data directory the tick read. |
 | `schemaVersion` | number | Envelope schema version; currently `1`. |
 | `generatedAt` | number | Epoch-millisecond time the tick was rendered. |
@@ -1566,6 +1576,66 @@ Soft `monitor_drift_stale` reports and ordinary `failed_required_step` failures 
 `activeStep`, when present, carries `stepId`, `kind`, `state`, `order`, and `required`.
 `nextAction` always carries `code`, `stepId`, `leaseKind`, and `detail`; `detail` is a ready-to-read sentence for the common path.
 `humanAction`, when present, carries `code` (`approve`, `resolve_gate`, or `clear_recovery`), `command` (the exact CLI to run), and `detail` (the reason or evidence sentence).
+
+### Stream mode
+
+`workflow run watch <run-id> --stream --jsonl` opens a long-lived stream that turns the durable event cursor API into newline-delimited JSON.
+Each record is a single self-contained line, so a consumer can split stdout on `\n` and `JSON.parse` each line independently.
+The stream polls durable state, writes every record as it is produced, and retains only the resume cursor between polls, so memory stays flat for the lifetime of even a very long run.
+
+Two record kinds share a common header (`ok`, `command: "workflow run watch"`, `mode: "stream"`, `runId`, `kind`, `emit`, `cursor`, `terminal`):
+
+- `kind: "event"` carries one durable semantic event under `event` (`id`, `cursor`, `timestamp`, `type`, `stepId`, `payload`) and is always `emit: true`.
+  These are the human-worthy records.
+- `kind: "heartbeat"` is a synthetic liveness tick emitted when a poll observed no new events, and is always `emit: false`.
+  A consumer suppresses heartbeats from any human-facing surface and uses them only to confirm the stream is alive.
+
+`cursor` is the durable resume token after the record; pass the last one you handled back as `--since` to reconnect exactly where you left off.
+`terminal` becomes `true` once the run reaches (or is already in) a terminal state.
+The stream emits the terminal record and then exits cleanly with status `0`; a client that reconnects past the terminal event still observes `terminal: true` on its next heartbeat because the run row's durable state is read out of band.
+`SIGINT` (Ctrl-C) aborts the stream between polls and exits cleanly - the durable event API is always there to reconnect from.
+
+An event record:
+
+```json
+{
+  "ok": true,
+  "command": "workflow run watch",
+  "mode": "stream",
+  "kind": "event",
+  "emit": true,
+  "runId": "mwf-abc123",
+  "cursor": "wfcur1.eyJ0IjozMDAwMCwiaWRzIjpbXX0",
+  "terminal": false,
+  "event": {
+    "id": "000000030000:monitor_quiet_heartbeat:mwf-abc123",
+    "cursor": "wfcur1.eyJ0IjozMDAwMCwiaWRzIjpbXX0",
+    "timestamp": 1730000030000,
+    "type": "monitor_quiet_heartbeat",
+    "stepId": "implementation",
+    "payload": {}
+  }
+}
+```
+
+A heartbeat record:
+
+```json
+{
+  "ok": true,
+  "command": "workflow run watch",
+  "mode": "stream",
+  "kind": "heartbeat",
+  "emit": false,
+  "runId": "mwf-abc123",
+  "cursor": "wfcur1.eyJ0IjozMDAwMCwiaWRzIjpbXX0",
+  "generatedAt": 1730000045000,
+  "terminal": false
+}
+```
+
+Stream-mode failures (`--stream` without `--jsonl`, an unknown run, an invalid `--since` cursor, or `--stream` combined with `--once`) are reported on stderr through the shared workflow error envelope with status `1`, not as stream records.
+See [Error codes](#error-codes).
 
 ### Supervisor scenarios
 
@@ -1761,11 +1831,14 @@ A cron, OpenClaw, or GUI poller branches on the envelope instead of scraping tex
 | Code | Meaning |
 |------|---------|
 | `run_id_required` | `<run-id>` was not supplied. |
-| `once_required` | `--once` was not supplied. |
+| `once_required` | Neither `--once` nor `--stream` was supplied. |
+| `jsonl_required` | `--stream` was supplied without `--jsonl`. |
+| `stream_once_conflict` | `--stream` and `--once` were supplied together. |
+| `invalid_cursor` | The `--since` value is not a valid durable event cursor. |
 | `data_dir_failed` | Data directory resolution, SQLite access, or the bounded dispatch tick failed. |
 | `daemon_live_wrapper_profile_invalid` | The shared daemon live-wrapper profile was configured but unreadable or invalid when the bounded dispatch tick resolved it. |
 | `run_not_found` | `<run-id>` does not exist in `workflow_runs`. |
-| `watch_unsupported_source` | The run source is not `momentum-native-coding`. |
+| `watch_unsupported_source` | The run source is not `momentum-native-coding` (`--once` mode only). |
 
 ### Text output
 
@@ -1875,7 +1948,7 @@ Exit code 0 on success, 1 on structured refusal, 2 on usage error.
 
 ### Boundary with stream mode
 
-`workflow run events` is replay-only. It does not hold a connection open, emit JSONL, or watch for filesystem/database changes after the read. A caller that wants live behavior should poll this command with the last returned cursor until a streaming command exists.
+`workflow run events` is replay-only. It does not hold a connection open, emit JSONL, or watch for filesystem/database changes after the read. A caller that wants a live connection should use `workflow run watch <run-id> --stream --jsonl`, which holds the connection open and emits JSONL records over the same durable event cursor API; a caller that prefers discrete reads should poll `workflow run events` with the last returned cursor.
 
 ## `workflow run logs`
 

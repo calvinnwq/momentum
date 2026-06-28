@@ -11,6 +11,7 @@ import type { WorkflowMonitorState } from "../core/workflow/monitor-state.js";
 import type {
   WorkflowWatchAdvisory
 } from "../core/workflow/watch-advisory.js";
+import type { WorkflowWatchStreamRecord } from "../core/workflow/watch-stream.js";
 import type { WorkflowRunImport, WorkflowRunImportDiagnostic } from "../core/workflow/run-import.js";
 import type { PersistWorkflowRunImportSummary } from "../core/workflow/run-import-persist.js";
 import type { WorkflowRunManualRecoveryState } from "../core/workflow/run-recovery.js";
@@ -913,6 +914,21 @@ export function emitWorkflowRunWatchFailure(
     ...failure,
     command: "workflow run watch"
   });
+}
+
+/**
+ * Write one SUP-05 (NGX-552) watch-stream record as a single newline-delimited
+ * JSON line to stdout. The stream driver calls this once per record so the JSONL
+ * wire shape stays owned by the renderer layer and the command module never
+ * touches the raw writer. Each record serializes to exactly one line - the driver
+ * guarantees records carry no embedded newlines - so a consumer can split stdout
+ * on `\n` and `JSON.parse` each line.
+ */
+export function emitWorkflowRunWatchStreamRecord(
+  io: CliIo,
+  record: WorkflowWatchStreamRecord
+): void {
+  write(io.stdout, `${JSON.stringify(record)}\n`);
 }
 
 export function emitWorkflowRunEvents(

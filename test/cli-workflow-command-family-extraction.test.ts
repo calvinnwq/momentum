@@ -69,6 +69,9 @@ describe("workflow command family extraction", () => {
     expect(result.stdout).toContain(
       "momentum workflow run watch <run-id> --once [--data-dir <path>] [--json]"
     );
+    expect(result.stdout).toContain(
+      "momentum workflow run watch <run-id> --stream --jsonl [--since <cursor>] [--data-dir <path>]"
+    );
     expect(result.stderr).toBe("");
   });
 
