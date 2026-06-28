@@ -58,9 +58,17 @@ export function createWorkflowWatchStreamDbPoll(
 }
 
 function isWorkflowRunRowTerminal(db: MomentumDb, runId: string): boolean {
+  if (!workflowRunsTableExists(db)) return false;
   const row = db
     .prepare("SELECT state FROM workflow_runs WHERE id = ?")
     .get(runId) as { state: string } | undefined;
   if (row === undefined) return false;
   return (WORKFLOW_RUN_TERMINAL_STATES as readonly string[]).includes(row.state);
+}
+
+function workflowRunsTableExists(db: MomentumDb): boolean {
+  const row = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?")
+    .get("workflow_runs") as { name: string } | undefined;
+  return row !== undefined;
 }

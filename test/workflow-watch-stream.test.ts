@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 
 import { runCli } from "../src/cli.js";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
@@ -1032,6 +1033,42 @@ describe("workflow run watch --stream --jsonl (CLI)", () => {
     expect(payload["command"]).toBe("workflow run watch");
     expect(payload["code"]).toBe("run_not_found");
     expect(payload["runId"]).toBe("missing-run");
+  });
+
+  it("reports run_not_found for an existing legacy database without workflow runs", async () => {
+    const dataDir = makeStreamSourceTempDir();
+    const legacyDb = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      legacyDb.exec(
+        `CREATE TABLE goals (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL
+        ) STRICT`
+      );
+    } finally {
+      legacyDb.close();
+    }
+
+    const result = await runStreamCli([
+      "workflow",
+      "run",
+      "watch",
+      "legacy-missing-run",
+      "--stream",
+      "--jsonl",
+      "--data-dir",
+      dataDir
+    ]);
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(JSON.parse(result.stderr)).toMatchObject({
+      ok: false,
+      command: "workflow run watch",
+      code: "run_not_found",
+      dataDir,
+      runId: "legacy-missing-run"
+    });
   });
 
   it("does not create a missing data directory on read-only stream misses", async () => {
