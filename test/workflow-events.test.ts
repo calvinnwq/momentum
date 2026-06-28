@@ -853,6 +853,43 @@ describe("workflow run events", () => {
     expect(result.stdout).toBe("");
   });
 
+  it("rejects arbitrary non-replay cursors instead of silently skipping events", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    seedRun(db, { runId: "run-legacy-cursor", state: "running" });
+    seedStep(db, {
+      runId: "run-legacy-cursor",
+      stepId: "implementation",
+      kind: "implementation",
+      state: "running",
+      order: 1,
+      startedAt: 10
+    });
+    db.close();
+
+    const result = await run([
+      "workflow",
+      "run",
+      "events",
+      "run-legacy-cursor",
+      "--since",
+      "zzz",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(1);
+    expect(JSON.parse(result.stderr)).toMatchObject({
+      ok: false,
+      command: "workflow run events",
+      code: "invalid_cursor",
+      dataDir,
+      runId: "run-legacy-cursor"
+    });
+    expect(result.stdout).toBe("");
+  });
+
   it("returns a compact not-found error for missing workflow runs", async () => {
     const dataDir = makeTempDir();
     openDb(dataDir).close();

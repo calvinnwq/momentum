@@ -496,6 +496,9 @@ function normalizeCursor(cursor: string | null | undefined): string | null {
   if (cursor === undefined || cursor === null || cursor.length === 0) {
     return null;
   }
+  if (!cursor.startsWith("wfcur1.")) {
+    throw new InvalidWorkflowEventCursorError(cursor);
+  }
   return cursor;
 }
 
@@ -512,7 +515,7 @@ function filterEventsAfterCursor(
         (event.timestamp === state.timestamp && !state.seenIds.has(event.id))
     );
   }
-  return events.filter((event) => event.cursor > since);
+  throw new InvalidWorkflowEventCursorError(since);
 }
 
 function attachReplayCursors(
