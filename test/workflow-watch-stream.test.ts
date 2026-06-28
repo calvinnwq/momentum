@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
+import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import type {
   WorkflowRunEvents,
   WorkflowSemanticEvent
@@ -11,6 +15,10 @@ import {
   type WorkflowWatchStreamPollResult,
   type WorkflowWatchStreamRecord
 } from "../src/core/workflow/watch-stream.js";
+import {
+  createWorkflowWatchStreamDbPoll,
+  WorkflowWatchStreamRunNotFoundError
+} from "../src/core/workflow/watch-stream-source.js";
 
 /**
  * SUP-05 (NGX-552) JSONL stream tick reducer.
@@ -564,5 +572,220 @@ describe("runWorkflowWatchStream", () => {
       })
     ).rejects.toThrow(/pollIntervalMs/);
     expect(polled).toBe(0);
+  });
+});
+
+/**
+ * SUP-05 (NGX-552) durable DB-backed poll source.
+ *
+ * `createWorkflowWatchStreamDbPoll` is the impure edge that bridges the SUP-04
+ * event cursor API ({@link loadWorkflowRunEvents}) and the run row's terminal
+ * state into the {@link runWorkflowWatchStream} driver's injected poll seam. It
+ * is the piece that lets a reconnecting stream recognise an already-terminal run
+ * even when it resumes from a cursor at or past the projected `terminal_state`
+ * event - the events envelope alone never re-surfaces that event, so the run
+ * row's state is read out-of-band per poll.
+ */
+
+const streamSourceTempRoots: string[] = [];
+
+afterEach(() => {
+  while (streamSourceTempRoots.length > 0) {
+    const dir = streamSourceTempRoots.pop();
+    if (dir) fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+function makeStreamSourceTempDir(): string {
+  const dir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "momentum-watch-stream-source-")
+  );
+  streamSourceTempRoots.push(dir);
+  return fs.realpathSync(dir);
+}
+
+function seedStreamRun(
+  db: MomentumDb,
+  input: {
+    runId: string;
+    state?: string;
+    startedAt?: number | null;
+    finishedAt?: number | null;
+    updatedAt?: number;
+  }
+): void {
+  db.prepare(
+    `INSERT INTO workflow_runs
+       (id, state, source, plan_json, issue_scope_json, route_json,
+        needs_manual_recovery, started_at, finished_at, created_at, updated_at)
+       VALUES (?, ?, 'momentum-native-coding', '{}', '{}', '{}',
+        0, ?, ?, ?, ?)`
+  ).run(
+    input.runId,
+    input.state ?? "running",
+    input.startedAt ?? null,
+    input.finishedAt ?? null,
+    1,
+    input.updatedAt ?? 1
+  );
+}
+
+function seedStreamEvent(
+  db: MomentumDb,
+  input: {
+    eventId: string;
+    runId: string;
+    type: string;
+    timestamp: number;
+    stepId?: string | null;
+    payload?: Record<string, unknown>;
+  }
+): void {
+  db.prepare(
+    `INSERT INTO workflow_events
+       (event_id, run_id, step_id, occurred_at, type, payload_json, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    input.eventId,
+    input.runId,
+    input.stepId ?? null,
+    input.timestamp,
+    input.type,
+    JSON.stringify(input.payload ?? {}),
+    input.timestamp
+  );
+}
+
+describe("createWorkflowWatchStreamDbPoll", () => {
+  it("returns durable events after the resume cursor for a live run", () => {
+    const dataDir = makeStreamSourceTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedStreamRun(db, { runId: "run-live", state: "running" });
+      seedStreamEvent(db, {
+        eventId: "000000000070:recovery_required:run-live",
+        runId: "run-live",
+        type: "recovery_required",
+        timestamp: 70,
+        payload: { reason: "manual inspection required" }
+      });
+
+      const poll = createWorkflowWatchStreamDbPoll(db, "run-live");
+      const result = poll(null);
+
+      expect(result.runTerminal).toBe(false);
+      expect(result.events.runId).toBe("run-live");
+      expect(result.events.since).toBeNull();
+      expect(result.events.events.map((event) => event.type)).toContain(
+        "recovery_required"
+      );
+      expect(result.events.cursor).not.toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("advances past consumed events when resuming from the prior cursor", () => {
+    const dataDir = makeStreamSourceTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedStreamRun(db, { runId: "run-advance", state: "running" });
+      seedStreamEvent(db, {
+        eventId: "000000000070:recovery_required:run-advance",
+        runId: "run-advance",
+        type: "recovery_required",
+        timestamp: 70
+      });
+
+      const poll = createWorkflowWatchStreamDbPoll(db, "run-advance");
+      const first = poll(null);
+      expect(first.events.events).toHaveLength(1);
+
+      const second = poll(first.events.cursor);
+      expect(second.events.events).toEqual([]);
+      expect(second.events.since).toBe(first.events.cursor);
+      expect(second.events.cursor).toBe(first.events.cursor);
+      expect(second.runTerminal).toBe(false);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("reports a terminal run out-of-band even when reconnecting past the terminal event", () => {
+    const dataDir = makeStreamSourceTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedStreamRun(db, {
+        runId: "run-term",
+        state: "succeeded",
+        startedAt: 5,
+        finishedAt: 80,
+        updatedAt: 80
+      });
+
+      const poll = createWorkflowWatchStreamDbPoll(db, "run-term");
+      const first = poll(null);
+      expect(first.runTerminal).toBe(true);
+      expect(first.events.events.map((event) => event.type)).toContain(
+        "terminal_state"
+      );
+
+      // Reconnecting from a cursor at/past the terminal event yields no new
+      // events, so the run row's state is the only terminal signal left.
+      const reconnect = poll(first.events.cursor);
+      expect(reconnect.events.events).toEqual([]);
+      expect(reconnect.runTerminal).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("throws WorkflowWatchStreamRunNotFoundError for an unknown run", () => {
+    const dataDir = makeStreamSourceTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedStreamRun(db, { runId: "run-present", state: "running" });
+      const poll = createWorkflowWatchStreamDbPoll(db, "run-missing");
+      expect(() => poll(null)).toThrow(WorkflowWatchStreamRunNotFoundError);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("drives runWorkflowWatchStream to a clean terminal exit against a real db", async () => {
+    const dataDir = makeStreamSourceTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedStreamRun(db, {
+        runId: "run-drive",
+        state: "succeeded",
+        startedAt: 5,
+        finishedAt: 80,
+        updatedAt: 80
+      });
+
+      const written: WorkflowWatchStreamRecord[] = [];
+      const result = await runWorkflowWatchStream({
+        poll: createWorkflowWatchStreamDbPoll(db, "run-drive"),
+        write: (record) => written.push(record),
+        now: () => NOW,
+        sleep: async () => {}
+      });
+
+      expect(result.exitReason).toBe("terminal");
+      expect(result.terminal).toBe(true);
+      expect(
+        written.some(
+          (record) =>
+            record.kind === "event" &&
+            record.event.type === "terminal_state"
+        )
+      ).toBe(true);
+      for (const record of written) {
+        expect(JSON.stringify(record)).not.toContain("\n");
+      }
+    } finally {
+      db.close();
+    }
   });
 });
