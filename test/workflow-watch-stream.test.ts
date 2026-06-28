@@ -1072,7 +1072,7 @@ describe("workflow run watch --stream --jsonl (CLI)", () => {
     });
   });
 
-  it("reports unexpected stream arguments as JSON when --jsonl is present", async () => {
+  it("reports unexpected stream arguments as JSON usage errors when --jsonl is present", async () => {
     const result = await runStreamCli([
       "workflow",
       "run",
@@ -1083,7 +1083,7 @@ describe("workflow run watch --stream --jsonl (CLI)", () => {
       "--jsonl"
     ]);
 
-    expect(result.code).toBe(1);
+    expect(result.code).toBe(2);
     expect(result.stdout).toBe("");
     expect(JSON.parse(result.stderr)).toMatchObject({
       ok: false,

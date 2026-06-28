@@ -45,6 +45,7 @@ type WorkflowRendererFailure = {
   gateId?: string;
   diagnostics?: WorkflowRunImportDiagnostic[];
   errors?: readonly WorkflowRunStartError[];
+  exitCode?: 1 | 2;
 };
 
 export type WorkflowRunStartCommand =
@@ -1478,12 +1479,13 @@ function emitWorkflowFailure(
     payload["diagnostics"] = [];
   }
 
+  const exitCode = failure.exitCode ?? 1;
   if (parsed.json) {
     writeJson(io.stderr, payload);
-    return 1;
+    return exitCode;
   }
   write(io.stderr, `${failure.message}\n`);
-  return 1;
+  return exitCode;
 }
 
 export function summaryToJsonShape(

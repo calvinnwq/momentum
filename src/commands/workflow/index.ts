@@ -2114,7 +2114,8 @@ async function workflowRunWatch(
     if (parsed.stream === true && parsed.jsonl === true) {
       return emitWorkflowRunWatchFailure(streamJsonFailureParsed, io, {
         code: "usage_error",
-        message: `Unexpected argument for workflow run watch: ${positional[1]}`
+        message: `Unexpected argument for workflow run watch: ${positional[1]}`,
+        exitCode: 2
       });
     }
     return usageError(
