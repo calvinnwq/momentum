@@ -241,7 +241,7 @@ function workflowRun(
   const subcommand = parsed.args[2];
   if (!subcommand) {
     return usageError(
-      "Missing required subcommand for workflow run. Expected: start, start-coding, preview-coding, list, approve, decide, update-step, clear-recovery, monitor, watch, logs.",
+      "Missing required subcommand for workflow run. Expected: start, start-coding, preview-coding, list, approve, decide, update-step, clear-recovery, events, monitor, watch, logs.",
       parsed,
       io
     );
