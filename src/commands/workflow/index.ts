@@ -1635,7 +1635,7 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
       }
       const stepRow = db
         .prepare(
-          `SELECT state, operator_reason, operator_actor,
+          `SELECT state, kind, step_order, required, operator_reason, operator_actor,
                   operator_evidence_pointer, operator_ledger_pointer,
                   operator_transition_at
              FROM workflow_steps WHERE run_id = ? AND step_id = ?`
@@ -1643,6 +1643,9 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
         .get(runId, stepId) as
         | {
             state: WorkflowStepState;
+            kind: string;
+            step_order: number;
+            required: number;
             operator_reason: string | null;
             operator_actor: string | null;
             operator_evidence_pointer: string | null;
@@ -1768,6 +1771,9 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
             type: "step_blocked",
             occurredAt: now,
             payload: {
+              kind: stepRow.kind,
+              order: stepRow.step_order,
+              required: stepRow.required === 1,
               reason,
               actor,
               evidencePointer,

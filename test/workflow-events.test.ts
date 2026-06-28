@@ -7,7 +7,10 @@ import path from "node:path";
 import { runCli } from "../src/cli.js";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import { insertWorkflowGate, resolveWorkflowGate } from "../src/core/workflow/gate-persist.js";
-import { markWorkflowRunNeedsManualRecovery } from "../src/core/workflow/run-recovery.js";
+import {
+  clearWorkflowRunManualRecoveryGuarded,
+  markWorkflowRunNeedsManualRecovery
+} from "../src/core/workflow/run-recovery.js";
 import { appendWorkflowEvent } from "../src/core/workflow/events.js";
 
 type RunResult = {
@@ -514,10 +517,110 @@ describe("workflow run events", () => {
     expect(envelope.events[0]).toMatchObject({
       stepId: "implementation",
       payload: {
+        kind: "implementation",
+        order: 1,
+        required: true,
         reason: "waiting on external state",
         previousState: "approved"
       }
     });
+  });
+
+  it("preserves a retry-cleared step start with stable identity", async () => {
+    const dataDir = makeTempDir();
+    const runId = "run-retry-start-preserved";
+    const stepId = "no-mistakes";
+    const invocationId = `${runId}::${stepId}::dispatch`;
+    const db = openDb(dataDir);
+    seedRun(db, {
+      runId,
+      state: "running",
+      updatedAt: 200
+    });
+    seedStep(db, {
+      runId,
+      stepId,
+      kind: "no-mistakes",
+      state: "running",
+      order: 3,
+      startedAt: 100
+    });
+    markWorkflowRunNeedsManualRecovery(db, {
+      runId,
+      reason: "runtime_unavailable",
+      now: 150
+    });
+    db.prepare(
+      `INSERT INTO executor_invocations
+         (invocation_id, workflow_run_id, step_run_id, step_key,
+          executor_family, state, attempt, started_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      invocationId,
+      runId,
+      stepId,
+      stepId,
+      "no-mistakes",
+      "manual_recovery_required",
+      1,
+      100,
+      100,
+      150
+    );
+    db.prepare(
+      `INSERT INTO executor_rounds
+         (round_id, invocation_id, workflow_run_id, step_run_id, step_key,
+          executor_family, attempt, round_index, state, recovery_code,
+          created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      `${invocationId}::round-0`,
+      invocationId,
+      runId,
+      stepId,
+      stepId,
+      "no-mistakes",
+      1,
+      0,
+      "manual_recovery_required",
+      "runtime_unavailable",
+      100,
+      150
+    );
+    db.close();
+
+    const beforeClear = await readEvents(dataDir, runId);
+    const beforeStart = beforeClear.events.find(
+      (event) => event.stepId === stepId && event.type === "step_started"
+    );
+    expect(beforeStart).toBeDefined();
+
+    const writeDb = openDb(dataDir);
+    const clear = clearWorkflowRunManualRecoveryGuarded(writeDb, {
+      runId,
+      now: 200
+    });
+    writeDb.close();
+    expect(clear).toMatchObject({
+      ok: true,
+      retryPrepared: {
+        stepId,
+        recoveryCode: "runtime_unavailable"
+      }
+    });
+
+    const fullReplay = await readEvents(dataDir, runId);
+    const afterStart = fullReplay.events.find(
+      (event) => event.stepId === stepId && event.type === "step_started"
+    );
+    expect(afterStart?.id).toBe(beforeStart?.id);
+
+    const catchup = await readEvents(dataDir, runId, beforeClear.cursor);
+    expect(
+      catchup.events.some(
+        (event) => event.stepId === stepId && event.type === "step_started"
+      )
+    ).toBe(false);
   });
 
   it("keeps repeated stored transitions with the same timestamp and payload", async () => {

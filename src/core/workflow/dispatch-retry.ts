@@ -6,6 +6,7 @@ import type {
 } from "../executors/loop-reducer.js";
 import { refreshWorkflowRunRuntimeState } from "./runtime-state.js";
 import type { WorkflowStepKind } from "./run-reducer.js";
+import { appendWorkflowEvent, buildWorkflowEventId } from "./events.js";
 
 const RETRYABLE_DISPATCH_STEP_KINDS: ReadonlySet<WorkflowStepKind> = new Set([
   "no-mistakes",
@@ -40,6 +41,9 @@ export type RetryableDispatchedStepRecovery = {
   attempt: number;
   latestRoundIndex: number;
   recoveryCode: string;
+  stepOrder: number;
+  required: boolean;
+  startedAt: number | null;
 };
 
 type RetryableDispatchRow = {
@@ -53,6 +57,9 @@ type RetryableDispatchRow = {
   attempt: number;
   round_index: number | null;
   recovery_code: string | null;
+  step_order: number;
+  required: number;
+  started_at: number | null;
 };
 
 export function findRetryableDispatchedStepRecovery(
@@ -84,6 +91,9 @@ export function findRetryableDispatchedStepRecovery(
                 s.step_id,
                 s.kind,
                 s.state,
+                s.step_order,
+                s.required,
+                s.started_at,
                 i.invocation_id,
                 i.executor_family,
                 i.state AS invocation_state,
@@ -137,6 +147,8 @@ export function prepareRetryableDispatchedStepForRecoveryClear(
     stepState: "running"
   });
   if (retryable === undefined) return { prepared: false };
+
+  appendRetryableStepStartedEventBeforeClear(db, retryable);
 
   const changed = db
     .prepare(
@@ -271,8 +283,38 @@ function parseRetryableDispatchRow(
     invocationState: "manual_recovery_required",
     attempt: row.attempt,
     latestRoundIndex: row.round_index,
-    recoveryCode: row.recovery_code
+    recoveryCode: row.recovery_code,
+    stepOrder: row.step_order,
+    required: row.required === 1,
+    startedAt: row.started_at
   };
+}
+
+function appendRetryableStepStartedEventBeforeClear(
+  db: MomentumDb,
+  retryable: RetryableDispatchedStepRecovery
+): void {
+  if (retryable.startedAt === null) return;
+  const payload = {
+    kind: retryable.kind,
+    order: retryable.stepOrder,
+    required: retryable.required
+  };
+  appendWorkflowEvent(db, {
+    runId: retryable.runId,
+    type: "step_started",
+    occurredAt: retryable.startedAt,
+    stepId: retryable.stepId,
+    payload,
+    eventId: buildWorkflowEventId({
+      runId: retryable.runId,
+      type: "step_started",
+      timestamp: retryable.startedAt,
+      stepId: retryable.stepId,
+      payload,
+      source: "step"
+    })
+  });
 }
 
 function buildRetryRound(
