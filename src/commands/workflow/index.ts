@@ -53,7 +53,10 @@ import {
   loadWorkflowMonitorEnvelope,
   type WorkflowMonitorEnvelope
 } from "../../core/workflow/monitor-envelope.js";
-import { deriveWorkflowMonitorProgress } from "../../core/workflow/monitor-progress.js";
+import {
+  deriveWorkflowMonitorProgress,
+  type WorkflowMonitorProgressTick
+} from "../../core/workflow/monitor-progress.js";
 import {
   deriveWorkflowMonitorState,
   type WorkflowMonitorState
@@ -122,8 +125,16 @@ import {
   resolveWorkflowGate
 } from "../../core/workflow/gate-persist.js";
 import {
+  InvalidWorkflowEventCursorError,
+  appendWorkflowEvent,
+  loadWorkflowRunEvents,
+  type WorkflowEventType
+} from "../../core/workflow/events.js";
+import {
   emitWorkflowHandoff,
   emitWorkflowHandoffFailure,
+  emitWorkflowRunEvents,
+  emitWorkflowRunEventsFailure,
   emitWorkflowRunLogs,
   emitWorkflowRunLogsFailure,
   emitWorkflowImportFailure,
@@ -167,6 +178,7 @@ type ParsedFlags = {
   issueScope?: string;
   updatedSince?: number;
   updatedUntil?: number;
+  since?: string;
   phrase?: string;
   actor?: string;
   approvalPath?: string;
@@ -229,7 +241,7 @@ function workflowRun(
   const subcommand = parsed.args[2];
   if (!subcommand) {
     return usageError(
-      "Missing required subcommand for workflow run. Expected: start, start-coding, preview-coding, list, approve, decide, update-step, clear-recovery, monitor, watch, logs.",
+      "Missing required subcommand for workflow run. Expected: start, start-coding, preview-coding, list, approve, decide, update-step, clear-recovery, events, monitor, watch, logs.",
       parsed,
       io
     );
@@ -245,6 +257,9 @@ function workflowRun(
   }
   if (subcommand === "logs") {
     return workflowRunLogs(parsed, io);
+  }
+  if (subcommand === "events") {
+    return workflowRunEvents(parsed, io);
   }
   if (subcommand === "list") {
     return workflowRunList(parsed, io);
@@ -272,6 +287,81 @@ function workflowRun(
     parsed,
     io
   );
+}
+
+/**
+ * `momentum workflow run events` - read-only semantic replay for one run.
+ *
+ * Supervisors and app clients pass the prior response cursor through `--since`
+ * to catch up without stdout scrollback or a live process connection.
+ */
+function workflowRunEvents(parsed: ParsedFlags, io: CliIo): number {
+  const positional = parsed.args.slice(3);
+  if (positional.length === 0 || !positional[0]) {
+    return emitWorkflowRunEventsFailure(parsed, io, {
+      code: "run_id_required",
+      message: "Missing required <run-id> for workflow run events."
+    });
+  }
+  if (positional.length > 1) {
+    return usageError(
+      `Unexpected argument for workflow run events: ${positional[1]}`,
+      parsed,
+      io
+    );
+  }
+  const runId = positional[0];
+
+  const dataDirOptions: DataDirOptions = {};
+  if (io.env !== undefined) dataDirOptions.env = io.env;
+  if (parsed.dataDir !== undefined) dataDirOptions.dataDir = parsed.dataDir;
+
+  let dataDir: string;
+  try {
+    dataDir = resolveDataDir(dataDirOptions);
+  } catch (err) {
+    return emitWorkflowRunEventsFailure(parsed, io, {
+      code: "data_dir_failed",
+      message: err instanceof Error ? err.message : String(err),
+      runId
+    });
+  }
+
+  const db = openExistingDbReadOnly(dataDir);
+  if (db === undefined) {
+    return emitWorkflowRunEventsFailure(parsed, io, {
+      code: "run_not_found",
+      message: `Workflow run not found: ${runId}`,
+      dataDir,
+      runId
+    });
+  }
+  try {
+    const envelope = loadWorkflowRunEvents(db, runId, {
+      since: parsed.since
+    });
+    if (envelope === null) {
+      return emitWorkflowRunEventsFailure(parsed, io, {
+        code: "run_not_found",
+        message: `Workflow run not found: ${runId}`,
+        dataDir,
+        runId
+      });
+    }
+    return emitWorkflowRunEvents(parsed, io, dataDir, envelope);
+  } catch (error) {
+    if (error instanceof InvalidWorkflowEventCursorError) {
+      return emitWorkflowRunEventsFailure(parsed, io, {
+        code: error.code,
+        message: error.message,
+        dataDir,
+        runId
+      });
+    }
+    throw error;
+  } finally {
+    db.close();
+  }
 }
 
 /**
@@ -1562,7 +1652,7 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
       }
       const stepRow = db
         .prepare(
-          `SELECT state, operator_reason, operator_actor,
+          `SELECT state, kind, step_order, required, operator_reason, operator_actor,
                   operator_evidence_pointer, operator_ledger_pointer,
                   operator_transition_at
              FROM workflow_steps WHERE run_id = ? AND step_id = ?`
@@ -1570,6 +1660,9 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
         .get(runId, stepId) as
         | {
             state: WorkflowStepState;
+            kind: string;
+            step_order: number;
+            required: number;
             operator_reason: string | null;
             operator_actor: string | null;
             operator_evidence_pointer: string | null;
@@ -1688,6 +1781,24 @@ function workflowRunUpdateStep(parsed: ParsedFlags, io: CliIo): number {
           runId,
           stepId
         );
+        if (targetState === "blocked") {
+          appendWorkflowEvent(db, {
+            runId,
+            stepId,
+            type: "step_blocked",
+            occurredAt: now,
+            payload: {
+              kind: stepRow.kind,
+              order: stepRow.step_order,
+              required: stepRow.required === 1,
+              reason,
+              actor,
+              evidencePointer,
+              ledgerPointer,
+              previousState
+            }
+          });
+        }
       }
 
       const monitorState = refreshWorkflowRunRuntimeState(db, {
@@ -2095,6 +2206,7 @@ async function workflowRunWatch(
          WHERE id = ?`
       )
       .run(progress.digest, emittedDigest, envelope.generatedAt, emittedAt, runId);
+    appendWorkflowWatchAdvisoryEvent(writeDb, envelope, progress, advisory);
   } catch (err) {
     return emitWorkflowRunWatchFailure(parsed, io, {
       code: "data_dir_failed",
@@ -2107,6 +2219,39 @@ async function workflowRunWatch(
   }
 
   return emitWorkflowRunWatch(parsed, io, dataDir, envelope, progress, advisory);
+}
+
+function appendWorkflowWatchAdvisoryEvent(
+  db: MomentumDb,
+  envelope: WorkflowMonitorEnvelope,
+  progress: WorkflowMonitorProgressTick,
+  advisory: ReturnType<typeof deriveWorkflowWatchAdvisory>
+): void {
+  const type = workflowEventTypeForWatchAdvisory(advisory.reason);
+  if (type === null || !advisory.emit) return;
+  appendWorkflowEvent(db, {
+    runId: envelope.runId,
+    stepId: advisory.activeStepId,
+    type,
+    occurredAt: envelope.generatedAt,
+    payload: {
+      reason: advisory.reason,
+      phase: progress.phase,
+      quietForSeconds: advisory.quietForSeconds,
+      quietThresholdSeconds: advisory.quietThresholdSeconds,
+      stuckRisk: advisory.stuckRisk,
+      inspectionCommand: advisory.inspectionCommand,
+      digest: progress.digest
+    }
+  });
+}
+
+function workflowEventTypeForWatchAdvisory(
+  reason: ReturnType<typeof deriveWorkflowWatchAdvisory>["reason"]
+): WorkflowEventType | null {
+  if (reason === "stuck_risk") return "monitor_stuck_risk";
+  if (reason === "quiet_heartbeat") return "monitor_quiet_heartbeat";
+  return null;
 }
 
 function seedMissingMonitorEmittedAt(

@@ -24,6 +24,7 @@
 
 import type { MomentumDb } from "../../adapters/db.js";
 import { prepareRetryableDispatchedStepForRecoveryClear } from "./dispatch-retry.js";
+import { appendWorkflowEvent, buildWorkflowEventId } from "./events.js";
 import { loadWorkflowRunDetail } from "./status.js";
 import type { WorkflowMonitorRecoveryCode } from "./monitor-state.js";
 import { refreshWorkflowRunRuntimeState } from "./runtime-state.js";
@@ -64,8 +65,17 @@ export function markWorkflowRunNeedsManualRecovery(
   }
 
   const before = db
-    .prepare("SELECT needs_manual_recovery FROM workflow_runs WHERE id = ?")
-    .get(input.runId) as { needs_manual_recovery: number } | undefined;
+    .prepare(
+      `SELECT needs_manual_recovery, manual_recovery_reason, manual_recovery_at
+         FROM workflow_runs WHERE id = ?`
+    )
+    .get(input.runId) as
+    | {
+        needs_manual_recovery: number;
+        manual_recovery_reason: string | null;
+        manual_recovery_at: number | null;
+      }
+    | undefined;
   if (!before) {
     return { ok: false, reason: "run_not_found" };
   }
@@ -78,6 +88,22 @@ export function markWorkflowRunNeedsManualRecovery(
            updated_at = ?
      WHERE id = ?`
   ).run(input.reason, now, now, input.runId);
+
+  if (
+    before.needs_manual_recovery !== 1 ||
+    before.manual_recovery_reason !== input.reason
+  ) {
+    appendWorkflowEvent(db, {
+      runId: input.runId,
+      type: "recovery_required",
+      occurredAt: now,
+      payload: {
+        reason: input.reason,
+        previousReason: before.manual_recovery_reason,
+        previousMarkedAt: before.manual_recovery_at
+      }
+    });
+  }
 
   return { ok: true, previouslyMarked: before.needs_manual_recovery === 1 };
 }
@@ -112,8 +138,17 @@ export function clearWorkflowRunManualRecovery(
   }
 
   const before = db
-    .prepare("SELECT needs_manual_recovery FROM workflow_runs WHERE id = ?")
-    .get(input.runId) as { needs_manual_recovery: number } | undefined;
+    .prepare(
+      `SELECT needs_manual_recovery, manual_recovery_reason, manual_recovery_at
+         FROM workflow_runs WHERE id = ?`
+    )
+    .get(input.runId) as
+    | {
+        needs_manual_recovery: number;
+        manual_recovery_reason: string | null;
+        manual_recovery_at: number | null;
+      }
+    | undefined;
   if (!before) {
     return { ok: false, reason: "run_not_found" };
   }
@@ -126,6 +161,18 @@ export function clearWorkflowRunManualRecovery(
            updated_at = ?
      WHERE id = ?`
   ).run(now, input.runId);
+
+  if (before.needs_manual_recovery === 1) {
+    appendWorkflowEvent(db, {
+      runId: input.runId,
+      type: "recovery_cleared",
+      occurredAt: now,
+      payload: {
+        previousReason: before.manual_recovery_reason,
+        previousMarkedAt: before.manual_recovery_at
+      }
+    });
+  }
 
   return { ok: true, wasMarked: before.needs_manual_recovery === 1 };
 }
@@ -496,11 +543,12 @@ function reconcileInterruptedNoMistakesStepForRecoveryClear(
 
   const row = db
     .prepare(
-      `SELECT kind, state, required
+      `SELECT kind, state, required, step_order, result_digest, error_code,
+              error_message, finished_at, updated_at
          FROM workflow_steps WHERE run_id = ? AND step_id = ?`
     )
     .get(input.runId, input.stepId) as
-    | { kind: string; state: string; required: number }
+    | FailedStepBeforeReconcileRow
     | undefined;
   if (
     row === undefined ||
@@ -510,6 +558,12 @@ function reconcileInterruptedNoMistakesStepForRecoveryClear(
   ) {
     return undefined;
   }
+
+  appendFailedStepEventBeforeReconcile(db, {
+    runId: input.runId,
+    stepId: input.stepId,
+    row
+  });
 
   const updated = db
     .prepare(
@@ -583,11 +637,12 @@ function reconcileExternalSideEffectTailStepForRecoveryClear(
   | undefined {
   const row = db
     .prepare(
-      `SELECT kind, state, required
+      `SELECT kind, state, required, step_order, result_digest, error_code,
+              error_message, finished_at, updated_at
          FROM workflow_steps WHERE run_id = ? AND step_id = ?`
     )
     .get(input.runId, input.stepId) as
-    | { kind: string; state: string; required: number }
+    | FailedStepBeforeReconcileRow
     | undefined;
   if (
     row === undefined ||
@@ -597,6 +652,12 @@ function reconcileExternalSideEffectTailStepForRecoveryClear(
   ) {
     return undefined;
   }
+
+  appendFailedStepEventBeforeReconcile(db, {
+    runId: input.runId,
+    stepId: input.stepId,
+    row
+  });
 
   const updated = db
     .prepare(
@@ -645,4 +706,58 @@ function reconcileExternalSideEffectTailStepForRecoveryClear(
     evidencePointer: input.evidencePointer,
     ledgerPointer: input.ledgerPointer
   };
+}
+
+type FailedStepBeforeReconcileRow = {
+  kind: string;
+  state: string;
+  required: number;
+  step_order: number;
+  result_digest: string | null;
+  error_code: string | null;
+  error_message: string | null;
+  finished_at: number | null;
+  updated_at: number;
+};
+
+function appendFailedStepEventBeforeReconcile(
+  db: MomentumDb,
+  input: {
+    runId: string;
+    stepId: string;
+    row: FailedStepBeforeReconcileRow;
+  }
+): void {
+  const occurredAt = input.row.finished_at ?? input.row.updated_at;
+  const payload = compactWorkflowEventPayload({
+    kind: input.row.kind,
+    order: input.row.step_order,
+    required: input.row.required === 1,
+    resultDigest: input.row.result_digest,
+    errorCode: input.row.error_code,
+    errorMessage: input.row.error_message
+  });
+  appendWorkflowEvent(db, {
+    runId: input.runId,
+    type: "step_failed",
+    occurredAt,
+    stepId: input.stepId,
+    payload,
+    eventId: buildWorkflowEventId({
+      runId: input.runId,
+      type: "step_failed",
+      timestamp: occurredAt,
+      stepId: input.stepId,
+      payload,
+      source: "step"
+    })
+  });
+}
+
+function compactWorkflowEventPayload(
+  payload: Record<string, unknown>
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(payload).filter(([, value]) => value !== null)
+  );
 }

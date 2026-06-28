@@ -224,11 +224,30 @@ describe("applyQueueMigrations", () => {
       expect(indexes).toContain("idx_update_intents_evidence");
       expect(indexes).toContain("idx_update_intents_adapter_target");
       expect(indexes).toContain("idx_update_intents_created_at");
+      expect(indexes).toContain("idx_workflow_events_run_cursor");
 
       expect(updateIntentColumns, "missing update_intents column: apply_state")
         .toContain("apply_state");
 
       expect(tableNames(db)).toContain("intent_apply_audits");
+      expect(tableNames(db)).toContain("workflow_events");
+      const workflowEventColumns = getColumns(db, "workflow_events").map(
+        (row) => row.name
+      );
+      for (const col of [
+        "event_id",
+        "run_id",
+        "step_id",
+        "occurred_at",
+        "type",
+        "payload_json",
+        "created_at"
+      ]) {
+        expect(
+          workflowEventColumns,
+          `missing workflow_events column: ${col}`
+        ).toContain(col);
+      }
       const auditColumns = getColumns(db, "intent_apply_audits").map(
         (row) => row.name
       );

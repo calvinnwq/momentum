@@ -26,6 +26,7 @@ export const COMMANDS = [
   "momentum workflow run clear-recovery <run-id> [--evidence-pointer <ref>] [--ledger-pointer <ref>] [--data-dir <path>] [--json]",
   "momentum workflow run monitor <run-id> [--advance] [--data-dir <path>] [--json]",
   "momentum workflow run watch <run-id> --once [--data-dir <path>] [--json]",
+  "momentum workflow run events <run-id> [--since <cursor>] [--data-dir <path>] [--json]",
   "momentum workflow run logs <run-id> [--data-dir <path>] [--json]",
   "momentum workflow run start --run-id <id> --repo <path> --objective <text> [--definition <key>] [--definition-version <n>] [--approval-boundary <boundary>] [--skill-revision <text>] [--issue-scope <identifier>] [--profile <name>] [--data-dir <path>] [--json]",
   "momentum workflow run start-coding --run-id <id> --repo <path> --objective <text> [--approval-boundary <boundary>] [--skill-revision <text>] [--issue-scope <identifier>] [--profile <name>] [--steps-json <json>] [--definition-version <n>] [--data-dir <path>] [--json]",

@@ -1,4 +1,5 @@
 import type { WorkflowGateRecord } from "../core/workflow/gate-persist.js";
+import type { WorkflowRunEvents } from "../core/workflow/events.js";
 import type { WorkflowHandoffEnvelope } from "../core/workflow/handoff.js";
 import type {
   WorkflowRunLogRound,
@@ -911,6 +912,67 @@ export function emitWorkflowRunWatchFailure(
   return emitWorkflowFailure(parsed, io, {
     ...failure,
     command: "workflow run watch"
+  });
+}
+
+export function emitWorkflowRunEvents(
+  parsed: { json: boolean },
+  io: CliIo,
+  dataDir: string,
+  envelope: WorkflowRunEvents
+): number {
+  const payload = {
+    ok: true,
+    command: "workflow run events",
+    dataDir,
+    runId: envelope.runId,
+    since: envelope.since,
+    cursor: envelope.cursor,
+    events: envelope.events.map((event) => ({
+      id: event.id,
+      cursor: event.cursor,
+      timestamp: event.timestamp,
+      type: event.type,
+      stepId: event.stepId,
+      payload: event.payload
+    })),
+    counts: { events: envelope.events.length }
+  };
+
+  if (parsed.json) {
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  const lines = [
+    `Workflow events for run: ${envelope.runId}`,
+    `Since: ${envelope.since ?? "(start)"}`,
+    `Cursor: ${envelope.cursor ?? "(none)"}`,
+    `Events: ${envelope.events.length}`,
+    ...envelope.events.map((event) =>
+      [
+        `  ${event.timestamp} ${event.type}`,
+        event.stepId === null ? "" : ` step=${event.stepId}`,
+        ` cursor=${event.cursor}`
+      ].join("")
+    ),
+    `Data dir: ${dataDir}`,
+    ""
+  ];
+  write(io.stdout, lines.join("\n"));
+  return 0;
+}
+
+export function emitWorkflowRunEventsFailure(
+  parsed: { json: boolean },
+  io: CliIo,
+  failure: Omit<WorkflowRendererFailure, "command"> & {
+    command?: "workflow run events";
+  }
+): number {
+  return emitWorkflowFailure(parsed, io, {
+    ...failure,
+    command: "workflow run events"
   });
 }
 
