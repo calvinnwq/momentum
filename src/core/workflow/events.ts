@@ -237,6 +237,7 @@ function projectGateEvents(
   db: MomentumDb,
   runId: string
 ): WorkflowSemanticEvent[] {
+  if (!tableExists(db, "workflow_gates")) return [];
   const rows = db
     .prepare(
       `SELECT gate_id, step_run_id, target_scope, gate_type, reason, evidence,

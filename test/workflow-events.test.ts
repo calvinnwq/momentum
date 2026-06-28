@@ -725,4 +725,76 @@ describe("workflow run events", () => {
     ]);
     expect(fs.existsSync(path.join(dataDir, "momentum.db"))).toBe(true);
   });
+
+  it("replays reproducible events from a pre-workflow-gates database", async () => {
+    const root = makeTempDir();
+    const dataDir = path.join(root, "legacy-data");
+    fs.mkdirSync(dataDir);
+    const db = new DatabaseSync(path.join(dataDir, "momentum.db"));
+    try {
+      db.exec(`
+        CREATE TABLE workflow_runs (
+          id TEXT PRIMARY KEY,
+          state TEXT NOT NULL DEFAULT 'pending',
+          source TEXT NOT NULL,
+          plan_json TEXT NOT NULL DEFAULT '{}',
+          issue_scope_json TEXT NOT NULL DEFAULT '{}',
+          route_json TEXT NOT NULL DEFAULT '{}',
+          needs_manual_recovery INTEGER NOT NULL DEFAULT 0,
+          started_at INTEGER,
+          finished_at INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        ) STRICT;
+        CREATE TABLE workflow_steps (
+          run_id TEXT NOT NULL,
+          step_id TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          state TEXT NOT NULL DEFAULT 'pending',
+          step_order INTEGER NOT NULL,
+          required INTEGER NOT NULL DEFAULT 1,
+          ledger_offset INTEGER,
+          result_digest TEXT,
+          error_code TEXT,
+          error_message TEXT,
+          started_at INTEGER,
+          finished_at INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (run_id, step_id)
+        ) STRICT;
+        CREATE TABLE workflow_approvals (
+          run_id TEXT NOT NULL,
+          boundary TEXT NOT NULL,
+          actor TEXT,
+          phrase TEXT NOT NULL,
+          artifact_path TEXT NOT NULL,
+          artifact_digest TEXT NOT NULL,
+          recorded_at INTEGER NOT NULL,
+          discharged_at INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (run_id, boundary)
+        ) STRICT;
+      `);
+      db.prepare(
+        `INSERT INTO workflow_runs
+           (id, state, source, created_at, updated_at)
+         VALUES ('legacy-run', 'running', 'momentum-native-coding', 1, 10)`
+      ).run();
+      db.prepare(
+        `INSERT INTO workflow_steps
+           (run_id, step_id, kind, state, step_order, started_at, created_at, updated_at)
+         VALUES ('legacy-run', 'implementation', 'implementation', 'running', 1, 10, 1, 10)`
+      ).run();
+    } finally {
+      db.close();
+    }
+
+    const envelope = await readEvents(dataDir, "legacy-run");
+    expect(envelope.events.map((event) => event.type)).toEqual([
+      "step_started"
+    ]);
+    expect(fs.existsSync(path.join(dataDir, "momentum.db"))).toBe(true);
+  });
 });
