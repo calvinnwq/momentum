@@ -312,6 +312,29 @@ describe("workflow run events", () => {
     expect(envelope.counts.events).toBe(envelope.events.length);
   });
 
+  it("replays terminal imported runs without a finished timestamp", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    seedRun(db, {
+      runId: "run-imported-terminal",
+      state: "succeeded",
+      finishedAt: null,
+      updatedAt: 95
+    });
+    db.close();
+
+    const envelope = await readEvents(dataDir, "run-imported-terminal");
+
+    expect(envelope.events).toHaveLength(1);
+    expect(envelope.events[0]).toMatchObject({
+      timestamp: 95,
+      type: "terminal_state",
+      stepId: null,
+      payload: { state: "succeeded" }
+    });
+    expect(envelope.cursor).toBe(envelope.events[0]?.cursor);
+  });
+
   it("continues from the returned cursor without replaying earlier events", async () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);
@@ -378,8 +401,10 @@ describe("workflow run events", () => {
 
     expect(envelope.events.map((event) => event.type)).toEqual([
       "step_started",
-      "step_failed"
+      "step_failed",
+      "terminal_state"
     ]);
+    expect(envelope.events.map((event) => event.timestamp)).toEqual([10, 10, 10]);
   });
 
   it("replays recovery reason changes while the run remains marked", async () => {

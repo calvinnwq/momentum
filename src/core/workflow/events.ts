@@ -110,7 +110,7 @@ export function loadWorkflowRunEvents(
   if (!tableExists(db, "workflow_runs")) return null;
   const run = db
     .prepare(
-      `SELECT id, state, finished_at
+      `SELECT id, state, finished_at, updated_at
          FROM workflow_runs WHERE id = ?`
     )
     .get(runId) as
@@ -118,6 +118,7 @@ export function loadWorkflowRunEvents(
         id: string;
         state: string;
         finished_at: number | null;
+        updated_at: number;
       }
     | undefined;
   if (run === undefined) return null;
@@ -334,18 +335,17 @@ function projectTerminalRunEvent(run: {
   id: string;
   state: string;
   finished_at: number | null;
+  updated_at: number;
 }): WorkflowSemanticEvent[] {
-  if (
-    run.finished_at === null ||
-    !(WORKFLOW_RUN_TERMINAL_STATES as readonly string[]).includes(run.state)
-  ) {
+  if (!(WORKFLOW_RUN_TERMINAL_STATES as readonly string[]).includes(run.state)) {
     return [];
   }
+  const timestamp = run.finished_at ?? run.updated_at;
   return [
     buildEvent({
       runId: run.id,
       type: "terminal_state",
-      timestamp: run.finished_at,
+      timestamp,
       stepId: null,
       payload: { state: run.state },
       source: "run"
