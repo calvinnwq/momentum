@@ -119,6 +119,7 @@ Returned cursors are opaque replay tokens, not event identities; clients persist
 The API is replay-only and read-only: it does not hold a connection open, dispatch work, or change monitor/watch delivery semantics.
 NGX-552 adds `workflow run watch <run-id> --stream --jsonl` as the long-lived JSONL stream over that durable event cursor API.
 The stream is read-only, resumes from `--since`, emits `event` records with `emit: true` only for durable human-worthy semantic events, emits `heartbeat` records with `emit: false` for liveness, retains only the cursor and counters between polls, and exits cleanly once the run row is terminal.
+When `--jsonl` is present, stream validation and usage failures use the shared JSON failure envelope instead of prose while usage errors still exit 2.
 It never runs the bounded watch dispatcher tick, writes monitor advisory baselines, delivers to OpenClaw, or invokes an LLM; durable events remain the source of truth for disconnected clients.
 NGX-521 hardens native dogfood tail recovery without changing the default route.
 Failed required `merge-cleanup` and `linear-refresh` steps classify as `failed_external_side_effect_step` so operators verify the canonical external state - pull request merge or close state and any surviving remote branch ref for `merge-cleanup`, or tracker state for `linear-refresh` - then reconcile through `workflow run clear-recovery --evidence-pointer <ref>` instead of blindly re-running side-effecting tail work.

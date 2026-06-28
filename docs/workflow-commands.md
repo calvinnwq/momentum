@@ -1581,7 +1581,8 @@ Soft `monitor_drift_stale` reports and ordinary `failed_required_step` failures 
 
 `workflow run watch <run-id> --stream --jsonl` opens a long-lived stream that turns the durable event cursor API into newline-delimited JSON.
 Each record is a single self-contained line, so a consumer can split stdout on `\n` and `JSON.parse` each line independently.
-The stream polls durable state, writes every record as it is produced, and retains only the resume cursor between polls, so memory stays flat for the lifetime of even a very long run.
+The stream polls durable state once per second while the run is non-terminal, writes every record as it is produced, and retains only the resume cursor between polls, so memory stays flat for the lifetime of even a very long run.
+The poll interval is a liveness cadence, not a delivery guarantee; consumers should persist cursors and resume with `--since` after reconnecting.
 
 Two record kinds share a common header (`ok`, `command: "workflow run watch"`, `mode: "stream"`, `runId`, `kind`, `emit`, `cursor`, `terminal`):
 
@@ -1636,6 +1637,7 @@ A heartbeat record:
 
 Stream-mode failures (`--stream` without `--jsonl`, an unknown run, an invalid `--since` cursor, or `--stream` combined with `--once`) are reported on stderr with status `1`, not as stream records.
 When `--jsonl` or `--json` is active, failures use the shared workflow JSON error envelope.
+Usage errors, such as an extra positional argument or a missing value for `--since`, also serialize as that JSON envelope when `--jsonl` is present, but still exit with status `2`.
 See [Error codes](#error-codes).
 
 ### Supervisor scenarios
@@ -1835,6 +1837,7 @@ A cron, OpenClaw, or GUI poller branches on the envelope instead of scraping tex
 | `once_required` | Neither `--once` nor `--stream` was supplied. |
 | `jsonl_required` | `--stream` was supplied without `--jsonl`. |
 | `stream_once_conflict` | `--stream` and `--once` were supplied together. |
+| `usage_error` | The stream invocation is malformed, such as an extra positional argument or a missing value for `--since`; with `--jsonl`, this still renders as JSON and exits `2`. |
 | `invalid_cursor` | The `--since` value is not a valid durable event cursor. |
 | `data_dir_failed` | Data directory resolution, SQLite access, the bounded `--once` dispatch tick, or stream polling failed. |
 | `daemon_live_wrapper_profile_invalid` | The shared daemon live-wrapper profile was configured but unreadable or invalid when the bounded dispatch tick resolved it. |

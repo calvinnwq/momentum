@@ -172,6 +172,6 @@ NGX-551 adds `events.ts` as the durable workflow event replay seam behind `workf
 It projects stable semantic events from workflow rows, combines them with append-only `workflow_events` rows for overwritten transitions and supervisor advisories, and returns opaque replay cursors so reconnecting clients can continue from the previous response cursor without relying on stdout or process state.
 
 NGX-552 adds `watch-stream.ts` and `watch-stream-source.ts` as the read-only JSONL stream seam behind `workflow run watch --stream --jsonl`.
-The driver polls the durable event cursor API, writes each stream record immediately, retains only the cursor and counters between polls, emits `emit: true` records only for semantic events, emits `emit: false` heartbeats for liveness, and exits when the run row is terminal.
+The driver polls the durable event cursor API on its bounded interval, writes each stream record immediately, retains only the cursor and counters between polls, emits `emit: true` records only for semantic events, emits `emit: false` heartbeats for liveness, and exits when the run row is terminal.
 The source layer uses incremental event reads plus the durable run row terminal state so a reconnecting stream resumed past the terminal event still observes completion without dispatching work or mutating monitor advisory baselines.
 The stream seam does not deliver to OpenClaw or invoke an LLM; clients decide how to consume the durable JSONL records.
