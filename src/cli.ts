@@ -204,7 +204,7 @@ export async function runCli(
 ): Promise<number> {
   const parsed = parseFlags(argv);
   if (parsed.error) {
-    return usageError(parsed.error, parsed, io);
+    return usageError(parsed.error, { json: parsed.json || parsed.jsonl }, io);
   }
 
   const [command, subcommand] = parsed.args;

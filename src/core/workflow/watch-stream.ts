@@ -97,6 +97,7 @@ export function buildWorkflowWatchStreamTick(
     const isTerminal = event.type === "terminal_state";
     const terminal =
       isTerminal ||
+      (sawTerminalEvent && index > terminalEventIndex) ||
       (runTerminal && !sawTerminalEvent && index === lastEventIndex);
     return buildEventRecord(events.runId, event, terminal);
   });

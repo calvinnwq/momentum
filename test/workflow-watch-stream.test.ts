@@ -172,6 +172,27 @@ describe("buildWorkflowWatchStreamTick", () => {
     });
   });
 
+  it("keeps records terminal after terminal_state within the same tick", () => {
+    const envelope = eventsEnvelope({
+      events: [
+        event({
+          type: "terminal_state",
+          cursor: "wfcur1.terminal",
+          payload: { state: "failed" }
+        }),
+        event({ type: "recovery_cleared", cursor: "wfcur1.after-terminal" })
+      ]
+    });
+
+    const tick = buildWorkflowWatchStreamTick(envelope, { now: NOW });
+
+    expect(tick.terminal).toBe(true);
+    expect(tick.records).toMatchObject([
+      { kind: "event", terminal: true, event: { type: "terminal_state" } },
+      { kind: "event", terminal: true, event: { type: "recovery_cleared" } }
+    ]);
+  });
+
   it("reports terminal on a heartbeat when the run is already terminal", () => {
     const envelope = eventsEnvelope({
       since: "wfcur1.done",
@@ -1069,6 +1090,26 @@ describe("workflow run watch --stream --jsonl (CLI)", () => {
       command: "workflow run watch",
       code: "usage_error",
       message: "Unexpected argument for workflow run watch: extra"
+    });
+  });
+
+  it("reports parse-level stream jsonl failures as JSON", async () => {
+    const result = await runStreamCli([
+      "workflow",
+      "run",
+      "watch",
+      "stream-run",
+      "--stream",
+      "--jsonl",
+      "--since"
+    ]);
+
+    expect(result.code).toBe(2);
+    expect(result.stdout).toBe("");
+    expect(JSON.parse(result.stderr)).toMatchObject({
+      ok: false,
+      code: "usage_error",
+      message: "Missing required value for --since."
     });
   });
 
