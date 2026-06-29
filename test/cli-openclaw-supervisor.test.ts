@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { runCli } from "../src/cli.js";
 import type { OpenClawSupervisorWatchEnvelope } from "../src/core/openclaw/supervisor.js";
@@ -15,6 +15,7 @@ type CliResult = {
 const tempRoots: string[] = [];
 
 afterEach(() => {
+  vi.restoreAllMocks();
   while (tempRoots.length > 0) {
     const dir = tempRoots.pop();
     if (dir) fs.rmSync(dir, { recursive: true, force: true });
@@ -354,6 +355,81 @@ describe("momentum openclaw supervise", () => {
       state: {
         disabled: true,
         persisted: true
+      }
+    });
+  });
+
+  it("repeats disabled cleanup when timestamp persistence fails", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-openclaw-cli";
+    const args = [
+      "openclaw",
+      "supervise",
+      runId,
+      "--once",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ];
+
+    const first = await run(
+      args,
+      watch({
+        reason: "terminal_succeeded",
+        cleanup: "release",
+        digest: "sha256:terminal-readonly",
+        nextPollSeconds: 0
+      })
+    );
+    expect(first.code, first.stderr).toBe(0);
+
+    const statePath = path.join(
+      dataDir,
+      "openclaw-supervisor",
+      `${encodeURIComponent(runId)}.json`
+    );
+    const originalWriteFileSync = fs.writeFileSync;
+    vi.spyOn(fs, "writeFileSync").mockImplementation((file, data, options) => {
+      if (file === statePath) {
+        throw new Error(`EACCES: permission denied, open '${statePath}'`);
+      }
+      return originalWriteFileSync(file, data, options);
+    });
+
+    let watchCalls = 0;
+    let stdout = "";
+    let stderr = "";
+    const secondCode = await runCli(
+      args,
+      {
+        stdout: { write: (chunk: string) => ((stdout += chunk), true) },
+        stderr: { write: (chunk: string) => ((stderr += chunk), true) },
+        env: {}
+      },
+      {
+        openClawWatchOnce: async () => {
+          watchCalls += 1;
+          return watch({});
+        }
+      }
+    );
+
+    expect(secondCode, stderr).toBe(0);
+    expect(stderr).toBe("");
+    expect(watchCalls).toBe(0);
+    expect(stdout).not.toContain(dataDir);
+    expect(JSON.parse(stdout)).toMatchObject({
+      emit: false,
+      eventType: null,
+      monitorEnabled: false,
+      cleanupAction: "remove_monitor",
+      state: {
+        disabled: true,
+        persisted: false
+      },
+      debug: {
+        suppressedReason: "monitor_disabled",
+        statePersistence: "failed"
       }
     });
   });

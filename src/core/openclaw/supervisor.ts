@@ -214,6 +214,14 @@ function classifyOpenClawSupervisorEvent(
   }
   if (watch.reason === "stuck_risk") return "stuck-risk";
   if (
+    watch.humanAction?.code === "clear_recovery" ||
+    watch.recommendedAction === "recover" ||
+    watch.reason === "recovery_required" ||
+    watch.reason === "monitor_drift"
+  ) {
+    return "recovery";
+  }
+  if (
     watch.humanAction?.code === "approve" ||
     watch.humanAction?.code === "resolve_gate" ||
     watch.recommendedAction === "approve" ||
@@ -221,14 +229,6 @@ function classifyOpenClawSupervisorEvent(
     watch.reason === "awaiting_approval"
   ) {
     return "approval";
-  }
-  if (
-    watch.humanAction?.code === "clear_recovery" ||
-    watch.recommendedAction === "recover" ||
-    watch.reason === "recovery_required" ||
-    watch.reason === "monitor_drift"
-  ) {
-    return "recovery";
   }
   if (watch.reason === "in_progress") return "progress";
   return null;

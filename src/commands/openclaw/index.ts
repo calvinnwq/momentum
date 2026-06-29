@@ -107,8 +107,14 @@ async function openClawSupervise(
         state: priorState,
         now: Date.now()
       });
-      saveOpenClawSupervisorState(dataDir, disabledTick.nextState);
-      return emitOpenClawSupervise(parsed, io, disabledTick);
+      try {
+        saveOpenClawSupervisorState(dataDir, disabledTick.nextState);
+        return emitOpenClawSupervise(parsed, io, disabledTick);
+      } catch {
+        return emitOpenClawSupervise(parsed, io, disabledTick, {
+          statePersistence: "failed"
+        });
+      }
     }
 
     const watchOnce = deps.openClawWatchOnce ?? runOpenClawWorkflowWatchOnce;

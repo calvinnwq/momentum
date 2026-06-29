@@ -125,6 +125,25 @@ describe("buildOpenClawSupervisorTick", () => {
     expect(tick.nextState.lastReason).toBe("recovery_required");
   });
 
+  it("classifies recovery-required operator decisions as recovery events", () => {
+    const tick = buildOpenClawSupervisorTick({
+      priorState: null,
+      watch: watch({
+        reason: "recovery_required",
+        recommendedAction: "operator_decision",
+        humanAction: null,
+        digest: "sha256:recovery-decision"
+      }),
+      now: NOW
+    });
+
+    expect(tick).toMatchObject({
+      emit: true,
+      eventType: "recovery",
+      recommendedAction: "operator_decision"
+    });
+  });
+
   it("honors due approval quiet heartbeat reminders from the watch reducer", () => {
     const first = buildOpenClawSupervisorTick({
       priorState: null,
