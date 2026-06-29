@@ -53,9 +53,10 @@ export function parseOpenClawWatchOutput(
   }
   const record = payload as Record<string, unknown>;
   if (record["ok"] !== true) {
+    const failure = parseOpenClawWatchFailureRecord(record);
     throw new OpenClawWatchRunnerError(
-      "watch_failed",
-      "Momentum watch returned a failure envelope."
+      failure?.code ?? "watch_failed",
+      failure?.message ?? "Momentum watch returned a failure envelope."
     );
   }
   const runId = stringValue(record["runId"], "runId");
@@ -135,6 +136,11 @@ async function runMomentumWatchProcess(
         resolve(stdout);
         return;
       }
+      const failure = parseOpenClawWatchFailureOutput(stderr);
+      if (failure !== null) {
+        reject(new OpenClawWatchRunnerError(failure.code, failure.message));
+        return;
+      }
       const detail = stderr.trim().length > 0 ? " with diagnostics" : "";
       reject(
         new OpenClawWatchRunnerError(
@@ -144,6 +150,22 @@ async function runMomentumWatchProcess(
       );
     });
   });
+}
+
+export function parseOpenClawWatchFailureOutput(
+  stderr: string
+): { code: string; message: string } | null {
+  const trimmed = stderr.trim();
+  if (trimmed.length === 0) return null;
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(trimmed) as unknown;
+  } catch {
+    return null;
+  }
+  if (typeof payload !== "object" || payload === null) return null;
+  return parseOpenClawWatchFailureRecord(payload as Record<string, unknown>);
 }
 
 function resolveMomentumEntrypoint(): string {
@@ -171,6 +193,17 @@ function parseHumanAction(
     command: stringValue(record["command"], "humanAction.command"),
     detail: nullableString(record["detail"], "humanAction.detail")
   };
+}
+
+function parseOpenClawWatchFailureRecord(
+  record: Record<string, unknown>
+): { code: string; message: string } | null {
+  if (record["ok"] !== false) return null;
+  const code = record["code"];
+  const message = record["message"];
+  if (typeof code !== "string" || code.length === 0) return null;
+  if (typeof message !== "string" || message.length === 0) return null;
+  return { code, message };
 }
 
 function stringValue(value: unknown, field: string): string {
