@@ -133,7 +133,7 @@ async function openClawSupervise(
       saveOpenClawSupervisorState(dataDir, tick.nextState);
       return emitOpenClawSupervise(parsed, io, tick);
     } catch (saveError) {
-      if (tick.emit) {
+      if (tick.emit || tick.cleanupAction === "remove_monitor") {
         return emitOpenClawSupervise(parsed, io, tick, {
           statePersistence: "failed"
         });

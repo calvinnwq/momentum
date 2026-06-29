@@ -1,0 +1,18 @@
+[live-step] start
+[live-step] kind: preflight
+[live-step] run_id: ngx544-missing-wrapper-config
+[live-step] step_id: preflight
+[live-step] attempt: 1
+[live-step] command: /Users/calvinnwq/.nvm/versions/node/v24.11.1/bin/node --no-warnings=ExperimentalWarning --import /Users/calvinnwq/.no-mistakes/worktrees/e4997494fb5b/01KW8ETJP762H36181547NW1QD/src/adapters/typescript-source-register.mjs /Users/calvinnwq/.no-mistakes/worktrees/e4997494fb5b/01KW8ETJP762H36181547NW1QD/src/adapters/coding-workflow-live-wrapper-cli.ts
+[live-step] cwd: /Users/calvinnwq/.no-mistakes/worktrees/e4997494fb5b/01KW8ETJP762H36181547NW1QD
+[live-step] timeout_sec: 30
+[live-step] result_path: /Users/calvinnwq/.no-mistakes/worktrees/e4997494fb5b/01KW8ETJP762H36181547NW1QD/.agent-workflows/ngx544-missing-wrapper-config/result.json
+[live-step] stderr:
+MOMENTUM_WRAPPER_RECOVERY_CODE=runtime_unavailable
+MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG is required when the daemon live-wrapper profile uses the coding workflow wrapper for "preflight".
+MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG is required when the daemon live-wrapper profile uses the coding workflow wrapper for "preflight".
+[live-step] exit_code: 1
+[live-step] duration_ms: 1266
+[live-step] result: nonzero_exit
+[live-step] summary: command exited with code 1
+[live-step] recovery: runtime_unavailable

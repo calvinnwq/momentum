@@ -433,4 +433,47 @@ describe("momentum openclaw supervise", () => {
       }
     });
   });
+
+  it("preserves terminal cleanup when watch is silent and state persistence fails", async () => {
+    const dataDir = makeTempDir();
+    fs.writeFileSync(path.join(dataDir, "openclaw-supervisor"), "blocked");
+
+    const result = await run(
+      [
+        "openclaw",
+        "supervise",
+        "cwfp-openclaw-cli",
+        "--once",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      watch({
+        emit: false,
+        reason: "terminal_succeeded",
+        cleanup: "release",
+        digest: "sha256:terminal-silent",
+        nextPollSeconds: 0
+      })
+    );
+
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).not.toContain(dataDir);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      emit: false,
+      eventType: null,
+      monitorEnabled: false,
+      cleanupAction: "remove_monitor",
+      state: {
+        disabled: true,
+        persisted: false
+      },
+      debug: {
+        watchEmit: false,
+        suppressedReason: "watch_silent",
+        statePersistence: "failed"
+      }
+    });
+  });
 });
