@@ -123,8 +123,17 @@ async function openClawSupervise(
       watch,
       now: Date.now()
     });
-    saveOpenClawSupervisorState(dataDir, tick.nextState);
-    return emitOpenClawSupervise(parsed, io, tick);
+    try {
+      saveOpenClawSupervisorState(dataDir, tick.nextState);
+      return emitOpenClawSupervise(parsed, io, tick);
+    } catch (saveError) {
+      if (tick.emit) {
+        return emitOpenClawSupervise(parsed, io, tick, {
+          statePersistence: "failed"
+        });
+      }
+      throw saveError;
+    }
   } catch (error) {
     const code = openClawFailureCode(error);
     return emitOpenClawSuperviseFailure(parsed, io, {

@@ -12,11 +12,19 @@ export type OpenClawRendererFailure = {
   exitCode?: number;
 };
 
+export type OpenClawRendererStatePersistence = "saved" | "failed";
+
 export function emitOpenClawSupervise(
   parsed: { json: boolean },
   io: CliIo,
-  tick: OpenClawSupervisorTick
+  tick: OpenClawSupervisorTick,
+  options: { statePersistence?: OpenClawRendererStatePersistence } = {}
 ): number {
+  const statePersistence = options.statePersistence ?? "saved";
+  const inspectionCommand = sanitizeInspectionCommand(
+    tick.inspectionCommand,
+    tick.runId
+  );
   const payload = {
     ok: true,
     command: "openclaw supervise",
@@ -31,7 +39,7 @@ export function emitOpenClawSupervise(
     nextPollSeconds: tick.nextPollSeconds,
     humanAction: tick.humanAction,
     stuckRisk: tick.stuckRisk,
-    inspectionCommand: tick.inspectionCommand,
+    inspectionCommand,
     monitorEnabled: tick.monitorEnabled,
     cleanupAction: tick.cleanupAction,
     state: {
@@ -41,12 +49,14 @@ export function emitOpenClawSupervise(
       lastReason: tick.nextState.lastReason,
       lastHumanUpdateAt: tick.nextState.lastHumanUpdateAt,
       disabled: tick.nextState.disabled,
-      updatedAt: tick.nextState.updatedAt
+      updatedAt: tick.nextState.updatedAt,
+      persisted: statePersistence === "saved"
     },
     debug: {
       watchEmit: tick.watchEmit,
       suppressedReason: tick.suppressedReason,
-      stateChanged: tick.stateChanged
+      stateChanged: tick.stateChanged,
+      statePersistence
     }
   };
 
@@ -55,7 +65,7 @@ export function emitOpenClawSupervise(
     return 0;
   }
 
-  write(io.stdout, renderOpenClawSuperviseText(tick));
+  write(io.stdout, renderOpenClawSuperviseText(tick, statePersistence));
   return 0;
 }
 
@@ -82,7 +92,14 @@ export function emitOpenClawSuperviseFailure(
   return exitCode;
 }
 
-function renderOpenClawSuperviseText(tick: OpenClawSupervisorTick): string {
+function renderOpenClawSuperviseText(
+  tick: OpenClawSupervisorTick,
+  statePersistence: OpenClawRendererStatePersistence
+): string {
+  const inspectionCommand = sanitizeInspectionCommand(
+    tick.inspectionCommand,
+    tick.runId
+  );
   const lines = [
     `OpenClaw supervise: ${tick.runId}`,
     `Mode: once`,
@@ -94,7 +111,8 @@ function renderOpenClawSuperviseText(tick: OpenClawSupervisorTick): string {
     `Monitor enabled: ${tick.monitorEnabled}`,
     `Cleanup action: ${tick.cleanupAction ?? "(none)"}`,
     `Digest: ${tick.digest}`,
-    `Suppressed reason: ${tick.suppressedReason ?? "(none)"}`
+    `Suppressed reason: ${tick.suppressedReason ?? "(none)"}`,
+    `State persistence: ${statePersistence}`
   ];
   if (tick.humanAction !== null) {
     lines.push(`Human action: ${tick.humanAction.command}`);
@@ -102,9 +120,22 @@ function renderOpenClawSuperviseText(tick: OpenClawSupervisorTick): string {
       lines.push(`Human action detail: ${tick.humanAction.detail}`);
     }
   }
-  if (tick.inspectionCommand !== null) {
-    lines.push(`Inspection command: ${tick.inspectionCommand}`);
+  if (inspectionCommand !== null) {
+    lines.push(`Inspection command: ${inspectionCommand}`);
   }
   lines.push("");
   return lines.join("\n");
+}
+
+function sanitizeInspectionCommand(
+  command: string | null,
+  runId: string
+): string | null {
+  if (command === null) return null;
+  if (!/(^|\s)--data-dir(?:=|\s|$)/.test(command)) return command;
+  return `momentum workflow run monitor ${shellQuote(runId)} --data-dir <data-dir> --advance --json`;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }

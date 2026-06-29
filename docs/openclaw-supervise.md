@@ -33,6 +33,12 @@ changed, and repeated `stuck_risk` advisories are delivered when the watcher
 says they are due. Suppressed ticks still update local state so a later change or
 due advisory can be evaluated correctly.
 
+If the workflow watcher has already returned an emitted advisory but the local
+OpenClaw supervisor state cannot be saved, the command still returns the
+advisory for delivery. The JSON `state.persisted` and
+`debug.statePersistence` fields report that the local state write failed without
+including filesystem paths.
+
 When a terminal watch envelope asks for `cleanup: "release"`, the OpenClaw
 envelope reports `monitorEnabled: false` and `cleanupAction: "remove_monitor"`.
 Hosts should treat that as the signal to stop polling this run and remove their
@@ -71,12 +77,14 @@ With `--json`, successful output is written to stdout:
     "lastReason": "quiet_heartbeat",
     "lastHumanUpdateAt": 1731500000000,
     "disabled": false,
-    "updatedAt": 1731500000000
+    "updatedAt": 1731500000000,
+    "persisted": true
   },
   "debug": {
     "watchEmit": true,
     "suppressedReason": null,
-    "stateChanged": true
+    "stateChanged": true,
+    "statePersistence": "saved"
   }
 }
 ```
@@ -86,6 +94,10 @@ when the tick should stay silent. `debug.watchEmit` preserves the upstream watch
 decision, while `debug.suppressedReason` explains why OpenClaw suppressed a
 watch-emitted or watch-silent tick (`watch_silent`, `heartbeat`,
 `duplicate_digest`, `not_human_worthy`, or `monitor_disabled`).
+`inspectionCommand`, when present for a stuck-risk advisory, uses a
+`<data-dir>` placeholder instead of exposing the resolved local data directory.
+`state.persisted: false` and `debug.statePersistence: "failed"` mean the host
+should deliver the advisory but treat the supervisor state as not durably saved.
 
 ## Failures and refusals
 

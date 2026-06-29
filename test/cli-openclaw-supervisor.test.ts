@@ -122,6 +122,61 @@ describe("momentum openclaw supervise", () => {
     expect(JSON.stringify(secondJson)).not.toContain(dataDir);
   });
 
+  it("sanitizes inspection commands in JSON and text output", async () => {
+    const dataDir = makeTempDir();
+    const payload = watch({
+      reason: "stuck_risk",
+      stuckRisk: "high",
+      inspectionCommand: `momentum workflow run monitor 'cwfp-openclaw-cli' --data-dir '${dataDir}' --advance --json`,
+      digest: "sha256:stuck-risk"
+    });
+
+    const jsonResult = await run(
+      [
+        "openclaw",
+        "supervise",
+        "cwfp-openclaw-cli",
+        "--once",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      payload
+    );
+
+    expect(jsonResult.code, jsonResult.stderr).toBe(0);
+    expect(jsonResult.stderr).toBe("");
+    expect(jsonResult.stdout).not.toContain(dataDir);
+    expect(JSON.parse(jsonResult.stdout)).toMatchObject({
+      inspectionCommand:
+        "momentum workflow run monitor 'cwfp-openclaw-cli' --data-dir <data-dir> --advance --json"
+    });
+
+    const textResult = await run(
+      [
+        "openclaw",
+        "supervise",
+        "cwfp-openclaw-cli-text",
+        "--once",
+        "--data-dir",
+        dataDir
+      ],
+      watch({
+        runId: "cwfp-openclaw-cli-text",
+        reason: "stuck_risk",
+        stuckRisk: "high",
+        inspectionCommand: `momentum workflow run monitor cwfp-openclaw-cli-text --data-dir=${dataDir} --advance --json`,
+        digest: "sha256:stuck-risk-text"
+      })
+    );
+
+    expect(textResult.code, textResult.stderr).toBe(0);
+    expect(textResult.stdout).not.toContain(dataDir);
+    expect(textResult.stdout).toContain(
+      "Inspection command: momentum workflow run monitor 'cwfp-openclaw-cli-text' --data-dir <data-dir> --advance --json"
+    );
+  });
+
   it("requires cron-safe --once mode", async () => {
     const dataDir = makeTempDir();
     const result = await run(
@@ -159,7 +214,7 @@ describe("momentum openclaw supervise", () => {
         dataDir,
         "--json"
       ],
-      watch({})
+      watch({ emit: false })
     );
 
     expect(jsonResult.code).toBe(1);
@@ -182,7 +237,7 @@ describe("momentum openclaw supervise", () => {
         "--data-dir",
         dataDir
       ],
-      watch({})
+      watch({ emit: false })
     );
 
     expect(textResult.code).toBe(1);
@@ -191,5 +246,46 @@ describe("momentum openclaw supervise", () => {
       "OpenClaw supervisor failed while processing the run.\n"
     );
     expect(textResult.stderr).not.toContain(dataDir);
+  });
+
+  it("preserves emitted advisories when local state persistence fails", async () => {
+    const dataDir = makeTempDir();
+    fs.writeFileSync(path.join(dataDir, "openclaw-supervisor"), "blocked");
+
+    const result = await run(
+      [
+        "openclaw",
+        "supervise",
+        "cwfp-openclaw-cli",
+        "--once",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      watch({
+        reason: "stuck_risk",
+        stuckRisk: "high",
+        inspectionCommand: `momentum workflow run monitor cwfp-openclaw-cli --data-dir '${dataDir}' --advance --json`,
+        digest: "sha256:state-save-failed"
+      })
+    );
+
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).not.toContain(dataDir);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      emit: true,
+      eventType: "stuck-risk",
+      inspectionCommand:
+        "momentum workflow run monitor 'cwfp-openclaw-cli' --data-dir <data-dir> --advance --json",
+      state: {
+        persisted: false
+      },
+      debug: {
+        statePersistence: "failed"
+      }
+    });
   });
 });
