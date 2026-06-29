@@ -22,9 +22,9 @@ src/index.ts -> src/cli.ts -> src/commands/ registry + command families -> domai
 `src/cli.ts` owns top-level parsing, global compatibility flags, route
 dispatch, and the remaining daemon / recovery / worker / doctor compatibility
 surfaces. Extracted command-family modules own the read-only status family,
-workflow, goal, source, evidence, project rollup, and update-intent / intent
-surfaces. Shared help, IO, reusable source / evidence / intent JSON shapes, and
-daemon / recovery / worker / doctor output contracts live under
+workflow, OpenClaw, goal, source, evidence, project rollup, and update-intent /
+intent surfaces. Shared help, IO, reusable source / evidence / intent JSON
+shapes, and daemon / recovery / worker / doctor output contracts live under
 `src/renderers/`.
 
 Infrastructure-facing clients and runtime adapters that used to sit as flat
@@ -32,8 +32,8 @@ Infrastructure-facing clients and runtime adapters that used to sit as flat
 opening helpers, git transactions, Linear HTTP / source / external-update
 adapters and refresh clients, fake / trusted-shell / ACP runner adapters and
 configs, live wrapper / harness-probe adapters for OpenClaw-facing execution,
-the opt-in coding-workflow live-wrapper CLI adapter, and no-mistakes executor /
-orchestrator wrappers.
+the opt-in coding-workflow live-wrapper CLI adapter, OpenClaw watch-process
+adapter, and no-mistakes executor / orchestrator wrappers.
 
 ## Deeper Contracts
 
@@ -67,7 +67,7 @@ src/renderers/            text / JSON envelope rendering helpers
 src/adapters/             infrastructure-facing clients and runtime adapters
 src/config/               env, path, and default-resolution support
 src/shared/               cross-cutting helpers with no narrower domain owner
-src/core/<domain>/        workflow, executors, goal, source, intent, daemon, repo, evidence
+src/core/<domain>/        workflow, executors, openclaw, goal, source, intent, daemon, repo, evidence
 ```
 
 The target post-M11 source taxonomy is `src/commands/`, `src/renderers/`,

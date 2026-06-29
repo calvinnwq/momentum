@@ -16,6 +16,16 @@ or scheduler. State lives under the resolved Momentum data directory, using the
 same precedence as other commands: `--data-dir`, then `MOMENTUM_HOME`, then
 `~/.momentum`.
 
+Required arguments:
+
+- `<run-id>` - the Momentum-native workflow run to supervise.
+
+Options:
+
+- `--once` - run one bounded scheduler-safe tick. Required.
+- `--data-dir <path>` - select the Momentum data directory.
+- `--json` - write the success envelope to stdout as JSON and structured failures to stderr.
+
 ## Behaviour
 
 Each invocation wraps `workflow run watch <run-id> --once --json`. The underlying
@@ -32,6 +42,11 @@ due approval or recovery reminders are delivered even when the digest has not
 changed, and repeated `stuck_risk` advisories are delivered when the watcher
 says they are due. Suppressed ticks still update local state so a later change or
 due advisory can be evaluated correctly.
+
+The persisted state file is
+`<data-dir>/openclaw-supervisor/<encoded-run-id>.json`, where the file name is
+`encodeURIComponent(runId)`. It is local delivery state only; the workflow run
+state, step state, gates, approvals, and events remain in `momentum.db`.
 
 If the workflow watcher has already returned an emitted advisory but the local
 OpenClaw supervisor state cannot be saved, the command still returns the
@@ -99,6 +114,49 @@ watch-emitted or watch-silent tick (`watch_silent`, `heartbeat`,
 `state.persisted: false` and `debug.statePersistence: "failed"` mean the host
 should deliver the advisory but treat the supervisor state as not durably saved.
 
+### Field meanings
+
+| Field | Type | Meaning |
+|------|------|---------|
+| `ok` | boolean | Always `true` for a rendered tick; failures use the error envelope below. |
+| `command` | string | Always `"openclaw supervise"`. |
+| `mode` | string | Always `"once"`. |
+| `runId` | string | The supervised workflow run id. |
+| `emit` | boolean | OpenClaw delivery decision. `false` means the host should stay silent. |
+| `eventType` | enum \| null | `progress`, `approval`, `recovery`, `stuck-risk`, `terminal`, or `null` when suppressed. |
+| `reason` | string | Upstream watch reason for this tick. |
+| `digest` | string | Upstream watch progress digest used for duplicate suppression. |
+| `cursor` | string \| null | Upstream watch cursor, when present. |
+| `recommendedAction` | string | Upstream watch recommendation (`poll`, `approve`, `operator_decision`, `recover`, or `release`). |
+| `nextPollSeconds` | number | Suggested delay before the host calls `openclaw supervise` again. |
+| `humanAction` | object \| null | Operator command from the watch envelope, or `null` when no operator command is required. |
+| `stuckRisk` | string | Upstream watch stuck-risk value. |
+| `inspectionCommand` | string \| null | Sanitized stuck-risk inspection command with `<data-dir>` replacing the resolved path. |
+| `monitorEnabled` | boolean | `false` after terminal cleanup disables further polling for this run. |
+| `cleanupAction` | enum \| null | `remove_monitor` when the host should remove its external monitor registration. |
+| `state` | object | Next local OpenClaw supervisor state, plus `persisted` to report whether it was saved. |
+| `debug` | object | Watch/suppression diagnostics for host logs. |
+
+## Text output
+
+Without `--json`, successful output is written to stdout in a stable summary:
+
+```text
+OpenClaw supervise: run-1
+Mode: once
+Emit: true
+Event type: approval
+Reason: quiet_heartbeat
+Recommended action: approve
+Next poll seconds: 30
+Monitor enabled: true
+Cleanup action: (none)
+Digest: sha256:...
+Suppressed reason: (none)
+State persistence: saved
+Human action: momentum workflow run approve run-1 --approval-boundary through-implementation --phrase "approve plan run-1 through-implementation"
+```
+
 ## Failures and refusals
 
 Failures are sanitized and do not include resolved data-directory paths. In
@@ -119,3 +177,23 @@ Common refusal codes include `run_id_required`, `once_required`,
 `workflow run watch --once --json`, such as unsupported source, missing run, or
 data-directory failures. Text mode writes the same operational summary or
 failure message without exposing local data-directory paths.
+
+### Error codes
+
+| Code | Meaning |
+|------|---------|
+| `run_id_required` | `<run-id>` was not supplied. |
+| `once_required` | `--once` was omitted, or stream/jsonl mode was requested. |
+| `data_dir_failed` | Data directory resolution failed. |
+| `watch_spawn_failed` | The wrapped `workflow run watch --once --json` process could not be started. |
+| `watch_parse_failed` | The wrapped watch command returned invalid or unexpected JSON. |
+| `watch_run_mismatch` | The wrapped watch command returned a different run id. |
+| `watch_failed` | The wrapped watch command exited unsuccessfully without a structured refusal code. |
+| `openclaw_supervisor_failed` | Local OpenClaw supervisor state processing failed. |
+| `run_not_found` | Propagated from `workflow run watch`; the run does not exist. |
+| `watch_unsupported_source` | Propagated from `workflow run watch`; the run source is not supported for one-shot watch supervision. |
+
+Other structured refusal codes from `workflow run watch --once --json` may pass
+through unchanged.
+
+Exit code 0 on success, 1 on structured refusal, 2 on usage error.
