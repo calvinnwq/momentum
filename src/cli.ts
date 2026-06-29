@@ -16,6 +16,7 @@ import { source } from "./commands/source/index.js";
 import { project } from "./commands/project/index.js";
 import { evidence } from "./commands/evidence/index.js";
 import { intent } from "./commands/intent/index.js";
+import { openclaw } from "./commands/openclaw/index.js";
 import { workflow } from "./commands/workflow/index.js";
 import { intentApplyAuditToJsonShape } from "./renderers/intent.js";
 import { sourceReconciliationPaginationStopped } from "./renderers/source.js";
@@ -99,6 +100,7 @@ import {
 } from "./core/intent/apply-audits.js";
 import { type LinearExternalUpdateClient } from "./adapters/linear-external-update-client.js";
 import { type LinearIssueRefreshClient } from "./adapters/linear-issue-refresh.js";
+import type { OpenClawWatchOnce } from "./adapters/openclaw-watch-runner.js";
 
 export const VERSION = "0.0.0";
 export const DOCTOR_MILESTONE =
@@ -131,6 +133,7 @@ export type CliDeps = {
   buildLinearIssueRefreshClient?: (
     input: LinearIssueRefreshClientFactoryInput
   ) => LinearIssueRefreshClient | null;
+  openClawWatchOnce?: OpenClawWatchOnce;
 };
 
 type ParsedFlags = {
@@ -251,7 +254,10 @@ export async function runCli(
     status,
     logs,
     handoff,
-    extraRoutes: [{ command: "workflow", run: workflow }]
+    extraRoutes: [
+      { command: "workflow", run: workflow },
+      { command: "openclaw", run: openclaw }
+    ]
   });
   const routedCommand = await dispatchMomentumCommand(commandRegistry, {
     parsed,
