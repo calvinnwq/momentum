@@ -181,10 +181,24 @@ function selectSuppressedReason(
   duplicate: boolean
 ): OpenClawSupervisorSuppressedReason | null {
   if (!watch.emit) return "watch_silent";
-  if (watch.reason === "quiet_heartbeat") return "heartbeat";
-  if (duplicate) return "duplicate_digest";
+  const dueHumanAdvisory = isDueHumanAdvisory(watch, eventType);
+  if (watch.reason === "quiet_heartbeat" && !dueHumanAdvisory) {
+    return "heartbeat";
+  }
+  if (duplicate && !dueHumanAdvisory) return "duplicate_digest";
   if (eventType === null) return "not_human_worthy";
   return null;
+}
+
+function isDueHumanAdvisory(
+  watch: OpenClawSupervisorWatchEnvelope,
+  eventType: OpenClawSupervisorEventType | null
+): boolean {
+  return (
+    watch.reason === "stuck_risk" ||
+    (watch.reason === "quiet_heartbeat" &&
+      (eventType === "approval" || eventType === "recovery"))
+  );
 }
 
 function classifyOpenClawSupervisorEvent(

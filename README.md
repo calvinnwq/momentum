@@ -79,6 +79,7 @@ momentum workflow import --path <run-dir> [--data-dir <path>] [--json]
 momentum workflow status [<run-id>] [options]
 momentum workflow handoff <run-id> [--data-dir <path>] [--json]
 momentum workflow run start|start-coding|preview-coding|approve|decide|list|update-step|clear-recovery|events|monitor|watch|logs [options]
+momentum openclaw supervise <run-id> --once [--data-dir <path>] [--json]
 momentum doctor [--repo <path>] [--data-dir <path>] [--json]
 ```
 

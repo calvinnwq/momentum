@@ -123,6 +123,92 @@ describe("buildOpenClawSupervisorTick", () => {
     expect(tick.nextState.lastReason).toBe("recovery_required");
   });
 
+  it("honors due approval quiet heartbeat reminders from the watch reducer", () => {
+    const first = buildOpenClawSupervisorTick({
+      priorState: null,
+      watch: watch({
+        reason: "quiet_heartbeat",
+        recommendedAction: "approve",
+        humanAction: {
+          code: "approve",
+          command: "momentum workflow run approve cwfp-openclaw --boundary next",
+          detail: null
+        },
+        digest: "sha256:approval-reminder"
+      }),
+      now: NOW
+    });
+    const second = buildOpenClawSupervisorTick({
+      priorState: first.nextState,
+      watch: watch({
+        reason: "quiet_heartbeat",
+        recommendedAction: "approve",
+        humanAction: {
+          code: "approve",
+          command: "momentum workflow run approve cwfp-openclaw --boundary next",
+          detail: null
+        },
+        digest: "sha256:approval-reminder"
+      }),
+      now: NOW + 60_000
+    });
+
+    expect(second).toMatchObject({
+      emit: true,
+      eventType: "approval",
+      suppressedReason: null
+    });
+    expect(second.nextState.lastHumanUpdateAt).toBe(NOW + 60_000);
+  });
+
+  it("keeps idle-only quiet heartbeats silent", () => {
+    const tick = buildOpenClawSupervisorTick({
+      priorState: null,
+      watch: watch({
+        reason: "quiet_heartbeat",
+        recommendedAction: "poll",
+        digest: "sha256:idle-reminder"
+      }),
+      now: NOW
+    });
+
+    expect(tick).toMatchObject({
+      emit: false,
+      eventType: null,
+      suppressedReason: "heartbeat"
+    });
+  });
+
+  it("honors repeated stuck risk advisories from the watch reducer", () => {
+    const first = buildOpenClawSupervisorTick({
+      priorState: null,
+      watch: watch({
+        reason: "stuck_risk",
+        stuckRisk: "high",
+        inspectionCommand: "momentum workflow run logs cwfp-openclaw",
+        digest: "sha256:stuck"
+      }),
+      now: NOW
+    });
+    const second = buildOpenClawSupervisorTick({
+      priorState: first.nextState,
+      watch: watch({
+        reason: "stuck_risk",
+        stuckRisk: "high",
+        inspectionCommand: "momentum workflow run logs cwfp-openclaw",
+        digest: "sha256:stuck"
+      }),
+      now: NOW + 60_000
+    });
+
+    expect(second).toMatchObject({
+      emit: true,
+      eventType: "stuck-risk",
+      suppressedReason: null
+    });
+    expect(second.nextState.lastHumanUpdateAt).toBe(NOW + 60_000);
+  });
+
   it("marks terminal cleanup so a host can remove the monitor loop", () => {
     const tick = buildOpenClawSupervisorTick({
       priorState: null,
