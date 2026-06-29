@@ -49,6 +49,18 @@ describe("public docs hygiene", () => {
     });
   });
 
+  describe("OpenClaw supervise examples", () => {
+    it("uses the valid workflow approval flag in human action examples", () => {
+      const doc = publicSurfaces.find(
+        (surface) => surface.file === "docs/openclaw-supervise.md"
+      )?.body;
+
+      expect(doc).toContain("--approval-boundary");
+      expect(doc).toContain("through-implementation");
+      expect(doc).not.toMatch(/workflow run approve[^\n"]* --boundary(?:\s|=)/);
+    });
+  });
+
   describe("no NGX/Linear issue identifiers", () => {
     for (const surface of publicSurfaces) {
       it(`${surface.label} must not reference NGX-* issue identifiers`, () => {

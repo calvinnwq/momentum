@@ -1386,9 +1386,11 @@ external. A chat, cron, or supervisor wrapper should call:
 momentum workflow run monitor <run-id> --advance --json
 ```
 
-Use `workflow run watch <run-id> --once --json` instead when the supervisor
-should also run one bounded target-run dispatcher tick before reading the same
-projection.
+Use `workflow run watch <run-id> --once --json` instead when a generic
+supervisor should also run one bounded target-run dispatcher tick before reading
+the same projection. Use [`openclaw supervise`](openclaw-supervise.md) when the
+caller is an OpenClaw delivery loop that also needs per-run delivery suppression
+state and terminal monitor cleanup.
 
 Then branch on the JSON instead of scraping text.
 For `workflow run monitor --advance --json`, use the nested `progress` projection:
@@ -1478,6 +1480,7 @@ momentum workflow run watch <run-id> --stream --jsonl [--since <cursor>] [--data
 
 `--once` emits a one-shot supervisor tick for a Momentum-native coding workflow run.
 The command reads the durable monitor projection, persists this tick's advisory digest / timestamp baseline, and returns a compact next-action envelope for cron, OpenClaw, or GUI pollers.
+OpenClaw hosts that need chat-delivery suppression, path-sanitized inspection commands, and terminal monitor cleanup should call [`openclaw supervise`](openclaw-supervise.md), which wraps this one-shot watch envelope and stores its own local delivery state.
 It does not resolve approvals, gates, manual recovery, or other operator decisions.
 
 `--stream --jsonl` opens a long-lived JSONL stream over the same durable event cursor API as `workflow run events`.

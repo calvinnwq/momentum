@@ -9,6 +9,7 @@ See also:
 - [docs/failure-reset.md](failure-reset.md) — per-iteration outcome matrix and `verification.log` capture rules.
 - [docs/recovery.md](recovery.md) — `recovery.md` artifact and the `needs_manual_recovery` flag.
 - [docs/runners.md](runners.md) — `trusted-shell` / `acp` runner profiles and the per-profile `result_file` override.
+- [docs/openclaw-supervise.md](openclaw-supervise.md) — OpenClaw supervisor state files written by `openclaw supervise`.
 
 ## Resolution chain
 
@@ -25,6 +26,8 @@ Momentum never modifies the data directory outside the resolved path. Each goal 
 ```text
 <data-dir>/
   momentum.db                  # SQLite (goals, jobs, events, repo_locks, daemon_runs, source_items, source_snapshots, source_reconciliation_runs, evidence_records, update_intents, intent_apply_audits, workflow_runs, workflow_steps, workflow_approvals, workflow_leases, workflow_events, workflow_definitions, step_definitions, executor_* tables)
+  openclaw-supervisor/
+    <encoded-run-id>.json      # Per-run OpenClaw supervise cursor/digest suppression state
   goals/
     <goal-id>/
       goal.md                  # Canonical copy of the goal spec
@@ -86,6 +89,12 @@ Files at `<data-dir>/goals/<goal-id>/`:
 - `handoff.md` — populated by `momentum handoff`; an empty placeholder file is created at init time.
 - `handoff.json` — populated by `momentum handoff` (schema v1); starts as `{}` at init time.
 - `recovery.md` — written lazily when a goal transitions to `needs_manual_recovery`. Intentionally left on disk after `recovery clear` as durable evidence.
+
+## OpenClaw supervisor state files
+
+Files at `<data-dir>/openclaw-supervisor/`:
+
+- `<encoded-run-id>.json` — per-run state for `momentum openclaw supervise`, keyed by `encodeURIComponent(runId)`. The file stores the last watch cursor, digest, reason, last delivered human-update timestamp, disabled monitor flag, and update timestamp so repeated scheduler calls can suppress duplicate OpenClaw deliveries while preserving terminal cleanup retries.
 
 ## Per-iteration artifact files
 

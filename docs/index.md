@@ -23,6 +23,7 @@ For a quick install / quick-start, see the [README](https://github.com/calvinnwq
 - [Evidence commands](evidence-commands.md)
 - [Intent commands](intent-commands.md)
 - [Workflow commands](workflow-commands.md)
+- [OpenClaw supervise](openclaw-supervise.md)
 - [Doctor](doctor.md)
 
 ## Concepts
