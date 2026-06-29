@@ -144,4 +144,52 @@ describe("momentum openclaw supervise", () => {
       code: "once_required"
     });
   });
+
+  it("sanitizes state persistence failure paths", async () => {
+    const dataDir = makeTempDir();
+    fs.writeFileSync(path.join(dataDir, "openclaw-supervisor"), "blocked");
+
+    const jsonResult = await run(
+      [
+        "openclaw",
+        "supervise",
+        "cwfp-openclaw-cli",
+        "--once",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      watch({})
+    );
+
+    expect(jsonResult.code).toBe(1);
+    expect(jsonResult.stdout).toBe("");
+    expect(jsonResult.stderr).not.toContain(dataDir);
+    expect(JSON.parse(jsonResult.stderr)).toMatchObject({
+      ok: false,
+      command: "openclaw supervise",
+      code: "openclaw_supervisor_failed",
+      message: "OpenClaw supervisor failed while processing the run.",
+      runId: "cwfp-openclaw-cli"
+    });
+
+    const textResult = await run(
+      [
+        "openclaw",
+        "supervise",
+        "cwfp-openclaw-cli",
+        "--once",
+        "--data-dir",
+        dataDir
+      ],
+      watch({})
+    );
+
+    expect(textResult.code).toBe(1);
+    expect(textResult.stdout).toBe("");
+    expect(textResult.stderr).toBe(
+      "OpenClaw supervisor failed while processing the run.\n"
+    );
+    expect(textResult.stderr).not.toContain(dataDir);
+  });
 });

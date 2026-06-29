@@ -1,4 +1,7 @@
-import { runOpenClawWorkflowWatchOnce } from "../../adapters/openclaw-watch-runner.js";
+import {
+  OpenClawWatchRunnerError,
+  runOpenClawWorkflowWatchOnce
+} from "../../adapters/openclaw-watch-runner.js";
 import type { OpenClawWatchOnce } from "../../adapters/openclaw-watch-runner.js";
 import { resolveDataDir, type DataDirOptions } from "../../config/data-dir.js";
 import {
@@ -123,17 +126,54 @@ async function openClawSupervise(
     saveOpenClawSupervisorState(dataDir, tick.nextState);
     return emitOpenClawSupervise(parsed, io, tick);
   } catch (error) {
-    const code =
-      typeof error === "object" &&
-      error !== null &&
-      "code" in error &&
-      typeof error.code === "string"
-        ? error.code
-        : "openclaw_supervisor_failed";
+    const code = openClawFailureCode(error);
     return emitOpenClawSuperviseFailure(parsed, io, {
       code,
-      message: error instanceof Error ? error.message : String(error),
+      message: openClawFailureMessage(error, code, dataDir),
       runId
     });
+  }
+}
+
+function openClawFailureCode(error: unknown): string {
+  if (error instanceof OpenClawWatchRunnerError) return error.code;
+  return "openclaw_supervisor_failed";
+}
+
+function openClawFailureMessage(
+  error: unknown,
+  code: string,
+  dataDir: string
+): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  if (containsUnsafePath(raw, dataDir)) {
+    return genericOpenClawFailureMessage(code);
+  }
+  return raw;
+}
+
+function containsUnsafePath(message: string, dataDir: string): boolean {
+  if (dataDir.length > 0 && message.includes(dataDir)) return true;
+  const normalized = message.replaceAll("\\", "/");
+  return /(^|[\s'"])(\/(?!\/)[^\s'"]+)/.test(normalized) ||
+    /[A-Za-z]:\//.test(normalized);
+}
+
+function genericOpenClawFailureMessage(code: string): string {
+  switch (code) {
+    case "data_dir_failed":
+      return "Momentum data directory is unavailable.";
+    case "watch_parse_failed":
+      return "Momentum watch returned an invalid response.";
+    case "watch_spawn_failed":
+      return "Momentum watch could not be started.";
+    case "watch_failed":
+      return "Momentum watch failed.";
+    case "run_not_found":
+      return "Workflow run was not found.";
+    case "watch_unsupported_source":
+      return "Workflow watch is not supported for this run source.";
+    default:
+      return "OpenClaw supervisor failed while processing the run.";
   }
 }
