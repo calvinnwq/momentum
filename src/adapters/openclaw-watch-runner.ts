@@ -15,6 +15,22 @@ export type OpenClawWatchOnce = (
   input: OpenClawWatchOnceInput
 ) => Promise<OpenClawSupervisorWatchEnvelope>;
 
+export type OpenClawWatchProcessCommand = {
+  command: string;
+  args: string[];
+};
+
+export type BuildOpenClawWatchProcessCommandInput = {
+  runId: string;
+  dataDir: string;
+  nodePath?: string;
+  nodeExecArgv?: readonly string[];
+  distEntrypoint?: string;
+  distExists?: boolean;
+  argvEntrypoint?: string | undefined;
+  argvEntrypointExists?: boolean;
+};
+
 export class OpenClawWatchRunnerError extends Error {
   readonly code: string;
 
@@ -95,21 +111,10 @@ export function parseOpenClawWatchOutput(
 async function runMomentumWatchProcess(
   input: OpenClawWatchOnceInput
 ): Promise<string> {
-  const entrypoint = resolveMomentumEntrypoint();
-  const args = [
-    entrypoint,
-    "workflow",
-    "run",
-    "watch",
-    input.runId,
-    "--once",
-    "--data-dir",
-    input.dataDir,
-    "--json"
-  ];
+  const command = buildOpenClawWatchProcessCommand(input);
 
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, args, {
+    const child = spawn(command.command, command.args, {
       env: input.env,
       stdio: ["ignore", "pipe", "pipe"]
     });
@@ -152,6 +157,28 @@ async function runMomentumWatchProcess(
   });
 }
 
+export function buildOpenClawWatchProcessCommand(
+  input: BuildOpenClawWatchProcessCommandInput
+): OpenClawWatchProcessCommand {
+  const entrypoint = resolveMomentumEntrypoint(input);
+  const args = [
+    ...entrypoint.nodeExecArgv,
+    entrypoint.file,
+    "workflow",
+    "run",
+    "watch",
+    input.runId,
+    "--once",
+    "--data-dir",
+    input.dataDir,
+    "--json"
+  ];
+  return {
+    command: input.nodePath ?? process.execPath,
+    args
+  };
+}
+
 export function parseOpenClawWatchFailureOutput(
   stderr: string
 ): { code: string; message: string } | null {
@@ -168,13 +195,31 @@ export function parseOpenClawWatchFailureOutput(
   return parseOpenClawWatchFailureRecord(payload as Record<string, unknown>);
 }
 
-function resolveMomentumEntrypoint(): string {
+function resolveMomentumEntrypoint(input: {
+  nodeExecArgv?: readonly string[];
+  distEntrypoint?: string;
+  distExists?: boolean;
+  argvEntrypoint?: string | undefined;
+  argvEntrypointExists?: boolean;
+}): { file: string; nodeExecArgv: readonly string[] } {
   const adapterFile = fileURLToPath(import.meta.url);
-  const distIndex = path.resolve(path.dirname(adapterFile), "..", "index.js");
-  if (fs.existsSync(distIndex)) return distIndex;
-  const argvEntrypoint = process.argv[1];
-  if (argvEntrypoint && fs.existsSync(argvEntrypoint)) return argvEntrypoint;
-  return distIndex;
+  const distIndex =
+    input.distEntrypoint ??
+    path.resolve(path.dirname(adapterFile), "..", "index.js");
+  const distExists = input.distExists ?? fs.existsSync(distIndex);
+  if (distExists) return { file: distIndex, nodeExecArgv: [] };
+
+  const argvEntrypoint = input.argvEntrypoint ?? process.argv[1];
+  const argvEntrypointExists =
+    input.argvEntrypointExists ??
+    (argvEntrypoint !== undefined && fs.existsSync(argvEntrypoint));
+  if (argvEntrypoint && argvEntrypointExists) {
+    return {
+      file: argvEntrypoint,
+      nodeExecArgv: input.nodeExecArgv ?? process.execArgv
+    };
+  }
+  return { file: distIndex, nodeExecArgv: [] };
 }
 
 function parseHumanAction(
