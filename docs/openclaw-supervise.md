@@ -63,7 +63,7 @@ With `--json`, successful output is written to stdout:
   "nextPollSeconds": 30,
   "humanAction": {
     "code": "approve",
-    "command": "momentum workflow run approve run-1 --boundary next",
+    "command": "momentum workflow run approve run-1 --approval-boundary through-implementation --phrase \"approve plan run-1 through-implementation\"",
     "detail": null
   },
   "stuckRisk": "low",

@@ -145,7 +145,7 @@ export function buildOpenClawSupervisorDisabledTick(input: {
     nextPollSeconds: 0,
     stuckRisk: "low",
     inspectionCommand: null,
-    cleanupAction: null,
+    cleanupAction: "remove_monitor",
     monitorEnabled: false,
     suppressedReason: "monitor_disabled",
     nextState,

@@ -288,4 +288,73 @@ describe("momentum openclaw supervise", () => {
       }
     });
   });
+
+  it("repeats cleanup action after terminal state disables monitoring", async () => {
+    const dataDir = makeTempDir();
+    const args = [
+      "openclaw",
+      "supervise",
+      "cwfp-openclaw-cli",
+      "--once",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ];
+
+    const first = await run(
+      args,
+      watch({
+        reason: "terminal_succeeded",
+        cleanup: "release",
+        digest: "sha256:terminal",
+        nextPollSeconds: 0
+      })
+    );
+    expect(first.code, first.stderr).toBe(0);
+    expect(JSON.parse(first.stdout)).toMatchObject({
+      emit: true,
+      eventType: "terminal",
+      monitorEnabled: false,
+      cleanupAction: "remove_monitor",
+      state: {
+        disabled: true,
+        persisted: true
+      }
+    });
+
+    let watchCalls = 0;
+    let stdout = "";
+    let stderr = "";
+    const secondCode = await runCli(
+      args,
+      {
+        stdout: { write: (chunk: string) => ((stdout += chunk), true) },
+        stderr: { write: (chunk: string) => ((stderr += chunk), true) },
+        env: {}
+      },
+      {
+        openClawWatchOnce: async () => {
+          watchCalls += 1;
+          return watch({});
+        }
+      }
+    );
+
+    expect(secondCode, stderr).toBe(0);
+    expect(stderr).toBe("");
+    expect(watchCalls).toBe(0);
+    expect(JSON.parse(stdout)).toMatchObject({
+      emit: false,
+      eventType: null,
+      monitorEnabled: false,
+      cleanupAction: "remove_monitor",
+      debug: {
+        suppressedReason: "monitor_disabled"
+      },
+      state: {
+        disabled: true,
+        persisted: true
+      }
+    });
+  });
 });

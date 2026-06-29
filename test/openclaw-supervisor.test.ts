@@ -4,9 +4,11 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  buildOpenClawSupervisorDisabledTick,
   buildOpenClawSupervisorTick,
   loadOpenClawSupervisorState,
   saveOpenClawSupervisorState,
+  type OpenClawSupervisorState,
   type OpenClawSupervisorWatchEnvelope
 } from "../src/core/openclaw/supervisor.js";
 
@@ -131,7 +133,8 @@ describe("buildOpenClawSupervisorTick", () => {
         recommendedAction: "approve",
         humanAction: {
           code: "approve",
-          command: "momentum workflow run approve cwfp-openclaw --boundary next",
+          command:
+            "momentum workflow run approve cwfp-openclaw --approval-boundary through-implementation",
           detail: null
         },
         digest: "sha256:approval-reminder"
@@ -145,7 +148,8 @@ describe("buildOpenClawSupervisorTick", () => {
         recommendedAction: "approve",
         humanAction: {
           code: "approve",
-          command: "momentum workflow run approve cwfp-openclaw --boundary next",
+          command:
+            "momentum workflow run approve cwfp-openclaw --approval-boundary through-implementation",
           detail: null
         },
         digest: "sha256:approval-reminder"
@@ -226,6 +230,34 @@ describe("buildOpenClawSupervisorTick", () => {
       eventType: "terminal",
       cleanupAction: "remove_monitor",
       monitorEnabled: false
+    });
+    expect(tick.nextState.disabled).toBe(true);
+  });
+
+  it("repeats terminal cleanup for disabled supervisor state retries", () => {
+    const disabledState: OpenClawSupervisorState = {
+      version: 1,
+      runId: "cwfp-openclaw",
+      lastCursor: "wfcur1.done",
+      lastDigest: "sha256:terminal",
+      lastReason: "terminal_succeeded",
+      lastHumanUpdateAt: NOW,
+      disabled: true,
+      updatedAt: NOW
+    };
+
+    const tick = buildOpenClawSupervisorDisabledTick({
+      runId: "cwfp-openclaw",
+      state: disabledState,
+      now: NOW + 5_000
+    });
+
+    expect(tick).toMatchObject({
+      emit: false,
+      eventType: null,
+      cleanupAction: "remove_monitor",
+      monitorEnabled: false,
+      suppressedReason: "monitor_disabled"
     });
     expect(tick.nextState.disabled).toBe(true);
   });
