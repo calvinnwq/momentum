@@ -1489,7 +1489,7 @@ momentum workflow run watch <run-id> --stream --jsonl [--since <cursor>] [--data
 `--once` emits a one-shot supervisor tick for a Momentum-native coding workflow run.
 The command reads the durable monitor projection, persists this tick's advisory digest / timestamp baseline, and returns a compact next-action envelope for cron, OpenClaw, or GUI pollers.
 OpenClaw hosts that need chat-delivery suppression, path-sanitized inspection commands, Discord/OpenClaw delivery intents, and terminal monitor cleanup should call [`openclaw supervise`](openclaw-supervise.md), which wraps this one-shot watch envelope and stores its own local delivery state.
-That wrapper also config-gates and audits its own local auto-actions before and after local state persistence; the raw watch command only reports `recommendedActionPolicy` and does not write OpenClaw auto-action audit files.
+That wrapper also config-gates and audits its own local auto-actions before any local state write, records the intended saved status before that write, and appends a matching failed status row if the write fails; the raw watch command only reports `recommendedActionPolicy` and does not write OpenClaw auto-action audit files.
 When the wrapper's local auto-action audit fails closed, it suppresses its own monitor-removal cleanup hint and surfaces a human-required OpenClaw escalation instead of changing the raw watch contract.
 It does not resolve approvals, gates, manual recovery, or other operator decisions.
 

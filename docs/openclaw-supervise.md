@@ -73,8 +73,8 @@ removing its registration without re-enabling the monitor.
 OpenClaw local auto-actions are limited to the explicitly supported `auto_allowed` policy actions: `watch_recheck`, `monitor_recheck`, `stale_lease_auto_release`, and `release_monitor`.
 Each attempted auto-action appends an initial audit record under `<data-dir>/openclaw-supervisor/<encoded-run-id>.auto-actions.jsonl` before the local state change is applied.
 The record includes the action type, policy action, reason, before and after digest/state snapshots, timestamp, result, and any failure or human escalation.
-Successful actions append a second required audit record after state persistence with `statePersistence: "saved"` or `"failed"`.
-`release_monitor` is repeat-bounded to three saved successful audit attempts for the same digest; failed or skipped persistence records do not reset that saved count.
+Successful actions append a second required audit record before the local state write with `statePersistence: "saved"`; if that write later fails, the supervisor appends a matching `statePersistence: "failed"` record for the same attempt.
+`release_monitor` is repeat-bounded to three saved successful audit attempts for the same digest, counting only saved attempts that do not have a matching failed status row; failed rows cancel only their own attempt and skipped records do not count.
 A fourth attempt for an enabled monitor keeps polling, clears cleanup, and escalates for human review.
 An already disabled monitor stays disabled at the repeat bound, does not append another auto-action audit record, and keeps repeating the cleanup hint so the host can remove its registration.
 The action fails closed when prior audit evidence is unreadable, invalid, digest-mismatched, or belongs to another run, when an `auto_allowed` policy is unsupported, or when required audit evidence cannot be written at either point.
@@ -250,7 +250,7 @@ When fail-closed handling suppresses monitor removal, both `deliveryIntent.clean
 | `afterState` | object | Local supervisor state snapshot the action leaves for persistence. |
 | `timestamp` | number | Epoch-millisecond time the auto-action record was produced. |
 | `result` | enum | `success`, `skipped`, or `failed`. |
-| `statePersistence` | enum \| null | `saved` or `failed` for rendered successful auto-actions. Audit records use `pending` before state persistence is attempted. Skipped and failed actions use `null`. |
+| `statePersistence` | enum \| null | `saved` or `failed` for rendered successful auto-actions. Audit records use `pending` for the initial pre-state-write record, `saved` for the required pre-state-write status record, and `failed` when the matching state write fails. Skipped actions and failed audit writes use `null`. |
 | `error` | string \| null | Sanitized failure or skip reason, if any. |
 | `escalation` | enum \| null | `human_required` when the supervisor failed closed and the host/operator should review the action. |
 

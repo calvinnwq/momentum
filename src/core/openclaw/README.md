@@ -12,7 +12,7 @@ rules, and loading/saving the per-run suppression state and audit files.
 | Concern | Modules |
 | --- | --- |
 | Supervisor tick and state | `supervisor.ts` |
-| Config-gated local auto-actions and initial/final audit evidence | `auto-actions.ts` |
+| Config-gated local auto-actions and pre-state-write audit evidence | `auto-actions.ts` |
 | Delivery intent mapping | `delivery-intent.ts` |
 
 `supervisor.ts`, `auto-actions.ts`, and `delivery-intent.ts` do not parse CLI arguments, format
@@ -29,8 +29,7 @@ Auto-action audit records are appended beside that state as
 `<data-dir>/openclaw-supervisor/<encoded-run-id>.auto-actions.jsonl`.
 The auto-action core owns the fail-closed policy for unsupported actions,
 bounded `release_monitor` repeats, invalid or unreadable audit evidence, and
-initial or final audit write failures before the renderer exposes sanitized
-output.
+pre-state-write audit failures before the renderer exposes sanitized output.
 
 ## Boundaries
 
