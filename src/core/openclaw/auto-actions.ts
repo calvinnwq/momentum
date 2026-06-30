@@ -291,19 +291,35 @@ function isOpenClawSupervisorAutoActionAuditRecord(
   runId: string
 ): value is OpenClawSupervisorAutoActionResult {
   if (!isObject(value)) return false;
+  if (
+    !(
+      typeof value.actionType === "string" &&
+      typeof value.policyAction === "string" &&
+      typeof value.reason === "string" &&
+      isStringOrNull(value.beforeDigest) &&
+      typeof value.afterDigest === "string" &&
+      isOpenClawSupervisorStateOrNull(value.beforeState, runId) &&
+      isOpenClawSupervisorState(value.afterState, runId) &&
+      typeof value.timestamp === "number" &&
+      isAutoActionResult(value.result) &&
+      isAutoActionStatePersistence(value.statePersistence) &&
+      isStringOrNull(value.error) &&
+      isAutoActionEscalation(value.escalation)
+    )
+  ) {
+    return false;
+  }
+  return autoActionRecordDigestsMatchStates(
+    value as OpenClawSupervisorAutoActionResult
+  );
+}
+
+function autoActionRecordDigestsMatchStates(
+  value: OpenClawSupervisorAutoActionResult
+): boolean {
   return (
-    typeof value.actionType === "string" &&
-    typeof value.policyAction === "string" &&
-    typeof value.reason === "string" &&
-    isStringOrNull(value.beforeDigest) &&
-    typeof value.afterDigest === "string" &&
-    isOpenClawSupervisorStateOrNull(value.beforeState, runId) &&
-    isOpenClawSupervisorState(value.afterState, runId) &&
-    typeof value.timestamp === "number" &&
-    isAutoActionResult(value.result) &&
-    isAutoActionStatePersistence(value.statePersistence) &&
-    isStringOrNull(value.error) &&
-    isAutoActionEscalation(value.escalation)
+    value.beforeDigest === (value.beforeState?.lastDigest ?? null) &&
+    value.afterDigest === value.afterState.lastDigest
   );
 }
 

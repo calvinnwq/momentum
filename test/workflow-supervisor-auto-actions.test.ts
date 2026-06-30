@@ -153,6 +153,10 @@ describe("OpenClaw supervisor auto-actions", () => {
       disabled: false,
       updatedAt: NOW
     };
+    const afterState = {
+      ...nullableState,
+      lastDigest: "sha256:nullable-state"
+    };
     fs.writeFileSync(
       path.join(auditDir, `${encodeURIComponent(runId)}.auto-actions.jsonl`),
       `${JSON.stringify({
@@ -162,7 +166,7 @@ describe("OpenClaw supervisor auto-actions", () => {
         beforeDigest: null,
         afterDigest: "sha256:nullable-state",
         beforeState: nullableState,
-        afterState: nullableState,
+        afterState,
         timestamp: NOW,
         result: "success",
         statePersistence: "saved",
@@ -178,7 +182,7 @@ describe("OpenClaw supervisor auto-actions", () => {
           lastReason: null
         },
         afterState: {
-          lastDigest: null,
+          lastDigest: "sha256:nullable-state",
           lastReason: null
         }
       }
@@ -221,6 +225,137 @@ describe("OpenClaw supervisor auto-actions", () => {
     expect(() =>
       loadOpenClawSupervisorAutoActionAudit(dataDir, runId)
     ).toThrow("Invalid OpenClaw supervisor auto-action audit record.");
+  });
+
+  it("rejects audit records whose top-level digests disagree with state", () => {
+    const dataDir = makeTempDir();
+    const auditDir = path.join(dataDir, "openclaw-supervisor");
+    fs.mkdirSync(auditDir, { recursive: true });
+    const runId = "mwf-auto-actions";
+    const beforeState = {
+      version: 1,
+      runId,
+      lastCursor: null,
+      lastDigest: "sha256:before-state",
+      lastReason: "terminal_succeeded",
+      lastHumanUpdateAt: NOW,
+      disabled: false,
+      updatedAt: NOW
+    };
+    const afterState = {
+      ...beforeState,
+      lastDigest: "sha256:after-state",
+      disabled: true,
+      updatedAt: NOW + 1
+    };
+
+    for (const record of [
+      {
+        beforeDigest: "sha256:different-before",
+        afterDigest: "sha256:after-state",
+        beforeState,
+        afterState
+      },
+      {
+        beforeDigest: "sha256:before-state",
+        afterDigest: "sha256:different-after",
+        beforeState,
+        afterState
+      }
+    ]) {
+      fs.writeFileSync(
+        path.join(auditDir, `${encodeURIComponent(runId)}.auto-actions.jsonl`),
+        `${JSON.stringify({
+          actionType: "release_monitor",
+          policyAction: "release_monitor",
+          reason: "terminal_succeeded",
+          timestamp: NOW,
+          result: "success",
+          statePersistence: "saved",
+          error: null,
+          escalation: null,
+          ...record
+        })}\n`
+      );
+
+      expect(() =>
+        loadOpenClawSupervisorAutoActionAudit(dataDir, runId)
+      ).toThrow("Invalid OpenClaw supervisor auto-action audit record.");
+    }
+  });
+
+  it("fails closed when prior repeat-limit audit digests disagree with state", () => {
+    const dataDir = makeTempDir();
+    const auditDir = path.join(dataDir, "openclaw-supervisor");
+    fs.mkdirSync(auditDir, { recursive: true });
+    const runId = "mwf-auto-actions";
+    const currentDigest = "sha256:terminal-corrupt-repeat";
+    const afterState = {
+      version: 1,
+      runId,
+      lastCursor: null,
+      lastDigest: "sha256:foreign-terminal-repeat",
+      lastReason: "terminal_succeeded",
+      lastHumanUpdateAt: NOW,
+      disabled: true,
+      updatedAt: NOW
+    };
+    const records = Array.from({ length: 3 }, (_, index) => ({
+      actionType: "release_monitor",
+      policyAction: "release_monitor",
+      reason: "terminal_succeeded",
+      beforeDigest: null,
+      afterDigest: currentDigest,
+      beforeState: null,
+      afterState: {
+        ...afterState,
+        updatedAt: NOW + index
+      },
+      timestamp: NOW + index,
+      result: "success",
+      statePersistence: "saved",
+      error: null,
+      escalation: null
+    }));
+    fs.writeFileSync(
+      path.join(auditDir, `${encodeURIComponent(runId)}.auto-actions.jsonl`),
+      records.map((record) => JSON.stringify(record)).join("\n") + "\n"
+    );
+    const tick = buildOpenClawSupervisorTick({
+      priorState: null,
+      watch: watch({
+        reason: "terminal_succeeded",
+        recommendedAction: "release",
+        recommendedActionPolicy: releasePolicy(),
+        cleanup: "release",
+        digest: currentDigest,
+        nextPollSeconds: 0,
+        phase: "terminal"
+      }),
+      now: NOW
+    });
+
+    const result = executeOpenClawSupervisorAutoAction({
+      dataDir,
+      priorState: null,
+      tick,
+      now: NOW,
+      enabled: true
+    });
+
+    expect(result.autoAction).toMatchObject({
+      actionType: "release_monitor",
+      result: "skipped",
+      escalation: "human_required",
+      error: "Auto-action audit evidence is unreadable."
+    });
+    expect(result.tick).toMatchObject({
+      cleanupAction: null,
+      monitorEnabled: true,
+      nextState: {
+        disabled: false
+      }
+    });
   });
 
   it("keeps the monitor enabled and audits when auto-actions are disabled", () => {
