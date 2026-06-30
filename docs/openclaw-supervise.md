@@ -54,7 +54,8 @@ advisory for delivery. The JSON `state.persisted` and
 `debug.statePersistence` fields report that the local state write failed without
 including filesystem paths.
 
-When a terminal watch envelope asks for `cleanup: "release"`, the OpenClaw
+When a terminal watch envelope asks for `cleanup: "release"` and its
+`recommendedActionPolicy` explicitly allows `release_monitor`, the OpenClaw
 envelope reports `monitorEnabled: false` and `cleanupAction: "remove_monitor"`.
 Hosts should treat that as the signal to stop polling this run and remove their
 external monitor registration.
@@ -188,7 +189,7 @@ should deliver the advisory but treat the supervisor state as not durably saved.
 | `inspectionCommand` | string \| null | Sanitized stuck-risk inspection command with `<data-dir>` replacing the resolved path. |
 | `deliveryIntent` | object \| null | Short host-delivery contract for Discord/OpenClaw. `null` means stay silent. |
 | `monitorEnabled` | boolean | `false` after terminal cleanup disables further polling for this run. |
-| `cleanupAction` | enum \| null | `remove_monitor` when the host should remove its external monitor registration. |
+| `cleanupAction` | enum \| null | `remove_monitor` when the host should remove its external monitor registration. This is emitted only when terminal cleanup is paired with an `auto_allowed` `release_monitor` policy. |
 | `state` | object | Next local OpenClaw supervisor state, plus `persisted` to report whether it was saved. |
 | `debug` | object | Watch/suppression diagnostics for host logs. |
 
@@ -204,7 +205,7 @@ should deliver the advisory but treat the supervisor state as not durably saved.
 | `message` | object | Delivery formatting contract: Discord plain text, no allowed mentions, and the maximum text length. |
 | `dedupeKey` | string | Host idempotency key for a delivery attempt. Repeated due reminders include the latest supervisor timestamp so intentional repeats can be delivered. |
 | `reminderKey` | string \| null | Stable reminder group for approval, recovery, and stuck-risk reminders; otherwise `null`. |
-| `cleanup` | object \| null | Terminal cleanup hint. `remove_monitor` means the host should stop polling this run and remove the external monitor registration. |
+| `cleanup` | object \| null | Terminal cleanup hint. `remove_monitor` means the host should stop polling this run and remove the external monitor registration; it is present only after the upstream `release_monitor` policy allowed terminal cleanup. |
 | `failure` | object | Host retry policy for failed webhook or wake attempts. Failures are retryable, should be logged at warn, have no Momentum state impact, and can be retried by repeating `openclaw supervise`. |
 
 ## Text output

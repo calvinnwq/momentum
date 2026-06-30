@@ -1424,8 +1424,9 @@ For `workflow run watch --once --json`, use the frozen top-level supervisor enve
   invalid, treat every non-wait action as `human_required`.
 - Render concise human text from `reason`, `activeStep`, `nextAction.detail`,
   and `humanAction.command` / `humanAction.detail` when `humanAction` is present.
-- Stop and clean up the wrapper when `recommendedAction` is `"release"` and
-  `cleanup` is `"release"`; keep polling recoverable failures while
+- Stop and clean up the wrapper when `recommendedAction` is `"release"`,
+  `cleanup` is `"release"`, and `recommendedActionPolicy` allows
+  `release_monitor`; keep polling recoverable failures while
   `recommendedAction` is `"operator_decision"` or `"recover"`.
 
 The source eligibility check for `workflow run monitor --advance` and
@@ -1676,6 +1677,11 @@ Progress tick - a step is advancing under a fresh lease, so keep polling quietly
   "nextAction": { "code": "resume_running", "stepId": "implementation" },
   "humanAction": null,
   "recommendedAction": "poll",
+  "recommendedActionPolicy": {
+    "action": "watch_recheck",
+    "authority": "auto_allowed",
+    "risk": "low"
+  },
   "nextPollSeconds": 15,
   "quietForSeconds": 0,
   "quietThresholdSeconds": 900,
@@ -1694,6 +1700,11 @@ Unchanged tick - a repeated identical poll below the quiet threshold suppresses 
   "disposition": "wait",
   "phase": "advancing",
   "recommendedAction": "poll",
+  "recommendedActionPolicy": {
+    "action": "watch_recheck",
+    "authority": "auto_allowed",
+    "risk": "low"
+  },
   "nextPollSeconds": 15,
   "quietForSeconds": 24,
   "quietThresholdSeconds": 900,
@@ -1714,6 +1725,11 @@ Stuck risk - a repeated identical active-execution poll reaches the active step'
   "phase": "advancing",
   "activeStep": { "stepId": "implementation", "state": "running" },
   "recommendedAction": "poll",
+  "recommendedActionPolicy": {
+    "action": "watch_recheck",
+    "authority": "auto_allowed",
+    "risk": "low"
+  },
   "nextPollSeconds": 15,
   "quietForSeconds": 900,
   "quietThresholdSeconds": 900,
@@ -1733,6 +1749,11 @@ Approval required - the next step is gated on operator approval:
   "disposition": "report",
   "phase": "awaiting_approval",
   "recommendedAction": "approve",
+  "recommendedActionPolicy": {
+    "action": "approval_decision",
+    "authority": "human_required",
+    "risk": "medium"
+  },
   "nextPollSeconds": 30,
   "quietForSeconds": 0,
   "quietThresholdSeconds": 1800,
@@ -1756,6 +1777,11 @@ Recovery required - the run is flagged for manual recovery and can be cleared di
   "disposition": "recover",
   "phase": "blocked",
   "recommendedAction": "recover",
+  "recommendedActionPolicy": {
+    "action": "clear_recovery",
+    "authority": "human_required",
+    "risk": "high"
+  },
   "nextPollSeconds": 30,
   "quietForSeconds": 0,
   "quietThresholdSeconds": 3600,
@@ -1781,6 +1807,11 @@ Idle risk - the run is `running` but exposes no active step, so the tick keeps p
   "phase": "idle",
   "activeStep": null,
   "recommendedAction": "poll",
+  "recommendedActionPolicy": {
+    "action": "watch_recheck",
+    "authority": "auto_allowed",
+    "risk": "low"
+  },
   "nextPollSeconds": 15,
   "quietForSeconds": 0,
   "quietThresholdSeconds": 900,
@@ -1803,6 +1834,11 @@ Terminal success - the run finished cleanly, so the wrapper reports once and sto
   "nextAction": { "code": "no_action", "stepId": null },
   "humanAction": null,
   "recommendedAction": "release",
+  "recommendedActionPolicy": {
+    "action": "release_monitor",
+    "authority": "auto_allowed",
+    "risk": "low"
+  },
   "nextPollSeconds": 0,
   "quietForSeconds": 0,
   "quietThresholdSeconds": 0,
@@ -1823,6 +1859,11 @@ Recoverable failure - a required step failed, so an operator must inspect and de
   "nextAction": { "code": "rerun_failed_step", "stepId": "implementation" },
   "humanAction": null,
   "recommendedAction": "operator_decision",
+  "recommendedActionPolicy": {
+    "action": "operator_decision",
+    "authority": "human_required",
+    "risk": "medium"
+  },
   "nextPollSeconds": 30,
   "quietForSeconds": 0,
   "quietThresholdSeconds": 3600,
@@ -1839,12 +1880,13 @@ A cron, OpenClaw, or GUI poller branches on the envelope instead of scraping tex
 - Suppress the update when `emit` is `false`.
   A suppressed tick repeats the prior `reason`, `phase`, and `digest`, so no new human update is warranted.
 - Treat `reason: "quiet_heartbeat"` and `reason: "stuck_risk"` as throttled advisory updates only. They do not mean the run or step failed; inspect with `inspectionCommand` when present and keep polling unless another field asks for operator action or release.
+- Check `recommendedActionPolicy` before executing or suppressing any behavior from `recommendedAction`; absent or invalid policy is fail-closed and makes every non-wait action human-required.
 - Otherwise branch on `recommendedAction`:
   - `poll` - work is advancing or idle; wait `nextPollSeconds` and tick again.
   - `approve` - run `humanAction.command` (a `workflow run approve` call) to release the approval gate.
   - `operator_decision` - a required step failed or a gate is open; an operator inspects and chooses via `workflow run decide` or a rerun, so `humanAction` may be `null`.
   - `recover` - run `humanAction.command` (a `workflow run clear-recovery` call, with `--evidence-pointer` for external-side-effect steps) after resolving the underlying cause.
-  - `release` - the run reached a clean terminal state (`cleanup: "release"`, `nextAction.code: "no_action"`); report once and stop polling.
+  - `release` - the run reached a clean terminal state (`cleanup: "release"`, `nextAction.code: "no_action"`); report once and stop polling only when `recommendedActionPolicy` allows `release_monitor`.
 - `emit` is the machine-polling signal and `reason` / `humanAction` are the human-facing content: decide whether to speak from `emit`, and what to say from `reason`, `activeStep`, `nextAction.detail`, and `humanAction`.
 - The envelope carries enough to render a concise human update for the common path - `reason`, `activeStep`, and `nextAction.detail`, plus `humanAction.command` / `detail` when an action is required - without a follow-up `workflow status` read.
 
@@ -1874,6 +1916,7 @@ Disposition: wait
 Phase: advancing
 Next action: resume_running
 Recommended action: poll
+Recommended action policy: auto_allowed (low)
 Next poll seconds: 15
 Quiet for seconds: 0
 Quiet threshold seconds: 900
