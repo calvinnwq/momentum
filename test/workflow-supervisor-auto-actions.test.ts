@@ -396,6 +396,40 @@ describe("OpenClaw supervisor auto-actions", () => {
     expect(result.tick.stateChanged).toBe(true);
   });
 
+  it("uses a distinct delivery dedupe key for auto-action escalations", () => {
+    const dataDir = makeTempDir();
+    const tick = buildOpenClawSupervisorTick({
+      priorState: null,
+      watch: watch({
+        recommendedActionPolicy: {
+          action: "future_auto_unblock",
+          authority: "auto_allowed",
+          risk: "low",
+          evidenceRequired: ["future policy evidence"],
+          rollback: "Stop polling.",
+          rationale: "Future policy has not been implemented locally."
+        },
+        digest: "sha256:auto-escalation-dedupe"
+      }),
+      now: NOW
+    });
+
+    const result = executeOpenClawSupervisorAutoAction({
+      dataDir,
+      priorState: null,
+      tick,
+      now: NOW,
+      enabled: true
+    });
+
+    expect(result.tick.deliveryIntent?.dedupeKey).not.toBe(
+      tick.deliveryIntent?.dedupeKey
+    );
+    expect(result.tick.deliveryIntent?.dedupeKey).toBe(
+      "openclaw-delivery:mwf-auto-actions:in_progress:sha256:auto-escalation-dedupe:auto-action:future_auto_unblock:skipped:human_required"
+    );
+  });
+
   it("escalates when repeated release attempts pass the bounded limit", () => {
     const dataDir = makeTempDir();
     const firstTick = buildOpenClawSupervisorTick({
@@ -626,6 +660,51 @@ describe("OpenClaw supervisor auto-actions", () => {
       deliveryIntent: {
         severity: "action_required"
       },
+      cleanupAction: null,
+      monitorEnabled: true,
+      nextState: {
+        disabled: false
+      }
+    });
+  });
+
+  it("escalates when prior audit evidence has an invalid shape", () => {
+    const dataDir = makeTempDir();
+    const auditDir = path.join(dataDir, "openclaw-supervisor");
+    fs.mkdirSync(auditDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(auditDir, `${encodeURIComponent("mwf-auto-actions")}.auto-actions.jsonl`),
+      "{}\n"
+    );
+    const tick = buildOpenClawSupervisorTick({
+      priorState: null,
+      watch: watch({
+        reason: "terminal_succeeded",
+        recommendedAction: "release",
+        recommendedActionPolicy: releasePolicy(),
+        cleanup: "release",
+        digest: "sha256:terminal-malformed-audit",
+        nextPollSeconds: 0,
+        phase: "terminal"
+      }),
+      now: NOW
+    });
+
+    const result = executeOpenClawSupervisorAutoAction({
+      dataDir,
+      priorState: null,
+      tick,
+      now: NOW,
+      enabled: true
+    });
+
+    expect(result.autoAction).toMatchObject({
+      actionType: "release_monitor",
+      result: "skipped",
+      escalation: "human_required",
+      error: "Auto-action audit evidence is unreadable."
+    });
+    expect(result.tick).toMatchObject({
       cleanupAction: null,
       monitorEnabled: true,
       nextState: {

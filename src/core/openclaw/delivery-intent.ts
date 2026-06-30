@@ -226,11 +226,14 @@ function deliveryDedupeKey(
   tick: OpenClawDeliveryIntentInput,
   reminder: string | null
 ): string {
-  const base = `openclaw-delivery:${tick.runId}:${tick.reason}:${tick.digest}`;
-  if (reminder === null || !isRepeatableReminderReason(tick.reason)) {
-    return base;
+  let key = `openclaw-delivery:${tick.runId}:${tick.reason}:${tick.digest}`;
+  if (tick.autoAction?.escalation === "human_required") {
+    key = `${key}:auto-action:${encodeURIComponent(tick.autoAction.actionType)}:${tick.autoAction.result}:${tick.autoAction.escalation}`;
   }
-  return `${base}:${tick.nextState.lastHumanUpdateAt ?? tick.nextState.updatedAt}`;
+  if (reminder === null || !isRepeatableReminderReason(tick.reason)) {
+    return key;
+  }
+  return `${key}:${tick.nextState.lastHumanUpdateAt ?? tick.nextState.updatedAt}`;
 }
 
 function isRepeatableReminderReason(reason: string): boolean {
