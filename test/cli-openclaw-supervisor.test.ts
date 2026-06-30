@@ -894,6 +894,82 @@ describe("momentum openclaw supervise", () => {
     }
   });
 
+  it("fails closed when final auto-action audit state persistence cannot be written", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-openclaw-final-audit";
+    const auditPath = path.join(
+      dataDir,
+      "openclaw-supervisor",
+      `${encodeURIComponent(runId)}.auto-actions.jsonl`
+    );
+    const statePath = path.join(
+      dataDir,
+      "openclaw-supervisor",
+      `${encodeURIComponent(runId)}.json`
+    );
+    const originalAppendFileSync = fs.appendFileSync;
+    let auditWriteCount = 0;
+    vi.spyOn(fs, "appendFileSync").mockImplementation(
+      (file, data, options) => {
+        if (file === auditPath) {
+          auditWriteCount += 1;
+          if (auditWriteCount === 2) {
+            throw new Error(`ENOSPC: no space left, open '${auditPath}'`);
+          }
+        }
+        return originalAppendFileSync(file, data, options);
+      }
+    );
+
+    const result = await run(
+      [
+        "openclaw",
+        "supervise",
+        runId,
+        "--once",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      watch({
+        runId,
+        digest: "sha256:final-audit-status-failed"
+      })
+    );
+
+    expect(result.code, result.stderr).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).not.toContain(dataDir);
+    expect(fs.existsSync(statePath)).toBe(true);
+    expect(auditWriteCount).toBe(2);
+    expect(JSON.parse(result.stderr)).toMatchObject({
+      ok: false,
+      code: "openclaw_auto_action_audit_failed",
+      emit: true,
+      eventType: "progress",
+      deliveryIntent: {
+        kind: "progress",
+        severity: "action_required",
+        text:
+          "Human review required for cwfp-openclaw-final-audit: OpenClaw supervisor auto-action watch_recheck did not complete."
+      },
+      autoAction: {
+        actionType: "watch_recheck",
+        result: "failed",
+        error: "Auto-action audit evidence could not be written.",
+        escalation: "human_required"
+      },
+      state: {
+        persisted: false
+      },
+      debug: {
+        autoActionResult: "failed",
+        autoActionEscalation: "human_required",
+        statePersistence: "failed"
+      }
+    });
+  });
+
   it("does not save supervisor state when required auto-action audit cannot be written", async () => {
     const dataDir = makeTempDir();
     const runId = "cwfp-openclaw-cli";

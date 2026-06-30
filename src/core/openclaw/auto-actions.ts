@@ -229,12 +229,19 @@ export function recordOpenClawSupervisorAutoActionStatePersistence(
   runId: string,
   record: OpenClawSupervisorAutoActionResult,
   statePersistence: "saved" | "failed"
-): void {
-  if (record.result !== "success") return;
-  appendAutoActionAuditBestEffort(dataDir, runId, {
+): OpenClawSupervisorAutoActionResult | null {
+  if (record.result !== "success") return null;
+  return appendRequiredAutoActionAudit(dataDir, runId, {
     ...record,
     statePersistence
   });
+}
+
+export function withOpenClawSupervisorAutoActionResult(
+  tick: OpenClawSupervisorTick,
+  autoAction: OpenClawSupervisorAutoActionResult
+): OpenClawSupervisorTick {
+  return withAutoAction(tick, autoAction);
 }
 
 export function loadOpenClawSupervisorAutoActionAudit(
