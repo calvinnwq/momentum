@@ -270,6 +270,58 @@ describe("momentum workflow run watch", () => {
     expect(payload.digest.startsWith("sha256:")).toBe(true);
   });
 
+  it("keeps healthy external-tail progress pollable instead of human-required", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-watch-merge-cleanup-progress";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "running" });
+      seedStep(db, {
+        runId,
+        stepId: "merge-cleanup",
+        kind: "merge-cleanup",
+        state: "running",
+        order: 4
+      });
+      seedLease(db, {
+        runId,
+        leaseKind: "managed-step",
+        expiresAt: FRESH_EXPIRY
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "watch",
+      runId,
+      "--once",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      recommendedAction: string;
+      recommendedActionPolicy: {
+        action: string;
+        authority: string;
+        risk: string;
+      };
+    };
+    expect(payload).toMatchObject({
+      recommendedAction: "poll",
+      recommendedActionPolicy: {
+        action: "watch_recheck",
+        authority: "auto_allowed",
+        risk: "low"
+      }
+    });
+  });
+
   it("returns a pollable idle supervisor envelope when no step is active yet", async () => {
     const dataDir = makeTempDir();
     const runId = "cwfp-watch-idle";

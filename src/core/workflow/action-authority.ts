@@ -313,13 +313,15 @@ export function policyForWorkflowGateRecommendedAction(
 function workflowWatchPolicyKey(
   input: WorkflowWatchRecommendedActionPolicyInput
 ): WorkflowActionPolicyKey | string {
-  if (
-    input.recoveryCode === "failed_external_side_effect_step" ||
-    input.activeStepKind === "merge-cleanup" ||
-    input.activeStepKind === "linear-refresh" ||
-    input.nextActionStepId === "merge-cleanup" ||
-    input.nextActionStepId === "linear-refresh"
-  ) {
+  const isExternalTailRecovery =
+    input.recommendedAction === "recover" &&
+    (input.recoveryCode === "failed_external_side_effect_step" ||
+      input.nextActionCode === "clear_recovery") &&
+    (input.activeStepKind === "merge-cleanup" ||
+      input.activeStepKind === "linear-refresh" ||
+      input.nextActionStepId === "merge-cleanup" ||
+      input.nextActionStepId === "linear-refresh");
+  if (isExternalTailRecovery) {
     return input.activeStepKind === "linear-refresh" ||
       input.nextActionStepId === "linear-refresh"
       ? "linear_refresh"

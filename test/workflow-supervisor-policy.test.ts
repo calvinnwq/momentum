@@ -138,6 +138,15 @@ describe("workflow supervisor action authority policy", () => {
         activeStepKind: "implementation"
       })
     ).toMatchObject({ action: "watch_recheck", authority: "auto_allowed" });
+
+    expect(
+      policyForWorkflowWatchRecommendedAction({
+        recommendedAction: "poll",
+        nextActionCode: "resume_running",
+        recoveryCode: null,
+        activeStepKind: "merge-cleanup"
+      })
+    ).toMatchObject({ action: "watch_recheck", authority: "auto_allowed" });
   });
 
   it("classifies open gate recommendations without executing them", () => {
