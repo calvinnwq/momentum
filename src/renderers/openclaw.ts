@@ -16,6 +16,8 @@ export type OpenClawRendererFailure = {
   message: string;
   runId?: string;
   exitCode?: number;
+  tick?: OpenClawSupervisorTick;
+  statePersistence?: OpenClawRendererStatePersistence;
 };
 
 export type OpenClawRendererStatePersistence = "saved" | "failed";
@@ -27,6 +29,63 @@ export function emitOpenClawSupervise(
   options: { statePersistence?: OpenClawRendererStatePersistence } = {}
 ): number {
   const statePersistence = options.statePersistence ?? "saved";
+  const payload = {
+    ok: true,
+    command: "openclaw supervise",
+    ...buildOpenClawSuperviseDetails(tick, statePersistence)
+  };
+
+  if (parsed.json) {
+    writeJson(io.stdout, payload);
+    return 0;
+  }
+
+  write(io.stdout, renderOpenClawSuperviseText(tick, statePersistence));
+  return 0;
+}
+
+export function emitOpenClawSuperviseFailure(
+  parsed: { json: boolean },
+  io: CliIo,
+  failure: OpenClawRendererFailure
+): number {
+  const statePersistence = failure.statePersistence ?? "failed";
+  const payload = {
+    ok: false,
+    command: "openclaw supervise",
+    code: failure.code,
+    message: failure.message,
+    runId: failure.runId ?? failure.tick?.runId ?? null,
+    ...(failure.tick === undefined
+      ? {}
+      : buildOpenClawSuperviseDetails(failure.tick, statePersistence))
+  };
+  const exitCode = failure.exitCode ?? 1;
+
+  if (parsed.json) {
+    writeJson(io.stderr, payload);
+    return exitCode;
+  }
+
+  if (failure.tick !== undefined) {
+    write(
+      io.stderr,
+      `${failure.message}\n${renderOpenClawSuperviseText(
+        failure.tick,
+        statePersistence
+      )}`
+    );
+    return exitCode;
+  }
+
+  write(io.stderr, `${failure.message}\n`);
+  return exitCode;
+}
+
+function buildOpenClawSuperviseDetails(
+  tick: OpenClawSupervisorTick,
+  statePersistence: OpenClawRendererStatePersistence
+) {
   const inspectionCommand = sanitizeInspectionCommand(
     tick.inspectionCommand,
     tick.runId
@@ -36,9 +95,7 @@ export function emitOpenClawSupervise(
     tick.runId
   );
   const autoAction = sanitizeAutoAction(tick.autoAction, statePersistence);
-  const payload = {
-    ok: true,
-    command: "openclaw supervise",
+  return {
     mode: "once",
     runId: tick.runId,
     emit: tick.emit,
@@ -75,37 +132,6 @@ export function emitOpenClawSupervise(
       autoActionEscalation: tick.autoAction?.escalation ?? null
     }
   };
-
-  if (parsed.json) {
-    writeJson(io.stdout, payload);
-    return 0;
-  }
-
-  write(io.stdout, renderOpenClawSuperviseText(tick, statePersistence));
-  return 0;
-}
-
-export function emitOpenClawSuperviseFailure(
-  parsed: { json: boolean },
-  io: CliIo,
-  failure: OpenClawRendererFailure
-): number {
-  const payload = {
-    ok: false,
-    command: "openclaw supervise",
-    code: failure.code,
-    message: failure.message,
-    runId: failure.runId ?? null
-  };
-  const exitCode = failure.exitCode ?? 1;
-
-  if (parsed.json) {
-    writeJson(io.stderr, payload);
-    return exitCode;
-  }
-
-  write(io.stderr, `${failure.message}\n`);
-  return exitCode;
 }
 
 function renderOpenClawSuperviseText(

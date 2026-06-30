@@ -3,6 +3,7 @@ import path from "node:path";
 
 import type {
   OpenClawSupervisorAutoActionResult,
+  OpenClawSupervisorEventType,
   OpenClawSupervisorState,
   OpenClawSupervisorTick
 } from "./supervisor.js";
@@ -360,9 +361,13 @@ function withAutoAction(
   tick: OpenClawSupervisorTick,
   autoAction: OpenClawSupervisorAutoActionResult
 ): OpenClawSupervisorTick {
-  return {
+  const tickWithAutoAction = {
     ...tick,
     autoAction
+  };
+  return {
+    ...tickWithAutoAction,
+    deliveryIntent: buildOpenClawDeliveryIntent(tickWithAutoAction)
   };
 }
 
@@ -375,8 +380,11 @@ function failClosedAutoActionTick(
 }
 
 function escalateAutoAction(tick: OpenClawSupervisorTick): OpenClawSupervisorTick {
-  return {
-    ...suppressAutoAction(tick),
+  const suppressed = suppressAutoAction(tick);
+  const escalated = {
+    ...suppressed,
+    emit: true,
+    eventType: autoActionEscalationEventType(tick),
     recommendedActionPolicy: {
       ...tick.recommendedActionPolicy,
       authority: "human_required" as WorkflowActionAuthorityClass,
@@ -390,6 +398,42 @@ function escalateAutoAction(tick: OpenClawSupervisorTick): OpenClawSupervisorTic
         "Supervisor auto-actions fail closed when local policy support is missing or ambiguous."
     }
   };
+  return {
+    ...escalated,
+    deliveryIntent: buildOpenClawDeliveryIntent(escalated)
+  };
+}
+
+function autoActionEscalationEventType(
+  tick: OpenClawSupervisorTick
+): OpenClawSupervisorEventType {
+  if (tick.eventType !== null) return tick.eventType;
+  if (
+    tick.cleanupAction === "remove_monitor" ||
+    tick.reason === "terminal_succeeded" ||
+    tick.reason === "terminal_canceled"
+  ) {
+    return "terminal";
+  }
+  if (tick.reason === "stuck_risk") return "stuck-risk";
+  if (
+    tick.humanAction?.code === "clear_recovery" ||
+    tick.recommendedAction === "recover" ||
+    tick.reason === "recovery_required" ||
+    tick.reason === "monitor_drift"
+  ) {
+    return "recovery";
+  }
+  if (
+    tick.humanAction?.code === "approve" ||
+    tick.humanAction?.code === "resolve_gate" ||
+    tick.recommendedAction === "approve" ||
+    tick.recommendedAction === "operator_decision" ||
+    tick.reason === "awaiting_approval"
+  ) {
+    return "approval";
+  }
+  return "stuck-risk";
 }
 
 function statesEqualForAutoAction(

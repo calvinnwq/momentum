@@ -115,6 +115,9 @@ function deliverySeverity(
   tick: OpenClawDeliveryIntentInput,
   kind: OpenClawDeliveryIntentKind
 ): OpenClawDeliveryIntentSeverity {
+  if (tick.autoAction?.escalation === "human_required") {
+    return "action_required";
+  }
   switch (kind) {
     case "progress":
       return "info";
@@ -153,6 +156,11 @@ function deliveryText(
   kind: OpenClawDeliveryIntentKind,
   action: OpenClawDeliveryIntentAction | null
 ): string {
+  if (tick.autoAction?.escalation === "human_required") {
+    return oneLine(
+      `Human review required for ${tick.runId}: OpenClaw supervisor auto-action ${tick.autoAction.actionType} did not complete.`
+    );
+  }
   switch (kind) {
     case "progress":
       return oneLine(

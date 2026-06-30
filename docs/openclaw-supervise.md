@@ -72,7 +72,8 @@ OpenClaw local auto-actions are limited to explicitly supported
 local state change is applied. The record includes the action type, policy
 action, reason, before and after digest/state snapshots, timestamp, result, and
 any failure or human escalation. If audit evidence cannot be written, the action
-fails closed and the JSON/text envelope reports a human-required escalation.
+fails closed, the command exits nonzero, and the JSON/text failure output keeps
+the sanitized human-required escalation details.
 
 Momentum does not post Discord webhooks, wake OpenClaw lanes, remove external
 monitors, or tail verbose logs into chat. It only decides whether a short

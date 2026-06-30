@@ -13,7 +13,8 @@ import {
   buildOpenClawSupervisorDisabledTick,
   buildOpenClawSupervisorTick,
   loadOpenClawSupervisorState,
-  saveOpenClawSupervisorState
+  saveOpenClawSupervisorState,
+  type OpenClawSupervisorTick
 } from "../../core/openclaw/supervisor.js";
 import {
   emitOpenClawSupervise,
@@ -122,9 +123,11 @@ async function openClawSupervise(
         enabled: autoActionsEnabled
       });
       if (autoActionResult.autoAction?.result === "failed") {
-        return emitOpenClawSupervise(parsed, io, autoActionResult.tick, {
-          statePersistence: "failed"
-        });
+        return emitOpenClawAutoActionAuditFailure(
+          parsed,
+          io,
+          autoActionResult.tick
+        );
       }
       try {
         saveOpenClawSupervisorState(dataDir, autoActionResult.tick.nextState);
@@ -173,9 +176,11 @@ async function openClawSupervise(
       enabled: autoActionsEnabled
     });
     if (autoActionResult.autoAction?.result === "failed") {
-      return emitOpenClawSupervise(parsed, io, autoActionResult.tick, {
-        statePersistence: "failed"
-      });
+      return emitOpenClawAutoActionAuditFailure(
+        parsed,
+        io,
+        autoActionResult.tick
+      );
     }
     try {
       saveOpenClawSupervisorState(dataDir, autoActionResult.tick.nextState);
@@ -216,6 +221,20 @@ async function openClawSupervise(
       runId
     });
   }
+}
+
+function emitOpenClawAutoActionAuditFailure(
+  parsed: ParsedFlags,
+  io: CliIo,
+  tick: OpenClawSupervisorTick
+): number {
+  return emitOpenClawSuperviseFailure(parsed, io, {
+    code: "openclaw_auto_action_audit_failed",
+    message: "OpenClaw supervisor auto-action audit evidence could not be written.",
+    runId: tick.runId,
+    tick,
+    statePersistence: "failed"
+  });
 }
 
 function openClawFailureCode(error: unknown): string {

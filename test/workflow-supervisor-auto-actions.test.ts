@@ -162,10 +162,12 @@ describe("OpenClaw supervisor auto-actions", () => {
     });
 
     expect(result.tick).toMatchObject({
+      emit: true,
       cleanupAction: null,
       monitorEnabled: true,
       nextPollSeconds: 30,
       deliveryIntent: {
+        severity: "action_required",
         cleanup: null
       },
       nextState: {
@@ -567,6 +569,10 @@ describe("OpenClaw supervisor auto-actions", () => {
       risk: "high"
     });
     expect(result.tick).toMatchObject({
+      emit: true,
+      deliveryIntent: {
+        severity: "action_required"
+      },
       cleanupAction: null,
       monitorEnabled: true,
       nextState: {
@@ -615,6 +621,10 @@ describe("OpenClaw supervisor auto-actions", () => {
       disabled: false
     });
     expect(result.tick).toMatchObject({
+      emit: true,
+      deliveryIntent: {
+        severity: "action_required"
+      },
       cleanupAction: null,
       monitorEnabled: true,
       nextState: {
