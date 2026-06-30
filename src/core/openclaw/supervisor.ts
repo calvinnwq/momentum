@@ -99,8 +99,11 @@ export function buildOpenClawSupervisorTick(
     priorState.lastHumanUpdateAt !== null;
   const suppressedReason = selectSuppressedReason(watch, eventType, duplicate);
   const emit = suppressedReason === null;
+  const canReleaseMonitor =
+    watch.recommendedActionPolicy.action === "release_monitor" &&
+    watch.recommendedActionPolicy.authority === "auto_allowed";
   const cleanupAction: OpenClawSupervisorCleanupAction =
-    eventType === "terminal" && watch.cleanup === "release"
+    eventType === "terminal" && watch.cleanup === "release" && canReleaseMonitor
       ? "remove_monitor"
       : null;
   const monitorEnabled = cleanupAction === null;

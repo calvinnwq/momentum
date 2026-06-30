@@ -58,6 +58,19 @@ function watch(
   };
 }
 
+function releaseMonitorPolicy() {
+  return {
+    action: "release_monitor",
+    authority: "auto_allowed" as const,
+    risk: "low" as const,
+    evidenceRequired: ["terminal run state", "cleanup release signal"],
+    rollback:
+      "Re-register or resume the external monitor if more observation is needed.",
+    rationale:
+      "Releasing a supervisor monitor after terminal evidence only affects local/host polling registration."
+  };
+}
+
 async function run(
   args: string[],
   watchPayload: OpenClawSupervisorWatchEnvelope
@@ -394,6 +407,8 @@ describe("momentum openclaw supervise", () => {
       args,
       watch({
         reason: "terminal_succeeded",
+        recommendedAction: "release",
+        recommendedActionPolicy: releaseMonitorPolicy(),
         cleanup: "release",
         digest: "sha256:terminal",
         nextPollSeconds: 0
@@ -464,6 +479,8 @@ describe("momentum openclaw supervise", () => {
       args,
       watch({
         reason: "terminal_succeeded",
+        recommendedAction: "release",
+        recommendedActionPolicy: releaseMonitorPolicy(),
         cleanup: "release",
         digest: "sha256:terminal-readonly",
         nextPollSeconds: 0
@@ -539,6 +556,8 @@ describe("momentum openclaw supervise", () => {
       watch({
         emit: false,
         reason: "terminal_succeeded",
+        recommendedAction: "release",
+        recommendedActionPolicy: releaseMonitorPolicy(),
         cleanup: "release",
         digest: "sha256:terminal-silent",
         nextPollSeconds: 0

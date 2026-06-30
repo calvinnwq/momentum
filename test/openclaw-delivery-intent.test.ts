@@ -38,6 +38,19 @@ function watch(
   };
 }
 
+function releaseMonitorPolicy() {
+  return {
+    action: "release_monitor",
+    authority: "auto_allowed" as const,
+    risk: "low" as const,
+    evidenceRequired: ["terminal run state", "cleanup release signal"],
+    rollback:
+      "Re-register or resume the external monitor if more observation is needed.",
+    rationale:
+      "Releasing a supervisor monitor after terminal evidence only affects local/host polling registration."
+  };
+}
+
 function tick(input: Partial<OpenClawSupervisorWatchEnvelope>) {
   return buildOpenClawSupervisorTick({
     priorState: null,
@@ -206,6 +219,8 @@ describe("buildOpenClawDeliveryIntent", () => {
     const intent = buildOpenClawDeliveryIntent(
       tick({
         reason: "terminal_succeeded",
+        recommendedAction: "release",
+        recommendedActionPolicy: releaseMonitorPolicy(),
         cleanup: "release",
         digest: "sha256:done",
         nextPollSeconds: 0
