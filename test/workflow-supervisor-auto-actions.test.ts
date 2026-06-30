@@ -351,6 +351,7 @@ describe("OpenClaw supervisor auto-actions", () => {
       authority: "human_required",
       risk: "high"
     });
+    expect(result.tick.stateChanged).toBe(true);
   });
 
   it("escalates when repeated release attempts pass the bounded limit", () => {

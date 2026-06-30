@@ -346,7 +346,8 @@ function suppressAutoAction(tick: OpenClawSupervisorTick): OpenClawSupervisorTic
     monitorEnabled: true,
     nextPollSeconds: tick.nextPollSeconds > 0 ? tick.nextPollSeconds : 30,
     nextState,
-    stateChanged: !statesEqualForAutoAction(tick.nextState, nextState),
+    stateChanged:
+      tick.stateChanged || !statesEqualForAutoAction(tick.nextState, nextState),
     deliveryIntent: null
   };
   return {
