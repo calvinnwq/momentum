@@ -409,6 +409,47 @@ describe("momentum openclaw supervise", () => {
     });
   });
 
+  it("fails silent non-auto-action ticks when local state persistence fails", async () => {
+    const dataDir = makeTempDir();
+    fs.writeFileSync(path.join(dataDir, "openclaw-supervisor"), "blocked");
+
+    const result = await run(
+      [
+        "openclaw",
+        "supervise",
+        "cwfp-openclaw-cli",
+        "--once",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      watch({
+        emit: false,
+        reason: "quiet_heartbeat",
+        recommendedAction: "approve",
+        recommendedActionPolicy: {
+          action: "approval_decision",
+          authority: "human_required",
+          risk: "medium",
+          evidenceRequired: ["open approval gate"],
+          rollback: "Record a gate decision through the approval path.",
+          rationale: "Approvals require an explicit operator decision."
+        },
+        digest: "sha256:silent-human-state-save-failed"
+      })
+    );
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).not.toContain(dataDir);
+    expect(JSON.parse(result.stderr)).toMatchObject({
+      ok: false,
+      command: "openclaw supervise",
+      code: "openclaw_supervisor_failed",
+      message: "OpenClaw supervisor failed while processing the run."
+    });
+  });
+
   it("repeats cleanup action after terminal state disables monitoring", async () => {
     const dataDir = makeTempDir();
     const args = [

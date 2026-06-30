@@ -200,7 +200,7 @@ async function openClawSupervise(
       if (
         autoActionResult.tick.emit ||
         autoActionResult.tick.cleanupAction === "remove_monitor" ||
-        autoActionResult.autoAction?.escalation !== null
+        (autoActionResult.autoAction?.escalation ?? null) !== null
       ) {
         return emitOpenClawSupervise(parsed, io, autoActionResult.tick, {
           statePersistence: "failed"
