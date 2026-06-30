@@ -22,6 +22,10 @@ import {
   type WorkflowGateRecord
 } from "./gate-persist.js";
 import {
+  policyForWorkflowGateRecommendedAction,
+  type WorkflowActionAuthorityPolicy
+} from "./action-authority.js";
+import {
   deriveWorkflowMonitorState,
   type WorkflowMonitorAdvisory,
   type WorkflowMonitorCheckpoint,
@@ -169,7 +173,11 @@ export type WorkflowRunDetail = {
    * inspectable in `workflow status`, `workflow handoff`, and every other
    * consumer of the shared run-detail loader.
    */
-  gates: WorkflowGateRecord[];
+  gates: WorkflowRunDetailGate[];
+};
+
+export type WorkflowRunDetailGate = WorkflowGateRecord & {
+  recommendedActionPolicy: WorkflowActionAuthorityPolicy;
 };
 
 const STEP_STATE_BUCKETS: readonly WorkflowStepState[] = [
@@ -302,7 +310,13 @@ export function loadWorkflowRunDetail(
       : {})
   });
   const evidence = listEvidenceLinksForRun(db, run);
-  const gates = listWorkflowGatesForRun(db, runId);
+  const gates = listWorkflowGatesForRun(db, runId).map((gate) => ({
+    ...gate,
+    recommendedActionPolicy: policyForWorkflowGateRecommendedAction({
+      gateType: gate.gateType,
+      recommendedAction: gate.recommendedAction
+    })
+  }));
   return { run, steps, approvals, leases, monitor, evidence, gates };
 }
 

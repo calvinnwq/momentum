@@ -15,9 +15,11 @@ import {
 import type {
   WorkflowEvidenceLink,
   WorkflowRunDetail,
+  WorkflowRunDetailGate,
   WorkflowRunRow
 } from "../src/core/workflow/status.js";
 import type { WorkflowGateRecord } from "../src/core/workflow/gate-persist.js";
+import { policyForWorkflowGateRecommendedAction } from "../src/core/workflow/action-authority.js";
 import {
   type WorkflowLeaseRecord,
   type WorkflowStepKind,
@@ -51,8 +53,10 @@ function lease(overrides: Partial<WorkflowLeaseRecord> = {}): WorkflowLeaseRecor
   };
 }
 
-function gate(overrides: Partial<WorkflowGateRecord> = {}): WorkflowGateRecord {
-  return {
+function gate(
+  overrides: Partial<WorkflowGateRecord> = {}
+): WorkflowRunDetailGate {
+  const record: WorkflowGateRecord = {
     gateId: "gate-1",
     workflowRunId: RUN_ID,
     stepRunId: null,
@@ -71,6 +75,13 @@ function gate(overrides: Partial<WorkflowGateRecord> = {}): WorkflowGateRecord {
     chosenAction: null,
     resolution: null,
     ...overrides
+  };
+  return {
+    ...record,
+    recommendedActionPolicy: policyForWorkflowGateRecommendedAction({
+      gateType: record.gateType,
+      recommendedAction: record.recommendedAction
+    })
   };
 }
 
@@ -471,7 +482,7 @@ describe("buildWorkflowMonitorEnvelope", () => {
   });
 
   it("surfaces durable gates and an open-vs-total gate count", () => {
-    const gates: WorkflowGateRecord[] = [
+    const gates: WorkflowRunDetailGate[] = [
       gate({ gateId: "gate-open-1" }),
       gate({
         gateId: "gate-done-1",

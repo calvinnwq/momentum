@@ -25,11 +25,6 @@
  * `manual_recovery_lease`.
  */
 import type { MomentumDb } from "../../adapters/db.js";
-import type { WorkflowGateRecord } from "./gate-persist.js";
-import {
-  policyForWorkflowGateRecommendedAction,
-  type WorkflowActionAuthorityPolicy
-} from "./action-authority.js";
 import {
   type WorkflowMonitorActiveStep,
   type WorkflowMonitorCheckpoint,
@@ -43,7 +38,8 @@ import {
   loadWorkflowRunDetail,
   type LoadWorkflowRunDetailOptions,
   type WorkflowEvidenceLink,
-  type WorkflowRunDetail
+  type WorkflowRunDetail,
+  type WorkflowRunDetailGate
 } from "./status.js";
 import type {
   WorkflowRunState,
@@ -97,9 +93,7 @@ export type WorkflowMonitorEnvelopeCounts = {
   gatesOpen: number;
 };
 
-export type WorkflowMonitorEnvelopeGate = WorkflowGateRecord & {
-  recommendedActionPolicy: WorkflowActionAuthorityPolicy;
-};
+export type WorkflowMonitorEnvelopeGate = WorkflowRunDetailGate;
 
 export type WorkflowMonitorEnvelope = {
   schemaVersion: number;
@@ -256,13 +250,7 @@ export function buildWorkflowMonitorEnvelope(
     nextAction: monitor.nextAction,
     recovery: monitor.recovery,
     evidence: detail.evidence,
-    gates: detail.gates.map((gate) => ({
-      ...gate,
-      recommendedActionPolicy: policyForWorkflowGateRecommendedAction({
-        gateType: gate.gateType,
-        recommendedAction: gate.recommendedAction
-      })
-    })),
+    gates: detail.gates,
     counts: countsFromDetail(detail),
     monitorLastEmittedDigest: detail.run.monitorLastEmittedDigest,
     monitorLastSeenAt: detail.run.monitorLastSeenAt,

@@ -698,6 +698,11 @@ describe("momentum workflow status", () => {
         reason: string;
         allowedActions: string[];
         recommendedAction: string | null;
+        recommendedActionPolicy: {
+          action: string;
+          authority: string;
+          risk: string;
+        };
         policyEnvelope: string[];
         open: boolean;
         resolvedAt: number | null;
@@ -718,6 +723,11 @@ describe("momentum workflow status", () => {
       gateType: "approval_required",
       allowedActions: ["approve", "reject"],
       recommendedAction: "approve",
+      recommendedActionPolicy: {
+        action: "approval_decision",
+        authority: "human_required",
+        risk: "medium"
+      },
       policyEnvelope: [],
       open: true,
       resolvedAt: null,
@@ -731,6 +741,11 @@ describe("momentum workflow status", () => {
       targetScope: "step",
       gateType: "operator_decision_required",
       open: false,
+      recommendedActionPolicy: {
+        action: "operator_decision",
+        authority: "human_required",
+        risk: "medium"
+      },
       resolvedBy: "calvin",
       chosenAction: "fix",
       resolutionMode: "operator"

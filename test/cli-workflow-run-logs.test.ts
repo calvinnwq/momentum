@@ -331,7 +331,16 @@ describe("momentum workflow run logs", () => {
       steps: Array<{ stepId: string }>;
       approvals: Array<{ boundary: string; actor: string | null }>;
       leases: Array<{ leaseKind: string; holder: string }>;
-      gates: Array<{ gateId: string; open: boolean; allowedActions: string[] }>;
+      gates: Array<{
+        gateId: string;
+        open: boolean;
+        allowedActions: string[];
+        recommendedActionPolicy: {
+          action: string;
+          authority: string;
+          risk: string;
+        };
+      }>;
       rounds: Array<{
         roundId: string;
         summary: string | null;
@@ -367,7 +376,12 @@ describe("momentum workflow run logs", () => {
       expect.objectContaining({
         gateId: "gate-open-1",
         open: true,
-        allowedActions: ["approve", "reject"]
+        allowedActions: ["approve", "reject"],
+        recommendedActionPolicy: expect.objectContaining({
+          action: "approval_decision",
+          authority: "human_required",
+          risk: "medium"
+        })
       })
     ]);
     expect(payload.rounds).toHaveLength(1);
