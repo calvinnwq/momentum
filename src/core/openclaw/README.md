@@ -4,8 +4,8 @@ OpenClaw-specific runtime domain. This folder owns Momentum's local delivery
 state and classification logic for the `openclaw supervise` command. It holds
 business/runtime behavior only: turning a frozen `workflow run watch --once`
 envelope into an OpenClaw delivery tick, deciding whether the host should emit,
-formatting the host delivery intent, and loading/saving the per-run suppression
-state file.
+formatting the host delivery intent, applying config-gated local auto-action
+rules, and loading/saving the per-run suppression state and audit files.
 
 ## Local structure
 

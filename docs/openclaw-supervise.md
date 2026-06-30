@@ -29,8 +29,9 @@ Options:
 Environment:
 
 - `MOMENTUM_OPENCLAW_AUTO_ACTIONS=0` disables OpenClaw's local auto-actions
-  while leaving the upstream watch recommendation visible. Other values, or an
-  unset variable, keep the local auto-actions enabled.
+  while leaving the upstream watch recommendation visible. The values `false`,
+  `off`, `no`, and `disabled` also disable them. Other values, or an unset
+  variable, keep the local auto-actions enabled.
 
 ## Behaviour
 
@@ -66,8 +67,10 @@ envelope reports `monitorEnabled: false` and `cleanupAction: "remove_monitor"`.
 Hosts should treat that as the signal to stop polling this run and remove their
 external monitor registration.
 
-OpenClaw local auto-actions are limited to explicitly supported
-`auto_allowed` policies. Each attempted auto-action appends an audit record under
+OpenClaw local auto-actions are limited to the explicitly supported
+`auto_allowed` policy actions: `watch_recheck`, `monitor_recheck`,
+`stale_lease_auto_release`, and `release_monitor`. Each attempted auto-action
+appends an audit record under
 `<data-dir>/openclaw-supervisor/<encoded-run-id>.auto-actions.jsonl` before the
 local state change is applied. The record includes the action type, policy
 action, reason, before and after digest/state snapshots, timestamp, result, and
@@ -185,6 +188,8 @@ is already represented by the supervisor state fields and must not be rewound by
 a webhook or wake failure.
 `state.persisted: false` and `debug.statePersistence: "failed"` mean the host
 should deliver the advisory but treat the supervisor state as not durably saved.
+`debug.autoActionResult` and `debug.autoActionEscalation` mirror the
+`autoAction` result and escalation for compact host logs.
 
 ### Field meanings
 
@@ -227,6 +232,23 @@ should deliver the advisory but treat the supervisor state as not durably saved.
 | `cleanup` | object \| null | Terminal cleanup hint. `remove_monitor` means the host should stop polling this run and remove the external monitor registration; it is present only after the upstream `release_monitor` policy allowed terminal cleanup. |
 | `failure` | object | Host retry policy for failed webhook or wake attempts. Failures are retryable, should be logged at warn, have no Momentum state impact, and can be retried by repeating `openclaw supervise`. |
 
+### Auto-action fields
+
+| Field | Type | Meaning |
+|------|------|---------|
+| `actionType` | string | Local action considered by the supervisor. |
+| `policyAction` | string | Upstream `recommendedActionPolicy.action` that authorized or requested the action. |
+| `reason` | string | Upstream watch reason for the tick. |
+| `beforeDigest` | string \| null | Prior local supervisor digest, when a prior state file existed. |
+| `afterDigest` | string | Digest from the current tick. |
+| `beforeState` | object \| null | Prior local supervisor state snapshot. |
+| `afterState` | object | Local supervisor state snapshot the action leaves for persistence. |
+| `timestamp` | number | Epoch-millisecond time the auto-action record was produced. |
+| `result` | enum | `success`, `skipped`, or `failed`. |
+| `statePersistence` | enum \| null | `saved` or `failed` for rendered successful auto-actions. Audit records use `pending` before state persistence is attempted. Skipped and failed actions use `null`. |
+| `error` | string \| null | Sanitized failure or skip reason, if any. |
+| `escalation` | enum \| null | `human_required` when the supervisor failed closed and the host/operator should review the action. |
+
 ## Text output
 
 Without `--json`, successful output is written to stdout in a stable summary:
@@ -252,6 +274,9 @@ Delivery retry: repeat_openclaw_supervise
 Delivery action: momentum workflow run approve run-1 --approval-boundary through-implementation --phrase "approve plan run-1 through-implementation"
 ```
 
+When `autoAction` is present, text output also includes `Auto action:
+<actionType> (<result>)` and `Auto action audit: <escalation|recorded>`.
+
 ## Failures and refusals
 
 Failures are sanitized and do not include resolved data-directory paths. In
@@ -268,10 +293,13 @@ JSON mode they are written to stderr:
 ```
 
 Common refusal codes include `run_id_required`, `once_required`,
-`data_dir_failed`, and the refusal codes propagated from
-`workflow run watch --once --json`, such as unsupported source, missing run, or
-data-directory failures. Text mode writes the same operational summary or
-failure message without exposing local data-directory paths.
+`data_dir_failed`, `openclaw_auto_action_audit_failed`, and the refusal codes
+propagated from `workflow run watch --once --json`, such as unsupported source,
+missing run, or data-directory failures. Auto-action audit failures include the
+sanitized tick details in the JSON failure envelope so a host can surface the
+human-required escalation without reading local files. Text mode writes the same
+operational summary or failure message without exposing local data-directory
+paths.
 
 ### Error codes
 
@@ -284,6 +312,7 @@ failure message without exposing local data-directory paths.
 | `watch_parse_failed` | The wrapped watch command returned invalid or unexpected JSON. |
 | `watch_run_mismatch` | The wrapped watch command returned a different run id. |
 | `watch_failed` | The wrapped watch command exited unsuccessfully without a structured refusal code. |
+| `openclaw_auto_action_audit_failed` | Required auto-action audit evidence could not be written, so the local action failed closed and was escalated for human review. |
 | `openclaw_supervisor_failed` | Local OpenClaw supervisor state processing failed. |
 | `run_not_found` | Propagated from `workflow run watch`; the run does not exist. |
 | `watch_unsupported_source` | Propagated from `workflow run watch`; the run source is not supported for one-shot watch supervision. |

@@ -28,6 +28,8 @@ Momentum never modifies the data directory outside the resolved path. Each goal 
   momentum.db                  # SQLite (goals, jobs, events, repo_locks, daemon_runs, source_items, source_snapshots, source_reconciliation_runs, evidence_records, update_intents, intent_apply_audits, workflow_runs, workflow_steps, workflow_approvals, workflow_leases, workflow_events, workflow_definitions, step_definitions, executor_* tables)
   openclaw-supervisor/
     <encoded-run-id>.json      # Per-run OpenClaw supervise cursor/digest suppression state
+    <encoded-run-id>.auto-actions.jsonl
+                                # Per-run OpenClaw local auto-action audit records
   goals/
     <goal-id>/
       goal.md                  # Canonical copy of the goal spec
@@ -96,6 +98,7 @@ Files at `<data-dir>/goals/<goal-id>/`:
 Files at `<data-dir>/openclaw-supervisor/`:
 
 - `<encoded-run-id>.json` — per-run state for `momentum openclaw supervise`, keyed by `encodeURIComponent(runId)`. The file stores the last watch cursor, digest, reason, last delivered human-update timestamp, disabled monitor flag, and update timestamp so repeated scheduler calls can suppress duplicate OpenClaw deliveries while preserving terminal cleanup retries.
+- `<encoded-run-id>.auto-actions.jsonl` — append-only audit records for local OpenClaw auto-actions considered by `momentum openclaw supervise`, keyed by `encodeURIComponent(runId)`. Each line records the action, policy action, before/after digest and state snapshots, result, state-persistence status, error, and human escalation when present.
 
 ## Per-iteration artifact files
 
