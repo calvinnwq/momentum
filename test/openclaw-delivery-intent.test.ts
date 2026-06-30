@@ -19,6 +19,14 @@ function watch(
     emit: input.emit ?? true,
     reason: input.reason ?? "in_progress",
     recommendedAction: input.recommendedAction ?? "poll",
+    recommendedActionPolicy: input.recommendedActionPolicy ?? {
+      action: "watch_recheck",
+      authority: "auto_allowed",
+      risk: "low",
+      evidenceRequired: ["durable monitor/watch state"],
+      rollback: "Stop polling; no external state was changed.",
+      rationale: "Read-only supervisor polling is safe to repeat."
+    },
     nextPollSeconds: input.nextPollSeconds ?? 15,
     humanAction: input.humanAction ?? null,
     cleanup: input.cleanup ?? "none",

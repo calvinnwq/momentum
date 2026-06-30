@@ -27,6 +27,10 @@
 import type { MomentumDb } from "../../adapters/db.js";
 import type { WorkflowGateRecord } from "./gate-persist.js";
 import {
+  policyForWorkflowGateRecommendedAction,
+  type WorkflowActionAuthorityPolicy
+} from "./action-authority.js";
+import {
   type WorkflowMonitorActiveStep,
   type WorkflowMonitorCheckpoint,
   type WorkflowMonitorDrift,
@@ -93,6 +97,10 @@ export type WorkflowMonitorEnvelopeCounts = {
   gatesOpen: number;
 };
 
+export type WorkflowMonitorEnvelopeGate = WorkflowGateRecord & {
+  recommendedActionPolicy: WorkflowActionAuthorityPolicy;
+};
+
 export type WorkflowMonitorEnvelope = {
   schemaVersion: number;
   generatedAt: number;
@@ -121,7 +129,7 @@ export type WorkflowMonitorEnvelope = {
    * explicit and inspectable to the monitor runner alongside the derived
    * disposition, mirroring `workflow status` / `workflow handoff`.
    */
-  gates: readonly WorkflowGateRecord[];
+  gates: readonly WorkflowMonitorEnvelopeGate[];
   counts: WorkflowMonitorEnvelopeCounts;
   /**
    * The digest of the last *emitted* native progress tick for this run, read
@@ -248,7 +256,13 @@ export function buildWorkflowMonitorEnvelope(
     nextAction: monitor.nextAction,
     recovery: monitor.recovery,
     evidence: detail.evidence,
-    gates: detail.gates,
+    gates: detail.gates.map((gate) => ({
+      ...gate,
+      recommendedActionPolicy: policyForWorkflowGateRecommendedAction({
+        gateType: gate.gateType,
+        recommendedAction: gate.recommendedAction
+      })
+    })),
     counts: countsFromDetail(detail),
     monitorLastEmittedDigest: detail.run.monitorLastEmittedDigest,
     monitorLastSeenAt: detail.run.monitorLastSeenAt,

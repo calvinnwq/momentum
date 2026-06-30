@@ -3,6 +3,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  policyForWorkflowWatchRecommendedAction,
+  WORKFLOW_ACTION_AUTHORITY_CLASSES,
+  WORKFLOW_ACTION_RISK_LEVELS,
+  fallbackWorkflowActionAuthorityPolicy,
+  type WorkflowActionAuthorityPolicy
+} from "../core/workflow/action-authority.js";
 import type { OpenClawSupervisorWatchEnvelope } from "../core/openclaw/supervisor.js";
 
 export type OpenClawWatchOnceInput = {
@@ -83,6 +90,11 @@ export function parseOpenClawWatchOutput(
     );
   }
 
+  const recommendedAction = stringValue(
+    record["recommendedAction"],
+    "recommendedAction"
+  );
+
   return {
     ok: true,
     command: "workflow run watch",
@@ -90,9 +102,11 @@ export function parseOpenClawWatchOutput(
     runId,
     emit: booleanValue(record["emit"], "emit"),
     reason: stringValue(record["reason"], "reason"),
-    recommendedAction: stringValue(
-      record["recommendedAction"],
-      "recommendedAction"
+    recommendedAction,
+    recommendedActionPolicy: parseRecommendedActionPolicy(
+      record["recommendedActionPolicy"],
+      recommendedAction,
+      record
     ),
     nextPollSeconds: numberValue(record["nextPollSeconds"], "nextPollSeconds"),
     humanAction: parseHumanAction(record["humanAction"]),
@@ -106,6 +120,81 @@ export function parseOpenClawWatchOutput(
       "inspectionCommand"
     )
   };
+}
+
+function parseRecommendedActionPolicy(
+  value: unknown,
+  recommendedAction: string,
+  source: Record<string, unknown>
+): WorkflowActionAuthorityPolicy {
+  if (typeof value !== "object" || value === null) {
+    return fallbackWorkflowActionAuthorityPolicy(recommendedAction);
+  }
+  const record = value as Record<string, unknown>;
+  const evidenceRequired = record["evidenceRequired"];
+  const action = record["action"];
+  const authority = record["authority"];
+  const risk = record["risk"];
+  if (
+    typeof action !== "string" ||
+    !isWorkflowActionAuthorityClass(authority) ||
+    !isWorkflowActionRiskLevel(risk) ||
+    !Array.isArray(evidenceRequired) ||
+    !evidenceRequired.every((item) => typeof item === "string") ||
+    typeof record["rollback"] !== "string" ||
+    typeof record["rationale"] !== "string"
+  ) {
+    return fallbackWorkflowActionAuthorityPolicy(recommendedAction);
+  }
+  const expected = policyForWorkflowWatchRecommendedAction({
+    recommendedAction,
+    nextActionCode: nestedString(source["nextAction"], "code"),
+    nextActionStepId: nestedString(source["nextAction"], "stepId"),
+    recoveryCode: null,
+    activeStepKind: nestedString(source["activeStep"], "kind")
+  });
+  if (
+    action !== expected.action ||
+    authority !== expected.authority ||
+    risk !== expected.risk
+  ) {
+    return fallbackWorkflowActionAuthorityPolicy(recommendedAction);
+  }
+  return {
+    action,
+    authority,
+    risk,
+    evidenceRequired,
+    rollback: record["rollback"],
+    rationale: record["rationale"]
+  };
+}
+
+function nestedString(
+  value: unknown,
+  key: string
+): string | null {
+  if (typeof value !== "object" || value === null) return null;
+  const nested = (value as Record<string, unknown>)[key];
+  return typeof nested === "string" ? nested : null;
+}
+
+function isWorkflowActionAuthorityClass(
+  value: unknown
+): value is WorkflowActionAuthorityPolicy["authority"] {
+  return (
+    typeof value === "string" &&
+    (WORKFLOW_ACTION_AUTHORITY_CLASSES as readonly string[]).includes(value)
+  );
+}
+
+function isWorkflowActionRiskLevel(
+  value: unknown
+): value is WorkflowActionAuthorityPolicy["risk"] {
+  return (
+    typeof value === "string" &&
+    (WORKFLOW_ACTION_RISK_LEVELS as readonly string[]).includes(value)
+  );
 }
 
 async function runMomentumWatchProcess(

@@ -992,7 +992,7 @@ The detail envelope flattens the per-run view at the top level (`run`, `steps`, 
 }
 ```
 
-`gates` is the list of durable workflow / step / executor gates for the run, oldest first. Each gate includes: `gateId`, `workflowRunId`, `stepRunId`, `invocationId`, `roundId`, `targetScope` (`workflow` / `step` / `invocation` / `round`), `gateType`, `reason`, `evidence`, `allowedActions`, `recommendedAction`, `policyEnvelope`, `open` (true while unresolved), `resolvedAt`, `resolvedBy`, `resolutionMode`, `chosenAction`, and `resolution`.
+`gates` is the list of durable workflow / step / executor gates for the run, oldest first. Each gate includes: `gateId`, `workflowRunId`, `stepRunId`, `invocationId`, `roundId`, `targetScope` (`workflow` / `step` / `invocation` / `round`), `gateType`, `reason`, `evidence`, `allowedActions`, `recommendedAction`, `recommendedActionPolicy`, `policyEnvelope`, `open` (true while unresolved), `resolvedAt`, `resolvedBy`, `resolutionMode`, `chosenAction`, and `resolution`.
 
 `run.source` is one of `agent-workflow`, `workflow-definition`, or `momentum-native-coding`.
 `run.route.profile` is present when a run was started with `--profile`; it records the operator-selected runtime/profile for status, handoff, monitor, and logs, but daemon execution still resolves the live-wrapper profile from `MOMENTUM_LIVE_WRAPPER_PROFILE`.
@@ -1416,6 +1416,12 @@ For `workflow run watch --once --json`, use the frozen top-level supervisor enve
   `recover`, or `release`) and use `nextPollSeconds`, `quietForSeconds`,
   `quietThresholdSeconds`, `stuckRisk`, `inspectionCommand`, and `cleanup`
   directly.
+- Read `recommendedActionPolicy` before turning a recommendation into any
+  behavior. `auto_allowed` is only for explicit wait/release/read-only or local
+  recheck cases; approvals, operator decisions, recovery clearing, stale manual
+  recovery, no-mistakes recovery, merge cleanup, Linear refresh, and
+  external-apply require human authority. If policy metadata is missing or
+  invalid, treat every non-wait action as `human_required`.
 - Render concise human text from `reason`, `activeStep`, `nextAction.detail`,
   and `humanAction.command` / `humanAction.detail` when `humanAction` is present.
 - Stop and clean up the wrapper when `recommendedAction` is `"release"` and
@@ -1530,6 +1536,14 @@ Options:
   },
   "humanAction": null,
   "recommendedAction": "poll",
+  "recommendedActionPolicy": {
+    "action": "watch_recheck",
+    "authority": "auto_allowed",
+    "risk": "low",
+    "evidenceRequired": ["fresh watch envelope", "durable workflow rows"],
+    "rollback": "Stop polling; no external state was changed by the policy.",
+    "rationale": "Supervisor watch rechecks are explicitly allowlisted for local/read-only polling metadata."
+  },
   "nextPollSeconds": 15,
   "quietForSeconds": 0,
   "quietThresholdSeconds": 900,
@@ -1568,6 +1582,7 @@ Soft `monitor_drift_stale` reports and ordinary `failed_required_step` failures 
 | `nextAction` | object | Machine next-step pointer derived from the monitor projection. |
 | `humanAction` | object \| null | The single operator command that unblocks the run, or `null` when no operator command is required. |
 | `recommendedAction` | enum | What the poller should do: `poll`, `approve`, `operator_decision`, `recover`, or `release`. |
+| `recommendedActionPolicy` | object | Authority metadata for the recommendation: `action`, `authority`, `risk`, `evidenceRequired`, `rollback`, and `rationale`. Consumers must fail closed by treating absent or invalid policy as `human_required` for every non-wait action. |
 | `nextPollSeconds` | number | Suggested wait before the next tick: `0` for release, `30` for blocked or approval waits, `15` otherwise. |
 | `quietForSeconds` | number | Elapsed seconds since the last surfaced tick for this run. It is `0` on a first observation or meaningful state change, grows across suppressed unchanged polls, and is included on throttled `quiet_heartbeat` / `stuck_risk` emissions. |
 | `quietThresholdSeconds` | number | Current quiet advisory threshold for the run phase or active step kind. Defaults: implementation `900`, postflight `600`, no-mistakes `900`, merge-cleanup `300`, linear-refresh `300`, approval reminders `1800`, recovery reminders `3600`, idle `900`. |
@@ -1578,6 +1593,7 @@ Soft `monitor_drift_stale` reports and ordinary `failed_required_step` failures 
 
 `activeStep`, when present, carries `stepId`, `kind`, `state`, `order`, and `required`.
 `nextAction` always carries `code`, `stepId`, `leaseKind`, and `detail`; `detail` is a ready-to-read sentence for the common path.
+`recommendedActionPolicy.authority` is `auto_allowed` only for explicit safe wait/release/read-only or local recheck cases, `recommend_only` for informational recommendations that must not execute, `human_required` for approvals, operator decisions, recovery clearing, stale manual recovery, no-mistakes recovery, merge cleanup, Linear refresh, and external-apply, and `forbidden` for destructive/default-switch/broad external actions that must surface as blocked policy metadata.
 `humanAction`, when present, carries `code` (`approve`, `resolve_gate`, or `clear_recovery`), `command` (the exact CLI to run), and `detail` (the reason or evidence sentence).
 
 ### Stream mode

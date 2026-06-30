@@ -488,7 +488,36 @@ describe("buildWorkflowMonitorEnvelope", () => {
     const envelope = buildWorkflowMonitorEnvelope(detailFrom({ gates }), {
       generatedAt: 11
     });
-    expect(envelope.gates).toEqual(gates);
+    expect(
+      envelope.gates.map((gate) => ({
+        gateId: gate.gateId,
+        recommendedAction: gate.recommendedAction,
+        recommendedActionPolicy: {
+          action: gate.recommendedActionPolicy.action,
+          authority: gate.recommendedActionPolicy.authority,
+          risk: gate.recommendedActionPolicy.risk
+        }
+      }))
+    ).toEqual([
+      {
+        gateId: "gate-open-1",
+        recommendedAction: "approve",
+        recommendedActionPolicy: {
+          action: "approval_decision",
+          authority: "human_required",
+          risk: "medium"
+        }
+      },
+      {
+        gateId: "gate-done-1",
+        recommendedAction: "approve",
+        recommendedActionPolicy: {
+          action: "operator_decision",
+          authority: "human_required",
+          risk: "medium"
+        }
+      }
+    ]);
     expect(envelope.counts.gates).toBe(2);
     expect(envelope.counts.gatesOpen).toBe(1);
   });

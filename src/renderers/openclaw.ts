@@ -43,6 +43,7 @@ export function emitOpenClawSupervise(
     digest: tick.digest,
     cursor: tick.cursor,
     recommendedAction: tick.recommendedAction,
+    recommendedActionPolicy: tick.recommendedActionPolicy,
     nextPollSeconds: tick.nextPollSeconds,
     humanAction: tick.humanAction,
     stuckRisk: tick.stuckRisk,

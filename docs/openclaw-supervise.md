@@ -82,6 +82,14 @@ With `--json`, successful output is written to stdout:
   "digest": "sha256:...",
   "cursor": "wfcur1...",
   "recommendedAction": "approve",
+  "recommendedActionPolicy": {
+    "action": "approval_decision",
+    "authority": "human_required",
+    "risk": "medium",
+    "evidenceRequired": ["open approval gate", "operator approval phrase"],
+    "rollback": "Clear or supersede the approval through the normal workflow gate path.",
+    "rationale": "Approval changes the authorized execution envelope and must remain operator-gated."
+  },
   "nextPollSeconds": 30,
   "humanAction": {
     "code": "approve",
@@ -173,6 +181,7 @@ should deliver the advisory but treat the supervisor state as not durably saved.
 | `digest` | string | Upstream watch progress digest used for duplicate suppression. |
 | `cursor` | string \| null | Upstream watch cursor, when present. |
 | `recommendedAction` | string | Upstream watch recommendation (`poll`, `approve`, `operator_decision`, `recover`, or `release`). |
+| `recommendedActionPolicy` | object | Upstream action-authority metadata: `action`, `authority`, `risk`, `evidenceRequired`, `rollback`, and `rationale`. Hosts should fail closed by treating absent or invalid policy as human-required for non-wait actions. |
 | `nextPollSeconds` | number | Suggested delay before the host calls `openclaw supervise` again. |
 | `humanAction` | object \| null | Operator command from the watch envelope, or `null` when no operator command is required. |
 | `stuckRisk` | string | Upstream watch stuck-risk value. |

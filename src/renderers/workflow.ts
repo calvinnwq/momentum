@@ -11,6 +11,7 @@ import type { WorkflowMonitorState } from "../core/workflow/monitor-state.js";
 import type {
   WorkflowWatchAdvisory
 } from "../core/workflow/watch-advisory.js";
+import type { WorkflowWatchActionRecommendation } from "../core/workflow/action-authority.js";
 import type { WorkflowWatchStreamRecord } from "../core/workflow/watch-stream.js";
 import type { WorkflowRunImport, WorkflowRunImportDiagnostic } from "../core/workflow/run-import.js";
 import type { PersistWorkflowRunImportSummary } from "../core/workflow/run-import-persist.js";
@@ -855,7 +856,8 @@ export function emitWorkflowRunWatch(
   dataDir: string,
   envelope: WorkflowMonitorEnvelope,
   progress: WorkflowMonitorProgressTick,
-  advisory: WorkflowWatchAdvisory
+  advisory: WorkflowWatchAdvisory,
+  recommendation: WorkflowWatchActionRecommendation
 ): number {
   const nextAction = buildWorkflowWatchNextAction(envelope);
   const payload = {
@@ -882,7 +884,8 @@ export function emitWorkflowRunWatch(
       : null,
     nextAction,
     humanAction: buildWorkflowWatchHumanAction(envelope),
-    recommendedAction: recommendWorkflowWatchAction(envelope, progress),
+    recommendedAction: recommendation.recommendedAction,
+    recommendedActionPolicy: recommendation.recommendedActionPolicy,
     nextPollSeconds: recommendWorkflowWatchPollSeconds(progress),
     quietForSeconds: advisory.quietForSeconds,
     quietThresholdSeconds: advisory.quietThresholdSeconds,
@@ -1151,38 +1154,6 @@ function isWorkflowWatchCleanTerminal(envelope: WorkflowMonitorEnvelope): boolea
   );
 }
 
-function recommendWorkflowWatchAction(
-  envelope: WorkflowMonitorEnvelope,
-  progress: WorkflowMonitorProgressTick
-): WorkflowWatchRecommendedAction {
-  if (progress.cleanup === "release") return "release";
-  if (envelope.recovery?.code === "failed_required_step") {
-    return "operator_decision";
-  }
-  if (
-    envelope.recovery?.code === "monitor_drift_stale" &&
-    !envelope.needsManualRecovery
-  ) {
-    return envelope.gates.some((gate) => gate.resolvedAt === null)
-      ? "operator_decision"
-      : "poll";
-  }
-  if (envelope.needsManualRecovery || envelope.recovery !== null) {
-    return "recover";
-  }
-  if (envelope.gates.some((gate) => gate.resolvedAt === null)) {
-    return "operator_decision";
-  }
-  if (
-    progress.phase === "awaiting_approval" &&
-    envelope.nextAction.code === "await_approval" &&
-    envelope.activeStep !== null
-  ) {
-    return "approve";
-  }
-  return "poll";
-}
-
 function recommendWorkflowWatchPollSeconds(
   progress: WorkflowMonitorProgressTick
 ): number {
@@ -1198,6 +1169,7 @@ type WorkflowWatchTextPayload = {
   reason: string;
   nextAction: { code: string };
   recommendedAction: string;
+  recommendedActionPolicy: { authority: string; risk: string };
   nextPollSeconds: number;
   quietForSeconds: number;
   quietThresholdSeconds: number;
@@ -1221,6 +1193,9 @@ function renderWorkflowWatchText(
   lines.push(`Phase: ${progress.phase}`);
   lines.push(`Next action: ${payload.nextAction.code}`);
   lines.push(`Recommended action: ${payload.recommendedAction}`);
+  lines.push(
+    `Recommended action policy: ${payload.recommendedActionPolicy.authority} (${payload.recommendedActionPolicy.risk})`
+  );
   lines.push(`Next poll seconds: ${payload.nextPollSeconds}`);
   lines.push(`Quiet for seconds: ${payload.quietForSeconds}`);
   lines.push(`Quiet threshold seconds: ${payload.quietThresholdSeconds}`);
@@ -1678,6 +1653,9 @@ export function workflowGateToJsonShape(
     evidence: gate.evidence,
     allowedActions: gate.allowedActions,
     recommendedAction: gate.recommendedAction,
+    ...("recommendedActionPolicy" in gate
+      ? { recommendedActionPolicy: gate.recommendedActionPolicy }
+      : {}),
     policyEnvelope: gate.policyEnvelope,
     open: gate.resolvedAt === null,
     resolvedAt: gate.resolvedAt,

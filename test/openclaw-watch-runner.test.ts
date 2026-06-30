@@ -73,6 +73,115 @@ describe("parseOpenClawWatchFailureOutput", () => {
 });
 
 describe("parseOpenClawWatchOutput", () => {
+  it("fails closed when watch output omits action policy metadata", () => {
+    const parsed = parseOpenClawWatchOutput(
+      JSON.stringify({
+        ok: true,
+        command: "workflow run watch",
+        mode: "once",
+        runId: "cwfp-openclaw",
+        emit: true,
+        reason: "in_progress",
+        recommendedAction: "poll",
+        nextPollSeconds: 15,
+        humanAction: null,
+        cleanup: "none",
+        digest: "sha256:progress",
+        cursor: null,
+        phase: "advancing",
+        stuckRisk: "low",
+        inspectionCommand: null
+      }),
+      "cwfp-openclaw"
+    );
+
+    expect(parsed.recommendedActionPolicy).toMatchObject({
+      action: "poll",
+      authority: "human_required",
+      risk: "high"
+    });
+  });
+
+  it("fails closed when watch output supplies invalid or unsafe policy metadata", () => {
+    const parsed = parseOpenClawWatchOutput(
+      JSON.stringify({
+        ok: true,
+        command: "workflow run watch",
+        mode: "once",
+        runId: "cwfp-openclaw",
+        emit: true,
+        reason: "awaiting_approval",
+        recommendedAction: "approve",
+        recommendedActionPolicy: {
+          action: "approval_decision",
+          authority: "auto_allowed",
+          risk: "low",
+          evidenceRequired: ["open approval gate"],
+          rollback: "No rollback.",
+          rationale: "Invalidly trusted approval."
+        },
+        nextPollSeconds: 30,
+        humanAction: null,
+        cleanup: "none",
+        digest: "sha256:approval",
+        cursor: null,
+        phase: "awaiting_approval",
+        stuckRisk: "medium",
+        inspectionCommand: null
+      }),
+      "cwfp-openclaw"
+    );
+
+    expect(parsed.recommendedActionPolicy).toMatchObject({
+      action: "approve",
+      authority: "human_required",
+      risk: "high"
+    });
+  });
+
+  it("fails closed when watch output smuggles a different policy action", () => {
+    const parsed = parseOpenClawWatchOutput(
+      JSON.stringify({
+        ok: true,
+        command: "workflow run watch",
+        mode: "once",
+        runId: "cwfp-openclaw",
+        emit: true,
+        reason: "in_progress",
+        recommendedAction: "poll",
+        recommendedActionPolicy: {
+          action: "stale_lease_auto_release",
+          authority: "auto_allowed",
+          risk: "low",
+          evidenceRequired: ["stale lease"],
+          rollback: "Recreate a lease.",
+          rationale: "Incorrect action for a poll recommendation."
+        },
+        nextAction: {
+          code: "resume_running",
+          stepId: "implementation",
+          leaseKind: "managed-step",
+          detail: "Step is running."
+        },
+        nextPollSeconds: 15,
+        humanAction: null,
+        cleanup: "none",
+        digest: "sha256:progress",
+        cursor: null,
+        phase: "advancing",
+        stuckRisk: "low",
+        inspectionCommand: null
+      }),
+      "cwfp-openclaw"
+    );
+
+    expect(parsed.recommendedActionPolicy).toMatchObject({
+      action: "poll",
+      authority: "human_required",
+      risk: "high"
+    });
+  });
+
   it("preserves direct failure envelope codes", () => {
     let thrown: unknown;
     try {

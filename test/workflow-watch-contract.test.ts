@@ -72,6 +72,7 @@ const WATCH_ENVELOPE_KEYS = [
   "nextAction",
   "humanAction",
   "recommendedAction",
+  "recommendedActionPolicy",
   "nextPollSeconds",
   "quietForSeconds",
   "quietThresholdSeconds",
@@ -90,6 +91,14 @@ const WATCH_ACTIVE_STEP_KEYS = [
   "required"
 ].sort();
 const WATCH_HUMAN_ACTION_KEYS = ["code", "command", "detail"].sort();
+const WATCH_RECOMMENDED_ACTION_POLICY_KEYS = [
+  "action",
+  "authority",
+  "risk",
+  "evidenceRequired",
+  "rollback",
+  "rationale"
+].sort();
 
 afterEach(() => {
   while (tempRoots.length > 0) {
@@ -285,6 +294,18 @@ function assertWatchEnvelopeContract(
   expect(
     isMember(WORKFLOW_WATCH_RECOMMENDED_ACTIONS, payload["recommendedAction"])
   ).toBe(true);
+  const recommendedActionPolicy = payload[
+    "recommendedActionPolicy"
+  ] as Record<string, unknown>;
+  expect(Object.keys(recommendedActionPolicy).sort()).toEqual(
+    WATCH_RECOMMENDED_ACTION_POLICY_KEYS
+  );
+  expect(typeof recommendedActionPolicy["action"]).toBe("string");
+  expect(typeof recommendedActionPolicy["authority"]).toBe("string");
+  expect(typeof recommendedActionPolicy["risk"]).toBe("string");
+  expect(Array.isArray(recommendedActionPolicy["evidenceRequired"])).toBe(true);
+  expect(typeof recommendedActionPolicy["rollback"]).toBe("string");
+  expect(typeof recommendedActionPolicy["rationale"]).toBe("string");
   expect(isMember(WORKFLOW_WATCH_STUCK_RISKS, payload["stuckRisk"])).toBe(true);
 
   expect([0, 15, 30]).toContain(payload["nextPollSeconds"]);
@@ -397,6 +418,11 @@ describe("workflow run watch supervisor envelope contract", () => {
       disposition: "wait",
       phase: "advancing",
       recommendedAction: "poll",
+      recommendedActionPolicy: {
+        action: "watch_recheck",
+        authority: "auto_allowed",
+        risk: "low"
+      },
       nextPollSeconds: 15,
       quietForSeconds: 0,
       stuckRisk: "low",
@@ -465,6 +491,11 @@ describe("workflow run watch supervisor envelope contract", () => {
       disposition: "report",
       phase: "awaiting_approval",
       recommendedAction: "approve",
+      recommendedActionPolicy: {
+        action: "approval_decision",
+        authority: "human_required",
+        risk: "medium"
+      },
       nextPollSeconds: 30,
       stuckRisk: "medium",
       cleanup: "none"
@@ -508,6 +539,11 @@ describe("workflow run watch supervisor envelope contract", () => {
       disposition: "recover",
       phase: "blocked",
       recommendedAction: "recover",
+      recommendedActionPolicy: {
+        action: "clear_recovery",
+        authority: "human_required",
+        risk: "high"
+      },
       nextPollSeconds: 30,
       stuckRisk: "high",
       cleanup: "none"
@@ -602,6 +638,11 @@ describe("workflow run watch supervisor envelope contract", () => {
       disposition: "recover",
       phase: "blocked",
       recommendedAction: "operator_decision",
+      recommendedActionPolicy: {
+        action: "operator_decision",
+        authority: "human_required",
+        risk: "medium"
+      },
       stuckRisk: "high",
       cleanup: "none",
       humanAction: null

@@ -39,6 +39,14 @@ function watch(
     emit: input.emit ?? true,
     reason: input.reason ?? "in_progress",
     recommendedAction: input.recommendedAction ?? "poll",
+    recommendedActionPolicy: input.recommendedActionPolicy ?? {
+      action: "watch_recheck",
+      authority: "auto_allowed",
+      risk: "low",
+      evidenceRequired: ["durable monitor/watch state"],
+      rollback: "Stop polling; no external state was changed.",
+      rationale: "Read-only supervisor polling is safe to repeat."
+    },
     nextPollSeconds: input.nextPollSeconds ?? 15,
     humanAction: input.humanAction ?? null,
     cleanup: input.cleanup ?? "none",
@@ -109,6 +117,14 @@ describe("buildOpenClawSupervisorTick", () => {
           command: "momentum workflow run clear-recovery cwfp-openclaw",
           detail: "Resolve the failed step evidence first."
         },
+        recommendedActionPolicy: {
+          action: "clear_recovery",
+          authority: "human_required",
+          risk: "high",
+          evidenceRequired: ["operator evidence"],
+          rollback: "Keep the run blocked until evidence is supplied.",
+          rationale: "Clearing recovery changes durable workflow state."
+        },
         digest: "sha256:recovery"
       }),
       now: NOW
@@ -117,6 +133,10 @@ describe("buildOpenClawSupervisorTick", () => {
     expect(tick).toMatchObject({
       emit: true,
       eventType: "recovery",
+      recommendedActionPolicy: {
+        action: "clear_recovery",
+        authority: "human_required"
+      },
       humanAction: {
         code: "clear_recovery",
         command: "momentum workflow run clear-recovery cwfp-openclaw"
