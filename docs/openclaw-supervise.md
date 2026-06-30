@@ -25,14 +25,13 @@ Options:
 
 Environment:
 
-- `MOMENTUM_OPENCLAW_AUTO_ACTIONS=0` disables OpenClaw's local auto-actions
-  while leaving the upstream watch recommendation visible. The values `false`,
-  `off`, `no`, and `disabled` also disable them. Other values, or an unset
-  variable, keep the local auto-actions enabled.
-  A disabled gate leaves benign recheck recommendations unaudited, but
-  `release_monitor` still fails closed with `autoAction.result: "skipped"`,
-  human escalation, and no `remove_monitor` cleanup hint so an operator can
-  review the terminal monitor release.
+- `MOMENTUM_OPENCLAW_AUTO_ACTIONS=0` disables OpenClaw's local auto-actions while leaving the upstream watch recommendation visible.
+  The values `false`, `off`, `no`, and `disabled` also disable them.
+  Other values, or an unset variable, keep the local auto-actions enabled.
+  A disabled gate leaves benign `watch_recheck` and `monitor_recheck` recommendations unaudited.
+  Other supported auto-actions, including `stale_lease_auto_release` and `release_monitor`, fail closed with `autoAction.result: "skipped"` and human escalation.
+  For an enabled terminal monitor, that fail-closed release path clears the `remove_monitor` cleanup hint so an operator can review the terminal monitor release.
+  A monitor that was already disabled remains disabled and can still repeat the cleanup hint after the escalation audit is saved.
 
 ## Behaviour
 
@@ -67,6 +66,9 @@ When a terminal watch envelope asks for `cleanup: "release"` and its
 envelope reports `monitorEnabled: false` and `cleanupAction: "remove_monitor"`.
 Hosts should treat that as the signal to stop polling this run and remove their
 external monitor registration.
+After that disabled state is saved, later `openclaw supervise` calls do not run
+`workflow run watch`; they repeat the local cleanup signal so a host can finish
+removing its registration without re-enabling the monitor.
 
 OpenClaw local auto-actions are limited to the explicitly supported `auto_allowed` policy actions: `watch_recheck`, `monitor_recheck`, `stale_lease_auto_release`, and `release_monitor`.
 Each attempted auto-action appends an initial audit record under `<data-dir>/openclaw-supervisor/<encoded-run-id>.auto-actions.jsonl` before the local state change is applied.
