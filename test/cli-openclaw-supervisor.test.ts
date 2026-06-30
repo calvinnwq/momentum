@@ -940,7 +940,7 @@ describe("momentum openclaw supervise", () => {
     expect(result.code, result.stderr).toBe(1);
     expect(result.stdout).toBe("");
     expect(result.stderr).not.toContain(dataDir);
-    expect(fs.existsSync(statePath)).toBe(false);
+    expect(fs.existsSync(statePath)).toBe(true);
     expect(auditWriteCount).toBe(2);
     expect(JSON.parse(result.stderr)).toMatchObject({
       ok: false,
@@ -1027,7 +1027,12 @@ describe("momentum openclaw supervise", () => {
     expect(result.code, result.stderr).toBe(1);
     expect(result.stdout).toBe("");
     expect(result.stderr).not.toContain(dataDir);
-    expect(fs.existsSync(statePath)).toBe(false);
+    expect(fs.existsSync(statePath)).toBe(true);
+    expect(
+      JSON.parse(fs.readFileSync(statePath, "utf8")) as Record<string, unknown>
+    ).toMatchObject({
+      disabled: false
+    });
     expect(auditWriteCount).toBe(2);
     expect(JSON.parse(result.stderr)).toMatchObject({
       ok: false,
@@ -1046,7 +1051,10 @@ describe("momentum openclaw supervise", () => {
       autoAction: {
         actionType: "release_monitor",
         result: "failed",
-        escalation: "human_required"
+        escalation: "human_required",
+        afterState: {
+          disabled: false
+        }
       },
       state: {
         disabled: false,
@@ -1124,7 +1132,10 @@ describe("momentum openclaw supervise", () => {
       autoAction: {
         actionType: "release_monitor",
         result: "failed",
-        escalation: "human_required"
+        escalation: "human_required",
+        afterState: {
+          disabled: false
+        }
       },
       state: {
         disabled: false,

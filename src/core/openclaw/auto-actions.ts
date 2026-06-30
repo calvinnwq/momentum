@@ -234,6 +234,10 @@ export function withOpenClawSupervisorAutoActionResult(
     autoAction.result !== "failed"
       ? tick
       : suppressAutoAction(tick);
+  const finalAutoAction =
+    baseTick.nextState === tick.nextState
+      ? autoAction
+      : { ...autoAction, afterState: baseTick.nextState };
   return withAutoAction(
     {
       ...baseTick,
@@ -241,7 +245,7 @@ export function withOpenClawSupervisorAutoActionResult(
       eventType: autoActionEscalationEventType(tick),
       recommendedActionPolicy: autoActionEscalationPolicy(tick)
     },
-    autoAction
+    finalAutoAction
   );
 }
 
