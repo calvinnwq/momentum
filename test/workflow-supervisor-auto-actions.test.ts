@@ -636,6 +636,63 @@ describe("OpenClaw supervisor auto-actions", () => {
     });
   });
 
+  it("does not subtract failed release persistence from saved repeat counts", () => {
+    const dataDir = makeTempDir();
+    const firstTick = buildOpenClawSupervisorTick({
+      priorState: null,
+      watch: watch({
+        reason: "terminal_succeeded",
+        recommendedAction: "release",
+        recommendedActionPolicy: releasePolicy(),
+        cleanup: "release",
+        digest: "sha256:terminal-repeat-with-failure",
+        nextPollSeconds: 0,
+        phase: "terminal"
+      }),
+      now: NOW
+    });
+
+    for (const [index, persistence] of [
+      "saved",
+      "saved",
+      "failed",
+      "saved"
+    ].entries()) {
+      const attempt = executeOpenClawSupervisorAutoAction({
+        dataDir,
+        priorState: null,
+        tick: firstTick,
+        now: NOW + index,
+        enabled: true
+      });
+      expect(attempt.autoAction).toMatchObject({
+        actionType: "release_monitor",
+        result: "success"
+      });
+      recordOpenClawSupervisorAutoActionStatePersistence(
+        dataDir,
+        "mwf-auto-actions",
+        attempt.autoAction!,
+        persistence as "saved" | "failed"
+      );
+    }
+
+    const result = executeOpenClawSupervisorAutoAction({
+      dataDir,
+      priorState: null,
+      tick: firstTick,
+      now: NOW + 10_000,
+      enabled: true
+    });
+
+    expect(result.autoAction).toMatchObject({
+      actionType: "release_monitor",
+      result: "skipped",
+      escalation: "human_required",
+      error: "Auto-action repeat limit exceeded."
+    });
+  });
+
   it("does not let the repeat limit re-enable an already disabled monitor", () => {
     const dataDir = makeTempDir();
     const disabledState = {

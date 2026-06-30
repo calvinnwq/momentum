@@ -433,19 +433,14 @@ function repeatLimitExceeded(
   digest: string
 ): boolean {
   if (!REPEAT_LIMITED_ACTIONS.has(actionType)) return false;
-  const successfulStateSaves = records.reduce((count, record) => {
-    if (
-      record.actionType !== actionType ||
-      record.afterDigest !== digest ||
-      record.result !== "success"
-    ) {
-      return count;
-    }
-    if (record.statePersistence === "saved") return count + 1;
-    if (record.statePersistence === "failed") return Math.max(0, count - 1);
-    return count;
-  }, 0);
-  return successfulStateSaves >= AUTO_ACTION_REPEAT_LIMIT;
+  const successfulStateSaves = records.filter(
+    (record) =>
+      record.actionType === actionType &&
+      record.afterDigest === digest &&
+      record.result === "success" &&
+      record.statePersistence === "saved"
+  );
+  return successfulStateSaves.length >= AUTO_ACTION_REPEAT_LIMIT;
 }
 
 function buildAutoActionRecord(input: {
