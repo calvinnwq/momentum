@@ -29,6 +29,10 @@ Environment:
   while leaving the upstream watch recommendation visible. The values `false`,
   `off`, `no`, and `disabled` also disable them. Other values, or an unset
   variable, keep the local auto-actions enabled.
+  A disabled gate leaves benign recheck recommendations unaudited, but
+  `release_monitor` still fails closed with `autoAction.result: "skipped"`,
+  human escalation, and no `remove_monitor` cleanup hint so an operator can
+  review the terminal monitor release.
 
 ## Behaviour
 
@@ -68,7 +72,9 @@ OpenClaw local auto-actions are limited to the explicitly supported `auto_allowe
 Each attempted auto-action appends an initial audit record under `<data-dir>/openclaw-supervisor/<encoded-run-id>.auto-actions.jsonl` before the local state change is applied.
 The record includes the action type, policy action, reason, before and after digest/state snapshots, timestamp, result, and any failure or human escalation.
 Successful actions append a second required audit record after state persistence with `statePersistence: "saved"` or `"failed"`.
-If required audit evidence cannot be written at either point, the action fails closed, the command exits nonzero, and the JSON/text failure output keeps the sanitized human-required escalation details.
+`release_monitor` is repeat-bounded to three saved successful audit attempts for the same digest; a fourth attempt for an enabled monitor keeps polling, clears cleanup, and escalates for human review.
+If prior audit evidence is unreadable, an `auto_allowed` policy is unsupported, or required audit evidence cannot be written at either point, the action fails closed.
+Fail-closed output uses a human-required policy, preserves a sanitized delivery text of `Human review required for <run-id>: OpenClaw supervisor auto-action <action> did not complete.`, clears monitor-removal cleanup unless the monitor was already disabled and the escalation audit was saved, and exits nonzero when required audit evidence could not be written.
 
 Momentum does not post Discord webhooks, wake OpenClaw lanes, remove external
 monitors, or tail verbose logs into chat. It only decides whether a short
@@ -224,6 +230,9 @@ should deliver the advisory but treat the supervisor state as not durably saved.
 | `cleanup` | object \| null | Terminal cleanup hint. `remove_monitor` means the host should stop polling this run and remove the external monitor registration; it is present only after the upstream `release_monitor` policy allowed terminal cleanup. |
 | `failure` | object | Host retry policy for failed webhook or wake attempts. Failures are retryable, should be logged at warn, have no Momentum state impact, and can be retried by repeating `openclaw supervise`. |
 
+When `autoAction.escalation` is `human_required`, the delivery text is replaced with a sanitized human-review message and the delivery dedupe key includes the auto-action type, result, and escalation.
+When fail-closed handling suppresses monitor removal, both `deliveryIntent.cleanup` and `cleanupAction` are `null` and `monitorEnabled` remains `true`.
+
 ### Auto-action fields
 
 | Field | Type | Meaning |
@@ -240,6 +249,9 @@ should deliver the advisory but treat the supervisor state as not durably saved.
 | `statePersistence` | enum \| null | `saved` or `failed` for rendered successful auto-actions. Audit records use `pending` before state persistence is attempted. Skipped and failed actions use `null`. |
 | `error` | string \| null | Sanitized failure or skip reason, if any. |
 | `escalation` | enum \| null | `human_required` when the supervisor failed closed and the host/operator should review the action. |
+
+`beforeState` and `afterState` use the same supervisor state shape as `state`.
+The cursor, digest, reason, and last-human-update fields in those snapshots may be `null`.
 
 ## Text output
 

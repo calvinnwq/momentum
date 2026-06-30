@@ -27,6 +27,9 @@ State files are written under
 name is `encodeURIComponent(runId)`.
 Auto-action audit records are appended beside that state as
 `<data-dir>/openclaw-supervisor/<encoded-run-id>.auto-actions.jsonl`.
+The auto-action core owns the fail-closed policy for unsupported actions,
+bounded `release_monitor` repeats, unreadable audit evidence, and initial or
+final audit write failures before the renderer exposes sanitized output.
 
 ## Boundaries
 
