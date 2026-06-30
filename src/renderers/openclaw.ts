@@ -4,7 +4,10 @@ import {
   type CliIo
 } from "./cli-output.js";
 import type { OpenClawDeliveryIntent } from "../core/openclaw/delivery-intent.js";
-import type { OpenClawSupervisorTick } from "../core/openclaw/supervisor.js";
+import type {
+  OpenClawSupervisorAutoActionResult,
+  OpenClawSupervisorTick
+} from "../core/openclaw/supervisor.js";
 
 const TRUNCATION_SUFFIX = "... [truncated]";
 
@@ -32,6 +35,7 @@ export function emitOpenClawSupervise(
     tick.deliveryIntent,
     tick.runId
   );
+  const autoAction = sanitizeAutoAction(tick.autoAction, statePersistence);
   const payload = {
     ok: true,
     command: "openclaw supervise",
@@ -49,6 +53,7 @@ export function emitOpenClawSupervise(
     stuckRisk: tick.stuckRisk,
     inspectionCommand,
     deliveryIntent,
+    autoAction,
     monitorEnabled: tick.monitorEnabled,
     cleanupAction: tick.cleanupAction,
     state: {
@@ -65,7 +70,9 @@ export function emitOpenClawSupervise(
       watchEmit: tick.watchEmit,
       suppressedReason: tick.suppressedReason,
       stateChanged: tick.stateChanged,
-      statePersistence
+      statePersistence,
+      autoActionResult: tick.autoAction?.result ?? null,
+      autoActionEscalation: tick.autoAction?.escalation ?? null
     }
   };
 
@@ -132,6 +139,13 @@ function renderOpenClawSuperviseText(
   if (inspectionCommand !== null) {
     lines.push(`Inspection command: ${inspectionCommand}`);
   }
+  const autoAction = sanitizeAutoAction(tick.autoAction, statePersistence);
+  if (autoAction !== null) {
+    lines.push(
+      `Auto action: ${autoAction.actionType} (${autoAction.result})`,
+      `Auto action audit: ${autoAction.escalation ?? "recorded"}`
+    );
+  }
   const deliveryIntent = sanitizeDeliveryIntent(
     tick.deliveryIntent,
     tick.runId
@@ -176,6 +190,22 @@ function sanitizeDeliveryIntent(
     ...intent,
     text: sanitizeDeliveryText(intent, action, runId),
     action
+  };
+}
+
+function sanitizeAutoAction(
+  action: OpenClawSupervisorAutoActionResult | null,
+  statePersistence: OpenClawRendererStatePersistence
+): OpenClawSupervisorAutoActionResult | null {
+  if (action === null) return null;
+  return {
+    ...action,
+    statePersistence:
+      action.result === "success" ? statePersistence : action.statePersistence,
+    error:
+      action.result === "failed" && action.error !== null
+        ? "Auto-action audit evidence could not be written."
+        : action.error
   };
 }
 

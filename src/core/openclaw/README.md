@@ -12,9 +12,10 @@ state file.
 | Concern | Modules |
 | --- | --- |
 | Supervisor tick and state | `supervisor.ts` |
+| Config-gated local auto-actions and audit evidence | `auto-actions.ts` |
 | Delivery intent mapping | `delivery-intent.ts` |
 
-`supervisor.ts` and `delivery-intent.ts` do not parse CLI arguments, format
+`supervisor.ts`, `auto-actions.ts`, and `delivery-intent.ts` do not parse CLI arguments, format
 terminal output, post webhooks, wake external lanes, or remove external
 monitors. The command orchestration lives in `src/commands/openclaw/`, the
 JSON/text envelope lives in `src/renderers/openclaw.ts`, and the subprocess
@@ -24,6 +25,8 @@ adapter that invokes `workflow run watch --once --json` lives in
 State files are written under
 `<data-dir>/openclaw-supervisor/<encoded-run-id>.json`, where the encoded file
 name is `encodeURIComponent(runId)`.
+Auto-action audit records are appended beside that state as
+`<data-dir>/openclaw-supervisor/<encoded-run-id>.auto-actions.jsonl`.
 
 ## Boundaries
 

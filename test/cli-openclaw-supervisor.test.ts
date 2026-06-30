@@ -73,7 +73,8 @@ function releaseMonitorPolicy() {
 
 async function run(
   args: string[],
-  watchPayload: OpenClawSupervisorWatchEnvelope
+  watchPayload: OpenClawSupervisorWatchEnvelope,
+  env: Record<string, string | undefined> = {}
 ): Promise<CliResult> {
   let stdout = "";
   let stderr = "";
@@ -82,7 +83,7 @@ async function run(
     {
       stdout: { write: (chunk: string) => ((stdout += chunk), true) },
       stderr: { write: (chunk: string) => ((stderr += chunk), true) },
-      env: {}
+      env
     },
     {
       openClawWatchOnce: async () => watchPayload
@@ -124,6 +125,11 @@ describe("momentum openclaw supervise", () => {
         watchEmit: true,
         suppressedReason: null,
         stateChanged: true
+      },
+      autoAction: {
+        actionType: "watch_recheck",
+        result: "success",
+        statePersistence: "saved"
       }
     });
     expect(firstJson).toMatchObject({
@@ -302,7 +308,7 @@ describe("momentum openclaw supervise", () => {
     });
   });
 
-  it("sanitizes state persistence failure paths", async () => {
+  it("sanitizes local audit and state persistence failure paths", async () => {
     const dataDir = makeTempDir();
     fs.writeFileSync(path.join(dataDir, "openclaw-supervisor"), "blocked");
 
@@ -319,15 +325,27 @@ describe("momentum openclaw supervise", () => {
       watch({ emit: false })
     );
 
-    expect(jsonResult.code).toBe(1);
-    expect(jsonResult.stdout).toBe("");
-    expect(jsonResult.stderr).not.toContain(dataDir);
-    expect(JSON.parse(jsonResult.stderr)).toMatchObject({
-      ok: false,
+    expect(jsonResult.code, jsonResult.stderr).toBe(0);
+    expect(jsonResult.stderr).toBe("");
+    expect(jsonResult.stdout).not.toContain(dataDir);
+    expect(JSON.parse(jsonResult.stdout)).toMatchObject({
+      ok: true,
       command: "openclaw supervise",
-      code: "openclaw_supervisor_failed",
-      message: "OpenClaw supervisor failed while processing the run.",
-      runId: "cwfp-openclaw-cli"
+      runId: "cwfp-openclaw-cli",
+      autoAction: {
+        actionType: "watch_recheck",
+        result: "failed",
+        error: "Auto-action audit evidence could not be written.",
+        escalation: "human_required"
+      },
+      state: {
+        persisted: false
+      },
+      debug: {
+        autoActionResult: "failed",
+        autoActionEscalation: "human_required",
+        statePersistence: "failed"
+      }
     });
 
     const textResult = await run(
@@ -342,12 +360,12 @@ describe("momentum openclaw supervise", () => {
       watch({ emit: false })
     );
 
-    expect(textResult.code).toBe(1);
-    expect(textResult.stdout).toBe("");
-    expect(textResult.stderr).toBe(
-      "OpenClaw supervisor failed while processing the run.\n"
+    expect(textResult.code, textResult.stderr).toBe(0);
+    expect(textResult.stderr).toBe("");
+    expect(textResult.stdout).toContain(
+      "Auto action: watch_recheck (failed)"
     );
-    expect(textResult.stderr).not.toContain(dataDir);
+    expect(textResult.stdout).not.toContain(dataDir);
   });
 
   it("preserves emitted advisories when local state persistence fails", async () => {
@@ -462,6 +480,119 @@ describe("momentum openclaw supervise", () => {
     });
   });
 
+  it("does not re-enable an already disabled monitor when auto-actions are disabled", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-openclaw-cli";
+    const args = [
+      "openclaw",
+      "supervise",
+      runId,
+      "--once",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ];
+
+    const first = await run(
+      args,
+      watch({
+        reason: "terminal_succeeded",
+        recommendedAction: "release",
+        recommendedActionPolicy: releaseMonitorPolicy(),
+        cleanup: "release",
+        digest: "sha256:terminal-disabled-env",
+        nextPollSeconds: 0
+      })
+    );
+    expect(first.code, first.stderr).toBe(0);
+
+    let watchCalls = 0;
+    let stdout = "";
+    let stderr = "";
+    const secondCode = await runCli(
+      args,
+      {
+        stdout: { write: (chunk: string) => ((stdout += chunk), true) },
+        stderr: { write: (chunk: string) => ((stderr += chunk), true) },
+        env: {
+          MOMENTUM_OPENCLAW_AUTO_ACTIONS: "0"
+        }
+      },
+      {
+        openClawWatchOnce: async () => {
+          watchCalls += 1;
+          return watch({});
+        }
+      }
+    );
+
+    expect(secondCode, stderr).toBe(0);
+    expect(stderr).toBe("");
+    expect(watchCalls).toBe(0);
+    expect(JSON.parse(stdout)).toMatchObject({
+      monitorEnabled: false,
+      cleanupAction: "remove_monitor",
+      state: {
+        disabled: true,
+        persisted: true
+      },
+      autoAction: {
+        actionType: "release_monitor",
+        result: "skipped",
+        escalation: "human_required"
+      }
+    });
+  });
+
+  it("reports skipped auto-action evidence when the config gate disables monitor release", async () => {
+    const dataDir = makeTempDir();
+    const result = await run(
+      [
+        "openclaw",
+        "supervise",
+        "cwfp-openclaw-cli",
+        "--once",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      watch({
+        reason: "terminal_succeeded",
+        recommendedAction: "release",
+        recommendedActionPolicy: releaseMonitorPolicy(),
+        cleanup: "release",
+        digest: "sha256:terminal-config-disabled",
+        nextPollSeconds: 0
+      }),
+      {
+        MOMENTUM_OPENCLAW_AUTO_ACTIONS: "0"
+      }
+    );
+
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.stderr).toBe("");
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      monitorEnabled: true,
+      cleanupAction: null,
+      state: {
+        disabled: false,
+        persisted: true
+      },
+      autoAction: {
+        actionType: "release_monitor",
+        policyAction: "release_monitor",
+        result: "skipped",
+        escalation: "human_required"
+      },
+      debug: {
+        autoActionResult: "skipped",
+        autoActionEscalation: "human_required"
+      }
+    });
+    expect(JSON.stringify(payload)).not.toContain(dataDir);
+  });
+
   it("repeats disabled cleanup when timestamp persistence fails", async () => {
     const dataDir = makeTempDir();
     const runId = "cwfp-openclaw-cli";
@@ -539,7 +670,7 @@ describe("momentum openclaw supervise", () => {
     });
   });
 
-  it("preserves terminal cleanup when watch is silent and state persistence fails", async () => {
+  it("escalates terminal cleanup when audit and state persistence fail", async () => {
     const dataDir = makeTempDir();
     fs.writeFileSync(path.join(dataDir, "openclaw-supervisor"), "blocked");
 
@@ -570,17 +701,137 @@ describe("momentum openclaw supervise", () => {
     expect(JSON.parse(result.stdout)).toMatchObject({
       emit: false,
       eventType: null,
-      monitorEnabled: false,
-      cleanupAction: "remove_monitor",
+      monitorEnabled: true,
+      cleanupAction: null,
+      autoAction: {
+        actionType: "release_monitor",
+        result: "failed",
+        error: "Auto-action audit evidence could not be written.",
+        escalation: "human_required"
+      },
       state: {
-        disabled: true,
+        disabled: false,
         persisted: false
       },
       debug: {
         watchEmit: false,
         suppressedReason: "watch_silent",
-        statePersistence: "failed"
+        statePersistence: "failed",
+        autoActionResult: "failed",
+        autoActionEscalation: "human_required"
       }
     });
+  });
+
+  it("does not repeat-limit monitor release when state persistence never succeeds", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-openclaw-cli";
+    const statePath = path.join(
+      dataDir,
+      "openclaw-supervisor",
+      `${encodeURIComponent(runId)}.json`
+    );
+    const originalWriteFileSync = fs.writeFileSync;
+    vi.spyOn(fs, "writeFileSync").mockImplementation((file, data, options) => {
+      if (file === statePath) {
+        throw new Error(`EACCES: permission denied, open '${statePath}'`);
+      }
+      return originalWriteFileSync(file, data, options);
+    });
+    const args = [
+      "openclaw",
+      "supervise",
+      runId,
+      "--once",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ];
+    const payload = watch({
+      runId,
+      emit: false,
+      reason: "terminal_succeeded",
+      recommendedAction: "release",
+      recommendedActionPolicy: releaseMonitorPolicy(),
+      cleanup: "release",
+      digest: "sha256:terminal-state-never-saved",
+      nextPollSeconds: 0
+    });
+
+    for (let index = 0; index < 4; index += 1) {
+      const result = await run(args, payload);
+      expect(result.code, result.stderr).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        monitorEnabled: false,
+        cleanupAction: "remove_monitor",
+        autoAction: {
+          actionType: "release_monitor",
+          result: "success",
+          statePersistence: "failed"
+        },
+        state: {
+          disabled: true,
+          persisted: false
+        }
+      });
+    }
+  });
+
+  it("does not save supervisor state when required auto-action audit cannot be written", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-openclaw-cli";
+    const statePath = path.join(
+      dataDir,
+      "openclaw-supervisor",
+      `${encodeURIComponent(runId)}.json`
+    );
+    fs.mkdirSync(
+      path.join(
+        dataDir,
+        "openclaw-supervisor",
+        `${encodeURIComponent(runId)}.auto-actions.jsonl`
+      ),
+      { recursive: true }
+    );
+
+    const result = await run(
+      [
+        "openclaw",
+        "supervise",
+        runId,
+        "--once",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      watch({
+        runId,
+        emit: false,
+        reason: "terminal_succeeded",
+        recommendedAction: "release",
+        recommendedActionPolicy: releaseMonitorPolicy(),
+        cleanup: "release",
+        digest: "sha256:audit-path-blocked",
+        nextPollSeconds: 0
+      })
+    );
+
+    expect(result.code, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      autoAction: {
+        actionType: "release_monitor",
+        result: "failed",
+        error: "Auto-action audit evidence could not be written.",
+        escalation: "human_required"
+      },
+      state: {
+        persisted: false
+      },
+      debug: {
+        statePersistence: "failed",
+        autoActionResult: "failed"
+      }
+    });
+    expect(fs.existsSync(statePath)).toBe(false);
   });
 });

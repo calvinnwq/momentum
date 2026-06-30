@@ -26,6 +26,12 @@ Options:
 - `--data-dir <path>` - select the Momentum data directory.
 - `--json` - write the success envelope to stdout as JSON and structured failures to stderr.
 
+Environment:
+
+- `MOMENTUM_OPENCLAW_AUTO_ACTIONS=0` disables OpenClaw's local auto-actions
+  while leaving the upstream watch recommendation visible. Other values, or an
+  unset variable, keep the local auto-actions enabled.
+
 ## Behaviour
 
 Each invocation wraps `workflow run watch <run-id> --once --json`. The underlying
@@ -59,6 +65,14 @@ When a terminal watch envelope asks for `cleanup: "release"` and its
 envelope reports `monitorEnabled: false` and `cleanupAction: "remove_monitor"`.
 Hosts should treat that as the signal to stop polling this run and remove their
 external monitor registration.
+
+OpenClaw local auto-actions are limited to explicitly supported
+`auto_allowed` policies. Each attempted auto-action appends an audit record under
+`<data-dir>/openclaw-supervisor/<encoded-run-id>.auto-actions.jsonl` before the
+local state change is applied. The record includes the action type, policy
+action, reason, before and after digest/state snapshots, timestamp, result, and
+any failure or human escalation. If audit evidence cannot be written, the action
+fails closed and the JSON/text envelope reports a human-required escalation.
 
 Momentum does not post Discord webhooks, wake OpenClaw lanes, remove external
 monitors, or tail verbose logs into chat. It only decides whether a short
@@ -128,6 +142,7 @@ With `--json`, successful output is written to stdout:
       "retry": "repeat_openclaw_supervise"
     }
   },
+  "autoAction": null,
   "monitorEnabled": true,
   "cleanupAction": null,
   "state": {
@@ -144,7 +159,9 @@ With `--json`, successful output is written to stdout:
     "watchEmit": true,
     "suppressedReason": null,
     "stateChanged": true,
-    "statePersistence": "saved"
+    "statePersistence": "saved",
+    "autoActionResult": null,
+    "autoActionEscalation": null
   }
 }
 ```
@@ -188,6 +205,7 @@ should deliver the advisory but treat the supervisor state as not durably saved.
 | `stuckRisk` | string | Upstream watch stuck-risk value. |
 | `inspectionCommand` | string \| null | Sanitized stuck-risk inspection command with `<data-dir>` replacing the resolved path. |
 | `deliveryIntent` | object \| null | Short host-delivery contract for Discord/OpenClaw. `null` means stay silent. |
+| `autoAction` | object \| null | Local auto-action audit summary when an `auto_allowed` action was attempted, skipped, failed, or escalated. `null` means no local auto-action was considered. |
 | `monitorEnabled` | boolean | `false` after terminal cleanup disables further polling for this run. |
 | `cleanupAction` | enum \| null | `remove_monitor` when the host should remove its external monitor registration. This is emitted only when terminal cleanup is paired with an `auto_allowed` `release_monitor` policy. |
 | `state` | object | Next local OpenClaw supervisor state, plus `persisted` to report whether it was saved. |
