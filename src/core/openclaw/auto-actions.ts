@@ -245,7 +245,8 @@ export function withOpenClawSupervisorAutoActionResult(
     return withAutoAction(tick, autoAction);
   }
   const baseTick =
-    tick.suppressedReason === "monitor_disabled"
+    tick.suppressedReason === "monitor_disabled" &&
+    autoAction.result !== "failed"
       ? tick
       : suppressAutoAction(tick);
   return withAutoAction(
@@ -402,14 +403,22 @@ function repeatLimitExceeded(
   digest: string
 ): boolean {
   if (!REPEAT_LIMITED_ACTIONS.has(actionType)) return false;
-  const successes = loadOpenClawSupervisorAutoActionAudit(dataDir, runId).filter(
-    (record) =>
-      record.actionType === actionType &&
-      record.afterDigest === digest &&
-      record.result === "success" &&
-      record.statePersistence === "saved"
-  );
-  return successes.length >= AUTO_ACTION_REPEAT_LIMIT;
+  const successfulStateSaves = loadOpenClawSupervisorAutoActionAudit(
+    dataDir,
+    runId
+  ).reduce((count, record) => {
+    if (
+      record.actionType !== actionType ||
+      record.afterDigest !== digest ||
+      record.result !== "success"
+    ) {
+      return count;
+    }
+    if (record.statePersistence === "saved") return count + 1;
+    if (record.statePersistence === "failed") return Math.max(0, count - 1);
+    return count;
+  }, 0);
+  return successfulStateSaves >= AUTO_ACTION_REPEAT_LIMIT;
 }
 
 function buildAutoActionRecord(input: {

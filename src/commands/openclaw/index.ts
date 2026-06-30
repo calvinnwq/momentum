@@ -131,7 +131,6 @@ async function openClawSupervise(
         );
       }
       try {
-        saveOpenClawSupervisorState(dataDir, autoActionResult.tick.nextState);
         if (autoActionResult.autoAction !== null) {
           const persistedAudit =
             recordOpenClawSupervisorAutoActionStatePersistence(
@@ -151,6 +150,7 @@ async function openClawSupervise(
             );
           }
         }
+        saveOpenClawSupervisorState(dataDir, autoActionResult.tick.nextState);
         return emitOpenClawSupervise(parsed, io, autoActionResult.tick);
       } catch {
         if (autoActionResult.autoAction !== null) {
@@ -206,7 +206,6 @@ async function openClawSupervise(
       );
     }
     try {
-      saveOpenClawSupervisorState(dataDir, autoActionResult.tick.nextState);
       if (autoActionResult.autoAction !== null) {
         const persistedAudit =
           recordOpenClawSupervisorAutoActionStatePersistence(
@@ -226,6 +225,7 @@ async function openClawSupervise(
           );
         }
       }
+      saveOpenClawSupervisorState(dataDir, autoActionResult.tick.nextState);
       return emitOpenClawSupervise(parsed, io, autoActionResult.tick);
     } catch (saveError) {
       if (autoActionResult.autoAction !== null) {
