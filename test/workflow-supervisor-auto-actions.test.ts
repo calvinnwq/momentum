@@ -12,7 +12,8 @@ import {
 import {
   executeOpenClawSupervisorAutoAction,
   loadOpenClawSupervisorAutoActionAudit,
-  recordOpenClawSupervisorAutoActionStatePersistence
+  recordOpenClawSupervisorAutoActionStatePersistence,
+  withOpenClawSupervisorAutoActionResult
 } from "../src/core/openclaw/auto-actions.js";
 
 const NOW = 1_730_002_000_000;
@@ -182,6 +183,44 @@ describe("OpenClaw supervisor auto-actions", () => {
         }
       }
     ]);
+  });
+
+  it("rejects audit records whose supervisor state belongs to another run", () => {
+    const dataDir = makeTempDir();
+    const auditDir = path.join(dataDir, "openclaw-supervisor");
+    fs.mkdirSync(auditDir, { recursive: true });
+    const runId = "mwf-auto-actions";
+    const otherRunState = {
+      version: 1,
+      runId: "other-run",
+      lastCursor: null,
+      lastDigest: "sha256:foreign",
+      lastReason: "terminal_succeeded",
+      lastHumanUpdateAt: NOW,
+      disabled: true,
+      updatedAt: NOW
+    };
+    fs.writeFileSync(
+      path.join(auditDir, `${encodeURIComponent(runId)}.auto-actions.jsonl`),
+      `${JSON.stringify({
+        actionType: "release_monitor",
+        policyAction: "release_monitor",
+        reason: "terminal_succeeded",
+        beforeDigest: null,
+        afterDigest: "sha256:foreign",
+        beforeState: null,
+        afterState: otherRunState,
+        timestamp: NOW,
+        result: "success",
+        statePersistence: "saved",
+        error: null,
+        escalation: null
+      })}\n`
+    );
+
+    expect(() =>
+      loadOpenClawSupervisorAutoActionAudit(dataDir, runId)
+    ).toThrow("Invalid OpenClaw supervisor auto-action audit record.");
   });
 
   it("keeps the monitor enabled and audits when auto-actions are disabled", () => {
@@ -485,6 +524,50 @@ describe("OpenClaw supervisor auto-actions", () => {
       stateChanged: true,
       nextState: {
         lastHumanUpdateAt: NOW
+      }
+    });
+  });
+
+  it("stamps human update time when a final audit failure escalates", () => {
+    const dataDir = makeTempDir();
+    const tick = buildOpenClawSupervisorTick({
+      priorState: null,
+      watch: watch({
+        emit: false,
+        digest: "sha256:silent-final-audit"
+      }),
+      now: NOW
+    });
+
+    const actionResult = executeOpenClawSupervisorAutoAction({
+      dataDir,
+      priorState: null,
+      tick,
+      now: NOW,
+      enabled: true
+    });
+    const failedAudit = {
+      ...actionResult.autoAction!,
+      result: "failed" as const,
+      statePersistence: null,
+      error: "audit failed",
+      escalation: "human_required" as const
+    };
+
+    const result = withOpenClawSupervisorAutoActionResult(tick, failedAudit);
+
+    expect(tick.emit).toBe(false);
+    expect(tick.nextState.lastHumanUpdateAt).toBeNull();
+    expect(result).toMatchObject({
+      emit: true,
+      stateChanged: true,
+      nextState: {
+        lastHumanUpdateAt: NOW
+      },
+      autoAction: {
+        afterState: {
+          lastHumanUpdateAt: NOW
+        }
       }
     });
   });

@@ -254,19 +254,17 @@ export function withOpenClawSupervisorAutoActionResult(
     autoAction.result !== "failed"
       ? tick
       : suppressAutoAction(tick);
+  const escalationTick = stampAutoActionEscalationHumanUpdate({
+    ...baseTick,
+    emit: true,
+    eventType: autoActionEscalationEventType(tick),
+    recommendedActionPolicy: autoActionEscalationPolicy(tick)
+  });
   const finalAutoAction =
-    baseTick.nextState === tick.nextState
+    statesEqualForAutoAction(autoAction.afterState, escalationTick.nextState)
       ? autoAction
-      : { ...autoAction, afterState: baseTick.nextState };
-  return withAutoAction(
-    {
-      ...baseTick,
-      emit: true,
-      eventType: autoActionEscalationEventType(tick),
-      recommendedActionPolicy: autoActionEscalationPolicy(tick)
-    },
-    finalAutoAction
-  );
+      : { ...autoAction, afterState: escalationTick.nextState };
+  return withAutoAction(escalationTick, finalAutoAction);
 }
 
 export function loadOpenClawSupervisorAutoActionAudit(
@@ -281,7 +279,7 @@ export function loadOpenClawSupervisorAutoActionAudit(
     .filter((line) => line.trim().length > 0)
     .map((line) => {
       const record = JSON.parse(line) as unknown;
-      if (!isOpenClawSupervisorAutoActionAuditRecord(record)) {
+      if (!isOpenClawSupervisorAutoActionAuditRecord(record, runId)) {
         throw new Error("Invalid OpenClaw supervisor auto-action audit record.");
       }
       return record;
@@ -289,7 +287,8 @@ export function loadOpenClawSupervisorAutoActionAudit(
 }
 
 function isOpenClawSupervisorAutoActionAuditRecord(
-  value: unknown
+  value: unknown,
+  runId: string
 ): value is OpenClawSupervisorAutoActionResult {
   if (!isObject(value)) return false;
   return (
@@ -298,8 +297,8 @@ function isOpenClawSupervisorAutoActionAuditRecord(
     typeof value.reason === "string" &&
     isStringOrNull(value.beforeDigest) &&
     typeof value.afterDigest === "string" &&
-    isOpenClawSupervisorStateOrNull(value.beforeState) &&
-    isOpenClawSupervisorState(value.afterState) &&
+    isOpenClawSupervisorStateOrNull(value.beforeState, runId) &&
+    isOpenClawSupervisorState(value.afterState, runId) &&
     typeof value.timestamp === "number" &&
     isAutoActionResult(value.result) &&
     isAutoActionStatePersistence(value.statePersistence) &&
@@ -309,18 +308,20 @@ function isOpenClawSupervisorAutoActionAuditRecord(
 }
 
 function isOpenClawSupervisorStateOrNull(
-  value: unknown
+  value: unknown,
+  runId: string
 ): value is OpenClawSupervisorState | null {
-  return value === null || isOpenClawSupervisorState(value);
+  return value === null || isOpenClawSupervisorState(value, runId);
 }
 
 function isOpenClawSupervisorState(
-  value: unknown
+  value: unknown,
+  runId: string
 ): value is OpenClawSupervisorState {
   if (!isObject(value)) return false;
   return (
     value.version === 1 &&
-    typeof value.runId === "string" &&
+    value.runId === runId &&
     isStringOrNull(value.lastCursor) &&
     isStringOrNull(value.lastDigest) &&
     isStringOrNull(value.lastReason) &&
