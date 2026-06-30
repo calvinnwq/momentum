@@ -3,8 +3,8 @@
 `openclaw supervise` is the cron-safe bridge between Momentum's native workflow
 watcher and an OpenClaw delivery loop. It runs one bounded watch tick for a
 single workflow run, persists the OpenClaw supervisor's local suppression state,
-and returns a sanitized envelope that a host can decide whether to deliver to
-chat.
+and returns a sanitized envelope plus a delivery intent that a host can decide
+whether to send to Discord or use to wake an OpenClaw lane.
 
 ```text
 momentum openclaw supervise <run-id> --once [--data-dir <path>] [--json]
@@ -59,6 +59,13 @@ envelope reports `monitorEnabled: false` and `cleanupAction: "remove_monitor"`.
 Hosts should treat that as the signal to stop polling this run and remove their
 external monitor registration.
 
+Momentum does not post Discord webhooks, wake OpenClaw lanes, remove external
+monitors, or tail verbose logs into chat. It only decides whether a short
+delivery intent exists and formats the data a host needs to perform its own
+delivery. To disable the integration, make the host ignore `deliveryIntent` (or
+stop calling `openclaw supervise`) while leaving `workflow run watch` and the
+supervisor CLI available for manual inspection.
+
 ## JSON envelope
 
 With `--json`, successful output is written to stdout:
@@ -83,6 +90,35 @@ With `--json`, successful output is written to stdout:
   },
   "stuckRisk": "low",
   "inspectionCommand": null,
+  "deliveryIntent": {
+    "kind": "approval",
+    "severity": "action_required",
+    "text": "Approval needed for run-1. Run: momentum workflow run approve run-1 --approval-boundary through-implementation --phrase \"approve plan run-1 through-implementation\"",
+    "action": {
+      "command": "momentum workflow run approve run-1 --approval-boundary through-implementation --phrase \"approve plan run-1 through-implementation\"",
+      "evidence": null
+    },
+    "wake": {
+      "target": "openclaw",
+      "intent": "wake",
+      "reason": "approval"
+    },
+    "message": {
+      "platform": "discord",
+      "format": "plain_text",
+      "allowedMentions": "none",
+      "maxLength": 1800
+    },
+    "dedupeKey": "openclaw-delivery:run-1:quiet_heartbeat:sha256:...",
+    "reminderKey": "openclaw-reminder:run-1:approval",
+    "cleanup": null,
+    "failure": {
+      "retryable": true,
+      "logLevel": "warn",
+      "stateImpact": "none",
+      "retry": "repeat_openclaw_supervise"
+    }
+  },
   "monitorEnabled": true,
   "cleanupAction": null,
   "state": {
@@ -111,6 +147,12 @@ watch-emitted or watch-silent tick (`watch_silent`, `heartbeat`,
 `duplicate_digest`, `not_human_worthy`, or `monitor_disabled`).
 `inspectionCommand`, when present for a stuck-risk advisory, uses a
 `<data-dir>` placeholder instead of exposing the resolved local data directory.
+`deliveryIntent` is `null` for suppressed ticks. When present, it contains a
+single Discord-safe message, optional operator command and evidence, OpenClaw
+wake/message metadata, dedupe and reminder keys, terminal cleanup hints, and
+retry/logging metadata for hosts whose delivery attempt fails. Delivery failure
+handling belongs to the host: Momentum state is already represented by the
+supervisor state fields and must not be rewound by a webhook or wake failure.
 `state.persisted: false` and `debug.statePersistence: "failed"` mean the host
 should deliver the advisory but treat the supervisor state as not durably saved.
 
@@ -132,6 +174,7 @@ should deliver the advisory but treat the supervisor state as not durably saved.
 | `humanAction` | object \| null | Operator command from the watch envelope, or `null` when no operator command is required. |
 | `stuckRisk` | string | Upstream watch stuck-risk value. |
 | `inspectionCommand` | string \| null | Sanitized stuck-risk inspection command with `<data-dir>` replacing the resolved path. |
+| `deliveryIntent` | object \| null | Short host-delivery contract for Discord/OpenClaw. `null` means stay silent. |
 | `monitorEnabled` | boolean | `false` after terminal cleanup disables further polling for this run. |
 | `cleanupAction` | enum \| null | `remove_monitor` when the host should remove its external monitor registration. |
 | `state` | object | Next local OpenClaw supervisor state, plus `persisted` to report whether it was saved. |
@@ -155,6 +198,11 @@ Digest: sha256:...
 Suppressed reason: (none)
 State persistence: saved
 Human action: momentum workflow run approve run-1 --approval-boundary through-implementation --phrase "approve plan run-1 through-implementation"
+Delivery intent: approval (action_required)
+Delivery text: Approval needed for run-1. Run: momentum workflow run approve run-1 --approval-boundary through-implementation --phrase "approve plan run-1 through-implementation"
+Delivery dedupe key: openclaw-delivery:run-1:quiet_heartbeat:sha256:...
+Delivery retry: repeat_openclaw_supervise
+Delivery action: momentum workflow run approve run-1 --approval-boundary through-implementation --phrase "approve plan run-1 through-implementation"
 ```
 
 ## Failures and refusals
