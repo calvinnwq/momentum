@@ -587,8 +587,17 @@ describe("momentum openclaw supervise", () => {
     expect(stderr).toBe("");
     expect(watchCalls).toBe(0);
     expect(JSON.parse(stdout)).toMatchObject({
+      emit: true,
+      eventType: "terminal",
       monitorEnabled: false,
       cleanupAction: "remove_monitor",
+      deliveryIntent: {
+        kind: "terminal",
+        severity: "action_required",
+        cleanup: {
+          action: "remove_monitor"
+        }
+      },
       state: {
         disabled: true,
         persisted: true

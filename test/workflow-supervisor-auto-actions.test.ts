@@ -513,8 +513,21 @@ describe("OpenClaw supervisor auto-actions", () => {
     });
 
     expect(result.tick).toMatchObject({
+      emit: true,
+      eventType: "terminal",
       monitorEnabled: false,
       cleanupAction: "remove_monitor",
+      recommendedActionPolicy: {
+        authority: "human_required",
+        risk: "high"
+      },
+      deliveryIntent: {
+        kind: "terminal",
+        severity: "action_required",
+        cleanup: {
+          action: "remove_monitor"
+        }
+      },
       nextState: {
         disabled: true
       }

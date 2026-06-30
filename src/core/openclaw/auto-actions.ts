@@ -375,7 +375,7 @@ function failClosedAutoActionTick(
   input: ExecuteOpenClawSupervisorAutoActionInput
 ): OpenClawSupervisorTick {
   return input.priorState?.disabled === true
-    ? input.tick
+    ? escalateDisabledAutoAction(input.tick)
     : escalateAutoAction(input.tick);
 }
 
@@ -385,22 +385,43 @@ function escalateAutoAction(tick: OpenClawSupervisorTick): OpenClawSupervisorTic
     ...suppressed,
     emit: true,
     eventType: autoActionEscalationEventType(tick),
-    recommendedActionPolicy: {
-      ...tick.recommendedActionPolicy,
-      authority: "human_required" as WorkflowActionAuthorityClass,
-      risk: "high" as WorkflowActionRiskLevel,
-      evidenceRequired: [
-        ...tick.recommendedActionPolicy.evidenceRequired,
-        "supported supervisor auto-action"
-      ],
-      rollback: "Keep the supervisor monitor registered until a human reviews the action.",
-      rationale:
-        "Supervisor auto-actions fail closed when local policy support is missing or ambiguous."
-    }
+    recommendedActionPolicy: autoActionEscalationPolicy(tick)
   };
   return {
     ...escalated,
     deliveryIntent: buildOpenClawDeliveryIntent(escalated)
+  };
+}
+
+function escalateDisabledAutoAction(
+  tick: OpenClawSupervisorTick
+): OpenClawSupervisorTick {
+  const escalated = {
+    ...tick,
+    emit: true,
+    eventType: autoActionEscalationEventType(tick),
+    recommendedActionPolicy: autoActionEscalationPolicy(tick)
+  };
+  return {
+    ...escalated,
+    deliveryIntent: buildOpenClawDeliveryIntent(escalated)
+  };
+}
+
+function autoActionEscalationPolicy(
+  tick: OpenClawSupervisorTick
+): WorkflowActionAuthorityPolicy {
+  return {
+    ...tick.recommendedActionPolicy,
+    authority: "human_required" as WorkflowActionAuthorityClass,
+    risk: "high" as WorkflowActionRiskLevel,
+    evidenceRequired: [
+      ...tick.recommendedActionPolicy.evidenceRequired,
+      "supported supervisor auto-action"
+    ],
+    rollback: "Keep the supervisor monitor registered until a human reviews the action.",
+    rationale:
+      "Supervisor auto-actions fail closed when local policy support is missing or ambiguous."
   };
 }
 
