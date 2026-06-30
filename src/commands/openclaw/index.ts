@@ -20,7 +20,8 @@ import {
 } from "../../core/openclaw/supervisor.js";
 import {
   emitOpenClawSupervise,
-  emitOpenClawSuperviseFailure
+  emitOpenClawSuperviseFailure,
+  emitOpenClawSuperviseHelp
 } from "../../renderers/openclaw.js";
 import {
   emitHelp,
@@ -48,6 +49,9 @@ export function openclaw(
 ): number | Promise<number> {
   const subcommand = parsed.args[1];
   if (parsed.args.includes("--help") || parsed.args.includes("-h")) {
+    if (subcommand === "supervise") {
+      return emitOpenClawSuperviseHelp(io);
+    }
     return emitHelp(io);
   }
   if (!subcommand) {
