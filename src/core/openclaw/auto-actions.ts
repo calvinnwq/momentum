@@ -153,7 +153,7 @@ export function executeOpenClawSupervisorAutoAction(
   const repeatLimitHit = repeatLimitExceeded(
     priorAuditRecords,
     actionType,
-    input.tick.digest
+    input.tick.nextState.lastDigest
   );
 
   if (repeatLimitHit && input.priorState?.disabled === true) {
@@ -297,7 +297,7 @@ function isOpenClawSupervisorAutoActionAuditRecord(
       typeof value.policyAction === "string" &&
       typeof value.reason === "string" &&
       isStringOrNull(value.beforeDigest) &&
-      typeof value.afterDigest === "string" &&
+      isStringOrNull(value.afterDigest) &&
       isOpenClawSupervisorStateOrNull(value.beforeState, runId) &&
       isOpenClawSupervisorState(value.afterState, runId) &&
       typeof value.timestamp === "number" &&
@@ -447,7 +447,7 @@ function withRequiredAutoActionAuditResult(
 function repeatLimitExceeded(
   records: OpenClawSupervisorAutoActionResult[],
   actionType: string,
-  digest: string
+  digest: string | null
 ): boolean {
   if (!REPEAT_LIMITED_ACTIONS.has(actionType)) return false;
   const attemptStatuses = new Map<string, { saved: number; failed: number }>();
@@ -498,7 +498,7 @@ function buildAutoActionRecord(input: {
     policyAction: input.policy.action,
     reason: input.tick.reason,
     beforeDigest: input.priorState?.lastDigest ?? null,
-    afterDigest: input.tick.digest,
+    afterDigest: input.tick.nextState.lastDigest,
     beforeState: input.priorState,
     afterState: input.tick.nextState,
     timestamp: input.now,

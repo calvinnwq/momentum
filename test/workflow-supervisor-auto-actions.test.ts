@@ -973,6 +973,55 @@ describe("OpenClaw supervisor auto-actions", () => {
     ).toHaveLength(beforeRecords.length);
   });
 
+  it("keeps disabled cleanup audit loadable when state digest is null", () => {
+    const dataDir = makeTempDir();
+    const disabledState = {
+      version: 1 as const,
+      runId: "mwf-auto-actions",
+      lastCursor: null,
+      lastDigest: null,
+      lastReason: "terminal_succeeded",
+      lastHumanUpdateAt: NOW,
+      disabled: true,
+      updatedAt: NOW
+    };
+    saveOpenClawSupervisorState(dataDir, disabledState);
+    const disabledTick = buildOpenClawSupervisorDisabledTick({
+      runId: "mwf-auto-actions",
+      state: disabledState,
+      now: NOW + 1_000
+    });
+
+    const result = executeOpenClawSupervisorAutoAction({
+      dataDir,
+      priorState: disabledState,
+      tick: disabledTick,
+      now: NOW + 1_000,
+      enabled: true
+    });
+
+    expect(result.autoAction).toMatchObject({
+      actionType: "release_monitor",
+      result: "success",
+      afterDigest: null,
+      afterState: {
+        lastDigest: null
+      }
+    });
+    expect(
+      loadOpenClawSupervisorAutoActionAudit(dataDir, "mwf-auto-actions")
+    ).toMatchObject([
+      {
+        actionType: "release_monitor",
+        result: "success",
+        afterDigest: null,
+        afterState: {
+          lastDigest: null
+        }
+      }
+    ]);
+  });
+
   it("does not let unreadable audit evidence re-enable an already disabled monitor", () => {
     const dataDir = makeTempDir();
     const disabledState = {

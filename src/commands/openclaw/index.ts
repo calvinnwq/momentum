@@ -285,8 +285,15 @@ function emitOpenClawAutoActionAuditFailureWithRepair(
 ): number {
   const failureTick = withOpenClawSupervisorAutoActionResult(tick, autoAction);
   let failureStatePersistence = statePersistence;
+  if (statePersistence === "failed") {
+    return emitOpenClawAutoActionAuditFailure(
+      parsed,
+      io,
+      failureTick,
+      failureStatePersistence
+    );
+  }
   if (
-    statePersistence === "failed" ||
     !openClawSupervisorStatesEqual(failureTick.nextState, tick.nextState)
   ) {
     try {

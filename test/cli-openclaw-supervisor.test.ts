@@ -1279,6 +1279,84 @@ describe("momentum openclaw supervise", () => {
     });
   });
 
+  it("does not repair state when failed state-persistence audit cannot be written", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-openclaw-release-save-and-audit-failed";
+    const supervisorDir = path.join(dataDir, "openclaw-supervisor");
+    const auditPath = path.join(
+      supervisorDir,
+      `${encodeURIComponent(runId)}.auto-actions.jsonl`
+    );
+    const statePath = path.join(
+      supervisorDir,
+      `${encodeURIComponent(runId)}.json`
+    );
+    const originalAppendFileSync = fs.appendFileSync;
+    let auditWriteCount = 0;
+    vi.spyOn(fs, "appendFileSync").mockImplementation(
+      (file, data, options) => {
+        if (file === auditPath) {
+          auditWriteCount += 1;
+          if (auditWriteCount === 3) {
+            throw new Error(`ENOSPC: no space left, open '${auditPath}'`);
+          }
+        }
+        return originalAppendFileSync(file, data, options);
+      }
+    );
+    const originalWriteFileSync = fs.writeFileSync;
+    let stateWriteCount = 0;
+    vi.spyOn(fs, "writeFileSync").mockImplementation(
+      (file, data, options) => {
+        if (file === statePath) {
+          stateWriteCount += 1;
+          if (stateWriteCount === 1) {
+            throw new Error(`EIO: input/output error, write '${statePath}'`);
+          }
+        }
+        return originalWriteFileSync(file, data, options);
+      }
+    );
+
+    const result = await run(
+      [
+        "openclaw",
+        "supervise",
+        runId,
+        "--once",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      watch({
+        runId,
+        emit: false,
+        reason: "terminal_succeeded",
+        recommendedAction: "release",
+        recommendedActionPolicy: releaseMonitorPolicy(),
+        cleanup: "release",
+        digest: "sha256:release-save-and-audit-failed",
+        nextPollSeconds: 0
+      })
+    );
+
+    expect(result.code, result.stderr).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(auditWriteCount).toBe(3);
+    expect(stateWriteCount).toBe(1);
+    expect(fs.existsSync(statePath)).toBe(false);
+    expect(JSON.parse(result.stderr)).toMatchObject({
+      ok: false,
+      code: "openclaw_auto_action_audit_failed",
+      state: {
+        persisted: false
+      },
+      debug: {
+        statePersistence: "failed"
+      }
+    });
+  });
+
   it("does not save supervisor state when required auto-action audit cannot be written", async () => {
     const dataDir = makeTempDir();
     const runId = "cwfp-openclaw-cli";

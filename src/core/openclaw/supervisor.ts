@@ -64,7 +64,7 @@ export type OpenClawSupervisorAutoActionResult = {
   policyAction: string;
   reason: string;
   beforeDigest: string | null;
-  afterDigest: string;
+  afterDigest: string | null;
   beforeState: OpenClawSupervisorState | null;
   afterState: OpenClawSupervisorState;
   timestamp: number;
