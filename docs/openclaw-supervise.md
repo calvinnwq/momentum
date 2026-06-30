@@ -75,6 +75,7 @@ Each attempted auto-action appends an initial audit record under `<data-dir>/ope
 The record includes the action type, policy action, reason, before and after digest/state snapshots, timestamp, result, and any failure or human escalation.
 Successful actions append a second required audit record after state persistence with `statePersistence: "saved"` or `"failed"`.
 `release_monitor` is repeat-bounded to three saved successful audit attempts for the same digest; a fourth attempt for an enabled monitor keeps polling, clears cleanup, and escalates for human review.
+An already disabled monitor stays disabled at the repeat bound, does not append another auto-action audit record, and keeps repeating the cleanup hint so the host can remove its registration.
 If prior audit evidence is unreadable, an `auto_allowed` policy is unsupported, or required audit evidence cannot be written at either point, the action fails closed.
 Fail-closed output uses a human-required policy, preserves a sanitized delivery text of `Human review required for <run-id>: OpenClaw supervisor auto-action <action> did not complete.`, clears monitor-removal cleanup unless the monitor was already disabled and the escalation audit was saved, and exits nonzero when required audit evidence could not be written.
 
@@ -213,7 +214,7 @@ should deliver the advisory but treat the supervisor state as not durably saved.
 | `deliveryIntent` | object \| null | Short host-delivery contract for Discord/OpenClaw. `null` means stay silent. |
 | `autoAction` | object \| null | Local auto-action audit summary when an `auto_allowed` action was attempted, skipped, failed, or escalated. `null` means no audit-recorded local auto-action ran, such as human-required recommendations or disabled benign recheck pass-through. |
 | `monitorEnabled` | boolean | `false` after terminal cleanup disables further polling for this run. |
-| `cleanupAction` | enum \| null | `remove_monitor` when the host should remove its external monitor registration. This is emitted only when terminal cleanup is paired with an `auto_allowed` `release_monitor` policy. |
+| `cleanupAction` | enum \| null | `remove_monitor` when the host should remove its external monitor registration. This is emitted after terminal cleanup disables the monitor, and may repeat for an already disabled monitor even when a later local auto-action escalation requires human review. |
 | `state` | object | Next local OpenClaw supervisor state, plus `persisted` to report whether it was saved. |
 | `debug` | object | Watch/suppression diagnostics for host logs. |
 
@@ -229,7 +230,7 @@ should deliver the advisory but treat the supervisor state as not durably saved.
 | `message` | object | Delivery formatting contract: Discord plain text, no allowed mentions, and the maximum text length. |
 | `dedupeKey` | string | Host idempotency key for a delivery attempt. Repeated due reminders include the latest supervisor timestamp so intentional repeats can be delivered. |
 | `reminderKey` | string \| null | Stable reminder group for approval, recovery, and stuck-risk reminders; otherwise `null`. |
-| `cleanup` | object \| null | Terminal cleanup hint. `remove_monitor` means the host should stop polling this run and remove the external monitor registration; it is present only after the upstream `release_monitor` policy allowed terminal cleanup. |
+| `cleanup` | object \| null | Terminal cleanup hint. `remove_monitor` means the host should stop polling this run and remove the external monitor registration; it is present after terminal cleanup disables the monitor and may repeat while an already disabled monitor is escalated for human review. |
 | `failure` | object | Host retry policy for failed webhook or wake attempts. Failures are retryable, should be logged at warn, have no Momentum state impact, and can be retried by repeating `openclaw supervise`. |
 
 When `autoAction.escalation` is `human_required`, the delivery text is replaced with a sanitized human-review message and the delivery dedupe key includes the auto-action type, result, and escalation.
@@ -280,8 +281,7 @@ Delivery retry: repeat_openclaw_supervise
 Delivery action: momentum workflow run approve run-1 --approval-boundary through-implementation --phrase "approve plan run-1 through-implementation"
 ```
 
-When `autoAction` is present, text output also includes `Auto action:
-<actionType> (<result>)` and `Auto action audit: <escalation|recorded>`.
+When `autoAction` is present, text output also includes `Auto action: <actionType> (<result>)` and `Auto action audit: <escalation|recorded>`.
 
 ## Failures and refusals
 
