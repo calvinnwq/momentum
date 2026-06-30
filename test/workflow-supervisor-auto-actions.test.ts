@@ -661,6 +661,109 @@ describe("OpenClaw supervisor auto-actions", () => {
     });
   });
 
+  it("suppresses disabled monitor cleanup when initial audit evidence cannot be written", () => {
+    const dataDir = makeTempDir();
+    fs.writeFileSync(path.join(dataDir, "openclaw-supervisor"), "blocked");
+    const disabledState = {
+      version: 1 as const,
+      runId: "mwf-auto-actions",
+      lastCursor: "wfcur1.done",
+      lastDigest: "sha256:terminal-disabled-audit-failed",
+      lastReason: "terminal_succeeded",
+      lastHumanUpdateAt: NOW,
+      disabled: true,
+      updatedAt: NOW
+    };
+    const disabledTick = buildOpenClawSupervisorDisabledTick({
+      runId: "mwf-auto-actions",
+      state: disabledState,
+      now: NOW + 1_000
+    });
+
+    const result = executeOpenClawSupervisorAutoAction({
+      dataDir,
+      priorState: disabledState,
+      tick: disabledTick,
+      now: NOW + 10_000,
+      enabled: true
+    });
+
+    expect(result.autoAction).toMatchObject({
+      actionType: "release_monitor",
+      result: "failed",
+      escalation: "human_required"
+    });
+    expect(result.tick).toMatchObject({
+      emit: true,
+      monitorEnabled: true,
+      cleanupAction: null,
+      deliveryIntent: {
+        severity: "action_required",
+        cleanup: null
+      },
+      nextState: {
+        disabled: false
+      }
+    });
+  });
+
+  it("suppresses disabled monitor cleanup when escalation audit evidence cannot be written", () => {
+    const dataDir = makeTempDir();
+    fs.writeFileSync(path.join(dataDir, "openclaw-supervisor"), "blocked");
+    const disabledState = {
+      version: 1 as const,
+      runId: "mwf-auto-actions",
+      lastCursor: "wfcur1.done",
+      lastDigest: "sha256:terminal-disabled-escalation-audit-failed",
+      lastReason: "terminal_succeeded",
+      lastHumanUpdateAt: NOW,
+      disabled: true,
+      updatedAt: NOW
+    };
+    const disabledTick = buildOpenClawSupervisorDisabledTick({
+      runId: "mwf-auto-actions",
+      state: disabledState,
+      now: NOW + 1_000
+    });
+    const unsupportedTick = {
+      ...disabledTick,
+      recommendedActionPolicy: {
+        action: "future_auto_unblock",
+        authority: "auto_allowed" as const,
+        risk: "low" as const,
+        evidenceRequired: ["future policy evidence"],
+        rollback: "Stop polling.",
+        rationale: "Future policy has not been implemented locally."
+      }
+    };
+
+    const result = executeOpenClawSupervisorAutoAction({
+      dataDir,
+      priorState: disabledState,
+      tick: unsupportedTick,
+      now: NOW + 10_000,
+      enabled: true
+    });
+
+    expect(result.autoAction).toMatchObject({
+      actionType: "future_auto_unblock",
+      result: "failed",
+      escalation: "human_required"
+    });
+    expect(result.tick).toMatchObject({
+      emit: true,
+      monitorEnabled: true,
+      cleanupAction: null,
+      deliveryIntent: {
+        severity: "action_required",
+        cleanup: null
+      },
+      nextState: {
+        disabled: false
+      }
+    });
+  });
+
   it("escalates when prior audit evidence is unreadable", () => {
     const dataDir = makeTempDir();
     const auditDir = path.join(dataDir, "openclaw-supervisor");

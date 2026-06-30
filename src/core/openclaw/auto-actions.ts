@@ -73,10 +73,7 @@ export function executeOpenClawSupervisorAutoAction(
       input.tick.runId,
       autoAction
     );
-    return {
-      tick: withAutoAction(finalTick, persisted),
-      autoAction: persisted
-    };
+    return withRequiredAutoActionAuditResult(input, finalTick, persisted);
   }
 
   if (!input.enabled) {
@@ -99,10 +96,7 @@ export function executeOpenClawSupervisorAutoAction(
       input.tick.runId,
       autoAction
     );
-    return {
-      tick: withAutoAction(finalTick, persisted),
-      autoAction: persisted
-    };
+    return withRequiredAutoActionAuditResult(input, finalTick, persisted);
   }
 
   if (actionType === "release_monitor" && input.tick.cleanupAction !== "remove_monitor") {
@@ -122,10 +116,7 @@ export function executeOpenClawSupervisorAutoAction(
       input.tick.runId,
       autoAction
     );
-    return {
-      tick: withAutoAction(finalTick, persisted),
-      autoAction: persisted
-    };
+    return withRequiredAutoActionAuditResult(input, finalTick, persisted);
   }
 
   let repeatLimitHit = false;
@@ -153,10 +144,7 @@ export function executeOpenClawSupervisorAutoAction(
       input.tick.runId,
       autoAction
     );
-    return {
-      tick: withAutoAction(finalTick, persisted),
-      autoAction: persisted
-    };
+    return withRequiredAutoActionAuditResult(input, finalTick, persisted);
   }
 
   if (repeatLimitHit && input.priorState?.disabled !== true) {
@@ -176,10 +164,7 @@ export function executeOpenClawSupervisorAutoAction(
       input.tick.runId,
       autoAction
     );
-    return {
-      tick: withAutoAction(finalTick, persisted),
-      autoAction: persisted
-    };
+    return withRequiredAutoActionAuditResult(input, finalTick, persisted);
   }
 
   const autoAction = buildAutoActionRecord({
@@ -200,7 +185,7 @@ export function executeOpenClawSupervisorAutoAction(
       autoAction
     );
   } catch (error) {
-    const finalTick = failClosedAutoActionTick(input);
+    const finalTick = failClosedAutoActionAuditFailureTick(input);
     const failed = buildAutoActionRecord({
       actionType,
       policy,
@@ -396,6 +381,28 @@ function appendRequiredAutoActionAudit(
   }
 }
 
+function withRequiredAutoActionAuditResult(
+  input: ExecuteOpenClawSupervisorAutoActionInput,
+  tick: OpenClawSupervisorTick,
+  record: OpenClawSupervisorAutoActionResult
+): ExecuteOpenClawSupervisorAutoActionResult {
+  if (record.result !== "failed") {
+    return {
+      tick: withAutoAction(tick, record),
+      autoAction: record
+    };
+  }
+  const auditFailureTick = failClosedAutoActionAuditFailureTick(input);
+  const auditFailureRecord = {
+    ...record,
+    afterState: auditFailureTick.nextState
+  };
+  return {
+    tick: withAutoAction(auditFailureTick, auditFailureRecord),
+    autoAction: auditFailureRecord
+  };
+}
+
 function repeatLimitExceeded(
   dataDir: string,
   runId: string,
@@ -488,6 +495,12 @@ function failClosedAutoActionTick(
   return input.priorState?.disabled === true
     ? escalateDisabledAutoAction(input.tick)
     : escalateAutoAction(input.tick);
+}
+
+function failClosedAutoActionAuditFailureTick(
+  input: ExecuteOpenClawSupervisorAutoActionInput
+): OpenClawSupervisorTick {
+  return escalateAutoAction(input.tick);
 }
 
 function escalateAutoAction(tick: OpenClawSupervisorTick): OpenClawSupervisorTick {
