@@ -9,6 +9,7 @@ import type {
   WorkflowMonitorEnvelope,
   WorkflowMonitorEnvelopeCounts
 } from "../src/core/workflow/monitor-envelope.js";
+import { getWorkflowActionAuthorityPolicy } from "../src/core/workflow/action-authority.js";
 
 /**
  * NGX-511: pure native progress-monitor digest reducer.
@@ -124,6 +125,9 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
             evidence: "goals/cwfp-run/gates/gate-approval.json",
             allowedActions: ["approve", "reject"],
             recommendedAction: "approve",
+            recommendedActionPolicy: getWorkflowActionAuthorityPolicy(
+              "approval_decision"
+            ),
             policyEnvelope: ["approve"],
             resolvedAt: null,
             resolvedBy: null,
@@ -150,6 +154,8 @@ describe("deriveWorkflowMonitorProgress (NGX-511)", () => {
             evidence: "goals/cwfp-run/gates/gate-recovery.json",
             allowedActions: ["retry", "skip"],
             recommendedAction: "retry",
+            recommendedActionPolicy:
+              getWorkflowActionAuthorityPolicy("clear_recovery"),
             policyEnvelope: ["retry"],
             resolvedAt: null,
             resolvedBy: null,

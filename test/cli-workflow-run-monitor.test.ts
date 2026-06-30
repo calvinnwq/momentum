@@ -742,6 +742,11 @@ describe("momentum workflow run monitor (NGX-328)", () => {
         gateType: string;
         open: boolean;
         allowedActions: string[];
+        recommendedActionPolicy: {
+          action: string;
+          authority: string;
+          risk: string;
+        };
         resolvedBy: string | null;
         chosenAction: string | null;
       }>;
@@ -757,11 +762,21 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       targetScope: "workflow",
       gateType: "approval_required",
       open: true,
-      allowedActions: ["approve", "reject"]
+      allowedActions: ["approve", "reject"],
+      recommendedActionPolicy: {
+        action: "approval_decision",
+        authority: "human_required",
+        risk: "medium"
+      }
     });
     const resolved = payload.gates.find((g) => g.gateId === "gate-done-1");
     expect(resolved).toMatchObject({
       open: false,
+      recommendedActionPolicy: {
+        action: "operator_decision",
+        authority: "human_required",
+        risk: "medium"
+      },
       resolvedBy: "calvin",
       chosenAction: "fix"
     });

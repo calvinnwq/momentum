@@ -25,7 +25,6 @@
  * `manual_recovery_lease`.
  */
 import type { MomentumDb } from "../../adapters/db.js";
-import type { WorkflowGateRecord } from "./gate-persist.js";
 import {
   type WorkflowMonitorActiveStep,
   type WorkflowMonitorCheckpoint,
@@ -39,7 +38,8 @@ import {
   loadWorkflowRunDetail,
   type LoadWorkflowRunDetailOptions,
   type WorkflowEvidenceLink,
-  type WorkflowRunDetail
+  type WorkflowRunDetail,
+  type WorkflowRunDetailGate
 } from "./status.js";
 import type {
   WorkflowRunState,
@@ -93,6 +93,8 @@ export type WorkflowMonitorEnvelopeCounts = {
   gatesOpen: number;
 };
 
+export type WorkflowMonitorEnvelopeGate = WorkflowRunDetailGate;
+
 export type WorkflowMonitorEnvelope = {
   schemaVersion: number;
   generatedAt: number;
@@ -121,7 +123,7 @@ export type WorkflowMonitorEnvelope = {
    * explicit and inspectable to the monitor runner alongside the derived
    * disposition, mirroring `workflow status` / `workflow handoff`.
    */
-  gates: readonly WorkflowGateRecord[];
+  gates: readonly WorkflowMonitorEnvelopeGate[];
   counts: WorkflowMonitorEnvelopeCounts;
   /**
    * The digest of the last *emitted* native progress tick for this run, read

@@ -5,6 +5,7 @@ import {
   buildOpenClawDeliveryIntent,
   type OpenClawDeliveryIntent
 } from "./delivery-intent.js";
+import type { WorkflowActionAuthorityPolicy } from "../workflow/action-authority.js";
 
 export type OpenClawSupervisorEventType =
   | "progress"
@@ -36,6 +37,7 @@ export type OpenClawSupervisorWatchEnvelope = {
   emit: boolean;
   reason: string;
   recommendedAction: string;
+  recommendedActionPolicy: WorkflowActionAuthorityPolicy;
   nextPollSeconds: number;
   humanAction: OpenClawSupervisorHumanAction | null;
   cleanup: string;
@@ -66,6 +68,7 @@ export type OpenClawSupervisorTick = {
   cursor: string | null;
   humanAction: OpenClawSupervisorHumanAction | null;
   recommendedAction: string;
+  recommendedActionPolicy: WorkflowActionAuthorityPolicy;
   nextPollSeconds: number;
   stuckRisk: string;
   inspectionCommand: string | null;
@@ -96,8 +99,11 @@ export function buildOpenClawSupervisorTick(
     priorState.lastHumanUpdateAt !== null;
   const suppressedReason = selectSuppressedReason(watch, eventType, duplicate);
   const emit = suppressedReason === null;
+  const canReleaseMonitor =
+    watch.recommendedActionPolicy.action === "release_monitor" &&
+    watch.recommendedActionPolicy.authority === "auto_allowed";
   const cleanupAction: OpenClawSupervisorCleanupAction =
-    eventType === "terminal" && watch.cleanup === "release"
+    eventType === "terminal" && watch.cleanup === "release" && canReleaseMonitor
       ? "remove_monitor"
       : null;
   const monitorEnabled = cleanupAction === null;
@@ -121,6 +127,7 @@ export function buildOpenClawSupervisorTick(
     cursor: watch.cursor,
     humanAction: watch.humanAction,
     recommendedAction: watch.recommendedAction,
+    recommendedActionPolicy: watch.recommendedActionPolicy,
     nextPollSeconds: watch.nextPollSeconds,
     stuckRisk: watch.stuckRisk,
     inspectionCommand: watch.inspectionCommand,
@@ -152,6 +159,15 @@ export function buildOpenClawSupervisorDisabledTick(input: {
     cursor: input.state.lastCursor,
     humanAction: null,
     recommendedAction: "release",
+    recommendedActionPolicy: {
+      action: "release_monitor",
+      authority: "auto_allowed",
+      risk: "low",
+      evidenceRequired: ["disabled OpenClaw supervisor state"],
+      rollback: "Re-enable the external monitor if the run still needs polling.",
+      rationale:
+        "Disabled supervisor cleanup only removes the host monitor registration."
+    },
     nextPollSeconds: 0,
     stuckRisk: "low",
     inspectionCommand: null,

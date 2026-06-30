@@ -270,6 +270,58 @@ describe("momentum workflow run watch", () => {
     expect(payload.digest.startsWith("sha256:")).toBe(true);
   });
 
+  it("keeps healthy external-tail progress pollable instead of human-required", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-watch-merge-cleanup-progress";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "running" });
+      seedStep(db, {
+        runId,
+        stepId: "merge-cleanup",
+        kind: "merge-cleanup",
+        state: "running",
+        order: 4
+      });
+      seedLease(db, {
+        runId,
+        leaseKind: "managed-step",
+        expiresAt: FRESH_EXPIRY
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "watch",
+      runId,
+      "--once",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      recommendedAction: string;
+      recommendedActionPolicy: {
+        action: string;
+        authority: string;
+        risk: string;
+      };
+    };
+    expect(payload).toMatchObject({
+      recommendedAction: "poll",
+      recommendedActionPolicy: {
+        action: "watch_recheck",
+        authority: "auto_allowed",
+        risk: "low"
+      }
+    });
+  });
+
   it("returns a pollable idle supervisor envelope when no step is active yet", async () => {
     const dataDir = makeTempDir();
     const runId = "cwfp-watch-idle";
@@ -884,6 +936,71 @@ describe("momentum workflow run watch", () => {
       stuckRisk: "high"
     });
   });
+
+  it.each([
+    {
+      stepId: "merge-cleanup",
+      kind: "merge-cleanup",
+      policyAction: "merge_cleanup"
+    },
+    {
+      stepId: "linear-refresh",
+      kind: "linear-refresh",
+      policyAction: "linear_refresh"
+    }
+  ])(
+    "marks failed external tail recovery as human-required for $stepId",
+    async ({ stepId, kind, policyAction }) => {
+      const dataDir = makeTempDir();
+      const runId = `cwfp-watch-failed-${stepId}`;
+      const db = openDb(dataDir);
+      try {
+        seedRun(db, { runId, state: "failed" });
+        seedStep(db, {
+          runId,
+          stepId,
+          kind,
+          state: "failed",
+          order: 4
+        });
+      } finally {
+        db.close();
+      }
+
+      const result = await run([
+        "workflow",
+        "run",
+        "watch",
+        runId,
+        "--once",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ]);
+
+      expect(result.code).toBe(0);
+      const payload = JSON.parse(result.stdout) as {
+        nextAction: { code: string; stepId?: string | null };
+        humanAction: { command: string; detail: string | null } | null;
+        recommendedAction: string;
+        recommendedActionPolicy: {
+          action: string;
+          authority: string;
+          risk: string;
+        };
+      };
+      expect(payload).toMatchObject({
+        nextAction: { code: "clear_recovery", stepId },
+        recommendedAction: "recover",
+        recommendedActionPolicy: {
+          action: policyAction,
+          authority: "human_required",
+          risk: "high"
+        }
+      });
+      expect(payload.humanAction?.command).toContain("--evidence-pointer <ref>");
+    }
+  );
 
   it.each([
     {

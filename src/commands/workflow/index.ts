@@ -53,6 +53,7 @@ import {
   loadWorkflowMonitorEnvelope,
   type WorkflowMonitorEnvelope
 } from "../../core/workflow/monitor-envelope.js";
+import { deriveWorkflowWatchActionRecommendation } from "../../core/workflow/action-authority.js";
 import {
   deriveWorkflowMonitorProgress,
   type WorkflowMonitorProgressTick
@@ -2207,6 +2208,10 @@ async function workflowRunWatch(
   const advisory = deriveWorkflowWatchAdvisory(envelope, progress, {
     dataDir
   });
+  const recommendation = deriveWorkflowWatchActionRecommendation(
+    envelope,
+    progress
+  );
   const emittedDigest = advisory.emit
     ? progress.digest
     : envelope.monitorLastEmittedDigest;
@@ -2239,7 +2244,15 @@ async function workflowRunWatch(
     writeDb?.close();
   }
 
-  return emitWorkflowRunWatch(parsed, io, dataDir, envelope, progress, advisory);
+  return emitWorkflowRunWatch(
+    parsed,
+    io,
+    dataDir,
+    envelope,
+    progress,
+    advisory,
+    recommendation
+  );
 }
 
 /**

@@ -293,6 +293,11 @@ describe("momentum workflow handoff", () => {
         gateType: string;
         open: boolean;
         allowedActions: string[];
+        recommendedActionPolicy: {
+          action: string;
+          authority: string;
+          risk: string;
+        };
       }>;
     };
     expect(payload.gates.map((g) => g.gateId)).toEqual(["handoff-gate-1"]);
@@ -300,7 +305,12 @@ describe("momentum workflow handoff", () => {
       targetScope: "workflow",
       gateType: "approval_required",
       open: true,
-      allowedActions: ["approve", "reject"]
+      allowedActions: ["approve", "reject"],
+      recommendedActionPolicy: {
+        action: "approval_decision",
+        authority: "human_required",
+        risk: "medium"
+      }
     });
 
     const textResult = await run([

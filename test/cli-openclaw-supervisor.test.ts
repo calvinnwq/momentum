@@ -39,6 +39,14 @@ function watch(
     emit: input.emit ?? true,
     reason: input.reason ?? "in_progress",
     recommendedAction: input.recommendedAction ?? "poll",
+    recommendedActionPolicy: input.recommendedActionPolicy ?? {
+      action: "watch_recheck",
+      authority: "auto_allowed",
+      risk: "low",
+      evidenceRequired: ["durable monitor/watch state"],
+      rollback: "Stop polling; no external state was changed.",
+      rationale: "Read-only supervisor polling is safe to repeat."
+    },
     nextPollSeconds: input.nextPollSeconds ?? 15,
     humanAction: input.humanAction ?? null,
     cleanup: input.cleanup ?? "none",
@@ -47,6 +55,19 @@ function watch(
     phase: input.phase ?? "advancing",
     stuckRisk: input.stuckRisk ?? "low",
     inspectionCommand: input.inspectionCommand ?? null
+  };
+}
+
+function releaseMonitorPolicy() {
+  return {
+    action: "release_monitor",
+    authority: "auto_allowed" as const,
+    risk: "low" as const,
+    evidenceRequired: ["terminal run state", "cleanup release signal"],
+    rollback:
+      "Re-register or resume the external monitor if more observation is needed.",
+    rationale:
+      "Releasing a supervisor monitor after terminal evidence only affects local/host polling registration."
   };
 }
 
@@ -386,6 +407,8 @@ describe("momentum openclaw supervise", () => {
       args,
       watch({
         reason: "terminal_succeeded",
+        recommendedAction: "release",
+        recommendedActionPolicy: releaseMonitorPolicy(),
         cleanup: "release",
         digest: "sha256:terminal",
         nextPollSeconds: 0
@@ -456,6 +479,8 @@ describe("momentum openclaw supervise", () => {
       args,
       watch({
         reason: "terminal_succeeded",
+        recommendedAction: "release",
+        recommendedActionPolicy: releaseMonitorPolicy(),
         cleanup: "release",
         digest: "sha256:terminal-readonly",
         nextPollSeconds: 0
@@ -531,6 +556,8 @@ describe("momentum openclaw supervise", () => {
       watch({
         emit: false,
         reason: "terminal_succeeded",
+        recommendedAction: "release",
+        recommendedActionPolicy: releaseMonitorPolicy(),
         cleanup: "release",
         digest: "sha256:terminal-silent",
         nextPollSeconds: 0

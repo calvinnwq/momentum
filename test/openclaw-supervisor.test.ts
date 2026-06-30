@@ -39,6 +39,14 @@ function watch(
     emit: input.emit ?? true,
     reason: input.reason ?? "in_progress",
     recommendedAction: input.recommendedAction ?? "poll",
+    recommendedActionPolicy: input.recommendedActionPolicy ?? {
+      action: "watch_recheck",
+      authority: "auto_allowed",
+      risk: "low",
+      evidenceRequired: ["durable monitor/watch state"],
+      rollback: "Stop polling; no external state was changed.",
+      rationale: "Read-only supervisor polling is safe to repeat."
+    },
     nextPollSeconds: input.nextPollSeconds ?? 15,
     humanAction: input.humanAction ?? null,
     cleanup: input.cleanup ?? "none",
@@ -109,6 +117,14 @@ describe("buildOpenClawSupervisorTick", () => {
           command: "momentum workflow run clear-recovery cwfp-openclaw",
           detail: "Resolve the failed step evidence first."
         },
+        recommendedActionPolicy: {
+          action: "clear_recovery",
+          authority: "human_required",
+          risk: "high",
+          evidenceRequired: ["operator evidence"],
+          rollback: "Keep the run blocked until evidence is supplied.",
+          rationale: "Clearing recovery changes durable workflow state."
+        },
         digest: "sha256:recovery"
       }),
       now: NOW
@@ -117,6 +133,10 @@ describe("buildOpenClawSupervisorTick", () => {
     expect(tick).toMatchObject({
       emit: true,
       eventType: "recovery",
+      recommendedActionPolicy: {
+        action: "clear_recovery",
+        authority: "human_required"
+      },
       humanAction: {
         code: "clear_recovery",
         command: "momentum workflow run clear-recovery cwfp-openclaw"
@@ -237,6 +257,17 @@ describe("buildOpenClawSupervisorTick", () => {
       priorState: null,
       watch: watch({
         reason: "terminal_succeeded",
+        recommendedAction: "release",
+        recommendedActionPolicy: {
+          action: "release_monitor",
+          authority: "auto_allowed",
+          risk: "low",
+          evidenceRequired: ["terminal run state", "cleanup release signal"],
+          rollback:
+            "Re-register or resume the external monitor if more observation is needed.",
+          rationale:
+            "Releasing a supervisor monitor after terminal evidence only affects local/host polling registration."
+        },
         cleanup: "release",
         digest: "sha256:terminal",
         nextPollSeconds: 0
@@ -251,6 +282,37 @@ describe("buildOpenClawSupervisorTick", () => {
       monitorEnabled: false
     });
     expect(tick.nextState.disabled).toBe(true);
+  });
+
+  it("keeps terminal monitoring enabled when release policy fails closed", () => {
+    const tick = buildOpenClawSupervisorTick({
+      priorState: null,
+      watch: watch({
+        reason: "terminal_succeeded",
+        recommendedAction: "release",
+        recommendedActionPolicy: {
+          action: "release_monitor",
+          authority: "human_required",
+          risk: "high",
+          evidenceRequired: ["valid action authority metadata"],
+          rollback: "Keep the supervisor monitor registered.",
+          rationale:
+            "Malformed or version-skewed policy metadata must not silently remove a host monitor."
+        },
+        cleanup: "release",
+        digest: "sha256:terminal-fail-closed",
+        nextPollSeconds: 0
+      }),
+      now: NOW
+    });
+
+    expect(tick).toMatchObject({
+      emit: true,
+      eventType: "terminal",
+      cleanupAction: null,
+      monitorEnabled: true
+    });
+    expect(tick.nextState.disabled).toBe(false);
   });
 
   it("repeats terminal cleanup for disabled supervisor state retries", () => {
