@@ -915,6 +915,59 @@ describe("OpenClaw supervisor auto-actions", () => {
     });
   });
 
+  it("escalates read-only auto-actions when prior audit evidence is unreadable", () => {
+    const dataDir = makeTempDir();
+    const auditDir = path.join(dataDir, "openclaw-supervisor");
+    fs.mkdirSync(auditDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(auditDir, `${encodeURIComponent("mwf-auto-actions")}.auto-actions.jsonl`),
+      "{not-json}\n"
+    );
+    const tick = buildOpenClawSupervisorTick({
+      priorState: null,
+      watch: watch({
+        recommendedAction: "poll",
+        recommendedActionPolicy: {
+          action: "watch_recheck",
+          authority: "auto_allowed",
+          risk: "low",
+          evidenceRequired: ["fresh watch envelope", "durable workflow rows"],
+          rollback: "Stop polling; no external state was changed by the policy.",
+          rationale:
+            "Supervisor watch rechecks are explicitly allowlisted for local/read-only polling metadata."
+        },
+        digest: "sha256:watch-corrupt-audit"
+      }),
+      now: NOW
+    });
+
+    const result = executeOpenClawSupervisorAutoAction({
+      dataDir,
+      priorState: null,
+      tick,
+      now: NOW,
+      enabled: true
+    });
+
+    expect(result.autoAction).toMatchObject({
+      actionType: "watch_recheck",
+      result: "skipped",
+      escalation: "human_required",
+      error: "Auto-action audit evidence is unreadable."
+    });
+    expect(result.tick.recommendedActionPolicy).toMatchObject({
+      action: "watch_recheck",
+      authority: "human_required",
+      risk: "high"
+    });
+    expect(result.tick).toMatchObject({
+      emit: true,
+      deliveryIntent: {
+        severity: "action_required"
+      }
+    });
+  });
+
   it("escalates when prior audit evidence has an invalid shape", () => {
     const dataDir = makeTempDir();
     const auditDir = path.join(dataDir, "openclaw-supervisor");

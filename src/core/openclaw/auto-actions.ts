@@ -124,13 +124,11 @@ export function executeOpenClawSupervisorAutoAction(
     return withRequiredAutoActionAuditResult(input, finalTick, persisted);
   }
 
-  let repeatLimitHit = false;
+  let priorAuditRecords: OpenClawSupervisorAutoActionResult[] = [];
   try {
-    repeatLimitHit = repeatLimitExceeded(
+    priorAuditRecords = loadOpenClawSupervisorAutoActionAudit(
       input.dataDir,
-      input.tick.runId,
-      actionType,
-      input.tick.digest
+      input.tick.runId
     );
   } catch {
     const finalTick = failClosedAutoActionTick(input);
@@ -151,6 +149,12 @@ export function executeOpenClawSupervisorAutoAction(
     );
     return withRequiredAutoActionAuditResult(input, finalTick, persisted);
   }
+
+  const repeatLimitHit = repeatLimitExceeded(
+    priorAuditRecords,
+    actionType,
+    input.tick.digest
+  );
 
   if (repeatLimitHit && input.priorState?.disabled === true) {
     return {
@@ -424,16 +428,12 @@ function withRequiredAutoActionAuditResult(
 }
 
 function repeatLimitExceeded(
-  dataDir: string,
-  runId: string,
+  records: OpenClawSupervisorAutoActionResult[],
   actionType: string,
   digest: string
 ): boolean {
   if (!REPEAT_LIMITED_ACTIONS.has(actionType)) return false;
-  const successfulStateSaves = loadOpenClawSupervisorAutoActionAudit(
-    dataDir,
-    runId
-  ).reduce((count, record) => {
+  const successfulStateSaves = records.reduce((count, record) => {
     if (
       record.actionType !== actionType ||
       record.afterDigest !== digest ||
