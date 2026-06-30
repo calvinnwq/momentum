@@ -1,10 +1,7 @@
 # OpenClaw supervise
 
-`openclaw supervise` is the cron-safe bridge between Momentum's native workflow
-watcher and an OpenClaw delivery loop. It runs one bounded watch tick for a
-single workflow run, persists the OpenClaw supervisor's local suppression state,
-and returns a sanitized envelope plus a delivery intent that a host can decide
-whether to send to Discord or use to wake an OpenClaw lane.
+`openclaw supervise` is the cron-safe bridge between Momentum's native workflow watcher and an OpenClaw delivery loop.
+It runs one bounded watch tick for a single workflow run, persists the OpenClaw supervisor's local suppression state, and returns a sanitized envelope with a delivery intent plus any local auto-action audit summary that a host can surface safely.
 
 ```text
 momentum openclaw supervise <run-id> --once [--data-dir <path>] [--json]
@@ -67,16 +64,11 @@ envelope reports `monitorEnabled: false` and `cleanupAction: "remove_monitor"`.
 Hosts should treat that as the signal to stop polling this run and remove their
 external monitor registration.
 
-OpenClaw local auto-actions are limited to the explicitly supported
-`auto_allowed` policy actions: `watch_recheck`, `monitor_recheck`,
-`stale_lease_auto_release`, and `release_monitor`. Each attempted auto-action
-appends an audit record under
-`<data-dir>/openclaw-supervisor/<encoded-run-id>.auto-actions.jsonl` before the
-local state change is applied. The record includes the action type, policy
-action, reason, before and after digest/state snapshots, timestamp, result, and
-any failure or human escalation. If audit evidence cannot be written, the action
-fails closed, the command exits nonzero, and the JSON/text failure output keeps
-the sanitized human-required escalation details.
+OpenClaw local auto-actions are limited to the explicitly supported `auto_allowed` policy actions: `watch_recheck`, `monitor_recheck`, `stale_lease_auto_release`, and `release_monitor`.
+Each attempted auto-action appends an initial audit record under `<data-dir>/openclaw-supervisor/<encoded-run-id>.auto-actions.jsonl` before the local state change is applied.
+The record includes the action type, policy action, reason, before and after digest/state snapshots, timestamp, result, and any failure or human escalation.
+Successful actions append a second required audit record after state persistence with `statePersistence: "saved"` or `"failed"`.
+If required audit evidence cannot be written at either point, the action fails closed, the command exits nonzero, and the JSON/text failure output keeps the sanitized human-required escalation details.
 
 Momentum does not post Discord webhooks, wake OpenClaw lanes, remove external
 monitors, or tail verbose logs into chat. It only decides whether a short

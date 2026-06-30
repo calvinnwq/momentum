@@ -12,7 +12,7 @@ rules, and loading/saving the per-run suppression state and audit files.
 | Concern | Modules |
 | --- | --- |
 | Supervisor tick and state | `supervisor.ts` |
-| Config-gated local auto-actions and audit evidence | `auto-actions.ts` |
+| Config-gated local auto-actions and initial/final audit evidence | `auto-actions.ts` |
 | Delivery intent mapping | `delivery-intent.ts` |
 
 `supervisor.ts`, `auto-actions.ts`, and `delivery-intent.ts` do not parse CLI arguments, format
