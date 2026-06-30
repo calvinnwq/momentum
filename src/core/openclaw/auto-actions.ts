@@ -244,9 +244,13 @@ export function withOpenClawSupervisorAutoActionResult(
   if (autoAction.escalation !== "human_required") {
     return withAutoAction(tick, autoAction);
   }
+  const baseTick =
+    tick.suppressedReason === "monitor_disabled"
+      ? tick
+      : suppressAutoAction(tick);
   return withAutoAction(
     {
-      ...tick,
+      ...baseTick,
       emit: true,
       eventType: autoActionEscalationEventType(tick),
       recommendedActionPolicy: autoActionEscalationPolicy(tick)
@@ -308,8 +312,8 @@ function isOpenClawSupervisorState(
     value.version === 1 &&
     typeof value.runId === "string" &&
     isStringOrNull(value.lastCursor) &&
-    typeof value.lastDigest === "string" &&
-    typeof value.lastReason === "string" &&
+    isStringOrNull(value.lastDigest) &&
+    isStringOrNull(value.lastReason) &&
     (typeof value.lastHumanUpdateAt === "number" ||
       value.lastHumanUpdateAt === null) &&
     typeof value.disabled === "boolean" &&

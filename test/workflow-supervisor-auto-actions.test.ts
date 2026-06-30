@@ -137,6 +137,53 @@ describe("OpenClaw supervisor auto-actions", () => {
     });
   });
 
+  it("loads audit records with nullable supervisor state fields", () => {
+    const dataDir = makeTempDir();
+    const auditDir = path.join(dataDir, "openclaw-supervisor");
+    fs.mkdirSync(auditDir, { recursive: true });
+    const runId = "mwf-auto-actions";
+    const nullableState = {
+      version: 1,
+      runId,
+      lastCursor: null,
+      lastDigest: null,
+      lastReason: null,
+      lastHumanUpdateAt: null,
+      disabled: false,
+      updatedAt: NOW
+    };
+    fs.writeFileSync(
+      path.join(auditDir, `${encodeURIComponent(runId)}.auto-actions.jsonl`),
+      `${JSON.stringify({
+        actionType: "release_monitor",
+        policyAction: "release_monitor",
+        reason: "terminal_succeeded",
+        beforeDigest: null,
+        afterDigest: "sha256:nullable-state",
+        beforeState: nullableState,
+        afterState: nullableState,
+        timestamp: NOW,
+        result: "success",
+        statePersistence: "saved",
+        error: null,
+        escalation: null
+      })}\n`
+    );
+
+    expect(loadOpenClawSupervisorAutoActionAudit(dataDir, runId)).toMatchObject([
+      {
+        beforeState: {
+          lastDigest: null,
+          lastReason: null
+        },
+        afterState: {
+          lastDigest: null,
+          lastReason: null
+        }
+      }
+    ]);
+  });
+
   it("keeps the monitor enabled and audits when auto-actions are disabled", () => {
     const dataDir = makeTempDir();
     const tick = buildOpenClawSupervisorTick({

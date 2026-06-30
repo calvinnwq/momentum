@@ -975,6 +975,80 @@ describe("momentum openclaw supervise", () => {
     });
   });
 
+  it("clears monitor cleanup when final release audit state persistence cannot be written", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-openclaw-release-final-audit";
+    const auditPath = path.join(
+      dataDir,
+      "openclaw-supervisor",
+      `${encodeURIComponent(runId)}.auto-actions.jsonl`
+    );
+    const originalAppendFileSync = fs.appendFileSync;
+    let auditWriteCount = 0;
+    vi.spyOn(fs, "appendFileSync").mockImplementation(
+      (file, data, options) => {
+        if (file === auditPath) {
+          auditWriteCount += 1;
+          if (auditWriteCount === 2) {
+            throw new Error(`ENOSPC: no space left, open '${auditPath}'`);
+          }
+        }
+        return originalAppendFileSync(file, data, options);
+      }
+    );
+
+    const result = await run(
+      [
+        "openclaw",
+        "supervise",
+        runId,
+        "--once",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      watch({
+        runId,
+        emit: false,
+        reason: "terminal_succeeded",
+        recommendedAction: "release",
+        recommendedActionPolicy: releaseMonitorPolicy(),
+        cleanup: "release",
+        digest: "sha256:release-final-audit-status-failed",
+        nextPollSeconds: 0
+      })
+    );
+
+    expect(result.code, result.stderr).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).not.toContain(dataDir);
+    expect(auditWriteCount).toBe(2);
+    expect(JSON.parse(result.stderr)).toMatchObject({
+      ok: false,
+      code: "openclaw_auto_action_audit_failed",
+      emit: true,
+      eventType: "terminal",
+      monitorEnabled: true,
+      cleanupAction: null,
+      deliveryIntent: {
+        kind: "terminal",
+        severity: "action_required",
+        cleanup: null,
+        text:
+          "Human review required for cwfp-openclaw-release-final-audit: OpenClaw supervisor auto-action release_monitor did not complete."
+      },
+      autoAction: {
+        actionType: "release_monitor",
+        result: "failed",
+        escalation: "human_required"
+      },
+      state: {
+        disabled: false,
+        persisted: false
+      }
+    });
+  });
+
   it("does not save supervisor state when required auto-action audit cannot be written", async () => {
     const dataDir = makeTempDir();
     const runId = "cwfp-openclaw-cli";
