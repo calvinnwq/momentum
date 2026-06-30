@@ -105,6 +105,30 @@ describe("momentum openclaw supervise", () => {
         stateChanged: true
       }
     });
+    expect(firstJson).toMatchObject({
+      deliveryIntent: {
+        kind: "progress",
+        severity: "info",
+        text: "cwfp-openclaw-cli is progressing. Next check in 15s.",
+        action: null,
+        wake: {
+          target: "openclaw",
+          intent: "message",
+          reason: "progress"
+        },
+        message: {
+          platform: "discord",
+          format: "plain_text",
+          allowedMentions: "none"
+        },
+        cleanup: null,
+        failure: {
+          retryable: true,
+          logLevel: "warn",
+          stateImpact: "none"
+        }
+      }
+    });
     expect(JSON.stringify(firstJson)).not.toContain(dataDir);
 
     const second = await run(args, payload);
@@ -114,6 +138,7 @@ describe("momentum openclaw supervise", () => {
       ok: true,
       emit: false,
       eventType: null,
+      deliveryIntent: null,
       debug: {
         watchEmit: true,
         suppressedReason: "duplicate_digest",
@@ -150,7 +175,17 @@ describe("momentum openclaw supervise", () => {
     expect(jsonResult.stdout).not.toContain(dataDir);
     expect(JSON.parse(jsonResult.stdout)).toMatchObject({
       inspectionCommand:
-        "momentum workflow run monitor 'cwfp-openclaw-cli' --data-dir <data-dir> --advance --json"
+        "momentum workflow run monitor 'cwfp-openclaw-cli' --data-dir <data-dir> --advance --json",
+      deliveryIntent: {
+        kind: "stuck-risk",
+        text:
+          "Stuck risk is high for cwfp-openclaw-cli. Inspect: momentum workflow run monitor 'cwfp-openclaw-cli' --data-dir <data-dir> --advance --json",
+        action: {
+          command:
+            "momentum workflow run monitor 'cwfp-openclaw-cli' --data-dir <data-dir> --advance --json",
+          evidence: "stuckRisk=high"
+        }
+      }
     });
 
     const textResult = await run(
@@ -175,6 +210,51 @@ describe("momentum openclaw supervise", () => {
     expect(textResult.stdout).not.toContain(dataDir);
     expect(textResult.stdout).toContain(
       "Inspection command: momentum workflow run monitor 'cwfp-openclaw-cli-text' --data-dir <data-dir> --advance --json"
+    );
+    expect(textResult.stdout).toContain("Delivery intent: stuck-risk (warning)");
+    expect(textResult.stdout).toContain(
+      "Delivery text: Stuck risk is high for cwfp-openclaw-cli-text. Inspect: momentum workflow run monitor 'cwfp-openclaw-cli-text' --data-dir <data-dir> --advance --json"
+    );
+  });
+
+  it("sanitizes long delivery text before applying Discord truncation", async () => {
+    const dataDir = `/tmp/${"private path with spaces ".repeat(160)}nested`;
+    const payload = watch({
+      reason: "stuck_risk",
+      stuckRisk: "high",
+      inspectionCommand: `momentum workflow run monitor cwfp-openclaw-cli --data-dir '${dataDir}' --advance --json`,
+      digest: "sha256:stuck-risk-long"
+    });
+
+    const result = await run(
+      [
+        "openclaw",
+        "supervise",
+        "cwfp-openclaw-cli",
+        "--once",
+        "--data-dir",
+        makeTempDir(),
+        "--json"
+      ],
+      payload
+    );
+
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.stdout).not.toContain(dataDir);
+    expect(result.stdout).not.toContain("private path with spaces");
+    const json = JSON.parse(result.stdout) as {
+      deliveryIntent: {
+        text: string;
+        action: { command: string };
+        message: { maxLength: number };
+      };
+    };
+    expect(json.deliveryIntent.text.length).toBeLessThanOrEqual(
+      json.deliveryIntent.message.maxLength
+    );
+    expect(json.deliveryIntent.text).toContain("--data-dir <data-dir>");
+    expect(json.deliveryIntent.action.command).toBe(
+      "momentum workflow run monitor 'cwfp-openclaw-cli' --data-dir <data-dir> --advance --json"
     );
   });
 

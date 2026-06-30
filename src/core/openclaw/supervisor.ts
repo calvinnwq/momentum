@@ -1,6 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import {
+  buildOpenClawDeliveryIntent,
+  type OpenClawDeliveryIntent
+} from "./delivery-intent.js";
+
 export type OpenClawSupervisorEventType =
   | "progress"
   | "approval"
@@ -70,6 +75,7 @@ export type OpenClawSupervisorTick = {
   nextState: OpenClawSupervisorState;
   stateChanged: boolean;
   watchEmit: boolean;
+  deliveryIntent: OpenClawDeliveryIntent | null;
 };
 
 export type BuildOpenClawSupervisorTickInput = {
@@ -106,7 +112,7 @@ export function buildOpenClawSupervisorTick(
     updatedAt: now
   };
 
-  return {
+  const tickWithoutIntent: Omit<OpenClawSupervisorTick, "deliveryIntent"> = {
     runId: watch.runId,
     emit,
     eventType: emit ? eventType : null,
@@ -125,6 +131,10 @@ export function buildOpenClawSupervisorTick(
     stateChanged: !statesEqual(priorState, nextState),
     watchEmit: watch.emit
   };
+  return {
+    ...tickWithoutIntent,
+    deliveryIntent: buildOpenClawDeliveryIntent(tickWithoutIntent)
+  };
 }
 
 export function buildOpenClawSupervisorDisabledTick(input: {
@@ -133,7 +143,7 @@ export function buildOpenClawSupervisorDisabledTick(input: {
   now: number;
 }): OpenClawSupervisorTick {
   const nextState = { ...input.state, updatedAt: input.now };
-  return {
+  const tickWithoutIntent: Omit<OpenClawSupervisorTick, "deliveryIntent"> = {
     runId: input.runId,
     emit: false,
     eventType: null,
@@ -151,6 +161,10 @@ export function buildOpenClawSupervisorDisabledTick(input: {
     nextState,
     stateChanged: !statesEqual(input.state, nextState),
     watchEmit: false
+  };
+  return {
+    ...tickWithoutIntent,
+    deliveryIntent: buildOpenClawDeliveryIntent(tickWithoutIntent)
   };
 }
 
