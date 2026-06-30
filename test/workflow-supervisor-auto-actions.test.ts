@@ -356,6 +356,46 @@ describe("OpenClaw supervisor auto-actions", () => {
     expect(result.tick.stateChanged).toBe(true);
   });
 
+  it("fails closed for unsupported auto-allowed actions when auto-actions are disabled", () => {
+    const dataDir = makeTempDir();
+    const tick = buildOpenClawSupervisorTick({
+      priorState: null,
+      watch: watch({
+        recommendedActionPolicy: {
+          action: "future_auto_unblock",
+          authority: "auto_allowed",
+          risk: "low",
+          evidenceRequired: ["future policy evidence"],
+          rollback: "Stop polling.",
+          rationale: "Future policy has not been implemented locally."
+        },
+        digest: "sha256:future-disabled"
+      }),
+      now: NOW
+    });
+
+    const result = executeOpenClawSupervisorAutoAction({
+      dataDir,
+      priorState: null,
+      tick,
+      now: NOW,
+      enabled: false
+    });
+
+    expect(result.autoAction).toMatchObject({
+      actionType: "future_auto_unblock",
+      result: "skipped",
+      escalation: "human_required",
+      error: "Unsupported auto-allowed supervisor action."
+    });
+    expect(result.tick.recommendedActionPolicy).toMatchObject({
+      action: "future_auto_unblock",
+      authority: "human_required",
+      risk: "high"
+    });
+    expect(result.tick.stateChanged).toBe(true);
+  });
+
   it("escalates when repeated release attempts pass the bounded limit", () => {
     const dataDir = makeTempDir();
     const firstTick = buildOpenClawSupervisorTick({

@@ -56,10 +56,7 @@ export function executeOpenClawSupervisorAutoAction(
   }
 
   const actionType = policy.action;
-  if (!input.enabled) {
-    if (actionType !== "release_monitor") {
-      return { tick: input.tick, autoAction: null };
-    }
+  if (!SUPPORTED_AUTO_ACTIONS.has(actionType)) {
     const finalTick = failClosedAutoActionTick(input);
     const autoAction = buildAutoActionRecord({
       actionType,
@@ -68,7 +65,7 @@ export function executeOpenClawSupervisorAutoAction(
       tick: finalTick,
       now: input.now,
       result: "skipped",
-      error: "Supervisor auto-actions are disabled by configuration.",
+      error: "Unsupported auto-allowed supervisor action.",
       escalation: "human_required"
     });
     const persisted = appendRequiredAutoActionAudit(
@@ -82,7 +79,10 @@ export function executeOpenClawSupervisorAutoAction(
     };
   }
 
-  if (!SUPPORTED_AUTO_ACTIONS.has(actionType)) {
+  if (!input.enabled) {
+    if (actionType !== "release_monitor") {
+      return { tick: input.tick, autoAction: null };
+    }
     const finalTick = failClosedAutoActionTick(input);
     const autoAction = buildAutoActionRecord({
       actionType,
@@ -91,7 +91,7 @@ export function executeOpenClawSupervisorAutoAction(
       tick: finalTick,
       now: input.now,
       result: "skipped",
-      error: "Unsupported auto-allowed supervisor action.",
+      error: "Supervisor auto-actions are disabled by configuration.",
       escalation: "human_required"
     });
     const persisted = appendRequiredAutoActionAudit(
@@ -241,7 +241,18 @@ export function withOpenClawSupervisorAutoActionResult(
   tick: OpenClawSupervisorTick,
   autoAction: OpenClawSupervisorAutoActionResult
 ): OpenClawSupervisorTick {
-  return withAutoAction(tick, autoAction);
+  if (autoAction.escalation !== "human_required") {
+    return withAutoAction(tick, autoAction);
+  }
+  return withAutoAction(
+    {
+      ...tick,
+      emit: true,
+      eventType: autoActionEscalationEventType(tick),
+      recommendedActionPolicy: autoActionEscalationPolicy(tick)
+    },
+    autoAction
+  );
 }
 
 export function loadOpenClawSupervisorAutoActionAudit(

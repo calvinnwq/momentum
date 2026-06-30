@@ -947,6 +947,11 @@ describe("momentum openclaw supervise", () => {
       code: "openclaw_auto_action_audit_failed",
       emit: true,
       eventType: "progress",
+      recommendedActionPolicy: {
+        action: "watch_recheck",
+        authority: "human_required",
+        risk: "high"
+      },
       deliveryIntent: {
         kind: "progress",
         severity: "action_required",
