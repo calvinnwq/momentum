@@ -975,6 +975,83 @@ describe("momentum openclaw supervise", () => {
     });
   });
 
+  it("does not rewrite unchanged state after final audit failure", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-openclaw-final-audit-unchanged-state";
+    const supervisorDir = path.join(dataDir, "openclaw-supervisor");
+    const auditPath = path.join(
+      supervisorDir,
+      `${encodeURIComponent(runId)}.auto-actions.jsonl`
+    );
+    const statePath = path.join(
+      supervisorDir,
+      `${encodeURIComponent(runId)}.json`
+    );
+    const originalAppendFileSync = fs.appendFileSync;
+    let auditWriteCount = 0;
+    vi.spyOn(fs, "appendFileSync").mockImplementation(
+      (file, data, options) => {
+        if (file === auditPath) {
+          auditWriteCount += 1;
+          if (auditWriteCount === 2) {
+            throw new Error(`ENOSPC: no space left, open '${auditPath}'`);
+          }
+        }
+        return originalAppendFileSync(file, data, options);
+      }
+    );
+    const originalWriteFileSync = fs.writeFileSync;
+    let stateWriteCount = 0;
+    vi.spyOn(fs, "writeFileSync").mockImplementation(
+      (file, data, options) => {
+        if (file === statePath) {
+          stateWriteCount += 1;
+          if (stateWriteCount === 2) {
+            throw new Error(`EIO: input/output error, write '${statePath}'`);
+          }
+        }
+        return originalWriteFileSync(file, data, options);
+      }
+    );
+
+    const result = await run(
+      [
+        "openclaw",
+        "supervise",
+        runId,
+        "--once",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      watch({
+        runId,
+        digest: "sha256:final-audit-status-saved"
+      })
+    );
+
+    expect(result.code, result.stderr).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(fs.existsSync(statePath)).toBe(true);
+    expect(auditWriteCount).toBe(2);
+    expect(stateWriteCount).toBe(1);
+    expect(JSON.parse(result.stderr)).toMatchObject({
+      ok: false,
+      code: "openclaw_auto_action_audit_failed",
+      autoAction: {
+        actionType: "watch_recheck",
+        result: "failed",
+        escalation: "human_required"
+      },
+      state: {
+        persisted: true
+      },
+      debug: {
+        statePersistence: "saved"
+      }
+    });
+  });
+
   it("clears monitor cleanup when final release audit state persistence cannot be written", async () => {
     const dataDir = makeTempDir();
     const runId = "cwfp-openclaw-release-final-audit";

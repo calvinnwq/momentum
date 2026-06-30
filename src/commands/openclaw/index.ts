@@ -15,6 +15,7 @@ import {
   buildOpenClawSupervisorTick,
   loadOpenClawSupervisorState,
   saveOpenClawSupervisorState,
+  type OpenClawSupervisorState,
   type OpenClawSupervisorTick
 } from "../../core/openclaw/supervisor.js";
 import {
@@ -280,7 +281,7 @@ function emitOpenClawAutoActionAuditFailureWithRepair(
   let failureStatePersistence = statePersistence;
   if (
     statePersistence === "failed" ||
-    failureTick.nextState !== tick.nextState
+    !openClawSupervisorStatesEqual(failureTick.nextState, tick.nextState)
   ) {
     try {
       saveOpenClawSupervisorState(dataDir, failureTick.nextState);
@@ -294,6 +295,22 @@ function emitOpenClawAutoActionAuditFailureWithRepair(
     io,
     failureTick,
     failureStatePersistence
+  );
+}
+
+function openClawSupervisorStatesEqual(
+  left: OpenClawSupervisorState,
+  right: OpenClawSupervisorState
+): boolean {
+  return (
+    left.version === right.version &&
+    left.runId === right.runId &&
+    left.lastCursor === right.lastCursor &&
+    left.lastDigest === right.lastDigest &&
+    left.lastReason === right.lastReason &&
+    left.lastHumanUpdateAt === right.lastHumanUpdateAt &&
+    left.disabled === right.disabled &&
+    left.updatedAt === right.updatedAt
   );
 }
 
