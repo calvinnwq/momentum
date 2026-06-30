@@ -152,7 +152,18 @@ export function executeOpenClawSupervisorAutoAction(
     return withRequiredAutoActionAuditResult(input, finalTick, persisted);
   }
 
-  if (repeatLimitHit && input.priorState?.disabled !== true) {
+  if (repeatLimitHit && input.priorState?.disabled === true) {
+    return {
+      tick: {
+        ...input.tick,
+        nextState: input.priorState,
+        stateChanged: false
+      },
+      autoAction: null
+    };
+  }
+
+  if (repeatLimitHit) {
     const finalTick = escalateAutoAction(input.tick);
     const autoAction = buildAutoActionRecord({
       actionType,

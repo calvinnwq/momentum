@@ -618,14 +618,26 @@ describe("OpenClaw supervisor auto-actions", () => {
     });
 
     for (let index = 0; index < 3; index += 1) {
-      executeOpenClawSupervisorAutoAction({
+      const attempt = executeOpenClawSupervisorAutoAction({
         dataDir,
         priorState: disabledState,
         tick: disabledTick,
         now: NOW + index,
         enabled: true
       });
+      if (attempt.autoAction !== null) {
+        recordOpenClawSupervisorAutoActionStatePersistence(
+          dataDir,
+          "mwf-auto-actions",
+          attempt.autoAction,
+          "saved"
+        );
+      }
     }
+    const beforeRecords = loadOpenClawSupervisorAutoActionAudit(
+      dataDir,
+      "mwf-auto-actions"
+    );
 
     const result = executeOpenClawSupervisorAutoAction({
       dataDir,
@@ -642,11 +654,10 @@ describe("OpenClaw supervisor auto-actions", () => {
         disabled: true
       }
     });
-    expect(result.autoAction).toMatchObject({
-      actionType: "release_monitor",
-      result: "success",
-      escalation: null
-    });
+    expect(result.autoAction).toBeNull();
+    expect(
+      loadOpenClawSupervisorAutoActionAudit(dataDir, "mwf-auto-actions")
+    ).toHaveLength(beforeRecords.length);
   });
 
   it("does not let unreadable audit evidence re-enable an already disabled monitor", () => {
