@@ -22,6 +22,9 @@ Options:
 - `--once` - run one bounded scheduler-safe tick. Required.
 - `--data-dir <path>` - select the Momentum data directory.
 - `--json` - write the success envelope to stdout as JSON and structured failures to stderr.
+- `--help`, `-h` - print focused supervise usage and operator notes before validating `<run-id>` or `--once`.
+
+`momentum openclaw --help` still prints the shared top-level CLI help, while `momentum openclaw supervise --help` prints only the focused supervise usage.
 
 Environment:
 

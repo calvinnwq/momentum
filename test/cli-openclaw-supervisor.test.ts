@@ -92,7 +92,53 @@ async function run(
   return { code, stdout, stderr };
 }
 
+async function runWithoutWatch(
+  args: string[],
+  env: Record<string, string | undefined> = {}
+): Promise<CliResult> {
+  let stdout = "";
+  let stderr = "";
+  const code = await runCli(
+    args,
+    {
+      stdout: { write: (chunk: string) => ((stdout += chunk), true) },
+      stderr: { write: (chunk: string) => ((stderr += chunk), true) },
+      env
+    }
+  );
+  return { code, stdout, stderr };
+}
+
 describe("momentum openclaw supervise", () => {
+  it("shows focused help for openclaw supervise --help", async () => {
+    const result = await runWithoutWatch([
+      "openclaw",
+      "supervise",
+      "--help"
+    ]);
+
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout.startsWith("Momentum\n\nUsage:\n")).toBe(true);
+    expect(result.stdout).toContain(
+      "momentum openclaw supervise <run-id> --once [--data-dir <path>] [--json]"
+    );
+    expect(result.stdout).toContain(
+      "--once is required for openclaw supervise."
+    );
+    expect(result.stdout).toContain("--json emits a structured supervisor envelope.");
+  });
+
+  it("preserves top-level help for openclaw --help", async () => {
+    const result = await runWithoutWatch(["openclaw", "--help"]);
+
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout.startsWith("Momentum\n\nUsage:\n")).toBe(true);
+    expect(result.stdout).toContain("momentum openclaw supervise <run-id> --once [--data-dir <path>] [--json]");
+    expect(result.stdout).toContain("momentum workflow run watch <run-id> --once [--data-dir <path>] [--json]");
+  });
+
   it("emits a sanitized once-mode JSON envelope and persists duplicate suppression", async () => {
     const dataDir = makeTempDir();
     const args = [

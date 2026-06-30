@@ -44,6 +44,22 @@ export function emitOpenClawSupervise(
   return 0;
 }
 
+export function emitOpenClawSuperviseHelp(io: CliIo): number {
+  const lines = [
+    "Momentum",
+    "",
+    "Usage:",
+    "  momentum openclaw supervise <run-id> --once [--data-dir <path>] [--json]",
+    "",
+    "Operator notes:",
+    "  --once is required for openclaw supervise.",
+    "  --json emits a structured supervisor envelope.",
+    ""
+  ];
+  write(io.stdout, `${lines.join("\n")}`);
+  return 0;
+}
+
 export function emitOpenClawSuperviseFailure(
   parsed: { json: boolean },
   io: CliIo,
