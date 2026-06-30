@@ -281,6 +281,54 @@ describe("OpenClaw supervisor auto-actions", () => {
     });
   });
 
+  it("fails closed for stale lease auto-release when auto-actions are disabled", () => {
+    const dataDir = makeTempDir();
+    const tick = buildOpenClawSupervisorTick({
+      priorState: null,
+      watch: watch({
+        recommendedActionPolicy: {
+          action: "stale_lease_auto_release",
+          authority: "auto_allowed",
+          risk: "low",
+          evidenceRequired: ["stale auto-release lease", "no active owner evidence"],
+          rollback: "Recreate a lease by dispatching the next valid workflow tick.",
+          rationale:
+            "The scheduler's stale auto-release path is a local recovery primitive with bounded durable evidence."
+        },
+        digest: "sha256:stale-lease-disabled"
+      }),
+      now: NOW
+    });
+
+    const result = executeOpenClawSupervisorAutoAction({
+      dataDir,
+      priorState: null,
+      tick,
+      now: NOW,
+      enabled: false
+    });
+
+    expect(result.autoAction).toMatchObject({
+      actionType: "stale_lease_auto_release",
+      result: "skipped",
+      escalation: "human_required",
+      error: "Supervisor auto-actions are disabled by configuration."
+    });
+    expect(result.tick.recommendedActionPolicy).toMatchObject({
+      action: "stale_lease_auto_release",
+      authority: "human_required",
+      risk: "high"
+    });
+    expect(loadOpenClawSupervisorAutoActionAudit(dataDir, "mwf-auto-actions"))
+      .toMatchObject([
+        {
+          actionType: "stale_lease_auto_release",
+          result: "skipped",
+          escalation: "human_required"
+        }
+      ]);
+  });
+
   it("fails closed when required escalation audit evidence cannot be written", () => {
     const dataDir = makeTempDir();
     const auditDir = path.join(dataDir, "openclaw-supervisor");

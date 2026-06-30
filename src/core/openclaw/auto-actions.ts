@@ -21,6 +21,11 @@ const SUPPORTED_AUTO_ACTIONS = new Set([
   "release_monitor"
 ]);
 
+const CONFIG_DISABLED_PASSTHROUGH_ACTIONS = new Set([
+  "watch_recheck",
+  "monitor_recheck"
+]);
+
 const REPEAT_LIMITED_ACTIONS = new Set(["release_monitor"]);
 const AUTO_ACTION_REPEAT_LIMIT = 3;
 
@@ -77,7 +82,7 @@ export function executeOpenClawSupervisorAutoAction(
   }
 
   if (!input.enabled) {
-    if (actionType !== "release_monitor") {
+    if (CONFIG_DISABLED_PASSTHROUGH_ACTIONS.has(actionType)) {
       return { tick: input.tick, autoAction: null };
     }
     const finalTick = failClosedAutoActionTick(input);

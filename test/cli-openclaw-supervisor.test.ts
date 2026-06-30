@@ -965,12 +965,12 @@ describe("momentum openclaw supervise", () => {
         escalation: "human_required"
       },
       state: {
-        persisted: false
+        persisted: true
       },
       debug: {
         autoActionResult: "failed",
         autoActionEscalation: "human_required",
-        statePersistence: "failed"
+        statePersistence: "saved"
       }
     });
   });
@@ -1058,7 +1058,7 @@ describe("momentum openclaw supervise", () => {
       },
       state: {
         disabled: false,
-        persisted: false
+        persisted: true
       }
     });
   });
@@ -1139,7 +1139,7 @@ describe("momentum openclaw supervise", () => {
       },
       state: {
         disabled: false,
-        persisted: false
+        persisted: true
       }
     });
   });

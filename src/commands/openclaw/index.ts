@@ -146,7 +146,8 @@ async function openClawSupervise(
               io,
               dataDir,
               autoActionResult.tick,
-              persistedAudit
+              persistedAudit,
+              "saved"
             );
           }
         }
@@ -166,7 +167,8 @@ async function openClawSupervise(
               io,
               dataDir,
               autoActionResult.tick,
-              persistedAudit
+              persistedAudit,
+              "failed"
             );
           }
         }
@@ -219,7 +221,8 @@ async function openClawSupervise(
             io,
             dataDir,
             autoActionResult.tick,
-            persistedAudit
+            persistedAudit,
+            "saved"
           );
         }
       }
@@ -239,7 +242,8 @@ async function openClawSupervise(
             io,
             dataDir,
             autoActionResult.tick,
-            persistedAudit
+            persistedAudit,
+            "failed"
           );
         }
       }
@@ -269,30 +273,42 @@ function emitOpenClawAutoActionAuditFailureWithRepair(
   io: CliIo,
   dataDir: string,
   tick: OpenClawSupervisorTick,
-  autoAction: NonNullable<OpenClawSupervisorTick["autoAction"]>
+  autoAction: NonNullable<OpenClawSupervisorTick["autoAction"]>,
+  statePersistence: "saved" | "failed"
 ): number {
   const failureTick = withOpenClawSupervisorAutoActionResult(tick, autoAction);
-  if (failureTick.nextState !== tick.nextState) {
+  let failureStatePersistence = statePersistence;
+  if (
+    statePersistence === "failed" ||
+    failureTick.nextState !== tick.nextState
+  ) {
     try {
       saveOpenClawSupervisorState(dataDir, failureTick.nextState);
+      failureStatePersistence = "saved";
     } catch {
-      // The rendered failure still exposes statePersistence=false; best effort only.
+      failureStatePersistence = "failed";
     }
   }
-  return emitOpenClawAutoActionAuditFailure(parsed, io, failureTick);
+  return emitOpenClawAutoActionAuditFailure(
+    parsed,
+    io,
+    failureTick,
+    failureStatePersistence
+  );
 }
 
 function emitOpenClawAutoActionAuditFailure(
   parsed: ParsedFlags,
   io: CliIo,
-  tick: OpenClawSupervisorTick
+  tick: OpenClawSupervisorTick,
+  statePersistence: "saved" | "failed" = "failed"
 ): number {
   return emitOpenClawSuperviseFailure(parsed, io, {
     code: "openclaw_auto_action_audit_failed",
     message: "OpenClaw supervisor auto-action audit evidence could not be written.",
     runId: tick.runId,
     tick,
-    statePersistence: "failed"
+    statePersistence
   });
 }
 
