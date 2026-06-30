@@ -5,10 +5,18 @@ import {
 import type { OpenClawWatchOnce } from "../../adapters/openclaw-watch-runner.js";
 import { resolveDataDir, type DataDirOptions } from "../../config/data-dir.js";
 import {
+  executeOpenClawSupervisorAutoAction,
+  openClawSupervisorAutoActionsEnabled,
+  recordOpenClawSupervisorAutoActionStatePersistence,
+  withOpenClawSupervisorAutoActionResult
+} from "../../core/openclaw/auto-actions.js";
+import {
   buildOpenClawSupervisorDisabledTick,
   buildOpenClawSupervisorTick,
   loadOpenClawSupervisorState,
-  saveOpenClawSupervisorState
+  saveOpenClawSupervisorState,
+  type OpenClawSupervisorState,
+  type OpenClawSupervisorTick
 } from "../../core/openclaw/supervisor.js";
 import {
   emitOpenClawSupervise,
@@ -101,17 +109,77 @@ async function openClawSupervise(
 
   try {
     const priorState = loadOpenClawSupervisorState(dataDir, runId);
+    const autoActionsEnabled = openClawSupervisorAutoActionsEnabled(io.env);
     if (priorState?.disabled) {
+      const now = Date.now();
       const disabledTick = buildOpenClawSupervisorDisabledTick({
         runId,
         state: priorState,
-        now: Date.now()
+        now
       });
+      const autoActionResult = executeOpenClawSupervisorAutoAction({
+        dataDir,
+        priorState,
+        tick: disabledTick,
+        now,
+        enabled: autoActionsEnabled
+      });
+      if (autoActionResult.autoAction?.result === "failed") {
+        return emitOpenClawAutoActionAuditFailure(
+          parsed,
+          io,
+          autoActionResult.tick
+        );
+      }
+      if (
+        !autoActionResult.tick.stateChanged &&
+        autoActionResult.autoAction === null
+      ) {
+        return emitOpenClawSupervise(parsed, io, autoActionResult.tick);
+      }
       try {
-        saveOpenClawSupervisorState(dataDir, disabledTick.nextState);
-        return emitOpenClawSupervise(parsed, io, disabledTick);
+        if (autoActionResult.autoAction !== null) {
+          const persistedAudit =
+            recordOpenClawSupervisorAutoActionStatePersistence(
+              dataDir,
+              runId,
+              autoActionResult.autoAction,
+              "saved"
+            );
+          if (persistedAudit?.result === "failed") {
+            return emitOpenClawAutoActionAuditFailure(
+              parsed,
+              io,
+              withOpenClawSupervisorAutoActionResult(
+                autoActionResult.tick,
+                persistedAudit
+              )
+            );
+          }
+        }
+        saveOpenClawSupervisorState(dataDir, autoActionResult.tick.nextState);
+        return emitOpenClawSupervise(parsed, io, autoActionResult.tick);
       } catch {
-        return emitOpenClawSupervise(parsed, io, disabledTick, {
+        if (autoActionResult.autoAction !== null) {
+          const persistedAudit =
+            recordOpenClawSupervisorAutoActionStatePersistence(
+              dataDir,
+              runId,
+              autoActionResult.autoAction,
+              "failed"
+          );
+          if (persistedAudit?.result === "failed") {
+            return emitOpenClawAutoActionAuditFailureWithRepair(
+              parsed,
+              io,
+              dataDir,
+              autoActionResult.tick,
+              persistedAudit,
+              "failed"
+            );
+          }
+        }
+        return emitOpenClawSupervise(parsed, io, autoActionResult.tick, {
           statePersistence: "failed"
         });
       }
@@ -124,17 +192,74 @@ async function openClawSupervise(
     };
     if (io.env !== undefined) watchInput.env = io.env;
     const watch = await watchOnce(watchInput);
+    const now = Date.now();
     const tick = buildOpenClawSupervisorTick({
       priorState,
       watch,
-      now: Date.now()
+      now
     });
+    const autoActionResult = executeOpenClawSupervisorAutoAction({
+      dataDir,
+      priorState,
+      tick,
+      now,
+      enabled: autoActionsEnabled
+    });
+    if (autoActionResult.autoAction?.result === "failed") {
+      return emitOpenClawAutoActionAuditFailure(
+        parsed,
+        io,
+        autoActionResult.tick
+      );
+    }
     try {
-      saveOpenClawSupervisorState(dataDir, tick.nextState);
-      return emitOpenClawSupervise(parsed, io, tick);
+      if (autoActionResult.autoAction !== null) {
+        const persistedAudit =
+          recordOpenClawSupervisorAutoActionStatePersistence(
+            dataDir,
+            runId,
+            autoActionResult.autoAction,
+            "saved"
+        );
+        if (persistedAudit?.result === "failed") {
+          return emitOpenClawAutoActionAuditFailure(
+            parsed,
+            io,
+            withOpenClawSupervisorAutoActionResult(
+              autoActionResult.tick,
+              persistedAudit
+            )
+          );
+        }
+      }
+      saveOpenClawSupervisorState(dataDir, autoActionResult.tick.nextState);
+      return emitOpenClawSupervise(parsed, io, autoActionResult.tick);
     } catch (saveError) {
-      if (tick.emit || tick.cleanupAction === "remove_monitor") {
-        return emitOpenClawSupervise(parsed, io, tick, {
+      if (autoActionResult.autoAction !== null) {
+        const persistedAudit =
+          recordOpenClawSupervisorAutoActionStatePersistence(
+            dataDir,
+            runId,
+            autoActionResult.autoAction,
+            "failed"
+        );
+        if (persistedAudit?.result === "failed") {
+          return emitOpenClawAutoActionAuditFailureWithRepair(
+            parsed,
+            io,
+            dataDir,
+            autoActionResult.tick,
+            persistedAudit,
+            "failed"
+          );
+        }
+      }
+      if (
+        autoActionResult.tick.emit ||
+        autoActionResult.tick.cleanupAction === "remove_monitor" ||
+        (autoActionResult.autoAction?.escalation ?? null) !== null
+      ) {
+        return emitOpenClawSupervise(parsed, io, autoActionResult.tick, {
           statePersistence: "failed"
         });
       }
@@ -148,6 +273,73 @@ async function openClawSupervise(
       runId
     });
   }
+}
+
+function emitOpenClawAutoActionAuditFailureWithRepair(
+  parsed: ParsedFlags,
+  io: CliIo,
+  dataDir: string,
+  tick: OpenClawSupervisorTick,
+  autoAction: NonNullable<OpenClawSupervisorTick["autoAction"]>,
+  statePersistence: "saved" | "failed"
+): number {
+  const failureTick = withOpenClawSupervisorAutoActionResult(tick, autoAction);
+  let failureStatePersistence = statePersistence;
+  if (statePersistence === "failed") {
+    return emitOpenClawAutoActionAuditFailure(
+      parsed,
+      io,
+      failureTick,
+      failureStatePersistence
+    );
+  }
+  if (
+    !openClawSupervisorStatesEqual(failureTick.nextState, tick.nextState)
+  ) {
+    try {
+      saveOpenClawSupervisorState(dataDir, failureTick.nextState);
+      failureStatePersistence = "saved";
+    } catch {
+      failureStatePersistence = "failed";
+    }
+  }
+  return emitOpenClawAutoActionAuditFailure(
+    parsed,
+    io,
+    failureTick,
+    failureStatePersistence
+  );
+}
+
+function openClawSupervisorStatesEqual(
+  left: OpenClawSupervisorState,
+  right: OpenClawSupervisorState
+): boolean {
+  return (
+    left.version === right.version &&
+    left.runId === right.runId &&
+    left.lastCursor === right.lastCursor &&
+    left.lastDigest === right.lastDigest &&
+    left.lastReason === right.lastReason &&
+    left.lastHumanUpdateAt === right.lastHumanUpdateAt &&
+    left.disabled === right.disabled &&
+    left.updatedAt === right.updatedAt
+  );
+}
+
+function emitOpenClawAutoActionAuditFailure(
+  parsed: ParsedFlags,
+  io: CliIo,
+  tick: OpenClawSupervisorTick,
+  statePersistence: "saved" | "failed" = "failed"
+): number {
+  return emitOpenClawSuperviseFailure(parsed, io, {
+    code: "openclaw_auto_action_audit_failed",
+    message: "OpenClaw supervisor auto-action audit evidence could not be written.",
+    runId: tick.runId,
+    tick,
+    statePersistence
+  });
 }
 
 function openClawFailureCode(error: unknown): string {

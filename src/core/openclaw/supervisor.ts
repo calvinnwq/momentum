@@ -59,6 +59,21 @@ export type OpenClawSupervisorState = {
   updatedAt: number;
 };
 
+export type OpenClawSupervisorAutoActionResult = {
+  actionType: string;
+  policyAction: string;
+  reason: string;
+  beforeDigest: string | null;
+  afterDigest: string | null;
+  beforeState: OpenClawSupervisorState | null;
+  afterState: OpenClawSupervisorState;
+  timestamp: number;
+  result: "success" | "skipped" | "failed";
+  statePersistence: "pending" | "saved" | "failed" | null;
+  error: string | null;
+  escalation: "human_required" | null;
+};
+
 export type OpenClawSupervisorTick = {
   runId: string;
   emit: boolean;
@@ -79,6 +94,7 @@ export type OpenClawSupervisorTick = {
   stateChanged: boolean;
   watchEmit: boolean;
   deliveryIntent: OpenClawDeliveryIntent | null;
+  autoAction: OpenClawSupervisorAutoActionResult | null;
 };
 
 export type BuildOpenClawSupervisorTickInput = {
@@ -136,7 +152,8 @@ export function buildOpenClawSupervisorTick(
     suppressedReason,
     nextState,
     stateChanged: !statesEqual(priorState, nextState),
-    watchEmit: watch.emit
+    watchEmit: watch.emit,
+    autoAction: null
   };
   return {
     ...tickWithoutIntent,
@@ -176,7 +193,8 @@ export function buildOpenClawSupervisorDisabledTick(input: {
     suppressedReason: "monitor_disabled",
     nextState,
     stateChanged: !statesEqual(input.state, nextState),
-    watchEmit: false
+    watchEmit: false,
+    autoAction: null
   };
   return {
     ...tickWithoutIntent,

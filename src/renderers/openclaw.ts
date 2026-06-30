@@ -4,7 +4,10 @@ import {
   type CliIo
 } from "./cli-output.js";
 import type { OpenClawDeliveryIntent } from "../core/openclaw/delivery-intent.js";
-import type { OpenClawSupervisorTick } from "../core/openclaw/supervisor.js";
+import type {
+  OpenClawSupervisorAutoActionResult,
+  OpenClawSupervisorTick
+} from "../core/openclaw/supervisor.js";
 
 const TRUNCATION_SUFFIX = "... [truncated]";
 
@@ -13,6 +16,8 @@ export type OpenClawRendererFailure = {
   message: string;
   runId?: string;
   exitCode?: number;
+  tick?: OpenClawSupervisorTick;
+  statePersistence?: OpenClawRendererStatePersistence;
 };
 
 export type OpenClawRendererStatePersistence = "saved" | "failed";
@@ -24,49 +29,10 @@ export function emitOpenClawSupervise(
   options: { statePersistence?: OpenClawRendererStatePersistence } = {}
 ): number {
   const statePersistence = options.statePersistence ?? "saved";
-  const inspectionCommand = sanitizeInspectionCommand(
-    tick.inspectionCommand,
-    tick.runId
-  );
-  const deliveryIntent = sanitizeDeliveryIntent(
-    tick.deliveryIntent,
-    tick.runId
-  );
   const payload = {
     ok: true,
     command: "openclaw supervise",
-    mode: "once",
-    runId: tick.runId,
-    emit: tick.emit,
-    eventType: tick.eventType,
-    reason: tick.reason,
-    digest: tick.digest,
-    cursor: tick.cursor,
-    recommendedAction: tick.recommendedAction,
-    recommendedActionPolicy: tick.recommendedActionPolicy,
-    nextPollSeconds: tick.nextPollSeconds,
-    humanAction: tick.humanAction,
-    stuckRisk: tick.stuckRisk,
-    inspectionCommand,
-    deliveryIntent,
-    monitorEnabled: tick.monitorEnabled,
-    cleanupAction: tick.cleanupAction,
-    state: {
-      version: tick.nextState.version,
-      lastCursor: tick.nextState.lastCursor,
-      lastDigest: tick.nextState.lastDigest,
-      lastReason: tick.nextState.lastReason,
-      lastHumanUpdateAt: tick.nextState.lastHumanUpdateAt,
-      disabled: tick.nextState.disabled,
-      updatedAt: tick.nextState.updatedAt,
-      persisted: statePersistence === "saved"
-    },
-    debug: {
-      watchEmit: tick.watchEmit,
-      suppressedReason: tick.suppressedReason,
-      stateChanged: tick.stateChanged,
-      statePersistence
-    }
+    ...buildOpenClawSuperviseDetails(tick, statePersistence)
   };
 
   if (parsed.json) {
@@ -83,12 +49,16 @@ export function emitOpenClawSuperviseFailure(
   io: CliIo,
   failure: OpenClawRendererFailure
 ): number {
+  const statePersistence = failure.statePersistence ?? "failed";
   const payload = {
     ok: false,
     command: "openclaw supervise",
     code: failure.code,
     message: failure.message,
-    runId: failure.runId ?? null
+    runId: failure.runId ?? failure.tick?.runId ?? null,
+    ...(failure.tick === undefined
+      ? {}
+      : buildOpenClawSuperviseDetails(failure.tick, statePersistence))
   };
   const exitCode = failure.exitCode ?? 1;
 
@@ -97,8 +67,72 @@ export function emitOpenClawSuperviseFailure(
     return exitCode;
   }
 
+  if (failure.tick !== undefined) {
+    write(
+      io.stderr,
+      `${failure.message}\n${renderOpenClawSuperviseText(
+        failure.tick,
+        statePersistence
+      )}`
+    );
+    return exitCode;
+  }
+
   write(io.stderr, `${failure.message}\n`);
   return exitCode;
+}
+
+function buildOpenClawSuperviseDetails(
+  tick: OpenClawSupervisorTick,
+  statePersistence: OpenClawRendererStatePersistence
+) {
+  const inspectionCommand = sanitizeInspectionCommand(
+    tick.inspectionCommand,
+    tick.runId
+  );
+  const deliveryIntent = sanitizeDeliveryIntent(
+    tick.deliveryIntent,
+    tick.runId,
+    tick.autoAction
+  );
+  const autoAction = sanitizeAutoAction(tick.autoAction, statePersistence);
+  return {
+    mode: "once",
+    runId: tick.runId,
+    emit: tick.emit,
+    eventType: tick.eventType,
+    reason: tick.reason,
+    digest: tick.digest,
+    cursor: tick.cursor,
+    recommendedAction: tick.recommendedAction,
+    recommendedActionPolicy: tick.recommendedActionPolicy,
+    nextPollSeconds: tick.nextPollSeconds,
+    humanAction: tick.humanAction,
+    stuckRisk: tick.stuckRisk,
+    inspectionCommand,
+    deliveryIntent,
+    autoAction,
+    monitorEnabled: tick.monitorEnabled,
+    cleanupAction: tick.cleanupAction,
+    state: {
+      version: tick.nextState.version,
+      lastCursor: tick.nextState.lastCursor,
+      lastDigest: tick.nextState.lastDigest,
+      lastReason: tick.nextState.lastReason,
+      lastHumanUpdateAt: tick.nextState.lastHumanUpdateAt,
+      disabled: tick.nextState.disabled,
+      updatedAt: tick.nextState.updatedAt,
+      persisted: statePersistence === "saved"
+    },
+    debug: {
+      watchEmit: tick.watchEmit,
+      suppressedReason: tick.suppressedReason,
+      stateChanged: tick.stateChanged,
+      statePersistence,
+      autoActionResult: tick.autoAction?.result ?? null,
+      autoActionEscalation: tick.autoAction?.escalation ?? null
+    }
+  };
 }
 
 function renderOpenClawSuperviseText(
@@ -132,9 +166,17 @@ function renderOpenClawSuperviseText(
   if (inspectionCommand !== null) {
     lines.push(`Inspection command: ${inspectionCommand}`);
   }
+  const autoAction = sanitizeAutoAction(tick.autoAction, statePersistence);
+  if (autoAction !== null) {
+    lines.push(
+      `Auto action: ${autoAction.actionType} (${autoAction.result})`,
+      `Auto action audit: ${autoAction.escalation ?? "recorded"}`
+    );
+  }
   const deliveryIntent = sanitizeDeliveryIntent(
     tick.deliveryIntent,
-    tick.runId
+    tick.runId,
+    tick.autoAction
   );
   if (deliveryIntent !== null) {
     lines.push(
@@ -158,7 +200,8 @@ function renderOpenClawSuperviseText(
 
 function sanitizeDeliveryIntent(
   intent: OpenClawDeliveryIntent | null,
-  runId: string
+  runId: string,
+  autoAction: OpenClawSupervisorAutoActionResult | null
 ): OpenClawDeliveryIntent | null {
   if (intent === null) return null;
   const action =
@@ -174,17 +217,40 @@ function sanitizeDeliveryIntent(
         };
   return {
     ...intent,
-    text: sanitizeDeliveryText(intent, action, runId),
+    text: sanitizeDeliveryText(intent, action, runId, autoAction),
     action
+  };
+}
+
+function sanitizeAutoAction(
+  action: OpenClawSupervisorAutoActionResult | null,
+  statePersistence: OpenClawRendererStatePersistence
+): OpenClawSupervisorAutoActionResult | null {
+  if (action === null) return null;
+  return {
+    ...action,
+    statePersistence:
+      action.result === "success" ? statePersistence : action.statePersistence,
+    error:
+      action.result === "failed" && action.error !== null
+        ? "Auto-action audit evidence could not be written."
+        : action.error
   };
 }
 
 function sanitizeDeliveryText(
   original: OpenClawDeliveryIntent,
   action: OpenClawDeliveryIntent["action"],
-  runId: string
+  runId: string,
+  autoAction: OpenClawSupervisorAutoActionResult | null
 ): string {
   let text = original.text;
+  if (autoAction?.escalation === "human_required") {
+    return clampDeliveryText(
+      sanitizeCommand(text),
+      original.message.maxLength
+    );
+  }
   if (action !== null) {
     switch (original.kind) {
       case "approval":

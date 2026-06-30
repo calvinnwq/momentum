@@ -85,6 +85,7 @@ State (`<data-dir>/momentum.db` SQLite plus per-goal `goals/<goal-id>/` artifact
 ## Local agent run artifacts
 - Use `.agent-runs/<tool>/<timestamp>-<label>/` for temporary local agent evidence.
 - `.agent-runs/` is ignored by git and may contain prompts, stdout, stderr, and result JSON.
+- `.agent-workflows/` is ignored by git and contains local workflow run artifacts such as plan, ledger, approval, recovery, and executor evidence files.
 - Delete stale run directories after the work is merged or captured in durable docs/issues.
 
 ## Verification before completion
