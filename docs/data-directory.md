@@ -101,6 +101,7 @@ Files at `<data-dir>/openclaw-supervisor/`:
 - `<encoded-run-id>.auto-actions.jsonl` — append-only audit records for local OpenClaw auto-actions that `momentum openclaw supervise` attempted, skipped, failed, or escalated, keyed by `encodeURIComponent(runId)`.
   Each line records the action, policy action, before/after digest and state snapshots, result, state-persistence status, error, and human escalation when present.
   Successful auto-actions first write a `pending` audit record before the local state change, then write a required `saved` or `failed` status record after state persistence.
+  The `release_monitor` repeat limiter counts saved successful records for a digest monotonically, so intervening failed persistence records remain audit history but do not reset the bound.
   Snapshot state fields use the same shape as the supervisor state file, including nullable cursor, digest, reason, and last-human-update fields.
 
 ## Per-iteration artifact files

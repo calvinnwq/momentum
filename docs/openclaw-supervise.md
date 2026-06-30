@@ -74,9 +74,10 @@ OpenClaw local auto-actions are limited to the explicitly supported `auto_allowe
 Each attempted auto-action appends an initial audit record under `<data-dir>/openclaw-supervisor/<encoded-run-id>.auto-actions.jsonl` before the local state change is applied.
 The record includes the action type, policy action, reason, before and after digest/state snapshots, timestamp, result, and any failure or human escalation.
 Successful actions append a second required audit record after state persistence with `statePersistence: "saved"` or `"failed"`.
-`release_monitor` is repeat-bounded to three saved successful audit attempts for the same digest; a fourth attempt for an enabled monitor keeps polling, clears cleanup, and escalates for human review.
+`release_monitor` is repeat-bounded to three saved successful audit attempts for the same digest; failed or skipped persistence records do not reset that saved count.
+A fourth attempt for an enabled monitor keeps polling, clears cleanup, and escalates for human review.
 An already disabled monitor stays disabled at the repeat bound, does not append another auto-action audit record, and keeps repeating the cleanup hint so the host can remove its registration.
-If prior audit evidence is unreadable, an `auto_allowed` policy is unsupported, or required audit evidence cannot be written at either point, the action fails closed.
+The action fails closed when prior audit evidence is unreadable, invalid, digest-mismatched, or belongs to another run, when an `auto_allowed` policy is unsupported, or when required audit evidence cannot be written at either point.
 Fail-closed output uses a human-required policy, preserves a sanitized delivery text of `Human review required for <run-id>: OpenClaw supervisor auto-action <action> did not complete.`, clears monitor-removal cleanup unless the monitor was already disabled and the escalation audit was saved, and exits nonzero when required audit evidence could not be written.
 
 Momentum does not post Discord webhooks, wake OpenClaw lanes, remove external
