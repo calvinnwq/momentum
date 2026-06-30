@@ -894,6 +894,69 @@ describe("momentum openclaw supervise", () => {
     }
   });
 
+  it("does not save disabled monitor state after the release repeat limit", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-openclaw-repeat-limited";
+    const statePath = path.join(
+      dataDir,
+      "openclaw-supervisor",
+      `${encodeURIComponent(runId)}.json`
+    );
+    const args = [
+      "openclaw",
+      "supervise",
+      runId,
+      "--once",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ];
+    const payload = watch({
+      runId,
+      emit: false,
+      reason: "terminal_succeeded",
+      recommendedAction: "release",
+      recommendedActionPolicy: releaseMonitorPolicy(),
+      cleanup: "release",
+      digest: "sha256:terminal-repeat-limited",
+      nextPollSeconds: 0
+    });
+
+    for (let index = 0; index < 3; index += 1) {
+      const result = await run(args, payload);
+      expect(result.code, result.stderr).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        autoAction: {
+          actionType: "release_monitor",
+          result: "success",
+          statePersistence: "saved"
+        }
+      });
+    }
+
+    const originalWriteFileSync = fs.writeFileSync;
+    let stateWriteCount = 0;
+    vi.spyOn(fs, "writeFileSync").mockImplementation((file, data, options) => {
+      if (file === statePath) {
+        stateWriteCount += 1;
+      }
+      return originalWriteFileSync(file, data, options);
+    });
+
+    const result = await run(args, payload);
+
+    expect(result.code, result.stderr).toBe(0);
+    expect(stateWriteCount).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      monitorEnabled: false,
+      cleanupAction: "remove_monitor",
+      autoAction: null,
+      state: {
+        disabled: true
+      }
+    });
+  });
+
   it("fails closed when final auto-action audit state persistence cannot be written", async () => {
     const dataDir = makeTempDir();
     const runId = "cwfp-openclaw-final-audit";

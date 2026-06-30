@@ -451,6 +451,44 @@ describe("OpenClaw supervisor auto-actions", () => {
     expect(result.tick.stateChanged).toBe(true);
   });
 
+  it("stamps human update time when a silent auto-action escalation emits", () => {
+    const dataDir = makeTempDir();
+    const tick = buildOpenClawSupervisorTick({
+      priorState: null,
+      watch: watch({
+        emit: false,
+        recommendedActionPolicy: {
+          action: "future_auto_unblock",
+          authority: "auto_allowed",
+          risk: "low",
+          evidenceRequired: ["future policy evidence"],
+          rollback: "Stop polling.",
+          rationale: "Future policy has not been implemented locally."
+        },
+        digest: "sha256:silent-future"
+      }),
+      now: NOW
+    });
+
+    const result = executeOpenClawSupervisorAutoAction({
+      dataDir,
+      priorState: null,
+      tick,
+      now: NOW,
+      enabled: true
+    });
+
+    expect(tick.emit).toBe(false);
+    expect(tick.nextState.lastHumanUpdateAt).toBeNull();
+    expect(result.tick).toMatchObject({
+      emit: true,
+      stateChanged: true,
+      nextState: {
+        lastHumanUpdateAt: NOW
+      }
+    });
+  });
+
   it("fails closed for unsupported auto-allowed actions when auto-actions are disabled", () => {
     const dataDir = makeTempDir();
     const tick = buildOpenClawSupervisorTick({

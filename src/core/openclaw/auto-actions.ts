@@ -495,6 +495,21 @@ function suppressAutoAction(tick: OpenClawSupervisorTick): OpenClawSupervisorTic
   };
 }
 
+function stampAutoActionEscalationHumanUpdate(
+  tick: OpenClawSupervisorTick
+): OpenClawSupervisorTick {
+  const nextState = {
+    ...tick.nextState,
+    lastHumanUpdateAt: tick.nextState.updatedAt
+  };
+  return {
+    ...tick,
+    nextState,
+    stateChanged:
+      tick.stateChanged || !statesEqualForAutoAction(tick.nextState, nextState)
+  };
+}
+
 function withAutoAction(
   tick: OpenClawSupervisorTick,
   autoAction: OpenClawSupervisorAutoActionResult
@@ -525,12 +540,12 @@ function failClosedAutoActionAuditFailureTick(
 
 function escalateAutoAction(tick: OpenClawSupervisorTick): OpenClawSupervisorTick {
   const suppressed = suppressAutoAction(tick);
-  const escalated = {
+  const escalated = stampAutoActionEscalationHumanUpdate({
     ...suppressed,
     emit: true,
     eventType: autoActionEscalationEventType(tick),
     recommendedActionPolicy: autoActionEscalationPolicy(tick)
-  };
+  });
   return {
     ...escalated,
     deliveryIntent: buildOpenClawDeliveryIntent(escalated)
@@ -540,12 +555,12 @@ function escalateAutoAction(tick: OpenClawSupervisorTick): OpenClawSupervisorTic
 function escalateDisabledAutoAction(
   tick: OpenClawSupervisorTick
 ): OpenClawSupervisorTick {
-  const escalated = {
+  const escalated = stampAutoActionEscalationHumanUpdate({
     ...tick,
     emit: true,
     eventType: autoActionEscalationEventType(tick),
     recommendedActionPolicy: autoActionEscalationPolicy(tick)
-  };
+  });
   return {
     ...escalated,
     deliveryIntent: buildOpenClawDeliveryIntent(escalated)

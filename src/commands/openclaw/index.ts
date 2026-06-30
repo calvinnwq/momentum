@@ -131,6 +131,12 @@ async function openClawSupervise(
           autoActionResult.tick
         );
       }
+      if (
+        !autoActionResult.tick.stateChanged &&
+        autoActionResult.autoAction === null
+      ) {
+        return emitOpenClawSupervise(parsed, io, autoActionResult.tick);
+      }
       try {
         saveOpenClawSupervisorState(dataDir, autoActionResult.tick.nextState);
         if (autoActionResult.autoAction !== null) {
