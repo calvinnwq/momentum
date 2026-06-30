@@ -138,7 +138,6 @@ async function openClawSupervise(
         return emitOpenClawSupervise(parsed, io, autoActionResult.tick);
       }
       try {
-        saveOpenClawSupervisorState(dataDir, autoActionResult.tick.nextState);
         if (autoActionResult.autoAction !== null) {
           const persistedAudit =
             recordOpenClawSupervisorAutoActionStatePersistence(
@@ -148,16 +147,17 @@ async function openClawSupervise(
               "saved"
             );
           if (persistedAudit?.result === "failed") {
-            return emitOpenClawAutoActionAuditFailureWithRepair(
+            return emitOpenClawAutoActionAuditFailure(
               parsed,
               io,
-              dataDir,
-              autoActionResult.tick,
-              persistedAudit,
-              "saved"
+              withOpenClawSupervisorAutoActionResult(
+                autoActionResult.tick,
+                persistedAudit
+              )
             );
           }
         }
+        saveOpenClawSupervisorState(dataDir, autoActionResult.tick.nextState);
         return emitOpenClawSupervise(parsed, io, autoActionResult.tick);
       } catch {
         if (autoActionResult.autoAction !== null) {
@@ -213,7 +213,6 @@ async function openClawSupervise(
       );
     }
     try {
-      saveOpenClawSupervisorState(dataDir, autoActionResult.tick.nextState);
       if (autoActionResult.autoAction !== null) {
         const persistedAudit =
           recordOpenClawSupervisorAutoActionStatePersistence(
@@ -223,16 +222,17 @@ async function openClawSupervise(
             "saved"
         );
         if (persistedAudit?.result === "failed") {
-          return emitOpenClawAutoActionAuditFailureWithRepair(
+          return emitOpenClawAutoActionAuditFailure(
             parsed,
             io,
-            dataDir,
-            autoActionResult.tick,
-            persistedAudit,
-            "saved"
+            withOpenClawSupervisorAutoActionResult(
+              autoActionResult.tick,
+              persistedAudit
+            )
           );
         }
       }
+      saveOpenClawSupervisorState(dataDir, autoActionResult.tick.nextState);
       return emitOpenClawSupervise(parsed, io, autoActionResult.tick);
     } catch (saveError) {
       if (autoActionResult.autoAction !== null) {

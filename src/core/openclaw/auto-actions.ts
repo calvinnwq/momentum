@@ -450,14 +450,37 @@ function repeatLimitExceeded(
   digest: string
 ): boolean {
   if (!REPEAT_LIMITED_ACTIONS.has(actionType)) return false;
-  const successfulStateSaves = records.filter(
-    (record) =>
-      record.actionType === actionType &&
-      record.afterDigest === digest &&
-      record.result === "success" &&
-      record.statePersistence === "saved"
+  const attemptStatuses = new Map<string, { saved: number; failed: number }>();
+  for (const record of records) {
+    if (
+      record.actionType !== actionType ||
+      record.afterDigest !== digest ||
+      record.result !== "success" ||
+      (record.statePersistence !== "saved" &&
+        record.statePersistence !== "failed")
+    ) {
+      continue;
+    }
+    const key = autoActionAttemptKey(record);
+    const status = attemptStatuses.get(key) ?? { saved: 0, failed: 0 };
+    status[record.statePersistence] += 1;
+    attemptStatuses.set(key, status);
+  }
+  const successfulStateSaves = [...attemptStatuses.values()].reduce(
+    (count, status) => count + Math.max(0, status.saved - status.failed),
+    0
   );
-  return successfulStateSaves.length >= AUTO_ACTION_REPEAT_LIMIT;
+  return successfulStateSaves >= AUTO_ACTION_REPEAT_LIMIT;
+}
+
+function autoActionAttemptKey(record: OpenClawSupervisorAutoActionResult): string {
+  return JSON.stringify({
+    timestamp: record.timestamp,
+    beforeDigest: record.beforeDigest,
+    afterDigest: record.afterDigest,
+    beforeUpdatedAt: record.beforeState?.updatedAt ?? null,
+    afterUpdatedAt: record.afterState.updatedAt
+  });
 }
 
 function buildAutoActionRecord(input: {

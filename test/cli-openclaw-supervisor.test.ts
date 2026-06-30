@@ -1003,7 +1003,7 @@ describe("momentum openclaw supervise", () => {
     expect(result.code, result.stderr).toBe(1);
     expect(result.stdout).toBe("");
     expect(result.stderr).not.toContain(dataDir);
-    expect(fs.existsSync(statePath)).toBe(true);
+    expect(fs.existsSync(statePath)).toBe(false);
     expect(auditWriteCount).toBe(2);
     expect(JSON.parse(result.stderr)).toMatchObject({
       ok: false,
@@ -1028,12 +1028,12 @@ describe("momentum openclaw supervise", () => {
         escalation: "human_required"
       },
       state: {
-        persisted: true
+        persisted: false
       },
       debug: {
         autoActionResult: "failed",
         autoActionEscalation: "human_required",
-        statePersistence: "saved"
+        statePersistence: "failed"
       }
     });
   });
@@ -1095,9 +1095,9 @@ describe("momentum openclaw supervise", () => {
 
     expect(result.code, result.stderr).toBe(1);
     expect(result.stdout).toBe("");
-    expect(fs.existsSync(statePath)).toBe(true);
+    expect(fs.existsSync(statePath)).toBe(false);
     expect(auditWriteCount).toBe(2);
-    expect(stateWriteCount).toBe(1);
+    expect(stateWriteCount).toBe(0);
     expect(JSON.parse(result.stderr)).toMatchObject({
       ok: false,
       code: "openclaw_auto_action_audit_failed",
@@ -1107,10 +1107,10 @@ describe("momentum openclaw supervise", () => {
         escalation: "human_required"
       },
       state: {
-        persisted: true
+        persisted: false
       },
       debug: {
-        statePersistence: "saved"
+        statePersistence: "failed"
       }
     });
   });
@@ -1167,12 +1167,7 @@ describe("momentum openclaw supervise", () => {
     expect(result.code, result.stderr).toBe(1);
     expect(result.stdout).toBe("");
     expect(result.stderr).not.toContain(dataDir);
-    expect(fs.existsSync(statePath)).toBe(true);
-    expect(
-      JSON.parse(fs.readFileSync(statePath, "utf8")) as Record<string, unknown>
-    ).toMatchObject({
-      disabled: false
-    });
+    expect(fs.existsSync(statePath)).toBe(false);
     expect(auditWriteCount).toBe(2);
     expect(JSON.parse(result.stderr)).toMatchObject({
       ok: false,
@@ -1198,7 +1193,7 @@ describe("momentum openclaw supervise", () => {
       },
       state: {
         disabled: false,
-        persisted: true
+        persisted: false
       }
     });
   });
@@ -1279,7 +1274,7 @@ describe("momentum openclaw supervise", () => {
       },
       state: {
         disabled: false,
-        persisted: true
+        persisted: false
       }
     });
   });
