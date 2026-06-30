@@ -150,9 +150,12 @@ watch-emitted or watch-silent tick (`watch_silent`, `heartbeat`,
 `deliveryIntent` is `null` for suppressed ticks. When present, it contains a
 single Discord-safe message, optional operator command and evidence, OpenClaw
 wake/message metadata, dedupe and reminder keys, terminal cleanup hints, and
-retry/logging metadata for hosts whose delivery attempt fails. Delivery failure
-handling belongs to the host: Momentum state is already represented by the
-supervisor state fields and must not be rewound by a webhook or wake failure.
+retry/logging metadata for hosts whose delivery attempt fails. Commands and
+delivery text are sanitized before rendering: any resolved `--data-dir` value is
+replaced with `<data-dir>`, and `text` is capped at `message.maxLength` with a
+truncation suffix. Delivery failure handling belongs to the host: Momentum state
+is already represented by the supervisor state fields and must not be rewound by
+a webhook or wake failure.
 `state.persisted: false` and `debug.statePersistence: "failed"` mean the host
 should deliver the advisory but treat the supervisor state as not durably saved.
 
@@ -179,6 +182,21 @@ should deliver the advisory but treat the supervisor state as not durably saved.
 | `cleanupAction` | enum \| null | `remove_monitor` when the host should remove its external monitor registration. |
 | `state` | object | Next local OpenClaw supervisor state, plus `persisted` to report whether it was saved. |
 | `debug` | object | Watch/suppression diagnostics for host logs. |
+
+### Delivery intent fields
+
+| Field | Type | Meaning |
+|------|------|---------|
+| `kind` | enum | Delivery class: `progress`, `approval`, `recovery`, `stuck-risk`, or `terminal`. Mirrors `eventType` when present. |
+| `severity` | enum | Host display severity: `info`, `action_required`, `warning`, `success`, or `error`. |
+| `text` | string | Single plain-text Discord-safe message, sanitized and capped to `message.maxLength`. |
+| `action` | object \| null | Operator or inspection command to surface with the message. `evidence` carries recovery detail or stuck-risk evidence when available. |
+| `wake` | object | OpenClaw routing hint. Approval, recovery, and stuck-risk intents use `intent: "wake"`; progress and terminal intents use `intent: "message"`. |
+| `message` | object | Delivery formatting contract: Discord plain text, no allowed mentions, and the maximum text length. |
+| `dedupeKey` | string | Host idempotency key for a delivery attempt. Repeated due reminders include the latest supervisor timestamp so intentional repeats can be delivered. |
+| `reminderKey` | string \| null | Stable reminder group for approval, recovery, and stuck-risk reminders; otherwise `null`. |
+| `cleanup` | object \| null | Terminal cleanup hint. `remove_monitor` means the host should stop polling this run and remove the external monitor registration. |
+| `failure` | object | Host retry policy for failed webhook or wake attempts. Failures are retryable, should be logged at warn, have no Momentum state impact, and can be retried by repeating `openclaw supervise`. |
 
 ## Text output
 
