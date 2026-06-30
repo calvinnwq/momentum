@@ -92,7 +92,8 @@ function buildOpenClawSuperviseDetails(
   );
   const deliveryIntent = sanitizeDeliveryIntent(
     tick.deliveryIntent,
-    tick.runId
+    tick.runId,
+    tick.autoAction
   );
   const autoAction = sanitizeAutoAction(tick.autoAction, statePersistence);
   return {
@@ -174,7 +175,8 @@ function renderOpenClawSuperviseText(
   }
   const deliveryIntent = sanitizeDeliveryIntent(
     tick.deliveryIntent,
-    tick.runId
+    tick.runId,
+    tick.autoAction
   );
   if (deliveryIntent !== null) {
     lines.push(
@@ -198,7 +200,8 @@ function renderOpenClawSuperviseText(
 
 function sanitizeDeliveryIntent(
   intent: OpenClawDeliveryIntent | null,
-  runId: string
+  runId: string,
+  autoAction: OpenClawSupervisorAutoActionResult | null
 ): OpenClawDeliveryIntent | null {
   if (intent === null) return null;
   const action =
@@ -214,7 +217,7 @@ function sanitizeDeliveryIntent(
         };
   return {
     ...intent,
-    text: sanitizeDeliveryText(intent, action, runId),
+    text: sanitizeDeliveryText(intent, action, runId, autoAction),
     action
   };
 }
@@ -238,9 +241,16 @@ function sanitizeAutoAction(
 function sanitizeDeliveryText(
   original: OpenClawDeliveryIntent,
   action: OpenClawDeliveryIntent["action"],
-  runId: string
+  runId: string,
+  autoAction: OpenClawSupervisorAutoActionResult | null
 ): string {
   let text = original.text;
+  if (autoAction?.escalation === "human_required") {
+    return clampDeliveryText(
+      sanitizeCommand(text),
+      original.message.maxLength
+    );
+  }
   if (action !== null) {
     switch (original.kind) {
       case "approval":

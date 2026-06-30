@@ -353,6 +353,49 @@ describe("momentum openclaw supervise", () => {
       }
     });
 
+    const stuckRiskResult = await run(
+      [
+        "openclaw",
+        "supervise",
+        "cwfp-openclaw-stuck-risk",
+        "--once",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      watch({
+        runId: "cwfp-openclaw-stuck-risk",
+        reason: "stuck_risk",
+        stuckRisk: "high",
+        inspectionCommand: `momentum workflow run monitor cwfp-openclaw-stuck-risk --data-dir '${dataDir}' --advance --json`,
+        digest: "sha256:audit-failed-stuck-risk"
+      })
+    );
+
+    expect(stuckRiskResult.code, stuckRiskResult.stderr).toBe(1);
+    expect(stuckRiskResult.stdout).toBe("");
+    expect(stuckRiskResult.stderr).not.toContain(dataDir);
+    expect(JSON.parse(stuckRiskResult.stderr)).toMatchObject({
+      ok: false,
+      code: "openclaw_auto_action_audit_failed",
+      eventType: "stuck-risk",
+      deliveryIntent: {
+        kind: "stuck-risk",
+        severity: "action_required",
+        text:
+          "Human review required for cwfp-openclaw-stuck-risk: OpenClaw supervisor auto-action watch_recheck did not complete.",
+        action: {
+          command:
+            "momentum workflow run monitor 'cwfp-openclaw-stuck-risk' --data-dir <data-dir> --advance --json"
+        }
+      },
+      autoAction: {
+        actionType: "watch_recheck",
+        result: "failed",
+        escalation: "human_required"
+      }
+    });
+
     const textResult = await run(
       [
         "openclaw",
