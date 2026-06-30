@@ -101,5 +101,6 @@ When `--json` is omitted, list prints the active filters and one summary line pe
 ## Operator notes
 
 - `evidence ingest` and `evidence list` are local-only surfaces. Neither reads from nor writes to external trackers; the `source: "agent-workflow"` records are produced by local agent runs and persisted into the Momentum data directory only.
+- `.agent-workflows/` is repo-local agent evidence and is ignored by git by default.
 - The `ingestKey` is the dedupe key for re-ingest idempotency. Operators replaying a workflow directory should expect the same artifacts to land in `skipped` on subsequent runs, with `goalId` / `sourceItemId` / `runId` / `stepId` attached opportunistically when the existing record was still unlinked.
 - For the cross-command surfaces that consume evidence records — `status` / `handoff` `latestEvidence`, `doctor` `evidence` aggregate, `project status` evidence-mismatch detection, and the `intent list --evidence-record <id>` pivot — see the linked operator-reference docs above.

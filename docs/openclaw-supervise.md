@@ -211,7 +211,7 @@ should deliver the advisory but treat the supervisor state as not durably saved.
 | `stuckRisk` | string | Upstream watch stuck-risk value. |
 | `inspectionCommand` | string \| null | Sanitized stuck-risk inspection command with `<data-dir>` replacing the resolved path. |
 | `deliveryIntent` | object \| null | Short host-delivery contract for Discord/OpenClaw. `null` means stay silent. |
-| `autoAction` | object \| null | Local auto-action audit summary when an `auto_allowed` action was attempted, skipped, failed, or escalated. `null` means no local auto-action was considered. |
+| `autoAction` | object \| null | Local auto-action audit summary when an `auto_allowed` action was attempted, skipped, failed, or escalated. `null` means no audit-recorded local auto-action ran, such as human-required recommendations or disabled benign recheck pass-through. |
 | `monitorEnabled` | boolean | `false` after terminal cleanup disables further polling for this run. |
 | `cleanupAction` | enum \| null | `remove_monitor` when the host should remove its external monitor registration. This is emitted only when terminal cleanup is paired with an `auto_allowed` `release_monitor` policy. |
 | `state` | object | Next local OpenClaw supervisor state, plus `persisted` to report whether it was saved. |

@@ -98,7 +98,7 @@ Files at `<data-dir>/goals/<goal-id>/`:
 Files at `<data-dir>/openclaw-supervisor/`:
 
 - `<encoded-run-id>.json` — per-run state for `momentum openclaw supervise`, keyed by `encodeURIComponent(runId)`. The file stores the last watch cursor, digest, reason, last delivered human-update timestamp, disabled monitor flag, and update timestamp so repeated scheduler calls can suppress duplicate OpenClaw deliveries while preserving terminal cleanup retries.
-- `<encoded-run-id>.auto-actions.jsonl` — append-only audit records for local OpenClaw auto-actions considered by `momentum openclaw supervise`, keyed by `encodeURIComponent(runId)`.
+- `<encoded-run-id>.auto-actions.jsonl` — append-only audit records for local OpenClaw auto-actions that `momentum openclaw supervise` attempted, skipped, failed, or escalated, keyed by `encodeURIComponent(runId)`.
   Each line records the action, policy action, before/after digest and state snapshots, result, state-persistence status, error, and human escalation when present.
   Successful auto-actions first write a `pending` audit record before the local state change, then write a required `saved` or `failed` status record after state persistence.
   Snapshot state fields use the same shape as the supervisor state file, including nullable cursor, digest, reason, and last-human-update fields.
