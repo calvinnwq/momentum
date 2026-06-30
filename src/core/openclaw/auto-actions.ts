@@ -199,18 +199,19 @@ export function executeOpenClawSupervisorAutoAction(
       autoAction
     );
   } catch (error) {
+    const finalTick = failClosedAutoActionTick(input);
     const failed = buildAutoActionRecord({
       actionType,
       policy,
       priorState: input.priorState,
-      tick: input.tick,
+      tick: finalTick,
       now: input.now,
       result: "failed",
       error: error instanceof Error ? error.message : String(error),
       escalation: "human_required"
     });
     return {
-      tick: withAutoAction(failClosedAutoActionTick(input), failed),
+      tick: withAutoAction(finalTick, failed),
       autoAction: failed
     };
   }

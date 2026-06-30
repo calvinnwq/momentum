@@ -610,6 +610,9 @@ describe("OpenClaw supervisor auto-actions", () => {
       risk: "high"
     });
     expect(result.autoAction?.error).toContain("openclaw-supervisor");
+    expect(result.autoAction?.afterState).toMatchObject({
+      disabled: false
+    });
     expect(result.tick).toMatchObject({
       cleanupAction: null,
       monitorEnabled: true,
