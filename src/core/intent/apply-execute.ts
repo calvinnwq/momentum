@@ -79,6 +79,7 @@ import {
   type PolicyEffectiveFieldSource,
   type UpdateIntentApplyPolicy
 } from "./policy.js";
+import { preflightLinearExternalApplyAuth } from "./external-apply-preflight.js";
 import { getSourceItemById } from "../source/items.js";
 import {
   reconcileAfterExternalApply,
@@ -1013,11 +1014,11 @@ function checkAdapterAuth(
   env: ExecuteExternalApplyEnv
 ): { ok: true } | { ok: false; message: string } {
   if (adapterKind === "linear") {
-    const key = env[LINEAR_API_KEY_ENV_VAR];
-    if (typeof key !== "string" || key.trim().length === 0) {
+    const preflight = preflightLinearExternalApplyAuth({ env });
+    if (!preflight.ok) {
       return {
         ok: false,
-        message: `${LINEAR_API_KEY_ENV_VAR} is not set; the linear external update path requires an operator-provided credential.`
+        message: `${preflight.message} ${preflight.action}`
       };
     }
     return { ok: true };

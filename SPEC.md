@@ -48,6 +48,9 @@ The default policy is local intent creation only. The Linear path supports
 comment-only `source_satisfied` intents and explicit `status_update` intents
 whose payload supplies the target state (`state` or `stateId`), carries a stable
 idempotency marker, and must fail closed without losing the M6 refusal reason.
+Before a Linear external write is attempted, the apply path must have a resolved
+target, `intent_apply_policy: external_apply_allowed`, and `LINEAR_API_KEY` in
+the applying process environment.
 
 ## Source And Adapter Boundaries
 
@@ -135,6 +138,7 @@ Momentum still does not post webhooks, wake external lanes, remove external moni
 NGX-521 hardens native dogfood tail recovery without changing the default route.
 Failed required `merge-cleanup` and `linear-refresh` steps classify as `failed_external_side_effect_step` so operators verify the canonical external state - pull request merge or close state and any surviving remote branch ref for `merge-cleanup`, or tracker state for `linear-refresh` - then reconcile through `workflow run clear-recovery --evidence-pointer <ref>` instead of blindly re-running side-effecting tail work.
 The checked-in live-wrapper dogfood profile executes the wrapper from source through the TypeScript source loader so cleanup of generated `dist/` artifacts does not break `merge-cleanup` or `linear-refresh` tail work.
+The `merge-cleanup` wrapper preflights explicit GitHub auth (`GH_TOKEN`, `GITHUB_TOKEN`, or `GH_CONFIG_DIR`) before it runs any PR merge or branch cleanup command, and the profile allowlists those variables for that step.
 For the `no-mistakes` step, the same live-wrapper treats a reported `checks-passed` outcome, or an otherwise-still-monitoring run with current clean pull request evidence and green or explicitly absent checks, as terminal Momentum success only when no current blocking outcome, active finding, unresolved gate, dirty / draft pull request, or non-successful check state is present.
 If the wrapper dies before writing that terminal evidence but the external no-mistakes run later proves `checks-passed`, `workflow run clear-recovery --evidence-pointer no-mistakes:<run-id>#checks-passed` may reconcile only the failed required `no-mistakes` step and then re-derive the run from durable rows; generic terminal run mutation remains refused.
 CWFP remains the default coding-workflow start and rollback route; the default switch stays NGX-404.

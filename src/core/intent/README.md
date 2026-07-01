@@ -19,5 +19,6 @@ These modules were regrouped from the former flat `src/*.ts` root siblings
 | --- | --- |
 | Update intent state | `update-intents.ts` |
 | Apply audit / execution | `apply-audits.ts`, `apply-execute.ts` |
+| External-apply preflight | `external-apply-preflight.ts` |
 | External-write policy | `policy.ts` |
 | Post-apply reconciliation | `post-apply-reconcile.ts` |

@@ -77,6 +77,9 @@ describe("NGX-499 coding workflow live wrapper profile", () => {
       "postflight",
       "preflight"
     ]);
+    expect(parsed.profile.wrappers.get("merge-cleanup")?.envAllow).toEqual(
+      expect.arrayContaining(["GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR"])
+    );
   });
 
   it("keeps merge-cleanup executable independent of generated dist", () => {
@@ -105,7 +108,7 @@ describe("NGX-499 coding workflow live wrapper profile", () => {
           args: ["-c", "true"],
           cwd: "repo",
           timeout_sec: 30,
-          env_allow: ["PATH"],
+          env_allow: ["PATH", "GH_TOKEN"],
           success_summary: "merge-cleanup source wrapper passed",
           commit: { type: "chore", subject: "complete merge-cleanup" }
         }
@@ -121,7 +124,8 @@ describe("NGX-499 coding workflow live wrapper profile", () => {
         MOMENTUM_REPO_PATH: process.cwd(),
         MOMENTUM_ITERATION_DIR: dir,
         MOMENTUM_RESULT_PATH: resultPath,
-        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath
+        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
+        GH_TOKEN: "test-token"
       },
       encoding: "utf8",
       timeout: 30_000
@@ -132,6 +136,48 @@ describe("NGX-499 coding workflow live wrapper profile", () => {
     const result = readResult(resultPath);
     expect(result.success).toBe(true);
     expect(result.summary).toBe("merge-cleanup source wrapper passed");
+  });
+
+  it("parks merge-cleanup GitHub auth preflight as setup recovery", () => {
+    const dir = makeTempDir();
+    const repo = path.join(dir, "repo");
+    const iteration = path.join(dir, "run");
+    const resultPath = path.join(iteration, "result.json");
+    const sentinelPath = path.join(dir, "merge-cleanup-ran");
+    fs.mkdirSync(repo);
+    const configPath = path.join(dir, "wrapper-config.json");
+    writeJson(configPath, {
+      steps: {
+        "merge-cleanup": {
+          command: "/bin/sh",
+          args: ["-c", `touch ${JSON.stringify(sentinelPath)}`],
+          cwd: "repo",
+          timeout_sec: 30,
+          env_allow: ["PATH"],
+          commit: { type: "chore", subject: "complete merge-cleanup" }
+        }
+      }
+    });
+
+    const outcome = runCodingWorkflowLiveWrapper(
+      deps({
+        MOMENTUM_STEP_KIND: "merge-cleanup",
+        MOMENTUM_REPO_PATH: repo,
+        MOMENTUM_ITERATION_DIR: iteration,
+        MOMENTUM_RESULT_PATH: resultPath,
+        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
+        PATH: process.env.PATH
+      })
+    );
+
+    expect(outcome.exitCode).toBe(1);
+    expect(outcome.success).toBe(false);
+    expect(outcome.summary).toContain("GitHub merge-cleanup");
+    expect(outcome.summary).toContain("no explicit auth");
+    expect(outcome.summary).toContain("GH_TOKEN");
+    expect(outcome.summary).toContain("GH_CONFIG_DIR");
+    expect(fs.existsSync(sentinelPath)).toBe(false);
+    expect(fs.existsSync(resultPath)).toBe(false);
   });
 });
 
@@ -347,7 +393,7 @@ describe("runCodingWorkflowLiveWrapper", () => {
             args: ["-c", `printf '%s\\n' ${JSON.stringify(stdout)}; exit 1`],
             cwd: "repo",
             timeout_sec: 30,
-            env_allow: ["PATH"],
+            env_allow: ["PATH", "GH_TOKEN"],
             commit: { type: "test", subject: "run no mistakes" }
           }
         }
@@ -360,6 +406,7 @@ describe("runCodingWorkflowLiveWrapper", () => {
           MOMENTUM_ITERATION_DIR: iteration,
           MOMENTUM_RESULT_PATH: resultPath,
           [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
+          GH_TOKEN: "test-token",
           PATH: process.env.PATH
         })
       );
@@ -857,7 +904,7 @@ describe("runCodingWorkflowLiveWrapper", () => {
             args: ["-c", `printf '%s\\n' ${JSON.stringify(stdout)}; exit 1`],
             cwd: "repo",
             timeout_sec: 30,
-            env_allow: ["PATH"],
+            env_allow: ["PATH", "GH_TOKEN"],
             key_changes_made: ["Verified no-mistakes readiness."],
             key_learnings: ["no-mistakes keeps monitoring open PRs."],
             commit: { type: "test", subject: "run no mistakes" }
@@ -872,6 +919,7 @@ describe("runCodingWorkflowLiveWrapper", () => {
           MOMENTUM_ITERATION_DIR: iteration,
           MOMENTUM_RESULT_PATH: resultPath,
           [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
+          GH_TOKEN: "test-token",
           PATH: process.env.PATH
         })
       );
@@ -2919,7 +2967,7 @@ describe("runCodingWorkflowLiveWrapper", () => {
             args: ["-c", "exit 1"],
             cwd: "repo",
             timeout_sec: 30,
-            env_allow: ["PATH"],
+            env_allow: ["PATH", "GH_TOKEN"],
             commit: { type: "chore", subject: `complete ${stepKind}` }
           }
         }
@@ -2932,6 +2980,7 @@ describe("runCodingWorkflowLiveWrapper", () => {
           MOMENTUM_ITERATION_DIR: iteration,
           MOMENTUM_RESULT_PATH: resultPath,
           [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
+          GH_TOKEN: "test-token",
           PATH: process.env.PATH
         })
       );

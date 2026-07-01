@@ -205,6 +205,15 @@ unreadable, invalid, or lacks the current step, the wrapper exits as an operator
 setup failure without writing normalized runner evidence; the daemon then parks
 the dispatched step for recovery instead of finalizing it as an ordinary failed
 workflow step.
+External-side-effect tail steps also run a local auth/capability preflight before
+contacting their external tools. `merge-cleanup` requires explicit GitHub auth
+in the live-wrapper environment (`GH_TOKEN`, `GITHUB_TOKEN`, or `GH_CONFIG_DIR`)
+before it attempts PR merge / branch cleanup work. The built-in `linear-refresh`
+step requires the usual policy-gated external-apply setup: a matching pending
+Linear intent, `intent_apply_policy: external_apply_allowed`, and
+`LINEAR_API_KEY` in the daemon/supervisor process environment. Missing auth or
+targets fail closed with operator-actionable recovery evidence; Momentum does
+not store these credentials.
 
 On retried dispatch attempts, `MOMENTUM_ATTEMPT` is incremented and attempt
 evidence is kept separate: attempt 1 uses the configured run directory paths,

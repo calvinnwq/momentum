@@ -589,6 +589,21 @@ describe("M11 CLI import boundaries", () => {
     ).toEqual([]);
   });
 
+  it("keeps intent policy/auth code independent from workflow runtime modules", () => {
+    const violations = importEdges().filter(
+      (edge) =>
+        edge.from.startsWith("src/core/intent/") &&
+        edge.to.startsWith("src/core/workflow/")
+    );
+
+    expect(
+      violations.map(
+        (edge) =>
+          `${edge.from} imports ${edge.specifier} -> ${edge.to}; intent owns external-apply policy/auth checks and must not reach into workflow runtime helpers.`
+      )
+    ).toEqual([]);
+  });
+
   it("prevents renderers from importing commands, adapters, or runtime mutation modules", () => {
     const violations = importEdges().filter((edge) => {
       if (!isRendererModule(edge.from)) return false;
