@@ -146,14 +146,16 @@ uses this run-scoped surface when a claimed step cannot be resolved to a known
 definition step or uses an executor family the daemon cannot dispatch yet; that
 path opens a `manual_recovery_required` workflow gate instead of silently dropping
 the claim. The daemon-dispatchable `external-apply` path uses the same surface
-when issue scope, pending-intent matching, credentials, policy, audit, or adapter
-safety checks refuse the write. The configured `subworkflow` path uses the same
+when issue scope, pending-intent matching, resolved target, credentials, policy,
+audit, or adapter safety checks refuse the write. The configured `subworkflow`
+path uses the same
 surface when child config is missing, recursion is unsafe, a child definition or
 attachment cannot be trusted, or child state cannot be mirrored safely. The
 configured live-wrapper dispatch lane uses the same surface when the wrapper is
 unconfigured for the claimed step kind, the step's repo/run directory cannot be
 derived, the run directory cannot be created, or a live wrapper returns a
-process-level failure such as `runtime_unavailable`. If
+process-level failure such as `runtime_unavailable`, including `merge-cleanup`
+GitHub auth preflight failure before the wrapper command is spawned. If
 the claimed run row has vanished, Momentum cannot write a run-scoped flag or
 gate without orphaning evidence, so it releases the lingering dispatch lease
 only. Stale `manual-recovery-required` workflow leases use the same surface;
@@ -187,8 +189,9 @@ to refuse until that lease condition is resolved.
 
 When a dispatched `no-mistakes` or `merge-cleanup` live-wrapper attempt failed
 before clean runner evidence existed because the wrapper/build path was stale or
-unavailable, `workflow run clear-recovery` prepares the step for a scheduler
-retry after the operator repairs the environment. The clear output includes
+unavailable, or because `merge-cleanup` lacked explicit GitHub auth in the
+live-wrapper environment, `workflow run clear-recovery` prepares the step for a
+scheduler retry after the operator repairs the environment. The clear output includes
 `retryPrepared`; the previous failed executor round remains durable, and an
 already-terminal successful step is only reattached/reconciled, not rerun.
 Before the step row is reopened for retry, Momentum preserves the previous `step_started` or `step_failed` transition as a workflow event so cursor replay does not lose the overwritten state.

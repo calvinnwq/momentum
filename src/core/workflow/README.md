@@ -22,7 +22,7 @@ in place; importers still reference the concrete modules below.
 | Leases | `leases.ts` |
 | Scheduling | `scheduler.ts` |
 | Dispatch | `dispatch.ts`, `dispatch-persist.ts`, `dispatch-execute.ts`, `dispatch-retry.ts`, `dispatch-executor-run.ts`, `dispatch-executor-terminalize.ts`, `dispatch-external-apply.ts`, `dispatch-external-apply-run.ts`, `external-apply-dispatch.ts`, `dispatch-subworkflow.ts`, `dispatch-subworkflow-run.ts`, `subworkflow-dispatch.ts`, `subworkflow-child-config.ts`, `subworkflow-route.ts`, `subworkflow-child-runner.ts`, `subworkflow-dispatch-context.ts`, `dispatch-reconcile.ts`, `dispatch-reconcile-execute.ts`, `daemon-live-wrapper-profile.ts`, `daemon-dispatch-exec-context.ts`, `live-wrapper-dispatch.ts`, `dogfood-dispatch.ts` |
-| Live-wrapper dogfood | `coding-workflow-live-wrapper.ts` |
+| Live-wrapper dogfood | `coding-workflow-live-wrapper.ts`, `merge-cleanup-preflight.ts` |
 | Recovery & monitor | `recovery-artifact.ts`, `recovery-reconcile.ts`, `monitor-state.ts`, `monitor-envelope.ts` |
 | Handoff | `handoff.ts` |
 
@@ -56,7 +56,9 @@ Other domains reach workflow behavior through these modules:
   `step-executor-real-adapters` (RC-5 production registry builder backed by
   live wrappers or honest `runtime_unavailable` adapters),
   `coding-workflow-live-wrapper` (the NGX-499 wrapper-command seam used by the
-  checked-in dogfood live-wrapper profile), `step-transitions`, `leases`,
+  checked-in dogfood live-wrapper profile), `merge-cleanup-preflight`
+  (GitHub auth preflight for the merge-cleanup tail step), `step-transitions`,
+  `leases`,
   `definition`, `recovery-artifact`, `scheduler`.
 
 `workflow run start-coding` records explicit Momentum-native coding runs with `source = "momentum-native-coding"` and the built-in `coding-workflow` definition metadata.
@@ -131,6 +133,9 @@ RC-3 (NGX-496) added the daemon-dispatchable `external-apply` adapter:
 `dispatch-external-apply-run.ts` runs the injected M6 write path and reconciles
 through RC-2, and `external-apply-dispatch.ts` gates the producer by scaffold
 family after the base dispatcher creates the durable start rows.
+The Linear apply preflight helpers live in `src/core/intent/` so workflow code
+continues to consume the intent-owned apply path instead of importing policy or
+auth checks back from workflow modules.
 
 RC-4 (NGX-497) added the `subworkflow` adapter mechanism, and RC-4b (NGX-498)
 flipped the configured production lane: `dispatch-subworkflow.ts` maps a child
@@ -155,6 +160,7 @@ compatibility.
 For `no-mistakes`, the helper also normalizes upstream terminal-success evidence: `checks-passed`, or a still-monitoring upstream run with current clean pull request evidence and green or explicitly absent checks, becomes successful runner evidence only when current blockers, active findings, unresolved gates, dirty / draft pull request state, and non-successful checks are absent.
 If the wrapper is interrupted before writing that evidence but the external no-mistakes run later proves `checks-passed`, guarded `clear-recovery` can reconcile only the failed required `no-mistakes` step with `no-mistakes:<run-id>#checks-passed` evidence and then re-derive the run so downstream work can continue.
 The checked-in dogfood profile runs the wrapper CLI from `src/` through the TypeScript source loader/register shims in `src/adapters/`, so cleanup of generated `dist/` files after test or no-mistakes work does not strand `merge-cleanup` or `linear-refresh` tail work.
+For `merge-cleanup`, `merge-cleanup-preflight.ts` requires explicit GitHub auth in the filtered wrapper environment before the command is spawned, so missing `GH_TOKEN`, `GITHUB_TOKEN`, or `GH_CONFIG_DIR` becomes setup recovery rather than an ambiguous partial cleanup.
 External-side-effect tail failures (`merge-cleanup` / `linear-refresh`) use the shared step-kind set in `run-reducer.ts`, classify through the monitor as `failed_external_side_effect_step`, and steer operators to evidence-backed `workflow run clear-recovery --evidence-pointer <ref>` reconciliation instead of a blind re-run that could repeat the external write.
 
 NGX-508 adds the explicit Momentum-native `workflow run start-coding` door.
