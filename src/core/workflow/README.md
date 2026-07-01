@@ -157,6 +157,7 @@ command for `MOMENTUM_STEP_KIND`, and writes normalized `RunnerResult` evidence
 so command failures become durable `success: false` results rather than stranded
 manual recovery. It is not a default-route switch and does not change CWFP
 compatibility.
+Before spawning, the helper validates that the run-local config has only a `steps` object and canonical snake_case per-step keys, rejects malformed `env_allow` and unsafe or mismatched `result_file` values as setup failures, and writes no runner evidence for rejected configs.
 For `no-mistakes`, the helper also normalizes upstream terminal-success evidence: `checks-passed`, or a still-monitoring upstream run with current clean pull request evidence and green or explicitly absent checks, becomes successful runner evidence only when current blockers, active findings, unresolved gates, dirty / draft pull request state, and non-successful checks are absent.
 If the wrapper is interrupted before writing that evidence but the external no-mistakes run later proves `checks-passed`, guarded `clear-recovery` can reconcile only the failed required `no-mistakes` step with `no-mistakes:<run-id>#checks-passed` evidence and then re-derive the run so downstream work can continue.
 The checked-in dogfood profile runs the wrapper CLI from `src/` through the TypeScript source loader/register shims in `src/adapters/`, so cleanup of generated `dist/` files after test or no-mistakes work does not strand `merge-cleanup` or `linear-refresh` tail work.

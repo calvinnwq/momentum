@@ -206,6 +206,8 @@ setup failure without writing normalized runner evidence; the daemon then parks
 the dispatched step for recovery instead of finalizing it as an ordinary failed
 workflow step.
 The config file must use canonical snake_case keys.
+The top-level object may only contain `steps`, and each step only accepts `command`, `args`, `cwd`, `timeout_sec`, `env_allow`, `result_file`, `success_summary`, `failure_summary`, `key_changes_made`, `key_learnings`, `remaining_work`, and `commit`.
+Unknown top-level or step keys are setup failures before any child command is spawned.
 `env_allow`, `timeout_sec`, and `result_file` use those names when present.
 When present, `result_file` must be a safe relative path that resolves to the same file as the live-wrapper profile's `result_file` injected through `MOMENTUM_RESULT_PATH`.
 `envAllow`, `timeoutSec`, or `resultFile` are rejected with setup guidance that

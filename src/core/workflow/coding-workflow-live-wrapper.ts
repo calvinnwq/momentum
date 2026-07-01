@@ -5,8 +5,9 @@
  * result placement, and dispatch reconciliation. This module is the command the
  * checked-in NGX-499 profile runs: it reads
  * `MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG`, selects the current
- * `MOMENTUM_STEP_KIND`, executes the configured child command, and writes a
- * normalized `RunnerResult` to `MOMENTUM_RESULT_PATH`. Child commands report by
+ * `MOMENTUM_STEP_KIND`, validates the run-local config before spawning,
+ * executes the configured child command, and writes a normalized `RunnerResult`
+ * to `MOMENTUM_RESULT_PATH`. Child commands report by
  * exit status; this seam synthesizes durable success/failure evidence so a
  * command failure is an ordinary failed step result instead of a stranded
  * process-level recovery case, except for explicitly classified no-mistakes
