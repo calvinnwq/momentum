@@ -110,7 +110,7 @@ Policy resolution:
 
 - `--repo <path>` loads the repo's `MOMENTUM.md` policy file to resolve the effective `intent_apply_policy`.
 - When `--repo` is not provided, the effective policy falls back to the built-in default (`create_intents_only`).
-- `--external-apply` performs a policy-gated external tracker write through the adapter's external update client. It requires a `--repo` context whose `MOMENTUM.md` sets `intent_apply_policy: external_apply_allowed`, and the adapter's credential env var (`LINEAR_API_KEY` for the linear adapter). The write is a two-phase audit-before-write flow that is idempotent under replay; `source_satisfied` is comment-only, while Linear `status_update` intents must carry a non-empty payload `state` or `stateId` and perform a comment plus status transition.
+- `--external-apply` performs a policy-gated external tracker write through the adapter's external update client. It requires a `--repo` context whose `MOMENTUM.md` sets `intent_apply_policy: external_apply_allowed`, a resolved target issue, and the adapter's credential env var (`LINEAR_API_KEY` for the linear adapter). The write is a two-phase audit-before-write flow that is idempotent under replay; `source_satisfied` is comment-only, while Linear `status_update` intents must carry a non-empty payload `state` or `stateId` and perform a comment plus status transition.
 
 Without `--external-apply`, `intent apply` records the operator's manual mark only and does not contact the external tracker.
 
@@ -128,7 +128,7 @@ When `--external-apply` is requested, JSON output also includes an `externalAppl
 
 - `policy_denied` — no `--repo` context, or the effective `intent_apply_policy` is not `external_apply_allowed`.
 - `policy_load_failed` — `--repo`'s `MOMENTUM.md` failed to parse.
-- `auth_unavailable` — the adapter's credential env var (e.g. `LINEAR_API_KEY`) is unset.
+- `auth_unavailable` — the adapter's credential env var (e.g. `LINEAR_API_KEY`) is unset in the process that is applying the intent.
 - `unsupported_adapter` / `unsupported_intent_type` — the intent's adapter or intent type is not supported by any registered external update adapter.
 - `target_missing` — no resolved external target id on the intent or its linked source item.
 - `intent_apply_in_progress` — a concurrent apply holds the CAS guard on this intent.

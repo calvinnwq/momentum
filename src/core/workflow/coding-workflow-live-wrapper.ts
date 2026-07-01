@@ -19,6 +19,7 @@ import path from "node:path";
 import { runProcessGroupSync } from "../../adapters/live-step-wrapper.js";
 import { normalizeRunnerResult } from "../executors/runner-result.js";
 import type { CommitIntent, CommitType, RunnerResult } from "../executors/types.js";
+import { preflightGitHubMergeCleanup } from "./external-adapter-preflight.js";
 import {
   WORKFLOW_STEP_KINDS,
   isExternalSideEffectTailStepKind,
@@ -162,6 +163,20 @@ export function runCodingWorkflowLiveWrapper(
   }
 
   const childEnv = buildChildEnv(deps.env, stepConfig.envAllow);
+  if (stepKind === "merge-cleanup") {
+    const preflight = preflightGitHubMergeCleanup({ env: childEnv });
+    if (!preflight.ok) {
+      return writeRunnerResult(deps, resultPath, {
+        success: false,
+        summary: preflight.message,
+        key_changes_made: [],
+        key_learnings: stepConfig.keyLearnings,
+        remaining_work: [preflight.action],
+        goal_complete: false,
+        commit: stepConfig.commit
+      });
+    }
+  }
   const result = deps.spawn(stepConfig.command, stepConfig.args, {
     cwd: cwd.path,
     env: childEnv,

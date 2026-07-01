@@ -417,6 +417,116 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     }
   });
 
+  it("preflights Linear external-apply auth before calling the adapter client", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    fs.writeFileSync(
+      path.join(repoDir, "MOMENTUM.md"),
+      "---\nintent_apply_policy: external_apply_allowed\n---\n",
+      "utf8"
+    );
+    const runId = "ngx559-linear-auth-preflight";
+
+    const startResult = await run([
+      "workflow",
+      "run",
+      "start",
+      "--run-id",
+      runId,
+      "--repo",
+      repoDir,
+      "--objective",
+      "Apply Linear refresh",
+      "--issue-scope",
+      "NGX-1001",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(startResult.code).toBe(0);
+
+    const db = openDb(dataDir);
+    try {
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_order < 5"
+      ).run(runId);
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'linear-refresh'"
+      ).run(runId);
+      db.prepare("UPDATE workflow_runs SET state = 'approved' WHERE id = ?").run(
+        runId
+      );
+      db.prepare(
+        `INSERT INTO source_items
+           (id, adapter_kind, external_id, external_key, url, title, status,
+            metadata_json, last_observed_at, goal_id, created_at, updated_at)
+         VALUES ('source_ngx1001_missing_auth', 'linear', 'linear-issue-1001', 'NGX-1001',
+                 'https://linear.app/example/issue/NGX-1001', 'Scoped issue',
+                 'Todo', '{}', 1, NULL, 1, 1)`
+      ).run();
+      db.prepare(
+        `INSERT INTO update_intents
+           (id, adapter_kind, target_external_id, intent_type, payload_json,
+            reason, source_item_id, status, idempotency_key, created_at,
+            updated_at, applied_at, skipped_at, canceled_at, decision_reason)
+         VALUES ('intent_ngx1001_missing_auth', 'linear', 'linear-issue-1001',
+                 'source_satisfied', '{"kind":"comment"}', 'evidence says done',
+                 'source_ngx1001_missing_auth', 'pending',
+                 'idemp:intent_ngx1001_missing_auth', 1, 1,
+                 NULL, NULL, NULL, NULL)`
+      ).run();
+    } finally {
+      db.close();
+    }
+
+    let applyCalls = 0;
+    const deps = {
+      buildLinearExternalUpdateClient: () => ({
+        async apply() {
+          applyCalls += 1;
+          throw new Error("must not call external apply without auth preflight");
+        }
+      })
+    };
+
+    const result = await run(
+      [
+        "daemon",
+        "start",
+        "--max-loop-iterations",
+        "1",
+        "--poll-interval-ms",
+        "0",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      {},
+      deps
+    );
+
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(applyCalls).toBe(0);
+
+    const verifyDb = openDb(dataDir);
+    try {
+      const runRow = verifyDb
+        .prepare("SELECT needs_manual_recovery FROM workflow_runs WHERE id = ?")
+        .get(runId) as { needs_manual_recovery: number } | undefined;
+      expect(runRow?.needs_manual_recovery).toBe(1);
+      const round = verifyDb
+        .prepare(
+          "SELECT state, summary FROM executor_rounds WHERE workflow_run_id = ? AND step_key = 'linear-refresh'"
+        )
+        .get(runId) as { state: string; summary: string | null } | undefined;
+      expect(round?.state).toBe("manual_recovery_required");
+      expect(round?.summary).toContain("LINEAR_API_KEY");
+    } finally {
+      verifyDb.close();
+    }
+  });
+
   it("applies Linear status_update intents for the linear-refresh step", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
