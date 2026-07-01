@@ -174,6 +174,11 @@ The `workflow run start-coding` / `workflow run preview-coding` doors accept a `
 Provider-specific model aliases are normalized during the same pure route pass when enough context is present, so known Claude, Codex, and OpenCode aliases preview, persist, and dispatch the command-ready model string for that harness instead of the bare alias; unknown or non-agent harness/model values remain free-form.
 Status, handoff, monitor, and logs expose the selected `route.steps` through durable run detail, dispatcher-created executor rounds freeze the mapped agent/model/effort values, and live-wrapper execution forwards them as `MOMENTUM_AGENT_PROVIDER`, `MOMENTUM_MODEL`, and `MOMENTUM_EFFORT`; a corrupt persisted `route.steps` namespace fails closed to manual recovery instead of silently falling back.
 
+NGX-549 and NGX-550 add the GUI-safe supervisor contract for `workflow run watch --once`.
+The command builds on the monitor projection, optionally performs one bounded target-run dispatcher tick, then emits a compact top-level envelope with `emit`, `reason`, `recommendedAction`, `recommendedActionPolicy`, quiet-duration fields, stuck-risk advisory fields, and optional `humanAction`.
+Plain `workflow run monitor` remains read-only, while `workflow run monitor --advance` and `workflow run watch --once` are the explicit write-limited polling modes that can update advisory baselines for `momentum-native-coding` runs.
+`test/fixtures/workflow-gui-contract.json` freezes the watch envelope keys, enum vocabularies, common GUI scenarios, event envelope keys, event keys, and event types so app clients can branch without terminal scraping.
+
 NGX-551 adds `events.ts` as the durable workflow event replay seam behind `workflow run events`.
 It projects stable semantic events from workflow rows, combines them with append-only `workflow_events` rows for overwritten transitions and supervisor advisories, and returns opaque replay cursors so reconnecting clients can continue from the previous response cursor without relying on stdout or process state.
 

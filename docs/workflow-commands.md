@@ -39,6 +39,7 @@ This help path ignores `--json`, reads no data directory, and performs no durabl
 GUI and sidecar surfaces should treat these endpoints as the stable source of truth.
 Read-only calls can render run state without terminal scraping.
 State-advancing and mutation calls are explicit and must be opt-in.
+The examples below are branching examples; the full `workflow run watch --once` and `workflow run events` envelope key sets remain the command-section contract.
 
 ### Read-only surfaces
 
@@ -197,7 +198,8 @@ State-advancing and mutation calls are explicit and must be opt-in.
 
 ### Event-cursor behavior for GUI replay
 
-`workflow run events` returns `since`, `cursor`, and `events`.
+`workflow run events` returns `ok`, `command`, `dataDir`, `runId`, `since`, `cursor`, `events`, and `counts`.
+Each event carries `id`, `cursor`, `timestamp`, `type`, `stepId`, and `payload`.
 The response `cursor` is the last returned event cursor.
 When no events are newly emitted, `cursor` repeats the supplied `since` value.
 Passing the returned `cursor` as next `--since` is idempotent.
@@ -1727,7 +1729,8 @@ Options:
 }
 ```
 
-`disposition`, `phase`, `cleanup`, and `digest` are derived from the same monitor progress tick as `workflow run monitor --advance`; `emit` and `reason` can also reflect watch-only quiet-heartbeat or stuck-risk advisories when an unchanged tick reaches its quiet threshold.
+`disposition`, `phase`, `cleanup`, and `digest` are derived from the same monitor progress tick as `workflow run monitor --advance`; plain `workflow run monitor` reads the projection without advancing any baseline.
+`emit` and `reason` can also reflect watch-only quiet-heartbeat or stuck-risk advisories when an unchanged tick reaches its quiet threshold.
 When a quiet-heartbeat or stuck-risk advisory emits, the command appends a matching workflow event row so disconnected clients can later catch up through `workflow run events`.
 Before deriving that tick, `workflow run watch --once` may run one target-run dispatcher tick, either to claim and dispatch one approved next step or to recheck one active running step that the scheduler can safely revisit.
 It does not resolve gates, approvals, or recovery decisions by itself, recover stale leases, or scan or claim work from other runs.
