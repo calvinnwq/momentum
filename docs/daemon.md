@@ -205,6 +205,30 @@ unreadable, invalid, or lacks the current step, the wrapper exits as an operator
 setup failure without writing normalized runner evidence; the daemon then parks
 the dispatched step for recovery instead of finalizing it as an ordinary failed
 workflow step.
+The config file must use canonical snake_case keys.
+`env_allow`, `timeout_sec`, and `result_file` use those names when present.
+`envAllow`, `timeoutSec`, or `resultFile` are rejected with setup guidance that
+points to the config path and key to fix.
+For example, this command block is valid:
+
+```json
+{
+  "steps": {
+    "implementation": {
+      "command": "/usr/bin/env",
+      "args": ["sh", "-c", "echo hello"],
+      "cwd": "repo",
+      "timeout_sec": 900,
+      "env_allow": ["PATH", "HOME"],
+      "result_file": "result.json"
+    }
+  }
+}
+```
+
+If the config has `envAllow`, `timeoutSec`, or `resultFile`, the wrapper returns a
+setup failure in the form `Unknown key "..." in steps.<step>; replace with "..."
+to use the required snake_case schema`, and no child process is spawned.
 External-side-effect tail steps also run a local auth/capability preflight before
 contacting their external tools. `merge-cleanup` requires explicit GitHub auth
 in the live-wrapper environment (`GH_TOKEN`, `GITHUB_TOKEN`, or `GH_CONFIG_DIR`)

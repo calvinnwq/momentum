@@ -212,6 +212,26 @@ describe("loadCodingWorkflowWrapperConfig", () => {
     );
   });
 
+  it("rejects unknown top-level wrapper config keys", () => {
+    const loaded = loadCodingWorkflowWrapperConfig({
+      env: { [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: "/config.json" },
+      readFile: () =>
+        JSON.stringify({
+          steps: {
+            preflight: {
+              command: "/bin/sh"
+            }
+          },
+          unsupportedRootKey: {}
+        })
+    });
+
+    expect(loaded.ok).toBe(false);
+    if (loaded.ok) return;
+    expect(loaded.error).toContain('"unsupportedRootKey"');
+    expect(loaded.error).toContain("supported keys: steps");
+  });
+
   it("refuses unsupported step keys", () => {
     const loaded = loadCodingWorkflowWrapperConfig({
       env: { [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: "/config.json" },
@@ -226,6 +246,126 @@ describe("loadCodingWorkflowWrapperConfig", () => {
     expect(loaded.ok).toBe(false);
     if (loaded.ok) return;
     expect(loaded.error).toContain("Unsupported workflow step kind");
+  });
+
+  it.each([
+    {
+      name: "envAllow",
+      field: "envAllow",
+      json: { preflight: { command: "/bin/sh", envAllow: ["PATH"] } },
+      expected: "env_allow"
+    },
+    {
+      name: "timeoutSec",
+      field: "timeoutSec",
+      json: { preflight: { command: "/bin/sh", timeoutSec: 30 } },
+      expected: "timeout_sec"
+    },
+    {
+      name: "resultFile",
+      field: "resultFile",
+      json: {
+        preflight: {
+          command: "/bin/sh",
+          resultFile: "result.json"
+        }
+      },
+      expected: "result_file"
+    }
+  ])("suggests canonical snake_case for camelCase step keys: $name", ({ field, json, expected }) => {
+    const loaded = loadCodingWorkflowWrapperConfig({
+      env: { [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: "/config.json" },
+      readFile: () => JSON.stringify({ steps: json })
+    });
+
+    expect(loaded.ok).toBe(false);
+    if (loaded.ok) return;
+    expect(loaded.error).toContain(`"${field}"`);
+    expect(loaded.error).toContain(expected);
+  });
+
+  it.each(["implementation", "postflight", "no-mistakes", "merge-cleanup"])(
+    "accepts validated step config for %s",
+    (stepKind) => {
+      const loaded = loadCodingWorkflowWrapperConfig({
+        env: { [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: "/config.json" },
+        readFile: () =>
+          JSON.stringify({
+            steps: {
+              [stepKind]: {
+                command: "/bin/sh",
+                args: ["-c", "echo ok"],
+                cwd: "repo",
+                timeout_sec: 30,
+                env_allow: ["PATH"],
+                commit: { type: "test", subject: `validate ${stepKind}` }
+              }
+            }
+          })
+      });
+      expect(loaded.ok, stepKind).toBe(true);
+      if (!loaded.ok) return;
+      expect(loaded.config.steps[stepKind as keyof typeof loaded.config.steps]).toBeDefined();
+    }
+  );
+
+  it("rejects malformed env_allow values", () => {
+    const loaded = loadCodingWorkflowWrapperConfig({
+      env: { [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: "/config.json" },
+      readFile: () =>
+        JSON.stringify({
+          steps: {
+            preflight: {
+              command: "/bin/sh",
+              env_allow: ["PATH", 12]
+            }
+          }
+        })
+    });
+
+    expect(loaded.ok).toBe(false);
+    if (loaded.ok) return;
+    expect(loaded.error).toContain("`env_allow` must be an array of strings.");
+  });
+
+  it("fails camelCase envAllow before spawning and points to the config file and key", () => {
+    const dir = makeTempDir();
+    const repo = path.join(dir, "repo");
+    const iteration = path.join(dir, "run");
+    const resultPath = path.join(iteration, "result.json");
+    const sentinelPath = path.join(iteration, "should-not-run");
+    fs.mkdirSync(repo);
+    const configPath = path.join(dir, "wrapper-config.json");
+    writeJson(configPath, {
+      steps: {
+        preflight: {
+          command: "/bin/sh",
+          args: ["-c", `touch ${JSON.stringify(sentinelPath)}`],
+          cwd: "repo",
+          timeout_sec: 30,
+          envAllow: ["PATH"],
+          commit: { type: "test", subject: "camel-case guard" }
+        }
+      }
+    });
+
+    const outcome = runCodingWorkflowLiveWrapper(
+      deps({
+        MOMENTUM_STEP_KIND: "preflight",
+        MOMENTUM_REPO_PATH: repo,
+        MOMENTUM_ITERATION_DIR: iteration,
+        MOMENTUM_RESULT_PATH: resultPath,
+        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath
+      })
+    );
+
+    expect(outcome.exitCode).toBe(1);
+    expect(outcome.success).toBe(false);
+    expect(outcome.summary).toContain(configPath);
+    expect(outcome.summary).toContain('"envAllow"');
+    expect(outcome.summary).toContain("env_allow");
+    expect(fs.existsSync(sentinelPath)).toBe(false);
+    expect(fs.existsSync(resultPath)).toBe(false);
   });
 });
 
@@ -316,6 +456,44 @@ describe("runCodingWorkflowLiveWrapper", () => {
       summary: "route selection reached child command"
     });
     expect(readResult(resultPath).success).toBe(true);
+  });
+
+  it("refuses malformed env_allow in wrapper config before spawning the child command", () => {
+    const dir = makeTempDir();
+    const repo = path.join(dir, "repo");
+    const iteration = path.join(dir, "run");
+    const resultPath = path.join(iteration, "result.json");
+    const sentinelPath = path.join(iteration, "should-not-run");
+    fs.mkdirSync(repo);
+    const configPath = path.join(dir, "wrapper-config.json");
+    writeJson(configPath, {
+      steps: {
+        implementation: {
+          command: "/bin/sh",
+          args: ["-c", `touch ${JSON.stringify(sentinelPath)}`],
+          cwd: "repo",
+          timeout_sec: 30,
+          env_allow: ["PATH", 100],
+          commit: { type: "chore", subject: "invalid env allow test" }
+        }
+      }
+    });
+
+    const outcome = runCodingWorkflowLiveWrapper(
+      deps({
+        MOMENTUM_STEP_KIND: "implementation",
+        MOMENTUM_REPO_PATH: repo,
+        MOMENTUM_ITERATION_DIR: iteration,
+        MOMENTUM_RESULT_PATH: resultPath,
+        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath
+      })
+    );
+
+    expect(outcome.exitCode).toBe(1);
+    expect(outcome.success).toBe(false);
+    expect(outcome.summary).toContain("`env_allow` must be an array of strings.");
+    expect(fs.existsSync(sentinelPath)).toBe(false);
+    expect(fs.existsSync(resultPath)).toBe(false);
   });
 
   it("records command failures as success=false runner evidence", () => {

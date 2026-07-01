@@ -53,6 +53,7 @@ export type CodingWorkflowWrapperStepConfig = {
   cwd: CodingWorkflowWrapperCwd;
   timeoutSec: number;
   envAllow: string[];
+  resultFile?: string;
   successSummary?: string;
   failureSummary?: string;
   keyChangesMade: string[];
@@ -93,6 +94,26 @@ export type CodingWorkflowWrapperOutcome = {
 };
 
 const WORKFLOW_STEP_KIND_SET: ReadonlySet<string> = new Set(WORKFLOW_STEP_KINDS);
+const WRAPPER_CONFIG_TOP_LEVEL_FIELDS: ReadonlySet<string> = new Set(["steps"]);
+const WRAPPER_STEP_CONFIG_FIELDS: ReadonlySet<string> = new Set([
+  "command",
+  "args",
+  "cwd",
+  "timeout_sec",
+  "env_allow",
+  "result_file",
+  "success_summary",
+  "failure_summary",
+  "key_changes_made",
+  "key_learnings",
+  "remaining_work",
+  "commit"
+]);
+const WRAPPER_STEP_CONFIG_ALIASES: Record<string, string> = {
+  envAllow: "env_allow",
+  timeoutSec: "timeout_sec",
+  resultFile: "result_file"
+};
 const DEFAULT_TIMEOUT_SEC = 900;
 const OUTPUT_MAX_BYTES = 10 * 1024 * 1024;
 
@@ -1794,19 +1815,37 @@ export function loadCodingWorkflowWrapperConfig(
     };
   }
 
-  return parseCodingWorkflowWrapperConfig(parsed);
+  return parseCodingWorkflowWrapperConfig(parsed, configPath);
 }
 
 export function parseCodingWorkflowWrapperConfig(
-  value: unknown
+  value: unknown,
+  source?: string
 ): ConfigLoadResult {
   if (!isRecord(value)) {
-    return { ok: false, error: "Coding workflow wrapper config must be an object." };
+    return {
+      ok: false,
+      error: `Coding workflow wrapper config must be an object${source === undefined ? "." : ` at ${source}.`}`
+    };
+  }
+
+  const topLevelUnknown = findUnknownKeys(
+    value,
+    WRAPPER_CONFIG_TOP_LEVEL_FIELDS,
+    {},
+    "wrapper config",
+    source
+  );
+  if (!topLevelUnknown.ok) {
+    return topLevelUnknown;
   }
 
   const rawSteps = value["steps"];
   if (rawSteps !== undefined && !isRecord(rawSteps)) {
-    return { ok: false, error: "Coding workflow wrapper config `steps` must be an object." };
+    return {
+      ok: false,
+      error: `Coding workflow wrapper config 'steps' must be an object${source === undefined ? "." : ` at ${source}.`}`
+    };
   }
 
   const steps: Partial<Record<WorkflowStepKind, CodingWorkflowWrapperStepConfig>> = {};
@@ -1815,10 +1854,10 @@ export function parseCodingWorkflowWrapperConfig(
       if (!WORKFLOW_STEP_KIND_SET.has(kind)) {
         return {
           ok: false,
-          error: `Unsupported workflow step kind in wrapper config: ${kind}`
+          error: `Unsupported workflow step kind ${kind} in MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG${source === undefined ? "." : ` at ${source}.`}`
         };
       }
-      const parsedStep = parseStepConfig(kind as WorkflowStepKind, rawStep);
+      const parsedStep = parseStepConfig(kind as WorkflowStepKind, rawStep, source);
       if (!parsedStep.ok) return parsedStep;
       steps[kind as WorkflowStepKind] = parsedStep.config;
     }
@@ -1833,10 +1872,22 @@ type StepConfigParse =
 
 function parseStepConfig(
   kind: WorkflowStepKind,
-  value: unknown
+  value: unknown,
+  source?: string
 ): StepConfigParse {
   if (!isRecord(value)) {
     return { ok: false, error: `Wrapper config for ${kind} must be an object.` };
+  }
+
+  const unknownStepKey = findUnknownKeys(
+    value,
+    WRAPPER_STEP_CONFIG_FIELDS,
+    WRAPPER_STEP_CONFIG_ALIASES,
+    `steps.${kind}`,
+    source
+  );
+  if (!unknownStepKey.ok) {
+    return unknownStepKey;
   }
 
   const command = readOptionalString(value["command"]);
@@ -1866,6 +1917,7 @@ function parseStepConfig(
     "remaining_work"
   );
   if (!remainingWork.ok) return remainingWork;
+  const resultFile = readOptionalString(value["result_file"]);
   const successSummary = readOptionalString(value["success_summary"]);
   const failureSummary = readOptionalString(value["failure_summary"]);
 
@@ -1882,9 +1934,35 @@ function parseStepConfig(
       keyChangesMade: keyChangesMade.value,
       keyLearnings: keyLearnings.value,
       remainingWork: remainingWork.value,
+      ...(resultFile !== undefined ? { resultFile } : {}),
       commit: commit.value
     }
   };
+}
+
+function findUnknownKeys(
+  value: Record<string, unknown>,
+  allowed: ReadonlySet<string>,
+  aliasMap: Record<string, string> = {},
+  location: string = "root",
+  source?: string
+): { ok: true } | { ok: false; error: string } {
+  const supported = [...allowed].sort().join(", ");
+  for (const key of Object.keys(value)) {
+    if (allowed.has(key)) continue;
+    const alias = aliasMap[key];
+    if (alias !== undefined) {
+      return {
+        ok: false,
+        error: `Unknown key "${key}" in ${location}; replace with "${alias}" to use the required snake_case schema at ${source ?? "this config file"}.`
+      };
+    }
+    return {
+      ok: false,
+        error: `Unknown key "${key}" in ${location}; supported keys: ${supported} at ${source ?? "this config file"}.`
+      };
+  }
+  return { ok: true };
 }
 
 function writeFailureResult(
@@ -2007,14 +2085,17 @@ type StringArrayParse =
 function readOptionalStringArray(value: unknown, field: string): StringArrayParse {
   if (value === undefined || value === null) return { ok: true, value: [] };
   if (!Array.isArray(value)) {
-    return { ok: false, error: `Wrapper config \`${field}\` must be an array.` };
+    return {
+      ok: false,
+      error: `Wrapper config \`${field}\` must be an array of strings.`
+    };
   }
   const out: string[] = [];
   for (const entry of value) {
     if (typeof entry !== "string") {
       return {
         ok: false,
-        error: `Wrapper config \`${field}\` must contain only strings.`
+        error: `Wrapper config \`${field}\` must be an array of strings.`
       };
     }
     out.push(entry);
