@@ -51,7 +51,7 @@ State-advancing and mutation calls are explicit and must be opt-in.
   It is the durable place to render step state, recovery flags, and open gates before prompting an action.
 - `workflow handoff <run-id>`.
   This mirrors status detail and lifts `nextAction` to the top level.
-  Open CLaw and GUI runners use it for a compact actionable dispatch summary.
+  OpenClaw and GUI runners use it for a compact actionable dispatch summary.
 - `workflow run monitor`.
   This is the stable progress discriminator for recurring poll loops.
   Use `--advance` only for `momentum-native-coding`.
