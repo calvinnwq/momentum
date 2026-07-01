@@ -79,7 +79,7 @@ import {
   type PolicyEffectiveFieldSource,
   type UpdateIntentApplyPolicy
 } from "./policy.js";
-import { preflightLinearExternalApply } from "../workflow/external-adapter-preflight.js";
+import { preflightLinearExternalApplyAuth } from "./external-apply-preflight.js";
 import { getSourceItemById } from "../source/items.js";
 import {
   reconcileAfterExternalApply,
@@ -1014,11 +1014,7 @@ function checkAdapterAuth(
   env: ExecuteExternalApplyEnv
 ): { ok: true } | { ok: false; message: string } {
   if (adapterKind === "linear") {
-    const preflight = preflightLinearExternalApply({
-      env,
-      intentApplyPolicy: "external_apply_allowed",
-      targetExternalId: "prevalidated-target"
-    });
+    const preflight = preflightLinearExternalApplyAuth({ env });
     if (!preflight.ok) {
       return {
         ok: false,

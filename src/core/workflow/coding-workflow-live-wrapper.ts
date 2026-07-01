@@ -19,7 +19,7 @@ import path from "node:path";
 import { runProcessGroupSync } from "../../adapters/live-step-wrapper.js";
 import { normalizeRunnerResult } from "../executors/runner-result.js";
 import type { CommitIntent, CommitType, RunnerResult } from "../executors/types.js";
-import { preflightGitHubMergeCleanup } from "./external-adapter-preflight.js";
+import { preflightGitHubMergeCleanup } from "./merge-cleanup-preflight.js";
 import {
   WORKFLOW_STEP_KINDS,
   isExternalSideEffectTailStepKind,

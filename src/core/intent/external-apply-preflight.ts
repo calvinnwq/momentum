@@ -1,9 +1,9 @@
 import {
   DEFAULT_INTENT_APPLY_POLICY,
   type UpdateIntentApplyPolicy
-} from "../intent/policy.js";
+} from "./policy.js";
 
-export const EXTERNAL_ADAPTER_PREFLIGHT_STATUSES = Object.freeze([
+export const LINEAR_EXTERNAL_APPLY_PREFLIGHT_STATUSES = Object.freeze([
   "ready",
   "auth_missing",
   "permission_missing",
@@ -13,10 +13,10 @@ export const EXTERNAL_ADAPTER_PREFLIGHT_STATUSES = Object.freeze([
   "unknown"
 ] as const);
 
-export type ExternalAdapterPreflightStatus =
-  (typeof EXTERNAL_ADAPTER_PREFLIGHT_STATUSES)[number];
+export type LinearExternalApplyPreflightStatus =
+  (typeof LINEAR_EXTERNAL_APPLY_PREFLIGHT_STATUSES)[number];
 
-export type ExternalAdapterPreflightResult =
+export type LinearExternalApplyPreflightResult =
   | {
       ok: true;
       status: "ready";
@@ -24,17 +24,12 @@ export type ExternalAdapterPreflightResult =
     }
   | {
       ok: false;
-      status: Exclude<ExternalAdapterPreflightStatus, "ready">;
+      status: Exclude<LinearExternalApplyPreflightStatus, "ready">;
       message: string;
       action: string;
     };
 
 const LINEAR_API_KEY_ENV = "LINEAR_API_KEY";
-const GITHUB_AUTH_ENV_VARS = [
-  "GH_TOKEN",
-  "GITHUB_TOKEN",
-  "GH_CONFIG_DIR"
-] as const;
 
 type EnvSnapshot = Record<string, string | undefined>;
 
@@ -42,7 +37,7 @@ export function preflightLinearExternalApply(input: {
   env: EnvSnapshot;
   intentApplyPolicy?: UpdateIntentApplyPolicy | null;
   targetExternalId?: string | null;
-}): ExternalAdapterPreflightResult {
+}): LinearExternalApplyPreflightResult {
   const target = input.targetExternalId?.trim() ?? "";
   if (target.length === 0) {
     return {
@@ -78,7 +73,7 @@ export function preflightLinearExternalApply(input: {
 
 export function preflightLinearExternalApplyAuth(input: {
   env: EnvSnapshot;
-}): ExternalAdapterPreflightResult {
+}): LinearExternalApplyPreflightResult {
   const apiKey = input.env[LINEAR_API_KEY_ENV];
   if (typeof apiKey !== "string" || apiKey.trim().length === 0) {
     return {
@@ -95,42 +90,5 @@ export function preflightLinearExternalApplyAuth(input: {
     ok: true,
     status: "ready",
     message: "Linear external-apply auth preflight passed."
-  };
-}
-
-export function preflightGitHubMergeCleanup(input: {
-  env: EnvSnapshot;
-  targetRef?: string | null;
-}): ExternalAdapterPreflightResult {
-  const target = input.targetRef?.trim();
-  if (target !== undefined && target.length === 0) {
-    return {
-      ok: false,
-      status: "target_missing",
-      message: "GitHub merge-cleanup has no pull request or branch target.",
-      action:
-        "Resolve the pull request / branch target before running merge-cleanup."
-    };
-  }
-
-  const presentAuth = GITHUB_AUTH_ENV_VARS.find((name) => {
-    const value = input.env[name];
-    return typeof value === "string" && value.trim().length > 0;
-  });
-  if (presentAuth === undefined) {
-    return {
-      ok: false,
-      status: "auth_missing",
-      message:
-        "GitHub merge-cleanup has no explicit auth in the workflow process environment.",
-      action:
-        "Provide GH_TOKEN, GITHUB_TOKEN, or GH_CONFIG_DIR to the live-wrapper environment before running merge-cleanup."
-    };
-  }
-
-  return {
-    ok: true,
-    status: "ready",
-    message: `GitHub merge-cleanup preflight passed using ${presentAuth}.`
   };
 }
