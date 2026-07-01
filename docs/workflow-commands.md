@@ -72,7 +72,7 @@ State-advancing and mutation calls are explicit and must be opt-in.
 
 - `workflow run approve <run-id>`.
   Resolve approval requirements.
-- `workflow run decide <run-id>`.
+- `workflow run decide <gate-id>`.
   Resolve a gate with an allowed action.
 - `workflow run clear-recovery <run-id>`.
   Clear manual-recovery flags once the operator has reconciled the blocking cause.
