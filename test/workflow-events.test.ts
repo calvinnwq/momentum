@@ -13,11 +13,32 @@ import {
 } from "../src/core/workflow/run-recovery.js";
 import { appendWorkflowEvent } from "../src/core/workflow/events.js";
 
+type WorkflowGuiEventsContractFixture = {
+  events: {
+    envelopeKeys: string[];
+    eventKeys: string[];
+    types: string[];
+    cursorPrefix: string;
+    replayPolicy: string;
+  };
+};
+
+const EVENTS_CONTRACT = JSON.parse(
+  fs.readFileSync(
+    path.join(process.cwd(), "test/fixtures/workflow-gui-contract.json"),
+    "utf-8"
+  )
+) as WorkflowGuiEventsContractFixture;
+
 type RunResult = {
   code: number;
   stdout: string;
   stderr: string;
 };
+
+const EVENT_ENVELOPE_KEYS = EVENTS_CONTRACT.events.envelopeKeys.slice().sort();
+const EVENT_KEYS = EVENTS_CONTRACT.events.eventKeys.slice().sort();
+
 
 type WorkflowEvent = {
   id: string;
@@ -95,6 +116,34 @@ async function readEvents(
   const result = await run(argv);
   expect(result.code, result.stderr).toBe(0);
   return JSON.parse(result.stdout) as WorkflowEventsEnvelope;
+}
+
+function assertWorkflowEventsEnvelopeContract(
+  envelope: WorkflowEventsEnvelope
+): void {
+  expect(Object.keys(envelope).sort()).toEqual(EVENT_ENVELOPE_KEYS);
+  expect(envelope.command).toBe("workflow run events");
+  expect(typeof envelope.runId).toBe("string");
+  expect(
+    envelope.since === null || typeof envelope.since === "string"
+  ).toBe(true);
+  expect(envelope.cursor === null || envelope.cursor.startsWith(EVENTS_CONTRACT.events.cursorPrefix)).toBe(true);
+  for (const event of envelope.events) {
+    expect(Object.keys(event).sort()).toEqual(EVENT_KEYS);
+    expect(typeof event.id).toBe("string");
+    expect(event.id.length).toBeGreaterThan(0);
+    expect(typeof event.cursor).toBe("string");
+    expect(event.cursor.startsWith(EVENTS_CONTRACT.events.cursorPrefix)).toBe(true);
+    expect(typeof event.timestamp).toBe("number");
+    expect(typeof event.type).toBe("string");
+    expect(EVENTS_CONTRACT.events.types).toContain(event.type);
+  }
+  if (envelope.events.length === 0) {
+    expect(envelope.cursor).toBe(envelope.since);
+  } else {
+    expect(envelope.events.at(-1)?.cursor).toBe(envelope.cursor);
+  }
+  expect(envelope.counts.events).toBe(envelope.events.length);
 }
 
 function seedRun(
@@ -199,6 +248,8 @@ describe("workflow run events", () => {
     const first = await readEvents(dataDir, "run-empty");
     const second = await readEvents(dataDir, "run-empty");
 
+    assertWorkflowEventsEnvelopeContract(first);
+    assertWorkflowEventsEnvelopeContract(second);
     expect(first).toEqual({
       ok: true,
       command: "workflow run events",
@@ -285,6 +336,7 @@ describe("workflow run events", () => {
 
     const envelope = await readEvents(dataDir, "run-replay");
 
+    assertWorkflowEventsEnvelopeContract(envelope);
     expect(envelope.since).toBeNull();
     expect(envelope.events.map((event) => event.type)).toEqual([
       "step_started",
@@ -301,6 +353,9 @@ describe("workflow run events", () => {
     for (const event of envelope.events) {
       expect(event.id.length).toBeGreaterThan(0);
       expect(event.cursor.length).toBeGreaterThan(0);
+    }
+    for (const eventType of envelope.events.map((event) => event.type)) {
+      expect(EVENTS_CONTRACT.events.types).toContain(eventType);
     }
     expect(envelope.events.at(-1)).toMatchObject({
       timestamp: 80,
@@ -325,6 +380,7 @@ describe("workflow run events", () => {
 
     const envelope = await readEvents(dataDir, "run-imported-terminal");
 
+    assertWorkflowEventsEnvelopeContract(envelope);
     expect(envelope.events).toHaveLength(1);
     expect(envelope.events[0]).toMatchObject({
       timestamp: 95,
@@ -350,6 +406,7 @@ describe("workflow run events", () => {
     db.close();
 
     const first = await readEvents(dataDir, "run-continue");
+    assertWorkflowEventsEnvelopeContract(first);
     expect(first.events.map((event) => event.type)).toEqual(["step_started"]);
     expect(first.cursor).toBe(first.events[0]?.cursor);
 
@@ -366,6 +423,7 @@ describe("workflow run events", () => {
     writeDb.close();
 
     const next = await readEvents(dataDir, "run-continue", first.cursor);
+    assertWorkflowEventsEnvelopeContract(next);
     expect(next.since).toBe(first.cursor);
     expect(next.events.map((event) => event.type)).toEqual(["step_failed"]);
     expect(next.events[0]).toMatchObject({
@@ -398,6 +456,7 @@ describe("workflow run events", () => {
     db.close();
 
     const envelope = await readEvents(dataDir, "run-same-timestamp-step");
+    assertWorkflowEventsEnvelopeContract(envelope);
 
     expect(envelope.events.map((event) => event.type)).toEqual([
       "step_started",
@@ -421,6 +480,7 @@ describe("workflow run events", () => {
     db.close();
 
     const first = await readEvents(dataDir, "run-recovery-remark");
+    assertWorkflowEventsEnvelopeContract(first);
     expect(first.events.map((event) => event.type)).toEqual([
       "recovery_required"
     ]);
@@ -440,6 +500,7 @@ describe("workflow run events", () => {
       "run-recovery-remark",
       first.cursor
     );
+    assertWorkflowEventsEnvelopeContract(next);
     expect(next.events).toHaveLength(1);
     expect(next.events[0]).toMatchObject({
       type: "recovery_required",
@@ -466,6 +527,7 @@ describe("workflow run events", () => {
     db.close();
 
     const first = await readEvents(dataDir, "run-recovery-idempotent");
+    assertWorkflowEventsEnvelopeContract(first);
     expect(first.events.map((event) => event.type)).toEqual([
       "recovery_required"
     ]);
@@ -485,6 +547,7 @@ describe("workflow run events", () => {
       "run-recovery-idempotent",
       first.cursor
     );
+    assertWorkflowEventsEnvelopeContract(next);
     expect(next.events).toEqual([]);
   });
 
@@ -536,6 +599,7 @@ describe("workflow run events", () => {
     expect(approved.code, approved.stderr).toBe(0);
 
     const envelope = await readEvents(dataDir, "run-blocked-transition");
+    assertWorkflowEventsEnvelopeContract(envelope);
     expect(envelope.events.map((event) => event.type)).toEqual([
       "step_blocked"
     ]);
@@ -576,6 +640,7 @@ describe("workflow run events", () => {
     db.close();
 
     const envelope = await readEvents(dataDir, "run-projected-blocked");
+    assertWorkflowEventsEnvelopeContract(envelope);
 
     expect(envelope.events.map((event) => event.type)).toEqual([
       "step_blocked"
@@ -659,6 +724,7 @@ describe("workflow run events", () => {
     db.close();
 
     const beforeClear = await readEvents(dataDir, runId);
+    assertWorkflowEventsEnvelopeContract(beforeClear);
     const beforeStart = beforeClear.events.find(
       (event) => event.stepId === stepId && event.type === "step_started"
     );
@@ -679,12 +745,14 @@ describe("workflow run events", () => {
     });
 
     const fullReplay = await readEvents(dataDir, runId);
+    assertWorkflowEventsEnvelopeContract(fullReplay);
     const afterStart = fullReplay.events.find(
       (event) => event.stepId === stepId && event.type === "step_started"
     );
     expect(afterStart?.id).toBe(beforeStart?.id);
 
     const catchup = await readEvents(dataDir, runId, beforeClear.cursor);
+    assertWorkflowEventsEnvelopeContract(catchup);
     expect(
       catchup.events.some(
         (event) => event.stepId === stepId && event.type === "step_started"
@@ -713,6 +781,7 @@ describe("workflow run events", () => {
     db.close();
 
     const envelope = await readEvents(dataDir, "run-repeat-stored");
+    assertWorkflowEventsEnvelopeContract(envelope);
     expect(envelope.events.map((event) => event.type)).toEqual([
       "step_blocked",
       "step_blocked"
@@ -721,6 +790,7 @@ describe("workflow run events", () => {
     expect(envelope.events[0]?.payload).toEqual(envelope.events[1]?.payload);
 
     const next = await readEvents(dataDir, "run-repeat-stored", envelope.cursor);
+    assertWorkflowEventsEnvelopeContract(next);
     expect(next.events).toEqual([]);
   });
 
@@ -736,6 +806,7 @@ describe("workflow run events", () => {
     db.close();
 
     const first = await readEvents(dataDir, "run-same-timestamp");
+    assertWorkflowEventsEnvelopeContract(first);
     expect(first.events.map((event) => event.type)).toEqual([
       "terminal_state"
     ]);
@@ -753,6 +824,7 @@ describe("workflow run events", () => {
     writeDb.close();
 
     const next = await readEvents(dataDir, "run-same-timestamp", terminalCursor);
+    assertWorkflowEventsEnvelopeContract(next);
     expect(next.events.map((event) => event.type)).toContain(
       "monitor_stuck_risk"
     );
@@ -761,6 +833,7 @@ describe("workflow run events", () => {
       "run-same-timestamp",
       next.cursor
     );
+    assertWorkflowEventsEnvelopeContract(quiesced);
     expect(quiesced.events).toEqual([]);
   });
 
