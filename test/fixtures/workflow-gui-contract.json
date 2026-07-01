@@ -71,6 +71,7 @@
         "quietThresholdSeconds": 900,
         "stuckRisk": "low",
         "cleanup": "none",
+        "humanAction": null,
         "activeStep": {
           "stepId": "implementation",
           "state": "running"
@@ -115,7 +116,8 @@
         "cleanup": "none",
         "humanAction": {
           "code": "clear_recovery",
-          "command": "momentum workflow run clear-recovery ${runId}"
+          "command": "momentum workflow run clear-recovery ${runId}",
+          "detail": "dispatch lease requires operator recovery"
         }
       },
       "stuckRisk": {
@@ -198,7 +200,10 @@
         "stuckRisk": "high",
         "cleanup": "none",
         "humanAction": null,
-        "nextActionCode": "rerun_failed_step",
+        "nextAction": {
+          "code": "rerun_failed_step",
+          "stepId": "implementation"
+        },
         "activeStep": {
           "stepId": "implementation",
           "state": "failed"
