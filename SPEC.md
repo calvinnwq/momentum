@@ -5,6 +5,11 @@ documentation contracts. Long-form planning history, milestone provenance,
 readiness notes, dogfood evidence, and migration rationale live in Obsidian
 `/Workspaces/Momentum`.
 
+[`VISION.md`](VISION.md) is the companion product and engineering opinion anchor.
+When choosing workflow shape, preflight boundaries, recovery behavior, monitor
+contracts, or GUI/operator surfaces, preserve that direction while keeping this
+file focused on shipped runtime contracts.
+
 ## Runtime Model
 
 Momentum is a workflow-first runtime for durable repo-work orchestration.
@@ -34,6 +39,12 @@ events, recovery, and logs surfaces. Autonomy is allowed only inside the approve
 Every dispatched step must produce normalized result evidence or mirrored
 external state before final classification. Process handles, hook events,
 sockets, and file watchers are fast-path hints, not authoritative state.
+
+Workflow-level preflight validates structural setup before runtime work begins:
+definition resolution, approval boundary, route config, wrapper/profile schema,
+canonical config keys, and result/config path shape. Side-effecting tail steps
+own their own capability/auth/target/idempotency checks inside the same durable
+step lifecycle that applies and reconciles the side effect.
 
 ## External Apply
 
