@@ -178,6 +178,15 @@ export function runCodingWorkflowLiveWrapper(
     );
   }
 
+  const configuredResultPath = resolveConfiguredResultPath(
+    stepConfig,
+    deps.env,
+    resultPath
+  );
+  if (!configuredResultPath.ok) {
+    return processSetupFailure(deps, configuredResultPath.error);
+  }
+
   const cwd = resolveStepCwd(stepConfig.cwd, deps.env);
   if (!cwd.ok) {
     return writeFailureResult(deps, resultPath, cwd.error, stepKind, stepConfig);
@@ -1917,7 +1926,8 @@ function parseStepConfig(
     "remaining_work"
   );
   if (!remainingWork.ok) return remainingWork;
-  const resultFile = readOptionalString(value["result_file"]);
+  const resultFile = readOptionalResultFile(value["result_file"]);
+  if (!resultFile.ok) return resultFile;
   const successSummary = readOptionalString(value["success_summary"]);
   const failureSummary = readOptionalString(value["failure_summary"]);
 
@@ -1934,7 +1944,7 @@ function parseStepConfig(
       keyChangesMade: keyChangesMade.value,
       keyLearnings: keyLearnings.value,
       remainingWork: remainingWork.value,
-      ...(resultFile !== undefined ? { resultFile } : {}),
+      ...(resultFile.value !== undefined ? { resultFile: resultFile.value } : {}),
       commit: commit.value
     }
   };
@@ -2048,6 +2058,44 @@ function resolveStepCwd(
   return { ok: true, path: iterationDir };
 }
 
+function resolveConfiguredResultPath(
+  config: CodingWorkflowWrapperStepConfig,
+  env: NodeJS.ProcessEnv,
+  resultPath: string
+): { ok: true } | { ok: false; error: string } {
+  if (config.resultFile === undefined) return { ok: true };
+  const iterationDir = readRequiredEnv(env, "MOMENTUM_ITERATION_DIR");
+  if (iterationDir === undefined) {
+    return {
+      ok: false,
+      error: "MOMENTUM_ITERATION_DIR is required when wrapper config `result_file` is set."
+    };
+  }
+  const base = path.resolve(iterationDir);
+  const resolved = path.resolve(base, config.resultFile);
+  const relative = path.relative(base, resolved);
+  if (
+    relative === "" ||
+    relative === ".." ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  ) {
+    return {
+      ok: false,
+      error:
+        "Wrapper config `result_file` must resolve inside the iteration artifact directory."
+    };
+  }
+  if (path.resolve(resultPath) !== resolved) {
+    return {
+      ok: false,
+      error:
+        "Wrapper config `result_file` must match the live wrapper MOMENTUM_RESULT_PATH."
+    };
+  }
+  return { ok: true };
+}
+
 function buildChildEnv(
   env: NodeJS.ProcessEnv,
   envAllow: readonly string[]
@@ -2076,6 +2124,38 @@ function readOptionalString(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function readOptionalResultFile(
+  value: unknown
+): { ok: true; value?: string } | { ok: false; error: string } {
+  if (value === undefined || value === null) return { ok: true };
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return {
+      ok: false,
+      error: "Wrapper config `result_file` must be a non-empty string."
+    };
+  }
+  const trimmed = value.trim();
+  const normalized = path.posix.normalize(trimmed.replace(/\\/g, "/"));
+  if (
+    path.isAbsolute(trimmed) ||
+    path.win32.isAbsolute(trimmed) ||
+    hasParentTraversalSegment(trimmed) ||
+    normalized === "." ||
+    normalized === "./"
+  ) {
+    return {
+      ok: false,
+      error:
+        "Wrapper config `result_file` must be a relative path inside the iteration artifact directory."
+    };
+  }
+  return { ok: true, value: trimmed };
+}
+
+function hasParentTraversalSegment(value: string): boolean {
+  return value.split(/[\\/]+/u).includes("..");
 }
 
 type StringArrayParse =

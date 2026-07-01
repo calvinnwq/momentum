@@ -328,6 +328,48 @@ describe("loadCodingWorkflowWrapperConfig", () => {
     expect(loaded.error).toContain("`env_allow` must be an array of strings.");
   });
 
+  it.each(["/tmp/result.json", "../result.json", ".", "nested/..", "C:\\temp\\result.json"])(
+    "rejects unsafe result_file values: %s",
+    (resultFile) => {
+      const loaded = loadCodingWorkflowWrapperConfig({
+        env: { [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: "/config.json" },
+        readFile: () =>
+          JSON.stringify({
+            steps: {
+              preflight: {
+                command: "/bin/sh",
+                result_file: resultFile
+              }
+            }
+          })
+      });
+
+      expect(loaded.ok).toBe(false);
+      if (loaded.ok) return;
+      expect(loaded.error).toContain("result_file");
+      expect(loaded.error).toContain("relative path inside the iteration artifact directory");
+    }
+  );
+
+  it("rejects non-string result_file values", () => {
+    const loaded = loadCodingWorkflowWrapperConfig({
+      env: { [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: "/config.json" },
+      readFile: () =>
+        JSON.stringify({
+          steps: {
+            preflight: {
+              command: "/bin/sh",
+              result_file: 42
+            }
+          }
+        })
+    });
+
+    expect(loaded.ok).toBe(false);
+    if (loaded.ok) return;
+    expect(loaded.error).toContain("`result_file` must be a non-empty string");
+  });
+
   it("fails camelCase envAllow before spawning and points to the config file and key", () => {
     const dir = makeTempDir();
     const repo = path.join(dir, "repo");
@@ -492,6 +534,47 @@ describe("runCodingWorkflowLiveWrapper", () => {
     expect(outcome.exitCode).toBe(1);
     expect(outcome.success).toBe(false);
     expect(outcome.summary).toContain("`env_allow` must be an array of strings.");
+    expect(fs.existsSync(sentinelPath)).toBe(false);
+    expect(fs.existsSync(resultPath)).toBe(false);
+  });
+
+  it("refuses result_file mismatches before spawning the child command", () => {
+    const dir = makeTempDir();
+    const repo = path.join(dir, "repo");
+    const iteration = path.join(dir, "run");
+    const resultPath = path.join(iteration, "result.json");
+    const sentinelPath = path.join(iteration, "should-not-run");
+    fs.mkdirSync(repo);
+    const configPath = path.join(dir, "wrapper-config.json");
+    writeJson(configPath, {
+      steps: {
+        implementation: {
+          command: "/bin/sh",
+          args: ["-c", `touch ${JSON.stringify(sentinelPath)}`],
+          cwd: "repo",
+          timeout_sec: 30,
+          env_allow: ["PATH"],
+          result_file: "custom-result.json",
+          commit: { type: "chore", subject: "result file guard" }
+        }
+      }
+    });
+
+    const outcome = runCodingWorkflowLiveWrapper(
+      deps({
+        MOMENTUM_STEP_KIND: "implementation",
+        MOMENTUM_REPO_PATH: repo,
+        MOMENTUM_ITERATION_DIR: iteration,
+        MOMENTUM_RESULT_PATH: resultPath,
+        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
+        PATH: process.env.PATH
+      })
+    );
+
+    expect(outcome.exitCode).toBe(1);
+    expect(outcome.success).toBe(false);
+    expect(outcome.summary).toContain("result_file");
+    expect(outcome.summary).toContain("MOMENTUM_RESULT_PATH");
     expect(fs.existsSync(sentinelPath)).toBe(false);
     expect(fs.existsSync(resultPath)).toBe(false);
   });
