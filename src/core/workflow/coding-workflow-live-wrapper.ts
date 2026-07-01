@@ -166,15 +166,10 @@ export function runCodingWorkflowLiveWrapper(
   if (stepKind === "merge-cleanup") {
     const preflight = preflightGitHubMergeCleanup({ env: childEnv });
     if (!preflight.ok) {
-      return writeRunnerResult(deps, resultPath, {
-        success: false,
-        summary: preflight.message,
-        key_changes_made: [],
-        key_learnings: stepConfig.keyLearnings,
-        remaining_work: [preflight.action],
-        goal_complete: false,
-        commit: stepConfig.commit
-      });
+      return processSetupFailure(
+        deps,
+        `${preflight.message} ${preflight.action}`
+      );
     }
   }
   const result = deps.spawn(stepConfig.command, stepConfig.args, {
