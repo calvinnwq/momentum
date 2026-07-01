@@ -290,6 +290,24 @@ function expectedHumanActionCommand(template: unknown, runId: string): unknown {
     : template;
 }
 
+function expectedInspectionCommand(
+  template: unknown,
+  runId: string,
+  dataDir: string | undefined
+): unknown {
+  if (typeof template !== "string") return template;
+  if (template.includes("${dataDir}") && dataDir === undefined) {
+    throw new Error("Missing dataDir for inspection command fixture");
+  }
+  return template
+    .replaceAll("${runId}", shellQuote(runId))
+    .replaceAll("${dataDir}", shellQuote(dataDir ?? ""));
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
 /**
  * Assert the envelope's frozen shape: stable header, exact key set, and every
  * enum-typed field constrained to its frozen value set. Returns the payload so
@@ -375,7 +393,8 @@ function assertWatchEnvelopeContract(
 function assertWatchScenario(
   payload: Record<string, unknown>,
   runId: string,
-  scenarioName: string
+  scenarioName: string,
+  dataDir?: string
 ): void {
   const scenario = WATCH_CONTRACT.watch.scenarios[scenarioName];
   if (scenario === undefined) {
@@ -402,7 +421,9 @@ function assertWatchScenario(
   expect(payload["stuckRisk"]).toBe(scenario.stuckRisk);
   expect(payload["cleanup"]).toBe(scenario.cleanup);
   if (scenario.inspectionCommand !== undefined) {
-    expect(payload["inspectionCommand"]).toBe(scenario.inspectionCommand);
+    expect(payload["inspectionCommand"]).toBe(
+      expectedInspectionCommand(scenario.inspectionCommand, runId, dataDir)
+    );
   }
   expect(payload["recommendedActionPolicy"]).toMatchObject(
     scenario.recommendedActionPolicy
@@ -688,6 +709,6 @@ describe("workflow run watch supervisor envelope contract", () => {
     }
 
     const payload = await watchOnce(dataDir, runId);
-    assertWatchScenario(payload, runId, "stuckRisk");
+    assertWatchScenario(payload, runId, "stuckRisk", dataDir);
   });
 });

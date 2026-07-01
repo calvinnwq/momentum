@@ -141,7 +141,8 @@
           "stepId": "implementation",
           "state": "running"
         },
-        "humanAction": null
+        "humanAction": null,
+        "inspectionCommand": "momentum workflow run monitor ${runId} --data-dir ${dataDir} --advance --json"
       },
       "terminalSuccess": {
         "emit": true,
