@@ -94,7 +94,7 @@
         "cleanup": "none",
         "humanAction": {
           "code": "approve",
-          "command": "momentum workflow run approve"
+          "command": "momentum workflow run approve ${runId} --approval-boundary through-implementation --phrase \"approve plan ${runId} through-implementation\""
         }
       },
       "manualRecovery": {
@@ -115,7 +115,7 @@
         "cleanup": "none",
         "humanAction": {
           "code": "clear_recovery",
-          "command": "momentum workflow run clear-recovery"
+          "command": "momentum workflow run clear-recovery ${runId}"
         }
       },
       "stuckRisk": {

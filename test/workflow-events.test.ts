@@ -11,7 +11,10 @@ import {
   clearWorkflowRunManualRecoveryGuarded,
   markWorkflowRunNeedsManualRecovery
 } from "../src/core/workflow/run-recovery.js";
-import { appendWorkflowEvent } from "../src/core/workflow/events.js";
+import {
+  WORKFLOW_EVENT_TYPES,
+  appendWorkflowEvent
+} from "../src/core/workflow/events.js";
 
 type WorkflowGuiEventsContractFixture = {
   events: {
@@ -239,6 +242,10 @@ function seedWorkflowEvent(
 }
 
 describe("workflow run events", () => {
+  it("freezes the GUI event vocabulary against the production tuple", () => {
+    expect([...WORKFLOW_EVENT_TYPES]).toEqual(EVENTS_CONTRACT.events.types);
+  });
+
   it("returns an empty deterministic event set for a run with no semantic transitions", async () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);

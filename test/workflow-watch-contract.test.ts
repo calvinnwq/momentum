@@ -284,6 +284,12 @@ function isMember(frozen: readonly string[], value: unknown): boolean {
   return typeof value === "string" && frozen.includes(value);
 }
 
+function expectedHumanActionCommand(template: unknown, runId: string): unknown {
+  return typeof template === "string"
+    ? template.replaceAll("${runId}", runId)
+    : template;
+}
+
 /**
  * Assert the envelope's frozen shape: stable header, exact key set, and every
  * enum-typed field constrained to its frozen value set. Returns the payload so
@@ -425,13 +431,10 @@ function assertWatchScenario(
     if ("detail" in scenario.humanAction) {
       expect(humanAction["detail"]).toBe(scenario.humanAction["detail"]);
     }
-    const expectedCommand = scenario.humanAction["command"];
-    if (
-      typeof expectedCommand === "string" &&
-      expectedCommand.length > 0 &&
-      typeof humanAction["command"] === "string"
-    ) {
-      expect(humanAction["command"]).toContain(expectedCommand);
+    if ("command" in scenario.humanAction) {
+      expect(humanAction["command"]).toBe(
+        expectedHumanActionCommand(scenario.humanAction["command"], runId)
+      );
     }
   }
 }

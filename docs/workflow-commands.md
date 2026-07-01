@@ -34,11 +34,11 @@ Operator-facing CLI envelopes for the `workflow run start`, `workflow run start-
 `workflow run --help` and any nested `workflow run ... --help` or `workflow run ... -h` invocation print the shared top-level CLI help to stdout and exit 0 before selecting or validating a run subcommand.
 This help path ignores `--json`, reads no data directory, and performs no durable writes.
 
-## GUI-ready contracts for Momentum orchestration (SUP-11)
+## GUI-ready contracts for Momentum orchestration
 
 GUI and sidecar surfaces should treat these endpoints as the stable source of truth.
 Read-only calls can render run state without terminal scraping.
-Mutation calls are explicit and must be opt-in.
+State-advancing and mutation calls are explicit and must be opt-in.
 
 ### Read-only surfaces
 
@@ -55,14 +55,18 @@ Mutation calls are explicit and must be opt-in.
 - `workflow run monitor`.
   This is the stable progress discriminator for recurring poll loops.
   Use `--advance` only for `momentum-native-coding`.
-- `workflow run watch --once`.
-  This is the compact supervisor envelope used for regular GUI polling.
 - `workflow run watch --stream` and `workflow run events`.
   These share the durable event cursor contract.
   They provide idempotent replay when polling disconnects.
 - `workflow run logs`.
   This is the stable evidence view for UI drill-down.
   Render it when a user opens a completed or failed run for review.
+
+### State-advancing poll surface
+
+- `workflow run watch --once`.
+  This is the compact supervisor envelope used for regular GUI polling.
+  It is write-limited to a safe run-scoped dispatcher tick, advisory monitor baselines, and append-only supervisor advisory events for supported Momentum-native coding runs.
 
 ### Mutation actions
 
