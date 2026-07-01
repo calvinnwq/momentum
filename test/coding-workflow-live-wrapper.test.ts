@@ -138,7 +138,7 @@ describe("NGX-499 coding workflow live wrapper profile", () => {
     expect(result.summary).toBe("merge-cleanup source wrapper passed");
   });
 
-  it("preflights merge-cleanup GitHub auth before running the child command", () => {
+  it("parks merge-cleanup GitHub auth preflight as setup recovery", () => {
     const dir = makeTempDir();
     const repo = path.join(dir, "repo");
     const iteration = path.join(dir, "run");
@@ -170,14 +170,14 @@ describe("NGX-499 coding workflow live wrapper profile", () => {
       })
     );
 
-    expect(outcome.exitCode).toBe(0);
+    expect(outcome.exitCode).toBe(1);
     expect(outcome.success).toBe(false);
+    expect(outcome.summary).toContain("GitHub merge-cleanup");
+    expect(outcome.summary).toContain("no explicit auth");
+    expect(outcome.summary).toContain("GH_TOKEN");
+    expect(outcome.summary).toContain("GH_CONFIG_DIR");
     expect(fs.existsSync(sentinelPath)).toBe(false);
-    const result = readResult(resultPath);
-    expect(result.summary).toContain("GitHub merge-cleanup");
-    expect(result.summary).toContain("no explicit auth");
-    expect(result.remaining_work.join("\n")).toContain("GH_TOKEN");
-    expect(result.remaining_work.join("\n")).toContain("GH_CONFIG_DIR");
+    expect(fs.existsSync(resultPath)).toBe(false);
   });
 });
 

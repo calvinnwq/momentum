@@ -11,7 +11,6 @@ import {
   LINEAR_API_KEY_ENV_VAR,
   type ExecuteExternalApplyDeps
 } from "../intent/apply-execute.js";
-import { preflightLinearExternalApply } from "../workflow/external-adapter-preflight.js";
 import {
   listUpdateIntents,
   type UpdateIntent
@@ -210,20 +209,6 @@ function resolveDaemonExternalApplyContext(
   }
 
   const intentId = pending[0]!.id;
-  const externalApplyPreflight = preflightLinearExternalApply({
-    env,
-    intentApplyPolicy: "external_apply_allowed",
-    targetExternalId: issueScopeIdentifier
-  });
-  if (!externalApplyPreflight.ok) {
-    return {
-      ok: false,
-      reason:
-        `external_apply_preflight_${externalApplyPreflight.status}: ` +
-        `${externalApplyPreflight.message} ${externalApplyPreflight.action}`
-    };
-  }
-
   const executeDeps: ExecuteExternalApplyDeps = {};
   const factory = deps.buildLinearExternalUpdateClient;
   if (factory) {

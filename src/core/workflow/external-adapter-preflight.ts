@@ -66,6 +66,19 @@ export function preflightLinearExternalApply(input: {
     };
   }
 
+  const auth = preflightLinearExternalApplyAuth({ env: input.env });
+  if (!auth.ok) return auth;
+
+  return {
+    ok: true,
+    status: "ready",
+    message: "Linear external-apply preflight passed."
+  };
+}
+
+export function preflightLinearExternalApplyAuth(input: {
+  env: EnvSnapshot;
+}): ExternalAdapterPreflightResult {
   const apiKey = input.env[LINEAR_API_KEY_ENV];
   if (typeof apiKey !== "string" || apiKey.trim().length === 0) {
     return {
@@ -81,7 +94,7 @@ export function preflightLinearExternalApply(input: {
   return {
     ok: true,
     status: "ready",
-    message: "Linear external-apply preflight passed."
+    message: "Linear external-apply auth preflight passed."
   };
 }
 
