@@ -34,6 +34,177 @@ Operator-facing CLI envelopes for the `workflow run start`, `workflow run start-
 `workflow run --help` and any nested `workflow run ... --help` or `workflow run ... -h` invocation print the shared top-level CLI help to stdout and exit 0 before selecting or validating a run subcommand.
 This help path ignores `--json`, reads no data directory, and performs no durable writes.
 
+## GUI-ready contracts for Momentum orchestration
+
+GUI and sidecar surfaces should treat these endpoints as the stable source of truth.
+Read-only calls can render run state without terminal scraping.
+State-advancing and mutation calls are explicit and must be opt-in.
+The examples below are branching examples; the full `workflow run watch --once` and `workflow run events` envelope key sets remain the command-section contract.
+
+### Read-only surfaces
+
+- `workflow run list`.
+  Use this for paged, filterable run discovery.
+  The response carries filter echoes and `{ run, counts, monitor }` entries.
+  Feed a selected `runId` into `workflow status` or `workflow handoff` for detail.
+- `workflow status <run-id>`.
+  This is the active run detail surface and includes `run`, `steps`, `approvals`, `leases`, `monitor`, `evidence`, and `gates`.
+  It is the durable place to render step state, recovery flags, and open gates before prompting an action.
+- `workflow handoff <run-id>`.
+  This mirrors status detail and lifts `nextAction` to the top level.
+  OpenClaw and GUI runners use it for a compact actionable dispatch summary.
+- `workflow run monitor`.
+  This is the stable progress discriminator for recurring poll loops.
+  Plain monitor reads the progress projection without advancing advisory baselines.
+- `workflow run watch --stream` and `workflow run events`.
+  These share the durable event cursor contract.
+  They provide idempotent replay when polling disconnects.
+- `workflow run logs`.
+  This is the stable evidence view for UI drill-down.
+  Render it when a user opens a completed or failed run for review.
+
+### State-advancing poll surface
+
+- `workflow run watch --once`.
+  This is the compact supervisor envelope used for regular GUI polling.
+  It is write-limited to a safe run-scoped dispatcher tick, advisory monitor baselines, and append-only supervisor advisory events for supported Momentum-native coding runs.
+- `workflow run monitor --advance`.
+  This is the write-limited monitor mode for supported Momentum-native coding runs.
+  It persists only advisory progress-suppression baselines and must be an explicit polling choice, not a read-only status call.
+
+### Mutation actions
+
+- `workflow run approve <run-id>`.
+  Resolve approval requirements.
+- `workflow run decide <gate-id>`.
+  Resolve a gate with an allowed action.
+- `workflow run clear-recovery <run-id>`.
+  Clear manual-recovery flags once the operator has reconciled the blocking cause.
+- `workflow run update-step <run-id>`.
+  Make an operator step transition.
+  This is a manual repair path and is intentionally explicit.
+
+### Contract examples for GUI states
+
+- Running / progressing state is a `watch` tick with `reason: "in_progress"` and `recommendedAction: "poll"`.
+  The command should treat `emit` as the polling signal and use `nextPollSeconds` for backoff.
+  ```json
+  {
+    "emit": true,
+    "reason": "in_progress",
+    "disposition": "wait",
+    "phase": "advancing",
+    "recommendedAction": "poll",
+    "humanAction": null,
+    "nextPollSeconds": 15,
+    "quietForSeconds": 0,
+    "quietThresholdSeconds": 900,
+    "stuckRisk": "low",
+    "cleanup": "none"
+  }
+  ```
+
+- Approval state is a `watch` tick with `reason: "awaiting_approval"`, `recommendedAction: "approve"`, and a `humanAction.code == "approve"` command.
+  ```json
+  {
+    "emit": true,
+    "reason": "awaiting_approval",
+    "disposition": "report",
+    "phase": "awaiting_approval",
+    "recommendedAction": "approve",
+    "humanAction": {
+      "code": "approve",
+      "command": "momentum workflow run approve <run-id> --approval-boundary ..."
+    },
+    "nextPollSeconds": 30,
+    "quietThresholdSeconds": 1800,
+    "stuckRisk": "medium",
+    "cleanup": "none"
+  }
+  ```
+
+- Recovery state is a `watch` tick with `reason: "recovery_required"`, `recommendedAction: "recover"` or `"operator_decision"`.
+  It must include the relevant recovery metadata and never be treated as terminal.
+  ```json
+  {
+    "emit": true,
+    "reason": "recovery_required",
+    "disposition": "recover",
+    "phase": "blocked",
+    "recommendedAction": "recover",
+    "humanAction": {
+      "code": "clear_recovery",
+      "command": "momentum workflow run clear-recovery <run-id>"
+    },
+    "nextPollSeconds": 30,
+    "quietThresholdSeconds": 3600,
+    "stuckRisk": "high",
+    "cleanup": "none"
+  }
+  ```
+
+- Stuck-risk state is `reason: "stuck_risk"`.
+  It is non-fatal and may include an inspection command.
+  ```json
+  {
+    "emit": true,
+    "reason": "stuck_risk",
+    "disposition": "wait",
+    "phase": "advancing",
+    "recommendedAction": "poll",
+    "humanAction": null,
+    "inspectionCommand": "momentum workflow run monitor <run-id> --data-dir ... --advance --json",
+    "nextPollSeconds": 15,
+    "quietForSeconds": 900,
+    "quietThresholdSeconds": 900,
+    "stuckRisk": "medium",
+    "cleanup": "none"
+  }
+  ```
+
+- Terminal success and terminal canceled states are stop states.
+  They use `recommendedAction: "release"` and `cleanup: "release"`.
+  ```json
+  {
+    "emit": true,
+    "reason": "terminal_succeeded",
+    "disposition": "report",
+    "phase": "terminal",
+    "recommendedAction": "release",
+    "humanAction": null,
+    "nextPollSeconds": 0,
+    "quietThresholdSeconds": 0,
+    "stuckRisk": "low",
+    "cleanup": "release"
+  }
+  ```
+
+- Recoverable failure is a required-step failure that keeps the run actionable.
+  It uses `disposition: "recover"`, `reason: "recovery_required"`, and `recommendedAction: "operator_decision"`.
+  ```json
+  {
+    "emit": true,
+    "reason": "recovery_required",
+    "disposition": "recover",
+    "phase": "blocked",
+    "recommendedAction": "operator_decision",
+    "humanAction": null,
+    "nextPollSeconds": 30,
+    "quietThresholdSeconds": 3600,
+    "stuckRisk": "high",
+    "cleanup": "none"
+  }
+  ```
+
+### Event-cursor behavior for GUI replay
+
+`workflow run events` returns `ok`, `command`, `dataDir`, `runId`, `since`, `cursor`, `events`, and `counts`.
+Each event carries `id`, `cursor`, `timestamp`, `type`, `stepId`, and `payload`.
+The response `cursor` is the last returned event cursor.
+When no events are newly emitted, `cursor` repeats the supplied `since` value.
+Passing the returned `cursor` as next `--since` is idempotent.
+Only the `wfcur1.` cursor namespace is accepted.
+
 See also:
 
 - [docs/data-directory.md](data-directory.md) — the workflow, gate, executor invocation / round, and executor child-evidence table schemas.
@@ -1558,7 +1729,8 @@ Options:
 }
 ```
 
-`disposition`, `phase`, `cleanup`, and `digest` are derived from the same monitor progress tick as `workflow run monitor --advance`; `emit` and `reason` can also reflect watch-only quiet-heartbeat or stuck-risk advisories when an unchanged tick reaches its quiet threshold.
+`disposition`, `phase`, `cleanup`, and `digest` are derived from the same monitor progress tick as `workflow run monitor --advance`; plain `workflow run monitor` reads the projection without advancing any baseline.
+`emit` and `reason` can also reflect watch-only quiet-heartbeat or stuck-risk advisories when an unchanged tick reaches its quiet threshold.
 When a quiet-heartbeat or stuck-risk advisory emits, the command appends a matching workflow event row so disconnected clients can later catch up through `workflow run events`.
 Before deriving that tick, `workflow run watch --once` may run one target-run dispatcher tick, either to claim and dispatch one approved next step or to recheck one active running step that the scheduler can safely revisit.
 It does not resolve gates, approvals, or recovery decisions by itself, recover stale leases, or scan or claim work from other runs.

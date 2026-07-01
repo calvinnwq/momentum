@@ -22,6 +22,62 @@ import {
 } from "../src/renderers/workflow.js";
 import { WORKFLOW_WATCH_REASONS } from "../src/core/workflow/watch-advisory.js";
 
+type WorkflowGuiWatchContractFixture = {
+  watch: {
+    envelopeKeys: string[];
+    scenarioKeys: {
+      activeStep: string[];
+      nextAction: string[];
+      humanAction: string[];
+      recommendedActionPolicy: string[];
+    };
+    scenarios: Record<
+      string,
+      {
+        emit: boolean;
+        reason: string;
+        disposition: string;
+        phase: string;
+        recommendedAction: string;
+        recommendedActionPolicy: {
+          action: string;
+          authority: string;
+          risk: string;
+        };
+        nextPollSeconds: number;
+        quietForSeconds?: number;
+        quietThresholdSeconds: number;
+        stuckRisk: string;
+        cleanup: string;
+        inspectionCommand?: string | null;
+        activeStep?: { [key: string]: unknown } | null;
+        nextAction?: { [key: string]: unknown };
+        humanAction?: { [key: string]: unknown } | null;
+        nextActionCode?: string;
+        quietForSecondsMin?: number;
+      }
+    >;
+    nextActionCodes: string[];
+    humanActionCodes: string[];
+    recommendedActions: string[];
+    dispositions: string[];
+    phases: string[];
+    reasons: string[];
+    recommendedActionPolicy: {
+      authority: string[];
+      risk: string[];
+      stuckRisk: string[];
+    };
+  };
+};
+
+const WATCH_CONTRACT = JSON.parse(
+  fs.readFileSync(
+    path.join(process.cwd(), "test/fixtures/workflow-gui-contract.json"),
+    "utf-8"
+  )
+) as WorkflowGuiWatchContractFixture;
+
 /**
  * Frozen supervisor-envelope contract for `workflow run watch --once --json`
  * (NGX-549 / SUP-02).
@@ -54,51 +110,19 @@ const tempRoots: string[] = [];
 const SEED_NOW = 1_730_000_000_000;
 const FRESH_EXPIRY = 9_999_999_999_999;
 
-/** The frozen top-level keys of the `workflow run watch` JSON envelope. */
-const WATCH_ENVELOPE_KEYS = [
-  "ok",
-  "command",
-  "mode",
-  "dataDir",
-  "schemaVersion",
-  "generatedAt",
-  "runId",
-  "runState",
-  "emit",
-  "reason",
-  "disposition",
-  "phase",
-  "activeStep",
-  "nextAction",
-  "humanAction",
-  "recommendedAction",
-  "recommendedActionPolicy",
-  "nextPollSeconds",
-  "quietForSeconds",
-  "quietThresholdSeconds",
-  "stuckRisk",
-  "inspectionCommand",
-  "cleanup",
-  "digest"
-].sort();
+const WATCH_ENVELOPE_KEYS = WATCH_CONTRACT.watch.envelopeKeys.slice().sort();
 
-const WATCH_NEXT_ACTION_KEYS = ["code", "stepId", "leaseKind", "detail"].sort();
-const WATCH_ACTIVE_STEP_KEYS = [
-  "stepId",
-  "kind",
-  "state",
-  "order",
-  "required"
-].sort();
-const WATCH_HUMAN_ACTION_KEYS = ["code", "command", "detail"].sort();
-const WATCH_RECOMMENDED_ACTION_POLICY_KEYS = [
-  "action",
-  "authority",
-  "risk",
-  "evidenceRequired",
-  "rollback",
-  "rationale"
-].sort();
+const WATCH_NEXT_ACTION_KEYS =
+  WATCH_CONTRACT.watch.scenarioKeys.nextAction.slice().sort();
+const WATCH_ACTIVE_STEP_KEYS =
+  WATCH_CONTRACT.watch.scenarioKeys.activeStep.slice().sort();
+const WATCH_HUMAN_ACTION_KEYS =
+  WATCH_CONTRACT.watch.scenarioKeys.humanAction.slice().sort();
+const WATCH_RECOMMENDED_ACTION_POLICY_KEYS =
+  WATCH_CONTRACT.watch.scenarioKeys.recommendedActionPolicy.slice().sort();
+const WATCH_MONITOR_REASONS = WATCH_CONTRACT.watch.reasons.filter(
+  (reason) => reason !== "quiet_heartbeat" && reason !== "stuck_risk"
+);
 
 afterEach(() => {
   while (tempRoots.length > 0) {
@@ -260,6 +284,30 @@ function isMember(frozen: readonly string[], value: unknown): boolean {
   return typeof value === "string" && frozen.includes(value);
 }
 
+function expectedHumanActionCommand(template: unknown, runId: string): unknown {
+  return typeof template === "string"
+    ? template.replaceAll("${runId}", runId)
+    : template;
+}
+
+function expectedInspectionCommand(
+  template: unknown,
+  runId: string,
+  dataDir: string | undefined
+): unknown {
+  if (typeof template !== "string") return template;
+  if (template.includes("${dataDir}") && dataDir === undefined) {
+    throw new Error("Missing dataDir for inspection command fixture");
+  }
+  return template
+    .replaceAll("${runId}", shellQuote(runId))
+    .replaceAll("${dataDir}", shellQuote(dataDir ?? ""));
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
 /**
  * Assert the envelope's frozen shape: stable header, exact key set, and every
  * enum-typed field constrained to its frozen value set. Returns the payload so
@@ -342,22 +390,82 @@ function assertWatchEnvelopeContract(
   }
 }
 
+function assertWatchScenario(
+  payload: Record<string, unknown>,
+  runId: string,
+  scenarioName: string,
+  dataDir?: string
+): void {
+  const scenario = WATCH_CONTRACT.watch.scenarios[scenarioName];
+  if (scenario === undefined) {
+    throw new Error(`Missing fixture scenario ${scenarioName}`);
+  }
+
+  assertWatchEnvelopeContract(payload, runId);
+  expect(payload["emit"]).toBe(scenario.emit);
+  expect(payload["reason"]).toBe(scenario.reason);
+  expect(payload["disposition"]).toBe(scenario.disposition);
+  expect(payload["phase"]).toBe(scenario.phase);
+  expect(payload["recommendedAction"]).toBe(scenario.recommendedAction);
+  expect(payload["nextPollSeconds"]).toBe(scenario.nextPollSeconds);
+  if (scenario.quietForSeconds !== undefined) {
+    expect(payload["quietForSeconds"]).toBe(scenario.quietForSeconds);
+  } else if (scenario.quietForSecondsMin !== undefined) {
+    expect(payload["quietForSeconds"] as number).toBeGreaterThanOrEqual(
+      scenario.quietForSecondsMin
+    );
+  } else {
+    expect(typeof payload["quietForSeconds"]).toBe("number");
+  }
+  expect(payload["quietThresholdSeconds"]).toBe(scenario.quietThresholdSeconds);
+  expect(payload["stuckRisk"]).toBe(scenario.stuckRisk);
+  expect(payload["cleanup"]).toBe(scenario.cleanup);
+  if (scenario.inspectionCommand !== undefined) {
+    expect(payload["inspectionCommand"]).toBe(
+      expectedInspectionCommand(scenario.inspectionCommand, runId, dataDir)
+    );
+  }
+  expect(payload["recommendedActionPolicy"]).toMatchObject(
+    scenario.recommendedActionPolicy
+  );
+
+  if (scenario.activeStep === null) {
+    expect(payload["activeStep"]).toBeNull();
+  } else if (scenario.activeStep !== undefined) {
+    expect(payload["activeStep"]).toMatchObject(scenario.activeStep);
+  }
+
+  if (scenario.nextActionCode !== undefined) {
+    const nextAction = payload["nextAction"] as Record<string, unknown>;
+    expect(nextAction["code"]).toBe(scenario.nextActionCode);
+  } else if (scenario.nextAction !== undefined) {
+    expect(payload["nextAction"]).toMatchObject(scenario.nextAction);
+  }
+
+  if (scenario.humanAction === null) {
+    expect(payload["humanAction"]).toBeNull();
+  } else if (scenario.humanAction !== undefined) {
+    const humanAction = payload["humanAction"] as Record<string, unknown>;
+    if ("code" in scenario.humanAction) {
+      expect(humanAction["code"]).toBe(scenario.humanAction["code"]);
+    }
+    if ("detail" in scenario.humanAction) {
+      expect(humanAction["detail"]).toBe(scenario.humanAction["detail"]);
+    }
+    if ("command" in scenario.humanAction) {
+      expect(humanAction["command"]).toBe(
+        expectedHumanActionCommand(scenario.humanAction["command"], runId)
+      );
+    }
+  }
+}
+
 describe("workflow run watch supervisor envelope contract", () => {
   it("freezes the supervisor enum vocabularies so a value cannot drift silently", () => {
-    expect([...WORKFLOW_MONITOR_REPORT_REASONS]).toEqual([
-      "terminal_succeeded",
-      "terminal_canceled",
-      "recovery_required",
-      "monitor_drift",
-      "awaiting_approval",
-      "in_progress",
-      "idle"
-    ]);
-    expect([...WORKFLOW_MONITOR_DISPOSITIONS]).toEqual([
-      "wait",
-      "report",
-      "recover"
-    ]);
+    expect([...WORKFLOW_MONITOR_REPORT_REASONS]).toEqual(WATCH_MONITOR_REASONS);
+    expect([...WORKFLOW_MONITOR_DISPOSITIONS]).toEqual(
+      WATCH_CONTRACT.watch.dispositions
+    );
     expect([...WORKFLOW_MONITOR_PROGRESS_PHASES]).toEqual([
       "advancing",
       "idle",
@@ -366,30 +474,21 @@ describe("workflow run watch supervisor envelope contract", () => {
       "terminal"
     ]);
     expect([...WORKFLOW_MONITOR_CLEANUP_ACTIONS]).toEqual(["none", "release"]);
-    expect([...WORKFLOW_WATCH_RECOMMENDED_ACTIONS]).toEqual([
-      "poll",
-      "approve",
-      "operator_decision",
-      "recover",
-      "release"
-    ]);
-    expect([...WORKFLOW_WATCH_STUCK_RISKS]).toEqual(["low", "medium", "high"]);
+    expect([...WORKFLOW_WATCH_RECOMMENDED_ACTIONS]).toEqual(
+      WATCH_CONTRACT.watch.recommendedActions
+    );
+    expect([...WORKFLOW_WATCH_STUCK_RISKS]).toEqual(
+      WATCH_CONTRACT.watch.recommendedActionPolicy.stuckRisk
+    );
     expect([...WORKFLOW_WATCH_HUMAN_ACTION_CODES]).toEqual([
       "approve",
       "resolve_gate",
       "clear_recovery"
     ]);
-    expect([...WORKFLOW_WATCH_REASONS]).toEqual([
-      "terminal_succeeded",
-      "terminal_canceled",
-      "recovery_required",
-      "monitor_drift",
-      "awaiting_approval",
-      "in_progress",
-      "idle",
-      "quiet_heartbeat",
-      "stuck_risk"
-    ]);
+    expect([...WORKFLOW_WATCH_REASONS]).toEqual(WATCH_CONTRACT.watch.reasons);
+    expect([...WORKFLOW_MONITOR_NEXT_ACTION_CODES]).toEqual(
+      WATCH_CONTRACT.watch.nextActionCodes
+    );
   });
 
   it("progress tick: an advancing run reports a pollable machine update with no human action", async () => {
@@ -411,27 +510,10 @@ describe("workflow run watch supervisor envelope contract", () => {
     }
 
     const payload = await watchOnce(dataDir, runId);
-    assertWatchEnvelopeContract(payload, runId);
-    expect(payload).toMatchObject({
-      emit: true,
-      reason: "in_progress",
-      disposition: "wait",
-      phase: "advancing",
-      recommendedAction: "poll",
-      recommendedActionPolicy: {
-        action: "watch_recheck",
-        authority: "auto_allowed",
-        risk: "low"
-      },
-      nextPollSeconds: 15,
-      quietForSeconds: 0,
-      stuckRisk: "low",
-      cleanup: "none",
-      humanAction: null
-    });
-    expect(payload["activeStep"]).toMatchObject({
-      stepId: "implementation",
-      state: "running"
+    assertWatchScenario(payload, runId, "progress");
+    expect(payload["nextAction"]).toMatchObject({
+      code: "resume_running",
+      stepId: "implementation"
     });
   });
 
@@ -455,7 +537,7 @@ describe("workflow run watch supervisor envelope contract", () => {
 
     const first = await watchOnce(dataDir, runId);
     const second = await watchOnce(dataDir, runId);
-    assertWatchEnvelopeContract(first, runId);
+    assertWatchScenario(first, runId, "progress");
     assertWatchEnvelopeContract(second, runId);
 
     expect(first).toMatchObject({ emit: true, quietForSeconds: 0 });
@@ -484,29 +566,7 @@ describe("workflow run watch supervisor envelope contract", () => {
     }
 
     const payload = await watchOnce(dataDir, runId);
-    assertWatchEnvelopeContract(payload, runId);
-    expect(payload).toMatchObject({
-      emit: true,
-      reason: "awaiting_approval",
-      disposition: "report",
-      phase: "awaiting_approval",
-      recommendedAction: "approve",
-      recommendedActionPolicy: {
-        action: "approval_decision",
-        authority: "human_required",
-        risk: "medium"
-      },
-      nextPollSeconds: 30,
-      stuckRisk: "medium",
-      cleanup: "none"
-    });
-    expect(payload["humanAction"]).toMatchObject({
-      code: "approve",
-      command:
-        `momentum workflow run approve ${runId} ` +
-        `--approval-boundary through-implementation ` +
-        `--phrase "approve plan ${runId} through-implementation"`
-    });
+    assertWatchScenario(payload, runId, "approval");
   });
 
   it("recovery required: a durable manual-recovery tick recommends clear-recovery", async () => {
@@ -532,26 +592,7 @@ describe("workflow run watch supervisor envelope contract", () => {
     }
 
     const payload = await watchOnce(dataDir, runId);
-    assertWatchEnvelopeContract(payload, runId);
-    expect(payload).toMatchObject({
-      emit: true,
-      reason: "recovery_required",
-      disposition: "recover",
-      phase: "blocked",
-      recommendedAction: "recover",
-      recommendedActionPolicy: {
-        action: "clear_recovery",
-        authority: "human_required",
-        risk: "high"
-      },
-      nextPollSeconds: 30,
-      stuckRisk: "high",
-      cleanup: "none"
-    });
-    expect(payload["humanAction"]).toMatchObject({
-      code: "clear_recovery",
-      detail: "dispatch lease requires operator recovery"
-    });
+    assertWatchScenario(payload, runId, "manualRecovery");
   });
 
   it("stuck risk: an idle run with no active step reports medium stuck risk and keeps polling", async () => {
@@ -565,19 +606,28 @@ describe("workflow run watch supervisor envelope contract", () => {
     }
 
     const payload = await watchOnce(dataDir, runId);
-    assertWatchEnvelopeContract(payload, runId);
-    expect(payload).toMatchObject({
-      emit: true,
-      reason: "idle",
-      disposition: "wait",
-      phase: "idle",
-      activeStep: null,
-      recommendedAction: "poll",
-      nextPollSeconds: 15,
-      stuckRisk: "medium",
-      cleanup: "none",
-      humanAction: null
-    });
+    assertWatchScenario(payload, runId, "idle");
+  });
+
+  it("terminal canceled: a canceled run signals terminal cleanup", async () => {
+    const dataDir = makeTempDir();
+    const runId = "mwf-contract-terminal-canceled";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "canceled" });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "canceled",
+        order: 1
+      });
+    } finally {
+      db.close();
+    }
+
+    const payload = await watchOnce(dataDir, runId);
+    assertWatchScenario(payload, runId, "terminalCanceled");
   });
 
   it("terminal success: a clean terminal run signals release and stops polling", async () => {
@@ -598,20 +648,7 @@ describe("workflow run watch supervisor envelope contract", () => {
     }
 
     const payload = await watchOnce(dataDir, runId);
-    assertWatchEnvelopeContract(payload, runId);
-    expect(payload).toMatchObject({
-      emit: true,
-      reason: "terminal_succeeded",
-      disposition: "report",
-      phase: "terminal",
-      activeStep: null,
-      recommendedAction: "release",
-      nextPollSeconds: 0,
-      stuckRisk: "low",
-      cleanup: "release",
-      humanAction: null
-    });
-    expect(payload["nextAction"]).toMatchObject({ code: "no_action" });
+    assertWatchScenario(payload, runId, "terminalSuccess");
   });
 
   it("recoverable failure: a failed required step recovers via operator decision and keeps polling", async () => {
@@ -632,24 +669,46 @@ describe("workflow run watch supervisor envelope contract", () => {
     }
 
     const payload = await watchOnce(dataDir, runId);
-    assertWatchEnvelopeContract(payload, runId);
-    expect(payload).toMatchObject({
-      reason: "recovery_required",
-      disposition: "recover",
-      phase: "blocked",
-      recommendedAction: "operator_decision",
-      recommendedActionPolicy: {
-        action: "operator_decision",
-        authority: "human_required",
-        risk: "medium"
-      },
-      stuckRisk: "high",
-      cleanup: "none",
-      humanAction: null
-    });
-    expect(payload["nextAction"]).toMatchObject({
-      code: "rerun_failed_step",
-      stepId: "implementation"
-    });
+    assertWatchScenario(payload, runId, "failedRecovery");
+  });
+
+  it("stuck-risk advisory: unchanged active execution emits an inspection reminder", async () => {
+    const dataDir = makeTempDir();
+    const runId = "mwf-contract-stuck-risk";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "running" });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "running",
+        order: 1
+      });
+      seedLease(db, { runId, expiresAt: FRESH_EXPIRY });
+    } finally {
+      db.close();
+    }
+
+    const first = await watchOnce(dataDir, runId);
+    const staleDb = openDb(dataDir);
+    try {
+      const digest = first["digest"] as string;
+      staleDb
+        .prepare(
+          `UPDATE workflow_runs
+             SET monitor_last_seen_digest = ?,
+                 monitor_last_seen_at = 1,
+                 monitor_last_emitted_digest = ?,
+           monitor_last_emitted_at = 1
+           WHERE id = ?`
+        )
+        .run(digest, digest, runId);
+    } finally {
+      staleDb.close();
+    }
+
+    const payload = await watchOnce(dataDir, runId);
+    assertWatchScenario(payload, runId, "stuckRisk", dataDir);
   });
 });

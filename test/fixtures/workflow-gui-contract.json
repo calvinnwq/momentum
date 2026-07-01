@@ -1,0 +1,308 @@
+{
+  "watch": {
+    "envelopeKeys": [
+      "ok",
+      "command",
+      "mode",
+      "dataDir",
+      "schemaVersion",
+      "generatedAt",
+      "runId",
+      "runState",
+      "emit",
+      "reason",
+      "disposition",
+      "phase",
+      "activeStep",
+      "nextAction",
+      "humanAction",
+      "recommendedAction",
+      "recommendedActionPolicy",
+      "nextPollSeconds",
+      "quietForSeconds",
+      "quietThresholdSeconds",
+      "stuckRisk",
+      "inspectionCommand",
+      "cleanup",
+      "digest"
+    ],
+    "scenarioKeys": {
+      "activeStep": [
+        "stepId",
+        "kind",
+        "state",
+        "order",
+        "required"
+      ],
+      "nextAction": [
+        "code",
+        "stepId",
+        "leaseKind",
+        "detail"
+      ],
+      "humanAction": [
+        "code",
+        "command",
+        "detail"
+      ],
+      "recommendedActionPolicy": [
+        "action",
+        "authority",
+        "risk",
+        "evidenceRequired",
+        "rollback",
+        "rationale"
+      ]
+    },
+    "scenarios": {
+      "progress": {
+        "emit": true,
+        "reason": "in_progress",
+        "disposition": "wait",
+        "phase": "advancing",
+        "recommendedAction": "poll",
+        "recommendedActionPolicy": {
+          "action": "watch_recheck",
+          "authority": "auto_allowed",
+          "risk": "low"
+        },
+        "nextPollSeconds": 15,
+        "quietForSeconds": 0,
+        "quietThresholdSeconds": 900,
+        "stuckRisk": "low",
+        "cleanup": "none",
+        "humanAction": null,
+        "activeStep": {
+          "stepId": "implementation",
+          "state": "running"
+        }
+      },
+      "approval": {
+        "emit": true,
+        "reason": "awaiting_approval",
+        "disposition": "report",
+        "phase": "awaiting_approval",
+        "recommendedAction": "approve",
+        "recommendedActionPolicy": {
+          "action": "approval_decision",
+          "authority": "human_required",
+          "risk": "medium"
+        },
+        "nextPollSeconds": 30,
+        "quietForSeconds": 0,
+        "quietThresholdSeconds": 1800,
+        "stuckRisk": "medium",
+        "cleanup": "none",
+        "humanAction": {
+          "code": "approve",
+          "command": "momentum workflow run approve ${runId} --approval-boundary through-implementation --phrase \"approve plan ${runId} through-implementation\""
+        }
+      },
+      "manualRecovery": {
+        "emit": true,
+        "reason": "recovery_required",
+        "disposition": "recover",
+        "phase": "blocked",
+        "recommendedAction": "recover",
+        "recommendedActionPolicy": {
+          "action": "clear_recovery",
+          "authority": "human_required",
+          "risk": "high"
+        },
+        "nextPollSeconds": 30,
+        "quietForSeconds": 0,
+        "quietThresholdSeconds": 3600,
+        "stuckRisk": "high",
+        "cleanup": "none",
+        "humanAction": {
+          "code": "clear_recovery",
+          "command": "momentum workflow run clear-recovery ${runId}",
+          "detail": "dispatch lease requires operator recovery"
+        }
+      },
+      "stuckRisk": {
+        "emit": true,
+        "reason": "stuck_risk",
+        "disposition": "wait",
+        "phase": "advancing",
+        "recommendedAction": "poll",
+        "recommendedActionPolicy": {
+          "action": "watch_recheck",
+          "authority": "auto_allowed",
+          "risk": "low"
+        },
+        "nextPollSeconds": 15,
+        "quietForSecondsMin": 900,
+        "quietThresholdSeconds": 900,
+        "stuckRisk": "medium",
+        "cleanup": "none",
+        "nextActionCode": "resume_running",
+        "activeStep": {
+          "stepId": "implementation",
+          "state": "running"
+        },
+        "humanAction": null,
+        "inspectionCommand": "momentum workflow run monitor ${runId} --data-dir ${dataDir} --advance --json"
+      },
+      "terminalSuccess": {
+        "emit": true,
+        "reason": "terminal_succeeded",
+        "disposition": "report",
+        "phase": "terminal",
+        "recommendedAction": "release",
+        "recommendedActionPolicy": {
+          "action": "release_monitor",
+          "authority": "auto_allowed",
+          "risk": "low"
+        },
+        "nextPollSeconds": 0,
+        "quietForSeconds": 0,
+        "quietThresholdSeconds": 0,
+        "stuckRisk": "low",
+        "cleanup": "release",
+        "nextActionCode": "no_action",
+        "humanAction": null,
+        "activeStep": null
+      },
+      "terminalCanceled": {
+        "emit": true,
+        "reason": "terminal_canceled",
+        "disposition": "report",
+        "phase": "terminal",
+        "recommendedAction": "release",
+        "recommendedActionPolicy": {
+          "action": "release_monitor",
+          "authority": "auto_allowed",
+          "risk": "low"
+        },
+        "nextPollSeconds": 0,
+        "quietForSeconds": 0,
+        "quietThresholdSeconds": 0,
+        "stuckRisk": "low",
+        "cleanup": "release",
+        "nextActionCode": "no_action",
+        "humanAction": null,
+        "activeStep": null
+      },
+      "failedRecovery": {
+        "emit": true,
+        "reason": "recovery_required",
+        "disposition": "recover",
+        "phase": "blocked",
+        "recommendedAction": "operator_decision",
+        "recommendedActionPolicy": {
+          "action": "operator_decision",
+          "authority": "human_required",
+          "risk": "medium"
+        },
+        "nextPollSeconds": 30,
+        "quietForSeconds": 0,
+        "quietThresholdSeconds": 3600,
+        "stuckRisk": "high",
+        "cleanup": "none",
+        "humanAction": null,
+        "nextAction": {
+          "code": "rerun_failed_step",
+          "stepId": "implementation"
+        },
+        "activeStep": {
+          "stepId": "implementation",
+          "state": "failed"
+        }
+      },
+      "idle": {
+        "emit": true,
+        "reason": "idle",
+        "disposition": "wait",
+        "phase": "idle",
+        "recommendedAction": "poll",
+        "recommendedActionPolicy": {
+          "action": "watch_recheck",
+          "authority": "auto_allowed",
+          "risk": "low"
+        },
+        "nextPollSeconds": 15,
+        "quietForSeconds": 0,
+        "quietThresholdSeconds": 900,
+        "stuckRisk": "medium",
+        "cleanup": "none",
+        "activeStep": null,
+        "humanAction": null
+      }
+    },
+    "nextActionCodes": [
+      "no_action",
+      "advance_to_step",
+      "await_approval",
+      "resume_running",
+      "investigate_stale",
+      "clear_recovery",
+      "rerun_failed_step"
+    ],
+    "humanActionCodes": ["approve", "resolve_gate", "clear_recovery"],
+    "recommendedActions": ["poll", "approve", "operator_decision", "recover", "release"],
+    "dispositions": ["wait", "report", "recover"],
+    "phases": [
+      "advancing",
+      "idle",
+      "awaiting_approval",
+      "blocked",
+      "terminal"
+    ],
+    "reasons": [
+      "terminal_succeeded",
+      "terminal_canceled",
+      "recovery_required",
+      "monitor_drift",
+      "awaiting_approval",
+      "in_progress",
+      "idle",
+      "quiet_heartbeat",
+      "stuck_risk"
+    ],
+    "recommendedActionPolicy": {
+      "authority": ["auto_allowed", "recommend_only", "human_required", "forbidden"],
+      "risk": ["low", "medium", "high"],
+      "stuckRisk": ["low", "medium", "high"]
+    }
+  },
+  "events": {
+    "envelopeKeys": [
+      "ok",
+      "command",
+      "dataDir",
+      "runId",
+      "since",
+      "cursor",
+      "events",
+      "counts"
+    ],
+    "eventKeys": [
+      "id",
+      "cursor",
+      "timestamp",
+      "type",
+      "stepId",
+      "payload"
+    ],
+    "types": [
+      "step_started",
+      "step_succeeded",
+      "step_failed",
+      "step_skipped",
+      "step_canceled",
+      "step_blocked",
+      "approval_required",
+      "approval_resolved",
+      "recovery_required",
+      "recovery_cleared",
+      "gate_opened",
+      "gate_resolved",
+      "terminal_state",
+      "monitor_stuck_risk",
+      "monitor_quiet_heartbeat"
+    ],
+    "cursorPrefix": "wfcur1.",
+    "replayPolicy": "since-opaque-token"
+  }
+}
