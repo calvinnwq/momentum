@@ -1,5 +1,73 @@
 # Changelog
 
+## [0.15.0](https://github.com/calvinnwq/momentum/compare/v0.14.4...v0.15.0) (2026-07-01)
+
+
+### Features
+
+* add OpenClaw supervisor runner ([0c967ae](https://github.com/calvinnwq/momentum/commit/0c967ae7d49efe2e295be700947e48013052c01c))
+* **cli:** add OpenClaw supervisor ([57c457d](https://github.com/calvinnwq/momentum/commit/57c457da12f0a55d1ab01cc090e750c11b521c6b))
+* **ngx-546:** dedupe duplicate linear source rows in project status ([5f17267](https://github.com/calvinnwq/momentum/commit/5f172678d3d2eec85f739cf154816456f5261c31))
+* **openclaw:** add delivery intent contract ([d17648e](https://github.com/calvinnwq/momentum/commit/d17648e837946a7fe3f4e29694323b2ce24bc2ee))
+* **openclaw:** add delivery intent evidence ([ebc9fee](https://github.com/calvinnwq/momentum/commit/ebc9feeed34137d87a77d99e3c6528fff45663c7))
+* **openclaw:** add supervise help output ([b795b66](https://github.com/calvinnwq/momentum/commit/b795b66f54216e44ad6d5216f601efe0f9e9dd54))
+* **openclaw:** audit safe supervisor auto-actions ([f5d918e](https://github.com/calvinnwq/momentum/commit/f5d918e238f416b448d950a38c9474f0ed5f9f5e))
+* **openclaw:** audit safe supervisor auto-actions ([9b39d53](https://github.com/calvinnwq/momentum/commit/9b39d5348060c075b525e2d7aa6ab7328064fbda))
+* **workflow:** add durable DB poll source for watch stream ([5529b7b](https://github.com/calvinnwq/momentum/commit/5529b7ba2202c86ec694ea2b91739777cfd1accf))
+* **workflow:** add durable run event replay cursor ([2962c84](https://github.com/calvinnwq/momentum/commit/2962c84728dc29a2df295aaae5c4f7ce45c91335))
+* **workflow:** add durable workflow event replay ([5f4a13f](https://github.com/calvinnwq/momentum/commit/5f4a13f841cfb67cb82c51ea49073292dd498b37))
+* **workflow:** add JSONL stream-tick reducer for watch --stream --jsonl ([9aa1cae](https://github.com/calvinnwq/momentum/commit/9aa1caed21c30e519012aed48e787f673303640c))
+* **workflow:** add JSONL watch stream mode ([9d805c0](https://github.com/calvinnwq/momentum/commit/9d805c06c9b0b3a3fd75f96bc61503da95558b5f))
+* **workflow:** add quiet watch advisories ([fc9b2d8](https://github.com/calvinnwq/momentum/commit/fc9b2d87b2343b2426ab119d509458d5b588c430))
+* **workflow:** add quiet watch stuck-risk advisories ([6ca9894](https://github.com/calvinnwq/momentum/commit/6ca98943a827161fd680833c4a1a8fc63d7f269a))
+* **workflow:** add runWorkflowWatchStream session driver ([e8c5454](https://github.com/calvinnwq/momentum/commit/e8c54546e5001deb739b4d2d733f73acf6d47f99))
+* **workflow:** add supervisor action authority policy ([de7cb7e](https://github.com/calvinnwq/momentum/commit/de7cb7e621538153dce51580d7991aa00907c65d))
+* **workflow:** add supervisor action authority policy ([6905563](https://github.com/calvinnwq/momentum/commit/690556391c0b04508c423bd11ed3e839a434d088))
+* **workflow:** add workflow run watch --once supervisor tick ([ede228a](https://github.com/calvinnwq/momentum/commit/ede228afb51b878979b798dd53253c330f49ab72))
+* **workflow:** add workflow run watch once supervisor tick ([7ca8fda](https://github.com/calvinnwq/momentum/commit/7ca8fda36c6f3e7a2beac894807dbf4130e23f7b))
+* **workflow:** freeze GUI-ready monitor contract ([41b8355](https://github.com/calvinnwq/momentum/commit/41b8355da821c477a519e7aaf5255e7dfef25fcd))
+* **workflow:** freeze supervisor envelope contract ([82276a2](https://github.com/calvinnwq/momentum/commit/82276a21b45106db65d0ba1e0fb95c273c689dec))
+* **workflow:** wire workflow run watch --stream --jsonl CLI mode ([cc3d3e6](https://github.com/calvinnwq/momentum/commit/cc3d3e634732e0f80e950a8f09d9685c523ac9e6))
+
+
+### Bug Fixes
+
+* **openclaw:** align audit failure state repair ([2d02164](https://github.com/calvinnwq/momentum/commit/2d0216435e5820a86ba600b69b2cfcd1960f9348))
+* **openclaw:** align failed auto-action audit state ([d1f297a](https://github.com/calvinnwq/momentum/commit/d1f297a56e9b02c8dc838ce7166be9e7a9901e7f))
+* **openclaw:** audit release persistence before disabling monitors ([bdb494f](https://github.com/calvinnwq/momentum/commit/bdb494f8e1328c4aedeb6b9c79d1da599a44058c))
+* **openclaw:** bound disabled monitor release audits ([f90f0cd](https://github.com/calvinnwq/momentum/commit/f90f0cdc1509ae9d75d8f6a11575971eb7285e1b))
+* **openclaw:** count saved release audits monotonically ([1ae4bb2](https://github.com/calvinnwq/momentum/commit/1ae4bb2f512551726234961542a366d717fde834))
+* **openclaw:** focus supervise help ([f494c66](https://github.com/calvinnwq/momentum/commit/f494c66683dcc49d66a489234a5e21cfe024a70f))
+* **openclaw:** preserve auto-action escalation delivery text ([2df61a6](https://github.com/calvinnwq/momentum/commit/2df61a6630ee9871af1267615c65bcd215d949a0))
+* **openclaw:** require final auto-action audit status ([58aa4b6](https://github.com/calvinnwq/momentum/commit/58aa4b63eeebcd984b055b19adfaf2b44c4cf01f))
+* **openclaw:** require policy before monitor cleanup ([5053229](https://github.com/calvinnwq/momentum/commit/505322945d7b345e29508839da71b24c0df86ede))
+* **openclaw:** suppress cleanup on audit escalation ([37631fc](https://github.com/calvinnwq/momentum/commit/37631fcc48209644f60284629261ef9ec36f5cdb))
+* **openclaw:** suppress repeated auto-action escalations ([5ef6334](https://github.com/calvinnwq/momentum/commit/5ef6334aeed562ca7f950be33aedabac81e3add2))
+* preserve OpenClaw source runner loader ([8475340](https://github.com/calvinnwq/momentum/commit/847534096b2bee8ca6f90ec5ff23c2637bc39141))
+* **project:** handle legacy Linear metadata in project status ([715da25](https://github.com/calvinnwq/momentum/commit/715da25d77df56204dbfa70c1ed4cf3d66d9408b))
+* **project:** NGX-545 handle legacy scalar project milestone metadata ([55ac4e3](https://github.com/calvinnwq/momentum/commit/55ac4e31484d694a4832552aff2f4d7b1c32f479))
+* **project:** preserve source alias evidence links ([e873a48](https://github.com/calvinnwq/momentum/commit/e873a488c30885a288464967e80e9dc9e5ffe8a7))
+* **project:** preserve typed metadata filter matching ([4bb6d09](https://github.com/calvinnwq/momentum/commit/4bb6d09cbf8aef4138feb075b59f07a6740e6f44))
+* **repo:** dedupe Linear project status sources ([0ea0460](https://github.com/calvinnwq/momentum/commit/0ea04609914476b700f68b022b512863f2034b91))
+* **workflow:** expose gate action policy in detail envelopes ([263230f](https://github.com/calvinnwq/momentum/commit/263230ffe41240ab0c71dce637cd9826a82e9116))
+* **workflow:** honor jsonl watch validation failures ([828d17a](https://github.com/calvinnwq/momentum/commit/828d17acb632152127f9eeb68f94a86bcdfff749))
+* **workflow:** keep event replay identities stable ([d59a048](https://github.com/calvinnwq/momentum/commit/d59a0480f1701915156362fdaae32843dec1ffcd))
+* **workflow:** keep external-tail polling auto-allowed ([66b350b](https://github.com/calvinnwq/momentum/commit/66b350b12e6dfb6a54ad7265e0a0873a9a19c085))
+* **workflow:** mark terminal watch stream closure ([f706c86](https://github.com/calvinnwq/momentum/commit/f706c86b0359263e29d82219e2e6ffa98eab1c10))
+* **workflow:** order replay events by lifecycle ([809f955](https://github.com/calvinnwq/momentum/commit/809f9556983957876e48ea26f2cfa9743eec7aaa))
+* **workflow:** preflight external adapter auth ([881bf92](https://github.com/calvinnwq/momentum/commit/881bf9286d57c9e5fe773e02b5029018c522aa21))
+* **workflow:** preflight external adapter auth ([c407aeb](https://github.com/calvinnwq/momentum/commit/c407aebbda6e6dabd37a3dc0f3f4d3167250c86b))
+* **workflow:** preserve jsonl stream terminal contracts ([863d922](https://github.com/calvinnwq/momentum/commit/863d922b45a77c7b1d30f6508bb949b6d33bdc8a))
+* **workflow:** preserve recovered step failure events ([73aa7dc](https://github.com/calvinnwq/momentum/commit/73aa7dcdf47de0b4a324bf15cc902c6e36df0d23))
+* **workflow:** preserve replay transitions across recovery ([1d60fe7](https://github.com/calvinnwq/momentum/commit/1d60fe7a5105f4ad5111e6db489eb062a9eedc9c))
+* **workflow:** reconcile interrupted no-mistakes recovery ([51595b8](https://github.com/calvinnwq/momentum/commit/51595b8db22693cd2a385f0de5010ff693cd7990))
+* **workflow:** reconcile interrupted no-mistakes success ([2d97cc9](https://github.com/calvinnwq/momentum/commit/2d97cc90c5d52a777c73f9c5dd85c2b76a9d581b))
+* **workflow:** reject invalid event replay cursors ([1b33c2e](https://github.com/calvinnwq/momentum/commit/1b33c2e53a975073e4d56982ae55dc058e61c1fe))
+* **workflow:** repair auth preflight recovery ([c2433c8](https://github.com/calvinnwq/momentum/commit/c2433c8642736d8bdf05636e0dcf2a92280c5c8e))
+* **workflow:** replay imported terminal run events ([41a5087](https://github.com/calvinnwq/momentum/commit/41a5087504277f5f6999e2d4c0df54e2d5c18ba3))
+* **workflow:** tighten no-mistakes recovery evidence ([0fe8783](https://github.com/calvinnwq/momentum/commit/0fe8783ad174b3b07740daead95a8474683f3dfb))
+* **workflow:** tolerate legacy event replay schemas ([66d8fdf](https://github.com/calvinnwq/momentum/commit/66d8fdf23e26b93f9074c6fa5530a0b12b9f008d))
+
 ## [0.14.4](https://github.com/calvinnwq/momentum/compare/v0.14.3...v0.14.4) (2026-06-25)
 
 
