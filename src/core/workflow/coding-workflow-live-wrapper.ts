@@ -5,8 +5,9 @@
  * result placement, and dispatch reconciliation. This module is the command the
  * checked-in NGX-499 profile runs: it reads
  * `MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG`, selects the current
- * `MOMENTUM_STEP_KIND`, executes the configured child command, and writes a
- * normalized `RunnerResult` to `MOMENTUM_RESULT_PATH`. Child commands report by
+ * `MOMENTUM_STEP_KIND`, validates the run-local config before spawning,
+ * executes the configured child command, and writes a normalized `RunnerResult`
+ * to `MOMENTUM_RESULT_PATH`. Child commands report by
  * exit status; this seam synthesizes durable success/failure evidence so a
  * command failure is an ordinary failed step result instead of a stranded
  * process-level recovery case, except for explicitly classified no-mistakes
@@ -53,6 +54,7 @@ export type CodingWorkflowWrapperStepConfig = {
   cwd: CodingWorkflowWrapperCwd;
   timeoutSec: number;
   envAllow: string[];
+  resultFile?: string;
   successSummary?: string;
   failureSummary?: string;
   keyChangesMade: string[];
@@ -93,6 +95,26 @@ export type CodingWorkflowWrapperOutcome = {
 };
 
 const WORKFLOW_STEP_KIND_SET: ReadonlySet<string> = new Set(WORKFLOW_STEP_KINDS);
+const WRAPPER_CONFIG_TOP_LEVEL_FIELDS: ReadonlySet<string> = new Set(["steps"]);
+const WRAPPER_STEP_CONFIG_FIELDS: ReadonlySet<string> = new Set([
+  "command",
+  "args",
+  "cwd",
+  "timeout_sec",
+  "env_allow",
+  "result_file",
+  "success_summary",
+  "failure_summary",
+  "key_changes_made",
+  "key_learnings",
+  "remaining_work",
+  "commit"
+]);
+const WRAPPER_STEP_CONFIG_ALIASES: Record<string, string> = {
+  envAllow: "env_allow",
+  timeoutSec: "timeout_sec",
+  resultFile: "result_file"
+};
 const DEFAULT_TIMEOUT_SEC = 900;
 const OUTPUT_MAX_BYTES = 10 * 1024 * 1024;
 
@@ -155,6 +177,15 @@ export function runCodingWorkflowLiveWrapper(
       deps,
       `No command is configured for workflow step "${stepKind}" in ${CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR}.`
     );
+  }
+
+  const configuredResultPath = resolveConfiguredResultPath(
+    stepConfig,
+    deps.env,
+    resultPath
+  );
+  if (!configuredResultPath.ok) {
+    return processSetupFailure(deps, configuredResultPath.error);
   }
 
   const cwd = resolveStepCwd(stepConfig.cwd, deps.env);
@@ -1794,19 +1825,37 @@ export function loadCodingWorkflowWrapperConfig(
     };
   }
 
-  return parseCodingWorkflowWrapperConfig(parsed);
+  return parseCodingWorkflowWrapperConfig(parsed, configPath);
 }
 
 export function parseCodingWorkflowWrapperConfig(
-  value: unknown
+  value: unknown,
+  source?: string
 ): ConfigLoadResult {
   if (!isRecord(value)) {
-    return { ok: false, error: "Coding workflow wrapper config must be an object." };
+    return {
+      ok: false,
+      error: `Coding workflow wrapper config must be an object${source === undefined ? "." : ` at ${source}.`}`
+    };
+  }
+
+  const topLevelUnknown = findUnknownKeys(
+    value,
+    WRAPPER_CONFIG_TOP_LEVEL_FIELDS,
+    {},
+    "wrapper config",
+    source
+  );
+  if (!topLevelUnknown.ok) {
+    return topLevelUnknown;
   }
 
   const rawSteps = value["steps"];
   if (rawSteps !== undefined && !isRecord(rawSteps)) {
-    return { ok: false, error: "Coding workflow wrapper config `steps` must be an object." };
+    return {
+      ok: false,
+      error: `Coding workflow wrapper config 'steps' must be an object${source === undefined ? "." : ` at ${source}.`}`
+    };
   }
 
   const steps: Partial<Record<WorkflowStepKind, CodingWorkflowWrapperStepConfig>> = {};
@@ -1815,10 +1864,10 @@ export function parseCodingWorkflowWrapperConfig(
       if (!WORKFLOW_STEP_KIND_SET.has(kind)) {
         return {
           ok: false,
-          error: `Unsupported workflow step kind in wrapper config: ${kind}`
+          error: `Unsupported workflow step kind ${kind} in MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG${source === undefined ? "." : ` at ${source}.`}`
         };
       }
-      const parsedStep = parseStepConfig(kind as WorkflowStepKind, rawStep);
+      const parsedStep = parseStepConfig(kind as WorkflowStepKind, rawStep, source);
       if (!parsedStep.ok) return parsedStep;
       steps[kind as WorkflowStepKind] = parsedStep.config;
     }
@@ -1833,10 +1882,22 @@ type StepConfigParse =
 
 function parseStepConfig(
   kind: WorkflowStepKind,
-  value: unknown
+  value: unknown,
+  source?: string
 ): StepConfigParse {
   if (!isRecord(value)) {
     return { ok: false, error: `Wrapper config for ${kind} must be an object.` };
+  }
+
+  const unknownStepKey = findUnknownKeys(
+    value,
+    WRAPPER_STEP_CONFIG_FIELDS,
+    WRAPPER_STEP_CONFIG_ALIASES,
+    `steps.${kind}`,
+    source
+  );
+  if (!unknownStepKey.ok) {
+    return unknownStepKey;
   }
 
   const command = readOptionalString(value["command"]);
@@ -1866,6 +1927,8 @@ function parseStepConfig(
     "remaining_work"
   );
   if (!remainingWork.ok) return remainingWork;
+  const resultFile = readOptionalResultFile(value["result_file"]);
+  if (!resultFile.ok) return resultFile;
   const successSummary = readOptionalString(value["success_summary"]);
   const failureSummary = readOptionalString(value["failure_summary"]);
 
@@ -1882,9 +1945,35 @@ function parseStepConfig(
       keyChangesMade: keyChangesMade.value,
       keyLearnings: keyLearnings.value,
       remainingWork: remainingWork.value,
+      ...(resultFile.value !== undefined ? { resultFile: resultFile.value } : {}),
       commit: commit.value
     }
   };
+}
+
+function findUnknownKeys(
+  value: Record<string, unknown>,
+  allowed: ReadonlySet<string>,
+  aliasMap: Record<string, string> = {},
+  location: string = "root",
+  source?: string
+): { ok: true } | { ok: false; error: string } {
+  const supported = [...allowed].sort().join(", ");
+  for (const key of Object.keys(value)) {
+    if (allowed.has(key)) continue;
+    const alias = aliasMap[key];
+    if (alias !== undefined) {
+      return {
+        ok: false,
+        error: `Unknown key "${key}" in ${location}; replace with "${alias}" to use the required snake_case schema at ${source ?? "this config file"}.`
+      };
+    }
+    return {
+      ok: false,
+        error: `Unknown key "${key}" in ${location}; supported keys: ${supported} at ${source ?? "this config file"}.`
+      };
+  }
+  return { ok: true };
 }
 
 function writeFailureResult(
@@ -1970,6 +2059,44 @@ function resolveStepCwd(
   return { ok: true, path: iterationDir };
 }
 
+function resolveConfiguredResultPath(
+  config: CodingWorkflowWrapperStepConfig,
+  env: NodeJS.ProcessEnv,
+  resultPath: string
+): { ok: true } | { ok: false; error: string } {
+  if (config.resultFile === undefined) return { ok: true };
+  const iterationDir = readRequiredEnv(env, "MOMENTUM_ITERATION_DIR");
+  if (iterationDir === undefined) {
+    return {
+      ok: false,
+      error: "MOMENTUM_ITERATION_DIR is required when wrapper config `result_file` is set."
+    };
+  }
+  const base = path.resolve(iterationDir);
+  const resolved = path.resolve(base, config.resultFile);
+  const relative = path.relative(base, resolved);
+  if (
+    relative === "" ||
+    relative === ".." ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  ) {
+    return {
+      ok: false,
+      error:
+        "Wrapper config `result_file` must resolve inside the iteration artifact directory."
+    };
+  }
+  if (path.resolve(resultPath) !== resolved) {
+    return {
+      ok: false,
+      error:
+        "Wrapper config `result_file` must match the live wrapper MOMENTUM_RESULT_PATH."
+    };
+  }
+  return { ok: true };
+}
+
 function buildChildEnv(
   env: NodeJS.ProcessEnv,
   envAllow: readonly string[]
@@ -2000,6 +2127,38 @@ function readOptionalString(value: unknown): string | undefined {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+function readOptionalResultFile(
+  value: unknown
+): { ok: true; value?: string } | { ok: false; error: string } {
+  if (value === undefined || value === null) return { ok: true };
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return {
+      ok: false,
+      error: "Wrapper config `result_file` must be a non-empty string."
+    };
+  }
+  const trimmed = value.trim();
+  const normalized = path.posix.normalize(trimmed.replace(/\\/g, "/"));
+  if (
+    path.isAbsolute(trimmed) ||
+    path.win32.isAbsolute(trimmed) ||
+    hasParentTraversalSegment(trimmed) ||
+    normalized === "." ||
+    normalized === "./"
+  ) {
+    return {
+      ok: false,
+      error:
+        "Wrapper config `result_file` must be a relative path inside the iteration artifact directory."
+    };
+  }
+  return { ok: true, value: trimmed };
+}
+
+function hasParentTraversalSegment(value: string): boolean {
+  return value.split(/[\\/]+/u).includes("..");
+}
+
 type StringArrayParse =
   | { ok: true; value: string[] }
   | { ok: false; error: string };
@@ -2007,14 +2166,17 @@ type StringArrayParse =
 function readOptionalStringArray(value: unknown, field: string): StringArrayParse {
   if (value === undefined || value === null) return { ok: true, value: [] };
   if (!Array.isArray(value)) {
-    return { ok: false, error: `Wrapper config \`${field}\` must be an array.` };
+    return {
+      ok: false,
+      error: `Wrapper config \`${field}\` must be an array of strings.`
+    };
   }
   const out: string[] = [];
   for (const entry of value) {
     if (typeof entry !== "string") {
       return {
         ok: false,
-        error: `Wrapper config \`${field}\` must contain only strings.`
+        error: `Wrapper config \`${field}\` must be an array of strings.`
       };
     }
     out.push(entry);
