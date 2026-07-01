@@ -54,7 +54,7 @@ State-advancing and mutation calls are explicit and must be opt-in.
   OpenClaw and GUI runners use it for a compact actionable dispatch summary.
 - `workflow run monitor`.
   This is the stable progress discriminator for recurring poll loops.
-  Use `--advance` only for `momentum-native-coding`.
+  Plain monitor reads the progress projection without advancing advisory baselines.
 - `workflow run watch --stream` and `workflow run events`.
   These share the durable event cursor contract.
   They provide idempotent replay when polling disconnects.
@@ -67,6 +67,9 @@ State-advancing and mutation calls are explicit and must be opt-in.
 - `workflow run watch --once`.
   This is the compact supervisor envelope used for regular GUI polling.
   It is write-limited to a safe run-scoped dispatcher tick, advisory monitor baselines, and append-only supervisor advisory events for supported Momentum-native coding runs.
+- `workflow run monitor --advance`.
+  This is the write-limited monitor mode for supported Momentum-native coding runs.
+  It persists only advisory progress-suppression baselines and must be an explicit polling choice, not a read-only status call.
 
 ### Mutation actions
 
