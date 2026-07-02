@@ -299,6 +299,45 @@ describe("linear-refresh lifecycle planner", () => {
     });
   });
 
+  it("reconciles the current already-applied status update when older applied history exists", () => {
+    const oldApplied = intent({
+      id: "intent_old",
+      status: "applied",
+      appliedAt: 1,
+      idempotencyKey: "linear:NGX-565:status_update:old",
+      payload: { state: "In Review" }
+    });
+    const currentApplied = intent({ status: "applied", appliedAt: 2 });
+    const plan = planLinearRefreshLifecycle(
+      baseInput({
+        pendingIntents: [],
+        appliedIntents: [oldApplied, currentApplied],
+        latestAuditsByIntentId: new Map([
+          [
+            oldApplied.id,
+            audit(oldApplied, {
+              id: "audit_old",
+              operatorReason:
+                "daemon external-apply for workflow old-run/linear-refresh"
+            })
+          ],
+          [currentApplied.id, audit(currentApplied)]
+        ])
+      })
+    );
+
+    expect(plan).toMatchObject({
+      phase: "reconcile",
+      status: "already_applied",
+      action: "reconcile_already_applied",
+      safeToMutate: false
+    });
+    expect(plan.evidence).toMatchObject({
+      intentId: INTENT_ID,
+      auditId: "audit_565"
+    });
+  });
+
   it("does not reconcile already-applied evidence from non-status intents", () => {
     const applied = intent({
       status: "applied",

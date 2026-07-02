@@ -125,6 +125,51 @@ function planAlreadyAppliedOrMissing(
   issueScopeIdentifier: string
 ): LinearRefreshLifecyclePlan {
   const applied = (input.appliedIntents ?? []).filter(isStatusUpdateIntent);
+  const currentApplied = applied.flatMap((intent) => {
+    const source = sourceForIntent(input.sourceItemsById, intent);
+    const audit = input.latestAuditsByIntentId?.get(intent.id) ?? null;
+    const marker = idempotencyMarker(intent);
+    const validation = validateAppliedIntent(intent, source, issueScopeIdentifier);
+    if (
+      validation.ok &&
+      auditMatchesCurrentRun(audit, marker, input.expectedOperatorReason)
+    ) {
+      return [{ intent, source, marker, audit }];
+    }
+    return [];
+  });
+  if (currentApplied.length === 1) {
+    const appliedIntent = currentApplied[0]!;
+    return plan(
+      "reconcile",
+      "already_applied",
+      "reconcile_already_applied",
+      false,
+      evidence(
+        issueScopeIdentifier,
+        appliedIntent.intent,
+        appliedIntent.source,
+        appliedIntent.marker,
+        appliedIntent.audit
+      )
+    );
+  }
+  if (currentApplied.length > 1) {
+    const appliedIntent = currentApplied[0]!;
+    return plan(
+      "preflight",
+      "intent_duplicate",
+      "resolve_intent_evidence",
+      false,
+      evidence(
+        issueScopeIdentifier,
+        appliedIntent.intent,
+        appliedIntent.source,
+        appliedIntent.marker,
+        appliedIntent.audit
+      )
+    );
+  }
   if (applied.length === 1) {
     const intent = applied[0]!;
     const source = sourceForIntent(input.sourceItemsById, intent);
@@ -140,21 +185,6 @@ function planAlreadyAppliedOrMissing(
         evidence(issueScopeIdentifier, intent, source, marker, audit)
       );
     }
-    if (
-      audit !== null &&
-      audit.lifecycleState === "succeeded" &&
-      audit.idempotencyMarker === marker &&
-      audit.operatorReason === input.expectedOperatorReason &&
-      audit.reconcile.status === "success"
-    ) {
-      return plan(
-        "reconcile",
-        "already_applied",
-        "reconcile_already_applied",
-        false,
-        evidence(issueScopeIdentifier, intent, source, marker, audit)
-      );
-    }
     return plan(
       "preflight",
       "intent_stale",
@@ -164,12 +194,18 @@ function planAlreadyAppliedOrMissing(
     );
   }
   if (applied.length > 1) {
+    const intent = applied[0]!;
     return plan(
       "preflight",
-      "intent_duplicate",
+      "intent_stale",
       "resolve_intent_evidence",
       false,
-      evidence(issueScopeIdentifier, applied[0] ?? null, null, null)
+      evidence(
+        issueScopeIdentifier,
+        intent,
+        sourceForIntent(input.sourceItemsById, intent),
+        null
+      )
     );
   }
   return plan(
@@ -304,6 +340,20 @@ function idempotencyMarker(intent: UpdateIntent): string {
     intentId: intent.id,
     payload: intent.payload
   });
+}
+
+function auditMatchesCurrentRun(
+  audit: IntentApplyAudit | null,
+  marker: string,
+  expectedOperatorReason: string | null
+): audit is IntentApplyAudit {
+  return (
+    audit !== null &&
+    audit.lifecycleState === "succeeded" &&
+    audit.idempotencyMarker === marker &&
+    audit.operatorReason === expectedOperatorReason &&
+    audit.reconcile.status === "success"
+  );
 }
 
 function hasLinearAuth(env: Record<string, string | undefined>): boolean {
