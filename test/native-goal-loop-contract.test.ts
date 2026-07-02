@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { parseRunnerResult } from "../src/core/executors/runner/result.js";
 import { WORKFLOW_EXECUTOR_FAMILIES } from "../src/core/workflow/definition/definition.js";
 import {
   EXECUTOR_INVOCATION_STATES,
@@ -59,9 +60,33 @@ describe("native goal-loop contract docs", () => {
     );
   });
 
-  it("freezes the normalized round result JSON fixture", () => {
+  it("freezes the shipped runner result JSON fixture", () => {
+    const raw = readRepoFile("test/fixtures/native-goal-loop-runner-result.json");
+    const parsed = parseRunnerResult(raw);
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value).toMatchObject({
+      success: true,
+      key_changes_made: [
+        "Added the native goal-loop runner result fixture.",
+        "Recorded durable evidence pointers for the round."
+      ],
+      goal_complete: false,
+      commit: {
+        type: "feat",
+        scope: "goal-loop",
+        subject: "document native goal loop contract"
+      }
+    });
+    expect(spec).toContain(
+      "The runner-authored result document consumed by the shipped goal-loop mechanism remains the normalized `RunnerResult` schema"
+    );
+  });
+
+  it("freezes the post-finalization round evidence JSON fixture", () => {
     const fixture = JSON.parse(
-      readRepoFile("test/fixtures/native-goal-loop-result.json")
+      readRepoFile("test/fixtures/native-goal-loop-round-evidence.json")
     ) as Record<string, unknown>;
 
     expect(Object.keys(fixture)).toEqual([
@@ -93,6 +118,9 @@ describe("native goal-loop contract docs", () => {
       commitSha: "0123456789abcdef0123456789abcdef01234567",
       recoveryReason: null
     });
+    expect(spec).toContain(
+      "The `momentum.native-goal-loop.round-result.v1` fixture is a post-finalization evidence projection"
+    );
   });
 
   it("documents commit/reset and resume semantics from Momentum-owned durable state", () => {

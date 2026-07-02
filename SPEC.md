@@ -45,8 +45,13 @@ Round states are `pending`, `running`, `capturing_result`, `finalizing`, `mirror
 `manual_recovery_required` carries stale, recovered, invalid, and unsafe-resume cases through recovery codes and durable evidence instead of adding non-repo state names.
 Stale in-flight work is detected from Momentum-owned leases and heartbeat/checkpoint age, then converted to durable recovery evidence before any continuation starts.
 
-A native round result is normalized as `momentum.native-goal-loop.round-result.v1` before classification.
-The required JSON fields are `summary`, `keyChanges`, `learnings`, `completionRecommendation`, `verificationResult`, `artifacts`, `checkpoints`, `changedFiles`, `commitSha`, `recoveryReason`, and `remainingWork`.
+The runner-authored result document consumed by the shipped goal-loop mechanism remains the normalized `RunnerResult` schema.
+Runner-authored results are parsed before finalization and classification, and their required fields are `success`, `summary`, `key_changes_made`, `key_learnings`, `remaining_work`, `goal_complete`, and `commit`.
+The `commit` object supplies the commit intent that Momentum uses only after repository safety and verification have passed.
+
+After finalization, Momentum projects the captured runner result plus durable round evidence into the native round evidence view consumed by status, logs, handoff, monitor, and future GUI surfaces.
+The `momentum.native-goal-loop.round-result.v1` fixture is a post-finalization evidence projection, not a runner-authored input document.
+Its required JSON fields are `summary`, `keyChanges`, `learnings`, `completionRecommendation`, `verificationResult`, `artifacts`, `checkpoints`, `changedFiles`, `commitSha`, `recoveryReason`, and `remainingWork`.
 `completionRecommendation` is the executor's recommendation only: `complete`, `continue`, `operator_decision_required`, `manual_recovery_required`, `blocked`, `failed`, or `cancelled`.
 `verificationResult` records command names, exit codes, timing when available, and an overall status such as `passed`, `failed`, `skipped`, or `not_run`.
 Artifacts and checkpoints are durable pointers under the round, not proof by terminal text.
