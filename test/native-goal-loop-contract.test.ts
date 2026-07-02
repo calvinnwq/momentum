@@ -79,8 +79,23 @@ describe("native goal-loop contract docs", () => {
         subject: "document native goal loop contract"
       }
     });
+
+    const withoutOptionalArrays = JSON.parse(raw) as Record<string, unknown>;
+    delete withoutOptionalArrays.key_learnings;
+    delete withoutOptionalArrays.remaining_work;
+    const parsedWithoutOptionalArrays = parseRunnerResult(
+      JSON.stringify(withoutOptionalArrays)
+    );
+
+    expect(parsedWithoutOptionalArrays.ok).toBe(true);
+    if (!parsedWithoutOptionalArrays.ok) return;
+    expect(parsedWithoutOptionalArrays.value.key_learnings).toEqual([]);
+    expect(parsedWithoutOptionalArrays.value.remaining_work).toEqual([]);
     expect(spec).toContain(
       "The runner-authored result document consumed by the shipped goal-loop mechanism remains the normalized `RunnerResult` schema"
+    );
+    expect(spec).toContain(
+      "`key_learnings` and `remaining_work` are optional runner-authored arrays that default to empty arrays when omitted."
     );
   });
 

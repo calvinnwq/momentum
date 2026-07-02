@@ -46,7 +46,8 @@ Round states are `pending`, `running`, `capturing_result`, `finalizing`, `mirror
 Stale in-flight work is detected from Momentum-owned leases and heartbeat/checkpoint age, then converted to durable recovery evidence before any continuation starts.
 
 The runner-authored result document consumed by the shipped goal-loop mechanism remains the normalized `RunnerResult` schema.
-Runner-authored results are parsed before finalization and classification, and their required fields are `success`, `summary`, `key_changes_made`, `key_learnings`, `remaining_work`, `goal_complete`, and `commit`.
+Runner-authored results are parsed before finalization and classification, and their required fields are `success`, `summary`, `key_changes_made`, `goal_complete`, and `commit`.
+`key_learnings` and `remaining_work` are optional runner-authored arrays that default to empty arrays when omitted.
 The `commit` object supplies the commit intent that Momentum uses only after repository safety and verification have passed.
 
 After finalization, Momentum projects the captured runner result plus durable round evidence into the native round evidence view consumed by status, logs, handoff, monitor, and future GUI surfaces.
