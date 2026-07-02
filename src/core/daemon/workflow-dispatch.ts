@@ -41,7 +41,11 @@ import {
 import { createLiveWrapperWorkflowDispatch } from "../workflow/dispatch/live-wrapper.js";
 import { createSubworkflowWorkflowDispatch } from "../workflow/dispatch/subworkflow-dispatch.js";
 import { deriveDispatchedSubworkflowContext } from "../workflow/route/subworkflow-dispatch-context.js";
-import { planLinearRefreshLifecycle } from "../workflow/dispatch/linear-refresh-lifecycle.js";
+import {
+  planLinearRefreshAlreadyAppliedReconciliation,
+  planLinearRefreshLifecycle,
+  type LinearRefreshLifecyclePlan
+} from "../workflow/dispatch/linear-refresh-lifecycle.js";
 import { buildRealWorkflowStepExecutorRegistry } from "../workflow/step/executor-real-adapters.js";
 import type {
   AsyncWorkflowStepDispatch,
@@ -214,6 +218,23 @@ function resolveDaemonExternalApplyContext(
     ...applied
   ]);
   const latestAuditsByIntentId = loadLatestLinearRefreshAudits(context.db, applied);
+  const operatorReason = linearRefreshOperatorReason(runId, stepId);
+  const alreadyAppliedLifecycle = planLinearRefreshAlreadyAppliedReconciliation({
+    issueScopeIdentifier,
+    pendingIntents: pending,
+    appliedIntents: applied,
+    sourceItemsById,
+    latestAuditsByIntentId,
+    expectedOperatorReason: operatorReason
+  });
+  const alreadyAppliedContext = resolveLinearRefreshAlreadyAppliedContext(
+    alreadyAppliedLifecycle,
+    applied,
+    sourceItemsById,
+    latestAuditsByIntentId,
+    resolved.exec.runDir
+  );
+  if (alreadyAppliedContext !== null) return alreadyAppliedContext;
   const policy = resolveLinearRefreshPolicy(resolved.exec.repoPath);
   if (!policy.ok) {
     return {
@@ -221,7 +242,6 @@ function resolveDaemonExternalApplyContext(
       reason: `linear_refresh_policy_load_failed: ${policy.code}: ${policy.error}`
     };
   }
-  const operatorReason = linearRefreshOperatorReason(runId, stepId);
   const lifecycle = planLinearRefreshLifecycle({
     env,
     intentApplyPolicy: policy.value,
@@ -232,29 +252,14 @@ function resolveDaemonExternalApplyContext(
     latestAuditsByIntentId,
     expectedOperatorReason: operatorReason
   });
-  if (lifecycle.status === "already_applied") {
-    const intent = applied.find((candidate) => candidate.id === lifecycle.evidence.intentId);
-    const source =
-      lifecycle.evidence.sourceItemId === null
-        ? null
-        : sourceItemsById.get(lifecycle.evidence.sourceItemId) ?? null;
-    const audit =
-      lifecycle.evidence.intentId === null
-        ? null
-        : latestAuditsByIntentId.get(lifecycle.evidence.intentId) ?? null;
-    if (intent === undefined || source === null || audit === null) {
-      return { ok: false, reason: "linear_refresh_reconcile_evidence_missing" };
-    }
-    return {
-      ok: true,
-      evidence: {
-        executorLogPath: path.join(resolved.exec.runDir, "external-apply.log"),
-        resultJsonPath: path.join(resolved.exec.runDir, "external-apply.json")
-      },
-      runExternalApply: async () =>
-        linearRefreshAlreadyAppliedSuccess(intent, source, audit)
-    };
-  }
+  const lifecycleAlreadyAppliedContext = resolveLinearRefreshAlreadyAppliedContext(
+    lifecycle,
+    applied,
+    sourceItemsById,
+    latestAuditsByIntentId,
+    resolved.exec.runDir
+  );
+  if (lifecycleAlreadyAppliedContext !== null) return lifecycleAlreadyAppliedContext;
   if (!lifecycle.safeToMutate) {
     return {
       ok: false,
@@ -303,6 +308,41 @@ function resolveDaemonExternalApplyContext(
         statusMutation: null,
         deps: executeDeps
       })
+  };
+}
+
+function resolveLinearRefreshAlreadyAppliedContext(
+  lifecycle: LinearRefreshLifecyclePlan | null,
+  applied: readonly UpdateIntent[],
+  sourceItemsById: ReadonlyMap<string, SourceItem>,
+  latestAuditsByIntentId: ReadonlyMap<
+    string,
+    NonNullable<ReturnType<typeof getLatestIntentApplyAudit>>
+  >,
+  runDir: string
+): DispatchedExternalApplyContextResolution | null {
+  if (lifecycle?.status !== "already_applied") return null;
+
+  const intent = applied.find((candidate) => candidate.id === lifecycle.evidence.intentId);
+  const source =
+    lifecycle.evidence.sourceItemId === null
+      ? null
+      : sourceItemsById.get(lifecycle.evidence.sourceItemId) ?? null;
+  const audit =
+    lifecycle.evidence.intentId === null
+      ? null
+      : latestAuditsByIntentId.get(lifecycle.evidence.intentId) ?? null;
+  if (intent === undefined || source === null || audit === null) {
+    return { ok: false, reason: "linear_refresh_reconcile_evidence_missing" };
+  }
+  return {
+    ok: true,
+    evidence: {
+      executorLogPath: path.join(runDir, "external-apply.log"),
+      resultJsonPath: path.join(runDir, "external-apply.json")
+    },
+    runExternalApply: async () =>
+      linearRefreshAlreadyAppliedSuccess(intent, source, audit)
   };
 }
 

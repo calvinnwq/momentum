@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { runCli } from "../src/cli.js";
 import { openDb } from "../src/adapters/db.js";
+import { buildIdempotencyMarker } from "../src/adapters/external-update-adapter.js";
 import { DOGFOOD_TERMINALIZE_DISPATCH_ENV_VAR } from "../src/core/workflow/dispatch/dogfood.js";
 import { DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR } from "../src/core/workflow/live-wrapper/daemon-profile.js";
 import { terminalizeDispatchedExecutorInvocation } from "../src/core/workflow/dispatch/executor-terminalize.js";
@@ -739,6 +740,149 @@ describe("daemon start production workflow lane (NGX-367)", () => {
       expect(round?.summary).toContain("policy_schema_invalid");
       expect(round?.summary).toContain("intent_apply_policy");
       expect(round?.summary).not.toContain("policy_denied");
+    } finally {
+      verifyDb.close();
+    }
+  });
+
+  it("reconciles already-applied Linear refresh evidence before policy load failures", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const runId = "ngx565-linear-applied-invalid-policy";
+    const intentId = "intent_ngx565_applied_invalid_policy";
+    const payload = { state: "Done" };
+    const marker = buildIdempotencyMarker({
+      adapterKind: "linear",
+      intentId,
+      payload
+    });
+
+    const startResult = await run([
+      "workflow",
+      "run",
+      "start",
+      "--run-id",
+      runId,
+      "--repo",
+      repoDir,
+      "--objective",
+      "Apply Linear refresh",
+      "--issue-scope",
+      "NGX-565",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(startResult.code).toBe(0);
+    fs.writeFileSync(
+      path.join(repoDir, "MOMENTUM.md"),
+      "---\nintent_apply_policy: write_everything\n---\n",
+      "utf8"
+    );
+
+    const db = openDb(dataDir);
+    try {
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_order < 5"
+      ).run(runId);
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'linear-refresh'"
+      ).run(runId);
+      db.prepare("UPDATE workflow_runs SET state = 'approved' WHERE id = ?").run(
+        runId
+      );
+      db.prepare(
+        `INSERT INTO source_items
+           (id, adapter_kind, external_id, external_key, url, title, status,
+            metadata_json, last_observed_at, goal_id, created_at, updated_at)
+         VALUES ('source_ngx565_applied_invalid_policy', 'linear', 'linear-issue-565', 'NGX-565',
+                 'https://linear.app/example/issue/NGX-565', 'Scoped issue',
+                 'Done', '{}', 1, NULL, 1, 1)`
+      ).run();
+      db.prepare(
+        `INSERT INTO update_intents
+           (id, adapter_kind, target_external_id, intent_type, payload_json,
+            reason, source_item_id, status, idempotency_key, created_at,
+            updated_at, applied_at, skipped_at, canceled_at, decision_reason)
+         VALUES (?, 'linear', 'linear-issue-565',
+                 'status_update', ?, 'workflow complete',
+                 'source_ngx565_applied_invalid_policy', 'applied',
+                 'idemp:intent_ngx565_applied_invalid_policy', 1, 2,
+                 2, NULL, NULL, NULL)`
+      ).run(intentId, JSON.stringify(payload));
+      db.prepare(
+        `INSERT INTO intent_apply_audits
+           (id, intent_id, adapter_kind, provider,
+            external_target_external_id, external_target_external_key,
+            external_target_url, external_target_title,
+            requested_at, finished_at,
+            operator_reason, operator_actor,
+            intent_apply_policy, allow_status_mutation,
+            mutation_kind, preview_summary, idempotency_marker,
+            lifecycle_state, result_status, result_code, result_message,
+            external_ref_comment_id, external_ref_comment_url,
+            external_ref_state_transition_id,
+            reconcile_status, reconcile_warning,
+            created_at, updated_at)
+         VALUES ('audit_ngx565_applied_invalid_policy', ?, 'linear', 'linear',
+                 'linear-issue-565', 'NGX-565',
+                 'https://linear.app/example/issue/NGX-565', 'Scoped issue',
+                 1, 2,
+                 ?, NULL,
+                 'external_apply_allowed', 1,
+                 'status_transition', 'Move NGX-565 to Done', ?,
+                 'succeeded', 'succeeded', 'applied', 'External write succeeded.',
+                 'comment-ngx565', 'https://linear.app/example/comment/NGX-565',
+                 'transition-ngx565',
+                 'success', NULL,
+                 1, 2)`
+      ).run(intentId, `daemon external-apply for workflow ${runId}/linear-refresh`, marker);
+    } finally {
+      db.close();
+    }
+
+    let applyCalls = 0;
+    const deps = {
+      buildLinearExternalUpdateClient: () => ({
+        async apply() {
+          applyCalls += 1;
+          throw new Error("must not call external apply for already-applied evidence");
+        }
+      })
+    };
+
+    const result = await run(
+      [
+        "daemon",
+        "start",
+        "--max-loop-iterations",
+        "1",
+        "--poll-interval-ms",
+        "0",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      {},
+      deps
+    );
+
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(applyCalls).toBe(0);
+
+    const verifyDb = openDb(dataDir);
+    try {
+      const step = verifyDb
+        .prepare(
+          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = 'linear-refresh'"
+        )
+        .get(runId) as { state: string } | undefined;
+      expect(step).toEqual({ state: "succeeded" });
+      const runRow = verifyDb
+        .prepare("SELECT needs_manual_recovery FROM workflow_runs WHERE id = ?")
+        .get(runId) as { needs_manual_recovery: number } | undefined;
+      expect(runRow?.needs_manual_recovery).toBe(0);
     } finally {
       verifyDb.close();
     }

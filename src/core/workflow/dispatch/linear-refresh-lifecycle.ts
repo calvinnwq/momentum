@@ -53,6 +53,16 @@ export type LinearRefreshLifecycleInput = {
   expectedOperatorReason: string | null;
 };
 
+export type LinearRefreshAlreadyAppliedReconciliationInput = Pick<
+  LinearRefreshLifecycleInput,
+  | "issueScopeIdentifier"
+  | "pendingIntents"
+  | "appliedIntents"
+  | "sourceItemsById"
+  | "latestAuditsByIntentId"
+  | "expectedOperatorReason"
+>;
+
 export function planLinearRefreshLifecycle(
   input: LinearRefreshLifecycleInput
 ): LinearRefreshLifecyclePlan {
@@ -126,6 +136,18 @@ export function planLinearRefreshLifecycle(
   );
 }
 
+export function planLinearRefreshAlreadyAppliedReconciliation(
+  input: LinearRefreshAlreadyAppliedReconciliationInput
+): LinearRefreshLifecyclePlan | null {
+  const issueScopeIdentifier = input.issueScopeIdentifier?.trim() || null;
+  if (issueScopeIdentifier === null) return null;
+
+  const pendingStatusIntents = input.pendingIntents.filter(isStatusUpdateIntent);
+  if (pendingStatusIntents.length > 0) return null;
+
+  return planCurrentAppliedEvidence(input, issueScopeIdentifier);
+}
+
 function planAlreadyAppliedOrMissing(
   input: LinearRefreshLifecycleInput,
   issueScopeIdentifier: string
@@ -182,7 +204,7 @@ function planAlreadyAppliedOrMissing(
 }
 
 function planCurrentAppliedEvidence(
-  input: LinearRefreshLifecycleInput,
+  input: LinearRefreshAlreadyAppliedReconciliationInput,
   issueScopeIdentifier: string
 ): LinearRefreshLifecyclePlan | null {
   const applied = (input.appliedIntents ?? []).filter(isStatusUpdateIntent);
