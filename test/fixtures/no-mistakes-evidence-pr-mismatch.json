@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "workflowRunId": "run-ngx-561",
+  "issueScope": ["NGX-561"],
+  "branch": {
+    "name": "feat/ngx-561-deterministic-no-mistakes-evidence",
+    "headSha": "1111111111111111111111111111111111111111"
+  },
+  "pullRequest": {
+    "id": "194",
+    "headSha": "1111111111111111111111111111111111111111",
+    "state": "open",
+    "draft": false,
+    "checks": "passed"
+  },
+  "noMistakes": {
+    "runId": "01KWHNGX561PASS000000000000",
+    "outcome": "checks-passed",
+    "unresolvedFindings": 0,
+    "unresolvedDecisions": 0
+  },
+  "phases": {
+    "review": "passed",
+    "tests": "passed",
+    "docs": "not_applicable",
+    "lint": "passed",
+    "format": "passed",
+    "push": "passed",
+    "pr": "passed",
+    "ci": "passed"
+  }
+}

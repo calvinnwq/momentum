@@ -22,6 +22,9 @@
  * still be re-derived as `manual_recovery_lease` blockers until resolved.
  */
 
+import fs from "node:fs";
+import path from "node:path";
+
 import type { MomentumDb } from "../../../adapters/db.js";
 import { prepareRetryableDispatchedStepForRecoveryClear } from "../dispatch/retry.js";
 import { appendWorkflowEvent, buildWorkflowEventId } from "./events.js";
@@ -32,6 +35,10 @@ import {
   isExternalSideEffectTailStepKind,
   type WorkflowStepKind
 } from "./reducer.js";
+import {
+  classifyNoMistakesDeterministicEvidence,
+  type NoMistakesEvidenceExpectedIdentity
+} from "../recovery/no-mistakes-evidence.js";
 
 export type MarkWorkflowRunNeedsManualRecoveryInput = {
   runId: string;
@@ -251,8 +258,10 @@ export type ClearWorkflowRunManualRecoveryGuardedInput = {
   externalSideEffectEvidencePointer?: string;
   /** Optional ledger pointer stored with external-side-effect reconciliation. */
   externalSideEffectLedgerPointer?: string;
-  /** `no-mistakes:<run-id>#checks-passed` proof for interrupted success. */
+  /** Legacy checks-passed proof or readable deterministic evidence pointer. */
   successfulNoMistakesEvidencePointer?: string;
+  /** Parsed deterministic no-mistakes evidence, usually loaded from a pointer. */
+  successfulNoMistakesEvidence?: unknown;
   /** Optional ledger pointer stored with interrupted no-mistakes reconciliation. */
   successfulNoMistakesLedgerPointer?: string;
   /** Lease-freshness grace window forwarded to the monitor re-derivation. */
@@ -428,6 +437,7 @@ export function clearWorkflowRunManualRecoveryGuarded(
           stepId: recoveryBeforeClear.stepId,
           now,
           evidencePointer,
+          successfulNoMistakesEvidence: input.successfulNoMistakesEvidence,
           ledgerPointer: input.successfulNoMistakesLedgerPointer ?? null
         });
         if (reconciledStep === undefined) {
@@ -526,6 +536,7 @@ function reconcileInterruptedNoMistakesStepForRecoveryClear(
     stepId: string;
     now: number;
     evidencePointer: string;
+    successfulNoMistakesEvidence?: unknown;
     ledgerPointer: string | null;
   }
 ):
@@ -538,7 +549,23 @@ function reconcileInterruptedNoMistakesStepForRecoveryClear(
     }
   | undefined {
   if (!isNoMistakesChecksPassedEvidencePointer(input.evidencePointer)) {
-    return undefined;
+    const deterministicEvidence =
+      input.successfulNoMistakesEvidence ??
+      readNoMistakesDeterministicEvidenceFromPointer(
+        input.evidencePointer,
+        input.ledgerPointer
+      );
+    if (deterministicEvidence === undefined) return undefined;
+    const expected = loadNoMistakesEvidenceExpectedIdentity(db, {
+      runId: input.runId,
+      stepId: input.stepId
+    });
+    if (expected === undefined) return undefined;
+    const classified = classifyNoMistakesDeterministicEvidence(
+      deterministicEvidence,
+      expected
+    );
+    if (!classified.ok) return undefined;
   }
 
   const row = db
@@ -615,6 +642,207 @@ function reconcileInterruptedNoMistakesStepForRecoveryClear(
 function isNoMistakesChecksPassedEvidencePointer(value: string): boolean {
   const normalized = value.trim().toLowerCase();
   return /^no-mistakes:[^#\s]+#checks-passed$/.test(normalized);
+}
+
+function readNoMistakesDeterministicEvidenceFromPointer(
+  evidencePointer: string,
+  ledgerPointer: string | null
+): unknown | undefined {
+  for (const pointer of [evidencePointer, ledgerPointer]) {
+    if (pointer === null) continue;
+    const filePath = pointerToReadableEvidencePath(pointer);
+    if (filePath === null) continue;
+    try {
+      return JSON.parse(fs.readFileSync(filePath, "utf8")) as unknown;
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+function pointerToReadableEvidencePath(pointer: string): string | null {
+  const withoutFragment = pointer.trim().split("#", 1)[0] ?? "";
+  if (withoutFragment.length === 0) return null;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(withoutFragment)) return null;
+  const candidate = path.resolve(withoutFragment);
+  try {
+    const stat = fs.statSync(candidate);
+    return stat.isFile() ? candidate : null;
+  } catch {
+    return null;
+  }
+}
+
+function loadNoMistakesEvidenceExpectedIdentity(
+  db: MomentumDb,
+  input: { runId: string; stepId: string }
+): NoMistakesEvidenceExpectedIdentity | undefined {
+  const row = db
+    .prepare("SELECT issue_scope_json FROM workflow_runs WHERE id = ?")
+    .get(input.runId) as { issue_scope_json: string | null } | undefined;
+  if (row === undefined) return undefined;
+  const checkpoint = loadCurrentNoMistakesCheckpointIdentity(db, input);
+  if (checkpoint === null) return undefined;
+  const issueScope = parseIssueScopeIdentifiers(row.issue_scope_json);
+  return {
+    workflowRunId: input.runId,
+    ...(issueScope.length > 0 ? { issueScope } : {}),
+    branch: {
+      name: checkpoint.branch,
+      headSha: checkpoint.headSha
+    },
+    ...(checkpoint.pullRequestId !== undefined
+      ? {
+          pullRequest: {
+            id: checkpoint.pullRequestId,
+            headSha: checkpoint.headSha
+          }
+        }
+      : {}),
+    noMistakesRunId: checkpoint.noMistakesRunId
+  };
+}
+
+type NoMistakesCheckpointIdentity = {
+  noMistakesRunId: string;
+  branch: string;
+  headSha: string;
+  pullRequestId?: string;
+};
+
+const NO_MISTAKES_CHECKPOINT_SHA_RE = /^[0-9a-f]{40}$/i;
+
+function loadCurrentNoMistakesCheckpointIdentity(
+  db: MomentumDb,
+  input: { runId: string; stepId: string }
+): NoMistakesCheckpointIdentity | null {
+  const rows = db
+    .prepare(
+      `SELECT r.attempt AS attempt, r.round_index AS roundIndex,
+              c.stage AS stage, c.detail AS detail, c.sequence AS sequence
+         FROM executor_rounds AS r
+         JOIN executor_checkpoints AS c ON c.round_id = r.round_id
+        WHERE r.workflow_run_id = ?
+          AND r.step_run_id = ?
+          AND r.executor_family = 'no-mistakes'
+          AND c.stage IN ('external_state_mirrored', 'expected_external_identity')
+        ORDER BY r.attempt DESC, r.round_index DESC,
+                 CASE c.stage WHEN 'external_state_mirrored' THEN 0 ELSE 1 END,
+                 c.sequence DESC`
+    )
+    .all(input.runId, input.stepId) as {
+    attempt: number;
+    roundIndex: number;
+    stage: string;
+    detail: string | null;
+    sequence: number;
+  }[];
+  const current = rows.filter(
+    (row) =>
+      row.attempt === rows[0]?.attempt && row.roundIndex === rows[0]?.roundIndex
+  );
+  const identities = current.flatMap((row) => {
+    const identity = parseNoMistakesCheckpointIdentity(row.detail);
+    return identity === null ? [] : [identity];
+  });
+  return (
+    identities.find((identity) => identity.pullRequestId !== undefined) ??
+    identities[0] ??
+    null
+  );
+}
+
+function parseNoMistakesCheckpointIdentity(
+  detail: string | null
+): NoMistakesCheckpointIdentity | null {
+  if (detail === null) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(detail);
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+  const record = parsed as Record<string, unknown>;
+  const noMistakesRunId = readNonBlankCheckpointString(record, "externalRunId");
+  const branch = readNonBlankCheckpointString(record, "branch");
+  const headSha = readCheckpointSha(record, "headSha");
+  if (noMistakesRunId === null || branch === null || headSha === null) {
+    return null;
+  }
+  const explicitPullRequestId = readNonBlankCheckpointString(
+    record,
+    "pullRequestId"
+  );
+  const pullRequestId =
+    explicitPullRequestId ?? pullRequestIdFromCheckpointUrl(record["prUrl"]);
+  return {
+    noMistakesRunId,
+    branch,
+    headSha,
+    ...(pullRequestId !== null ? { pullRequestId } : {})
+  };
+}
+
+function readNonBlankCheckpointString(
+  record: Record<string, unknown>,
+  key: string
+): string | null {
+  const value = record[key];
+  if (typeof value !== "string" || value.trim().length === 0) return null;
+  return value.trim();
+}
+
+function readCheckpointSha(
+  record: Record<string, unknown>,
+  key: string
+): string | null {
+  const value = readNonBlankCheckpointString(record, key);
+  if (value === null || !NO_MISTAKES_CHECKPOINT_SHA_RE.test(value)) return null;
+  return value.toLowerCase();
+}
+
+function pullRequestIdFromCheckpointUrl(value: unknown): string | null {
+  if (typeof value !== "string" || value.trim().length === 0) return null;
+  const trimmed = value.trim();
+  try {
+    const parts = new URL(trimmed).pathname.split("/").filter(Boolean);
+    const pullIndex = parts.indexOf("pull");
+    return pullIndex >= 0 ? parts[pullIndex + 1]?.trim() || null : null;
+  } catch {
+    const match = /(?:^|\/)pull\/([^/#?]+)/.exec(trimmed);
+    return match?.[1]?.trim() || null;
+  }
+}
+
+function parseIssueScopeIdentifiers(value: string | null): string[] {
+  if (value === null || value.trim().length === 0) return [];
+  try {
+    return collectIssueScopeIdentifiers(JSON.parse(value) as unknown);
+  } catch {
+    return [];
+  }
+}
+
+function collectIssueScopeIdentifiers(value: unknown): string[] {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => collectIssueScopeIdentifiers(item));
+  }
+  if (value === null || typeof value !== "object") return [];
+  const record = value as Record<string, unknown>;
+  const direct = ["identifier", "id", "issue", "issueId", "key"].flatMap((key) =>
+    typeof record[key] === "string" ? [record[key] as string] : []
+  );
+  return [
+    ...direct,
+    ...["issues", "identifiers", "issueScope", "scope"].flatMap((key) =>
+      collectIssueScopeIdentifiers(record[key])
+    )
+  ];
 }
 
 function reconcileExternalSideEffectTailStepForRecoveryClear(

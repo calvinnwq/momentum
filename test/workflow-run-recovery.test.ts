@@ -40,17 +40,22 @@ function seedRunWithState(
   db: MomentumDb,
   id: string,
   state: string,
-  options: { updatedAt?: number; finishedAt?: number | null } = {}
+  options: {
+    updatedAt?: number;
+    finishedAt?: number | null;
+    issueScope?: unknown;
+  } = {}
 ): void {
   const updatedAt = options.updatedAt ?? 1_730_000_000_000;
   db.prepare(
     `INSERT INTO workflow_runs (
-       id, source, state, finished_at, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?)`
+       id, source, state, issue_scope_json, finished_at, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     "momentum-native-coding",
     state,
+    JSON.stringify(options.issueScope ?? {}),
     options.finishedAt ?? null,
     updatedAt,
     updatedAt
@@ -77,6 +82,106 @@ function seedStep(
     options.order ?? 0,
     options.required ?? 1,
     at,
+    at
+  );
+}
+
+function seedNoMistakesCheckpoint(
+  db: MomentumDb,
+  runId: string,
+  stepId: string,
+  options: {
+    noMistakesRunId?: string;
+    branch?: string;
+    headSha?: string;
+    prUrl?: string | null;
+    at?: number;
+  } = {}
+): void {
+  const at = options.at ?? 1_730_000_000_000;
+  const invocationId = `${runId}::${stepId}::dispatch`;
+  const roundId = `${invocationId}::round-0`;
+  db.prepare(
+    `INSERT INTO executor_invocations (
+       invocation_id, workflow_run_id, step_run_id, step_key, executor_family,
+       state, attempt, started_at, heartbeat_at, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    invocationId,
+    runId,
+    stepId,
+    stepId,
+    "no-mistakes",
+    "running",
+    1,
+    at,
+    at,
+    at,
+    at
+  );
+  db.prepare(
+    `INSERT INTO executor_rounds (
+       round_id, invocation_id, workflow_run_id, step_run_id, step_key,
+       executor_family, attempt, round_index, state, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    roundId,
+    invocationId,
+    runId,
+    stepId,
+    stepId,
+    "no-mistakes",
+    1,
+    0,
+    "mirroring_external_state",
+    at,
+    at
+  );
+  db.prepare(
+    `INSERT INTO executor_checkpoints (
+       checkpoint_id, round_id, sequence, stage, detail, created_at
+     ) VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(
+    `${roundId}::checkpoint-0`,
+    roundId,
+    0,
+    "external_state_mirrored",
+    JSON.stringify({
+      externalRunId: options.noMistakesRunId ?? "01KWHNGX561PASS000000000000",
+      branch:
+        options.branch ?? "feat/ngx-561-deterministic-no-mistakes-evidence",
+      headSha: options.headSha ?? "1111111111111111111111111111111111111111",
+      activeStep: null,
+      stepStatus: "completed",
+      prUrl:
+        options.prUrl === undefined
+          ? "https://github.com/acme/momentum/pull/193"
+          : options.prUrl,
+      ciState: "passed"
+    }),
+    at
+  );
+}
+
+function seedNoMistakesExternalStateCheckpoint(
+  db: MomentumDb,
+  runId: string,
+  stepId: string,
+  sequence: number,
+  detail: Record<string, unknown>,
+  at = 1_730_000_000_000
+): void {
+  const roundId = `${runId}::${stepId}::dispatch::round-0`;
+  db.prepare(
+    `INSERT INTO executor_checkpoints (
+       checkpoint_id, round_id, sequence, stage, detail, created_at
+     ) VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(
+    `${roundId}::checkpoint-${sequence}`,
+    roundId,
+    sequence,
+    "external_state_mirrored",
+    JSON.stringify(detail),
     at
   );
 }
@@ -618,6 +723,240 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
           ".agent-workflows/run-1/daemon-no-mistakes.json#interrupted-wrapper",
         finished_at: 1_730_000_900_000
       });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("reconciles an interrupted no-mistakes failure from deterministic evidence without a new no-mistakes run", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRunWithState(db, "run-ngx-561", "failed", {
+        finishedAt: 1_730_000_800_000,
+        issueScope: { identifiers: ["NGX-561"] }
+      });
+      seedStep(db, "run-ngx-561", "preflight", "succeeded", {
+        kind: "preflight",
+        order: 0
+      });
+      seedStep(db, "run-ngx-561", "implementation", "succeeded", {
+        kind: "implementation",
+        order: 1
+      });
+      seedStep(db, "run-ngx-561", "postflight", "succeeded", {
+        kind: "postflight",
+        order: 2
+      });
+      seedStep(db, "run-ngx-561", "no-mistakes", "failed", {
+        kind: "no-mistakes",
+        order: 3
+      });
+      seedNoMistakesCheckpoint(db, "run-ngx-561", "no-mistakes");
+
+      const evidence = JSON.parse(
+        fs.readFileSync(
+          path.join(
+            process.cwd(),
+            "test/fixtures/no-mistakes-evidence-clean-success.json"
+          ),
+          "utf8"
+        )
+      ) as unknown;
+      const out = clearWorkflowRunManualRecoveryGuarded(db, {
+        runId: "run-ngx-561",
+        now: 1_730_000_900_000,
+        successfulNoMistakesEvidencePointer:
+          ".agent-workflows/run-ngx-561/no-mistakes-evidence.json",
+        successfulNoMistakesEvidence: evidence,
+        successfulNoMistakesLedgerPointer:
+          ".agent-workflows/run-ngx-561/no-mistakes-evidence.json#sha256=test"
+      });
+
+      expect(out).toEqual({
+        ok: true,
+        runId: "run-ngx-561",
+        previousReason: null,
+        previousMarkedAt: null,
+        clearedAt: 1_730_000_900_000,
+        reconciledStep: {
+          stepId: "no-mistakes",
+          recoveryCode: "interrupted_no_mistakes_checks_passed",
+          state: "succeeded",
+          evidencePointer:
+            ".agent-workflows/run-ngx-561/no-mistakes-evidence.json",
+          ledgerPointer:
+            ".agent-workflows/run-ngx-561/no-mistakes-evidence.json#sha256=test"
+        }
+      });
+      const step = db
+        .prepare(
+          `SELECT state, operator_reason, operator_actor, operator_evidence_pointer,
+                  operator_ledger_pointer
+             FROM workflow_steps WHERE run_id = ? AND step_id = ?`
+        )
+        .get("run-ngx-561", "no-mistakes") as {
+        state: string;
+        operator_reason: string | null;
+        operator_actor: string | null;
+        operator_evidence_pointer: string | null;
+        operator_ledger_pointer: string | null;
+      };
+      expect(step).toEqual({
+        state: "succeeded",
+        operator_reason: "interrupted_no_mistakes_checks_passed",
+        operator_actor: "workflow run clear-recovery",
+        operator_evidence_pointer:
+          ".agent-workflows/run-ngx-561/no-mistakes-evidence.json",
+        operator_ledger_pointer:
+          ".agent-workflows/run-ngx-561/no-mistakes-evidence.json#sha256=test"
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps no-mistakes blocked when deterministic evidence is stale", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRunWithState(db, "run-ngx-561", "failed", {
+        finishedAt: 1_730_000_800_000,
+        issueScope: { identifiers: ["NGX-561"] }
+      });
+      seedStep(db, "run-ngx-561", "no-mistakes", "failed", {
+        kind: "no-mistakes",
+        order: 3
+      });
+      seedNoMistakesCheckpoint(db, "run-ngx-561", "no-mistakes");
+
+      const evidence = JSON.parse(
+        fs.readFileSync(
+          path.join(
+            process.cwd(),
+            "test/fixtures/no-mistakes-evidence-missing-test-phase.json"
+          ),
+          "utf8"
+        )
+      ) as unknown;
+      const out = clearWorkflowRunManualRecoveryGuarded(db, {
+        runId: "run-ngx-561",
+        now: 1_730_000_900_000,
+        successfulNoMistakesEvidencePointer:
+          ".agent-workflows/run-ngx-561/no-mistakes-evidence.json",
+        successfulNoMistakesEvidence: evidence
+      });
+
+      expect(out.ok).toBe(false);
+      if (out.ok) throw new Error("expected refusal");
+      expect(out.reason).toBe("recovery_clear_refused");
+      const step = db
+        .prepare("SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?")
+        .get("run-ngx-561", "no-mistakes") as { state: string };
+      expect(step.state).toBe("failed");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps no-mistakes blocked when deterministic evidence mismatches the durable no-mistakes checkpoint", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRunWithState(db, "run-ngx-561", "failed", {
+        finishedAt: 1_730_000_800_000,
+        issueScope: { identifiers: ["NGX-561"] }
+      });
+      seedStep(db, "run-ngx-561", "no-mistakes", "failed", {
+        kind: "no-mistakes",
+        order: 3
+      });
+      seedNoMistakesCheckpoint(db, "run-ngx-561", "no-mistakes");
+
+      const evidence = JSON.parse(
+        fs.readFileSync(
+          path.join(
+            process.cwd(),
+            "test/fixtures/no-mistakes-evidence-stale-head.json"
+          ),
+          "utf8"
+        )
+      ) as unknown;
+      const out = clearWorkflowRunManualRecoveryGuarded(db, {
+        runId: "run-ngx-561",
+        now: 1_730_000_900_000,
+        successfulNoMistakesEvidencePointer:
+          ".agent-workflows/run-ngx-561/no-mistakes-evidence.json",
+        successfulNoMistakesEvidence: evidence
+      });
+
+      expect(out.ok).toBe(false);
+      if (out.ok) throw new Error("expected refusal");
+      expect(out.reason).toBe("recovery_clear_refused");
+      const step = db
+        .prepare("SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?")
+        .get("run-ngx-561", "no-mistakes") as { state: string };
+      expect(step.state).toBe("failed");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps no-mistakes blocked when latest checkpoint PR identity mismatches deterministic evidence", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRunWithState(db, "run-ngx-561", "failed", {
+        finishedAt: 1_730_000_800_000,
+        issueScope: { identifiers: ["NGX-561"] }
+      });
+      seedStep(db, "run-ngx-561", "no-mistakes", "failed", {
+        kind: "no-mistakes",
+        order: 3
+      });
+      seedNoMistakesCheckpoint(db, "run-ngx-561", "no-mistakes", {
+        prUrl: null
+      });
+      seedNoMistakesExternalStateCheckpoint(
+        db,
+        "run-ngx-561",
+        "no-mistakes",
+        1,
+        {
+          externalRunId: "01KWHNGX561PASS000000000000",
+          branch: "feat/ngx-561-deterministic-no-mistakes-evidence",
+          headSha: "1111111111111111111111111111111111111111",
+          activeStep: null,
+          stepStatus: "completed",
+          prUrl: "https://github.com/acme/momentum/pull/193",
+          ciState: "passed"
+        }
+      );
+
+      const evidence = JSON.parse(
+        fs.readFileSync(
+          path.join(
+            process.cwd(),
+            "test/fixtures/no-mistakes-evidence-pr-mismatch.json"
+          ),
+          "utf8"
+        )
+      ) as unknown;
+      const out = clearWorkflowRunManualRecoveryGuarded(db, {
+        runId: "run-ngx-561",
+        now: 1_730_000_900_000,
+        successfulNoMistakesEvidencePointer:
+          ".agent-workflows/run-ngx-561/no-mistakes-evidence.json",
+        successfulNoMistakesEvidence: evidence
+      });
+
+      expect(out.ok).toBe(false);
+      if (out.ok) throw new Error("expected refusal");
+      expect(out.reason).toBe("recovery_clear_refused");
+      const step = db
+        .prepare("SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?")
+        .get("run-ngx-561", "no-mistakes") as { state: string };
+      expect(step.state).toBe("failed");
     } finally {
       db.close();
     }
