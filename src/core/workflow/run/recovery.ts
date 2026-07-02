@@ -22,6 +22,9 @@
  * still be re-derived as `manual_recovery_lease` blockers until resolved.
  */
 
+import fs from "node:fs";
+import path from "node:path";
+
 import type { MomentumDb } from "../../../adapters/db.js";
 import { prepareRetryableDispatchedStepForRecoveryClear } from "../dispatch/retry.js";
 import { appendWorkflowEvent, buildWorkflowEventId } from "./events.js";
@@ -32,6 +35,10 @@ import {
   isExternalSideEffectTailStepKind,
   type WorkflowStepKind
 } from "./reducer.js";
+import {
+  classifyNoMistakesDeterministicEvidence,
+  type NoMistakesEvidenceExpectedIdentity
+} from "../recovery/no-mistakes-evidence.js";
 
 export type MarkWorkflowRunNeedsManualRecoveryInput = {
   runId: string;
@@ -253,6 +260,8 @@ export type ClearWorkflowRunManualRecoveryGuardedInput = {
   externalSideEffectLedgerPointer?: string;
   /** `no-mistakes:<run-id>#checks-passed` proof for interrupted success. */
   successfulNoMistakesEvidencePointer?: string;
+  /** Parsed deterministic no-mistakes evidence, usually loaded from a pointer. */
+  successfulNoMistakesEvidence?: unknown;
   /** Optional ledger pointer stored with interrupted no-mistakes reconciliation. */
   successfulNoMistakesLedgerPointer?: string;
   /** Lease-freshness grace window forwarded to the monitor re-derivation. */
@@ -428,6 +437,7 @@ export function clearWorkflowRunManualRecoveryGuarded(
           stepId: recoveryBeforeClear.stepId,
           now,
           evidencePointer,
+          successfulNoMistakesEvidence: input.successfulNoMistakesEvidence,
           ledgerPointer: input.successfulNoMistakesLedgerPointer ?? null
         });
         if (reconciledStep === undefined) {
@@ -526,6 +536,7 @@ function reconcileInterruptedNoMistakesStepForRecoveryClear(
     stepId: string;
     now: number;
     evidencePointer: string;
+    successfulNoMistakesEvidence?: unknown;
     ledgerPointer: string | null;
   }
 ):
@@ -538,7 +549,22 @@ function reconcileInterruptedNoMistakesStepForRecoveryClear(
     }
   | undefined {
   if (!isNoMistakesChecksPassedEvidencePointer(input.evidencePointer)) {
-    return undefined;
+    const deterministicEvidence =
+      input.successfulNoMistakesEvidence ??
+      readNoMistakesDeterministicEvidenceFromPointer(
+        input.evidencePointer,
+        input.ledgerPointer
+      );
+    if (deterministicEvidence === undefined) return undefined;
+    const expected = loadNoMistakesEvidenceExpectedIdentity(db, {
+      runId: input.runId
+    });
+    if (expected === undefined) return undefined;
+    const classified = classifyNoMistakesDeterministicEvidence(
+      deterministicEvidence,
+      expected
+    );
+    if (!classified.ok) return undefined;
   }
 
   const row = db
@@ -615,6 +641,78 @@ function reconcileInterruptedNoMistakesStepForRecoveryClear(
 function isNoMistakesChecksPassedEvidencePointer(value: string): boolean {
   const normalized = value.trim().toLowerCase();
   return /^no-mistakes:[^#\s]+#checks-passed$/.test(normalized);
+}
+
+function readNoMistakesDeterministicEvidenceFromPointer(
+  evidencePointer: string,
+  ledgerPointer: string | null
+): unknown | undefined {
+  for (const pointer of [evidencePointer, ledgerPointer]) {
+    if (pointer === null) continue;
+    const filePath = pointerToReadableEvidencePath(pointer);
+    if (filePath === null) continue;
+    try {
+      return JSON.parse(fs.readFileSync(filePath, "utf8")) as unknown;
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
+function pointerToReadableEvidencePath(pointer: string): string | null {
+  const withoutFragment = pointer.trim().split("#", 1)[0] ?? "";
+  if (withoutFragment.length === 0) return null;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(withoutFragment)) return null;
+  const candidate = path.resolve(withoutFragment);
+  try {
+    const stat = fs.statSync(candidate);
+    return stat.isFile() ? candidate : null;
+  } catch {
+    return null;
+  }
+}
+
+function loadNoMistakesEvidenceExpectedIdentity(
+  db: MomentumDb,
+  input: { runId: string }
+): NoMistakesEvidenceExpectedIdentity | undefined {
+  const row = db
+    .prepare("SELECT issue_scope_json FROM workflow_runs WHERE id = ?")
+    .get(input.runId) as { issue_scope_json: string | null } | undefined;
+  if (row === undefined) return undefined;
+  const issueScope = parseIssueScopeIdentifiers(row.issue_scope_json);
+  return {
+    workflowRunId: input.runId,
+    ...(issueScope.length > 0 ? { issueScope } : {})
+  };
+}
+
+function parseIssueScopeIdentifiers(value: string | null): string[] {
+  if (value === null || value.trim().length === 0) return [];
+  try {
+    return collectIssueScopeIdentifiers(JSON.parse(value) as unknown);
+  } catch {
+    return [];
+  }
+}
+
+function collectIssueScopeIdentifiers(value: unknown): string[] {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => collectIssueScopeIdentifiers(item));
+  }
+  if (value === null || typeof value !== "object") return [];
+  const record = value as Record<string, unknown>;
+  const direct = ["identifier", "id", "issue", "issueId", "key"].flatMap((key) =>
+    typeof record[key] === "string" ? [record[key] as string] : []
+  );
+  return [
+    ...direct,
+    ...["issues", "identifiers", "issueScope", "scope"].flatMap((key) =>
+      collectIssueScopeIdentifiers(record[key])
+    )
+  ];
 }
 
 function reconcileExternalSideEffectTailStepForRecoveryClear(
