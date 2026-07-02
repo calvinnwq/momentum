@@ -153,9 +153,35 @@ function seedNoMistakesCheckpoint(
       headSha: options.headSha ?? "1111111111111111111111111111111111111111",
       activeStep: null,
       stepStatus: "completed",
-      prUrl: options.prUrl ?? "https://github.com/acme/momentum/pull/193",
+      prUrl:
+        options.prUrl === undefined
+          ? "https://github.com/acme/momentum/pull/193"
+          : options.prUrl,
       ciState: "passed"
     }),
+    at
+  );
+}
+
+function seedNoMistakesExternalStateCheckpoint(
+  db: MomentumDb,
+  runId: string,
+  stepId: string,
+  sequence: number,
+  detail: Record<string, unknown>,
+  at = 1_730_000_000_000
+): void {
+  const roundId = `${runId}::${stepId}::dispatch::round-0`;
+  db.prepare(
+    `INSERT INTO executor_checkpoints (
+       checkpoint_id, round_id, sequence, stage, detail, created_at
+     ) VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(
+    `${roundId}::checkpoint-${sequence}`,
+    roundId,
+    sequence,
+    "external_state_mirrored",
+    JSON.stringify(detail),
     at
   );
 }
@@ -852,6 +878,66 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
           path.join(
             process.cwd(),
             "test/fixtures/no-mistakes-evidence-stale-head.json"
+          ),
+          "utf8"
+        )
+      ) as unknown;
+      const out = clearWorkflowRunManualRecoveryGuarded(db, {
+        runId: "run-ngx-561",
+        now: 1_730_000_900_000,
+        successfulNoMistakesEvidencePointer:
+          ".agent-workflows/run-ngx-561/no-mistakes-evidence.json",
+        successfulNoMistakesEvidence: evidence
+      });
+
+      expect(out.ok).toBe(false);
+      if (out.ok) throw new Error("expected refusal");
+      expect(out.reason).toBe("recovery_clear_refused");
+      const step = db
+        .prepare("SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?")
+        .get("run-ngx-561", "no-mistakes") as { state: string };
+      expect(step.state).toBe("failed");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps no-mistakes blocked when latest checkpoint PR identity mismatches deterministic evidence", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRunWithState(db, "run-ngx-561", "failed", {
+        finishedAt: 1_730_000_800_000,
+        issueScope: { identifiers: ["NGX-561"] }
+      });
+      seedStep(db, "run-ngx-561", "no-mistakes", "failed", {
+        kind: "no-mistakes",
+        order: 3
+      });
+      seedNoMistakesCheckpoint(db, "run-ngx-561", "no-mistakes", {
+        prUrl: null
+      });
+      seedNoMistakesExternalStateCheckpoint(
+        db,
+        "run-ngx-561",
+        "no-mistakes",
+        1,
+        {
+          externalRunId: "01KWHNGX561PASS000000000000",
+          branch: "feat/ngx-561-deterministic-no-mistakes-evidence",
+          headSha: "1111111111111111111111111111111111111111",
+          activeStep: null,
+          stepStatus: "completed",
+          prUrl: "https://github.com/acme/momentum/pull/193",
+          ciState: "passed"
+        }
+      );
+
+      const evidence = JSON.parse(
+        fs.readFileSync(
+          path.join(
+            process.cwd(),
+            "test/fixtures/no-mistakes-evidence-pr-mismatch.json"
           ),
           "utf8"
         )

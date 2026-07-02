@@ -719,7 +719,8 @@ function loadCurrentNoMistakesCheckpointIdentity(
 ): NoMistakesCheckpointIdentity | null {
   const rows = db
     .prepare(
-      `SELECT c.stage AS stage, c.detail AS detail
+      `SELECT r.attempt AS attempt, r.round_index AS roundIndex,
+              c.stage AS stage, c.detail AS detail, c.sequence AS sequence
          FROM executor_rounds AS r
          JOIN executor_checkpoints AS c ON c.round_id = r.round_id
         WHERE r.workflow_run_id = ?
@@ -728,14 +729,28 @@ function loadCurrentNoMistakesCheckpointIdentity(
           AND c.stage IN ('external_state_mirrored', 'expected_external_identity')
         ORDER BY r.attempt DESC, r.round_index DESC,
                  CASE c.stage WHEN 'external_state_mirrored' THEN 0 ELSE 1 END,
-                 c.sequence ASC`
+                 c.sequence DESC`
     )
-    .all(input.runId, input.stepId) as { stage: string; detail: string | null }[];
-  for (const row of rows) {
+    .all(input.runId, input.stepId) as {
+    attempt: number;
+    roundIndex: number;
+    stage: string;
+    detail: string | null;
+    sequence: number;
+  }[];
+  const current = rows.filter(
+    (row) =>
+      row.attempt === rows[0]?.attempt && row.roundIndex === rows[0]?.roundIndex
+  );
+  const identities = current.flatMap((row) => {
     const identity = parseNoMistakesCheckpointIdentity(row.detail);
-    if (identity !== null) return identity;
-  }
-  return null;
+    return identity === null ? [] : [identity];
+  });
+  return (
+    identities.find((identity) => identity.pullRequestId !== undefined) ??
+    identities[0] ??
+    null
+  );
 }
 
 function parseNoMistakesCheckpointIdentity(
