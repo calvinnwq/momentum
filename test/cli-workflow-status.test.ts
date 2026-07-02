@@ -515,6 +515,66 @@ describe("momentum workflow status", () => {
     expect(outsidePayload.runs).toEqual([]);
   });
 
+  it("classifies open gates in status list next action", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, {
+        runId: "cwfp-list-gate",
+        state: "running",
+        updatedAt: NOW
+      });
+      seedStep(db, "cwfp-list-gate", {
+        stepId: "implementation",
+        kind: "implementation",
+        state: "running",
+        order: 1,
+        startedAt: RECENT
+      });
+      seedLease(db, "cwfp-list-gate", {
+        leaseKind: "managed-step",
+        holder: "pipeline",
+        acquiredAt: RECENT,
+        expiresAt: FUTURE,
+        heartbeatAt: RECENT
+      });
+      insertWorkflowGate(
+        db,
+        {
+          gateId: "gate-list-open",
+          workflowRunId: "cwfp-list-gate",
+          targetScope: "workflow",
+          gateType: "operator_decision_required",
+          reason: "operator must resolve the gate",
+          allowedActions: ["fix", "abort"],
+          recommendedAction: "fix",
+          policyEnvelope: ["fix"]
+        },
+        { now: RECENT }
+      );
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "status",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      runs: Array<{
+        monitor: { nextAction: { code: string; actionClass: string } };
+      }>;
+    };
+    expect(payload.runs[0]?.monitor.nextAction).toMatchObject({
+      code: "resume_running",
+      actionClass: "resolve_gate"
+    });
+  });
+
   it("returns run_not_found for an unknown run-id in detail mode", async () => {
     const dataDir = makeTempDir();
     const result = await run([

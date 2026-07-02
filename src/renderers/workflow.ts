@@ -1645,7 +1645,7 @@ export function summaryToJsonShape(
     },
     monitor: workflowMonitorToJsonShape(
       summary.monitor,
-      workflowActionClassContextForRun(summary.run)
+      workflowActionClassContextForRun(summary.run, summary.gates)
     )
   };
 }
