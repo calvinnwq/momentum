@@ -2,34 +2,22 @@
 
 ## [0.16.0](https://github.com/calvinnwq/momentum/compare/v0.15.0...v0.16.0) (2026-07-02)
 
+0.16.0 is a native workflow hardening release. It makes coding workflow startup fail earlier and more clearly, makes recovery/readback surfaces easier to consume, and tightens the lifecycle for external tail steps like merge cleanup and Linear refresh.
 
-### Features
+### Highlights
 
-* **daemon:** add Linear refresh lifecycle reconciliation ([fb8c95e](https://github.com/calvinnwq/momentum/commit/fb8c95edba9a0c1d40a031da629da51a0fa16e0e))
-* **workflow:** add structural workflow preflight validation ([1fb7390](https://github.com/calvinnwq/momentum/commit/1fb7390171c559855afc6854d8e10459911e94c3))
-* **workflow:** Added a focused NGX-563 run-shape structural preflight slice for invalid approval boundaries with compact evidence on preview/start paths. ([22ff768](https://github.com/calvinnwq/momentum/commit/22ff768924378422fbf4623a55ef1af289c7e79a))
-* **workflow:** Added and verified the NGX-563 result_file mismatch structural preflight slice on branch feat/ngx-563-structural-workflow-preflight at HEAD 209b046. ([4772936](https://github.com/calvinnwq/momentum/commit/47729363215049a9ed13ab780e0a0a0d3dc20fb9))
-* **workflow:** Added field-level structural preflight evidence for unknown wrapper config top-level and step keys, verified with focused tests, typecheck, build, and diff checks. ([209b046](https://github.com/calvinnwq/momentum/commit/209b04607ee30fc1a34b6be3cec26a73af457ecf))
-* **workflow:** Added the first NGX-563 structural preflight slice by emitting compact route.steps preflight evidence for invalid native coding route config before preview/start can proceed. ([04c79f8](https://github.com/calvinnwq/momentum/commit/04c79f869bd60d86078ffeb776d4fbfe89666cc2))
-* **workflow:** Added the next NGX-563 slice so missing coding-door objectives now emit compact workflow.run_shape structural preflight evidence on both preview-coding and start-coding. ([24015f1](https://github.com/calvinnwq/momentum/commit/24015f11fe5ecd7f68070042cba87a9146aeb720))
-* **workflow:** Added the next NGX-563 slice: route.profile structural preflight now rejects blank profiles with compact evidence before preview/start can continue. ([b600aa1](https://github.com/calvinnwq/momentum/commit/b600aa14de549f1774b441573c8b1f561b1f23ad))
-* **workflow:** Added the next NGX-563 structural preflight slice by rejecting blank issue-scope identifiers with compact run-shape evidence. ([69d4965](https://github.com/calvinnwq/momentum/commit/69d4965682560b9060e66a77f452703d0ee32f7a))
-* **workflow:** Added the NGX-563 built-in definition resolution preflight slice so missing native coding workflow versions now fail with compact evidence before durable DB creation. ([0a40b9d](https://github.com/calvinnwq/momentum/commit/0a40b9db9c1e99143a27f0588da1f553d1e4d3d1))
-* **workflow:** Added wrapper-config structural preflight evidence and verified it with focused tests, typecheck, build, and diff whitespace checks. ([9cdd627](https://github.com/calvinnwq/momentum/commit/9cdd62715b58e917977b31998b5adbf1342b467d))
-* **workflow:** define native goal-loop contract ([7e9f2f3](https://github.com/calvinnwq/momentum/commit/7e9f2f352de6ad3ae72d4645b4c3f0652539340d))
-* **workflow:** expose structured recovery action classes ([14e472a](https://github.com/calvinnwq/momentum/commit/14e472af4ce41d95018076ededaac223dc2a0e75))
-* **workflow:** harden merge-cleanup lifecycle ([b72b855](https://github.com/calvinnwq/momentum/commit/b72b855a1e7262cd524a978639d7e14cc59f4dae))
-* **workflow:** reconcile no-mistakes recovery from deterministic evidence ([4c579bd](https://github.com/calvinnwq/momentum/commit/4c579bd5af56487ee29e0b64ac9e7f48c64d74d7))
+* Native coding workflow preflight now validates workflow definition resolution, approval boundaries, route profiles, route steps, wrapper config shape, issue scope, repo inputs, and required objectives before execution proceeds. Invalid inputs now return compact structural evidence instead of drifting into later runtime failures. ([1fb7390](https://github.com/calvinnwq/momentum/commit/1fb7390171c559855afc6854d8e10459911e94c3), [71527d3](https://github.com/calvinnwq/momentum/commit/71527d38937b71848dd95b6f425b12213ebef9c4))
+* Recovery readbacks now use a clearer shared `nextAction` contract across monitor, status, watch, and handoff-style surfaces, including action classes and recovery detail where they are meaningful. ([14e472a](https://github.com/calvinnwq/momentum/commit/14e472af4ce41d95018076ededaac223dc2a0e75), [27ee520](https://github.com/calvinnwq/momentum/commit/27ee520ffdb284e5cfd69691e58703f629df01c5))
+* No-mistakes recovery can reconcile interrupted runs from deterministic checks-passed evidence, while ordinary failed no-mistakes steps remain normal retryable failures. ([4c579bd](https://github.com/calvinnwq/momentum/commit/4c579bd5af56487ee29e0b64ac9e7f48c64d74d7), [27ee520](https://github.com/calvinnwq/momentum/commit/27ee520ffdb284e5cfd69691e58703f629df01c5))
+* Merge cleanup and Linear refresh tails now have stronger preflight, audit, reconciliation, and recovery behavior for external side effects. ([b72b855](https://github.com/calvinnwq/momentum/commit/b72b855a1e7262cd524a978639d7e14cc59f4dae), [fb8c95e](https://github.com/calvinnwq/momentum/commit/fb8c95edba9a0c1d40a031da629da51a0fa16e0e))
+* The native goal-loop contract is now documented, including invocation and round evidence, completion recommendations, verification results, artifacts, learnings, and recovery metadata. ([7e9f2f3](https://github.com/calvinnwq/momentum/commit/7e9f2f352de6ad3ae72d4645b4c3f0652539340d))
 
+### Operator Notes
 
-### Bug Fixes
-
-* **renderers:** align workflow recovery next actions ([27ee520](https://github.com/calvinnwq/momentum/commit/27ee520ffdb284e5cfd69691e58703f629df01c5))
-* **workflow:** align renderer recovery actions ([8a1353b](https://github.com/calvinnwq/momentum/commit/8a1353bcf26e101926a251cae4772f89ec0fd6c1))
-* **workflow:** Moved coding start run-shape structural preflight ahead of database opening so invalid approval boundaries now fail with evidence before durable writes. ([a3197c0](https://github.com/calvinnwq/momentum/commit/a3197c03473cde1ba11808cdb5ce290de1809f06))
-* **workflow:** Rejected blank whitespace repo inputs on native coding preview/start paths with structural preflight evidence and verified the focused NGX-563 gates. ([cb67d4d](https://github.com/calvinnwq/momentum/commit/cb67d4dc2eff662a7c3d9e5c948f56322c6bf6eb))
-* **workflow:** validate native workflow config ([a4e42bf](https://github.com/calvinnwq/momentum/commit/a4e42bf5bd7eab4a92c54bf2712d5acd768d45e8))
-* **workflow:** validate native wrapper configuration ([71527d3](https://github.com/calvinnwq/momentum/commit/71527d38937b71848dd95b6f425b12213ebef9c4))
+* `workflow run preview-coding` and `workflow run start-coding` now reject malformed native workflow inputs earlier, including blank repo values, missing objectives, invalid approval boundaries, missing built-in definitions, malformed route config, and unsafe wrapper config fields.
+* `reconcile_deterministic_evidence` is now reserved for explicit interrupted no-mistakes evidence recovery. A plain failed no-mistakes step should surface as `retry_failed_step` with no recovery detail.
+* Merge cleanup and Linear refresh remain external-write tail steps. They should reconcile from durable evidence and explicit intent instead of replaying writes blindly.
+* Documentation and architecture anchors were refreshed around the native goal-loop direction and workflow/executor module ownership.
 
 ## [0.15.0](https://github.com/calvinnwq/momentum/compare/v0.14.4...v0.15.0) (2026-07-01)
 
