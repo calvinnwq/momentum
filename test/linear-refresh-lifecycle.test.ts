@@ -159,6 +159,29 @@ describe("linear-refresh lifecycle planner", () => {
     });
   });
 
+  it("ignores pending non-status intents when selecting the refresh status update", () => {
+    const plan = planLinearRefreshLifecycle(
+      baseInput({
+        pendingIntents: [
+          intent({
+            id: "intent_source_satisfied",
+            intentType: "source_satisfied",
+            payload: { kind: "comment" }
+          }),
+          intent()
+        ]
+      })
+    );
+
+    expect(plan).toMatchObject({
+      phase: "apply",
+      status: "ready",
+      action: "apply_external_update",
+      safeToMutate: true
+    });
+    expect(plan.evidence.intentId).toBe(INTENT_ID);
+  });
+
   it("requires a matching Linear source item", () => {
     expect(
       planLinearRefreshLifecycle(baseInput({ sourceItemsById: sources() }))
@@ -175,7 +198,7 @@ describe("linear-refresh lifecycle planner", () => {
       planLinearRefreshLifecycle(
         baseInput({ pendingIntents: [intent({ intentType: "source_satisfied" })] })
       )
-    ).toMatchObject({ status: "intent_stale", safeToMutate: false });
+    ).toMatchObject({ status: "intent_missing", safeToMutate: false });
     expect(
       planLinearRefreshLifecycle(
         baseInput({ pendingIntents: [intent({ payload: {} })] })
@@ -242,6 +265,30 @@ describe("linear-refresh lifecycle planner", () => {
       phase: "preflight",
       status: "intent_stale",
       action: "resolve_intent_evidence",
+      safeToMutate: false
+    });
+  });
+
+  it("does not reconcile already-applied evidence from non-status intents", () => {
+    const applied = intent({
+      status: "applied",
+      appliedAt: 2,
+      intentType: "source_satisfied",
+      payload: { kind: "comment" }
+    });
+
+    expect(
+      planLinearRefreshLifecycle(
+        baseInput({
+          pendingIntents: [],
+          appliedIntents: [applied],
+          latestAuditsByIntentId: new Map([[applied.id, audit(applied)]])
+        })
+      )
+    ).toMatchObject({
+      phase: "preflight",
+      status: "intent_missing",
+      action: "seed_pending_intent_then_retry",
       safeToMutate: false
     });
   });

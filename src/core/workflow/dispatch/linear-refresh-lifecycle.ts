@@ -83,20 +83,21 @@ export function planLinearRefreshLifecycle(
       evidence(null, null, null, null)
     );
   }
-  if (input.pendingIntents.length > 1) {
+  const pendingStatusIntents = input.pendingIntents.filter(isStatusUpdateIntent);
+  if (pendingStatusIntents.length > 1) {
     return plan(
       "preflight",
       "intent_duplicate",
       "resolve_intent_evidence",
       false,
-      evidence(issueScopeIdentifier, input.pendingIntents[0] ?? null, null, null)
+      evidence(issueScopeIdentifier, pendingStatusIntents[0] ?? null, null, null)
     );
   }
-  if (input.pendingIntents.length === 0) {
+  if (pendingStatusIntents.length === 0) {
     return planAlreadyAppliedOrMissing(input, issueScopeIdentifier);
   }
 
-  const intent = input.pendingIntents[0]!;
+  const intent = pendingStatusIntents[0]!;
   const source = sourceForIntent(input.sourceItemsById, intent);
   const validation = validateIntent(intent, source, issueScopeIdentifier);
   if (!validation.ok) {
@@ -122,14 +123,23 @@ function planAlreadyAppliedOrMissing(
   input: LinearRefreshLifecycleInput,
   issueScopeIdentifier: string
 ): LinearRefreshLifecyclePlan {
-  const applied = input.appliedIntents ?? [];
+  const applied = (input.appliedIntents ?? []).filter(isStatusUpdateIntent);
   if (applied.length === 1) {
     const intent = applied[0]!;
     const source = sourceForIntent(input.sourceItemsById, intent);
     const audit = input.latestAuditsByIntentId?.get(intent.id) ?? null;
     const marker = idempotencyMarker(intent);
+    const validation = validateAppliedIntent(intent, source, issueScopeIdentifier);
+    if (!validation.ok) {
+      return plan(
+        "preflight",
+        validation.status,
+        validation.action,
+        false,
+        evidence(issueScopeIdentifier, intent, source, marker, audit)
+      );
+    }
     if (
-      source !== null &&
       audit !== null &&
       audit.lifecycleState === "succeeded" &&
       audit.idempotencyMarker === marker &&
@@ -194,7 +204,6 @@ function validateIntent(
   if (
     intent.adapterKind !== "linear" ||
     intent.status !== "pending" ||
-    intent.intentType !== "status_update" ||
     !matchesScope
   ) {
     return {
@@ -211,6 +220,53 @@ function validateIntent(
     };
   }
   return { ok: true };
+}
+
+function validateAppliedIntent(
+  intent: UpdateIntent,
+  source: SourceItem | null,
+  issueScopeIdentifier: string
+):
+  | { ok: true }
+  | {
+      ok: false;
+      status: "source_missing" | "intent_stale" | "payload_invalid";
+      action: LinearRefreshLifecycleAction;
+    } {
+  if (source === null || source.adapterKind !== "linear") {
+    return {
+      ok: false,
+      status: "source_missing",
+      action: "resolve_intent_evidence"
+    };
+  }
+  const matchesScope =
+    source.externalId === issueScopeIdentifier ||
+    source.externalKey === issueScopeIdentifier ||
+    intent.targetExternalId === issueScopeIdentifier;
+  if (
+    intent.adapterKind !== "linear" ||
+    intent.status !== "applied" ||
+    !matchesScope
+  ) {
+    return {
+      ok: false,
+      status: "intent_stale",
+      action: "resolve_intent_evidence"
+    };
+  }
+  if (!statusUpdatePayloadValid(intent.payload)) {
+    return {
+      ok: false,
+      status: "payload_invalid",
+      action: "resolve_intent_evidence"
+    };
+  }
+  return { ok: true };
+}
+
+function isStatusUpdateIntent(intent: UpdateIntent): boolean {
+  return intent.intentType === "status_update";
 }
 
 function statusUpdatePayloadValid(payload: Record<string, unknown>): boolean {

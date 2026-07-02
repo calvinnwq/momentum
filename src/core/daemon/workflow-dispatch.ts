@@ -15,7 +15,8 @@ import {
 import { getLatestIntentApplyAudit } from "../intent/apply-audits.js";
 import {
   loadMomentumPolicy,
-  resolveIntentApplyPolicy
+  resolveIntentApplyPolicy,
+  type UpdateIntentApplyPolicy
 } from "../intent/policy.js";
 import {
   listUpdateIntents,
@@ -214,9 +215,15 @@ function resolveDaemonExternalApplyContext(
   ]);
   const latestAuditsByIntentId = loadLatestLinearRefreshAudits(context.db, applied);
   const policy = resolveLinearRefreshPolicy(resolved.exec.repoPath);
+  if (!policy.ok) {
+    return {
+      ok: false,
+      reason: `linear_refresh_policy_load_failed: ${policy.code}: ${policy.error}`
+    };
+  }
   const lifecycle = planLinearRefreshLifecycle({
     env,
-    intentApplyPolicy: policy,
+    intentApplyPolicy: policy.value,
     issueScopeIdentifier,
     pendingIntents: pending,
     appliedIntents: applied,
@@ -249,11 +256,18 @@ function resolveDaemonExternalApplyContext(
   if (!lifecycle.safeToMutate) {
     return {
       ok: false,
-      reason: linearRefreshRefusalReason(lifecycle.status, policy, lifecycle.message)
+      reason: linearRefreshRefusalReason(
+        lifecycle.status,
+        policy.value,
+        lifecycle.message
+      )
     };
   }
 
-  const intentId = pending[0]!.id;
+  const intentId = lifecycle.evidence.intentId;
+  if (intentId === null) {
+    return { ok: false, reason: "linear_refresh_intent_evidence_missing" };
+  }
   const executeDeps: ExecuteExternalApplyDeps = {};
   const factory = deps.buildLinearExternalUpdateClient;
   if (factory) {
@@ -356,10 +370,30 @@ function loadLatestLinearRefreshAudits(
   return out;
 }
 
-function resolveLinearRefreshPolicy(repoPath: string) {
+type LinearRefreshPolicyResolution =
+  | { ok: true; value: UpdateIntentApplyPolicy }
+  | {
+      ok: false;
+      code: string;
+      error: string;
+    };
+
+function resolveLinearRefreshPolicy(repoPath: string): LinearRefreshPolicyResolution {
   const loaded = loadMomentumPolicy(repoPath);
-  if (!loaded.ok || !loaded.present) return resolveIntentApplyPolicy(undefined).value;
-  return resolveIntentApplyPolicy(loaded.policy.config).value;
+  if (!loaded.ok) {
+    return {
+      ok: false,
+      code: loaded.code,
+      error: loaded.error
+    };
+  }
+  if (!loaded.present) {
+    return { ok: true, value: resolveIntentApplyPolicy(undefined).value };
+  }
+  return {
+    ok: true,
+    value: resolveIntentApplyPolicy(loaded.policy.config).value
+  };
 }
 
 function linearRefreshRefusalReason(
