@@ -2196,7 +2196,8 @@ Exit code 0 on success, 1 on structured refusal, 2 on usage error.
 
 ## Native goal-loop evidence contract
 
-Native goal-loop status and log readers treat Momentum executor rows and child evidence as the source of truth.
+Native goal-loop log readers treat Momentum executor rows and child evidence as the source of truth.
+Future status, handoff, monitor, and GUI readers must use the same projection once they are wired to executor round evidence.
 The implementation step's `goal-loop` executor records one `executor_invocation` for the autonomous attempt and one ordered `executor_round` per durable iteration.
 Readers must derive summaries, key changes, learnings, remaining work, verification status, changed files, commit SHA, recovery reason, artifacts, checkpoints, findings, and decisions from those rows and artifact pointers.
 They must not scrape terminal scrollback or treat `.gnhf/runs` as authoritative.

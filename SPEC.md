@@ -51,10 +51,11 @@ Runner-authored results are parsed before finalization and classification, and t
 The `commit` object supplies the commit intent that Momentum uses only after repository safety and verification have passed.
 Inside `commit`, `type` and `subject` are required; `scope`, `body`, and `breaking` are optional intent fields.
 
-After finalization, Momentum projects the captured runner result plus durable round evidence into the native round evidence view consumed by status, logs, handoff, monitor, and future GUI surfaces.
+After finalization, Momentum projects the captured runner result plus durable round evidence into the native round evidence view consumed by `workflow run logs`.
+Future status, handoff, monitor, and GUI surfaces must use the same projection once they are wired to executor round evidence instead of scraping terminal text or runner-owned directories.
 The `momentum.native-goal-loop.round-result.v1` fixture is a post-finalization evidence projection, not a runner-authored input document.
 Its required JSON fields are `schema`, `summary`, `keyChanges`, `learnings`, `completionRecommendation`, `verificationResult`, `artifacts`, `checkpoints`, `changedFiles`, `commitSha`, `recoveryReason`, and `remainingWork`.
-`completionRecommendation` is the executor's recommendation only: `complete`, `continue`, `operator_decision_required`, `manual_recovery_required`, `blocked`, `failed`, or `cancelled`.
+`completionRecommendation` is the executor's recommendation only: `complete`, `continue`, `approval_required`, `operator_decision_required`, `manual_recovery_required`, `blocked`, `failed`, or `cancelled`.
 `verificationResult` records command names, exit codes, timing when available, and an overall status such as `passed`, `failed`, `skipped`, or `not_run`.
 Artifacts and checkpoints are durable pointers under the round, not proof by terminal text.
 `commitSha` is non-null only after Momentum has verified and recorded the successful commit for that round.

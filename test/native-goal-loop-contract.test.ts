@@ -139,6 +139,9 @@ describe("native goal-loop contract docs", () => {
     expect(spec).toContain(
       "Its required JSON fields are `schema`, `summary`, `keyChanges`, `learnings`, `completionRecommendation`, `verificationResult`, `artifacts`, `checkpoints`, `changedFiles`, `commitSha`, `recoveryReason`, and `remainingWork`."
     );
+    expect(spec).toContain(
+      "`completionRecommendation` is the executor's recommendation only: `complete`, `continue`, `approval_required`, `operator_decision_required`, `manual_recovery_required`, `blocked`, `failed`, or `cancelled`."
+    );
   });
 
   it("documents commit/reset and resume semantics from Momentum-owned durable state", () => {
@@ -157,7 +160,10 @@ describe("native goal-loop contract docs", () => {
       "For native goal-loop, `executor_invocations` own the autonomous attempt and `executor_rounds` own each durable iteration"
     );
     expect(workflowCommands).toContain(
-      "Native goal-loop status and log readers treat Momentum executor rows and child evidence as the source of truth"
+      "Native goal-loop log readers treat Momentum executor rows and child evidence as the source of truth"
+    );
+    expect(workflowCommands).toContain(
+      "Future status, handoff, monitor, and GUI readers must use the same projection once they are wired to executor round evidence."
     );
   });
 
