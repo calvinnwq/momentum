@@ -40,9 +40,10 @@ import {
 } from "../run/reducer.js";
 
 /**
- * Executor families pinned by SPEC.md's Runtime Model anchor. A
- * `StepDefinition` selects one family; the full executor config record arrives
- * with M10-03.
+ * Executor families pinned by SPEC.md's Runtime Model and Native Goal-Loop
+ * Contract anchors. A `StepDefinition` selects one family; runner
+ * compatibility shims such as GNHF belong below `goal-loop` rather than in this
+ * family list.
  */
 export const WORKFLOW_EXECUTOR_FAMILIES = [
   "goal-loop",
@@ -312,7 +313,10 @@ export const CODING_WORKFLOW_DEFINITION_KEY = "coding-workflow";
  *                                       daemon-dispatchable through the
  *                                       M6 safety-gated adapter)
  *
- * These families are editable defaults, not a fixed product boundary.
+ * These families can evolve through explicit workflow-runtime design, but
+ * compatibility runners such as GNHF must report through the native `goal-loop`
+ * invocation / round contract rather than becoming first-class executor
+ * families merely to reuse behavior.
  */
 export const CODING_WORKFLOW_DEFINITION: WorkflowDefinition = {
   key: CODING_WORKFLOW_DEFINITION_KEY,

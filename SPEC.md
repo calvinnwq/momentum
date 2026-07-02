@@ -49,6 +49,7 @@ The runner-authored result document consumed by the shipped goal-loop mechanism 
 Runner-authored results are parsed before finalization and classification, and their required fields are `success`, `summary`, `key_changes_made`, `goal_complete`, and `commit`.
 `key_learnings` and `remaining_work` are optional runner-authored arrays that default to empty arrays when omitted.
 The `commit` object supplies the commit intent that Momentum uses only after repository safety and verification have passed.
+Inside `commit`, `type` and `subject` are required; `scope`, `body`, and `breaking` are optional intent fields.
 
 After finalization, Momentum projects the captured runner result plus durable round evidence into the native round evidence view consumed by status, logs, handoff, monitor, and future GUI surfaces.
 The `momentum.native-goal-loop.round-result.v1` fixture is a post-finalization evidence projection, not a runner-authored input document.
