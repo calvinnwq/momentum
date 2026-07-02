@@ -50,6 +50,7 @@ export type LinearRefreshLifecycleInput = {
   appliedIntents?: readonly UpdateIntent[];
   sourceItemsById: ReadonlyMap<string, SourceItem>;
   latestAuditsByIntentId?: ReadonlyMap<string, IntentApplyAudit>;
+  expectedOperatorReason: string | null;
 };
 
 export function planLinearRefreshLifecycle(
@@ -143,6 +144,7 @@ function planAlreadyAppliedOrMissing(
       audit !== null &&
       audit.lifecycleState === "succeeded" &&
       audit.idempotencyMarker === marker &&
+      audit.operatorReason === input.expectedOperatorReason &&
       audit.reconcile.status === "success"
     ) {
       return plan(
@@ -197,14 +199,11 @@ function validateIntent(
       action: "resolve_intent_evidence"
     };
   }
-  const matchesScope =
-    source.externalId === issueScopeIdentifier ||
-    source.externalKey === issueScopeIdentifier ||
-    intent.targetExternalId === issueScopeIdentifier;
   if (
     intent.adapterKind !== "linear" ||
     intent.status !== "pending" ||
-    !matchesScope
+    !sourceMatchesIssueScope(source, issueScopeIdentifier) ||
+    !intentTargetMatchesSource(intent, source)
   ) {
     return {
       ok: false,
@@ -240,14 +239,11 @@ function validateAppliedIntent(
       action: "resolve_intent_evidence"
     };
   }
-  const matchesScope =
-    source.externalId === issueScopeIdentifier ||
-    source.externalKey === issueScopeIdentifier ||
-    intent.targetExternalId === issueScopeIdentifier;
   if (
     intent.adapterKind !== "linear" ||
     intent.status !== "applied" ||
-    !matchesScope
+    !sourceMatchesIssueScope(source, issueScopeIdentifier) ||
+    !intentTargetMatchesSource(intent, source)
   ) {
     return {
       ok: false,
@@ -267,6 +263,25 @@ function validateAppliedIntent(
 
 function isStatusUpdateIntent(intent: UpdateIntent): boolean {
   return intent.intentType === "status_update";
+}
+
+function sourceMatchesIssueScope(
+  source: SourceItem,
+  issueScopeIdentifier: string
+): boolean {
+  return (
+    source.externalId === issueScopeIdentifier ||
+    source.externalKey === issueScopeIdentifier
+  );
+}
+
+function intentTargetMatchesSource(
+  intent: UpdateIntent,
+  source: SourceItem
+): boolean {
+  return (
+    intent.targetExternalId === null || intent.targetExternalId === source.externalId
+  );
 }
 
 function statusUpdatePayloadValid(payload: Record<string, unknown>): boolean {

@@ -221,6 +221,7 @@ function resolveDaemonExternalApplyContext(
       reason: `linear_refresh_policy_load_failed: ${policy.code}: ${policy.error}`
     };
   }
+  const operatorReason = linearRefreshOperatorReason(runId, stepId);
   const lifecycle = planLinearRefreshLifecycle({
     env,
     intentApplyPolicy: policy.value,
@@ -228,7 +229,8 @@ function resolveDaemonExternalApplyContext(
     pendingIntents: pending,
     appliedIntents: applied,
     sourceItemsById,
-    latestAuditsByIntentId
+    latestAuditsByIntentId,
+    expectedOperatorReason: operatorReason
   });
   if (lifecycle.status === "already_applied") {
     const intent = applied.find((candidate) => candidate.id === lifecycle.evidence.intentId);
@@ -295,7 +297,7 @@ function resolveDaemonExternalApplyContext(
       executeExternalApply({
         db: context.db,
         intentId,
-        operatorReason: `daemon external-apply for workflow ${runId}/${stepId}`,
+        operatorReason,
         repoPath: resolved.exec.repoPath,
         env,
         statusMutation: null,
@@ -458,6 +460,10 @@ function linearRefreshAlreadyAppliedSuccess(
       idempotencyMarker: audit.idempotencyMarker
     }
   };
+}
+
+function linearRefreshOperatorReason(runId: string, stepId: string): string {
+  return `daemon external-apply for workflow ${runId}/${stepId}`;
 }
 
 function readLinearApiKey(

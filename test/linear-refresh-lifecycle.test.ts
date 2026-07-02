@@ -11,6 +11,8 @@ import {
 const ISSUE_SCOPE = "NGX-565";
 const SOURCE_ID = "source_565";
 const INTENT_ID = "intent_565";
+const EXPECTED_OPERATOR_REASON =
+  "daemon external-apply for workflow current-run/linear-refresh";
 
 function source(overrides: Partial<SourceItem> = {}): SourceItem {
   return {
@@ -72,7 +74,7 @@ function audit(
     },
     requestedAt: 1,
     finishedAt: 2,
-    operatorReason: "daemon external-apply",
+    operatorReason: EXPECTED_OPERATOR_REASON,
     operatorActor: null,
     intentApplyPolicy: "external_apply_allowed",
     allowStatusMutation: true,
@@ -110,6 +112,7 @@ function baseInput(overrides: Partial<Parameters<typeof planLinearRefreshLifecyc
     issueScopeIdentifier: ISSUE_SCOPE,
     pendingIntents: [intent()],
     sourceItemsById: sources(source()),
+    expectedOperatorReason: EXPECTED_OPERATOR_REASON,
     ...overrides
   };
 }
@@ -248,6 +251,33 @@ describe("linear-refresh lifecycle planner", () => {
     expect(plan.evidence.auditId).toBe("audit_565");
   });
 
+  it("refuses already-applied evidence from another workflow run", () => {
+    const applied = intent({ status: "applied", appliedAt: 2 });
+    const input = {
+      ...baseInput({
+        pendingIntents: [],
+        appliedIntents: [applied],
+        latestAuditsByIntentId: new Map([
+          [
+            applied.id,
+            audit(applied, {
+              operatorReason:
+                "daemon external-apply for workflow old-run/linear-refresh"
+            })
+          ]
+        ])
+      }),
+      expectedOperatorReason: EXPECTED_OPERATOR_REASON
+    };
+
+    expect(planLinearRefreshLifecycle(input)).toMatchObject({
+      phase: "preflight",
+      status: "intent_stale",
+      action: "resolve_intent_evidence",
+      safeToMutate: false
+    });
+  });
+
   it("refuses stale or mismatched already-applied evidence", () => {
     const applied = intent({ status: "applied", appliedAt: 2 });
 
@@ -289,6 +319,27 @@ describe("linear-refresh lifecycle planner", () => {
       phase: "preflight",
       status: "intent_missing",
       action: "seed_pending_intent_then_retry",
+      safeToMutate: false
+    });
+  });
+
+  it("refuses status updates whose source item does not match issue scope", () => {
+    expect(
+      planLinearRefreshLifecycle(
+        baseInput({
+          pendingIntents: [intent({ targetExternalId: ISSUE_SCOPE })],
+          sourceItemsById: sources(
+            source({
+              externalId: "linear-issue-other",
+              externalKey: "NGX-999"
+            })
+          )
+        })
+      )
+    ).toMatchObject({
+      phase: "preflight",
+      status: "intent_stale",
+      action: "resolve_intent_evidence",
       safeToMutate: false
     });
   });
