@@ -69,7 +69,7 @@ describe("repo internal docs boundary", () => {
   });
 
   it("keeps compact source-truth anchors in living repo docs", () => {
-    for (const rel of ["AGENTS.md", "ARCHITECTURE.md", "SPEC.md"]) {
+    for (const rel of ["AGENTS.md", "ARCHITECTURE.md", "SPEC.md", "VISION.md"]) {
       const body = readDoc(rel);
       expect(body.trim().length, `${rel} should not be empty`).toBeGreaterThan(0);
       expect(body, `${rel} should route long-form docs to Obsidian`).toContain(
@@ -92,7 +92,7 @@ describe("repo internal docs boundary", () => {
   });
 
   it("documents where internal docs go and how exceptions are reviewed", () => {
-    for (const rel of ["AGENTS.md", "SPEC.md"]) {
+    for (const rel of ["AGENTS.md", "SPEC.md", "VISION.md"]) {
       const body = readDoc(rel);
       expect(body, `${rel} should keep Obsidian as the durable internal home`).toContain(
         "/Workspaces/Momentum"
@@ -112,6 +112,7 @@ describe("repo internal docs boundary", () => {
       path.join(repoRoot, "AGENTS.md"),
       path.join(repoRoot, "ARCHITECTURE.md"),
       path.join(repoRoot, "SPEC.md"),
+      path.join(repoRoot, "VISION.md"),
       ...listMarkdown(path.join(repoRoot, "docs")),
     ];
 
