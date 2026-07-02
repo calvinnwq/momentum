@@ -600,7 +600,12 @@ describe("momentum workflow status", () => {
         runState: string;
         terminal: boolean;
         activeStep: { stepId: string; state: string } | null;
-        nextAction: { code: string; stepId: string | null };
+        nextAction: {
+          code: string;
+          stepId: string | null;
+          actionClass: string;
+          recoveryDetail: unknown;
+        };
         recovery: { code: string } | null;
       };
       evidence: unknown[];
@@ -621,6 +626,8 @@ describe("momentum workflow status", () => {
     expect(payload.monitor.terminal).toBe(false);
     expect(payload.monitor.activeStep?.stepId).toBe("implementation");
     expect(payload.monitor.nextAction.code).toBe("resume_running");
+    expect(payload.monitor.nextAction.actionClass).toBe("continue_polling");
+    expect(payload.monitor.nextAction.recoveryDetail).toBeNull();
     expect(payload.monitor.recovery).toBeNull();
   });
 
@@ -865,13 +872,72 @@ describe("momentum workflow status", () => {
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
       monitor: {
-        nextAction: { code: string; stepId: string | null };
+        nextAction: {
+          code: string;
+          stepId: string | null;
+          actionClass: string;
+          recoveryDetail: unknown;
+        };
         recovery: { code: string; stepId: string | null } | null;
       };
     };
     expect(payload.monitor.nextAction.code).toBe("rerun_failed_step");
+    expect(payload.monitor.nextAction.actionClass).toBe("retry_failed_step");
     expect(payload.monitor.recovery?.code).toBe("failed_required_step");
     expect(payload.monitor.recovery?.stepId).toBe("implementation");
+  });
+
+  it("labels failed no-mistakes detail as deterministic evidence reconciliation", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, {
+        runId: "cwfp-no-mistakes-evidence",
+        state: "failed",
+        source: "momentum-native-coding",
+        startedAt: RECENT,
+        finishedAt: NOW
+      });
+      seedStep(db, "cwfp-no-mistakes-evidence", {
+        stepId: "no-mistakes",
+        kind: "no-mistakes",
+        state: "failed",
+        order: 3,
+        startedAt: RECENT,
+        finishedAt: NOW,
+        errorCode: "executor_failed"
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "status",
+      "cwfp-no-mistakes-evidence",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      monitor: {
+        nextAction: {
+          code: string;
+          actionClass: string;
+          recoveryDetail: Record<string, unknown> | null;
+        };
+      };
+    };
+    expect(payload.monitor.nextAction).toMatchObject({
+      code: "rerun_failed_step",
+      actionClass: "reconcile_deterministic_evidence",
+      recoveryDetail: {
+        kind: "no_mistakes_deterministic_evidence",
+        evidencePointerRequired: true,
+        refusalReason: null
+      }
+    });
   });
 
   it("renders text output for list and detail modes", async () => {

@@ -854,6 +854,20 @@ export const WORKFLOW_WATCH_HUMAN_ACTION_CODES = [
 export type WorkflowWatchHumanActionCode =
   (typeof WORKFLOW_WATCH_HUMAN_ACTION_CODES)[number];
 
+export const WORKFLOW_OPERATOR_ACTION_CLASSES = [
+  "continue_polling",
+  "approve_next_gate",
+  "fix_setup_config_then_retry",
+  "reconcile_deterministic_evidence",
+  "reconcile_external_tail",
+  "clear_recovery",
+  "resolve_gate",
+  "retry_failed_step",
+  "stop_monitoring"
+] as const;
+export type WorkflowOperatorActionClass =
+  (typeof WORKFLOW_OPERATOR_ACTION_CLASSES)[number];
+
 export function emitWorkflowRunWatch(
   parsed: { json: boolean },
   io: CliIo,
@@ -1098,13 +1112,20 @@ function buildWorkflowWatchNextAction(envelope: WorkflowMonitorEnvelope): {
   stepId: string | null;
   leaseKind: string | null;
   detail: string | null;
+  actionClass: WorkflowOperatorActionClass;
+  recoveryDetail: Record<string, unknown> | null;
 } {
   if (isWorkflowWatchCleanTerminal(envelope)) {
     return {
       code: envelope.nextAction.code,
       stepId: envelope.nextAction.stepId,
       leaseKind: envelope.nextAction.leaseKind,
-      detail: envelope.nextAction.detail
+      detail: envelope.nextAction.detail,
+      actionClass: workflowOperatorActionClassForMonitor(envelope, {
+        manualRecoveryReason: envelope.manualRecoveryReason,
+        needsManualRecovery: envelope.needsManualRecovery
+      }),
+      recoveryDetail: workflowRecoveryDetailForMonitor(envelope)
     };
   }
   if (envelope.needsManualRecovery) {
@@ -1116,7 +1137,12 @@ function buildWorkflowWatchNextAction(envelope: WorkflowMonitorEnvelope): {
         code: envelope.nextAction.code,
         stepId: envelope.nextAction.stepId,
         leaseKind: envelope.nextAction.leaseKind,
-        detail: envelope.nextAction.detail
+        detail: envelope.nextAction.detail,
+        actionClass: workflowOperatorActionClassForMonitor(envelope, {
+          manualRecoveryReason: envelope.manualRecoveryReason,
+          needsManualRecovery: envelope.needsManualRecovery
+        }),
+        recoveryDetail: workflowRecoveryDetailForMonitor(envelope)
       };
     }
     return {
@@ -1129,15 +1155,103 @@ function buildWorkflowWatchNextAction(envelope: WorkflowMonitorEnvelope): {
       detail:
         envelope.manualRecoveryReason ??
         envelope.recovery?.message ??
-        "Run is flagged for manual recovery. Clear recovery after resolving the underlying cause."
+        "Run is flagged for manual recovery. Clear recovery after resolving the underlying cause.",
+      actionClass: workflowOperatorActionClassForMonitor(envelope, {
+        manualRecoveryReason: envelope.manualRecoveryReason,
+        needsManualRecovery: envelope.needsManualRecovery
+      }),
+      recoveryDetail: workflowRecoveryDetailForMonitor(envelope)
     };
   }
   return {
     code: envelope.nextAction.code,
     stepId: envelope.nextAction.stepId,
     leaseKind: envelope.nextAction.leaseKind,
-    detail: envelope.nextAction.detail
+    detail: envelope.nextAction.detail,
+    actionClass: workflowOperatorActionClassForMonitor(envelope, {
+      manualRecoveryReason: envelope.manualRecoveryReason,
+      needsManualRecovery: envelope.needsManualRecovery
+    }),
+    recoveryDetail: workflowRecoveryDetailForMonitor(envelope)
   };
+}
+
+function workflowOperatorActionClassForMonitor(
+  monitor: WorkflowMonitorState | WorkflowMonitorEnvelope,
+  options: {
+    manualRecoveryReason?: string | null;
+    needsManualRecovery?: boolean;
+  } = {}
+): WorkflowOperatorActionClass {
+  if (isSetupConfigRecoveryReason(options.manualRecoveryReason ?? null)) {
+    return "fix_setup_config_then_retry";
+  }
+  if (options.needsManualRecovery) {
+    return "clear_recovery";
+  }
+  if (monitor.terminal && monitor.nextAction.code === "no_action") {
+    return "stop_monitoring";
+  }
+  if (monitor.nextAction.code === "await_approval") {
+    return "approve_next_gate";
+  }
+  if (
+    monitor.nextAction.code === "resume_running" ||
+    monitor.nextAction.code === "advance_to_step"
+  ) {
+    return "continue_polling";
+  }
+  if (
+    monitor.recovery?.code === "failed_external_side_effect_step" ||
+    (monitor.nextAction.code === "clear_recovery" &&
+      (monitor.activeStep?.kind === "merge-cleanup" ||
+        monitor.activeStep?.kind === "linear-refresh"))
+  ) {
+    return "reconcile_external_tail";
+  }
+  if (
+    monitor.activeStep?.kind === "no-mistakes" &&
+    (monitor.nextAction.code === "rerun_failed_step" ||
+      monitor.nextAction.code === "clear_recovery")
+  ) {
+    return "reconcile_deterministic_evidence";
+  }
+  if (monitor.nextAction.code === "clear_recovery") {
+    return "clear_recovery";
+  }
+  if (monitor.nextAction.code === "rerun_failed_step") {
+    return "retry_failed_step";
+  }
+  return "continue_polling";
+}
+
+function workflowRecoveryDetailForMonitor(
+  monitor: WorkflowMonitorState | WorkflowMonitorEnvelope
+): Record<string, unknown> | null {
+  if (
+    monitor.activeStep?.kind === "no-mistakes" &&
+    (monitor.nextAction.code === "rerun_failed_step" ||
+      monitor.nextAction.code === "clear_recovery")
+  ) {
+    return {
+      kind: "no_mistakes_deterministic_evidence",
+      evidencePointerRequired: true,
+      refusalReason: null
+    };
+  }
+  if (monitor.recovery?.code === "failed_external_side_effect_step") {
+    return {
+      kind: "external_tail_reconcile",
+      evidencePointerRequired: true,
+      refusalReason: null
+    };
+  }
+  return null;
+}
+
+function isSetupConfigRecoveryReason(reason: string | null): boolean {
+  if (reason === null) return false;
+  return /runtime_unavailable|auth_unavailable|setup|config/i.test(reason);
 }
 
 function workflowWatchRecoveryHasNoDirectClearCommand(
@@ -1628,7 +1742,9 @@ export function nextActionToJsonShape(
     code: monitor.nextAction.code,
     stepId: monitor.nextAction.stepId,
     leaseKind: monitor.nextAction.leaseKind,
-    detail: monitor.nextAction.detail
+    detail: monitor.nextAction.detail,
+    actionClass: workflowOperatorActionClassForMonitor(monitor),
+    recoveryDetail: workflowRecoveryDetailForMonitor(monitor)
   };
 }
 

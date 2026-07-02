@@ -1793,7 +1793,20 @@ Soft `monitor_drift_stale` reports and ordinary `failed_required_step` failures 
 | `digest` | string | Deterministic `sha256:` progress digest; unchanged across identical ticks so consumers can dedupe. |
 
 `activeStep`, when present, carries `stepId`, `kind`, `state`, `order`, and `required`.
-`nextAction` always carries `code`, `stepId`, `leaseKind`, and `detail`; `detail` is a ready-to-read sentence for the common path.
+`nextAction` always carries `code`, `stepId`, `leaseKind`, `detail`, `actionClass`, and `recoveryDetail`; `detail` is a ready-to-read sentence for the common path.
+`actionClass` is the stable operator decision class for watch/status/handoff consumers:
+
+- `continue_polling` - keep polling or dispatching the already-approved local step.
+- `approve_next_gate` - use the printed approval command.
+- `fix_setup_config_then_retry` - fix runtime/auth/config setup before retrying.
+- `reconcile_deterministic_evidence` - provide deterministic no-mistakes evidence before clearing recovery.
+- `reconcile_external_tail` - verify external state and clear recovery with an evidence pointer.
+- `clear_recovery` - clear a non-tail manual recovery after resolving the cause.
+- `resolve_gate` - decide an open workflow gate with an allowed action.
+- `retry_failed_step` - inspect a normal failed step and decide whether to retry.
+- `stop_monitoring` - release or stop the monitor for a terminal run.
+
+`recoveryDetail` is `null` for ordinary states. Recovery states that require external evidence use a compact object with `kind`, `evidencePointerRequired`, and `refusalReason`.
 `recommendedActionPolicy.authority` is `auto_allowed` only for explicit safe wait/release/read-only or local recheck cases, `recommend_only` for informational recommendations that must not execute, `human_required` for approvals, operator decisions, recovery clearing, stale manual recovery, no-mistakes recovery, merge cleanup, Linear refresh, and external-apply, and `forbidden` for destructive/default-switch/broad external actions that must surface as blocked policy metadata.
 `humanAction`, when present, carries `code` (`approve`, `resolve_gate`, or `clear_recovery`), `command` (the exact CLI to run), and `detail` (the reason or evidence sentence).
 

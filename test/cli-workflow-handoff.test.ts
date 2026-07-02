@@ -214,6 +214,8 @@ describe("momentum workflow handoff", () => {
         stepId: string | null;
         leaseKind: string | null;
         detail: string;
+        actionClass: string;
+        recoveryDetail: unknown;
       };
     };
     expect(payload.ok).toBe(true);
@@ -229,6 +231,8 @@ describe("momentum workflow handoff", () => {
     expect(payload.nextAction.stepId).toBe("implementation");
     expect(payload.nextAction.leaseKind).toBe("managed-step");
     expect(payload.nextAction.detail.length).toBeGreaterThan(0);
+    expect(payload.nextAction.actionClass).toBe("continue_polling");
+    expect(payload.nextAction.recoveryDetail).toBeNull();
   });
 
   it("renders text output with schema-version and next-action lines", async () => {
