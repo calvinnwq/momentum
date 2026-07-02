@@ -90,15 +90,17 @@ is `dispatched`. `lastWorkflowCode` is the last scheduler-lane tick code
 For a supported executor family, dispatch advances the step to `running` and
 creates durable executor invocation / round scaffold rows with deterministic
 dispatcher ids. The built-in `linear-refresh` step uses the `external-apply`
-family: bounded `daemon start` matches exactly one pending Linear update intent
-for the run's issue scope, reuses the same policy-gated external-apply write path
-as `intent apply --external-apply`, including `status_update` payloads that move
-the Linear issue to a configured `state` / `stateId`, writes
-`external-apply.log` / `external-apply.json` evidence under the run directory,
-and reconciles the step from that terminal evidence. Missing issue scope, no
-matching pending intent, ambiguous intents, missing credentials, policy denial,
-audit-incomplete, blocked, or other unsafe apply outcomes park the step for
-manual recovery rather than fabricating success. Configured `subworkflow` steps are also handled by the
+family as a tail-owned preflight -> apply -> reconcile lifecycle. Bounded
+`daemon start` proves the run's issue scope, `LINEAR_API_KEY`, repo
+`intent_apply_policy: external_apply_allowed`, exactly one pending Linear
+`status_update` intent, a matching Linear source item, a valid one-of `state` /
+`stateId` payload, and the stable idempotency marker before it reuses the same
+policy-gated external-apply write path as `intent apply --external-apply`.
+Successful apply writes `external-apply.log` / `external-apply.json` evidence
+under the run directory and reconciles the step from that terminal evidence.
+If durable external-apply audit evidence already proves the intended write landed and post-apply reconcile succeeded, the step records already-applied terminal evidence without another Linear mutation.
+Missing issue scope, no matching pending intent, ambiguous intents, stale or mismatched applied evidence, missing credentials, policy denial, audit-incomplete, blocked, or other unsafe apply outcomes park the step for manual recovery rather than fabricating success.
+Configured `subworkflow` steps are also handled by the
 managed daemon: the parent run's `route.subworkflow.child` config selects the
 child workflow definition, bounded lineage in `route.subworkflow.lineage` prevents
 unsafe recursion, and the parent step mirrors terminal child-run evidence only
@@ -261,12 +263,9 @@ must prove explicit GitHub auth in the live-wrapper environment (`GH_TOKEN`,
 state showing the target is open, non-draft, mergeable, and still at the expected
 head. If GitHub shows the PR is already merged or the cleanup branch is already
 deleted, the wrapper stops before mutation and routes operators to evidence-backed
-reconciliation instead of a blind rerun. The built-in `linear-refresh` step
-requires the usual policy-gated external-apply setup: a matching pending Linear
-intent, `intent_apply_policy: external_apply_allowed`, and `LINEAR_API_KEY` in
-the daemon/supervisor process environment. Missing auth or targets fail closed
-with operator-actionable recovery evidence; Momentum does not store these
-credentials.
+reconciliation instead of a blind rerun. The built-in `linear-refresh` step requires the run issue scope, exactly one pending Linear `status_update` intent, a matching source item, a valid one-of `state` / `stateId` payload, `intent_apply_policy: external_apply_allowed`, and `LINEAR_API_KEY` in the daemon/supervisor process environment.
+Missing auth, issue scope, target, intent evidence, source evidence, or missing valid payload fails closed with operator-actionable recovery evidence;
+Momentum does not store these credentials.
 
 On retried dispatch attempts, `MOMENTUM_ATTEMPT` is incremented and attempt
 evidence is kept separate: attempt 1 uses the configured run directory paths,

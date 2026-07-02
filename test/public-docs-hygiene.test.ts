@@ -76,6 +76,7 @@ describe("public docs hygiene", () => {
   describe("no internal milestone vocabulary", () => {
     const forbiddenPhrases = [
       /\bMilestone\s+[0-9]+\b/,
+      /\bM[0-9]+\b/,
       /\bM[3-9]\s+(contract|alignment|closeout|scope|non-goals|invariant)/i,
       /\b(Milestone\s+[0-9]+|M[3-9])\s+is\s+(complete|the\s+active\s+milestone)\b/i,
       /\bactive\s+milestone\b/i,

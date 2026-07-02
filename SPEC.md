@@ -112,9 +112,14 @@ The default policy is local intent creation only. The Linear path supports
 comment-only `source_satisfied` intents and explicit `status_update` intents
 whose payload supplies the target state (`state` or `stateId`), carries a stable
 idempotency marker, and must fail closed without losing the M6 refusal reason.
-Before a Linear external write is attempted, the apply path must have a resolved
-target, `intent_apply_policy: external_apply_allowed`, and `LINEAR_API_KEY` in
-the applying process environment.
+Before a workflow `linear-refresh` external write is attempted, the tail
+lifecycle preflight must prove `LINEAR_API_KEY` in the applying process,
+`intent_apply_policy: external_apply_allowed`, a workflow issue scope, exactly
+one pending Linear `status_update` intent, a matching Linear source item, a valid
+payload with exactly one `state` / `stateId`, and the stable idempotency marker.
+If durable M6 audit evidence already proves the intended write landed and
+post-apply reconcile succeeded, `linear-refresh` reconciles without another
+Linear mutation.
 
 ## Source And Adapter Boundaries
 
@@ -208,6 +213,7 @@ Status, handoff, monitor, and watch expose that lane as `nextAction.actionClass:
 The checked-in live-wrapper dogfood profile executes the wrapper from source through the TypeScript source loader so cleanup of generated `dist/` artifacts does not break `merge-cleanup` or `linear-refresh` tail work.
 The wrapper validates `MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG` before spawning a child command: the top level is limited to `steps`, per-step keys must use the canonical snake_case schema, malformed `env_allow` and unsafe or mismatched `result_file` values fail closed as setup recovery, and rejected configs write no runner evidence.
 The `merge-cleanup` wrapper owns its side-effecting tail lifecycle: preflight proves explicit GitHub auth (`GH_TOKEN`, `GITHUB_TOKEN`, or `GH_CONFIG_DIR`), durable target identity (`merge_cleanup.pull_request_id`, `expected_head_sha`, and `cleanup_branch`), and live PR state/head/mergeability in the same worker before apply can spawn the merge command; already-merged or already-deleted cleanup state routes to reconcile instead of another mutation. This remains tail-local and is not promoted into workflow-level structural preflight.
+The `linear-refresh` daemon tail owns the same preflight -> apply -> reconcile shape around the existing M6 external-apply path: missing auth, missing source item, missing/duplicate/stale intent, invalid payload, policy denial, or mismatched audit evidence fails closed before the Linear client is called; already-applied succeeded audit evidence maps to terminal executor evidence instead of generic update-step repair.
 For the `no-mistakes` step, the same live-wrapper treats a reported `checks-passed` outcome, or an otherwise-still-monitoring run with current clean pull request evidence and green or explicitly absent checks, as terminal Momentum success only when no current blocking outcome, active finding, unresolved gate, dirty / draft pull request, or non-successful check state is present.
 Interrupted no-mistakes success reconciliation is surfaced as `nextAction.actionClass: "reconcile_deterministic_evidence"` with `recoveryDetail.kind: "no_mistakes_deterministic_evidence"` until the operator supplies the evidence pointer.
 If the wrapper dies before writing that terminal evidence but the external no-mistakes run later proves success, `workflow run clear-recovery` may reconcile only the failed required `no-mistakes` step from durable rows and then re-derive the run; generic terminal run mutation remains refused.

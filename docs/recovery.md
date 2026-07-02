@@ -145,13 +145,10 @@ classifications such as `head_mismatch`, `result_missing`, `repo_lock_lost`,
 uses this run-scoped surface when a claimed step cannot be resolved to a known
 definition step or uses an executor family the daemon cannot dispatch yet; that
 path opens a `manual_recovery_required` workflow gate instead of silently dropping
-the claim. The daemon-dispatchable `external-apply` path uses the same surface
-when issue scope, pending-intent matching, resolved target, credentials, policy,
-audit, or adapter safety checks refuse the write. The configured `subworkflow`
-path uses the same
-surface when child config is missing, recursion is unsafe, a child definition or
-attachment cannot be trusted, or child state cannot be mirrored safely. The
-configured live-wrapper dispatch lane uses the same surface when the wrapper is
+the claim.
+The daemon-dispatchable `external-apply` path uses the same surface when issue scope, exactly one pending Linear `status_update` intent, matching source item, valid payload, resolved target, credentials, policy, audit, or adapter safety checks refuse the write.
+The configured `subworkflow` path uses the same surface when child config is missing, recursion is unsafe, a child definition or attachment cannot be trusted, or child state cannot be mirrored safely.
+The configured live-wrapper dispatch lane uses the same surface when the wrapper is
 unconfigured for the claimed step kind, the step's repo/run directory cannot be
 derived, the run directory cannot be created, or a live wrapper returns a
 process-level failure such as `runtime_unavailable`, including `merge-cleanup`
@@ -233,10 +230,11 @@ Before running `workflow run clear-recovery <run-id> --evidence-pointer <ref>` f
 **`linear-refresh` (writes Linear tracker)**
 
 1. Open the Linear issue identified by the run's `--issue-scope` identifier.
-2. Confirm whether the issue state, labels, or comments were updated by the step.
-3. If the tracker was updated, use the Linear issue URL or a stable snapshot as the evidence pointer.
-4. If no Linear update landed, the step failed before any external write; treat it like a retryable failure.
-5. Do not re-run `linear-refresh` if the tracker is already consistent; that would attempt a duplicate write.
+2. Confirm the durable pending intent was a single Linear `status_update` intent with a matching source item, stable idempotency marker, and exactly one valid `state` or `stateId` payload.
+3. Confirm whether the issue state and idempotency-marker comment were updated by the step.
+4. If the tracker was updated, use the Linear issue URL or a stable audit/snapshot as the evidence pointer.
+5. If no Linear update landed, the step failed before any external write; treat it like a retryable failure after fixing the missing auth/policy/issue-scope/intent/source/payload cause.
+6. Do not re-run `linear-refresh` if the tracker is already consistent and the external-apply audit reconcile succeeded; that would attempt a duplicate write.
 
 **Evidence pointer**
 

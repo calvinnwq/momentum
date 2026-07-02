@@ -9,13 +9,20 @@ import {
   defaultBuildLinearRefreshClient,
   executeExternalApply,
   LINEAR_API_KEY_ENV_VAR,
+  type ExecuteExternalApplySuccess,
   type ExecuteExternalApplyDeps
 } from "../intent/apply-execute.js";
+import { getLatestIntentApplyAudit } from "../intent/apply-audits.js";
+import {
+  loadMomentumPolicy,
+  resolveIntentApplyPolicy,
+  type UpdateIntentApplyPolicy
+} from "../intent/policy.js";
 import {
   listUpdateIntents,
   type UpdateIntent
 } from "../intent/update-intents.js";
-import { getSourceItemById } from "../source/items.js";
+import { getSourceItemById, type SourceItem } from "../source/items.js";
 import { DEFAULT_DAEMON_STARTUP_RECOVERY_GRACE_MS } from "./loop.js";
 import {
   loadDispatchedStepRunProvenance,
@@ -34,6 +41,11 @@ import {
 import { createLiveWrapperWorkflowDispatch } from "../workflow/dispatch/live-wrapper.js";
 import { createSubworkflowWorkflowDispatch } from "../workflow/dispatch/subworkflow-dispatch.js";
 import { deriveDispatchedSubworkflowContext } from "../workflow/route/subworkflow-dispatch-context.js";
+import {
+  planLinearRefreshAlreadyAppliedReconciliation,
+  planLinearRefreshLifecycle,
+  type LinearRefreshLifecyclePlan
+} from "../workflow/dispatch/linear-refresh-lifecycle.js";
 import { buildRealWorkflowStepExecutorRegistry } from "../workflow/step/executor-real-adapters.js";
 import type {
   AsyncWorkflowStepDispatch,
@@ -193,22 +205,76 @@ function resolveDaemonExternalApplyContext(
     context.db,
     runId
   );
-  if (issueScopeIdentifier === null) {
-    return { ok: false, reason: "external_apply_issue_scope_missing" };
-  }
-
   const pending = findPendingLinearExternalApplyIntents(
     context.db,
-    issueScopeIdentifier
+    issueScopeIdentifier ?? ""
   );
-  if (pending.length === 0) {
-    return { ok: false, reason: "external_apply_intent_not_found" };
+  const applied = findAppliedLinearExternalApplyIntents(
+    context.db,
+    issueScopeIdentifier ?? ""
+  );
+  const sourceItemsById = loadLinearRefreshSourceItems(context.db, [
+    ...pending,
+    ...applied
+  ]);
+  const latestAuditsByIntentId = loadLatestLinearRefreshAudits(context.db, applied);
+  const operatorReason = linearRefreshOperatorReason(runId, stepId);
+  const alreadyAppliedLifecycle = planLinearRefreshAlreadyAppliedReconciliation({
+    issueScopeIdentifier,
+    pendingIntents: pending,
+    appliedIntents: applied,
+    sourceItemsById,
+    latestAuditsByIntentId,
+    expectedOperatorReason: operatorReason
+  });
+  const alreadyAppliedContext = resolveLinearRefreshAlreadyAppliedContext(
+    alreadyAppliedLifecycle,
+    applied,
+    sourceItemsById,
+    latestAuditsByIntentId,
+    resolved.exec.runDir
+  );
+  if (alreadyAppliedContext !== null) return alreadyAppliedContext;
+  const policy = resolveLinearRefreshPolicy(resolved.exec.repoPath);
+  if (!policy.ok) {
+    return {
+      ok: false,
+      reason: `linear_refresh_policy_load_failed: ${policy.code}: ${policy.error}`
+    };
   }
-  if (pending.length > 1) {
-    return { ok: false, reason: "external_apply_intent_ambiguous" };
+  const lifecycle = planLinearRefreshLifecycle({
+    env,
+    intentApplyPolicy: policy.value,
+    issueScopeIdentifier,
+    pendingIntents: pending,
+    appliedIntents: applied,
+    sourceItemsById,
+    latestAuditsByIntentId,
+    expectedOperatorReason: operatorReason
+  });
+  const lifecycleAlreadyAppliedContext = resolveLinearRefreshAlreadyAppliedContext(
+    lifecycle,
+    applied,
+    sourceItemsById,
+    latestAuditsByIntentId,
+    resolved.exec.runDir
+  );
+  if (lifecycleAlreadyAppliedContext !== null) return lifecycleAlreadyAppliedContext;
+  if (!lifecycle.safeToMutate) {
+    return {
+      ok: false,
+      reason: linearRefreshRefusalReason(
+        lifecycle.status,
+        policy.value,
+        lifecycle.message
+      )
+    };
   }
 
-  const intentId = pending[0]!.id;
+  const intentId = lifecycle.evidence.intentId;
+  if (intentId === null) {
+    return { ok: false, reason: "linear_refresh_intent_evidence_missing" };
+  }
   const executeDeps: ExecuteExternalApplyDeps = {};
   const factory = deps.buildLinearExternalUpdateClient;
   if (factory) {
@@ -236,12 +302,47 @@ function resolveDaemonExternalApplyContext(
       executeExternalApply({
         db: context.db,
         intentId,
-        operatorReason: `daemon external-apply for workflow ${runId}/${stepId}`,
+        operatorReason,
         repoPath: resolved.exec.repoPath,
         env,
         statusMutation: null,
         deps: executeDeps
       })
+  };
+}
+
+function resolveLinearRefreshAlreadyAppliedContext(
+  lifecycle: LinearRefreshLifecyclePlan | null,
+  applied: readonly UpdateIntent[],
+  sourceItemsById: ReadonlyMap<string, SourceItem>,
+  latestAuditsByIntentId: ReadonlyMap<
+    string,
+    NonNullable<ReturnType<typeof getLatestIntentApplyAudit>>
+  >,
+  runDir: string
+): DispatchedExternalApplyContextResolution | null {
+  if (lifecycle?.status !== "already_applied") return null;
+
+  const intent = applied.find((candidate) => candidate.id === lifecycle.evidence.intentId);
+  const source =
+    lifecycle.evidence.sourceItemId === null
+      ? null
+      : sourceItemsById.get(lifecycle.evidence.sourceItemId) ?? null;
+  const audit =
+    lifecycle.evidence.intentId === null
+      ? null
+      : latestAuditsByIntentId.get(lifecycle.evidence.intentId) ?? null;
+  if (intent === undefined || source === null || audit === null) {
+    return { ok: false, reason: "linear_refresh_reconcile_evidence_missing" };
+  }
+  return {
+    ok: true,
+    evidence: {
+      executorLogPath: path.join(runDir, "external-apply.log"),
+      resultJsonPath: path.join(runDir, "external-apply.json")
+    },
+    runExternalApply: async () =>
+      linearRefreshAlreadyAppliedSuccess(intent, source, audit)
   };
 }
 
@@ -257,11 +358,24 @@ function findPendingLinearExternalApplyIntents(
   );
 }
 
+function findAppliedLinearExternalApplyIntents(
+  db: MomentumDb,
+  issueScopeIdentifier: string
+): UpdateIntent[] {
+  return listUpdateIntents(db, {
+    status: "applied",
+    adapterKind: "linear"
+  }).filter((intent) =>
+    pendingLinearIntentMatchesIssueScope(db, intent, issueScopeIdentifier)
+  );
+}
+
 function pendingLinearIntentMatchesIssueScope(
   db: MomentumDb,
   intent: UpdateIntent,
   issueScopeIdentifier: string
 ): boolean {
+  if (issueScopeIdentifier.trim().length === 0) return false;
   if (intent.targetExternalId === issueScopeIdentifier) return true;
   if (intent.sourceItemId === null) return false;
 
@@ -271,6 +385,125 @@ function pendingLinearIntentMatchesIssueScope(
     sourceItem.externalId === issueScopeIdentifier ||
     sourceItem.externalKey === issueScopeIdentifier
   );
+}
+
+function loadLinearRefreshSourceItems(
+  db: MomentumDb,
+  intents: readonly UpdateIntent[]
+): ReadonlyMap<string, SourceItem> {
+  const out = new Map<string, SourceItem>();
+  for (const intent of intents) {
+    if (intent.sourceItemId === null || out.has(intent.sourceItemId)) continue;
+    const source = getSourceItemById(db, intent.sourceItemId);
+    if (source !== null) out.set(source.id, source);
+  }
+  return out;
+}
+
+function loadLatestLinearRefreshAudits(
+  db: MomentumDb,
+  intents: readonly UpdateIntent[]
+) {
+  const out = new Map<string, NonNullable<ReturnType<typeof getLatestIntentApplyAudit>>>();
+  for (const intent of intents) {
+    const audit = getLatestIntentApplyAudit(db, intent.id);
+    if (audit !== null) out.set(intent.id, audit);
+  }
+  return out;
+}
+
+type LinearRefreshPolicyResolution =
+  | { ok: true; value: UpdateIntentApplyPolicy }
+  | {
+      ok: false;
+      code: string;
+      error: string;
+    };
+
+function resolveLinearRefreshPolicy(repoPath: string): LinearRefreshPolicyResolution {
+  const loaded = loadMomentumPolicy(repoPath);
+  if (!loaded.ok) {
+    return {
+      ok: false,
+      code: loaded.code,
+      error: loaded.error
+    };
+  }
+  if (!loaded.present) {
+    return { ok: true, value: resolveIntentApplyPolicy(undefined).value };
+  }
+  return {
+    ok: true,
+    value: resolveIntentApplyPolicy(loaded.policy.config).value
+  };
+}
+
+function linearRefreshRefusalReason(
+  status: string,
+  policy: string,
+  message: string
+): string {
+  switch (status) {
+    case "auth_missing":
+      return `linear_refresh_auth_missing: LINEAR_API_KEY is not set in the workflow process environment; ${message}`;
+    case "policy_denied":
+      return `linear_refresh_policy_denied: intent_apply_policy=${policy}; ${message}`;
+    default:
+      return `linear_refresh_${status}: ${message}`;
+  }
+}
+
+function linearRefreshAlreadyAppliedSuccess(
+  intent: UpdateIntent,
+  source: SourceItem,
+  audit: NonNullable<ReturnType<typeof getLatestIntentApplyAudit>>
+): ExecuteExternalApplySuccess {
+  return {
+    ok: true,
+    resultCode: "applied",
+    context: {
+      intentId: intent.id,
+      intentStatus: intent.status,
+      adapterKind: "linear",
+      intentType: intent.intentType,
+      target: {
+        adapterKind: source.adapterKind,
+        externalId: source.externalId,
+        externalKey: source.externalKey,
+        url: source.url,
+        title: source.title
+      },
+      applyPolicy: {
+        value: audit.intentApplyPolicy,
+        source: "momentum_policy"
+      },
+      allowStatusMutation: audit.allowStatusMutation,
+      mutationKind: audit.mutationKind,
+      auditId: audit.id,
+      reconcile: {
+        status: "success",
+        warning: null
+      }
+    },
+    intent,
+    audit,
+    external: {
+      alreadyApplied: true,
+      issueId: source.externalId,
+      issueKey: source.externalKey,
+      issueUrl: source.url,
+      commentId: audit.externalRefs.commentId,
+      commentUrl: audit.externalRefs.commentUrl,
+      statusTransitioned: audit.externalRefs.stateTransitionId !== null,
+      nextStateId: null,
+      nextStateName: null,
+      idempotencyMarker: audit.idempotencyMarker
+    }
+  };
+}
+
+function linearRefreshOperatorReason(runId: string, stepId: string): string {
+  return `daemon external-apply for workflow ${runId}/${stepId}`;
 }
 
 function readLinearApiKey(
