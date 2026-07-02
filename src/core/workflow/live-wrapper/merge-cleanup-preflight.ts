@@ -141,7 +141,7 @@ function messageForPlan(plan: MergeCleanupPlan): string {
     case "pr_missing":
       return `GitHub merge-cleanup could not verify pull request ${plan.evidence.pullRequestId ?? "(unknown)"}.`;
     case "head_mismatch":
-      return `GitHub merge-cleanup refused PR ${plan.evidence.pullRequestId}: observed head ${plan.evidence.observedHeadSha ?? "(unknown)"} does not match expected head ${plan.evidence.expectedHeadSha ?? "(unknown)"}.`;
+      return `GitHub merge-cleanup refused PR ${plan.evidence.pullRequestId}: observed head ${plan.evidence.observedHeadSha ?? "(unknown)"} and cleanup branch ${plan.evidence.observedCleanupBranch ?? "(unknown)"} do not match expected head ${plan.evidence.expectedHeadSha ?? "(unknown)"} and cleanup branch ${plan.evidence.cleanupBranch ?? "(unknown)"}.`;
     case "already_merged":
       return `GitHub merge-cleanup found PR ${plan.evidence.pullRequestId} already merged; reconcile the tail lifecycle instead of re-running mutation.`;
     case "branch_already_deleted":

@@ -48,6 +48,7 @@ function deps(env: NodeJS.ProcessEnv): CodingWorkflowWrapperDeps {
       ok: true,
       pullRequest: {
         id: target.pullRequestId,
+        headBranch: target.cleanupBranch,
         headSha: target.expectedHeadSha,
         state: "open",
         draft: false,
@@ -127,7 +128,7 @@ describe("NGX-499 coding workflow live wrapper profile", () => {
       ghPath,
       `#!/bin/sh
 if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
-  printf '%s\n' '{"number":42,"headRefOid":"${MERGE_CLEANUP_HEAD}","state":"OPEN","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN"}'
+  printf '%s\n' '{"number":42,"headRefName":"feat/test-branch","headRefOid":"${MERGE_CLEANUP_HEAD}","state":"OPEN","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN"}'
   exit 0
 fi
 exit 1
@@ -342,6 +343,7 @@ exit 1
         ok: true,
         pullRequest: {
           id: target.pullRequestId,
+          headBranch: target.cleanupBranch,
           headSha: target.expectedHeadSha,
           state: "merged",
           draft: false,
@@ -376,7 +378,7 @@ exit 1
       ghPath,
       `#!/bin/sh
 if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
-  printf '%s\n' '{"number":42,"headRefOid":"${MERGE_CLEANUP_HEAD}","state":"MERGED","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN"}'
+  printf '%s\n' '{"number":42,"headRefName":"feat/test-branch","headRefOid":"${MERGE_CLEANUP_HEAD}","state":"MERGED","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN"}'
   exit 0
 fi
 if [ "$1" = "api" ]; then
@@ -425,6 +427,125 @@ exit 1
     expect(fs.existsSync(sentinelPath)).toBe(false);
     const result = readResult(resultPath);
     expect(result.remaining_work.join("\n")).toContain("clear-recovery");
+  });
+
+  it("refuses merge-cleanup when the PR head branch differs from the cleanup target", () => {
+    const dir = makeTempDir();
+    const repo = path.join(dir, "repo");
+    const iteration = path.join(dir, "run");
+    const resultPath = path.join(iteration, "result.json");
+    const sentinelPath = path.join(dir, "merge-cleanup-ran");
+    const binDir = path.join(dir, "bin");
+    fs.mkdirSync(repo);
+    fs.mkdirSync(binDir);
+    const ghPath = path.join(binDir, "gh");
+    fs.writeFileSync(
+      ghPath,
+      `#!/bin/sh
+if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
+  printf '%s\n' '{"number":42,"headRefName":"feat/other-branch","headRefOid":"${MERGE_CLEANUP_HEAD}","state":"OPEN","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN"}'
+  exit 0
+fi
+exit 1
+`,
+      "utf8"
+    );
+    fs.chmodSync(ghPath, 0o755);
+    const configPath = path.join(dir, "wrapper-config.json");
+    writeJson(configPath, {
+      steps: {
+        "merge-cleanup": {
+          command: "/bin/sh",
+          args: ["-c", `touch ${JSON.stringify(sentinelPath)}`],
+          cwd: "repo",
+          timeout_sec: 30,
+          env_allow: ["PATH", "GH_TOKEN"],
+          merge_cleanup: mergeCleanupTargetConfig(),
+          commit: { type: "chore", subject: "complete merge-cleanup" }
+        }
+      }
+    });
+
+    const outcome = runCodingWorkflowLiveWrapper({
+      ...defaultCodingWorkflowWrapperDeps(),
+      env: {
+        MOMENTUM_STEP_KIND: "merge-cleanup",
+        MOMENTUM_REPO_PATH: repo,
+        MOMENTUM_ITERATION_DIR: iteration,
+        MOMENTUM_RESULT_PATH: resultPath,
+        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
+        GH_TOKEN: "test-token",
+        PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`
+      },
+      stdout: () => {},
+      stderr: () => {}
+    });
+
+    expect(outcome.exitCode).toBe(1);
+    expect(outcome.success).toBe(false);
+    expect(outcome.summary).toContain("cleanup branch");
+    expect(outcome.summary).toContain("feat/other-branch");
+    expect(fs.existsSync(sentinelPath)).toBe(false);
+    expect(fs.existsSync(resultPath)).toBe(false);
+  });
+
+  it("refuses merge-cleanup when GitHub reports an unclean merge state", () => {
+    const dir = makeTempDir();
+    const repo = path.join(dir, "repo");
+    const iteration = path.join(dir, "run");
+    const resultPath = path.join(iteration, "result.json");
+    const sentinelPath = path.join(dir, "merge-cleanup-ran");
+    const binDir = path.join(dir, "bin");
+    fs.mkdirSync(repo);
+    fs.mkdirSync(binDir);
+    const ghPath = path.join(binDir, "gh");
+    fs.writeFileSync(
+      ghPath,
+      `#!/bin/sh
+if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
+  printf '%s\n' '{"number":42,"headRefName":"feat/test-branch","headRefOid":"${MERGE_CLEANUP_HEAD}","state":"OPEN","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"UNSTABLE"}'
+  exit 0
+fi
+exit 1
+`,
+      "utf8"
+    );
+    fs.chmodSync(ghPath, 0o755);
+    const configPath = path.join(dir, "wrapper-config.json");
+    writeJson(configPath, {
+      steps: {
+        "merge-cleanup": {
+          command: "/bin/sh",
+          args: ["-c", `touch ${JSON.stringify(sentinelPath)}`],
+          cwd: "repo",
+          timeout_sec: 30,
+          env_allow: ["PATH", "GH_TOKEN"],
+          merge_cleanup: mergeCleanupTargetConfig(),
+          commit: { type: "chore", subject: "complete merge-cleanup" }
+        }
+      }
+    });
+
+    const outcome = runCodingWorkflowLiveWrapper({
+      ...defaultCodingWorkflowWrapperDeps(),
+      env: {
+        MOMENTUM_STEP_KIND: "merge-cleanup",
+        MOMENTUM_REPO_PATH: repo,
+        MOMENTUM_ITERATION_DIR: iteration,
+        MOMENTUM_RESULT_PATH: resultPath,
+        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
+        GH_TOKEN: "test-token",
+        PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`
+      },
+      stdout: () => {},
+      stderr: () => {}
+    });
+
+    expect(outcome.exitCode).toBe(1);
+    expect(outcome.success).toBe(false);
+    expect(outcome.summary).toContain("not an open, non-draft, mergeable target");
+    expect(fs.existsSync(sentinelPath)).toBe(false);
+    expect(fs.existsSync(resultPath)).toBe(false);
   });
 
   it("bounds GitHub merge-cleanup preflight subprocesses", () => {

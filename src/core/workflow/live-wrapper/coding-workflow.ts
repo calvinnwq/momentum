@@ -2184,7 +2184,7 @@ function readGitHubMergeCleanupPullRequest(input: {
         "view",
         input.target.pullRequestId,
         "--json",
-        "number,headRefOid,state,isDraft,mergeable,mergeStateStatus"
+        "number,headRefName,headRefOid,state,isDraft,mergeable,mergeStateStatus"
       ],
       {
         cwd: input.cwd,
@@ -2215,11 +2215,12 @@ function readGitHubMergeCleanupPullRequest(input: {
   }
 
   const id = readPullRequestId(parsed["number"]);
+  const headBranch = readOptionalString(parsed["headRefName"]);
   const headSha = readOptionalString(parsed["headRefOid"]);
-  if (id === undefined || headSha === undefined) {
+  if (id === undefined || headBranch === undefined || headSha === undefined) {
     return {
       ok: false,
-      error: "gh pr view did not include a pull request number and headRefOid."
+      error: "gh pr view did not include a pull request number, headRefName, and headRefOid."
     };
   }
 
@@ -2234,6 +2235,7 @@ function readGitHubMergeCleanupPullRequest(input: {
     ok: true,
     pullRequest: {
       id,
+      headBranch,
       headSha,
       state: readPullRequestState(parsed["state"]),
       draft: parsed["isDraft"] === true,
@@ -2299,8 +2301,9 @@ function readPullRequestMergeable(
 ): MergeCleanupPullRequestState["mergeable"] {
   const state =
     typeof mergeStateStatus === "string" ? mergeStateStatus.trim().toLowerCase() : "";
-  if (state === "blocked" || state === "behind" || state === "dirty") return "blocked";
   const value = typeof mergeable === "string" ? mergeable.trim().toLowerCase() : "";
+  if (state === "blocked" || state === "behind" || state === "dirty") return "blocked";
+  if (state !== "clean") return value === "conflicting" ? "conflicting" : "unknown";
   if (value === "mergeable") return "mergeable";
   if (value === "conflicting") return "conflicting";
   return "unknown";

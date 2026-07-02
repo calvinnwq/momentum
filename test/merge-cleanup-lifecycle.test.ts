@@ -18,6 +18,7 @@ function pr(
 ): MergeCleanupPullRequestState {
   return {
     id: TARGET.pullRequestId,
+    headBranch: TARGET.cleanupBranch,
     headSha: TARGET.expectedHeadSha,
     state: "open",
     draft: false,

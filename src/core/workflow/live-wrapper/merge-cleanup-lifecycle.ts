@@ -26,6 +26,7 @@ export type MergeCleanupTargetIdentity = {
 
 export type MergeCleanupPullRequestState = {
   id: string;
+  headBranch: string;
   headSha: string;
   state: "open" | "merged" | "closed";
   draft: boolean;
@@ -53,6 +54,7 @@ export type MergeCleanupLifecyclePlan = {
     expectedHeadSha: string | null;
     observedHeadSha: string | null;
     cleanupBranch: string | null;
+    observedCleanupBranch: string | null;
   };
 };
 
@@ -67,7 +69,8 @@ export function planMergeCleanupLifecycle(
     pullRequestId: input.target?.pullRequestId ?? null,
     expectedHeadSha: input.target?.expectedHeadSha ?? null,
     observedHeadSha: input.pullRequest?.headSha ?? null,
-    cleanupBranch: input.target?.cleanupBranch ?? null
+    cleanupBranch: input.target?.cleanupBranch ?? null,
+    observedCleanupBranch: input.pullRequest?.headBranch ?? null
   };
 
   if (!input.authAvailable || authSource === null) {
@@ -91,6 +94,9 @@ export function planMergeCleanupLifecycle(
   }
   if (input.pullRequest.id !== input.target.pullRequestId) {
     return plan("preflight", "pr_missing", "resolve_target_then_retry", false, evidenceBase);
+  }
+  if (input.pullRequest.headBranch !== input.target.cleanupBranch) {
+    return plan("preflight", "head_mismatch", "stop_unsafe_state", false, evidenceBase);
   }
   if (input.pullRequest.headSha.toLowerCase() !== input.target.expectedHeadSha.toLowerCase()) {
     return plan("preflight", "head_mismatch", "stop_unsafe_state", false, evidenceBase);
