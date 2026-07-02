@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.15.1](https://github.com/calvinnwq/momentum/compare/v0.15.0...v0.15.1) (2026-07-02)
+
+
+### Bug Fixes
+
+* **workflow:** validate native workflow config ([a4e42bf](https://github.com/calvinnwq/momentum/commit/a4e42bf5bd7eab4a92c54bf2712d5acd768d45e8))
+* **workflow:** validate native wrapper configuration ([71527d3](https://github.com/calvinnwq/momentum/commit/71527d38937b71848dd95b6f425b12213ebef9c4))
+
 ## [0.15.0](https://github.com/calvinnwq/momentum/compare/v0.14.4...v0.15.0) (2026-07-01)
 
 
