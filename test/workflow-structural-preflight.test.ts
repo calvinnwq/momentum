@@ -185,6 +185,35 @@ describe("coding workflow structural preflight", () => {
     expect(Object.keys(evidence)).toEqual(STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS);
   });
 
+  it("refuses blank coding issue-scope identifiers with compact run-shape evidence", () => {
+    const result = preflightCodingWorkflowRunStartInput({
+      definition: CODING_WORKFLOW_DEFINITION,
+      runId: "run-shape-invalid-issue-scope",
+      repoPath: "/tmp/momentum-repo",
+      objective: "Validate the structural run shape",
+      now: 123,
+      issueScope: { identifier: "   " }
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected failed preflight");
+    expect(result.evidence).toEqual([
+      {
+        checkId: "workflow.run_shape",
+        status: "failed",
+        severity: "error",
+        path: "issueScope.identifier",
+        key: "issueScope.identifier",
+        message: "Issue scope identifier must be a non-empty string when provided.",
+        recommendedAction:
+          "Set issueScope.identifier to the target issue identifier, or omit issueScope."
+      }
+    ]);
+    const evidence = result.evidence[0];
+    if (evidence === undefined) throw new Error("expected preflight evidence");
+    expect(Object.keys(evidence)).toEqual(STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS);
+  });
+
   it("returns compact passed evidence for valid wrapper config", () => {
     const result = preflightCodingWorkflowWrapperConfig({
       steps: {

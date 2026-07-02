@@ -168,7 +168,9 @@ export function preflightCodingWorkflowRunStartInput(
   input: WorkflowRunStartInput
 ): CodingWorkflowRunStartInputPreflightResult {
   const materialized = materializeWorkflowRunStart(input);
-  if (materialized.ok) {
+  const issueScopeIdentifierError =
+    validateCodingWorkflowIssueScopeIdentifier(input);
+  if (materialized.ok && issueScopeIdentifierError === undefined) {
     return {
       ok: true,
       plan: materialized.plan,
@@ -186,10 +188,17 @@ export function preflightCodingWorkflowRunStartInput(
     };
   }
 
+  const errors = materialized.ok
+    ? []
+    : [...materialized.errors];
+  if (issueScopeIdentifierError !== undefined) {
+    errors.push(issueScopeIdentifierError);
+  }
+
   return {
     ok: false,
-    errors: materialized.errors,
-    evidence: materialized.errors.map((error) =>
+    errors,
+    evidence: errors.map((error) =>
       buildStructuralPreflightEvidence({
         checkId: RUN_SHAPE_CHECK_ID,
         status: "failed",
@@ -200,6 +209,22 @@ export function preflightCodingWorkflowRunStartInput(
         recommendedAction: recommendedActionForRunStartError(error)
       })
     )
+  };
+}
+
+function validateCodingWorkflowIssueScopeIdentifier(
+  input: WorkflowRunStartInput
+): WorkflowRunStartError | undefined {
+  const issueScope = input.issueScope;
+  if (!isRecord(issueScope)) return undefined;
+  if (!Object.prototype.hasOwnProperty.call(issueScope, "identifier")) {
+    return undefined;
+  }
+  if (isNonBlankString(issueScope["identifier"])) return undefined;
+  return {
+    code: "issue_scope_invalid",
+    message: "Issue scope identifier must be a non-empty string when provided.",
+    path: "issueScope.identifier"
   };
 }
 
@@ -356,6 +381,9 @@ function recommendedActionForRunStartError(
     case "approval_boundary_invalid":
       return "Set approvalBoundary to a supported workflow approval boundary or omit it for manual approval.";
     case "issue_scope_invalid":
+      if (error.path === "issueScope.identifier") {
+        return "Set issueScope.identifier to the target issue identifier, or omit issueScope.";
+      }
       return 'Set issueScope to a plain object such as { identifier: "NGX-123" }, or omit it.';
     case "route_invalid":
       return "Set route to a plain object containing only validated coding workflow route fields.";
@@ -550,6 +578,10 @@ function isSafeWrapperResultFile(value: unknown): value is string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isNonBlankString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function normalizeRouteStepsPath(path: string | undefined): string {
