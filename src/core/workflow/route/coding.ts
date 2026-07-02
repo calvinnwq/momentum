@@ -12,8 +12,8 @@
  *
  * This module owns ONLY the pure representation + validation half (no SQLite, no
  * file system, no clock, no network), the same discipline
- * `validateSubworkflowChildConfig` (`subworkflow-child-config.ts`) and
- * `readSubworkflowParentLineage` (`subworkflow-route.ts`) follow, so the
+ * `validateSubworkflowChildConfig` (`route/subworkflow-child-config.ts`) and
+ * `readSubworkflowParentLineage` (`route/subworkflow.ts`) follow, so the
  * fail-closed contract is exhaustively testable on its own. The CLI
  * start/preview doors build overrides from `--steps-json`, the detail/read-back
  * surfaces expose the selected config through the durable run route and executor
@@ -23,7 +23,7 @@
  *
  * Home and namespace. A {@link import("../definition/definition.js").StepDefinition} carries
  * only an executor *family*, never per-step config, so - exactly as
- * `subworkflow-route.ts` reasoned for child config - the only in-scope durable
+ * `route/subworkflow.ts` reasoned for child config - the only in-scope durable
  * home without a schema change is the run's free-form `route` JSON. Per-step
  * overrides live under the single {@link CODING_ROUTE_STEPS_KEY} (`route.steps`)
  * namespace, parallel to `route.subworkflow` and the run-level `route.profile`.

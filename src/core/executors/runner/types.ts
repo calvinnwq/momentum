@@ -1,7 +1,7 @@
 // Runner result shapes shared across the executor families and the runners that
 // produce them. `COMMIT_TYPES` is the canonical enumeration backing the
 // `CommitType` union, so the const and its derived type live together here even
-// though the const is a runtime value; the parser in `./runner-result.ts`
+// though the const is a runtime value; the parser in `runner/result.ts`
 // imports it for validation.
 export const COMMIT_TYPES = [
   "build",

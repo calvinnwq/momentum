@@ -92,7 +92,7 @@ to make.
   `COMMIT_TYPES` is a runtime const, but it backs the `CommitType` union and has
   no behavior, so it is colocated with the type it defines.
 - No executor barrel/seam consolidation and no finalizer/reconciliation redesign.
-  ARCH-08 only added the workflow-owned `runtime-state.ts` refresh seam after
+  ARCH-08 only added the workflow-owned `run/runtime-state.ts` refresh seam after
   caller-owned durable mutations; the cross-path finalization owner has since landed
   as RC-2 (NGX-480: `dispatch/reconcile.ts` /
   `dispatch/reconcile-execute.ts`). Importers keep direct typed module paths.

@@ -1,7 +1,7 @@
 /**
  * Daemon-lane entry point for the `subworkflow` executor family (RC-4, NGX-497).
  *
- * The async sibling of `external-apply-dispatch.ts`'s
+ * The async sibling of `dispatch/external-apply-dispatch.ts`'s
  * {@link createExternalApplyWorkflowDispatch}: it wraps the production base
  * dispatch so a successfully-dispatched `subworkflow` step's child run is observed
  * and reconciled in the same tick, through the landed producer
@@ -17,7 +17,7 @@
  *     re-entered) a scaffold; a fail-closed / not-startable base result already
  *     parked the run and released its lease, so the wrapper echoes it untouched.
  *   - It runs the producer ONLY for a `subworkflow`-family invocation. The
- *     live-wrapper lane (`live-wrapper-dispatch.ts`) and the external-apply lane
+ *     live-wrapper lane (`dispatch/live-wrapper.ts`) and the external-apply lane
  *     own the other families; routing a non-`subworkflow` invocation here would
  *     run the wrong producer against a foreign scaffold.
  *   - The child-run start/attach is derived by injection

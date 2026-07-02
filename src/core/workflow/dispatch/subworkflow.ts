@@ -13,11 +13,11 @@
  *
  * The durable dispatch lane already has two reusable seams this composes with:
  *
- *   - `dispatch-executor-terminalize.ts` records a finished
+ *   - `dispatch/executor-terminalize.ts` records a finished
  *     {@link WorkflowStepExecutorDispatchResult} as terminal executor evidence on
  *     the `<run>::<step>::dispatch` scaffold (succeeded / failed for a clean
  *     terminal; `manual_recovery_required` for any `ok: false` result), and
- *   - `dispatch-reconcile-execute.ts` (RC-2) finalizes the owning
+ *   - `dispatch/reconcile-execute.ts` (RC-2) finalizes the owning
  *     `workflow_steps` row from that terminal evidence, exactly once.
  *
  * It is pure and total — no SQLite, no file system, no network, no clock — so the

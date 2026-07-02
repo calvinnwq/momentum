@@ -2,8 +2,8 @@
  * Run-level durable recovery for live finalization and dispatch failures
  * (NGX-334, M9-03).
  *
- * The shared `step-finalize.ts` transaction, re-exported through
- * `live-step-finalize.ts` for this M9 lane, returns a rich in-memory outcome
+ * The shared `shared/step-finalize.ts` transaction, re-exported through
+ * `live-step/finalize.ts` for this M9 lane, returns a rich in-memory outcome
  * over git + verification but owns no durable state. Process-level
  * dispatch failures also return recovery evidence before any git transaction
  * runs: a precise wrapper `liveRecoveryCode` when the executor provides one,
@@ -47,7 +47,7 @@
  * `committed`, a `reset_step_failure` / `reset_verification_failure` where the
  * worktree was already safely reset, or a clean commit-failure step failure.
  *
- * Mirroring {@link ./core/workflow/recovery-reconcile.ts}, the durable flag is
+ * Mirroring `src/core/workflow/recovery/reconcile.ts`, the durable flag is
  * written *first*: it is the authority that blocks unsafe progression, so it
  * must land even if the best-effort `recovery.md` write later fails
  * (`artifact_write_failed`). This module never clears recovery — clearing stays

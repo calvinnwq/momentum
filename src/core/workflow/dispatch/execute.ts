@@ -3,16 +3,16 @@
  * NGX-367).
  *
  * `dispatch.ts` owns the *pure* dispatch decision and
- * `dispatch-persist.ts` owns the *read-only* resolution that produces
+ * `dispatch/persist.ts` owns the *read-only* resolution that produces
  * it. This module owns the third layer: applying that decision durably as the
  * scheduler's executor-dispatch seam. {@link executeWorkflowStepDispatch} has the
  * exact {@link WorkflowStepDispatch} shape `runWorkflowSchedulerOnce` calls with a
  * claimed step, so the bounded `daemon start` workflow lane can pass it straight
  * through with no test-only injection. It is the storage/effect twin of the
- * dispatch brain, exactly as `gate-persist.ts` is the effect twin of
- * `gate.ts`.
+ * dispatch brain, exactly as `gate/persist.ts` is the effect twin of
+ * `gate/gate.ts`.
  *
- * The seam contract (`scheduler.ts`): "On a normal return the dispatcher
+ * The seam contract (`dispatch/scheduler.ts`): "On a normal return the dispatcher
  * owns the dispatch lease's lifecycle (refresh across rounds, release on
  * terminal). If it throws, the lane releases the lease." This module honours both
  * halves and never silently no-ops a claimed step:
@@ -46,7 +46,7 @@
  * advance the step to a terminal state. The landed `runGoalLoopStep` /
  * `runSingleShotStep` / `runNoMistakesMirrorStep` adapters own nested
  * `executor_invocations` / `executor_rounds` evidence only; the RC-2
- * reconciliation seam (`dispatch-reconcile-execute.ts`, NGX-480) is now the
+ * reconciliation seam (`dispatch/reconcile-execute.ts`, NGX-480) is now the
  * single owner that converts terminal executor evidence into the workflow step's
  * terminal transition. The phase-1 invocation /
  * round ids are deliberately namespaced (`...::dispatch`) so that follow-up owns
@@ -482,7 +482,7 @@ function parseRouteJson(
  * id (see the module doc's phase-1 boundary note).
  *
  * Exported as the single source of truth for this id: the RC-2 reconciliation
- * seam (`dispatch-reconcile-execute.ts`) recomputes the same id to find the
+ * seam (`dispatch/reconcile-execute.ts`) recomputes the same id to find the
  * dispatched step's terminal executor evidence, so the two halves can never drift
  * apart on the namespacing convention.
  */

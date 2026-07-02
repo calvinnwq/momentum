@@ -3,10 +3,10 @@
  *
  * The production dispatch lane is assembled from landed, individually-tested seams:
  *
- *   - `dispatch-execute.ts` (`executeWorkflowStepDispatch`) advances a claimed step
+ *   - `dispatch/execute.ts` (`executeWorkflowStepDispatch`) advances a claimed step
  *     `approved -> running`, creates the `<run>::<step>::dispatch` executor
  *     invocation + first round start scaffold, and holds the dispatch lease.
- *   - `dispatch-executor-run.ts` (`executeAndReconcileDispatchedWorkflowStep`) runs
+ *   - `dispatch/executor-run.ts` (`executeAndReconcileDispatchedWorkflowStep`) runs
  *     the dispatched step's executor through an injected registry, records the
  *     result as terminal evidence, and lets the RC-2 reconciliation seam finalize
  *     the step exactly once. It REQUIRES the scaffold to already exist.
@@ -15,7 +15,7 @@
  * step's executor was never run by the daemon: the base dispatch only ever created
  * the scaffold and left the step `running`. This module is that missing composition.
  * It is the production analogue of the test/dogfood `createTerminalizingWorkflowDispatch`
- * (`dogfood-dispatch.ts`): same wrap-the-base-dispatch shape, but it drives the REAL
+ * (`dispatch/dogfood.ts`): same wrap-the-base-dispatch shape, but it drives the REAL
  * executor registry and finalizes through RC-2 instead of stamping a fake `succeeded`.
  *
  * Boundary discipline (so RC-2 stays the single finalization owner):
@@ -46,8 +46,8 @@
  *
  * It takes the {@link WorkflowStepExecutorRegistry} and the per-step execution-context
  * deriver by injection: daemon callers resolve the daemon-default live-wrapper
- * profile into a registry (`daemon-live-wrapper-profile.ts`) and derive the run-dir
- * / result / log layout (`daemon-dispatch-exec-context.ts`) before handing both to
+ * profile into a registry (`live-wrapper/daemon-profile.ts`) and derive the run-dir
+ * / result / log layout (`live-wrapper/daemon-exec-context.ts`) before handing both to
  * this reusable, registry-agnostic dispatch-lane composition.
  */
 

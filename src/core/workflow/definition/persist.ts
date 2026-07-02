@@ -2,7 +2,7 @@
  * Persistence layer for M10-01 (NGX-345) workflow / step definition primitives.
  *
  * Takes the pure {@link WorkflowDefinition} shape owned by
- * `definition.ts` and writes it into the durable
+ * `definition/definition.ts` and writes it into the durable
  * `workflow_definitions` / `step_definitions` tables added by `migrations.ts`.
  * This is the storage twin of the pure validator: nothing here runs executors
  * or schedules work. First-class run start is layered separately on these

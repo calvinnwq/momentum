@@ -21,11 +21,11 @@
  * This module owns the *pure* half of that mirror: the {@link NoMistakesExternalState}
  * snapshot shape, the daemon classification of a mirrored snapshot, the durable
  * finding / decision projections, and the deterministic, reattachable invocation
- * / round identity. Like `single-shot-executor.ts` and `goal-loop-executor.ts`,
+ * / round identity. Like `single-shot/executor.ts` and `goal-loop/executor.ts`,
  * it is a pure function of its inputs: no SQLite, no file system, no git, no
  * executor invocation. The mechanism / orchestrator siblings layer the
  * external-state reader and durable persistence on top, exactly as the
- * single-shot twins layer on `single-shot-executor.ts`.
+ * single-shot twins layer on `single-shot/executor.ts`.
  *
  * The defining discipline is the ticket's "Treat external no-mistakes state as
  * evidence to classify, not blindly trusted authority" and the contract's
@@ -80,7 +80,7 @@ import type {
 
 /**
  * The single executor family this adapter mirrors. Pinned as a named constant —
- * mirroring `goal-loop-executor.ts`'s `GOAL_LOOP_EXECUTOR_FAMILY` — so the
+ * mirroring `goal-loop/executor.ts`'s `GOAL_LOOP_EXECUTOR_FAMILY` — so the
  * mechanism / orchestrator twins and the family guard stay in sync.
  */
 export const NO_MISTAKES_EXECUTOR_FAMILY =

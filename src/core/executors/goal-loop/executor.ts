@@ -13,16 +13,16 @@
  * preserved recovery code, and any durable human gate.
  *
  * It is a pure function of its inputs: no SQLite, no file system, no git, no
- * executor invocation — exactly the discipline `loop-reducer.ts` and
- * `step-finalize.ts` follow. The durable orchestrator that creates the
+ * executor invocation — exactly the discipline `loop/reducer.ts` and
+ * `shared/step-finalize.ts` follow. The durable orchestrator that creates the
  * invocation, inserts the round, runs the bounded mechanism, runs finalization,
  * and persists this decision is layered on top in later M10-05 slices, the same
- * way `live-step-orchestrator.ts` composes the shared `step-finalize.ts`
- * transaction (through its `live-step-finalize.ts` back-compat alias).
+ * way `live-step/orchestrator.ts` composes the shared `shared/step-finalize.ts`
+ * transaction (through its `live-step/finalize.ts` back-compat alias).
  *
  * Beyond the classification, this module also projects a finished round into the
  * durable {@link ExecutorRoundUpdate} patches the M10-03 persistence twin
- * (`loop-persist.ts`) writes — implementing the contract's "Round
+ * (`loop/persist.ts`) writes — implementing the contract's "Round
  * Schema" result/verification/commit/recovery evidence requirement. The
  * projection is two-phase to honour both the contract's Round Lifecycle and the
  * round transition graph: a `capturing_result` patch carries the normalized
@@ -60,7 +60,7 @@
  *     (moved HEAD, failed reset/commit, lost repo lock, missing/invalid result)
  *     routes the round to `manual_recovery_required` and preserves the precise
  *     M9 recovery code, never silently retrying. This mirrors how
- *     `live-step-run-recovery.ts` sets `needs_manual_recovery` for the same
+ *     `live-step/run-recovery.ts` sets `needs_manual_recovery` for the same
  *     finalize outcomes.
  *   - Bounded autonomy. "`continue` means the executor recommends another round,
  *     but the daemon must still enforce max rounds ...": once the configured
@@ -436,7 +436,7 @@ export const GOAL_LOOP_GLOBAL_DEFAULT_SELECTION: Required<GoalLoopSelectionConfi
 /**
  * Finalize outcomes that leave the worktree in an unsafe or ambiguous state. The
  * round routes to manual recovery and preserves the precise code; this is the
- * same set `live-step-run-recovery.ts` flags as `needs_manual_recovery`.
+ * same set `live-step/run-recovery.ts` flags as `needs_manual_recovery`.
  */
 const UNSAFE_FINALIZE_OUTCOMES: ReadonlySet<GoalLoopFinalizeOutcome> = new Set([
   "manual_recovery_required",

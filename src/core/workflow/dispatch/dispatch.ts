@@ -6,7 +6,7 @@
  * the phase-1 executor-family allowlist and the deterministic decision
  * ({@link planWorkflowStepDispatch}) that routes a claimed workflow step either
  * to a real executor dispatch or to a fail-closed, operator-visible
- * manual-recovery outcome. It follows the same discipline as `gate.ts`
+ * manual-recovery outcome. It follows the same discipline as `gate/gate.ts`
  * and the executor-loop reducer: no SQLite, no file system, no daemon, no
  * executor invocation. The durable twins resolve the claimed step against
  * `workflow_runs` / `step_definitions`, create the `executor_invocations` /
@@ -14,7 +14,7 @@
  * carry one, flag manual recovery for the fail-closed outcome when possible,
  * release the dispatch lease where appropriate, and wire the dispatcher into
  * bounded `daemon start`, exactly as
- * `gate-persist.ts` is the storage twin of `gate.ts`.
+ * `gate/persist.ts` is the storage twin of `gate/gate.ts`.
  *
  * Scope decisions pinned here, grounded in the compact Runtime Model, Workflow
  * Safety, and Runtime Consolidation anchors in SPEC.md plus the long-form

@@ -2,21 +2,21 @@
  * Daemon-lane child-run context deriver for the `subworkflow` executor family
  * (RC-4b, NGX-498).
  *
- * The landed RC-4 entry-point factory (`subworkflow-dispatch.ts`) takes its
+ * The landed RC-4 entry-point factory (`dispatch/subworkflow-dispatch.ts`) takes its
  * child-run derivation by injection — a {@link DeriveDispatchedSubworkflowContext}
  * — precisely so the daemon lane owns building the start-or-attach runner and the
  * evidence paths from the existing workflow-owned seams, and the wrapper stays
  * agnostic to *how* the child is driven. Iterations 1-3 landed the pieces that
  * derivation composes; this module is the connective IO that assembles them:
  *
- *   - iteration 1 (`subworkflow-child-config.ts`): the child-config shape +
+ *   - iteration 1 (`route/subworkflow-child-config.ts`): the child-config shape +
  *     recursion-safety deciders;
- *   - iteration 2 (`subworkflow-route.ts`): {@link planSubworkflowChildLaunchFromRoute},
+ *   - iteration 2 (`route/subworkflow.ts`): {@link planSubworkflowChildLaunchFromRoute},
  *     which sources the child config from `route.subworkflow.child` and the durable
  *     recursion lineage from `route.subworkflow.lineage`, returning a launch plan
  *     (child definition key, deterministic child run id, propagated child route) or
  *     a typed fail-closed refusal;
- *   - iteration 3 (`subworkflow-child-runner.ts`):
+ *   - iteration 3 (`route/subworkflow-child-runner.ts`):
  *     {@link buildDispatchedSubworkflowChildRunner}, which resolves the child
  *     definition by key and returns the production start-or-attach runner.
  *
@@ -26,7 +26,7 @@
  * runner, and returns the {@link DispatchedSubworkflowContextResolution} the
  * factory forwards into the producer (or routes to manual recovery on any refusal).
  *
- * Discipline (the pure-decision / injected-IO split `daemon-dispatch-exec-context.ts`
+ * Discipline (the pure-decision / injected-IO split `live-wrapper/daemon-exec-context.ts`
  * uses, and total so the factory never has to handle a thrown derivation specially):
  *
  *   - {@link resolveSubworkflowParentRunFacts} is the pure half: it validates the

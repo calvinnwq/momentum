@@ -1,13 +1,13 @@
 /**
  * Goal-loop executor adapter — single-round driver (M10-05, NGX-349).
  *
- * `goal-loop-executor.ts` owns the *pure* projections for one bounded round: the
+ * `goal-loop/executor.ts` owns the *pure* projections for one bounded round: the
  * round-start record ({@link planGoalLoopRoundStart}), the daemon classification
  * + two-phase persistence patches ({@link planGoalLoopRoundPersistence}), and the
  * deterministic agent/model selection. This module is the stateful seam that
  * composes those projections with the *real* M10-03 executor-loop persistence
  * layer and round transition graph around the bounded mechanism, exactly the way
- * `live-step-orchestrator.ts` composes the pure `step-finalize.ts`
+ * `live-step/orchestrator.ts` composes the pure `shared/step-finalize.ts`
  * transaction:
  *
  *   insert the round-start row  (running, agent/model/input frozen in)
@@ -138,7 +138,7 @@ export type GoalLoopRoundMechanismResult = {
  * (its frozen agent/model/effort, input digest, artifact root, and identity) and
  * returns the round's normalized result + finalize outcome. It must be total —
  * encode failures as finalize outcomes rather than throwing — mirroring
- * `finalizeWorkflowStepFromResultFile`. `goal-loop-mechanism.ts`'s
+ * `finalizeWorkflowStepFromResultFile`. `goal-loop/mechanism.ts`'s
  * `goalLoopRoundMechanismFromResultFile` is the concrete mechanism that reuses
  * that shared finalize safety over a round's result document; the daemon wiring that
  * runs the agent producing the document then calls it inside this closure. Tests
@@ -451,7 +451,7 @@ export type RunGoalLoopStepInput = {
  * injected `now`. As with {@link runGoalLoopInvocation}, a round's finish clock is
  * read when the round is planned; refining it to a wall-clock-accurate
  * post-mechanism stamp is part of the deferred real daemon clock wiring, the same
- * way `live-step-orchestrator.ts` owns its own lease/heartbeat clock.
+ * way `live-step/orchestrator.ts` owns its own lease/heartbeat clock.
  *
  * @throws {ExecutorInvocationConflictError} if the invocation id already exists
  * (a re-run must use a fresh `attempt`).

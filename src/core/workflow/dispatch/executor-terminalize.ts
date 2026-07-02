@@ -1,11 +1,11 @@
 /**
  * Dispatched executor-evidence terminalization seam (RC-5b, NGX-492).
  *
- * The production dispatch lane (`dispatch-execute.ts`) stops at the phase-1
+ * The production dispatch lane (`dispatch/execute.ts`) stops at the phase-1
  * *start scaffold*: it advances a claimed step `approved -> running`, creates the
  * `<run>::<step>::dispatch` executor invocation (`running`) and its first round
  * (`pending`) with every evidence field empty, and holds the dispatch lease. The
- * RC-2 reconciliation seam (`dispatch-reconcile-execute.ts`) then finalizes the
+ * RC-2 reconciliation seam (`dispatch/reconcile-execute.ts`) then finalizes the
  * workflow step from that invocation's *terminal* executor state. Nothing in
  * production bridged the two: no code drove the scaffold's invocation/round from
  * `running`/`pending` to a terminal state from a real executor result, so the

@@ -4,7 +4,7 @@
  *
  * This is the daemon-dispatchable *producer* that makes `external-apply`
  * runnable by the workflow lane. It is the async sibling of
- * `dispatch-executor-run.ts`'s {@link executeAndReconcileDispatchedWorkflowStep}:
+ * `dispatch/executor-run.ts`'s {@link executeAndReconcileDispatchedWorkflowStep}:
  * same "run the work -> terminalize the evidence -> let RC-2 finalize" shape and
  * the same single-finalization-owner / idempotent-re-entry discipline, but the
  * work it runs is the existing M6 external-apply write path
@@ -227,7 +227,7 @@ export async function executeAndReconcileDispatchedExternalApplyStep(
  * Drive the idempotent RC-2 reconciliation, trapping a thrown reconcile so a
  * recorded-but-unreconciled terminal can be retried on a later tick without
  * losing the durable evidence or releasing the held lease. Mirrors the same
- * helper the synchronous run path uses (`dispatch-executor-run.ts`).
+ * helper the synchronous run path uses (`dispatch/executor-run.ts`).
  */
 function tryReconcileDispatchedWorkflowStep(input: {
   db: MomentumDb;

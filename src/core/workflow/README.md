@@ -116,7 +116,7 @@ provenance to the bounded session's working directory — a native run runs unde
 `<repoPath>/.agent-workflows/<runId>/` and an imported run under its source
 artifact's run dir — and refuses honestly with `missing_repo_path` (rather than
 fabricating a working directory) when the run has no repo, so the lane can fail
-closed into manual recovery. `live-wrapper-dispatch.ts` now consumes that refusal
+closed into manual recovery. `dispatch/live-wrapper.ts` now consumes that refusal
 safely: its deriver injection returns a total
 `DispatchedStepExecutorContextResolution`, and an `ok: false` resolution is routed
 to manual recovery (`recordUnresolvedDispatchedStepContext` in
@@ -125,7 +125,7 @@ to manual recovery (`recordUnresolvedDispatchedStepContext` in
 park the run) instead of throwing — a throw inside the dispatch closure, after the
 scaffold exists, would release the lease over a still-`running` step and strand it.
 The bounded `daemon start` workflow lane now wires the resolved profile,
-registry, and deriver by composing `live-wrapper-dispatch.ts` around the base
+registry, and deriver by composing `dispatch/live-wrapper.ts` around the base
 workflow dispatcher for configured daemon-default profiles.
 
 RC-3 (NGX-496) added the daemon-dispatchable `external-apply` adapter:

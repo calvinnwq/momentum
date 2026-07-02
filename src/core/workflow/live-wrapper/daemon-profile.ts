@@ -4,7 +4,7 @@
  * RC-5 (NGX-485) made the production `WorkflowStepExecutor` default real: with no
  * live-wrapper profile wired, every canonical kind resolves to the honest
  * `runtime_unavailable` adapter rather than a fabricated success
- * (`step-executor-real-adapters.ts`). RC-5b lets the daemon run dispatched
+ * (`step/executor-real-adapters.ts`). RC-5b lets the daemon run dispatched
  * steps through a configured live command and feed the terminal evidence into the
  * RC-2 reconciliation seam. The production lane is split across two focused pieces:
  *
@@ -12,7 +12,7 @@
  *      {@link LiveWrapperProfile} from operator configuration (this module); and
  *   2. **daemon-lane wiring** — composing the resolved profile + the
  *      `executeAndReconcileDispatchedWorkflowStep` producer
- *      (`dispatch-executor-run.ts`) into the bounded `daemon start` workflow lane.
+ *      (`dispatch/executor-run.ts`) into the bounded `daemon start` workflow lane.
  *
  * This module owns profile source resolution. It resolves the daemon's
  * live-wrapper profile from a single operator-controlled environment variable
@@ -34,7 +34,7 @@
  *
  * The filesystem read is injected ({@link ResolveDaemonLiveWrapperProfileDeps})
  * so the decision logic stays a pure, exhaustively unit-testable function — the
- * same pure-decision / injected-IO split `real-workflow-smoke.ts` (decision) and
+ * same pure-decision / injected-IO split `smoke/workflow-harness.ts` (decision) and
  * `real-workflow-probe.ts` (IO) use. {@link readDaemonLiveWrapperProfileSource} is
  * the default real loader the daemon passes.
  */

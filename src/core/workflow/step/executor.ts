@@ -22,7 +22,7 @@
  * NGX-434 runtime consolidation plan classified as deprecate-later: the default
  * registry is now built from real adapters (the honest unconfigured adapter
  * below, which refuses with `runtime_unavailable` rather than fabricating a
- * success), and `step-executor-real-adapters.ts` wires configured kinds to real
+ * success), and `step/executor-real-adapters.ts` wires configured kinds to real
  * M9 live wrappers. The deterministic fake moved behind an explicit test-only
  * seam (`test/helpers/fake-workflow-step-executor.ts`) that the M7/M8/M10
  * substrate smokes inject through the `registry` parameter of the three
@@ -199,7 +199,7 @@ export type WorkflowStepExecutorRegistry = ReadonlyMap<
  * kind. It is a real adapter (`executes: true`) that refuses at execute time
  * with `runtime_unavailable` — the established prerequisite-missing class —
  * rather than fabricating a terminal result. The dispatcher then treats it as a
- * missing prerequisite, never as a clean success. `step-executor-real-adapters.ts`
+ * missing prerequisite, never as a clean success. `step/executor-real-adapters.ts`
  * reuses this for canonical kinds a live-wrapper profile does not configure.
  */
 export function createUnconfiguredWorkflowStepExecutor(

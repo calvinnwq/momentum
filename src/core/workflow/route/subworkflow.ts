@@ -2,7 +2,7 @@
  * Route-encoded child config + durable recursion lineage for production
  * `subworkflow` steps (RC-4b, NGX-498).
  *
- * Iteration 1 (`subworkflow-child-config.ts`) landed the two pure deciders —
+ * Iteration 1 (`route/subworkflow-child-config.ts`) landed the two pure deciders —
  * {@link validateSubworkflowChildConfig} and {@link planSubworkflowChildLaunch} —
  * but left two connective decisions to "the wiring slice":
  *
@@ -28,7 +28,7 @@
  *     `subworkflow` steps can detect a cycle / depth bound. Absent for a top-level
  *     run.
  *
- * Discipline (pure + total + fail-closed, mirroring `subworkflow-child-config.ts`
+ * Discipline (pure + total + fail-closed, mirroring `route/subworkflow-child-config.ts`
  * — no SQLite, no file system, no clock):
  *
  *   - {@link readSubworkflowParentLineage} treats an absent lineage as a legitimate

@@ -3,9 +3,9 @@
  * `subworkflow` executor family (RC-4b, NGX-498).
  *
  * RC-4 (NGX-497) landed the daemon-dispatchable `subworkflow` *mechanism* — the
- * pure child-mirror mapping (`dispatch-subworkflow.ts`), the async producer
- * (`dispatch-subworkflow-run.ts`), and the daemon-lane entry-point factory
- * (`subworkflow-dispatch.ts`) — but production stayed fail-closed because the
+ * pure child-mirror mapping (`dispatch/subworkflow.ts`), the async producer
+ * (`dispatch/subworkflow-run.ts`), and the daemon-lane entry-point factory
+ * (`dispatch/subworkflow-dispatch.ts`) — but production stayed fail-closed because the
  * "open decision" was unresolved: *what configures a production `subworkflow`
  * step's child run, and what keeps recursion bounded?* This module owns exactly
  * that keystone decision. It does not itself touch

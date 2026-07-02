@@ -1,7 +1,7 @@
 /**
  * Goal-loop executor adapter — round mechanism bridge (M10-05, NGX-349).
  *
- * `goal-loop-orchestrator.ts` drives one bounded round through its durable
+ * `goal-loop/orchestrator.ts` drives one bounded round through its durable
  * lifecycle around an *injected* {@link GoalLoopRoundRunner} mechanism; every
  * test so far has injected a deterministic fake mechanism. This module is the
  * concrete mechanism that reuses the existing Goal / iteration safety the ticket

@@ -1,9 +1,9 @@
 /**
  * Daemon-lane dispatched-step execution-context derivation (RC-5b, NGX-492).
  *
- * The live-wrapper dispatch composition (`live-wrapper-dispatch.ts`) runs a
+ * The live-wrapper dispatch composition (`dispatch/live-wrapper.ts`) runs a
  * dispatched step's executor through `executeAndReconcileDispatchedWorkflowStep`
- * (`dispatch-executor-run.ts`), which needs a {@link DispatchedStepExecutorContext}:
+ * (`dispatch/executor-run.ts`), which needs a {@link DispatchedStepExecutorContext}:
  * the repo the bounded session operates on, its working directory, and the
  * result / log paths. That wrapper takes the deriver by injection precisely so the
  * daemon lane owns the run-dir layout decision; iterations 3 and 4 deferred it here.
@@ -11,7 +11,7 @@
  * This module owns that decision. It is split into a pure resolver
  * ({@link resolveDispatchedStepExecutorContext}) and the injected IO loader
  * ({@link loadDispatchedStepRunProvenance}) that reads the durable run row — the
- * same pure-decision / injected-IO split `daemon-live-wrapper-profile.ts` uses.
+ * same pure-decision / injected-IO split `live-wrapper/daemon-profile.ts` uses.
  *
  * Run-dir layout (the deferred design decision, now settled to match existing
  * precedent):
@@ -19,10 +19,10 @@
  *   - **native run** (`repo_path` set, no `source_artifact_path`): the session runs
  *     under `<repoPath>/.agent-workflows/<runId>/`, matching the agent-workflows
  *     directory convention the scheduler's recovery-artifact writer already uses
- *     (`scheduler.ts`).
+ *     (`dispatch/scheduler.ts`).
  *   - **imported run** (`source_artifact_path` set): the session runs under the run
  *     dir derived from the source artifact — `path.dirname(source_artifact_path)` —
- *     mirroring the scheduler's recovery-artifact run-dir derivation and `status.ts`
+ *     mirroring the scheduler's recovery-artifact run-dir derivation and `run/status.ts`
  *     evidence-link matching for imported runs.
  *
  * The result / log file names (`result.json` / `executor.log`) are advisory: a

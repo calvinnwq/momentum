@@ -7,9 +7,9 @@
  * is a pure function of an *already-typed* snapshot. This module is the IO seam
  * that produces that snapshot: it reads the untrusted external no-mistakes state
  * store and turns its raw bytes into a typed {@link NoMistakesExternalState} the
- * brain can classify — exactly the way `goal-loop-mechanism.ts` is the seam
+ * brain can classify — exactly the way `goal-loop/mechanism.ts` is the seam
  * between "the round's agent wrote a result document" and "the daemon classifies
- * and persists", and `single-shot-mechanism.ts` is the seam that runs the bounded
+ * and persists", and `single-shot/mechanism.ts` is the seam that runs the bounded
  * command. Here the bounded work is a *read*: no-mistakes owns and runs its own
  * pipeline (ticket "No rewrite of no-mistakes"; contract "Replacement of GNHF or
  * no-mistakes internals" is a non-goal), so Momentum only mirrors enough state to

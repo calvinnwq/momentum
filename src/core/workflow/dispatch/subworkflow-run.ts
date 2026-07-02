@@ -4,7 +4,7 @@
  *
  * This is the daemon-dispatchable *producer* that makes `subworkflow` runnable by
  * the workflow lane. It is the async sibling of
- * `dispatch-external-apply-run.ts`'s
+ * `dispatch/external-apply-run.ts`'s
  * {@link executeAndReconcileDispatchedExternalApplyStep}: same "observe the work
  * -> terminalize the evidence -> let RC-2 finalize" shape and the same
  * single-finalization-owner / idempotent-re-entry discipline, but the work it

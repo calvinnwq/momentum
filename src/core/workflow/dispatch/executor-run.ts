@@ -4,20 +4,20 @@
  * The production dispatch lane is built from three landed halves that, before
  * this module, were never composed in production:
  *
- *   1. `dispatch-execute.ts` advances a claimed step `approved -> running`,
+ *   1. `dispatch/execute.ts` advances a claimed step `approved -> running`,
  *      creates the `<run>::<step>::dispatch` executor invocation (`running`) +
  *      first round (`pending`) start scaffold, and holds the dispatch lease.
- *   2. `dispatch-executor-terminalize.ts` records a finished
+ *   2. `dispatch/executor-terminalize.ts` records a finished
  *      {@link WorkflowStepExecutorDispatchResult} as terminal evidence on that
  *      scaffold's invocation / round (succeeded / failed, or manual_recovery for
  *      an unconfigured / process-level failure).
- *   3. `dispatch-reconcile-execute.ts` (RC-2) finalizes the owning
+ *   3. `dispatch/reconcile-execute.ts` (RC-2) finalizes the owning
  *      `workflow_steps` row from that terminal invocation, exactly once.
  *
  * The gap RC-5b closes is the *producer* in the middle: nothing in production ran
  * the dispatched step's executor to yield the result step 2 consumes, so a
  * dispatched step stayed `running` forever (or only advanced under the
- * test/dogfood-only `dogfood-dispatch.ts` stand-in). This module owns that
+ * test/dogfood-only `dispatch/dogfood.ts` stand-in). This module owns that
  * producer and the composition:
  *
  *   run the dispatched step's executor (through the injected real registry)
@@ -160,7 +160,7 @@ export const WORKFLOW_EXECUTE_RECONCILE_STATUS = {
    * (e.g. a `subworkflow` child run that is non-terminal), so it produced NO
    * terminal evidence and left the step running for a later tick to re-check —
    * the structural guard against prematurely finalizing a parent over an
-   * unfinished child. See `dispatch-subworkflow-run.ts`.
+   * unfinished child. See `dispatch/subworkflow-run.ts`.
    */
   childDeferred: "execute_child_deferred",
   /**
@@ -393,7 +393,7 @@ export function recordDispatchedStepManualRecovery(
  * result takes — without running any executor and without fabricating a clean
  * terminal.
  *
- * The daemon lane (`live-wrapper-dispatch.ts`) calls this when its context deriver
+ * The daemon lane (`dispatch/live-wrapper.ts`) calls this when its context deriver
  * refuses. Deriving the context happens INSIDE the dispatch closure, *after* the
  * base dispatch advanced the step `approved -> running` and created the
  * `<run>::<step>::dispatch` scaffold. Throwing there would make the scheduler

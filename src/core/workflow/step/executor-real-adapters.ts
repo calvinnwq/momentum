@@ -1,7 +1,7 @@
 /**
  * Real `WorkflowStepExecutor` production adapter registry (RC-5, NGX-485).
  *
- * The M7 executor boundary (`step-executor.ts`) shipped a fake `ADAPTERS` map:
+ * The M7 executor boundary (`step/executor.ts`) shipped a fake `ADAPTERS` map:
  * `getWorkflowStepExecutor` / `dispatchWorkflowStepExecutor` resolved to a
  * deterministic fake for every `WorkflowStepExecutorKind`. The runtime
  * consolidation plan (`SPEC.md`, Path 6)
@@ -43,7 +43,7 @@ import {
 
 /**
  * Re-exported from the base executor module (RC-5 moved the honest "no live
- * wrapper configured" adapter to `step-executor.ts` so it can also back the
+ * wrapper configured" adapter to `step/executor.ts` so it can also back the
  * production default registry). Kept exported here for callers that resolve it
  * alongside {@link buildRealWorkflowStepExecutorRegistry}.
  */

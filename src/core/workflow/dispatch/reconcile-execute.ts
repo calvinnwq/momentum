@@ -1,14 +1,14 @@
 /**
  * Side-effecting twin of the RC-2 workflow-step reconciliation decider (NGX-480).
  *
- * `dispatch-reconcile.ts` owns the *pure* half — the deterministic decision that
+ * `dispatch/reconcile.ts` owns the *pure* half — the deterministic decision that
  * maps a dispatched step's terminal executor-invocation state to a finalization
  * outcome. This module owns the durable half: the single production seam the
- * runtime-consolidation plan names RC-2. It is to `dispatch-reconcile.ts` exactly
- * what `dispatch-execute.ts` is to `dispatch.ts`.
+ * runtime-consolidation plan names RC-2. It is to `dispatch/reconcile.ts` exactly
+ * what `dispatch/execute.ts` is to `dispatch.ts`.
  *
  * The seam reads the deterministic `<run>::<step>::dispatch` invocation the
- * production dispatcher (`dispatch-execute.ts`) created, asks
+ * production dispatcher (`dispatch/execute.ts`) created, asks
  * {@link planWorkflowStepReconciliation} what to do, and applies that decision
  * inside a single `BEGIN IMMEDIATE` transaction:
  *
@@ -16,7 +16,7 @@
  *     owning `workflow_steps` row to the matching clean terminal via
  *     `finishWorkflowStep`, release the held `dispatch` lease (honouring the
  *     scheduler contract's "release on terminal" half), and refresh the cached
- *     run-state / monitor columns through the ARCH-08 `runtime-state.ts` seam.
+ *     run-state / monitor columns through the ARCH-08 `run/runtime-state.ts` seam.
  *   - **manual_recovery** (`blocked` / `manual_recovery_required` invocation): the
  *     bounded attempt ended needing operator inspection, so the seam parks the run
  *     (`needs_manual_recovery`) and opens an operator-visible `manual_recovery_required`

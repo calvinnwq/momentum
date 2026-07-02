@@ -2,7 +2,7 @@
  * Production start-or-attach child-run runner builder for the `subworkflow`
  * executor family (RC-4b, NGX-498).
  *
- * The RC-4 producer (`dispatch-subworkflow-run.ts`) drives a dispatched
+ * The RC-4 producer (`dispatch/subworkflow-run.ts`) drives a dispatched
  * `subworkflow` step through an injected {@link DispatchedSubworkflowChildRunner}
  * — the parent step never reaches into the child's runtime; it starts or attaches
  * to the child run through the existing workflow-owned seams and observes that
@@ -22,7 +22,7 @@
  * lane that injects this runner once the configured lane was proven.
  *
  * Discipline (the same pure-decision / injected-IO split
- * `daemon-dispatch-exec-context.ts` uses for the live-wrapper lane):
+ * `live-wrapper/daemon-exec-context.ts` uses for the live-wrapper lane):
  *
  *   - {@link buildDispatchedSubworkflowChildRunner} resolves the child
  *     {@link WorkflowDefinition} by key *once*, at build (derive) time. A key that

@@ -5,11 +5,11 @@
  * This module owns the *pure* half of workflow gates and operator decisions: the
  * durable gate-type and target-scope vocabularies plus the delegated-policy /
  * operator decision brain ({@link evaluateGateDecision}). It follows the same
- * discipline as `definition.ts` and the executor-loop reducer: no
+ * discipline as `definition/definition.ts` and the executor-loop reducer: no
  * SQLite, no file system, no daemon. Durable gate persistence and the
  * `workflow run decide` CLI surface layer on top of these primitives, exactly
- * as `definition-persist.ts` is the storage twin of
- * `definition.ts`.
+ * as `definition/persist.ts` is the storage twin of
+ * `definition/definition.ts`.
  *
  * Scope decisions pinned here, grounded in the compact Workflow Safety anchor in
  * SPEC.md plus the long-form planning contracts externalized to Obsidian:

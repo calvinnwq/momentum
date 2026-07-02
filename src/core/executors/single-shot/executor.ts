@@ -16,14 +16,14 @@
  * *mechanism* — `one-shot` requires a normalized {@link RunnerResult} document
  * (an agent/review pass) while `script` is exit-code based (a deterministic local
  * command) — which the mechanism / orchestrator twins layer on top, the same way
- * `goal-loop-mechanism.ts` / `goal-loop-orchestrator.ts` layer on
- * `goal-loop-executor.ts`. This module owns the *pure* half both
+ * `goal-loop/mechanism.ts` / `goal-loop/orchestrator.ts` layer on
+ * `goal-loop/executor.ts`. This module owns the *pure* half both
  * families share: the recovery taxonomy, the daemon classification of a single
  * invocation, and the deterministic, reattachable invocation / round identity.
  *
  * It is a pure function of its inputs: no SQLite, no file system, no git, no
- * executor invocation — exactly the discipline `goal-loop-executor.ts` and
- * `loop-reducer.ts` follow.
+ * executor invocation — exactly the discipline `goal-loop/executor.ts` and
+ * `loop/reducer.ts` follow.
  *
  * Classification, grounded in the contract's "Completion Classification"
  * definitions:
@@ -54,7 +54,7 @@
  * The recovery taxonomy reuses the existing vocabulary rather than inventing a
  * parallel one: the execution-time codes are exactly the M9
  * {@link LIVE_STEP_WRAPPER_RECOVERY_CODES}, and the unsafe-finalize codes are the
- * same strings `goal-loop-executor.ts` preserves for an unsafe finalize outcome,
+ * same strings `goal-loop/executor.ts` preserves for an unsafe finalize outcome,
  * plus `invalid_input` for rejected mechanism configuration or launch
  * preconditions.
  */
@@ -131,7 +131,7 @@ export const SINGLE_SHOT_FAILED_RECOVERY_CODES = [
  * Recovery codes that route to `manual_recovery_required`: an unsafe or
  * ambiguous repo-finalization outcome, or an invalid mechanism/config input that
  * Momentum must not retry away. Most are the same strings
- * `goal-loop-executor.ts` preserves for an unsafe finalize; `invalid_input` also
+ * `goal-loop/executor.ts` preserves for an unsafe finalize; `invalid_input` also
  * covers pre-launch guards such as bad family, malformed `baseHead`, or relative
  * artifact / script paths.
  */

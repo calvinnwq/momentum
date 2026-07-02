@@ -2,7 +2,7 @@
  * Persistence layer for the executor-loop spine (M10-03, NGX-347).
  *
  * Takes the pure {@link ExecutorDefinitionRecord} / {@link ExecutorInvocationRecord}
- * / {@link ExecutorRoundRecord} shapes owned by `loop-reducer.ts` and
+ * / {@link ExecutorRoundRecord} shapes owned by `loop/reducer.ts` and
  * writes them into the durable `executor_definitions` / `executor_invocations` /
  * `executor_rounds` tables added by `migrations.ts`. This is the storage twin of
  * the pure reducer: nothing here runs executors or starts a Goal loop. The

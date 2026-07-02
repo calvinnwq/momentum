@@ -1,13 +1,13 @@
 /**
  * Single-shot executor adapter — single-round driver (M10-06, NGX-350).
  *
- * `single-shot-executor.ts` owns the *pure* projections for one single-shot
+ * `single-shot/executor.ts` owns the *pure* projections for one single-shot
  * invocation: the durable invocation/round identity, the deterministic
  * agent/model selection, the round-start record, the daemon classification +
  * two-phase persistence patches, and the artifact / checkpoint projections. This
  * module is the stateful seam that composes those projections with the *real*
  * M10-03 executor-loop persistence layer and round transition graph around the
- * bounded mechanism, exactly the way `goal-loop-orchestrator.ts` composes the
+ * bounded mechanism, exactly the way `goal-loop/orchestrator.ts` composes the
  * goal-loop projections — but simpler, because a single shot owns exactly one
  * round and never loops:
  *

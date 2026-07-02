@@ -1,7 +1,7 @@
 /**
  * Dogfood terminalize-and-continue dispatch wrapper (M10-09b, NGX-391).
  *
- * The production workflow-lane dispatcher (`dispatch-execute.ts`) stops
+ * The production workflow-lane dispatcher (`dispatch/execute.ts`) stops
  * at the phase-1 *start scaffold*: it advances a claimed step `approved ->
  * running`, creates the durable `executor_invocations` / `executor_rounds` rows,
  * and *holds* the dispatch lease while an executor lane drives the round to terminal
@@ -38,8 +38,8 @@
  *
  * RC-2 status (NGX-480): the production owner of post-scaffold `workflow_steps`
  * finalization is now `reconcileDispatchedWorkflowStep`
- * (`dispatch-reconcile-execute.ts`), built on the pure decider
- * `planWorkflowStepReconciliation` (`dispatch-reconcile.ts`); it finalizes a
+ * (`dispatch/reconcile-execute.ts`), built on the pure decider
+ * `planWorkflowStepReconciliation` (`dispatch/reconcile.ts`); it finalizes a
  * dispatched step from terminal executor evidence idempotently and single-owner.
  * This module is therefore **test/dogfood-only** and hides no production terminal
  * gap behind it: it is the opt-in single-process multi-dispatch fixture
