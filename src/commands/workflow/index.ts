@@ -108,7 +108,10 @@ import {
   writeCodingStepRouteOverrides,
   type CodingStepRouteOverrides
 } from "../../core/workflow/route/coding.js";
-import { preflightCodingWorkflowRouteSteps } from "../../core/workflow/preflight/structural.js";
+import {
+  preflightCodingWorkflowRouteProfile,
+  preflightCodingWorkflowRouteSteps
+} from "../../core/workflow/preflight/structural.js";
 import {
   InvalidWorkflowRunStartError,
   WorkflowRunStartConflictError,
@@ -524,6 +527,22 @@ function runWorkflowStartCommand(
   // so the generic `workflow run start` refuses it rather than silently dropping
   // a coding-only selection; a malformed or unsupported selection fails closed
   // before any durable write.
+  let routeProfile: string | undefined;
+  if (parsed.profile !== undefined) {
+    const structuralPreflight = preflightCodingWorkflowRouteProfile(parsed.profile);
+    if (!structuralPreflight.ok) {
+      const failedCheck = structuralPreflight.evidence[0];
+      return emitWorkflowRunStartFailure(parsed, io, {
+        command,
+        code: "route_config_invalid",
+        message: `--profile is invalid (${failedCheck.path}): ${failedCheck.message}`,
+        runId,
+        preflightEvidence: structuralPreflight.evidence
+      });
+    }
+    routeProfile = structuralPreflight.profile;
+  }
+
   let stepRouteOverrides: CodingStepRouteOverrides = {};
   if (parsed.stepsJson !== undefined) {
     if (!options.coding) {
@@ -626,7 +645,8 @@ function runWorkflowStartCommand(
       now,
       coding: options.coding,
       parsed,
-      stepRouteOverrides
+      stepRouteOverrides,
+      routeProfile
     });
     const previewResult = materializeWorkflowCodingPlanPreview(input);
     if (!previewResult.ok) {
@@ -697,7 +717,8 @@ function runWorkflowStartCommand(
       now,
       coding: options.coding,
       parsed,
-      stepRouteOverrides
+      stepRouteOverrides,
+      routeProfile
     });
 
     let summary: PersistWorkflowRunStartSummary;
@@ -817,6 +838,7 @@ function buildWorkflowRunStartInput(args: {
   coding: boolean;
   parsed: ParsedFlags;
   stepRouteOverrides: CodingStepRouteOverrides;
+  routeProfile: string | undefined;
 }): WorkflowRunStartInput {
   const {
     definition,
@@ -826,7 +848,8 @@ function buildWorkflowRunStartInput(args: {
     now,
     coding,
     parsed,
-    stepRouteOverrides
+    stepRouteOverrides,
+    routeProfile
   } = args;
   const input: WorkflowRunStartInput = {
     definition,
@@ -852,8 +875,8 @@ function buildWorkflowRunStartInput(args: {
   // embedded when at least one override is present, so a run with neither input keeps
   // an empty route, exactly as before NGX-510.
   let route: Record<string, unknown> = {};
-  if (parsed.profile !== undefined) {
-    route.profile = parsed.profile;
+  if (routeProfile !== undefined) {
+    route.profile = routeProfile;
   }
   route = writeCodingStepRouteOverrides(route, stepRouteOverrides);
   if (Object.keys(route).length > 0) {

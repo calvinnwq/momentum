@@ -198,6 +198,52 @@ describe("momentum workflow run preview-coding", () => {
     ]);
   });
 
+  it("emits structural preflight evidence for blank route profiles", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const result = await run(
+      previewCodingArgs({
+        dataDir,
+        repoDir,
+        runId: "preview-invalid-profile",
+        objective: "Block blank profile",
+        extra: ["--profile", "   "]
+      })
+    );
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "workflow run preview-coding",
+      code: "route_config_invalid",
+      runId: "preview-invalid-profile"
+    });
+    expect(payload["preflightEvidence"]).toEqual([
+      {
+        checkId: "route.profile",
+        status: "failed",
+        severity: "error",
+        path: "route.profile",
+        key: "profile",
+        message: "Coding route profile must be a non-empty string when provided.",
+        recommendedAction:
+          "Set route.profile to a non-empty runtime/profile name, or remove --profile to use the default route."
+      }
+    ]);
+
+    const db = openDb(dataDir);
+    try {
+      const runRow = db
+        .prepare("SELECT id FROM workflow_runs WHERE id = ?")
+        .get("preview-invalid-profile");
+      expect(runRow).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
   it("writes nothing durable: no run row is created by a preview", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();

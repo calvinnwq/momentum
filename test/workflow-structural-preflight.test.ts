@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS,
+  preflightCodingWorkflowRouteProfile,
   preflightCodingWorkflowWrapperConfig,
   preflightCodingWorkflowRouteSteps
 } from "../src/core/workflow/preflight/structural.js";
@@ -51,6 +52,50 @@ describe("coding workflow structural preflight", () => {
           'Coding route step "linear-refresh" is not configurable; supported steps: implementation, postflight, no-mistakes, merge-cleanup.',
         recommendedAction:
           "Use route.steps only for implementation, postflight, no-mistakes, or merge-cleanup, or remove the unsupported step key."
+      }
+    ]);
+    expect(Object.keys(result.evidence[0])).toEqual(
+      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS
+    );
+  });
+
+  it("returns compact passed evidence for valid route profiles", () => {
+    const result = preflightCodingWorkflowRouteProfile(" live-wrapper ");
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected passed preflight");
+    expect(result.profile).toBe("live-wrapper");
+    expect(result.evidence).toEqual([
+      {
+        checkId: "route.profile",
+        status: "passed",
+        severity: "info",
+        path: "route.profile",
+        key: "profile",
+        message: "Coding route profile is structurally valid.",
+        recommendedAction: "No action required."
+      }
+    ]);
+    expect(Object.keys(result.evidence[0])).toEqual(
+      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS
+    );
+  });
+
+  it("refuses blank route profiles with stable compact evidence fields", () => {
+    const result = preflightCodingWorkflowRouteProfile("   ");
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected failed preflight");
+    expect(result.evidence).toEqual([
+      {
+        checkId: "route.profile",
+        status: "failed",
+        severity: "error",
+        path: "route.profile",
+        key: "profile",
+        message: "Coding route profile must be a non-empty string when provided.",
+        recommendedAction:
+          "Set route.profile to a non-empty runtime/profile name, or remove --profile to use the default route."
       }
     ]);
     expect(Object.keys(result.evidence[0])).toEqual(

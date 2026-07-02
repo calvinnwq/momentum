@@ -44,6 +44,17 @@ export type CodingWorkflowRouteStepsPreflightResult =
       evidence: readonly [StructuralPreflightEvidence];
     };
 
+export type CodingWorkflowRouteProfilePreflightResult =
+  | {
+      ok: true;
+      profile: string;
+      evidence: readonly [StructuralPreflightEvidence];
+    }
+  | {
+      ok: false;
+      evidence: readonly [StructuralPreflightEvidence];
+    };
+
 export type CodingWorkflowWrapperConfigPreflightResult =
   | {
       ok: true;
@@ -56,6 +67,7 @@ export type CodingWorkflowWrapperConfigPreflightResult =
     };
 
 const ROUTE_STEPS_CHECK_ID = "route.steps";
+const ROUTE_PROFILE_CHECK_ID = "route.profile";
 const WRAPPER_CONFIG_CHECK_ID = "wrapper.config";
 const WRAPPER_CONFIG_CAMEL_CASE_KEYS: Readonly<Record<string, string>> = {
   envAllow: "env_allow",
@@ -96,6 +108,44 @@ export function preflightCodingWorkflowRouteSteps(
         key: routeStepsEvidenceKey(validated.path),
         message: validated.reason,
         recommendedAction: recommendedActionForRouteStepsRefusal(validated.refusal)
+      })
+    ]
+  };
+}
+
+export function preflightCodingWorkflowRouteProfile(
+  value: unknown
+): CodingWorkflowRouteProfilePreflightResult {
+  if (typeof value === "string" && value.trim().length > 0) {
+    return {
+      ok: true,
+      profile: value.trim(),
+      evidence: [
+        buildStructuralPreflightEvidence({
+          checkId: ROUTE_PROFILE_CHECK_ID,
+          status: "passed",
+          severity: "info",
+          path: "route.profile",
+          key: "profile",
+          message: "Coding route profile is structurally valid.",
+          recommendedAction: "No action required."
+        })
+      ]
+    };
+  }
+
+  return {
+    ok: false,
+    evidence: [
+      buildStructuralPreflightEvidence({
+        checkId: ROUTE_PROFILE_CHECK_ID,
+        status: "failed",
+        severity: "error",
+        path: "route.profile",
+        key: "profile",
+        message: "Coding route profile must be a non-empty string when provided.",
+        recommendedAction:
+          "Set route.profile to a non-empty runtime/profile name, or remove --profile to use the default route."
       })
     ]
   };
