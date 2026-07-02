@@ -830,6 +830,45 @@ describe("momentum workflow run preview-coding", () => {
       }
     ]);
   });
+
+  it("emits structural preflight evidence when --repo is blank", async () => {
+    const dataDir = makeTempDir();
+    const result = await run([
+      "workflow",
+      "run",
+      "preview-coding",
+      "--run-id",
+      "preview-blank-repo",
+      "--repo",
+      "   ",
+      "--objective",
+      "Reject blank repo",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "workflow run preview-coding",
+      code: "repo_required",
+      runId: "preview-blank-repo"
+    });
+    expect(payload["preflightEvidence"]).toEqual([
+      {
+        checkId: "workflow.run_shape",
+        status: "failed",
+        severity: "error",
+        path: "repoPath",
+        key: "repoPath",
+        message: "Repo path must be a non-empty string.",
+        recommendedAction:
+          "Set repoPath to a non-empty repository path before starting the run."
+      }
+    ]);
+  });
 });
 
 describe("workflow run start surfaces are unchanged by preview-coding", () => {

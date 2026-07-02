@@ -506,7 +506,7 @@ function runWorkflowStartCommand(
       message: `Missing required --run-id <id> for ${command}.`
     });
   }
-  if (parsed.repo === undefined || parsed.repo.length === 0) {
+  if (parsed.repo === undefined || parsed.repo.trim().length === 0) {
     return emitWorkflowRunStartFailure(parsed, io, {
       command,
       code: "repo_required",
