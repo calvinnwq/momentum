@@ -316,7 +316,9 @@ describe("daemon start production workflow lane (NGX-367)", () => {
             reason, source_item_id, status, idempotency_key, created_at,
             updated_at, applied_at, skipped_at, canceled_at, decision_reason)
          VALUES ('intent_ngx1001', 'linear', 'linear-issue-1001',
-                 'source_satisfied', '{"kind":"comment"}', 'evidence says done',
+                 'status_update',
+                 '{"state":"Done","comment":"evidence says done"}',
+                 'evidence says done',
                  'source_ngx1001', 'pending', 'idemp:intent_ngx1001', 1, 1,
                  NULL, NULL, NULL, NULL)`
       ).run();
@@ -344,11 +346,11 @@ describe("daemon start production workflow lane (NGX-367)", () => {
               url: "https://linear.app/example/comment/NGX-1001"
             },
             status: {
-              transitioned: false as const,
+              transitioned: true as const,
               previousStateId: "state-todo",
               previousStateName: "Todo",
-              nextStateId: null,
-              nextStateName: null
+              nextStateId: "state-done",
+              nextStateName: "Done"
             },
             idempotencyMarker: marker
           };

@@ -233,10 +233,11 @@ Before running `workflow run clear-recovery <run-id> --evidence-pointer <ref>` f
 **`linear-refresh` (writes Linear tracker)**
 
 1. Open the Linear issue identified by the run's `--issue-scope` identifier.
-2. Confirm whether the issue state, labels, or comments were updated by the step.
-3. If the tracker was updated, use the Linear issue URL or a stable snapshot as the evidence pointer.
-4. If no Linear update landed, the step failed before any external write; treat it like a retryable failure.
-5. Do not re-run `linear-refresh` if the tracker is already consistent; that would attempt a duplicate write.
+2. Confirm the durable pending intent was a single Linear `status_update` intent with a matching source item, stable idempotency marker, and valid `state` or `stateId` payload.
+3. Confirm whether the issue state and idempotency-marker comment were updated by the step.
+4. If the tracker was updated, use the Linear issue URL or a stable audit/snapshot as the evidence pointer.
+5. If no Linear update landed, the step failed before any external write; treat it like a retryable failure after fixing the missing auth/intent/source/payload cause.
+6. Do not re-run `linear-refresh` if the tracker is already consistent and the M6 audit reconcile succeeded; that would attempt a duplicate write.
 
 **Evidence pointer**
 
