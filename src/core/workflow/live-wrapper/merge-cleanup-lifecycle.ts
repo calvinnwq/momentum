@@ -76,7 +76,7 @@ export function planMergeCleanupLifecycle(
       authSource: null
     });
   }
-  if (!isValidTarget(input.target)) {
+  if (!isValidMergeCleanupTarget(input.target)) {
     return plan("preflight", "target_missing", "resolve_target_then_retry", false, evidenceBase);
   }
   const pullRequestReadError = input.pullRequestReadError?.trim();
@@ -114,7 +114,7 @@ export function planMergeCleanupLifecycle(
   return plan("apply", "open_safe_merge", "merge_and_cleanup", true, evidenceBase);
 }
 
-function isValidTarget(
+export function isValidMergeCleanupTarget(
   target: MergeCleanupTargetIdentity | null | undefined
 ): target is MergeCleanupTargetIdentity {
   return (

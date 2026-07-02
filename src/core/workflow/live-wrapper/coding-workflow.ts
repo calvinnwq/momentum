@@ -20,7 +20,10 @@ import path from "node:path";
 import { runProcessGroupSync } from "../../../adapters/live-step-wrapper.js";
 import { normalizeRunnerResult } from "../../executors/runner/result.js";
 import type { CommitIntent, CommitType, RunnerResult } from "../../executors/runner/types.js";
-import { preflightGitHubMergeCleanup } from "./merge-cleanup-preflight.js";
+import {
+  preflightGitHubMergeCleanup,
+  preflightGitHubMergeCleanupSetup
+} from "./merge-cleanup-preflight.js";
 import type {
   MergeCleanupPullRequestState,
   MergeCleanupTargetIdentity
@@ -132,6 +135,7 @@ const WRAPPER_STEP_CONFIG_ALIASES: Record<string, string> = {
 };
 const DEFAULT_TIMEOUT_SEC = 900;
 const OUTPUT_MAX_BYTES = 10 * 1024 * 1024;
+const GITHUB_STATE_READ_TIMEOUT_MS = 15_000;
 
 export function defaultCodingWorkflowWrapperDeps(): CodingWorkflowWrapperDeps {
   return {
@@ -211,19 +215,26 @@ export function runCodingWorkflowLiveWrapper(
 
   const childEnv = buildChildEnv(deps.env, stepConfig.envAllow);
   if (stepKind === "merge-cleanup") {
-    const stateRead =
-      stepConfig.mergeCleanup === undefined
-        ? undefined
-        : deps.readMergeCleanupPullRequest({
-            target: stepConfig.mergeCleanup,
-            cwd: cwd.path,
-            env: childEnv
-          });
-    const preflight = preflightGitHubMergeCleanup({
+    const setupPreflight = preflightGitHubMergeCleanupSetup({
       env: childEnv,
       ...(stepConfig.mergeCleanup !== undefined
         ? { target: stepConfig.mergeCleanup }
-        : {}),
+        : {})
+    });
+    if (!setupPreflight.ok) {
+      return processSetupFailure(
+        deps,
+        `${setupPreflight.message} ${setupPreflight.action}`
+      );
+    }
+    const stateRead = deps.readMergeCleanupPullRequest({
+      target: setupPreflight.target,
+      cwd: cwd.path,
+      env: childEnv
+    });
+    const preflight = preflightGitHubMergeCleanup({
+      env: childEnv,
+      target: setupPreflight.target,
       ...(stateRead?.ok ? { pullRequest: stateRead.pullRequest } : {}),
       ...(stateRead?.ok === false ? { pullRequestReadError: stateRead.error } : {})
     });
@@ -2178,6 +2189,7 @@ function readGitHubMergeCleanupPullRequest(input: {
       {
         cwd: input.cwd,
         env: input.env,
+        timeout: GITHUB_STATE_READ_TIMEOUT_MS,
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"]
       }
@@ -2246,6 +2258,7 @@ function readCleanupBranchDeleted(input: {
       {
         cwd: input.cwd,
         env: input.env,
+        timeout: GITHUB_STATE_READ_TIMEOUT_MS,
         encoding: "utf8",
         stdio: ["ignore", "ignore", "pipe"]
       }

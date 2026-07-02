@@ -1,4 +1,5 @@
 import {
+  isValidMergeCleanupTarget,
   planMergeCleanupLifecycle,
   type MergeCleanupPullRequestState,
   type MergeCleanupTargetIdentity
@@ -30,6 +31,15 @@ export type MergeCleanupPreflightResult =
       action: string;
     };
 
+export type MergeCleanupSetupPreflightResult =
+  | {
+      ok: true;
+      status: "ready";
+      message: string;
+      target: MergeCleanupTargetIdentity;
+    }
+  | Extract<MergeCleanupPreflightResult, { ok: false }>;
+
 const GITHUB_AUTH_ENV_VARS = [
   "GH_TOKEN",
   "GITHUB_TOKEN",
@@ -38,16 +48,53 @@ const GITHUB_AUTH_ENV_VARS = [
 
 type EnvSnapshot = Record<string, string | undefined>;
 
+export function preflightGitHubMergeCleanupSetup(input: {
+  env: EnvSnapshot;
+  target?: MergeCleanupTargetIdentity | null;
+}): MergeCleanupSetupPreflightResult {
+  const presentAuth = findGitHubAuthSource(input.env);
+  if (presentAuth === undefined) {
+    const plan = planMergeCleanupLifecycle({
+      authAvailable: false,
+      ...(input.target !== undefined ? { target: input.target } : {})
+    });
+    return {
+      ok: false,
+      status: plan.status === "open_safe_merge" ? "unknown" : plan.status,
+      message: messageForPlan(plan),
+      action: actionForPlan(plan)
+    };
+  }
+
+  if (!isValidMergeCleanupTarget(input.target)) {
+    const plan = planMergeCleanupLifecycle({
+      authAvailable: true,
+      authSource: presentAuth,
+      ...(input.target !== undefined ? { target: input.target } : {})
+    });
+    return {
+      ok: false,
+      status: plan.status === "open_safe_merge" ? "unknown" : plan.status,
+      message: messageForPlan(plan),
+      action: actionForPlan(plan)
+    };
+  }
+
+  return {
+    ok: true,
+    status: "ready",
+    message: `GitHub merge-cleanup setup preflight passed using ${presentAuth}.`,
+    target: input.target
+  };
+}
+
 export function preflightGitHubMergeCleanup(input: {
   env: EnvSnapshot;
   target?: MergeCleanupTargetIdentity | null;
   pullRequest?: MergeCleanupPullRequestState | null;
   pullRequestReadError?: string | null;
 }): MergeCleanupPreflightResult {
-  const presentAuth = GITHUB_AUTH_ENV_VARS.find((name) => {
-    const value = input.env[name];
-    return typeof value === "string" && value.trim().length > 0;
-  });
+  const presentAuth = findGitHubAuthSource(input.env);
 
   const plan = planMergeCleanupLifecycle({
     authAvailable: presentAuth !== undefined,
@@ -75,6 +122,13 @@ export function preflightGitHubMergeCleanup(input: {
 }
 
 type MergeCleanupPlan = ReturnType<typeof planMergeCleanupLifecycle>;
+
+function findGitHubAuthSource(env: EnvSnapshot): string | undefined {
+  return GITHUB_AUTH_ENV_VARS.find((name) => {
+    const value = env[name];
+    return typeof value === "string" && value.trim().length > 0;
+  });
+}
 
 function messageForPlan(plan: MergeCleanupPlan): string {
   switch (plan.status) {

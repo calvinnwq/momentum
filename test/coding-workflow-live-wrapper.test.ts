@@ -217,6 +217,53 @@ exit 1
     expect(fs.existsSync(resultPath)).toBe(false);
   });
 
+  it("does not read merge-cleanup GitHub state before explicit auth is present", () => {
+    const dir = makeTempDir();
+    const repo = path.join(dir, "repo");
+    const iteration = path.join(dir, "run");
+    const resultPath = path.join(iteration, "result.json");
+    const sentinelPath = path.join(dir, "merge-cleanup-ran");
+    let stateReadCount = 0;
+    fs.mkdirSync(repo);
+    const configPath = path.join(dir, "wrapper-config.json");
+    writeJson(configPath, {
+      steps: {
+        "merge-cleanup": {
+          command: "/bin/sh",
+          args: ["-c", `touch ${JSON.stringify(sentinelPath)}`],
+          cwd: "repo",
+          timeout_sec: 30,
+          env_allow: ["PATH", "HOME"],
+          merge_cleanup: mergeCleanupTargetConfig(),
+          commit: { type: "chore", subject: "complete merge-cleanup" }
+        }
+      }
+    });
+
+    const outcome = runCodingWorkflowLiveWrapper({
+      ...deps({
+        MOMENTUM_STEP_KIND: "merge-cleanup",
+        MOMENTUM_REPO_PATH: repo,
+        MOMENTUM_ITERATION_DIR: iteration,
+        MOMENTUM_RESULT_PATH: resultPath,
+        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
+        HOME: process.env.HOME,
+        PATH: process.env.PATH
+      }),
+      readMergeCleanupPullRequest: () => {
+        stateReadCount += 1;
+        return { ok: false, error: "state read should not run without auth" };
+      }
+    });
+
+    expect(outcome.exitCode).toBe(1);
+    expect(outcome.success).toBe(false);
+    expect(outcome.summary).toContain("no explicit auth");
+    expect(stateReadCount).toBe(0);
+    expect(fs.existsSync(sentinelPath)).toBe(false);
+    expect(fs.existsSync(resultPath)).toBe(false);
+  });
+
   it("parks merge-cleanup missing target identity before spawning", () => {
     const dir = makeTempDir();
     const repo = path.join(dir, "repo");
@@ -378,6 +425,18 @@ exit 1
     expect(fs.existsSync(sentinelPath)).toBe(false);
     const result = readResult(resultPath);
     expect(result.remaining_work.join("\n")).toContain("clear-recovery");
+  });
+
+  it("bounds GitHub merge-cleanup preflight subprocesses", () => {
+    const sourcePath = path.join(
+      process.cwd(),
+      "src/core/workflow/live-wrapper/coding-workflow.ts"
+    );
+    const source = fs.readFileSync(sourcePath, "utf8");
+
+    expect(source).toContain("const GITHUB_STATE_READ_TIMEOUT_MS");
+    expect(source).toContain("timeout: GITHUB_STATE_READ_TIMEOUT_MS");
+    expect(source.match(/timeout: GITHUB_STATE_READ_TIMEOUT_MS/g)).toHaveLength(2);
   });
 });
 
