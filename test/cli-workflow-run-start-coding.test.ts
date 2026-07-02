@@ -635,6 +635,42 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
     expect(fs.existsSync(path.join(dataDir, "momentum.db"))).toBe(false);
   });
 
+  it("emits structural preflight evidence for invalid approval boundaries before durable writes", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const result = await run(
+      startCodingArgs({
+        dataDir,
+        repoDir,
+        runId: "ngx-563-invalid-approval-before-db",
+        objective: "Reject invalid approval boundary",
+        extra: ["--approval-boundary", "through-linear-refresh"]
+      })
+    );
+
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "workflow run start-coding",
+      code: "invalid_run_start",
+      runId: "ngx-563-invalid-approval-before-db"
+    });
+    expect(payload["preflightEvidence"]).toEqual([
+      {
+        checkId: "workflow.run_shape",
+        status: "failed",
+        severity: "error",
+        path: "approvalBoundary",
+        key: "approvalBoundary",
+        message: "Approval boundary is not a known workflow approval boundary.",
+        recommendedAction:
+          "Set approvalBoundary to a supported workflow approval boundary or omit it for manual approval."
+      }
+    ]);
+    expect(fs.existsSync(path.join(dataDir, "momentum.db"))).toBe(false);
+  });
+
   it("is readable through workflow status, handoff, and monitor from Momentum state alone", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();

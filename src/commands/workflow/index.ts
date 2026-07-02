@@ -672,10 +672,8 @@ function runWorkflowStartCommand(
     codingDefinition = structuralPreflight.definition;
   }
 
-  // Preview mode (coding door only) shares every precondition above but stops
-  // before any durable write: it resolves the built-in definition, materializes
-  // a frozen plan projection, and emits it without opening the database for writes.
-  if (options.preview === true) {
+  let preflightedCodingInput: WorkflowRunStartInput | undefined;
+  if (options.coding) {
     const definition = codingDefinition;
     if (definition === undefined) throw new Error("Missing coding definition.");
     const input = buildWorkflowRunStartInput({
@@ -703,6 +701,15 @@ function runWorkflowStartCommand(
         preflightEvidence: structuralPreflight.evidence
       });
     }
+    preflightedCodingInput = input;
+  }
+
+  // Preview mode (coding door only) shares every precondition above but stops
+  // before any durable write: it resolves the built-in definition, materializes
+  // a frozen plan projection, and emits it without opening the database for writes.
+  if (options.preview === true) {
+    const input = preflightedCodingInput;
+    if (input === undefined) throw new Error("Missing coding preflight input.");
     const previewResult = materializeWorkflowCodingPlanPreview(input);
     if (!previewResult.ok) {
       return emitWorkflowRunStartFailure(parsed, io, {
@@ -761,31 +768,35 @@ function runWorkflowStartCommand(
       });
     }
 
-    const input = buildWorkflowRunStartInput({
-      definition,
-      runId,
-      repoPath,
-      objective,
-      now,
-      coding: options.coding,
-      parsed,
-      stepRouteOverrides,
-      routeProfile
-    });
-
-    const structuralPreflight = preflightCodingWorkflowRunStartInput(input);
-    if (!structuralPreflight.ok) {
-      return emitWorkflowRunStartFailure(parsed, io, {
-        command,
-        code: "invalid_run_start",
-        message: `Invalid workflow run start: ${structuralPreflight.errors
-          .map((error) => error.code)
-          .join(", ")}`,
-        dataDir,
+    const input =
+      preflightedCodingInput ??
+      buildWorkflowRunStartInput({
+        definition,
         runId,
-        errors: structuralPreflight.errors,
-        preflightEvidence: structuralPreflight.evidence
+        repoPath,
+        objective,
+        now,
+        coding: options.coding,
+        parsed,
+        stepRouteOverrides,
+        routeProfile
       });
+
+    if (!options.coding) {
+      const structuralPreflight = preflightCodingWorkflowRunStartInput(input);
+      if (!structuralPreflight.ok) {
+        return emitWorkflowRunStartFailure(parsed, io, {
+          command,
+          code: "invalid_run_start",
+          message: `Invalid workflow run start: ${structuralPreflight.errors
+            .map((error) => error.code)
+            .join(", ")}`,
+          dataDir,
+          runId,
+          errors: structuralPreflight.errors,
+          preflightEvidence: structuralPreflight.evidence
+        });
+      }
     }
 
     let summary: PersistWorkflowRunStartSummary;
