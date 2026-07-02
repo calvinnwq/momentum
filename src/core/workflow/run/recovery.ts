@@ -258,7 +258,7 @@ export type ClearWorkflowRunManualRecoveryGuardedInput = {
   externalSideEffectEvidencePointer?: string;
   /** Optional ledger pointer stored with external-side-effect reconciliation. */
   externalSideEffectLedgerPointer?: string;
-  /** `no-mistakes:<run-id>#checks-passed` proof for interrupted success. */
+  /** Legacy checks-passed proof or readable deterministic evidence pointer. */
   successfulNoMistakesEvidencePointer?: string;
   /** Parsed deterministic no-mistakes evidence, usually loaded from a pointer. */
   successfulNoMistakesEvidence?: unknown;

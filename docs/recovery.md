@@ -201,7 +201,9 @@ gate state and cancellation before reliable completion. These are not trusted as
 verification failures because the external no-mistakes runner did not produce
 reliable pass/fail evidence.
 When no-mistakes instead reports `checks-passed`, or is still monitoring while current pull request evidence is clean and checks are green or explicitly absent, the wrapper writes successful runner evidence instead of entering this recovery lane, unless current output also shows a blocking outcome, active finding, unresolved gate, dirty / draft pull request, or non-successful check state.
-If the wrapper process is interrupted before writing evidence but the external no-mistakes run later proves `checks-passed`, operators may reconcile the failed `no-mistakes` step with `workflow run clear-recovery --evidence-pointer no-mistakes:<run-id>#checks-passed`.
+If the wrapper process is interrupted before writing evidence but the external no-mistakes run later proves success, operators may reconcile the failed `no-mistakes` step with either legacy `workflow run clear-recovery --evidence-pointer no-mistakes:<run-id>#checks-passed` proof or a readable structured deterministic evidence JSON file.
+The structured record uses `schemaVersion: 1` and must carry the current workflow run id, issue scope, branch name and head SHA, pull request identity and check state when present, no-mistakes run id and successful outcome, zero unresolved findings and decisions, and explicit `review`, `tests`, `docs`, `lint`, `format`, `push`, `pr`, and `ci` phase statuses.
+Momentum refuses unknown schema versions or extra phases, stale workflow, issue, branch, head, pull request, or no-mistakes identities, unresolved findings or decisions, closed or draft pull requests, pending, failed, or unknown checks, non-success outcomes, and partial phase evidence.
 This path is intentionally narrower than generic `update-step`: it only accepts a failed required `no-mistakes` step, stamps operator evidence on that row, updates stale `finished_at` to match the re-derived terminal or non-terminal run state, and re-derives the run so merge cleanup can continue.
 Ordinary failed implementation/postflight steps still refuse guarded clear and must be retried or investigated.
 
@@ -243,7 +245,8 @@ For `failed_external_side_effect_step`, its value is a free-form stable referenc
 For a failed `merge-cleanup` step, supply the merged pull request URL (e.g. `https://github.com/org/repo/pull/123` or `github://pulls/123#merged`).
 For a failed `linear-refresh` step, supply the Linear issue URL (e.g. `https://linear.app/team/issue/KEY-123` or `linear://issues/KEY-123#updated`).
 For an interrupted failed `no-mistakes` step whose external no-mistakes run
-later proved success, supply `no-mistakes:<run-id>#checks-passed`.
+later proved success, supply either legacy `no-mistakes:<run-id>#checks-passed` proof or a readable local JSON evidence file path.
+Structured no-mistakes evidence must be deterministic and current against the durable workflow run, latest no-mistakes checkpoint identity, branch head SHA, pull request identity, unresolved finding counts, check state, and all required phase statuses.
 Without `--evidence-pointer`, `clear-recovery` refuses with `recovery_clear_refused` and leaves the failed step and any recovery flag intact.
 
 **Ledger pointer**
@@ -255,7 +258,7 @@ The ledger pointer does not affect the reconciliation outcome; it is stored on t
 **Monitor state before and after recovery**
 
 Before clearing external-tail recovery, `workflow run monitor <run-id> --json` reports `disposition: "recover"`, `reportReason: "recovery_required"`, `nextAction.code: "clear_recovery"`, and `recovery.code: "failed_external_side_effect_step"`.
-For interrupted no-mistakes reconciliation, the pre-clear monitor still reports `recovery.code: "failed_required_step"`; the `no-mistakes:<run-id>#checks-passed` evidence pointer narrows `clear-recovery` to that failed required `no-mistakes` row.
+For interrupted no-mistakes reconciliation, the pre-clear monitor still reports `recovery.code: "failed_required_step"`; the legacy `no-mistakes:<run-id>#checks-passed` pointer or structured deterministic evidence file narrows `clear-recovery` to that failed required `no-mistakes` row.
 
 After a successful `workflow run clear-recovery --evidence-pointer <ref>`, re-run the monitor command to verify the next durable state.
 When the reconciled tail step was the last remaining required work, the monitor reports `disposition: "report"`, `reportReason: "terminal_succeeded"`, `nextAction.code: "no_action"`, and `recovery: null`.

@@ -1,5 +1,6 @@
 export const NO_MISTAKES_DETERMINISTIC_EVIDENCE_SCHEMA_VERSION = 1;
 
+/** Required phase keys in a structured no-mistakes recovery evidence record. */
 export const NO_MISTAKES_DETERMINISTIC_PHASES = [
   "review",
   "tests",
@@ -21,6 +22,7 @@ export type NoMistakesEvidencePhaseStatus =
   | "pending"
   | "missing";
 
+/** Deterministic evidence accepted for interrupted no-mistakes recovery. */
 export type NoMistakesDeterministicEvidence = {
   schemaVersion: typeof NO_MISTAKES_DETERMINISTIC_EVIDENCE_SCHEMA_VERSION;
   workflowRunId: string;
@@ -45,6 +47,7 @@ export type NoMistakesDeterministicEvidence = {
   phases: Record<NoMistakesDeterministicPhase, NoMistakesEvidencePhaseStatus>;
 };
 
+/** Durable identity loaded from the interrupted workflow step checkpoint. */
 export type NoMistakesEvidenceExpectedIdentity = {
   workflowRunId: string;
   issueScope?: readonly string[];
@@ -92,6 +95,7 @@ export type NoMistakesEvidenceClassifiedResult =
 const COMMIT_SHA_RE = /^[0-9a-f]{40}$/i;
 const PHASE_SET: ReadonlySet<string> = new Set(NO_MISTAKES_DETERMINISTIC_PHASES);
 
+/** Validate structured evidence against the durable workflow/run identity. */
 export function classifyNoMistakesDeterministicEvidence(
   value: unknown,
   expected: NoMistakesEvidenceExpectedIdentity
