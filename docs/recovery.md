@@ -201,6 +201,8 @@ If the wrapper process is interrupted before writing evidence but the external n
 The structured record uses `schemaVersion: 1` and must carry the current workflow run id, issue scope, branch name and head SHA, pull request identity and check state when present, no-mistakes run id and successful outcome, zero unresolved findings and decisions, and explicit `review`, `tests`, `docs`, `lint`, `format`, `push`, `pr`, and `ci` phase statuses.
 Momentum refuses unknown schema versions or extra phases, stale workflow, issue, branch, head, pull request, or no-mistakes identities, unresolved findings or decisions, closed or draft pull requests, pending, failed, or unknown checks, non-success outcomes, and partial phase evidence.
 This path is intentionally narrower than generic `update-step`: it only accepts a failed required `no-mistakes` step, stamps operator evidence on that row, updates stale `finished_at` to match the re-derived terminal or non-terminal run state, and re-derives the run so merge cleanup can continue.
+Ordinary failed no-mistakes steps still surface as `retry_failed_step` with `recoveryDetail: null` unless the durable manual-recovery context identifies interrupted checks-passed or deterministic-evidence reconciliation.
+`workflow run clear-recovery` may still accept explicit checks-passed or structured deterministic evidence for an unflagged failed no-mistakes step.
 Ordinary failed implementation/postflight steps still refuse guarded clear and must be retried or investigated.
 
 When the failed required step is an external-side-effect tail step
@@ -256,7 +258,10 @@ The ledger pointer does not affect the reconciliation outcome; it is stored on t
 **Monitor state before and after recovery**
 
 Before clearing external-tail recovery, `workflow run monitor <run-id> --json` reports `disposition: "recover"`, `reportReason: "recovery_required"`, `nextAction.code: "clear_recovery"`, `nextAction.actionClass: "reconcile_external_tail"`, `nextAction.recoveryDetail.kind: "external_tail_reconcile"`, and `recovery.code: "failed_external_side_effect_step"`.
-For interrupted no-mistakes reconciliation, the pre-clear monitor still reports `recovery.code: "failed_required_step"`, `nextAction.actionClass: "reconcile_deterministic_evidence"`, and `nextAction.recoveryDetail.kind: "no_mistakes_deterministic_evidence"`; the legacy `no-mistakes:<run-id>#checks-passed` pointer or structured deterministic evidence file narrows `clear-recovery` to that failed required `no-mistakes` row.
+For interrupted no-mistakes reconciliation, monitor/status/watch advertise `nextAction.actionClass: "reconcile_deterministic_evidence"` and `nextAction.recoveryDetail.kind: "no_mistakes_deterministic_evidence"` only when the durable manual-recovery context identifies interrupted checks-passed or deterministic-evidence reconciliation.
+Ordinary failed no-mistakes steps still surface as `retry_failed_step` with `recoveryDetail: null` unless the durable manual-recovery context identifies interrupted checks-passed or deterministic-evidence reconciliation.
+`workflow run clear-recovery` may still accept explicit checks-passed or structured deterministic evidence for an unflagged failed no-mistakes step.
+The legacy `no-mistakes:<run-id>#checks-passed` pointer or structured deterministic evidence file narrows `clear-recovery` to that failed required `no-mistakes` row.
 
 After a successful `workflow run clear-recovery --evidence-pointer <ref>`, re-run the monitor command to verify the next durable state.
 When the reconciled tail step was the last remaining required work, the monitor reports `disposition: "report"`, `reportReason: "terminal_succeeded"`, `nextAction.code: "no_action"`, `nextAction.actionClass: "stop_monitoring"`, and `recovery: null`.

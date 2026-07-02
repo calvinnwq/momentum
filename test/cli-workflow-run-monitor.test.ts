@@ -426,7 +426,14 @@ describe("momentum workflow run monitor (NGX-328)", () => {
       runState: "failed",
       disposition: "recover",
       reportable: true,
-      reportReason: "recovery_required"
+      reportReason: "recovery_required",
+      nextAction: {
+        code: "rerun_failed_step",
+        stepId: "no-mistakes",
+        leaseKind: "managed-step",
+        actionClass: "retry_failed_step",
+        recoveryDetail: null
+      }
     });
     expect((payload["recovery"] as Record<string, unknown>)["code"]).toBe(
       "failed_required_step"

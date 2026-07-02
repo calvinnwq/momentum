@@ -658,7 +658,7 @@ describe("workflow run watch supervisor envelope contract", () => {
     });
   });
 
-  it("no-mistakes recovery: labels deterministic evidence reconciliation", async () => {
+  it("no-mistakes recovery: keeps ordinary failures retryable", async () => {
     const dataDir = makeTempDir();
     const runId = "mwf-contract-no-mistakes-evidence";
     const db = openDb(dataDir);
@@ -679,14 +679,42 @@ describe("workflow run watch supervisor envelope contract", () => {
     assertWatchEnvelopeContract(payload, runId);
     expect(payload["nextAction"]).toMatchObject({
       code: "rerun_failed_step",
-      actionClass: "reconcile_deterministic_evidence",
-      recoveryDetail: {
-        kind: "no_mistakes_deterministic_evidence",
-        evidencePointerRequired: true,
-        refusalReason: null
-      }
+      actionClass: "retry_failed_step",
+      recoveryDetail: null
     });
     expect(payload["humanAction"]).toBeNull();
+  });
+
+  it("no-mistakes manual recovery: ignores broad evidence wording", async () => {
+    const dataDir = makeTempDir();
+    const runId = "mwf-contract-no-mistakes-broad-manual";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, {
+        runId,
+        state: "failed",
+        needsManualRecovery: true,
+        manualRecoveryReason:
+          "operator mentioned checks-passed deterministic evidence while investigating"
+      });
+      seedStep(db, {
+        runId,
+        stepId: "no-mistakes",
+        kind: "no-mistakes",
+        state: "failed",
+        order: 3
+      });
+    } finally {
+      db.close();
+    }
+
+    const payload = await watchOnce(dataDir, runId);
+    assertWatchEnvelopeContract(payload, runId);
+    expect(payload["nextAction"]).toMatchObject({
+      code: "rerun_failed_step",
+      actionClass: "retry_failed_step",
+      recoveryDetail: null
+    });
   });
 
   it("no-mistakes manual recovery: keeps deterministic evidence action class", async () => {
@@ -698,7 +726,8 @@ describe("workflow run watch supervisor envelope contract", () => {
         runId,
         state: "failed",
         needsManualRecovery: true,
-        manualRecoveryReason: "no-mistakes evidence needs reconciliation"
+        manualRecoveryReason:
+          "interrupted no-mistakes checks-passed evidence needs reconciliation"
       });
       seedStep(db, {
         runId,

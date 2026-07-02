@@ -948,7 +948,7 @@ describe("momentum workflow status", () => {
     expect(payload.monitor.recovery?.stepId).toBe("implementation");
   });
 
-  it("labels failed no-mistakes detail as deterministic evidence reconciliation", async () => {
+  it("keeps ordinary failed no-mistakes detail as a retry action", async () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);
     try {
@@ -976,6 +976,110 @@ describe("momentum workflow status", () => {
       "workflow",
       "status",
       "cwfp-no-mistakes-evidence",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      monitor: {
+        nextAction: {
+          code: string;
+          actionClass: string;
+          recoveryDetail: Record<string, unknown> | null;
+        };
+      };
+    };
+    expect(payload.monitor.nextAction).toMatchObject({
+      code: "rerun_failed_step",
+      actionClass: "retry_failed_step",
+      recoveryDetail: null
+    });
+  });
+
+  it("keeps broad no-mistakes manual recovery reasons as retry actions", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, {
+        runId: "cwfp-no-mistakes-broad-manual",
+        state: "failed",
+        source: "momentum-native-coding",
+        needsManualRecovery: true,
+        manualRecoveryReason:
+          "operator mentioned checks-passed deterministic evidence while investigating",
+        startedAt: RECENT,
+        finishedAt: NOW
+      });
+      seedStep(db, "cwfp-no-mistakes-broad-manual", {
+        stepId: "no-mistakes",
+        kind: "no-mistakes",
+        state: "failed",
+        order: 3,
+        startedAt: RECENT,
+        finishedAt: NOW,
+        errorCode: "executor_failed"
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "status",
+      "cwfp-no-mistakes-broad-manual",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      monitor: {
+        nextAction: {
+          code: string;
+          actionClass: string;
+          recoveryDetail: Record<string, unknown> | null;
+        };
+      };
+    };
+    expect(payload.monitor.nextAction).toMatchObject({
+      code: "rerun_failed_step",
+      actionClass: "retry_failed_step",
+      recoveryDetail: null
+    });
+  });
+
+  it("labels interrupted no-mistakes evidence detail as deterministic evidence reconciliation", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, {
+        runId: "cwfp-no-mistakes-evidence-manual",
+        state: "failed",
+        source: "momentum-native-coding",
+        needsManualRecovery: true,
+        manualRecoveryReason:
+          "interrupted no-mistakes checks-passed evidence needs reconciliation",
+        startedAt: RECENT,
+        finishedAt: NOW
+      });
+      seedStep(db, "cwfp-no-mistakes-evidence-manual", {
+        stepId: "no-mistakes",
+        kind: "no-mistakes",
+        state: "failed",
+        order: 3,
+        startedAt: RECENT,
+        finishedAt: NOW,
+        errorCode: "executor_failed"
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "status",
+      "cwfp-no-mistakes-evidence-manual",
       "--data-dir",
       dataDir,
       "--json"

@@ -61,6 +61,26 @@ describe("public docs hygiene", () => {
     });
   });
 
+  describe("no-mistakes recovery advertisement contract", () => {
+    it("distinguishes clear-recovery acceptance from monitor advertising", () => {
+      const recovery = publicSurfaces.find(
+        (surface) => surface.file === "docs/recovery.md"
+      )?.body;
+      const commands = publicSurfaces.find(
+        (surface) => surface.file === "docs/workflow-commands.md"
+      )?.body;
+      const ordinaryFailure =
+        "Ordinary failed no-mistakes steps still surface as `retry_failed_step` with `recoveryDetail: null` unless the durable manual-recovery context identifies interrupted checks-passed or deterministic-evidence reconciliation.";
+      const unflaggedClear =
+        "`workflow run clear-recovery` may still accept explicit checks-passed or structured deterministic evidence for an unflagged failed no-mistakes step.";
+
+      expect(recovery).toContain(ordinaryFailure);
+      expect(recovery).toContain(unflaggedClear);
+      expect(commands).toContain(ordinaryFailure);
+      expect(commands).toContain(unflaggedClear);
+    });
+  });
+
   describe("no NGX/Linear issue identifiers", () => {
     for (const surface of publicSurfaces) {
       it(`${surface.label} must not reference NGX-* issue identifiers`, () => {
