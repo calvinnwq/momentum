@@ -889,9 +889,14 @@ Behaviour:
 - For scheduler-lane stale workflow lease recovery, stale `manual-recovery-required` leases are left outstanding as durable evidence with the `stale_workflow_lease_manual_recovery_required` reason prefix. Because the monitor reducer can still classify that lease as `manual_recovery_lease`, guarded clear refuses until the lease condition is resolved.
 - Refuses with `not_flagged` when the run is not currently flagged, so a stale clear cannot mutate anything, except for the evidence-backed `failed_external_side_effect_step` and interrupted `no-mistakes` reconciliation paths above.
   In that exception, `clear-recovery --evidence-pointer <ref>` can reconcile the failed external tail step, or a failed `no-mistakes` step with legacy checks-passed proof or structured deterministic evidence, even if the durable manual-recovery flag was never set.
+  `workflow run clear-recovery` may still accept explicit checks-passed or structured deterministic evidence for an unflagged failed no-mistakes step.
+  Ordinary failed no-mistakes steps still surface as `retry_failed_step` with `recoveryDetail: null` unless the durable manual-recovery context identifies interrupted checks-passed or deterministic-evidence reconciliation.
 - Never auto-clears from elapsed time alone, never repairs the underlying run, and never issues an external write. The `recovery.md` artifact is intentionally left on disk as durable audit; remove it after capturing the context elsewhere.
 - Before clearing recovery for `failed_external_side_effect_step`, `workflow run monitor <run-id> --json` reports `disposition: "recover"`, `reportReason: "recovery_required"`, `nextAction.code: "clear_recovery"`, `nextAction.actionClass: "reconcile_external_tail"`, `nextAction.recoveryDetail.kind: "external_tail_reconcile"`, and `recovery.code: "failed_external_side_effect_step"`.
-  Before interrupted no-mistakes reconciliation, monitor still reports `recovery.code: "failed_required_step"` with `nextAction.actionClass: "reconcile_deterministic_evidence"` and `nextAction.recoveryDetail.kind: "no_mistakes_deterministic_evidence"`; the legacy `no-mistakes:<run-id>#checks-passed` pointer or structured deterministic evidence file narrows the clear to that failed required `no-mistakes` row.
+  Before interrupted no-mistakes reconciliation, monitor/status/watch advertise `nextAction.actionClass: "reconcile_deterministic_evidence"` and `nextAction.recoveryDetail.kind: "no_mistakes_deterministic_evidence"` only when the durable manual-recovery context identifies interrupted checks-passed or deterministic-evidence reconciliation.
+  Ordinary failed no-mistakes steps still surface as `retry_failed_step` with `recoveryDetail: null` unless the durable manual-recovery context identifies interrupted checks-passed or deterministic-evidence reconciliation.
+  `workflow run clear-recovery` may still accept explicit checks-passed or structured deterministic evidence for an unflagged failed no-mistakes step.
+  The legacy `no-mistakes:<run-id>#checks-passed` pointer or structured deterministic evidence file narrows the clear to that failed required `no-mistakes` row.
   After a successful reconciliation clear, the same command reports `disposition: "report"`, `reportReason: "terminal_succeeded"`, `nextAction.code: "no_action"`, `nextAction.actionClass: "stop_monitoring"`, and `recovery: null` only when no downstream required work remains.
   Its progress tick then reports `phase: "terminal"`, `terminal: true`, `cleanup: "release"`, and `blockerReason: null` so a delivery wrapper can stop instead of carrying forward the pre-clear recovery phase.
   If a full workflow still has `linear-refresh` pending or approved after a reconciled `merge-cleanup`, monitor surfaces that next step instead of terminal success.
@@ -1223,7 +1228,7 @@ verification / git finalization failures reconciled after the executor result.
 - `rerun_failed_step` - an ordinary required step failed; decide whether to retry or mark for manual recovery. (A failed external-side-effect tail step routes to `clear_recovery` instead, since a naive re-run could double-merge a pull request or re-write the tracker.)
 
 `monitor.nextAction.actionClass` groups those low-level codes into the stable operator decision classes shared by status, handoff, monitor, and watch: `continue_polling`, `approve_next_gate`, `fix_setup_config_then_retry`, `reconcile_deterministic_evidence`, `reconcile_external_tail`, `clear_recovery`, `resolve_gate`, `retry_failed_step`, or `stop_monitoring`.
-`monitor.nextAction.recoveryDetail` is `null` unless the action needs evidence-backed recovery; no-mistakes reconciliation reports `kind: "no_mistakes_deterministic_evidence"`, and external-tail reconciliation reports `kind: "external_tail_reconcile"`.
+`monitor.nextAction.recoveryDetail` is `null` unless the action needs evidence-backed recovery; no-mistakes reconciliation reports `kind: "no_mistakes_deterministic_evidence"` only when durable manual-recovery context identifies interrupted checks-passed or deterministic-evidence reconciliation, and external-tail reconciliation reports `kind: "external_tail_reconcile"`.
 
 `monitor.recovery.code`, when present, is one of: `stale_running_step`, `ghost_active_no_lease`, `manual_recovery_lease`, `monitor_drift_stale`, `failed_required_step`, `failed_external_side_effect_step`. `failed_external_side_effect_step` is the subset of `failed_required_step` where the failed required step is an external-side-effect tail step (`merge-cleanup` / `linear-refresh`) that may already have pushed a branch, merged a pull request, or written the tracker before failing.
 
@@ -1816,7 +1821,7 @@ Soft `monitor_drift_stale` reports and ordinary `failed_required_step` failures 
 - `continue_polling` - keep polling or dispatching the already-approved local step.
 - `approve_next_gate` - use the printed approval command.
 - `fix_setup_config_then_retry` - fix runtime/auth/config setup before retrying.
-- `reconcile_deterministic_evidence` - provide deterministic no-mistakes evidence before clearing recovery.
+- `reconcile_deterministic_evidence` - provide deterministic no-mistakes evidence before clearing recovery when durable manual-recovery context identifies interrupted checks-passed or deterministic-evidence reconciliation.
 - `reconcile_external_tail` - verify external state and clear recovery with an evidence pointer.
 - `clear_recovery` - clear a non-tail manual recovery after resolving the cause.
 - `resolve_gate` - decide an open workflow gate with an allowed action.
