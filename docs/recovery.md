@@ -225,10 +225,11 @@ Before running `workflow run clear-recovery <run-id> --evidence-pointer <ref>` f
 
 1. Confirm the pull request state on the hosting service (GitHub, etc.) first: check whether the PR is merged, closed, or still open.
 2. Treat the PR merge or close state as canonical, because a successful merge can legitimately delete the remote branch.
-3. If the PR is still open or the host still lists a head branch, confirm the current remote branch ref with `git -C <repo> ls-remote --heads origin <branch>`.
-4. If the PR is merged, use a GitHub PR URL as the evidence pointer: `github://pulls/<number>#merged` or the HTTPS URL.
-5. If the PR is not merged and no remote branch or PR update exists, the tail step failed cleanly before any external write; treat it like a retryable failure rather than a reconciliation.
-6. Do not re-run `merge-cleanup` if the PR is already merged; that would attempt to push and merge again.
+3. If the PR is still open, confirm its current head SHA matches the run's `merge_cleanup.expected_head_sha`; a moved head is stale evidence and must be resolved before retry.
+4. If the PR is still open or the host still lists a head branch, confirm the current remote branch ref with `git -C <repo> ls-remote --heads origin <branch>`.
+5. If the PR is merged, use a GitHub PR URL as the evidence pointer: `github://pulls/<number>#merged` or the HTTPS URL.
+6. If the PR is not merged and no remote branch or PR update exists, the tail step failed cleanly before any external write; treat it like a retryable failure rather than a reconciliation.
+7. Do not re-run `merge-cleanup` if the PR is already merged; that would attempt to push and merge again.
 
 **`linear-refresh` (writes Linear tracker)**
 
