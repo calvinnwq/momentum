@@ -244,6 +244,52 @@ describe("momentum workflow run preview-coding", () => {
     }
   });
 
+  it("emits structural preflight evidence for invalid approval boundaries", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const result = await run(
+      previewCodingArgs({
+        dataDir,
+        repoDir,
+        runId: "preview-invalid-approval",
+        objective: "Block bad approval boundary",
+        extra: ["--approval-boundary", "through-linear-refresh"]
+      })
+    );
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "workflow run preview-coding",
+      code: "invalid_run_start",
+      runId: "preview-invalid-approval"
+    });
+    expect(payload["preflightEvidence"]).toEqual([
+      {
+        checkId: "workflow.run_shape",
+        status: "failed",
+        severity: "error",
+        path: "approvalBoundary",
+        key: "approvalBoundary",
+        message: "Approval boundary is not a known workflow approval boundary.",
+        recommendedAction:
+          "Set approvalBoundary to a supported workflow approval boundary or omit it for manual approval."
+      }
+    ]);
+
+    const db = openDb(dataDir);
+    try {
+      const runRow = db
+        .prepare("SELECT id FROM workflow_runs WHERE id = ?")
+        .get("preview-invalid-approval");
+      expect(runRow).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
   it("writes nothing durable: no run row is created by a preview", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();

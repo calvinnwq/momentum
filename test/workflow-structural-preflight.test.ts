@@ -3,9 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS,
   preflightCodingWorkflowRouteProfile,
+  preflightCodingWorkflowRunStartInput,
   preflightCodingWorkflowWrapperConfig,
   preflightCodingWorkflowRouteSteps
 } from "../src/core/workflow/preflight/structural.js";
+import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition/definition.js";
 
 describe("coding workflow structural preflight", () => {
   it("returns normalized route step overrides with compact passed evidence", () => {
@@ -101,6 +103,35 @@ describe("coding workflow structural preflight", () => {
     expect(Object.keys(result.evidence[0])).toEqual(
       STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS
     );
+  });
+
+  it("refuses invalid approval boundaries with compact run-shape evidence", () => {
+    const result = preflightCodingWorkflowRunStartInput({
+      definition: CODING_WORKFLOW_DEFINITION,
+      runId: "run-shape-invalid-approval",
+      repoPath: "/tmp/momentum-repo",
+      objective: "Validate the structural run shape",
+      now: 123,
+      approvalBoundary: "through-linear-refresh"
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected failed preflight");
+    expect(result.evidence).toEqual([
+      {
+        checkId: "workflow.run_shape",
+        status: "failed",
+        severity: "error",
+        path: "approvalBoundary",
+        key: "approvalBoundary",
+        message: "Approval boundary is not a known workflow approval boundary.",
+        recommendedAction:
+          "Set approvalBoundary to a supported workflow approval boundary or omit it for manual approval."
+      }
+    ]);
+    const evidence = result.evidence[0];
+    if (evidence === undefined) throw new Error("expected preflight evidence");
+    expect(Object.keys(evidence)).toEqual(STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS);
   });
 
   it("returns compact passed evidence for valid wrapper config", () => {

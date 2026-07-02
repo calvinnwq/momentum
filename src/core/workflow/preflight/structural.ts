@@ -11,6 +11,12 @@ import {
   parseCodingWorkflowWrapperConfig,
   type CodingWorkflowWrapperConfig
 } from "../live-wrapper/coding-workflow.js";
+import {
+  materializeWorkflowRunStart,
+  type WorkflowRunStartInput,
+  type WorkflowRunStartPlan,
+  type WorkflowRunStartError
+} from "../run/start.js";
 
 export const STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS = [
   "checkId",
@@ -66,6 +72,19 @@ export type CodingWorkflowWrapperConfigPreflightResult =
       evidence: readonly [StructuralPreflightEvidence];
     };
 
+export type CodingWorkflowRunStartInputPreflightResult =
+  | {
+      ok: true;
+      plan: WorkflowRunStartPlan;
+      evidence: readonly [StructuralPreflightEvidence];
+    }
+  | {
+      ok: false;
+      errors: readonly WorkflowRunStartError[];
+      evidence: readonly StructuralPreflightEvidence[];
+    };
+
+const RUN_SHAPE_CHECK_ID = "workflow.run_shape";
 const ROUTE_STEPS_CHECK_ID = "route.steps";
 const ROUTE_PROFILE_CHECK_ID = "route.profile";
 const WRAPPER_CONFIG_CHECK_ID = "wrapper.config";
@@ -74,6 +93,45 @@ const WRAPPER_CONFIG_CAMEL_CASE_KEYS: Readonly<Record<string, string>> = {
   resultFile: "result_file",
   timeoutSec: "timeout_sec"
 };
+
+export function preflightCodingWorkflowRunStartInput(
+  input: WorkflowRunStartInput
+): CodingWorkflowRunStartInputPreflightResult {
+  const materialized = materializeWorkflowRunStart(input);
+  if (materialized.ok) {
+    return {
+      ok: true,
+      plan: materialized.plan,
+      evidence: [
+        buildStructuralPreflightEvidence({
+          checkId: RUN_SHAPE_CHECK_ID,
+          status: "passed",
+          severity: "info",
+          path: "workflow.run",
+          key: "run",
+          message: "Coding workflow run shape is structurally valid.",
+          recommendedAction: "No action required."
+        })
+      ]
+    };
+  }
+
+  return {
+    ok: false,
+    errors: materialized.errors,
+    evidence: materialized.errors.map((error) =>
+      buildStructuralPreflightEvidence({
+        checkId: RUN_SHAPE_CHECK_ID,
+        status: "failed",
+        severity: "error",
+        path: error.path ?? "workflow.run",
+        key: error.path ?? "run",
+        message: error.message,
+        recommendedAction: recommendedActionForRunStartError(error)
+      })
+    )
+  };
+}
 
 export function preflightCodingWorkflowRouteSteps(
   value: unknown
@@ -189,6 +247,27 @@ export function preflightCodingWorkflowWrapperConfig(
       })
     ]
   };
+}
+
+function recommendedActionForRunStartError(
+  error: WorkflowRunStartError
+): string {
+  switch (error.code) {
+    case "definition_invalid":
+      return "Use the supported built-in coding workflow definition key and version.";
+    case "run_id_invalid":
+      return "Set runId to a non-empty path-safe workflow run id.";
+    case "repo_path_invalid":
+      return "Set repoPath to a non-empty repository path before starting the run.";
+    case "objective_invalid":
+      return "Set objective to a non-empty objective before starting the run.";
+    case "approval_boundary_invalid":
+      return "Set approvalBoundary to a supported workflow approval boundary or omit it for manual approval.";
+    case "issue_scope_invalid":
+      return 'Set issueScope to a plain object such as { identifier: "NGX-123" }, or omit it.';
+    case "route_invalid":
+      return "Set route to a plain object containing only validated coding workflow route fields.";
+  }
 }
 
 function buildStructuralPreflightEvidence(

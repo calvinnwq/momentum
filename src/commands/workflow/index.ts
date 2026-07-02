@@ -110,7 +110,8 @@ import {
 } from "../../core/workflow/route/coding.js";
 import {
   preflightCodingWorkflowRouteProfile,
-  preflightCodingWorkflowRouteSteps
+  preflightCodingWorkflowRouteSteps,
+  preflightCodingWorkflowRunStartInput
 } from "../../core/workflow/preflight/structural.js";
 import {
   InvalidWorkflowRunStartError,
@@ -648,6 +649,20 @@ function runWorkflowStartCommand(
       stepRouteOverrides,
       routeProfile
     });
+    const structuralPreflight = preflightCodingWorkflowRunStartInput(input);
+    if (!structuralPreflight.ok) {
+      return emitWorkflowRunStartFailure(parsed, io, {
+        command,
+        code: "invalid_run_start",
+        message: `Invalid workflow run start: ${structuralPreflight.errors
+          .map((error) => error.code)
+          .join(", ")}`,
+        dataDir,
+        runId,
+        errors: structuralPreflight.errors,
+        preflightEvidence: structuralPreflight.evidence
+      });
+    }
     const previewResult = materializeWorkflowCodingPlanPreview(input);
     if (!previewResult.ok) {
       return emitWorkflowRunStartFailure(parsed, io, {
@@ -720,6 +735,21 @@ function runWorkflowStartCommand(
       stepRouteOverrides,
       routeProfile
     });
+
+    const structuralPreflight = preflightCodingWorkflowRunStartInput(input);
+    if (!structuralPreflight.ok) {
+      return emitWorkflowRunStartFailure(parsed, io, {
+        command,
+        code: "invalid_run_start",
+        message: `Invalid workflow run start: ${structuralPreflight.errors
+          .map((error) => error.code)
+          .join(", ")}`,
+        dataDir,
+        runId,
+        errors: structuralPreflight.errors,
+        preflightEvidence: structuralPreflight.evidence
+      });
+    }
 
     let summary: PersistWorkflowRunStartSummary;
     try {
