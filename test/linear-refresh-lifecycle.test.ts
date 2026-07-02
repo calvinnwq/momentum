@@ -251,6 +251,43 @@ describe("linear-refresh lifecycle planner", () => {
     expect(plan.evidence.auditId).toBe("audit_565");
   });
 
+  it("reconciles matching already-applied audit evidence without current mutation gates", () => {
+    const applied = intent({ status: "applied", appliedAt: 2 });
+    const appliedEvidence = {
+      pendingIntents: [],
+      appliedIntents: [applied],
+      latestAuditsByIntentId: new Map([[applied.id, audit(applied)]])
+    };
+
+    expect(
+      planLinearRefreshLifecycle(
+        baseInput({
+          ...appliedEvidence,
+          env: {}
+        })
+      )
+    ).toMatchObject({
+      phase: "reconcile",
+      status: "already_applied",
+      action: "reconcile_already_applied",
+      safeToMutate: false
+    });
+
+    expect(
+      planLinearRefreshLifecycle(
+        baseInput({
+          ...appliedEvidence,
+          intentApplyPolicy: "create_intents_only"
+        })
+      )
+    ).toMatchObject({
+      phase: "reconcile",
+      status: "already_applied",
+      action: "reconcile_already_applied",
+      safeToMutate: false
+    });
+  });
+
   it("refuses already-applied evidence from another workflow run", () => {
     const applied = intent({ status: "applied", appliedAt: 2 });
     const input = {

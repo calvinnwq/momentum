@@ -57,6 +57,22 @@ export function planLinearRefreshLifecycle(
   input: LinearRefreshLifecycleInput
 ): LinearRefreshLifecyclePlan {
   const issueScopeIdentifier = input.issueScopeIdentifier?.trim() || null;
+  if (issueScopeIdentifier === null) {
+    return plan(
+      "preflight",
+      "issue_scope_missing",
+      "resolve_intent_evidence",
+      false,
+      evidence(null, null, null, null)
+    );
+  }
+
+  const pendingStatusIntents = input.pendingIntents.filter(isStatusUpdateIntent);
+  if (pendingStatusIntents.length === 0) {
+    const currentAppliedPlan = planCurrentAppliedEvidence(input, issueScopeIdentifier);
+    if (currentAppliedPlan !== null) return currentAppliedPlan;
+  }
+
   if (input.intentApplyPolicy !== "external_apply_allowed") {
     return plan(
       "preflight",
@@ -75,16 +91,6 @@ export function planLinearRefreshLifecycle(
       evidence(issueScopeIdentifier, null, null, null)
     );
   }
-  if (issueScopeIdentifier === null) {
-    return plan(
-      "preflight",
-      "issue_scope_missing",
-      "resolve_intent_evidence",
-      false,
-      evidence(null, null, null, null)
-    );
-  }
-  const pendingStatusIntents = input.pendingIntents.filter(isStatusUpdateIntent);
   if (pendingStatusIntents.length > 1) {
     return plan(
       "preflight",
@@ -124,52 +130,10 @@ function planAlreadyAppliedOrMissing(
   input: LinearRefreshLifecycleInput,
   issueScopeIdentifier: string
 ): LinearRefreshLifecyclePlan {
+  const currentAppliedPlan = planCurrentAppliedEvidence(input, issueScopeIdentifier);
+  if (currentAppliedPlan !== null) return currentAppliedPlan;
+
   const applied = (input.appliedIntents ?? []).filter(isStatusUpdateIntent);
-  const currentApplied = applied.flatMap((intent) => {
-    const source = sourceForIntent(input.sourceItemsById, intent);
-    const audit = input.latestAuditsByIntentId?.get(intent.id) ?? null;
-    const marker = idempotencyMarker(intent);
-    const validation = validateAppliedIntent(intent, source, issueScopeIdentifier);
-    if (
-      validation.ok &&
-      auditMatchesCurrentRun(audit, marker, input.expectedOperatorReason)
-    ) {
-      return [{ intent, source, marker, audit }];
-    }
-    return [];
-  });
-  if (currentApplied.length === 1) {
-    const appliedIntent = currentApplied[0]!;
-    return plan(
-      "reconcile",
-      "already_applied",
-      "reconcile_already_applied",
-      false,
-      evidence(
-        issueScopeIdentifier,
-        appliedIntent.intent,
-        appliedIntent.source,
-        appliedIntent.marker,
-        appliedIntent.audit
-      )
-    );
-  }
-  if (currentApplied.length > 1) {
-    const appliedIntent = currentApplied[0]!;
-    return plan(
-      "preflight",
-      "intent_duplicate",
-      "resolve_intent_evidence",
-      false,
-      evidence(
-        issueScopeIdentifier,
-        appliedIntent.intent,
-        appliedIntent.source,
-        appliedIntent.marker,
-        appliedIntent.audit
-      )
-    );
-  }
   if (applied.length === 1) {
     const intent = applied[0]!;
     const source = sourceForIntent(input.sourceItemsById, intent);
@@ -215,6 +179,60 @@ function planAlreadyAppliedOrMissing(
     false,
     evidence(issueScopeIdentifier, null, null, null)
   );
+}
+
+function planCurrentAppliedEvidence(
+  input: LinearRefreshLifecycleInput,
+  issueScopeIdentifier: string
+): LinearRefreshLifecyclePlan | null {
+  const applied = (input.appliedIntents ?? []).filter(isStatusUpdateIntent);
+  const currentApplied = applied.flatMap((intent) => {
+    const source = sourceForIntent(input.sourceItemsById, intent);
+    const audit = input.latestAuditsByIntentId?.get(intent.id) ?? null;
+    const marker = idempotencyMarker(intent);
+    const validation = validateAppliedIntent(intent, source, issueScopeIdentifier);
+    if (
+      validation.ok &&
+      auditMatchesCurrentRun(audit, marker, input.expectedOperatorReason)
+    ) {
+      return [{ intent, source, marker, audit }];
+    }
+    return [];
+  });
+
+  if (currentApplied.length === 1) {
+    const appliedIntent = currentApplied[0]!;
+    return plan(
+      "reconcile",
+      "already_applied",
+      "reconcile_already_applied",
+      false,
+      evidence(
+        issueScopeIdentifier,
+        appliedIntent.intent,
+        appliedIntent.source,
+        appliedIntent.marker,
+        appliedIntent.audit
+      )
+    );
+  }
+  if (currentApplied.length > 1) {
+    const appliedIntent = currentApplied[0]!;
+    return plan(
+      "preflight",
+      "intent_duplicate",
+      "resolve_intent_evidence",
+      false,
+      evidence(
+        issueScopeIdentifier,
+        appliedIntent.intent,
+        appliedIntent.source,
+        appliedIntent.marker,
+        appliedIntent.audit
+      )
+    );
+  }
+  return null;
 }
 
 function validateIntent(
