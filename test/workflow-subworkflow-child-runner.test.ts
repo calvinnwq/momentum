@@ -7,12 +7,12 @@ import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
   CODING_WORKFLOW_DEFINITION,
   type WorkflowDefinition
-} from "../src/core/workflow/definition.js";
-import { persistWorkflowDefinition } from "../src/core/workflow/definition-persist.js";
-import { persistWorkflowRunStart } from "../src/core/workflow/run-start-persist.js";
-import { markWorkflowRunNeedsManualRecovery } from "../src/core/workflow/run-recovery.js";
-import { loadWorkflowRunDetail } from "../src/core/workflow/status.js";
-import { buildDispatchedSubworkflowChildRunner } from "../src/core/workflow/subworkflow-child-runner.js";
+} from "../src/core/workflow/definition/definition.js";
+import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
+import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
+import { markWorkflowRunNeedsManualRecovery } from "../src/core/workflow/run/recovery.js";
+import { loadWorkflowRunDetail } from "../src/core/workflow/run/status.js";
+import { buildDispatchedSubworkflowChildRunner } from "../src/core/workflow/route/subworkflow-child-runner.js";
 
 /**
  * NGX-498 (RC-4b) — focused coverage for the *production* start-or-attach child

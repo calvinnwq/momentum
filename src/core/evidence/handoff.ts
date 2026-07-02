@@ -2,7 +2,7 @@ import fs from "node:fs";
 
 import type { GoalArtifactPaths } from "./artifacts.js";
 import type { DataDirOptions } from "../../config/data-dir.js";
-import type { RunnerProfile } from "../executors/runner-profile.js";
+import type { RunnerProfile } from "../executors/runner/profile.js";
 import {
   loadGoalStatus,
   type GoalStatusArtifactFiles,

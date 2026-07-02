@@ -12,7 +12,7 @@ import type {
   ExecutorFindingRecord,
   ExecutorInvocationRecord,
   ExecutorRoundRecord
-} from "../src/core/executors/loop-reducer.js";
+} from "../src/core/executors/loop/reducer.js";
 import {
   ExecutorEvidenceConflictError,
   ExecutorInvocationConflictError,
@@ -40,7 +40,7 @@ import {
   persistExecutorDefinition,
   updateExecutorInvocationState,
   updateExecutorRound
-} from "../src/core/executors/loop-persist.js";
+} from "../src/core/executors/loop/persist.js";
 
 const tempRoots: string[] = [];
 

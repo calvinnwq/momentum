@@ -4,16 +4,16 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
-import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition.js";
-import { persistWorkflowDefinition } from "../src/core/workflow/definition-persist.js";
-import { persistWorkflowRunStart } from "../src/core/workflow/run-start-persist.js";
-import { buildDispatchedStepExecutorInput } from "../src/core/workflow/dispatch-executor-run.js";
-import { dispatchWorkflowStepExecutor } from "../src/core/workflow/step-executor.js";
-import { buildRealWorkflowStepExecutorRegistry } from "../src/core/workflow/step-executor-real-adapters.js";
+import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition/definition.js";
+import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
+import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
+import { buildDispatchedStepExecutorInput } from "../src/core/workflow/dispatch/executor-run.js";
+import { dispatchWorkflowStepExecutor } from "../src/core/workflow/step/executor.js";
+import { buildRealWorkflowStepExecutorRegistry } from "../src/core/workflow/step/executor-real-adapters.js";
 import {
   loadDispatchedStepRunProvenance,
   resolveDispatchedStepExecutorContext
-} from "../src/core/workflow/daemon-dispatch-exec-context.js";
+} from "../src/core/workflow/live-wrapper/daemon-exec-context.js";
 
 /**
  * NGX-492 (RC-5b) — the daemon-lane exec-context deriver. The live-wrapper

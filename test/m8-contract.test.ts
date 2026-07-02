@@ -3,8 +3,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import { WORKFLOW_GATE_TYPES } from "../src/core/workflow/gate.js";
-import { WORKFLOW_APPROVAL_BOUNDARIES } from "../src/core/workflow/run-reducer.js";
+import { WORKFLOW_GATE_TYPES } from "../src/core/workflow/gate/gate.js";
+import { WORKFLOW_APPROVAL_BOUNDARIES } from "../src/core/workflow/run/reducer.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");

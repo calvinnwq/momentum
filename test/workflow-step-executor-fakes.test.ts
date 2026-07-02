@@ -7,7 +7,7 @@ import {
   listExecutingWorkflowStepExecutorKinds,
   type WorkflowStepExecutorInput,
   type WorkflowStepExecutorKind
-} from "../src/core/workflow/step-executor.js";
+} from "../src/core/workflow/step/executor.js";
 import {
   buildFakeWorkflowStepExecutorRegistry,
   createFakeWorkflowStepExecutor

@@ -4,39 +4,39 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
-import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition.js";
-import { persistWorkflowDefinition } from "../src/core/workflow/definition-persist.js";
+import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition/definition.js";
+import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
 import {
   persistWorkflowRunStart,
   WorkflowRunStartConflictError
-} from "../src/core/workflow/run-start-persist.js";
+} from "../src/core/workflow/run/start-persist.js";
 import {
   claimRunnableWorkflowStep,
   type ClaimedWorkflowStep
-} from "../src/core/workflow/scheduler.js";
+} from "../src/core/workflow/dispatch/scheduler.js";
 import { getWorkflowLease } from "../src/core/workflow/leases.js";
-import { listWorkflowGatesForRun } from "../src/core/workflow/gate-persist.js";
+import { listWorkflowGatesForRun } from "../src/core/workflow/gate/persist.js";
 import {
   getWorkflowRunManualRecoveryState,
   markWorkflowRunNeedsManualRecovery
-} from "../src/core/workflow/run-recovery.js";
-import { getWorkflowStep } from "../src/core/workflow/step-transitions.js";
+} from "../src/core/workflow/run/recovery.js";
+import { getWorkflowStep } from "../src/core/workflow/step/transitions.js";
 import {
   listExecutorRoundsForInvocation,
   loadExecutorInvocation
-} from "../src/core/executors/loop-persist.js";
+} from "../src/core/executors/loop/persist.js";
 import {
   deriveDispatchInvocationId,
   executeWorkflowStepDispatch
-} from "../src/core/workflow/dispatch-execute.js";
-import { WORKFLOW_RECONCILE_RESULT_STATUS } from "../src/core/workflow/dispatch-reconcile-execute.js";
-import { WORKFLOW_EXECUTE_RECONCILE_STATUS } from "../src/core/workflow/dispatch-executor-run.js";
+} from "../src/core/workflow/dispatch/execute.js";
+import { WORKFLOW_RECONCILE_RESULT_STATUS } from "../src/core/workflow/dispatch/reconcile-execute.js";
+import { WORKFLOW_EXECUTE_RECONCILE_STATUS } from "../src/core/workflow/dispatch/executor-run.js";
 import {
   executeAndReconcileDispatchedSubworkflowStep,
   type DispatchedSubworkflowChildRunner
-} from "../src/core/workflow/dispatch-subworkflow-run.js";
-import { loadWorkflowRunDetail } from "../src/core/workflow/status.js";
-import type { WorkflowRunState } from "../src/core/workflow/run-reducer.js";
+} from "../src/core/workflow/dispatch/subworkflow-run.js";
+import { loadWorkflowRunDetail } from "../src/core/workflow/run/status.js";
+import type { WorkflowRunState } from "../src/core/workflow/run/reducer.js";
 
 /**
  * NGX-497 (RC-4) — integration proof binding the daemon-dispatchable

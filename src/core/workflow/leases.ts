@@ -4,7 +4,7 @@
  * M7 added the `workflow_leases` table (PK `(run_id, lease_kind)`) and the pure
  * `classifyWorkflowLease` / `deriveWorkflowRunState` reducers, but no `src`
  * function acquired, heartbeated, or released a row — tests seeded leases with
- * raw SQL and the executor bridge (`live-step-executor.ts`) deferred this to
+ * raw SQL and the executor bridge (`live-step/executor.ts`) deferred this to
  * "caller-side" work. The M9 live-execution contract requires each live step to
  * "acquire a workflow lease before spawning the process", "heartbeat while the
  * process is active", and "persist terminal state before releasing the lease",
@@ -38,7 +38,7 @@ import {
   type WorkflowLeaseKind,
   type WorkflowLeaseRecord,
   type WorkflowLeaseStalePolicy
-} from "./run-reducer.js";
+} from "./run/reducer.js";
 
 const LEASE_KIND_SET: ReadonlySet<string> = new Set(WORKFLOW_LEASE_KINDS);
 const STALE_POLICY_SET: ReadonlySet<string> = new Set(

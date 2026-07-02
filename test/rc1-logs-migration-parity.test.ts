@@ -28,11 +28,11 @@ import { ingestEvidenceRecord } from "../src/core/evidence/records.js";
 import {
   insertExecutorInvocation,
   insertExecutorRound
-} from "../src/core/executors/loop-persist.js";
+} from "../src/core/executors/loop/persist.js";
 import type {
   ExecutorInvocationRecord,
   ExecutorRoundRecord
-} from "../src/core/executors/loop-reducer.js";
+} from "../src/core/executors/loop/reducer.js";
 
 type RunResult = {
   code: number;

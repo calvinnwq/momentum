@@ -1,7 +1,7 @@
 /**
  * Test-only deterministic fake `WorkflowStepExecutor` seam (RC-5, NGX-485).
  *
- * The M7 executor boundary (`src/core/workflow/step-executor.ts`) originally
+ * The M7 executor boundary (`src/core/workflow/step/executor.ts`) originally
  * shipped this fake as the production `ADAPTERS` map default: every
  * `WorkflowStepExecutorKind` resolved to a deterministic fake. The runtime
  * consolidation plan (`SPEC.md`, Path 6)
@@ -41,7 +41,7 @@ import {
   type WorkflowStepExecutorRetryHint,
   type WorkflowStepExecutorSuccess,
   type WorkflowStepExecutorTerminalState
-} from "../../src/core/workflow/step-executor.js";
+} from "../../src/core/workflow/step/executor.js";
 
 export type FakeWorkflowStepExecutorOutcome =
   | "success"

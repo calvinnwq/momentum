@@ -8,23 +8,23 @@ import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
   LIVE_STEP_DEFAULT_LEASE_KIND,
   runLiveWorkflowStep
-} from "../src/core/executors/live-step-orchestrator.js";
+} from "../src/core/executors/live-step/orchestrator.js";
 import {
   acquireWorkflowLease,
   getWorkflowLease
 } from "../src/core/workflow/leases.js";
-import { getWorkflowStep } from "../src/core/workflow/step-transitions.js";
+import { getWorkflowStep } from "../src/core/workflow/step/transitions.js";
 import type {
   WorkflowStepExecutor,
   WorkflowStepExecutorDispatchResult,
   WorkflowStepExecutorKind,
   WorkflowStepExecutorInput
-} from "../src/core/workflow/step-executor.js";
+} from "../src/core/workflow/step/executor.js";
 import type {
   WorkflowApprovalBoundary,
   WorkflowLeaseKind,
   WorkflowStepState
-} from "../src/core/workflow/run-reducer.js";
+} from "../src/core/workflow/run/reducer.js";
 
 const tempRoots: string[] = [];
 

@@ -10,15 +10,15 @@ import {
   insertExecutorInvocation,
   listExecutorArtifactsForRound,
   loadExecutorRound
-} from "../src/core/executors/loop-persist.js";
-import type { ExecutorInvocationRecord } from "../src/core/executors/loop-reducer.js";
+} from "../src/core/executors/loop/persist.js";
+import type { ExecutorInvocationRecord } from "../src/core/executors/loop/reducer.js";
 import {
   resolveGoalLoopRoundSelection,
   type PlanGoalLoopRoundStartInput
-} from "../src/core/executors/goal-loop-executor.js";
-import { goalLoopRoundMechanismFromResultFile } from "../src/core/executors/goal-loop-mechanism.js";
-import { runGoalLoopRound } from "../src/core/executors/goal-loop-orchestrator.js";
-import type { CommitIntent, RunnerResult } from "../src/core/executors/types.js";
+} from "../src/core/executors/goal-loop/executor.js";
+import { goalLoopRoundMechanismFromResultFile } from "../src/core/executors/goal-loop/mechanism.js";
+import { runGoalLoopRound } from "../src/core/executors/goal-loop/orchestrator.js";
+import type { CommitIntent, RunnerResult } from "../src/core/executors/runner/types.js";
 
 // Proves the goal-loop round *mechanism* bridge reuses the shared goal /
 // iteration safety (the `finalizeWorkflowStepFromResultFile` verify -> commit /

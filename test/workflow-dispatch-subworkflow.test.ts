@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { planDispatchedExecutorTerminalization } from "../src/core/workflow/dispatch-executor-terminalize.js";
+import { planDispatchedExecutorTerminalization } from "../src/core/workflow/dispatch/executor-terminalize.js";
 import {
   planSubworkflowChildMirror,
   type SubworkflowMirrorEvidence
-} from "../src/core/workflow/dispatch-subworkflow.js";
+} from "../src/core/workflow/dispatch/subworkflow.js";
 import {
   WORKFLOW_RUN_STATES,
   type WorkflowRunState
-} from "../src/core/workflow/run-reducer.js";
+} from "../src/core/workflow/run/reducer.js";
 
 /**
  * NGX-497 (RC-4) — the pure half of the daemon-dispatchable `subworkflow`

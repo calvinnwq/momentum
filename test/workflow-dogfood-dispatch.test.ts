@@ -1,18 +1,18 @@
 import { describe, expect, it } from "vitest";
 
-import { WORKFLOW_DISPATCH_RESULT_STATUS } from "../src/core/workflow/dispatch-execute.js";
+import { WORKFLOW_DISPATCH_RESULT_STATUS } from "../src/core/workflow/dispatch/execute.js";
 import {
   DOGFOOD_TERMINALIZE_DISPATCH_ENV_VAR,
   isDogfoodTerminalizeDispatchEnabled,
   resolveDaemonWorkflowDispatch,
   shouldTerminalizeAfterDispatch
-} from "../src/core/workflow/dogfood-dispatch.js";
+} from "../src/core/workflow/dispatch/dogfood.js";
 import type {
   ClaimedWorkflowStep,
   WorkflowStepDispatch,
   WorkflowStepDispatchContext,
   WorkflowStepDispatchResult
-} from "../src/core/workflow/scheduler.js";
+} from "../src/core/workflow/dispatch/scheduler.js";
 
 describe("shouldTerminalizeAfterDispatch (NGX-391 dogfood safety gate)", () => {
   it("terminalizes a step whose executor scaffold was freshly started", () => {

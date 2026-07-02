@@ -5,22 +5,22 @@ import path from "node:path";
 
 import { runCli } from "../src/cli.js";
 import { openDb } from "../src/adapters/db.js";
-import type { WorkflowDefinition } from "../src/core/workflow/definition.js";
-import { persistWorkflowDefinition } from "../src/core/workflow/definition-persist.js";
-import { persistWorkflowRunStart } from "../src/core/workflow/run-start-persist.js";
+import type { WorkflowDefinition } from "../src/core/workflow/definition/definition.js";
+import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
+import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
 import { runDaemonLoop } from "../src/core/daemon/loop.js";
 import { startDaemonRun } from "../src/core/daemon/runs.js";
 import {
   deriveDispatchInvocationId,
   executeWorkflowStepDispatch,
   WORKFLOW_DISPATCH_RESULT_STATUS
-} from "../src/core/workflow/dispatch-execute.js";
-import { createTerminalizingWorkflowDispatch } from "../src/core/workflow/dogfood-dispatch.js";
-import { claimRunnableWorkflowStep } from "../src/core/workflow/scheduler.js";
-import type { WorkflowStepDispatch } from "../src/core/workflow/scheduler.js";
+} from "../src/core/workflow/dispatch/execute.js";
+import { createTerminalizingWorkflowDispatch } from "../src/core/workflow/dispatch/dogfood.js";
+import { claimRunnableWorkflowStep } from "../src/core/workflow/dispatch/scheduler.js";
+import type { WorkflowStepDispatch } from "../src/core/workflow/dispatch/scheduler.js";
 import { getWorkflowLease } from "../src/core/workflow/leases.js";
-import { getWorkflowStep } from "../src/core/workflow/step-transitions.js";
-import { loadExecutorInvocation } from "../src/core/executors/loop-persist.js";
+import { getWorkflowStep } from "../src/core/workflow/step/transitions.js";
+import { loadExecutorInvocation } from "../src/core/executors/loop/persist.js";
 
 type RunResult = {
   code: number;

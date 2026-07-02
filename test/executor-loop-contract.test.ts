@@ -8,7 +8,7 @@ import {
   EXECUTOR_ROUND_TERMINAL_STATES,
   transitionExecutorInvocation,
   transitionExecutorRound
-} from "../src/core/executors/loop-reducer.js";
+} from "../src/core/executors/loop/reducer.js";
 import { expectSpecSection, readRepoFile } from "./helpers/repo-docs.js";
 
 describe("executor loop contract", () => {

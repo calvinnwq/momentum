@@ -4,35 +4,35 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
-import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition.js";
-import { persistWorkflowDefinition } from "../src/core/workflow/definition-persist.js";
-import { persistWorkflowRunStart } from "../src/core/workflow/run-start-persist.js";
+import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition/definition.js";
+import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
+import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
 import {
   claimRunnableWorkflowStep,
   type ClaimedWorkflowStep
-} from "../src/core/workflow/scheduler.js";
+} from "../src/core/workflow/dispatch/scheduler.js";
 import { getWorkflowLease } from "../src/core/workflow/leases.js";
-import { listWorkflowGatesForRun } from "../src/core/workflow/gate-persist.js";
-import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run-recovery.js";
-import { getWorkflowStep } from "../src/core/workflow/step-transitions.js";
+import { listWorkflowGatesForRun } from "../src/core/workflow/gate/persist.js";
+import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run/recovery.js";
+import { getWorkflowStep } from "../src/core/workflow/step/transitions.js";
 import {
   loadExecutorInvocation,
   listExecutorRoundsForInvocation
-} from "../src/core/executors/loop-persist.js";
+} from "../src/core/executors/loop/persist.js";
 import {
   deriveDispatchInvocationId,
   executeWorkflowStepDispatch
-} from "../src/core/workflow/dispatch-execute.js";
+} from "../src/core/workflow/dispatch/execute.js";
 import {
   reconcileDispatchedWorkflowStep,
   WORKFLOW_RECONCILE_RESULT_STATUS
-} from "../src/core/workflow/dispatch-reconcile-execute.js";
-import type { WorkflowStepExecutorDispatchResult } from "../src/core/workflow/step-executor.js";
+} from "../src/core/workflow/dispatch/reconcile-execute.js";
+import type { WorkflowStepExecutorDispatchResult } from "../src/core/workflow/step/executor.js";
 import {
   planDispatchedExecutorTerminalization,
   terminalizeDispatchedExecutorInvocation,
   WORKFLOW_EXECUTOR_TERMINALIZE_STATUS
-} from "../src/core/workflow/dispatch-executor-terminalize.js";
+} from "../src/core/workflow/dispatch/executor-terminalize.js";
 
 /**
  * NGX-492 (RC-5b) — the production seam that drives a dispatched step's

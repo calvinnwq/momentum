@@ -49,9 +49,9 @@ import type {
   LiveWrapperConfig,
   LiveWrapperProbeConfig
 } from "./live-wrapper-registry.js";
-import { parseRunnerResult } from "../core/executors/runner-result.js";
-import type { RunnerResult } from "../core/executors/types.js";
-import type { WorkflowStepKind } from "../core/workflow/run-reducer.js";
+import { parseRunnerResult } from "../core/executors/runner/result.js";
+import type { RunnerResult } from "../core/executors/runner/types.js";
+import type { WorkflowStepKind } from "../core/workflow/run/reducer.js";
 
 /**
  * Stable recovery vocabulary for live-wrapper *execution* failures. This is the

@@ -11,7 +11,7 @@ import {
   selectBuiltInWorkflowDefinition,
   validateWorkflowDefinition,
   type WorkflowDefinition
-} from "../src/core/workflow/definition.js";
+} from "../src/core/workflow/definition/definition.js";
 
 function baseValidDefinition(): WorkflowDefinition {
   return {

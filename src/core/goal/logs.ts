@@ -15,7 +15,7 @@ import {
   validateGoalReadBackInput,
   type GoalEvidenceSummary
 } from "./read-back.js";
-import { parseRunnerResult } from "../executors/runner-result.js";
+import { parseRunnerResult } from "../executors/runner/result.js";
 import {
   listSourceItemSummariesForGoal,
   type SourceItemSummary

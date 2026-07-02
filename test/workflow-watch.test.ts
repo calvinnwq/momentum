@@ -7,10 +7,10 @@ import { runCli } from "../src/cli.js";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
   MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE
-} from "../src/core/workflow/run-start.js";
-import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition.js";
-import { persistWorkflowRunStart } from "../src/core/workflow/run-start-persist.js";
-import { insertWorkflowGate } from "../src/core/workflow/gate-persist.js";
+} from "../src/core/workflow/run/start.js";
+import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition/definition.js";
+import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
+import { insertWorkflowGate } from "../src/core/workflow/gate/persist.js";
 
 type RunResult = {
   code: number;

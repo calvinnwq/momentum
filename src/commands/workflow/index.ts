@@ -17,11 +17,11 @@ import { loadMomentumPolicy } from "../../core/intent/policy.js";
 import {
   isReservedCompatibilityRunId,
   parseWorkflowRunImport
-} from "../../core/workflow/run-import.js";
+} from "../../core/workflow/run/import.js";
 import {
   persistWorkflowRunImport,
   type PersistWorkflowRunImportSummary
-} from "../../core/workflow/run-import-persist.js";
+} from "../../core/workflow/run/import-persist.js";
 import {
   WORKFLOW_STATUS_FILTER_KEYS,
   listWorkflowRunSummaries,
@@ -29,7 +29,7 @@ import {
   type WorkflowRunDetail,
   type WorkflowRunSummary,
   type WorkflowStatusFilterKey
-} from "../../core/workflow/status.js";
+} from "../../core/workflow/run/status.js";
 import {
   highestWorkflowApprovalBoundary,
   isTerminalStepState,
@@ -40,30 +40,30 @@ import {
   workflowStepKindsForApprovalBoundary,
   type WorkflowRunState,
   type WorkflowStepState
-} from "../../core/workflow/run-reducer.js";
+} from "../../core/workflow/run/reducer.js";
 import {
   loadWorkflowHandoff,
   type WorkflowHandoffEnvelope
-} from "../../core/workflow/handoff.js";
+} from "../../core/workflow/run/handoff.js";
 import {
   loadWorkflowRunLogs,
   type WorkflowRunLogsEnvelope
-} from "../../core/workflow/logs.js";
+} from "../../core/workflow/run/logs.js";
 import {
   loadWorkflowMonitorEnvelope,
   type WorkflowMonitorEnvelope
-} from "../../core/workflow/monitor-envelope.js";
-import { deriveWorkflowWatchActionRecommendation } from "../../core/workflow/action-authority.js";
+} from "../../core/workflow/monitor/envelope.js";
+import { deriveWorkflowWatchActionRecommendation } from "../../core/workflow/monitor/action-authority.js";
 import {
   deriveWorkflowMonitorProgress,
   type WorkflowMonitorProgressTick
-} from "../../core/workflow/monitor-progress.js";
+} from "../../core/workflow/monitor/progress.js";
 import {
   deriveWorkflowMonitorState,
   type WorkflowMonitorState
-} from "../../core/workflow/monitor-state.js";
-import { deriveWorkflowWatchAdvisory } from "../../core/workflow/watch-advisory.js";
-import { executeWorkflowStepDispatch } from "../../core/workflow/dispatch-execute.js";
+} from "../../core/workflow/monitor/state.js";
+import { deriveWorkflowWatchAdvisory } from "../../core/workflow/monitor/watch-advisory.js";
+import { executeWorkflowStepDispatch } from "../../core/workflow/dispatch/execute.js";
 import {
   resolveDaemonWorkflowStepDispatch,
   type DaemonWorkflowDispatchDeps
@@ -71,11 +71,11 @@ import {
 import {
   runWorkflowSchedulerOnceAsync,
   type RecoverStaleWorkflowLeasesResult
-} from "../../core/workflow/scheduler.js";
+} from "../../core/workflow/dispatch/scheduler.js";
 import {
   loadWorkflowRuntimeStateRows,
   refreshWorkflowRunRuntimeState
-} from "../../core/workflow/runtime-state.js";
+} from "../../core/workflow/run/runtime-state.js";
 import {
   clearWorkflowRunManualRecoveryGuarded,
   getWorkflowRunManualRecoveryState,
@@ -83,59 +83,59 @@ import {
   type ClearWorkflowRunManualRecoveryGuardedInput,
   type ClearWorkflowRunManualRecoveryGuardedResult,
   type WorkflowRunManualRecoveryState
-} from "../../core/workflow/run-recovery.js";
+} from "../../core/workflow/run/recovery.js";
 import {
   reconcileWorkflowRunManualRecovery,
   type ReconcileWorkflowRunManualRecoveryResult
-} from "../../core/workflow/recovery-reconcile.js";
+} from "../../core/workflow/recovery/reconcile.js";
 import {
   CODING_WORKFLOW_DEFINITION_KEY,
   getBuiltInWorkflowDefinition,
   type WorkflowDefinition
-} from "../../core/workflow/definition.js";
+} from "../../core/workflow/definition/definition.js";
 import {
   loadWorkflowDefinition,
   persistWorkflowDefinition
-} from "../../core/workflow/definition-persist.js";
+} from "../../core/workflow/definition/persist.js";
 import {
   MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
   materializeWorkflowCodingPlanPreview,
   type WorkflowRunStartInput
-} from "../../core/workflow/run-start.js";
+} from "../../core/workflow/run/start.js";
 import {
   formatCodingRouteStepSelectionLines,
   resolveCodingRouteStepSelections,
   validateCodingStepRouteOverrides,
   writeCodingStepRouteOverrides,
   type CodingStepRouteOverrides
-} from "../../core/workflow/coding-route-config.js";
+} from "../../core/workflow/route/coding.js";
 import {
   InvalidWorkflowRunStartError,
   WorkflowRunStartConflictError,
   persistWorkflowRunStart,
   type PersistWorkflowRunStartSummary
-} from "../../core/workflow/run-start-persist.js";
+} from "../../core/workflow/run/start-persist.js";
 import {
   GATE_DECISION_MODES,
   type GateDecisionMode,
   type GateDecisionRequest
-} from "../../core/workflow/gate.js";
+} from "../../core/workflow/gate/gate.js";
 import {
   WorkflowGateDecisionError,
   WorkflowGateNotFoundError,
   resolveWorkflowGate
-} from "../../core/workflow/gate-persist.js";
+} from "../../core/workflow/gate/persist.js";
 import {
   InvalidWorkflowEventCursorError,
   appendWorkflowEvent,
   loadWorkflowRunEvents,
   type WorkflowEventType
-} from "../../core/workflow/events.js";
-import { runWorkflowWatchStream } from "../../core/workflow/watch-stream.js";
+} from "../../core/workflow/run/events.js";
+import { runWorkflowWatchStream } from "../../core/workflow/monitor/watch-stream.js";
 import {
   createWorkflowWatchStreamDbPoll,
   WorkflowWatchStreamRunNotFoundError
-} from "../../core/workflow/watch-stream-source.js";
+} from "../../core/workflow/monitor/watch-stream-source.js";
 import {
   emitWorkflowHandoff,
   emitWorkflowHandoffFailure,

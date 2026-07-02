@@ -9,18 +9,18 @@ import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import type {
   WorkflowRunEvents,
   WorkflowSemanticEvent
-} from "../src/core/workflow/events.js";
+} from "../src/core/workflow/run/events.js";
 import {
   buildWorkflowWatchStreamTick,
   runWorkflowWatchStream,
   type RunWorkflowWatchStreamResult,
   type WorkflowWatchStreamPollResult,
   type WorkflowWatchStreamRecord
-} from "../src/core/workflow/watch-stream.js";
+} from "../src/core/workflow/monitor/watch-stream.js";
 import {
   createWorkflowWatchStreamDbPoll,
   WorkflowWatchStreamRunNotFoundError
-} from "../src/core/workflow/watch-stream-source.js";
+} from "../src/core/workflow/monitor/watch-stream-source.js";
 
 /**
  * SUP-05 (NGX-552) JSONL stream tick reducer.

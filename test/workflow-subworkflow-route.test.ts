@@ -7,8 +7,8 @@ import {
   planSubworkflowChildLaunchFromRoute,
   readSubworkflowParentLineage,
   type SubworkflowRouteLineage
-} from "../src/core/workflow/subworkflow-route.js";
-import type { SubworkflowParentLineage } from "../src/core/workflow/subworkflow-child-config.js";
+} from "../src/core/workflow/route/subworkflow.js";
+import type { SubworkflowParentLineage } from "../src/core/workflow/route/subworkflow-child-config.js";
 
 /**
  * RC-4b (NGX-498) — the pure policy core of the daemon-lane subworkflow deriver.

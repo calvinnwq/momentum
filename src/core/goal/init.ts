@@ -21,7 +21,7 @@ import {
   type RunnerProfile,
   type RunnerProfileErrorCode,
   type RunnerProfileSource
-} from "../executors/runner-profile.js";
+} from "../executors/runner/profile.js";
 import {
   loadMomentumPolicy,
   resolvePolicyEffectiveValues,

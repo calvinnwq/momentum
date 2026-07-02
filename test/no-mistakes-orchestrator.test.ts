@@ -15,8 +15,8 @@ import {
   loadExecutorInvocation,
   loadExecutorRound,
   updateExecutorRound
-} from "../src/core/executors/loop-persist.js";
-import type { ExecutorRoundRecord } from "../src/core/executors/loop-reducer.js";
+} from "../src/core/executors/loop/persist.js";
+import type { ExecutorRoundRecord } from "../src/core/executors/loop/reducer.js";
 import {
   noMistakesInvocationId,
   noMistakesRoundId,
@@ -24,7 +24,7 @@ import {
   planNoMistakesRoundStart,
   type NoMistakesExternalState
 } from "../src/adapters/no-mistakes-executor.js";
-import { readNoMistakesExternalState } from "../src/core/executors/no-mistakes-mechanism.js";
+import { readNoMistakesExternalState } from "../src/core/executors/no-mistakes/mechanism.js";
 import {
   runNoMistakesMirrorRound,
   runNoMistakesMirrorStep,

@@ -3,8 +3,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-import { WORKFLOW_EXECUTOR_FAMILIES } from "../src/core/workflow/definition.js";
-import { PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES } from "../src/core/workflow/dispatch.js";
+import { WORKFLOW_EXECUTOR_FAMILIES } from "../src/core/workflow/definition/definition.js";
+import { PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES } from "../src/core/workflow/dispatch/dispatch.js";
 import { expectSpecSection } from "./helpers/repo-docs.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));

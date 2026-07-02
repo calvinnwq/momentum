@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { EXECUTOR_HUMAN_GATE_TYPES } from "../src/core/executors/loop-reducer.js";
+import { EXECUTOR_HUMAN_GATE_TYPES } from "../src/core/executors/loop/reducer.js";
 import {
   GATE_DECISION_MODES,
   GATE_DECISION_REFUSAL_CODES,
@@ -11,7 +11,7 @@ import {
   isWorkflowGateType,
   type GateDecisionInput,
   type GateDecisionRequest
-} from "../src/core/workflow/gate.js";
+} from "../src/core/workflow/gate/gate.js";
 
 function gate(overrides: Partial<GateDecisionInput> = {}): GateDecisionInput {
   return {

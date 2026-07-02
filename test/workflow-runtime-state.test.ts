@@ -7,13 +7,13 @@ import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
   loadWorkflowRuntimeStateRows,
   refreshWorkflowRunRuntimeState
-} from "../src/core/workflow/runtime-state.js";
+} from "../src/core/workflow/run/runtime-state.js";
 import type {
   WorkflowLeaseKind,
   WorkflowLeaseStalePolicy,
   WorkflowStepKind,
   WorkflowStepState
-} from "../src/core/workflow/run-reducer.js";
+} from "../src/core/workflow/run/reducer.js";
 
 const tempRoots: string[] = [];
 

@@ -4,40 +4,40 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
-import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition.js";
-import { persistWorkflowDefinition } from "../src/core/workflow/definition-persist.js";
-import { persistWorkflowRunStart } from "../src/core/workflow/run-start-persist.js";
+import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition/definition.js";
+import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
+import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
 import {
   claimRunnableWorkflowStep,
   type ClaimedWorkflowStep
-} from "../src/core/workflow/scheduler.js";
+} from "../src/core/workflow/dispatch/scheduler.js";
 import {
   acquireWorkflowLease,
   getWorkflowLease,
   releaseWorkflowLease
 } from "../src/core/workflow/leases.js";
-import { listWorkflowGatesForRun } from "../src/core/workflow/gate-persist.js";
-import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run-recovery.js";
+import { listWorkflowGatesForRun } from "../src/core/workflow/gate/persist.js";
+import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run/recovery.js";
 import {
   finishWorkflowStep,
   getWorkflowStep,
   startWorkflowStep
-} from "../src/core/workflow/step-transitions.js";
+} from "../src/core/workflow/step/transitions.js";
 import {
   loadExecutorInvocation,
   updateExecutorInvocationState
-} from "../src/core/executors/loop-persist.js";
-import type { ExecutorInvocationState } from "../src/core/executors/loop-reducer.js";
-import { executeWorkflowStepDispatch } from "../src/core/workflow/dispatch-execute.js";
+} from "../src/core/executors/loop/persist.js";
+import type { ExecutorInvocationState } from "../src/core/executors/loop/reducer.js";
+import { executeWorkflowStepDispatch } from "../src/core/workflow/dispatch/execute.js";
 import {
   reconcileDispatchedWorkflowStep,
   WORKFLOW_RECONCILE_RESULT_STATUS
-} from "../src/core/workflow/dispatch-reconcile-execute.js";
-import { runLiveWorkflowStep } from "../src/core/executors/live-step-orchestrator.js";
+} from "../src/core/workflow/dispatch/reconcile-execute.js";
+import { runLiveWorkflowStep } from "../src/core/executors/live-step/orchestrator.js";
 import {
   getWorkflowStepExecutor,
   type WorkflowStepExecutorInput
-} from "../src/core/workflow/step-executor.js";
+} from "../src/core/workflow/step/executor.js";
 
 /**
  * RC-2 (NGX-480) production reconciliation effect twin.

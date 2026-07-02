@@ -7,8 +7,8 @@ import {
   EXECUTOR_ROUND_TERMINAL_STATES,
   transitionExecutorInvocation,
   transitionExecutorRound
-} from "../src/core/executors/loop-reducer.js";
-import { isWorkflowExecutorFamily } from "../src/core/workflow/definition.js";
+} from "../src/core/executors/loop/reducer.js";
+import { isWorkflowExecutorFamily } from "../src/core/workflow/definition/definition.js";
 import {
   NO_MISTAKES_CI_STATES,
   NO_MISTAKES_EXECUTOR_FAMILIES,

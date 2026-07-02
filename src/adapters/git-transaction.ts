@@ -1,6 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
 
-import type { CommitIntent } from "../core/executors/types.js";
+import type { CommitIntent } from "../core/executors/runner/types.js";
 
 const SHA40_RE = /^[0-9a-f]{40}$/;
 

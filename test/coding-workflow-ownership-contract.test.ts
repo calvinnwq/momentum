@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition.js";
+import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition/definition.js";
 import {
   WORKFLOW_APPROVAL_BOUNDARIES,
   workflowStepKindsForApprovalBoundary
-} from "../src/core/workflow/run-reducer.js";
+} from "../src/core/workflow/run/reducer.js";
 import { expectSpecSection, readRepoFile } from "./helpers/repo-docs.js";
 
 describe("Momentum-owned coding workflow contract", () => {

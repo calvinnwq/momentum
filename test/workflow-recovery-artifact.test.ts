@@ -15,12 +15,12 @@ import {
   workflowRecoverySafeNextSteps,
   writeWorkflowRecoveryArtifact,
   type WorkflowRecoveryArtifactInput
-} from "../src/core/workflow/recovery-artifact.js";
+} from "../src/core/workflow/recovery/artifact.js";
 import {
   WORKFLOW_MONITOR_RECOVERY_CODES,
   type WorkflowMonitorNextAction,
   type WorkflowMonitorRecovery
-} from "../src/core/workflow/monitor-state.js";
+} from "../src/core/workflow/monitor/state.js";
 
 const tempRoots: string[] = [];
 

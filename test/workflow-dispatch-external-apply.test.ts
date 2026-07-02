@@ -10,8 +10,8 @@ import {
 } from "../src/core/intent/apply-execute.js";
 import type { IntentApplyAudit } from "../src/core/intent/apply-audits.js";
 import type { UpdateIntent } from "../src/core/intent/update-intents.js";
-import { planDispatchedExecutorTerminalization } from "../src/core/workflow/dispatch-executor-terminalize.js";
-import { mapExternalApplyResultToExecutorResult } from "../src/core/workflow/dispatch-external-apply.js";
+import { planDispatchedExecutorTerminalization } from "../src/core/workflow/dispatch/executor-terminalize.js";
+import { mapExternalApplyResultToExecutorResult } from "../src/core/workflow/dispatch/external-apply.js";
 
 /**
  * NGX-496 (RC-3) — the pure half of the daemon-dispatchable external-apply

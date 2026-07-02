@@ -6,13 +6,13 @@ import path from "node:path";
 import {
   buildRealWorkflowStepExecutorRegistry,
   createUnconfiguredWorkflowStepExecutor
-} from "../src/core/workflow/step-executor-real-adapters.js";
+} from "../src/core/workflow/step/executor-real-adapters.js";
 import {
   WORKFLOW_STEP_EXECUTOR_KINDS,
   type WorkflowStepExecutor,
   type WorkflowStepExecutorInput,
   type WorkflowStepExecutorKind
-} from "../src/core/workflow/step-executor.js";
+} from "../src/core/workflow/step/executor.js";
 import {
   parseLiveWrapperProfile,
   type LiveWrapperProfile

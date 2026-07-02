@@ -4,9 +4,9 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
-import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition.js";
-import { persistWorkflowDefinition } from "../src/core/workflow/definition-persist.js";
-import { persistWorkflowRunStart } from "../src/core/workflow/run-start-persist.js";
+import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition/definition.js";
+import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
+import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
 import {
   claimRunnableWorkflowStep,
   recoverStaleWorkflowLeases,
@@ -20,18 +20,18 @@ import {
   type WorkflowStepDispatch,
   type WorkflowStepDispatchContext,
   type WorkflowStepDispatchResult
-} from "../src/core/workflow/scheduler.js";
+} from "../src/core/workflow/dispatch/scheduler.js";
 import { getWorkflowLease } from "../src/core/workflow/leases.js";
 import {
   deriveDispatchInvocationId,
   executeWorkflowStepDispatch
-} from "../src/core/workflow/dispatch-execute.js";
-import { terminalizeDispatchedExecutorInvocation } from "../src/core/workflow/dispatch-executor-terminalize.js";
-import { resolveWorkflowRecoveryArtifactPath } from "../src/core/workflow/recovery-artifact.js";
-import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run-recovery.js";
-import { deriveWorkflowRunState } from "../src/core/workflow/run-reducer.js";
-import { getWorkflowStep } from "../src/core/workflow/step-transitions.js";
-import { loadExecutorInvocation } from "../src/core/executors/loop-persist.js";
+} from "../src/core/workflow/dispatch/execute.js";
+import { terminalizeDispatchedExecutorInvocation } from "../src/core/workflow/dispatch/executor-terminalize.js";
+import { resolveWorkflowRecoveryArtifactPath } from "../src/core/workflow/recovery/artifact.js";
+import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run/recovery.js";
+import { deriveWorkflowRunState } from "../src/core/workflow/run/reducer.js";
+import { getWorkflowStep } from "../src/core/workflow/step/transitions.js";
+import { loadExecutorInvocation } from "../src/core/executors/loop/persist.js";
 import type {
   WorkflowLeaseKind,
   WorkflowLeaseRecord,
@@ -39,7 +39,7 @@ import type {
   WorkflowRunState,
   WorkflowStepKind,
   WorkflowStepState
-} from "../src/core/workflow/run-reducer.js";
+} from "../src/core/workflow/run/reducer.js";
 
 const NOW = 1_730_000_000_000;
 

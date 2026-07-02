@@ -6,26 +6,26 @@ import {
   WORKFLOW_MONITOR_SCHEMA_VERSION,
   buildWorkflowMonitorEnvelope,
   classifyWorkflowMonitorReport
-} from "../src/core/workflow/monitor-envelope.js";
+} from "../src/core/workflow/monitor/envelope.js";
 import {
   deriveWorkflowMonitorState,
   type WorkflowMonitorAdvisory,
   type WorkflowMonitorInput
-} from "../src/core/workflow/monitor-state.js";
+} from "../src/core/workflow/monitor/state.js";
 import type {
   WorkflowEvidenceLink,
   WorkflowRunDetail,
   WorkflowRunDetailGate,
   WorkflowRunRow
-} from "../src/core/workflow/status.js";
-import type { WorkflowGateRecord } from "../src/core/workflow/gate-persist.js";
-import { policyForWorkflowGateRecommendedAction } from "../src/core/workflow/action-authority.js";
+} from "../src/core/workflow/run/status.js";
+import type { WorkflowGateRecord } from "../src/core/workflow/gate/persist.js";
+import { policyForWorkflowGateRecommendedAction } from "../src/core/workflow/monitor/action-authority.js";
 import {
   type WorkflowLeaseRecord,
   type WorkflowStepKind,
   type WorkflowStepRecord,
   type WorkflowStepState
-} from "../src/core/workflow/run-reducer.js";
+} from "../src/core/workflow/run/reducer.js";
 
 const RUN_ID = "cwfp-monitor01";
 

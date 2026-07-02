@@ -8,21 +8,21 @@ import {
   CODING_WORKFLOW_DEFINITION,
   CODING_WORKFLOW_DEFINITION_KEY,
   type WorkflowDefinition
-} from "../src/core/workflow/definition.js";
-import { persistWorkflowDefinition } from "../src/core/workflow/definition-persist.js";
-import { persistWorkflowRunStart } from "../src/core/workflow/run-start-persist.js";
+} from "../src/core/workflow/definition/definition.js";
+import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
+import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
 import {
   claimRunnableWorkflowStep,
   type ClaimedWorkflowStep,
   type WorkflowStepDispatchContext
-} from "../src/core/workflow/scheduler.js";
-import { loadWorkflowRunDetail } from "../src/core/workflow/status.js";
+} from "../src/core/workflow/dispatch/scheduler.js";
+import { loadWorkflowRunDetail } from "../src/core/workflow/run/status.js";
 import {
   deriveDispatchedSubworkflowContext,
   loadSubworkflowParentRunRow,
   resolveSubworkflowParentRunFacts,
   type SubworkflowParentRunRow
-} from "../src/core/workflow/subworkflow-dispatch-context.js";
+} from "../src/core/workflow/route/subworkflow-dispatch-context.js";
 
 /**
  * NGX-498 (RC-4b) — focused coverage for the *daemon-lane context deriver* that

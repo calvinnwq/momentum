@@ -5,23 +5,23 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
-import { advanceLiveWorkflowStep } from "../src/core/executors/live-step-advance.js";
-import { getWorkflowStep } from "../src/core/workflow/step-transitions.js";
-import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run-recovery.js";
-import { resolveWorkflowRecoveryArtifactPath } from "../src/core/workflow/recovery-artifact.js";
+import { advanceLiveWorkflowStep } from "../src/core/executors/live-step/advance.js";
+import { getWorkflowStep } from "../src/core/workflow/step/transitions.js";
+import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run/recovery.js";
+import { resolveWorkflowRecoveryArtifactPath } from "../src/core/workflow/recovery/artifact.js";
 import { getRepoLock } from "../src/core/repo/locks.js";
-import type { PersistLiveWorkflowFinalizeRecoveryResult } from "../src/core/executors/live-step-run-recovery.js";
+import type { PersistLiveWorkflowFinalizeRecoveryResult } from "../src/core/executors/live-step/run-recovery.js";
 import type {
   WorkflowStepExecutor,
   WorkflowStepExecutorDispatchResult,
   WorkflowStepExecutorInput,
   WorkflowStepExecutorKind
-} from "../src/core/workflow/step-executor.js";
-import type { CommitIntent, RunnerResult } from "../src/core/executors/types.js";
+} from "../src/core/workflow/step/executor.js";
+import type { CommitIntent, RunnerResult } from "../src/core/executors/runner/types.js";
 import type {
   WorkflowApprovalBoundary,
   WorkflowStepState
-} from "../src/core/workflow/run-reducer.js";
+} from "../src/core/workflow/run/reducer.js";
 
 const SEED_AT = 1_730_000_000_000;
 const NOW = SEED_AT + 1_000;

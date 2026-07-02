@@ -9,7 +9,7 @@ import {
   classifyWorkflowHarnessOutcome,
   planWorkflowHarnessSmoke,
   type ProbeSpawnResult
-} from "../src/core/executors/real-workflow-smoke.js";
+} from "../src/core/executors/smoke/workflow-harness.js";
 
 /**
  * NGX-372 opt-in real coding-workflow harness smoke — pure planner / classifier.

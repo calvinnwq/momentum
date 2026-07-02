@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
-import { listWorkflowRunSummaries } from "../src/core/workflow/status.js";
+import { listWorkflowRunSummaries } from "../src/core/workflow/run/status.js";
 
 const tempRoots: string[] = [];
 

@@ -8,7 +8,7 @@ import {
   WORKFLOW_RUN_STATES,
   WORKFLOW_STEP_KINDS,
   WORKFLOW_STEP_STATES
-} from "../src/core/workflow/run-reducer.js";
+} from "../src/core/workflow/run/reducer.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");

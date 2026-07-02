@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { planWorkflowStepReconciliation } from "../src/core/workflow/dispatch-reconcile.js";
+import { planWorkflowStepReconciliation } from "../src/core/workflow/dispatch/reconcile.js";
 import {
   PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES,
   WORKFLOW_DISPATCH_FAIL_CLOSED_CODES,
   planWorkflowStepDispatch
-} from "../src/core/workflow/dispatch.js";
+} from "../src/core/workflow/dispatch/dispatch.js";
 import { expectSpecSection, readRepoFile } from "./helpers/repo-docs.js";
 
 describe("runtime consolidation contract", () => {

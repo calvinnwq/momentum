@@ -6,11 +6,11 @@
  * ({@link decideNoMistakesMirror} / {@link decideNoMistakesUnreadable}), the
  * decision -> round-patch projection ({@link noMistakesRoundUpdate}), and the
  * durable invocation / round-start / finding / decision projections.
- * `no-mistakes-mechanism.ts` owns the IO seam that turns the untrusted external
+ * `no-mistakes/mechanism.ts` owns the IO seam that turns the untrusted external
  * state store into a typed snapshot ({@link NoMistakesExternalStateRead}). This
  * module is the stateful seam that composes both with the *real* M10-03
  * executor-loop persistence layer and round transition graph, exactly the way
- * `single-shot-orchestrator.ts` and `goal-loop-orchestrator.ts` compose their pure
+ * `single-shot/orchestrator.ts` and `goal-loop/orchestrator.ts` compose their pure
  * projections around a bounded mechanism — but the mirror's "bounded mechanism" is
  * a *read*, and the round is a single long-lived poll loop rather than a one-shot
  * or a bounded round sequence:
@@ -69,7 +69,7 @@ import {
   updateExecutorInvocationState,
   updateExecutorRound,
   type ExecutorRoundUpdate
-} from "../core/executors/loop-persist.js";
+} from "../core/executors/loop/persist.js";
 import {
   isTerminalExecutorInvocationState,
   isTerminalExecutorRoundState,
@@ -77,7 +77,7 @@ import {
   type ExecutorFindingRecord,
   type ExecutorInvocationRecord,
   type ExecutorRoundRecord
-} from "../core/executors/loop-reducer.js";
+} from "../core/executors/loop/reducer.js";
 import {
   decideNoMistakesMirror,
   decideNoMistakesUnreadable,
@@ -91,7 +91,7 @@ import {
   type NoMistakesMirrorDecision,
   type NoMistakesRoundRuntimeInputs
 } from "./no-mistakes-executor.js";
-import type { NoMistakesExternalStateRead } from "../core/executors/no-mistakes-mechanism.js";
+import type { NoMistakesExternalStateRead } from "../core/executors/no-mistakes/mechanism.js";
 
 class NoMistakesMirrorRoundFamilyError extends Error {
   readonly roundId: string;

@@ -6,15 +6,15 @@ import path from "node:path";
 
 import { runCli } from "../src/cli.js";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
-import { insertWorkflowGate, resolveWorkflowGate } from "../src/core/workflow/gate-persist.js";
+import { insertWorkflowGate, resolveWorkflowGate } from "../src/core/workflow/gate/persist.js";
 import {
   clearWorkflowRunManualRecoveryGuarded,
   markWorkflowRunNeedsManualRecovery
-} from "../src/core/workflow/run-recovery.js";
+} from "../src/core/workflow/run/recovery.js";
 import {
   WORKFLOW_EVENT_TYPES,
   appendWorkflowEvent
-} from "../src/core/workflow/events.js";
+} from "../src/core/workflow/run/events.js";
 
 type WorkflowGuiEventsContractFixture = {
   events: {

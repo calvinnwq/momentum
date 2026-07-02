@@ -73,7 +73,7 @@ import {
   DEFAULT_RUNNER_KIND,
   buildRunnerProfile,
   safeRunnerProfileSummary
-} from "./core/executors/runner-profile.js";
+} from "./core/executors/runner/profile.js";
 import {
   DEFAULT_INTENT_APPLY_POLICY,
   loadMomentumPolicy,
@@ -88,7 +88,7 @@ import {
   summarizeEvidenceRecords,
   type EvidenceRecordsSummary
 } from "./core/evidence/records.js";
-import { executeWorkflowStepDispatch } from "./core/workflow/dispatch-execute.js";
+import { executeWorkflowStepDispatch } from "./core/workflow/dispatch/execute.js";
 import {
   resolveDaemonWorkflowStepDispatch,
   type DaemonWorkflowDispatchResolution

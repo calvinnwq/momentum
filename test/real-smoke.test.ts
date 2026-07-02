@@ -10,7 +10,7 @@ import {
   REAL_SMOKE_LINEAR_PROJECT_ENV_VAR,
   classifyRealSmokeReadOutcome,
   planLinearReadSmoke
-} from "../src/core/executors/real-smoke.js";
+} from "../src/core/executors/smoke/linear-read.js";
 import { LINEAR_API_KEY_ENV_VAR } from "../src/core/intent/apply-execute.js";
 import type {
   LinearReconciliationStop,

@@ -12,7 +12,7 @@ import type {
   WorkflowActionAuthorityClass,
   WorkflowActionAuthorityPolicy,
   WorkflowActionRiskLevel
-} from "../workflow/action-authority.js";
+} from "../workflow/monitor/action-authority.js";
 
 const SUPPORTED_AUTO_ACTIONS = new Set([
   "watch_recheck",

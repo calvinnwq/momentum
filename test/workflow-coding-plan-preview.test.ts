@@ -3,12 +3,12 @@ import { describe, expect, it } from "vitest";
 import {
   CODING_WORKFLOW_DEFINITION,
   type WorkflowDefinition
-} from "../src/core/workflow/definition.js";
+} from "../src/core/workflow/definition/definition.js";
 import {
   MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
   materializeWorkflowCodingPlanPreview,
   type WorkflowRunStartInput
-} from "../src/core/workflow/run-start.js";
+} from "../src/core/workflow/run/start.js";
 
 function baseInput(
   overrides: Partial<WorkflowRunStartInput> = {}

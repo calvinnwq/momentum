@@ -7,12 +7,12 @@ import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
   getWorkflowRunManualRecoveryState,
   markWorkflowRunNeedsManualRecovery
-} from "../src/core/workflow/run-recovery.js";
-import { reconcileWorkflowRunManualRecovery } from "../src/core/workflow/recovery-reconcile.js";
+} from "../src/core/workflow/run/recovery.js";
+import { reconcileWorkflowRunManualRecovery } from "../src/core/workflow/recovery/reconcile.js";
 import {
   resolveWorkflowRecoveryArtifactPath,
   WORKFLOW_RECOVERY_SAFETY_NOTES
-} from "../src/core/workflow/recovery-artifact.js";
+} from "../src/core/workflow/recovery/artifact.js";
 
 const tempRoots: string[] = [];
 
