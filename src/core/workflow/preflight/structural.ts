@@ -21,6 +21,7 @@ import {
   type WorkflowRunStartPlan,
   type WorkflowRunStartError
 } from "../run/start.js";
+import { WORKFLOW_STEP_KINDS } from "../run/reducer.js";
 
 export const STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS = [
   "checkId",
@@ -104,6 +105,10 @@ const RUN_SHAPE_CHECK_ID = "workflow.run_shape";
 const ROUTE_STEPS_CHECK_ID = "route.steps";
 const ROUTE_PROFILE_CHECK_ID = "route.profile";
 const WRAPPER_CONFIG_CHECK_ID = "wrapper.config";
+const WRAPPER_CONFIG_TOP_LEVEL_KEYS: ReadonlySet<string> = new Set(["steps"]);
+const WRAPPER_CONFIG_STEP_KIND_SET: ReadonlySet<string> = new Set(
+  WORKFLOW_STEP_KINDS
+);
 const WRAPPER_CONFIG_CAMEL_CASE_KEYS: Readonly<Record<string, string>> = {
   envAllow: "env_allow",
   resultFile: "result_file",
@@ -352,6 +357,10 @@ type WrapperConfigFailureLocation = {
 };
 
 function locateWrapperConfigFailure(value: unknown): WrapperConfigFailureLocation {
+  const topLevelFailure = locateWrapperConfigTopLevelFailure(value);
+  if (topLevelFailure !== undefined) return topLevelFailure;
+  const stepKeyFailure = locateWrapperConfigStepKeyFailure(value);
+  if (stepKeyFailure !== undefined) return stepKeyFailure;
   const casingDrift = locateWrapperConfigCasingDrift(value);
   if (casingDrift !== undefined) return casingDrift;
   const fieldFailure = locateWrapperConfigFieldFailure(value);
@@ -362,6 +371,40 @@ function locateWrapperConfigFailure(value: unknown): WrapperConfigFailureLocatio
     recommendedAction:
       "Update the coding workflow wrapper config to match the supported structural schema."
   };
+}
+
+function locateWrapperConfigTopLevelFailure(
+  value: unknown
+): WrapperConfigFailureLocation | undefined {
+  if (!isRecord(value)) return undefined;
+
+  for (const key of Object.keys(value)) {
+    if (WRAPPER_CONFIG_TOP_LEVEL_KEYS.has(key)) continue;
+    return {
+      path: `wrapper.config.${key}`,
+      key,
+      recommendedAction: `Remove wrapper.config.${key} or replace it with supported key "steps".`
+    };
+  }
+  return undefined;
+}
+
+function locateWrapperConfigStepKeyFailure(
+  value: unknown
+): WrapperConfigFailureLocation | undefined {
+  if (!isRecord(value)) return undefined;
+  const steps = value["steps"];
+  if (!isRecord(steps)) return undefined;
+
+  for (const stepKind of Object.keys(steps)) {
+    if (WRAPPER_CONFIG_STEP_KIND_SET.has(stepKind)) continue;
+    return {
+      path: `wrapper.config.steps.${stepKind}`,
+      key: stepKind,
+      recommendedAction: `Use wrapper config steps only for supported workflow step kinds, or remove wrapper.config.steps.${stepKind}.`
+    };
+  }
+  return undefined;
 }
 
 function locateWrapperConfigCasingDrift(

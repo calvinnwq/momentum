@@ -246,6 +246,61 @@ describe("coding workflow structural preflight", () => {
     );
   });
 
+  it("refuses unknown top-level wrapper config keys with field-level evidence", () => {
+    const result = preflightCodingWorkflowWrapperConfig({
+      steps: {},
+      unsupportedRootKey: true
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected failed preflight");
+    expect(result.evidence).toEqual([
+      {
+        checkId: "wrapper.config",
+        status: "failed",
+        severity: "error",
+        path: "wrapper.config.unsupportedRootKey",
+        key: "unsupportedRootKey",
+        message:
+          'Unknown key "unsupportedRootKey" in wrapper config; supported keys: steps at this config file.',
+        recommendedAction:
+          'Remove wrapper.config.unsupportedRootKey or replace it with supported key "steps".'
+      }
+    ]);
+    expect(Object.keys(result.evidence[0])).toEqual(
+      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS
+    );
+  });
+
+  it("refuses unsupported wrapper config step keys with field-level evidence", () => {
+    const result = preflightCodingWorkflowWrapperConfig({
+      steps: {
+        "deploy-production": {
+          command: "/bin/sh"
+        }
+      }
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected failed preflight");
+    expect(result.evidence).toEqual([
+      {
+        checkId: "wrapper.config",
+        status: "failed",
+        severity: "error",
+        path: "wrapper.config.steps.deploy-production",
+        key: "deploy-production",
+        message:
+          "Unsupported workflow step kind deploy-production in MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG.",
+        recommendedAction:
+          "Use wrapper config steps only for supported workflow step kinds, or remove wrapper.config.steps.deploy-production."
+      }
+    ]);
+    expect(Object.keys(result.evidence[0])).toEqual(
+      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS
+    );
+  });
+
   it("refuses malformed env allowlists with field-level corrective evidence", () => {
     const result = preflightCodingWorkflowWrapperConfig({
       steps: {
