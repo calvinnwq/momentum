@@ -360,6 +360,40 @@ describe("coding workflow structural preflight", () => {
     );
   });
 
+  it("refuses result files that do not match the expected live-wrapper result file", () => {
+    const result = preflightCodingWorkflowWrapperConfig(
+      {
+        steps: {
+          "merge-cleanup": {
+            command: "/bin/sh",
+            result_file: "merge-cleanup-result.json"
+          }
+        }
+      },
+      undefined,
+      { expectedResultFile: "result.json" }
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected failed preflight");
+    expect(result.evidence).toEqual([
+      {
+        checkId: "wrapper.config",
+        status: "failed",
+        severity: "error",
+        path: "wrapper.config.steps.merge-cleanup.result_file",
+        key: "result_file",
+        message:
+          'Wrapper config `result_file` must match the expected live-wrapper result file "result.json".',
+        recommendedAction:
+          'Set wrapper.config.steps.merge-cleanup.result_file to "result.json", or remove the override.'
+      }
+    ]);
+    expect(Object.keys(result.evidence[0])).toEqual(
+      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS
+    );
+  });
+
   it("refuses invalid timeout fields with field-level corrective evidence", () => {
     const result = preflightCodingWorkflowWrapperConfig({
       steps: {

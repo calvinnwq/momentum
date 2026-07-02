@@ -77,6 +77,10 @@ export type CodingWorkflowWrapperConfigPreflightResult =
       evidence: readonly [StructuralPreflightEvidence];
     };
 
+export type CodingWorkflowWrapperConfigPreflightOptions = {
+  expectedResultFile?: string;
+};
+
 export type CodingWorkflowRunStartInputPreflightResult =
   | {
       ok: true;
@@ -277,10 +281,32 @@ export function preflightCodingWorkflowRouteProfile(
 
 export function preflightCodingWorkflowWrapperConfig(
   value: unknown,
-  source?: string
+  source?: string,
+  options: CodingWorkflowWrapperConfigPreflightOptions = {}
 ): CodingWorkflowWrapperConfigPreflightResult {
   const parsed = parseCodingWorkflowWrapperConfig(value, source);
   if (parsed.ok) {
+    const resultFileMismatch = locateWrapperConfigExpectedResultFileMismatch(
+      parsed.config,
+      options.expectedResultFile
+    );
+    if (resultFileMismatch !== undefined) {
+      return {
+        ok: false,
+        evidence: [
+          buildStructuralPreflightEvidence({
+            checkId: WRAPPER_CONFIG_CHECK_ID,
+            status: "failed",
+            severity: "error",
+            path: resultFileMismatch.path,
+            key: resultFileMismatch.key,
+            message: resultFileMismatch.message,
+            recommendedAction: resultFileMismatch.recommendedAction
+          })
+        ]
+      };
+    }
+
     return {
       ok: true,
       config: parsed.config,
@@ -371,6 +397,29 @@ function locateWrapperConfigFailure(value: unknown): WrapperConfigFailureLocatio
     recommendedAction:
       "Update the coding workflow wrapper config to match the supported structural schema."
   };
+}
+
+function locateWrapperConfigExpectedResultFileMismatch(
+  config: CodingWorkflowWrapperConfig,
+  expectedResultFile: string | undefined
+): (WrapperConfigFailureLocation & { message: string }) | undefined {
+  if (expectedResultFile === undefined) return undefined;
+  const expected = expectedResultFile.trim();
+  if (expected.length === 0) return undefined;
+
+  for (const [stepKind, stepConfig] of Object.entries(config.steps)) {
+    if (stepConfig?.resultFile === undefined) continue;
+    if (stepConfig.resultFile === expected) continue;
+    const basePath = `wrapper.config.steps.${stepKind}`;
+    return {
+      path: `${basePath}.result_file`,
+      key: "result_file",
+      message: `Wrapper config \`result_file\` must match the expected live-wrapper result file "${expected}".`,
+      recommendedAction: `Set ${basePath}.result_file to "${expected}", or remove the override.`
+    };
+  }
+
+  return undefined;
 }
 
 function locateWrapperConfigTopLevelFailure(
