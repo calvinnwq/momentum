@@ -206,7 +206,7 @@ setup failure without writing normalized runner evidence; the daemon then parks
 the dispatched step for recovery instead of finalizing it as an ordinary failed
 workflow step.
 The config file must use canonical snake_case keys.
-The top-level object may only contain `steps`, and each step only accepts `command`, `args`, `cwd`, `timeout_sec`, `env_allow`, `result_file`, `success_summary`, `failure_summary`, `key_changes_made`, `key_learnings`, `remaining_work`, and `commit`.
+The top-level object may only contain `steps`, and each step only accepts `command`, `args`, `cwd`, `timeout_sec`, `env_allow`, `result_file`, `success_summary`, `failure_summary`, `key_changes_made`, `key_learnings`, `remaining_work`, `commit`, and the merge-cleanup-only `merge_cleanup` target block.
 Unknown top-level or step keys are setup failures before any child command is spawned.
 `env_allow`, `timeout_sec`, and `result_file` use those names when present.
 When present, `result_file` must be a safe relative path that resolves to the same file as the live-wrapper profile's `result_file` injected through `MOMENTUM_RESULT_PATH`.
@@ -229,18 +229,44 @@ For example, this command block is valid:
 }
 ```
 
+For `merge-cleanup`, include the target block that the wrapper will verify against GitHub before it runs the merge command:
+
+```json
+{
+  "steps": {
+    "merge-cleanup": {
+      "command": "/usr/bin/env",
+      "args": ["sh", "-c", "merge-and-cleanup"],
+      "cwd": "repo",
+      "env_allow": ["PATH", "GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR"],
+      "merge_cleanup": {
+        "pull_request_id": "123",
+        "expected_head_sha": "0123456789abcdef0123456789abcdef01234567",
+        "cleanup_branch": "feat/example"
+      }
+    }
+  }
+}
+```
+
 If the config has `envAllow`, `timeoutSec`, or `resultFile`, the wrapper returns a
 setup failure in the form `Unknown key "..." in steps.<step>; replace with "..."
 to use the required snake_case schema`, and no child process is spawned.
 External-side-effect tail steps also run a local auth/capability preflight before
-contacting their external tools. `merge-cleanup` requires explicit GitHub auth
-in the live-wrapper environment (`GH_TOKEN`, `GITHUB_TOKEN`, or `GH_CONFIG_DIR`)
-before it attempts PR merge / branch cleanup work. The built-in `linear-refresh`
-step requires the usual policy-gated external-apply setup: a matching pending
-Linear intent, `intent_apply_policy: external_apply_allowed`, and
-`LINEAR_API_KEY` in the daemon/supervisor process environment. Missing auth or
-targets fail closed with operator-actionable recovery evidence; Momentum does
-not store these credentials.
+contacting their external tools. `merge-cleanup` is a tail-owned preflight ->
+apply -> reconcile lifecycle: before spawning the merge command, the same worker
+must prove explicit GitHub auth in the live-wrapper environment (`GH_TOKEN`,
+`GITHUB_TOKEN`, or `GH_CONFIG_DIR`), a configured `merge_cleanup` block with
+`pull_request_id`, `expected_head_sha`, and `cleanup_branch`, and live GitHub PR
+state showing the target is open, non-draft, mergeable, and still at the expected
+head. If GitHub shows the PR is already merged or the cleanup branch is already
+deleted, the wrapper stops before mutation and routes operators to evidence-backed
+reconciliation instead of a blind rerun. The built-in `linear-refresh` step
+requires the usual policy-gated external-apply setup: a matching pending Linear
+intent, `intent_apply_policy: external_apply_allowed`, and `LINEAR_API_KEY` in
+the daemon/supervisor process environment. Missing auth or targets fail closed
+with operator-actionable recovery evidence; Momentum does not store these
+credentials.
 
 On retried dispatch attempts, `MOMENTUM_ATTEMPT` is incremented and attempt
 evidence is kept separate: attempt 1 uses the configured run directory paths,

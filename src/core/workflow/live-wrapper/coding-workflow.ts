@@ -13,14 +13,21 @@
  * process-level recovery case, except for explicitly classified no-mistakes
  * lifecycle gaps and terminal-success evidence.
  */
-import type { SpawnSyncReturns } from "node:child_process";
+import { execFileSync, type SpawnSyncReturns } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
 import { runProcessGroupSync } from "../../../adapters/live-step-wrapper.js";
 import { normalizeRunnerResult } from "../../executors/runner/result.js";
 import type { CommitIntent, CommitType, RunnerResult } from "../../executors/runner/types.js";
-import { preflightGitHubMergeCleanup } from "./merge-cleanup-preflight.js";
+import {
+  preflightGitHubMergeCleanup,
+  preflightGitHubMergeCleanupSetup
+} from "./merge-cleanup-preflight.js";
+import type {
+  MergeCleanupPullRequestState,
+  MergeCleanupTargetIdentity
+} from "./merge-cleanup-lifecycle.js";
 import {
   WORKFLOW_STEP_KINDS,
   isExternalSideEffectTailStepKind,
@@ -61,6 +68,7 @@ export type CodingWorkflowWrapperStepConfig = {
   keyLearnings: string[];
   remainingWork: string[];
   commit: CommitIntent;
+  mergeCleanup?: MergeCleanupTargetIdentity;
 };
 
 export type CodingWorkflowWrapperConfig = {
@@ -85,6 +93,11 @@ export type CodingWorkflowWrapperDeps = {
   ) => SpawnSyncReturns<string>;
   stdout: (chunk: string) => void;
   stderr: (chunk: string) => void;
+  readMergeCleanupPullRequest: (input: {
+    target: MergeCleanupTargetIdentity;
+    cwd: string;
+    env: NodeJS.ProcessEnv;
+  }) => MergeCleanupPullRequestReadResult;
 };
 
 export type CodingWorkflowWrapperOutcome = {
@@ -93,6 +106,10 @@ export type CodingWorkflowWrapperOutcome = {
   summary: string;
   resultPath?: string;
 };
+
+export type MergeCleanupPullRequestReadResult =
+  | { ok: true; pullRequest: MergeCleanupPullRequestState }
+  | { ok: false; error: string };
 
 const WORKFLOW_STEP_KIND_SET: ReadonlySet<string> = new Set(WORKFLOW_STEP_KINDS);
 const WRAPPER_CONFIG_TOP_LEVEL_FIELDS: ReadonlySet<string> = new Set(["steps"]);
@@ -108,7 +125,8 @@ const WRAPPER_STEP_CONFIG_FIELDS: ReadonlySet<string> = new Set([
   "key_changes_made",
   "key_learnings",
   "remaining_work",
-  "commit"
+  "commit",
+  "merge_cleanup"
 ]);
 const WRAPPER_STEP_CONFIG_ALIASES: Record<string, string> = {
   envAllow: "env_allow",
@@ -117,6 +135,7 @@ const WRAPPER_STEP_CONFIG_ALIASES: Record<string, string> = {
 };
 const DEFAULT_TIMEOUT_SEC = 900;
 const OUTPUT_MAX_BYTES = 10 * 1024 * 1024;
+const GITHUB_STATE_READ_TIMEOUT_MS = 15_000;
 
 export function defaultCodingWorkflowWrapperDeps(): CodingWorkflowWrapperDeps {
   return {
@@ -136,7 +155,8 @@ export function defaultCodingWorkflowWrapperDeps(): CodingWorkflowWrapperDeps {
     },
     stderr: (chunk) => {
       fs.writeSync(2, chunk);
-    }
+    },
+    readMergeCleanupPullRequest: readGitHubMergeCleanupPullRequest
   };
 }
 
@@ -195,12 +215,46 @@ export function runCodingWorkflowLiveWrapper(
 
   const childEnv = buildChildEnv(deps.env, stepConfig.envAllow);
   if (stepKind === "merge-cleanup") {
-    const preflight = preflightGitHubMergeCleanup({ env: childEnv });
-    if (!preflight.ok) {
+    const setupPreflight = preflightGitHubMergeCleanupSetup({
+      env: childEnv,
+      ...(stepConfig.mergeCleanup !== undefined
+        ? { target: stepConfig.mergeCleanup }
+        : {})
+    });
+    if (!setupPreflight.ok) {
       return processSetupFailure(
         deps,
-        `${preflight.message} ${preflight.action}`
+        `${setupPreflight.message} ${setupPreflight.action}`
       );
+    }
+    const stateRead = deps.readMergeCleanupPullRequest({
+      target: setupPreflight.target,
+      cwd: cwd.path,
+      env: childEnv
+    });
+    const preflight = preflightGitHubMergeCleanup({
+      env: childEnv,
+      target: setupPreflight.target,
+      ...(stateRead?.ok ? { pullRequest: stateRead.pullRequest } : {}),
+      ...(stateRead?.ok === false ? { pullRequestReadError: stateRead.error } : {})
+    });
+    if (!preflight.ok) {
+      const summary = `${preflight.message} ${preflight.action}`;
+      if (
+        preflight.status === "already_merged" ||
+        preflight.status === "branch_already_deleted"
+      ) {
+        return writeRunnerResult(deps, resultPath, {
+          success: false,
+          summary,
+          key_changes_made: [],
+          key_learnings: stepConfig.keyLearnings,
+          remaining_work: [preflight.action],
+          goal_complete: false,
+          commit: stepConfig.commit
+        });
+      }
+      return processSetupFailure(deps, summary);
     }
   }
   const result = deps.spawn(stepConfig.command, stepConfig.args, {
@@ -1931,6 +1985,8 @@ function parseStepConfig(
   if (!resultFile.ok) return resultFile;
   const successSummary = readOptionalString(value["success_summary"]);
   const failureSummary = readOptionalString(value["failure_summary"]);
+  const mergeCleanup = readMergeCleanupTarget(value["merge_cleanup"], kind);
+  if (!mergeCleanup.ok) return mergeCleanup;
 
   return {
     ok: true,
@@ -1946,7 +2002,10 @@ function parseStepConfig(
       keyLearnings: keyLearnings.value,
       remainingWork: remainingWork.value,
       ...(resultFile.value !== undefined ? { resultFile: resultFile.value } : {}),
-      commit: commit.value
+      commit: commit.value,
+      ...(mergeCleanup.value !== undefined
+        ? { mergeCleanup: mergeCleanup.value }
+        : {})
     }
   };
 }
@@ -2111,6 +2170,172 @@ function buildChildEnv(
   return out;
 }
 
+function readGitHubMergeCleanupPullRequest(input: {
+  target: MergeCleanupTargetIdentity;
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+}): MergeCleanupPullRequestReadResult {
+  let raw: string;
+  try {
+    raw = execFileSync(
+      "gh",
+      [
+        "pr",
+        "view",
+        input.target.pullRequestId,
+        "--json",
+        "number,headRefName,headRefOid,state,isDraft,mergeable,mergeStateStatus"
+      ],
+      {
+        cwd: input.cwd,
+        env: input.env,
+        timeout: GITHUB_STATE_READ_TIMEOUT_MS,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"]
+      }
+    );
+  } catch (error) {
+    return {
+      ok: false,
+      error: `gh pr view failed: ${errorDetail(error)}`
+    };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    return {
+      ok: false,
+      error: `gh pr view returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`
+    };
+  }
+  if (!isRecord(parsed)) {
+    return { ok: false, error: "gh pr view returned a non-object payload." };
+  }
+
+  const id = readPullRequestId(parsed["number"]);
+  const headBranch = readOptionalString(parsed["headRefName"]);
+  const headSha = readOptionalString(parsed["headRefOid"]);
+  if (id === undefined || headBranch === undefined || headSha === undefined) {
+    return {
+      ok: false,
+      error: "gh pr view did not include a pull request number, headRefName, and headRefOid."
+    };
+  }
+
+  const cleanupBranch =
+    isMergedPullRequestState(parsed["state"])
+      ? readCleanupBranchDeleted(input)
+      : { ok: true as const, branchDeleted: false };
+  if (!cleanupBranch.ok) {
+    return { ok: false, error: cleanupBranch.error };
+  }
+  return {
+    ok: true,
+    pullRequest: {
+      id,
+      headBranch,
+      headSha,
+      state: readPullRequestState(parsed["state"]),
+      draft: parsed["isDraft"] === true,
+      mergeable: readPullRequestMergeable(parsed["mergeable"], parsed["mergeStateStatus"]),
+      branchDeleted: cleanupBranch.branchDeleted
+    }
+  };
+}
+
+function readCleanupBranchDeleted(input: {
+  target: MergeCleanupTargetIdentity;
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+}): { ok: true; branchDeleted: boolean } | { ok: false; error: string } {
+  try {
+    execFileSync(
+      "gh",
+      [
+        "api",
+        `repos/:owner/:repo/branches/${encodeURIComponent(input.target.cleanupBranch)}`
+      ],
+      {
+        cwd: input.cwd,
+        env: input.env,
+        timeout: GITHUB_STATE_READ_TIMEOUT_MS,
+        encoding: "utf8",
+        stdio: ["ignore", "ignore", "pipe"]
+      }
+    );
+    return { ok: true, branchDeleted: false };
+  } catch (error) {
+    if (errorIndicatesGitHubNotFound(error)) {
+      return { ok: true, branchDeleted: true };
+    }
+    return {
+      ok: false,
+      error: `gh branch lookup failed: ${errorDetail(error)}`
+    };
+  }
+}
+
+function readPullRequestId(value: unknown): string | undefined {
+  if (typeof value === "number" && Number.isInteger(value) && value > 0) {
+    return String(value);
+  }
+  return readOptionalString(value);
+}
+
+function readPullRequestState(value: unknown): MergeCleanupPullRequestState["state"] {
+  const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (normalized === "open") return "open";
+  if (normalized === "merged") return "merged";
+  return "closed";
+}
+
+function isMergedPullRequestState(value: unknown): boolean {
+  return typeof value === "string" && value.trim().toLowerCase() === "merged";
+}
+
+function readPullRequestMergeable(
+  mergeable: unknown,
+  mergeStateStatus: unknown
+): MergeCleanupPullRequestState["mergeable"] {
+  const state =
+    typeof mergeStateStatus === "string" ? mergeStateStatus.trim().toLowerCase() : "";
+  const value = typeof mergeable === "string" ? mergeable.trim().toLowerCase() : "";
+  if (state === "blocked" || state === "behind" || state === "dirty") return "blocked";
+  if (state !== "clean") return value === "conflicting" ? "conflicting" : "unknown";
+  if (value === "mergeable") return "mergeable";
+  if (value === "conflicting") return "conflicting";
+  return "unknown";
+}
+
+function errorDetail(error: unknown): string {
+  if (error instanceof Error) {
+    const withStderr = error as Error & { stderr?: Buffer | string };
+    const stderr =
+      typeof withStderr.stderr === "string"
+        ? withStderr.stderr
+        : Buffer.isBuffer(withStderr.stderr)
+          ? withStderr.stderr.toString("utf8")
+          : "";
+    const detail = stderr.trim();
+    return detail.length > 0 ? detail : error.message;
+  }
+  return String(error);
+}
+
+function errorIndicatesGitHubNotFound(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const withStderr = error as Error & { stderr?: Buffer | string };
+  const stderr =
+    typeof withStderr.stderr === "string"
+      ? withStderr.stderr
+      : Buffer.isBuffer(withStderr.stderr)
+        ? withStderr.stderr.toString("utf8")
+        : "";
+  return /\b(?:HTTP\s+)?404\b|\bnot found\b/i.test(stderr);
+}
+
 function readWorkflowStepKind(value: string | undefined): WorkflowStepKind | undefined {
   if (value === undefined || !WORKFLOW_STEP_KIND_SET.has(value)) return undefined;
   return value as WorkflowStepKind;
@@ -2153,6 +2378,53 @@ function readOptionalResultFile(
     };
   }
   return { ok: true, value: trimmed };
+}
+
+function readMergeCleanupTarget(
+  value: unknown,
+  kind: WorkflowStepKind
+):
+  | { ok: true; value?: MergeCleanupTargetIdentity }
+  | { ok: false; error: string } {
+  if (value === undefined || value === null) return { ok: true };
+  if (kind !== "merge-cleanup") {
+    return {
+      ok: false,
+      error:
+        "Wrapper config `merge_cleanup` is only supported for the merge-cleanup step."
+    };
+  }
+  if (!isRecord(value)) {
+    return {
+      ok: false,
+      error: "Wrapper config `merge_cleanup` must be an object."
+    };
+  }
+  const pullRequestId = readOptionalString(value["pull_request_id"]);
+  const expectedHeadSha = readOptionalString(value["expected_head_sha"]);
+  const cleanupBranch = readOptionalString(value["cleanup_branch"]);
+  if (
+    pullRequestId === undefined ||
+    expectedHeadSha === undefined ||
+    cleanupBranch === undefined
+  ) {
+    return {
+      ok: false,
+      error:
+        "Wrapper config `merge_cleanup` requires pull_request_id, expected_head_sha, and cleanup_branch."
+    };
+  }
+  if (!/^[0-9a-f]{40}$/i.test(expectedHeadSha)) {
+    return {
+      ok: false,
+      error:
+        "Wrapper config `merge_cleanup.expected_head_sha` must be a 40-character hex SHA."
+    };
+  }
+  return {
+    ok: true,
+    value: { pullRequestId, expectedHeadSha, cleanupBranch }
+  };
 }
 
 function hasParentTraversalSegment(value: string): boolean {
