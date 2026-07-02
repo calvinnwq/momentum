@@ -811,11 +811,24 @@ describe("momentum workflow run preview-coding", () => {
       "--json"
     ]);
     expect(noObjective.code).toBe(1);
-    expect(JSON.parse(noObjective.stderr)).toMatchObject({
+    const noObjectivePayload = JSON.parse(noObjective.stderr) as Record<string, unknown>;
+    expect(noObjectivePayload).toMatchObject({
       ok: false,
       command: "workflow run preview-coding",
       code: "objective_required"
     });
+    expect(noObjectivePayload["preflightEvidence"]).toEqual([
+      {
+        checkId: "workflow.run_shape",
+        status: "failed",
+        severity: "error",
+        path: "objective",
+        key: "objective",
+        message: "Objective must be a non-empty string.",
+        recommendedAction:
+          "Set objective to a non-empty objective before starting the run."
+      }
+    ]);
   });
 });
 

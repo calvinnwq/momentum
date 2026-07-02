@@ -89,6 +89,7 @@ import {
   type ReconcileWorkflowRunManualRecoveryResult
 } from "../../core/workflow/recovery/reconcile.js";
 import {
+  CODING_WORKFLOW_DEFINITION,
   CODING_WORKFLOW_DEFINITION_KEY,
   getBuiltInWorkflowDefinition,
   type WorkflowDefinition
@@ -112,7 +113,8 @@ import {
   preflightCodingWorkflowBuiltInDefinition,
   preflightCodingWorkflowRouteProfile,
   preflightCodingWorkflowRouteSteps,
-  preflightCodingWorkflowRunStartInput
+  preflightCodingWorkflowRunStartInput,
+  type StructuralPreflightEvidence
 } from "../../core/workflow/preflight/structural.js";
 import {
   InvalidWorkflowRunStartError,
@@ -458,6 +460,29 @@ type WorkflowStartCommandOptions = {
  * `--steps-json` support) while `preview` keeps the materialized plan on the
  * read-only path.
  */
+function buildCodingRequiredInputPreflightEvidence(
+  parsed: ParsedFlags,
+  evidencePath: "repoPath" | "objective"
+): readonly StructuralPreflightEvidence[] {
+  const structuralPreflight = preflightCodingWorkflowRunStartInput({
+    definition: CODING_WORKFLOW_DEFINITION,
+    runId: parsed.runId ?? "",
+    repoPath: parsed.repo ?? "",
+    objective: parsed.objective ?? "",
+    now: Date.now(),
+    ...(parsed.approvalBoundary !== undefined
+      ? { approvalBoundary: parsed.approvalBoundary }
+      : {}),
+    ...(parsed.issueScope !== undefined
+      ? { issueScope: { identifier: parsed.issueScope } }
+      : {})
+  });
+  if (structuralPreflight.ok) return [];
+  return structuralPreflight.evidence.filter(
+    (evidence) => evidence.path === evidencePath
+  );
+}
+
 function runWorkflowStartCommand(
   parsed: ParsedFlags,
   io: CliIo,
@@ -486,7 +511,10 @@ function runWorkflowStartCommand(
       command,
       code: "repo_required",
       message: `Missing required --repo <path> for ${command}.`,
-      runId
+      runId,
+      ...(options.coding
+        ? { preflightEvidence: buildCodingRequiredInputPreflightEvidence(parsed, "repoPath") }
+        : {})
     });
   }
   if (parsed.objective === undefined || parsed.objective.length === 0) {
@@ -494,7 +522,10 @@ function runWorkflowStartCommand(
       command,
       code: "objective_required",
       message: `Missing required --objective <text> for ${command}.`,
-      runId
+      runId,
+      ...(options.coding
+        ? { preflightEvidence: buildCodingRequiredInputPreflightEvidence(parsed, "objective") }
+        : {})
     });
   }
 

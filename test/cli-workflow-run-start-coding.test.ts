@@ -557,6 +557,44 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
     });
   });
 
+  it("emits structural preflight evidence when --objective is missing", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const result = await run([
+      "workflow",
+      "run",
+      "start-coding",
+      "--run-id",
+      "ngx-563-no-objective",
+      "--repo",
+      repoDir,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "workflow run start-coding",
+      code: "objective_required",
+      runId: "ngx-563-no-objective"
+    });
+    expect(payload["preflightEvidence"]).toEqual([
+      {
+        checkId: "workflow.run_shape",
+        status: "failed",
+        severity: "error",
+        path: "objective",
+        key: "objective",
+        message: "Objective must be a non-empty string.",
+        recommendedAction:
+          "Set objective to a non-empty objective before starting the run."
+      }
+    ]);
+  });
+
   it("is readable through workflow status, handoff, and monitor from Momentum state alone", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
