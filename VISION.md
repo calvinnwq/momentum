@@ -103,6 +103,46 @@ Operators and clients should see one clear next move:
 Ambiguous runtime failures should be refined into structured setup, recovery,
 or operator-decision states with precise machine-readable fields.
 
+### Native Goal Loop Is The Core Flywheel
+
+Momentum's `goal-loop` executor should be the native autonomous implementation
+engine for repo work. It should keep looping through a task until the goal's
+requirements are met, not stop merely because one agent attempt ended.
+
+By default, a goal loop has no maximum iteration count and no token cap. The
+goal's acceptance requirements are the stop condition. Operational safety still
+matters: each round should have a bounded execution envelope, heartbeat/stale
+lease detection, no-progress detection, manual stop/cancel semantics, and
+operator recovery gates.
+
+The durable loop shape is:
+
+```text
+read durable state -> run one verifiable round -> verify -> commit or reset -> record evidence -> decide complete or continue
+```
+
+Each successful round should commit its own coherent unit of work and record the
+commit SHA, changed files, verification result, normalized result JSON,
+artifacts, checkpoints, and learnings. Failed, invalid, or no-op rounds should
+not create misleading commits, but they should still preserve useful learnings
+and recovery evidence so the next round does not repeat the same mistake.
+
+If a process dies halfway through, Momentum should resume from durable
+invocation and round state: completed rounds, in-flight/stale round markers,
+notes/learnings, commits, artifacts, leases, gates, and recovery evidence. A
+resumed loop must not infer truth from terminal scrollback, duplicate completed
+rounds, or create duplicate commits.
+
+GNHF is valuable source material for this loop: its per-iteration prompt, notes,
+structured JSON result, commit-per-successful-iteration behavior, stop condition,
+and resume model are all directionally right. But Momentum owns the runtime
+boundary. `.gnhf/runs` may be mirrored or used by a runner, but it must not be
+the durable source of truth for Momentum-native workflows.
+
+Do not add a first-class `gnhf` executor family merely to reuse that behavior.
+The product shape is native `goal-loop`; GNHF can be a runner, compatibility
+source, or extraction reference beneath it.
+
 ## Workflow-Level Preflight Work Spec
 
 The next workflow-level hardening slice should implement structural preflight

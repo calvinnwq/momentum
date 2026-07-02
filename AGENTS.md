@@ -54,7 +54,10 @@ contract rationale lives in Obsidian `/Workspaces/Momentum`.
 Momentum's workflow direction is compactly anchored in [`VISION.md`](VISION.md):
 steps should be resumable/idempotent, structured JSON and durable evidence beat
 terminal scraping, workflow-level preflight is structural, and side-effecting
-tail steps own their own `preflight -> apply -> reconcile` lifecycle.
+tail steps own their own `preflight -> apply -> reconcile` lifecycle. The
+native `goal-loop` executor is the intended autonomous implementation flywheel:
+it loops until the goal requirements are met, commits successful rounds, records
+durable evidence, and resumes from Momentum-owned state.
 
 ## Stack and workflow commands
 TypeScript on Node.js with Vitest tests, managed by pnpm. See [README.md](README.md)'s `## Development` block for `pnpm install`, `pnpm test`, `pnpm test:integration`, `pnpm test:full`, `pnpm typecheck`, `pnpm lint`, `pnpm build`, `pnpm format:check`, `node dist/index.js --help`, `node dist/index.js doctor`.
