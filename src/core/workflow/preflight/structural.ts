@@ -1,3 +1,15 @@
+/**
+ * Pure structural preflight for Momentum-native workflow setup.
+ *
+ * This module validates setup shape before runtime work or external side effects begin.
+ * It deliberately stays pure: no SQLite writes, no filesystem mutation, no child process spawn, no network calls, and no clock reads except values supplied by callers.
+ * The CLI start and preview doors use it to fail closed before durable run materialization when the built-in definition, route profile, route steps, run-start shape, or required inputs are structurally invalid.
+ * The coding workflow wrapper config validator uses the same evidence shape for field-level setup failures, including canonical snake_case guidance and result-file path checks.
+ *
+ * Preflight evidence is compact and stable for machine clients.
+ * Every evidence object carries the same ordered fields: check id, status, severity, offending path, offending key, message, and recommended action.
+ * Side-effect capability checks still belong to the step that owns the side effect, such as GitHub merge cleanup or Linear refresh.
+ */
 import path from "node:path";
 
 import {

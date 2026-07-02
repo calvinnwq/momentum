@@ -399,7 +399,7 @@ function workflowRunStart(parsed: ParsedFlags, io: CliIo): number {
  * `momentum workflow run start-coding` - the explicit Momentum-native coding
  * workflow start door (NGX-508). It is a thin, unmistakable selector over the
  * same durable {@link persistWorkflowRunStart} machinery as `workflow run
- * start`, adding four coding-specific guarantees:
+ * start`, adding five coding-specific guarantees:
  *
  *   - it always materializes the built-in `coding-workflow` definition (a
  *     conflicting `--definition` is refused with `definition_not_allowed`);
@@ -408,13 +408,15 @@ function workflowRunStart(parsed: ParsedFlags, io: CliIo): number {
  *     `cwfp-*` primary state;
  *   - it records the run with the {@link MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE}
  *     provenance so status / handoff / monitor / logs surface it as
- *     Momentum-owned; and
+ *     Momentum-owned;
  *   - it accepts the coding-only `--steps-json` route override and records
  *     validated per-step harness/model/effort selections under `route.steps`,
- *     with provider-aware model aliases normalized before persistence.
+ *     with provider-aware model aliases normalized before persistence; and
+ *   - it runs structural preflight for built-in definition lookup, route
+ *     profile, route steps, and run-start shape before any durable write.
  *
- * The ordinary `workflow run start` path and the imported CWFP read/compat paths
- * are left exactly as they were.
+ * The ordinary `workflow run start` path shares the structural route-profile and
+ * run-shape checks, while imported CWFP read/compat paths are left as they were.
  */
 function workflowRunStartCoding(parsed: ParsedFlags, io: CliIo): number {
   return runWorkflowStartCommand(parsed, io, {

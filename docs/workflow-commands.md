@@ -232,7 +232,8 @@ Optional arguments:
 - `--approval-boundary <boundary>` - promote the steps the boundary covers to `approved` and open the run in `approved` rather than `pending` (same boundary coverage as [`workflow run approve`](#workflow-run-approve)).
 - `--skill-revision <text>` - record the skill revision that started the run.
 - `--issue-scope <identifier>` - record an issue-scope identifier on the run.
-- `--profile <name>` - record the selected runtime/profile on the run's durable `route.profile` so status, handoff, monitor, and logs can report which profile the run was started for.
+- `--profile <name>` - record the trimmed selected runtime/profile on the run's durable `route.profile` so status, handoff, monitor, and logs can report which profile the run was started for.
+  Blank profile values are refused before the run is written.
   This captures the operator's intent in durable state; the daemon still resolves the live-wrapper profile it actually executes from `MOMENTUM_LIVE_WRAPPER_PROFILE` at run time.
 
 Behaviour:
@@ -289,7 +290,9 @@ Behaviour:
 }
 ```
 
-`dataDir` and `runId` are included whenever they are known at the point of failure. The `invalid_run_start` refusal additionally carries an `errors` array of `{ code, message, path? }` entries from the run-start materialization taxonomy:
+`dataDir` and `runId` are included whenever they are known at the point of failure.
+Structural preflight failures may also include `preflightEvidence`, a compact array of `{ checkId, status, severity, path, key, message, recommendedAction }` entries that identify the failed setup check and the corrective action.
+The `invalid_run_start` refusal additionally carries an `errors` array of `{ code, message, path? }` entries from the run-start materialization taxonomy:
 
 ```json
 {
@@ -305,6 +308,17 @@ Behaviour:
       "message": "Approval boundary is not a known workflow approval boundary.",
       "path": "approvalBoundary"
     }
+  ],
+  "preflightEvidence": [
+    {
+      "checkId": "workflow.run_shape",
+      "status": "failed",
+      "severity": "error",
+      "path": "approvalBoundary",
+      "key": "approvalBoundary",
+      "message": "Approval boundary is not a known workflow approval boundary.",
+      "recommendedAction": "Set approvalBoundary to a supported workflow approval boundary or omit it for manual approval."
+    }
   ]
 }
 ```
@@ -314,13 +328,14 @@ Behaviour:
 | Code | Meaning |
 |------|---------|
 | `run_id_required` | `--run-id` was not supplied. |
-| `repo_required` | `--repo` was not supplied. |
+| `repo_required` | `--repo` was not supplied, or the supplied repository path was blank. |
 | `objective_required` | `--objective` was not supplied. |
 | `data_dir_failed` | Data directory resolution failed. |
 | `definition_not_found` | No workflow definition matches `--definition` (and `--definition-version`, when supplied), and the built-in fallback did not match either. |
 | `policy_invalid` | `<repo>/MOMENTUM.md` is present but malformed; the start is refused and nothing is written. |
 | `invalid_run_start` | Run-start materialization rejected the inputs; carries an `errors` array. |
 | `run_exists` | A workflow run with `--run-id` already exists; the existing run is left untouched. |
+| `route_config_invalid` | `--profile` was supplied but blank; carries structural `preflightEvidence` and writes nothing. |
 | `route_config_not_allowed` | `--steps-json` was supplied to the generic start; per-step coding route overrides are only accepted on `workflow run start-coding` / `workflow run preview-coding`. |
 
 The `invalid_run_start` `errors[]` use the run-start materialization taxonomy: `definition_invalid`, `run_id_invalid`, `repo_path_invalid`, `objective_invalid`, `approval_boundary_invalid`, `issue_scope_invalid`, `route_invalid`.
@@ -371,6 +386,7 @@ Optional arguments:
 - `--skill-revision <text>` - record the skill revision that started the run.
 - `--issue-scope <identifier>` - record an issue-scope identifier on the run.
 - `--profile <name>` - record the selected runtime/profile on the run's durable `route.profile`, so status, handoff, monitor, and logs can explain which runtime/profile the Momentum-native run was started for from durable state alone.
+  The value is trimmed and must be non-blank.
   This captures intent only; the executing live-wrapper profile is still resolved by the daemon from `MOMENTUM_LIVE_WRAPPER_PROFILE` at run time.
 - `--steps-json <json>` - reconfigure the planned per-step harness/model/effort selections before the run starts, recorded on the run's durable `route.steps` so status, handoff, monitor, and logs can audit which selection the run was started with.
   The value is a JSON object keyed by the operationally meaningful coding steps (`implementation`, `postflight`, `no-mistakes`, `merge-cleanup`), each mapping to any of the `harness`, `model`, and `effort` string fields; an omitted step or field keeps the default (inherit at execution time).
@@ -393,6 +409,8 @@ Behaviour:
 - **Native source**: on success the `workflow_runs.source` is `momentum-native-coding` (rather than the generic `workflow-definition`), so status, handoff, monitor, and logs can show the run as Momentum-owned primary state from durable rows alone.
 - **Built-in dispatch provenance**: native coding dispatch resolves executor families from the built-in `coding-workflow` definition recorded on the run by key and version, even if a persisted `coding-workflow` definition with the same key/version exists.
   If the recorded built-in version is unavailable, dispatch fails closed with `step_definition_not_found` instead of substituting persisted rows or a later built-in version.
+- **Structural preflight**: built-in definition lookup, required repository/objective shape, approval boundary, issue scope, route profile, and per-step route overrides fail closed before durable writes when they are structurally invalid.
+  JSON failures from these checks include `preflightEvidence` with the failing check id, path, key, message, severity, and recommended action.
 - **Shared persistence**: everything else - durable run/step/approval rows, the no-clobber duplicate-run refusal, repo-policy refusal, and the `invalid_run_start` materialization taxonomy - matches `workflow run start`.
   The success and failure envelopes are identical except that `command` is `workflow run start-coding`.
 
@@ -404,7 +422,7 @@ In addition to every [`workflow run start`](#error-codes) refusal code (`run_id_
 |------|---------|
 | `reserved_run_id` | `--run-id` begins with a reserved compatibility prefix (`cwfp-`, `cwfb-`, `overnight-`); refused so native runs are not confused with imported compatibility state. |
 | `definition_not_allowed` | A `--definition` other than `coding-workflow` was supplied; this door always uses the built-in coding workflow. |
-| `route_config_invalid` | `--steps-json` is malformed JSON, names an unsupported step, carries an unknown field, or has a blank value; the run is refused and nothing is written. |
+| `route_config_invalid` | `--profile` is blank, or `--steps-json` is malformed JSON, names an unsupported step, carries an unknown field, or has a blank value; the run is refused and nothing is written. |
 
 Exit code 0 on success, 1 on structured refusal, 2 on usage error.
 
@@ -418,7 +436,7 @@ The read-only plan preview for the Momentum-native coding workflow.
 It runs the exact same precondition checks and built-in definition resolution as [`workflow run start-coding`](#workflow-run-start-coding) - required inputs, the reserved-run-id and conflicting-`--definition` refusals, data-directory resolution, and repo-policy loading - but stops before any durable write.
 Instead of persisting a run it emits a frozen plan an operator can inspect before approving or executing it.
 
-It takes the same required and optional arguments as [`workflow run start-coding`](#workflow-run-start-coding), including `--profile <name>` as a read-only route/profile preview, `--steps-json <json>` as a read-only preview of the reconfigured per-step `route.steps` selection, and `--approval-boundary <boundary>` as the projected initial approval state.
+It takes the same required and optional arguments as [`workflow run start-coding`](#workflow-run-start-coding), including `--profile <name>` as a trimmed, non-blank read-only route/profile preview, `--steps-json <json>` as a read-only preview of the reconfigured per-step `route.steps` selection, and `--approval-boundary <boundary>` as the projected initial approval state.
 A `--steps-json` selection is validated and projected into the previewed `route` exactly as `workflow run start-coding` would record it, so an operator can preview the default route, change it, and start the same frozen selection.
 Provider-aware model alias normalization is part of that projection, so the preview shows the exact model string the later run would persist and forward to the live wrapper.
 
@@ -504,6 +522,7 @@ With provider-specific aliases such as `{"implementation":{"harness":"claude","m
 ### Text output (failure)
 
 Structured refusals render the same message text as `workflow run start-coding`, with `command` set to `workflow run preview-coding` in JSON mode.
+Structural preflight failures include the same `preflightEvidence` array described for `workflow run start`.
 
 ```text
 Workflow run already exists: native-coding-1.
