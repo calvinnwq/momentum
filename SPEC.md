@@ -30,6 +30,49 @@ bounded progress. Executors own bounded work and may recommend `continue`,
 `blocked`, `failed`, `cancelled`, or `complete`. The daemon decides state
 transitions from durable evidence.
 
+## Native Goal-Loop Contract
+
+The native `goal-loop` is Momentum's autonomous implementation flywheel below a workflow step.
+`executor_invocation` is the whole autonomous goal-loop attempt for one workflow step.
+`executor_round` is one durable iteration beneath that invocation.
+The invocation owns the ordered round sequence, shared lease/checkpoint envelope, accumulated notes and learnings, and final stop condition for the attempt.
+A completed round is never replayed, renamed, or overwritten to continue the loop.
+A later loop iteration creates the next round under the same invocation, and a retry after terminal recovery creates a new invocation or explicitly reopened attempt according to the step recovery policy.
+
+Goal-loop rounds reuse the repo-native executor state vocabulary rather than introducing a parallel pending/running/succeeded/failed/stale/recovered/canceled enum.
+Invocation states are `pending`, `preparing`, `running`, `pausing`, `waiting_operator`, `manual_recovery_required`, `blocked`, `failed`, `succeeded`, and `cancelled`.
+Round states are `pending`, `running`, `capturing_result`, `finalizing`, `mirroring_external_state`, `waiting_operator`, `manual_recovery_required`, `blocked`, `failed`, `succeeded`, and `cancelled`.
+`manual_recovery_required` carries stale, recovered, invalid, and unsafe-resume cases through recovery codes and durable evidence instead of adding non-repo state names.
+Stale in-flight work is detected from Momentum-owned leases and heartbeat/checkpoint age, then converted to durable recovery evidence before any continuation starts.
+
+A native round result is normalized as `momentum.native-goal-loop.round-result.v1` before classification.
+The required JSON fields are `summary`, `keyChanges`, `learnings`, `completionRecommendation`, `verificationResult`, `artifacts`, `checkpoints`, `changedFiles`, `commitSha`, `recoveryReason`, and `remainingWork`.
+`completionRecommendation` is the executor's recommendation only: `complete`, `continue`, `operator_decision_required`, `manual_recovery_required`, `blocked`, `failed`, or `cancelled`.
+`verificationResult` records command names, exit codes, timing when available, and an overall status such as `passed`, `failed`, `skipped`, or `not_run`.
+Artifacts and checkpoints are durable pointers under the round, not proof by terminal text.
+`commitSha` is non-null only after Momentum has verified and recorded the successful commit for that round.
+`recoveryReason` is non-null only when the round requires recovery or explains why no safe commit was created.
+
+Successful rounds commit exactly once after verification evidence is captured.
+The commit is the durable proof of a coherent unit of progress and is recorded with changed files, verification result, normalized result digest, artifacts, checkpoints, and learnings.
+Failed, invalid, stale, unsafe, canceled, or no-op rounds do not create commits.
+They still preserve their result document when present, verification or reset evidence, recovery reason, artifacts, checkpoints, and learnings so the next round can avoid repeating the same work.
+A reset belongs to the round finalization path that detected unsafe or incomplete work; it must never manufacture a commit to make progress look cleaner.
+
+Momentum resumes from durable executor_invocations, executor_rounds, leases, checkpoints, artifacts, commits, recovery codes, and accumulated learnings.
+Resume never depends on terminal scrollback, chat transcript memory, process handles, or a runner-owned run directory.
+On resume, terminal rounds remain immutable, in-flight rounds are rechecked against their lease and checkpoint evidence, stale rounds move to manual recovery or a recovered evidence state through repo-native recovery codes, and the next runnable round receives the accumulated notes/learnings from prior rounds.
+The loop must preserve no duplicate completed rounds and no duplicate commits by deriving the next round index and commit ownership from durable Momentum rows.
+If a round already recorded a commit SHA, resume treats that commit as owned by that round and never commits it again.
+If a round never reached a safe commit boundary, resume may start a later round only after preserving the recovery reason and reset/checkpoint evidence for the stale or failed round.
+
+GNHF is source material, a compatibility reference, or an optional runner below `goal-loop`.
+GNHF's per-iteration prompt, notes, JSON result, stop condition, and commit-per-successful-iteration behavior may inform the native runner mechanism.
+`.gnhf/runs` is not Momentum's durable source of truth.
+Momentum's durable source of truth is the workflow run, step, executor invocation, executor round, child evidence, lease, checkpoint, commit, and recovery rows under `<data-dir>/momentum.db` plus their artifact pointers.
+`gnhf` must not become a first-class executor family merely to reuse behavior.
+A future GNHF-backed runner must report into native `goal-loop` invocation and round records instead of making `.gnhf/runs` authoritative.
+
 ## Workflow Safety
 
 Human gates are first-class durable rows. Approval, operator decision, and manual
