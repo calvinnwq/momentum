@@ -164,6 +164,7 @@ If the wrapper is interrupted before writing that evidence but the external no-m
 The checked-in dogfood profile runs the wrapper CLI from `src/` through the TypeScript source loader/register shims in `src/adapters/`, so cleanup of generated `dist/` files after test or no-mistakes work does not strand `merge-cleanup` or `linear-refresh` tail work.
 For `merge-cleanup`, `live-wrapper/merge-cleanup-preflight.ts` requires explicit GitHub auth in the filtered wrapper environment before the command is spawned, so missing `GH_TOKEN`, `GITHUB_TOKEN`, or `GH_CONFIG_DIR` becomes setup recovery rather than an ambiguous partial cleanup.
 External-side-effect tail failures (`merge-cleanup` / `linear-refresh`) use the shared step-kind set in `run/reducer.ts`, classify through the monitor as `failed_external_side_effect_step`, and steer operators to evidence-backed `workflow run clear-recovery --evidence-pointer <ref>` reconciliation instead of a blind re-run that could repeat the external write.
+Renderer next-action shapes expose this as `actionClass: "reconcile_external_tail"` with `recoveryDetail.kind: "external_tail_reconcile"`; interrupted no-mistakes evidence reconciliation similarly exposes `actionClass: "reconcile_deterministic_evidence"` with `recoveryDetail.kind: "no_mistakes_deterministic_evidence"`.
 
 NGX-508 adds the explicit Momentum-native `workflow run start-coding` door.
 It reuses `run/start` / `run/start-persist` for durable rows, reserves the historical `cwfp-`, `cwfb-`, and `overnight-` prefixes for compatibility imports, stores any selected profile under `route.profile`, and keeps CWFP/default switching separate.
@@ -184,9 +185,9 @@ Native `goal-loop` round evidence is currently consumed by `workflow run logs` f
 Status, handoff, monitor, and GUI readers remain future consumers until they are wired to the same executor-round projection instead of runner-authored JSON, terminal scrollback, or runner-local directories.
 
 NGX-549 and NGX-550 add the GUI-safe supervisor contract for `workflow run watch --once`.
-The command builds on the monitor projection, optionally performs one bounded target-run dispatcher tick, then emits a compact top-level envelope with `emit`, `reason`, `recommendedAction`, `recommendedActionPolicy`, quiet-duration fields, stuck-risk advisory fields, and optional `humanAction`.
+The command builds on the monitor projection, optionally performs one bounded target-run dispatcher tick, then emits a compact top-level envelope with `emit`, `reason`, `recommendedAction`, `recommendedActionPolicy`, quiet-duration fields, stuck-risk advisory fields, `nextAction.actionClass`, `nextAction.recoveryDetail`, and optional `humanAction`.
 Plain `workflow run monitor` remains read-only, while `workflow run monitor --advance` and `workflow run watch --once` are the explicit write-limited polling modes that can update advisory baselines for `momentum-native-coding` runs.
-`test/fixtures/workflow-gui-contract.json` freezes the watch envelope keys, enum vocabularies, common GUI scenarios, event envelope keys, event keys, and event types so app clients can branch without terminal scraping.
+`test/fixtures/workflow-gui-contract.json` freezes the watch envelope keys, next-action operator classes, recovery-detail presence, common GUI scenarios, event envelope keys, event keys, and event types so app clients can branch without terminal scraping.
 
 NGX-551 adds `run/events.ts` as the durable workflow event replay seam behind `workflow run events`.
 It projects stable semantic events from workflow rows, combines them with append-only `workflow_events` rows for overwritten transitions and supervisor advisories, and returns opaque replay cursors so reconnecting clients can continue from the previous response cursor without relying on stdout or process state.

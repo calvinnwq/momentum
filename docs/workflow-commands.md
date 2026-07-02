@@ -51,7 +51,7 @@ The examples below are branching examples; the full `workflow run watch --once` 
   This is the active run detail surface and includes `run`, `steps`, `approvals`, `leases`, `monitor`, `evidence`, and `gates`.
   It is the durable place to render step state, recovery flags, and open gates before prompting an action.
 - `workflow handoff <run-id>`.
-  This mirrors status detail and lifts `nextAction` to the top level.
+  This mirrors status detail and lifts `nextAction` to the top level, including the compact `actionClass` and `recoveryDetail` fields.
   OpenClaw and GUI runners use it for a compact actionable dispatch summary.
 - `workflow run monitor`.
   This is the stable progress discriminator for recurring poll loops.
@@ -888,9 +888,9 @@ Behaviour:
 - Refuses with `not_flagged` when the run is not currently flagged, so a stale clear cannot mutate anything, except for the evidence-backed `failed_external_side_effect_step` and interrupted `no-mistakes` reconciliation paths above.
   In that exception, `clear-recovery --evidence-pointer <ref>` can reconcile the failed external tail step, or a failed `no-mistakes` step with legacy checks-passed proof or structured deterministic evidence, even if the durable manual-recovery flag was never set.
 - Never auto-clears from elapsed time alone, never repairs the underlying run, and never issues an external write. The `recovery.md` artifact is intentionally left on disk as durable audit; remove it after capturing the context elsewhere.
-- Before clearing recovery for `failed_external_side_effect_step`, `workflow run monitor <run-id> --json` reports `disposition: "recover"`, `reportReason: "recovery_required"`, `nextAction.code: "clear_recovery"`, and `recovery.code: "failed_external_side_effect_step"`.
-  Before interrupted no-mistakes reconciliation, monitor still reports `recovery.code: "failed_required_step"`; the legacy `no-mistakes:<run-id>#checks-passed` pointer or structured deterministic evidence file narrows the clear to that failed required `no-mistakes` row.
-  After a successful reconciliation clear, the same command reports `disposition: "report"`, `reportReason: "terminal_succeeded"`, `nextAction.code: "no_action"`, and `recovery: null` only when no downstream required work remains.
+- Before clearing recovery for `failed_external_side_effect_step`, `workflow run monitor <run-id> --json` reports `disposition: "recover"`, `reportReason: "recovery_required"`, `nextAction.code: "clear_recovery"`, `nextAction.actionClass: "reconcile_external_tail"`, `nextAction.recoveryDetail.kind: "external_tail_reconcile"`, and `recovery.code: "failed_external_side_effect_step"`.
+  Before interrupted no-mistakes reconciliation, monitor still reports `recovery.code: "failed_required_step"` with `nextAction.actionClass: "reconcile_deterministic_evidence"` and `nextAction.recoveryDetail.kind: "no_mistakes_deterministic_evidence"`; the legacy `no-mistakes:<run-id>#checks-passed` pointer or structured deterministic evidence file narrows the clear to that failed required `no-mistakes` row.
+  After a successful reconciliation clear, the same command reports `disposition: "report"`, `reportReason: "terminal_succeeded"`, `nextAction.code: "no_action"`, `nextAction.actionClass: "stop_monitoring"`, and `recovery: null` only when no downstream required work remains.
   Its progress tick then reports `phase: "terminal"`, `terminal: true`, `cleanup: "release"`, and `blockerReason: null` so a delivery wrapper can stop instead of carrying forward the pre-clear recovery phase.
   If a full workflow still has `linear-refresh` pending or approved after a reconciled `merge-cleanup`, monitor surfaces that next step instead of terminal success.
 
@@ -1175,7 +1175,9 @@ The detail envelope flattens the per-run view at the top level (`run`, `steps`, 
       "code": "resume_running",
       "stepId": "implementation",
       "leaseKind": "managed-step",
-      "detail": "Step is running with a fresh dispatch lease and recent checkpoint evidence. Allow it to continue."
+      "detail": "Step is running with a fresh dispatch lease and recent checkpoint evidence. Allow it to continue.",
+      "actionClass": "continue_polling",
+      "recoveryDetail": null
     },
     "needsRecoveryArtifact": false,
     "recovery": null
@@ -1209,14 +1211,17 @@ verification / git finalization failures reconciled after the executor result.
 
 `monitor.nextAction.code` is one of:
 
-- `no_action` — terminal run (succeeded / canceled); no follow-up needed.
-- `advance_to_step` — an approved step is ready to dispatch.
-- `await_approval` — a pending step needs approval before it can run.
-- `resume_running` — a running step has fresh evidence; let it continue.
-- `investigate_stale` — a running step is stale (no fresh lease, no recent checkpoint) or an orphan lease is holding a finalized run open.
+- `no_action` - terminal run (succeeded / canceled); no follow-up needed.
+- `advance_to_step` - an approved step is ready to dispatch.
+- `await_approval` - a pending step needs approval before it can run.
+- `resume_running` - a running step has fresh evidence; let it continue.
+- `investigate_stale` - a running step is stale (no fresh lease, no recent checkpoint) or an orphan lease is holding a finalized run open.
 - `clear_recovery` - the run is blocked (manual-recovery-required lease or blocked step), or a failed external-side-effect tail step (`merge-cleanup` / `linear-refresh`) needs operator reconciliation; verify external state and clear the recovery once the cause is resolved rather than re-running the step.
   For a failed external-side-effect tail step, clearing recovery reconciles that step to `succeeded` before clearing the durable flag.
 - `rerun_failed_step` - an ordinary required step failed; decide whether to retry or mark for manual recovery. (A failed external-side-effect tail step routes to `clear_recovery` instead, since a naive re-run could double-merge a pull request or re-write the tracker.)
+
+`monitor.nextAction.actionClass` groups those low-level codes into the stable operator decision classes shared by status, handoff, monitor, and watch: `continue_polling`, `approve_next_gate`, `fix_setup_config_then_retry`, `reconcile_deterministic_evidence`, `reconcile_external_tail`, `clear_recovery`, `resolve_gate`, `retry_failed_step`, or `stop_monitoring`.
+`monitor.nextAction.recoveryDetail` is `null` unless the action needs evidence-backed recovery; no-mistakes reconciliation reports `kind: "no_mistakes_deterministic_evidence"`, and external-tail reconciliation reports `kind: "external_tail_reconcile"`.
 
 `monitor.recovery.code`, when present, is one of: `stale_running_step`, `ghost_active_no_lease`, `manual_recovery_lease`, `monitor_drift_stale`, `failed_required_step`, `failed_external_side_effect_step`. `failed_external_side_effect_step` is the subset of `failed_required_step` where the failed required step is an external-side-effect tail step (`merge-cleanup` / `linear-refresh`) that may already have pushed a branch, merged a pull request, or written the tracker before failing.
 
@@ -1314,7 +1319,9 @@ Emits a machine-readable next-action envelope for one workflow run. Wraps the sa
     "code": "resume_running",
     "stepId": "implementation",
     "leaseKind": "managed-step",
-    "detail": "Step is running with a fresh dispatch lease and recent checkpoint evidence. Allow it to continue."
+    "detail": "Step is running with a fresh dispatch lease and recent checkpoint evidence. Allow it to continue.",
+    "actionClass": "continue_polling",
+    "recoveryDetail": null
   }
 }
 ```
@@ -1415,7 +1422,11 @@ All filters are optional and compose: passing multiple filters narrows the resul
         "runState": "running",
         "terminal": false,
         "blocked": false,
-        "nextAction": { "code": "resume_running" }
+        "nextAction": {
+          "code": "resume_running",
+          "actionClass": "continue_polling",
+          "recoveryDetail": null
+        }
       }
     }
   ]
@@ -1522,7 +1533,9 @@ Consumers that need full run metadata should call `workflow status` / `workflow 
     "code": "resume_running",
     "stepId": "implementation",
     "leaseKind": "managed-step",
-    "detail": "Step is running with a fresh dispatch lease and recent checkpoint evidence. Allow it to continue."
+    "detail": "Step is running with a fresh dispatch lease and recent checkpoint evidence. Allow it to continue.",
+    "actionClass": "continue_polling",
+    "recoveryDetail": null
   },
   "recovery": null,
   "evidence": [{ "...": "same typed evidence pointers as workflow status detail" }],
@@ -1597,8 +1610,8 @@ For `workflow run monitor --advance --json`, use the nested `progress` projectio
 - Send a concise operator update when `progress.emit`, `blocked`,
   `needsManualRecovery`, or `terminal` is `true`.
 - Include `runId`, `runState`, `activeStep` / `progress.currentStep`,
-  `progress.phase`, `nextAction.code`, succeeded/total step counts, and any
-  recovery or open-gate detail.
+  `progress.phase`, `nextAction.code`, `nextAction.actionClass`, succeeded/total
+  step counts, and any recovery or open-gate detail.
 - Stop and clean up the wrapper only when `progress.cleanup` is `"release"`,
   `runState` is `canceled`, or `nextAction.code` is `no_action`.
 - Keep polling recoverable terminal failures only when `progress.cleanup` is `"none"`
@@ -1610,9 +1623,9 @@ For `workflow run watch --once --json`, use the frozen top-level supervisor enve
 - Suppress the human update when `emit` is `false`; the tick still carries the
   same `reason`, `phase`, and `digest` for machine dedupe.
 - Branch on `recommendedAction` (`poll`, `approve`, `operator_decision`,
-  `recover`, or `release`) and use `nextPollSeconds`, `quietForSeconds`,
-  `quietThresholdSeconds`, `stuckRisk`, `inspectionCommand`, and `cleanup`
-  directly.
+  `recover`, or `release`) and use `nextAction.actionClass`,
+  `nextPollSeconds`, `quietForSeconds`, `quietThresholdSeconds`, `stuckRisk`,
+  `inspectionCommand`, and `cleanup` directly.
 - Read `recommendedActionPolicy` before turning a recommendation into any
   behavior. `auto_allowed` is only for explicit wait/release/read-only or local
   recheck cases; approvals, operator decisions, recovery clearing, stale manual
@@ -1732,7 +1745,9 @@ Options:
     "code": "resume_running",
     "stepId": "implementation",
     "leaseKind": "managed-step",
-    "detail": "Step is running with a fresh dispatch lease and recent checkpoint evidence. Allow it to continue."
+    "detail": "Step is running with a fresh dispatch lease and recent checkpoint evidence. Allow it to continue.",
+    "actionClass": "continue_polling",
+    "recoveryDetail": null
   },
   "humanAction": null,
   "recommendedAction": "poll",
@@ -1794,7 +1809,7 @@ Soft `monitor_drift_stale` reports and ordinary `failed_required_step` failures 
 
 `activeStep`, when present, carries `stepId`, `kind`, `state`, `order`, and `required`.
 `nextAction` always carries `code`, `stepId`, `leaseKind`, `detail`, `actionClass`, and `recoveryDetail`; `detail` is a ready-to-read sentence for the common path.
-`actionClass` is the stable operator decision class for watch/status/handoff consumers:
+`actionClass` is the stable operator decision class for watch/status/monitor/handoff consumers:
 
 - `continue_polling` - keep polling or dispatching the already-approved local step.
 - `approve_next_gate` - use the printed approval command.
@@ -1806,7 +1821,9 @@ Soft `monitor_drift_stale` reports and ordinary `failed_required_step` failures 
 - `retry_failed_step` - inspect a normal failed step and decide whether to retry.
 - `stop_monitoring` - release or stop the monitor for a terminal run.
 
-`recoveryDetail` is `null` for ordinary states. Recovery states that require external evidence use a compact object with `kind`, `evidencePointerRequired`, and `refusalReason`.
+`recoveryDetail` is `null` for ordinary states.
+Recovery states that require external evidence use a compact object with `kind`, `evidencePointerRequired`, and `refusalReason`.
+Current `kind` values are `no_mistakes_deterministic_evidence` and `external_tail_reconcile`.
 `recommendedActionPolicy.authority` is `auto_allowed` only for explicit safe wait/release/read-only or local recheck cases, `recommend_only` for informational recommendations that must not execute, `human_required` for approvals, operator decisions, recovery clearing, stale manual recovery, no-mistakes recovery, merge cleanup, Linear refresh, and external-apply, and `forbidden` for destructive/default-switch/broad external actions that must surface as blocked policy metadata.
 `humanAction`, when present, carries `code` (`approve`, `resolve_gate`, or `clear_recovery`), `command` (the exact CLI to run), and `detail` (the reason or evidence sentence).
 
@@ -1887,7 +1904,12 @@ Progress tick - a step is advancing under a fresh lease, so keep polling quietly
   "disposition": "wait",
   "phase": "advancing",
   "activeStep": { "stepId": "implementation", "state": "running" },
-  "nextAction": { "code": "resume_running", "stepId": "implementation" },
+  "nextAction": {
+    "code": "resume_running",
+    "stepId": "implementation",
+    "actionClass": "continue_polling",
+    "recoveryDetail": null
+  },
   "humanAction": null,
   "recommendedAction": "poll",
   "recommendedActionPolicy": {
@@ -2001,7 +2023,12 @@ Recovery required - the run is flagged for manual recovery and can be cleared di
   "stuckRisk": "high",
   "inspectionCommand": null,
   "cleanup": "none",
-  "nextAction": { "code": "clear_recovery", "stepId": "implementation" },
+  "nextAction": {
+    "code": "clear_recovery",
+    "stepId": "implementation",
+    "actionClass": "clear_recovery",
+    "recoveryDetail": null
+  },
   "humanAction": {
     "code": "clear_recovery",
     "command": "momentum workflow run clear-recovery mwf-abc123",
@@ -2044,7 +2071,12 @@ Terminal success - the run finished cleanly, so the wrapper reports once and sto
   "disposition": "report",
   "phase": "terminal",
   "activeStep": null,
-  "nextAction": { "code": "no_action", "stepId": null },
+  "nextAction": {
+    "code": "no_action",
+    "stepId": null,
+    "actionClass": "stop_monitoring",
+    "recoveryDetail": null
+  },
   "humanAction": null,
   "recommendedAction": "release",
   "recommendedActionPolicy": {
@@ -2069,7 +2101,12 @@ Recoverable failure - a required step failed, so an operator must inspect and de
   "reason": "recovery_required",
   "disposition": "recover",
   "phase": "blocked",
-  "nextAction": { "code": "rerun_failed_step", "stepId": "implementation" },
+  "nextAction": {
+    "code": "rerun_failed_step",
+    "stepId": "implementation",
+    "actionClass": "retry_failed_step",
+    "recoveryDetail": null
+  },
   "humanAction": null,
   "recommendedAction": "operator_decision",
   "recommendedActionPolicy": {
@@ -2100,8 +2137,9 @@ A cron, OpenClaw, or GUI poller branches on the envelope instead of scraping tex
   - `operator_decision` - a required step failed or a gate is open; an operator inspects and chooses via `workflow run decide` or a rerun, so `humanAction` may be `null`.
   - `recover` - run `humanAction.command` (a `workflow run clear-recovery` call, with `--evidence-pointer` for external-side-effect steps) after resolving the underlying cause.
   - `release` - the run reached a clean terminal state (`cleanup: "release"`, `nextAction.code: "no_action"`); report once and stop polling only when `recommendedActionPolicy` allows `release_monitor`.
-- `emit` is the machine-polling signal and `reason` / `humanAction` are the human-facing content: decide whether to speak from `emit`, and what to say from `reason`, `activeStep`, `nextAction.detail`, and `humanAction`.
-- The envelope carries enough to render a concise human update for the common path - `reason`, `activeStep`, and `nextAction.detail`, plus `humanAction.command` / `detail` when an action is required - without a follow-up `workflow status` read.
+- `emit` is the machine-polling signal, `nextAction.actionClass` is the compact operator branch, and `reason` / `humanAction` are the human-facing content.
+- Decide whether to speak from `emit`, and what to say from `reason`, `activeStep`, `nextAction.detail`, `nextAction.recoveryDetail`, and `humanAction`.
+- The envelope carries enough to render a concise human update for the common path - `reason`, `activeStep`, and `nextAction.detail`, plus `nextAction.recoveryDetail` and `humanAction.command` / `detail` when an action is required - without a follow-up `workflow status` read.
 
 ### Error codes
 
