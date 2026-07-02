@@ -66,6 +66,7 @@ type SeedRunInput = {
   approvalBoundary?: string;
   objective?: string;
   needsManualRecovery?: boolean;
+  manualRecoveryReason?: string | null;
   startedAt?: number;
   finishedAt?: number;
   updatedAt?: number;
@@ -126,7 +127,7 @@ function seedRun(db: MomentumDb, input: SeedRunInput): void {
     input.approvalBoundary ?? null,
     null,
     input.needsManualRecovery ? 1 : 0,
-    null,
+    input.manualRecoveryReason ?? null,
     null,
     input.startedAt ?? null,
     input.finishedAt ?? null,
@@ -514,6 +515,66 @@ describe("momentum workflow status", () => {
     expect(outsidePayload.runs).toEqual([]);
   });
 
+  it("classifies open gates in status list next action", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, {
+        runId: "cwfp-list-gate",
+        state: "running",
+        updatedAt: NOW
+      });
+      seedStep(db, "cwfp-list-gate", {
+        stepId: "implementation",
+        kind: "implementation",
+        state: "running",
+        order: 1,
+        startedAt: RECENT
+      });
+      seedLease(db, "cwfp-list-gate", {
+        leaseKind: "managed-step",
+        holder: "pipeline",
+        acquiredAt: RECENT,
+        expiresAt: FUTURE,
+        heartbeatAt: RECENT
+      });
+      insertWorkflowGate(
+        db,
+        {
+          gateId: "gate-list-open",
+          workflowRunId: "cwfp-list-gate",
+          targetScope: "workflow",
+          gateType: "operator_decision_required",
+          reason: "operator must resolve the gate",
+          allowedActions: ["fix", "abort"],
+          recommendedAction: "fix",
+          policyEnvelope: ["fix"]
+        },
+        { now: RECENT }
+      );
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "status",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      runs: Array<{
+        monitor: { nextAction: { code: string; actionClass: string } };
+      }>;
+    };
+    expect(payload.runs[0]?.monitor.nextAction).toMatchObject({
+      code: "resume_running",
+      actionClass: "resolve_gate"
+    });
+  });
+
   it("returns run_not_found for an unknown run-id in detail mode", async () => {
     const dataDir = makeTempDir();
     const result = await run([
@@ -600,7 +661,12 @@ describe("momentum workflow status", () => {
         runState: string;
         terminal: boolean;
         activeStep: { stepId: string; state: string } | null;
-        nextAction: { code: string; stepId: string | null };
+        nextAction: {
+          code: string;
+          stepId: string | null;
+          actionClass: string;
+          recoveryDetail: unknown;
+        };
         recovery: { code: string } | null;
       };
       evidence: unknown[];
@@ -621,6 +687,8 @@ describe("momentum workflow status", () => {
     expect(payload.monitor.terminal).toBe(false);
     expect(payload.monitor.activeStep?.stepId).toBe("implementation");
     expect(payload.monitor.nextAction.code).toBe("resume_running");
+    expect(payload.monitor.nextAction.actionClass).toBe("continue_polling");
+    expect(payload.monitor.nextAction.recoveryDetail).toBeNull();
     expect(payload.monitor.recovery).toBeNull();
   });
 
@@ -865,13 +933,118 @@ describe("momentum workflow status", () => {
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
       monitor: {
-        nextAction: { code: string; stepId: string | null };
+        nextAction: {
+          code: string;
+          stepId: string | null;
+          actionClass: string;
+          recoveryDetail: unknown;
+        };
         recovery: { code: string; stepId: string | null } | null;
       };
     };
     expect(payload.monitor.nextAction.code).toBe("rerun_failed_step");
+    expect(payload.monitor.nextAction.actionClass).toBe("retry_failed_step");
     expect(payload.monitor.recovery?.code).toBe("failed_required_step");
     expect(payload.monitor.recovery?.stepId).toBe("implementation");
+  });
+
+  it("labels failed no-mistakes detail as deterministic evidence reconciliation", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, {
+        runId: "cwfp-no-mistakes-evidence",
+        state: "failed",
+        source: "momentum-native-coding",
+        startedAt: RECENT,
+        finishedAt: NOW
+      });
+      seedStep(db, "cwfp-no-mistakes-evidence", {
+        stepId: "no-mistakes",
+        kind: "no-mistakes",
+        state: "failed",
+        order: 3,
+        startedAt: RECENT,
+        finishedAt: NOW,
+        errorCode: "executor_failed"
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "status",
+      "cwfp-no-mistakes-evidence",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      monitor: {
+        nextAction: {
+          code: string;
+          actionClass: string;
+          recoveryDetail: Record<string, unknown> | null;
+        };
+      };
+    };
+    expect(payload.monitor.nextAction).toMatchObject({
+      code: "rerun_failed_step",
+      actionClass: "reconcile_deterministic_evidence",
+      recoveryDetail: {
+        kind: "no_mistakes_deterministic_evidence",
+        evidencePointerRequired: true,
+        refusalReason: null
+      }
+    });
+  });
+
+  it("labels run-level setup recovery in status next action", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, {
+        runId: "cwfp-runtime-recovery",
+        state: "running",
+        needsManualRecovery: true,
+        manualRecoveryReason:
+          "runtime_unavailable: wrapper config is missing for preflight"
+      });
+      seedStep(db, "cwfp-runtime-recovery", {
+        stepId: "preflight",
+        kind: "preflight",
+        state: "approved",
+        order: 0
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "status",
+      "cwfp-runtime-recovery",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      monitor: {
+        nextAction: {
+          code: string;
+          actionClass: string;
+          recoveryDetail: unknown;
+        };
+      };
+    };
+    expect(payload.monitor.nextAction).toMatchObject({
+      code: "advance_to_step",
+      actionClass: "fix_setup_config_then_retry",
+      recoveryDetail: null
+    });
   });
 
   it("renders text output for list and detail modes", async () => {

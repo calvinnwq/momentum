@@ -257,11 +257,11 @@ The ledger pointer does not affect the reconciliation outcome; it is stored on t
 
 **Monitor state before and after recovery**
 
-Before clearing external-tail recovery, `workflow run monitor <run-id> --json` reports `disposition: "recover"`, `reportReason: "recovery_required"`, `nextAction.code: "clear_recovery"`, and `recovery.code: "failed_external_side_effect_step"`.
-For interrupted no-mistakes reconciliation, the pre-clear monitor still reports `recovery.code: "failed_required_step"`; the legacy `no-mistakes:<run-id>#checks-passed` pointer or structured deterministic evidence file narrows `clear-recovery` to that failed required `no-mistakes` row.
+Before clearing external-tail recovery, `workflow run monitor <run-id> --json` reports `disposition: "recover"`, `reportReason: "recovery_required"`, `nextAction.code: "clear_recovery"`, `nextAction.actionClass: "reconcile_external_tail"`, `nextAction.recoveryDetail.kind: "external_tail_reconcile"`, and `recovery.code: "failed_external_side_effect_step"`.
+For interrupted no-mistakes reconciliation, the pre-clear monitor still reports `recovery.code: "failed_required_step"`, `nextAction.actionClass: "reconcile_deterministic_evidence"`, and `nextAction.recoveryDetail.kind: "no_mistakes_deterministic_evidence"`; the legacy `no-mistakes:<run-id>#checks-passed` pointer or structured deterministic evidence file narrows `clear-recovery` to that failed required `no-mistakes` row.
 
 After a successful `workflow run clear-recovery --evidence-pointer <ref>`, re-run the monitor command to verify the next durable state.
-When the reconciled tail step was the last remaining required work, the monitor reports `disposition: "report"`, `reportReason: "terminal_succeeded"`, `nextAction.code: "no_action"`, and `recovery: null`.
+When the reconciled tail step was the last remaining required work, the monitor reports `disposition: "report"`, `reportReason: "terminal_succeeded"`, `nextAction.code: "no_action"`, `nextAction.actionClass: "stop_monitoring"`, and `recovery: null`.
 Its progress tick reports `phase: "terminal"`, `terminal: true`, `cleanup: "release"`, and `blockerReason: null`, so monitor delivery can stop instead of retaining the earlier recovery tick.
 When downstream required work remains, such as `linear-refresh` after a reconciled `merge-cleanup` in a full workflow, the monitor reports that pending or approved next step instead of terminal success.
 

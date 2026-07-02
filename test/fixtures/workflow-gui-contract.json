@@ -35,7 +35,9 @@
         "required"
       ],
       "nextAction": [
+        "actionClass",
         "code",
+        "recoveryDetail",
         "stepId",
         "leaseKind",
         "detail"
@@ -71,6 +73,10 @@
         "quietThresholdSeconds": 900,
         "stuckRisk": "low",
         "cleanup": "none",
+        "nextAction": {
+          "actionClass": "continue_polling",
+          "recoveryDetail": null
+        },
         "humanAction": null,
         "activeStep": {
           "stepId": "implementation",
@@ -93,6 +99,10 @@
         "quietThresholdSeconds": 1800,
         "stuckRisk": "medium",
         "cleanup": "none",
+        "nextAction": {
+          "actionClass": "approve_next_gate",
+          "recoveryDetail": null
+        },
         "humanAction": {
           "code": "approve",
           "command": "momentum workflow run approve ${runId} --approval-boundary through-implementation --phrase \"approve plan ${runId} through-implementation\""
@@ -114,6 +124,10 @@
         "quietThresholdSeconds": 3600,
         "stuckRisk": "high",
         "cleanup": "none",
+        "nextAction": {
+          "actionClass": "clear_recovery",
+          "recoveryDetail": null
+        },
         "humanAction": {
           "code": "clear_recovery",
           "command": "momentum workflow run clear-recovery ${runId}",
@@ -137,6 +151,10 @@
         "stuckRisk": "medium",
         "cleanup": "none",
         "nextActionCode": "resume_running",
+        "nextAction": {
+          "actionClass": "continue_polling",
+          "recoveryDetail": null
+        },
         "activeStep": {
           "stepId": "implementation",
           "state": "running"
@@ -161,6 +179,10 @@
         "stuckRisk": "low",
         "cleanup": "release",
         "nextActionCode": "no_action",
+        "nextAction": {
+          "actionClass": "stop_monitoring",
+          "recoveryDetail": null
+        },
         "humanAction": null,
         "activeStep": null
       },
@@ -181,6 +203,10 @@
         "stuckRisk": "low",
         "cleanup": "release",
         "nextActionCode": "no_action",
+        "nextAction": {
+          "actionClass": "stop_monitoring",
+          "recoveryDetail": null
+        },
         "humanAction": null,
         "activeStep": null
       },
@@ -203,6 +229,8 @@
         "humanAction": null,
         "nextAction": {
           "code": "rerun_failed_step",
+          "actionClass": "retry_failed_step",
+          "recoveryDetail": null,
           "stepId": "implementation"
         },
         "activeStep": {
@@ -227,6 +255,10 @@
         "stuckRisk": "medium",
         "cleanup": "none",
         "activeStep": null,
+        "nextAction": {
+          "actionClass": "approve_next_gate",
+          "recoveryDetail": null
+        },
         "humanAction": null
       }
     },

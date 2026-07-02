@@ -157,6 +157,7 @@ export type WorkflowRunSummary = {
     leases: number;
   };
   monitor: WorkflowMonitorState;
+  gates: WorkflowGateRecord[];
 };
 
 export type WorkflowRunDetail = {
@@ -251,6 +252,7 @@ export function listWorkflowRunSummaries(
     const steps = listStepsByRunId(db, run.runId);
     const leases = listLeasesByRunId(db, run.runId);
     const approvals = listApprovalsByRunId(db, run.runId);
+    const gates = listWorkflowGatesForRun(db, run.runId);
     const monitor = deriveWorkflowMonitorState({
       runId: run.runId,
       steps: toStepRecords(steps),
@@ -271,7 +273,8 @@ export function listWorkflowRunSummaries(
         approvals: approvals.length,
         leases: leases.length
       },
-      monitor
+      monitor,
+      gates
     });
   }
 
