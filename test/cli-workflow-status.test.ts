@@ -66,6 +66,7 @@ type SeedRunInput = {
   approvalBoundary?: string;
   objective?: string;
   needsManualRecovery?: boolean;
+  manualRecoveryReason?: string | null;
   startedAt?: number;
   finishedAt?: number;
   updatedAt?: number;
@@ -126,7 +127,7 @@ function seedRun(db: MomentumDb, input: SeedRunInput): void {
     input.approvalBoundary ?? null,
     null,
     input.needsManualRecovery ? 1 : 0,
-    null,
+    input.manualRecoveryReason ?? null,
     null,
     input.startedAt ?? null,
     input.finishedAt ?? null,
@@ -937,6 +938,52 @@ describe("momentum workflow status", () => {
         evidencePointerRequired: true,
         refusalReason: null
       }
+    });
+  });
+
+  it("labels run-level setup recovery in status next action", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, {
+        runId: "cwfp-runtime-recovery",
+        state: "running",
+        needsManualRecovery: true,
+        manualRecoveryReason:
+          "runtime_unavailable: wrapper config is missing for preflight"
+      });
+      seedStep(db, "cwfp-runtime-recovery", {
+        stepId: "preflight",
+        kind: "preflight",
+        state: "approved",
+        order: 0
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "status",
+      "cwfp-runtime-recovery",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      monitor: {
+        nextAction: {
+          code: string;
+          actionClass: string;
+          recoveryDetail: unknown;
+        };
+      };
+    };
+    expect(payload.monitor.nextAction).toMatchObject({
+      code: "advance_to_step",
+      actionClass: "fix_setup_config_then_retry",
+      recoveryDetail: null
     });
   });
 

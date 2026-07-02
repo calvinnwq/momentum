@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { runCli } from "../src/cli.js";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
+import { insertWorkflowGate } from "../src/core/workflow/gate/persist.js";
 import { MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE } from "../src/core/workflow/run/start.js";
 import {
   WORKFLOW_MONITOR_DISPOSITIONS,
@@ -260,6 +261,25 @@ function seedLease(
     "auto-release",
     SEED_NOW,
     SEED_NOW
+  );
+}
+
+function seedOpenGate(db: MomentumDb, runId: string): void {
+  insertWorkflowGate(
+    db,
+    {
+      gateId: `${runId}-gate`,
+      workflowRunId: runId,
+      stepRunId: "implementation",
+      targetScope: "step",
+      gateType: "operator_decision_required",
+      reason: "Implementation needs operator direction.",
+      evidence: `goals/${runId}/gates/${runId}-gate.json`,
+      allowedActions: ["fix", "skip", "approve_as_is"],
+      recommendedAction: "fix",
+      policyEnvelope: ["fix"]
+    },
+    { now: SEED_NOW }
   );
 }
 
@@ -669,6 +689,41 @@ describe("workflow run watch supervisor envelope contract", () => {
     expect(payload["humanAction"]).toBeNull();
   });
 
+  it("no-mistakes manual recovery: keeps deterministic evidence action class", async () => {
+    const dataDir = makeTempDir();
+    const runId = "mwf-contract-no-mistakes-manual";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, {
+        runId,
+        state: "failed",
+        needsManualRecovery: true,
+        manualRecoveryReason: "no-mistakes evidence needs reconciliation"
+      });
+      seedStep(db, {
+        runId,
+        stepId: "no-mistakes",
+        kind: "no-mistakes",
+        state: "failed",
+        order: 3
+      });
+    } finally {
+      db.close();
+    }
+
+    const payload = await watchOnce(dataDir, runId);
+    assertWatchEnvelopeContract(payload, runId);
+    expect(payload["nextAction"]).toMatchObject({
+      code: "rerun_failed_step",
+      actionClass: "reconcile_deterministic_evidence",
+      recoveryDetail: {
+        kind: "no_mistakes_deterministic_evidence",
+        evidencePointerRequired: true,
+        refusalReason: null
+      }
+    });
+  });
+
   it("external-tail recovery: labels evidence-backed reconciliation", async () => {
     const dataDir = makeTempDir();
     const runId = "mwf-contract-external-tail";
@@ -701,6 +756,100 @@ describe("workflow run watch supervisor envelope contract", () => {
       code: "clear_recovery",
       command: `momentum workflow run clear-recovery ${runId} --evidence-pointer <ref>`
     });
+  });
+
+  it("external-tail manual recovery: keeps external reconciliation action class", async () => {
+    const dataDir = makeTempDir();
+    const runId = "mwf-contract-external-tail-manual";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, {
+        runId,
+        state: "failed",
+        needsManualRecovery: true,
+        manualRecoveryReason: "merge cleanup needs reconciliation"
+      });
+      seedStep(db, {
+        runId,
+        stepId: "merge-cleanup",
+        kind: "merge-cleanup",
+        state: "failed",
+        order: 4
+      });
+    } finally {
+      db.close();
+    }
+
+    const payload = await watchOnce(dataDir, runId);
+    assertWatchEnvelopeContract(payload, runId);
+    expect(payload["nextAction"]).toMatchObject({
+      code: "clear_recovery",
+      actionClass: "reconcile_external_tail",
+      recoveryDetail: {
+        kind: "external_tail_reconcile",
+        evidencePointerRequired: true,
+        refusalReason: null
+      }
+    });
+  });
+
+  it("open operator gate: labels the action as gate resolution", async () => {
+    const dataDir = makeTempDir();
+    const runId = "mwf-contract-open-gate";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "running" });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "approved",
+        order: 1
+      });
+      seedOpenGate(db, runId);
+    } finally {
+      db.close();
+    }
+
+    const payload = await watchOnce(dataDir, runId);
+    assertWatchEnvelopeContract(payload, runId);
+    expect(payload["nextAction"]).toMatchObject({
+      code: "advance_to_step",
+      actionClass: "resolve_gate",
+      recoveryDetail: null
+    });
+    expect(payload["humanAction"]).toMatchObject({
+      code: "resolve_gate",
+      command: `momentum workflow run decide ${runId}-gate --action <action> --actor <name>`
+    });
+  });
+
+  it("stale orphan lease: does not label investigation as continue polling", async () => {
+    const dataDir = makeTempDir();
+    const runId = "mwf-contract-stale-orphan";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, { runId, state: "running" });
+      seedStep(db, {
+        runId,
+        stepId: "implementation",
+        kind: "implementation",
+        state: "succeeded",
+        order: 1
+      });
+      seedLease(db, { runId, expiresAt: 5_000 });
+    } finally {
+      db.close();
+    }
+
+    const payload = await watchOnce(dataDir, runId);
+    assertWatchEnvelopeContract(payload, runId);
+    expect(payload["nextAction"]).toMatchObject({
+      code: "investigate_stale",
+      actionClass: "clear_recovery",
+      recoveryDetail: null
+    });
+    expect(payload["humanAction"]).toBeNull();
   });
 
   it("stuck risk: an idle run with no active step reports medium stuck risk and keeps polling", async () => {

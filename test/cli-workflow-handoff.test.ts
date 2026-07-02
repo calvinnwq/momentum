@@ -235,6 +235,58 @@ describe("momentum workflow handoff", () => {
     expect(payload.nextAction.recoveryDetail).toBeNull();
   });
 
+  it("labels run-level setup recovery in handoff next actions", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-handoff-runtime-recovery";
+    const db = openDb(dataDir);
+    try {
+      seedRunningRun(db, runId);
+      db.prepare(
+        `UPDATE workflow_runs
+         SET needs_manual_recovery = 1,
+             manual_recovery_reason = ?,
+             manual_recovery_at = ?
+         WHERE id = ?`
+      ).run(
+        "runtime_unavailable: wrapper config is missing for implementation",
+        Date.now(),
+        runId
+      );
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "handoff",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      monitor: {
+        nextAction: {
+          actionClass: string;
+          recoveryDetail: unknown;
+        };
+      };
+      nextAction: {
+        actionClass: string;
+        recoveryDetail: unknown;
+      };
+    };
+    expect(payload.monitor.nextAction).toMatchObject({
+      actionClass: "fix_setup_config_then_retry",
+      recoveryDetail: null
+    });
+    expect(payload.nextAction).toMatchObject({
+      actionClass: "fix_setup_config_then_retry",
+      recoveryDetail: null
+    });
+  });
+
   it("renders text output with schema-version and next-action lines", async () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);

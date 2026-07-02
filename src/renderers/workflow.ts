@@ -373,7 +373,10 @@ export function emitWorkflowStatusDetail(
     steps: detail.steps.map(workflowStepToJsonShape),
     approvals: detail.approvals.map(workflowApprovalToJsonShape),
     leases: detail.leases.map(workflowLeaseToJsonShape),
-    monitor: workflowMonitorToJsonShape(detail.monitor),
+    monitor: workflowMonitorToJsonShape(
+      detail.monitor,
+      workflowActionClassContextForRun(detail.run, detail.gates)
+    ),
     evidence: detail.evidence.map(workflowEvidenceToJsonShape),
     gates: detail.gates.map(workflowGateToJsonShape)
   };
@@ -868,6 +871,12 @@ export const WORKFLOW_OPERATOR_ACTION_CLASSES = [
 export type WorkflowOperatorActionClass =
   (typeof WORKFLOW_OPERATOR_ACTION_CLASSES)[number];
 
+type WorkflowOperatorActionClassContext = {
+  manualRecoveryReason?: string | null;
+  needsManualRecovery?: boolean;
+  gates?: readonly { resolvedAt: number | null }[];
+};
+
 export function emitWorkflowRunWatch(
   parsed: { json: boolean },
   io: CliIo,
@@ -1178,28 +1187,13 @@ function buildWorkflowWatchNextAction(envelope: WorkflowMonitorEnvelope): {
 
 function workflowOperatorActionClassForMonitor(
   monitor: WorkflowMonitorState | WorkflowMonitorEnvelope,
-  options: {
-    manualRecoveryReason?: string | null;
-    needsManualRecovery?: boolean;
-  } = {}
+  options: WorkflowOperatorActionClassContext = {}
 ): WorkflowOperatorActionClass {
   if (isSetupConfigRecoveryReason(options.manualRecoveryReason ?? null)) {
     return "fix_setup_config_then_retry";
   }
-  if (options.needsManualRecovery) {
-    return "clear_recovery";
-  }
   if (monitor.terminal && monitor.nextAction.code === "no_action") {
     return "stop_monitoring";
-  }
-  if (monitor.nextAction.code === "await_approval") {
-    return "approve_next_gate";
-  }
-  if (
-    monitor.nextAction.code === "resume_running" ||
-    monitor.nextAction.code === "advance_to_step"
-  ) {
-    return "continue_polling";
   }
   if (
     monitor.recovery?.code === "failed_external_side_effect_step" ||
@@ -1216,6 +1210,24 @@ function workflowOperatorActionClassForMonitor(
   ) {
     return "reconcile_deterministic_evidence";
   }
+  if (monitor.nextAction.code === "investigate_stale") {
+    return "clear_recovery";
+  }
+  if (options.needsManualRecovery) {
+    return "clear_recovery";
+  }
+  if (workflowMonitorHasOpenGate(monitor, options)) {
+    return "resolve_gate";
+  }
+  if (monitor.nextAction.code === "await_approval") {
+    return "approve_next_gate";
+  }
+  if (
+    monitor.nextAction.code === "resume_running" ||
+    monitor.nextAction.code === "advance_to_step"
+  ) {
+    return "continue_polling";
+  }
   if (monitor.nextAction.code === "clear_recovery") {
     return "clear_recovery";
   }
@@ -1223,6 +1235,16 @@ function workflowOperatorActionClassForMonitor(
     return "retry_failed_step";
   }
   return "continue_polling";
+}
+
+function workflowMonitorHasOpenGate(
+  monitor: WorkflowMonitorState | WorkflowMonitorEnvelope,
+  options: WorkflowOperatorActionClassContext
+): boolean {
+  const gates =
+    options.gates ??
+    ("gates" in monitor ? monitor.gates : ([] as readonly { resolvedAt: number | null }[]));
+  return gates.some((gate) => gate.resolvedAt === null);
 }
 
 function workflowRecoveryDetailForMonitor(
@@ -1350,10 +1372,22 @@ export function emitWorkflowHandoff(
     steps: envelope.detail.steps.map(workflowStepToJsonShape),
     approvals: envelope.detail.approvals.map(workflowApprovalToJsonShape),
     leases: envelope.detail.leases.map(workflowLeaseToJsonShape),
-    monitor: workflowMonitorToJsonShape(envelope.detail.monitor),
+    monitor: workflowMonitorToJsonShape(
+      envelope.detail.monitor,
+      workflowActionClassContextForRun(
+        envelope.detail.run,
+        envelope.detail.gates
+      )
+    ),
     evidence: envelope.detail.evidence.map(workflowEvidenceToJsonShape),
     gates: envelope.detail.gates.map(workflowGateToJsonShape),
-    nextAction: nextActionToJsonShape(envelope.detail.monitor)
+    nextAction: nextActionToJsonShape(
+      envelope.detail.monitor,
+      workflowActionClassContextForRun(
+        envelope.detail.run,
+        envelope.detail.gates
+      )
+    )
   };
 
   if (parsed.json) {
@@ -1389,11 +1423,23 @@ export function emitWorkflowRunLogs(
     steps: envelope.detail.steps.map(workflowStepToJsonShape),
     approvals: envelope.detail.approvals.map(workflowApprovalToJsonShape),
     leases: envelope.detail.leases.map(workflowLeaseToJsonShape),
-    monitor: workflowMonitorToJsonShape(envelope.detail.monitor),
+    monitor: workflowMonitorToJsonShape(
+      envelope.detail.monitor,
+      workflowActionClassContextForRun(
+        envelope.detail.run,
+        envelope.detail.gates
+      )
+    ),
     evidence: envelope.detail.evidence.map(workflowEvidenceToJsonShape),
     gates: envelope.detail.gates.map(workflowGateToJsonShape),
     rounds: envelope.rounds.map(workflowRoundToJsonShape),
-    nextAction: nextActionToJsonShape(envelope.detail.monitor)
+    nextAction: nextActionToJsonShape(
+      envelope.detail.monitor,
+      workflowActionClassContextForRun(
+        envelope.detail.run,
+        envelope.detail.gates
+      )
+    )
   };
 
   if (parsed.json) {
@@ -1597,7 +1643,10 @@ export function summaryToJsonShape(
       approvals: summary.counts.approvals,
       leases: summary.counts.leases
     },
-    monitor: workflowMonitorToJsonShape(summary.monitor)
+    monitor: workflowMonitorToJsonShape(
+      summary.monitor,
+      workflowActionClassContextForRun(summary.run)
+    )
   };
 }
 
@@ -1624,6 +1673,20 @@ export function workflowRunToJsonShape(run: WorkflowRunRow): Record<string, unkn
     createdAt: run.createdAt,
     updatedAt: run.updatedAt
   };
+}
+
+function workflowActionClassContextForRun(
+  run: Pick<WorkflowRunRow, "manualRecoveryReason" | "needsManualRecovery">,
+  gates?: readonly WorkflowGateRecord[]
+): WorkflowOperatorActionClassContext {
+  const context: WorkflowOperatorActionClassContext = {
+    manualRecoveryReason: run.manualRecoveryReason,
+    needsManualRecovery: run.needsManualRecovery
+  };
+  if (gates !== undefined) {
+    context.gates = gates;
+  }
+  return context;
 }
 
 export function workflowStepToJsonShape(
@@ -1682,7 +1745,8 @@ export function workflowLeaseToJsonShape(
 }
 
 export function workflowMonitorToJsonShape(
-  monitor: WorkflowMonitorState
+  monitor: WorkflowMonitorState,
+  options: WorkflowOperatorActionClassContext = {}
 ): Record<string, unknown> {
   return {
     runId: monitor.runId,
@@ -1723,7 +1787,7 @@ export function workflowMonitorToJsonShape(
           reason: monitor.monitorDrift.reason
         }
       : null,
-    nextAction: nextActionToJsonShape(monitor),
+    nextAction: nextActionToJsonShape(monitor, options),
     needsRecoveryArtifact: monitor.needsRecoveryArtifact,
     recovery: monitor.recovery
       ? {
@@ -1736,14 +1800,15 @@ export function workflowMonitorToJsonShape(
 }
 
 export function nextActionToJsonShape(
-  monitor: WorkflowMonitorState
+  monitor: WorkflowMonitorState,
+  options: WorkflowOperatorActionClassContext = {}
 ): Record<string, unknown> {
   return {
     code: monitor.nextAction.code,
     stepId: monitor.nextAction.stepId,
     leaseKind: monitor.nextAction.leaseKind,
     detail: monitor.nextAction.detail,
-    actionClass: workflowOperatorActionClassForMonitor(monitor),
+    actionClass: workflowOperatorActionClassForMonitor(monitor, options),
     recoveryDetail: workflowRecoveryDetailForMonitor(monitor)
   };
 }
