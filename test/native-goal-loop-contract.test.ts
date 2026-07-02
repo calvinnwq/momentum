@@ -136,6 +136,9 @@ describe("native goal-loop contract docs", () => {
     expect(spec).toContain(
       "The `momentum.native-goal-loop.round-result.v1` fixture is a post-finalization evidence projection"
     );
+    expect(spec).toContain(
+      "Its required JSON fields are `schema`, `summary`, `keyChanges`, `learnings`, `completionRecommendation`, `verificationResult`, `artifacts`, `checkpoints`, `changedFiles`, `commitSha`, `recoveryReason`, and `remainingWork`."
+    );
   });
 
   it("documents commit/reset and resume semantics from Momentum-owned durable state", () => {
