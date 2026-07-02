@@ -1,3 +1,11 @@
+/**
+ * Pure decision model for the side-effecting merge-cleanup tail step.
+ *
+ * The live wrapper owns this lifecycle locally so workflow-level structural
+ * preflight stays free of network/auth checks while the GitHub mutation path
+ * still fails closed until auth, durable target identity, live PR readback, and
+ * safe apply conditions all agree.
+ */
 export type MergeCleanupLifecyclePhase = "preflight" | "apply" | "reconcile";
 
 export type MergeCleanupLifecycleAction =
@@ -60,6 +68,14 @@ export type MergeCleanupLifecyclePlan = {
 
 const SHA_RE = /^[0-9a-f]{40}$/i;
 
+/**
+ * Classify the current merge-cleanup state before the wrapper may mutate
+ * GitHub.
+ *
+ * Only an open, non-draft, mergeable PR at the expected head and cleanup branch
+ * enters the `apply` phase. Already-applied states return reconciliation
+ * guidance instead of permitting a second merge or branch cleanup.
+ */
 export function planMergeCleanupLifecycle(
   input: MergeCleanupLifecycleInput
 ): MergeCleanupLifecyclePlan {
@@ -120,6 +136,7 @@ export function planMergeCleanupLifecycle(
   return plan("apply", "open_safe_merge", "merge_and_cleanup", true, evidenceBase);
 }
 
+/** Validate the durable merge-cleanup target identity supplied by the wrapper config. */
 export function isValidMergeCleanupTarget(
   target: MergeCleanupTargetIdentity | null | undefined
 ): target is MergeCleanupTargetIdentity {

@@ -229,6 +229,26 @@ For example, this command block is valid:
 }
 ```
 
+For `merge-cleanup`, include the target block that the wrapper will verify against GitHub before it runs the merge command:
+
+```json
+{
+  "steps": {
+    "merge-cleanup": {
+      "command": "/usr/bin/env",
+      "args": ["sh", "-c", "merge-and-cleanup"],
+      "cwd": "repo",
+      "env_allow": ["PATH", "GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR"],
+      "merge_cleanup": {
+        "pull_request_id": "123",
+        "expected_head_sha": "0123456789abcdef0123456789abcdef01234567",
+        "cleanup_branch": "feat/example"
+      }
+    }
+  }
+}
+```
+
 If the config has `envAllow`, `timeoutSec`, or `resultFile`, the wrapper returns a
 setup failure in the form `Unknown key "..." in steps.<step>; replace with "..."
 to use the required snake_case schema`, and no child process is spawned.

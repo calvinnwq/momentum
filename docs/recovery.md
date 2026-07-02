@@ -155,10 +155,10 @@ configured live-wrapper dispatch lane uses the same surface when the wrapper is
 unconfigured for the claimed step kind, the step's repo/run directory cannot be
 derived, the run directory cannot be created, or a live wrapper returns a
 process-level failure such as `runtime_unavailable`, including `merge-cleanup`
-GitHub auth preflight failure before the wrapper command is spawned. If
-the claimed run row has vanished, Momentum cannot write a run-scoped flag or
-gate without orphaning evidence, so it releases the lingering dispatch lease
-only. Stale `manual-recovery-required` workflow leases use the same surface;
+auth, target, PR readback, head mismatch, or unsafe-state preflight refusal
+before the wrapper command is spawned.
+If the claimed run row has vanished, Momentum cannot write a run-scoped flag or gate without orphaning evidence, so it releases the lingering dispatch lease only.
+Stale `manual-recovery-required` workflow leases use the same surface;
 stale `auto-release` workflow leases are usually released, but a stale running
 dispatch without terminal evidence is parked for manual recovery before release.
 
@@ -189,11 +189,10 @@ to refuse until that lease condition is resolved.
 
 When a dispatched `no-mistakes` or `merge-cleanup` live-wrapper attempt failed
 before clean runner evidence existed because the wrapper/build path was stale or
-unavailable, or because `merge-cleanup` lacked explicit GitHub auth in the
-live-wrapper environment, `workflow run clear-recovery` prepares the step for a
-scheduler retry after the operator repairs the environment. The clear output includes
-`retryPrepared`; the previous failed executor round remains durable, and an
-already-terminal successful step is only reattached/reconciled, not rerun.
+unavailable, or because `merge-cleanup` refused before apply on auth, target,
+PR-state readback, expected-head, cleanup-branch, or mergeability checks,
+`workflow run clear-recovery` prepares the step for a scheduler retry after the operator repairs the environment or target state.
+The clear output includes `retryPrepared`; the previous failed executor round remains durable, and an already-terminal successful step is only reattached/reconciled, not rerun.
 Before the step row is reopened for retry, Momentum preserves the previous `step_started` or `step_failed` transition as a workflow event so cursor replay does not lose the overwritten state.
 For `no-mistakes`, the coding-workflow wrapper also parks known external runner
 lifecycle failures in this same retryable recovery lane: missing branch-start /
@@ -226,7 +225,7 @@ Before running `workflow run clear-recovery <run-id> --evidence-pointer <ref>` f
 1. Confirm the pull request state on the hosting service (GitHub, etc.) first: check whether the PR is merged, closed, or still open.
 2. Treat the PR merge or close state as canonical, because a successful merge can legitimately delete the remote branch.
 3. If the PR is still open, confirm its current head SHA matches the run's `merge_cleanup.expected_head_sha`; a moved head is stale evidence and must be resolved before retry.
-4. If the PR is still open or the host still lists a head branch, confirm the current remote branch ref with `git -C <repo> ls-remote --heads origin <branch>`.
+4. If the PR is still open or the host still lists a head branch, confirm the current cleanup branch ref with `git -C <repo> ls-remote --heads origin <merge_cleanup.cleanup_branch>`.
 5. If the PR is merged, use a GitHub PR URL as the evidence pointer: `github://pulls/<number>#merged` or the HTTPS URL.
 6. If the PR is not merged and no remote branch or PR update exists, the tail step failed cleanly before any external write; treat it like a retryable failure rather than a reconciliation.
 7. Do not re-run `merge-cleanup` if the PR is already merged; that would attempt to push and merge again.
