@@ -77,11 +77,10 @@ export function planLinearRefreshLifecycle(
     );
   }
 
+  const currentAppliedPlan = planCurrentAppliedEvidence(input, issueScopeIdentifier);
+  if (currentAppliedPlan !== null) return currentAppliedPlan;
+
   const pendingStatusIntents = input.pendingIntents.filter(isStatusUpdateIntent);
-  if (pendingStatusIntents.length === 0) {
-    const currentAppliedPlan = planCurrentAppliedEvidence(input, issueScopeIdentifier);
-    if (currentAppliedPlan !== null) return currentAppliedPlan;
-  }
 
   if (input.intentApplyPolicy !== "external_apply_allowed") {
     return plan(
@@ -141,9 +140,6 @@ export function planLinearRefreshAlreadyAppliedReconciliation(
 ): LinearRefreshLifecyclePlan | null {
   const issueScopeIdentifier = input.issueScopeIdentifier?.trim() || null;
   if (issueScopeIdentifier === null) return null;
-
-  const pendingStatusIntents = input.pendingIntents.filter(isStatusUpdateIntent);
-  if (pendingStatusIntents.length > 0) return null;
 
   return planCurrentAppliedEvidence(input, issueScopeIdentifier);
 }

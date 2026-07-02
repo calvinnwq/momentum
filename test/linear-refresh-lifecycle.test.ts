@@ -5,6 +5,7 @@ import type { IntentApplyAudit } from "../src/core/intent/apply-audits.js";
 import type { UpdateIntent } from "../src/core/intent/update-intents.js";
 import type { SourceItem } from "../src/core/source/items.js";
 import {
+  planLinearRefreshAlreadyAppliedReconciliation,
   planLinearRefreshLifecycle
 } from "../src/core/workflow/dispatch/linear-refresh-lifecycle.js";
 
@@ -360,6 +361,51 @@ describe("linear-refresh lifecycle planner", () => {
           ],
           [currentApplied.id, audit(currentApplied)]
         ])
+      })
+    );
+
+    expect(plan).toMatchObject({
+      phase: "reconcile",
+      status: "already_applied",
+      action: "reconcile_already_applied",
+      safeToMutate: false
+    });
+    expect(plan.evidence).toMatchObject({
+      intentId: INTENT_ID,
+      auditId: "audit_565"
+    });
+  });
+
+  it("reconciles current already-applied audit evidence before stale pending intents", () => {
+    const stalePending = intent({
+      id: "intent_stale_pending",
+      idempotencyKey: "linear:NGX-565:status_update:stale",
+      payload: { state: "In Review" }
+    });
+    const currentApplied = intent({ status: "applied", appliedAt: 2 });
+    const appliedEvidence = {
+      issueScopeIdentifier: ISSUE_SCOPE,
+      pendingIntents: [stalePending],
+      appliedIntents: [currentApplied],
+      sourceItemsById: sources(source()),
+      latestAuditsByIntentId: new Map([[currentApplied.id, audit(currentApplied)]]),
+      expectedOperatorReason: EXPECTED_OPERATOR_REASON
+    };
+
+    expect(
+      planLinearRefreshAlreadyAppliedReconciliation(appliedEvidence)
+    ).toMatchObject({
+      phase: "reconcile",
+      status: "already_applied",
+      action: "reconcile_already_applied",
+      safeToMutate: false
+    });
+
+    const plan = planLinearRefreshLifecycle(
+      baseInput({
+        pendingIntents: [stalePending],
+        appliedIntents: [currentApplied],
+        latestAuditsByIntentId: new Map([[currentApplied.id, audit(currentApplied)]])
       })
     );
 
