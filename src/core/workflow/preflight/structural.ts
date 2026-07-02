@@ -5,6 +5,10 @@ import {
   type CodingRouteConfigRefusal,
   type CodingStepRouteOverrides
 } from "../route/coding.js";
+import {
+  parseCodingWorkflowWrapperConfig,
+  type CodingWorkflowWrapperConfig
+} from "../live-wrapper/coding-workflow.js";
 
 export const STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS = [
   "checkId",
@@ -38,7 +42,24 @@ export type CodingWorkflowRouteStepsPreflightResult =
       evidence: readonly [StructuralPreflightEvidence];
     };
 
+export type CodingWorkflowWrapperConfigPreflightResult =
+  | {
+      ok: true;
+      config: CodingWorkflowWrapperConfig;
+      evidence: readonly [StructuralPreflightEvidence];
+    }
+  | {
+      ok: false;
+      evidence: readonly [StructuralPreflightEvidence];
+    };
+
 const ROUTE_STEPS_CHECK_ID = "route.steps";
+const WRAPPER_CONFIG_CHECK_ID = "wrapper.config";
+const WRAPPER_CONFIG_CAMEL_CASE_KEYS: Readonly<Record<string, string>> = {
+  envAllow: "env_allow",
+  resultFile: "result_file",
+  timeoutSec: "timeout_sec"
+};
 
 export function preflightCodingWorkflowRouteSteps(
   value: unknown
@@ -78,6 +99,46 @@ export function preflightCodingWorkflowRouteSteps(
   };
 }
 
+export function preflightCodingWorkflowWrapperConfig(
+  value: unknown,
+  source?: string
+): CodingWorkflowWrapperConfigPreflightResult {
+  const parsed = parseCodingWorkflowWrapperConfig(value, source);
+  if (parsed.ok) {
+    return {
+      ok: true,
+      config: parsed.config,
+      evidence: [
+        buildStructuralPreflightEvidence({
+          checkId: WRAPPER_CONFIG_CHECK_ID,
+          status: "passed",
+          severity: "info",
+          path: "wrapper.config",
+          key: "steps",
+          message: "Coding workflow wrapper config is structurally valid.",
+          recommendedAction: "No action required."
+        })
+      ]
+    };
+  }
+
+  const location = locateWrapperConfigFailure(value);
+  return {
+    ok: false,
+    evidence: [
+      buildStructuralPreflightEvidence({
+        checkId: WRAPPER_CONFIG_CHECK_ID,
+        status: "failed",
+        severity: "error",
+        path: location.path,
+        key: location.key,
+        message: parsed.error,
+        recommendedAction: location.recommendedAction
+      })
+    ]
+  };
+}
+
 function buildStructuralPreflightEvidence(
   evidence: StructuralPreflightEvidence
 ): StructuralPreflightEvidence {
@@ -90,6 +151,49 @@ function buildStructuralPreflightEvidence(
     message: evidence.message,
     recommendedAction: evidence.recommendedAction
   };
+}
+
+type WrapperConfigFailureLocation = {
+  path: string;
+  key: string;
+  recommendedAction: string;
+};
+
+function locateWrapperConfigFailure(value: unknown): WrapperConfigFailureLocation {
+  const casingDrift = locateWrapperConfigCasingDrift(value);
+  if (casingDrift !== undefined) return casingDrift;
+  return {
+    path: "wrapper.config",
+    key: "config",
+    recommendedAction:
+      "Update the coding workflow wrapper config to match the supported structural schema."
+  };
+}
+
+function locateWrapperConfigCasingDrift(
+  value: unknown
+): WrapperConfigFailureLocation | undefined {
+  if (!isRecord(value)) return undefined;
+  const steps = value["steps"];
+  if (!isRecord(steps)) return undefined;
+
+  for (const [stepKind, rawStep] of Object.entries(steps)) {
+    if (!isRecord(rawStep)) continue;
+    for (const [actual, expected] of Object.entries(WRAPPER_CONFIG_CAMEL_CASE_KEYS)) {
+      if (Object.prototype.hasOwnProperty.call(rawStep, actual)) {
+        return {
+          path: `wrapper.config.steps.${stepKind}.${actual}`,
+          key: actual,
+          recommendedAction: `Replace "${actual}" with "${expected}".`
+        };
+      }
+    }
+  }
+  return undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function normalizeRouteStepsPath(path: string | undefined): string {
