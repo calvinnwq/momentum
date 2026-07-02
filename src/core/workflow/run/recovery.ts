@@ -557,7 +557,8 @@ function reconcileInterruptedNoMistakesStepForRecoveryClear(
       );
     if (deterministicEvidence === undefined) return undefined;
     const expected = loadNoMistakesEvidenceExpectedIdentity(db, {
-      runId: input.runId
+      runId: input.runId,
+      stepId: input.stepId
     });
     if (expected === undefined) return undefined;
     const classified = classifyNoMistakesDeterministicEvidence(
@@ -675,17 +676,131 @@ function pointerToReadableEvidencePath(pointer: string): string | null {
 
 function loadNoMistakesEvidenceExpectedIdentity(
   db: MomentumDb,
-  input: { runId: string }
+  input: { runId: string; stepId: string }
 ): NoMistakesEvidenceExpectedIdentity | undefined {
   const row = db
     .prepare("SELECT issue_scope_json FROM workflow_runs WHERE id = ?")
     .get(input.runId) as { issue_scope_json: string | null } | undefined;
   if (row === undefined) return undefined;
+  const checkpoint = loadCurrentNoMistakesCheckpointIdentity(db, input);
+  if (checkpoint === null) return undefined;
   const issueScope = parseIssueScopeIdentifiers(row.issue_scope_json);
   return {
     workflowRunId: input.runId,
-    ...(issueScope.length > 0 ? { issueScope } : {})
+    ...(issueScope.length > 0 ? { issueScope } : {}),
+    branch: {
+      name: checkpoint.branch,
+      headSha: checkpoint.headSha
+    },
+    ...(checkpoint.pullRequestId !== undefined
+      ? {
+          pullRequest: {
+            id: checkpoint.pullRequestId,
+            headSha: checkpoint.headSha
+          }
+        }
+      : {}),
+    noMistakesRunId: checkpoint.noMistakesRunId
   };
+}
+
+type NoMistakesCheckpointIdentity = {
+  noMistakesRunId: string;
+  branch: string;
+  headSha: string;
+  pullRequestId?: string;
+};
+
+const NO_MISTAKES_CHECKPOINT_SHA_RE = /^[0-9a-f]{40}$/i;
+
+function loadCurrentNoMistakesCheckpointIdentity(
+  db: MomentumDb,
+  input: { runId: string; stepId: string }
+): NoMistakesCheckpointIdentity | null {
+  const rows = db
+    .prepare(
+      `SELECT c.stage AS stage, c.detail AS detail
+         FROM executor_rounds AS r
+         JOIN executor_checkpoints AS c ON c.round_id = r.round_id
+        WHERE r.workflow_run_id = ?
+          AND r.step_run_id = ?
+          AND r.executor_family = 'no-mistakes'
+          AND c.stage IN ('external_state_mirrored', 'expected_external_identity')
+        ORDER BY r.attempt DESC, r.round_index DESC,
+                 CASE c.stage WHEN 'external_state_mirrored' THEN 0 ELSE 1 END,
+                 c.sequence ASC`
+    )
+    .all(input.runId, input.stepId) as { stage: string; detail: string | null }[];
+  for (const row of rows) {
+    const identity = parseNoMistakesCheckpointIdentity(row.detail);
+    if (identity !== null) return identity;
+  }
+  return null;
+}
+
+function parseNoMistakesCheckpointIdentity(
+  detail: string | null
+): NoMistakesCheckpointIdentity | null {
+  if (detail === null) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(detail);
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return null;
+  }
+  const record = parsed as Record<string, unknown>;
+  const noMistakesRunId = readNonBlankCheckpointString(record, "externalRunId");
+  const branch = readNonBlankCheckpointString(record, "branch");
+  const headSha = readCheckpointSha(record, "headSha");
+  if (noMistakesRunId === null || branch === null || headSha === null) {
+    return null;
+  }
+  const explicitPullRequestId = readNonBlankCheckpointString(
+    record,
+    "pullRequestId"
+  );
+  const pullRequestId =
+    explicitPullRequestId ?? pullRequestIdFromCheckpointUrl(record["prUrl"]);
+  return {
+    noMistakesRunId,
+    branch,
+    headSha,
+    ...(pullRequestId !== null ? { pullRequestId } : {})
+  };
+}
+
+function readNonBlankCheckpointString(
+  record: Record<string, unknown>,
+  key: string
+): string | null {
+  const value = record[key];
+  if (typeof value !== "string" || value.trim().length === 0) return null;
+  return value.trim();
+}
+
+function readCheckpointSha(
+  record: Record<string, unknown>,
+  key: string
+): string | null {
+  const value = readNonBlankCheckpointString(record, key);
+  if (value === null || !NO_MISTAKES_CHECKPOINT_SHA_RE.test(value)) return null;
+  return value.toLowerCase();
+}
+
+function pullRequestIdFromCheckpointUrl(value: unknown): string | null {
+  if (typeof value !== "string" || value.trim().length === 0) return null;
+  const trimmed = value.trim();
+  try {
+    const parts = new URL(trimmed).pathname.split("/").filter(Boolean);
+    const pullIndex = parts.indexOf("pull");
+    return pullIndex >= 0 ? parts[pullIndex + 1]?.trim() || null : null;
+  } catch {
+    const match = /(?:^|\/)pull\/([^/#?]+)/.exec(trimmed);
+    return match?.[1]?.trim() || null;
+  }
 }
 
 function parseIssueScopeIdentifiers(value: string | null): string[] {

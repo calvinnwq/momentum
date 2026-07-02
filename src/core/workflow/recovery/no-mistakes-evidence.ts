@@ -172,6 +172,15 @@ export function classifyNoMistakesDeterministicEvidence(
       `evidence no-mistakes run ${evidence.noMistakes.runId} does not match ${expected.noMistakesRunId}`
     );
   }
+  if (
+    evidence.pullRequest !== null &&
+    evidence.pullRequest.headSha !== evidence.branch.headSha
+  ) {
+    return refusal(
+      "pull_request_mismatch",
+      "evidence pull request head SHA does not match branch head SHA"
+    );
+  }
 
   if (evidence.noMistakes.outcome !== "checks-passed" && evidence.noMistakes.outcome !== "passed") {
     return refusal(
@@ -190,14 +199,15 @@ export function classifyNoMistakesDeterministicEvidence(
   }
   if (
     evidence.pullRequest !== null &&
-    (evidence.pullRequest.draft ||
+    (evidence.pullRequest.state === "closed" ||
+      evidence.pullRequest.draft ||
       evidence.pullRequest.checks === "failed" ||
       evidence.pullRequest.checks === "pending" ||
       evidence.pullRequest.checks === "unknown")
   ) {
     return refusal(
       "failed_or_pending_checks",
-      "evidence pull request is draft or checks are not passed/absent"
+      "evidence pull request is closed, draft, or checks are not passed/absent"
     );
   }
 

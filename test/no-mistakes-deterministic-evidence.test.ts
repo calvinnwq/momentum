@@ -98,6 +98,38 @@ describe("classifyNoMistakesDeterministicEvidence", () => {
     });
   });
 
+  it("refuses closed pull request evidence", () => {
+    const evidence = fixture("no-mistakes-evidence-clean-success.json") as {
+      pullRequest: { state: string };
+    };
+    evidence.pullRequest.state = "closed";
+
+    const out = classifyNoMistakesDeterministicEvidence(evidence, EXPECTED);
+
+    expect(out).toMatchObject({
+      ok: false,
+      reason: "failed_or_pending_checks"
+    });
+  });
+
+  it("refuses internally mismatched pull request head evidence", () => {
+    const evidence = fixture("no-mistakes-evidence-clean-success.json") as {
+      pullRequest: { headSha: string };
+    };
+    evidence.pullRequest.headSha = "2222222222222222222222222222222222222222";
+
+    const { pullRequest: _pullRequest, ...expectedWithoutPullRequest } = EXPECTED;
+    const out = classifyNoMistakesDeterministicEvidence(
+      evidence,
+      expectedWithoutPullRequest
+    );
+
+    expect(out).toMatchObject({
+      ok: false,
+      reason: "pull_request_mismatch"
+    });
+  });
+
   it("refuses malformed or unknown-version evidence", () => {
     const out = classifyNoMistakesDeterministicEvidence(
       fixture("no-mistakes-evidence-unknown-schema.json"),

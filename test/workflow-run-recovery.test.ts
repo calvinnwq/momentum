@@ -86,6 +86,80 @@ function seedStep(
   );
 }
 
+function seedNoMistakesCheckpoint(
+  db: MomentumDb,
+  runId: string,
+  stepId: string,
+  options: {
+    noMistakesRunId?: string;
+    branch?: string;
+    headSha?: string;
+    prUrl?: string | null;
+    at?: number;
+  } = {}
+): void {
+  const at = options.at ?? 1_730_000_000_000;
+  const invocationId = `${runId}::${stepId}::dispatch`;
+  const roundId = `${invocationId}::round-0`;
+  db.prepare(
+    `INSERT INTO executor_invocations (
+       invocation_id, workflow_run_id, step_run_id, step_key, executor_family,
+       state, attempt, started_at, heartbeat_at, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    invocationId,
+    runId,
+    stepId,
+    stepId,
+    "no-mistakes",
+    "running",
+    1,
+    at,
+    at,
+    at,
+    at
+  );
+  db.prepare(
+    `INSERT INTO executor_rounds (
+       round_id, invocation_id, workflow_run_id, step_run_id, step_key,
+       executor_family, attempt, round_index, state, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    roundId,
+    invocationId,
+    runId,
+    stepId,
+    stepId,
+    "no-mistakes",
+    1,
+    0,
+    "mirroring_external_state",
+    at,
+    at
+  );
+  db.prepare(
+    `INSERT INTO executor_checkpoints (
+       checkpoint_id, round_id, sequence, stage, detail, created_at
+     ) VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(
+    `${roundId}::checkpoint-0`,
+    roundId,
+    0,
+    "external_state_mirrored",
+    JSON.stringify({
+      externalRunId: options.noMistakesRunId ?? "01KWHNGX561PASS000000000000",
+      branch:
+        options.branch ?? "feat/ngx-561-deterministic-no-mistakes-evidence",
+      headSha: options.headSha ?? "1111111111111111111111111111111111111111",
+      activeStep: null,
+      stepStatus: "completed",
+      prUrl: options.prUrl ?? "https://github.com/acme/momentum/pull/193",
+      ciState: "passed"
+    }),
+    at
+  );
+}
+
 function readRunRow(
   db: MomentumDb,
   id: string
@@ -652,6 +726,7 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
         kind: "no-mistakes",
         order: 3
       });
+      seedNoMistakesCheckpoint(db, "run-ngx-561", "no-mistakes");
 
       const evidence = JSON.parse(
         fs.readFileSync(
@@ -727,12 +802,56 @@ describe("clearWorkflowRunManualRecoveryGuarded", () => {
         kind: "no-mistakes",
         order: 3
       });
+      seedNoMistakesCheckpoint(db, "run-ngx-561", "no-mistakes");
 
       const evidence = JSON.parse(
         fs.readFileSync(
           path.join(
             process.cwd(),
             "test/fixtures/no-mistakes-evidence-missing-test-phase.json"
+          ),
+          "utf8"
+        )
+      ) as unknown;
+      const out = clearWorkflowRunManualRecoveryGuarded(db, {
+        runId: "run-ngx-561",
+        now: 1_730_000_900_000,
+        successfulNoMistakesEvidencePointer:
+          ".agent-workflows/run-ngx-561/no-mistakes-evidence.json",
+        successfulNoMistakesEvidence: evidence
+      });
+
+      expect(out.ok).toBe(false);
+      if (out.ok) throw new Error("expected refusal");
+      expect(out.reason).toBe("recovery_clear_refused");
+      const step = db
+        .prepare("SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = ?")
+        .get("run-ngx-561", "no-mistakes") as { state: string };
+      expect(step.state).toBe("failed");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps no-mistakes blocked when deterministic evidence mismatches the durable no-mistakes checkpoint", () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRunWithState(db, "run-ngx-561", "failed", {
+        finishedAt: 1_730_000_800_000,
+        issueScope: { identifiers: ["NGX-561"] }
+      });
+      seedStep(db, "run-ngx-561", "no-mistakes", "failed", {
+        kind: "no-mistakes",
+        order: 3
+      });
+      seedNoMistakesCheckpoint(db, "run-ngx-561", "no-mistakes");
+
+      const evidence = JSON.parse(
+        fs.readFileSync(
+          path.join(
+            process.cwd(),
+            "test/fixtures/no-mistakes-evidence-stale-head.json"
           ),
           "utf8"
         )
