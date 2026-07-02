@@ -118,4 +118,92 @@ describe("coding workflow structural preflight", () => {
       STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS
     );
   });
+
+  it("refuses malformed env allowlists with field-level corrective evidence", () => {
+    const result = preflightCodingWorkflowWrapperConfig({
+      steps: {
+        preflight: {
+          command: "/bin/sh",
+          env_allow: "PATH"
+        }
+      }
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected failed preflight");
+    expect(result.evidence).toEqual([
+      {
+        checkId: "wrapper.config",
+        status: "failed",
+        severity: "error",
+        path: "wrapper.config.steps.preflight.env_allow",
+        key: "env_allow",
+        message: "Wrapper config `env_allow` must be an array of strings.",
+        recommendedAction:
+          "Set wrapper.config.steps.preflight.env_allow to an array of environment variable names."
+      }
+    ]);
+    expect(Object.keys(result.evidence[0])).toEqual(
+      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS
+    );
+  });
+
+  it("refuses unsafe result files with field-level corrective evidence", () => {
+    const result = preflightCodingWorkflowWrapperConfig({
+      steps: {
+        preflight: {
+          command: "/bin/sh",
+          result_file: "../result.json"
+        }
+      }
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected failed preflight");
+    expect(result.evidence).toEqual([
+      {
+        checkId: "wrapper.config",
+        status: "failed",
+        severity: "error",
+        path: "wrapper.config.steps.preflight.result_file",
+        key: "result_file",
+        message:
+          "Wrapper config `result_file` must be a relative path inside the iteration artifact directory.",
+        recommendedAction:
+          "Set wrapper.config.steps.preflight.result_file to a safe relative path inside the iteration artifact directory."
+      }
+    ]);
+    expect(Object.keys(result.evidence[0])).toEqual(
+      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS
+    );
+  });
+
+  it("refuses invalid timeout fields with field-level corrective evidence", () => {
+    const result = preflightCodingWorkflowWrapperConfig({
+      steps: {
+        preflight: {
+          command: "/bin/sh",
+          timeout_sec: 0
+        }
+      }
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected failed preflight");
+    expect(result.evidence).toEqual([
+      {
+        checkId: "wrapper.config",
+        status: "failed",
+        severity: "error",
+        path: "wrapper.config.steps.preflight.timeout_sec",
+        key: "timeout_sec",
+        message: "Wrapper config `timeout_sec` must be a positive integer.",
+        recommendedAction:
+          "Set wrapper.config.steps.preflight.timeout_sec to a positive integer number of seconds."
+      }
+    ]);
+    expect(Object.keys(result.evidence[0])).toEqual(
+      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS
+    );
+  });
 });

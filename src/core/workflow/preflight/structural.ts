@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import {
   CONFIGURABLE_CODING_STEP_KEYS,
   CODING_ROUTE_STEPS_KEY,
@@ -162,6 +164,8 @@ type WrapperConfigFailureLocation = {
 function locateWrapperConfigFailure(value: unknown): WrapperConfigFailureLocation {
   const casingDrift = locateWrapperConfigCasingDrift(value);
   if (casingDrift !== undefined) return casingDrift;
+  const fieldFailure = locateWrapperConfigFieldFailure(value);
+  if (fieldFailure !== undefined) return fieldFailure;
   return {
     path: "wrapper.config",
     key: "config",
@@ -190,6 +194,76 @@ function locateWrapperConfigCasingDrift(
     }
   }
   return undefined;
+}
+
+function locateWrapperConfigFieldFailure(
+  value: unknown
+): WrapperConfigFailureLocation | undefined {
+  if (!isRecord(value)) return undefined;
+  const steps = value["steps"];
+  if (!isRecord(steps)) return undefined;
+
+  for (const [stepKind, rawStep] of Object.entries(steps)) {
+    if (!isRecord(rawStep)) continue;
+    const basePath = `wrapper.config.steps.${stepKind}`;
+
+    if (
+      Object.prototype.hasOwnProperty.call(rawStep, "env_allow") &&
+      !isStringArray(rawStep["env_allow"])
+    ) {
+      return {
+        path: `${basePath}.env_allow`,
+        key: "env_allow",
+        recommendedAction: `Set ${basePath}.env_allow to an array of environment variable names.`
+      };
+    }
+
+    if (
+      Object.prototype.hasOwnProperty.call(rawStep, "result_file") &&
+      !isSafeWrapperResultFile(rawStep["result_file"])
+    ) {
+      return {
+        path: `${basePath}.result_file`,
+        key: "result_file",
+        recommendedAction: `Set ${basePath}.result_file to a safe relative path inside the iteration artifact directory.`
+      };
+    }
+
+    if (
+      Object.prototype.hasOwnProperty.call(rawStep, "timeout_sec") &&
+      !isPositiveInteger(rawStep["timeout_sec"])
+    ) {
+      return {
+        path: `${basePath}.timeout_sec`,
+        key: "timeout_sec",
+        recommendedAction: `Set ${basePath}.timeout_sec to a positive integer number of seconds.`
+      };
+    }
+  }
+
+  return undefined;
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function isSafeWrapperResultFile(value: unknown): value is string {
+  if (value === undefined || value === null) return true;
+  if (typeof value !== "string" || value.trim().length === 0) return false;
+  const trimmed = value.trim();
+  const normalized = path.posix.normalize(trimmed.replace(/\\/g, "/"));
+  return (
+    !path.isAbsolute(trimmed) &&
+    !path.win32.isAbsolute(trimmed) &&
+    !trimmed.split(/[\\/]+/u).includes("..") &&
+    normalized !== "." &&
+    normalized !== "./"
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
