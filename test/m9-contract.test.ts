@@ -10,7 +10,7 @@ import {
 import {
   WORKFLOW_LEASE_FRESHNESS_CLASSIFICATIONS,
   WORKFLOW_LEASE_STALE_POLICIES
-} from "../src/core/workflow/run-reducer.js";
+} from "../src/core/workflow/run/reducer.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "..");

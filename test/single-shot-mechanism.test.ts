@@ -6,20 +6,20 @@ import os from "node:os";
 import path from "node:path";
 
 import { waitMs } from "./helpers/process-kill-harness.js";
-import type { ExecutorRoundRecord } from "../src/core/executors/loop-reducer.js";
+import type { ExecutorRoundRecord } from "../src/core/executors/loop/reducer.js";
 import type { LiveWrapperConfig } from "../src/adapters/live-wrapper-registry.js";
-import type { RunnerResult } from "../src/core/executors/types.js";
+import type { RunnerResult } from "../src/core/executors/runner/types.js";
 import {
   createOneShotLiveWrapperRoundRunner,
   createScriptCommandRoundRunner
-} from "../src/core/executors/single-shot-mechanism.js";
+} from "../src/core/executors/single-shot/mechanism.js";
 
 const tempRoots: string[] = [];
 
 afterEach(() => {
   vi.restoreAllMocks();
   vi.doUnmock("../src/adapters/live-step-wrapper.js");
-  vi.doUnmock("../src/core/executors/live-step-finalize.js");
+  vi.doUnmock("../src/core/executors/live-step/finalize.js");
   vi.resetModules();
   while (tempRoots.length > 0) {
     const dir = tempRoots.pop();
@@ -708,7 +708,7 @@ describe("single-shot concrete mechanisms", () => {
       };
     });
     const { createScriptCommandRoundRunner: createMockedScriptCommandRoundRunner } =
-      await import("../src/core/executors/single-shot-mechanism.js");
+      await import("../src/core/executors/single-shot/mechanism.js");
     const mechanism = createMockedScriptCommandRoundRunner({
       command: "/bin/sh",
       args: ["-c", "printf 'unused'"],
@@ -837,9 +837,9 @@ describe("single-shot concrete mechanisms", () => {
   it("preserves reset_failed when commit-failure cleanup fails", async () => {
     const artifactRoot = makeTempDir();
     vi.resetModules();
-    vi.doMock("../src/core/executors/live-step-finalize.js", async (importOriginal) => {
+    vi.doMock("../src/core/executors/live-step/finalize.js", async (importOriginal) => {
       const actual =
-        await importOriginal<typeof import("../src/core/executors/live-step-finalize.js")>();
+        await importOriginal<typeof import("../src/core/executors/live-step/finalize.js")>();
       return {
         ...actual,
         finalizeLiveWorkflowStep: () => ({
@@ -859,7 +859,7 @@ describe("single-shot concrete mechanisms", () => {
       };
     });
     const { createScriptCommandRoundRunner: createMockedScriptCommandRoundRunner } =
-      await import("../src/core/executors/single-shot-mechanism.js");
+      await import("../src/core/executors/single-shot/mechanism.js");
     const { repoPath, baseHead } = initRepo();
     const mechanism = createMockedScriptCommandRoundRunner({
       command: "/bin/sh",

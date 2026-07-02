@@ -12,7 +12,7 @@ import {
   validateCodingStepRouteOverrides,
   writeCodingStepRouteOverrides,
   type CodingStepRouteOverrides
-} from "../src/core/workflow/coding-route-config.js";
+} from "../src/core/workflow/route/coding.js";
 
 /**
  * NGX-510 — native per-step coding route/config overrides. This is the pure

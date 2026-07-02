@@ -4,31 +4,31 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
-import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition.js";
-import { persistWorkflowDefinition } from "../src/core/workflow/definition-persist.js";
-import { persistWorkflowRunStart } from "../src/core/workflow/run-start-persist.js";
+import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition/definition.js";
+import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
+import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
 import {
   claimRunnableWorkflowStep,
   type ClaimedWorkflowStep
-} from "../src/core/workflow/scheduler.js";
+} from "../src/core/workflow/dispatch/scheduler.js";
 import { getWorkflowLease } from "../src/core/workflow/leases.js";
-import { listWorkflowGatesForRun } from "../src/core/workflow/gate-persist.js";
-import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run-recovery.js";
-import { getWorkflowStep } from "../src/core/workflow/step-transitions.js";
+import { listWorkflowGatesForRun } from "../src/core/workflow/gate/persist.js";
+import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run/recovery.js";
+import { getWorkflowStep } from "../src/core/workflow/step/transitions.js";
 import {
   listExecutorRoundsForInvocation,
   loadExecutorInvocation
-} from "../src/core/executors/loop-persist.js";
+} from "../src/core/executors/loop/persist.js";
 import {
   deriveDispatchInvocationId,
   executeWorkflowStepDispatch
-} from "../src/core/workflow/dispatch-execute.js";
-import { WORKFLOW_RECONCILE_RESULT_STATUS } from "../src/core/workflow/dispatch-reconcile-execute.js";
-import { WORKFLOW_EXECUTE_RECONCILE_STATUS } from "../src/core/workflow/dispatch-executor-run.js";
+} from "../src/core/workflow/dispatch/execute.js";
+import { WORKFLOW_RECONCILE_RESULT_STATUS } from "../src/core/workflow/dispatch/reconcile-execute.js";
+import { WORKFLOW_EXECUTE_RECONCILE_STATUS } from "../src/core/workflow/dispatch/executor-run.js";
 import {
   executeAndReconcileDispatchedExternalApplyStep,
   type DispatchedExternalApplyRunner
-} from "../src/core/workflow/dispatch-external-apply-run.js";
+} from "../src/core/workflow/dispatch/external-apply-run.js";
 import {
   executeExternalApply,
   LINEAR_API_KEY_ENV_VAR

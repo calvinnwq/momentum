@@ -9,7 +9,7 @@ import {
   insertWorkflowGate,
   loadWorkflowGate,
   type NewWorkflowGate
-} from "../src/core/workflow/gate-persist.js";
+} from "../src/core/workflow/gate/persist.js";
 
 type RunResult = {
   code: number;

@@ -38,7 +38,7 @@ import {
   type WorkflowLeaseKind,
   type WorkflowLeaseRecord,
   type WorkflowLeaseStalePolicy
-} from "./run-reducer.js";
+} from "./run/reducer.js";
 
 const LEASE_KIND_SET: ReadonlySet<string> = new Set(WORKFLOW_LEASE_KINDS);
 const STALE_POLICY_SET: ReadonlySet<string> = new Set(

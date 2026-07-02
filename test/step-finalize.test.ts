@@ -7,12 +7,12 @@ import { fileURLToPath } from "node:url";
 import {
   finalizeWorkflowStep,
   finalizeWorkflowStepFromResultFile
-} from "../src/core/executors/step-finalize.js";
+} from "../src/core/executors/shared/step-finalize.js";
 import {
   finalizeLiveWorkflowStep,
   finalizeLiveWorkflowStepFromResultFile
-} from "../src/core/executors/live-step-finalize.js";
-import type { CommitIntent } from "../src/core/executors/types.js";
+} from "../src/core/executors/live-step/finalize.js";
+import type { CommitIntent } from "../src/core/executors/runner/types.js";
 
 // Covers the NGX-494 shared finalization seam (`step-finalize.ts`), the
 // workflow/runtime-owned home the verify -> commit / reset transaction moved to
@@ -164,28 +164,28 @@ describe("goal-loop family finalization ownership boundary (NGX-494 AC #1)", () 
   // AC #1: the goal-loop executor no longer directly depends on the M9
   // live-wrapper finalization primitive as an ownership boundary. The goal-loop
   // family must reach the shared verify -> commit / reset transaction through the
-  // neutral `step-finalize.ts` seam, not through the M9-named
-  // `live-step-finalize.ts` back-compat alias. This guard locks the
+  // neutral `shared/step-finalize.ts` seam, not through the M9-named
+  // `live-step/finalize.ts` back-compat alias. This guard locks the
   // disentanglement so a later edit cannot silently re-couple the M10
   // executor-loop family to the M9 lane's module.
   const here = path.dirname(fileURLToPath(import.meta.url));
   const repoRoot = path.resolve(here, "..");
   const goalLoopFamily = [
-    "src/core/executors/goal-loop-mechanism.ts",
-    "src/core/executors/goal-loop-executor.ts",
-    "src/core/executors/goal-loop-orchestrator.ts"
+    "src/core/executors/goal-loop/mechanism.ts",
+    "src/core/executors/goal-loop/executor.ts",
+    "src/core/executors/goal-loop/orchestrator.ts"
   ];
 
   for (const relative of goalLoopFamily) {
-    it(`${relative} imports the finalization seam from step-finalize.ts, not the M9 alias`, () => {
+    it(`${relative} imports the finalization seam from shared/step-finalize.ts, not the M9 alias`, () => {
       const source = fs.readFileSync(path.join(repoRoot, relative), "utf8");
       expect(
-        source.includes('"./step-finalize.js"'),
-        `${relative} should import the finalization seam from "./step-finalize.js"`
+        source.includes('"../shared/step-finalize.js"'),
+        `${relative} should import the finalization seam from "../shared/step-finalize.js"`
       ).toBe(true);
       expect(
-        source.includes('"./live-step-finalize.js"'),
-        `${relative} must not import from the M9 "./live-step-finalize.js" alias as an ownership boundary`
+        source.includes('"../live-step/finalize.js"'),
+        `${relative} must not import from the M9 "../live-step/finalize.js" alias as an ownership boundary`
       ).toBe(false);
     });
   }

@@ -10,7 +10,7 @@ import {
   getWorkflowRunManualRecoveryState,
   isBlockingWorkflowRecoveryCode,
   markWorkflowRunNeedsManualRecovery
-} from "../src/core/workflow/run-recovery.js";
+} from "../src/core/workflow/run/recovery.js";
 
 const tempRoots: string[] = [];
 

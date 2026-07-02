@@ -8,12 +8,12 @@ import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
   insertWorkflowGate,
   resolveWorkflowGate
-} from "../src/core/workflow/gate-persist.js";
-import { parseWorkflowRunImport } from "../src/core/workflow/run-import.js";
-import { persistWorkflowRunImport } from "../src/core/workflow/run-import-persist.js";
+} from "../src/core/workflow/gate/persist.js";
+import { parseWorkflowRunImport } from "../src/core/workflow/run/import.js";
+import { persistWorkflowRunImport } from "../src/core/workflow/run/import-persist.js";
 import {
   MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE
-} from "../src/core/workflow/run-start.js";
+} from "../src/core/workflow/run/start.js";
 
 type RunResult = {
   code: number;

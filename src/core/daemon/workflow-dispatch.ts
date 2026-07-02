@@ -20,25 +20,25 @@ import { DEFAULT_DAEMON_STARTUP_RECOVERY_GRACE_MS } from "./loop.js";
 import {
   loadDispatchedStepRunProvenance,
   resolveDispatchedStepExecutorContext
-} from "../workflow/daemon-dispatch-exec-context.js";
+} from "../workflow/live-wrapper/daemon-exec-context.js";
 import {
   readDaemonLiveWrapperProfileSource,
   resolveDaemonLiveWrapperProfile,
   DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR
-} from "../workflow/daemon-live-wrapper-profile.js";
-import { resolveDaemonWorkflowDispatch as resolveDogfoodDaemonWorkflowDispatch } from "../workflow/dogfood-dispatch.js";
+} from "../workflow/live-wrapper/daemon-profile.js";
+import { resolveDaemonWorkflowDispatch as resolveDogfoodDaemonWorkflowDispatch } from "../workflow/dispatch/dogfood.js";
 import {
   createExternalApplyWorkflowDispatch,
   type DispatchedExternalApplyContextResolution
-} from "../workflow/external-apply-dispatch.js";
-import { createLiveWrapperWorkflowDispatch } from "../workflow/live-wrapper-dispatch.js";
-import { createSubworkflowWorkflowDispatch } from "../workflow/subworkflow-dispatch.js";
-import { deriveDispatchedSubworkflowContext } from "../workflow/subworkflow-dispatch-context.js";
-import { buildRealWorkflowStepExecutorRegistry } from "../workflow/step-executor-real-adapters.js";
+} from "../workflow/dispatch/external-apply-dispatch.js";
+import { createLiveWrapperWorkflowDispatch } from "../workflow/dispatch/live-wrapper.js";
+import { createSubworkflowWorkflowDispatch } from "../workflow/dispatch/subworkflow-dispatch.js";
+import { deriveDispatchedSubworkflowContext } from "../workflow/route/subworkflow-dispatch-context.js";
+import { buildRealWorkflowStepExecutorRegistry } from "../workflow/step/executor-real-adapters.js";
 import type {
   AsyncWorkflowStepDispatch,
   WorkflowStepDispatch
-} from "../workflow/scheduler.js";
+} from "../workflow/dispatch/scheduler.js";
 
 export type LinearIssueRefreshClientFactoryInput = {
   apiKey: string | null;

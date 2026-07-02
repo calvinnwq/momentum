@@ -9,7 +9,7 @@ import {
   WORKFLOW_ACTION_RISK_LEVELS,
   fallbackWorkflowActionAuthorityPolicy,
   type WorkflowActionAuthorityPolicy
-} from "../core/workflow/action-authority.js";
+} from "../core/workflow/monitor/action-authority.js";
 import type { OpenClawSupervisorWatchEnvelope } from "../core/openclaw/supervisor.js";
 
 export type OpenClawWatchOnceInput = {

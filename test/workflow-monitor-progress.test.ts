@@ -4,12 +4,12 @@ import {
   deriveWorkflowMonitorProgress,
   WORKFLOW_MONITOR_PROGRESS_PHASES,
   type WorkflowMonitorProgressPhase
-} from "../src/core/workflow/monitor-progress.js";
+} from "../src/core/workflow/monitor/progress.js";
 import type {
   WorkflowMonitorEnvelope,
   WorkflowMonitorEnvelopeCounts
-} from "../src/core/workflow/monitor-envelope.js";
-import { getWorkflowActionAuthorityPolicy } from "../src/core/workflow/action-authority.js";
+} from "../src/core/workflow/monitor/envelope.js";
+import { getWorkflowActionAuthorityPolicy } from "../src/core/workflow/monitor/action-authority.js";
 
 /**
  * NGX-511: pure native progress-monitor digest reducer.

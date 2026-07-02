@@ -4,16 +4,16 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
-import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run-recovery.js";
-import { resolveWorkflowRecoveryArtifactPath } from "../src/core/workflow/recovery-artifact.js";
+import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run/recovery.js";
+import { resolveWorkflowRecoveryArtifactPath } from "../src/core/workflow/recovery/artifact.js";
 import {
   persistLiveWorkflowDispatchRecovery,
   persistLiveWorkflowFinalizeRecovery
-} from "../src/core/executors/live-step-run-recovery.js";
+} from "../src/core/executors/live-step/run-recovery.js";
 import type {
   FinalizeLiveWorkflowStepFromResultFileResult,
   FinalizeLiveWorkflowStepResult
-} from "../src/core/executors/live-step-finalize.js";
+} from "../src/core/executors/live-step/finalize.js";
 
 const tempRoots: string[] = [];
 

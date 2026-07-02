@@ -12,7 +12,7 @@ import {
   insertExecutorFinding,
   insertExecutorInvocation,
   insertExecutorRound
-} from "../src/core/executors/loop-persist.js";
+} from "../src/core/executors/loop/persist.js";
 import type {
   ExecutorArtifactRecord,
   ExecutorCheckpointRecord,
@@ -20,8 +20,8 @@ import type {
   ExecutorFindingRecord,
   ExecutorInvocationRecord,
   ExecutorRoundRecord
-} from "../src/core/executors/loop-reducer.js";
-import { insertWorkflowGate } from "../src/core/workflow/gate-persist.js";
+} from "../src/core/executors/loop/reducer.js";
+import { insertWorkflowGate } from "../src/core/workflow/gate/persist.js";
 
 type RunResult = {
   code: number;
@@ -105,7 +105,7 @@ function makeRound(runId: string): ExecutorRoundRecord {
     summary: "implemented the slice",
     keyChanges: ["added reader"],
     remainingWork: [],
-    changedFiles: ["src/core/workflow/logs.ts"],
+    changedFiles: ["src/core/workflow/run/logs.ts"],
     verificationStatus: "passed",
     commitSha: "abc123",
     recoveryCode: null,
@@ -391,7 +391,7 @@ describe("momentum workflow run logs", () => {
     expect(round.verificationStatus).toBe("passed");
     expect(round.commitSha).toBe("abc123");
     expect(round.logPaths).toEqual(["/runs/cwfp-logs01/round-1/agent.log"]);
-    expect(round.changedFiles).toEqual(["src/core/workflow/logs.ts"]);
+    expect(round.changedFiles).toEqual(["src/core/workflow/run/logs.ts"]);
     expect(round.artifacts).toEqual([makeArtifact("cwfp-logs01")]);
     expect(round.checkpoints).toEqual([makeCheckpoint()]);
     expect(round.findings).toEqual([makeFinding()]);

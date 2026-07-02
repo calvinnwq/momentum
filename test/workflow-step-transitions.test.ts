@@ -8,12 +8,12 @@ import {
   finishWorkflowStep,
   getWorkflowStep,
   startWorkflowStep
-} from "../src/core/workflow/step-transitions.js";
+} from "../src/core/workflow/step/transitions.js";
 import {
   deriveWorkflowRunState,
   type WorkflowStepKind,
   type WorkflowStepState
-} from "../src/core/workflow/run-reducer.js";
+} from "../src/core/workflow/run/reducer.js";
 
 const tempRoots: string[] = [];
 

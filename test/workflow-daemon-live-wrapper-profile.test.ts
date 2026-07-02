@@ -8,8 +8,8 @@ import {
   readDaemonLiveWrapperProfileSource,
   resolveDaemonLiveWrapperProfile,
   type DaemonLiveWrapperProfileSourceLoad
-} from "../src/core/workflow/daemon-live-wrapper-profile.js";
-import { buildRealWorkflowStepExecutorRegistry } from "../src/core/workflow/step-executor-real-adapters.js";
+} from "../src/core/workflow/live-wrapper/daemon-profile.js";
+import { buildRealWorkflowStepExecutorRegistry } from "../src/core/workflow/step/executor-real-adapters.js";
 
 /**
  * RC-5b (NGX-492): the daemon-default live-wrapper profile *source resolution*.

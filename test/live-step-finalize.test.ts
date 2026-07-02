@@ -7,8 +7,8 @@ import path from "node:path";
 import {
   finalizeLiveWorkflowStep,
   finalizeLiveWorkflowStepFromResultFile
-} from "../src/core/executors/live-step-finalize.js";
-import type { CommitIntent, RunnerResult } from "../src/core/executors/types.js";
+} from "../src/core/executors/live-step/finalize.js";
+import type { CommitIntent, RunnerResult } from "../src/core/executors/runner/types.js";
 
 const ZERO_SHA = "0".repeat(40);
 const tempRoots: string[] = [];

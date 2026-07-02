@@ -4,33 +4,33 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
-import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition.js";
-import { persistWorkflowDefinition } from "../src/core/workflow/definition-persist.js";
-import { persistWorkflowRunStart } from "../src/core/workflow/run-start-persist.js";
-import { MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE } from "../src/core/workflow/run-start.js";
+import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition/definition.js";
+import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
+import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
+import { MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE } from "../src/core/workflow/run/start.js";
 import {
   claimRunnableWorkflowStep,
   type ClaimedWorkflowStep,
   type WorkflowStepDispatchContext,
   type WorkflowStepDispatchResult
-} from "../src/core/workflow/scheduler.js";
+} from "../src/core/workflow/dispatch/scheduler.js";
 import { getWorkflowLease } from "../src/core/workflow/leases.js";
-import { listWorkflowGatesForRun } from "../src/core/workflow/gate-persist.js";
+import { listWorkflowGatesForRun } from "../src/core/workflow/gate/persist.js";
 import {
   clearWorkflowRunManualRecoveryGuarded,
   getWorkflowRunManualRecoveryState
-} from "../src/core/workflow/run-recovery.js";
-import { getWorkflowStep } from "../src/core/workflow/step-transitions.js";
+} from "../src/core/workflow/run/recovery.js";
+import { getWorkflowStep } from "../src/core/workflow/step/transitions.js";
 import {
   loadExecutorInvocation,
   listExecutorRoundsForInvocation
-} from "../src/core/executors/loop-persist.js";
+} from "../src/core/executors/loop/persist.js";
 import {
   deriveDispatchInvocationId,
   executeWorkflowStepDispatch,
   WORKFLOW_DISPATCH_RESULT_STATUS
-} from "../src/core/workflow/dispatch-execute.js";
-import { WORKFLOW_RECONCILE_RESULT_STATUS } from "../src/core/workflow/dispatch-reconcile-execute.js";
+} from "../src/core/workflow/dispatch/execute.js";
+import { WORKFLOW_RECONCILE_RESULT_STATUS } from "../src/core/workflow/dispatch/reconcile-execute.js";
 import {
   WORKFLOW_STEP_EXECUTOR_KINDS,
   type WorkflowStepExecutor,
@@ -38,17 +38,17 @@ import {
   type WorkflowStepExecutorInput,
   type WorkflowStepExecutorKind,
   type WorkflowStepExecutorRegistry
-} from "../src/core/workflow/step-executor.js";
-import { buildRealWorkflowStepExecutorRegistry } from "../src/core/workflow/step-executor-real-adapters.js";
+} from "../src/core/workflow/step/executor.js";
+import { buildRealWorkflowStepExecutorRegistry } from "../src/core/workflow/step/executor-real-adapters.js";
 import {
   parseLiveWrapperProfile,
   type LiveWrapperProfile
 } from "../src/adapters/live-wrapper-registry.js";
-import type { DispatchedStepExecutorContext } from "../src/core/workflow/dispatch-executor-run.js";
+import type { DispatchedStepExecutorContext } from "../src/core/workflow/dispatch/executor-run.js";
 import {
   createLiveWrapperWorkflowDispatch,
   shouldRunDispatchedExecutor
-} from "../src/core/workflow/live-wrapper-dispatch.js";
+} from "../src/core/workflow/dispatch/live-wrapper.js";
 
 /**
  * NGX-492 (RC-5b) — the daemon dispatch composition that turns the registry-injected

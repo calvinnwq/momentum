@@ -6,7 +6,7 @@ import {
   validateSubworkflowChildConfig,
   type SubworkflowChildDefinitionConfig,
   type SubworkflowParentLineage
-} from "../src/core/workflow/subworkflow-child-config.js";
+} from "../src/core/workflow/route/subworkflow-child-config.js";
 
 /**
  * NGX-498 (RC-4b) — the keystone "open decision" the production `subworkflow`

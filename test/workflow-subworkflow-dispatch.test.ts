@@ -4,9 +4,9 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
-import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition.js";
-import { persistWorkflowDefinition } from "../src/core/workflow/definition-persist.js";
-import { persistWorkflowRunStart } from "../src/core/workflow/run-start-persist.js";
+import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition/definition.js";
+import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
+import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
 import {
   claimRunnableWorkflowStep,
   runWorkflowSchedulerOnceAsync,
@@ -14,23 +14,23 @@ import {
   type ClaimedWorkflowStep,
   type WorkflowStepDispatchContext,
   type WorkflowStepDispatchResult
-} from "../src/core/workflow/scheduler.js";
+} from "../src/core/workflow/dispatch/scheduler.js";
 import { getWorkflowLease } from "../src/core/workflow/leases.js";
-import { listWorkflowGatesForRun } from "../src/core/workflow/gate-persist.js";
-import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run-recovery.js";
-import { getWorkflowStep } from "../src/core/workflow/step-transitions.js";
-import { loadExecutorInvocation } from "../src/core/executors/loop-persist.js";
+import { listWorkflowGatesForRun } from "../src/core/workflow/gate/persist.js";
+import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run/recovery.js";
+import { getWorkflowStep } from "../src/core/workflow/step/transitions.js";
+import { loadExecutorInvocation } from "../src/core/executors/loop/persist.js";
 import {
   deriveDispatchInvocationId,
   executeWorkflowStepDispatch,
   WORKFLOW_DISPATCH_RESULT_STATUS
-} from "../src/core/workflow/dispatch-execute.js";
+} from "../src/core/workflow/dispatch/execute.js";
 import {
   createSubworkflowWorkflowDispatch,
   type DispatchedSubworkflowContextResolution
-} from "../src/core/workflow/subworkflow-dispatch.js";
-import type { SubworkflowChildObservation } from "../src/core/workflow/dispatch-subworkflow-run.js";
-import type { WorkflowRunState } from "../src/core/workflow/run-reducer.js";
+} from "../src/core/workflow/dispatch/subworkflow-dispatch.js";
+import type { SubworkflowChildObservation } from "../src/core/workflow/dispatch/subworkflow-run.js";
+import type { WorkflowRunState } from "../src/core/workflow/run/reducer.js";
 
 /**
  * NGX-497 (RC-4) — the daemon-lane *entry point* that composes the landed

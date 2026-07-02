@@ -5,14 +5,14 @@ import os from "node:os";
 import path from "node:path";
 
 import { parseLiveWrapperProfile } from "../src/adapters/live-wrapper-registry.js";
-import { parseRunnerResult } from "../src/core/executors/runner-result.js";
+import { parseRunnerResult } from "../src/core/executors/runner/result.js";
 import {
   CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR,
   defaultCodingWorkflowWrapperDeps,
   loadCodingWorkflowWrapperConfig,
   runCodingWorkflowLiveWrapper,
   type CodingWorkflowWrapperDeps
-} from "../src/core/workflow/coding-workflow-live-wrapper.js";
+} from "../src/core/workflow/live-wrapper/coding-workflow.js";
 
 const tempRoots: string[] = [];
 

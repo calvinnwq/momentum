@@ -5,8 +5,8 @@ import path from "node:path";
 import {
   dispatchWorkflowStepExecutor,
   type WorkflowStepExecutorInput
-} from "../../src/core/workflow/step-executor.js";
-import type { WorkflowStepKind } from "../../src/core/workflow/run-reducer.js";
+} from "../../src/core/workflow/step/executor.js";
+import type { WorkflowStepKind } from "../../src/core/workflow/run/reducer.js";
 
 import {
   buildFakeWorkflowStepExecutorRegistry,

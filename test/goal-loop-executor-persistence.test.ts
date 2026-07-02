@@ -9,15 +9,15 @@ import {
   insertExecutorRound,
   loadExecutorRound,
   updateExecutorRound
-} from "../src/core/executors/loop-persist.js";
-import type { ExecutorInvocationRecord } from "../src/core/executors/loop-reducer.js";
+} from "../src/core/executors/loop/persist.js";
+import type { ExecutorInvocationRecord } from "../src/core/executors/loop/reducer.js";
 import {
   planGoalLoopRoundPersistence,
   planGoalLoopRoundStart,
   resolveGoalLoopRoundSelection
-} from "../src/core/executors/goal-loop-executor.js";
-import type { FinalizeWorkflowStepFromResultFileResult } from "../src/core/executors/step-finalize.js";
-import type { RunnerResult } from "../src/core/executors/types.js";
+} from "../src/core/executors/goal-loop/executor.js";
+import type { FinalizeWorkflowStepFromResultFileResult } from "../src/core/executors/shared/step-finalize.js";
+import type { RunnerResult } from "../src/core/executors/runner/types.js";
 
 // This is the integration twin of the pure projections in
 // goal-loop-executor.test.ts: it drives a goal-loop round's start record and the

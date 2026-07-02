@@ -11,7 +11,7 @@ import {
   insertExecutorFinding,
   insertExecutorInvocation,
   insertExecutorRound
-} from "../src/core/executors/loop-persist.js";
+} from "../src/core/executors/loop/persist.js";
 import type {
   ExecutorArtifactRecord,
   ExecutorCheckpointRecord,
@@ -19,11 +19,11 @@ import type {
   ExecutorFindingRecord,
   ExecutorInvocationRecord,
   ExecutorRoundRecord
-} from "../src/core/executors/loop-reducer.js";
+} from "../src/core/executors/loop/reducer.js";
 import {
   WORKFLOW_RUN_LOGS_SCHEMA_VERSION,
   loadWorkflowRunLogs
-} from "../src/core/workflow/logs.js";
+} from "../src/core/workflow/run/logs.js";
 
 const tempRoots: string[] = [];
 
@@ -99,7 +99,7 @@ function makeRound(
     summary: "implemented the slice",
     keyChanges: ["added reader"],
     remainingWork: [],
-    changedFiles: ["src/core/workflow/logs.ts"],
+    changedFiles: ["src/core/workflow/run/logs.ts"],
     verificationStatus: "passed",
     commitSha: "abc123",
     recoveryCode: null,
@@ -208,7 +208,7 @@ describe("loadWorkflowRunLogs", () => {
       ]);
       expect(round.verificationStatus).toBe("passed");
       expect(round.commitSha).toBe("abc123");
-      expect(round.changedFiles).toEqual(["src/core/workflow/logs.ts"]);
+      expect(round.changedFiles).toEqual(["src/core/workflow/run/logs.ts"]);
     } finally {
       db.close();
     }

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   COMPATIBILITY_RUN_ID_PREFIXES,
   isReservedCompatibilityRunId
-} from "../src/core/workflow/run-import.js";
+} from "../src/core/workflow/run/import.js";
 
 describe("isReservedCompatibilityRunId (NGX-508)", () => {
   it("recognizes the cwfp/cwfb/overnight compatibility prefixes", () => {

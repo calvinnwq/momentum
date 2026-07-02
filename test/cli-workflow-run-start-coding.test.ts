@@ -6,8 +6,8 @@ import { fileURLToPath } from "node:url";
 
 import { runCli } from "../src/cli.js";
 import { openDb } from "../src/adapters/db.js";
-import { persistWorkflowDefinition } from "../src/core/workflow/definition-persist.js";
-import type { WorkflowDefinition } from "../src/core/workflow/definition.js";
+import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
+import type { WorkflowDefinition } from "../src/core/workflow/definition/definition.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 

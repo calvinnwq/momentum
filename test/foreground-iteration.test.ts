@@ -4,12 +4,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { runForegroundIteration } from "../src/core/executors/foreground-iteration.js";
+import { runForegroundIteration } from "../src/core/executors/goal-iteration/foreground.js";
 import {
   FAKE_RUNNER_FAIL_ENV,
   FAKE_RUNNER_FIXTURE_FILENAME
 } from "../src/adapters/fake-runner.js";
-import { parseRunnerResult } from "../src/core/executors/runner-result.js";
+import { parseRunnerResult } from "../src/core/executors/runner/result.js";
 import {
   initGoalArtifacts,
   resolveGoalArtifactPaths

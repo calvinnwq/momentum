@@ -4,9 +4,9 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
-import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition.js";
-import { persistWorkflowDefinition } from "../src/core/workflow/definition-persist.js";
-import { persistWorkflowRunStart } from "../src/core/workflow/run-start-persist.js";
+import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition/definition.js";
+import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
+import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
 import {
   reconcileLinearSource,
   type LinearReconciliationClient,
@@ -18,35 +18,35 @@ import {
   listSourceSnapshotsForItem
 } from "../src/core/source/items.js";
 import { listSourceReconciliationRuns } from "../src/core/source/reconciliation-runs.js";
-import { claimRunnableWorkflowStep } from "../src/core/workflow/scheduler.js";
+import { claimRunnableWorkflowStep } from "../src/core/workflow/dispatch/scheduler.js";
 import { getWorkflowLease } from "../src/core/workflow/leases.js";
-import { listWorkflowGatesForRun } from "../src/core/workflow/gate-persist.js";
-import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run-recovery.js";
+import { listWorkflowGatesForRun } from "../src/core/workflow/gate/persist.js";
+import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run/recovery.js";
 import {
   executeWorkflowStepDispatch,
   WORKFLOW_DISPATCH_RESULT_STATUS
-} from "../src/core/workflow/dispatch-execute.js";
+} from "../src/core/workflow/dispatch/execute.js";
 import {
   listExecutorArtifactsForRound,
   listExecutorCheckpointsForRound,
   listExecutorRoundsForInvocation,
   loadExecutorInvocation,
   loadExecutorRound
-} from "../src/core/executors/loop-persist.js";
+} from "../src/core/executors/loop/persist.js";
 import {
   resolveSingleShotRoundSelection,
   singleShotInvocationId,
   singleShotRoundId,
   type SingleShotRoundRuntimeInputs
-} from "../src/core/executors/single-shot-executor.js";
-import { runSingleShotStep } from "../src/core/executors/single-shot-orchestrator.js";
+} from "../src/core/executors/single-shot/executor.js";
+import { runSingleShotStep } from "../src/core/executors/single-shot/orchestrator.js";
 import {
   goalLoopInvocationId,
   goalLoopRoundId,
   resolveGoalLoopRoundSelection,
   type GoalLoopRoundRuntimeInputs
-} from "../src/core/executors/goal-loop-executor.js";
-import { runGoalLoopStep } from "../src/core/executors/goal-loop-orchestrator.js";
+} from "../src/core/executors/goal-loop/executor.js";
+import { runGoalLoopStep } from "../src/core/executors/goal-loop/orchestrator.js";
 import {
   noMistakesInvocationId,
   noMistakesRoundId,
@@ -57,16 +57,16 @@ import { runNoMistakesMirrorStep } from "../src/adapters/no-mistakes-orchestrato
 import {
   LIVE_STEP_DEFAULT_LEASE_KIND,
   runLiveWorkflowStep
-} from "../src/core/executors/live-step-orchestrator.js";
-import { getWorkflowStep } from "../src/core/workflow/step-transitions.js";
+} from "../src/core/executors/live-step/orchestrator.js";
+import { getWorkflowStep } from "../src/core/workflow/step/transitions.js";
 import type {
   WorkflowStepExecutor,
   WorkflowStepExecutorDispatchResult,
   WorkflowStepExecutorInput
-} from "../src/core/workflow/step-executor.js";
-import type { WorkflowApprovalBoundary } from "../src/core/workflow/run-reducer.js";
-import type { FinalizeLiveWorkflowStepFromResultFileResult } from "../src/core/executors/live-step-finalize.js";
-import type { RunnerResult } from "../src/core/executors/types.js";
+} from "../src/core/workflow/step/executor.js";
+import type { WorkflowApprovalBoundary } from "../src/core/workflow/run/reducer.js";
+import type { FinalizeLiveWorkflowStepFromResultFileResult } from "../src/core/executors/live-step/finalize.js";
+import type { RunnerResult } from "../src/core/executors/runner/types.js";
 
 /**
  * NGX-372 full adapter E2E proof (Adapter Test Coverage milestone).
@@ -101,7 +101,7 @@ import type { RunnerResult } from "../src/core/executors/types.js";
  * row are owned by the landed `runSingleShotStep` / `runGoalLoopStep` /
  * `runNoMistakesMirrorStep` adapters, whose seam-level reconciliation with the
  * scaffold is the documented real-adapter follow-up (see the phase-1 boundary
- * note in src/core/workflow/dispatch-execute.ts). This proof therefore exercises the
+ * note in src/core/workflow/dispatch/execute.ts). This proof therefore exercises the
  * scaffold via the production seam on one one-shot step (`preflight`) and the
  * terminal finalization via the landed adapters on distinct steps: the one-shot
  * adapter on `postflight`, the goal-loop adapter on `implementation` (the
@@ -725,7 +725,7 @@ describe("NGX-372 full adapter E2E proof", () => {
 
       // --- Layer 3: goal-loop landed adapter -> terminal finalization ---
       // `implementation` is the goal-loop family in the real coding workflow
-      // definition (src/core/workflow/definition.ts). The landed adapter drives a
+      // definition (src/core/workflow/definition/definition.ts). The landed adapter drives a
       // bounded multi-round invocation below the StepRun: round 0 commits progress
       // but is incomplete (continue); round 1 commits and recommends completion,
       // each round gated by a passing verification finalize. `runGoalLoopStep`
@@ -895,7 +895,7 @@ describe("NGX-372 full adapter E2E proof", () => {
 
       // --- Layer 3: no-mistakes mirror landed adapter -> terminal finalization ---
       // `no-mistakes` is the no-mistakes family in the real coding workflow
-      // definition (src/core/workflow/definition.ts). Unlike the result-bearing
+      // definition (src/core/workflow/definition/definition.ts). Unlike the result-bearing
       // adapters, the mirror does not drive an agent Momentum chose: it reflects an
       // external review gate's state as untrusted evidence to classify. The landed
       // adapter materializes the durable invocation + the single long-lived mirror

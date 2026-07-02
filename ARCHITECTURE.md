@@ -78,10 +78,11 @@ placeholder-free pending homes, and import guards; ARCH-03 populated
 `src/core/<domain>/` (goal, source, intent, daemon, repo, evidence) plus
 `src/config/`. ARCH-06 drained the final root type modules into
 `src/shared/events.ts`, `src/core/goal/{spec,types}.ts`, and
-`src/core/executors/{runner-result,types}.ts`; transitional root exceptions are
-now empty. Each core domain carries a local `README.md` module map. Detailed
-current rules live in this file and [SPEC.md](SPEC.md); long-form architecture
-migration rationale lives in Obsidian `/Workspaces/Momentum`.
+`src/core/executors/runner/{result,types}.ts`; transitional root exceptions are
+now empty. High-density workflow and executor modules are grouped under local
+folders documented by each domain `README.md`. Detailed current rules live in
+this file and [SPEC.md](SPEC.md); long-form architecture migration rationale
+lives in Obsidian `/Workspaces/Momentum`.
 
 The import direction is fixed:
 

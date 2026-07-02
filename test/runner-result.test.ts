@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   normalizeRunnerResult,
   parseRunnerResult
-} from "../src/core/executors/runner-result.js";
-import type { RunnerResult } from "../src/core/executors/types.js";
+} from "../src/core/executors/runner/result.js";
+import type { RunnerResult } from "../src/core/executors/runner/types.js";
 
 const VALID: RunnerResult = {
   success: true,

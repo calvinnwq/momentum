@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   EXECUTOR_INVOCATION_STATES,
   type ExecutorInvocationState
-} from "../src/core/executors/loop-reducer.js";
-import { planWorkflowStepReconciliation } from "../src/core/workflow/dispatch-reconcile.js";
+} from "../src/core/executors/loop/reducer.js";
+import { planWorkflowStepReconciliation } from "../src/core/workflow/dispatch/reconcile.js";
 
 /**
  * RC-2 (NGX-480) pure reconciliation decider.

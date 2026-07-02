@@ -7,7 +7,7 @@ import {
   getWorkflowActionAuthorityPolicy,
   policyForWorkflowGateRecommendedAction,
   policyForWorkflowWatchRecommendedAction
-} from "../src/core/workflow/action-authority.js";
+} from "../src/core/workflow/monitor/action-authority.js";
 
 describe("workflow supervisor action authority policy", () => {
   it("freezes the authority classes and known policy action keys", () => {

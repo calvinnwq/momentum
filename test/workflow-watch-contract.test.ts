@@ -5,22 +5,22 @@ import path from "node:path";
 
 import { runCli } from "../src/cli.js";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
-import { MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE } from "../src/core/workflow/run-start.js";
+import { MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE } from "../src/core/workflow/run/start.js";
 import {
   WORKFLOW_MONITOR_DISPOSITIONS,
   WORKFLOW_MONITOR_REPORT_REASONS
-} from "../src/core/workflow/monitor-envelope.js";
+} from "../src/core/workflow/monitor/envelope.js";
 import {
   WORKFLOW_MONITOR_CLEANUP_ACTIONS,
   WORKFLOW_MONITOR_PROGRESS_PHASES
-} from "../src/core/workflow/monitor-progress.js";
-import { WORKFLOW_MONITOR_NEXT_ACTION_CODES } from "../src/core/workflow/monitor-state.js";
+} from "../src/core/workflow/monitor/progress.js";
+import { WORKFLOW_MONITOR_NEXT_ACTION_CODES } from "../src/core/workflow/monitor/state.js";
 import {
   WORKFLOW_WATCH_HUMAN_ACTION_CODES,
   WORKFLOW_WATCH_RECOMMENDED_ACTIONS,
   WORKFLOW_WATCH_STUCK_RISKS
 } from "../src/renderers/workflow.js";
-import { WORKFLOW_WATCH_REASONS } from "../src/core/workflow/watch-advisory.js";
+import { WORKFLOW_WATCH_REASONS } from "../src/core/workflow/monitor/watch-advisory.js";
 
 type WorkflowGuiWatchContractFixture = {
   watch: {

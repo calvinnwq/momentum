@@ -10,8 +10,8 @@ import {
   isTerminalExecutorRoundState,
   transitionExecutorInvocation,
   type WorkflowExecutorFamily
-} from "../src/core/executors/loop-reducer.js";
-import { isWorkflowExecutorFamily } from "../src/core/workflow/definition.js";
+} from "../src/core/executors/loop/reducer.js";
+import { isWorkflowExecutorFamily } from "../src/core/workflow/definition/definition.js";
 import {
   SINGLE_SHOT_BLOCKED_RECOVERY_CODES,
   SINGLE_SHOT_EXECUTOR_FAMILIES,
@@ -33,8 +33,8 @@ import {
   type SingleShotInvocationOutcome,
   type SingleShotRoundArtifacts,
   type SingleShotRoundSelection
-} from "../src/core/executors/single-shot-executor.js";
-import type { RunnerResult } from "../src/core/executors/types.js";
+} from "../src/core/executors/single-shot/executor.js";
+import type { RunnerResult } from "../src/core/executors/runner/types.js";
 
 const COMPLETION_SET = new Set<string>(EXECUTOR_COMPLETION_CLASSIFICATIONS);
 const ROUND_TERMINAL_SET = new Set<string>(EXECUTOR_ROUND_TERMINAL_STATES);

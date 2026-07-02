@@ -7,22 +7,22 @@ import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
   CODING_WORKFLOW_DEFINITION,
   type WorkflowDefinition
-} from "../src/core/workflow/definition.js";
-import { persistWorkflowDefinition } from "../src/core/workflow/definition-persist.js";
-import { persistWorkflowRunStart } from "../src/core/workflow/run-start-persist.js";
-import { MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE } from "../src/core/workflow/run-start.js";
+} from "../src/core/workflow/definition/definition.js";
+import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
+import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
+import { MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE } from "../src/core/workflow/run/start.js";
 import {
   claimRunnableWorkflowStep,
   type ClaimedWorkflowStep,
   type WorkflowStepDispatch
-} from "../src/core/workflow/scheduler.js";
+} from "../src/core/workflow/dispatch/scheduler.js";
 import { getWorkflowLease } from "../src/core/workflow/leases.js";
-import { listWorkflowGatesForRun } from "../src/core/workflow/gate-persist.js";
-import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run-recovery.js";
+import { listWorkflowGatesForRun } from "../src/core/workflow/gate/persist.js";
+import { getWorkflowRunManualRecoveryState } from "../src/core/workflow/run/recovery.js";
 import {
   executeWorkflowStepDispatch,
   WORKFLOW_DISPATCH_RESULT_STATUS
-} from "../src/core/workflow/dispatch-execute.js";
+} from "../src/core/workflow/dispatch/execute.js";
 
 const NOW = 1_700_000_000_000;
 const RUN_ID = "run-dispatch-exec-001";

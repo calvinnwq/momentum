@@ -21,5 +21,5 @@ their names.
 | Workflow evidence linkage | `workflow.ts` |
 | Goal handoff data | `handoff.ts` |
 
-Workflow-run handoff (`src/core/workflow/handoff.ts`) is a separate workflow-domain
+Workflow-run handoff (`src/core/workflow/run/handoff.ts`) is a separate workflow-domain
 module; this `handoff.ts` is the goal-handoff compatibility data.

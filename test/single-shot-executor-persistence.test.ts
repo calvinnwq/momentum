@@ -9,16 +9,16 @@ import {
   insertExecutorRound,
   loadExecutorRound,
   updateExecutorRound
-} from "../src/core/executors/loop-persist.js";
-import type { ExecutorInvocationRecord } from "../src/core/executors/loop-reducer.js";
-import type { RunnerResult } from "../src/core/executors/types.js";
+} from "../src/core/executors/loop/persist.js";
+import type { ExecutorInvocationRecord } from "../src/core/executors/loop/reducer.js";
+import type { RunnerResult } from "../src/core/executors/runner/types.js";
 import {
   planSingleShotRoundPersistence,
   planSingleShotRoundStart,
   resolveSingleShotRoundSelection,
   singleShotRoundId,
   type SingleShotExecutorFamily
-} from "../src/core/executors/single-shot-executor.js";
+} from "../src/core/executors/single-shot/executor.js";
 
 // This is the integration twin of the pure projections in
 // single-shot-executor.test.ts: it drives a single-shot round's start record and

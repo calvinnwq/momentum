@@ -5,9 +5,9 @@ import path from "node:path";
 
 import { runCli } from "../src/cli.js";
 import { openDb } from "../src/adapters/db.js";
-import { DOGFOOD_TERMINALIZE_DISPATCH_ENV_VAR } from "../src/core/workflow/dogfood-dispatch.js";
-import { DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR } from "../src/core/workflow/daemon-live-wrapper-profile.js";
-import { terminalizeDispatchedExecutorInvocation } from "../src/core/workflow/dispatch-executor-terminalize.js";
+import { DOGFOOD_TERMINALIZE_DISPATCH_ENV_VAR } from "../src/core/workflow/dispatch/dogfood.js";
+import { DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR } from "../src/core/workflow/live-wrapper/daemon-profile.js";
+import { terminalizeDispatchedExecutorInvocation } from "../src/core/workflow/dispatch/executor-terminalize.js";
 
 type RunResult = {
   code: number;

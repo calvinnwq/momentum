@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 import { runCli } from "../src/cli.js";
 import { openDb } from "../src/adapters/db.js";
-import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition.js";
+import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition/definition.js";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 

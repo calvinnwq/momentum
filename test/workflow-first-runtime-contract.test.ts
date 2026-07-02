@@ -4,7 +4,7 @@ import {
   CODING_WORKFLOW_DEFINITION,
   WORKFLOW_EXECUTOR_FAMILIES,
   listBuiltInWorkflowDefinitionKeys
-} from "../src/core/workflow/definition.js";
+} from "../src/core/workflow/definition/definition.js";
 import { readRepoFile, expectSpecSection } from "./helpers/repo-docs.js";
 
 describe("workflow-first runtime contract", () => {

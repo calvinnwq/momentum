@@ -7,7 +7,7 @@ import {
   EXECUTOR_ROUND_TERMINAL_STATES,
   transitionExecutorRound,
   type ExecutorCompletionClassification
-} from "../src/core/executors/loop-reducer.js";
+} from "../src/core/executors/loop/reducer.js";
 import {
   GOAL_LOOP_GLOBAL_DEFAULT_SELECTION,
   decideGoalLoopRound,
@@ -28,9 +28,9 @@ import {
   type GoalLoopRoundArtifacts,
   type GoalLoopRoundSelection,
   type PlanGoalLoopRoundStartInput
-} from "../src/core/executors/goal-loop-executor.js";
-import type { FinalizeWorkflowStepFromResultFileResult } from "../src/core/executors/step-finalize.js";
-import type { RunnerResult } from "../src/core/executors/types.js";
+} from "../src/core/executors/goal-loop/executor.js";
+import type { FinalizeWorkflowStepFromResultFileResult } from "../src/core/executors/shared/step-finalize.js";
+import type { RunnerResult } from "../src/core/executors/runner/types.js";
 
 const COMPLETION_SET = new Set<string>(EXECUTOR_COMPLETION_CLASSIFICATIONS);
 const ROUND_TERMINAL_SET = new Set<string>(EXECUTOR_ROUND_TERMINAL_STATES);

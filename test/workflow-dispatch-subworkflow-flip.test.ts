@@ -5,26 +5,26 @@ import path from "node:path";
 
 import { runCli } from "../src/cli.js";
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
-import type { WorkflowDefinition } from "../src/core/workflow/definition.js";
-import { persistWorkflowDefinition } from "../src/core/workflow/definition-persist.js";
-import { persistWorkflowRunStart } from "../src/core/workflow/run-start-persist.js";
+import type { WorkflowDefinition } from "../src/core/workflow/definition/definition.js";
+import { persistWorkflowDefinition } from "../src/core/workflow/definition/persist.js";
+import { persistWorkflowRunStart } from "../src/core/workflow/run/start-persist.js";
 import {
   claimRunnableWorkflowStep,
   type ClaimedWorkflowStep
-} from "../src/core/workflow/scheduler.js";
+} from "../src/core/workflow/dispatch/scheduler.js";
 import { getWorkflowLease } from "../src/core/workflow/leases.js";
-import { getWorkflowStep } from "../src/core/workflow/step-transitions.js";
+import { getWorkflowStep } from "../src/core/workflow/step/transitions.js";
 import {
   deriveDispatchInvocationId,
   executeWorkflowStepDispatch
-} from "../src/core/workflow/dispatch-execute.js";
-import { loadExecutorInvocation } from "../src/core/executors/loop-persist.js";
-import { WORKFLOW_EXECUTE_RECONCILE_STATUS } from "../src/core/workflow/dispatch-executor-run.js";
-import { WORKFLOW_RECONCILE_RESULT_STATUS } from "../src/core/workflow/dispatch-reconcile-execute.js";
-import { executeAndReconcileDispatchedSubworkflowStep } from "../src/core/workflow/dispatch-subworkflow-run.js";
-import { deriveDispatchedSubworkflowContext } from "../src/core/workflow/subworkflow-dispatch-context.js";
-import { loadWorkflowRunDetail } from "../src/core/workflow/status.js";
-import type { WorkflowRunState } from "../src/core/workflow/run-reducer.js";
+} from "../src/core/workflow/dispatch/execute.js";
+import { loadExecutorInvocation } from "../src/core/executors/loop/persist.js";
+import { WORKFLOW_EXECUTE_RECONCILE_STATUS } from "../src/core/workflow/dispatch/executor-run.js";
+import { WORKFLOW_RECONCILE_RESULT_STATUS } from "../src/core/workflow/dispatch/reconcile-execute.js";
+import { executeAndReconcileDispatchedSubworkflowStep } from "../src/core/workflow/dispatch/subworkflow-run.js";
+import { deriveDispatchedSubworkflowContext } from "../src/core/workflow/route/subworkflow-dispatch-context.js";
+import { loadWorkflowRunDetail } from "../src/core/workflow/run/status.js";
+import type { WorkflowRunState } from "../src/core/workflow/run/reducer.js";
 
 /**
  * NGX-498 (RC-4b) — the production flip proof.

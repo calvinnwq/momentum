@@ -18,7 +18,7 @@ import {
   FAKE_RUNNER_GOAL_COMPLETE_ENV,
   FAKE_RUNNER_TRAJECTORY_ENV
 } from "../src/adapters/fake-runner.js";
-import { parseRunnerResult } from "../src/core/executors/runner-result.js";
+import { parseRunnerResult } from "../src/core/executors/runner/result.js";
 import type { GoalSpec } from "../src/core/goal/types.js";
 
 const tempRoots: string[] = [];

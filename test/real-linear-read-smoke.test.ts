@@ -12,7 +12,7 @@ import {
   REAL_SMOKE_LINEAR_OPT_IN_ENV_VAR,
   classifyRealSmokeReadOutcome,
   planLinearReadSmoke
-} from "../src/core/executors/real-smoke.js";
+} from "../src/core/executors/smoke/linear-read.js";
 
 /**
  * NGX-372 opt-in real Linear read smoke (Adapter Test Coverage milestone).

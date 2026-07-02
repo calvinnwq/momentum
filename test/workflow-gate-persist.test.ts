@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
-import type { GateDecisionRequest } from "../src/core/workflow/gate.js";
+import type { GateDecisionRequest } from "../src/core/workflow/gate/gate.js";
 import {
   InvalidWorkflowGateError,
   WorkflowGateConflictError,
@@ -16,7 +16,7 @@ import {
   loadWorkflowGate,
   resolveWorkflowGate,
   type NewWorkflowGate
-} from "../src/core/workflow/gate-persist.js";
+} from "../src/core/workflow/gate/persist.js";
 
 const tempRoots: string[] = [];
 

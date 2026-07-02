@@ -5,7 +5,7 @@ import {
   buildOpenClawDeliveryIntent,
   type OpenClawDeliveryIntent
 } from "./delivery-intent.js";
-import type { WorkflowActionAuthorityPolicy } from "../workflow/action-authority.js";
+import type { WorkflowActionAuthorityPolicy } from "../workflow/monitor/action-authority.js";
 
 export type OpenClawSupervisorEventType =
   | "progress"

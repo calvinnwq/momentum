@@ -2246,7 +2246,7 @@ Rounds are returned across every invocation in the run, ordered by step key, the
       "summary": "implemented the slice",
       "keyChanges": ["added reader"],
       "remainingWork": [],
-      "changedFiles": ["src/core/workflow/logs.ts"],
+      "changedFiles": ["src/core/workflow/run/logs.ts"],
       "verificationStatus": "passed",
       "commitSha": "abc123",
       "recoveryCode": null,
@@ -2303,7 +2303,7 @@ Executor rounds: 1
     summary: implemented the slice
     verification: passed commit: abc123
     logs: /path/to/data/runs/cwfp-abc123/round-1/agent.log
-    changed files: src/core/workflow/logs.ts
+    changed files: src/core/workflow/run/logs.ts
     child evidence: 2
     artifacts: /path/to/data/runs/cwfp-abc123/round-1/verify.txt
     checkpoints: 0:verify

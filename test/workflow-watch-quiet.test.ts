@@ -9,17 +9,17 @@ import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
   deriveWorkflowMonitorProgress,
   type WorkflowMonitorProgressTick
-} from "../src/core/workflow/monitor-progress.js";
+} from "../src/core/workflow/monitor/progress.js";
 import type {
   WorkflowMonitorEnvelope,
   WorkflowMonitorEnvelopeCounts
-} from "../src/core/workflow/monitor-envelope.js";
+} from "../src/core/workflow/monitor/envelope.js";
 import {
   deriveWorkflowWatchAdvisory,
   WORKFLOW_WATCH_DEFAULT_QUIET_THRESHOLDS_SECONDS,
   WORKFLOW_WATCH_REASONS
-} from "../src/core/workflow/watch-advisory.js";
-import { MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE } from "../src/core/workflow/run-start.js";
+} from "../src/core/workflow/monitor/watch-advisory.js";
+import { MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE } from "../src/core/workflow/run/start.js";
 
 const NOW = 1_730_000_900_000;
 const SEED_NOW = 1_730_000_000_000;

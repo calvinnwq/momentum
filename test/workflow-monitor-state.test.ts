@@ -7,13 +7,13 @@ import {
   type WorkflowMonitorAdvisory,
   type WorkflowMonitorCheckpoint,
   type WorkflowMonitorInput
-} from "../src/core/workflow/monitor-state.js";
+} from "../src/core/workflow/monitor/state.js";
 import {
   type WorkflowLeaseRecord,
   type WorkflowStepKind,
   type WorkflowStepRecord,
   type WorkflowStepState
-} from "../src/core/workflow/run-reducer.js";
+} from "../src/core/workflow/run/reducer.js";
 
 const RUN_ID = "cwfp-test01";
 
