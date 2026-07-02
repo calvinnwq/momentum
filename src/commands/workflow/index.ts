@@ -109,6 +109,7 @@ import {
   type CodingStepRouteOverrides
 } from "../../core/workflow/route/coding.js";
 import {
+  preflightCodingWorkflowBuiltInDefinition,
   preflightCodingWorkflowRouteProfile,
   preflightCodingWorkflowRouteSteps,
   preflightCodingWorkflowRunStartInput
@@ -618,15 +619,13 @@ function runWorkflowStartCommand(
     });
   }
 
-  // Preview mode (coding door only) shares every precondition above but stops
-  // before any durable write: it resolves the built-in definition, materializes
-  // a frozen plan projection, and emits it without opening the database for writes.
-  if (options.preview === true) {
-    const definition = resolveBuiltInWorkflowRunStartDefinition(
+  let codingDefinition: WorkflowDefinition | undefined;
+  if (options.coding) {
+    const structuralPreflight = preflightCodingWorkflowBuiltInDefinition(
       definitionKey,
       parsed.definitionVersion
     );
-    if (definition === undefined) {
+    if (!structuralPreflight.ok) {
       return emitWorkflowRunStartFailure(parsed, io, {
         command,
         code: "definition_not_found",
@@ -635,9 +634,19 @@ function runWorkflowStartCommand(
             ? `No workflow definition found for key: ${definitionKey}.`
             : `No workflow definition found for key ${definitionKey} version ${parsed.definitionVersion}.`,
         dataDir,
-        runId
+        runId,
+        preflightEvidence: structuralPreflight.evidence
       });
     }
+    codingDefinition = structuralPreflight.definition;
+  }
+
+  // Preview mode (coding door only) shares every precondition above but stops
+  // before any durable write: it resolves the built-in definition, materializes
+  // a frozen plan projection, and emits it without opening the database for writes.
+  if (options.preview === true) {
+    const definition = codingDefinition;
+    if (definition === undefined) throw new Error("Missing coding definition.");
     const input = buildWorkflowRunStartInput({
       definition,
       runId,
@@ -701,10 +710,7 @@ function runWorkflowStartCommand(
   const db = openDb(dataDir);
   try {
     const definition = options.coding
-      ? resolveBuiltInWorkflowRunStartDefinition(
-          definitionKey,
-          parsed.definitionVersion
-        )
+      ? codingDefinition
       : resolveWorkflowRunStartDefinition(
           db,
           definitionKey,
@@ -816,18 +822,6 @@ function resolveWorkflowRunStartDefinition(
   }
   persistWorkflowDefinition(db, builtIn, { now });
   return builtIn;
-}
-
-/**
- * Resolve the built-in workflow definition for the Momentum-native coding door.
- * Versioned starts require the exact built-in key/version pair; unversioned
- * starts select the latest known built-in version.
- */
-function resolveBuiltInWorkflowRunStartDefinition(
-  key: string,
-  version: number | undefined
-): WorkflowDefinition | undefined {
-  return getBuiltInWorkflowDefinition(key, version);
 }
 
 function workflowRunExistsReadOnly(dataDir: string, runId: string): boolean {

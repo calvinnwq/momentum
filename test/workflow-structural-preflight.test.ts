@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS,
+  preflightCodingWorkflowBuiltInDefinition,
   preflightCodingWorkflowRouteProfile,
   preflightCodingWorkflowRunStartInput,
   preflightCodingWorkflowWrapperConfig,
@@ -10,6 +11,56 @@ import {
 import { CODING_WORKFLOW_DEFINITION } from "../src/core/workflow/definition/definition.js";
 
 describe("coding workflow structural preflight", () => {
+  it("resolves the built-in coding workflow definition with compact passed evidence", () => {
+    const result = preflightCodingWorkflowBuiltInDefinition(
+      "coding-workflow",
+      1
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected passed preflight");
+    expect(result.definition).toBe(CODING_WORKFLOW_DEFINITION);
+    expect(result.evidence).toEqual([
+      {
+        checkId: "workflow.definition",
+        status: "passed",
+        severity: "info",
+        path: "workflow.definition",
+        key: "definition",
+        message: "Built-in coding workflow definition resolved.",
+        recommendedAction: "No action required."
+      }
+    ]);
+    expect(Object.keys(result.evidence[0])).toEqual(
+      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS
+    );
+  });
+
+  it("refuses missing built-in coding workflow versions with compact evidence", () => {
+    const result = preflightCodingWorkflowBuiltInDefinition(
+      "coding-workflow",
+      99
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected failed preflight");
+    expect(result.evidence).toEqual([
+      {
+        checkId: "workflow.definition",
+        status: "failed",
+        severity: "error",
+        path: "workflow.definition.version",
+        key: "definitionVersion",
+        message: "Built-in coding workflow definition version was not found.",
+        recommendedAction:
+          "Use the supported built-in coding workflow definition key and version."
+      }
+    ]);
+    expect(Object.keys(result.evidence[0])).toEqual(
+      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS
+    );
+  });
+
   it("returns normalized route step overrides with compact passed evidence", () => {
     const result = preflightCodingWorkflowRouteSteps({
       implementation: { model: " opus " }

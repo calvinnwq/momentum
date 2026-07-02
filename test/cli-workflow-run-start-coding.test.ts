@@ -485,6 +485,43 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
     });
   });
 
+  it("emits structural preflight evidence for missing built-in definition versions before durable writes", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const result = await run(
+      startCodingArgs({
+        dataDir,
+        repoDir,
+        runId: "ngx-563-missing-definition-version",
+        objective: "Block missing built-in definition version",
+        extra: ["--definition-version", "99"]
+      })
+    );
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "workflow run start-coding",
+      code: "definition_not_found",
+      runId: "ngx-563-missing-definition-version"
+    });
+    expect(payload["preflightEvidence"]).toEqual([
+      {
+        checkId: "workflow.definition",
+        status: "failed",
+        severity: "error",
+        path: "workflow.definition.version",
+        key: "definitionVersion",
+        message: "Built-in coding workflow definition version was not found.",
+        recommendedAction:
+          "Use the supported built-in coding workflow definition key and version."
+      }
+    ]);
+    expect(fs.existsSync(path.join(dataDir, "momentum.db"))).toBe(false);
+  });
+
   it("accepts an explicit --definition coding-workflow as a no-op selector", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();

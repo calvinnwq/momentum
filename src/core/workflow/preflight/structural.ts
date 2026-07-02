@@ -1,6 +1,10 @@
 import path from "node:path";
 
 import {
+  getBuiltInWorkflowDefinition,
+  type WorkflowDefinition
+} from "../definition/definition.js";
+import {
   CONFIGURABLE_CODING_STEP_KEYS,
   CODING_ROUTE_STEPS_KEY,
   validateCodingStepRouteOverrides,
@@ -84,6 +88,18 @@ export type CodingWorkflowRunStartInputPreflightResult =
       evidence: readonly StructuralPreflightEvidence[];
     };
 
+export type CodingWorkflowBuiltInDefinitionPreflightResult =
+  | {
+      ok: true;
+      definition: WorkflowDefinition;
+      evidence: readonly [StructuralPreflightEvidence];
+    }
+  | {
+      ok: false;
+      evidence: readonly [StructuralPreflightEvidence];
+    };
+
+const WORKFLOW_DEFINITION_CHECK_ID = "workflow.definition";
 const RUN_SHAPE_CHECK_ID = "workflow.run_shape";
 const ROUTE_STEPS_CHECK_ID = "route.steps";
 const ROUTE_PROFILE_CHECK_ID = "route.profile";
@@ -93,6 +109,51 @@ const WRAPPER_CONFIG_CAMEL_CASE_KEYS: Readonly<Record<string, string>> = {
   resultFile: "result_file",
   timeoutSec: "timeout_sec"
 };
+
+export function preflightCodingWorkflowBuiltInDefinition(
+  key: string,
+  version: number | undefined
+): CodingWorkflowBuiltInDefinitionPreflightResult {
+  const definition = getBuiltInWorkflowDefinition(key, version);
+  if (definition !== undefined) {
+    return {
+      ok: true,
+      definition,
+      evidence: [
+        buildStructuralPreflightEvidence({
+          checkId: WORKFLOW_DEFINITION_CHECK_ID,
+          status: "passed",
+          severity: "info",
+          path: "workflow.definition",
+          key: "definition",
+          message: "Built-in coding workflow definition resolved.",
+          recommendedAction: "No action required."
+        })
+      ]
+    };
+  }
+
+  const missingVersion = version !== undefined;
+  return {
+    ok: false,
+    evidence: [
+      buildStructuralPreflightEvidence({
+        checkId: WORKFLOW_DEFINITION_CHECK_ID,
+        status: "failed",
+        severity: "error",
+        path: missingVersion
+          ? "workflow.definition.version"
+          : "workflow.definition.key",
+        key: missingVersion ? "definitionVersion" : "definition",
+        message: missingVersion
+          ? "Built-in coding workflow definition version was not found."
+          : "Built-in coding workflow definition key was not found.",
+        recommendedAction:
+          "Use the supported built-in coding workflow definition key and version."
+      })
+    ]
+  };
+}
 
 export function preflightCodingWorkflowRunStartInput(
   input: WorkflowRunStartInput
