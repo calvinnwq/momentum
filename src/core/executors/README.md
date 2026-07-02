@@ -30,6 +30,9 @@ were left in place; importers still reference the concrete modules below.
 `loop/reducer.ts` is the central pure reducer and the most widely consumed entry
 point; `loop/persist.ts` wraps it with persistence. The goal-loop and single-shot
 families build on `loop/reducer` / `loop/persist`.
+The native `goal-loop` family treats runner-authored `RunnerResult` JSON as input to finalization only.
+After finalization, its authoritative evidence is the `executor_invocations` / `executor_rounds` tree plus child artifacts, checkpoints, findings, and decisions that `workflow run logs` reads today.
+Compatibility mechanisms such as GNHF must sit below `goal-loop`; they must not become workflow executor families or make `.gnhf/runs` authoritative state.
 
 ### Shared step finalization (M9 / M10 separation)
 
