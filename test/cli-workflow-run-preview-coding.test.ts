@@ -158,6 +158,138 @@ describe("momentum workflow run preview-coding", () => {
     ]);
   });
 
+  it("emits structural preflight evidence for invalid route steps", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const result = await run(
+      previewCodingArgs({
+        dataDir,
+        repoDir,
+        runId: "preview-invalid-route-steps",
+        objective: "Block bad route config",
+        extra: [
+          "--steps-json",
+          JSON.stringify({ "linear-refresh": { model: "opus" } })
+        ]
+      })
+    );
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "workflow run preview-coding",
+      code: "route_config_invalid",
+      runId: "preview-invalid-route-steps"
+    });
+    expect(payload["preflightEvidence"]).toEqual([
+      {
+        checkId: "route.steps",
+        status: "failed",
+        severity: "error",
+        path: "route.steps.linear-refresh",
+        key: "linear-refresh",
+        message:
+          'Coding route step "linear-refresh" is not configurable; supported steps: implementation, postflight, no-mistakes, merge-cleanup.',
+        recommendedAction:
+          "Use route.steps only for implementation, postflight, no-mistakes, or merge-cleanup, or remove the unsupported step key."
+      }
+    ]);
+  });
+
+  it("emits structural preflight evidence for blank route profiles", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const result = await run(
+      previewCodingArgs({
+        dataDir,
+        repoDir,
+        runId: "preview-invalid-profile",
+        objective: "Block blank profile",
+        extra: ["--profile", "   "]
+      })
+    );
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "workflow run preview-coding",
+      code: "route_config_invalid",
+      runId: "preview-invalid-profile"
+    });
+    expect(payload["preflightEvidence"]).toEqual([
+      {
+        checkId: "route.profile",
+        status: "failed",
+        severity: "error",
+        path: "route.profile",
+        key: "profile",
+        message: "Coding route profile must be a non-empty string when provided.",
+        recommendedAction:
+          "Set route.profile to a non-empty runtime/profile name, or remove --profile to use the default route."
+      }
+    ]);
+
+    const db = openDb(dataDir);
+    try {
+      const runRow = db
+        .prepare("SELECT id FROM workflow_runs WHERE id = ?")
+        .get("preview-invalid-profile");
+      expect(runRow).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("emits structural preflight evidence for invalid approval boundaries", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const result = await run(
+      previewCodingArgs({
+        dataDir,
+        repoDir,
+        runId: "preview-invalid-approval",
+        objective: "Block bad approval boundary",
+        extra: ["--approval-boundary", "through-linear-refresh"]
+      })
+    );
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "workflow run preview-coding",
+      code: "invalid_run_start",
+      runId: "preview-invalid-approval"
+    });
+    expect(payload["preflightEvidence"]).toEqual([
+      {
+        checkId: "workflow.run_shape",
+        status: "failed",
+        severity: "error",
+        path: "approvalBoundary",
+        key: "approvalBoundary",
+        message: "Approval boundary is not a known workflow approval boundary.",
+        recommendedAction:
+          "Set approvalBoundary to a supported workflow approval boundary or omit it for manual approval."
+      }
+    ]);
+
+    const db = openDb(dataDir);
+    try {
+      const runRow = db
+        .prepare("SELECT id FROM workflow_runs WHERE id = ?")
+        .get("preview-invalid-approval");
+      expect(runRow).toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
   it("writes nothing durable: no run row is created by a preview", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
@@ -679,11 +811,63 @@ describe("momentum workflow run preview-coding", () => {
       "--json"
     ]);
     expect(noObjective.code).toBe(1);
-    expect(JSON.parse(noObjective.stderr)).toMatchObject({
+    const noObjectivePayload = JSON.parse(noObjective.stderr) as Record<string, unknown>;
+    expect(noObjectivePayload).toMatchObject({
       ok: false,
       command: "workflow run preview-coding",
       code: "objective_required"
     });
+    expect(noObjectivePayload["preflightEvidence"]).toEqual([
+      {
+        checkId: "workflow.run_shape",
+        status: "failed",
+        severity: "error",
+        path: "objective",
+        key: "objective",
+        message: "Objective must be a non-empty string.",
+        recommendedAction:
+          "Set objective to a non-empty objective before starting the run."
+      }
+    ]);
+  });
+
+  it("emits structural preflight evidence when --repo is blank", async () => {
+    const dataDir = makeTempDir();
+    const result = await run([
+      "workflow",
+      "run",
+      "preview-coding",
+      "--run-id",
+      "preview-blank-repo",
+      "--repo",
+      "   ",
+      "--objective",
+      "Reject blank repo",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "workflow run preview-coding",
+      code: "repo_required",
+      runId: "preview-blank-repo"
+    });
+    expect(payload["preflightEvidence"]).toEqual([
+      {
+        checkId: "workflow.run_shape",
+        status: "failed",
+        severity: "error",
+        path: "repoPath",
+        key: "repoPath",
+        message: "Repo path must be a non-empty string.",
+        recommendedAction:
+          "Set repoPath to a non-empty repository path before starting the run."
+      }
+    ]);
   });
 });
 

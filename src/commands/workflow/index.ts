@@ -89,6 +89,7 @@ import {
   type ReconcileWorkflowRunManualRecoveryResult
 } from "../../core/workflow/recovery/reconcile.js";
 import {
+  CODING_WORKFLOW_DEFINITION,
   CODING_WORKFLOW_DEFINITION_KEY,
   getBuiltInWorkflowDefinition,
   type WorkflowDefinition
@@ -105,10 +106,16 @@ import {
 import {
   formatCodingRouteStepSelectionLines,
   resolveCodingRouteStepSelections,
-  validateCodingStepRouteOverrides,
   writeCodingStepRouteOverrides,
   type CodingStepRouteOverrides
 } from "../../core/workflow/route/coding.js";
+import {
+  preflightCodingWorkflowBuiltInDefinition,
+  preflightCodingWorkflowRouteProfile,
+  preflightCodingWorkflowRouteSteps,
+  preflightCodingWorkflowRunStartInput,
+  type StructuralPreflightEvidence
+} from "../../core/workflow/preflight/structural.js";
 import {
   InvalidWorkflowRunStartError,
   WorkflowRunStartConflictError,
@@ -392,7 +399,7 @@ function workflowRunStart(parsed: ParsedFlags, io: CliIo): number {
  * `momentum workflow run start-coding` - the explicit Momentum-native coding
  * workflow start door (NGX-508). It is a thin, unmistakable selector over the
  * same durable {@link persistWorkflowRunStart} machinery as `workflow run
- * start`, adding four coding-specific guarantees:
+ * start`, adding five coding-specific guarantees:
  *
  *   - it always materializes the built-in `coding-workflow` definition (a
  *     conflicting `--definition` is refused with `definition_not_allowed`);
@@ -401,13 +408,15 @@ function workflowRunStart(parsed: ParsedFlags, io: CliIo): number {
  *     `cwfp-*` primary state;
  *   - it records the run with the {@link MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE}
  *     provenance so status / handoff / monitor / logs surface it as
- *     Momentum-owned; and
+ *     Momentum-owned;
  *   - it accepts the coding-only `--steps-json` route override and records
  *     validated per-step harness/model/effort selections under `route.steps`,
- *     with provider-aware model aliases normalized before persistence.
+ *     with provider-aware model aliases normalized before persistence; and
+ *   - it runs structural preflight for built-in definition lookup, route
+ *     profile, route steps, and run-start shape before any durable write.
  *
- * The ordinary `workflow run start` path and the imported CWFP read/compat paths
- * are left exactly as they were.
+ * The ordinary `workflow run start` path shares the structural route-profile and
+ * run-shape checks, while imported CWFP read/compat paths are left as they were.
  */
 function workflowRunStartCoding(parsed: ParsedFlags, io: CliIo): number {
   return runWorkflowStartCommand(parsed, io, {
@@ -453,6 +462,29 @@ type WorkflowStartCommandOptions = {
  * `--steps-json` support) while `preview` keeps the materialized plan on the
  * read-only path.
  */
+function buildCodingRequiredInputPreflightEvidence(
+  parsed: ParsedFlags,
+  evidencePath: "repoPath" | "objective"
+): readonly StructuralPreflightEvidence[] {
+  const structuralPreflight = preflightCodingWorkflowRunStartInput({
+    definition: CODING_WORKFLOW_DEFINITION,
+    runId: parsed.runId ?? "",
+    repoPath: parsed.repo ?? "",
+    objective: parsed.objective ?? "",
+    now: Date.now(),
+    ...(parsed.approvalBoundary !== undefined
+      ? { approvalBoundary: parsed.approvalBoundary }
+      : {}),
+    ...(parsed.issueScope !== undefined
+      ? { issueScope: { identifier: parsed.issueScope } }
+      : {})
+  });
+  if (structuralPreflight.ok) return [];
+  return structuralPreflight.evidence.filter(
+    (evidence) => evidence.path === evidencePath
+  );
+}
+
 function runWorkflowStartCommand(
   parsed: ParsedFlags,
   io: CliIo,
@@ -476,12 +508,15 @@ function runWorkflowStartCommand(
       message: `Missing required --run-id <id> for ${command}.`
     });
   }
-  if (parsed.repo === undefined || parsed.repo.length === 0) {
+  if (parsed.repo === undefined || parsed.repo.trim().length === 0) {
     return emitWorkflowRunStartFailure(parsed, io, {
       command,
       code: "repo_required",
       message: `Missing required --repo <path> for ${command}.`,
-      runId
+      runId,
+      ...(options.coding
+        ? { preflightEvidence: buildCodingRequiredInputPreflightEvidence(parsed, "repoPath") }
+        : {})
     });
   }
   if (parsed.objective === undefined || parsed.objective.length === 0) {
@@ -489,7 +524,10 @@ function runWorkflowStartCommand(
       command,
       code: "objective_required",
       message: `Missing required --objective <text> for ${command}.`,
-      runId
+      runId,
+      ...(options.coding
+        ? { preflightEvidence: buildCodingRequiredInputPreflightEvidence(parsed, "objective") }
+        : {})
     });
   }
 
@@ -524,6 +562,22 @@ function runWorkflowStartCommand(
   // so the generic `workflow run start` refuses it rather than silently dropping
   // a coding-only selection; a malformed or unsupported selection fails closed
   // before any durable write.
+  let routeProfile: string | undefined;
+  if (parsed.profile !== undefined) {
+    const structuralPreflight = preflightCodingWorkflowRouteProfile(parsed.profile);
+    if (!structuralPreflight.ok) {
+      const failedCheck = structuralPreflight.evidence[0];
+      return emitWorkflowRunStartFailure(parsed, io, {
+        command,
+        code: "route_config_invalid",
+        message: `--profile is invalid (${failedCheck.path}): ${failedCheck.message}`,
+        runId,
+        preflightEvidence: structuralPreflight.evidence
+      });
+    }
+    routeProfile = structuralPreflight.profile;
+  }
+
   let stepRouteOverrides: CodingStepRouteOverrides = {};
   if (parsed.stepsJson !== undefined) {
     if (!options.coding) {
@@ -547,18 +601,19 @@ function runWorkflowStartCommand(
         runId
       });
     }
-    const validated = validateCodingStepRouteOverrides(rawStepRouteConfig);
-    if (!validated.ok) {
+    const structuralPreflight =
+      preflightCodingWorkflowRouteSteps(rawStepRouteConfig);
+    if (!structuralPreflight.ok) {
+      const failedCheck = structuralPreflight.evidence[0];
       return emitWorkflowRunStartFailure(parsed, io, {
         command,
         code: "route_config_invalid",
-        message: `--steps-json is invalid (${validated.refusal}${
-          validated.path === undefined ? "" : ` at ${validated.path}`
-        }): ${validated.reason}`,
-        runId
+        message: `--steps-json is invalid (${failedCheck.path}): ${failedCheck.message}`,
+        runId,
+        preflightEvidence: structuralPreflight.evidence
       });
     }
-    stepRouteOverrides = validated.overrides;
+    stepRouteOverrides = structuralPreflight.overrides;
   }
 
   const repoPath = path.resolve(parsed.repo);
@@ -597,15 +652,13 @@ function runWorkflowStartCommand(
     });
   }
 
-  // Preview mode (coding door only) shares every precondition above but stops
-  // before any durable write: it resolves the built-in definition, materializes
-  // a frozen plan projection, and emits it without opening the database for writes.
-  if (options.preview === true) {
-    const definition = resolveBuiltInWorkflowRunStartDefinition(
+  let codingDefinition: WorkflowDefinition | undefined;
+  if (options.coding) {
+    const structuralPreflight = preflightCodingWorkflowBuiltInDefinition(
       definitionKey,
       parsed.definitionVersion
     );
-    if (definition === undefined) {
+    if (!structuralPreflight.ok) {
       return emitWorkflowRunStartFailure(parsed, io, {
         command,
         code: "definition_not_found",
@@ -614,9 +667,17 @@ function runWorkflowStartCommand(
             ? `No workflow definition found for key: ${definitionKey}.`
             : `No workflow definition found for key ${definitionKey} version ${parsed.definitionVersion}.`,
         dataDir,
-        runId
+        runId,
+        preflightEvidence: structuralPreflight.evidence
       });
     }
+    codingDefinition = structuralPreflight.definition;
+  }
+
+  let preflightedCodingInput: WorkflowRunStartInput | undefined;
+  if (options.coding) {
+    const definition = codingDefinition;
+    if (definition === undefined) throw new Error("Missing coding definition.");
     const input = buildWorkflowRunStartInput({
       definition,
       runId,
@@ -625,8 +686,32 @@ function runWorkflowStartCommand(
       now,
       coding: options.coding,
       parsed,
-      stepRouteOverrides
+      stepRouteOverrides,
+      routeProfile
     });
+    const structuralPreflight = preflightCodingWorkflowRunStartInput(input);
+    if (!structuralPreflight.ok) {
+      return emitWorkflowRunStartFailure(parsed, io, {
+        command,
+        code: "invalid_run_start",
+        message: `Invalid workflow run start: ${structuralPreflight.errors
+          .map((error) => error.code)
+          .join(", ")}`,
+        dataDir,
+        runId,
+        errors: structuralPreflight.errors,
+        preflightEvidence: structuralPreflight.evidence
+      });
+    }
+    preflightedCodingInput = input;
+  }
+
+  // Preview mode (coding door only) shares every precondition above but stops
+  // before any durable write: it resolves the built-in definition, materializes
+  // a frozen plan projection, and emits it without opening the database for writes.
+  if (options.preview === true) {
+    const input = preflightedCodingInput;
+    if (input === undefined) throw new Error("Missing coding preflight input.");
     const previewResult = materializeWorkflowCodingPlanPreview(input);
     if (!previewResult.ok) {
       return emitWorkflowRunStartFailure(parsed, io, {
@@ -665,10 +750,7 @@ function runWorkflowStartCommand(
   const db = openDb(dataDir);
   try {
     const definition = options.coding
-      ? resolveBuiltInWorkflowRunStartDefinition(
-          definitionKey,
-          parsed.definitionVersion
-        )
+      ? codingDefinition
       : resolveWorkflowRunStartDefinition(
           db,
           definitionKey,
@@ -688,16 +770,36 @@ function runWorkflowStartCommand(
       });
     }
 
-    const input = buildWorkflowRunStartInput({
-      definition,
-      runId,
-      repoPath,
-      objective,
-      now,
-      coding: options.coding,
-      parsed,
-      stepRouteOverrides
-    });
+    const input =
+      preflightedCodingInput ??
+      buildWorkflowRunStartInput({
+        definition,
+        runId,
+        repoPath,
+        objective,
+        now,
+        coding: options.coding,
+        parsed,
+        stepRouteOverrides,
+        routeProfile
+      });
+
+    if (!options.coding) {
+      const structuralPreflight = preflightCodingWorkflowRunStartInput(input);
+      if (!structuralPreflight.ok) {
+        return emitWorkflowRunStartFailure(parsed, io, {
+          command,
+          code: "invalid_run_start",
+          message: `Invalid workflow run start: ${structuralPreflight.errors
+            .map((error) => error.code)
+            .join(", ")}`,
+          dataDir,
+          runId,
+          errors: structuralPreflight.errors,
+          preflightEvidence: structuralPreflight.evidence
+        });
+      }
+    }
 
     let summary: PersistWorkflowRunStartSummary;
     try {
@@ -766,18 +868,6 @@ function resolveWorkflowRunStartDefinition(
   return builtIn;
 }
 
-/**
- * Resolve the built-in workflow definition for the Momentum-native coding door.
- * Versioned starts require the exact built-in key/version pair; unversioned
- * starts select the latest known built-in version.
- */
-function resolveBuiltInWorkflowRunStartDefinition(
-  key: string,
-  version: number | undefined
-): WorkflowDefinition | undefined {
-  return getBuiltInWorkflowDefinition(key, version);
-}
-
 function workflowRunExistsReadOnly(dataDir: string, runId: string): boolean {
   const db = openExistingDbReadOnly(dataDir);
   if (db === undefined) {
@@ -816,6 +906,7 @@ function buildWorkflowRunStartInput(args: {
   coding: boolean;
   parsed: ParsedFlags;
   stepRouteOverrides: CodingStepRouteOverrides;
+  routeProfile: string | undefined;
 }): WorkflowRunStartInput {
   const {
     definition,
@@ -825,7 +916,8 @@ function buildWorkflowRunStartInput(args: {
     now,
     coding,
     parsed,
-    stepRouteOverrides
+    stepRouteOverrides,
+    routeProfile
   } = args;
   const input: WorkflowRunStartInput = {
     definition,
@@ -851,8 +943,8 @@ function buildWorkflowRunStartInput(args: {
   // embedded when at least one override is present, so a run with neither input keeps
   // an empty route, exactly as before NGX-510.
   let route: Record<string, unknown> = {};
-  if (parsed.profile !== undefined) {
-    route.profile = parsed.profile;
+  if (routeProfile !== undefined) {
+    route.profile = routeProfile;
   }
   route = writeCodingStepRouteOverrides(route, stepRouteOverrides);
   if (Object.keys(route).length > 0) {

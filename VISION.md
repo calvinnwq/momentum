@@ -143,10 +143,11 @@ Do not add a first-class `gnhf` executor family merely to reuse that behavior.
 The product shape is native `goal-loop`; GNHF can be a runner, compatibility
 source, or extraction reference beneath it.
 
-## Workflow-Level Preflight Work Spec
+## Workflow-Level Preflight Contract
 
-The next workflow-level hardening slice should implement structural preflight
-without moving tail-step side-effect checks out of their owning steps.
+The first workflow-level hardening slice implements structural preflight for
+native coding start and preview setup without moving tail-step side-effect
+checks out of their owning steps.
 
 ### Goal
 
@@ -156,18 +157,17 @@ operator exactly what setup must be fixed.
 
 ### Scope
 
-- Reuse one structural preflight routine across preview/start validation and
-  the native coding workflow's `preflight` step where the same data is
-  available.
+- Reuse one structural preflight routine across preview/start validation where
+  the same data is available.
 - Validate `route.steps` as fail-closed structured config.
-- Validate wrapper/profile config shape before a live wrapper can spawn child
-  work.
+- Validate route profile and wrapper config shape before invalid setup reaches
+  runtime work.
 - Reject unknown keys and common casing drift with canonical snake_case
   guidance.
 - Validate env allowlists, result-file fields, timeout fields, and per-step
   config ownership.
-- Persist or emit a compact preflight evidence object with check ids, status,
-  offending path/key, and recommended fix.
+- Emit compact preflight evidence with check ids, status, offending path/key,
+  and recommended fix.
 - Keep side-effect capability checks inside `merge-cleanup`, `linear-refresh`,
   and other effectful steps.
 

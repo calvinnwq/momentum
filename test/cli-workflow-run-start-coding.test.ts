@@ -485,6 +485,43 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
     });
   });
 
+  it("emits structural preflight evidence for missing built-in definition versions before durable writes", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const result = await run(
+      startCodingArgs({
+        dataDir,
+        repoDir,
+        runId: "ngx-563-missing-definition-version",
+        objective: "Block missing built-in definition version",
+        extra: ["--definition-version", "99"]
+      })
+    );
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "workflow run start-coding",
+      code: "definition_not_found",
+      runId: "ngx-563-missing-definition-version"
+    });
+    expect(payload["preflightEvidence"]).toEqual([
+      {
+        checkId: "workflow.definition",
+        status: "failed",
+        severity: "error",
+        path: "workflow.definition.version",
+        key: "definitionVersion",
+        message: "Built-in coding workflow definition version was not found.",
+        recommendedAction:
+          "Use the supported built-in coding workflow definition key and version."
+      }
+    ]);
+    expect(fs.existsSync(path.join(dataDir, "momentum.db"))).toBe(false);
+  });
+
   it("accepts an explicit --definition coding-workflow as a no-op selector", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
@@ -518,6 +555,120 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
       command: "workflow run start-coding",
       code: "run_id_required"
     });
+  });
+
+  it("emits structural preflight evidence when --objective is missing", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const result = await run([
+      "workflow",
+      "run",
+      "start-coding",
+      "--run-id",
+      "ngx-563-no-objective",
+      "--repo",
+      repoDir,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "workflow run start-coding",
+      code: "objective_required",
+      runId: "ngx-563-no-objective"
+    });
+    expect(payload["preflightEvidence"]).toEqual([
+      {
+        checkId: "workflow.run_shape",
+        status: "failed",
+        severity: "error",
+        path: "objective",
+        key: "objective",
+        message: "Objective must be a non-empty string.",
+        recommendedAction:
+          "Set objective to a non-empty objective before starting the run."
+      }
+    ]);
+  });
+
+  it("emits structural preflight evidence when --repo is blank before durable writes", async () => {
+    const dataDir = makeTempDir();
+    const result = await run([
+      "workflow",
+      "run",
+      "start-coding",
+      "--run-id",
+      "ngx-563-blank-repo",
+      "--repo",
+      "   ",
+      "--objective",
+      "Reject blank repo",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "workflow run start-coding",
+      code: "repo_required",
+      runId: "ngx-563-blank-repo"
+    });
+    expect(payload["preflightEvidence"]).toEqual([
+      {
+        checkId: "workflow.run_shape",
+        status: "failed",
+        severity: "error",
+        path: "repoPath",
+        key: "repoPath",
+        message: "Repo path must be a non-empty string.",
+        recommendedAction:
+          "Set repoPath to a non-empty repository path before starting the run."
+      }
+    ]);
+    expect(fs.existsSync(path.join(dataDir, "momentum.db"))).toBe(false);
+  });
+
+  it("emits structural preflight evidence for invalid approval boundaries before durable writes", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const result = await run(
+      startCodingArgs({
+        dataDir,
+        repoDir,
+        runId: "ngx-563-invalid-approval-before-db",
+        objective: "Reject invalid approval boundary",
+        extra: ["--approval-boundary", "through-linear-refresh"]
+      })
+    );
+
+    expect(result.code).toBe(1);
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "workflow run start-coding",
+      code: "invalid_run_start",
+      runId: "ngx-563-invalid-approval-before-db"
+    });
+    expect(payload["preflightEvidence"]).toEqual([
+      {
+        checkId: "workflow.run_shape",
+        status: "failed",
+        severity: "error",
+        path: "approvalBoundary",
+        key: "approvalBoundary",
+        message: "Approval boundary is not a known workflow approval boundary.",
+        recommendedAction:
+          "Set approvalBoundary to a supported workflow approval boundary or omit it for manual approval."
+      }
+    ]);
+    expect(fs.existsSync(path.join(dataDir, "momentum.db"))).toBe(false);
   });
 
   it("is readable through workflow status, handoff, and monitor from Momentum state alone", async () => {

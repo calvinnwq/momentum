@@ -22,6 +22,7 @@ were left in place; importers still reference the concrete modules below.
 | Leases | `leases.ts` |
 | Dispatch | `dispatch/dispatch.ts`, `dispatch/persist.ts`, `dispatch/execute.ts`, `dispatch/retry.ts`, `dispatch/executor-run.ts`, `dispatch/executor-terminalize.ts`, `dispatch/reconcile.ts`, `dispatch/reconcile-execute.ts`, `dispatch/external-apply.ts`, `dispatch/external-apply-run.ts`, `dispatch/external-apply-dispatch.ts`, `dispatch/subworkflow.ts`, `dispatch/subworkflow-run.ts`, `dispatch/subworkflow-dispatch.ts`, `dispatch/live-wrapper.ts`, `dispatch/dogfood.ts`, `dispatch/scheduler.ts` |
 | Routes | `route/coding.ts`, `route/subworkflow.ts`, `route/subworkflow-child-config.ts`, `route/subworkflow-child-runner.ts`, `route/subworkflow-dispatch-context.ts` |
+| Preflight | `preflight/structural.ts` |
 | Monitor & watch | `monitor/state.ts`, `monitor/envelope.ts`, `monitor/progress.ts`, `monitor/watch-advisory.ts`, `monitor/watch-stream.ts`, `monitor/watch-stream-source.ts`, `monitor/action-authority.ts` |
 | Live-wrapper dogfood | `live-wrapper/coding-workflow.ts`, `live-wrapper/merge-cleanup-preflight.ts`, `live-wrapper/daemon-profile.ts`, `live-wrapper/daemon-exec-context.ts` |
 | Recovery | `recovery/artifact.ts`, `recovery/reconcile.ts` |
@@ -174,6 +175,11 @@ NGX-510 adds the pure `route/coding.ts` keystone for native per-step coding rout
 The `workflow run start-coding` / `workflow run preview-coding` doors accept a `--steps-json` flag that builds overrides via this module and embeds them in the durable run route (or the frozen preview route, which also projects a human-readable per-step selection block); the generic `workflow run start` refuses the flag with `route_config_not_allowed`, and a misconfigured selection fails closed with `route_config_invalid` before any write.
 Provider-specific model aliases are normalized during the same pure route pass when enough context is present, so known Claude, Codex, and OpenCode aliases preview, persist, and dispatch the command-ready model string for that harness instead of the bare alias; unknown or non-agent harness/model values remain free-form.
 Status, handoff, monitor, and logs expose the selected `route.steps` through durable run detail, dispatcher-created executor rounds freeze the mapped agent/model/effort values, and live-wrapper execution forwards them as `MOMENTUM_AGENT_PROVIDER`, `MOMENTUM_MODEL`, and `MOMENTUM_EFFORT`; a corrupt persisted `route.steps` namespace fails closed to manual recovery instead of silently falling back.
+
+`preflight/structural.ts` is the pure structural preflight seam for native coding workflow setup.
+The start and preview doors use it to validate built-in definition lookup, required run shape, approval boundary, issue scope, route profile, and route steps before durable writes.
+It emits compact `preflightEvidence` objects with stable fields (`checkId`, `status`, `severity`, `path`, `key`, `message`, `recommendedAction`) so CLI clients can fix setup without parsing prose.
+It also exposes wrapper config validation for canonical snake_case keys, env allowlists, timeouts, and safe or expected result files, while GitHub, Linear, no-mistakes, and other side-effect checks stay inside the step that owns the side effect.
 Native `goal-loop` round evidence is currently consumed by `workflow run logs` from executor invocation / round rows and child evidence.
 Status, handoff, monitor, and GUI readers remain future consumers until they are wired to the same executor-round projection instead of runner-authored JSON, terminal scrollback, or runner-local directories.
 

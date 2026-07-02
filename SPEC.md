@@ -96,6 +96,8 @@ definition resolution, approval boundary, route config, wrapper/profile schema,
 canonical config keys, and result/config path shape. Side-effecting tail steps
 own their own capability/auth/target/idempotency checks inside the same durable
 step lifecycle that applies and reconciles the side effect.
+Structural preflight evidence uses a compact stable shape:
+`checkId`, `status`, `severity`, `path`, `key`, `message`, and `recommendedAction`.
 
 ## External Apply
 
@@ -159,6 +161,7 @@ Built-in workflow definitions are resolved by key and version; native runs must 
 If the recorded built-in version is unavailable, native dispatch must fail closed instead of substituting persisted rows or a later built-in version.
 `workflow run preview-coding` (NGX-509) is the read-only native plan-preview door: it shares the `start-coding` preconditions and built-in definition resolution but writes nothing, emitting a frozen plan (run id, repo, objective, issue scope, approval boundary, route fields such as `route.profile` and `route.steps`, definition key/version, and every step with its executor family and on-start state) so an operator can inspect the proposed run before approval or execution.
 The preview is a pure projection of the version-pinned built-in definition plus inputs, so a later `start-coding` from the same inputs persists a matching run, and the frozen plan can be reconstructed from the run's recorded `(definition key, version)` for approval/dispatch to reference.
+Structural preflight is shared by the native coding start and preview doors before durable run writes: missing built-in definition versions, blank required repository paths, invalid approval boundaries, invalid issue-scope identifiers, blank route profiles, and invalid route steps fail closed with `preflightEvidence`.
 NGX-510 adds native per-step coding route/config overrides to the coding doors: `workflow run start-coding` / `workflow run preview-coding` accept `--steps-json <json>`, a sparse object keyed by the configurable coding steps (`implementation`, `postflight`, `no-mistakes`, `merge-cleanup`) carrying `harness`/`model`/`effort` string fields.
 Selections are validated and normalized to a byte-stable `route.steps` namespace on the durable run route, parallel to `route.profile` and `route.subworkflow`; absent steps/fields defer to defaults, and an unsupported step, unknown field, blank value, or malformed JSON fails closed with `route_config_invalid` (and writes nothing), while the generic `workflow run start` refuses the flag with `route_config_not_allowed`.
 Provider-specific model aliases are part of that normalization when the same step supplies the matching harness: known Claude aliases persist as pinned Claude Code model strings, known Codex aliases persist as un-namespaced Codex CLI model ids, and known OpenCode aliases persist as provider-qualified OpenCode model ids, while unknown harness/model values remain free-form.
