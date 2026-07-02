@@ -105,10 +105,10 @@ import {
 import {
   formatCodingRouteStepSelectionLines,
   resolveCodingRouteStepSelections,
-  validateCodingStepRouteOverrides,
   writeCodingStepRouteOverrides,
   type CodingStepRouteOverrides
 } from "../../core/workflow/route/coding.js";
+import { preflightCodingWorkflowRouteSteps } from "../../core/workflow/preflight/structural.js";
 import {
   InvalidWorkflowRunStartError,
   WorkflowRunStartConflictError,
@@ -547,18 +547,19 @@ function runWorkflowStartCommand(
         runId
       });
     }
-    const validated = validateCodingStepRouteOverrides(rawStepRouteConfig);
-    if (!validated.ok) {
+    const structuralPreflight =
+      preflightCodingWorkflowRouteSteps(rawStepRouteConfig);
+    if (!structuralPreflight.ok) {
+      const failedCheck = structuralPreflight.evidence[0];
       return emitWorkflowRunStartFailure(parsed, io, {
         command,
         code: "route_config_invalid",
-        message: `--steps-json is invalid (${validated.refusal}${
-          validated.path === undefined ? "" : ` at ${validated.path}`
-        }): ${validated.reason}`,
-        runId
+        message: `--steps-json is invalid (${failedCheck.path}): ${failedCheck.message}`,
+        runId,
+        preflightEvidence: structuralPreflight.evidence
       });
     }
-    stepRouteOverrides = validated.overrides;
+    stepRouteOverrides = structuralPreflight.overrides;
   }
 
   const repoPath = path.resolve(parsed.repo);

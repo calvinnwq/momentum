@@ -18,6 +18,9 @@ import type { PersistWorkflowRunImportSummary } from "../core/workflow/run/impor
 import type { WorkflowRunManualRecoveryState } from "../core/workflow/run/recovery.js";
 import type { PersistWorkflowRunStartSummary } from "../core/workflow/run/start-persist.js";
 import type {
+  StructuralPreflightEvidence
+} from "../core/workflow/preflight/structural.js";
+import type {
   WorkflowCodingPlanPreview,
   WorkflowRunStartError
 } from "../core/workflow/run/start.js";
@@ -46,6 +49,7 @@ type WorkflowRendererFailure = {
   gateId?: string;
   diagnostics?: WorkflowRunImportDiagnostic[];
   errors?: readonly WorkflowRunStartError[];
+  preflightEvidence?: readonly StructuralPreflightEvidence[];
   exitCode?: 1 | 2;
 };
 
@@ -1445,6 +1449,11 @@ function emitWorkflowFailure(
   if (failure.gateId !== undefined) payload["gateId"] = failure.gateId;
   if (failure.errors !== undefined) {
     payload["errors"] = failure.errors.map((error) => ({ ...error }));
+  }
+  if (failure.preflightEvidence !== undefined) {
+    payload["preflightEvidence"] = failure.preflightEvidence.map((evidence) => ({
+      ...evidence
+    }));
   }
   if (failure.diagnostics !== undefined) {
     payload["diagnostics"] = failure.diagnostics.map((diagnostic) => ({

@@ -158,6 +158,46 @@ describe("momentum workflow run preview-coding", () => {
     ]);
   });
 
+  it("emits structural preflight evidence for invalid route steps", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const result = await run(
+      previewCodingArgs({
+        dataDir,
+        repoDir,
+        runId: "preview-invalid-route-steps",
+        objective: "Block bad route config",
+        extra: [
+          "--steps-json",
+          JSON.stringify({ "linear-refresh": { model: "opus" } })
+        ]
+      })
+    );
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toBe("");
+    const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: false,
+      command: "workflow run preview-coding",
+      code: "route_config_invalid",
+      runId: "preview-invalid-route-steps"
+    });
+    expect(payload["preflightEvidence"]).toEqual([
+      {
+        checkId: "route.steps",
+        status: "failed",
+        severity: "error",
+        path: "route.steps.linear-refresh",
+        key: "linear-refresh",
+        message:
+          'Coding route step "linear-refresh" is not configurable; supported steps: implementation, postflight, no-mistakes, merge-cleanup.',
+        recommendedAction:
+          "Use route.steps only for implementation, postflight, no-mistakes, or merge-cleanup, or remove the unsupported step key."
+      }
+    ]);
+  });
+
   it("writes nothing durable: no run row is created by a preview", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
