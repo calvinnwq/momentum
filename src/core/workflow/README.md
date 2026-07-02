@@ -20,7 +20,7 @@ were left in place; importers still reference the concrete modules below.
 | Steps | `step/executor.ts`, `step/executor-real-adapters.ts`, `step/transitions.ts` |
 | Gates | `gate/gate.ts`, `gate/persist.ts` |
 | Leases | `leases.ts` |
-| Dispatch | `dispatch/dispatch.ts`, `dispatch/persist.ts`, `dispatch/execute.ts`, `dispatch/retry.ts`, `dispatch/executor-run.ts`, `dispatch/executor-terminalize.ts`, `dispatch/reconcile.ts`, `dispatch/reconcile-execute.ts`, `dispatch/external-apply.ts`, `dispatch/external-apply-run.ts`, `dispatch/external-apply-dispatch.ts`, `dispatch/subworkflow.ts`, `dispatch/subworkflow-run.ts`, `dispatch/subworkflow-dispatch.ts`, `dispatch/live-wrapper.ts`, `dispatch/dogfood.ts`, `dispatch/scheduler.ts` |
+| Dispatch | `dispatch/dispatch.ts`, `dispatch/persist.ts`, `dispatch/execute.ts`, `dispatch/retry.ts`, `dispatch/executor-run.ts`, `dispatch/executor-terminalize.ts`, `dispatch/reconcile.ts`, `dispatch/reconcile-execute.ts`, `dispatch/external-apply.ts`, `dispatch/external-apply-run.ts`, `dispatch/external-apply-dispatch.ts`, `dispatch/linear-refresh-lifecycle.ts`, `dispatch/subworkflow.ts`, `dispatch/subworkflow-run.ts`, `dispatch/subworkflow-dispatch.ts`, `dispatch/live-wrapper.ts`, `dispatch/dogfood.ts`, `dispatch/scheduler.ts` |
 | Routes | `route/coding.ts`, `route/subworkflow.ts`, `route/subworkflow-child-config.ts`, `route/subworkflow-child-runner.ts`, `route/subworkflow-dispatch-context.ts` |
 | Preflight | `preflight/structural.ts` |
 | Monitor & watch | `monitor/state.ts`, `monitor/envelope.ts`, `monitor/progress.ts`, `monitor/watch-advisory.ts`, `monitor/watch-stream.ts`, `monitor/watch-stream-source.ts`, `monitor/action-authority.ts` |
@@ -47,7 +47,7 @@ Other domains reach workflow behavior through these modules:
 - **CLI renderers** (`src/renderers/workflow.ts`): the same run/gate/monitor/
   status/handoff/events/logs shapes, imported **type-only** (renderers format, they
   do not mutate state).
-- **Daemon and supervisor dispatch** (`src/core/daemon/workflow-dispatch.ts`): `dispatch/execute`, `dispatch/dogfood`, `dispatch/external-apply-dispatch`, `dispatch/subworkflow-dispatch`, `dispatch/live-wrapper`, and `live-wrapper/daemon-profile`; configured `subworkflow` steps compose the child-run producer after the base scaffold while live-wrapper-owned families stay on the live-wrapper lane for both bounded daemon cycles and `workflow run watch --once` ticks.
+- **Daemon and supervisor dispatch** (`src/core/daemon/workflow-dispatch.ts`): `dispatch/execute`, `dispatch/dogfood`, `dispatch/external-apply-dispatch`, `dispatch/linear-refresh-lifecycle`, `dispatch/subworkflow-dispatch`, `dispatch/live-wrapper`, and `live-wrapper/daemon-profile`; configured `subworkflow` steps compose the child-run producer after the base scaffold while live-wrapper-owned families stay on the live-wrapper lane for both bounded daemon cycles and `workflow run watch --once` ticks.
 - **Dispatched-step reconciliation**: `dispatch/reconcile` /
   `dispatch/reconcile-execute` own the RC-2 pure/effect seam that finalizes a
   dispatched step from terminal executor evidence.
@@ -136,14 +136,8 @@ RC-3 (NGX-496) added the daemon-dispatchable `external-apply` adapter:
 `dispatch/external-apply-run.ts` runs the injected M6 write path and reconciles
 through RC-2, and `dispatch/external-apply-dispatch.ts` gates the producer by scaffold
 family after the base dispatcher creates the durable start rows.
-`dispatch/linear-refresh-lifecycle.ts` adds the tail-owned preflight -> apply ->
-reconcile classifier for the built-in `linear-refresh` step: it proves auth,
-policy, source item, exactly one pending `status_update` intent, valid payload,
-and stable idempotency marker before the M6 write path can run, and it turns
-already-applied successful audit evidence into terminal executor evidence without
-another Linear mutation. The Linear apply preflight helpers live in `src/core/intent/`
-so workflow code continues to consume the intent-owned apply path instead of importing policy or
-auth checks back from workflow modules.
+`dispatch/linear-refresh-lifecycle.ts` adds the tail-owned preflight -> apply -> reconcile classifier for the built-in `linear-refresh` step: it proves issue scope, auth, policy, source item, exactly one pending `status_update` intent, valid one-of `state` / `stateId` payload, and stable idempotency marker before the M6 write path can run, and it turns already-applied successful audit evidence into terminal executor evidence without another Linear mutation.
+The Linear apply preflight helpers live in `src/core/intent/` so workflow code continues to consume the intent-owned apply path instead of importing policy or auth checks back from workflow modules.
 
 RC-4 (NGX-497) added the `subworkflow` adapter mechanism, and RC-4b (NGX-498)
 flipped the configured production lane: `dispatch/subworkflow.ts` maps a child

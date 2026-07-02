@@ -1,6 +1,6 @@
 # Intent commands
 
-Operator-facing CLI envelopes for the `intent list`, `intent get`, `intent apply`, `intent skip`, and `intent cancel` commands. Intents are durable update-intent rows that source adapters and evidence ingestion record locally; the CLI applies one explicitly selected intent via `intent apply --external-apply` (gated by `MOMENTUM.md` `intent_apply_policy`). Bounded workflow daemon execution reuses that same policy-gated apply path for a built-in `linear-refresh` / `external-apply` step only after matching exactly one pending Linear intent to the run issue scope.
+Operator-facing CLI envelopes for the `intent list`, `intent get`, `intent apply`, `intent skip`, and `intent cancel` commands. Intents are durable update-intent rows that source adapters and evidence ingestion record locally; the CLI applies one explicitly selected intent via `intent apply --external-apply` (gated by `MOMENTUM.md` `intent_apply_policy`). Bounded workflow daemon execution reuses that same policy-gated apply path for a built-in `linear-refresh` / `external-apply` step only after proving repo policy, Linear auth, the run issue scope, exactly one pending Linear `status_update` intent, a matching source item, a valid one-of `state` / `stateId` payload, and a stable idempotency marker, or after matching already-successful audit evidence that can be reconciled without another Linear mutation.
 
 See also:
 
@@ -110,7 +110,7 @@ Policy resolution:
 
 - `--repo <path>` loads the repo's `MOMENTUM.md` policy file to resolve the effective `intent_apply_policy`.
 - When `--repo` is not provided, the effective policy falls back to the built-in default (`create_intents_only`).
-- `--external-apply` performs a policy-gated external tracker write through the adapter's external update client. It requires a `--repo` context whose `MOMENTUM.md` sets `intent_apply_policy: external_apply_allowed`, a resolved target issue, and the adapter's credential env var (`LINEAR_API_KEY` for the linear adapter). The write is a two-phase audit-before-write flow that is idempotent under replay; `source_satisfied` is comment-only, while Linear `status_update` intents must carry a non-empty payload `state` or `stateId` and perform a comment plus status transition.
+- `--external-apply` performs a policy-gated external tracker write through the adapter's external update client. It requires a `--repo` context whose `MOMENTUM.md` sets `intent_apply_policy: external_apply_allowed`, a resolved target issue, and the adapter's credential env var (`LINEAR_API_KEY` for the linear adapter). The write is a two-phase audit-before-write flow that is idempotent under replay; `source_satisfied` is comment-only, while Linear `status_update` intents must carry exactly one non-empty payload field, `state` or `stateId`, and perform a comment plus status transition.
 
 Without `--external-apply`, `intent apply` records the operator's manual mark only and does not contact the external tracker.
 
