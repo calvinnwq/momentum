@@ -98,9 +98,11 @@ adapter at execution time.
 
 When the result JSON conforms to the `RunnerResult` schema, `parseError`
 is `null` and the parsed content is available via the `content` field of
-the per-file block. The `RunnerResult` schema details (`status`,
-`failure_code`, `commit_sha`, `output_overflow`, and the failure-code
-taxonomy) live in [`docs/runners.md`](runners.md).
+the per-file block.
+The `RunnerResult` schema details (`success`, `summary`,
+`key_changes_made`, `goal_complete`, `commit`, optional `key_learnings`,
+and optional `remaining_work`) plus the runner failure-code taxonomy live
+in [`docs/runners.md`](runners.md).
 
 ## Failure surfaces
 

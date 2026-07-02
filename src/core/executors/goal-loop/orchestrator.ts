@@ -21,14 +21,14 @@
  * round: it inserts the durable `executor_invocations` row (running) before any
  * round, drives {@link runGoalLoopRound} per round index until a round's decision
  * stops the loop, and advances/terminalizes the invocation via
- * {@link invocationStateForRoundClassification} — succeeded on completion, the
+ * {@link invocationStateForRoundClassification} - succeeded on completion, the
  * durable `waiting_operator` pause on a quota / operator gate, a terminal
- * failure / manual recovery on the repo-safety boundaries. The real
- * bounded-mechanism wiring (the M9 goal iteration plugged into the
- * {@link GoalLoopRoundRunner} seam) and the run-level composition that materializes
- * the invocation/round identity and threads each round's result into the next
- * round's input are layered on top in later M10-05 slices, the same way the
- * run-level caller composes `runLiveWorkflowStep`.
+ * failure / manual recovery on the repo-safety boundaries. The concrete
+ * result-file mechanism lives in `goal-loop/mechanism.ts`, while
+ * {@link runGoalLoopStep} materializes the invocation/round identity and leaves
+ * the real daemon wiring to thread each round's result into the next round's
+ * input through its runtime input resolver, the same way the run-level caller
+ * composes `runLiveWorkflowStep`.
  *
  * The bounded mechanism is injected as a {@link GoalLoopRoundRunner} so the real
  * M9 goal iteration, a no-op, or a deterministic fake can all drive a round

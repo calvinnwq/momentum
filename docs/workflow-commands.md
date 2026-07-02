@@ -2194,6 +2194,19 @@ Exit code 0 on success, 1 on structured refusal, 2 on usage error.
 
 `workflow run events` is replay-only. It does not hold a connection open, emit JSONL, or watch for filesystem/database changes after the read. A caller that wants a live connection should use `workflow run watch <run-id> --stream --jsonl`, which holds the connection open and emits JSONL records over the same durable event cursor API; a caller that prefers discrete reads should poll `workflow run events` with the last returned cursor.
 
+## Native goal-loop evidence contract
+
+Native goal-loop log readers treat Momentum executor rows and child evidence as the source of truth.
+`workflow run logs` is the shipped consumer of this projection today.
+Future status, handoff, monitor, and GUI readers must use the same projection once they are wired to executor round evidence.
+The implementation step's `goal-loop` executor records one `executor_invocation` for the autonomous attempt and one ordered `executor_round` per durable iteration.
+Readers must derive summaries, key changes, learnings, remaining work, verification status, changed files, commit SHA, recovery reason, artifacts, checkpoints, findings, and decisions from those rows and artifact pointers.
+Post-finalization native round evidence exposes the daemon's `completionRecommendation` as `complete`, `continue`, `approval_required`, `operator_decision_required`, `manual_recovery_required`, `blocked`, `failed`, or `cancelled`.
+They must not scrape terminal scrollback or treat `.gnhf/runs` as authoritative.
+A GNHF-backed mechanism may run beneath `goal-loop`, but `gnhf` is not a workflow executor family and cannot replace the native invocation/round contract.
+Successful rounds show the single commit SHA Momentum recorded for that round.
+Failed, invalid, stale, unsafe, canceled, or no-op rounds show their recovery and checkpoint evidence without inventing a commit.
+
 ## `workflow run logs`
 
 ```text

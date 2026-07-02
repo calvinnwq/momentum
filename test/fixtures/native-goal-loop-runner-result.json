@@ -1,0 +1,22 @@
+{
+  "success": true,
+  "summary": "Implemented one bounded slice and verified it locally.",
+  "key_changes_made": [
+    "Added the native goal-loop runner result fixture.",
+    "Recorded durable evidence pointers for the round."
+  ],
+  "key_learnings": [
+    "The next round should continue from the persisted checkpoint rather than terminal scrollback."
+  ],
+  "remaining_work": [
+    "Implement native storage and runtime wiring in a later slice."
+  ],
+  "goal_complete": false,
+  "commit": {
+    "type": "feat",
+    "scope": "goal-loop",
+    "subject": "document native goal loop contract",
+    "body": "",
+    "breaking": false
+  }
+}

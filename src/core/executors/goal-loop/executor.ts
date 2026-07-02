@@ -13,12 +13,13 @@
  * preserved recovery code, and any durable human gate.
  *
  * It is a pure function of its inputs: no SQLite, no file system, no git, no
- * executor invocation — exactly the discipline `loop/reducer.ts` and
+ * executor invocation - exactly the discipline `loop/reducer.ts` and
  * `shared/step-finalize.ts` follow. The durable orchestrator that creates the
  * invocation, inserts the round, runs the bounded mechanism, runs finalization,
- * and persists this decision is layered on top in later M10-05 slices, the same
- * way `live-step/orchestrator.ts` composes the shared `shared/step-finalize.ts`
- * transaction (through its `live-step/finalize.ts` back-compat alias).
+ * and persists this decision is layered on top in `goal-loop/orchestrator.ts`,
+ * the same way `live-step/orchestrator.ts` composes the shared
+ * `shared/step-finalize.ts` transaction (through its `live-step/finalize.ts`
+ * back-compat alias).
  *
  * Beyond the classification, this module also projects a finished round into the
  * durable {@link ExecutorRoundUpdate} patches the M10-03 persistence twin
