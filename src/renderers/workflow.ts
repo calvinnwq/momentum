@@ -1219,6 +1219,12 @@ function workflowOperatorActionClassForMonitor(
   if (monitor.nextAction.code === "investigate_stale") {
     return "clear_recovery";
   }
+  if (
+    monitor.activeStep?.kind === "no-mistakes" &&
+    monitor.nextAction.code === "rerun_failed_step"
+  ) {
+    return "retry_failed_step";
+  }
   if (options.needsManualRecovery) {
     return "clear_recovery";
   }
@@ -1285,12 +1291,13 @@ function isInterruptedNoMistakesRecovery(
   ) {
     return false;
   }
-  const reason = options.manualRecoveryReason ?? "";
+  const reason = (options.manualRecoveryReason ?? "").trim();
   return (
     options.needsManualRecovery === true &&
-    /interrupted_no_mistakes_checks_passed|checks[-_ ]passed|deterministic.*evidence|no[-_ ]mistakes.*evidence.*reconcil/i.test(
-      reason
-    )
+    (reason === "interrupted_no_mistakes_checks_passed" ||
+      /^interrupted[-_ ]+no[-_ ]mistakes[-_ ]+(?:checks[-_ ]passed[-_ ]+evidence|deterministic[-_ ]+evidence)[-_ ]+(?:needs[-_ ]+)?reconciliation$/i.test(
+        reason
+      ))
   );
 }
 

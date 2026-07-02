@@ -685,6 +685,38 @@ describe("workflow run watch supervisor envelope contract", () => {
     expect(payload["humanAction"]).toBeNull();
   });
 
+  it("no-mistakes manual recovery: ignores broad evidence wording", async () => {
+    const dataDir = makeTempDir();
+    const runId = "mwf-contract-no-mistakes-broad-manual";
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, {
+        runId,
+        state: "failed",
+        needsManualRecovery: true,
+        manualRecoveryReason:
+          "operator mentioned checks-passed deterministic evidence while investigating"
+      });
+      seedStep(db, {
+        runId,
+        stepId: "no-mistakes",
+        kind: "no-mistakes",
+        state: "failed",
+        order: 3
+      });
+    } finally {
+      db.close();
+    }
+
+    const payload = await watchOnce(dataDir, runId);
+    assertWatchEnvelopeContract(payload, runId);
+    expect(payload["nextAction"]).toMatchObject({
+      code: "rerun_failed_step",
+      actionClass: "retry_failed_step",
+      recoveryDetail: null
+    });
+  });
+
   it("no-mistakes manual recovery: keeps deterministic evidence action class", async () => {
     const dataDir = makeTempDir();
     const runId = "mwf-contract-no-mistakes-manual";
