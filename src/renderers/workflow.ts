@@ -761,12 +761,10 @@ export function emitWorkflowRunMonitor(
           reason: envelope.monitorDrift.reason
         }
       : null,
-    nextAction: {
-      code: envelope.nextAction.code,
-      stepId: envelope.nextAction.stepId,
-      leaseKind: envelope.nextAction.leaseKind,
-      detail: envelope.nextAction.detail
-    },
+    nextAction: nextActionToJsonShape(
+      envelope,
+      workflowActionClassContextForMonitorEnvelope(envelope)
+    ),
     recovery: envelope.recovery
       ? {
           code: envelope.recovery.code,
@@ -1134,7 +1132,10 @@ function buildWorkflowWatchNextAction(envelope: WorkflowMonitorEnvelope): {
         manualRecoveryReason: envelope.manualRecoveryReason,
         needsManualRecovery: envelope.needsManualRecovery
       }),
-      recoveryDetail: workflowRecoveryDetailForMonitor(envelope)
+      recoveryDetail: workflowRecoveryDetailForMonitor(envelope, {
+        manualRecoveryReason: envelope.manualRecoveryReason,
+        needsManualRecovery: envelope.needsManualRecovery
+      })
     };
   }
   if (envelope.needsManualRecovery) {
@@ -1151,7 +1152,10 @@ function buildWorkflowWatchNextAction(envelope: WorkflowMonitorEnvelope): {
           manualRecoveryReason: envelope.manualRecoveryReason,
           needsManualRecovery: envelope.needsManualRecovery
         }),
-        recoveryDetail: workflowRecoveryDetailForMonitor(envelope)
+        recoveryDetail: workflowRecoveryDetailForMonitor(envelope, {
+          manualRecoveryReason: envelope.manualRecoveryReason,
+          needsManualRecovery: envelope.needsManualRecovery
+        })
       };
     }
     return {
@@ -1169,7 +1173,10 @@ function buildWorkflowWatchNextAction(envelope: WorkflowMonitorEnvelope): {
         manualRecoveryReason: envelope.manualRecoveryReason,
         needsManualRecovery: envelope.needsManualRecovery
       }),
-      recoveryDetail: workflowRecoveryDetailForMonitor(envelope)
+      recoveryDetail: workflowRecoveryDetailForMonitor(envelope, {
+        manualRecoveryReason: envelope.manualRecoveryReason,
+        needsManualRecovery: envelope.needsManualRecovery
+      })
     };
   }
   return {
@@ -1181,7 +1188,10 @@ function buildWorkflowWatchNextAction(envelope: WorkflowMonitorEnvelope): {
       manualRecoveryReason: envelope.manualRecoveryReason,
       needsManualRecovery: envelope.needsManualRecovery
     }),
-    recoveryDetail: workflowRecoveryDetailForMonitor(envelope)
+    recoveryDetail: workflowRecoveryDetailForMonitor(envelope, {
+      manualRecoveryReason: envelope.manualRecoveryReason,
+      needsManualRecovery: envelope.needsManualRecovery
+    })
   };
 }
 
@@ -1203,11 +1213,7 @@ function workflowOperatorActionClassForMonitor(
   ) {
     return "reconcile_external_tail";
   }
-  if (
-    monitor.activeStep?.kind === "no-mistakes" &&
-    (monitor.nextAction.code === "rerun_failed_step" ||
-      monitor.nextAction.code === "clear_recovery")
-  ) {
+  if (isInterruptedNoMistakesRecovery(monitor, options)) {
     return "reconcile_deterministic_evidence";
   }
   if (monitor.nextAction.code === "investigate_stale") {
@@ -1248,13 +1254,10 @@ function workflowMonitorHasOpenGate(
 }
 
 function workflowRecoveryDetailForMonitor(
-  monitor: WorkflowMonitorState | WorkflowMonitorEnvelope
+  monitor: WorkflowMonitorState | WorkflowMonitorEnvelope,
+  options: WorkflowOperatorActionClassContext = {}
 ): Record<string, unknown> | null {
-  if (
-    monitor.activeStep?.kind === "no-mistakes" &&
-    (monitor.nextAction.code === "rerun_failed_step" ||
-      monitor.nextAction.code === "clear_recovery")
-  ) {
+  if (isInterruptedNoMistakesRecovery(monitor, options)) {
     return {
       kind: "no_mistakes_deterministic_evidence",
       evidencePointerRequired: true,
@@ -1269,6 +1272,26 @@ function workflowRecoveryDetailForMonitor(
     };
   }
   return null;
+}
+
+function isInterruptedNoMistakesRecovery(
+  monitor: WorkflowMonitorState | WorkflowMonitorEnvelope,
+  options: WorkflowOperatorActionClassContext
+): boolean {
+  if (
+    monitor.activeStep?.kind !== "no-mistakes" ||
+    (monitor.nextAction.code !== "rerun_failed_step" &&
+      monitor.nextAction.code !== "clear_recovery")
+  ) {
+    return false;
+  }
+  const reason = options.manualRecoveryReason ?? "";
+  return (
+    options.needsManualRecovery === true &&
+    /interrupted_no_mistakes_checks_passed|checks[-_ ]passed|deterministic.*evidence|no[-_ ]mistakes.*evidence.*reconcil/i.test(
+      reason
+    )
+  );
 }
 
 function isSetupConfigRecoveryReason(reason: string | null): boolean {
@@ -1689,6 +1712,16 @@ function workflowActionClassContextForRun(
   return context;
 }
 
+function workflowActionClassContextForMonitorEnvelope(
+  envelope: WorkflowMonitorEnvelope
+): WorkflowOperatorActionClassContext {
+  return {
+    manualRecoveryReason: envelope.manualRecoveryReason,
+    needsManualRecovery: envelope.needsManualRecovery,
+    gates: envelope.gates
+  };
+}
+
 export function workflowStepToJsonShape(
   step: WorkflowStepRow
 ): Record<string, unknown> {
@@ -1800,7 +1833,7 @@ export function workflowMonitorToJsonShape(
 }
 
 export function nextActionToJsonShape(
-  monitor: WorkflowMonitorState,
+  monitor: WorkflowMonitorState | WorkflowMonitorEnvelope,
   options: WorkflowOperatorActionClassContext = {}
 ): Record<string, unknown> {
   return {
@@ -1809,7 +1842,7 @@ export function nextActionToJsonShape(
     leaseKind: monitor.nextAction.leaseKind,
     detail: monitor.nextAction.detail,
     actionClass: workflowOperatorActionClassForMonitor(monitor, options),
-    recoveryDetail: workflowRecoveryDetailForMonitor(monitor)
+    recoveryDetail: workflowRecoveryDetailForMonitor(monitor, options)
   };
 }
 

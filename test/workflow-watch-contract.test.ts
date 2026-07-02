@@ -658,7 +658,7 @@ describe("workflow run watch supervisor envelope contract", () => {
     });
   });
 
-  it("no-mistakes recovery: labels deterministic evidence reconciliation", async () => {
+  it("no-mistakes recovery: keeps ordinary failures retryable", async () => {
     const dataDir = makeTempDir();
     const runId = "mwf-contract-no-mistakes-evidence";
     const db = openDb(dataDir);
@@ -679,12 +679,8 @@ describe("workflow run watch supervisor envelope contract", () => {
     assertWatchEnvelopeContract(payload, runId);
     expect(payload["nextAction"]).toMatchObject({
       code: "rerun_failed_step",
-      actionClass: "reconcile_deterministic_evidence",
-      recoveryDetail: {
-        kind: "no_mistakes_deterministic_evidence",
-        evidencePointerRequired: true,
-        refusalReason: null
-      }
+      actionClass: "retry_failed_step",
+      recoveryDetail: null
     });
     expect(payload["humanAction"]).toBeNull();
   });
@@ -698,7 +694,8 @@ describe("workflow run watch supervisor envelope contract", () => {
         runId,
         state: "failed",
         needsManualRecovery: true,
-        manualRecoveryReason: "no-mistakes evidence needs reconciliation"
+        manualRecoveryReason:
+          "interrupted no-mistakes checks-passed evidence needs reconciliation"
       });
       seedStep(db, {
         runId,
