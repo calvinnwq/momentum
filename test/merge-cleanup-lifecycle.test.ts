@@ -122,4 +122,20 @@ describe("merge-cleanup lifecycle planner", () => {
       safeToMutate: false
     });
   });
+
+  it("fails closed when mergeability is unknown", () => {
+    expect(
+      planMergeCleanupLifecycle({
+        authAvailable: true,
+        authSource: "GH_TOKEN",
+        target: TARGET,
+        pullRequest: pr({ mergeable: "unknown" })
+      })
+    ).toMatchObject({
+      phase: "preflight",
+      status: "unsafe_state",
+      action: "stop_unsafe_state",
+      safeToMutate: false
+    });
+  });
 });

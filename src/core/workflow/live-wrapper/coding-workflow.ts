@@ -228,10 +228,22 @@ export function runCodingWorkflowLiveWrapper(
       ...(stateRead?.ok === false ? { pullRequestReadError: stateRead.error } : {})
     });
     if (!preflight.ok) {
-      return processSetupFailure(
-        deps,
-        `${preflight.message} ${preflight.action}`
-      );
+      const summary = `${preflight.message} ${preflight.action}`;
+      if (
+        preflight.status === "already_merged" ||
+        preflight.status === "branch_already_deleted"
+      ) {
+        return writeRunnerResult(deps, resultPath, {
+          success: false,
+          summary,
+          key_changes_made: [],
+          key_learnings: stepConfig.keyLearnings,
+          remaining_work: [preflight.action],
+          goal_complete: false,
+          commit: stepConfig.commit
+        });
+      }
+      return processSetupFailure(deps, summary);
     }
   }
   const result = deps.spawn(stepConfig.command, stepConfig.args, {
@@ -2235,7 +2247,7 @@ function readCleanupBranchDeleted(input: {
         cwd: input.cwd,
         env: input.env,
         encoding: "utf8",
-        stdio: ["ignore", "ignore", "ignore"]
+        stdio: ["ignore", "ignore", "pipe"]
       }
     );
     return { ok: true, branchDeleted: false };

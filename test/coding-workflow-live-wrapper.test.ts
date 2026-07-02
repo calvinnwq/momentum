@@ -304,13 +304,80 @@ exit 1
       })
     });
 
-    expect(outcome.exitCode).toBe(1);
+    expect(outcome.exitCode).toBe(0);
     expect(outcome.success).toBe(false);
     expect(outcome.summary).toContain("already merged");
     expect(outcome.summary).toContain("already deleted");
     expect(outcome.summary).toContain("clear-recovery");
     expect(fs.existsSync(sentinelPath)).toBe(false);
-    expect(fs.existsSync(resultPath)).toBe(false);
+    const result = readResult(resultPath);
+    expect(result.success).toBe(false);
+    expect(result.remaining_work.join("\n")).toContain("clear-recovery");
+  });
+
+  it("detects deleted cleanup branches from gh branch lookup stderr", () => {
+    const dir = makeTempDir();
+    const repo = path.join(dir, "repo");
+    const iteration = path.join(dir, "run");
+    const resultPath = path.join(iteration, "result.json");
+    const sentinelPath = path.join(dir, "merge-cleanup-ran");
+    const binDir = path.join(dir, "bin");
+    fs.mkdirSync(repo);
+    fs.mkdirSync(binDir);
+    const ghPath = path.join(binDir, "gh");
+    fs.writeFileSync(
+      ghPath,
+      `#!/bin/sh
+if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
+  printf '%s\n' '{"number":42,"headRefOid":"${MERGE_CLEANUP_HEAD}","state":"MERGED","isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN"}'
+  exit 0
+fi
+if [ "$1" = "api" ]; then
+  printf '%s\n' 'HTTP 404: Not Found' >&2
+  exit 1
+fi
+exit 1
+`,
+      "utf8"
+    );
+    fs.chmodSync(ghPath, 0o755);
+    const configPath = path.join(dir, "wrapper-config.json");
+    writeJson(configPath, {
+      steps: {
+        "merge-cleanup": {
+          command: "/bin/sh",
+          args: ["-c", `touch ${JSON.stringify(sentinelPath)}`],
+          cwd: "repo",
+          timeout_sec: 30,
+          env_allow: ["PATH", "GH_TOKEN"],
+          merge_cleanup: mergeCleanupTargetConfig(),
+          commit: { type: "chore", subject: "complete merge-cleanup" }
+        }
+      }
+    });
+
+    const outcome = runCodingWorkflowLiveWrapper({
+      ...defaultCodingWorkflowWrapperDeps(),
+      env: {
+        MOMENTUM_STEP_KIND: "merge-cleanup",
+        MOMENTUM_REPO_PATH: repo,
+        MOMENTUM_ITERATION_DIR: iteration,
+        MOMENTUM_RESULT_PATH: resultPath,
+        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
+        GH_TOKEN: "test-token",
+        PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`
+      },
+      stdout: () => {},
+      stderr: () => {}
+    });
+
+    expect(outcome.exitCode).toBe(0);
+    expect(outcome.success).toBe(false);
+    expect(outcome.summary).toContain("already merged");
+    expect(outcome.summary).toContain("already deleted");
+    expect(fs.existsSync(sentinelPath)).toBe(false);
+    const result = readResult(resultPath);
+    expect(result.remaining_work.join("\n")).toContain("clear-recovery");
   });
 });
 

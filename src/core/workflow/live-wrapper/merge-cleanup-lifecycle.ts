@@ -107,8 +107,7 @@ export function planMergeCleanupLifecycle(
   if (
     input.pullRequest.state !== "open" ||
     input.pullRequest.draft ||
-    input.pullRequest.mergeable === "conflicting" ||
-    input.pullRequest.mergeable === "blocked"
+    input.pullRequest.mergeable !== "mergeable"
   ) {
     return plan("preflight", "unsafe_state", "stop_unsafe_state", false, evidenceBase);
   }
