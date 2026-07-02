@@ -97,8 +97,8 @@ family as a tail-owned preflight -> apply -> reconcile lifecycle. Bounded
 `stateId` payload, and the stable idempotency marker before it reuses the same
 policy-gated external-apply write path as `intent apply --external-apply`.
 Successful apply writes `external-apply.log` / `external-apply.json` evidence
-under the run directory and reconciles the step from that terminal evidence. If
-durable M6 audit evidence already proves the intended write landed and
+under the run directory and reconciles the step from that terminal evidence.
+If durable external-apply audit evidence already proves the intended write landed and
 post-apply reconcile succeeded, the step records already-applied terminal
 evidence without another Linear mutation. Missing issue scope, no matching
 pending intent, ambiguous intents, stale or mismatched applied evidence, missing
