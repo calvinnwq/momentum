@@ -10,14 +10,14 @@ function readDoc(rel: string): string {
   return fs.readFileSync(path.join(repoRoot, rel), "utf8");
 }
 
-function listMarkdown(dir: string): string[] {
+function listPublicDocs(dir: string): string[] {
   if (!fs.existsSync(dir)) return [];
   const out: string[] = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      out.push(...listMarkdown(full));
-    } else if (entry.isFile() && entry.name.endsWith(".md")) {
+      out.push(...listPublicDocs(full));
+    } else if (entry.isFile() && /\.(?:md|html)$/.test(entry.name)) {
       out.push(full);
     }
   }
@@ -113,7 +113,7 @@ describe("repo internal docs boundary", () => {
       path.join(repoRoot, "ARCHITECTURE.md"),
       path.join(repoRoot, "SPEC.md"),
       path.join(repoRoot, "VISION.md"),
-      ...listMarkdown(path.join(repoRoot, "docs")),
+      ...listPublicDocs(path.join(repoRoot, "docs")),
     ];
 
     const hits: string[] = [];
@@ -130,7 +130,7 @@ describe("repo internal docs boundary", () => {
   it("keeps public docs free of Obsidian-only internal routing details", () => {
     const publicDocs = [
       path.join(repoRoot, "README.md"),
-      ...listMarkdown(path.join(repoRoot, "docs")),
+      ...listPublicDocs(path.join(repoRoot, "docs")),
     ];
 
     const hits: string[] = [];

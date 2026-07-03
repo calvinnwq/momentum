@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Momentum docs - durable repo-work orchestration</title>
+    <meta name="description" content="Momentum is a TypeScript CLI for durable autonomous repo-work orchestration with workflow state, evidence, recovery, and operator gates.">
+    <script>
+      (function () {
+        var stored = null;
+        try { stored = localStorage.getItem("momentum-docs-theme"); } catch (e) {}
+        var dark = false;
+        try { dark = matchMedia("(prefers-color-scheme: dark)").matches; } catch (e) {}
+        document.documentElement.dataset.theme = stored || (dark ? "dark" : "light");
+      })();
+    </script>
+    <link rel="stylesheet" href="assets/styles.css">
+    <script src="assets/site.js" defer></script>
+  </head>
+  <body data-page="index.html">
+    <a class="skip" href="#content">Skip to content</a>
+    <header class="masthead">
+      <div class="masthead-inner">
+        <button class="menu-btn" type="button" data-menu aria-label="Toggle navigation" aria-expanded="false">
+          <span class="menu-lines" aria-hidden="true"></span>
+        </button>
+        <a class="brand" href="index.html">Momentum<span class="brand-tag">docs</span></a>
+        <button class="search-btn" type="button" data-search-open><span>Search docs</span><kbd>/</kbd></button>
+        <div class="masthead-tools">
+          <a class="gh" href="https://github.com/calvinnwq/momentum">GitHub</a>
+          <button class="theme-btn" type="button" data-theme-toggle aria-label="Toggle color theme" aria-pressed="false">
+            <span class="theme-glyph" aria-hidden="true"></span>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <div class="frame">
+      <nav id="sidebar" class="sidebar" aria-label="Documentation"></nav>
+
+      <main id="content" class="article-col">
+        <article>
+          <p class="kicker"><span class="n">01</span>Overview</p>
+          <h1>Durable repo work, without terminal archaeology.</h1>
+          <p class="lede">
+            Momentum turns autonomous coding work into explicit workflow state:
+            durable runs, resumable steps, evidence records, gates, recovery
+            actions, and operator-readable surfaces.
+          </p>
+
+          <div class="runtime-strip" aria-label="Momentum runtime loop">
+            <span>Plan</span>
+            <i></i>
+            <span>Run</span>
+            <i></i>
+            <span>Record</span>
+            <i></i>
+            <span>Recover</span>
+            <i></i>
+            <span>Reconcile</span>
+          </div>
+
+          <section>
+            <h2>Start with a disposable run</h2>
+            <p>
+              The fastest way to understand Momentum is to run a tiny goal,
+              inspect the state, then read the handoff and logs. The CLI is
+              pre-release, so local source install is the supported path.
+            </p>
+            <pre><code><span class="c"># build the CLI from source</span>
+pnpm install
+pnpm build
+
+<span class="c"># check local runtime readiness</span>
+node dist/index.js doctor --json
+
+<span class="c"># run a foreground goal from a Markdown spec</span>
+node dist/index.js goal start ./goal.md --foreground --json
+node dist/index.js status --json
+node dist/index.js handoff &lt;goal-id&gt; --json</code></pre>
+            <p>
+              For a copy-paste smoke test, use the <a href="walkthrough.html">end-to-end walkthrough</a>.
+            </p>
+          </section>
+
+          <section>
+            <h2>What Momentum owns</h2>
+            <div class="cards">
+              <a class="card" href="workflow-commands.html">
+                <span class="card-k">Workflow runtime</span>
+                <strong>Runs, steps, approvals, gates, monitors, watch ticks, and logs.</strong>
+                <span>The native coding workflow is represented as durable rows and JSON envelopes.</span>
+              </a>
+              <a class="card" href="evidence-commands.html">
+                <span class="card-k">Evidence</span>
+                <strong>Artifacts and proof become queryable records.</strong>
+                <span>Evidence links goals, source items, external intents, workflow state, and recovery.</span>
+              </a>
+              <a class="card" href="recovery.html">
+                <span class="card-k">Recovery</span>
+                <strong>Manual recovery is state, not vibes in a transcript.</strong>
+                <span>Stale leases, failed runners, external-tail reconcile, and no-mistakes evidence lanes are explicit.</span>
+              </a>
+              <a class="card" href="intent-commands.html">
+                <span class="card-k">External apply</span>
+                <strong>Tracker writes are policy-gated and audited before mutation.</strong>
+                <span>Linear updates are intents first, then approved external apply or workflow tail reconciliation.</span>
+              </a>
+            </div>
+          </section>
+
+          <section>
+            <h2>Runtime map</h2>
+            <p>
+              Momentum separates the user command, durable workflow state, the
+              executor doing bounded work, and the side effects that require
+              evidence-backed reconciliation.
+            </p>
+            <div class="map" role="img" aria-label="Momentum runtime map">
+              <div class="map-node primary">
+                <span>Operator</span>
+                <strong>CLI or host wrapper</strong>
+                <small>start, status, monitor, approve, recover</small>
+              </div>
+              <div class="map-line"></div>
+              <div class="map-node">
+                <span>Workflow state</span>
+                <strong>SQLite plus artifacts</strong>
+                <small>runs, steps, gates, events, evidence</small>
+              </div>
+              <div class="map-line"></div>
+              <div class="map-node">
+                <span>Executors</span>
+                <strong>goal-loop, one-shot, no-mistakes</strong>
+                <small>bounded work with normalized results</small>
+              </div>
+              <div class="map-line"></div>
+              <div class="map-node accent">
+                <span>External systems</span>
+                <strong>Git, GitHub, Linear</strong>
+                <small>read first, mutate only through approved paths</small>
+              </div>
+            </div>
+          </section>
+
+          <section>
+            <h2>Operator surfaces</h2>
+            <p>
+              These are the everyday commands for observing a run and choosing
+              the next safe action. Read-only commands are designed for humans,
+              agents, GUI clients, and scheduled supervisors.
+            </p>
+            <div class="surface-list">
+              <a href="status.html"><code>momentum status</code><span>Inspect active goal state and current recovery flags.</span></a>
+              <a href="workflow-commands.html"><code>momentum workflow run watch --once --json</code><span>Poll one native workflow and receive the next recommended action.</span></a>
+              <a href="handoff.html"><code>momentum handoff &lt;goal-id&gt;</code><span>Emit a compact restart packet with the same durable facts.</span></a>
+              <a href="openclaw-supervise.html"><code>momentum openclaw supervise &lt;run-id&gt; --once --json</code><span>OpenClaw supervise wraps watch output for host delivery and local auto-actions.</span></a>
+            </div>
+          </section>
+
+          <section>
+            <h2>Documentation routes</h2>
+            <div class="route-grid">
+              <a href="goal-spec.html"><b>Goal files</b><span>Markdown frontmatter, runners, verification, and goal text.</span></a>
+              <a href="data-directory.html"><b>State and artifacts</b><span>Where Momentum stores SQLite rows, run artifacts, and evidence.</span></a>
+              <a href="runners.html"><b>Runner profiles</b><span>Fake, trusted shell, ACP, repo policy, and result-file behavior.</span></a>
+              <a href="failure-reset.html"><b>Failure semantics</b><span>How Momentum resets unsafe work and records failure evidence.</span></a>
+              <a href="doctor.html"><b>Doctor</b><span>Runtime readiness, data directory health, daemon state, and external apply checks.</span></a>
+              <a href="source-commands.html"><b>Source adapters</b><span>Read-only source item ingestion and reconciliation surfaces.</span></a>
+            </div>
+          </section>
+        </article>
+        <footer class="pager" id="pager"></footer>
+      </main>
+
+      <aside class="toc-col"><p class="toc-title">On this page</p><nav id="toc" aria-label="On this page"></nav></aside>
+    </div>
+
+    <footer class="colophon">
+      <div class="colophon-inner"><span>Momentum docs</span><span>Pre-release</span><a href="https://github.com/calvinnwq/momentum">GitHub</a></div>
+    </footer>
+  </body>
+</html>

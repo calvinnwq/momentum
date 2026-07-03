@@ -22,7 +22,7 @@ describe("M3 provenance anchor", () => {
     const readme = readDoc("README.md");
     expect(readme).not.toContain("Milestone 3");
     expect(readme).not.toContain("NGX-272");
-    expect(readDoc("docs/index.md")).not.toMatch(/m3-operational-safety/i);
+    expect(readDoc("docs/index.html")).not.toMatch(/m3-operational-safety/i);
   });
 
   it("preserves the operational CLI surface", () => {
