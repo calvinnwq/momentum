@@ -61,6 +61,7 @@ durable evidence, and resumes from Momentum-owned state.
 
 ## Stack and workflow commands
 TypeScript on Node.js with Vitest tests, managed by pnpm. See [README.md](README.md)'s `## Development` block for `pnpm install`, `pnpm test`, `pnpm test:integration`, `pnpm test:full`, `pnpm typecheck`, `pnpm lint`, `pnpm build`, `pnpm format:check`, `node dist/index.js --help`, `node dist/index.js doctor`.
+No-mistakes reads `.no-mistakes.yaml` and runs the configured `pnpm` checks instead of delegating test discovery to an agent.
 
 ## Coding discipline
 - Follow existing code patterns and naming in `src/` and `test/`.
