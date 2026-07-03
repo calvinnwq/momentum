@@ -114,7 +114,9 @@ The examples below are branching examples; the full `workflow run watch --once` 
     "recommendedAction": "approve",
     "humanAction": {
       "code": "approve",
-      "command": "momentum workflow run approve <run-id> --approval-boundary ..."
+      "command": "momentum workflow run approve <run-id> --approval-boundary ...",
+      "detail": null,
+      "gateType": null
     },
     "nextPollSeconds": 30,
     "quietThresholdSeconds": 1800,
@@ -134,7 +136,9 @@ The examples below are branching examples; the full `workflow run watch --once` 
     "recommendedAction": "recover",
     "humanAction": {
       "code": "clear_recovery",
-      "command": "momentum workflow run clear-recovery <run-id>"
+      "command": "momentum workflow run clear-recovery <run-id>",
+      "detail": null,
+      "gateType": null
     },
     "nextPollSeconds": 30,
     "quietThresholdSeconds": 3600,
@@ -1640,7 +1644,7 @@ For `workflow run watch --once --json`, use the frozen top-level supervisor enve
   external-apply require human authority. If policy metadata is missing or
   invalid, treat every non-wait action as `human_required`.
 - Render concise human text from `reason`, `activeStep`, `nextAction.detail`,
-  and `humanAction.command` / `humanAction.detail` when `humanAction` is present.
+  `humanAction.command`, `humanAction.detail`, and `humanAction.gateType` when `humanAction` is present.
 - Stop and clean up the wrapper when `recommendedAction` is `"release"`,
   `cleanup` is `"release"`, and `recommendedActionPolicy` allows
   `release_monitor`; keep polling recoverable failures while
@@ -1832,7 +1836,8 @@ Soft `monitor_drift_stale` reports and ordinary `failed_required_step` failures 
 Recovery states that require external evidence use a compact object with `kind`, `evidencePointerRequired`, and `refusalReason`.
 Current `kind` values are `no_mistakes_deterministic_evidence` and `external_tail_reconcile`.
 `recommendedActionPolicy.authority` is `auto_allowed` only for explicit safe wait/release/read-only or local recheck cases, `recommend_only` for informational recommendations that must not execute, `human_required` for approvals, operator decisions, recovery clearing, stale manual recovery, no-mistakes recovery, merge cleanup, Linear refresh, and external-apply, and `forbidden` for destructive/default-switch/broad external actions that must surface as blocked policy metadata.
-`humanAction`, when present, carries `code` (`approve`, `resolve_gate`, or `clear_recovery`), `command` (the exact CLI to run), and `detail` (the reason or evidence sentence).
+`humanAction`, when present, carries `code` (`approve`, `resolve_gate`, or `clear_recovery`), `command` (the exact CLI to run), `detail` (the reason or evidence sentence), and `gateType`.
+`gateType` is `null` for approval and clear-recovery commands, and carries the durable workflow gate type when `code` is `resolve_gate`.
 
 ### Stream mode
 
@@ -2005,7 +2010,8 @@ Approval required - the next step is gated on operator approval:
   "humanAction": {
     "code": "approve",
     "command": "momentum workflow run approve mwf-abc123 --approval-boundary through-implementation --phrase \"approve plan mwf-abc123 through-implementation\"",
-    "detail": "Step implementation is waiting for approval."
+    "detail": "Step implementation is waiting for approval.",
+    "gateType": null
   }
 }
 ```
@@ -2039,7 +2045,8 @@ Recovery required - the run is flagged for manual recovery and can be cleared di
   "humanAction": {
     "code": "clear_recovery",
     "command": "momentum workflow run clear-recovery mwf-abc123",
-    "detail": "dispatch lease requires operator recovery"
+    "detail": "dispatch lease requires operator recovery",
+    "gateType": null
   }
 }
 ```
@@ -2146,7 +2153,7 @@ A cron, OpenClaw, or GUI poller branches on the envelope instead of scraping tex
   - `release` - the run reached a clean terminal state (`cleanup: "release"`, `nextAction.code: "no_action"`); report once and stop polling only when `recommendedActionPolicy` allows `release_monitor`.
 - `emit` is the machine-polling signal, `nextAction.actionClass` is the compact operator branch, and `reason` / `humanAction` are the human-facing content.
 - Decide whether to speak from `emit`, and what to say from `reason`, `activeStep`, `nextAction.detail`, `nextAction.recoveryDetail`, and `humanAction`.
-- The envelope carries enough to render a concise human update for the common path - `reason`, `activeStep`, and `nextAction.detail`, plus `nextAction.recoveryDetail` and `humanAction.command` / `detail` when an action is required - without a follow-up `workflow status` read.
+- The envelope carries enough to render a concise human update for the common path - `reason`, `activeStep`, and `nextAction.detail`, plus `nextAction.recoveryDetail` and `humanAction.command` / `detail` / `gateType` when an action is required - without a follow-up `workflow status` read.
 
 ### Error codes
 

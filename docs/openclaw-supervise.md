@@ -118,7 +118,8 @@ With `--json`, successful output is written to stdout:
   "humanAction": {
     "code": "approve",
     "command": "momentum workflow run approve run-1 --approval-boundary through-implementation --phrase \"approve plan run-1 through-implementation\"",
-    "detail": null
+    "detail": null,
+    "gateType": null
   },
   "stuckRisk": "low",
   "inspectionCommand": null,
@@ -212,7 +213,7 @@ should deliver the advisory but treat the supervisor state as not durably saved.
 | `recommendedAction` | string | Upstream watch recommendation (`poll`, `approve`, `operator_decision`, `recover`, or `release`). |
 | `recommendedActionPolicy` | object | Upstream action-authority metadata: `action`, `authority`, `risk`, `evidenceRequired`, `rollback`, and `rationale`. Hosts should fail closed by treating absent or invalid policy as human-required for non-wait actions. |
 | `nextPollSeconds` | number | Suggested delay before the host calls `openclaw supervise` again. |
-| `humanAction` | object \| null | Operator command from the watch envelope, or `null` when no operator command is required. |
+| `humanAction` | object \| null | Operator command from the watch envelope, or `null` when no operator command is required; when present it carries `code`, `command`, `detail`, and `gateType`. |
 | `stuckRisk` | string | Upstream watch stuck-risk value. |
 | `inspectionCommand` | string \| null | Sanitized stuck-risk inspection command with `<data-dir>` replacing the resolved path. |
 | `deliveryIntent` | object \| null | Short host-delivery contract for Discord/OpenClaw. `null` means stay silent. |
