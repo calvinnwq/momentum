@@ -874,15 +874,7 @@ describe("momentum workflow run preview-coding", () => {
       postflight: "pending"
     });
 
-    const dbBeforeStart = openDb(dataDir);
-    try {
-      const runRow = dbBeforeStart
-        .prepare("SELECT id FROM workflow_runs WHERE id = ?")
-        .get(runId);
-      expect(runRow).toBeUndefined();
-    } finally {
-      dbBeforeStart.close();
-    }
+    expect(fs.existsSync(path.join(dataDir, "momentum.db"))).toBe(false);
 
     const started = await run([
       "workflow",
