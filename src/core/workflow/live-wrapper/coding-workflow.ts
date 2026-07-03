@@ -341,7 +341,7 @@ export function classifyRecoverableNoMistakesRunnerFailure(
 
 function hasCancelledNoMistakesRunEvidence(output: string): boolean {
   if (!output.includes("aborted by user")) return false;
-  let yamlSection: string | null = null;
+  const yamlSections: Array<{ indent: number; section: string }> = [];
   for (const rawLine of output.split(/\r?\n/)) {
     for (const line of rawLine
       .replace(/\\r\\n/g, "\n")
@@ -349,26 +349,34 @@ function hasCancelledNoMistakesRunEvidence(output: string): boolean {
       .split("\n")) {
       const trimmed = line.trim();
       if (trimmed.length === 0) continue;
-      const indented = /^\s/.test(line);
-      const section = !indented ? parseNoMistakesYamlSection(trimmed) : null;
+      if (hasCompactCancelledNoMistakesRunStatus(trimmed)) return true;
+      const indent = leadingWhitespaceLength(line);
+      const section = parseNoMistakesYamlSection(trimmed);
       if (section !== null) {
-        yamlSection = section;
+        while (
+          yamlSections.length > 0 &&
+          yamlSections[yamlSections.length - 1]!.indent >= indent
+        ) {
+          yamlSections.pop();
+        }
+        yamlSections.push({ indent, section });
         continue;
       }
       if (
-        !indented &&
+        indent === 0 &&
         parseNoMistakesStatusOrOutcomeLine(trimmed).length === 0
       ) {
-        yamlSection = null;
+        yamlSections.length = 0;
       }
       if (isHistoricalNoMistakesEvidenceLine(trimmed)) continue;
       for (const { label, value } of parseNoMistakesStatusOrOutcomeLine(trimmed)) {
         if (value !== "cancelled") continue;
-        if (label === "outcome") return true;
+        if (label === "outcome" && isCurrentNoMistakesRunStatusContext(yamlSections)) {
+          return true;
+        }
         if (
           label === "status" &&
-          yamlSection !== null &&
-          isNoMistakesRunYamlSection(yamlSection)
+          isCurrentNoMistakesRunStatusContext(yamlSections)
         ) {
           return true;
         }
@@ -378,9 +386,27 @@ function hasCancelledNoMistakesRunEvidence(output: string): boolean {
   return false;
 }
 
+function leadingWhitespaceLength(line: string): number {
+  return line.length - line.trimStart().length;
+}
+
 function parseNoMistakesYamlSection(line: string): string | null {
   const match = /^(?<section>[a-z0-9][a-z0-9 _-]*)\s*:\s*$/.exec(line);
   return match?.groups?.section ?? null;
+}
+
+function hasCompactCancelledNoMistakesRunStatus(line: string): boolean {
+  return (
+    /\brun\s+status\s*[:=]\s*cancelled\b/.test(line) ||
+    /["']run["']\s*:\s*\{[^{}]*["']status["']\s*:\s*["']cancelled["']/.test(line)
+  );
+}
+
+function isCurrentNoMistakesRunStatusContext(
+  yamlSections: ReadonlyArray<{ section: string }>
+): boolean {
+  if (yamlSections.length === 0) return true;
+  return isNoMistakesRunYamlSection(yamlSections[yamlSections.length - 1]!.section);
 }
 
 function isNoMistakesRunYamlSection(section: string): boolean {
