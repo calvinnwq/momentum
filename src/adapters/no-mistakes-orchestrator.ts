@@ -461,6 +461,7 @@ function insertExpectedExternalIdentityCheckpoint(
 }
 
 function noMistakesPollRoundUpdate(
+  current: ExecutorRoundRecord,
   decision: NoMistakesMirrorDecision,
   stateRead: NoMistakesExternalStateRead,
   polledAt: number
@@ -469,9 +470,15 @@ function noMistakesPollRoundUpdate(
     ? polledAt
     : null;
   const baseUpdate = noMistakesRoundUpdate(decision);
+  const heartbeatAt =
+    stateRead.ok &&
+    decision.classification === "continue" &&
+    current.inputDigest === stateRead.digest
+      ? (current.heartbeatAt ?? current.startedAt ?? polledAt)
+      : polledAt;
   return stateRead.ok
-    ? { ...baseUpdate, inputDigest: stateRead.digest, heartbeatAt: polledAt, finishedAt }
-    : { ...baseUpdate, heartbeatAt: polledAt, finishedAt };
+    ? { ...baseUpdate, inputDigest: stateRead.digest, heartbeatAt, finishedAt }
+    : { ...baseUpdate, heartbeatAt, finishedAt };
 }
 
 function updateInvocationForDecision(
@@ -752,7 +759,12 @@ export function runNoMistakesMirrorRound(
   //    round with the exact bytes this poll mirrored (only on a successful read —
   //    a failure has no trustworthy digest, so the frozen one stays in place).
   return withSavepoint(db, "no_mistakes_mirror_poll", () => {
-    const roundUpdate = noMistakesPollRoundUpdate(decision, stateRead, polledAt);
+    const roundUpdate = noMistakesPollRoundUpdate(
+      current,
+      decision,
+      stateRead,
+      polledAt
+    );
     if (decision.invocationState === "succeeded") {
       resumeWaitingInvocationBeforeSuccess(db, current.invocationId, polledAt);
     }

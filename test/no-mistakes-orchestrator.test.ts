@@ -900,6 +900,42 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
     );
   });
 
+  it("parks unchanged running external state even when intermediate polls continue", () => {
+    const db = openMirrorRoundDb();
+    const read = okReader({ stepStatus: "running", activeStep: "review" });
+    const firstPollAt = 2_000;
+    const intermediatePollAt =
+      firstPollAt + Math.floor(NO_MISTAKES_MIRROR_STALL_AFTER_MS / 2);
+
+    runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
+      read,
+      polledAt: firstPollAt
+    });
+    const intermediate = runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      read,
+      polledAt: intermediatePollAt
+    });
+    expect(intermediate.decision.classification).toBe("continue");
+
+    const stalled = runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      read,
+      polledAt: firstPollAt + NO_MISTAKES_MIRROR_STALL_AFTER_MS
+    });
+
+    expect(stalled.decision.classification).toBe("manual_recovery_required");
+    expect(stalled.round.state).toBe("manual_recovery_required");
+    expect(stalled.round.summary).toContain(
+      `has not changed for ${NO_MISTAKES_MIRROR_STALL_AFTER_MS}ms`
+    );
+  });
+
   it("keeps polling when running external state changes before the stall window", () => {
     const db = openMirrorRoundDb();
 
