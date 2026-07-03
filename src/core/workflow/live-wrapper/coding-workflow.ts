@@ -349,16 +349,17 @@ function hasCancelledNoMistakesRunEvidence(output: string): boolean {
       .split("\n")) {
       const trimmed = line.trim();
       if (trimmed.length === 0) continue;
-      if (hasCompactCancelledNoMistakesRunStatus(trimmed)) return true;
       const indent = leadingWhitespaceLength(line);
+      while (
+        yamlSections.length > 0 &&
+        yamlSections[yamlSections.length - 1]!.indent >= indent
+      ) {
+        yamlSections.pop();
+      }
+      if (isHistoricalNoMistakesEvidenceLine(trimmed)) continue;
+      if (hasCompactCancelledNoMistakesRunStatus(trimmed)) return true;
       const section = parseNoMistakesYamlSection(trimmed);
       if (section !== null) {
-        while (
-          yamlSections.length > 0 &&
-          yamlSections[yamlSections.length - 1]!.indent >= indent
-        ) {
-          yamlSections.pop();
-        }
         yamlSections.push({ indent, section });
         continue;
       }
@@ -368,7 +369,6 @@ function hasCancelledNoMistakesRunEvidence(output: string): boolean {
       ) {
         yamlSections.length = 0;
       }
-      if (isHistoricalNoMistakesEvidenceLine(trimmed)) continue;
       for (const { label, value } of parseNoMistakesStatusOrOutcomeLine(trimmed)) {
         if (value !== "cancelled") continue;
         if (label === "outcome" && isCurrentNoMistakesRunStatusContext(yamlSections)) {
@@ -396,6 +396,7 @@ function parseNoMistakesYamlSection(line: string): string | null {
 }
 
 function hasCompactCancelledNoMistakesRunStatus(line: string): boolean {
+  if (/\b(?:previous|historical|history)\b/.test(line)) return false;
   return (
     /^run\s+status\s*[:=]\s*cancelled\b/.test(line) ||
     /^\{\s*["']run["']\s*:\s*\{[^{}]*["']status["']\s*:\s*["']cancelled["']/.test(line)

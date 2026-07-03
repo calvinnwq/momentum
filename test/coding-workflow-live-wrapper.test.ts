@@ -1092,6 +1092,18 @@ describe("runCodingWorkflowLiveWrapper", () => {
         'error: "cancelled: aborted by user"'
       ].join("\n"),
       expected: "cancelled before producing a reliable successful result"
+    },
+    {
+      name: "cancelled external no-mistakes run after nested status block",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  ci:",
+        "    status: running",
+        "  status: cancelled",
+        'error: "cancelled: aborted by user"'
+      ].join("\n"),
+      expected: "cancelled before producing a reliable successful result"
     }
   ])(
     "parks no-mistakes runner lifecycle failure as process setup recovery: $name",
@@ -3662,6 +3674,16 @@ describe("runCodingWorkflowLiveWrapper", () => {
         '  id: "01TEST"',
         "  status: running",
         "previous run status: cancelled",
+        'error: "cancelled: aborted by user"'
+      ].join("\n")
+    },
+    {
+      name: "annotated historical compact cancelled no-mistakes status with aborted user text",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "run status: cancelled (previous run)",
         'error: "cancelled: aborted by user"'
       ].join("\n")
     }
