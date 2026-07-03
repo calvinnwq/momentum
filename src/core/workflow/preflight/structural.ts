@@ -67,6 +67,9 @@ export type CodingWorkflowRouteStepsPreflightResult =
       evidence: readonly [StructuralPreflightEvidence];
     };
 
+export type CodingWorkflowRouteStepsJsonPreflightResult =
+  CodingWorkflowRouteStepsPreflightResult;
+
 export type CodingWorkflowRouteProfilePreflightResult =
   | {
       ok: true;
@@ -276,6 +279,33 @@ export function preflightCodingWorkflowRouteSteps(
       })
     ]
   };
+}
+
+export function preflightCodingWorkflowRouteStepsJson(
+  value: string
+): CodingWorkflowRouteStepsJsonPreflightResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return {
+      ok: false,
+      evidence: [
+        buildStructuralPreflightEvidence({
+          checkId: ROUTE_STEPS_CHECK_ID,
+          status: "failed",
+          severity: "error",
+          path: "route.steps",
+          key: CODING_ROUTE_STEPS_KEY,
+          message: "Coding route steps must be valid JSON.",
+          recommendedAction:
+            "Pass --steps-json as a JSON object keyed by configurable coding steps, or remove it to use the default route."
+        })
+      ]
+    };
+  }
+
+  return preflightCodingWorkflowRouteSteps(parsed);
 }
 
 export function preflightCodingWorkflowRouteProfile(

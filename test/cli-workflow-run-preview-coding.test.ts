@@ -198,6 +198,71 @@ describe("momentum workflow run preview-coding", () => {
     ]);
   });
 
+  it("emits structural preflight evidence for malformed route steps before durable writes", async () => {
+    const commands = [
+      {
+        name: "preview-coding",
+        buildArgs: (dataDir: string, repoDir: string) =>
+          previewCodingArgs({
+            dataDir,
+            repoDir,
+            runId: "readiness-preview-malformed-steps",
+            objective: "Block malformed preview route config",
+            extra: ["--steps-json", "{ not json"]
+          })
+      },
+      {
+        name: "start-coding",
+        buildArgs: (dataDir: string, repoDir: string) => [
+          "workflow",
+          "run",
+          "start-coding",
+          "--run-id",
+          "readiness-start-malformed-steps",
+          "--repo",
+          repoDir,
+          "--objective",
+          "Block malformed start route config",
+          "--data-dir",
+          dataDir,
+          "--json",
+          "--steps-json",
+          "{ not json"
+        ]
+      }
+    ];
+
+    for (const command of commands) {
+      const dataDir = makeTempDir();
+      const repoDir = makeTempDir();
+      const result = await run(command.buildArgs(dataDir, repoDir));
+
+      expect(result.code, command.name).toBe(1);
+      expect(result.stdout, command.name).toBe("");
+      const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+      expect(payload, command.name).toMatchObject({
+        ok: false,
+        command: `workflow run ${command.name}`,
+        code: "route_config_invalid"
+      });
+      expect(payload["preflightEvidence"], command.name).toEqual([
+        {
+          checkId: "route.steps",
+          status: "failed",
+          severity: "error",
+          path: "route.steps",
+          key: "steps",
+          message: "Coding route steps must be valid JSON.",
+          recommendedAction:
+            "Pass --steps-json as a JSON object keyed by configurable coding steps, or remove it to use the default route."
+        }
+      ]);
+      expect(fs.existsSync(path.join(dataDir, "momentum.db")), command.name).toBe(
+        false
+      );
+    }
+  });
+
   it("emits structural preflight evidence for blank route profiles", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();

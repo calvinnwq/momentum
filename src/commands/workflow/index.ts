@@ -112,7 +112,7 @@ import {
 import {
   preflightCodingWorkflowBuiltInDefinition,
   preflightCodingWorkflowRouteProfile,
-  preflightCodingWorkflowRouteSteps,
+  preflightCodingWorkflowRouteStepsJson,
   preflightCodingWorkflowRunStartInput,
   type StructuralPreflightEvidence
 } from "../../core/workflow/preflight/structural.js";
@@ -588,21 +588,8 @@ function runWorkflowStartCommand(
         runId
       });
     }
-    let rawStepRouteConfig: unknown;
-    try {
-      rawStepRouteConfig = JSON.parse(parsed.stepsJson);
-    } catch (parseError) {
-      return emitWorkflowRunStartFailure(parsed, io, {
-        command,
-        code: "route_config_invalid",
-        message: `--steps-json is not valid JSON: ${
-          parseError instanceof Error ? parseError.message : String(parseError)
-        }`,
-        runId
-      });
-    }
     const structuralPreflight =
-      preflightCodingWorkflowRouteSteps(rawStepRouteConfig);
+      preflightCodingWorkflowRouteStepsJson(parsed.stepsJson);
     if (!structuralPreflight.ok) {
       const failedCheck = structuralPreflight.evidence[0];
       return emitWorkflowRunStartFailure(parsed, io, {
