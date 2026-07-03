@@ -3619,6 +3619,17 @@ describe("runCodingWorkflowLiveWrapper", () => {
       ].join("\n")
     },
     {
+      name: "nested cancelled CI status with aborted user text",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "ci:",
+        "  status: cancelled",
+        'error: "cancelled: aborted by user"'
+      ].join("\n")
+    },
+    {
       name: "historical cancelled no-mistakes status with aborted user text",
       stdout: [
         "run:",

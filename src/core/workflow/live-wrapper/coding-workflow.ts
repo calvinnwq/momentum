@@ -341,13 +341,54 @@ export function classifyRecoverableNoMistakesRunnerFailure(
 
 function hasCancelledNoMistakesRunEvidence(output: string): boolean {
   if (!output.includes("aborted by user")) return false;
-  return toNoMistakesOutputLines(output).some((line) => {
-    if (isHistoricalNoMistakesEvidenceLine(line)) return false;
-    return parseNoMistakesStatusOrOutcomeLine(line).some(
-      ({ label, value }) =>
-        value === "cancelled" && (label === "outcome" || label === "status")
-    );
-  });
+  let yamlSection: string | null = null;
+  for (const rawLine of output.split(/\r?\n/)) {
+    for (const line of rawLine
+      .replace(/\\r\\n/g, "\n")
+      .replace(/\\n/g, "\n")
+      .split("\n")) {
+      const trimmed = line.trim();
+      if (trimmed.length === 0) continue;
+      const indented = /^\s/.test(line);
+      const section = !indented ? parseNoMistakesYamlSection(trimmed) : null;
+      if (section !== null) {
+        yamlSection = section;
+        continue;
+      }
+      if (
+        !indented &&
+        parseNoMistakesStatusOrOutcomeLine(trimmed).length === 0
+      ) {
+        yamlSection = null;
+      }
+      if (isHistoricalNoMistakesEvidenceLine(trimmed)) continue;
+      for (const { label, value } of parseNoMistakesStatusOrOutcomeLine(trimmed)) {
+        if (value !== "cancelled") continue;
+        if (label === "outcome") return true;
+        if (
+          label === "status" &&
+          yamlSection !== null &&
+          isNoMistakesRunYamlSection(yamlSection)
+        ) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+function parseNoMistakesYamlSection(line: string): string | null {
+  const match = /^(?<section>[a-z0-9][a-z0-9 _-]*)\s*:\s*$/.exec(line);
+  return match?.groups?.section ?? null;
+}
+
+function isNoMistakesRunYamlSection(section: string): boolean {
+  return (
+    section === "run" ||
+    section === "no-mistakes" ||
+    section === "no mistakes"
+  );
 }
 
 /**
