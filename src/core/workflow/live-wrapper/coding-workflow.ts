@@ -341,10 +341,13 @@ export function classifyRecoverableNoMistakesRunnerFailure(
 
 function hasCancelledNoMistakesRunEvidence(output: string): boolean {
   if (!output.includes("aborted by user")) return false;
-  return (
-    output.includes("outcome: cancelled") ||
-    output.includes("status: cancelled")
-  );
+  return toNoMistakesOutputLines(output).some((line) => {
+    if (isHistoricalNoMistakesEvidenceLine(line)) return false;
+    return parseNoMistakesStatusOrOutcomeLine(line).some(
+      ({ label, value }) =>
+        value === "cancelled" && (label === "outcome" || label === "status")
+    );
+  });
 }
 
 /**

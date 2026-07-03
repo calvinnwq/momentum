@@ -3607,6 +3607,26 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "GitHub checks passed",
         "current selected finding ids: [F-1]"
       ].join("\n")
+    },
+    {
+      name: "cancelled CI status with aborted user text",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "ci status: cancelled",
+        'error: "cancelled: aborted by user"'
+      ].join("\n")
+    },
+    {
+      name: "historical cancelled no-mistakes status with aborted user text",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "previous status: cancelled",
+        'error: "cancelled: aborted by user"'
+      ].join("\n")
     }
   ])("does not treat no-mistakes $name as workflow success", ({ stdout }) => {
     const dir = makeTempDir();
