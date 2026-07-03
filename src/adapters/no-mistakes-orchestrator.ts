@@ -28,13 +28,19 @@
  * long-lived round, which lives in `mirroring_external_state` between ticks. Each
  * tick reconciles the durable round with the latest external evidence:
  *
- *   - `continue` is a legal same-state `mirroring_external_state` heartbeat that
- *     keeps the round live for the next tick (no `finished_at`).
+ *   - `continue` is a legal same-state `mirroring_external_state` poll that
+ *     keeps the round live for the next tick (no `finished_at`). When the same
+ *     external-state digest repeats, the prior heartbeat is preserved so the
+ *     mirror can detect a stalled external run instead of treating every poll as
+ *     fresh progress.
  *   - a gate moves it to a durable, non-terminal `waiting_operator` Momentum never
  *     auto-resolves; a later tick can resume it back to `mirroring_external_state`.
  *   - a settle moves it straight to its terminal (`succeeded` directly from the
  *     mirror phase — no intervening capture, unlike the result-bearing families —
  *     or `failed` / `blocked` / `manual_recovery_required`).
+ *   - a running snapshot with an unchanged digest for the stall window settles to
+ *     `manual_recovery_required` so an operator can inspect no-mistakes rather
+ *     than letting Momentum wait forever on stale mirror evidence.
  *
  * {@link runNoMistakesMirrorStep} is the entrypoint a daemon / scheduler calls with
  * a `StepRun` identity to *start* a mirror: it materializes the durable invocation
@@ -92,6 +98,8 @@ import {
   type NoMistakesRoundRuntimeInputs
 } from "./no-mistakes-executor.js";
 import type { NoMistakesExternalStateRead } from "../core/executors/no-mistakes/mechanism.js";
+
+export const NO_MISTAKES_MIRROR_STALL_AFTER_MS = 4 * 60 * 1000;
 
 class NoMistakesMirrorRoundFamilyError extends Error {
   readonly roundId: string;
@@ -275,6 +283,10 @@ function noMistakesExternalStateInconsistent(
   };
 }
 
+function noMistakesExternalStateStalled(reason: string): NoMistakesMirrorDecision {
+  return noMistakesExternalStateInconsistent(reason);
+}
+
 function insertNewFindings(
   db: MomentumDb,
   roundId: string,
@@ -455,6 +467,7 @@ function insertExpectedExternalIdentityCheckpoint(
 }
 
 function noMistakesPollRoundUpdate(
+  current: ExecutorRoundRecord,
   decision: NoMistakesMirrorDecision,
   stateRead: NoMistakesExternalStateRead,
   polledAt: number
@@ -463,9 +476,15 @@ function noMistakesPollRoundUpdate(
     ? polledAt
     : null;
   const baseUpdate = noMistakesRoundUpdate(decision);
+  const heartbeatAt =
+    stateRead.ok &&
+    decision.classification === "continue" &&
+    current.inputDigest === stateRead.digest
+      ? (current.heartbeatAt ?? current.startedAt ?? polledAt)
+      : polledAt;
   return stateRead.ok
-    ? { ...baseUpdate, inputDigest: stateRead.digest, heartbeatAt: polledAt, finishedAt }
-    : { ...baseUpdate, heartbeatAt: polledAt, finishedAt };
+    ? { ...baseUpdate, inputDigest: stateRead.digest, heartbeatAt, finishedAt }
+    : { ...baseUpdate, heartbeatAt, finishedAt };
 }
 
 function updateInvocationForDecision(
@@ -599,6 +618,29 @@ function reconcileNoMistakesTerminalDecision(
   );
 }
 
+function reconcileNoMistakesStalledDecision(
+  current: ExecutorRoundRecord,
+  stateRead: NoMistakesExternalStateRead,
+  decision: NoMistakesMirrorDecision,
+  polledAt: number
+): NoMistakesMirrorDecision {
+  if (!stateRead.ok || decision.classification !== "continue") {
+    return decision;
+  }
+  if (current.inputDigest !== stateRead.digest) {
+    return decision;
+  }
+  const lastHeartbeatAt = current.heartbeatAt ?? current.startedAt ?? polledAt;
+  const stalledForMs = polledAt - lastHeartbeatAt;
+  if (stalledForMs < NO_MISTAKES_MIRROR_STALL_AFTER_MS) {
+    return decision;
+  }
+  const step = stateRead.value.activeStep ?? "unknown";
+  return noMistakesExternalStateStalled(
+    `external no-mistakes state for step ${step} has not changed for ${stalledForMs}ms; inspect the external no-mistakes run and clear recovery only after it produces fresh progress or terminal evidence`
+  );
+}
+
 export type RunNoMistakesMirrorRoundInput = {
   db: MomentumDb;
   /** The id of the durable, already-started mirror round to poll. */
@@ -705,19 +747,30 @@ export function runNoMistakesMirrorRound(
     classified.recoveryCode === "external_state_unreadable"
       ? classified
       : noMistakesExternalStateInconsistent(identityTrustReason);
-  const decision = reconcileNoMistakesTerminalDecision(
+  const terminalDecision = reconcileNoMistakesTerminalDecision(
     db,
     roundId,
     stateRead,
     identityReconciled,
     expectedExternalIdentity
   );
+  const decision = reconcileNoMistakesStalledDecision(
+    current,
+    stateRead,
+    terminalDecision,
+    polledAt
+  );
 
   // 3. Patch the durable round, stamping the daemon clock and re-fingerprinting the
   //    round with the exact bytes this poll mirrored (only on a successful read —
   //    a failure has no trustworthy digest, so the frozen one stays in place).
   return withSavepoint(db, "no_mistakes_mirror_poll", () => {
-    const roundUpdate = noMistakesPollRoundUpdate(decision, stateRead, polledAt);
+    const roundUpdate = noMistakesPollRoundUpdate(
+      current,
+      decision,
+      stateRead,
+      polledAt
+    );
     if (decision.invocationState === "succeeded") {
       resumeWaitingInvocationBeforeSuccess(db, current.invocationId, polledAt);
     }

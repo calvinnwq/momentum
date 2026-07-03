@@ -1065,6 +1065,45 @@ describe("runCodingWorkflowLiveWrapper", () => {
         'error: "cancelled: aborted by user"'
       ].join("\n"),
       expected: "cancelled before producing a reliable successful result"
+    },
+    {
+      name: "cancelled external no-mistakes run without outcome line",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: cancelled",
+        "  review: failed",
+        'error: "cancelled: aborted by user"'
+      ].join("\n"),
+      expected: "cancelled before producing a reliable successful result"
+    },
+    {
+      name: "compact cancelled external no-mistakes run status",
+      stdout: [
+        "run status: cancelled",
+        'error: "cancelled: aborted by user"'
+      ].join("\n"),
+      expected: "cancelled before producing a reliable successful result"
+    },
+    {
+      name: "JSON cancelled external no-mistakes run status",
+      stdout: [
+        '{"run":{"id":"01TEST","status":"cancelled"}}',
+        'error: "cancelled: aborted by user"'
+      ].join("\n"),
+      expected: "cancelled before producing a reliable successful result"
+    },
+    {
+      name: "cancelled external no-mistakes run after nested status block",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  ci:",
+        "    status: running",
+        "  status: cancelled",
+        'error: "cancelled: aborted by user"'
+      ].join("\n"),
+      expected: "cancelled before producing a reliable successful result"
     }
   ])(
     "parks no-mistakes runner lifecycle failure as process setup recovery: $name",
@@ -3595,6 +3634,102 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "PR #42 mergeStateStatus CLEAN",
         "GitHub checks passed",
         "current selected finding ids: [F-1]"
+      ].join("\n")
+    },
+    {
+      name: "cancelled CI status with aborted user text",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "ci status: cancelled",
+        'error: "cancelled: aborted by user"'
+      ].join("\n")
+    },
+    {
+      name: "nested cancelled CI status with aborted user text",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "ci:",
+        "  status: cancelled",
+        'error: "cancelled: aborted by user"'
+      ].join("\n")
+    },
+    {
+      name: "historical cancelled no-mistakes status with aborted user text",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "previous status: cancelled",
+        'error: "cancelled: aborted by user"'
+      ].join("\n")
+    },
+    {
+      name: "historical compact cancelled no-mistakes status with aborted user text",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "previous run status: cancelled",
+        'error: "cancelled: aborted by user"'
+      ].join("\n")
+    },
+    {
+      name: "annotated historical compact cancelled no-mistakes status with aborted user text",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "run status: cancelled (previous run)",
+        'error: "cancelled: aborted by user"'
+      ].join("\n")
+    },
+    {
+      name: "historical section compact cancelled no-mistakes status with aborted user text",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "history:",
+        "  run status: cancelled",
+        'error: "cancelled: aborted by user"'
+      ].join("\n")
+    },
+    {
+      name: "CI section compact cancelled no-mistakes status with aborted user text",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "ci:",
+        "  run status: cancelled",
+        'error: "cancelled: aborted by user"'
+      ].join("\n")
+    },
+    {
+      name: "historical section nested cancelled no-mistakes run with aborted user text",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "history:",
+        "  run:",
+        "    status: cancelled",
+        'error: "cancelled: aborted by user"'
+      ].join("\n")
+    },
+    {
+      name: "previous section cancelled status with aborted user text",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "previous:",
+        "  status: cancelled",
+        'error: "cancelled: aborted by user"'
       ].join("\n")
     }
   ])("does not treat no-mistakes $name as workflow success", ({ stdout }) => {

@@ -26,6 +26,7 @@ import {
 } from "../src/adapters/no-mistakes-executor.js";
 import { readNoMistakesExternalState } from "../src/core/executors/no-mistakes/mechanism.js";
 import {
+  NO_MISTAKES_MIRROR_STALL_AFTER_MS,
   runNoMistakesMirrorRound,
   runNoMistakesMirrorStep,
   type NoMistakesMirrorReader,
@@ -866,6 +867,101 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
     expect(third.round.finishedAt).toBe(4_000);
     expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe("succeeded");
     expect(loadExecutorInvocation(db, INVOCATION_ID)!.finishedAt).toBe(4_000);
+  });
+
+  it("parks unchanged running external state in manual recovery after the stall window", () => {
+    const db = openMirrorRoundDb();
+    const read = okReader({ stepStatus: "running", activeStep: "review" });
+
+    const first = runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
+      read,
+      polledAt: 2_000
+    });
+    expect(first.round.state).toBe("mirroring_external_state");
+
+    const stalled = runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      read,
+      polledAt: 2_000 + NO_MISTAKES_MIRROR_STALL_AFTER_MS
+    });
+
+    expect(stalled.decision.classification).toBe("manual_recovery_required");
+    expect(stalled.round.state).toBe("manual_recovery_required");
+    expect(stalled.round.recoveryCode).toBe("external_state_inconsistent");
+    expect(stalled.round.humanGate).toBe("manual_recovery_required");
+    expect(stalled.round.summary).toContain("has not changed");
+    expect(stalled.round.summary).toContain("review");
+    expect(loadExecutorInvocation(db, INVOCATION_ID)!.state).toBe(
+      "manual_recovery_required"
+    );
+  });
+
+  it("parks unchanged running external state even when intermediate polls continue", () => {
+    const db = openMirrorRoundDb();
+    const read = okReader({ stepStatus: "running", activeStep: "review" });
+    const firstPollAt = 2_000;
+    const intermediatePollAt =
+      firstPollAt + Math.floor(NO_MISTAKES_MIRROR_STALL_AFTER_MS / 2);
+
+    runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
+      read,
+      polledAt: firstPollAt
+    });
+    const intermediate = runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      read,
+      polledAt: intermediatePollAt
+    });
+    expect(intermediate.decision.classification).toBe("continue");
+
+    const stalled = runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      read,
+      polledAt: firstPollAt + NO_MISTAKES_MIRROR_STALL_AFTER_MS
+    });
+
+    expect(stalled.decision.classification).toBe("manual_recovery_required");
+    expect(stalled.round.state).toBe("manual_recovery_required");
+    expect(stalled.round.summary).toContain(
+      `has not changed for ${NO_MISTAKES_MIRROR_STALL_AFTER_MS}ms`
+    );
+  });
+
+  it("keeps polling when running external state changes before the stall window", () => {
+    const db = openMirrorRoundDb();
+
+    runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
+      read: okReader(
+        { stepStatus: "running", activeStep: "review" },
+        "sha256:first"
+      ),
+      polledAt: 2_000
+    });
+    const moved = runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      read: okReader(
+        { stepStatus: "running", activeStep: "test" },
+        "sha256:second"
+      ),
+      polledAt: 2_000 + NO_MISTAKES_MIRROR_STALL_AFTER_MS
+    });
+
+    expect(moved.decision.classification).toBe("continue");
+    expect(moved.round.state).toBe("mirroring_external_state");
+    expect(moved.round.recoveryCode).toBeNull();
   });
 
   it("rolls back a terminal poll when evidence persistence fails", () => {

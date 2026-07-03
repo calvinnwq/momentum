@@ -274,12 +274,14 @@ If a wrapper command is `node` (or `/usr/bin/env node`) and the configured
 script entrypoint itself is missing, the failure is classified as
 `runtime_unavailable`; module failures from inside an existing wrapper script
 remain ordinary command failures. For retryable `no-mistakes` and
-`merge-cleanup` bootstrap failures, `workflow run clear-recovery` can prepare a
-new scheduler attempt after the operator repairs the wrapper path.
+`merge-cleanup` setup failures, `workflow run clear-recovery` can prepare a
+new scheduler attempt after the operator repairs the wrapper path or external
+runner state.
 The coding-workflow wrapper also treats known no-mistakes runner lifecycle
 failures as recovery setup failures rather than ordinary failed runner evidence:
-missing external branch-start state, cancelled no-mistakes runs before a
-reliable result, and similarly concrete no-result runner lifecycle failures.
+missing external branch-start state, current no-mistakes run status or outcome
+evidence that the run was cancelled before a reliable result, and similarly
+concrete no-result runner lifecycle failures.
 Those cases leave no normalized runner result, so the daemon parks the step for
 operator repair and a guarded retry instead of terminalizing the workflow as if
 verification itself failed.

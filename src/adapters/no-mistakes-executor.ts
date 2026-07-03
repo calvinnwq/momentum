@@ -150,7 +150,9 @@ export type NoMistakesCiState = (typeof NO_MISTAKES_CI_STATES)[number];
  *   - `external_state_blocked` — the external run reported a durable blockage.
  *   - `external_state_inconsistent` — the snapshot's own fields contradict each
  *     other (a `completed` claim with failing / pending CI or an unresolved
- *     decision; an `awaiting_decision` claim with no surfaced decision).
+ *     decision; an `awaiting_decision` claim with no surfaced decision), or the
+ *     orchestrator saw unchanged running mirror evidence long enough that it
+ *     needs operator inspection.
  *   - `external_state_unreadable` — the snapshot is structurally malformed and
  *     cannot be trusted at all (bad ids / SHA, dangling selected finding,
  *     unknown status / CI state).
