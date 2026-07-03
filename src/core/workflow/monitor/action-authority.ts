@@ -264,6 +264,7 @@ export type WorkflowWatchRecommendedActionPolicyInput = {
   nextActionStepId?: string | null;
   recoveryCode: WorkflowMonitorRecoveryCode | string | null;
   activeStepKind: WorkflowStepKind | string | null;
+  openGateType?: WorkflowGateType | string | null;
 };
 
 export function policyForWorkflowWatchRecommendedAction(
@@ -278,6 +279,7 @@ export function deriveWorkflowWatchActionRecommendation(
   progress: WorkflowMonitorProgressTick
 ): WorkflowWatchActionRecommendation {
   const recommendedAction = recommendWorkflowWatchAction(envelope, progress);
+  const openGate = envelope.gates.find((gate) => gate.resolvedAt === null);
   return {
     recommendedAction,
     recommendedActionPolicy: policyForWorkflowWatchRecommendedAction({
@@ -285,7 +287,8 @@ export function deriveWorkflowWatchActionRecommendation(
       nextActionCode: envelope.nextAction.code,
       nextActionStepId: envelope.nextAction.stepId,
       recoveryCode: envelope.recovery?.code ?? null,
-      activeStepKind: envelope.activeStep?.kind ?? null
+      activeStepKind: envelope.activeStep?.kind ?? null,
+      openGateType: openGate?.gateType ?? null
     })
   };
 }
@@ -328,6 +331,23 @@ function workflowWatchPolicyKey(
       : "merge_cleanup";
   }
   if (
+    input.recommendedAction === "operator_decision" &&
+    input.openGateType !== undefined &&
+    input.openGateType !== null
+  ) {
+    return policyKeyForOpenWorkflowGate(input.openGateType);
+  }
+  if (
+    input.recommendedAction === "operator_decision" &&
+    input.nextActionCode === "advance_to_step" &&
+    (input.nextActionStepId === "merge-cleanup" ||
+      input.nextActionStepId === "linear-refresh")
+  ) {
+    return input.nextActionStepId === "linear-refresh"
+      ? "linear_refresh"
+      : "merge_cleanup";
+  }
+  if (
     input.activeStepKind === "no-mistakes" &&
     input.nextActionCode === "clear_recovery"
   ) {
@@ -351,6 +371,21 @@ function workflowWatchPolicyKey(
   }
 }
 
+function policyKeyForOpenWorkflowGate(
+  gateType: WorkflowGateType | string
+): WorkflowActionPolicyKey | string {
+  if (gateType === "approval_required") {
+    return "approval_decision";
+  }
+  if (gateType === "operator_decision_required") {
+    return "operator_decision";
+  }
+  if (gateType === "manual_recovery_required") {
+    return "clear_recovery";
+  }
+  return "operator_decision";
+}
+
 function recommendWorkflowWatchAction(
   envelope: WorkflowMonitorEnvelope,
   progress: WorkflowMonitorProgressTick
@@ -371,6 +406,13 @@ function recommendWorkflowWatchAction(
     return "recover";
   }
   if (envelope.gates.some((gate) => gate.resolvedAt === null)) {
+    return "operator_decision";
+  }
+  if (
+    envelope.nextAction.code === "advance_to_step" &&
+    (envelope.nextAction.stepId === "merge-cleanup" ||
+      envelope.nextAction.stepId === "linear-refresh")
+  ) {
     return "operator_decision";
   }
   if (

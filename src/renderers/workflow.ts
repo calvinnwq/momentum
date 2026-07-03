@@ -1027,6 +1027,7 @@ function buildWorkflowWatchHumanAction(
   code: WorkflowWatchHumanActionCode;
   command: string;
   detail: string | null;
+  gateType: string | null;
 } | null {
   if (isWorkflowWatchCleanTerminal(envelope)) {
     return null;
@@ -1049,7 +1050,8 @@ function buildWorkflowWatchHumanAction(
       command:
         `momentum workflow run clear-recovery ${envelope.runId} ` +
         "--evidence-pointer <ref>",
-      detail: envelope.recovery.message
+      detail: envelope.recovery.message,
+      gateType: null
     };
   }
   if (envelope.needsManualRecovery) {
@@ -1059,7 +1061,8 @@ function buildWorkflowWatchHumanAction(
       detail:
         envelope.manualRecoveryReason ??
         envelope.recovery?.message ??
-        envelope.nextAction.detail
+        envelope.nextAction.detail,
+      gateType: null
     };
   }
   if (envelope.recovery !== null) {
@@ -1070,7 +1073,8 @@ function buildWorkflowWatchHumanAction(
     return {
       code: "resolve_gate",
       command: `momentum workflow run decide ${openGate.gateId} --action <action> --actor <name>`,
-      detail: openGate.reason
+      detail: openGate.reason,
+      gateType: openGate.gateType
     };
   }
   if (
@@ -1087,7 +1091,8 @@ function buildWorkflowWatchHumanAction(
           `momentum workflow run approve ${envelope.runId} ` +
           `--approval-boundary ${boundary} ` +
           `--phrase "approve plan ${envelope.runId} ${boundary}"`,
-        detail: envelope.nextAction.detail
+        detail: envelope.nextAction.detail,
+        gateType: null
       };
     }
   }
