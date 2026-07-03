@@ -93,6 +93,8 @@ import {
 } from "./no-mistakes-executor.js";
 import type { NoMistakesExternalStateRead } from "../core/executors/no-mistakes/mechanism.js";
 
+export const NO_MISTAKES_MIRROR_STALL_AFTER_MS = 4 * 60 * 1000;
+
 class NoMistakesMirrorRoundFamilyError extends Error {
   readonly roundId: string;
   readonly executorFamily: string;
@@ -273,6 +275,10 @@ function noMistakesExternalStateInconsistent(
     recoveryCode: "external_state_inconsistent",
     reason
   };
+}
+
+function noMistakesExternalStateStalled(reason: string): NoMistakesMirrorDecision {
+  return noMistakesExternalStateInconsistent(reason);
 }
 
 function insertNewFindings(
@@ -599,6 +605,29 @@ function reconcileNoMistakesTerminalDecision(
   );
 }
 
+function reconcileNoMistakesStalledDecision(
+  current: ExecutorRoundRecord,
+  stateRead: NoMistakesExternalStateRead,
+  decision: NoMistakesMirrorDecision,
+  polledAt: number
+): NoMistakesMirrorDecision {
+  if (!stateRead.ok || decision.classification !== "continue") {
+    return decision;
+  }
+  if (current.inputDigest !== stateRead.digest) {
+    return decision;
+  }
+  const lastHeartbeatAt = current.heartbeatAt ?? current.startedAt ?? polledAt;
+  const stalledForMs = polledAt - lastHeartbeatAt;
+  if (stalledForMs < NO_MISTAKES_MIRROR_STALL_AFTER_MS) {
+    return decision;
+  }
+  const step = stateRead.value.activeStep ?? "unknown";
+  return noMistakesExternalStateStalled(
+    `external no-mistakes state for step ${step} has not changed for ${stalledForMs}ms; inspect the external no-mistakes run and clear recovery only after it produces fresh progress or terminal evidence`
+  );
+}
+
 export type RunNoMistakesMirrorRoundInput = {
   db: MomentumDb;
   /** The id of the durable, already-started mirror round to poll. */
@@ -705,12 +734,18 @@ export function runNoMistakesMirrorRound(
     classified.recoveryCode === "external_state_unreadable"
       ? classified
       : noMistakesExternalStateInconsistent(identityTrustReason);
-  const decision = reconcileNoMistakesTerminalDecision(
+  const terminalDecision = reconcileNoMistakesTerminalDecision(
     db,
     roundId,
     stateRead,
     identityReconciled,
     expectedExternalIdentity
+  );
+  const decision = reconcileNoMistakesStalledDecision(
+    current,
+    stateRead,
+    terminalDecision,
+    polledAt
   );
 
   // 3. Patch the durable round, stamping the daemon clock and re-fingerprinting the
