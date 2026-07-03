@@ -356,17 +356,17 @@ function hasCancelledNoMistakesRunEvidence(output: string): boolean {
       ) {
         yamlSections.pop();
       }
+      const section = parseNoMistakesYamlSection(trimmed);
+      if (section !== null) {
+        yamlSections.push({ indent, section });
+        continue;
+      }
       if (isHistoricalNoMistakesEvidenceLine(trimmed)) continue;
       if (
         isCurrentNoMistakesRunStatusContext(yamlSections) &&
         hasCompactCancelledNoMistakesRunStatus(trimmed)
       ) {
         return true;
-      }
-      const section = parseNoMistakesYamlSection(trimmed);
-      if (section !== null) {
-        yamlSections.push({ indent, section });
-        continue;
       }
       if (
         indent === 0 &&
@@ -412,7 +412,7 @@ function isCurrentNoMistakesRunStatusContext(
   yamlSections: ReadonlyArray<{ section: string }>
 ): boolean {
   if (yamlSections.length === 0) return true;
-  return isNoMistakesRunYamlSection(yamlSections[yamlSections.length - 1]!.section);
+  return yamlSections.every(({ section }) => isNoMistakesRunYamlSection(section));
 }
 
 function isNoMistakesRunYamlSection(section: string): boolean {
