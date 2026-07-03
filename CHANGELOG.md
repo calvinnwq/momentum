@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.16.1](https://github.com/calvinnwq/momentum/compare/v0.16.0...v0.16.1) (2026-07-03)
+
+
+### Bug Fixes
+
+* **workflow:** Added a focused NGX-575 readiness slice so malformed native coding route JSON now fails closed with compact structural preflight evidence before durable writes. ([2a88508](https://github.com/calvinnwq/momentum/commit/2a885084d7a1b9082a8a7a46ea3b73801b657832))
+* **workflow:** fail closed on malformed native coding routes ([e592c9a](https://github.com/calvinnwq/momentum/commit/e592c9a448559507910a0e3414d2eb298cd511e3))
+* **workflow:** keep watch from starting tail steps ([6c047d8](https://github.com/calvinnwq/momentum/commit/6c047d80af1476b3875c36d2d988e118e84f5a99))
+* **workflow:** require operator action for watch tail steps ([23ef9ad](https://github.com/calvinnwq/momentum/commit/23ef9adfba4cf17ba152775bc488aa66160b73c0))
+
 ## [0.16.0](https://github.com/calvinnwq/momentum/compare/v0.15.0...v0.16.0) (2026-07-02)
 
 0.16.0 is a native workflow hardening release. It makes coding workflow startup fail earlier and more clearly, makes recovery/readback surfaces easier to consume, and tightens the lifecycle for external tail steps like merge cleanup and Linear refresh.
