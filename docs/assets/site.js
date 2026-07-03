@@ -46,14 +46,6 @@
         { n: "18", t: "Evidence commands", h: "evidence-commands.html" },
         { n: "19", t: "Intent commands", h: "intent-commands.html" }
       ]
-    },
-    {
-      title: "Project",
-      items: [
-        { t: "README", h: "https://github.com/calvinnwq/momentum#readme", ext: true },
-        { t: "SPEC.md", h: "https://github.com/calvinnwq/momentum/blob/main/SPEC.md", ext: true },
-        { t: "GitHub", h: "https://github.com/calvinnwq/momentum", ext: true }
-      ]
     }
   ];
 

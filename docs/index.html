@@ -3,8 +3,8 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Momentum docs - durable repo-work orchestration</title>
-    <meta name="description" content="Momentum is a TypeScript CLI for durable autonomous repo-work orchestration with workflow state, evidence, recovery, and operator gates.">
+    <title>Momentum docs - AI-native workflow backbone</title>
+    <meta name="description" content="Momentum is an AI-native workflow backbone for durable repo work, with custom workflows, executors, adapters, evidence, recovery, and operator gates.">
     <script>
       (function () {
         var stored = null;
@@ -27,7 +27,6 @@
         <a class="brand" href="index.html">Momentum<span class="brand-tag">docs</span></a>
         <button class="search-btn" type="button" data-search-open><span>Search docs</span><kbd>/</kbd></button>
         <div class="masthead-tools">
-          <a class="gh" href="https://github.com/calvinnwq/momentum">GitHub</a>
           <button class="theme-btn" type="button" data-theme-toggle aria-label="Toggle color theme" aria-pressed="false">
             <span class="theme-glyph" aria-hidden="true"></span>
           </button>
@@ -41,11 +40,14 @@
       <main id="content" class="article-col">
         <article>
           <p class="kicker"><span class="n">01</span>Overview</p>
-          <h1>Durable repo work, without terminal archaeology.</h1>
+          <h1>AI-native workflow backbone.</h1>
           <p class="lede">
-            Momentum turns autonomous coding work into explicit workflow state:
-            durable runs, resumable steps, evidence records, gates, recovery
-            actions, and operator-readable surfaces.
+            Momentum is a skeleton for creating AI-native repo workflows:
+            reusable workflows, ordered steps, pluggable executors, source
+            adapters, durable evidence, gates, recovery actions, and
+            operator-readable surfaces. The Momentum-native coding workflow is
+            the first shipped recipe; the original goal loop remains available
+            as a compatibility smoke path.
           </p>
 
           <div class="runtime-strip" aria-label="Momentum runtime loop">
@@ -61,12 +63,25 @@
           </div>
 
           <section>
-            <h2>Start with a disposable run</h2>
+            <h2>Choose an entry point</h2>
             <p>
-              The fastest way to understand Momentum is to run a tiny goal,
-              inspect the state, then read the handoff and logs. The CLI is
-              pre-release, so local source install is the supported path.
+              The fastest way to understand Momentum today is to preview the
+              shipped coding workflow, then inspect the durable run surfaces it
+              writes. Custom workflows, steps, executors, and adapters use the
+              same backbone as those surfaces grow.
             </p>
+            <div class="cards entry-grid">
+              <a class="card" href="workflow-commands.html#workflow-run-preview-coding">
+                <span class="card-k">Shipped workflow</span>
+                <strong>Preview first, then start a durable coding run.</strong>
+                <span>Use this path to see workflow definitions, steps, approvals, monitor/watch events, and tail-step recovery in one run.</span>
+              </a>
+              <a class="card" href="goal-start.html">
+                <span class="card-k">Compatibility smoke</span>
+                <strong>Run one small goal loop from a Markdown spec.</strong>
+                <span>Use this path for a minimal foreground/worker smoke test of the older goal-loop surface.</span>
+              </a>
+            </div>
             <pre><code><span class="c"># build the CLI from source</span>
 pnpm install
 pnpm build
@@ -74,12 +89,22 @@ pnpm build
 <span class="c"># check local runtime readiness</span>
 node dist/index.js doctor --json
 
-<span class="c"># run a foreground goal from a Markdown spec</span>
+<span class="c"># preview a Momentum-native coding workflow without writing state</span>
+node dist/index.js workflow run preview-coding \
+  --run-id &lt;run-id&gt; \
+  --repo &lt;repo&gt; \
+  --objective "Make the requested change" \
+  --approval-boundary through-no-mistakes \
+  --json
+
+<span class="c"># or run a tiny compatibility goal from a Markdown spec</span>
 node dist/index.js goal start ./goal.md --foreground --json
 node dist/index.js status --json
+node dist/index.js logs &lt;goal-id&gt; --json
 node dist/index.js handoff &lt;goal-id&gt; --json</code></pre>
             <p>
-              For a copy-paste smoke test, use the <a href="walkthrough.html">end-to-end walkthrough</a>.
+              For a copy-paste goal-loop smoke test, use the <a href="walkthrough.html">end-to-end walkthrough</a>.
+              For the native workflow contract, start with <a href="workflow-commands.html">workflow commands</a>.
             </p>
           </section>
 
@@ -87,24 +112,24 @@ node dist/index.js handoff &lt;goal-id&gt; --json</code></pre>
             <h2>What Momentum owns</h2>
             <div class="cards">
               <a class="card" href="workflow-commands.html">
-                <span class="card-k">Workflow runtime</span>
-                <strong>Runs, steps, approvals, gates, monitors, watch ticks, and logs.</strong>
-                <span>The native coding workflow is represented as durable rows and JSON envelopes.</span>
+                <span class="card-k">Workflow backbone</span>
+                <strong>Definitions, steps, runs, approvals, gates, monitors, watch ticks, and logs.</strong>
+                <span>The built-in coding workflow is one recipe on top of the same durable runtime intended for user-defined workflows.</span>
               </a>
               <a class="card" href="evidence-commands.html">
-                <span class="card-k">Evidence</span>
-                <strong>Artifacts and proof become queryable records.</strong>
-                <span>Evidence links goals, source items, external intents, workflow state, and recovery.</span>
+                <span class="card-k">Evidence and adapters</span>
+                <strong>External state is read, mirrored, and reconciled through local records.</strong>
+                <span>Source adapters, evidence rows, and update intents connect workflow state to systems like trackers without making every read a write.</span>
               </a>
               <a class="card" href="recovery.html">
-                <span class="card-k">Recovery</span>
-                <strong>Manual recovery is state, not vibes in a transcript.</strong>
-                <span>Stale leases, failed runners, external-tail reconcile, and no-mistakes evidence lanes are explicit.</span>
+                <span class="card-k">Daemon and recovery</span>
+                <strong>Scheduling, leases, gates, and manual recovery are runtime state.</strong>
+                <span>The daemon and monitor surfaces decide what can advance, what needs approval, and what must be recovered before retry.</span>
               </a>
               <a class="card" href="intent-commands.html">
-                <span class="card-k">External apply</span>
-                <strong>Tracker writes are policy-gated and audited before mutation.</strong>
-                <span>Linear updates are intents first, then approved external apply or workflow tail reconciliation.</span>
+                <span class="card-k">Executors and apply</span>
+                <strong>Bounded work lives below steps; side effects stay explicit.</strong>
+                <span>Executor families such as goal-loop, one-shot, script, no-mistakes, and external-apply produce normalized evidence the workflow can resume from.</span>
               </a>
             </div>
           </section>
@@ -112,33 +137,33 @@ node dist/index.js handoff &lt;goal-id&gt; --json</code></pre>
           <section>
             <h2>Runtime map</h2>
             <p>
-              Momentum separates the user command, durable workflow state, the
-              executor doing bounded work, and the side effects that require
-              evidence-backed reconciliation.
+              Momentum separates the workflow definition, the durable runtime
+              state, the executor doing bounded work, and the adapters or side
+              effects that require evidence-backed reconciliation.
             </p>
             <div class="map" role="img" aria-label="Momentum runtime map">
               <div class="map-node primary">
-                <span>Operator</span>
-                <strong>CLI or host wrapper</strong>
-                <small>start, status, monitor, approve, recover</small>
+                <span>Workflow authors</span>
+                <strong>Definitions and step recipes</strong>
+                <small>built-in coding today; custom workflows over time</small>
               </div>
               <div class="map-line"></div>
               <div class="map-node">
-                <span>Workflow state</span>
+                <span>Runtime backbone</span>
                 <strong>SQLite plus artifacts</strong>
-                <small>runs, steps, gates, events, evidence</small>
+                <small>runs, steps, leases, gates, events, evidence</small>
               </div>
               <div class="map-line"></div>
               <div class="map-node">
                 <span>Executors</span>
-                <strong>goal-loop, one-shot, no-mistakes</strong>
-                <small>bounded work with normalized results</small>
+                <strong>goal-loop, one-shot, script, no-mistakes</strong>
+                <small>bounded work with normalized results and logs</small>
               </div>
               <div class="map-line"></div>
               <div class="map-node accent">
-                <span>External systems</span>
-                <strong>Git, GitHub, Linear</strong>
-                <small>read first, mutate only through approved paths</small>
+                <span>Adapters and systems</span>
+                <strong>Git, GitHub, Linear, future sources</strong>
+                <small>read first, mutate only through approved apply paths</small>
               </div>
             </div>
           </section>
@@ -177,7 +202,7 @@ node dist/index.js handoff &lt;goal-id&gt; --json</code></pre>
     </div>
 
     <footer class="colophon">
-      <div class="colophon-inner"><span>Momentum docs</span><span>Pre-release</span><a href="https://github.com/calvinnwq/momentum">GitHub</a></div>
+      <div class="colophon-inner"><span>Momentum docs</span><span>Pre-release</span></div>
     </footer>
   </body>
 </html>

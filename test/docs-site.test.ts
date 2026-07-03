@@ -30,12 +30,15 @@ describe("docs static site", () => {
 
   it("presents the current Momentum runtime shape", () => {
     for (const phrase of [
-      "Durable repo work",
-      "Workflow runtime",
-      "Evidence",
-      "Recovery",
-      "External apply",
+      "AI-native workflow backbone",
+      "skeleton for creating AI-native repo workflows",
+      "Workflow backbone",
+      "Evidence and adapters",
+      "Daemon and recovery",
+      "Executors and apply",
       "OpenClaw supervise",
+      "workflow run preview-coding",
+      "Compatibility smoke",
     ]) {
       expect(index).toContain(phrase);
     }

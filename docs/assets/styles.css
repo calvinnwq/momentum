@@ -418,6 +418,7 @@ pre .c { color: var(--term-soft); }
   gap: 14px;
   margin: 22px 0;
 }
+.entry-grid { margin-bottom: 18px; }
 .card,
 .route-grid a {
   display: block;

@@ -11,6 +11,11 @@ Momentum is a durable workflow runtime for repo work. It should make work
 observable, resumable, auditable, and recoverable without depending on terminal
 scrollback or repeated LLM summarization.
 
+Momentum is also the backbone for AI-native workflow construction: users should
+be able to define their own workflows, compose ordered steps, plug in executor
+families, connect source adapters, and let the runtime preserve state,
+evidence, gates, recovery, and side-effect reconciliation.
+
 - Durable rows, compact JSON envelopes, fixtures, and evidence records are the
   source of truth.
 - CLI text is for humans; structured JSON is for agents, GUI clients, monitors,
