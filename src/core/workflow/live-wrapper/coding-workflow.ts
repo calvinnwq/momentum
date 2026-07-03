@@ -397,8 +397,8 @@ function parseNoMistakesYamlSection(line: string): string | null {
 
 function hasCompactCancelledNoMistakesRunStatus(line: string): boolean {
   return (
-    /\brun\s+status\s*[:=]\s*cancelled\b/.test(line) ||
-    /["']run["']\s*:\s*\{[^{}]*["']status["']\s*:\s*["']cancelled["']/.test(line)
+    /^run\s+status\s*[:=]\s*cancelled\b/.test(line) ||
+    /^\{\s*["']run["']\s*:\s*\{[^{}]*["']status["']\s*:\s*["']cancelled["']/.test(line)
   );
 }
 
