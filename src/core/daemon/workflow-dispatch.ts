@@ -559,7 +559,7 @@ function linearRefreshAlreadyAppliedSuccess(
 ): ExecuteExternalApplySuccess {
   return {
     ok: true,
-    resultCode: "applied",
+    resultCode: "already_applied",
     context: {
       intentId: intent.id,
       intentStatus: intent.status,

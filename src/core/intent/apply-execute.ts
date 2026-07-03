@@ -228,7 +228,7 @@ export type ExecuteExternalApplyExternalResult = {
 
 export type ExecuteExternalApplySuccess = {
   ok: true;
-  resultCode: "applied";
+  resultCode: "applied" | "already_applied";
   context: ExecuteExternalApplyContext;
   intent: UpdateIntent;
   audit: IntentApplyAudit;
@@ -804,7 +804,7 @@ export async function executeExternalApply(
 
   return {
     ok: true,
-    resultCode: "applied",
+    resultCode: externalResult.alreadyApplied ? "already_applied" : "applied",
     context: successContext,
     intent: markApplied.intent,
     audit: reconciled.audit,
@@ -885,7 +885,7 @@ function buildExternalSuccess(args: {
 
   return {
     ok: true,
-    resultCode: "applied",
+    resultCode: args.externalResult.alreadyApplied ? "already_applied" : "applied",
     context: successContext,
     intent: args.intent,
     audit: args.audit,

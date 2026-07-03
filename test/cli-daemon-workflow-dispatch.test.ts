@@ -1164,6 +1164,14 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         )
         .get(runId) as { state: string } | undefined;
       expect(step).toEqual({ state: "succeeded" });
+      const resultJson = JSON.parse(
+        fs.readFileSync(
+          path.join(repoDir, ".agent-workflows", runId, "external-apply.json"),
+          "utf8"
+        )
+      ) as { resultCode?: string; external?: { alreadyApplied?: boolean } };
+      expect(resultJson.resultCode).toBe("already_applied");
+      expect(resultJson.external?.alreadyApplied).toBe(true);
       const runRow = verifyDb
         .prepare("SELECT needs_manual_recovery FROM workflow_runs WHERE id = ?")
         .get(runId) as { needs_manual_recovery: number } | undefined;

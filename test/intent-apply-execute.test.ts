@@ -742,6 +742,7 @@ describe("executeExternalApply two-phase happy path", () => {
         })
       );
       if (!result.ok) throw new Error(`expected ok, got ${result.code}`);
+      expect(result.resultCode).toBe("already_applied");
       expect(result.external.alreadyApplied).toBe(true);
       expect(result.external.commentId).toBe("comment_existing");
       expect(result.audit.resultCode).toBe("already_applied");
