@@ -330,16 +330,21 @@ export function classifyRecoverableNoMistakesRunnerFailure(
       "Repair or re-seed the no-mistakes branch/gate state, then clear recovery to retry the no-mistakes step."
     ].join(" ");
   }
-  if (
-    output.includes("outcome: cancelled") &&
-    output.includes("aborted by user")
-  ) {
+  if (hasCancelledNoMistakesRunEvidence(output)) {
     return [
       "no-mistakes was cancelled before producing a reliable successful result.",
       "Inspect the external no-mistakes run for review/fixer state, repair the blocker, then clear recovery to retry the no-mistakes step."
     ].join(" ");
   }
   return null;
+}
+
+function hasCancelledNoMistakesRunEvidence(output: string): boolean {
+  if (!output.includes("aborted by user")) return false;
+  return (
+    output.includes("outcome: cancelled") ||
+    output.includes("status: cancelled")
+  );
 }
 
 /**

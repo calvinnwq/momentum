@@ -1065,6 +1065,17 @@ describe("runCodingWorkflowLiveWrapper", () => {
         'error: "cancelled: aborted by user"'
       ].join("\n"),
       expected: "cancelled before producing a reliable successful result"
+    },
+    {
+      name: "cancelled external no-mistakes run without outcome line",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: cancelled",
+        "  review: failed",
+        'error: "cancelled: aborted by user"'
+      ].join("\n"),
+      expected: "cancelled before producing a reliable successful result"
     }
   ])(
     "parks no-mistakes runner lifecycle failure as process setup recovery: $name",
