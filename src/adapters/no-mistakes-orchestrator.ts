@@ -28,13 +28,19 @@
  * long-lived round, which lives in `mirroring_external_state` between ticks. Each
  * tick reconciles the durable round with the latest external evidence:
  *
- *   - `continue` is a legal same-state `mirroring_external_state` heartbeat that
- *     keeps the round live for the next tick (no `finished_at`).
+ *   - `continue` is a legal same-state `mirroring_external_state` poll that
+ *     keeps the round live for the next tick (no `finished_at`). When the same
+ *     external-state digest repeats, the prior heartbeat is preserved so the
+ *     mirror can detect a stalled external run instead of treating every poll as
+ *     fresh progress.
  *   - a gate moves it to a durable, non-terminal `waiting_operator` Momentum never
  *     auto-resolves; a later tick can resume it back to `mirroring_external_state`.
  *   - a settle moves it straight to its terminal (`succeeded` directly from the
  *     mirror phase — no intervening capture, unlike the result-bearing families —
  *     or `failed` / `blocked` / `manual_recovery_required`).
+ *   - a running snapshot with an unchanged digest for the stall window settles to
+ *     `manual_recovery_required` so an operator can inspect no-mistakes rather
+ *     than letting Momentum wait forever on stale mirror evidence.
  *
  * {@link runNoMistakesMirrorStep} is the entrypoint a daemon / scheduler calls with
  * a `StepRun` identity to *start* a mirror: it materializes the durable invocation

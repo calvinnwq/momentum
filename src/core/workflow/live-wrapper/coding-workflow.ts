@@ -339,6 +339,9 @@ export function classifyRecoverableNoMistakesRunnerFailure(
   return null;
 }
 
+// Only current no-mistakes run status/outcome evidence can classify a cancellation
+// as retryable recovery; historical, previous-run, or CI-only cancellation text
+// stays an ordinary no-mistakes failure.
 function hasCancelledNoMistakesRunEvidence(output: string): boolean {
   if (!output.includes("aborted by user")) return false;
   const yamlSections: Array<{ indent: number; section: string }> = [];
