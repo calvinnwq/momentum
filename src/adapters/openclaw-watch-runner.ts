@@ -151,7 +151,8 @@ function parseRecommendedActionPolicy(
     nextActionCode: nestedString(source["nextAction"], "code"),
     nextActionStepId: nestedString(source["nextAction"], "stepId"),
     recoveryCode: null,
-    activeStepKind: nestedString(source["activeStep"], "kind")
+    activeStepKind: nestedString(source["activeStep"], "kind"),
+    openGateType: nestedString(source["humanAction"], "gateType")
   });
   if (
     action !== expected.action ||
@@ -325,7 +326,8 @@ function parseHumanAction(
   return {
     code: stringValue(record["code"], "humanAction.code"),
     command: stringValue(record["command"], "humanAction.command"),
-    detail: nullableString(record["detail"], "humanAction.detail")
+    detail: nullableString(record["detail"], "humanAction.detail"),
+    gateType: nullableString(record["gateType"], "humanAction.gateType")
   };
 }
 

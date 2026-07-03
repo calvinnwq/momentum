@@ -27,6 +27,7 @@ export type OpenClawSupervisorHumanAction = {
   code: string;
   command: string;
   detail: string | null;
+  gateType?: string | null;
 };
 
 export type OpenClawSupervisorWatchEnvelope = {

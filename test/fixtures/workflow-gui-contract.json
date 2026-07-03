@@ -45,7 +45,8 @@
       "humanAction": [
         "code",
         "command",
-        "detail"
+        "detail",
+        "gateType"
       ],
       "recommendedActionPolicy": [
         "action",

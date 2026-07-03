@@ -862,6 +862,7 @@ export const WORKFLOW_OPERATOR_ACTION_CLASSES = [
   "reconcile_deterministic_evidence",
   "reconcile_external_tail",
   "clear_recovery",
+  "operator_decision",
   "resolve_gate",
   "retry_failed_step",
   "stop_monitoring"
@@ -1027,6 +1028,7 @@ function buildWorkflowWatchHumanAction(
   code: WorkflowWatchHumanActionCode;
   command: string;
   detail: string | null;
+  gateType: string | null;
 } | null {
   if (isWorkflowWatchCleanTerminal(envelope)) {
     return null;
@@ -1049,7 +1051,8 @@ function buildWorkflowWatchHumanAction(
       command:
         `momentum workflow run clear-recovery ${envelope.runId} ` +
         "--evidence-pointer <ref>",
-      detail: envelope.recovery.message
+      detail: envelope.recovery.message,
+      gateType: null
     };
   }
   if (envelope.needsManualRecovery) {
@@ -1059,7 +1062,8 @@ function buildWorkflowWatchHumanAction(
       detail:
         envelope.manualRecoveryReason ??
         envelope.recovery?.message ??
-        envelope.nextAction.detail
+        envelope.nextAction.detail,
+      gateType: null
     };
   }
   if (envelope.recovery !== null) {
@@ -1070,7 +1074,8 @@ function buildWorkflowWatchHumanAction(
     return {
       code: "resolve_gate",
       command: `momentum workflow run decide ${openGate.gateId} --action <action> --actor <name>`,
-      detail: openGate.reason
+      detail: openGate.reason,
+      gateType: openGate.gateType
     };
   }
   if (
@@ -1087,7 +1092,8 @@ function buildWorkflowWatchHumanAction(
           `momentum workflow run approve ${envelope.runId} ` +
           `--approval-boundary ${boundary} ` +
           `--phrase "approve plan ${envelope.runId} ${boundary}"`,
-        detail: envelope.nextAction.detail
+        detail: envelope.nextAction.detail,
+        gateType: null
       };
     }
   }
@@ -1231,6 +1237,9 @@ function workflowOperatorActionClassForMonitor(
   if (workflowMonitorHasOpenGate(monitor, options)) {
     return "resolve_gate";
   }
+  if (workflowMonitorHasExternalTailAdvance(monitor)) {
+    return "operator_decision";
+  }
   if (monitor.nextAction.code === "await_approval") {
     return "approve_next_gate";
   }
@@ -1247,6 +1256,16 @@ function workflowOperatorActionClassForMonitor(
     return "retry_failed_step";
   }
   return "continue_polling";
+}
+
+function workflowMonitorHasExternalTailAdvance(
+  monitor: WorkflowMonitorState | WorkflowMonitorEnvelope
+): boolean {
+  return (
+    monitor.nextAction.code === "advance_to_step" &&
+    (monitor.nextAction.stepId === "merge-cleanup" ||
+      monitor.nextAction.stepId === "linear-refresh")
+  );
 }
 
 function workflowMonitorHasOpenGate(

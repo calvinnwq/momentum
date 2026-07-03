@@ -182,6 +182,63 @@ describe("parseOpenClawWatchOutput", () => {
     });
   });
 
+  it("preserves gate policy precedence for approved tail-step watch payloads", () => {
+    const parsed = parseOpenClawWatchOutput(
+      JSON.stringify({
+        ok: true,
+        command: "workflow run watch",
+        mode: "once",
+        runId: "cwfp-openclaw",
+        emit: true,
+        reason: "operator_decision",
+        recommendedAction: "operator_decision",
+        recommendedActionPolicy: {
+          action: "operator_decision",
+          authority: "human_required",
+          risk: "medium",
+          evidenceRequired: ["open operator-decision gate", "chosen allowed action"],
+          rollback: "Record a new gate decision or recover the run with operator evidence.",
+          rationale:
+            "Operator decisions select a branch of execution and cannot be inferred by the supervisor."
+        },
+        nextAction: {
+          code: "advance_to_step",
+          stepId: "merge-cleanup",
+          leaseKind: "managed-step",
+          detail: "Step is approved."
+        },
+        activeStep: {
+          stepId: "merge-cleanup",
+          kind: "merge-cleanup",
+          state: "approved",
+          order: 4,
+          required: true
+        },
+        nextPollSeconds: 15,
+        humanAction: {
+          code: "resolve_gate",
+          command:
+            "momentum workflow run decide gate-watch-tail-decision --action <action> --actor <name>",
+          detail: "Merge cleanup needs operator direction before dispatch.",
+          gateType: "operator_decision_required"
+        },
+        cleanup: "none",
+        digest: "sha256:tail-gate",
+        cursor: null,
+        phase: "advancing",
+        stuckRisk: "medium",
+        inspectionCommand: null
+      }),
+      "cwfp-openclaw"
+    );
+
+    expect(parsed.recommendedActionPolicy).toMatchObject({
+      action: "operator_decision",
+      authority: "human_required",
+      risk: "medium"
+    });
+  });
+
   it("preserves direct failure envelope codes", () => {
     let thrown: unknown;
     try {

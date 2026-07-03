@@ -19,7 +19,8 @@ Operator-facing CLI envelopes for the `workflow run start`, `workflow run start-
 - `workflow run monitor` is read-only by default and emits one stable JSON shape per run, derived from durable rows and the monitor reducer, so a monitor runner can decide whether to report, wait, or ask an operator to recover without parsing prose or scraping artifacts.
   Its opt-in `--advance` mode is restricted to Momentum-native coding runs and writes only advisory digest / timestamp baselines for progress suppression.
 - `workflow run watch` watches a run two ways.
-  `--once` emits a one-shot supervisor envelope for a Momentum-native coding run: it safely runs at most one run-scoped dispatcher tick when the target run has one approved next step or one active step eligible for recheck, then persists the same advisory suppression baseline as a monitor advance tick and gives external pollers one recommended next action.
+  `--once` emits a one-shot supervisor envelope for a Momentum-native coding run: it safely runs at most one run-scoped dispatcher tick when the target run has one approved non-tail next step or one active step eligible for recheck, then persists the same advisory suppression baseline as a monitor advance tick and gives external pollers one recommended next action.
+  Approved `merge-cleanup` and `linear-refresh` tail steps are surfaced as operator decisions instead of being started by the poller.
   `--stream --jsonl` instead opens a read-only, long-lived JSONL event stream over the durable event cursor API for a TUI, GUI, or sidecar, resumable from a `--since` cursor and bounded in memory.
 - `workflow run events` is a read-only replay surface for supervisors and app clients that need semantic run changes after reconnecting.
   It returns ordered event records from durable workflow state and append-only workflow event rows without reading stdout scrollback or running dispatch.
@@ -29,6 +30,7 @@ Operator-facing CLI envelopes for the `workflow run start`, `workflow run start-
 `workflow run preview-coding`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run events`, and `workflow run logs` are read-only: they never write SQLite or files.
 `workflow run monitor` is also read-only unless `--advance` is passed, in which case supported Momentum-native coding runs persist only `monitor_last_seen_digest` / `monitor_last_seen_at` and `monitor_last_emitted_digest` / `monitor_last_emitted_at` progress baselines.
 `workflow run watch --once` is write-limited to the target run's safe dispatcher tick, the same advisory baseline columns, and append-only quiet-heartbeat / stuck-risk event rows for supported Momentum-native coding runs.
+That dispatcher tick does not start approved `merge-cleanup` or `linear-refresh` tail steps; those side-effecting steps stay on a human-required operator-decision path.
 `workflow run watch --stream` is read-only: it replays durable events and reads the run's terminal state without writing SQLite or files, running dispatch, delivering to OpenClaw, or invoking an LLM.
 
 `workflow run --help` and any nested `workflow run ... --help` or `workflow run ... -h` invocation print the shared top-level CLI help to stdout and exit 0 before selecting or validating a run subcommand.
@@ -67,7 +69,8 @@ The examples below are branching examples; the full `workflow run watch --once` 
 
 - `workflow run watch --once`.
   This is the compact supervisor envelope used for regular GUI polling.
-  It is write-limited to a safe run-scoped dispatcher tick, advisory monitor baselines, and append-only supervisor advisory events for supported Momentum-native coding runs.
+  It is write-limited to a safe non-tail run-scoped dispatcher tick, advisory monitor baselines, and append-only supervisor advisory events for supported Momentum-native coding runs.
+  If the next approved step is `merge-cleanup` or `linear-refresh`, the tick reports an operator decision rather than starting the side-effecting tail step.
 - `workflow run monitor --advance`.
   This is the write-limited monitor mode for supported Momentum-native coding runs.
   It persists only advisory progress-suppression baselines and must be an explicit polling choice, not a read-only status call.
@@ -114,7 +117,9 @@ The examples below are branching examples; the full `workflow run watch --once` 
     "recommendedAction": "approve",
     "humanAction": {
       "code": "approve",
-      "command": "momentum workflow run approve <run-id> --approval-boundary ..."
+      "command": "momentum workflow run approve <run-id> --approval-boundary ...",
+      "detail": null,
+      "gateType": null
     },
     "nextPollSeconds": 30,
     "quietThresholdSeconds": 1800,
@@ -134,7 +139,9 @@ The examples below are branching examples; the full `workflow run watch --once` 
     "recommendedAction": "recover",
     "humanAction": {
       "code": "clear_recovery",
-      "command": "momentum workflow run clear-recovery <run-id>"
+      "command": "momentum workflow run clear-recovery <run-id>",
+      "detail": null,
+      "gateType": null
     },
     "nextPollSeconds": 30,
     "quietThresholdSeconds": 3600,
@@ -192,6 +199,28 @@ The examples below are branching examples; the full `workflow run watch --once` 
     "nextPollSeconds": 30,
     "quietThresholdSeconds": 3600,
     "stuckRisk": "high",
+    "cleanup": "none"
+  }
+  ```
+
+- Approved side-effecting tail steps are operator-decision states even when the low-level next action is `advance_to_step`.
+  The poller must not start `merge-cleanup` or `linear-refresh` from this state.
+  ```json
+  {
+    "emit": true,
+    "reason": "in_progress",
+    "disposition": "wait",
+    "phase": "advancing",
+    "nextAction": {
+      "code": "advance_to_step",
+      "stepId": "merge-cleanup",
+      "actionClass": "operator_decision"
+    },
+    "recommendedAction": "operator_decision",
+    "humanAction": null,
+    "nextPollSeconds": 15,
+    "quietThresholdSeconds": 300,
+    "stuckRisk": "low",
     "cleanup": "none"
   }
   ```
@@ -1219,7 +1248,8 @@ verification / git finalization failures reconciled after the executor result.
 `monitor.nextAction.code` is one of:
 
 - `no_action` - terminal run (succeeded / canceled); no follow-up needed.
-- `advance_to_step` - an approved step is ready to dispatch.
+- `advance_to_step` - an approved step is ready for dispatcher consideration.
+  Approved `merge-cleanup` and `linear-refresh` tail steps still use this low-level code, but status, handoff, monitor, and watch expose `actionClass: "operator_decision"` so a poller does not start side effects without operator authority.
 - `await_approval` - a pending step needs approval before it can run.
 - `resume_running` - a running step has fresh evidence; let it continue.
 - `investigate_stale` - a running step is stale (no fresh lease, no recent checkpoint) or an orphan lease is holding a finalized run open.
@@ -1227,7 +1257,7 @@ verification / git finalization failures reconciled after the executor result.
   For a failed external-side-effect tail step, clearing recovery reconciles that step to `succeeded` before clearing the durable flag.
 - `rerun_failed_step` - an ordinary required step failed; decide whether to retry or mark for manual recovery. (A failed external-side-effect tail step routes to `clear_recovery` instead, since a naive re-run could double-merge a pull request or re-write the tracker.)
 
-`monitor.nextAction.actionClass` groups those low-level codes into the stable operator decision classes shared by status, handoff, monitor, and watch: `continue_polling`, `approve_next_gate`, `fix_setup_config_then_retry`, `reconcile_deterministic_evidence`, `reconcile_external_tail`, `clear_recovery`, `resolve_gate`, `retry_failed_step`, or `stop_monitoring`.
+`monitor.nextAction.actionClass` groups those low-level codes into the stable operator decision classes shared by status, handoff, monitor, and watch: `continue_polling`, `approve_next_gate`, `fix_setup_config_then_retry`, `reconcile_deterministic_evidence`, `reconcile_external_tail`, `clear_recovery`, `operator_decision`, `resolve_gate`, `retry_failed_step`, or `stop_monitoring`.
 `monitor.nextAction.recoveryDetail` is `null` unless the action needs evidence-backed recovery; no-mistakes reconciliation reports `kind: "no_mistakes_deterministic_evidence"` only when durable manual-recovery context identifies interrupted checks-passed or deterministic-evidence reconciliation, and external-tail reconciliation reports `kind: "external_tail_reconcile"`.
 
 `monitor.recovery.code`, when present, is one of: `stale_running_step`, `ghost_active_no_lease`, `manual_recovery_lease`, `monitor_drift_stale`, `failed_required_step`, `failed_external_side_effect_step`. `failed_external_side_effect_step` is the subset of `failed_required_step` where the failed required step is an external-side-effect tail step (`merge-cleanup` / `linear-refresh`) that may already have pushed a branch, merged a pull request, or written the tracker before failing.
@@ -1640,7 +1670,7 @@ For `workflow run watch --once --json`, use the frozen top-level supervisor enve
   external-apply require human authority. If policy metadata is missing or
   invalid, treat every non-wait action as `human_required`.
 - Render concise human text from `reason`, `activeStep`, `nextAction.detail`,
-  and `humanAction.command` / `humanAction.detail` when `humanAction` is present.
+  `humanAction.command`, `humanAction.detail`, and `humanAction.gateType` when `humanAction` is present.
 - Stop and clean up the wrapper when `recommendedAction` is `"release"`,
   `cleanup` is `"release"`, and `recommendedActionPolicy` allows
   `release_monitor`; keep polling recoverable failures while
@@ -1779,7 +1809,8 @@ Options:
 `disposition`, `phase`, `cleanup`, and `digest` are derived from the same monitor progress tick as `workflow run monitor --advance`; plain `workflow run monitor` reads the projection without advancing any baseline.
 `emit` and `reason` can also reflect watch-only quiet-heartbeat or stuck-risk advisories when an unchanged tick reaches its quiet threshold.
 When a quiet-heartbeat or stuck-risk advisory emits, the command appends a matching workflow event row so disconnected clients can later catch up through `workflow run events`.
-Before deriving that tick, `workflow run watch --once` may run one target-run dispatcher tick, either to claim and dispatch one approved next step or to recheck one active running step that the scheduler can safely revisit.
+Before deriving that tick, `workflow run watch --once` may run one target-run dispatcher tick, either to claim and dispatch one approved non-tail next step or to recheck one active running step that the scheduler can safely revisit.
+Approved `merge-cleanup` and `linear-refresh` tail steps are not started by that dispatcher tick; the envelope reports `recommendedAction: "operator_decision"` with a human-required merge-cleanup or Linear-refresh policy instead.
 It does not resolve gates, approvals, or recovery decisions by itself, recover stale leases, or scan or claim work from other runs.
 `activeStep` is `null` when no step is active.
 `humanAction` is `null` when no operator command is required, points to `workflow run approve` for approval waits, points to `workflow run decide` for open gates, and points to `workflow run clear-recovery` only for recovery states that can be cleared directly or with an explicit evidence pointer.
@@ -1803,7 +1834,7 @@ Soft `monitor_drift_stale` reports and ordinary `failed_required_step` failures 
 | `phase` | enum | Progress phase: `advancing`, `idle`, `awaiting_approval`, `blocked`, or `terminal`. |
 | `activeStep` | object \| null | The step in flight, or `null` when no step is active. |
 | `nextAction` | object | Machine next-step pointer derived from the monitor projection. |
-| `humanAction` | object \| null | The single operator command that unblocks the run, or `null` when no operator command is required. |
+| `humanAction` | object \| null | The single operator command that unblocks the run, or `null` when no operator command is required; when present it carries `code`, `command`, `detail`, and `gateType`. |
 | `recommendedAction` | enum | What the poller should do: `poll`, `approve`, `operator_decision`, `recover`, or `release`. |
 | `recommendedActionPolicy` | object | Authority metadata for the recommendation: `action`, `authority`, `risk`, `evidenceRequired`, `rollback`, and `rationale`. Consumers must fail closed by treating absent or invalid policy as `human_required` for every non-wait action. |
 | `nextPollSeconds` | number | Suggested wait before the next tick: `0` for release, `30` for blocked or approval waits, `15` otherwise. |
@@ -1818,12 +1849,13 @@ Soft `monitor_drift_stale` reports and ordinary `failed_required_step` failures 
 `nextAction` always carries `code`, `stepId`, `leaseKind`, `detail`, `actionClass`, and `recoveryDetail`; `detail` is a ready-to-read sentence for the common path.
 `actionClass` is the stable operator decision class for watch/status/monitor/handoff consumers:
 
-- `continue_polling` - keep polling or dispatching the already-approved local step.
+- `continue_polling` - keep polling or dispatching the already-approved non-tail local step.
 - `approve_next_gate` - use the printed approval command.
 - `fix_setup_config_then_retry` - fix runtime/auth/config setup before retrying.
 - `reconcile_deterministic_evidence` - provide deterministic no-mistakes evidence before clearing recovery when durable manual-recovery context identifies interrupted checks-passed or deterministic-evidence reconciliation.
 - `reconcile_external_tail` - verify external state and clear recovery with an evidence pointer.
 - `clear_recovery` - clear a non-tail manual recovery after resolving the cause.
+- `operator_decision` - an approved side-effecting tail step needs operator authority before dispatch.
 - `resolve_gate` - decide an open workflow gate with an allowed action.
 - `retry_failed_step` - inspect a normal failed step and decide whether to retry.
 - `stop_monitoring` - release or stop the monitor for a terminal run.
@@ -1832,7 +1864,9 @@ Soft `monitor_drift_stale` reports and ordinary `failed_required_step` failures 
 Recovery states that require external evidence use a compact object with `kind`, `evidencePointerRequired`, and `refusalReason`.
 Current `kind` values are `no_mistakes_deterministic_evidence` and `external_tail_reconcile`.
 `recommendedActionPolicy.authority` is `auto_allowed` only for explicit safe wait/release/read-only or local recheck cases, `recommend_only` for informational recommendations that must not execute, `human_required` for approvals, operator decisions, recovery clearing, stale manual recovery, no-mistakes recovery, merge cleanup, Linear refresh, and external-apply, and `forbidden` for destructive/default-switch/broad external actions that must surface as blocked policy metadata.
-`humanAction`, when present, carries `code` (`approve`, `resolve_gate`, or `clear_recovery`), `command` (the exact CLI to run), and `detail` (the reason or evidence sentence).
+`humanAction`, when present, carries `code` (`approve`, `resolve_gate`, or `clear_recovery`), `command` (the exact CLI to run), `detail` (the reason or evidence sentence), and `gateType`.
+`gateType` is `null` for approval and clear-recovery commands, and carries the durable workflow gate type when `code` is `resolve_gate`.
+When an open gate and an approved side-effecting tail step coexist, `humanAction.gateType` makes the gate policy authoritative before any tail-step policy implied by `nextAction.stepId`.
 
 ### Stream mode
 
@@ -2005,7 +2039,8 @@ Approval required - the next step is gated on operator approval:
   "humanAction": {
     "code": "approve",
     "command": "momentum workflow run approve mwf-abc123 --approval-boundary through-implementation --phrase \"approve plan mwf-abc123 through-implementation\"",
-    "detail": "Step implementation is waiting for approval."
+    "detail": "Step implementation is waiting for approval.",
+    "gateType": null
   }
 }
 ```
@@ -2039,7 +2074,8 @@ Recovery required - the run is flagged for manual recovery and can be cleared di
   "humanAction": {
     "code": "clear_recovery",
     "command": "momentum workflow run clear-recovery mwf-abc123",
-    "detail": "dispatch lease requires operator recovery"
+    "detail": "dispatch lease requires operator recovery",
+    "gateType": null
   }
 }
 ```
@@ -2141,12 +2177,12 @@ A cron, OpenClaw, or GUI poller branches on the envelope instead of scraping tex
 - Otherwise branch on `recommendedAction`:
   - `poll` - work is advancing or idle; wait `nextPollSeconds` and tick again.
   - `approve` - run `humanAction.command` (a `workflow run approve` call) to release the approval gate.
-  - `operator_decision` - a required step failed or a gate is open; an operator inspects and chooses via `workflow run decide` or a rerun, so `humanAction` may be `null`.
+  - `operator_decision` - a required step failed, a gate is open, or an approved `merge-cleanup` / `linear-refresh` tail step needs operator authority before dispatch; an operator inspects and chooses via `workflow run decide`, a rerun, or the appropriate side-effecting tail path, so `humanAction` may be `null`.
   - `recover` - run `humanAction.command` (a `workflow run clear-recovery` call, with `--evidence-pointer` for external-side-effect steps) after resolving the underlying cause.
   - `release` - the run reached a clean terminal state (`cleanup: "release"`, `nextAction.code: "no_action"`); report once and stop polling only when `recommendedActionPolicy` allows `release_monitor`.
 - `emit` is the machine-polling signal, `nextAction.actionClass` is the compact operator branch, and `reason` / `humanAction` are the human-facing content.
 - Decide whether to speak from `emit`, and what to say from `reason`, `activeStep`, `nextAction.detail`, `nextAction.recoveryDetail`, and `humanAction`.
-- The envelope carries enough to render a concise human update for the common path - `reason`, `activeStep`, and `nextAction.detail`, plus `nextAction.recoveryDetail` and `humanAction.command` / `detail` when an action is required - without a follow-up `workflow status` read.
+- The envelope carries enough to render a concise human update for the common path - `reason`, `activeStep`, and `nextAction.detail`, plus `nextAction.recoveryDetail` and `humanAction.command` / `detail` / `gateType` when an action is required - without a follow-up `workflow status` read.
 
 ### Error codes
 

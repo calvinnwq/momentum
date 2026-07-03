@@ -533,6 +533,276 @@ describe("momentum workflow run watch", () => {
     }
   });
 
+  it("does not start an approved merge-cleanup tail step from a watch tick", async () => {
+    const dataDir = makeTempDir();
+    const runId = "mwf-watch-merge-cleanup-approved";
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunStart(db, {
+        definition: CODING_WORKFLOW_DEFINITION,
+        runId,
+        repoPath: "/repos/momentum",
+        objective: "Exercise watch tail-step dispatch guard",
+        now: SEED_NOW,
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
+        approvalBoundary: "through-merge-cleanup"
+      });
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_order < 4"
+      ).run(runId);
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'merge-cleanup'"
+      ).run(runId);
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "watch",
+      runId,
+      "--once",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      nextAction: {
+        actionClass: string;
+        code: string;
+        stepId?: string | null;
+      };
+      humanAction: unknown;
+      recommendedAction: string;
+      recommendedActionPolicy: {
+        action: string;
+        authority: string;
+        risk: string;
+      };
+    };
+    expect(payload).toMatchObject({
+      nextAction: {
+        actionClass: "operator_decision",
+        code: "advance_to_step",
+        stepId: "merge-cleanup"
+      },
+      humanAction: null,
+      recommendedAction: "operator_decision",
+      recommendedActionPolicy: {
+        action: "merge_cleanup",
+        authority: "human_required",
+        risk: "high"
+      }
+    });
+
+    const after = openDb(dataDir);
+    try {
+      const steps = after
+        .prepare(
+          "SELECT step_id AS stepId, state FROM workflow_steps WHERE run_id = ? ORDER BY step_order"
+        )
+        .all(runId) as Array<{ stepId: string; state: string }>;
+      expect(steps).toEqual([
+        { stepId: "preflight", state: "succeeded" },
+        { stepId: "implementation", state: "succeeded" },
+        { stepId: "postflight", state: "succeeded" },
+        { stepId: "no-mistakes", state: "succeeded" },
+        { stepId: "merge-cleanup", state: "approved" },
+        { stepId: "linear-refresh", state: "pending" }
+      ]);
+      const leaseCount = after
+        .prepare(
+          "SELECT COUNT(*) AS count FROM workflow_leases WHERE run_id = ? AND lease_kind = 'dispatch'"
+        )
+        .get(runId) as { count: number };
+      expect(leaseCount.count).toBe(0);
+      const invocationCount = after
+        .prepare(
+          "SELECT COUNT(*) AS count FROM executor_invocations WHERE workflow_run_id = ?"
+        )
+        .get(runId) as { count: number };
+      expect(invocationCount.count).toBe(0);
+    } finally {
+      after.close();
+    }
+  });
+
+  it("does not expose an approved linear-refresh tail step as pollable", async () => {
+    const dataDir = makeTempDir();
+    const runId = "mwf-watch-tail-linear-class";
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunStart(db, {
+        definition: CODING_WORKFLOW_DEFINITION,
+        runId,
+        repoPath: "/repos/momentum",
+        objective: "Exercise watch linear-refresh action class",
+        now: SEED_NOW,
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
+        approvalBoundary: "full"
+      });
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_order < 5"
+      ).run(runId);
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'linear-refresh'"
+      ).run(runId);
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "watch",
+      runId,
+      "--once",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      nextAction: {
+        actionClass: string;
+        code: string;
+        stepId?: string | null;
+      };
+      recommendedAction: string;
+      recommendedActionPolicy: {
+        action: string;
+        authority: string;
+        risk: string;
+      };
+    };
+    expect(payload).toMatchObject({
+      nextAction: {
+        actionClass: "operator_decision",
+        code: "advance_to_step",
+        stepId: "linear-refresh"
+      },
+      recommendedAction: "operator_decision",
+      recommendedActionPolicy: {
+        action: "linear_refresh",
+        authority: "human_required",
+        risk: "high"
+      }
+    });
+
+    const after = openDb(dataDir);
+    try {
+      const invocationCount = after
+        .prepare(
+          "SELECT COUNT(*) AS count FROM executor_invocations WHERE workflow_run_id = ?"
+        )
+        .get(runId) as { count: number };
+      expect(invocationCount.count).toBe(0);
+    } finally {
+      after.close();
+    }
+  });
+
+  it("uses open gate policy before tail-step policy on watch ticks", async () => {
+    const dataDir = makeTempDir();
+    const runId = "mwf-watch-tail-open-gate";
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunStart(db, {
+        definition: CODING_WORKFLOW_DEFINITION,
+        runId,
+        repoPath: "/repos/momentum",
+        objective: "Exercise gated watch tail-step policy precedence",
+        now: SEED_NOW,
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
+        approvalBoundary: "through-merge-cleanup"
+      });
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_order < 4"
+      ).run(runId);
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'merge-cleanup'"
+      ).run(runId);
+      insertWorkflowGate(
+        db,
+        {
+          gateId: "gate-watch-tail-decision",
+          workflowRunId: runId,
+          stepRunId: "merge-cleanup",
+          targetScope: "step",
+          gateType: "operator_decision_required",
+          reason: "Merge cleanup needs operator direction before dispatch.",
+          evidence: "goals/mwf-watch-tail-open-gate/gates/gate-watch-tail-decision.json",
+          allowedActions: ["fix", "skip", "approve_as_is"],
+          recommendedAction: "fix",
+          policyEnvelope: ["fix"]
+        },
+        { now: SEED_NOW }
+      );
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "watch",
+      runId,
+      "--once",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      nextAction: { code: string; stepId?: string | null };
+      humanAction: { code: string; command: string; detail: string | null } | null;
+      recommendedAction: string;
+      recommendedActionPolicy: {
+        action: string;
+        authority: string;
+        risk: string;
+      };
+    };
+    expect(payload).toMatchObject({
+      nextAction: { code: "advance_to_step", stepId: "merge-cleanup" },
+      humanAction: {
+        code: "resolve_gate",
+        command:
+          "momentum workflow run decide gate-watch-tail-decision --action <action> --actor <name>",
+        detail: "Merge cleanup needs operator direction before dispatch."
+      },
+      recommendedAction: "operator_decision",
+      recommendedActionPolicy: {
+        action: "operator_decision",
+        authority: "human_required",
+        risk: "medium"
+      }
+    });
+
+    const after = openDb(dataDir);
+    try {
+      const step = after
+        .prepare(
+          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = 'merge-cleanup'"
+        )
+        .get(runId) as { state: string };
+      expect(step.state).toBe("approved");
+      const invocationCount = after
+        .prepare(
+          "SELECT COUNT(*) AS count FROM executor_invocations WHERE workflow_run_id = ?"
+        )
+        .get(runId) as { count: number };
+      expect(invocationCount.count).toBe(0);
+    } finally {
+      after.close();
+    }
+  });
+
   it("uses the daemon live-wrapper dispatch chain for a watch tick", async () => {
     const dataDir = makeTempDir();
     const repoPath = path.join(dataDir, "repo");

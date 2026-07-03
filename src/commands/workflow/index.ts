@@ -2501,6 +2501,16 @@ class WorkflowWatchDispatchConfigError extends Error {
   }
 }
 
+function isWorkflowWatchTailStepDispatchBlocked(
+  envelope: WorkflowMonitorEnvelope
+): boolean {
+  const stepId = envelope.nextAction.stepId;
+  if (envelope.nextAction.code !== "advance_to_step" || stepId === null) {
+    return false;
+  }
+  return stepId === "merge-cleanup" || stepId === "linear-refresh";
+}
+
 async function runWorkflowWatchDispatcherTick(
   db: MomentumDb,
   envelope: WorkflowMonitorEnvelope,
@@ -2513,6 +2523,7 @@ async function runWorkflowWatchDispatcherTick(
   const canRecheckActiveStep = envelope.activeStep?.state === "running";
   if (
     envelope.source !== MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE ||
+    isWorkflowWatchTailStepDispatchBlocked(envelope) ||
     envelope.needsManualRecovery ||
     envelope.recovery !== null ||
     envelope.gates.some((gate) => gate.resolvedAt === null) ||
