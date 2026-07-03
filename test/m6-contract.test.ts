@@ -69,6 +69,6 @@ describe("M6 external-apply contract", () => {
   it("keeps internal M6 planning detail out of public docs", () => {
     expect(readDoc("README.md")).not.toContain("Milestone 6");
     expect(readDoc("README.md")).not.toContain("NGX-295");
-    expect(readDoc("docs/index.md")).not.toMatch(/m6-external-apply/i);
+    expect(readDoc("docs/index.html")).not.toMatch(/m6-external-apply/i);
   });
 });

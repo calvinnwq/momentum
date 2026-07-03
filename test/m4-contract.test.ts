@@ -21,7 +21,7 @@ describe("M4 provenance anchor", () => {
   it("keeps runner profile milestone detail out of public docs", () => {
     expect(readDoc("README.md")).not.toContain("Milestone 4");
     expect(readDoc("README.md")).not.toContain("NGX-279");
-    expect(readDoc("docs/index.md")).not.toMatch(/m4-real-runners/i);
+    expect(readDoc("docs/index.html")).not.toMatch(/m4-real-runners/i);
   });
 
   it("keeps current runner docs as operator-facing truth", () => {

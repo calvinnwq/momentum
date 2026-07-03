@@ -83,7 +83,7 @@ momentum openclaw supervise <run-id> --once [--data-dir <path>] [--json]
 momentum doctor [--repo <path>] [--data-dir <path>] [--json]
 ```
 
-See [docs](docs/index.md).
+See [docs](docs/index.html).
 
 ## Development
 

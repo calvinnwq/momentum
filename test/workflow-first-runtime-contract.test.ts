@@ -49,6 +49,6 @@ describe("workflow-first runtime contract", () => {
 
   it("keeps public docs free of workflow-first planning vocabulary", () => {
     expect(readRepoFile("README.md")).not.toMatch(/\bM10\b|Workflow-First Runtime/);
-    expect(readRepoFile("docs/index.md")).not.toMatch(/\bM10\b|Workflow-First Runtime/);
+    expect(readRepoFile("docs/index.html")).not.toMatch(/\bM10\b|Workflow-First Runtime/);
   });
 });

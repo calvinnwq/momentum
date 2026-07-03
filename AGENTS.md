@@ -82,7 +82,7 @@ TypeScript on Node.js with Vitest tests, managed by pnpm. See [README.md](README
   the existing architecture tests.
 
 ## CLI expectations
-The full public CLI surface lives in [README.md](README.md); per-command JSON envelopes, refusal codes, and idempotency semantics live in `docs/` (linked from [`docs/index.md`](docs/index.md)).
+The full public CLI surface lives in [README.md](README.md); per-command JSON envelopes, refusal codes, and idempotency semantics live in `docs/` (linked from [`docs/index.html`](docs/index.html)).
 The operational-safety surfaces - `daemon start`, `daemon stop`, `daemon status`, `recovery clear`, and `doctor` - remain wire-stable.
 
 - Preserve stable CLI behavior across both JSON and text outputs.

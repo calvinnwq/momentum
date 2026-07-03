@@ -55,6 +55,6 @@ describe("M10 workflow-first runtime provenance", () => {
 
   it("keeps public docs free of internal M10 planning vocabulary", () => {
     expect(readDoc("README.md")).not.toMatch(/\bM10\b|Workflow-First Runtime/);
-    expect(readDoc("docs/index.md")).not.toMatch(/m10-workflow-first-runtime|workflow-first-gap-matrix/);
+    expect(readDoc("docs/index.html")).not.toMatch(/m10-workflow-first-runtime|workflow-first-gap-matrix/);
   });
 });

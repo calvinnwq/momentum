@@ -40,7 +40,7 @@ describe("M5 provenance anchor", () => {
   it("keeps source adapter planning detail out of public docs", () => {
     expect(readDoc("README.md")).not.toContain("Milestone 5");
     expect(readDoc("README.md")).not.toContain("NGX-287");
-    expect(readDoc("docs/index.md")).not.toMatch(/source-adapters/i);
+    expect(readDoc("docs/index.html")).not.toMatch(/source-adapters/i);
   });
 
   it("keeps current source commands documented for operators", () => {

@@ -9,13 +9,13 @@ const repoRoot = path.resolve(here, "..");
 const PUBLIC_DOCS_DIR = path.join(repoRoot, "docs");
 const README_PATH = path.join(repoRoot, "README.md");
 
-function listMarkdown(dir: string): string[] {
+function listPublicDocs(dir: string): string[] {
   const out: string[] = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      out.push(...listMarkdown(full));
-    } else if (entry.isFile() && entry.name.endsWith(".md")) {
+      out.push(...listPublicDocs(full));
+    } else if (entry.isFile() && /\.(?:md|html)$/.test(entry.name)) {
       out.push(full);
     }
   }
@@ -26,7 +26,7 @@ function relFromRoot(p: string): string {
   return path.relative(repoRoot, p).split(path.sep).join("/");
 }
 
-const publicDocs = listMarkdown(PUBLIC_DOCS_DIR);
+const publicDocs = listPublicDocs(PUBLIC_DOCS_DIR);
 
 const publicSurfaces: { label: string; file: string; body: string }[] = [
   { label: "README.md", file: "README.md", body: fs.readFileSync(README_PATH, "utf8") },

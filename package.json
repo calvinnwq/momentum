@@ -9,6 +9,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "docs": "python3 -m http.server 8080 --bind 127.0.0.1 --directory docs",
+    "docs:serve": "python3 -m http.server 8080 --bind 127.0.0.1 --directory docs",
     "test": "vitest run --config vitest.fast.config.ts",
     "test:fast": "vitest run --config vitest.fast.config.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",

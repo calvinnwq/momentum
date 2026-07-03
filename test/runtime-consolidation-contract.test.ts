@@ -69,6 +69,6 @@ describe("runtime consolidation contract", () => {
 
   it("keeps runtime-consolidation guidance out of the public docs front door", () => {
     expect(readRepoFile("README.md")).not.toMatch(/runtime-consolidation|RC-2|RC-4b/);
-    expect(readRepoFile("docs/index.md")).not.toMatch(/runtime-consolidation|RC-2|RC-4b/);
+    expect(readRepoFile("docs/index.html")).not.toMatch(/runtime-consolidation|RC-2|RC-4b/);
   });
 });
