@@ -1231,7 +1231,7 @@ verification / git finalization failures reconciled after the executor result.
   For a failed external-side-effect tail step, clearing recovery reconciles that step to `succeeded` before clearing the durable flag.
 - `rerun_failed_step` - an ordinary required step failed; decide whether to retry or mark for manual recovery. (A failed external-side-effect tail step routes to `clear_recovery` instead, since a naive re-run could double-merge a pull request or re-write the tracker.)
 
-`monitor.nextAction.actionClass` groups those low-level codes into the stable operator decision classes shared by status, handoff, monitor, and watch: `continue_polling`, `approve_next_gate`, `fix_setup_config_then_retry`, `reconcile_deterministic_evidence`, `reconcile_external_tail`, `clear_recovery`, `resolve_gate`, `retry_failed_step`, or `stop_monitoring`.
+`monitor.nextAction.actionClass` groups those low-level codes into the stable operator decision classes shared by status, handoff, monitor, and watch: `continue_polling`, `approve_next_gate`, `fix_setup_config_then_retry`, `reconcile_deterministic_evidence`, `reconcile_external_tail`, `clear_recovery`, `operator_decision`, `resolve_gate`, `retry_failed_step`, or `stop_monitoring`.
 `monitor.nextAction.recoveryDetail` is `null` unless the action needs evidence-backed recovery; no-mistakes reconciliation reports `kind: "no_mistakes_deterministic_evidence"` only when durable manual-recovery context identifies interrupted checks-passed or deterministic-evidence reconciliation, and external-tail reconciliation reports `kind: "external_tail_reconcile"`.
 
 `monitor.recovery.code`, when present, is one of: `stale_running_step`, `ghost_active_no_lease`, `manual_recovery_lease`, `monitor_drift_stale`, `failed_required_step`, `failed_external_side_effect_step`. `failed_external_side_effect_step` is the subset of `failed_required_step` where the failed required step is an external-side-effect tail step (`merge-cleanup` / `linear-refresh`) that may already have pushed a branch, merged a pull request, or written the tracker before failing.
@@ -1828,6 +1828,7 @@ Soft `monitor_drift_stale` reports and ordinary `failed_required_step` failures 
 - `reconcile_deterministic_evidence` - provide deterministic no-mistakes evidence before clearing recovery when durable manual-recovery context identifies interrupted checks-passed or deterministic-evidence reconciliation.
 - `reconcile_external_tail` - verify external state and clear recovery with an evidence pointer.
 - `clear_recovery` - clear a non-tail manual recovery after resolving the cause.
+- `operator_decision` - an approved side-effecting tail step needs operator authority before dispatch.
 - `resolve_gate` - decide an open workflow gate with an allowed action.
 - `retry_failed_step` - inspect a normal failed step and decide whether to retry.
 - `stop_monitoring` - release or stop the monitor for a terminal run.

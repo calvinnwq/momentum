@@ -570,7 +570,11 @@ describe("momentum workflow run watch", () => {
 
     expect(result.code).toBe(0);
     const payload = JSON.parse(result.stdout) as {
-      nextAction: { code: string; stepId?: string | null };
+      nextAction: {
+        actionClass: string;
+        code: string;
+        stepId?: string | null;
+      };
       humanAction: unknown;
       recommendedAction: string;
       recommendedActionPolicy: {
@@ -580,7 +584,11 @@ describe("momentum workflow run watch", () => {
       };
     };
     expect(payload).toMatchObject({
-      nextAction: { code: "advance_to_step", stepId: "merge-cleanup" },
+      nextAction: {
+        actionClass: "operator_decision",
+        code: "advance_to_step",
+        stepId: "merge-cleanup"
+      },
       humanAction: null,
       recommendedAction: "operator_decision",
       recommendedActionPolicy: {
@@ -611,6 +619,82 @@ describe("momentum workflow run watch", () => {
         )
         .get(runId) as { count: number };
       expect(leaseCount.count).toBe(0);
+      const invocationCount = after
+        .prepare(
+          "SELECT COUNT(*) AS count FROM executor_invocations WHERE workflow_run_id = ?"
+        )
+        .get(runId) as { count: number };
+      expect(invocationCount.count).toBe(0);
+    } finally {
+      after.close();
+    }
+  });
+
+  it("does not expose an approved linear-refresh tail step as pollable", async () => {
+    const dataDir = makeTempDir();
+    const runId = "mwf-watch-tail-linear-class";
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunStart(db, {
+        definition: CODING_WORKFLOW_DEFINITION,
+        runId,
+        repoPath: "/repos/momentum",
+        objective: "Exercise watch linear-refresh action class",
+        now: SEED_NOW,
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE,
+        approvalBoundary: "full"
+      });
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_order < 5"
+      ).run(runId);
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'linear-refresh'"
+      ).run(runId);
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "watch",
+      runId,
+      "--once",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      nextAction: {
+        actionClass: string;
+        code: string;
+        stepId?: string | null;
+      };
+      recommendedAction: string;
+      recommendedActionPolicy: {
+        action: string;
+        authority: string;
+        risk: string;
+      };
+    };
+    expect(payload).toMatchObject({
+      nextAction: {
+        actionClass: "operator_decision",
+        code: "advance_to_step",
+        stepId: "linear-refresh"
+      },
+      recommendedAction: "operator_decision",
+      recommendedActionPolicy: {
+        action: "linear_refresh",
+        authority: "human_required",
+        risk: "high"
+      }
+    });
+
+    const after = openDb(dataDir);
+    try {
       const invocationCount = after
         .prepare(
           "SELECT COUNT(*) AS count FROM executor_invocations WHERE workflow_run_id = ?"

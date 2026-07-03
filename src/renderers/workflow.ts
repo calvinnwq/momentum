@@ -862,6 +862,7 @@ export const WORKFLOW_OPERATOR_ACTION_CLASSES = [
   "reconcile_deterministic_evidence",
   "reconcile_external_tail",
   "clear_recovery",
+  "operator_decision",
   "resolve_gate",
   "retry_failed_step",
   "stop_monitoring"
@@ -1236,6 +1237,9 @@ function workflowOperatorActionClassForMonitor(
   if (workflowMonitorHasOpenGate(monitor, options)) {
     return "resolve_gate";
   }
+  if (workflowMonitorHasExternalTailAdvance(monitor)) {
+    return "operator_decision";
+  }
   if (monitor.nextAction.code === "await_approval") {
     return "approve_next_gate";
   }
@@ -1252,6 +1256,16 @@ function workflowOperatorActionClassForMonitor(
     return "retry_failed_step";
   }
   return "continue_polling";
+}
+
+function workflowMonitorHasExternalTailAdvance(
+  monitor: WorkflowMonitorState | WorkflowMonitorEnvelope
+): boolean {
+  return (
+    monitor.nextAction.code === "advance_to_step" &&
+    (monitor.nextAction.stepId === "merge-cleanup" ||
+      monitor.nextAction.stepId === "linear-refresh")
+  );
 }
 
 function workflowMonitorHasOpenGate(
