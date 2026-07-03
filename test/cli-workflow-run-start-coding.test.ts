@@ -721,6 +721,150 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
     ]);
     expect(monitor.code).toBe(0);
   });
+
+  it("provides an NGX-575 readiness readback with shared nextAction and approval evidence", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const awaitingApprovalRunId = "ngx-575-readiness-awaiting-approval";
+    const started = await run(
+      startCodingArgs({
+        dataDir,
+        repoDir,
+        runId: awaitingApprovalRunId,
+        objective: "Exercise native workflow readiness readback"
+      })
+    );
+    expect(started.code).toBe(0);
+
+    const status = await run([
+      "workflow",
+      "status",
+      awaitingApprovalRunId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(status.code).toBe(0);
+    const statusPayload = JSON.parse(status.stdout) as {
+      monitor: {
+        nextAction: {
+          code: string;
+          stepId: string | null;
+          leaseKind: string | null;
+          detail: string;
+          actionClass: string;
+          recoveryDetail: unknown;
+        };
+      };
+    };
+    expect(statusPayload.monitor.nextAction).toEqual({
+      code: "await_approval",
+      stepId: "preflight",
+      leaseKind: "managed-step",
+      detail: 'Step "preflight" is pending approval before it can advance.',
+      actionClass: "approve_next_gate",
+      recoveryDetail: null
+    });
+
+    const monitor = await run([
+      "workflow",
+      "run",
+      "monitor",
+      awaitingApprovalRunId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(monitor.code).toBe(0);
+    const monitorPayload = JSON.parse(monitor.stdout) as {
+      nextAction: typeof statusPayload.monitor.nextAction;
+    };
+    expect(monitorPayload.nextAction).toEqual(statusPayload.monitor.nextAction);
+
+    const handoff = await run([
+      "workflow",
+      "handoff",
+      awaitingApprovalRunId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(handoff.code).toBe(0);
+    const handoffPayload = JSON.parse(handoff.stdout) as {
+      nextAction: typeof statusPayload.monitor.nextAction;
+    };
+    expect(handoffPayload.nextAction).toEqual(statusPayload.monitor.nextAction);
+
+    const watch = await run([
+      "workflow",
+      "run",
+      "watch",
+      awaitingApprovalRunId,
+      "--once",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(watch.code).toBe(0);
+    const watchPayload = JSON.parse(watch.stdout) as {
+      nextAction: typeof statusPayload.monitor.nextAction;
+      recommendedAction: string;
+      humanAction: { code: string; command: string } | null;
+    };
+    expect(watchPayload.nextAction).toEqual(statusPayload.monitor.nextAction);
+    expect(watchPayload.recommendedAction).toBe("approve");
+    expect(watchPayload.humanAction).toMatchObject({
+      code: "approve",
+      command: `momentum workflow run approve ${awaitingApprovalRunId} --approval-boundary through-implementation --phrase "approve plan ${awaitingApprovalRunId} through-implementation"`
+    });
+
+    const approvedRunId = "ngx-575-readiness-approval-evidence";
+    const approved = await run(
+      startCodingArgs({
+        dataDir,
+        repoDir,
+        runId: approvedRunId,
+        objective: "Exercise durable approval evidence",
+        extra: [
+          "--approval-boundary",
+          "through-implementation",
+          "--issue-scope",
+          "NGX-575"
+        ]
+      })
+    );
+    expect(approved.code).toBe(0);
+
+    const events = await run([
+      "workflow",
+      "run",
+      "events",
+      approvedRunId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(events.code).toBe(0);
+    const eventsPayload = JSON.parse(events.stdout) as {
+      events: Array<{
+        type: string;
+        payload: Record<string, unknown>;
+      }>;
+      counts: { events: number };
+    };
+    expect(eventsPayload.counts.events).toBeGreaterThan(0);
+    expect(eventsPayload.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "approval_resolved",
+          payload: expect.objectContaining({
+            boundary: "through-implementation",
+            actor: "momentum-native-coding"
+          })
+        })
+      ])
+    );
+  });
 });
 
 describe("momentum workflow run start-coding route reconfiguration (NGX-510)", () => {

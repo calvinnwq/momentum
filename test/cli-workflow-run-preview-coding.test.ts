@@ -198,6 +198,71 @@ describe("momentum workflow run preview-coding", () => {
     ]);
   });
 
+  it("emits structural preflight evidence for malformed route steps before durable writes", async () => {
+    const commands = [
+      {
+        name: "preview-coding",
+        buildArgs: (dataDir: string, repoDir: string) =>
+          previewCodingArgs({
+            dataDir,
+            repoDir,
+            runId: "readiness-preview-malformed-steps",
+            objective: "Block malformed preview route config",
+            extra: ["--steps-json", "{ not json"]
+          })
+      },
+      {
+        name: "start-coding",
+        buildArgs: (dataDir: string, repoDir: string) => [
+          "workflow",
+          "run",
+          "start-coding",
+          "--run-id",
+          "readiness-start-malformed-steps",
+          "--repo",
+          repoDir,
+          "--objective",
+          "Block malformed start route config",
+          "--data-dir",
+          dataDir,
+          "--json",
+          "--steps-json",
+          "{ not json"
+        ]
+      }
+    ];
+
+    for (const command of commands) {
+      const dataDir = makeTempDir();
+      const repoDir = makeTempDir();
+      const result = await run(command.buildArgs(dataDir, repoDir));
+
+      expect(result.code, command.name).toBe(1);
+      expect(result.stdout, command.name).toBe("");
+      const payload = JSON.parse(result.stderr) as Record<string, unknown>;
+      expect(payload, command.name).toMatchObject({
+        ok: false,
+        command: `workflow run ${command.name}`,
+        code: "route_config_invalid"
+      });
+      expect(payload["preflightEvidence"], command.name).toEqual([
+        {
+          checkId: "route.steps",
+          status: "failed",
+          severity: "error",
+          path: "route.steps",
+          key: "steps",
+          message: "Coding route steps must be valid JSON.",
+          recommendedAction:
+            "Pass --steps-json as a JSON object keyed by configurable coding steps, or remove it to use the default route."
+        }
+      ]);
+      expect(fs.existsSync(path.join(dataDir, "momentum.db")), command.name).toBe(
+        false
+      );
+    }
+  });
+
   it("emits structural preflight evidence for blank route profiles", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
@@ -740,6 +805,147 @@ describe("momentum workflow run preview-coding", () => {
     expect(previewSteps.map((step) => step.executor)).toEqual(
       CODING_WORKFLOW_DEFINITION.steps.map((step) => step.executor)
     );
+  });
+
+  it("provides an NGX-575 preview-to-start readiness fixture with approval and route readback", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const runId = "ngx-575-readiness-preview-start";
+    const objective = "Dogfood the native workflow readiness fixture";
+    const stepsJson = JSON.stringify({
+      implementation: {
+        harness: "codex",
+        model: "openai/gpt-5.5",
+        effort: "high"
+      },
+      postflight: { harness: "opencode", model: "glm-5.2" }
+    });
+    const sharedExtra = [
+      "--profile",
+      "ngx-575-dogfood-live-wrapper",
+      "--issue-scope",
+      "NGX-575",
+      "--approval-boundary",
+      "through-implementation",
+      "--steps-json",
+      stepsJson
+    ];
+
+    const preview = await run(
+      previewCodingArgs({
+        dataDir,
+        repoDir,
+        runId,
+        objective,
+        extra: sharedExtra
+      })
+    );
+    expect(preview.code).toBe(0);
+    const previewPayload = JSON.parse(preview.stdout) as Record<string, unknown>;
+    const previewSteps = previewPayload["steps"] as Array<{
+      stepId: string;
+      state: string;
+    }>;
+    expect(previewPayload).toMatchObject({
+      ok: true,
+      command: "workflow run preview-coding",
+      preview: true,
+      runId,
+      state: "approved",
+      approvalBoundary: "through-implementation",
+      issueScope: { identifier: "NGX-575" },
+      route: {
+        profile: "ngx-575-dogfood-live-wrapper",
+        steps: {
+          implementation: {
+            harness: "codex",
+            model: "gpt-5.5",
+            effort: "high"
+          },
+          postflight: { harness: "opencode", model: "opencode-go/glm-5.2" }
+        }
+      }
+    });
+    expect(
+      Object.fromEntries(previewSteps.map((step) => [step.stepId, step.state]))
+    ).toMatchObject({
+      preflight: "approved",
+      implementation: "approved",
+      postflight: "pending"
+    });
+
+    expect(fs.existsSync(path.join(dataDir, "momentum.db"))).toBe(false);
+
+    const started = await run([
+      "workflow",
+      "run",
+      "start-coding",
+      "--run-id",
+      runId,
+      "--repo",
+      repoDir,
+      "--objective",
+      objective,
+      "--data-dir",
+      dataDir,
+      "--json",
+      ...sharedExtra
+    ]);
+    expect(started.code).toBe(0);
+    expect(JSON.parse(started.stdout)).toMatchObject({
+      ok: true,
+      command: "workflow run start-coding",
+      runId,
+      state: "approved",
+      approvalBoundary: "through-implementation"
+    });
+
+    const db = openDb(dataDir);
+    try {
+      const runRow = db
+        .prepare(
+          `SELECT approval_boundary, issue_scope_json, route_json
+             FROM workflow_runs WHERE id = ?`
+        )
+        .get(runId) as {
+        approval_boundary: string | null;
+        issue_scope_json: string;
+        route_json: string;
+      };
+      expect(runRow.approval_boundary).toBe("through-implementation");
+      expect(JSON.parse(runRow.issue_scope_json)).toEqual({
+        identifier: "NGX-575"
+      });
+      expect(JSON.parse(runRow.route_json)).toEqual(previewPayload["route"]);
+
+      const persistedStepStates = db
+        .prepare(
+          `SELECT step_id, state
+             FROM workflow_steps WHERE run_id = ? ORDER BY step_order`
+        )
+        .all(runId) as Array<{ step_id: string; state: string }>;
+      expect(
+        Object.fromEntries(
+          persistedStepStates.map((step) => [step.step_id, step.state])
+        )
+      ).toMatchObject({
+        preflight: "approved",
+        implementation: "approved",
+        postflight: "pending"
+      });
+
+      const approval = db
+        .prepare(
+          `SELECT boundary, actor FROM workflow_approvals WHERE run_id = ?`
+        )
+        .get(runId) as { boundary: string; actor: string } | undefined;
+      expect(approval).toEqual({
+        boundary: "through-implementation",
+        actor: "momentum-native-coding"
+      });
+    } finally {
+      db.close();
+    }
   });
 
   it("refuses a run id reserved for compatibility imports", async () => {
