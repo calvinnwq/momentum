@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.16.0](https://github.com/calvinnwq/momentum/compare/v0.15.0...v0.16.0) (2026-07-02)
+
+0.16.0 is a native workflow hardening release. It makes coding workflow startup fail earlier and more clearly, makes recovery/readback surfaces easier to consume, and tightens the lifecycle for external tail steps like merge cleanup and Linear refresh.
+
+### Highlights
+
+* Native coding workflow preflight now validates workflow definition resolution, approval boundaries, route profiles, route steps, wrapper config shape, issue scope, repo inputs, and required objectives before execution proceeds. Invalid inputs now return compact structural evidence instead of drifting into later runtime failures. ([1fb7390](https://github.com/calvinnwq/momentum/commit/1fb7390171c559855afc6854d8e10459911e94c3), [71527d3](https://github.com/calvinnwq/momentum/commit/71527d38937b71848dd95b6f425b12213ebef9c4))
+* Recovery readbacks now use a clearer shared `nextAction` contract across monitor, status, watch, and handoff-style surfaces, including action classes and recovery detail where they are meaningful. ([14e472a](https://github.com/calvinnwq/momentum/commit/14e472af4ce41d95018076ededaac223dc2a0e75), [27ee520](https://github.com/calvinnwq/momentum/commit/27ee520ffdb284e5cfd69691e58703f629df01c5))
+* No-mistakes recovery can reconcile interrupted runs from deterministic checks-passed evidence, while ordinary failed no-mistakes steps remain normal retryable failures. ([4c579bd](https://github.com/calvinnwq/momentum/commit/4c579bd5af56487ee29e0b64ac9e7f48c64d74d7), [27ee520](https://github.com/calvinnwq/momentum/commit/27ee520ffdb284e5cfd69691e58703f629df01c5))
+* Merge cleanup and Linear refresh tails now have stronger preflight, audit, reconciliation, and recovery behavior for external side effects. ([b72b855](https://github.com/calvinnwq/momentum/commit/b72b855a1e7262cd524a978639d7e14cc59f4dae), [fb8c95e](https://github.com/calvinnwq/momentum/commit/fb8c95edba9a0c1d40a031da629da51a0fa16e0e))
+* The native goal-loop contract is now documented, including invocation and round evidence, completion recommendations, verification results, artifacts, learnings, and recovery metadata. ([7e9f2f3](https://github.com/calvinnwq/momentum/commit/7e9f2f352de6ad3ae72d4645b4c3f0652539340d))
+
+### Operator Notes
+
+* `workflow run preview-coding` and `workflow run start-coding` now reject malformed native workflow inputs earlier, including blank repo values, missing objectives, invalid approval boundaries, missing built-in definitions, malformed route config, and unsafe wrapper config fields.
+* `reconcile_deterministic_evidence` is now reserved for explicit interrupted no-mistakes evidence recovery. A plain failed no-mistakes step should surface as `retry_failed_step` with no recovery detail.
+* Merge cleanup and Linear refresh remain external-write tail steps. They should reconcile from durable evidence and explicit intent instead of replaying writes blindly.
+* Documentation and architecture anchors were refreshed around the native goal-loop direction and workflow/executor module ownership.
+
 ## [0.15.0](https://github.com/calvinnwq/momentum/compare/v0.14.4...v0.15.0) (2026-07-01)
 
 
