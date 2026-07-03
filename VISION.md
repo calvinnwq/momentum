@@ -63,7 +63,7 @@ For `merge-cleanup`, that means the step proves GitHub auth/config visibility,
 pull request identity, expected head, and safe merge state before it mutates
 GitHub. On retry it reads GitHub and git first, then reconciles or applies once.
 
-For `linear-refresh`, that means the step proves repo policy, Linear auth, run issue scope, exactly one pending Linear `status_update` intent, a matching source item, a valid one-of `state` / `stateId` payload, and a stable idempotency marker before it mutates Linear.
+For `linear-refresh`, that means the step proves repo policy, Linear auth, run issue scope, a matching source item, one pending Linear `status_update` intent or deterministic seed evidence for the expected intent, a valid one-of `state` / `stateId` payload, and a stable idempotency marker before it mutates Linear.
 On retry it reads intent audit state first; if current successful audit evidence already proves the write landed and reconcile succeeded, it records terminal evidence without another mutation, otherwise it applies once or blocks.
 
 These checks belong inside the step that owns the side effect so recovery stays
