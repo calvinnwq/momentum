@@ -47,7 +47,7 @@ Other domains reach workflow behavior through these modules:
 - **CLI renderers** (`src/renderers/workflow.ts`): the same run/gate/monitor/
   status/handoff/events/logs shapes, imported **type-only** (renderers format, they
   do not mutate state).
-- **Daemon and supervisor dispatch** (`src/core/daemon/workflow-dispatch.ts`): `dispatch/execute`, `dispatch/dogfood`, `dispatch/external-apply-dispatch`, `dispatch/linear-refresh-lifecycle`, `dispatch/subworkflow-dispatch`, `dispatch/live-wrapper`, and `live-wrapper/daemon-profile`; configured `subworkflow` steps compose the child-run producer after the base scaffold while live-wrapper-owned families stay on the live-wrapper lane for both bounded daemon cycles and `workflow run watch --once` ticks.
+- **Daemon and supervisor dispatch** (`src/core/daemon/workflow-dispatch.ts`): `dispatch/execute`, `dispatch/dogfood`, `dispatch/external-apply-dispatch`, `dispatch/linear-refresh-lifecycle`, `dispatch/subworkflow-dispatch`, `dispatch/live-wrapper`, and `live-wrapper/daemon-profile`; configured `subworkflow` steps compose the child-run producer after the base scaffold while live-wrapper-owned families stay on the live-wrapper lane for bounded daemon cycles and eligible `workflow run watch --once` ticks.
 - **Dispatched-step reconciliation**: `dispatch/reconcile` /
   `dispatch/reconcile-execute` own the RC-2 pure/effect seam that finalizes a
   dispatched step from terminal executor evidence.
@@ -187,7 +187,8 @@ Native `goal-loop` round evidence is currently consumed by `workflow run logs` f
 Status, handoff, monitor, and GUI readers remain future consumers until they are wired to the same executor-round projection instead of runner-authored JSON, terminal scrollback, or runner-local directories.
 
 NGX-549 and NGX-550 add the GUI-safe supervisor contract for `workflow run watch --once`.
-The command builds on the monitor projection, optionally performs one bounded target-run dispatcher tick, then emits a compact top-level envelope with `emit`, `reason`, `recommendedAction`, `recommendedActionPolicy`, quiet-duration fields, stuck-risk advisory fields, `nextAction.actionClass`, `nextAction.recoveryDetail`, and optional `humanAction`.
+The command builds on the monitor projection, optionally performs one bounded non-tail target-run dispatcher tick, then emits a compact top-level envelope with `emit`, `reason`, `recommendedAction`, `recommendedActionPolicy`, quiet-duration fields, stuck-risk advisory fields, `nextAction.actionClass`, `nextAction.recoveryDetail`, and optional `humanAction`.
+Approved `merge-cleanup` and `linear-refresh` tail steps stay human-required and surface as operator-decision actions instead of being started by the supervisor poller.
 Plain `workflow run monitor` remains read-only, while `workflow run monitor --advance` and `workflow run watch --once` are the explicit write-limited polling modes that can update advisory baselines for `momentum-native-coding` runs.
 `test/fixtures/workflow-gui-contract.json` freezes the watch envelope keys, next-action operator classes, recovery-detail presence, common GUI scenarios, event envelope keys, event keys, and event types so app clients can branch without terminal scraping.
 

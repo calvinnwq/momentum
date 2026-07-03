@@ -39,8 +39,10 @@ Environment:
 ## Behaviour
 
 Each invocation wraps `workflow run watch <run-id> --once --json`. The underlying
-watch tick may safely dispatch at most one approved Momentum-native coding step,
-or recheck one active running step that the scheduler can revisit. OpenClaw then
+watch tick may safely dispatch at most one approved non-tail Momentum-native
+coding step, or recheck one active running step that the scheduler can revisit.
+Approved `merge-cleanup` and `linear-refresh` tail steps are returned as
+operator decisions instead of being started by the supervisor poller. OpenClaw then
 classifies the returned watch envelope into a smaller operator event type:
 `progress`, `approval`, `recovery`, `stuck-risk`, `terminal`, or `null`.
 
@@ -211,7 +213,7 @@ should deliver the advisory but treat the supervisor state as not durably saved.
 | `digest` | string | Upstream watch progress digest used for duplicate suppression. |
 | `cursor` | string \| null | Upstream watch cursor, when present. |
 | `recommendedAction` | string | Upstream watch recommendation (`poll`, `approve`, `operator_decision`, `recover`, or `release`). |
-| `recommendedActionPolicy` | object | Upstream action-authority metadata: `action`, `authority`, `risk`, `evidenceRequired`, `rollback`, and `rationale`. Hosts should fail closed by treating absent or invalid policy as human-required for non-wait actions. |
+| `recommendedActionPolicy` | object | Upstream action-authority metadata: `action`, `authority`, `risk`, `evidenceRequired`, `rollback`, and `rationale`. Hosts should fail closed by treating absent or invalid policy as human-required for non-wait actions. When `humanAction.gateType` is present, the open gate policy takes precedence over any tail-step policy implied by `nextAction.stepId`. |
 | `nextPollSeconds` | number | Suggested delay before the host calls `openclaw supervise` again. |
 | `humanAction` | object \| null | Operator command from the watch envelope, or `null` when no operator command is required; when present it carries `code`, `command`, `detail`, and `gateType`. |
 | `stuckRisk` | string | Upstream watch stuck-risk value. |
