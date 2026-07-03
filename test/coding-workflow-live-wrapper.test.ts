@@ -3686,6 +3686,28 @@ describe("runCodingWorkflowLiveWrapper", () => {
         "run status: cancelled (previous run)",
         'error: "cancelled: aborted by user"'
       ].join("\n")
+    },
+    {
+      name: "historical section compact cancelled no-mistakes status with aborted user text",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "history:",
+        "  run status: cancelled",
+        'error: "cancelled: aborted by user"'
+      ].join("\n")
+    },
+    {
+      name: "CI section compact cancelled no-mistakes status with aborted user text",
+      stdout: [
+        "run:",
+        '  id: "01TEST"',
+        "  status: running",
+        "ci:",
+        "  run status: cancelled",
+        'error: "cancelled: aborted by user"'
+      ].join("\n")
     }
   ])("does not treat no-mistakes $name as workflow success", ({ stdout }) => {
     const dir = makeTempDir();

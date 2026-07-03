@@ -357,7 +357,12 @@ function hasCancelledNoMistakesRunEvidence(output: string): boolean {
         yamlSections.pop();
       }
       if (isHistoricalNoMistakesEvidenceLine(trimmed)) continue;
-      if (hasCompactCancelledNoMistakesRunStatus(trimmed)) return true;
+      if (
+        isCurrentNoMistakesRunStatusContext(yamlSections) &&
+        hasCompactCancelledNoMistakesRunStatus(trimmed)
+      ) {
+        return true;
+      }
       const section = parseNoMistakesYamlSection(trimmed);
       if (section !== null) {
         yamlSections.push({ indent, section });
