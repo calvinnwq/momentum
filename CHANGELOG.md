@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.16.2](https://github.com/calvinnwq/momentum/compare/v0.16.1...v0.16.2) (2026-07-03)
+
+
+### Bug Fixes
+
+* **workflow:** anchor compact no-mistakes cancellation ([857a933](https://github.com/calvinnwq/momentum/commit/857a933bace41c0c972d3e75999f038fa2f78180))
+* **workflow:** classify cancelled no-mistakes status for retry ([04ec54c](https://github.com/calvinnwq/momentum/commit/04ec54c4df8aa785ce12fcce38ff301f396cb204))
+* **workflow:** detect stalled no-mistakes mirror state ([9c9eba8](https://github.com/calvinnwq/momentum/commit/9c9eba875f2457be299f03ea55ff295d3c22c721))
+* **workflow:** gate compact no-mistakes cancellation context ([c544ce5](https://github.com/calvinnwq/momentum/commit/c544ce54b46d0412bf08bd3a34bfb9fa513d2c63))
+* **workflow:** handle nested no-mistakes cancellation evidence ([e49d732](https://github.com/calvinnwq/momentum/commit/e49d7324b70d10ff792bc08f3fe6d44c3098a231))
+* **workflow:** parse no-mistakes cancellation context safely ([492f026](https://github.com/calvinnwq/momentum/commit/492f026c9c876bf4bd7d826ecfe5e1aceefe599d))
+* **workflow:** preserve no-mistakes cancellation context ([df7fb6e](https://github.com/calvinnwq/momentum/commit/df7fb6e3af66b8962f5c004c73d71937352b9a69))
+* **workflow:** recover stalled no-mistakes runs ([5a965a1](https://github.com/calvinnwq/momentum/commit/5a965a187492543bc1a8c137e5044a204d4bd887))
+* **workflow:** require current no-mistakes cancellation ancestry ([1c123e1](https://github.com/calvinnwq/momentum/commit/1c123e1291511ef30b2e568ca085bfbb5aa0e4c6))
+
 ## [0.16.1](https://github.com/calvinnwq/momentum/compare/v0.16.0...v0.16.1) (2026-07-03)
 
 
