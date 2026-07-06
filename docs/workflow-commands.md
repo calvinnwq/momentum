@@ -2328,6 +2328,8 @@ Future status, handoff, monitor, and GUI readers must use the same projection on
 The implementation step's `goal-loop` executor records one `executor_invocation` for the autonomous attempt and one ordered `executor_round` per durable iteration.
 Readers must derive attempt state plus summaries, key changes, learnings, remaining work, verification status, changed files, commit SHA, recovery reason, artifacts, checkpoints, findings, and decisions from those rows and artifact pointers.
 Post-finalization native round evidence exposes the daemon's `completionRecommendation` as `complete`, `continue`, `approval_required`, `operator_decision_required`, `manual_recovery_required`, `blocked`, `failed`, or `cancelled`.
+For `goal-loop` rounds, `workflow run logs --json` includes the schema-aligned `nativeRoundEvidence` projection next to the raw durable round and child evidence fields.
+For non-`goal-loop` executor rows, `nativeRoundEvidence` is `null`.
 They must not scrape terminal scrollback or treat `.gnhf/runs` as authoritative.
 A GNHF-backed mechanism may run beneath `goal-loop`, but `gnhf` is not a workflow executor family and cannot replace the native invocation/round contract.
 Successful rounds show the single commit SHA Momentum recorded for that round.
@@ -2401,6 +2403,34 @@ Rounds are returned across every invocation in the run, ordered by step key, the
       "keyChanges": ["added reader"],
       "keyLearnings": ["use durable round state for follow-up input"],
       "learnings": ["use durable round state for follow-up input"],
+      "nativeRoundEvidence": {
+        "schema": "momentum.native-goal-loop.round-result.v1",
+        "summary": "implemented the slice",
+        "keyChanges": ["added reader"],
+        "learnings": ["use durable round state for follow-up input"],
+        "completionRecommendation": "complete",
+        "verificationResult": {
+          "status": "passed",
+          "commands": []
+        },
+        "artifacts": [
+          {
+            "class": "verification_output",
+            "path": "/path/to/data/runs/cwfp-abc123/round-1/verify.txt",
+            "digest": "sha256:..."
+          }
+        ],
+        "checkpoints": [
+          {
+            "stage": "verify",
+            "detail": "verification completed"
+          }
+        ],
+        "changedFiles": ["src/core/workflow/run/logs.ts"],
+        "commitSha": "abc123",
+        "recoveryReason": null,
+        "remainingWork": []
+      },
       "remainingWork": [],
       "changedFiles": ["src/core/workflow/run/logs.ts"],
       "verificationStatus": "passed",

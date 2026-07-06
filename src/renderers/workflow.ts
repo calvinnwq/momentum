@@ -1549,6 +1549,10 @@ export function workflowRoundToJsonShape(
     keyChanges: round.keyChanges,
     keyLearnings: round.keyLearnings,
     learnings: round.keyLearnings,
+    nativeRoundEvidence:
+      round.executorFamily === "goal-loop"
+        ? workflowNativeRoundEvidence(round)
+        : null,
     remainingWork: round.remainingWork,
     changedFiles: round.changedFiles,
     verificationStatus: round.verificationStatus,
@@ -1560,6 +1564,35 @@ export function workflowRoundToJsonShape(
     checkpoints: round.checkpoints.map((checkpoint) => ({ ...checkpoint })),
     findings: round.findings.map((finding) => ({ ...finding })),
     decisions: round.decisions.map((decision) => ({ ...decision }))
+  };
+}
+
+function workflowNativeRoundEvidence(
+  round: WorkflowRunLogRound
+): Record<string, unknown> {
+  return {
+    schema: "momentum.native-goal-loop.round-result.v1",
+    summary: round.summary,
+    keyChanges: round.keyChanges,
+    learnings: round.keyLearnings,
+    completionRecommendation: round.classification ?? "continue",
+    verificationResult: {
+      status: round.verificationStatus ?? "not_run",
+      commands: []
+    },
+    artifacts: round.artifacts.map((artifact) => ({
+      class: artifact.artifactClass,
+      path: artifact.path,
+      digest: artifact.digest
+    })),
+    checkpoints: round.checkpoints.map((checkpoint) => ({
+      stage: checkpoint.stage,
+      detail: checkpoint.detail
+    })),
+    changedFiles: round.changedFiles,
+    commitSha: round.commitSha,
+    recoveryReason: round.recoveryCode,
+    remainingWork: round.remainingWork
   };
 }
 

@@ -361,6 +361,30 @@ describe("momentum workflow run logs", () => {
         summary: string | null;
         keyLearnings: string[];
         learnings: string[];
+        nativeRoundEvidence: {
+          schema: string;
+          summary: string | null;
+          keyChanges: string[];
+          learnings: string[];
+          completionRecommendation: string;
+          verificationResult: {
+            status: string;
+            commands: unknown[];
+          };
+          artifacts: Array<{
+            class: string;
+            path: string;
+            digest: string | null;
+          }>;
+          checkpoints: Array<{
+            stage: string;
+            detail: string | null;
+          }>;
+          changedFiles: string[];
+          commitSha: string | null;
+          recoveryReason: string | null;
+          remainingWork: string[];
+        };
         verificationStatus: string | null;
         commitSha: string | null;
         recoveryCode: string | null;
@@ -425,6 +449,34 @@ describe("momentum workflow run logs", () => {
     expect(round.learnings).toEqual([
       "operator readback needs durable learnings"
     ]);
+    expect(round.nativeRoundEvidence).toEqual({
+      schema: "momentum.native-goal-loop.round-result.v1",
+      summary: "implemented the slice",
+      keyChanges: ["added reader"],
+      learnings: ["operator readback needs durable learnings"],
+      completionRecommendation: "complete",
+      verificationResult: {
+        status: "passed",
+        commands: []
+      },
+      artifacts: [
+        {
+          class: "verification_output",
+          path: "/runs/cwfp-logs01/round-1/verify.txt",
+          digest: "sha256:verify"
+        }
+      ],
+      checkpoints: [
+        {
+          stage: "verify",
+          detail: "pnpm test passed"
+        }
+      ],
+      changedFiles: ["src/core/workflow/run/logs.ts"],
+      commitSha: "abc123",
+      recoveryReason: null,
+      remainingWork: ["wire additional consumers"]
+    });
     expect(round.verificationStatus).toBe("passed");
     expect(round.commitSha).toBe("abc123");
     expect(round.recoveryCode).toBeNull();
