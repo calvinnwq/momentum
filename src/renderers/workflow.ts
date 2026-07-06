@@ -1764,15 +1764,15 @@ function workflowRoundOutcome(round: WorkflowRunLogRound): string {
   if (round.recoveryCode === "result_invalid") {
     return "invalid_result";
   }
-  if (round.verificationStatus === "failed") {
-    return "verification_failed";
-  }
   if (
     round.state === "manual_recovery_required" ||
     round.classification === "manual_recovery_required" ||
     round.humanGate === "manual_recovery_required"
   ) {
     return "manual_recovery";
+  }
+  if (round.verificationStatus === "failed") {
+    return "verification_failed";
   }
   if (round.commitSha !== null || round.classification === "complete") {
     return "successful";

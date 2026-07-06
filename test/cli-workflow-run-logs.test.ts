@@ -594,6 +594,18 @@ describe("momentum workflow run logs", () => {
             humanGate: "manual_recovery_required"
           },
           "manual_recovery"
+        ],
+        [
+          "manual-recovery-after-verification-failed",
+          {
+            state: "manual_recovery_required",
+            classification: "manual_recovery_required",
+            commitSha: null,
+            verificationStatus: "failed",
+            recoveryCode: "reset_failed",
+            humanGate: "manual_recovery_required"
+          },
+          "manual_recovery"
         ]
       ];
 
@@ -635,7 +647,11 @@ describe("momentum workflow run logs", () => {
         ["no-op", "no_op"],
         ["invalid-result", "invalid_result"],
         ["verification-failed", "verification_failed"],
-        ["manual-recovery", "manual_recovery"]
+        ["manual-recovery", "manual_recovery"],
+        [
+          "manual-recovery-after-verification-failed",
+          "manual_recovery"
+        ]
       ]
     );
   });
