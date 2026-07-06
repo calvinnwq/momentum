@@ -231,15 +231,13 @@ For example, this command block is valid:
 }
 ```
 
-For `no-mistakes`, include an explicit runner profile so the wrapper does not
-depend on ambient daemon environment. The runner profile requires the `axi`
-interface, a closed/non-interactive stdin policy, and the environment variables
-that the configured no-mistakes agent needs. Momentum supports the no-mistakes
-agent choices `claude`, `codex`, `opencode`, and `rovodev`; `agent=auto` is
-rejected in the native wrapper because it cannot be validated deterministically.
-For Codex, the checked-in live-wrapper profile allows `CODEX_HOME` into the
-wrapper process, and the run-local `env_allow` must forward it to the child
-process before no-mistakes starts:
+For `no-mistakes`, include an explicit runner profile so the wrapper does not depend on ambient daemon environment.
+The runner profile requires the `axi` interface, `stdin: "closed"`, and the environment variables that the configured no-mistakes agent needs.
+Momentum supports the no-mistakes agent choices `claude`, `codex`, `opencode`, and `rovodev`; `agent=auto` is rejected in the native wrapper because it cannot be validated deterministically.
+Before spawning no-mistakes, the wrapper reads `HOME/.no-mistakes/config.yaml` with strict YAML parsing and requires the top-level `agent` plus the top-level `agent_path_override.<agent>` entry to match the runner profile.
+Duplicate keys, malformed YAML, tab indentation, missing YAML key separators, nested-only `agent_path_override` entries, non-mapping overrides, or non-absolute override paths fail closed before no-mistakes starts.
+YAML aliases and either order of the top-level `agent` and `agent_path_override` entries are accepted because validation follows YAML semantics instead of line-scanner order.
+For Codex, the checked-in live-wrapper profile allows `CODEX_HOME` into the wrapper process, and the run-local `env_allow` must forward it to the child process before no-mistakes starts:
 
 ```json
 {
@@ -261,14 +259,7 @@ process before no-mistakes starts:
 }
 ```
 
-If the no-mistakes runner profile is missing, malformed, lacks
-the selected agent's required environment (`HOME` and `PATH`, plus `CODEX_HOME`
-for Codex), the filtered child environment does not contain one of its required
-variables, the selected agent path is missing/non-executable, the no-mistakes
-`agent` setting is `auto` or does not match the profile, or the no-mistakes
-`agent_path_override.<agent>` setting does not match the runner profile, the
-wrapper fails closed before spawning the no-mistakes command and writes no
-runner evidence.
+If the no-mistakes runner profile is missing, malformed, lacks the selected agent's required environment (`HOME` and `PATH`, plus `CODEX_HOME` for Codex), the filtered child environment does not contain one of its required variables, the selected agent path is missing/non-executable, `HOME/.no-mistakes/config.yaml` is unreadable or invalid, the no-mistakes `agent` setting is `auto` or does not match the profile, or the no-mistakes `agent_path_override.<agent>` setting is missing, non-absolute, or does not match the runner profile, the wrapper fails closed before spawning the no-mistakes command and writes no runner evidence.
 
 For `merge-cleanup`, include the target block that the wrapper will verify against GitHub before it runs the merge command:
 

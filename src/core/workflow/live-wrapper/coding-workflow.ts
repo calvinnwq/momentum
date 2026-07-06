@@ -7,11 +7,13 @@
  * `MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG`, selects the current
  * `MOMENTUM_STEP_KIND`, validates the run-local config before spawning,
  * executes the configured child command, and writes a normalized `RunnerResult`
- * to `MOMENTUM_RESULT_PATH`. Child commands report by
- * exit status; this seam synthesizes durable success/failure evidence so a
- * command failure is an ordinary failed step result instead of a stranded
- * process-level recovery case, except for explicitly classified no-mistakes
- * lifecycle gaps and terminal-success evidence.
+ * to `MOMENTUM_RESULT_PATH`. The no-mistakes step additionally requires an
+ * explicit selected-agent runner profile and validates the filtered environment,
+ * executable path, and `HOME/.no-mistakes/config.yaml` YAML config before spawn.
+ * Child commands report by exit status; this seam synthesizes durable
+ * success/failure evidence so a command failure is an ordinary failed step
+ * result instead of a stranded process-level recovery case, except for explicitly
+ * classified no-mistakes lifecycle gaps and terminal-success evidence.
  */
 import { execFileSync, type SpawnSyncReturns } from "node:child_process";
 import fs from "node:fs";
