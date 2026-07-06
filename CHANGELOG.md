@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.17.0](https://github.com/calvinnwq/momentum/compare/v0.16.3...v0.17.0) (2026-07-06)
+
+
+### Features
+
+* **workflow:** Implemented the first NGX-584 slice: issue-scoped linear-refresh now deterministically seeds a missing Linear status_update intent and applies it, verified by focused tests plus pnpm test, pnpm typecheck, pnpm build, and git diff --check HEAD. ([56956f6](https://github.com/calvinnwq/momentum/commit/56956f6b7edb71390fb77c493f4aa8423ecff0b9))
+* **workflow:** recover linear-refresh status update intents ([5e86be6](https://github.com/calvinnwq/momentum/commit/5e86be64034b2a87d4dfaa9af408f349ca534536))
+
+
+### Bug Fixes
+
+* **workflow:** NGX-584 already-applied linear-refresh replay evidence now reports top-level resultCode="already_applied" and all configured focused gates passed; current HEAD before the orchestrator commit is 2dc3c79. ([99403b4](https://github.com/calvinnwq/momentum/commit/99403b4362c1452403b7284259535fe74473dc73))
+
 ## [0.16.3](https://github.com/calvinnwq/momentum/compare/v0.16.2...v0.16.3) (2026-07-06)
 
 
