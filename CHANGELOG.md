@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.16.3](https://github.com/calvinnwq/momentum/compare/v0.16.2...v0.16.3) (2026-07-06)
+
+
+### Bug Fixes
+
+* **workflow:** require deterministic no-mistakes runner profiles ([95c1fc9](https://github.com/calvinnwq/momentum/commit/95c1fc9d2168be3352d79b3ca3a9ebf0d30fda6f))
+* **workflow:** require no-mistakes runner profile ([a6a74de](https://github.com/calvinnwq/momentum/commit/a6a74def9b0c4c2ba58bbdd31c233c86b8803dc4))
+* **workflow:** resolve no-mistakes config aliases ([9476c4e](https://github.com/calvinnwq/momentum/commit/9476c4ed7b5b27dc2eb29dc9ae1823fb7c8a385e))
+
 ## [0.16.2](https://github.com/calvinnwq/momentum/compare/v0.16.1...v0.16.2) (2026-07-03)
 
 
