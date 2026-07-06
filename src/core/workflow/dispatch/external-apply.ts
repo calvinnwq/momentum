@@ -115,7 +115,7 @@ function buildAppliedSummary(result: ExecuteExternalApplySuccess): string {
     context.target.externalKey ??
     context.target.externalId ??
     "unknown";
-  const verb = external.alreadyApplied
+  const verb = result.resultCode === "already_applied"
     ? "replayed (already applied)"
     : "applied";
   const comment = external.commentUrl ?? external.commentId ?? "n/a";

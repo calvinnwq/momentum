@@ -146,13 +146,16 @@ function makeAudit(): IntentApplyAudit {
 function makeSuccess(
   externalOverrides: Partial<ExecuteExternalApplyExternalResult> = {}
 ): ExecuteExternalApplySuccess {
+  const external = makeExternal(externalOverrides);
   return {
     ok: true,
-    resultCode: "applied",
+    resultCode: external.alreadyApplied && !external.statusTransitioned
+      ? "already_applied"
+      : "applied",
     context: makeContext({ intentStatus: "applied" }),
     intent: makeIntent(),
     audit: makeAudit(),
-    external: makeExternal(externalOverrides)
+    external
   };
 }
 
@@ -208,6 +211,23 @@ describe("mapExternalApplyResultToExecutorResult — pure mapping", () => {
     if (!mapped.ok) throw new Error("expected ok result");
     expect(mapped.result.state).toBe("succeeded");
     expect(mapped.result.summary).toContain("already applied");
+  });
+
+  it("summarizes an already-marked status transition as applied", () => {
+    const mapped = mapExternalApplyResultToExecutorResult(
+      makeSuccess({
+        alreadyApplied: true,
+        statusTransitioned: true,
+        nextStateId: "state-done",
+        nextStateName: "Done"
+      }),
+      EVIDENCE
+    );
+    expect(mapped.ok).toBe(true);
+    if (!mapped.ok) throw new Error("expected ok result");
+    expect(mapped.result.state).toBe("succeeded");
+    expect(mapped.result.summary).toContain("External apply applied");
+    expect(mapped.result.summary).not.toContain("already applied");
   });
 
   it("routes EVERY M6 external-apply failure code to a fail-closed manual-recovery executor result", () => {

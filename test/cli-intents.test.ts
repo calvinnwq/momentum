@@ -1967,6 +1967,112 @@ describe("momentum intent apply policy gating", () => {
     }
   });
 
+  it("reports already-applied external apply success as no tracker write", async () => {
+    const dataDir = makeTempDir();
+    const repo = makeRepoWithPolicy(
+      `---\nintent_apply_policy: external_apply_allowed\n---\n`
+    );
+    const intentId = seedIntent(dataDir, {
+      adapterKind: "linear",
+      targetExternalId: "linear_issue_replay",
+      intentType: "source_satisfied",
+      reason: "satisfied",
+      idempotencyKey: "linear:ext-policy-replay:source_satisfied:goal-policy"
+    });
+
+    const applyCalls: Array<{ idempotencyMarker: string }> = [];
+    const result = await runWithDeps(
+      [
+        "intent",
+        "apply",
+        intentId,
+        "--reason",
+        "operator decision",
+        "--external-apply",
+        "--repo",
+        repo,
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      { LINEAR_API_KEY: "test-key" },
+      {
+        buildLinearExternalUpdateClient: () => ({
+          apply: async (clientInput) => {
+            applyCalls.push({
+              idempotencyMarker: clientInput.preview.idempotencyMarker
+            });
+            return {
+              ok: true as const,
+              alreadyApplied: true,
+              issue: {
+                id: "linear_issue_replay",
+                key: "NGX-REPLAY",
+                url: "https://linear.app/example/issue/NGX-REPLAY"
+              },
+              comment: {
+                id: "linear_comment_replay",
+                url: "https://linear.app/example/issue/NGX-REPLAY#comment-replay"
+              },
+              status: {
+                transitioned: false,
+                previousStateId: null,
+                previousStateName: null,
+                nextStateId: null,
+                nextStateName: null
+              },
+              idempotencyMarker: clientInput.preview.idempotencyMarker
+            };
+          }
+        }),
+        buildLinearIssueRefreshClient: () => ({
+          refresh: async () => ({
+            ok: true as const,
+            issue: {
+              id: "linear_issue_replay",
+              identifier: "NGX-REPLAY",
+              title: "External apply replay issue",
+              url: "https://linear.app/example/issue/NGX-REPLAY",
+              updatedAt: "2026-05-21T00:00:00.000Z",
+              state: { id: "state-done", name: "Done" }
+            },
+            comments: [
+              {
+                id: "linear_comment_replay",
+                body: `Applied ${applyCalls[0]?.idempotencyMarker ?? ""}`,
+                url: "https://linear.app/example/issue/NGX-REPLAY#comment-replay"
+              }
+            ]
+          })
+        })
+      }
+    );
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      ok: true;
+      applyPolicy: {
+        externalApplyPerformed: boolean;
+        note: string;
+      };
+      externalApply: {
+        external: {
+          alreadyApplied: boolean;
+          statusTransitioned: boolean;
+        } | null;
+        reconcile: { status: string | null };
+      };
+    };
+    expect(payload.ok).toBe(true);
+    expect(payload.applyPolicy.externalApplyPerformed).toBe(false);
+    expect(payload.applyPolicy.note).toBe(
+      "External apply was already present; no tracker write was performed."
+    );
+    expect(payload.externalApply.external?.alreadyApplied).toBe(true);
+    expect(payload.externalApply.external?.statusTransitioned).toBe(false);
+    expect(payload.externalApply.reconcile.status).toBe("success");
+  });
+
   it("surfaces write_rejected from the linear client and leaves the intent pending", async () => {
     const dataDir = makeTempDir();
     const repo = makeRepoWithPolicy(

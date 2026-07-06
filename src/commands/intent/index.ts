@@ -575,7 +575,9 @@ function buildExternalApplyPolicySummary(
     resolved.source === "missing_repo" ? "builtin_default" : resolved.source;
   const performed = externalApplyPerformed(result);
   let note: string;
-  if (result.ok) {
+  if (result.ok && result.resultCode === "already_applied") {
+    note = "External apply was already present; no tracker write was performed.";
+  } else if (result.ok) {
     note = "External apply was performed through the configured tracker adapter.";
   } else if (performed) {
     note =
@@ -596,7 +598,7 @@ function buildExternalApplyPolicySummary(
 }
 
 function externalApplyPerformed(result: ExecuteExternalApplyResult): boolean {
-  if (result.ok) return true;
+  if (result.ok) return result.resultCode !== "already_applied";
   return Boolean(
     result.external?.commentId ||
       result.external?.statusTransitioned ||

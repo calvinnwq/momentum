@@ -320,13 +320,16 @@ function makeAudit(): IntentApplyAudit {
 function makeSuccess(
   externalOverrides: Partial<ExecuteExternalApplyExternalResult> = {}
 ): ExecuteExternalApplySuccess {
+  const external = makeExternal(externalOverrides);
   return {
     ok: true,
-    resultCode: "applied",
+    resultCode: external.alreadyApplied && !external.statusTransitioned
+      ? "already_applied"
+      : "applied",
     context: makeContext({ intentStatus: "applied" }),
     intent: makeIntent(),
     audit: makeAudit(),
-    external: makeExternal(externalOverrides)
+    external
   };
 }
 
