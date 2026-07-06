@@ -78,7 +78,8 @@ const EXECUTOR_DECISION_EXTERNAL_REF_COLUMNS: ColumnSpec[] = [
 ];
 
 const EXECUTOR_ROUND_LEARNING_COLUMNS: ColumnSpec[] = [
-  { name: "key_learnings", type: "TEXT NOT NULL DEFAULT '[]'" }
+  { name: "key_learnings", type: "TEXT NOT NULL DEFAULT '[]'" },
+  { name: "verification_results", type: "TEXT NOT NULL DEFAULT '[]'" }
 ];
 
 const REPO_LOCKS_DDL = `
@@ -591,6 +592,7 @@ CREATE TABLE IF NOT EXISTS executor_rounds (
   remaining_work TEXT NOT NULL DEFAULT '[]',
   changed_files TEXT NOT NULL DEFAULT '[]',
   verification_status TEXT,
+  verification_results TEXT NOT NULL DEFAULT '[]',
   commit_sha TEXT,
   recovery_code TEXT,
   human_gate TEXT,

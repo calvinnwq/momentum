@@ -80,6 +80,7 @@ import type {
   ExecutorInvocationState,
   ExecutorRoundRecord,
   ExecutorRoundState,
+  ExecutorRoundVerificationResult,
   WorkflowExecutorFamily
 } from "../loop/reducer.js";
 import type { ExecutorRoundUpdate } from "../loop/persist.js";
@@ -816,6 +817,7 @@ export function planGoalLoopRoundPersistence(
     maxRounds: input.maxRounds
   });
   const evidence = goalLoopFinalizeEvidenceFromResult(input.finalize);
+  const verificationResults = verificationResultsFromFinalize(input.finalize);
   const captureUpdate: ExecutorRoundUpdate | null =
     input.result === null
       ? null
@@ -836,6 +838,7 @@ export function planGoalLoopRoundPersistence(
     toState: decision.roundState,
     classification: decision.classification,
     verificationStatus: evidence.verificationStatus,
+    ...(verificationResults.length > 0 ? { verificationResults } : {}),
     commitSha: evidence.commitSha,
     recoveryCode: decision.recoveryCode,
     humanGate: decision.humanGate,
@@ -848,6 +851,20 @@ export function planGoalLoopRoundPersistence(
       : {})
   };
   return { decision, evidence, captureUpdate, terminalUpdate };
+}
+
+function verificationResultsFromFinalize(
+  result: FinalizeWorkflowStepFromResultFileResult
+): ExecutorRoundVerificationResult[] {
+  const verification =
+    "verification" in result ? result.verification : undefined;
+  if (verification === undefined || verification === null) return [];
+  return verification.results.map((commandResult) => ({
+    command: commandResult.command,
+    exitCode: commandResult.exit_code,
+    durationMs: commandResult.duration_ms,
+    timedOut: commandResult.timed_out
+  }));
 }
 
 /**

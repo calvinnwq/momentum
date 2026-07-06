@@ -420,9 +420,22 @@ export type ExecutorRoundRecord = {
   remainingWork: string[];
   changedFiles: string[];
   verificationStatus: string | null;
+  verificationResults?: ExecutorRoundVerificationResult[] | undefined;
   commitSha: string | null;
   recoveryCode: string | null;
   humanGate: ExecutorHumanGateType | null;
+};
+
+/**
+ * One verification command result captured by a round.
+ * The shape mirrors the native round evidence projection and intentionally omits
+ * stdout/stderr, which live in the verification output artifact.
+ */
+export type ExecutorRoundVerificationResult = {
+  command: string;
+  exitCode: number | null;
+  durationMs: number;
+  timedOut: boolean;
 };
 
 /**

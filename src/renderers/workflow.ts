@@ -1578,7 +1578,12 @@ function workflowNativeRoundEvidence(
     completionRecommendation: round.classification ?? "continue",
     verificationResult: {
       status: round.verificationStatus ?? "not_run",
-      commands: []
+      commands: (round.verificationResults ?? []).map((result) => ({
+        command: result.command,
+        exitCode: result.exitCode,
+        durationMs: result.durationMs,
+        timedOut: result.timedOut
+      }))
     },
     artifacts: round.artifacts.map((artifact) => ({
       class: artifact.artifactClass,

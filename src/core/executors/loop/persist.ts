@@ -68,6 +68,7 @@ import {
   type ExecutorRoundRecord,
   type ExecutorRoundState,
   type ExecutorRoundTransitionErrorCode,
+  type ExecutorRoundVerificationResult,
   isTerminalExecutorRoundState,
   type WorkflowExecutorFamily
 } from "./reducer.js";
@@ -495,12 +496,12 @@ export function insertExecutorRound(
          started_at, heartbeat_at, finished_at, agent_provider, model, effort,
          input_digest, result_digest, artifact_root, log_paths,
          summary, key_changes, key_learnings, remaining_work, changed_files,
-         verification_status, commit_sha, recovery_code, human_gate,
+         verification_status, verification_results, commit_sha, recovery_code, human_gate,
          created_at, updated_at
        ) VALUES (
          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
        )`
     ).run(
       record.roundId,
@@ -529,6 +530,7 @@ export function insertExecutorRound(
       JSON.stringify(record.remainingWork),
       JSON.stringify(record.changedFiles),
       record.verificationStatus,
+      JSON.stringify(record.verificationResults ?? []),
       record.commitSha,
       record.recoveryCode,
       record.humanGate,
@@ -623,6 +625,7 @@ export type ExecutorRoundUpdate = {
   remainingWork?: string[];
   changedFiles?: string[];
   verificationStatus?: string | null;
+  verificationResults?: ExecutorRoundVerificationResult[];
   commitSha?: string | null;
   recoveryCode?: string | null;
   humanGate?: ExecutorHumanGateType | null;
@@ -687,6 +690,15 @@ export function updateExecutorRound(
       update.verificationStatus,
       current.verificationStatus
     ),
+    ...(coalesce(update.verificationResults, current.verificationResults) !==
+    undefined
+      ? {
+          verificationResults: coalesce(
+            update.verificationResults,
+            current.verificationResults
+          )
+        }
+      : {}),
     commitSha: coalesce(update.commitSha, current.commitSha),
     recoveryCode: coalesce(update.recoveryCode, current.recoveryCode),
     humanGate: coalesce(update.humanGate, current.humanGate)
@@ -702,7 +714,7 @@ export function updateExecutorRound(
        finished_at = ?, agent_provider = ?, model = ?, effort = ?,
        input_digest = ?, result_digest = ?, artifact_root = ?, log_paths = ?,
        summary = ?, key_changes = ?, key_learnings = ?, remaining_work = ?, changed_files = ?,
-       verification_status = ?, commit_sha = ?, recovery_code = ?, human_gate = ?,
+       verification_status = ?, verification_results = ?, commit_sha = ?, recovery_code = ?, human_gate = ?,
        updated_at = ?
      WHERE round_id = ? AND state = ? AND updated_at = ?`
   ).run(
@@ -724,6 +736,7 @@ export function updateExecutorRound(
     JSON.stringify(next.remainingWork),
     JSON.stringify(next.changedFiles),
     next.verificationStatus,
+    JSON.stringify(next.verificationResults ?? []),
     next.commitSha,
     next.recoveryCode,
     next.humanGate,
@@ -1018,6 +1031,7 @@ type ExecutorRoundRow = {
   remaining_work: string;
   changed_files: string;
   verification_status: string | null;
+  verification_results: string;
   commit_sha: string | null;
   recovery_code: string | null;
   human_gate: string | null;
@@ -1084,7 +1098,7 @@ const ROUND_SELECT = `
          started_at, heartbeat_at, finished_at, agent_provider, model, effort,
          input_digest, result_digest, artifact_root, log_paths,
          summary, key_changes, key_learnings, remaining_work, changed_files,
-         verification_status, commit_sha, recovery_code, human_gate,
+         verification_status, verification_results, commit_sha, recovery_code, human_gate,
          updated_at
     FROM executor_rounds`;
 
@@ -1126,6 +1140,7 @@ function rowToInvocation(row: ExecutorInvocationRow): ExecutorInvocationRecord {
 }
 
 function rowToRound(row: ExecutorRoundRow): ExecutorRoundRecord {
+  const verificationResults = parseVerificationResults(row.verification_results);
   return {
     roundId: row.round_id,
     invocationId: row.invocation_id,
@@ -1154,6 +1169,7 @@ function rowToRound(row: ExecutorRoundRow): ExecutorRoundRecord {
     remainingWork: parseStringArray(row.remaining_work),
     changedFiles: parseStringArray(row.changed_files),
     verificationStatus: row.verification_status,
+    ...(verificationResults.length > 0 ? { verificationResults } : {}),
     commitSha: row.commit_sha,
     recoveryCode: row.recovery_code,
     humanGate: row.human_gate as ExecutorHumanGateType | null
@@ -1363,6 +1379,10 @@ function roundPatchMatches(
     arrayFieldMatches(current.remainingWork, update.remainingWork) &&
     arrayFieldMatches(current.changedFiles, update.changedFiles) &&
     fieldMatches(current.verificationStatus, update.verificationStatus) &&
+    verificationResultsMatch(
+      current.verificationResults,
+      update.verificationResults
+    ) &&
     fieldMatches(current.commitSha, update.commitSha) &&
     fieldMatches(current.recoveryCode, update.recoveryCode) &&
     fieldMatches(current.humanGate, update.humanGate)
@@ -1384,9 +1404,45 @@ function arrayFieldMatches(
   );
 }
 
+function verificationResultsMatch(
+  current: readonly ExecutorRoundVerificationResult[] | undefined,
+  update: readonly ExecutorRoundVerificationResult[] | undefined
+): boolean {
+  return (
+    update === undefined ||
+    JSON.stringify(current ?? []) === JSON.stringify(update)
+  );
+}
+
 function parseStringArray(text: string): string[] {
   const parsed = JSON.parse(text) as unknown;
   return Array.isArray(parsed) ? parsed.map((value) => String(value)) : [];
+}
+
+function parseVerificationResults(text: string): ExecutorRoundVerificationResult[] {
+  const parsed = JSON.parse(text) as unknown;
+  if (!Array.isArray(parsed)) return [];
+  return parsed.flatMap((value) => {
+    if (typeof value !== "object" || value === null) return [];
+    const record = value as Record<string, unknown>;
+    if (typeof record.command !== "string") return [];
+    const exitCode =
+      typeof record.exitCode === "number" && Number.isInteger(record.exitCode)
+        ? record.exitCode
+        : null;
+    const durationMs =
+      typeof record.durationMs === "number" && Number.isFinite(record.durationMs)
+        ? record.durationMs
+        : 0;
+    return [
+      {
+        command: record.command,
+        exitCode,
+        durationMs,
+        timedOut: record.timedOut === true
+      }
+    ];
+  });
 }
 
 function coalesce<T>(next: T | undefined, previous: T): T {

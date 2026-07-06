@@ -111,6 +111,14 @@ function makeRound(
     remainingWork: ["wire additional consumers"],
     changedFiles: ["src/core/workflow/run/logs.ts"],
     verificationStatus: "passed",
+    verificationResults: [
+      {
+        command: "pnpm test",
+        exitCode: 0,
+        durationMs: 1200,
+        timedOut: false
+      }
+    ],
     commitSha: "abc123",
     recoveryCode: null,
     humanGate: null,
@@ -457,7 +465,14 @@ describe("momentum workflow run logs", () => {
       completionRecommendation: "complete",
       verificationResult: {
         status: "passed",
-        commands: []
+        commands: [
+          {
+            command: "pnpm test",
+            exitCode: 0,
+            durationMs: 1200,
+            timedOut: false
+          }
+        ]
       },
       artifacts: [
         {

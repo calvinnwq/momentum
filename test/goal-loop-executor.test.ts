@@ -513,6 +513,14 @@ describe("planGoalLoopRoundPersistence — committed completion", () => {
       toState: "succeeded",
       classification: "complete",
       verificationStatus: "passed",
+      verificationResults: [
+        {
+          command: "pnpm test",
+          exitCode: 0,
+          durationMs: 12,
+          timedOut: false
+        }
+      ],
       commitSha: SHA_A,
       recoveryCode: null,
       humanGate: null

@@ -2411,7 +2411,14 @@ Rounds are returned across every invocation in the run, ordered by step key, the
         "completionRecommendation": "complete",
         "verificationResult": {
           "status": "passed",
-          "commands": []
+          "commands": [
+            {
+              "command": "pnpm test",
+              "exitCode": 0,
+              "durationMs": 1200,
+              "timedOut": false
+            }
+          ]
         },
         "artifacts": [
           {
