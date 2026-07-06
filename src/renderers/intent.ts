@@ -431,6 +431,9 @@ export function emitIntentExternalApplySuccess(
 
   const record = input.record;
   const target = input.externalApply.target;
+  const externalApplyStatus = input.applyPolicy.externalApplyPerformed
+    ? "performed"
+    : "already present";
   const lines: string[] = [
     `Update intent ${record.id} ${record.status}`,
     `Adapter: ${record.adapterKind}`,
@@ -443,7 +446,7 @@ export function emitIntentExternalApplySuccess(
     `Updated at: ${record.updatedAt}`,
     `Data dir: ${input.dataDir}`,
     `Apply policy: ${input.applyPolicy.effective} (${input.applyPolicy.source}); ${input.applyPolicy.note}`,
-    `External apply: performed (audit ${input.externalApply.auditId ?? "(none)"})`,
+    `External apply: ${externalApplyStatus} (audit ${input.externalApply.auditId ?? "(none)"})`,
     `Target: ${target.adapterKind} ${target.externalKey ?? target.externalId ?? "(unknown)"}${target.url ? ` <${target.url}>` : ""}`
   ];
   if (input.externalApply.external) {

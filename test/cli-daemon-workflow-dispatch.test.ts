@@ -420,6 +420,177 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     }
   });
 
+  it("seeds and applies a missing Linear status_update intent from issue scope", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    fs.writeFileSync(
+      path.join(repoDir, "MOMENTUM.md"),
+      "---\nintent_apply_policy: external_apply_allowed\n---\n",
+      "utf8"
+    );
+    const runId = "ngx584-linear-refresh-seed";
+
+    const startResult = await run([
+      "workflow",
+      "run",
+      "start",
+      "--run-id",
+      runId,
+      "--repo",
+      repoDir,
+      "--objective",
+      "Seed Linear refresh intent",
+      "--issue-scope",
+      "NGX-1001",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(startResult.code).toBe(0);
+
+    const db = openDb(dataDir);
+    try {
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_order < 5"
+      ).run(runId);
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'linear-refresh'"
+      ).run(runId);
+      db.prepare("UPDATE workflow_runs SET state = 'approved' WHERE id = ?").run(
+        runId
+      );
+      db.prepare(
+        `INSERT INTO source_items
+           (id, adapter_kind, external_id, external_key, url, title, status,
+            metadata_json, last_observed_at, goal_id, created_at, updated_at)
+         VALUES ('source_ngx1001_seeded', 'linear', 'linear-issue-1001',
+                 'NGX-1001',
+                 'https://linear.app/example/issue/NGX-1001', 'Scoped issue',
+                 'Todo', '{}', 1, NULL, 1, 1)`
+      ).run();
+    } finally {
+      db.close();
+    }
+
+    let marker = "";
+    let applyCalls = 0;
+    let observedStateName: string | null = null;
+    const deps = {
+      buildLinearExternalUpdateClient: () => ({
+        async apply(input: {
+          preview: { idempotencyMarker: string };
+          statusMutation?: { kind: string; stateName?: string } | null;
+        }) {
+          applyCalls += 1;
+          marker = input.preview.idempotencyMarker;
+          observedStateName =
+            input.statusMutation?.kind === "by_name"
+              ? input.statusMutation.stateName ?? null
+              : null;
+          return {
+            ok: true as const,
+            alreadyApplied: false,
+            issue: {
+              id: "linear-issue-1001",
+              key: "NGX-1001",
+              url: "https://linear.app/example/issue/NGX-1001"
+            },
+            comment: {
+              id: "comment-ngx1001-seeded",
+              url: "https://linear.app/example/comment/NGX-1001-seeded"
+            },
+            status: {
+              transitioned: true as const,
+              previousStateId: "state-todo",
+              previousStateName: "Todo",
+              nextStateId: "state-done",
+              nextStateName: "Done"
+            },
+            idempotencyMarker: marker
+          };
+        }
+      }),
+      buildLinearIssueRefreshClient: () => ({
+        async refresh() {
+          return {
+            ok: true as const,
+            issue: {
+              id: "linear-issue-1001",
+              identifier: "NGX-1001",
+              title: "Scoped issue",
+              url: "https://linear.app/example/issue/NGX-1001",
+              updatedAt: "2026-05-21T00:00:00.000Z",
+              state: { id: "state-done", name: "Done" }
+            },
+            comments: [
+              {
+                id: "comment-ngx1001-seeded",
+                body: `Applied ${marker}`,
+                url: "https://linear.app/example/comment/NGX-1001-seeded"
+              }
+            ]
+          };
+        }
+      })
+    };
+
+    const result = await run(
+      [
+        "daemon",
+        "start",
+        "--max-loop-iterations",
+        "1",
+        "--poll-interval-ms",
+        "0",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      { LINEAR_API_KEY: "test-key" },
+      deps
+    );
+
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(applyCalls).toBe(1);
+    expect(observedStateName).toBe("Done");
+
+    const verifyDb = openDb(dataDir);
+    try {
+      const intents = verifyDb
+        .prepare(
+          `SELECT intent_type, payload_json, source_item_id, status,
+                  idempotency_key
+             FROM update_intents
+            WHERE source_item_id = 'source_ngx1001_seeded'
+            ORDER BY created_at ASC`
+        )
+        .all() as Array<{
+        intent_type: string;
+        payload_json: string;
+        source_item_id: string;
+        status: string;
+        idempotency_key: string;
+      }>;
+      expect(intents).toHaveLength(1);
+      expect(intents[0]).toMatchObject({
+        intent_type: "status_update",
+        source_item_id: "source_ngx1001_seeded",
+        status: "applied",
+        idempotency_key: "linear:linear-issue-1001:status_update:done"
+      });
+      expect(JSON.parse(intents[0]!.payload_json)).toEqual({ state: "Done" });
+      const step = verifyDb
+        .prepare(
+          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = 'linear-refresh'"
+        )
+        .get(runId) as { state: string } | undefined;
+      expect(step).toEqual({ state: "succeeded" });
+    } finally {
+      verifyDb.close();
+    }
+  });
+
   it("preflights Linear external-apply auth before calling the adapter client", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
@@ -745,6 +916,120 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     }
   });
 
+  it("fails closed before Linear mutation when the status_update target state is unsafe", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const runId = "ngx584-linear-invalid-target-state";
+
+    const startResult = await run([
+      "workflow",
+      "run",
+      "start",
+      "--run-id",
+      runId,
+      "--repo",
+      repoDir,
+      "--objective",
+      "Apply Linear refresh",
+      "--issue-scope",
+      "NGX-1004",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(startResult.code).toBe(0);
+    fs.writeFileSync(
+      path.join(repoDir, "MOMENTUM.md"),
+      "---\nintent_apply_policy: external_apply_allowed\n---\n",
+      "utf8"
+    );
+
+    const db = openDb(dataDir);
+    try {
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'succeeded' WHERE run_id = ? AND step_order < 5"
+      ).run(runId);
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'linear-refresh'"
+      ).run(runId);
+      db.prepare("UPDATE workflow_runs SET state = 'approved' WHERE id = ?").run(
+        runId
+      );
+      db.prepare(
+        `INSERT INTO source_items
+           (id, adapter_kind, external_id, external_key, url, title, status,
+            metadata_json, last_observed_at, goal_id, created_at, updated_at)
+         VALUES ('source_ngx1004_invalid_target_state', 'linear', 'linear-issue-1004', 'NGX-1004',
+                 'https://linear.app/example/issue/NGX-1004', 'Scoped issue',
+                 'Todo', '{}', 1, NULL, 1, 1)`
+      ).run();
+      db.prepare(
+        `INSERT INTO update_intents
+           (id, adapter_kind, target_external_id, intent_type, payload_json,
+            reason, source_item_id, status, idempotency_key, created_at,
+            updated_at, applied_at, skipped_at, canceled_at, decision_reason)
+         VALUES ('intent_ngx1004_invalid_target_state', 'linear', 'linear-issue-1004',
+                 'status_update', '{"state":"Done","stateId":"done-id"}',
+                 'evidence says done',
+                 'source_ngx1004_invalid_target_state', 'pending',
+                 'idemp:intent_ngx1004_invalid_target_state', 1, 1,
+                 NULL, NULL, NULL, NULL)`
+      ).run();
+    } finally {
+      db.close();
+    }
+
+    let applyCalls = 0;
+    const deps = {
+      buildLinearExternalUpdateClient: () => ({
+        async apply() {
+          applyCalls += 1;
+          throw new Error("must not call external apply for invalid target state");
+        }
+      })
+    };
+
+    const result = await run(
+      [
+        "daemon",
+        "start",
+        "--max-loop-iterations",
+        "1",
+        "--poll-interval-ms",
+        "0",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      { LINEAR_API_KEY: "test-key" },
+      deps
+    );
+
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(applyCalls).toBe(0);
+
+    const verifyDb = openDb(dataDir);
+    try {
+      const round = verifyDb
+        .prepare(
+          "SELECT state, summary FROM executor_rounds WHERE workflow_run_id = ? AND step_key = 'linear-refresh'"
+        )
+        .get(runId) as { state: string; summary: string | null } | undefined;
+      expect(round?.state).toBe("manual_recovery_required");
+      expect(round?.summary).toContain("payload_invalid");
+      expect(round?.summary).toContain("resolve_intent_evidence");
+      const intentRow = verifyDb
+        .prepare(
+          "SELECT status FROM update_intents WHERE id = 'intent_ngx1004_invalid_target_state'"
+        )
+        .get() as { status: string } | undefined;
+      expect(intentRow).toEqual({ status: "pending" });
+    } finally {
+      verifyDb.close();
+    }
+  });
+
   it("reconciles already-applied Linear refresh evidence before policy load failures", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
@@ -879,6 +1164,14 @@ describe("daemon start production workflow lane (NGX-367)", () => {
         )
         .get(runId) as { state: string } | undefined;
       expect(step).toEqual({ state: "succeeded" });
+      const resultJson = JSON.parse(
+        fs.readFileSync(
+          path.join(repoDir, ".agent-workflows", runId, "external-apply.json"),
+          "utf8"
+        )
+      ) as { resultCode?: string; external?: { alreadyApplied?: boolean } };
+      expect(resultJson.resultCode).toBe("already_applied");
+      expect(resultJson.external?.alreadyApplied).toBe(true);
       const runRow = verifyDb
         .prepare("SELECT needs_manual_recovery FROM workflow_runs WHERE id = ?")
         .get(runId) as { needs_manual_recovery: number } | undefined;

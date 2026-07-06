@@ -948,6 +948,66 @@ describe("momentum workflow status", () => {
     expect(payload.monitor.recovery?.stepId).toBe("implementation");
   });
 
+  it("labels failed linear-refresh as external tail reconciliation", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRun(db, {
+        runId: "cwfp-linear-refresh-reconcile",
+        state: "failed",
+        source: "momentum-native-coding",
+        startedAt: RECENT,
+        finishedAt: NOW
+      });
+      seedStep(db, "cwfp-linear-refresh-reconcile", {
+        stepId: "linear-refresh",
+        kind: "linear-refresh",
+        state: "failed",
+        order: 4,
+        startedAt: RECENT,
+        finishedAt: NOW,
+        errorCode: "executor_failed"
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "status",
+      "cwfp-linear-refresh-reconcile",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      monitor: {
+        nextAction: {
+          code: string;
+          stepId: string | null;
+          actionClass: string;
+          recoveryDetail: Record<string, unknown> | null;
+        };
+        recovery: { code: string; stepId: string | null } | null;
+      };
+    };
+    expect(payload.monitor.nextAction).toMatchObject({
+      code: "clear_recovery",
+      stepId: "linear-refresh",
+      actionClass: "reconcile_external_tail",
+      recoveryDetail: {
+        kind: "external_tail_reconcile",
+        evidencePointerRequired: true,
+        refusalReason: null
+      }
+    });
+    expect(payload.monitor.recovery).toMatchObject({
+      code: "failed_external_side_effect_step",
+      stepId: "linear-refresh"
+    });
+  });
+
   it("keeps ordinary failed no-mistakes detail as a retry action", async () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);

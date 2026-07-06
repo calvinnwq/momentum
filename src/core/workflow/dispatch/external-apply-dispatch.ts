@@ -7,9 +7,11 @@ import {
 } from "./executor-run.js";
 import {
   executeAndReconcileDispatchedExternalApplyStep,
+  reconcileAlreadyTerminalDispatchedExternalApplyStep,
   type DispatchedExternalApplyRunner
 } from "./external-apply-run.js";
 import type { ExternalApplyExecutorEvidence } from "./external-apply.js";
+import { getWorkflowStep } from "../step/transitions.js";
 import { shouldRunDispatchedExecutor } from "./live-wrapper.js";
 import type {
   AsyncWorkflowStepDispatch,
@@ -50,6 +52,17 @@ export function createExternalApplyWorkflowDispatch(
     if (invocation?.executorFamily !== "external-apply") return result;
 
     try {
+      const terminalReentry = reconcileAlreadyTerminalDispatchedExternalApplyStep({
+        db: context.db,
+        runId: claim.runId,
+        stepId: claim.stepId,
+        now: context.now
+      });
+      if (terminalReentry !== null) return result;
+
+      const step = getWorkflowStep(context.db, claim.runId, claim.stepId);
+      if (step?.state !== "running") return result;
+
       const resolved = await deps.deriveExternalApply(claim, context);
       if (resolved.ok) {
         await executeAndReconcileDispatchedExternalApplyStep({

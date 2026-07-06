@@ -19,10 +19,15 @@ import {
   type UpdateIntentApplyPolicy
 } from "../intent/policy.js";
 import {
+  createUpdateIntent,
   listUpdateIntents,
   type UpdateIntent
 } from "../intent/update-intents.js";
-import { getSourceItemById, type SourceItem } from "../source/items.js";
+import {
+  getSourceItemById,
+  listSourceItems,
+  type SourceItem
+} from "../source/items.js";
 import { DEFAULT_DAEMON_STARTUP_RECOVERY_GRACE_MS } from "./loop.js";
 import {
   loadDispatchedStepRunProvenance,
@@ -181,7 +186,7 @@ function withSubworkflowDispatch(
 function resolveDaemonExternalApplyContext(
   runId: string,
   stepId: string,
-  context: { db: MomentumDb },
+  context: { db: MomentumDb; now: number },
   env: Record<string, string | undefined>,
   deps: DaemonWorkflowDispatchDeps
 ): DispatchedExternalApplyContextResolution {
@@ -205,7 +210,7 @@ function resolveDaemonExternalApplyContext(
     context.db,
     runId
   );
-  const pending = findPendingLinearExternalApplyIntents(
+  let pending = findPendingLinearExternalApplyIntents(
     context.db,
     issueScopeIdentifier ?? ""
   );
@@ -213,7 +218,7 @@ function resolveDaemonExternalApplyContext(
     context.db,
     issueScopeIdentifier ?? ""
   );
-  const sourceItemsById = loadLinearRefreshSourceItems(context.db, [
+  let sourceItemsById = loadLinearRefreshSourceItems(context.db, [
     ...pending,
     ...applied
   ]);
@@ -242,7 +247,7 @@ function resolveDaemonExternalApplyContext(
       reason: `linear_refresh_policy_load_failed: ${policy.code}: ${policy.error}`
     };
   }
-  const lifecycle = planLinearRefreshLifecycle({
+  let lifecycle = planLinearRefreshLifecycle({
     env,
     intentApplyPolicy: policy.value,
     issueScopeIdentifier,
@@ -252,6 +257,32 @@ function resolveDaemonExternalApplyContext(
     latestAuditsByIntentId,
     expectedOperatorReason: operatorReason
   });
+  if (lifecycle.status === "intent_missing") {
+    const seeded = seedLinearRefreshStatusUpdateIntent({
+      db: context.db,
+      runId,
+      issueScopeIdentifier,
+      now: context.now
+    });
+    if (!seeded.ok) {
+      return { ok: false, reason: seeded.reason };
+    }
+    pending = appendIntentIfMissing(pending, seeded.intent);
+    sourceItemsById = new Map(sourceItemsById).set(
+      seeded.sourceItem.id,
+      seeded.sourceItem
+    );
+    lifecycle = planLinearRefreshLifecycle({
+      env,
+      intentApplyPolicy: policy.value,
+      issueScopeIdentifier,
+      pendingIntents: pending,
+      appliedIntents: applied,
+      sourceItemsById,
+      latestAuditsByIntentId,
+      expectedOperatorReason: operatorReason
+    });
+  }
   const lifecycleAlreadyAppliedContext = resolveLinearRefreshAlreadyAppliedContext(
     lifecycle,
     applied,
@@ -344,6 +375,74 @@ function resolveLinearRefreshAlreadyAppliedContext(
     runExternalApply: async () =>
       linearRefreshAlreadyAppliedSuccess(intent, source, audit)
   };
+}
+
+function seedLinearRefreshStatusUpdateIntent(input: {
+  db: MomentumDb;
+  runId: string;
+  issueScopeIdentifier: string | null;
+  now: number;
+}):
+  | { ok: true; intent: UpdateIntent; sourceItem: SourceItem }
+  | { ok: false; reason: string } {
+  const issueScopeIdentifier = input.issueScopeIdentifier?.trim() || null;
+  if (issueScopeIdentifier === null) {
+    return {
+      ok: false,
+      reason: "linear_refresh_issue_scope_missing: cannot seed status_update intent without workflow issue scope"
+    };
+  }
+
+  const matches = listSourceItems(input.db, { adapterKind: "linear" }).filter(
+    (sourceItem) =>
+      sourceItem.externalId === issueScopeIdentifier ||
+      sourceItem.externalKey === issueScopeIdentifier
+  );
+  if (matches.length === 0) {
+    return {
+      ok: false,
+      reason: `linear_refresh_source_missing: no Linear source item matches workflow issue scope ${issueScopeIdentifier}`
+    };
+  }
+  if (matches.length > 1) {
+    return {
+      ok: false,
+      reason: `linear_refresh_source_ambiguous: ${matches.length} Linear source items match workflow issue scope ${issueScopeIdentifier}`
+    };
+  }
+
+  const sourceItem = matches[0]!;
+  const intent = createUpdateIntent(
+    input.db,
+    {
+      adapterKind: "linear",
+      targetExternalId: sourceItem.externalId,
+      intentType: "status_update",
+      payload: { state: "Done" },
+      reason: `Workflow ${input.runId} reached linear-refresh for ${issueScopeIdentifier}; update Linear issue to Done.`,
+      sourceItemId: sourceItem.id,
+      idempotencyKey: `linear:${sourceItem.externalId}:status_update:done`
+    },
+    { now: () => input.now }
+  ).intent;
+
+  if (intent.status !== "pending") {
+    return {
+      ok: false,
+      reason: `linear_refresh_intent_${intent.status}: seeded status_update intent ${intent.id} is ${intent.status}, not pending`
+    };
+  }
+  return { ok: true, intent, sourceItem };
+}
+
+function appendIntentIfMissing(
+  intents: readonly UpdateIntent[],
+  intent: UpdateIntent
+): UpdateIntent[] {
+  if (intents.some((candidate) => candidate.id === intent.id)) {
+    return [...intents];
+  }
+  return [...intents, intent];
 }
 
 function findPendingLinearExternalApplyIntents(
@@ -460,7 +559,7 @@ function linearRefreshAlreadyAppliedSuccess(
 ): ExecuteExternalApplySuccess {
   return {
     ok: true,
-    resultCode: "applied",
+    resultCode: "already_applied",
     context: {
       intentId: intent.id,
       intentStatus: intent.status,

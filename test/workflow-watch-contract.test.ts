@@ -753,74 +753,86 @@ describe("workflow run watch supervisor envelope contract", () => {
     });
   });
 
-  it("external-tail recovery: labels evidence-backed reconciliation", async () => {
-    const dataDir = makeTempDir();
-    const runId = "mwf-contract-external-tail";
-    const db = openDb(dataDir);
-    try {
-      seedRun(db, { runId, state: "failed" });
-      seedStep(db, {
-        runId,
-        stepId: "merge-cleanup",
-        kind: "merge-cleanup",
-        state: "failed",
-        order: 4
-      });
-    } finally {
-      db.close();
-    }
-
-    const payload = await watchOnce(dataDir, runId);
-    assertWatchEnvelopeContract(payload, runId);
-    expect(payload["nextAction"]).toMatchObject({
-      code: "clear_recovery",
-      actionClass: "reconcile_external_tail",
-      recoveryDetail: {
-        kind: "external_tail_reconcile",
-        evidencePointerRequired: true,
-        refusalReason: null
+  it.each([
+    ["merge-cleanup"] as const,
+    ["linear-refresh"] as const
+  ])(
+    "external-tail recovery: labels %s evidence-backed reconciliation",
+    async (kind) => {
+      const dataDir = makeTempDir();
+      const runId = `mwf-contract-external-tail-${kind}`;
+      const db = openDb(dataDir);
+      try {
+        seedRun(db, { runId, state: "failed" });
+        seedStep(db, {
+          runId,
+          stepId: kind,
+          kind,
+          state: "failed",
+          order: 4
+        });
+      } finally {
+        db.close();
       }
-    });
-    expect(payload["humanAction"]).toMatchObject({
-      code: "clear_recovery",
-      command: `momentum workflow run clear-recovery ${runId} --evidence-pointer <ref>`
-    });
-  });
 
-  it("external-tail manual recovery: keeps external reconciliation action class", async () => {
-    const dataDir = makeTempDir();
-    const runId = "mwf-contract-external-tail-manual";
-    const db = openDb(dataDir);
-    try {
-      seedRun(db, {
-        runId,
-        state: "failed",
-        needsManualRecovery: true,
-        manualRecoveryReason: "merge cleanup needs reconciliation"
+      const payload = await watchOnce(dataDir, runId);
+      assertWatchEnvelopeContract(payload, runId);
+      expect(payload["nextAction"]).toMatchObject({
+        code: "clear_recovery",
+        actionClass: "reconcile_external_tail",
+        recoveryDetail: {
+          kind: "external_tail_reconcile",
+          evidencePointerRequired: true,
+          refusalReason: null
+        }
       });
-      seedStep(db, {
-        runId,
-        stepId: "merge-cleanup",
-        kind: "merge-cleanup",
-        state: "failed",
-        order: 4
+      expect(payload["humanAction"]).toMatchObject({
+        code: "clear_recovery",
+        command: `momentum workflow run clear-recovery ${runId} --evidence-pointer <ref>`
       });
-    } finally {
-      db.close();
     }
+  );
 
-    const payload = await watchOnce(dataDir, runId);
-    assertWatchEnvelopeContract(payload, runId);
-    expect(payload["nextAction"]).toMatchObject({
-      code: "clear_recovery",
-      actionClass: "reconcile_external_tail",
-      recoveryDetail: {
-        kind: "external_tail_reconcile",
-        evidencePointerRequired: true,
-        refusalReason: null
+  it.each([
+    ["merge-cleanup"] as const,
+    ["linear-refresh"] as const
+  ])(
+    "external-tail manual recovery: keeps %s external reconciliation action class",
+    async (kind) => {
+      const dataDir = makeTempDir();
+      const runId = `mwf-contract-external-tail-manual-${kind}`;
+      const db = openDb(dataDir);
+      try {
+        seedRun(db, {
+          runId,
+          state: "failed",
+          needsManualRecovery: true,
+          manualRecoveryReason: `${kind} needs reconciliation`
+        });
+        seedStep(db, {
+          runId,
+          stepId: kind,
+          kind,
+          state: "failed",
+          order: 4
+        });
+      } finally {
+        db.close();
       }
-    });
-  });
+
+      const payload = await watchOnce(dataDir, runId);
+      assertWatchEnvelopeContract(payload, runId);
+      expect(payload["nextAction"]).toMatchObject({
+        code: "clear_recovery",
+        actionClass: "reconcile_external_tail",
+        recoveryDetail: {
+          kind: "external_tail_reconcile",
+          evidencePointerRequired: true,
+          refusalReason: null
+        }
+      });
+    }
+  );
 
   it("open operator gate: labels the action as gate resolution", async () => {
     const dataDir = makeTempDir();

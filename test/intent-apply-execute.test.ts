@@ -179,12 +179,16 @@ function makeApplySpy(
 
 function makeSuccessOutcome(args: {
   alreadyApplied?: boolean;
+  statusTransitioned?: boolean;
   issueId?: string;
   issueKey?: string | null;
   commentId?: string;
   commentUrl?: string | null;
+  nextStateId?: string | null;
+  nextStateName?: string | null;
   idempotencyMarker: string;
 }): LinearExternalUpdateSuccess {
+  const statusTransitioned = args.statusTransitioned ?? false;
   return {
     ok: true,
     alreadyApplied: args.alreadyApplied ?? false,
@@ -198,11 +202,11 @@ function makeSuccessOutcome(args: {
       url: args.commentUrl ?? "https://linear.app/example/comment/1"
     },
     status: {
-      transitioned: false,
+      transitioned: statusTransitioned,
       previousStateId: "state_started",
       previousStateName: "In Progress",
-      nextStateId: null,
-      nextStateName: null
+      nextStateId: statusTransitioned ? (args.nextStateId ?? "state_done") : null,
+      nextStateName: statusTransitioned ? (args.nextStateName ?? "Done") : null
     },
     idempotencyMarker: args.idempotencyMarker
   };
@@ -742,9 +746,53 @@ describe("executeExternalApply two-phase happy path", () => {
         })
       );
       if (!result.ok) throw new Error(`expected ok, got ${result.code}`);
+      expect(result.resultCode).toBe("already_applied");
       expect(result.external.alreadyApplied).toBe(true);
       expect(result.external.commentId).toBe("comment_existing");
       expect(result.audit.resultCode).toBe("already_applied");
+      expect(result.intent.status).toBe("applied");
+      expect(spy.calls).toHaveLength(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("reports alreadyApplied replay with a status transition as applied", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const { intentId } = seedHappyPath(db);
+      const repoPath = makeRepo(externalApplyAllowedPolicy());
+      const intent = getUpdateIntentById(db, intentId);
+      if (!intent) throw new Error("intent missing");
+      const idempotencyMarker = expectedIdempotencyMarker(intentId, intent.payload);
+      const spy = makeApplySpy(
+        makeSuccessOutcome({
+          alreadyApplied: true,
+          statusTransitioned: true,
+          commentId: "comment_existing",
+          commentUrl: "https://linear.app/example/comment/existing",
+          nextStateId: "state_done",
+          nextStateName: "Done",
+          idempotencyMarker
+        })
+      );
+
+      const result = await executeExternalApply(
+        baseInput(db, {
+          intentId,
+          repoPath,
+          deps: { buildLinearClient: () => spy.client, now: () => 2050 }
+        })
+      );
+      if (!result.ok) throw new Error(`expected ok, got ${result.code}`);
+      expect(result.resultCode).toBe("applied");
+      expect(result.external.alreadyApplied).toBe(true);
+      expect(result.external.statusTransitioned).toBe(true);
+      expect(result.external.nextStateId).toBe("state_done");
+      expect(result.external.commentId).toBe("comment_existing");
+      expect(result.audit.resultCode).toBe("applied");
+      expect(result.audit.externalRefs.stateTransitionId).toBe("state_done");
       expect(result.intent.status).toBe("applied");
       expect(spy.calls).toHaveLength(1);
     } finally {

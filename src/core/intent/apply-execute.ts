@@ -228,7 +228,7 @@ export type ExecuteExternalApplyExternalResult = {
 
 export type ExecuteExternalApplySuccess = {
   ok: true;
-  resultCode: "applied";
+  resultCode: "applied" | "already_applied";
   context: ExecuteExternalApplyContext;
   intent: UpdateIntent;
   audit: IntentApplyAudit;
@@ -629,13 +629,15 @@ export async function executeExternalApply(
     });
   }
 
-  // External write succeeded — finalize audit before transitioning the intent.
+  const successResultCode = externalApplyResultCode(externalResult);
+
+  // External write succeeded - finalize audit before transitioning the intent.
   const finalizeSucceeded = finalizeFn(input.db, {
     auditId: audit.id,
     lifecycleState: "succeeded",
     resultStatus: "succeeded",
-    resultCode: externalResult.alreadyApplied ? "already_applied" : "applied",
-    resultMessage: externalResult.alreadyApplied
+    resultCode: successResultCode,
+    resultMessage: successResultCode === "already_applied"
       ? "External write already present; replay no-op."
       : "External write succeeded.",
     externalRefs: {
@@ -804,7 +806,7 @@ export async function executeExternalApply(
 
   return {
     ok: true,
-    resultCode: "applied",
+    resultCode: externalApplyResultCode(externalResult),
     context: successContext,
     intent: markApplied.intent,
     audit: reconciled.audit,
@@ -885,7 +887,7 @@ function buildExternalSuccess(args: {
 
   return {
     ok: true,
-    resultCode: "applied",
+    resultCode: externalApplyResultCode(args.externalResult),
     context: successContext,
     intent: args.intent,
     audit: args.audit,
@@ -1267,6 +1269,14 @@ function externalSummary(
     nextStateName: result.status.nextStateName,
     idempotencyMarker: result.idempotencyMarker
   };
+}
+
+function externalApplyResultCode(
+  result: LinearExternalUpdateResult & { ok: true }
+): ExecuteExternalApplySuccess["resultCode"] {
+  return result.alreadyApplied && !result.status.transitioned
+    ? "already_applied"
+    : "applied";
 }
 
 function externalRefsFromError(

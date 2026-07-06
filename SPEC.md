@@ -114,9 +114,11 @@ whose payload supplies the target state (`state` or `stateId`), carries a stable
 idempotency marker, and must fail closed without losing the M6 refusal reason.
 Before a workflow `linear-refresh` external write is attempted, the tail
 lifecycle preflight must prove `LINEAR_API_KEY` in the applying process,
-`intent_apply_policy: external_apply_allowed`, a workflow issue scope, exactly
-one pending Linear `status_update` intent, a matching Linear source item, a valid
-payload with exactly one `state` / `stateId`, and the stable idempotency marker.
+`intent_apply_policy: external_apply_allowed`, a workflow issue scope, a matching
+Linear source item, and either one pending Linear `status_update` intent or enough
+unique issue-scope/source evidence to seed the expected pending `status_update` intent
+with a `Done` payload deterministically.
+The resulting intent must carry a valid payload with exactly one `state` / `stateId` and the stable idempotency marker.
 If durable M6 audit evidence already proves the intended write landed and
 post-apply reconcile succeeded, `linear-refresh` reconciles without another
 Linear mutation.
@@ -216,7 +218,7 @@ The wrapper validates `MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG` before spawning 
 For the `no-mistakes` step, the wrapper config must include a `runner_profile` block that selects the `axi` interface, declares `stdin: "closed"`, records the selected no-mistakes agent (`claude`, `codex`, `opencode`, or `rovodev`), records that agent's required harness environment (`HOME` and `PATH`, plus `CODEX_HOME` for Codex), and names the configured absolute executable agent path.
 The wrapper checks the filtered child environment, executable agent path, no-mistakes `HOME/.no-mistakes/config.yaml` top-level `agent`, and no-mistakes top-level `agent_path_override.<agent>` config against that profile before spawning no-mistakes, so missing runner env, `agent=auto`, malformed YAML, duplicate config keys, nested-only overrides, a missing/non-executable agent path, a mismatched no-mistakes agent override, or an unsafe stdin policy fails closed as setup recovery instead of relying on ambient daemon state.
 The `merge-cleanup` wrapper owns its side-effecting tail lifecycle: preflight proves explicit GitHub auth (`GH_TOKEN`, `GITHUB_TOKEN`, or `GH_CONFIG_DIR`), durable target identity (`merge_cleanup.pull_request_id`, `expected_head_sha`, and `cleanup_branch`), and live PR state/head/mergeability in the same worker before apply can spawn the merge command; already-merged or already-deleted cleanup state routes to reconcile instead of another mutation. This remains tail-local and is not promoted into workflow-level structural preflight.
-The `linear-refresh` daemon tail owns the same preflight -> apply -> reconcile shape around the existing M6 external-apply path: missing auth, missing source item, missing/duplicate/stale intent, invalid payload, policy denial, or mismatched audit evidence fails closed before the Linear client is called; already-applied succeeded audit evidence maps to terminal executor evidence instead of generic update-step repair.
+The `linear-refresh` daemon tail owns the same preflight -> apply -> reconcile shape around the existing M6 external-apply path: missing auth, missing source item, ambiguous source evidence, duplicate/stale intent, invalid payload, policy denial, or mismatched audit evidence fails closed before the Linear client is called; a missing intent can be deterministically seeded to `Done` only from the workflow issue scope plus a unique matching Linear source item, and already-applied succeeded audit evidence maps to terminal executor evidence instead of generic update-step repair.
 For the `no-mistakes` step, the same live-wrapper treats a reported `checks-passed` outcome, or an otherwise-still-monitoring run with current clean pull request evidence and green or explicitly absent checks, as terminal Momentum success only when no current blocking outcome, active finding, unresolved gate, dirty / draft pull request, or non-successful check state is present.
 Current no-mistakes run status or outcome evidence showing cancellation before reliable completion remains retryable manual recovery, not failed verification.
 The no-mistakes mirror preserves the last heartbeat while a running external-state digest is unchanged; after four minutes without fresh progress or terminal evidence it parks the round in manual recovery so operators inspect the external run before clearing recovery.

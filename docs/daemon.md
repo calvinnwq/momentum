@@ -92,14 +92,16 @@ creates durable executor invocation / round scaffold rows with deterministic
 dispatcher ids. The built-in `linear-refresh` step uses the `external-apply`
 family as a tail-owned preflight -> apply -> reconcile lifecycle. Bounded
 `daemon start` proves the run's issue scope, `LINEAR_API_KEY`, repo
-`intent_apply_policy: external_apply_allowed`, exactly one pending Linear
-`status_update` intent, a matching Linear source item, a valid one-of `state` /
-`stateId` payload, and the stable idempotency marker before it reuses the same
+`intent_apply_policy: external_apply_allowed`, a matching Linear source item, and
+either one pending Linear `status_update` intent or enough unique issue-scope /
+source evidence to seed the expected pending `status_update` intent with a `Done` payload
+deterministically. The resulting intent must have a valid one-of `state` /
+`stateId` payload and the stable idempotency marker before it reuses the same
 policy-gated external-apply write path as `intent apply --external-apply`.
 Successful apply writes `external-apply.log` / `external-apply.json` evidence
 under the run directory and reconciles the step from that terminal evidence.
 If durable external-apply audit evidence already proves the intended write landed and post-apply reconcile succeeded, the step records already-applied terminal evidence without another Linear mutation.
-Missing issue scope, no matching pending intent, ambiguous intents, stale or mismatched applied evidence, missing credentials, policy denial, audit-incomplete, blocked, or other unsafe apply outcomes park the step for manual recovery rather than fabricating success.
+Missing issue scope, missing or ambiguous source evidence, duplicate intents, stale or mismatched applied evidence, missing credentials, policy denial, audit-incomplete, blocked, or other unsafe apply outcomes park the step for manual recovery rather than fabricating success.
 Configured `subworkflow` steps are also handled by the
 managed daemon: the parent run's `route.subworkflow.child` config selects the
 child workflow definition, bounded lineage in `route.subworkflow.lineage` prevents
@@ -293,8 +295,8 @@ must prove explicit GitHub auth in the live-wrapper environment (`GH_TOKEN`,
 state showing the target is open, non-draft, mergeable, and still at the expected
 head. If GitHub shows the PR is already merged or the cleanup branch is already
 deleted, the wrapper stops before mutation and routes operators to evidence-backed
-reconciliation instead of a blind rerun. The built-in `linear-refresh` step requires the run issue scope, exactly one pending Linear `status_update` intent, a matching source item, a valid one-of `state` / `stateId` payload, `intent_apply_policy: external_apply_allowed`, and `LINEAR_API_KEY` in the daemon/supervisor process environment.
-Missing auth, issue scope, target, intent evidence, source evidence, or missing valid payload fails closed with operator-actionable recovery evidence;
+reconciliation instead of a blind rerun. The built-in `linear-refresh` step requires the run issue scope, a matching source item, one pending Linear `status_update` intent or deterministic seed evidence for the expected `Done` intent, a valid one-of `state` / `stateId` payload, `intent_apply_policy: external_apply_allowed`, and `LINEAR_API_KEY` in the daemon/supervisor process environment.
+Missing auth, issue scope, target, source evidence, deterministic intent evidence, or missing valid payload fails closed with operator-actionable recovery evidence;
 Momentum does not store these credentials.
 
 On retried dispatch attempts, `MOMENTUM_ATTEMPT` is incremented and attempt
