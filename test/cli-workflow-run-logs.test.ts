@@ -346,6 +346,16 @@ describe("momentum workflow run logs", () => {
           risk: string;
         };
       }>;
+      invocations: Array<{
+        invocationId: string;
+        stepKey: string;
+        executorFamily: string;
+        attempt: number;
+        state: string;
+        startedAt: number | null;
+        heartbeatAt: number | null;
+        finishedAt: number | null;
+      }>;
       rounds: Array<{
         roundId: string;
         summary: string | null;
@@ -387,6 +397,18 @@ describe("momentum workflow run logs", () => {
           authority: "human_required",
           risk: "medium"
         })
+      })
+    ]);
+    expect(payload.invocations).toEqual([
+      expect.objectContaining({
+        invocationId: "inv-1",
+        stepKey: "implementation",
+        executorFamily: "goal-loop",
+        attempt: 1,
+        state: "running",
+        startedAt: 10,
+        heartbeatAt: 10,
+        finishedAt: null
       })
     ]);
     expect(payload.rounds).toHaveLength(1);
@@ -564,6 +586,10 @@ describe("momentum workflow run logs", () => {
     expect(result.stdout).toContain("implemented the slice");
     expect(result.stdout).toContain("input digest: in-1");
     expect(result.stdout).toContain("result digest: res-1");
+    expect(result.stdout).toContain("Executor invocations: 1");
+    expect(result.stdout).toContain(
+      "- inv-1 [implementation/running] attempt=1"
+    );
     expect(result.stdout).toContain("Approvals: 1");
     expect(result.stdout).toContain("Leases: 1");
     expect(result.stdout).toContain("Gates: 1 (open: 1)");

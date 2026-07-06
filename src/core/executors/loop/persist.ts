@@ -378,6 +378,25 @@ export function loadExecutorInvocation(
   return loadExecutorInvocationSnapshot(db, invocationId)?.record;
 }
 
+/**
+ * List every invocation for a workflow run in deterministic executor read-back
+ * order.
+ * This surfaces the whole attempt below a step, including attempts that have no
+ * round rows yet or are paused between rounds.
+ */
+export function listExecutorInvocationsForRun(
+  db: MomentumDb,
+  runId: string
+): ExecutorInvocationRecord[] {
+  const rows = db
+    .prepare(
+      `${INVOCATION_SELECT} WHERE workflow_run_id = ?
+       ORDER BY step_key, attempt, invocation_id`
+    )
+    .all(runId) as ExecutorInvocationRow[];
+  return rows.map(rowToInvocation);
+}
+
 export type UpdateExecutorInvocationOptions = {
   now?: number;
   startedAt?: number | null;
@@ -1053,6 +1072,12 @@ type ExecutorDecisionRow = {
   external_ref: string | null;
 };
 
+const INVOCATION_SELECT = `
+  SELECT invocation_id, workflow_run_id, step_run_id, step_key,
+         executor_family, state, attempt, started_at, heartbeat_at,
+         finished_at, updated_at
+    FROM executor_invocations`;
+
 const ROUND_SELECT = `
   SELECT round_id, invocation_id, workflow_run_id, step_run_id, step_key,
          executor_family, attempt, round_index, state, classification,
@@ -1068,12 +1093,7 @@ function loadExecutorInvocationSnapshot(
   invocationId: string
 ): ExecutorInvocationSnapshot | undefined {
   const row = db
-    .prepare(
-      `SELECT invocation_id, workflow_run_id, step_run_id, step_key,
-              executor_family, state, attempt, started_at, heartbeat_at,
-              finished_at, updated_at
-         FROM executor_invocations WHERE invocation_id = ?`
-    )
+    .prepare(`${INVOCATION_SELECT} WHERE invocation_id = ?`)
     .get(invocationId) as ExecutorInvocationRow | undefined;
   if (row === undefined) return undefined;
   return { record: rowToInvocation(row), updatedAt: row.updated_at };

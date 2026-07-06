@@ -1485,6 +1485,7 @@ export function emitWorkflowRunLogs(
     ),
     evidence: envelope.detail.evidence.map(workflowEvidenceToJsonShape),
     gates: envelope.detail.gates.map(workflowGateToJsonShape),
+    invocations: envelope.invocations.map(workflowInvocationToJsonShape),
     rounds: envelope.rounds.map(workflowRoundToJsonShape),
     nextAction: nextActionToJsonShape(
       envelope.detail.monitor,
@@ -1557,6 +1558,23 @@ export function workflowRoundToJsonShape(
   };
 }
 
+export function workflowInvocationToJsonShape(
+  invocation: WorkflowRunLogsEnvelope["invocations"][number]
+): Record<string, unknown> {
+  return {
+    invocationId: invocation.invocationId,
+    workflowRunId: invocation.workflowRunId,
+    stepRunId: invocation.stepRunId,
+    stepKey: invocation.stepKey,
+    executorFamily: invocation.executorFamily,
+    state: invocation.state,
+    attempt: invocation.attempt,
+    startedAt: invocation.startedAt,
+    heartbeatAt: invocation.heartbeatAt,
+    finishedAt: invocation.finishedAt
+  };
+}
+
 export function renderWorkflowRunLogsText(
   dataDir: string,
   envelope: WorkflowRunLogsEnvelope
@@ -1582,6 +1600,14 @@ export function renderWorkflowRunLogsText(
         (gate.recommendedAction !== null
           ? ` recommended=${gate.recommendedAction}`
           : "")
+    );
+  }
+  lines.push(`Executor invocations: ${envelope.invocations.length}`);
+  for (const invocation of envelope.invocations) {
+    lines.push(
+      `- ${invocation.invocationId} [${invocation.stepKey}/${invocation.state}]` +
+        ` attempt=${invocation.attempt}` +
+        ` executor=${invocation.executorFamily}`
     );
   }
   lines.push(`Executor rounds: ${envelope.rounds.length}`);

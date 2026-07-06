@@ -19,6 +19,7 @@ import {
   listExecutorCheckpointsForRound,
   listExecutorDecisionsForRound,
   listExecutorFindingsForRound,
+  listExecutorInvocationsForRun,
   listExecutorRoundsForRun
 } from "../../executors/loop/persist.js";
 import type {
@@ -26,6 +27,7 @@ import type {
   ExecutorCheckpointRecord,
   ExecutorDecisionRecord,
   ExecutorFindingRecord,
+  ExecutorInvocationRecord,
   ExecutorRoundRecord
 } from "../../executors/loop/reducer.js";
 import {
@@ -51,6 +53,7 @@ export type WorkflowRunLogsEnvelope = {
   schemaVersion: number;
   generatedAt: number;
   detail: WorkflowRunDetail;
+  invocations: ExecutorInvocationRecord[];
   rounds: WorkflowRunLogRound[];
 };
 
@@ -62,6 +65,7 @@ export function loadWorkflowRunLogs(
   const detail = loadWorkflowRunDetail(db, runId, options);
   if (detail === null) return null;
   const generatedAt = options.generatedAt ?? Date.now();
+  const invocations = listExecutorInvocationsForRun(db, runId);
   const rounds = listExecutorRoundsForRun(db, runId).map((round) => ({
     ...round,
     artifacts: listExecutorArtifactsForRound(db, round.roundId),
@@ -73,6 +77,7 @@ export function loadWorkflowRunLogs(
     schemaVersion: WORKFLOW_RUN_LOGS_SCHEMA_VERSION,
     generatedAt,
     detail,
+    invocations,
     rounds
   };
 }

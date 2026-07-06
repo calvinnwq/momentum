@@ -2323,7 +2323,7 @@ Native goal-loop log readers treat Momentum executor rows and child evidence as 
 `workflow run logs` is the shipped consumer of this projection today.
 Future status, handoff, monitor, and GUI readers must use the same projection once they are wired to executor round evidence.
 The implementation step's `goal-loop` executor records one `executor_invocation` for the autonomous attempt and one ordered `executor_round` per durable iteration.
-Readers must derive summaries, key changes, learnings, remaining work, verification status, changed files, commit SHA, recovery reason, artifacts, checkpoints, findings, and decisions from those rows and artifact pointers.
+Readers must derive attempt state plus summaries, key changes, learnings, remaining work, verification status, changed files, commit SHA, recovery reason, artifacts, checkpoints, findings, and decisions from those rows and artifact pointers.
 Post-finalization native round evidence exposes the daemon's `completionRecommendation` as `complete`, `continue`, `approval_required`, `operator_decision_required`, `manual_recovery_required`, `blocked`, `failed`, or `cancelled`.
 They must not scrape terminal scrollback or treat `.gnhf/runs` as authoritative.
 A GNHF-backed mechanism may run beneath `goal-loop`, but `gnhf` is not a workflow executor family and cannot replace the native invocation/round contract.
@@ -2337,9 +2337,10 @@ momentum workflow run logs <run-id> [--data-dir <path>] [--json]
 ```
 
 Read-back of one workflow run's durable logs and evidence, for operators inspecting what each step actually ran and produced.
-It is the workflow-first equivalent of goal-first `logs <goal-id>`: it wraps the same detail loader as `workflow status <run-id>` / `workflow handoff` (run, steps, approvals, leases, monitor, evidence, gates) and adds the per-round executor evidence that the detail loader does not carry - executor family / agent / model / effort, input and result digests, log paths, summaries, key changes, changed files, verification status, commit SHA, recovery codes, and the child artifacts / checkpoints / findings / decisions emitted below each round.
+It is the workflow-first equivalent of goal-first `logs <goal-id>`: it wraps the same detail loader as `workflow status <run-id>` / `workflow handoff` (run, steps, approvals, leases, monitor, evidence, gates) and adds executor invocation read-back plus the per-round executor evidence that the detail loader does not carry - executor family / agent / model / effort, input and result digests, log paths, summaries, key changes, changed files, verification status, commit SHA, recovery codes, and the child artifacts / checkpoints / findings / decisions emitted below each round.
 Read-only: no SQLite mutation, no file reads, no external writes.
 
+Invocations are returned across the run in step key, attempt, invocation id order.
 Rounds are returned across every invocation in the run, ordered by step key, then invocation attempt, then invocation id, then round index, then round id.
 
 ### JSON envelope
@@ -2358,6 +2359,20 @@ Rounds are returned across every invocation in the run, ordered by step key, the
   "monitor": { "...": "same shape as workflow status detail" },
   "evidence": [ "..." ],
   "gates": [ "..." ],
+  "invocations": [
+    {
+      "invocationId": "cwfp-abc123::implementation::dispatch",
+      "workflowRunId": "cwfp-abc123",
+      "stepRunId": "implementation",
+      "stepKey": "implementation",
+      "executorFamily": "goal-loop",
+      "state": "running",
+      "attempt": 1,
+      "startedAt": 1730000500000,
+      "heartbeatAt": 1730000550000,
+      "finishedAt": null
+    }
+  ],
   "rounds": [
     {
       "roundId": "cwfp-abc123::implementation::dispatch::round-1",
@@ -2434,8 +2449,10 @@ Approvals: 1
 Leases: 1
 Gates: 1 (open: 1)
 - gate-nm-1 [step/operator_decision_required] OPEN allowed=fix,skip,approve_as_is recommended=fix
+Executor invocations: 1
+- cwfp-abc123::implementation::dispatch [implementation/running] attempt=1 executor=goal-loop
 Executor rounds: 1
-- cwfp-abc123::implementation::dispatch::round-1 [implementation/succeeded] complete
+- cwfp-abc123::implementation::dispatch::round-1 [implementation/succeeded] complete outcome=successful
     summary: implemented the slice
     input digest: sha256:...
     result digest: sha256:...
