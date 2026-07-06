@@ -104,6 +104,8 @@ import {
   type WorkflowRunStartInput
 } from "../../core/workflow/run/start.js";
 import {
+  CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY,
+  NATIVE_GOAL_LOOP_IMPLEMENTATION_ENGINE,
   formatCodingRouteStepSelectionLines,
   resolveCodingRouteStepSelections,
   writeCodingStepRouteOverrides,
@@ -925,11 +927,16 @@ function buildWorkflowRunStartInput(args: {
   if (parsed.issueScope !== undefined) {
     input.issueScope = { identifier: parsed.issueScope };
   }
-  // Compose the durable run route from the recorded operator profile (route.profile)
-  // and the validated per-step overrides (route.steps). The steps namespace is only
-  // embedded when at least one override is present, so a run with neither input keeps
-  // an empty route, exactly as before NGX-510.
+  // Compose the durable run route from the recorded implementation engine
+  // (route.implementationEngine), operator profile (route.profile), and validated
+  // per-step overrides (route.steps). The engine marker is written for native
+  // coding starts even when profile and per-step overrides are omitted, so readback
+  // can distinguish the selected implementation path from the compatibility route.
   let route: Record<string, unknown> = {};
+  if (coding) {
+    route[CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY] =
+      NATIVE_GOAL_LOOP_IMPLEMENTATION_ENGINE;
+  }
   if (routeProfile !== undefined) {
     route.profile = routeProfile;
   }

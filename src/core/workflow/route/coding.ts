@@ -47,6 +47,12 @@
  */
 import { resolveCommandModelAlias } from "../../model-aliases.js";
 
+/** The run-`route` field that records the selected coding implementation engine. */
+export const CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY = "implementationEngine";
+
+/** The explicit native goal-loop route selected by `workflow run start-coding`. */
+export const NATIVE_GOAL_LOOP_IMPLEMENTATION_ENGINE = "native-goal-loop";
+
 /** The run-`route` namespace that carries per-step coding route/config overrides. */
 export const CODING_ROUTE_STEPS_KEY = "steps";
 

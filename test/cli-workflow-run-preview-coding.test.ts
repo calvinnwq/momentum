@@ -423,7 +423,11 @@ describe("momentum workflow run preview-coding", () => {
       ok: true,
       state: "approved",
       approvalBoundary: "through-implementation",
-      route: { profile: "live-wrapper" }
+      route: {
+        profile: "live-wrapper",
+        implementationEngine: "native-goal-loop"
+      },
+      implementationEngine: "native-goal-loop"
     });
     const steps = payload["steps"] as Array<{ stepId: string; state: string }>;
     const stateByStep = Object.fromEntries(
@@ -453,6 +457,7 @@ describe("momentum workflow run preview-coding", () => {
     expect(result.stdout).toContain("preview-human");
     expect(result.stdout).toContain("coding-workflow v1");
     expect(result.stdout).toContain("Profile: live-wrapper");
+    expect(result.stdout).toContain("Implementation engine: native-goal-loop");
     expect(result.stdout).toContain("implementation");
     expect(result.stdout).toContain("goal-loop");
     expect(result.stdout).toContain("external-apply");

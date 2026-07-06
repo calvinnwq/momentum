@@ -408,7 +408,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
     );
   });
 
-  it("leaves the run route empty when no runtime/profile is selected", async () => {
+  it("records the native implementation engine even when no runtime profile is selected", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
     const result = await run(
@@ -426,7 +426,9 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
       const runRow = db
         .prepare(`SELECT route_json FROM workflow_runs WHERE id = ?`)
         .get("ngx-508-no-profile") as { route_json: string };
-      expect(runRow.route_json).toBe("{}");
+      expect(JSON.parse(runRow.route_json)).toEqual({
+        implementationEngine: "native-goal-loop"
+      });
     } finally {
       db.close();
     }
@@ -895,6 +897,7 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
         .get("ngx-510-steps") as { route_json: string };
       // Trimmed, and normalized to canonical step + field order (byte-stable).
       expect(JSON.parse(runRow.route_json)).toEqual({
+        implementationEngine: "native-goal-loop",
         steps: {
           implementation: { harness: "gnhf", model: "claude-opus-4-8" },
           "no-mistakes": { effort: "high" }
@@ -947,6 +950,7 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
         .prepare(`SELECT route_json FROM workflow_runs WHERE id = ?`)
         .get("ngx-510-profile-steps") as { route_json: string };
       expect(JSON.parse(runRow.route_json)).toEqual({
+        implementationEngine: "native-goal-loop",
         profile: "ngx-499-coding-workflow-live-wrapper",
         steps: { postflight: { harness: "claude" } }
       });
@@ -993,6 +997,7 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
         .prepare(`SELECT route_json FROM workflow_runs WHERE id = ?`)
         .get("ngx-510-model-alias") as { route_json: string };
       expect(JSON.parse(runRow.route_json)).toEqual({
+        implementationEngine: "native-goal-loop",
         steps: {
           implementation: {
             harness: "claude",
