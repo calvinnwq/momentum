@@ -2396,11 +2396,14 @@ Rounds are returned across every invocation in the run, ordered by step key, the
       "logPaths": ["/path/to/data/runs/cwfp-abc123/round-1/agent.log"],
       "summary": "implemented the slice",
       "keyChanges": ["added reader"],
+      "keyLearnings": ["use durable round state for follow-up input"],
+      "learnings": ["use durable round state for follow-up input"],
       "remainingWork": [],
       "changedFiles": ["src/core/workflow/run/logs.ts"],
       "verificationStatus": "passed",
       "commitSha": "abc123",
       "recoveryCode": null,
+      "recoveryReason": null,
       "humanGate": null,
       "artifacts": [
         {

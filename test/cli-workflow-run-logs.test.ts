@@ -359,8 +359,12 @@ describe("momentum workflow run logs", () => {
       rounds: Array<{
         roundId: string;
         summary: string | null;
+        keyLearnings: string[];
+        learnings: string[];
         verificationStatus: string | null;
         commitSha: string | null;
+        recoveryCode: string | null;
+        recoveryReason: string | null;
         logPaths: string[];
         changedFiles: string[];
         artifacts: ExecutorArtifactRecord[];
@@ -415,8 +419,16 @@ describe("momentum workflow run logs", () => {
     const round = payload.rounds[0]!;
     expect(round.roundId).toBe("round-1");
     expect(round.summary).toBe("implemented the slice");
+    expect(round.keyLearnings).toEqual([
+      "operator readback needs durable learnings"
+    ]);
+    expect(round.learnings).toEqual([
+      "operator readback needs durable learnings"
+    ]);
     expect(round.verificationStatus).toBe("passed");
     expect(round.commitSha).toBe("abc123");
+    expect(round.recoveryCode).toBeNull();
+    expect(round.recoveryReason).toBeNull();
     expect(round.logPaths).toEqual(["/runs/cwfp-logs01/round-1/agent.log"]);
     expect(round.changedFiles).toEqual(["src/core/workflow/run/logs.ts"]);
     expect(round.artifacts).toEqual([makeArtifact("cwfp-logs01")]);
