@@ -2306,6 +2306,7 @@ function parseNoMistakesAgentConfig(contents: string): {
   const lines = contents.split(/\r?\n/u);
   let inAgentPathOverride = false;
   let sectionIndent = 0;
+  let agentPathOverrideEntryIndent: number | undefined;
   let agent: string | undefined;
   const agentPathOverrides: Partial<Record<NoMistakesRunnerAgent, string>> = {};
   for (const rawLine of lines) {
@@ -2315,6 +2316,7 @@ function parseNoMistakesAgentConfig(contents: string): {
     const trimmed = withoutComment.trim();
     if (inAgentPathOverride && indent <= sectionIndent) {
       inAgentPathOverride = false;
+      agentPathOverrideEntryIndent = undefined;
     }
     if (!inAgentPathOverride && indent === 0) {
       const agentMatch = trimmed.match(/^agent\s*:\s*(.+)$/u);
@@ -2328,10 +2330,13 @@ function parseNoMistakesAgentConfig(contents: string): {
       if (section !== null && indent === 0) {
         inAgentPathOverride = true;
         sectionIndent = indent;
+        agentPathOverrideEntryIndent = undefined;
       }
       continue;
     }
 
+    agentPathOverrideEntryIndent ??= indent;
+    if (indent !== agentPathOverrideEntryIndent) continue;
     const override = trimmed.match(/^([A-Za-z0-9_-]+)\s*:\s*(.+)$/u);
     if (override === null) continue;
     const key = override[1]!.trim();
