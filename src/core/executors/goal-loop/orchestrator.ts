@@ -283,12 +283,24 @@ export type GoalLoopInvocationRoundPlan = {
 };
 
 /**
+ * Momentum-owned context available while planning the next round.
+ * The loop builds this from already persisted prior rounds so a resumed or
+ * continuing invocation can derive its next input from durable summaries,
+ * learnings, recovery evidence, commits, and artifacts instead of terminal
+ * scrollback or runner-local notes.
+ */
+export type GoalLoopInvocationRoundContext = {
+  priorRounds: readonly ExecutorRoundRecord[];
+};
+
+/**
  * Materialize the {@link GoalLoopInvocationRoundPlan} for one round index. Called
  * once per round, in order (0, 1, 2, ...). The returned `start.roundIndex` must
  * equal the requested index so the loop's round-budget accounting stays honest.
  */
 export type GoalLoopInvocationRoundPlanner = (
-  roundIndex: number
+  roundIndex: number,
+  context: GoalLoopInvocationRoundContext
 ) => GoalLoopInvocationRoundPlan;
 
 export type RunGoalLoopInvocationInput = {
@@ -355,7 +367,10 @@ export function runGoalLoopInvocation(
 
   const rounds: RunGoalLoopRoundResult[] = [];
   for (let roundIndex = 0; ; roundIndex++) {
-    const plan = planRound(roundIndex);
+    const context: GoalLoopInvocationRoundContext = {
+      priorRounds: rounds.map((round) => round.round)
+    };
+    const plan = planRound(roundIndex, context);
     if (plan.start.roundIndex !== roundIndex) {
       throw new Error(
         `runGoalLoopInvocation: planner returned roundIndex ${String(plan.start.roundIndex)} for loop index ${roundIndex}; the round-start index must match the loop index so the round-budget accounting stays honest`
@@ -422,8 +437,15 @@ export type RunGoalLoopStepInput = {
   selection: GoalLoopRoundSelection;
   /** The bounded mechanism each round runs (the real M9 goal iteration plugs in here). */
   runRound: GoalLoopRoundRunner;
-  /** Resolves the per-round input digest / artifact root / log paths the daemon provides. */
-  resolveRoundInputs: (roundIndex: number) => GoalLoopRoundRuntimeInputs;
+  /**
+   * Resolves the per-round input digest / artifact root / log paths the daemon
+   * provides, with durable prior-round context for threading accumulated
+   * learnings into the next round's input.
+   */
+  resolveRoundInputs: (
+    roundIndex: number,
+    context: GoalLoopInvocationRoundContext
+  ) => GoalLoopRoundRuntimeInputs;
   /** Clock for the invocation + round timestamps; defaults to {@link Date.now}. */
   now?: () => number;
 };
@@ -473,12 +495,12 @@ export function runGoalLoopStep(
     db: input.db,
     invocation,
     runRound: input.runRound,
-    planRound: (roundIndex) => {
+    planRound: (roundIndex, context) => {
       const start = planGoalLoopRoundStartForInvocation({
         invocation,
         selection: input.selection,
         roundIndex,
-        runtime: input.resolveRoundInputs(roundIndex),
+        runtime: input.resolveRoundInputs(roundIndex, context),
         startedAt: now()
       });
       return { start, finishedAt: now() };
