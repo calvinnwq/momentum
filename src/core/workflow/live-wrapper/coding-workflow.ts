@@ -2321,6 +2321,13 @@ function parseNoMistakesAgentConfig(contents: string):
   const seenTopLevelKeys = new Set<string>();
   const seenAgentPathOverrideKeys = new Set<string>();
   for (const rawLine of lines) {
+    if (hasYamlIndentationTab(rawLine)) {
+      return {
+        ok: false,
+        error:
+          "No-mistakes config uses tab indentation; use spaces before running no-mistakes."
+      };
+    }
     const withoutComment = rawLine.replace(/\s+#.*$/u, "");
     if (withoutComment.trim().length === 0) continue;
     const indent = leadingWhitespaceCount(withoutComment);
@@ -2457,6 +2464,10 @@ function parseQuotedYamlMappingKeyPrefix(
 function leadingWhitespaceCount(value: string): number {
   const match = value.match(/^\s*/u);
   return match?.[0].length ?? 0;
+}
+
+function hasYamlIndentationTab(value: string): boolean {
+  return /^[ \t]*\t/u.test(value);
 }
 
 function unquoteYamlScalar(value: string): string {
