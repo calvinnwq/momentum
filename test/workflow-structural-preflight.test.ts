@@ -451,4 +451,92 @@ describe("coding workflow structural preflight", () => {
       STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS
     );
   });
+
+  it("refuses no-mistakes wrapper config without an explicit runner profile", () => {
+    const result = preflightCodingWorkflowWrapperConfig({
+      steps: {
+        "no-mistakes": {
+          command: "/bin/sh",
+          env_allow: ["PATH", "HOME", "CODEX_HOME"]
+        }
+      }
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected failed preflight");
+    expect(result.evidence).toEqual([
+      {
+        checkId: "wrapper.config",
+        status: "failed",
+        severity: "error",
+        path: "wrapper.config.steps.no-mistakes.runner_profile",
+        key: "runner_profile",
+        message:
+          "Wrapper config `runner_profile` is required for the no-mistakes step.",
+        recommendedAction:
+          'Add a no-mistakes runner_profile with interface="axi", stdin="closed", agent, required_env, and agent_path.'
+      }
+    ]);
+    expect(Object.keys(result.evidence[0])).toEqual(
+      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS
+    );
+  });
+
+  it("returns compact passed evidence for valid no-mistakes runner profiles", () => {
+    const result = preflightCodingWorkflowWrapperConfig({
+      steps: {
+        "no-mistakes": {
+          command: "/bin/sh",
+          env_allow: ["PATH", "HOME", "CODEX_HOME"],
+          runner_profile: {
+            interface: "axi",
+            stdin: "closed",
+            agent: "codex",
+            required_env: ["HOME", "CODEX_HOME", "PATH"],
+            agent_path: "/tmp/codex-runner"
+          }
+        }
+      }
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("expected passed preflight");
+    expect(result.config.steps["no-mistakes"]?.noMistakesRunnerProfile).toEqual({
+      interface: "axi",
+      stdin: "closed",
+      agent: "codex",
+      requiredEnv: ["HOME", "CODEX_HOME", "PATH"],
+      agentPath: "/tmp/codex-runner"
+    });
+  });
+
+  it("refuses no-mistakes runner profiles with non-absolute agent paths", () => {
+    const result = preflightCodingWorkflowWrapperConfig({
+      steps: {
+        "no-mistakes": {
+          command: "/bin/sh",
+          env_allow: ["PATH", "HOME", "CODEX_HOME"],
+          runner_profile: {
+            interface: "axi",
+            stdin: "closed",
+            agent: "codex",
+            required_env: ["HOME", "CODEX_HOME", "PATH"],
+            agent_path: "codex-runner"
+          }
+        }
+      }
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected failed preflight");
+    expect(result.evidence[0]).toMatchObject({
+      path: "wrapper.config.steps.no-mistakes.runner_profile.agent_path",
+      key: "agent_path",
+      recommendedAction:
+        "Set wrapper.config.steps.no-mistakes.runner_profile.agent_path to an absolute executable path."
+    });
+    expect(Object.keys(result.evidence[0])).toEqual(
+      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS
+    );
+  });
 });

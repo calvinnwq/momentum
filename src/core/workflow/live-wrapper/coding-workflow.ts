@@ -61,6 +61,7 @@ export type CodingWorkflowWrapperStepConfig = {
   cwd: CodingWorkflowWrapperCwd;
   timeoutSec: number;
   envAllow: string[];
+  noMistakesRunnerProfile?: NoMistakesRunnerProfile;
   resultFile?: string;
   successSummary?: string;
   failureSummary?: string;
@@ -111,6 +112,16 @@ export type MergeCleanupPullRequestReadResult =
   | { ok: true; pullRequest: MergeCleanupPullRequestState }
   | { ok: false; error: string };
 
+export type NoMistakesRunnerProfile = {
+  interface: "axi";
+  stdin: "closed";
+  agent: NoMistakesRunnerAgent;
+  requiredEnv: string[];
+  agentPath: string;
+};
+
+type NoMistakesRunnerAgent = "claude" | "codex" | "opencode" | "rovodev";
+
 const WORKFLOW_STEP_KIND_SET: ReadonlySet<string> = new Set(WORKFLOW_STEP_KINDS);
 const WRAPPER_CONFIG_TOP_LEVEL_FIELDS: ReadonlySet<string> = new Set(["steps"]);
 const WRAPPER_STEP_CONFIG_FIELDS: ReadonlySet<string> = new Set([
@@ -126,16 +137,33 @@ const WRAPPER_STEP_CONFIG_FIELDS: ReadonlySet<string> = new Set([
   "key_learnings",
   "remaining_work",
   "commit",
+  "runner_profile",
   "merge_cleanup"
 ]);
 const WRAPPER_STEP_CONFIG_ALIASES: Record<string, string> = {
   envAllow: "env_allow",
   timeoutSec: "timeout_sec",
-  resultFile: "result_file"
+  resultFile: "result_file",
+  runnerProfile: "runner_profile"
 };
 const DEFAULT_TIMEOUT_SEC = 900;
 const OUTPUT_MAX_BYTES = 10 * 1024 * 1024;
 const GITHUB_STATE_READ_TIMEOUT_MS = 15_000;
+const NO_MISTAKES_RUNNER_AGENTS = [
+  "claude",
+  "codex",
+  "opencode",
+  "rovodev"
+] as const satisfies readonly NoMistakesRunnerAgent[];
+const REQUIRED_NO_MISTAKES_BASE_ENV = ["HOME", "PATH"] as const;
+const REQUIRED_NO_MISTAKES_AGENT_ENV: Readonly<
+  Record<NoMistakesRunnerAgent, readonly string[]>
+> = {
+  claude: [],
+  codex: ["CODEX_HOME"],
+  opencode: [],
+  rovodev: []
+};
 
 export function defaultCodingWorkflowWrapperDeps(): CodingWorkflowWrapperDeps {
   return {
@@ -214,6 +242,15 @@ export function runCodingWorkflowLiveWrapper(
   }
 
   const childEnv = buildChildEnv(deps.env, stepConfig.envAllow);
+  if (stepKind === "no-mistakes") {
+    const runnerProfilePreflight = preflightNoMistakesRunnerProfile(
+      stepConfig,
+      childEnv
+    );
+    if (!runnerProfilePreflight.ok) {
+      return processSetupFailure(deps, runnerProfilePreflight.error);
+    }
+  }
   if (stepKind === "merge-cleanup") {
     const setupPreflight = preflightGitHubMergeCleanupSetup({
       env: childEnv,
@@ -2047,6 +2084,11 @@ function parseStepConfig(
   if (!timeoutSec.ok) return timeoutSec;
   const envAllow = readOptionalStringArray(value["env_allow"], "env_allow");
   if (!envAllow.ok) return envAllow;
+  const noMistakesRunnerProfile = readNoMistakesRunnerProfile(
+    value["runner_profile"],
+    kind
+  );
+  if (!noMistakesRunnerProfile.ok) return noMistakesRunnerProfile;
   const commit = readCommit(value["commit"], kind);
   if (!commit.ok) return commit;
 
@@ -2080,6 +2122,9 @@ function parseStepConfig(
       cwd: cwd.value,
       timeoutSec: timeoutSec.value,
       envAllow: envAllow.value,
+      ...(noMistakesRunnerProfile.value !== undefined
+        ? { noMistakesRunnerProfile: noMistakesRunnerProfile.value }
+        : {}),
       ...(successSummary !== undefined ? { successSummary } : {}),
       ...(failureSummary !== undefined ? { failureSummary } : {}),
       keyChangesMade: keyChangesMade.value,
@@ -2117,6 +2162,202 @@ function findUnknownKeys(
       };
   }
   return { ok: true };
+}
+
+function preflightNoMistakesRunnerProfile(
+  config: CodingWorkflowWrapperStepConfig,
+  childEnv: NodeJS.ProcessEnv
+): { ok: true } | { ok: false; error: string } {
+  const profile = config.noMistakesRunnerProfile;
+  if (profile === undefined) {
+    return {
+      ok: false,
+      error:
+        "No no-mistakes runner profile is configured. Set wrapper config steps.no-mistakes.runner_profile with interface=axi, stdin=closed, agent, required_env, and agent_path before running no-mistakes."
+    };
+  }
+
+  const missing = profile.requiredEnv.filter((key) => {
+    const value = childEnv[key];
+    return value === undefined || value.trim().length === 0;
+  });
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      error: `No-mistakes runner profile is missing required environment: ${missing.join(", ")}. Update env_allow or the daemon environment before running no-mistakes.`
+    };
+  }
+
+  if (!isExecutableFile(profile.agentPath)) {
+    return {
+      ok: false,
+      error: `No-mistakes runner profile agent_path is not an executable file: ${profile.agentPath}. Configure steps.no-mistakes.runner_profile.agent_path to the absolute executable path used by no-mistakes for ${profile.agent}.`
+    };
+  }
+
+  const noMistakesConfig = readNoMistakesAgentConfig(childEnv);
+  if (!noMistakesConfig.ok) {
+    return noMistakesConfig;
+  }
+  if (noMistakesConfig.value.agent !== profile.agent) {
+    return {
+      ok: false,
+      error: `No-mistakes configured agent ${noMistakesConfig.value.agent} does not match runner_profile.agent ${profile.agent}. Update no-mistakes config or the Momentum runner profile before running no-mistakes.`
+    };
+  }
+  const configuredAgentPath = noMistakesConfig.value.agentPathOverrides[profile.agent];
+  if (configuredAgentPath === undefined) {
+    return {
+      ok: false,
+      error: `No-mistakes config must set agent_path_override.${profile.agent} to the executable declared by runner_profile.agent_path.`
+    };
+  }
+  if (!path.isAbsolute(configuredAgentPath)) {
+    return {
+      ok: false,
+      error: `No-mistakes agent_path_override.${profile.agent} must be an absolute path before running no-mistakes.`
+    };
+  }
+  if (path.resolve(configuredAgentPath) !== path.resolve(profile.agentPath)) {
+    return {
+      ok: false,
+      error: `No-mistakes agent_path_override.${profile.agent} does not match runner_profile.agent_path. Update no-mistakes config or the Momentum runner profile before running no-mistakes.`
+    };
+  }
+
+  return { ok: true };
+}
+
+function isExecutableFile(filePath: string): boolean {
+  try {
+    if (!fs.statSync(filePath).isFile()) return false;
+    fs.accessSync(filePath, fs.constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function readNoMistakesAgentConfig(
+  childEnv: NodeJS.ProcessEnv
+):
+  | {
+      ok: true;
+      value: {
+        agent: NoMistakesRunnerAgent;
+        agentPathOverrides: Partial<Record<NoMistakesRunnerAgent, string>>;
+      };
+    }
+  | { ok: false; error: string } {
+  const home = childEnv.HOME;
+  if (home === undefined || home.trim().length === 0) {
+    return {
+      ok: false,
+      error:
+        "No-mistakes runner profile cannot verify no-mistakes agent config because HOME is missing from the filtered child environment."
+    };
+  }
+  const configPath = path.join(home, ".no-mistakes", "config.yaml");
+  let contents = "";
+  try {
+    contents = fs.readFileSync(configPath, "utf8");
+  } catch {
+    return {
+      ok: false,
+      error:
+        "No-mistakes config is not readable from HOME/.no-mistakes/config.yaml; cannot verify configured agent and agent_path_override before running no-mistakes."
+    };
+  }
+
+  const parsed = parseNoMistakesAgentConfig(contents);
+  if (parsed.agent === undefined) {
+    return {
+      ok: false,
+      error:
+        "No-mistakes config must set an explicit supported agent before Momentum can run no-mistakes."
+    };
+  }
+  if (parsed.agent === "auto") {
+    return {
+      ok: false,
+      error:
+        "No-mistakes config agent=auto is not deterministic enough for Momentum native workflow; set agent to claude, codex, opencode, or rovodev."
+    };
+  }
+  if (!isNoMistakesRunnerAgent(parsed.agent)) {
+    return {
+      ok: false,
+      error: `No-mistakes config agent ${parsed.agent} is not supported by Momentum runner profiles. Supported agents: ${NO_MISTAKES_RUNNER_AGENTS.join(", ")}.`
+    };
+  }
+  return {
+    ok: true,
+    value: {
+      agent: parsed.agent,
+      agentPathOverrides: parsed.agentPathOverrides
+    }
+  };
+}
+
+function parseNoMistakesAgentConfig(contents: string): {
+  agent: string | undefined;
+  agentPathOverrides: Partial<Record<NoMistakesRunnerAgent, string>>;
+} {
+  const lines = contents.split(/\r?\n/u);
+  let inAgentPathOverride = false;
+  let sectionIndent = 0;
+  let agent: string | undefined;
+  const agentPathOverrides: Partial<Record<NoMistakesRunnerAgent, string>> = {};
+  for (const rawLine of lines) {
+    const withoutComment = rawLine.replace(/\s+#.*$/u, "");
+    if (withoutComment.trim().length === 0) continue;
+    const indent = leadingWhitespaceCount(withoutComment);
+    const trimmed = withoutComment.trim();
+    if (inAgentPathOverride && indent <= sectionIndent) {
+      inAgentPathOverride = false;
+    }
+    if (!inAgentPathOverride && indent === 0) {
+      const agentMatch = trimmed.match(/^agent\s*:\s*(.+)$/u);
+      if (agentMatch !== null) {
+        agent = unquoteYamlScalar(agentMatch[1]!.trim());
+        continue;
+      }
+    }
+    if (!inAgentPathOverride) {
+      const section = trimmed.match(/^agent_path_override\s*:\s*$/u);
+      if (section !== null && indent === 0) {
+        inAgentPathOverride = true;
+        sectionIndent = indent;
+      }
+      continue;
+    }
+
+    const override = trimmed.match(/^([A-Za-z0-9_-]+)\s*:\s*(.+)$/u);
+    if (override === null) continue;
+    const key = override[1]!.trim();
+    if (!isNoMistakesRunnerAgent(key)) continue;
+    agentPathOverrides[key] = unquoteYamlScalar(override[2]!.trim());
+  }
+  return { agent, agentPathOverrides };
+}
+
+function isNoMistakesRunnerAgent(value: string): value is NoMistakesRunnerAgent {
+  return (NO_MISTAKES_RUNNER_AGENTS as readonly string[]).includes(value);
+}
+
+function leadingWhitespaceCount(value: string): number {
+  const match = value.match(/^\s*/u);
+  return match?.[0].length ?? 0;
+}
+
+function unquoteYamlScalar(value: string): string {
+  if (
+    (value.startsWith('"') && value.endsWith('"')) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
+    return value.slice(1, -1);
+  }
+  return value;
 }
 
 function writeFailureResult(
@@ -2511,6 +2752,142 @@ function readMergeCleanupTarget(
   };
 }
 
+function readNoMistakesRunnerProfile(
+  value: unknown,
+  kind: WorkflowStepKind
+):
+  | { ok: true; value?: NoMistakesRunnerProfile }
+  | { ok: false; error: string } {
+  if (value === undefined || value === null) {
+    if (kind !== "no-mistakes") return { ok: true };
+    return {
+      ok: false,
+      error:
+        "Wrapper config `runner_profile` is required for the no-mistakes step."
+    };
+  }
+  if (kind !== "no-mistakes") {
+    return {
+      ok: false,
+      error:
+        "Wrapper config `runner_profile` is only supported for the no-mistakes step."
+    };
+  }
+  if (!isRecord(value)) {
+    return {
+      ok: false,
+      error: "Wrapper config `runner_profile` must be an object."
+    };
+  }
+
+  const allowed = new Set([
+    "interface",
+    "stdin",
+    "agent",
+    "required_env",
+    "agent_path"
+  ]);
+  const unknown = findUnknownKeys(
+    value,
+    allowed,
+    {},
+    "steps.no-mistakes.runner_profile"
+  );
+  if (!unknown.ok) return unknown;
+
+  if (value["interface"] !== "axi") {
+    return {
+      ok: false,
+      error: 'Wrapper config `runner_profile.interface` must be "axi".'
+    };
+  }
+  if (value["stdin"] !== "closed") {
+    return {
+      ok: false,
+      error: 'Wrapper config `runner_profile.stdin` must be "closed".'
+    };
+  }
+  const agentValue = readOptionalString(value["agent"]);
+  if (agentValue === undefined) {
+    return {
+      ok: false,
+      error:
+        "Wrapper config `runner_profile.agent` must be one of claude, codex, opencode, or rovodev."
+    };
+  }
+  if (agentValue === "auto") {
+    return {
+      ok: false,
+      error:
+        'Wrapper config `runner_profile.agent` must not be "auto"; choose claude, codex, opencode, or rovodev for deterministic execution.'
+    };
+  }
+  if (!isNoMistakesRunnerAgent(agentValue)) {
+    return {
+      ok: false,
+      error: `Wrapper config \`runner_profile.agent\` must be one of ${NO_MISTAKES_RUNNER_AGENTS.join(", ")}.`
+    };
+  }
+
+  const requiredEnv = readOptionalStringArray(
+    value["required_env"],
+    "runner_profile.required_env"
+  );
+  if (!requiredEnv.ok) return requiredEnv;
+  if (requiredEnv.value.length === 0) {
+    return {
+      ok: false,
+      error:
+        "Wrapper config `runner_profile.required_env` must list HOME and PATH, plus any selected-agent environment such as CODEX_HOME for Codex."
+    };
+  }
+  const invalidEnvName = requiredEnv.value.find((entry) => !isEnvVarName(entry));
+  if (invalidEnvName !== undefined) {
+    return {
+      ok: false,
+      error: `Wrapper config \`runner_profile.required_env\` contains invalid environment variable name "${invalidEnvName}".`
+    };
+  }
+  const requiredForAgent = [
+    ...REQUIRED_NO_MISTAKES_BASE_ENV,
+    ...REQUIRED_NO_MISTAKES_AGENT_ENV[agentValue]
+  ];
+  const missingRequired = requiredForAgent.filter(
+    (key) => !requiredEnv.value.includes(key)
+  );
+  if (missingRequired.length > 0) {
+    return {
+      ok: false,
+      error: `Wrapper config \`runner_profile.required_env\` must include ${missingRequired.join(", ")}.`
+    };
+  }
+
+  const agentPath = readOptionalString(value["agent_path"]);
+  if (agentPath === undefined) {
+    return {
+      ok: false,
+      error: "Wrapper config `runner_profile.agent_path` must be a non-empty string."
+    };
+  }
+  if (!path.isAbsolute(agentPath)) {
+    return {
+      ok: false,
+      error: "Wrapper config `runner_profile.agent_path` must be an absolute path."
+    };
+  }
+
+  return {
+    ok: true,
+    value: {
+      interface: "axi",
+      stdin: "closed",
+      agent: agentValue,
+      requiredEnv: requiredEnv.value,
+      agentPath
+    }
+  };
+}
+
 function hasParentTraversalSegment(value: string): boolean {
   return value.split(/[\\/]+/u).includes("..");
 }
@@ -2619,4 +2996,8 @@ function defaultCommitType(kind: WorkflowStepKind): CommitType {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isEnvVarName(value: string): boolean {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(value);
 }

@@ -68,6 +68,38 @@ function mergeCleanupTargetConfig(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function noMistakesRunnerProfile(overrides: Record<string, unknown> = {}) {
+  return {
+    interface: "axi",
+    stdin: "closed",
+    agent: "codex",
+    required_env: ["HOME", "CODEX_HOME", "PATH"],
+    agent_path: process.execPath,
+    ...overrides
+  };
+}
+
+function makeNoMistakesHome(
+  parentDir: string,
+  agentPath = process.execPath,
+  agent = "codex"
+): string {
+  const home = path.join(parentDir, "home");
+  const configPath = path.join(home, ".no-mistakes", "config.yaml");
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.writeFileSync(
+    configPath,
+    [
+      `agent: ${agent}`,
+      "agent_path_override:",
+      `  ${agent}: ${agentPath}`,
+      ""
+    ].join("\n"),
+    "utf8"
+  );
+  return home;
+}
+
 function readResult(resultPath: string) {
   const parsed = parseRunnerResult(fs.readFileSync(resultPath, "utf8"));
   expect(parsed.ok).toBe(true);
@@ -101,6 +133,9 @@ describe("NGX-499 coding workflow live wrapper profile", () => {
     ]);
     expect(parsed.profile.wrappers.get("merge-cleanup")?.envAllow).toEqual(
       expect.arrayContaining(["GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR"])
+    );
+    expect(parsed.profile.wrappers.get("no-mistakes")?.envAllow).toEqual(
+      expect.arrayContaining(["HOME", "CODEX_HOME", "PATH"])
     );
   });
 
@@ -678,6 +713,9 @@ describe("loadCodingWorkflowWrapperConfig", () => {
                 cwd: "repo",
                 timeout_sec: 30,
                 env_allow: ["PATH"],
+                ...(stepKind === "no-mistakes"
+                  ? { runner_profile: noMistakesRunnerProfile() }
+                  : {}),
                 commit: { type: "test", subject: `validate ${stepKind}` }
               }
             }
@@ -688,6 +726,464 @@ describe("loadCodingWorkflowWrapperConfig", () => {
       expect(loaded.config.steps[stepKind as keyof typeof loaded.config.steps]).toBeDefined();
     }
   );
+
+  it("requires an explicit no-mistakes runner profile", () => {
+    const loaded = loadCodingWorkflowWrapperConfig({
+      env: { [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: "/config.json" },
+      readFile: () =>
+        JSON.stringify({
+          steps: {
+            "no-mistakes": {
+              command: "/bin/sh",
+              env_allow: ["PATH", "HOME", "CODEX_HOME"]
+            }
+          }
+        })
+    });
+
+    expect(loaded.ok).toBe(false);
+    if (loaded.ok) return;
+    expect(loaded.error).toContain("`runner_profile` is required");
+  });
+
+  it("requires Codex no-mistakes runner profiles to include CODEX_HOME", () => {
+    const loaded = loadCodingWorkflowWrapperConfig({
+      env: { [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: "/config.json" },
+      readFile: () =>
+        JSON.stringify({
+          steps: {
+            "no-mistakes": {
+              command: "/bin/sh",
+              env_allow: ["PATH", "HOME"],
+              runner_profile: noMistakesRunnerProfile({
+                required_env: ["PATH", "HOME"]
+              })
+            }
+          }
+        })
+    });
+
+    expect(loaded.ok).toBe(false);
+    if (loaded.ok) return;
+    expect(loaded.error).toContain("CODEX_HOME");
+  });
+
+  it("accepts a non-Codex no-mistakes runner profile without CODEX_HOME", () => {
+    const loaded = loadCodingWorkflowWrapperConfig({
+      env: { [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: "/config.json" },
+      readFile: () =>
+        JSON.stringify({
+          steps: {
+            "no-mistakes": {
+              command: "/bin/sh",
+              env_allow: ["PATH", "HOME"],
+              runner_profile: noMistakesRunnerProfile({
+                agent: "claude",
+                required_env: ["PATH", "HOME"]
+              })
+            }
+          }
+        })
+    });
+
+    expect(loaded.ok).toBe(true);
+  });
+
+  it("rejects auto no-mistakes runner profiles", () => {
+    const loaded = loadCodingWorkflowWrapperConfig({
+      env: { [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: "/config.json" },
+      readFile: () =>
+        JSON.stringify({
+          steps: {
+            "no-mistakes": {
+              command: "/bin/sh",
+              env_allow: ["PATH", "HOME"],
+              runner_profile: noMistakesRunnerProfile({
+                agent: "auto",
+                required_env: ["PATH", "HOME"]
+              })
+            }
+          }
+        })
+    });
+
+    expect(loaded.ok).toBe(false);
+    if (loaded.ok) return;
+    expect(loaded.error).toContain("must not be \"auto\"");
+  });
+
+  it("rejects unsupported no-mistakes runner profile agents", () => {
+    const loaded = loadCodingWorkflowWrapperConfig({
+      env: { [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: "/config.json" },
+      readFile: () =>
+        JSON.stringify({
+          steps: {
+            "no-mistakes": {
+              command: "/bin/sh",
+              env_allow: ["PATH", "HOME"],
+              runner_profile: noMistakesRunnerProfile({
+                agent: "gemini",
+                required_env: ["PATH", "HOME"]
+              })
+            }
+          }
+        })
+    });
+
+    expect(loaded.ok).toBe(false);
+    if (loaded.ok) return;
+    expect(loaded.error).toContain("claude, codex, opencode, rovodev");
+  });
+
+  it("requires no-mistakes runner profiles to use an absolute agent path", () => {
+    const loaded = loadCodingWorkflowWrapperConfig({
+      env: { [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: "/config.json" },
+      readFile: () =>
+        JSON.stringify({
+          steps: {
+            "no-mistakes": {
+              command: "/bin/sh",
+              env_allow: ["PATH", "HOME", "CODEX_HOME"],
+              runner_profile: noMistakesRunnerProfile({
+                agent_path: "codex-runner"
+              })
+            }
+          }
+        })
+    });
+
+    expect(loaded.ok).toBe(false);
+    if (loaded.ok) return;
+    expect(loaded.error).toContain("absolute path");
+  });
+
+  it("fails closed before spawning no-mistakes when required runner env is absent", () => {
+    const dir = makeTempDir();
+    const repo = path.join(dir, "repo");
+    const iteration = path.join(dir, "run");
+    const resultPath = path.join(iteration, "result.json");
+    const sentinelPath = path.join(dir, "no-mistakes-ran");
+    fs.mkdirSync(repo);
+    const configPath = path.join(dir, "wrapper-config.json");
+    writeJson(configPath, {
+      steps: {
+        "no-mistakes": {
+          command: "/bin/sh",
+          args: ["-c", `touch ${JSON.stringify(sentinelPath)}`],
+          cwd: "repo",
+          timeout_sec: 30,
+          env_allow: ["PATH", "HOME"],
+          runner_profile: noMistakesRunnerProfile(),
+          commit: { type: "test", subject: "run no mistakes" }
+        }
+      }
+    });
+
+    const outcome = runCodingWorkflowLiveWrapper(
+      deps({
+        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_REPO_PATH: repo,
+        MOMENTUM_ITERATION_DIR: iteration,
+        MOMENTUM_RESULT_PATH: resultPath,
+        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
+        HOME: makeNoMistakesHome(dir),
+        PATH: process.env.PATH
+      })
+    );
+
+    expect(outcome.exitCode).toBe(1);
+    expect(outcome.success).toBe(false);
+    expect(outcome.summary).toContain("CODEX_HOME");
+    expect(fs.existsSync(sentinelPath)).toBe(false);
+    expect(fs.existsSync(resultPath)).toBe(false);
+  });
+
+  it("fails closed before spawning no-mistakes when the agent path is not executable", () => {
+    const dir = makeTempDir();
+    const repo = path.join(dir, "repo");
+    const iteration = path.join(dir, "run");
+    const resultPath = path.join(iteration, "result.json");
+    const sentinelPath = path.join(dir, "no-mistakes-ran");
+    fs.mkdirSync(repo);
+    const configPath = path.join(dir, "wrapper-config.json");
+    writeJson(configPath, {
+      steps: {
+        "no-mistakes": {
+          command: "/bin/sh",
+          args: ["-c", `touch ${JSON.stringify(sentinelPath)}`],
+          cwd: "repo",
+          timeout_sec: 30,
+          env_allow: ["PATH", "HOME", "CODEX_HOME"],
+          runner_profile: noMistakesRunnerProfile({
+            agent_path: path.join(dir, "missing-agent-runner")
+          }),
+          commit: { type: "test", subject: "run no mistakes" }
+        }
+      }
+    });
+
+    const outcome = runCodingWorkflowLiveWrapper(
+      deps({
+        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_REPO_PATH: repo,
+        MOMENTUM_ITERATION_DIR: iteration,
+        MOMENTUM_RESULT_PATH: resultPath,
+        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
+        HOME: makeNoMistakesHome(dir),
+        CODEX_HOME: "/tmp/codex-home",
+        PATH: process.env.PATH
+      })
+    );
+
+    expect(outcome.exitCode).toBe(1);
+    expect(outcome.success).toBe(false);
+    expect(outcome.summary).toContain("agent_path is not an executable file");
+    expect(fs.existsSync(sentinelPath)).toBe(false);
+    expect(fs.existsSync(resultPath)).toBe(false);
+  });
+
+  it("fails closed before spawning no-mistakes when the agent path is a directory", () => {
+    const dir = makeTempDir();
+    const repo = path.join(dir, "repo");
+    const iteration = path.join(dir, "run");
+    const resultPath = path.join(iteration, "result.json");
+    const sentinelPath = path.join(dir, "no-mistakes-ran");
+    fs.mkdirSync(repo);
+    const configPath = path.join(dir, "wrapper-config.json");
+    writeJson(configPath, {
+      steps: {
+        "no-mistakes": {
+          command: "/bin/sh",
+          args: ["-c", `touch ${JSON.stringify(sentinelPath)}`],
+          cwd: "repo",
+          timeout_sec: 30,
+          env_allow: ["PATH", "HOME", "CODEX_HOME"],
+          runner_profile: noMistakesRunnerProfile({
+            agent_path: dir
+          }),
+          commit: { type: "test", subject: "run no mistakes" }
+        }
+      }
+    });
+
+    const outcome = runCodingWorkflowLiveWrapper(
+      deps({
+        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_REPO_PATH: repo,
+        MOMENTUM_ITERATION_DIR: iteration,
+        MOMENTUM_RESULT_PATH: resultPath,
+        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
+        HOME: makeNoMistakesHome(dir, dir),
+        CODEX_HOME: "/tmp/codex-home",
+        PATH: process.env.PATH
+      })
+    );
+
+    expect(outcome.exitCode).toBe(1);
+    expect(outcome.success).toBe(false);
+    expect(outcome.summary).toContain("agent_path is not an executable file");
+    expect(fs.existsSync(sentinelPath)).toBe(false);
+    expect(fs.existsSync(resultPath)).toBe(false);
+  });
+
+  it("fails closed before spawning no-mistakes when no-mistakes config selects another agent", () => {
+    const dir = makeTempDir();
+    const repo = path.join(dir, "repo");
+    const iteration = path.join(dir, "run");
+    const resultPath = path.join(iteration, "result.json");
+    const sentinelPath = path.join(dir, "no-mistakes-ran");
+    fs.mkdirSync(repo);
+    const configPath = path.join(dir, "wrapper-config.json");
+    writeJson(configPath, {
+      steps: {
+        "no-mistakes": {
+          command: "/bin/sh",
+          args: ["-c", `touch ${JSON.stringify(sentinelPath)}`],
+          cwd: "repo",
+          timeout_sec: 30,
+          env_allow: ["PATH", "HOME", "CODEX_HOME"],
+          runner_profile: noMistakesRunnerProfile(),
+          commit: { type: "test", subject: "run no mistakes" }
+        }
+      }
+    });
+
+    const outcome = runCodingWorkflowLiveWrapper(
+      deps({
+        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_REPO_PATH: repo,
+        MOMENTUM_ITERATION_DIR: iteration,
+        MOMENTUM_RESULT_PATH: resultPath,
+        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
+        HOME: makeNoMistakesHome(dir, process.execPath, "claude"),
+        CODEX_HOME: "/tmp/codex-home",
+        PATH: process.env.PATH
+      })
+    );
+
+    expect(outcome.exitCode).toBe(1);
+    expect(outcome.success).toBe(false);
+    expect(outcome.summary).toContain("configured agent claude does not match");
+    expect(fs.existsSync(sentinelPath)).toBe(false);
+    expect(fs.existsSync(resultPath)).toBe(false);
+  });
+
+  it("fails closed when no-mistakes agent config only appears in nested YAML", () => {
+    const dir = makeTempDir();
+    const repo = path.join(dir, "repo");
+    const iteration = path.join(dir, "run");
+    const resultPath = path.join(iteration, "result.json");
+    const sentinelPath = path.join(dir, "no-mistakes-ran");
+    const home = path.join(dir, "home");
+    const noMistakesConfigPath = path.join(home, ".no-mistakes", "config.yaml");
+    fs.mkdirSync(repo);
+    fs.mkdirSync(path.dirname(noMistakesConfigPath), { recursive: true });
+    fs.writeFileSync(
+      noMistakesConfigPath,
+      [
+        "nested:",
+        "  agent: codex",
+        "  agent_path_override:",
+        `    codex: ${process.execPath}`,
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+    const configPath = path.join(dir, "wrapper-config.json");
+    writeJson(configPath, {
+      steps: {
+        "no-mistakes": {
+          command: "/bin/sh",
+          args: ["-c", `touch ${JSON.stringify(sentinelPath)}`],
+          cwd: "repo",
+          timeout_sec: 30,
+          env_allow: ["PATH", "HOME", "CODEX_HOME"],
+          runner_profile: noMistakesRunnerProfile(),
+          commit: { type: "test", subject: "run no mistakes" }
+        }
+      }
+    });
+
+    const outcome = runCodingWorkflowLiveWrapper(
+      deps({
+        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_REPO_PATH: repo,
+        MOMENTUM_ITERATION_DIR: iteration,
+        MOMENTUM_RESULT_PATH: resultPath,
+        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
+        HOME: home,
+        CODEX_HOME: "/tmp/codex-home",
+        PATH: process.env.PATH
+      })
+    );
+
+    expect(outcome.exitCode).toBe(1);
+    expect(outcome.success).toBe(false);
+    expect(outcome.summary).toContain("must set an explicit supported agent");
+    expect(fs.existsSync(sentinelPath)).toBe(false);
+    expect(fs.existsSync(resultPath)).toBe(false);
+  });
+
+  it("fails closed when no-mistakes agent path override only appears in nested YAML", () => {
+    const dir = makeTempDir();
+    const repo = path.join(dir, "repo");
+    const iteration = path.join(dir, "run");
+    const resultPath = path.join(iteration, "result.json");
+    const sentinelPath = path.join(dir, "no-mistakes-ran");
+    const home = path.join(dir, "home");
+    const noMistakesConfigPath = path.join(home, ".no-mistakes", "config.yaml");
+    fs.mkdirSync(repo);
+    fs.mkdirSync(path.dirname(noMistakesConfigPath), { recursive: true });
+    fs.writeFileSync(
+      noMistakesConfigPath,
+      [
+        "agent: codex",
+        "nested:",
+        "  agent_path_override:",
+        `    codex: ${process.execPath}`,
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+    const configPath = path.join(dir, "wrapper-config.json");
+    writeJson(configPath, {
+      steps: {
+        "no-mistakes": {
+          command: "/bin/sh",
+          args: ["-c", `touch ${JSON.stringify(sentinelPath)}`],
+          cwd: "repo",
+          timeout_sec: 30,
+          env_allow: ["PATH", "HOME", "CODEX_HOME"],
+          runner_profile: noMistakesRunnerProfile(),
+          commit: { type: "test", subject: "run no mistakes" }
+        }
+      }
+    });
+
+    const outcome = runCodingWorkflowLiveWrapper(
+      deps({
+        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_REPO_PATH: repo,
+        MOMENTUM_ITERATION_DIR: iteration,
+        MOMENTUM_RESULT_PATH: resultPath,
+        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
+        HOME: home,
+        CODEX_HOME: "/tmp/codex-home",
+        PATH: process.env.PATH
+      })
+    );
+
+    expect(outcome.exitCode).toBe(1);
+    expect(outcome.success).toBe(false);
+    expect(outcome.summary).toContain("agent_path_override.codex");
+    expect(fs.existsSync(sentinelPath)).toBe(false);
+    expect(fs.existsSync(resultPath)).toBe(false);
+  });
+
+  it("fails closed before spawning no-mistakes when no-mistakes config points the agent elsewhere", () => {
+    const dir = makeTempDir();
+    const repo = path.join(dir, "repo");
+    const iteration = path.join(dir, "run");
+    const resultPath = path.join(iteration, "result.json");
+    const sentinelPath = path.join(dir, "no-mistakes-ran");
+    const otherWrapper = path.join(dir, "other-codex-runner");
+    fs.mkdirSync(repo);
+    fs.writeFileSync(otherWrapper, "#!/bin/sh\nexit 0\n", "utf8");
+    fs.chmodSync(otherWrapper, 0o755);
+    const configPath = path.join(dir, "wrapper-config.json");
+    writeJson(configPath, {
+      steps: {
+        "no-mistakes": {
+          command: "/bin/sh",
+          args: ["-c", `touch ${JSON.stringify(sentinelPath)}`],
+          cwd: "repo",
+          timeout_sec: 30,
+          env_allow: ["PATH", "HOME", "CODEX_HOME"],
+          runner_profile: noMistakesRunnerProfile(),
+          commit: { type: "test", subject: "run no mistakes" }
+        }
+      }
+    });
+
+    const outcome = runCodingWorkflowLiveWrapper(
+      deps({
+        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_REPO_PATH: repo,
+        MOMENTUM_ITERATION_DIR: iteration,
+        MOMENTUM_RESULT_PATH: resultPath,
+        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
+        HOME: makeNoMistakesHome(dir, otherWrapper),
+        CODEX_HOME: "/tmp/codex-home",
+        PATH: process.env.PATH
+      })
+    );
+
+    expect(outcome.exitCode).toBe(1);
+    expect(outcome.success).toBe(false);
+    expect(outcome.summary).toContain("agent_path_override.codex");
+    expect(fs.existsSync(sentinelPath)).toBe(false);
+    expect(fs.existsSync(resultPath)).toBe(false);
+  });
 
   it("rejects malformed env_allow values", () => {
     const loaded = loadCodingWorkflowWrapperConfig({
@@ -840,6 +1336,108 @@ describe("loadCodingWorkflowWrapperConfig", () => {
 });
 
 describe("runCodingWorkflowLiveWrapper", () => {
+  it("runs a non-Codex no-mistakes runner profile with matching no-mistakes config", () => {
+    const dir = makeTempDir();
+    const repo = path.join(dir, "repo");
+    const iteration = path.join(dir, "run");
+    const resultPath = path.join(iteration, "result.json");
+    fs.mkdirSync(repo);
+    const configPath = path.join(dir, "wrapper-config.json");
+    writeJson(configPath, {
+      steps: {
+        "no-mistakes": {
+          command: "/bin/sh",
+          args: ["-c", "test \"$HOME\" != \"\" && test \"$PATH\" != \"\""],
+          cwd: "repo",
+          timeout_sec: 30,
+          env_allow: ["PATH", "HOME"],
+          runner_profile: noMistakesRunnerProfile({
+            agent: "claude",
+            required_env: ["HOME", "PATH"],
+            agent_path: process.execPath
+          }),
+          success_summary: "non-Codex no-mistakes profile passed",
+          commit: { type: "test", subject: "run no mistakes" }
+        }
+      }
+    });
+
+    const outcome = runCodingWorkflowLiveWrapper(
+      deps({
+        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_REPO_PATH: repo,
+        MOMENTUM_ITERATION_DIR: iteration,
+        MOMENTUM_RESULT_PATH: resultPath,
+        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
+        HOME: makeNoMistakesHome(dir, process.execPath, "claude"),
+        PATH: process.env.PATH
+      })
+    );
+
+    expect(outcome).toMatchObject({
+      exitCode: 0,
+      success: true,
+      summary: "non-Codex no-mistakes profile passed"
+    });
+    expect(readResult(resultPath).success).toBe(true);
+  });
+
+  it("accepts no-mistakes config when agent appears after agent_path_override", () => {
+    const dir = makeTempDir();
+    const repo = path.join(dir, "repo");
+    const iteration = path.join(dir, "run");
+    const resultPath = path.join(iteration, "result.json");
+    const home = path.join(dir, "home");
+    const noMistakesConfigPath = path.join(home, ".no-mistakes", "config.yaml");
+    fs.mkdirSync(repo);
+    fs.mkdirSync(path.dirname(noMistakesConfigPath), { recursive: true });
+    fs.writeFileSync(
+      noMistakesConfigPath,
+      [
+        "agent_path_override:",
+        `  codex: ${process.execPath}`,
+        "agent: codex",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+    const configPath = path.join(dir, "wrapper-config.json");
+    writeJson(configPath, {
+      steps: {
+        "no-mistakes": {
+          command: "/bin/sh",
+          args: ["-c", "test \"$CODEX_HOME\" != \"\""],
+          cwd: "repo",
+          timeout_sec: 30,
+          env_allow: ["PATH", "HOME", "CODEX_HOME"],
+          runner_profile: noMistakesRunnerProfile(),
+          success_summary: "reordered no-mistakes config passed",
+          commit: { type: "test", subject: "run no mistakes" }
+        }
+      }
+    });
+
+    const outcome = runCodingWorkflowLiveWrapper(
+      deps({
+        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_REPO_PATH: repo,
+        MOMENTUM_ITERATION_DIR: iteration,
+        MOMENTUM_RESULT_PATH: resultPath,
+        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
+        HOME: home,
+        CODEX_HOME: "/tmp/codex-home",
+        PATH: process.env.PATH
+      })
+    );
+
+    expect(outcome).toMatchObject({
+      exitCode: 0,
+      success: true,
+      summary: "reordered no-mistakes config passed"
+    });
+    expect(readResult(resultPath).success).toBe(true);
+  });
+
   it("runs the configured command and writes a successful RunnerResult", () => {
     const dir = makeTempDir();
     const repo = path.join(dir, "repo");
@@ -1121,7 +1719,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
             args: ["-c", `printf '%s\\n' ${JSON.stringify(stdout)}; exit 1`],
             cwd: "repo",
             timeout_sec: 30,
-            env_allow: ["PATH", "GH_TOKEN"],
+            env_allow: ["PATH", "HOME", "CODEX_HOME", "GH_TOKEN"],
+            runner_profile: noMistakesRunnerProfile(),
             commit: { type: "test", subject: "run no mistakes" }
           }
         }
@@ -1135,6 +1734,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
           MOMENTUM_RESULT_PATH: resultPath,
           [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
           GH_TOKEN: "test-token",
+          HOME: makeNoMistakesHome(dir),
+          CODEX_HOME: "/tmp/codex-home",
           PATH: process.env.PATH
         })
       );
@@ -1632,7 +2233,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
             args: ["-c", `printf '%s\\n' ${JSON.stringify(stdout)}; exit 1`],
             cwd: "repo",
             timeout_sec: 30,
-            env_allow: ["PATH", "GH_TOKEN"],
+            env_allow: ["PATH", "HOME", "CODEX_HOME", "GH_TOKEN"],
+            runner_profile: noMistakesRunnerProfile(),
             key_changes_made: ["Verified no-mistakes readiness."],
             key_learnings: ["no-mistakes keeps monitoring open PRs."],
             commit: { type: "test", subject: "run no mistakes" }
@@ -1648,6 +2250,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
           MOMENTUM_RESULT_PATH: resultPath,
           [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
           GH_TOKEN: "test-token",
+          HOME: makeNoMistakesHome(dir),
+          CODEX_HOME: "/tmp/codex-home",
           PATH: process.env.PATH
         })
       );
@@ -3749,7 +4353,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
           ],
           cwd: "repo",
           timeout_sec: 30,
-          env_allow: ["PATH"],
+          env_allow: ["PATH", "HOME", "CODEX_HOME"],
+          runner_profile: noMistakesRunnerProfile(),
           commit: { type: "test", subject: "run no mistakes" }
         }
       }
@@ -3762,6 +4367,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         MOMENTUM_ITERATION_DIR: iteration,
         MOMENTUM_RESULT_PATH: resultPath,
         [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
+        HOME: makeNoMistakesHome(dir),
+        CODEX_HOME: "/tmp/codex-home",
         PATH: process.env.PATH
       })
     );
@@ -3857,7 +4464,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
           ],
           cwd: "repo",
           timeout_sec: 1,
-          env_allow: ["PATH"],
+          env_allow: ["PATH", "HOME", "CODEX_HOME"],
+          runner_profile: noMistakesRunnerProfile(),
           commit: { type: "test", subject: "verify no mistakes" }
         }
       }
@@ -3871,6 +4479,8 @@ describe("runCodingWorkflowLiveWrapper", () => {
         MOMENTUM_ITERATION_DIR: iteration,
         MOMENTUM_RESULT_PATH: resultPath,
         [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
+        HOME: makeNoMistakesHome(dir),
+        CODEX_HOME: "/tmp/codex-home",
         PATH: process.env.PATH
       },
       stdout: () => {},

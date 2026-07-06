@@ -131,8 +131,22 @@ const WRAPPER_CONFIG_STEP_KIND_SET: ReadonlySet<string> = new Set(
 const WRAPPER_CONFIG_CAMEL_CASE_KEYS: Readonly<Record<string, string>> = {
   envAllow: "env_allow",
   resultFile: "result_file",
-  timeoutSec: "timeout_sec"
+  timeoutSec: "timeout_sec",
+  runnerProfile: "runner_profile"
 };
+const NO_MISTAKES_RUNNER_PROFILE_KEYS: ReadonlySet<string> = new Set([
+  "interface",
+  "stdin",
+  "agent",
+  "required_env",
+  "agent_path"
+]);
+const NO_MISTAKES_RUNNER_AGENTS = new Set([
+  "claude",
+  "codex",
+  "opencode",
+  "rovodev"
+]);
 
 export function preflightCodingWorkflowBuiltInDefinition(
   key: string,
@@ -590,6 +604,93 @@ function locateWrapperConfigFieldFailure(
         key: "timeout_sec",
         recommendedAction: `Set ${basePath}.timeout_sec to a positive integer number of seconds.`
       };
+    }
+
+    if (stepKind === "no-mistakes") {
+      const rawProfile = rawStep["runner_profile"];
+      if (rawProfile === undefined) {
+        return {
+          path: `${basePath}.runner_profile`,
+          key: "runner_profile",
+          recommendedAction:
+            "Add a no-mistakes runner_profile with interface=\"axi\", stdin=\"closed\", agent, required_env, and agent_path."
+        };
+      }
+      if (!isRecord(rawProfile)) {
+        return {
+          path: `${basePath}.runner_profile`,
+          key: "runner_profile",
+          recommendedAction: `Set ${basePath}.runner_profile to an object.`
+        };
+      }
+      for (const key of Object.keys(rawProfile)) {
+        if (NO_MISTAKES_RUNNER_PROFILE_KEYS.has(key)) continue;
+        return {
+          path: `${basePath}.runner_profile.${key}`,
+          key,
+          recommendedAction: `Remove ${basePath}.runner_profile.${key} or replace it with one of: ${[
+            ...NO_MISTAKES_RUNNER_PROFILE_KEYS
+          ].join(", ")}.`
+        };
+      }
+      if (rawProfile["interface"] !== "axi") {
+        return {
+          path: `${basePath}.runner_profile.interface`,
+          key: "interface",
+          recommendedAction: `Set ${basePath}.runner_profile.interface to "axi".`
+        };
+      }
+      if (rawProfile["stdin"] !== "closed") {
+        return {
+          path: `${basePath}.runner_profile.stdin`,
+          key: "stdin",
+          recommendedAction: `Set ${basePath}.runner_profile.stdin to "closed".`
+        };
+      }
+      if (
+        !isNonBlankString(rawProfile["agent"]) ||
+        !NO_MISTAKES_RUNNER_AGENTS.has(rawProfile["agent"])
+      ) {
+        return {
+          path: `${basePath}.runner_profile.agent`,
+          key: "agent",
+          recommendedAction: `Set ${basePath}.runner_profile.agent to one of claude, codex, opencode, or rovodev.`
+        };
+      }
+      if (!isStringArray(rawProfile["required_env"])) {
+        return {
+          path: `${basePath}.runner_profile.required_env`,
+          key: "required_env",
+          recommendedAction: `Set ${basePath}.runner_profile.required_env to an array including HOME and PATH, plus selected-agent environment such as CODEX_HOME for Codex.`
+        };
+      }
+      const requiredEnv = rawProfile["required_env"];
+      const requiredRunnerEnv =
+        rawProfile["agent"] === "codex"
+          ? ["HOME", "PATH", "CODEX_HOME"]
+          : ["HOME", "PATH"];
+      for (const required of requiredRunnerEnv) {
+        if (requiredEnv.includes(required)) continue;
+        return {
+          path: `${basePath}.runner_profile.required_env`,
+          key: "required_env",
+          recommendedAction: `Add "${required}" to ${basePath}.runner_profile.required_env.`
+        };
+      }
+      if (!isNonBlankString(rawProfile["agent_path"])) {
+        return {
+          path: `${basePath}.runner_profile.agent_path`,
+          key: "agent_path",
+          recommendedAction: `Set ${basePath}.runner_profile.agent_path to the configured absolute agent executable path.`
+        };
+      }
+      if (!path.isAbsolute(rawProfile["agent_path"])) {
+        return {
+          path: `${basePath}.runner_profile.agent_path`,
+          key: "agent_path",
+          recommendedAction: `Set ${basePath}.runner_profile.agent_path to an absolute executable path.`
+        };
+      }
     }
   }
 
