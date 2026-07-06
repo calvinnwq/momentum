@@ -2073,6 +2073,97 @@ describe("momentum intent apply policy gating", () => {
     expect(payload.externalApply.reconcile.status).toBe("success");
   });
 
+  it("renders already-applied external apply text as no tracker write", async () => {
+    const dataDir = makeTempDir();
+    const repo = makeRepoWithPolicy(
+      `---\nintent_apply_policy: external_apply_allowed\n---\n`
+    );
+    const intentId = seedIntent(dataDir, {
+      adapterKind: "linear",
+      targetExternalId: "linear_issue_text_replay",
+      intentType: "source_satisfied",
+      reason: "satisfied",
+      idempotencyKey:
+        "linear:ext-policy-text-replay:source_satisfied:goal-policy"
+    });
+
+    const applyCalls: Array<{ idempotencyMarker: string }> = [];
+    const result = await runWithDeps(
+      [
+        "intent",
+        "apply",
+        intentId,
+        "--reason",
+        "operator decision",
+        "--external-apply",
+        "--repo",
+        repo,
+        "--data-dir",
+        dataDir
+      ],
+      { LINEAR_API_KEY: "test-key" },
+      {
+        buildLinearExternalUpdateClient: () => ({
+          apply: async (clientInput) => {
+            applyCalls.push({
+              idempotencyMarker: clientInput.preview.idempotencyMarker
+            });
+            return {
+              ok: true as const,
+              alreadyApplied: true,
+              issue: {
+                id: "linear_issue_text_replay",
+                key: "NGX-TEXT",
+                url: "https://linear.app/example/issue/NGX-TEXT"
+              },
+              comment: {
+                id: "linear_comment_text_replay",
+                url: "https://linear.app/example/issue/NGX-TEXT#comment-replay"
+              },
+              status: {
+                transitioned: false,
+                previousStateId: null,
+                previousStateName: null,
+                nextStateId: null,
+                nextStateName: null
+              },
+              idempotencyMarker: clientInput.preview.idempotencyMarker
+            };
+          }
+        }),
+        buildLinearIssueRefreshClient: () => ({
+          refresh: async () => ({
+            ok: true as const,
+            issue: {
+              id: "linear_issue_text_replay",
+              identifier: "NGX-TEXT",
+              title: "External apply replay issue",
+              url: "https://linear.app/example/issue/NGX-TEXT",
+              updatedAt: "2026-05-21T00:00:00.000Z",
+              state: { id: "state-done", name: "Done" }
+            },
+            comments: [
+              {
+                id: "linear_comment_text_replay",
+                body: `Applied ${applyCalls[0]?.idempotencyMarker ?? ""}`,
+                url: "https://linear.app/example/issue/NGX-TEXT#comment-replay"
+              }
+            ]
+          })
+        })
+      }
+    );
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(
+      "External apply was already present; no tracker write was performed."
+    );
+    expect(result.stdout).toContain("External apply: already present");
+    expect(result.stdout).not.toContain("External apply: performed");
+    expect(result.stdout).toContain("Comment: linear_comment_text_replay");
+    expect(result.stdout).toContain("(replay)");
+  });
+
   it("surfaces write_rejected from the linear client and leaves the intent pending", async () => {
     const dataDir = makeTempDir();
     const repo = makeRepoWithPolicy(
