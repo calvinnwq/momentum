@@ -94,7 +94,7 @@ family as a tail-owned preflight -> apply -> reconcile lifecycle. Bounded
 `daemon start` proves the run's issue scope, `LINEAR_API_KEY`, repo
 `intent_apply_policy: external_apply_allowed`, a matching Linear source item, and
 either one pending Linear `status_update` intent or enough unique issue-scope /
-source evidence to seed the expected pending `status_update` intent
+source evidence to seed the expected pending `status_update` intent with a `Done` payload
 deterministically. The resulting intent must have a valid one-of `state` /
 `stateId` payload and the stable idempotency marker before it reuses the same
 policy-gated external-apply write path as `intent apply --external-apply`.
@@ -295,7 +295,7 @@ must prove explicit GitHub auth in the live-wrapper environment (`GH_TOKEN`,
 state showing the target is open, non-draft, mergeable, and still at the expected
 head. If GitHub shows the PR is already merged or the cleanup branch is already
 deleted, the wrapper stops before mutation and routes operators to evidence-backed
-reconciliation instead of a blind rerun. The built-in `linear-refresh` step requires the run issue scope, a matching source item, one pending Linear `status_update` intent or deterministic seed evidence for the expected intent, a valid one-of `state` / `stateId` payload, `intent_apply_policy: external_apply_allowed`, and `LINEAR_API_KEY` in the daemon/supervisor process environment.
+reconciliation instead of a blind rerun. The built-in `linear-refresh` step requires the run issue scope, a matching source item, one pending Linear `status_update` intent or deterministic seed evidence for the expected `Done` intent, a valid one-of `state` / `stateId` payload, `intent_apply_policy: external_apply_allowed`, and `LINEAR_API_KEY` in the daemon/supervisor process environment.
 Missing auth, issue scope, target, source evidence, deterministic intent evidence, or missing valid payload fails closed with operator-actionable recovery evidence;
 Momentum does not store these credentials.
 
