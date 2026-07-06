@@ -7,15 +7,18 @@
  * `MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG`, selects the current
  * `MOMENTUM_STEP_KIND`, validates the run-local config before spawning,
  * executes the configured child command, and writes a normalized `RunnerResult`
- * to `MOMENTUM_RESULT_PATH`. Child commands report by
- * exit status; this seam synthesizes durable success/failure evidence so a
- * command failure is an ordinary failed step result instead of a stranded
- * process-level recovery case, except for explicitly classified no-mistakes
- * lifecycle gaps and terminal-success evidence.
+ * to `MOMENTUM_RESULT_PATH`. The no-mistakes step additionally requires an
+ * explicit selected-agent runner profile and validates the filtered environment,
+ * executable path, and `HOME/.no-mistakes/config.yaml` YAML config before spawn.
+ * Child commands report by exit status; this seam synthesizes durable
+ * success/failure evidence so a command failure is an ordinary failed step
+ * result instead of a stranded process-level recovery case, except for explicitly
+ * classified no-mistakes lifecycle gaps and terminal-success evidence.
  */
 import { execFileSync, type SpawnSyncReturns } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { isMap, isScalar, parseDocument, type YAMLMap } from "yaml";
 
 import { runProcessGroupSync } from "../../../adapters/live-step-wrapper.js";
 import { normalizeRunnerResult } from "../../executors/runner/result.js";
@@ -61,6 +64,7 @@ export type CodingWorkflowWrapperStepConfig = {
   cwd: CodingWorkflowWrapperCwd;
   timeoutSec: number;
   envAllow: string[];
+  noMistakesRunnerProfile?: NoMistakesRunnerProfile;
   resultFile?: string;
   successSummary?: string;
   failureSummary?: string;
@@ -111,6 +115,16 @@ export type MergeCleanupPullRequestReadResult =
   | { ok: true; pullRequest: MergeCleanupPullRequestState }
   | { ok: false; error: string };
 
+export type NoMistakesRunnerProfile = {
+  interface: "axi";
+  stdin: "closed";
+  agent: NoMistakesRunnerAgent;
+  requiredEnv: string[];
+  agentPath: string;
+};
+
+type NoMistakesRunnerAgent = "claude" | "codex" | "opencode" | "rovodev";
+
 const WORKFLOW_STEP_KIND_SET: ReadonlySet<string> = new Set(WORKFLOW_STEP_KINDS);
 const WRAPPER_CONFIG_TOP_LEVEL_FIELDS: ReadonlySet<string> = new Set(["steps"]);
 const WRAPPER_STEP_CONFIG_FIELDS: ReadonlySet<string> = new Set([
@@ -126,16 +140,33 @@ const WRAPPER_STEP_CONFIG_FIELDS: ReadonlySet<string> = new Set([
   "key_learnings",
   "remaining_work",
   "commit",
+  "runner_profile",
   "merge_cleanup"
 ]);
 const WRAPPER_STEP_CONFIG_ALIASES: Record<string, string> = {
   envAllow: "env_allow",
   timeoutSec: "timeout_sec",
-  resultFile: "result_file"
+  resultFile: "result_file",
+  runnerProfile: "runner_profile"
 };
 const DEFAULT_TIMEOUT_SEC = 900;
 const OUTPUT_MAX_BYTES = 10 * 1024 * 1024;
 const GITHUB_STATE_READ_TIMEOUT_MS = 15_000;
+const NO_MISTAKES_RUNNER_AGENTS = [
+  "claude",
+  "codex",
+  "opencode",
+  "rovodev"
+] as const satisfies readonly NoMistakesRunnerAgent[];
+const REQUIRED_NO_MISTAKES_BASE_ENV = ["HOME", "PATH"] as const;
+const REQUIRED_NO_MISTAKES_AGENT_ENV: Readonly<
+  Record<NoMistakesRunnerAgent, readonly string[]>
+> = {
+  claude: [],
+  codex: ["CODEX_HOME"],
+  opencode: [],
+  rovodev: []
+};
 
 export function defaultCodingWorkflowWrapperDeps(): CodingWorkflowWrapperDeps {
   return {
@@ -214,6 +245,15 @@ export function runCodingWorkflowLiveWrapper(
   }
 
   const childEnv = buildChildEnv(deps.env, stepConfig.envAllow);
+  if (stepKind === "no-mistakes") {
+    const runnerProfilePreflight = preflightNoMistakesRunnerProfile(
+      stepConfig,
+      childEnv
+    );
+    if (!runnerProfilePreflight.ok) {
+      return processSetupFailure(deps, runnerProfilePreflight.error);
+    }
+  }
   if (stepKind === "merge-cleanup") {
     const setupPreflight = preflightGitHubMergeCleanupSetup({
       env: childEnv,
@@ -2047,6 +2087,11 @@ function parseStepConfig(
   if (!timeoutSec.ok) return timeoutSec;
   const envAllow = readOptionalStringArray(value["env_allow"], "env_allow");
   if (!envAllow.ok) return envAllow;
+  const noMistakesRunnerProfile = readNoMistakesRunnerProfile(
+    value["runner_profile"],
+    kind
+  );
+  if (!noMistakesRunnerProfile.ok) return noMistakesRunnerProfile;
   const commit = readCommit(value["commit"], kind);
   if (!commit.ok) return commit;
 
@@ -2080,6 +2125,9 @@ function parseStepConfig(
       cwd: cwd.value,
       timeoutSec: timeoutSec.value,
       envAllow: envAllow.value,
+      ...(noMistakesRunnerProfile.value !== undefined
+        ? { noMistakesRunnerProfile: noMistakesRunnerProfile.value }
+        : {}),
       ...(successSummary !== undefined ? { successSummary } : {}),
       ...(failureSummary !== undefined ? { failureSummary } : {}),
       keyChangesMade: keyChangesMade.value,
@@ -2117,6 +2165,396 @@ function findUnknownKeys(
       };
   }
   return { ok: true };
+}
+
+function preflightNoMistakesRunnerProfile(
+  config: CodingWorkflowWrapperStepConfig,
+  childEnv: NodeJS.ProcessEnv
+): { ok: true } | { ok: false; error: string } {
+  const profile = config.noMistakesRunnerProfile;
+  if (profile === undefined) {
+    return {
+      ok: false,
+      error:
+        "No no-mistakes runner profile is configured. Set wrapper config steps.no-mistakes.runner_profile with interface=axi, stdin=closed, agent, required_env, and agent_path before running no-mistakes."
+    };
+  }
+
+  const missing = profile.requiredEnv.filter((key) => {
+    const value = childEnv[key];
+    return value === undefined || value.trim().length === 0;
+  });
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      error: `No-mistakes runner profile is missing required environment: ${missing.join(", ")}. Update env_allow or the daemon environment before running no-mistakes.`
+    };
+  }
+
+  if (!isExecutableFile(profile.agentPath)) {
+    return {
+      ok: false,
+      error: `No-mistakes runner profile agent_path is not an executable file: ${profile.agentPath}. Configure steps.no-mistakes.runner_profile.agent_path to the absolute executable path used by no-mistakes for ${profile.agent}.`
+    };
+  }
+
+  const selectedAgent = childEnv.MOMENTUM_AGENT_PROVIDER;
+  if (selectedAgent !== undefined && selectedAgent !== profile.agent) {
+    return {
+      ok: false,
+      error: `No-mistakes selected agent ${selectedAgent} does not match runner_profile.agent ${profile.agent}. Update the route selection, no-mistakes config, or the Momentum runner profile before running no-mistakes.`
+    };
+  }
+
+  const noMistakesConfig = readNoMistakesAgentConfig(childEnv);
+  if (!noMistakesConfig.ok) {
+    return noMistakesConfig;
+  }
+  if (noMistakesConfig.value.agent !== profile.agent) {
+    return {
+      ok: false,
+      error: `No-mistakes configured agent ${noMistakesConfig.value.agent} does not match runner_profile.agent ${profile.agent}. Update no-mistakes config or the Momentum runner profile before running no-mistakes.`
+    };
+  }
+  const configuredAgentPath = noMistakesConfig.value.agentPathOverrides[profile.agent];
+  if (configuredAgentPath === undefined) {
+    return {
+      ok: false,
+      error: `No-mistakes config must set agent_path_override.${profile.agent} to the executable declared by runner_profile.agent_path.`
+    };
+  }
+  if (!path.isAbsolute(configuredAgentPath)) {
+    return {
+      ok: false,
+      error: `No-mistakes agent_path_override.${profile.agent} must be an absolute path before running no-mistakes.`
+    };
+  }
+  if (path.resolve(configuredAgentPath) !== path.resolve(profile.agentPath)) {
+    return {
+      ok: false,
+      error: `No-mistakes agent_path_override.${profile.agent} does not match runner_profile.agent_path. Update no-mistakes config or the Momentum runner profile before running no-mistakes.`
+    };
+  }
+
+  return { ok: true };
+}
+
+function isExecutableFile(filePath: string): boolean {
+  try {
+    if (!fs.statSync(filePath).isFile()) return false;
+    fs.accessSync(filePath, fs.constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function readNoMistakesAgentConfig(
+  childEnv: NodeJS.ProcessEnv
+):
+  | {
+      ok: true;
+      value: {
+        agent: NoMistakesRunnerAgent;
+        agentPathOverrides: Partial<Record<NoMistakesRunnerAgent, string>>;
+      };
+    }
+  | { ok: false; error: string } {
+  const home = childEnv.HOME;
+  if (home === undefined || home.trim().length === 0) {
+    return {
+      ok: false,
+      error:
+        "No-mistakes runner profile cannot verify no-mistakes agent config because HOME is missing from the filtered child environment."
+    };
+  }
+  const configPath = path.join(home, ".no-mistakes", "config.yaml");
+  let contents = "";
+  try {
+    contents = fs.readFileSync(configPath, "utf8");
+  } catch {
+    return {
+      ok: false,
+      error:
+        "No-mistakes config is not readable from HOME/.no-mistakes/config.yaml; cannot verify configured agent and agent_path_override before running no-mistakes."
+    };
+  }
+
+  const parsed = parseNoMistakesAgentConfig(contents);
+  if (!parsed.ok) {
+    return {
+      ok: false,
+      error: parsed.error
+    };
+  }
+  if (parsed.agent === undefined) {
+    return {
+      ok: false,
+      error:
+        "No-mistakes config must set an explicit supported agent before Momentum can run no-mistakes."
+    };
+  }
+  if (parsed.agent === "auto") {
+    return {
+      ok: false,
+      error:
+        "No-mistakes config agent=auto is not deterministic enough for Momentum native workflow; set agent to claude, codex, opencode, or rovodev."
+    };
+  }
+  if (!isNoMistakesRunnerAgent(parsed.agent)) {
+    return {
+      ok: false,
+      error: `No-mistakes config agent ${parsed.agent} is not supported by Momentum runner profiles. Supported agents: ${NO_MISTAKES_RUNNER_AGENTS.join(", ")}.`
+    };
+  }
+  return {
+    ok: true,
+    value: {
+      agent: parsed.agent,
+      agentPathOverrides: parsed.agentPathOverrides
+    }
+  };
+}
+
+function parseNoMistakesAgentConfig(contents: string):
+  | {
+      ok: true;
+      agent: string | undefined;
+      agentPathOverrides: Partial<Record<NoMistakesRunnerAgent, string>>;
+    }
+  | { ok: false; error: string } {
+  const separatorError = findNoMistakesYamlSeparatorError(contents);
+  if (separatorError !== undefined) {
+    return { ok: false, error: separatorError };
+  }
+  const document = parseDocument(contents, {
+    strict: true,
+    uniqueKeys: true
+  });
+  if (document.errors.length > 0) {
+    const duplicate = isMap(document.contents)
+      ? findDuplicateNoMistakesConfigKey(document.contents)
+      : undefined;
+    if (duplicate?.scope === "top-level") {
+      return {
+        ok: false,
+        error: `No-mistakes config has duplicate top-level key ${duplicate.key}; remove duplicate keys before running no-mistakes.`
+      };
+    }
+    if (duplicate?.scope === "agent_path_override") {
+      return {
+        ok: false,
+        error: `No-mistakes config has duplicate agent_path_override key ${duplicate.key}; remove duplicate keys before running no-mistakes.`
+      };
+    }
+    const firstError = document.errors[0]?.message ?? "invalid YAML";
+    if (firstError.includes("Tabs are not allowed as indentation")) {
+      return {
+        ok: false,
+        error:
+          "No-mistakes config uses tab indentation; use spaces before running no-mistakes."
+      };
+    }
+    if (firstError.includes("Missing closing")) {
+      return {
+        ok: false,
+        error:
+          "No-mistakes config contains malformed scalar syntax; fix YAML before running no-mistakes."
+      };
+    }
+    return {
+      ok: false,
+      error: `No-mistakes config contains invalid YAML: ${firstError.split("\n")[0] ?? firstError}`
+    };
+  }
+  if (!isMap(document.contents)) {
+    return { ok: true, agent: undefined, agentPathOverrides: {} };
+  }
+  const resolved = document.toJS();
+  if (!isRecord(resolved)) {
+    return { ok: true, agent: undefined, agentPathOverrides: {} };
+  }
+  const agent =
+    typeof resolved.agent === "string" ? resolved.agent : undefined;
+  const agentPathOverrideNode = resolved.agent_path_override;
+  const agentPathOverrides: Partial<Record<NoMistakesRunnerAgent, string>> = {};
+  if (agentPathOverrideNode !== undefined && agentPathOverrideNode !== null) {
+    if (!isRecord(agentPathOverrideNode)) {
+      return {
+        ok: false,
+        error:
+          "No-mistakes config agent_path_override must contain YAML mapping entries before running no-mistakes."
+      };
+    }
+    for (const [key, value] of Object.entries(agentPathOverrideNode)) {
+      if (!isNoMistakesRunnerAgent(key) || typeof value !== "string") continue;
+      agentPathOverrides[key] = value;
+    }
+  }
+  return { ok: true, agent, agentPathOverrides };
+}
+
+function findNoMistakesYamlSeparatorError(contents: string): string | undefined {
+  const lines = contents.split(/\r?\n/u);
+  let inAgentPathOverride = false;
+  let sectionIndent = 0;
+  let agentPathOverrideEntryIndent: number | undefined;
+  for (const rawLine of lines) {
+    if (hasYamlIndentationTab(rawLine)) {
+      return "No-mistakes config uses tab indentation; use spaces before running no-mistakes.";
+    }
+    const withoutComment = rawLine.replace(/\s+#.*$/u, "");
+    if (withoutComment.trim().length === 0) continue;
+    const indent = leadingWhitespaceCount(withoutComment);
+    const trimmed = withoutComment.trim();
+    if (inAgentPathOverride && indent <= sectionIndent) {
+      inAgentPathOverride = false;
+      agentPathOverrideEntryIndent = undefined;
+    }
+    if (!inAgentPathOverride && indent === 0) {
+      const entry = parseYamlMappingEntry(trimmed);
+      if (entry?.ok === false) {
+        return `No-mistakes config entry ${entry.key} is missing a YAML key separator after ":"; write ${entry.key}: <value> before running no-mistakes.`;
+      }
+    }
+    if (!inAgentPathOverride) {
+      const section = indent === 0 ? parseYamlMappingEntry(trimmed) : undefined;
+      if (
+        section?.ok === true &&
+        section.key === "agent_path_override" &&
+        section.value === undefined
+      ) {
+        inAgentPathOverride = true;
+        sectionIndent = indent;
+        agentPathOverrideEntryIndent = undefined;
+      }
+      continue;
+    }
+
+    agentPathOverrideEntryIndent ??= indent;
+    if (indent !== agentPathOverrideEntryIndent) continue;
+    const override = parseYamlMappingEntry(trimmed);
+    if (override?.ok === false) {
+      return `No-mistakes config entry agent_path_override.${override.key} is missing a YAML key separator after ":"; write ${override.key}: <path> before running no-mistakes.`;
+    }
+    if (override?.ok !== true) {
+      return "No-mistakes config agent_path_override must contain YAML mapping entries before running no-mistakes.";
+    }
+  }
+  return undefined;
+}
+
+function findDuplicateNoMistakesConfigKey(
+  map: YAMLMap
+):
+  | { scope: "top-level"; key: string }
+  | { scope: "agent_path_override"; key: string }
+  | undefined {
+  const topLevelKeys = new Set<string>();
+  for (const item of map.items) {
+    const key = yamlScalarString(item.key);
+    if (key === undefined) continue;
+    if (topLevelKeys.has(key)) return { scope: "top-level", key };
+    topLevelKeys.add(key);
+    if (key !== "agent_path_override" || !isMap(item.value)) continue;
+    const overrideKeys = new Set<string>();
+    for (const override of item.value.items) {
+      const overrideKey = yamlScalarString(override.key);
+      if (overrideKey === undefined) continue;
+      if (overrideKeys.has(overrideKey)) {
+        return { scope: "agent_path_override", key: overrideKey };
+      }
+      overrideKeys.add(overrideKey);
+    }
+  }
+  return undefined;
+}
+
+function getYamlMapValue(map: YAMLMap, key: string): unknown {
+  for (const item of map.items) {
+    if (yamlScalarString(item.key) === key) return item.value;
+  }
+  return undefined;
+}
+
+function yamlScalarString(value: unknown): string | undefined {
+  if (!isScalar(value)) return undefined;
+  if (typeof value.value !== "string") return undefined;
+  return value.value;
+}
+
+function isNoMistakesRunnerAgent(value: string): value is NoMistakesRunnerAgent {
+  return (NO_MISTAKES_RUNNER_AGENTS as readonly string[]).includes(value);
+}
+
+function parseYamlMappingEntry(value: string):
+  | { ok: true; key: string; value: string | undefined }
+  | { ok: false; key: string }
+  | undefined {
+  const parsedKey = parseYamlMappingKeyPrefix(value);
+  if (parsedKey === undefined) return undefined;
+  const separatorIndex = parsedKey.rest.search(/\S/u);
+  if (
+    separatorIndex === -1 ||
+    parsedKey.rest[separatorIndex] !== ":"
+  ) {
+    return undefined;
+  }
+  const afterSeparator = parsedKey.rest.slice(separatorIndex + 1);
+  if (afterSeparator.length > 0 && !/^\s/u.test(afterSeparator)) {
+    return { ok: false, key: parsedKey.key };
+  }
+  const trimmedValue = afterSeparator.trim();
+  return {
+    ok: true,
+    key: parsedKey.key,
+    value: trimmedValue.length > 0 ? trimmedValue : undefined
+  };
+}
+
+function parseYamlMappingKeyPrefix(
+  value: string
+): { key: string; rest: string } | undefined {
+  if (value.startsWith('"') || value.startsWith("'")) {
+    return parseQuotedYamlMappingKeyPrefix(value);
+  }
+  const match = value.match(/^([A-Za-z0-9_-]+)(.*)$/u);
+  if (match === null) return undefined;
+  return { key: match[1]!, rest: match[2]! };
+}
+
+function parseQuotedYamlMappingKeyPrefix(
+  value: string
+): { key: string; rest: string } | undefined {
+  const quote = value[0];
+  let key = "";
+  for (let index = 1; index < value.length; index += 1) {
+    const char = value[index];
+    if (char === quote) {
+      if (quote === "'" && value[index + 1] === "'") {
+        key += "'";
+        index += 1;
+        continue;
+      }
+      return { key, rest: value.slice(index + 1) };
+    }
+    if (quote === '"' && char === "\\" && index + 1 < value.length) {
+      key += value[index + 1];
+      index += 1;
+      continue;
+    }
+    key += char;
+  }
+  return undefined;
+}
+
+function leadingWhitespaceCount(value: string): number {
+  const match = value.match(/^\s*/u);
+  return match?.[0].length ?? 0;
+}
+
+function hasYamlIndentationTab(value: string): boolean {
+  return /^[ \t]*\t/u.test(value);
 }
 
 function writeFailureResult(
@@ -2511,6 +2949,142 @@ function readMergeCleanupTarget(
   };
 }
 
+function readNoMistakesRunnerProfile(
+  value: unknown,
+  kind: WorkflowStepKind
+):
+  | { ok: true; value?: NoMistakesRunnerProfile }
+  | { ok: false; error: string } {
+  if (value === undefined || value === null) {
+    if (kind !== "no-mistakes") return { ok: true };
+    return {
+      ok: false,
+      error:
+        "Wrapper config `runner_profile` is required for the no-mistakes step."
+    };
+  }
+  if (kind !== "no-mistakes") {
+    return {
+      ok: false,
+      error:
+        "Wrapper config `runner_profile` is only supported for the no-mistakes step."
+    };
+  }
+  if (!isRecord(value)) {
+    return {
+      ok: false,
+      error: "Wrapper config `runner_profile` must be an object."
+    };
+  }
+
+  const allowed = new Set([
+    "interface",
+    "stdin",
+    "agent",
+    "required_env",
+    "agent_path"
+  ]);
+  const unknown = findUnknownKeys(
+    value,
+    allowed,
+    {},
+    "steps.no-mistakes.runner_profile"
+  );
+  if (!unknown.ok) return unknown;
+
+  if (value["interface"] !== "axi") {
+    return {
+      ok: false,
+      error: 'Wrapper config `runner_profile.interface` must be "axi".'
+    };
+  }
+  if (value["stdin"] !== "closed") {
+    return {
+      ok: false,
+      error: 'Wrapper config `runner_profile.stdin` must be "closed".'
+    };
+  }
+  const agentValue = readOptionalString(value["agent"]);
+  if (agentValue === undefined) {
+    return {
+      ok: false,
+      error:
+        "Wrapper config `runner_profile.agent` must be one of claude, codex, opencode, or rovodev."
+    };
+  }
+  if (agentValue === "auto") {
+    return {
+      ok: false,
+      error:
+        'Wrapper config `runner_profile.agent` must not be "auto"; choose claude, codex, opencode, or rovodev for deterministic execution.'
+    };
+  }
+  if (!isNoMistakesRunnerAgent(agentValue)) {
+    return {
+      ok: false,
+      error: `Wrapper config \`runner_profile.agent\` must be one of ${NO_MISTAKES_RUNNER_AGENTS.join(", ")}.`
+    };
+  }
+
+  const requiredEnv = readOptionalStringArray(
+    value["required_env"],
+    "runner_profile.required_env"
+  );
+  if (!requiredEnv.ok) return requiredEnv;
+  if (requiredEnv.value.length === 0) {
+    return {
+      ok: false,
+      error:
+        "Wrapper config `runner_profile.required_env` must list HOME and PATH, plus any selected-agent environment such as CODEX_HOME for Codex."
+    };
+  }
+  const invalidEnvName = requiredEnv.value.find((entry) => !isEnvVarName(entry));
+  if (invalidEnvName !== undefined) {
+    return {
+      ok: false,
+      error: `Wrapper config \`runner_profile.required_env\` contains invalid environment variable name "${invalidEnvName}".`
+    };
+  }
+  const requiredForAgent = [
+    ...REQUIRED_NO_MISTAKES_BASE_ENV,
+    ...REQUIRED_NO_MISTAKES_AGENT_ENV[agentValue]
+  ];
+  const missingRequired = requiredForAgent.filter(
+    (key) => !requiredEnv.value.includes(key)
+  );
+  if (missingRequired.length > 0) {
+    return {
+      ok: false,
+      error: `Wrapper config \`runner_profile.required_env\` must include ${missingRequired.join(", ")}.`
+    };
+  }
+
+  const agentPath = readOptionalString(value["agent_path"]);
+  if (agentPath === undefined) {
+    return {
+      ok: false,
+      error: "Wrapper config `runner_profile.agent_path` must be a non-empty string."
+    };
+  }
+  if (!path.isAbsolute(agentPath)) {
+    return {
+      ok: false,
+      error: "Wrapper config `runner_profile.agent_path` must be an absolute path."
+    };
+  }
+
+  return {
+    ok: true,
+    value: {
+      interface: "axi",
+      stdin: "closed",
+      agent: agentValue,
+      requiredEnv: requiredEnv.value,
+      agentPath
+    }
+  };
+}
+
 function hasParentTraversalSegment(value: string): boolean {
   return value.split(/[\\/]+/u).includes("..");
 }
@@ -2619,4 +3193,8 @@ function defaultCommitType(kind: WorkflowStepKind): CommitType {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isEnvVarName(value: string): boolean {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(value);
 }
