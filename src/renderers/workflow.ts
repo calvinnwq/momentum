@@ -1627,6 +1627,12 @@ export function renderWorkflowRunLogsText(
   lines.push(`Schema version: ${envelope.schemaVersion}`);
   lines.push(`Generated at (epoch ms): ${envelope.generatedAt}`);
   lines.push(`Run state: ${envelope.detail.run.state}`);
+  const implementationEngine = workflowRunImplementationEngine(
+    envelope.detail.run.route
+  );
+  if (implementationEngine !== null) {
+    lines.push(`Implementation engine: ${implementationEngine}`);
+  }
   lines.push(`Steps: ${envelope.detail.steps.length}`);
   lines.push(`Approvals: ${envelope.detail.approvals.length}`);
   lines.push(`Leases: ${envelope.detail.leases.length}`);
@@ -1740,6 +1746,15 @@ export function renderWorkflowRunLogsText(
   lines.push(`Data dir: ${dataDir}`);
   lines.push("");
   return lines.join("\n");
+}
+
+function workflowRunImplementationEngine(
+  route: Record<string, unknown>
+): string | null {
+  const value = route["implementationEngine"];
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 function workflowRoundOutcome(round: WorkflowRunLogRound): string {

@@ -682,4 +682,32 @@ describe("momentum workflow run logs", () => {
     expect(result.stdout).toContain("Gates: 1 (open: 1)");
     expect(result.stdout).toContain("gate-open-1");
   });
+
+  it("renders the selected implementation engine in text readback when route evidence exists", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      seedRunWithRound(db, "cwfp-logs-engine");
+      db.prepare(
+        "UPDATE workflow_runs SET route_json = ? WHERE id = ?"
+      ).run(
+        JSON.stringify({ implementationEngine: "native-goal-loop" }),
+        "cwfp-logs-engine"
+      );
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "logs",
+      "cwfp-logs-engine",
+      "--data-dir",
+      dataDir
+    ]);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("Implementation engine: native-goal-loop");
+  });
 });

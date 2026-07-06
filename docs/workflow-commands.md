@@ -2487,6 +2487,7 @@ Workflow run logs: cwfp-abc123
 Schema version: 1
 Generated at (epoch ms): 1730000600000
 Run state: running
+Implementation engine: native-goal-loop
 Steps: 5
 Approvals: 1
 Leases: 1
