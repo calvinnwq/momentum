@@ -108,6 +108,24 @@ export type ExecuteAndReconcileDispatchedExternalApplyStepInput = {
   now: number;
 };
 
+export function reconcileAlreadyTerminalDispatchedExternalApplyStep(input: {
+  db: MomentumDb;
+  runId: string;
+  stepId: string;
+  now: number;
+}): ExecuteAndReconcileDispatchedStepResult | null {
+  const invocation = loadExecutorInvocation(
+    input.db,
+    deriveDispatchInvocationId(input.runId, input.stepId)
+  );
+  if (invocation?.executorFamily !== "external-apply") return null;
+  if (!isTerminalExecutorInvocationState(invocation.state)) return null;
+  return reconcileTerminalDispatchedExternalApplyInvocation(
+    input,
+    invocation.state
+  );
+}
+
 /**
  * Run a dispatched `external-apply` step's M6 write path and finalize it through
  * RC-2. The async analogue of {@link executeAndReconcileDispatchedWorkflowStep}:
@@ -139,27 +157,10 @@ export async function executeAndReconcileDispatchedExternalApplyStep(
   }
 
   if (isTerminalExecutorInvocationState(invocation.state)) {
-    // Idempotent re-entry: a prior execution already issued the external write and
-    // recorded its terminal evidence. NEVER re-run the write (no second Linear
-    // mutation / duplicate evidence); just re-drive the idempotent RC-2
-    // reconciliation so a crashed prior finalize still converges the step / lease.
-    const reconciled = tryReconcileDispatchedWorkflowStep({
-      db,
-      runId,
-      stepId,
-      now
-    });
-    if (!reconciled.ok) {
-      return {
-        status: WORKFLOW_EXECUTE_RECONCILE_STATUS.reconcileDeferred,
-        detail: reconciled.detail
-      };
-    }
-    return {
-      status: WORKFLOW_EXECUTE_RECONCILE_STATUS.alreadyExecuted,
-      reconcile: reconciled.reconcile,
-      detail: invocation.state
-    };
+    return reconcileTerminalDispatchedExternalApplyInvocation(
+      { db, runId, stepId, now },
+      invocation.state
+    );
   }
 
   const step = getWorkflowStep(db, runId, stepId);
@@ -220,6 +221,25 @@ export async function executeAndReconcileDispatchedExternalApplyStep(
     executorResult,
     terminalize,
     reconcile: reconciled.reconcile
+  };
+}
+
+
+function reconcileTerminalDispatchedExternalApplyInvocation(
+  input: { db: MomentumDb; runId: string; stepId: string; now: number },
+  state: string
+): ExecuteAndReconcileDispatchedStepResult {
+  const reconciled = tryReconcileDispatchedWorkflowStep(input);
+  if (!reconciled.ok) {
+    return {
+      status: WORKFLOW_EXECUTE_RECONCILE_STATUS.reconcileDeferred,
+      detail: reconciled.detail
+    };
+  }
+  return {
+    status: WORKFLOW_EXECUTE_RECONCILE_STATUS.alreadyExecuted,
+    reconcile: reconciled.reconcile,
+    detail: state
   };
 }
 

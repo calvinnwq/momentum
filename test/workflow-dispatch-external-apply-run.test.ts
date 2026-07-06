@@ -20,6 +20,7 @@ import {
   listExecutorRoundsForInvocation
 } from "../src/core/executors/loop/persist.js";
 import {
+  WORKFLOW_DISPATCH_RESULT_STATUS,
   deriveDispatchInvocationId,
   executeWorkflowStepDispatch
 } from "../src/core/workflow/dispatch/execute.js";
@@ -568,6 +569,69 @@ describe("executeAndReconcileDispatchedExternalApplyStep — fail-closed on M6 r
 });
 
 describe("executeAndReconcileDispatchedExternalApplyStep — idempotent re-entry", () => {
+  it("does not derive external-apply context on terminal re-entry", async () => {
+    const db = openSeededDb();
+    db.prepare(
+      `UPDATE step_definitions
+          SET executor = 'external-apply'
+        WHERE definition_key = ? AND definition_version = ? AND step_key = ?`
+    ).run(
+      CODING_WORKFLOW_DEFINITION.key,
+      CODING_WORKFLOW_DEFINITION.version,
+      STEP_ID
+    );
+    const claim = approveAndClaim(db, STEP_ID);
+    const runner = countingRunner(makeSuccess());
+    const dispatch = createExternalApplyWorkflowDispatch(
+      executeWorkflowStepDispatch,
+      {
+        deriveExternalApply: () => ({
+          ok: true,
+          runExternalApply: runner.run,
+          evidence: makeWritableEvidence()
+        })
+      }
+    );
+
+    await dispatch(claim, { db, workerId: WORKER, now: DISPATCH_AT });
+    expect(runner.calls()).toBe(1);
+    expect(
+      loadExecutorInvocation(db, deriveDispatchInvocationId(RUN_ID, STEP_ID))
+        ?.state
+    ).toBe("succeeded");
+
+    let deriveCalls = 0;
+    const reentryDispatch = createExternalApplyWorkflowDispatch(
+      () => ({
+        status: WORKFLOW_DISPATCH_RESULT_STATUS.alreadyDispatched,
+        detail: deriveDispatchInvocationId(RUN_ID, STEP_ID)
+      }),
+      {
+        deriveExternalApply: () => {
+          deriveCalls += 1;
+          return {
+            ok: true,
+            runExternalApply: async () => {
+              throw new Error("terminal re-entry must not run external apply");
+            },
+            evidence: makeWritableEvidence()
+          };
+        }
+      }
+    );
+
+    const result = await reentryDispatch(claim, {
+      db,
+      workerId: WORKER,
+      now: DISPATCH_AT + 100
+    });
+
+    expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.alreadyDispatched);
+    expect(deriveCalls).toBe(0);
+    expect(runner.calls()).toBe(1);
+    expect(stepState(db)).toBe("succeeded");
+  });
+
   it("never re-runs the external write once the dispatch invocation is terminal", async () => {
     const db = openSeededDb();
     dispatchStep(db);
