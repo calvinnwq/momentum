@@ -77,6 +77,10 @@ const EXECUTOR_DECISION_EXTERNAL_REF_COLUMNS: ColumnSpec[] = [
   { name: "external_ref", type: "TEXT" }
 ];
 
+const EXECUTOR_ROUND_LEARNING_COLUMNS: ColumnSpec[] = [
+  { name: "key_learnings", type: "TEXT NOT NULL DEFAULT '[]'" }
+];
+
 const REPO_LOCKS_DDL = `
 CREATE TABLE IF NOT EXISTS repo_locks (
   id TEXT PRIMARY KEY,
@@ -583,6 +587,7 @@ CREATE TABLE IF NOT EXISTS executor_rounds (
   log_paths TEXT NOT NULL DEFAULT '[]',
   summary TEXT,
   key_changes TEXT NOT NULL DEFAULT '[]',
+  key_learnings TEXT NOT NULL DEFAULT '[]',
   remaining_work TEXT NOT NULL DEFAULT '[]',
   changed_files TEXT NOT NULL DEFAULT '[]',
   verification_status TEXT,
@@ -779,6 +784,11 @@ export function applyQueueMigrations(db: MomentumDb): void {
     db.exec(WORKFLOW_RUNS_IDENTITY_INDEX_DDL);
     db.exec(WORKFLOW_DEFINITIONS_DDL);
     db.exec(EXECUTOR_LOOP_DDL);
+    if (tableExists(db, "executor_rounds")) {
+      for (const column of EXECUTOR_ROUND_LEARNING_COLUMNS) {
+        ensureColumn(db, "executor_rounds", column);
+      }
+    }
     if (tableExists(db, "executor_decisions")) {
       for (const column of EXECUTOR_DECISION_EXTERNAL_REF_COLUMNS) {
         ensureColumn(db, "executor_decisions", column);

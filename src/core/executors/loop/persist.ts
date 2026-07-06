@@ -30,7 +30,7 @@
  *     without first entering the capture or mirror phase, and the refusal leaves
  *     the durable row unchanged.
  *   - The round carries the contract "Round Schema" normalized result fields
- *     (`summary`, `key_changes`, `remaining_work`, `changed_files`,
+ *     (`summary`, `key_changes`, `key_learnings`, `remaining_work`, `changed_files`,
  *     `verification_status`, `commit_sha`, ...) so workflow status, handoff,
  *     monitor, logs, and recovery surfaces can reattach without understanding
  *     executor internals.
@@ -475,13 +475,13 @@ export function insertExecutorRound(
          executor_family, attempt, round_index, state, classification,
          started_at, heartbeat_at, finished_at, agent_provider, model, effort,
          input_digest, result_digest, artifact_root, log_paths,
-         summary, key_changes, remaining_work, changed_files,
+         summary, key_changes, key_learnings, remaining_work, changed_files,
          verification_status, commit_sha, recovery_code, human_gate,
          created_at, updated_at
        ) VALUES (
          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
        )`
     ).run(
       record.roundId,
@@ -506,6 +506,7 @@ export function insertExecutorRound(
       JSON.stringify(record.logPaths),
       record.summary,
       JSON.stringify(record.keyChanges),
+      JSON.stringify(record.keyLearnings),
       JSON.stringify(record.remainingWork),
       JSON.stringify(record.changedFiles),
       record.verificationStatus,
@@ -599,6 +600,7 @@ export type ExecutorRoundUpdate = {
   logPaths?: string[];
   summary?: string | null;
   keyChanges?: string[];
+  keyLearnings?: string[];
   remainingWork?: string[];
   changedFiles?: string[];
   verificationStatus?: string | null;
@@ -659,6 +661,7 @@ export function updateExecutorRound(
     logPaths: coalesce(update.logPaths, current.logPaths),
     summary: coalesce(update.summary, current.summary),
     keyChanges: coalesce(update.keyChanges, current.keyChanges),
+    keyLearnings: coalesce(update.keyLearnings, current.keyLearnings),
     remainingWork: coalesce(update.remainingWork, current.remainingWork),
     changedFiles: coalesce(update.changedFiles, current.changedFiles),
     verificationStatus: coalesce(
@@ -679,7 +682,7 @@ export function updateExecutorRound(
        state = ?, classification = ?, started_at = ?, heartbeat_at = ?,
        finished_at = ?, agent_provider = ?, model = ?, effort = ?,
        input_digest = ?, result_digest = ?, artifact_root = ?, log_paths = ?,
-       summary = ?, key_changes = ?, remaining_work = ?, changed_files = ?,
+       summary = ?, key_changes = ?, key_learnings = ?, remaining_work = ?, changed_files = ?,
        verification_status = ?, commit_sha = ?, recovery_code = ?, human_gate = ?,
        updated_at = ?
      WHERE round_id = ? AND state = ? AND updated_at = ?`
@@ -698,6 +701,7 @@ export function updateExecutorRound(
     JSON.stringify(next.logPaths),
     next.summary,
     JSON.stringify(next.keyChanges),
+    JSON.stringify(next.keyLearnings),
     JSON.stringify(next.remainingWork),
     JSON.stringify(next.changedFiles),
     next.verificationStatus,
@@ -991,6 +995,7 @@ type ExecutorRoundRow = {
   log_paths: string;
   summary: string | null;
   key_changes: string;
+  key_learnings: string;
   remaining_work: string;
   changed_files: string;
   verification_status: string | null;
@@ -1053,7 +1058,7 @@ const ROUND_SELECT = `
          executor_family, attempt, round_index, state, classification,
          started_at, heartbeat_at, finished_at, agent_provider, model, effort,
          input_digest, result_digest, artifact_root, log_paths,
-         summary, key_changes, remaining_work, changed_files,
+         summary, key_changes, key_learnings, remaining_work, changed_files,
          verification_status, commit_sha, recovery_code, human_gate,
          updated_at
     FROM executor_rounds`;
@@ -1125,6 +1130,7 @@ function rowToRound(row: ExecutorRoundRow): ExecutorRoundRecord {
     logPaths: parseStringArray(row.log_paths),
     summary: row.summary,
     keyChanges: parseStringArray(row.key_changes),
+    keyLearnings: parseStringArray(row.key_learnings),
     remainingWork: parseStringArray(row.remaining_work),
     changedFiles: parseStringArray(row.changed_files),
     verificationStatus: row.verification_status,
@@ -1333,6 +1339,7 @@ function roundPatchMatches(
     arrayFieldMatches(current.logPaths, update.logPaths) &&
     fieldMatches(current.summary, update.summary) &&
     arrayFieldMatches(current.keyChanges, update.keyChanges) &&
+    arrayFieldMatches(current.keyLearnings, update.keyLearnings) &&
     arrayFieldMatches(current.remainingWork, update.remainingWork) &&
     arrayFieldMatches(current.changedFiles, update.changedFiles) &&
     fieldMatches(current.verificationStatus, update.verificationStatus) &&

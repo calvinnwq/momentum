@@ -495,6 +495,7 @@ describe("planGoalLoopRoundPersistence — committed completion", () => {
       toState: "capturing_result",
       summary: result.summary,
       keyChanges: result.key_changes_made,
+      keyLearnings: result.key_learnings,
       remainingWork: result.remaining_work
     });
 

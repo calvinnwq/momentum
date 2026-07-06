@@ -554,6 +554,7 @@ export function planGoalLoopRoundStart(
     logPaths: input.logPaths ?? [],
     summary: null,
     keyChanges: [],
+    keyLearnings: [],
     remainingWork: [],
     changedFiles: [],
     verificationStatus: null,
@@ -815,6 +816,7 @@ export function planGoalLoopRoundPersistence(
           toState: "capturing_result",
           summary: input.result.summary,
           keyChanges: input.result.key_changes_made,
+          keyLearnings: input.result.key_learnings,
           remainingWork: input.result.remaining_work,
           // Stamp the result digest only when the mechanism reported one; an
           // absent digest is left off the patch so `coalesce` keeps the

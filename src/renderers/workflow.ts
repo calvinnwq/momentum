@@ -1540,6 +1540,7 @@ export function workflowRoundToJsonShape(
     logPaths: round.logPaths,
     summary: round.summary,
     keyChanges: round.keyChanges,
+    keyLearnings: round.keyLearnings,
     remainingWork: round.remainingWork,
     changedFiles: round.changedFiles,
     verificationStatus: round.verificationStatus,

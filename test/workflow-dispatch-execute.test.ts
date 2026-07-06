@@ -365,6 +365,7 @@ describe("executeWorkflowStepDispatch — supported family", () => {
                 model, effort, input_digest AS inputDigest,
                 result_digest AS resultDigest, artifact_root AS artifactRoot,
                 log_paths AS logPaths, summary, key_changes AS keyChanges,
+                key_learnings AS keyLearnings,
                 remaining_work AS remainingWork, changed_files AS changedFiles,
                 verification_status AS verificationStatus, commit_sha AS commitSha,
                 recovery_code AS recoveryCode, human_gate AS humanGate
@@ -386,6 +387,7 @@ describe("executeWorkflowStepDispatch — supported family", () => {
       logPaths: "[]",
       summary: null,
       keyChanges: "[]",
+      keyLearnings: "[]",
       remainingWork: "[]",
       changedFiles: "[]",
       verificationStatus: null,

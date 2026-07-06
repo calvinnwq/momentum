@@ -380,6 +380,7 @@ function buildRoundScaffold(
     logPaths: [],
     summary: null,
     keyChanges: [],
+    keyLearnings: [],
     remainingWork: [],
     changedFiles: [],
     verificationStatus: null,

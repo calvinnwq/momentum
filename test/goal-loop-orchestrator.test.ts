@@ -700,6 +700,31 @@ describe("runGoalLoopInvocation — multi-round completion", () => {
     expect(loadExecutorInvocation(db, "inv-1")).toEqual(result.invocation);
   });
 
+  it("persists distinct learning evidence for every completed round", () => {
+    const db = openInvocationDb();
+    const result = runGoalLoopInvocation({
+      db,
+      invocation: buildInvocation(),
+      planRound: (roundIndex) => planRoundFor(roundIndex, 2),
+      runRound: (round) => ({
+        result: runnerResult({
+          goal_complete: round.roundIndex === 1,
+          key_learnings: [`round ${round.roundIndex} learning`]
+        }),
+        finalize: COMMITTED
+      })
+    });
+
+    expect(result.rounds).toHaveLength(2);
+    for (const [index, roundResult] of result.rounds.entries()) {
+      const expectedLearnings = [`round ${index} learning`];
+      expect(roundResult.round.keyLearnings).toEqual(expectedLearnings);
+      expect(loadExecutorRound(db, `round-${index}`)?.keyLearnings).toEqual(
+        expectedLearnings
+      );
+    }
+  });
+
   it("inserts the durable running invocation before the first round runs", () => {
     const db = openInvocationDb();
     let stateDuringFirstRound: string | undefined;

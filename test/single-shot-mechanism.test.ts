@@ -79,6 +79,7 @@ function round(overrides: Partial<ExecutorRoundRecord> = {}): ExecutorRoundRecor
     logPaths: [path.join(artifactRoot, "executor.log")],
     summary: null,
     keyChanges: [],
+    keyLearnings: [],
     remainingWork: [],
     changedFiles: [],
     verificationStatus: null,

@@ -104,6 +104,7 @@ function makeRound(runId: string): ExecutorRoundRecord {
     logPaths: [`/runs/${runId}/round-1/agent.log`],
     summary: "implemented the slice",
     keyChanges: ["added reader"],
+    keyLearnings: [],
     remainingWork: [],
     changedFiles: ["src/core/workflow/run/logs.ts"],
     verificationStatus: "passed",

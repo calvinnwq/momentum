@@ -416,6 +416,7 @@ export type ExecutorRoundRecord = {
   // Result.
   summary: string | null;
   keyChanges: string[];
+  keyLearnings: string[];
   remainingWork: string[];
   changedFiles: string[];
   verificationStatus: string | null;
