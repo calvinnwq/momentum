@@ -16,6 +16,7 @@
 import { execFileSync, type SpawnSyncReturns } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { isMap, isScalar, parseDocument, type YAMLMap } from "yaml";
 
 import { runProcessGroupSync } from "../../../adapters/live-step-wrapper.js";
 import { normalizeRunnerResult } from "../../executors/runner/result.js";
@@ -2195,6 +2196,14 @@ function preflightNoMistakesRunnerProfile(
     };
   }
 
+  const selectedAgent = childEnv.MOMENTUM_AGENT_PROVIDER;
+  if (selectedAgent !== undefined && selectedAgent !== profile.agent) {
+    return {
+      ok: false,
+      error: `No-mistakes selected agent ${selectedAgent} does not match runner_profile.agent ${profile.agent}. Update the route selection, no-mistakes config, or the Momentum runner profile before running no-mistakes.`
+    };
+  }
+
   const noMistakesConfig = readNoMistakesAgentConfig(childEnv);
   if (!noMistakesConfig.ok) {
     return noMistakesConfig;
@@ -2312,21 +2321,86 @@ function parseNoMistakesAgentConfig(contents: string):
       agentPathOverrides: Partial<Record<NoMistakesRunnerAgent, string>>;
     }
   | { ok: false; error: string } {
-  const lines = contents.split(/\r?\n/u);
-  let inAgentPathOverride = false;
-  let sectionIndent = 0;
-  let agentPathOverrideEntryIndent: number | undefined;
-  let agent: string | undefined;
-  const agentPathOverrides: Partial<Record<NoMistakesRunnerAgent, string>> = {};
-  const seenTopLevelKeys = new Set<string>();
-  const seenAgentPathOverrideKeys = new Set<string>();
-  for (const rawLine of lines) {
-    if (hasYamlIndentationTab(rawLine)) {
+  const separatorError = findNoMistakesYamlSeparatorError(contents);
+  if (separatorError !== undefined) {
+    return { ok: false, error: separatorError };
+  }
+  const document = parseDocument(contents, {
+    strict: true,
+    uniqueKeys: true
+  });
+  if (document.errors.length > 0) {
+    const duplicate = isMap(document.contents)
+      ? findDuplicateNoMistakesConfigKey(document.contents)
+      : undefined;
+    if (duplicate?.scope === "top-level") {
+      return {
+        ok: false,
+        error: `No-mistakes config has duplicate top-level key ${duplicate.key}; remove duplicate keys before running no-mistakes.`
+      };
+    }
+    if (duplicate?.scope === "agent_path_override") {
+      return {
+        ok: false,
+        error: `No-mistakes config has duplicate agent_path_override key ${duplicate.key}; remove duplicate keys before running no-mistakes.`
+      };
+    }
+    const firstError = document.errors[0]?.message ?? "invalid YAML";
+    if (firstError.includes("Tabs are not allowed as indentation")) {
       return {
         ok: false,
         error:
           "No-mistakes config uses tab indentation; use spaces before running no-mistakes."
       };
+    }
+    if (firstError.includes("Missing closing")) {
+      return {
+        ok: false,
+        error:
+          "No-mistakes config contains malformed scalar syntax; fix YAML before running no-mistakes."
+      };
+    }
+    return {
+      ok: false,
+      error: `No-mistakes config contains invalid YAML: ${firstError.split("\n")[0] ?? firstError}`
+    };
+  }
+  if (!isMap(document.contents)) {
+    return { ok: true, agent: undefined, agentPathOverrides: {} };
+  }
+  const agent = yamlScalarString(getYamlMapValue(document.contents, "agent"));
+  const agentPathOverrideNode = getYamlMapValue(
+    document.contents,
+    "agent_path_override"
+  );
+  const agentPathOverrides: Partial<Record<NoMistakesRunnerAgent, string>> = {};
+  if (agentPathOverrideNode !== undefined && agentPathOverrideNode !== null) {
+    if (!isMap(agentPathOverrideNode)) {
+      return {
+        ok: false,
+        error:
+          "No-mistakes config agent_path_override must contain YAML mapping entries before running no-mistakes."
+      };
+    }
+    for (const item of agentPathOverrideNode.items) {
+      const key = yamlScalarString(item.key);
+      if (key === undefined || !isNoMistakesRunnerAgent(key)) continue;
+      const value = yamlScalarString(item.value);
+      if (value === undefined) continue;
+      agentPathOverrides[key] = value;
+    }
+  }
+  return { ok: true, agent, agentPathOverrides };
+}
+
+function findNoMistakesYamlSeparatorError(contents: string): string | undefined {
+  const lines = contents.split(/\r?\n/u);
+  let inAgentPathOverride = false;
+  let sectionIndent = 0;
+  let agentPathOverrideEntryIndent: number | undefined;
+  for (const rawLine of lines) {
+    if (hasYamlIndentationTab(rawLine)) {
+      return "No-mistakes config uses tab indentation; use spaces before running no-mistakes.";
     }
     const withoutComment = rawLine.replace(/\s+#.*$/u, "");
     if (withoutComment.trim().length === 0) continue;
@@ -2339,23 +2413,7 @@ function parseNoMistakesAgentConfig(contents: string):
     if (!inAgentPathOverride && indent === 0) {
       const entry = parseYamlMappingEntry(trimmed);
       if (entry?.ok === false) {
-        return {
-          ok: false,
-          error: `No-mistakes config entry ${entry.key} is missing a YAML key separator after ":"; write ${entry.key}: <value> before running no-mistakes.`
-        };
-      }
-      if (entry?.ok === true) {
-        if (seenTopLevelKeys.has(entry.key)) {
-          return {
-            ok: false,
-            error: `No-mistakes config has duplicate top-level key ${entry.key}; remove duplicate keys before running no-mistakes.`
-          };
-        }
-        seenTopLevelKeys.add(entry.key);
-        if (entry.key === "agent" && entry.value !== undefined) {
-          agent = unquoteYamlScalar(entry.value);
-          continue;
-        }
+        return `No-mistakes config entry ${entry.key} is missing a YAML key separator after ":"; write ${entry.key}: <value> before running no-mistakes.`;
       }
     }
     if (!inAgentPathOverride) {
@@ -2376,30 +2434,52 @@ function parseNoMistakesAgentConfig(contents: string):
     if (indent !== agentPathOverrideEntryIndent) continue;
     const override = parseYamlMappingEntry(trimmed);
     if (override?.ok === false) {
-      return {
-        ok: false,
-        error: `No-mistakes config entry agent_path_override.${override.key} is missing a YAML key separator after ":"; write ${override.key}: <path> before running no-mistakes.`
-      };
+      return `No-mistakes config entry agent_path_override.${override.key} is missing a YAML key separator after ":"; write ${override.key}: <path> before running no-mistakes.`;
     }
     if (override?.ok !== true) {
-      return {
-        ok: false,
-        error:
-          "No-mistakes config agent_path_override must contain YAML mapping entries before running no-mistakes."
-      };
+      return "No-mistakes config agent_path_override must contain YAML mapping entries before running no-mistakes.";
     }
-    if (seenAgentPathOverrideKeys.has(override.key)) {
-      return {
-        ok: false,
-        error: `No-mistakes config has duplicate agent_path_override key ${override.key}; remove duplicate keys before running no-mistakes.`
-      };
-    }
-    seenAgentPathOverrideKeys.add(override.key);
-    if (!isNoMistakesRunnerAgent(override.key)) continue;
-    if (override.value === undefined) continue;
-    agentPathOverrides[override.key] = unquoteYamlScalar(override.value);
   }
-  return { ok: true, agent, agentPathOverrides };
+  return undefined;
+}
+
+function findDuplicateNoMistakesConfigKey(
+  map: YAMLMap
+):
+  | { scope: "top-level"; key: string }
+  | { scope: "agent_path_override"; key: string }
+  | undefined {
+  const topLevelKeys = new Set<string>();
+  for (const item of map.items) {
+    const key = yamlScalarString(item.key);
+    if (key === undefined) continue;
+    if (topLevelKeys.has(key)) return { scope: "top-level", key };
+    topLevelKeys.add(key);
+    if (key !== "agent_path_override" || !isMap(item.value)) continue;
+    const overrideKeys = new Set<string>();
+    for (const override of item.value.items) {
+      const overrideKey = yamlScalarString(override.key);
+      if (overrideKey === undefined) continue;
+      if (overrideKeys.has(overrideKey)) {
+        return { scope: "agent_path_override", key: overrideKey };
+      }
+      overrideKeys.add(overrideKey);
+    }
+  }
+  return undefined;
+}
+
+function getYamlMapValue(map: YAMLMap, key: string): unknown {
+  for (const item of map.items) {
+    if (yamlScalarString(item.key) === key) return item.value;
+  }
+  return undefined;
+}
+
+function yamlScalarString(value: unknown): string | undefined {
+  if (!isScalar(value)) return undefined;
+  if (typeof value.value !== "string") return undefined;
+  return value.value;
 }
 
 function isNoMistakesRunnerAgent(value: string): value is NoMistakesRunnerAgent {
@@ -2474,16 +2554,6 @@ function leadingWhitespaceCount(value: string): number {
 
 function hasYamlIndentationTab(value: string): boolean {
   return /^[ \t]*\t/u.test(value);
-}
-
-function unquoteYamlScalar(value: string): string {
-  if (
-    (value.startsWith('"') && value.endsWith('"')) ||
-    (value.startsWith("'") && value.endsWith("'"))
-  ) {
-    return value.slice(1, -1);
-  }
-  return value;
 }
 
 function writeFailureResult(
