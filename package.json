@@ -1,6 +1,6 @@
 {
   "name": "@calvinnwq/momentum",
-  "version": "0.16.2",
+  "version": "0.16.3",
   "private": true,
   "description": "TypeScript CLI scaffold for Momentum autonomous repo-work orchestration.",
   "type": "module",
