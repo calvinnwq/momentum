@@ -2337,7 +2337,7 @@ momentum workflow run logs <run-id> [--data-dir <path>] [--json]
 ```
 
 Read-back of one workflow run's durable logs and evidence, for operators inspecting what each step actually ran and produced.
-It is the workflow-first equivalent of goal-first `logs <goal-id>`: it wraps the same detail loader as `workflow status <run-id>` / `workflow handoff` (run, steps, approvals, leases, monitor, evidence, gates) and adds the per-round executor evidence that the detail loader does not carry - executor family / agent / model / effort, log paths, summaries, key changes, changed files, verification status, commit SHA, recovery codes, and the child artifacts / checkpoints / findings / decisions emitted below each round.
+It is the workflow-first equivalent of goal-first `logs <goal-id>`: it wraps the same detail loader as `workflow status <run-id>` / `workflow handoff` (run, steps, approvals, leases, monitor, evidence, gates) and adds the per-round executor evidence that the detail loader does not carry - executor family / agent / model / effort, input and result digests, log paths, summaries, key changes, changed files, verification status, commit SHA, recovery codes, and the child artifacts / checkpoints / findings / decisions emitted below each round.
 Read-only: no SQLite mutation, no file reads, no external writes.
 
 Rounds are returned across every invocation in the run, ordered by step key, then invocation attempt, then invocation id, then round index, then round id.
@@ -2437,6 +2437,8 @@ Gates: 1 (open: 1)
 Executor rounds: 1
 - cwfp-abc123::implementation::dispatch::round-1 [implementation/succeeded] complete
     summary: implemented the slice
+    input digest: sha256:...
+    result digest: sha256:...
     verification: passed commit: abc123
     logs: /path/to/data/runs/cwfp-abc123/round-1/agent.log
     changed files: src/core/workflow/run/logs.ts

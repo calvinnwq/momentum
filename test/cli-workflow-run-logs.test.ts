@@ -562,6 +562,8 @@ describe("momentum workflow run logs", () => {
     expect(result.stdout).toContain("Schema version: 1");
     expect(result.stdout).toContain("round-1");
     expect(result.stdout).toContain("implemented the slice");
+    expect(result.stdout).toContain("input digest: in-1");
+    expect(result.stdout).toContain("result digest: res-1");
     expect(result.stdout).toContain("Approvals: 1");
     expect(result.stdout).toContain("Leases: 1");
     expect(result.stdout).toContain("Gates: 1 (open: 1)");

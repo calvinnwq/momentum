@@ -1594,6 +1594,12 @@ export function renderWorkflowRunLogsText(
     if (round.summary !== null) {
       lines.push(`    summary: ${round.summary}`);
     }
+    if (round.inputDigest !== null) {
+      lines.push(`    input digest: ${round.inputDigest}`);
+    }
+    if (round.resultDigest !== null) {
+      lines.push(`    result digest: ${round.resultDigest}`);
+    }
     lines.push(
       `    verification: ${round.verificationStatus ?? "(none)"}` +
         ` commit: ${round.commitSha ?? "(none)"}` +
