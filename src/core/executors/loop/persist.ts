@@ -68,6 +68,7 @@ import {
   type ExecutorRoundRecord,
   type ExecutorRoundState,
   type ExecutorRoundTransitionErrorCode,
+  isTerminalExecutorRoundState,
   type WorkflowExecutorFamily
 } from "./reducer.js";
 import { isWorkflowExecutorFamily } from "../../workflow/definition/definition.js";
@@ -560,6 +561,22 @@ export function listExecutorRoundsForRun(
     )
     .all(runId) as ExecutorRoundRow[];
   return rows.map(rowToRound);
+}
+
+/**
+ * List non-terminal rounds for a workflow run in the same deterministic order as
+ * the full run-scoped reader.
+ * This is the reattach/recovery read model for interrupted executor work: a
+ * process that dies after a round-start insert leaves a durable active row, and
+ * readers can identify that row without mutating completed round evidence.
+ */
+export function listIncompleteExecutorRoundsForRun(
+  db: MomentumDb,
+  runId: string
+): ExecutorRoundRecord[] {
+  return listExecutorRoundsForRun(db, runId).filter(
+    (round) => !isTerminalExecutorRoundState(round.state)
+  );
 }
 
 /**
