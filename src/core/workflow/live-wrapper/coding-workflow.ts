@@ -2368,25 +2368,24 @@ function parseNoMistakesAgentConfig(contents: string):
   if (!isMap(document.contents)) {
     return { ok: true, agent: undefined, agentPathOverrides: {} };
   }
-  const agent = yamlScalarString(getYamlMapValue(document.contents, "agent"));
-  const agentPathOverrideNode = getYamlMapValue(
-    document.contents,
-    "agent_path_override"
-  );
+  const resolved = document.toJS();
+  if (!isRecord(resolved)) {
+    return { ok: true, agent: undefined, agentPathOverrides: {} };
+  }
+  const agent =
+    typeof resolved.agent === "string" ? resolved.agent : undefined;
+  const agentPathOverrideNode = resolved.agent_path_override;
   const agentPathOverrides: Partial<Record<NoMistakesRunnerAgent, string>> = {};
   if (agentPathOverrideNode !== undefined && agentPathOverrideNode !== null) {
-    if (!isMap(agentPathOverrideNode)) {
+    if (!isRecord(agentPathOverrideNode)) {
       return {
         ok: false,
         error:
           "No-mistakes config agent_path_override must contain YAML mapping entries before running no-mistakes."
       };
     }
-    for (const item of agentPathOverrideNode.items) {
-      const key = yamlScalarString(item.key);
-      if (key === undefined || !isNoMistakesRunnerAgent(key)) continue;
-      const value = yamlScalarString(item.value);
-      if (value === undefined) continue;
+    for (const [key, value] of Object.entries(agentPathOverrideNode)) {
+      if (!isNoMistakesRunnerAgent(key) || typeof value !== "string") continue;
       agentPathOverrides[key] = value;
     }
   }

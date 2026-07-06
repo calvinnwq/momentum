@@ -2049,6 +2049,63 @@ describe("runCodingWorkflowLiveWrapper", () => {
     expect(readResult(resultPath).success).toBe(true);
   });
 
+  it("accepts no-mistakes config with YAML aliases for agent path overrides", () => {
+    const dir = makeTempDir();
+    const repo = path.join(dir, "repo");
+    const iteration = path.join(dir, "run");
+    const resultPath = path.join(iteration, "result.json");
+    const home = path.join(dir, "home");
+    const noMistakesConfigPath = path.join(home, ".no-mistakes", "config.yaml");
+    fs.mkdirSync(repo);
+    fs.mkdirSync(path.dirname(noMistakesConfigPath), { recursive: true });
+    fs.writeFileSync(
+      noMistakesConfigPath,
+      [
+        "agent: codex",
+        `codex_path: &codex_path ${process.execPath}`,
+        "agent_path_override:",
+        "  codex: *codex_path",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+    const configPath = path.join(dir, "wrapper-config.json");
+    writeJson(configPath, {
+      steps: {
+        "no-mistakes": {
+          command: "/bin/sh",
+          args: ["-c", "test \"$CODEX_HOME\" != \"\""],
+          cwd: "repo",
+          timeout_sec: 30,
+          env_allow: ["PATH", "HOME", "CODEX_HOME"],
+          runner_profile: noMistakesRunnerProfile(),
+          success_summary: "aliased no-mistakes config passed",
+          commit: { type: "test", subject: "run no mistakes" }
+        }
+      }
+    });
+
+    const outcome = runCodingWorkflowLiveWrapper(
+      deps({
+        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_REPO_PATH: repo,
+        MOMENTUM_ITERATION_DIR: iteration,
+        MOMENTUM_RESULT_PATH: resultPath,
+        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
+        HOME: home,
+        CODEX_HOME: "/tmp/codex-home",
+        PATH: process.env.PATH
+      })
+    );
+
+    expect(outcome).toMatchObject({
+      exitCode: 0,
+      success: true,
+      summary: "aliased no-mistakes config passed"
+    });
+    expect(readResult(resultPath).success).toBe(true);
+  });
+
   it("runs the configured command and writes a successful RunnerResult", () => {
     const dir = makeTempDir();
     const repo = path.join(dir, "repo");
