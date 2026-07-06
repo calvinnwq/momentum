@@ -2330,33 +2330,34 @@ function parseNoMistakesAgentConfig(contents: string):
       agentPathOverrideEntryIndent = undefined;
     }
     if (!inAgentPathOverride && indent === 0) {
-      const malformedKey = parseMalformedYamlKeySeparator(trimmed);
-      if (malformedKey !== undefined) {
+      const entry = parseYamlMappingEntry(trimmed);
+      if (entry?.ok === false) {
         return {
           ok: false,
-          error: `No-mistakes config entry ${malformedKey} is missing a YAML key separator after ":"; write ${malformedKey}: <value> before running no-mistakes.`
+          error: `No-mistakes config entry ${entry.key} is missing a YAML key separator after ":"; write ${entry.key}: <value> before running no-mistakes.`
         };
       }
-      const keyMatch = trimmed.match(/^([A-Za-z0-9_-]+)\s*:(?:\s+.*)?$/u);
-      if (keyMatch !== null) {
-        const key = keyMatch[1]!.trim();
-        if (seenTopLevelKeys.has(key)) {
+      if (entry?.ok === true) {
+        if (seenTopLevelKeys.has(entry.key)) {
           return {
             ok: false,
-            error: `No-mistakes config has duplicate top-level key ${key}; remove duplicate keys before running no-mistakes.`
+            error: `No-mistakes config has duplicate top-level key ${entry.key}; remove duplicate keys before running no-mistakes.`
           };
         }
-        seenTopLevelKeys.add(key);
-      }
-      const agentMatch = trimmed.match(/^agent\s*:\s+(.+)$/u);
-      if (agentMatch !== null) {
-        agent = unquoteYamlScalar(agentMatch[1]!.trim());
-        continue;
+        seenTopLevelKeys.add(entry.key);
+        if (entry.key === "agent" && entry.value !== undefined) {
+          agent = unquoteYamlScalar(entry.value);
+          continue;
+        }
       }
     }
     if (!inAgentPathOverride) {
-      const section = trimmed.match(/^agent_path_override\s*:\s*$/u);
-      if (section !== null && indent === 0) {
+      const section = indent === 0 ? parseYamlMappingEntry(trimmed) : undefined;
+      if (
+        section?.ok === true &&
+        section.key === "agent_path_override" &&
+        section.value === undefined
+      ) {
         inAgentPathOverride = true;
         sectionIndent = indent;
         agentPathOverrideEntryIndent = undefined;
@@ -2366,25 +2367,24 @@ function parseNoMistakesAgentConfig(contents: string):
 
     agentPathOverrideEntryIndent ??= indent;
     if (indent !== agentPathOverrideEntryIndent) continue;
-    const malformedOverrideKey = parseMalformedYamlKeySeparator(trimmed);
-    if (malformedOverrideKey !== undefined) {
+    const override = parseYamlMappingEntry(trimmed);
+    if (override?.ok === false) {
       return {
         ok: false,
-        error: `No-mistakes config entry agent_path_override.${malformedOverrideKey} is missing a YAML key separator after ":"; write ${malformedOverrideKey}: <path> before running no-mistakes.`
+        error: `No-mistakes config entry agent_path_override.${override.key} is missing a YAML key separator after ":"; write ${override.key}: <path> before running no-mistakes.`
       };
     }
-    const override = trimmed.match(/^([A-Za-z0-9_-]+)\s*:\s+(.+)$/u);
-    if (override === null) continue;
-    const key = override[1]!.trim();
-    if (seenAgentPathOverrideKeys.has(key)) {
+    if (override?.ok !== true) continue;
+    if (seenAgentPathOverrideKeys.has(override.key)) {
       return {
         ok: false,
-        error: `No-mistakes config has duplicate agent_path_override key ${key}; remove duplicate keys before running no-mistakes.`
+        error: `No-mistakes config has duplicate agent_path_override key ${override.key}; remove duplicate keys before running no-mistakes.`
       };
     }
-    seenAgentPathOverrideKeys.add(key);
-    if (!isNoMistakesRunnerAgent(key)) continue;
-    agentPathOverrides[key] = unquoteYamlScalar(override[2]!.trim());
+    seenAgentPathOverrideKeys.add(override.key);
+    if (!isNoMistakesRunnerAgent(override.key)) continue;
+    if (override.value === undefined) continue;
+    agentPathOverrides[override.key] = unquoteYamlScalar(override.value);
   }
   return { ok: true, agent, agentPathOverrides };
 }
@@ -2393,9 +2393,65 @@ function isNoMistakesRunnerAgent(value: string): value is NoMistakesRunnerAgent 
   return (NO_MISTAKES_RUNNER_AGENTS as readonly string[]).includes(value);
 }
 
-function parseMalformedYamlKeySeparator(value: string): string | undefined {
-  const match = value.match(/^([A-Za-z0-9_-]+)\s*:\S/u);
-  return match?.[1];
+function parseYamlMappingEntry(value: string):
+  | { ok: true; key: string; value: string | undefined }
+  | { ok: false; key: string }
+  | undefined {
+  const parsedKey = parseYamlMappingKeyPrefix(value);
+  if (parsedKey === undefined) return undefined;
+  const separatorIndex = parsedKey.rest.search(/\S/u);
+  if (
+    separatorIndex === -1 ||
+    parsedKey.rest[separatorIndex] !== ":"
+  ) {
+    return undefined;
+  }
+  const afterSeparator = parsedKey.rest.slice(separatorIndex + 1);
+  if (afterSeparator.length > 0 && !/^\s/u.test(afterSeparator)) {
+    return { ok: false, key: parsedKey.key };
+  }
+  const trimmedValue = afterSeparator.trim();
+  return {
+    ok: true,
+    key: parsedKey.key,
+    value: trimmedValue.length > 0 ? trimmedValue : undefined
+  };
+}
+
+function parseYamlMappingKeyPrefix(
+  value: string
+): { key: string; rest: string } | undefined {
+  if (value.startsWith('"') || value.startsWith("'")) {
+    return parseQuotedYamlMappingKeyPrefix(value);
+  }
+  const match = value.match(/^([A-Za-z0-9_-]+)(.*)$/u);
+  if (match === null) return undefined;
+  return { key: match[1]!, rest: match[2]! };
+}
+
+function parseQuotedYamlMappingKeyPrefix(
+  value: string
+): { key: string; rest: string } | undefined {
+  const quote = value[0];
+  let key = "";
+  for (let index = 1; index < value.length; index += 1) {
+    const char = value[index];
+    if (char === quote) {
+      if (quote === "'" && value[index + 1] === "'") {
+        key += "'";
+        index += 1;
+        continue;
+      }
+      return { key, rest: value.slice(index + 1) };
+    }
+    if (quote === '"' && char === "\\" && index + 1 < value.length) {
+      key += value[index + 1];
+      index += 1;
+      continue;
+    }
+    key += char;
+  }
+  return undefined;
 }
 
 function leadingWhitespaceCount(value: string): number {
