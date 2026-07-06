@@ -158,6 +158,44 @@ describe("momentum workflow run preview-coding", () => {
     ]);
   });
 
+  it("previews the current GNHF/CWFP implementation engine as an explicit route choice", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const result = await run(
+      previewCodingArgs({
+        dataDir,
+        repoDir,
+        runId: "preview-current-engine",
+        objective: "Inspect the current fallback route",
+        extra: ["--implementation-engine", "current-gnhf-cwfp"]
+      })
+    );
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      command: "workflow run preview-coding",
+      runId: "preview-current-engine",
+      implementationEngine: "current-gnhf-cwfp",
+      route: {
+        implementationEngine: "current-gnhf-cwfp"
+      }
+    });
+    expect(payload["steps"]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          stepId: "implementation",
+          executor: "goal-loop"
+        }),
+        expect.objectContaining({
+          stepId: "no-mistakes",
+          executor: "no-mistakes"
+        })
+      ])
+    );
+  });
+
   it("emits structural preflight evidence for invalid route steps", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();

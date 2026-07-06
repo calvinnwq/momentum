@@ -151,6 +151,8 @@ describe("persistWorkflowRunStart", () => {
         approvalBoundary: null,
         definitionKey: "sample-workflow",
         definitionVersion: 3,
+        route: {},
+        implementationEngine: null,
         stepCount: 2,
         inserted: true
       });

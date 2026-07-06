@@ -82,6 +82,8 @@ export function emitWorkflowRunStartSuccess(
     approvalBoundary: summary.approvalBoundary,
     definitionKey: summary.definitionKey,
     definitionVersion: summary.definitionVersion,
+    route: summary.route,
+    implementationEngine: summary.implementationEngine,
     repoPath: result.repoPath,
     objective: result.objective,
     counts: { steps: summary.stepCount },

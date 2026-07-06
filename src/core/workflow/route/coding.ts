@@ -53,6 +53,27 @@ export const CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY = "implementationEngine";
 /** The explicit native goal-loop route selected by `workflow run start-coding`. */
 export const NATIVE_GOAL_LOOP_IMPLEMENTATION_ENGINE = "native-goal-loop";
 
+/** The explicit compatibility route that keeps the current GNHF/CWFP path selectable. */
+export const CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE = "current-gnhf-cwfp";
+
+export const CODING_IMPLEMENTATION_ENGINES = [
+  NATIVE_GOAL_LOOP_IMPLEMENTATION_ENGINE,
+  CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE
+] as const;
+
+export type CodingImplementationEngine =
+  (typeof CODING_IMPLEMENTATION_ENGINES)[number];
+
+const CODING_IMPLEMENTATION_ENGINE_SET: ReadonlySet<string> = new Set(
+  CODING_IMPLEMENTATION_ENGINES
+);
+
+export function isCodingImplementationEngine(
+  value: string
+): value is CodingImplementationEngine {
+  return CODING_IMPLEMENTATION_ENGINE_SET.has(value);
+}
+
 /** The run-`route` namespace that carries per-step coding route/config overrides. */
 export const CODING_ROUTE_STEPS_KEY = "steps";
 

@@ -105,10 +105,13 @@ import {
 } from "../../core/workflow/run/start.js";
 import {
   CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY,
+  CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE,
   NATIVE_GOAL_LOOP_IMPLEMENTATION_ENGINE,
   formatCodingRouteStepSelectionLines,
+  isCodingImplementationEngine,
   resolveCodingRouteStepSelections,
   writeCodingStepRouteOverrides,
+  type CodingImplementationEngine,
   type CodingStepRouteOverrides
 } from "../../core/workflow/route/coding.js";
 import {
@@ -212,6 +215,7 @@ type ParsedFlags = {
   objective?: string;
   runId?: string;
   skillRevision?: string;
+  implementationEngine?: string;
   profile?: string;
   stepsJson?: string;
   error?: string;
@@ -555,6 +559,32 @@ function runWorkflowStartCommand(
     });
   }
 
+  let implementationEngine: CodingImplementationEngine =
+    NATIVE_GOAL_LOOP_IMPLEMENTATION_ENGINE;
+  if (parsed.implementationEngine !== undefined) {
+    if (!options.coding) {
+      return emitWorkflowRunStartFailure(parsed, io, {
+        command,
+        code: "route_config_not_allowed",
+        message: `--implementation-engine is only supported on the coding doors (\`workflow run start-coding\` / \`workflow run preview-coding\`); the generic \`workflow run start\` does not accept coding implementation engine routes.`,
+        runId
+      });
+    }
+    const normalizedEngine = parsed.implementationEngine.trim();
+    if (!isCodingImplementationEngine(normalizedEngine)) {
+      return emitWorkflowRunStartFailure(parsed, io, {
+        command,
+        code: "route_config_invalid",
+        message: `--implementation-engine must be one of: ${[
+          NATIVE_GOAL_LOOP_IMPLEMENTATION_ENGINE,
+          CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE
+        ].join(", ")}.`,
+        runId
+      });
+    }
+    implementationEngine = normalizedEngine;
+  }
+
   // Native per-step coding route reconfiguration (NGX-510): an operator can adjust
   // the planned harness/model/effort selections per step before kickoff via
   // --steps-json. The validated, normalized overrides, including provider-aware
@@ -676,7 +706,8 @@ function runWorkflowStartCommand(
       coding: options.coding,
       parsed,
       stepRouteOverrides,
-      routeProfile
+      routeProfile,
+      implementationEngine
     });
     const structuralPreflight = preflightCodingWorkflowRunStartInput(input);
     if (!structuralPreflight.ok) {
@@ -770,7 +801,8 @@ function runWorkflowStartCommand(
         coding: options.coding,
         parsed,
         stepRouteOverrides,
-        routeProfile
+        routeProfile,
+        implementationEngine
       });
 
     if (!options.coding) {
@@ -896,6 +928,7 @@ function buildWorkflowRunStartInput(args: {
   parsed: ParsedFlags;
   stepRouteOverrides: CodingStepRouteOverrides;
   routeProfile: string | undefined;
+  implementationEngine: CodingImplementationEngine;
 }): WorkflowRunStartInput {
   const {
     definition,
@@ -906,7 +939,8 @@ function buildWorkflowRunStartInput(args: {
     coding,
     parsed,
     stepRouteOverrides,
-    routeProfile
+    routeProfile,
+    implementationEngine
   } = args;
   const input: WorkflowRunStartInput = {
     definition,
@@ -934,8 +968,7 @@ function buildWorkflowRunStartInput(args: {
   // can distinguish the selected implementation path from the compatibility route.
   let route: Record<string, unknown> = {};
   if (coding) {
-    route[CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY] =
-      NATIVE_GOAL_LOOP_IMPLEMENTATION_ENGINE;
+    route[CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY] = implementationEngine;
   }
   if (routeProfile !== undefined) {
     route.profile = routeProfile;

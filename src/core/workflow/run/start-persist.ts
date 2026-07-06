@@ -34,6 +34,9 @@ import crypto from "node:crypto";
 
 import { isUniqueViolation, type MomentumDb } from "../../../adapters/db.js";
 import {
+  CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY
+} from "../route/coding.js";
+import {
   materializeWorkflowRunStart,
   type WorkflowRunStartError,
   type WorkflowRunStartInput
@@ -82,6 +85,8 @@ export type PersistWorkflowRunStartSummary = {
   approvalBoundary: WorkflowApprovalBoundary | null;
   definitionKey: string;
   definitionVersion: number;
+  route: Record<string, unknown>;
+  implementationEngine: string | null;
   stepCount: number;
   inserted: boolean;
 };
@@ -201,9 +206,19 @@ export function persistWorkflowRunStart(
     approvalBoundary: run.approvalBoundary,
     definitionKey: run.definitionKey,
     definitionVersion: run.definitionVersion,
+    route: run.route,
+    implementationEngine: readImplementationEngine(run.route),
     stepCount: steps.length,
     inserted: true
   };
+}
+
+function readImplementationEngine(route: Record<string, unknown>): string | null {
+  const value = route[CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY];
+  if (typeof value === "string" && value.trim().length > 0) {
+    return value;
+  }
+  return null;
 }
 
 function safeRollback(db: MomentumDb): void {

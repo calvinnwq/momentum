@@ -138,6 +138,44 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
     }
   });
 
+  it("persists the current GNHF/CWFP implementation engine when explicitly selected", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const result = await run(
+      startCodingArgs({
+        dataDir,
+        repoDir,
+        runId: "ngx-568-current-engine",
+        objective: "Start the current fallback route",
+        extra: ["--implementation-engine", "current-gnhf-cwfp"]
+      })
+    );
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      command: "workflow run start-coding",
+      runId: "ngx-568-current-engine",
+      implementationEngine: "current-gnhf-cwfp",
+      route: {
+        implementationEngine: "current-gnhf-cwfp"
+      }
+    });
+
+    const db = openDb(dataDir);
+    try {
+      const runRow = db
+        .prepare(`SELECT route_json FROM workflow_runs WHERE id = ?`)
+        .get("ngx-568-current-engine") as { route_json: string };
+      expect(JSON.parse(runRow.route_json)).toEqual({
+        implementationEngine: "current-gnhf-cwfp"
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   it("ignores persisted coding-workflow overrides and starts the built-in six-step definition", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
