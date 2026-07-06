@@ -387,6 +387,24 @@ export function preflightCodingWorkflowWrapperConfig(
         ]
       };
     }
+    const runnerEnvAllowMismatch =
+      locateWrapperConfigRunnerProfileEnvAllowMismatch(parsed.config);
+    if (runnerEnvAllowMismatch !== undefined) {
+      return {
+        ok: false,
+        evidence: [
+          buildStructuralPreflightEvidence({
+            checkId: WRAPPER_CONFIG_CHECK_ID,
+            status: "failed",
+            severity: "error",
+            path: runnerEnvAllowMismatch.path,
+            key: runnerEnvAllowMismatch.key,
+            message: runnerEnvAllowMismatch.message,
+            recommendedAction: runnerEnvAllowMismatch.recommendedAction
+          })
+        ]
+      };
+    }
 
     return {
       ok: true,
@@ -500,6 +518,29 @@ function locateWrapperConfigExpectedResultFileMismatch(
       key: "result_file",
       message: `Wrapper config \`result_file\` must match the expected live-wrapper result file "${expected}".`,
       recommendedAction: `Set ${basePath}.result_file to "${expected}", or remove the override.`
+    };
+  }
+
+  return undefined;
+}
+
+function locateWrapperConfigRunnerProfileEnvAllowMismatch(
+  config: CodingWorkflowWrapperConfig
+): (WrapperConfigFailureLocation & { message: string }) | undefined {
+  for (const [stepKind, stepConfig] of Object.entries(config.steps)) {
+    const profile = stepConfig?.noMistakesRunnerProfile;
+    if (profile === undefined) continue;
+    const allowed = new Set(stepConfig.envAllow);
+    const missing = profile.requiredEnv.filter((key) => !allowed.has(key));
+    if (missing.length === 0) continue;
+    const formattedMissing = missing.join(", ");
+    const quotedMissing = missing.map((key) => `"${key}"`).join(", ");
+    const basePath = `wrapper.config.steps.${stepKind}`;
+    return {
+      path: `${basePath}.env_allow`,
+      key: "env_allow",
+      message: `Wrapper config \`env_allow\` must include runner_profile.required_env entries: ${formattedMissing}.`,
+      recommendedAction: `Add ${quotedMissing} to ${basePath}.env_allow so the runner profile environment can reach no-mistakes.`
     };
   }
 

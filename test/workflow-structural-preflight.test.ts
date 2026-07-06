@@ -510,6 +510,43 @@ describe("coding workflow structural preflight", () => {
     });
   });
 
+  it("refuses no-mistakes runner profiles with required env outside env_allow", () => {
+    const result = preflightCodingWorkflowWrapperConfig({
+      steps: {
+        "no-mistakes": {
+          command: "/bin/sh",
+          env_allow: ["PATH", "HOME"],
+          runner_profile: {
+            interface: "axi",
+            stdin: "closed",
+            agent: "codex",
+            required_env: ["HOME", "CODEX_HOME", "PATH"],
+            agent_path: "/tmp/codex-runner"
+          }
+        }
+      }
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("expected failed preflight");
+    expect(result.evidence).toEqual([
+      {
+        checkId: "wrapper.config",
+        status: "failed",
+        severity: "error",
+        path: "wrapper.config.steps.no-mistakes.env_allow",
+        key: "env_allow",
+        message:
+          "Wrapper config `env_allow` must include runner_profile.required_env entries: CODEX_HOME.",
+        recommendedAction:
+          'Add "CODEX_HOME" to wrapper.config.steps.no-mistakes.env_allow so the runner profile environment can reach no-mistakes.'
+      }
+    ]);
+    expect(Object.keys(result.evidence[0])).toEqual(
+      STRUCTURAL_PREFLIGHT_EVIDENCE_FIELDS
+    );
+  });
+
   it("refuses no-mistakes runner profiles with non-absolute agent paths", () => {
     const result = preflightCodingWorkflowWrapperConfig({
       steps: {
