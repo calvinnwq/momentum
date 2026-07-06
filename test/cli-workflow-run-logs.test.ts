@@ -625,6 +625,17 @@ describe("momentum workflow run logs", () => {
             humanGate: "quota_exhausted"
           },
           "operator_decision_required"
+        ],
+        [
+          "operator-gated-after-verification-failed",
+          {
+            state: "waiting_operator",
+            classification: "operator_decision_required",
+            commitSha: "abc123",
+            verificationStatus: "failed",
+            humanGate: "quota_exhausted"
+          },
+          "operator_decision_required"
         ]
       ];
 
@@ -674,9 +685,81 @@ describe("momentum workflow run logs", () => {
         [
           "operator-gated-after-progress",
           "operator_decision_required"
+        ],
+        [
+          "operator-gated-after-verification-failed",
+          "operator_decision_required"
         ]
       ]
     );
+  });
+
+  it("does not fabricate native round evidence before executor result capture", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-logs-pending-round";
+    const db = openDb(dataDir);
+    try {
+      db.prepare(
+        `INSERT INTO workflow_runs
+           (id, state, source, plan_json, objective, issue_scope_json, route_json,
+            needs_manual_recovery, created_at, updated_at)
+           VALUES (?, 'running', 'agent-workflow', '{}', 'logs read-back', '{}', '{}', 0, 1, 1)`
+      ).run(runId);
+      db.prepare(
+        `INSERT INTO workflow_steps
+           (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
+           VALUES (?, 'implementation', 'implementation', 'running', 1, 1, 1, 1)`
+      ).run(runId);
+      insertExecutorInvocation(db, makeInvocation(runId), { now: 1 });
+      insertExecutorRound(
+        db,
+        makeRound(runId, {
+          state: "pending",
+          classification: null,
+          executorRecommendation: null,
+          startedAt: null,
+          heartbeatAt: null,
+          finishedAt: null,
+          summary: null,
+          keyChanges: [],
+          keyLearnings: [],
+          remainingWork: [],
+          changedFiles: [],
+          verificationStatus: null,
+          verificationResults: [],
+          commitSha: null,
+          recoveryCode: null,
+          humanGate: null
+        }),
+        { now: 1 }
+      );
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "logs",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      rounds: Array<{
+        executorRecommendation: string | null;
+        classification: string | null;
+        nativeRoundEvidence: unknown;
+      }>;
+    };
+    expect(payload.rounds[0]).toMatchObject({
+      executorRecommendation: null,
+      classification: null,
+      nativeRoundEvidence: null
+    });
   });
 
   it("keeps executor recommendation separate from gated classification", async () => {

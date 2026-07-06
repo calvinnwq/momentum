@@ -1550,10 +1550,9 @@ export function workflowRoundToJsonShape(
     keyChanges: round.keyChanges,
     keyLearnings: round.keyLearnings,
     learnings: round.keyLearnings,
-    nativeRoundEvidence:
-      round.executorFamily === "goal-loop"
-        ? workflowNativeRoundEvidence(round)
-        : null,
+    nativeRoundEvidence: workflowShouldEmitNativeRoundEvidence(round)
+      ? workflowNativeRoundEvidence(round)
+      : null,
     remainingWork: round.remainingWork,
     changedFiles: round.changedFiles,
     verificationStatus: round.verificationStatus,
@@ -1601,6 +1600,15 @@ function workflowNativeRoundEvidence(
     recoveryReason: round.recoveryCode,
     remainingWork: round.remainingWork
   };
+}
+
+function workflowShouldEmitNativeRoundEvidence(
+  round: WorkflowRunLogRound
+): boolean {
+  return (
+    round.executorFamily === "goal-loop" &&
+    (round.classification !== null || round.executorRecommendation != null)
+  );
 }
 
 function workflowRoundCompletionRecommendation(
@@ -1788,9 +1796,6 @@ function workflowRoundOutcome(round: WorkflowRunLogRound): string {
   ) {
     return "manual_recovery";
   }
-  if (round.verificationStatus === "failed") {
-    return "verification_failed";
-  }
   if (
     round.classification === "operator_decision_required" ||
     round.classification === "approval_required" ||
@@ -1799,6 +1804,9 @@ function workflowRoundOutcome(round: WorkflowRunLogRound): string {
     round.humanGate === "approval_required"
   ) {
     return round.classification ?? "operator_decision_required";
+  }
+  if (round.verificationStatus === "failed") {
+    return "verification_failed";
   }
   if (round.commitSha !== null || round.classification === "complete") {
     return "successful";
