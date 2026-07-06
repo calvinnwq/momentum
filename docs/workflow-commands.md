@@ -2454,6 +2454,9 @@ Executor invocations: 1
 Executor rounds: 1
 - cwfp-abc123::implementation::dispatch::round-1 [implementation/succeeded] complete outcome=successful
     summary: implemented the slice
+    key changes: added reader
+    learnings: use durable round state for follow-up input
+    remaining work: wire additional consumers
     input digest: sha256:...
     result digest: sha256:...
     verification: passed commit: abc123

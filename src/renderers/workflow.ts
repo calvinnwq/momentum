@@ -1620,6 +1620,15 @@ export function renderWorkflowRunLogsText(
     if (round.summary !== null) {
       lines.push(`    summary: ${round.summary}`);
     }
+    if (round.keyChanges.length > 0) {
+      lines.push(`    key changes: ${round.keyChanges.join("; ")}`);
+    }
+    if (round.keyLearnings.length > 0) {
+      lines.push(`    learnings: ${round.keyLearnings.join("; ")}`);
+    }
+    if (round.remainingWork.length > 0) {
+      lines.push(`    remaining work: ${round.remainingWork.join("; ")}`);
+    }
     if (round.inputDigest !== null) {
       lines.push(`    input digest: ${round.inputDigest}`);
     }

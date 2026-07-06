@@ -107,8 +107,8 @@ function makeRound(
     logPaths: [`/runs/${runId}/round-1/agent.log`],
     summary: "implemented the slice",
     keyChanges: ["added reader"],
-    keyLearnings: [],
-    remainingWork: [],
+    keyLearnings: ["operator readback needs durable learnings"],
+    remainingWork: ["wire additional consumers"],
     changedFiles: ["src/core/workflow/run/logs.ts"],
     verificationStatus: "passed",
     commitSha: "abc123",
@@ -584,6 +584,11 @@ describe("momentum workflow run logs", () => {
     expect(result.stdout).toContain("Schema version: 1");
     expect(result.stdout).toContain("round-1");
     expect(result.stdout).toContain("implemented the slice");
+    expect(result.stdout).toContain("key changes: added reader");
+    expect(result.stdout).toContain(
+      "learnings: operator readback needs durable learnings"
+    );
+    expect(result.stdout).toContain("remaining work: wire additional consumers");
     expect(result.stdout).toContain("input digest: in-1");
     expect(result.stdout).toContain("result digest: res-1");
     expect(result.stdout).toContain("Executor invocations: 1");
