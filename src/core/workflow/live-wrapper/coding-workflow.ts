@@ -2330,7 +2330,14 @@ function parseNoMistakesAgentConfig(contents: string):
       agentPathOverrideEntryIndent = undefined;
     }
     if (!inAgentPathOverride && indent === 0) {
-      const keyMatch = trimmed.match(/^([A-Za-z0-9_-]+)\s*:/u);
+      const malformedKey = parseMalformedYamlKeySeparator(trimmed);
+      if (malformedKey !== undefined) {
+        return {
+          ok: false,
+          error: `No-mistakes config entry ${malformedKey} is missing a YAML key separator after ":"; write ${malformedKey}: <value> before running no-mistakes.`
+        };
+      }
+      const keyMatch = trimmed.match(/^([A-Za-z0-9_-]+)\s*:(?:\s+.*)?$/u);
       if (keyMatch !== null) {
         const key = keyMatch[1]!.trim();
         if (seenTopLevelKeys.has(key)) {
@@ -2341,7 +2348,7 @@ function parseNoMistakesAgentConfig(contents: string):
         }
         seenTopLevelKeys.add(key);
       }
-      const agentMatch = trimmed.match(/^agent\s*:\s*(.+)$/u);
+      const agentMatch = trimmed.match(/^agent\s*:\s+(.+)$/u);
       if (agentMatch !== null) {
         agent = unquoteYamlScalar(agentMatch[1]!.trim());
         continue;
@@ -2359,7 +2366,14 @@ function parseNoMistakesAgentConfig(contents: string):
 
     agentPathOverrideEntryIndent ??= indent;
     if (indent !== agentPathOverrideEntryIndent) continue;
-    const override = trimmed.match(/^([A-Za-z0-9_-]+)\s*:\s*(.+)$/u);
+    const malformedOverrideKey = parseMalformedYamlKeySeparator(trimmed);
+    if (malformedOverrideKey !== undefined) {
+      return {
+        ok: false,
+        error: `No-mistakes config entry agent_path_override.${malformedOverrideKey} is missing a YAML key separator after ":"; write ${malformedOverrideKey}: <path> before running no-mistakes.`
+      };
+    }
+    const override = trimmed.match(/^([A-Za-z0-9_-]+)\s*:\s+(.+)$/u);
     if (override === null) continue;
     const key = override[1]!.trim();
     if (seenAgentPathOverrideKeys.has(key)) {
@@ -2377,6 +2391,11 @@ function parseNoMistakesAgentConfig(contents: string):
 
 function isNoMistakesRunnerAgent(value: string): value is NoMistakesRunnerAgent {
   return (NO_MISTAKES_RUNNER_AGENTS as readonly string[]).includes(value);
+}
+
+function parseMalformedYamlKeySeparator(value: string): string | undefined {
+  const match = value.match(/^([A-Za-z0-9_-]+)\s*:\S/u);
+  return match?.[1];
 }
 
 function leadingWhitespaceCount(value: string): number {

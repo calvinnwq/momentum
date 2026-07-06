@@ -1143,6 +1143,121 @@ describe("loadCodingWorkflowWrapperConfig", () => {
     expect(fs.existsSync(resultPath)).toBe(false);
   });
 
+  it("fails closed when no-mistakes config omits YAML separators", () => {
+    const dir = makeTempDir();
+    const repo = path.join(dir, "repo");
+    const iteration = path.join(dir, "run");
+    const resultPath = path.join(iteration, "result.json");
+    const sentinelPath = path.join(dir, "no-mistakes-ran");
+    const home = path.join(dir, "home");
+    const noMistakesConfigPath = path.join(home, ".no-mistakes", "config.yaml");
+    fs.mkdirSync(repo);
+    fs.mkdirSync(path.dirname(noMistakesConfigPath), { recursive: true });
+    const otherWrapper = path.join(dir, "other-codex-runner");
+    fs.writeFileSync(otherWrapper, "#!/bin/sh\nexit 0\n", "utf8");
+    fs.chmodSync(otherWrapper, 0o755);
+    fs.writeFileSync(
+      noMistakesConfigPath,
+      [
+        "agent: codex",
+        "agent_path_override:",
+        `  codex:${otherWrapper}`,
+        `  codex: ${process.execPath}`,
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+    const configPath = path.join(dir, "wrapper-config.json");
+    writeJson(configPath, {
+      steps: {
+        "no-mistakes": {
+          command: "/bin/sh",
+          args: ["-c", `touch ${JSON.stringify(sentinelPath)}`],
+          cwd: "repo",
+          timeout_sec: 30,
+          env_allow: ["PATH", "HOME", "CODEX_HOME"],
+          runner_profile: noMistakesRunnerProfile(),
+          commit: { type: "test", subject: "run no mistakes" }
+        }
+      }
+    });
+
+    const outcome = runCodingWorkflowLiveWrapper(
+      deps({
+        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_REPO_PATH: repo,
+        MOMENTUM_ITERATION_DIR: iteration,
+        MOMENTUM_RESULT_PATH: resultPath,
+        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
+        HOME: home,
+        CODEX_HOME: "/tmp/codex-home",
+        PATH: process.env.PATH
+      })
+    );
+
+    expect(outcome.exitCode).toBe(1);
+    expect(outcome.success).toBe(false);
+    expect(outcome.summary).toContain("agent_path_override.codex");
+    expect(fs.existsSync(sentinelPath)).toBe(false);
+    expect(fs.existsSync(resultPath)).toBe(false);
+  });
+
+  it("fails closed when no-mistakes agent omits the YAML separator", () => {
+    const dir = makeTempDir();
+    const repo = path.join(dir, "repo");
+    const iteration = path.join(dir, "run");
+    const resultPath = path.join(iteration, "result.json");
+    const sentinelPath = path.join(dir, "no-mistakes-ran");
+    const home = path.join(dir, "home");
+    const noMistakesConfigPath = path.join(home, ".no-mistakes", "config.yaml");
+    fs.mkdirSync(repo);
+    fs.mkdirSync(path.dirname(noMistakesConfigPath), { recursive: true });
+    fs.writeFileSync(
+      noMistakesConfigPath,
+      [
+        "agent:codex",
+        "agent: codex",
+        "agent_path_override:",
+        `  codex: ${process.execPath}`,
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+    const configPath = path.join(dir, "wrapper-config.json");
+    writeJson(configPath, {
+      steps: {
+        "no-mistakes": {
+          command: "/bin/sh",
+          args: ["-c", `touch ${JSON.stringify(sentinelPath)}`],
+          cwd: "repo",
+          timeout_sec: 30,
+          env_allow: ["PATH", "HOME", "CODEX_HOME"],
+          runner_profile: noMistakesRunnerProfile(),
+          commit: { type: "test", subject: "run no mistakes" }
+        }
+      }
+    });
+
+    const outcome = runCodingWorkflowLiveWrapper(
+      deps({
+        MOMENTUM_STEP_KIND: "no-mistakes",
+        MOMENTUM_REPO_PATH: repo,
+        MOMENTUM_ITERATION_DIR: iteration,
+        MOMENTUM_RESULT_PATH: resultPath,
+        [CODING_WORKFLOW_WRAPPER_CONFIG_ENV_VAR]: configPath,
+        HOME: home,
+        CODEX_HOME: "/tmp/codex-home",
+        PATH: process.env.PATH
+      })
+    );
+
+    expect(outcome.exitCode).toBe(1);
+    expect(outcome.success).toBe(false);
+    expect(outcome.summary).toContain("entry agent is missing a YAML key separator");
+    expect(fs.existsSync(sentinelPath)).toBe(false);
+    expect(fs.existsSync(resultPath)).toBe(false);
+  });
+
   it("fails closed when no-mistakes agent config only appears in nested YAML", () => {
     const dir = makeTempDir();
     const repo = path.join(dir, "repo");
