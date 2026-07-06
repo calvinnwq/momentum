@@ -2270,6 +2270,12 @@ function readNoMistakesAgentConfig(
   }
 
   const parsed = parseNoMistakesAgentConfig(contents);
+  if (!parsed.ok) {
+    return {
+      ok: false,
+      error: parsed.error
+    };
+  }
   if (parsed.agent === undefined) {
     return {
       ok: false,
@@ -2299,16 +2305,21 @@ function readNoMistakesAgentConfig(
   };
 }
 
-function parseNoMistakesAgentConfig(contents: string): {
-  agent: string | undefined;
-  agentPathOverrides: Partial<Record<NoMistakesRunnerAgent, string>>;
-} {
+function parseNoMistakesAgentConfig(contents: string):
+  | {
+      ok: true;
+      agent: string | undefined;
+      agentPathOverrides: Partial<Record<NoMistakesRunnerAgent, string>>;
+    }
+  | { ok: false; error: string } {
   const lines = contents.split(/\r?\n/u);
   let inAgentPathOverride = false;
   let sectionIndent = 0;
   let agentPathOverrideEntryIndent: number | undefined;
   let agent: string | undefined;
   const agentPathOverrides: Partial<Record<NoMistakesRunnerAgent, string>> = {};
+  const seenTopLevelKeys = new Set<string>();
+  const seenAgentPathOverrideKeys = new Set<string>();
   for (const rawLine of lines) {
     const withoutComment = rawLine.replace(/\s+#.*$/u, "");
     if (withoutComment.trim().length === 0) continue;
@@ -2319,6 +2330,17 @@ function parseNoMistakesAgentConfig(contents: string): {
       agentPathOverrideEntryIndent = undefined;
     }
     if (!inAgentPathOverride && indent === 0) {
+      const keyMatch = trimmed.match(/^([A-Za-z0-9_-]+)\s*:/u);
+      if (keyMatch !== null) {
+        const key = keyMatch[1]!.trim();
+        if (seenTopLevelKeys.has(key)) {
+          return {
+            ok: false,
+            error: `No-mistakes config has duplicate top-level key ${key}; remove duplicate keys before running no-mistakes.`
+          };
+        }
+        seenTopLevelKeys.add(key);
+      }
       const agentMatch = trimmed.match(/^agent\s*:\s*(.+)$/u);
       if (agentMatch !== null) {
         agent = unquoteYamlScalar(agentMatch[1]!.trim());
@@ -2340,10 +2362,17 @@ function parseNoMistakesAgentConfig(contents: string): {
     const override = trimmed.match(/^([A-Za-z0-9_-]+)\s*:\s*(.+)$/u);
     if (override === null) continue;
     const key = override[1]!.trim();
+    if (seenAgentPathOverrideKeys.has(key)) {
+      return {
+        ok: false,
+        error: `No-mistakes config has duplicate agent_path_override key ${key}; remove duplicate keys before running no-mistakes.`
+      };
+    }
+    seenAgentPathOverrideKeys.add(key);
     if (!isNoMistakesRunnerAgent(key)) continue;
     agentPathOverrides[key] = unquoteYamlScalar(override[2]!.trim());
   }
-  return { agent, agentPathOverrides };
+  return { ok: true, agent, agentPathOverrides };
 }
 
 function isNoMistakesRunnerAgent(value: string): value is NoMistakesRunnerAgent {
