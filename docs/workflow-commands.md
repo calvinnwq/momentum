@@ -25,7 +25,7 @@ Operator-facing CLI envelopes for the `workflow run start`, `workflow run start-
 - `workflow run events` is a read-only replay surface for supervisors and app clients that need semantic run changes after reconnecting.
   It returns ordered event records from durable workflow state and append-only workflow event rows without reading stdout scrollback or running dispatch.
   It is the catch-up substrate for stream mode and discrete pollers, not a replacement for live polling by itself.
-- `workflow run logs` is a read-only run-scoped log and evidence reader that reuses the workflow detail shape and attaches executor rounds plus their child artifacts, checkpoints, findings, and decisions.
+- `workflow run logs` is a read-only run-scoped log and evidence reader that reuses the workflow detail shape and attaches executor invocations, executor rounds, and their child artifacts, checkpoints, findings, and decisions.
 
 `workflow run preview-coding`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run events`, and `workflow run logs` are read-only: they never write SQLite or files.
 `workflow run monitor` is also read-only unless `--advance` is passed, in which case supported Momentum-native coding runs persist only `monitor_last_seen_digest` / `monitor_last_seen_at` and `monitor_last_emitted_digest` / `monitor_last_emitted_at` progress baselines.
@@ -300,6 +300,8 @@ Behaviour:
   "approvalBoundary": null,
   "definitionKey": "coding-workflow",
   "definitionVersion": 1,
+  "route": {},
+  "implementationEngine": null,
   "repoPath": "/path/to/repo",
   "objective": "Ship the feature",
   "counts": { "steps": 6 },
@@ -307,7 +309,10 @@ Behaviour:
 }
 ```
 
-`state` is `approved` and `approvalBoundary` echoes the supplied boundary when `--approval-boundary` is used; otherwise `state` is `pending` and `approvalBoundary` is `null`. `counts.steps` is the number of materialized step rows. `policy.present` is `true` only when a valid `MOMENTUM.md` was loaded; `policy.path` is always the resolved `MOMENTUM.md` path.
+`state` is `approved` and `approvalBoundary` echoes the supplied boundary when `--approval-boundary` is used; otherwise `state` is `pending` and `approvalBoundary` is `null`.
+`route` is the durable run route as persisted, and `implementationEngine` is the selected coding implementation path when the route includes one.
+`counts.steps` is the number of materialized step rows.
+`policy.present` is `true` only when a valid `MOMENTUM.md` was loaded; `policy.path` is always the resolved `MOMENTUM.md` path.
 
 ### JSON envelope (failure)
 
@@ -367,7 +372,7 @@ The `invalid_run_start` refusal additionally carries an `errors` array of `{ cod
 | `policy_invalid` | `<repo>/MOMENTUM.md` is present but malformed; the start is refused and nothing is written. |
 | `invalid_run_start` | Run-start materialization rejected the inputs; carries an `errors` array. |
 | `run_exists` | A workflow run with `--run-id` already exists; the existing run is left untouched. |
-| `route_config_invalid` | `--profile` was supplied but blank, or `--implementation-engine` was not one of the supported coding engine values; invalid profile failures carry structural `preflightEvidence` and write nothing. |
+| `route_config_invalid` | `--profile` was supplied but blank, or a coding door received an unsupported `--implementation-engine`; invalid profile failures carry structural `preflightEvidence` and write nothing. |
 | `route_config_not_allowed` | `--implementation-engine` or `--steps-json` was supplied to the generic start; coding route options are only accepted on `workflow run start-coding` / `workflow run preview-coding`. |
 
 The `invalid_run_start` `errors[]` use the run-start materialization taxonomy: `definition_invalid`, `run_id_invalid`, `repo_path_invalid`, `objective_invalid`, `approval_boundary_invalid`, `issue_scope_invalid`, `route_invalid`.
@@ -379,7 +384,6 @@ Workflow run started: run-1
 Definition: coding-workflow v1
 State: pending
 Approval boundary: (none)
-Implementation engine: native-goal-loop
 Steps: 6
 Repo: /path/to/repo
 Objective: Ship the feature
@@ -424,7 +428,7 @@ Optional arguments:
   The value is trimmed and must be non-blank.
   This captures intent only; the executing live-wrapper profile is still resolved by the daemon from `MOMENTUM_LIVE_WRAPPER_PROFILE` at run time.
 - `--implementation-engine <engine>` - select the coding implementation engine recorded on the run's durable `route.implementationEngine`.
-  Valid values are `native-goal-loop` and `current-gnhf-cwfp`; when omitted, the coding doors keep selecting `native-goal-loop`.
+  Valid values are `native-goal-loop` and `current-gnhf-cwfp`; when omitted, the coding doors keep selecting and persisting `native-goal-loop`.
   The current GNHF/CWFP route and the native goal-loop route share the no-mistakes tail, but the route marker lets operators preview, start, compare, and roll back by selecting the desired implementation path explicitly.
   Until the compatibility implementation is wired into native dispatch, a run that selects `current-gnhf-cwfp` is parked at the implementation step with `route_config_invalid` rather than silently running the native goal-loop implementation.
 - `--steps-json <json>` - reconfigure the planned per-step harness/model/effort selections before the run starts, recorded on the run's durable `route.steps` so status, handoff, monitor, and logs can audit which selection the run was started with.
@@ -448,10 +452,10 @@ Behaviour:
 - **Native source**: on success the `workflow_runs.source` is `momentum-native-coding` (rather than the generic `workflow-definition`), so status, handoff, monitor, and logs can show the run as Momentum-owned primary state from durable rows alone.
 - **Built-in dispatch provenance**: native coding dispatch resolves executor families from the built-in `coding-workflow` definition recorded on the run by key and version, even if a persisted `coding-workflow` definition with the same key/version exists.
   If the recorded built-in version is unavailable, dispatch fails closed with `step_definition_not_found` instead of substituting persisted rows or a later built-in version.
-- **Structural preflight**: built-in definition lookup, required repository/objective shape, approval boundary, issue scope, route profile, and per-step route overrides fail closed before durable writes when they are structurally invalid.
+- **Structural preflight**: built-in definition lookup, required repository/objective shape, approval boundary, issue scope, route profile, implementation engine, and per-step route overrides fail closed before durable writes when they are structurally invalid.
   JSON failures from these checks include `preflightEvidence` with the failing check id, path, key, message, severity, and recommended action.
 - **Shared persistence**: everything else - durable run/step/approval rows, the no-clobber duplicate-run refusal, repo-policy refusal, and the `invalid_run_start` materialization taxonomy - matches `workflow run start`.
-  The success and failure envelopes are identical except that `command` is `workflow run start-coding`.
+  The success envelope also includes the coding `route` with `implementationEngine` and the top-level `implementationEngine` value; failure envelopes are identical except that `command` is `workflow run start-coding`.
 
 ### Error codes
 
@@ -488,7 +492,7 @@ Behaviour:
 - **Stable output**: the envelope carries no wall-clock fields, so repeated previews of the same inputs are byte-stable and safe to show before approval.
 - **Step detail**: each step carries its `kind`, executor family, `order`, `required` flag, and on-start `state` (`pending`, or `approved` for the steps an `--approval-boundary` covers).
 
-Success JSON adds a `preview: true` marker, the run header (`runId`, `source`, `state`, `approvalBoundary`, `definitionKey`, `definitionVersion`, `repoPath`, `objective`, `issueScope`, `route`, `skillRevision`), a `steps` array, `counts.steps`, and `policy`:
+Success JSON adds a `preview: true` marker, the run header (`runId`, `source`, `state`, `approvalBoundary`, `definitionKey`, `definitionVersion`, `repoPath`, `objective`, `issueScope`, `route`, `implementationEngine`, `skillRevision`), a `steps` array, `counts.steps`, and `policy`:
 
 ```json
 {
@@ -505,7 +509,10 @@ Success JSON adds a `preview: true` marker, the run header (`runId`, `source`, `
   "repoPath": "/path/to/repo",
   "objective": "Ship the slice",
   "issueScope": {},
-  "route": {},
+  "route": {
+    "implementationEngine": "native-goal-loop"
+  },
+  "implementationEngine": "native-goal-loop",
   "skillRevision": null,
   "steps": [
     { "stepId": "preflight", "kind": "preflight", "executor": "one-shot", "order": 0, "required": true, "state": "pending" },
@@ -522,7 +529,7 @@ Success JSON adds a `preview: true` marker, the run header (`runId`, `source`, `
 
 ### Text output (success)
 
-Text output is a human-readable preview of the same frozen plan and includes the command's no-write status, definition key/version, source, projected run state, approval boundary, profile, per-step route selections, repo, objective, policy path or `(none)`, data directory, and every step with order, step id, kind, executor family, required/optional marker, and projected state.
+Text output is a human-readable preview of the same frozen plan and includes the command's no-write status, definition key/version, source, projected run state, approval boundary, profile, implementation engine, per-step route selections, repo, objective, policy path or `(none)`, data directory, and every step with order, step id, kind, executor family, required/optional marker, and projected state.
 The per-step route block lists every configurable step (implementation, postflight, no-mistakes, merge-cleanup) with its harness/model/effort selection, showing `(default)` where the operator did not override the field, so an operator can audit the default selections and any `--steps-json` changes before approval:
 
 ```text
@@ -531,7 +538,8 @@ Definition: coding-workflow v1
 Source: momentum-native-coding
 State on start: pending
 Approval boundary: (none)
-Profile: live-wrapper
+Profile: (none)
+Implementation engine: native-goal-loop
 Per-step route:
   implementation: harness=(default), model=(default), effort=(default)
   postflight: harness=(default), model=(default), effort=(default)
@@ -2345,7 +2353,7 @@ momentum workflow run logs <run-id> [--data-dir <path>] [--json]
 ```
 
 Read-back of one workflow run's durable logs and evidence, for operators inspecting what each step actually ran and produced.
-It is the workflow-first equivalent of goal-first `logs <goal-id>`: it wraps the same detail loader as `workflow status <run-id>` / `workflow handoff` (run, steps, approvals, leases, monitor, evidence, gates) and adds executor invocation read-back plus the per-round executor evidence that the detail loader does not carry - executor family / agent / model / effort, input and result digests, log paths, summaries, key changes, changed files, verification status, commit SHA, recovery codes, and the child artifacts / checkpoints / findings / decisions emitted below each round.
+It is the workflow-first equivalent of goal-first `logs <goal-id>`: it wraps the same detail loader as `workflow status <run-id>` / `workflow handoff` (run, steps, approvals, leases, monitor, evidence, gates) and adds executor invocation read-back plus the per-round executor evidence that the detail loader does not carry - executor family / agent / model / effort, input and result digests, log paths, summaries, key changes, learnings, remaining work, executor recommendation, outcome, changed files, verification status and command details, native round evidence, commit SHA, recovery codes, and the child artifacts / checkpoints / findings / decisions emitted below each round.
 Read-only: no SQLite mutation, no file reads, no external writes.
 
 Invocations are returned across the run in step key, attempt, invocation id order.
@@ -2392,6 +2400,8 @@ Rounds are returned across every invocation in the run, ordered by step key, the
       "roundIndex": 0,
       "state": "succeeded",
       "classification": "complete",
+      "executorRecommendation": "complete",
+      "outcome": "successful",
       "startedAt": 1730000500000,
       "heartbeatAt": 1730000550000,
       "finishedAt": 1730000600000,

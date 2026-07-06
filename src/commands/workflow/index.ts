@@ -415,6 +415,9 @@ function workflowRunStart(parsed: ParsedFlags, io: CliIo): number {
  *   - it records the run with the {@link MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE}
  *     provenance so status / handoff / monitor / logs surface it as
  *     Momentum-owned;
+ *   - it records the coding implementation engine under
+ *     `route.implementationEngine`, defaulting to `native-goal-loop` while
+ *     preserving `current-gnhf-cwfp` as an explicit compatibility selection;
  *   - it accepts the coding-only `--steps-json` route override and records
  *     validated per-step harness/model/effort selections under `route.steps`,
  *     with provider-aware model aliases normalized before persistence; and
@@ -438,9 +441,9 @@ function workflowRunStartCoding(parsed: ParsedFlags, io: CliIo): number {
  * instead of persisting a run it materializes a frozen
  * {@link materializeWorkflowCodingPlanPreview} projection and emits it so an
  * operator can inspect the proposed run - run id, repo, objective, issue scope,
- * approval boundary, route/profile and per-step route selections, definition
- * key/version, and every step with its executor family - before approving or
- * executing it. The preview is a pure
+ * approval boundary, route/profile, implementation engine, and per-step route
+ * selections, definition key/version, and every step with its executor family -
+ * before approving or executing it. The preview is a pure
  * projection of the version-pinned built-in definition plus inputs, so the
  * durable run a later `start-coding` persists matches it exactly.
  */
@@ -465,8 +468,8 @@ type WorkflowStartCommandOptions = {
  * the coding preconditions but returns a read-only plan before the durable
  * persistence point. The `coding` option toggles the coding-specific guards
  * (forced definition, reserved-run-id refusal, native source provenance,
- * `--steps-json` support) while `preview` keeps the materialized plan on the
- * read-only path.
+ * implementation-engine route selection, `--steps-json` support) while `preview`
+ * keeps the materialized plan on the read-only path.
  */
 function buildCodingRequiredInputPreflightEvidence(
   parsed: ParsedFlags,
