@@ -434,6 +434,37 @@ describe("executeWorkflowStepDispatch — supported family", () => {
     });
   });
 
+  it("routes unsupported current GNHF/CWFP implementation dispatch to manual recovery", () => {
+    const db = openNativeCodingDbWithRoute({
+      implementationEngine: "current-gnhf-cwfp"
+    });
+    const claim = approveAndClaim(db, "implementation");
+
+    const result = executeWorkflowStepDispatch(claim, {
+      db,
+      workerId: WORKER,
+      now: NOW + 1
+    });
+
+    expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.failClosed);
+    const gates = listWorkflowGatesForRun(db, RUN_ID);
+    expect(gates).toHaveLength(1);
+    expect(gates[0]).toMatchObject({
+      gateType: "manual_recovery_required",
+      targetScope: "step",
+      stepRunId: "implementation",
+      evidence: "route_config_invalid",
+      resolvedAt: null
+    });
+    expect(gates[0]?.reason).toContain("current-gnhf-cwfp");
+    expect(
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+    ).toBe(true);
+    expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
+    expect(countInvocations(db, RUN_ID)).toBe(0);
+    expect(stepState(db, RUN_ID, "implementation")).toBe("approved");
+  });
+
   it("holds the dispatch lease on a successful dispatch (owns the lifecycle)", () => {
     const db = openSeededDb();
     const claim = approveAndClaim(db, "preflight");

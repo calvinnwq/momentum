@@ -484,6 +484,7 @@ describe("executor rounds", () => {
       const record = makeRound({
         state: "succeeded",
         classification: "complete",
+        executorRecommendation: "complete",
         startedAt: 500,
         heartbeatAt: 600,
         finishedAt: 700,

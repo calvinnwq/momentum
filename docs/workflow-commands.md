@@ -426,6 +426,7 @@ Optional arguments:
 - `--implementation-engine <engine>` - select the coding implementation engine recorded on the run's durable `route.implementationEngine`.
   Valid values are `native-goal-loop` and `current-gnhf-cwfp`; when omitted, the coding doors keep selecting `native-goal-loop`.
   The current GNHF/CWFP route and the native goal-loop route share the no-mistakes tail, but the route marker lets operators preview, start, compare, and roll back by selecting the desired implementation path explicitly.
+  Until the compatibility implementation is wired into native dispatch, a run that selects `current-gnhf-cwfp` is parked at the implementation step with `route_config_invalid` rather than silently running the native goal-loop implementation.
 - `--steps-json <json>` - reconfigure the planned per-step harness/model/effort selections before the run starts, recorded on the run's durable `route.steps` so status, handoff, monitor, and logs can audit which selection the run was started with.
   The value is a JSON object keyed by the operationally meaningful coding steps (`implementation`, `postflight`, `no-mistakes`, `merge-cleanup`), each mapping to any of the `harness`, `model`, and `effort` string fields; an omitted step or field keeps the default (inherit at execution time).
   Selections are validated and normalized to a canonical, byte-stable shape before they are recorded; an unsupported step, unknown field, blank value, or malformed JSON fails closed with `route_config_invalid` and writes nothing.
@@ -1237,6 +1238,7 @@ The detail envelope flattens the per-run view at the top level (`run`, `steps`, 
 `run.source` is one of `agent-workflow`, `workflow-definition`, or `momentum-native-coding`.
 `run.route.profile` is present when a run was started with `--profile`; it records the operator-selected runtime/profile for status, handoff, monitor, and logs, but daemon execution still resolves the live-wrapper profile from `MOMENTUM_LIVE_WRAPPER_PROFILE`.
 `run.route.implementationEngine` records the selected coding implementation path, either `native-goal-loop` or `current-gnhf-cwfp`.
+Native dispatch currently executes `native-goal-loop`; `current-gnhf-cwfp` is treated as an explicit unsupported compatibility selection and fails closed before the implementation executor starts.
 `run.route.steps` is present when a coding run was started with `--steps-json`; it records the per-step harness/model/effort selections the run was started with (only the steps and fields the operator overrode), so the selected route can be audited from durable state.
 Provider-specific model aliases have already been normalized here when the step supplied a known mapped harness (`claude`, `codex`, or `opencode`), so status, handoff, monitor, logs, and dispatch read the same command-ready model string.
 Malformed route JSON is fail-closed.
@@ -2327,7 +2329,8 @@ Native goal-loop log readers treat Momentum executor rows and child evidence as 
 Future status, handoff, monitor, and GUI readers must use the same projection once they are wired to executor round evidence.
 The implementation step's `goal-loop` executor records one `executor_invocation` for the autonomous attempt and one ordered `executor_round` per durable iteration.
 Readers must derive attempt state plus summaries, key changes, learnings, remaining work, verification status, changed files, commit SHA, recovery reason, artifacts, checkpoints, findings, and decisions from those rows and artifact pointers.
-Post-finalization native round evidence exposes the daemon's `completionRecommendation` as `complete`, `continue`, `approval_required`, `operator_decision_required`, `manual_recovery_required`, `blocked`, `failed`, or `cancelled`.
+Post-finalization native round evidence exposes the executor's `completionRecommendation` as `complete`, `continue`, `approval_required`, `operator_decision_required`, `manual_recovery_required`, `blocked`, `failed`, or `cancelled`.
+It exposes Momentum's post-policy daemon decision separately as `daemonClassification`, so quota, recovery, and operator gates do not overwrite what the executor recommended.
 For `goal-loop` rounds, `workflow run logs --json` includes the schema-aligned `nativeRoundEvidence` projection next to the raw durable round and child evidence fields.
 For non-`goal-loop` executor rows, `nativeRoundEvidence` is `null`.
 They must not scrape terminal scrollback or treat `.gnhf/runs` as authoritative.
@@ -2409,6 +2412,7 @@ Rounds are returned across every invocation in the run, ordered by step key, the
         "keyChanges": ["added reader"],
         "learnings": ["use durable round state for follow-up input"],
         "completionRecommendation": "complete",
+        "daemonClassification": "complete",
         "verificationResult": {
           "status": "passed",
           "commands": [

@@ -79,7 +79,8 @@ const EXECUTOR_DECISION_EXTERNAL_REF_COLUMNS: ColumnSpec[] = [
 
 const EXECUTOR_ROUND_LEARNING_COLUMNS: ColumnSpec[] = [
   { name: "key_learnings", type: "TEXT NOT NULL DEFAULT '[]'" },
-  { name: "verification_results", type: "TEXT NOT NULL DEFAULT '[]'" }
+  { name: "verification_results", type: "TEXT NOT NULL DEFAULT '[]'" },
+  { name: "executor_recommendation", type: "TEXT" }
 ];
 
 const REPO_LOCKS_DDL = `
@@ -576,6 +577,7 @@ CREATE TABLE IF NOT EXISTS executor_rounds (
   round_index INTEGER NOT NULL,
   state TEXT NOT NULL DEFAULT 'pending',
   classification TEXT,
+  executor_recommendation TEXT,
   started_at INTEGER,
   heartbeat_at INTEGER,
   finished_at INTEGER,

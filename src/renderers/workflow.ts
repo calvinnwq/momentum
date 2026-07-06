@@ -1534,6 +1534,7 @@ export function workflowRoundToJsonShape(
     roundIndex: round.roundIndex,
     state: round.state,
     classification: round.classification,
+    executorRecommendation: round.executorRecommendation ?? null,
     outcome: workflowRoundOutcome(round),
     startedAt: round.startedAt,
     heartbeatAt: round.heartbeatAt,
@@ -1575,7 +1576,8 @@ function workflowNativeRoundEvidence(
     summary: round.summary,
     keyChanges: round.keyChanges,
     learnings: round.keyLearnings,
-    completionRecommendation: round.classification ?? "continue",
+    completionRecommendation: workflowRoundCompletionRecommendation(round),
+    daemonClassification: round.classification,
     verificationResult: {
       status: round.verificationStatus ?? "not_run",
       commands: (round.verificationResults ?? []).map((result) => ({
@@ -1599,6 +1601,21 @@ function workflowNativeRoundEvidence(
     recoveryReason: round.recoveryCode,
     remainingWork: round.remainingWork
   };
+}
+
+function workflowRoundCompletionRecommendation(
+  round: WorkflowRunLogRound
+): string {
+  if (round.executorRecommendation != null) {
+    return round.executorRecommendation;
+  }
+  if (
+    round.classification === "operator_decision_required" &&
+    round.humanGate === "quota_exhausted"
+  ) {
+    return round.commitSha !== null ? "continue" : "failed";
+  }
+  return round.classification ?? "continue";
 }
 
 export function workflowInvocationToJsonShape(
@@ -1773,6 +1790,15 @@ function workflowRoundOutcome(round: WorkflowRunLogRound): string {
   }
   if (round.verificationStatus === "failed") {
     return "verification_failed";
+  }
+  if (
+    round.classification === "operator_decision_required" ||
+    round.classification === "approval_required" ||
+    round.humanGate === "quota_exhausted" ||
+    round.humanGate === "operator_decision_required" ||
+    round.humanGate === "approval_required"
+  ) {
+    return round.classification ?? "operator_decision_required";
   }
   if (round.commitSha !== null || round.classification === "complete") {
     return "successful";

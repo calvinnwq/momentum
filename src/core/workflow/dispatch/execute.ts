@@ -67,8 +67,13 @@ import type {
 } from "../../executors/loop/reducer.js";
 import { CODING_WORKFLOW_DEFINITION_KEY } from "../definition/definition.js";
 import {
+  CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY,
+  CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE,
+  NATIVE_GOAL_LOOP_IMPLEMENTATION_ENGINE,
+  isCodingImplementationEngine,
   readCodingStepRouteOverrides,
   resolveCodingStepExecutorSelection,
+  type CodingImplementationEngine,
   type CodingStepExecutorSelection
 } from "../route/coding.js";
 import {
@@ -431,6 +436,23 @@ function resolveDispatchRoundSelection(
   if (!route.ok) {
     return { ok: false, reason: route.reason };
   }
+  const implementationEngine = readCodingImplementationEngine(
+    claim.runId,
+    route.route
+  );
+  if (!implementationEngine.ok) {
+    return { ok: false, reason: implementationEngine.reason };
+  }
+  if (
+    claim.stepId === "implementation" &&
+    implementationEngine.engine === CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE
+  ) {
+    return {
+      ok: false,
+      reason: `Native coding run ${claim.runId} selected implementationEngine=${CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE}, but that compatibility implementation is not wired to the native dispatch lane yet; select ${NATIVE_GOAL_LOOP_IMPLEMENTATION_ENGINE} or route through the compatibility import path.`
+    };
+  }
+
   const overrides = readCodingStepRouteOverrides(route.route);
   if (!overrides.ok) {
     return {
@@ -447,6 +469,32 @@ function resolveDispatchRoundSelection(
       claim.stepId
     )
   };
+}
+
+function readCodingImplementationEngine(
+  runId: string,
+  route: Record<string, unknown>
+):
+  | { ok: true; engine: CodingImplementationEngine }
+  | { ok: false; reason: string } {
+  const value = route[CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY];
+  if (value === undefined) {
+    return { ok: true, engine: NATIVE_GOAL_LOOP_IMPLEMENTATION_ENGINE };
+  }
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return {
+      ok: false,
+      reason: `Native coding run ${runId} route.implementationEngine is invalid; routing to manual recovery.`
+    };
+  }
+  const normalized = value.trim();
+  if (!isCodingImplementationEngine(normalized)) {
+    return {
+      ok: false,
+      reason: `Native coding run ${runId} route.implementationEngine is unsupported (${normalized}); routing to manual recovery.`
+    };
+  }
+  return { ok: true, engine: normalized };
 }
 
 function parseRouteJson(

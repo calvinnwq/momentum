@@ -837,6 +837,10 @@ export function planGoalLoopRoundPersistence(
   const terminalUpdate: ExecutorRoundUpdate = {
     toState: decision.roundState,
     classification: decision.classification,
+    executorRecommendation: completionRecommendationFromResult(
+      input.result,
+      decision.classification
+    ),
     verificationStatus: evidence.verificationStatus,
     ...(verificationResults.length > 0 ? { verificationResults } : {}),
     commitSha: evidence.commitSha,
@@ -851,6 +855,15 @@ export function planGoalLoopRoundPersistence(
       : {})
   };
   return { decision, evidence, captureUpdate, terminalUpdate };
+}
+
+function completionRecommendationFromResult(
+  result: RunnerResult | null,
+  fallback: ExecutorCompletionClassification
+): ExecutorCompletionClassification {
+  if (result === null) return fallback;
+  if (!result.success) return "failed";
+  return result.goal_complete ? "complete" : "continue";
 }
 
 function verificationResultsFromFinalize(

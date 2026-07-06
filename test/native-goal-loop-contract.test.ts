@@ -110,6 +110,7 @@ describe("native goal-loop contract docs", () => {
       "keyChanges",
       "learnings",
       "completionRecommendation",
+      "daemonClassification",
       "verificationResult",
       "artifacts",
       "checkpoints",
@@ -121,6 +122,7 @@ describe("native goal-loop contract docs", () => {
     expect(fixture).toMatchObject({
       schema: "momentum.native-goal-loop.round-result.v1",
       completionRecommendation: "continue",
+      daemonClassification: "continue",
       verificationResult: {
         status: "passed",
         commands: [
@@ -137,7 +139,7 @@ describe("native goal-loop contract docs", () => {
       "The `momentum.native-goal-loop.round-result.v1` fixture is a post-finalization evidence projection"
     );
     expect(spec).toContain(
-      "Its required JSON fields are `schema`, `summary`, `keyChanges`, `learnings`, `completionRecommendation`, `verificationResult`, `artifacts`, `checkpoints`, `changedFiles`, `commitSha`, `recoveryReason`, and `remainingWork`."
+      "Its required JSON fields are `schema`, `summary`, `keyChanges`, `learnings`, `completionRecommendation`, `daemonClassification`, `verificationResult`, `artifacts`, `checkpoints`, `changedFiles`, `commitSha`, `recoveryReason`, and `remainingWork`."
     );
     expect(spec).toContain(
       "`completionRecommendation` is the executor's recommendation only: `complete`, `continue`, `approval_required`, `operator_decision_required`, `manual_recovery_required`, `blocked`, `failed`, or `cancelled`."

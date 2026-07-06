@@ -492,7 +492,7 @@ export function insertExecutorRound(
     db.prepare(
       `INSERT INTO executor_rounds (
          round_id, invocation_id, workflow_run_id, step_run_id, step_key,
-         executor_family, attempt, round_index, state, classification,
+         executor_family, attempt, round_index, state, classification, executor_recommendation,
          started_at, heartbeat_at, finished_at, agent_provider, model, effort,
          input_digest, result_digest, artifact_root, log_paths,
          summary, key_changes, key_learnings, remaining_work, changed_files,
@@ -501,7 +501,7 @@ export function insertExecutorRound(
        ) VALUES (
          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
        )`
     ).run(
       record.roundId,
@@ -514,6 +514,7 @@ export function insertExecutorRound(
       record.roundIndex,
       record.state,
       record.classification,
+      record.executorRecommendation ?? null,
       record.startedAt,
       record.heartbeatAt,
       record.finishedAt,
@@ -609,6 +610,7 @@ export function listIncompleteExecutorRoundsForRun(
 export type ExecutorRoundUpdate = {
   toState: ExecutorRoundState;
   classification?: ExecutorCompletionClassification | null;
+  executorRecommendation?: ExecutorCompletionClassification | null;
   startedAt?: number | null;
   heartbeatAt?: number | null;
   finishedAt?: number | null;
@@ -671,6 +673,10 @@ export function updateExecutorRound(
     ...current,
     state: update.toState,
     classification: coalesce(update.classification, current.classification),
+    executorRecommendation: coalesce(
+      update.executorRecommendation,
+      current.executorRecommendation ?? null
+    ),
     startedAt: coalesce(update.startedAt, current.startedAt),
     heartbeatAt: coalesce(update.heartbeatAt, current.heartbeatAt),
     finishedAt: coalesce(update.finishedAt, current.finishedAt),
@@ -710,7 +716,7 @@ export function updateExecutorRound(
   const now = options.now ?? Date.now();
   const updateResult = db.prepare(
     `UPDATE executor_rounds SET
-       state = ?, classification = ?, started_at = ?, heartbeat_at = ?,
+       state = ?, classification = ?, executor_recommendation = ?, started_at = ?, heartbeat_at = ?,
        finished_at = ?, agent_provider = ?, model = ?, effort = ?,
        input_digest = ?, result_digest = ?, artifact_root = ?, log_paths = ?,
        summary = ?, key_changes = ?, key_learnings = ?, remaining_work = ?, changed_files = ?,
@@ -720,6 +726,7 @@ export function updateExecutorRound(
   ).run(
     next.state,
     next.classification,
+    next.executorRecommendation ?? null,
     next.startedAt,
     next.heartbeatAt,
     next.finishedAt,
@@ -1015,6 +1022,7 @@ type ExecutorRoundRow = {
   round_index: number;
   state: string;
   classification: string | null;
+  executor_recommendation: string | null;
   started_at: number | null;
   heartbeat_at: number | null;
   finished_at: number | null;
@@ -1094,7 +1102,7 @@ const INVOCATION_SELECT = `
 
 const ROUND_SELECT = `
   SELECT round_id, invocation_id, workflow_run_id, step_run_id, step_key,
-         executor_family, attempt, round_index, state, classification,
+         executor_family, attempt, round_index, state, classification, executor_recommendation,
          started_at, heartbeat_at, finished_at, agent_provider, model, effort,
          input_digest, result_digest, artifact_root, log_paths,
          summary, key_changes, key_learnings, remaining_work, changed_files,
@@ -1153,6 +1161,8 @@ function rowToRound(row: ExecutorRoundRow): ExecutorRoundRecord {
     state: row.state as ExecutorRoundState,
     classification:
       row.classification as ExecutorCompletionClassification | null,
+    executorRecommendation:
+      row.executor_recommendation as ExecutorCompletionClassification | null,
     startedAt: row.started_at,
     heartbeatAt: row.heartbeat_at,
     finishedAt: row.finished_at,
@@ -1281,6 +1291,15 @@ function validateRoundRecord(
       message: `unknown completion classification: ${String(record.classification)}`
     });
   }
+  if (
+    record.executorRecommendation != null &&
+    !CLASSIFICATION_SET.has(record.executorRecommendation)
+  ) {
+    errors.push({
+      code: "executor_round_unknown_executor_recommendation",
+      message: `unknown executor recommendation: ${String(record.executorRecommendation)}`
+    });
+  }
   if (record.humanGate !== null && !GATE_TYPE_SET.has(record.humanGate)) {
     errors.push({
       code: "executor_round_unknown_human_gate",
@@ -1363,6 +1382,10 @@ function roundPatchMatches(
 ): boolean {
   return (
     fieldMatches(current.classification, update.classification) &&
+    fieldMatches(
+      current.executorRecommendation ?? null,
+      update.executorRecommendation
+    ) &&
     fieldMatches(current.startedAt, update.startedAt) &&
     fieldMatches(current.heartbeatAt, update.heartbeatAt) &&
     fieldMatches(current.finishedAt, update.finishedAt) &&

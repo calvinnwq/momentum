@@ -403,6 +403,7 @@ export type ExecutorRoundRecord = {
   // Execution.
   state: ExecutorRoundState;
   classification: ExecutorCompletionClassification | null;
+  executorRecommendation?: ExecutorCompletionClassification | null;
   startedAt: number | null;
   heartbeatAt: number | null;
   finishedAt: number | null;

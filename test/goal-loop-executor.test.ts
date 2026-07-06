@@ -512,6 +512,7 @@ describe("planGoalLoopRoundPersistence — committed completion", () => {
     expect(plan.terminalUpdate).toEqual({
       toState: "succeeded",
       classification: "complete",
+      executorRecommendation: "complete",
       verificationStatus: "passed",
       verificationResults: [
         {
@@ -558,6 +559,7 @@ describe("planGoalLoopRoundPersistence — continue and quota", () => {
     expect(plan.decision.classification).toBe("continue");
     expect(plan.terminalUpdate.toState).toBe("succeeded");
     expect(plan.terminalUpdate.classification).toBe("continue");
+    expect(plan.terminalUpdate.executorRecommendation).toBe("continue");
     expect(plan.terminalUpdate.humanGate).toBeNull();
   });
 
@@ -571,6 +573,7 @@ describe("planGoalLoopRoundPersistence — continue and quota", () => {
     expect(plan.terminalUpdate.classification).toBe(
       "operator_decision_required"
     );
+    expect(plan.terminalUpdate.executorRecommendation).toBe("continue");
     expect(plan.terminalUpdate.humanGate).toBe("quota_exhausted");
   });
 });

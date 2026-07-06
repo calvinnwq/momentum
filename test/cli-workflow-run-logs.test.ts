@@ -369,16 +369,17 @@ describe("momentum workflow run logs", () => {
         summary: string | null;
         keyLearnings: string[];
         learnings: string[];
-        nativeRoundEvidence: {
-          schema: string;
-          summary: string | null;
-          keyChanges: string[];
-          learnings: string[];
-          completionRecommendation: string;
-          verificationResult: {
-            status: string;
-            commands: unknown[];
-          };
+      nativeRoundEvidence: {
+        schema: string;
+        summary: string | null;
+        keyChanges: string[];
+        learnings: string[];
+        completionRecommendation: string;
+        daemonClassification: string | null;
+        verificationResult: {
+          status: string;
+          commands: unknown[];
+        };
           artifacts: Array<{
             class: string;
             path: string;
@@ -463,6 +464,7 @@ describe("momentum workflow run logs", () => {
       keyChanges: ["added reader"],
       learnings: ["operator readback needs durable learnings"],
       completionRecommendation: "complete",
+      daemonClassification: "complete",
       verificationResult: {
         status: "passed",
         commands: [
@@ -526,7 +528,13 @@ describe("momentum workflow run logs", () => {
         [
           string,
           Partial<ExecutorRoundRecord>,
-          "successful" | "failed" | "no_op" | "invalid_result" | "verification_failed" | "manual_recovery"
+          | "successful"
+          | "failed"
+          | "no_op"
+          | "invalid_result"
+          | "verification_failed"
+          | "manual_recovery"
+          | "operator_decision_required"
         ]
       > = [
         [
@@ -606,6 +614,17 @@ describe("momentum workflow run logs", () => {
             humanGate: "manual_recovery_required"
           },
           "manual_recovery"
+        ],
+        [
+          "operator-gated-after-progress",
+          {
+            state: "succeeded",
+            classification: "operator_decision_required",
+            commitSha: "abc123",
+            verificationStatus: "passed",
+            humanGate: "quota_exhausted"
+          },
+          "operator_decision_required"
         ]
       ];
 
@@ -651,9 +670,73 @@ describe("momentum workflow run logs", () => {
         [
           "manual-recovery-after-verification-failed",
           "manual_recovery"
+        ],
+        [
+          "operator-gated-after-progress",
+          "operator_decision_required"
         ]
       ]
     );
+  });
+
+  it("keeps executor recommendation separate from gated classification", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-logs-gated";
+    const db = openDb(dataDir);
+    try {
+      db.prepare(
+        `INSERT INTO workflow_runs
+           (id, state, source, plan_json, objective, issue_scope_json, route_json,
+            needs_manual_recovery, created_at, updated_at)
+           VALUES (?, 'running', 'agent-workflow', '{}', 'logs read-back', '{}', '{}', 0, 1, 1)`
+      ).run(runId);
+      db.prepare(
+        `INSERT INTO workflow_steps
+           (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
+           VALUES (?, 'implementation', 'implementation', 'running', 1, 1, 1, 1)`
+      ).run(runId);
+      insertExecutorInvocation(db, makeInvocation(runId), { now: 1 });
+      insertExecutorRound(
+        db,
+        makeRound(runId, {
+          classification: "operator_decision_required",
+          humanGate: "quota_exhausted",
+          commitSha: "abc123",
+          verificationStatus: "passed"
+        }),
+        { now: 1 }
+      );
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "logs",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      rounds: Array<{
+        outcome: string;
+        nativeRoundEvidence: {
+          completionRecommendation: string;
+          daemonClassification: string | null;
+        };
+      }>;
+    };
+    expect(payload.rounds[0]).toMatchObject({
+      outcome: "operator_decision_required",
+      nativeRoundEvidence: {
+        completionRecommendation: "continue",
+        daemonClassification: "operator_decision_required"
+      }
+    });
   });
 
   it("renders text output with schema version and round log lines", async () => {
