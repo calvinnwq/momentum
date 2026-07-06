@@ -379,6 +379,7 @@ Workflow run started: run-1
 Definition: coding-workflow v1
 State: pending
 Approval boundary: (none)
+Implementation engine: native-goal-loop
 Steps: 6
 Repo: /path/to/repo
 Objective: Ship the feature
@@ -386,7 +387,9 @@ Policy: (none)
 Data dir: /path/to/data
 ```
 
-The `Approval boundary` line prints the boundary when one was supplied. The `Policy` line prints the `MOMENTUM.md` path when a valid policy was loaded and `(none)` otherwise.
+The `Approval boundary` line prints the boundary when one was supplied.
+For coding starts, the `Implementation engine` line prints the durable route path recorded for the run.
+The `Policy` line prints the `MOMENTUM.md` path when a valid policy was loaded and `(none)` otherwise.
 
 ### Text output (failure)
 

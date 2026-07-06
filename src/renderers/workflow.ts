@@ -100,6 +100,9 @@ export function emitWorkflowRunStartSuccess(
     `Definition: ${summary.definitionKey} v${summary.definitionVersion}`,
     `State: ${summary.state}`,
     `Approval boundary: ${summary.approvalBoundary ?? "(none)"}`,
+    ...(summary.implementationEngine !== null
+      ? [`Implementation engine: ${summary.implementationEngine}`]
+      : []),
     `Steps: ${summary.stepCount}`,
     `Repo: ${result.repoPath}`,
     `Objective: ${result.objective}`,

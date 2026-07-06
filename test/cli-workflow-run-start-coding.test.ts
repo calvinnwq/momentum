@@ -176,6 +176,32 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
     }
   });
 
+  it("renders the selected implementation engine in text success output", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const result = await run([
+      "workflow",
+      "run",
+      "start-coding",
+      "--run-id",
+      "ngx-568-text-engine",
+      "--repo",
+      repoDir,
+      "--objective",
+      "Show the operator which implementation path started",
+      "--data-dir",
+      dataDir,
+      "--implementation-engine",
+      "current-gnhf-cwfp"
+    ]);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(
+      "Implementation engine: current-gnhf-cwfp"
+    );
+    expect(result.stderr).toBe("");
+  });
+
   it("ignores persisted coding-workflow overrides and starts the built-in six-step definition", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
