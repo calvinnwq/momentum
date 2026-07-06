@@ -2381,7 +2381,13 @@ function parseNoMistakesAgentConfig(contents: string):
         error: `No-mistakes config entry agent_path_override.${override.key} is missing a YAML key separator after ":"; write ${override.key}: <path> before running no-mistakes.`
       };
     }
-    if (override?.ok !== true) continue;
+    if (override?.ok !== true) {
+      return {
+        ok: false,
+        error:
+          "No-mistakes config agent_path_override must contain YAML mapping entries before running no-mistakes."
+      };
+    }
     if (seenAgentPathOverrideKeys.has(override.key)) {
       return {
         ok: false,
