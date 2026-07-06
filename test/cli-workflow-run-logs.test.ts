@@ -668,6 +668,9 @@ describe("momentum workflow run logs", () => {
       "learnings: operator readback needs durable learnings"
     );
     expect(result.stdout).toContain("remaining work: wire additional consumers");
+    expect(result.stdout).toContain(
+      "verification commands: pnpm test (exit=0, duration=1200ms, timedOut=false)"
+    );
     expect(result.stdout).toContain("input digest: in-1");
     expect(result.stdout).toContain("result digest: res-1");
     expect(result.stdout).toContain("Executor invocations: 1");

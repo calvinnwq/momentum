@@ -1685,6 +1685,18 @@ export function renderWorkflowRunLogsText(
           ? ` recovery: ${round.recoveryCode}`
           : "")
     );
+    if (round.verificationResults && round.verificationResults.length > 0) {
+      lines.push(
+        `    verification commands: ${round.verificationResults
+          .map(
+            (result) =>
+              `${result.command} (exit=${result.exitCode}, duration=${
+                result.durationMs ?? "unknown"
+              }ms, timedOut=${result.timedOut})`
+          )
+          .join("; ")}`
+      );
+    }
     if (round.logPaths.length > 0) {
       lines.push(`    logs: ${round.logPaths.join(", ")}`);
     }

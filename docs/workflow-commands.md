@@ -2503,6 +2503,7 @@ Executor rounds: 1
     input digest: sha256:...
     result digest: sha256:...
     verification: passed commit: abc123
+    verification commands: pnpm test (exit=0, duration=1200ms, timedOut=false)
     logs: /path/to/data/runs/cwfp-abc123/round-1/agent.log
     changed files: src/core/workflow/run/logs.ts
     child evidence: 2
