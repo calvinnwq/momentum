@@ -700,6 +700,31 @@ describe("runGoalLoopInvocation — multi-round completion", () => {
     expect(loadExecutorInvocation(db, "inv-1")).toEqual(result.invocation);
   });
 
+  it("persists distinct learning evidence for every completed round", () => {
+    const db = openInvocationDb();
+    const result = runGoalLoopInvocation({
+      db,
+      invocation: buildInvocation(),
+      planRound: (roundIndex) => planRoundFor(roundIndex, 2),
+      runRound: (round) => ({
+        result: runnerResult({
+          goal_complete: round.roundIndex === 1,
+          key_learnings: [`round ${round.roundIndex} learning`]
+        }),
+        finalize: COMMITTED
+      })
+    });
+
+    expect(result.rounds).toHaveLength(2);
+    for (const [index, roundResult] of result.rounds.entries()) {
+      const expectedLearnings = [`round ${index} learning`];
+      expect(roundResult.round.keyLearnings).toEqual(expectedLearnings);
+      expect(loadExecutorRound(db, `round-${index}`)?.keyLearnings).toEqual(
+        expectedLearnings
+      );
+    }
+  });
+
   it("inserts the durable running invocation before the first round runs", () => {
     const db = openInvocationDb();
     let stateDuringFirstRound: string | undefined;
@@ -937,6 +962,49 @@ describe("runGoalLoopStep — invocation/round materialization", () => {
     expect(result.invocation.startedAt).toBe(1_000);
     expect(round0?.startedAt).toBe(1_100);
     expect(round0?.finishedAt).toBe(1_200);
+  });
+
+  it("passes prior durable rounds to the next input resolver so learnings can shape resume input", () => {
+    const db = openInvocationDb();
+    const observedPriorLearnings: string[][] = [];
+    const result = runGoalLoopStep({
+      db,
+      workflowRunId: "run-1",
+      stepRunId: "step-1",
+      stepKey: "implementation",
+      attempt: 1,
+      selection: stepSelection(2),
+      resolveRoundInputs: (roundIndex, context) => {
+        const priorLearnings = context.priorRounds.flatMap(
+          (round) => round.keyLearnings
+        );
+        observedPriorLearnings.push(priorLearnings);
+        return {
+          inputDigest:
+            roundIndex === 0
+              ? "sha256:initial-input"
+              : `sha256:${priorLearnings.join("+")}`,
+          artifactRoot: `/artifacts/round-${roundIndex}`,
+          logPaths: [`/artifacts/round-${roundIndex}/stdout.log`]
+        };
+      },
+      now: monotonicClock(),
+      runRound: (round) => ({
+        result: runnerResult({
+          goal_complete: round.roundIndex === 1,
+          key_learnings: [`learning-${round.roundIndex}`]
+        }),
+        finalize: COMMITTED
+      })
+    });
+
+    expect(observedPriorLearnings).toEqual([[], ["learning-0"]]);
+    expect(result.rounds[1]?.round.inputDigest).toBe("sha256:learning-0");
+
+    const invocationId = goalLoopInvocationId("run-1", "step-1", 1);
+    expect(loadExecutorRound(db, goalLoopRoundId(invocationId, 1))?.inputDigest).toBe(
+      "sha256:learning-0"
+    );
   });
 
   it("inserts the materialized invocation before the first round runs", () => {

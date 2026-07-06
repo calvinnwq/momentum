@@ -158,6 +158,44 @@ describe("momentum workflow run preview-coding", () => {
     ]);
   });
 
+  it("previews the current GNHF/CWFP implementation engine as an explicit route choice", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const result = await run(
+      previewCodingArgs({
+        dataDir,
+        repoDir,
+        runId: "preview-current-engine",
+        objective: "Inspect the current fallback route",
+        extra: ["--implementation-engine", "current-gnhf-cwfp"]
+      })
+    );
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      command: "workflow run preview-coding",
+      runId: "preview-current-engine",
+      implementationEngine: "current-gnhf-cwfp",
+      route: {
+        implementationEngine: "current-gnhf-cwfp"
+      }
+    });
+    expect(payload["steps"]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          stepId: "implementation",
+          executor: "goal-loop"
+        }),
+        expect.objectContaining({
+          stepId: "no-mistakes",
+          executor: "no-mistakes"
+        })
+      ])
+    );
+  });
+
   it("emits structural preflight evidence for invalid route steps", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
@@ -423,7 +461,11 @@ describe("momentum workflow run preview-coding", () => {
       ok: true,
       state: "approved",
       approvalBoundary: "through-implementation",
-      route: { profile: "live-wrapper" }
+      route: {
+        profile: "live-wrapper",
+        implementationEngine: "native-goal-loop"
+      },
+      implementationEngine: "native-goal-loop"
     });
     const steps = payload["steps"] as Array<{ stepId: string; state: string }>;
     const stateByStep = Object.fromEntries(
@@ -453,6 +495,7 @@ describe("momentum workflow run preview-coding", () => {
     expect(result.stdout).toContain("preview-human");
     expect(result.stdout).toContain("coding-workflow v1");
     expect(result.stdout).toContain("Profile: live-wrapper");
+    expect(result.stdout).toContain("Implementation engine: native-goal-loop");
     expect(result.stdout).toContain("implementation");
     expect(result.stdout).toContain("goal-loop");
     expect(result.stdout).toContain("external-apply");

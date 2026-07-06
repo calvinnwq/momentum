@@ -613,6 +613,43 @@ describe("goalLoopRoundMechanismFromResultFile composed into runGoalLoopRound", 
     db.close();
   });
 
+  it("persists per-command verification results onto the durable round", () => {
+    const { repoPath, baseHead } = setupRepoWithRoundEdits();
+    const resultFilePath = writeResultFile(
+      JSON.stringify(baseRunnerResult({ goal_complete: true }))
+    );
+    const verificationLogPath = makeVerificationLogPath();
+    const db = openRoundDb();
+
+    runGoalLoopRound({
+      db,
+      start: buildStart(),
+      finishedAt: 5_000,
+      runRound: () =>
+        goalLoopRoundMechanismFromResultFile({
+          repoPath,
+          baseHead,
+          resultFilePath,
+          verificationCommands: ["echo verify-ok"],
+          verificationTimeoutSec: 30,
+          verificationLogPath
+        })
+    });
+
+    const durable = loadExecutorRound(db, "round-1");
+    expect(durable?.verificationResults).toEqual([
+      expect.objectContaining({
+        command: "echo verify-ok",
+        exitCode: 0,
+        timedOut: false
+      })
+    ]);
+    expect(durable?.verificationResults?.[0]?.durationMs).toEqual(
+      expect.any(Number)
+    );
+    db.close();
+  });
+
   it("drives a missing-result round to a durable manual-recovery round through the real finalize", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
     const resultFilePath = path.join(makeTempDir(), "absent-result.json");

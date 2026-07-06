@@ -81,11 +81,14 @@ describe("materializeWorkflowCodingPlanPreview", () => {
     ]);
   });
 
-  it("captures run identity, definition pin, route, and issue scope", () => {
+  it("captures run identity, definition pin, route, engine, and issue scope", () => {
     const result = materializeWorkflowCodingPlanPreview(
       baseInput({
         issueScope: { identifier: "NGX-509" },
-        route: { profile: "live-wrapper" }
+        route: {
+        profile: "live-wrapper",
+        implementationEngine: "native-goal-loop"
+      }
       })
     );
     expect(result.ok).toBe(true);
@@ -100,7 +103,11 @@ describe("materializeWorkflowCodingPlanPreview", () => {
       definitionKey: "coding-workflow",
       definitionVersion: 1,
       issueScope: { identifier: "NGX-509" },
-      route: { profile: "live-wrapper" },
+      route: {
+        profile: "live-wrapper",
+        implementationEngine: "native-goal-loop"
+      },
+      implementationEngine: "native-goal-loop",
       skillRevision: null
     });
   });

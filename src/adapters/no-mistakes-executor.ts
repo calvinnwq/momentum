@@ -648,6 +648,7 @@ export function planNoMistakesRoundStart(
     logPaths: runtime.logPaths ?? [],
     summary: null,
     keyChanges: [],
+    keyLearnings: [],
     remainingWork: [],
     changedFiles: [],
     verificationStatus: null,

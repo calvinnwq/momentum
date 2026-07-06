@@ -162,7 +162,7 @@ operator exactly what setup must be fixed.
 
 - Reuse one structural preflight routine across preview/start validation where
   the same data is available.
-- Validate `route.steps` as fail-closed structured config.
+- Validate `route.implementationEngine` and `route.steps` as fail-closed structured config.
 - Validate route profile and wrapper config shape before invalid setup reaches
   runtime work.
 - Reject unknown keys and common casing drift with canonical snake_case

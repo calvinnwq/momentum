@@ -30,7 +30,7 @@
  *     without first entering the capture or mirror phase, and the refusal leaves
  *     the durable row unchanged.
  *   - The round carries the contract "Round Schema" normalized result fields
- *     (`summary`, `key_changes`, `remaining_work`, `changed_files`,
+ *     (`summary`, `key_changes`, `key_learnings`, `remaining_work`, `changed_files`,
  *     `verification_status`, `commit_sha`, ...) so workflow status, handoff,
  *     monitor, logs, and recovery surfaces can reattach without understanding
  *     executor internals.
@@ -68,6 +68,8 @@ import {
   type ExecutorRoundRecord,
   type ExecutorRoundState,
   type ExecutorRoundTransitionErrorCode,
+  type ExecutorRoundVerificationResult,
+  isTerminalExecutorRoundState,
   type WorkflowExecutorFamily
 } from "./reducer.js";
 import { isWorkflowExecutorFamily } from "../../workflow/definition/definition.js";
@@ -377,6 +379,25 @@ export function loadExecutorInvocation(
   return loadExecutorInvocationSnapshot(db, invocationId)?.record;
 }
 
+/**
+ * List every invocation for a workflow run in deterministic executor read-back
+ * order.
+ * This surfaces the whole attempt below a step, including attempts that have no
+ * round rows yet or are paused between rounds.
+ */
+export function listExecutorInvocationsForRun(
+  db: MomentumDb,
+  runId: string
+): ExecutorInvocationRecord[] {
+  const rows = db
+    .prepare(
+      `${INVOCATION_SELECT} WHERE workflow_run_id = ?
+       ORDER BY step_key, attempt, invocation_id`
+    )
+    .all(runId) as ExecutorInvocationRow[];
+  return rows.map(rowToInvocation);
+}
+
 export type UpdateExecutorInvocationOptions = {
   now?: number;
   startedAt?: number | null;
@@ -471,16 +492,16 @@ export function insertExecutorRound(
     db.prepare(
       `INSERT INTO executor_rounds (
          round_id, invocation_id, workflow_run_id, step_run_id, step_key,
-         executor_family, attempt, round_index, state, classification,
+         executor_family, attempt, round_index, state, classification, executor_recommendation,
          started_at, heartbeat_at, finished_at, agent_provider, model, effort,
          input_digest, result_digest, artifact_root, log_paths,
-         summary, key_changes, remaining_work, changed_files,
-         verification_status, commit_sha, recovery_code, human_gate,
+         summary, key_changes, key_learnings, remaining_work, changed_files,
+         verification_status, verification_results, commit_sha, recovery_code, human_gate,
          created_at, updated_at
        ) VALUES (
          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
        )`
     ).run(
       record.roundId,
@@ -493,6 +514,7 @@ export function insertExecutorRound(
       record.roundIndex,
       record.state,
       record.classification,
+      record.executorRecommendation ?? null,
       record.startedAt,
       record.heartbeatAt,
       record.finishedAt,
@@ -505,9 +527,11 @@ export function insertExecutorRound(
       JSON.stringify(record.logPaths),
       record.summary,
       JSON.stringify(record.keyChanges),
+      JSON.stringify(record.keyLearnings),
       JSON.stringify(record.remainingWork),
       JSON.stringify(record.changedFiles),
       record.verificationStatus,
+      JSON.stringify(record.verificationResults ?? []),
       record.commitSha,
       record.recoveryCode,
       record.humanGate,
@@ -563,6 +587,22 @@ export function listExecutorRoundsForRun(
 }
 
 /**
+ * List non-terminal rounds for a workflow run in the same deterministic order as
+ * the full run-scoped reader.
+ * This is the reattach/recovery read model for interrupted executor work: a
+ * process that dies after a round-start insert leaves a durable active row, and
+ * readers can identify that row without mutating completed round evidence.
+ */
+export function listIncompleteExecutorRoundsForRun(
+  db: MomentumDb,
+  runId: string
+): ExecutorRoundRecord[] {
+  return listExecutorRoundsForRun(db, runId).filter(
+    (round) => !isTerminalExecutorRoundState(round.state)
+  );
+}
+
+/**
  * The patch applied by {@link updateExecutorRound}. `toState` is required and
  * transition-gated; every other field overwrites only when provided (an explicit
  * `null` clears a column, `undefined` leaves it as-is).
@@ -570,6 +610,7 @@ export function listExecutorRoundsForRun(
 export type ExecutorRoundUpdate = {
   toState: ExecutorRoundState;
   classification?: ExecutorCompletionClassification | null;
+  executorRecommendation?: ExecutorCompletionClassification | null;
   startedAt?: number | null;
   heartbeatAt?: number | null;
   finishedAt?: number | null;
@@ -582,9 +623,11 @@ export type ExecutorRoundUpdate = {
   logPaths?: string[];
   summary?: string | null;
   keyChanges?: string[];
+  keyLearnings?: string[];
   remainingWork?: string[];
   changedFiles?: string[];
   verificationStatus?: string | null;
+  verificationResults?: ExecutorRoundVerificationResult[];
   commitSha?: string | null;
   recoveryCode?: string | null;
   humanGate?: ExecutorHumanGateType | null;
@@ -630,6 +673,10 @@ export function updateExecutorRound(
     ...current,
     state: update.toState,
     classification: coalesce(update.classification, current.classification),
+    executorRecommendation: coalesce(
+      update.executorRecommendation,
+      current.executorRecommendation ?? null
+    ),
     startedAt: coalesce(update.startedAt, current.startedAt),
     heartbeatAt: coalesce(update.heartbeatAt, current.heartbeatAt),
     finishedAt: coalesce(update.finishedAt, current.finishedAt),
@@ -642,12 +689,22 @@ export function updateExecutorRound(
     logPaths: coalesce(update.logPaths, current.logPaths),
     summary: coalesce(update.summary, current.summary),
     keyChanges: coalesce(update.keyChanges, current.keyChanges),
+    keyLearnings: coalesce(update.keyLearnings, current.keyLearnings),
     remainingWork: coalesce(update.remainingWork, current.remainingWork),
     changedFiles: coalesce(update.changedFiles, current.changedFiles),
     verificationStatus: coalesce(
       update.verificationStatus,
       current.verificationStatus
     ),
+    ...(coalesce(update.verificationResults, current.verificationResults) !==
+    undefined
+      ? {
+          verificationResults: coalesce(
+            update.verificationResults,
+            current.verificationResults
+          )
+        }
+      : {}),
     commitSha: coalesce(update.commitSha, current.commitSha),
     recoveryCode: coalesce(update.recoveryCode, current.recoveryCode),
     humanGate: coalesce(update.humanGate, current.humanGate)
@@ -659,16 +716,17 @@ export function updateExecutorRound(
   const now = options.now ?? Date.now();
   const updateResult = db.prepare(
     `UPDATE executor_rounds SET
-       state = ?, classification = ?, started_at = ?, heartbeat_at = ?,
+       state = ?, classification = ?, executor_recommendation = ?, started_at = ?, heartbeat_at = ?,
        finished_at = ?, agent_provider = ?, model = ?, effort = ?,
        input_digest = ?, result_digest = ?, artifact_root = ?, log_paths = ?,
-       summary = ?, key_changes = ?, remaining_work = ?, changed_files = ?,
-       verification_status = ?, commit_sha = ?, recovery_code = ?, human_gate = ?,
+       summary = ?, key_changes = ?, key_learnings = ?, remaining_work = ?, changed_files = ?,
+       verification_status = ?, verification_results = ?, commit_sha = ?, recovery_code = ?, human_gate = ?,
        updated_at = ?
      WHERE round_id = ? AND state = ? AND updated_at = ?`
   ).run(
     next.state,
     next.classification,
+    next.executorRecommendation ?? null,
     next.startedAt,
     next.heartbeatAt,
     next.finishedAt,
@@ -681,9 +739,11 @@ export function updateExecutorRound(
     JSON.stringify(next.logPaths),
     next.summary,
     JSON.stringify(next.keyChanges),
+    JSON.stringify(next.keyLearnings),
     JSON.stringify(next.remainingWork),
     JSON.stringify(next.changedFiles),
     next.verificationStatus,
+    JSON.stringify(next.verificationResults ?? []),
     next.commitSha,
     next.recoveryCode,
     next.humanGate,
@@ -962,6 +1022,7 @@ type ExecutorRoundRow = {
   round_index: number;
   state: string;
   classification: string | null;
+  executor_recommendation: string | null;
   started_at: number | null;
   heartbeat_at: number | null;
   finished_at: number | null;
@@ -974,9 +1035,11 @@ type ExecutorRoundRow = {
   log_paths: string;
   summary: string | null;
   key_changes: string;
+  key_learnings: string;
   remaining_work: string;
   changed_files: string;
   verification_status: string | null;
+  verification_results: string;
   commit_sha: string | null;
   recovery_code: string | null;
   human_gate: string | null;
@@ -1031,13 +1094,19 @@ type ExecutorDecisionRow = {
   external_ref: string | null;
 };
 
+const INVOCATION_SELECT = `
+  SELECT invocation_id, workflow_run_id, step_run_id, step_key,
+         executor_family, state, attempt, started_at, heartbeat_at,
+         finished_at, updated_at
+    FROM executor_invocations`;
+
 const ROUND_SELECT = `
   SELECT round_id, invocation_id, workflow_run_id, step_run_id, step_key,
-         executor_family, attempt, round_index, state, classification,
+         executor_family, attempt, round_index, state, classification, executor_recommendation,
          started_at, heartbeat_at, finished_at, agent_provider, model, effort,
          input_digest, result_digest, artifact_root, log_paths,
-         summary, key_changes, remaining_work, changed_files,
-         verification_status, commit_sha, recovery_code, human_gate,
+         summary, key_changes, key_learnings, remaining_work, changed_files,
+         verification_status, verification_results, commit_sha, recovery_code, human_gate,
          updated_at
     FROM executor_rounds`;
 
@@ -1046,12 +1115,7 @@ function loadExecutorInvocationSnapshot(
   invocationId: string
 ): ExecutorInvocationSnapshot | undefined {
   const row = db
-    .prepare(
-      `SELECT invocation_id, workflow_run_id, step_run_id, step_key,
-              executor_family, state, attempt, started_at, heartbeat_at,
-              finished_at, updated_at
-         FROM executor_invocations WHERE invocation_id = ?`
-    )
+    .prepare(`${INVOCATION_SELECT} WHERE invocation_id = ?`)
     .get(invocationId) as ExecutorInvocationRow | undefined;
   if (row === undefined) return undefined;
   return { record: rowToInvocation(row), updatedAt: row.updated_at };
@@ -1084,6 +1148,7 @@ function rowToInvocation(row: ExecutorInvocationRow): ExecutorInvocationRecord {
 }
 
 function rowToRound(row: ExecutorRoundRow): ExecutorRoundRecord {
+  const verificationResults = parseVerificationResults(row.verification_results);
   return {
     roundId: row.round_id,
     invocationId: row.invocation_id,
@@ -1096,6 +1161,8 @@ function rowToRound(row: ExecutorRoundRow): ExecutorRoundRecord {
     state: row.state as ExecutorRoundState,
     classification:
       row.classification as ExecutorCompletionClassification | null,
+    executorRecommendation:
+      row.executor_recommendation as ExecutorCompletionClassification | null,
     startedAt: row.started_at,
     heartbeatAt: row.heartbeat_at,
     finishedAt: row.finished_at,
@@ -1108,9 +1175,11 @@ function rowToRound(row: ExecutorRoundRow): ExecutorRoundRecord {
     logPaths: parseStringArray(row.log_paths),
     summary: row.summary,
     keyChanges: parseStringArray(row.key_changes),
+    keyLearnings: parseStringArray(row.key_learnings),
     remainingWork: parseStringArray(row.remaining_work),
     changedFiles: parseStringArray(row.changed_files),
     verificationStatus: row.verification_status,
+    ...(verificationResults.length > 0 ? { verificationResults } : {}),
     commitSha: row.commit_sha,
     recoveryCode: row.recovery_code,
     humanGate: row.human_gate as ExecutorHumanGateType | null
@@ -1222,6 +1291,15 @@ function validateRoundRecord(
       message: `unknown completion classification: ${String(record.classification)}`
     });
   }
+  if (
+    record.executorRecommendation != null &&
+    !CLASSIFICATION_SET.has(record.executorRecommendation)
+  ) {
+    errors.push({
+      code: "executor_round_unknown_executor_recommendation",
+      message: `unknown executor recommendation: ${String(record.executorRecommendation)}`
+    });
+  }
   if (record.humanGate !== null && !GATE_TYPE_SET.has(record.humanGate)) {
     errors.push({
       code: "executor_round_unknown_human_gate",
@@ -1304,6 +1382,10 @@ function roundPatchMatches(
 ): boolean {
   return (
     fieldMatches(current.classification, update.classification) &&
+    fieldMatches(
+      current.executorRecommendation ?? null,
+      update.executorRecommendation
+    ) &&
     fieldMatches(current.startedAt, update.startedAt) &&
     fieldMatches(current.heartbeatAt, update.heartbeatAt) &&
     fieldMatches(current.finishedAt, update.finishedAt) &&
@@ -1316,9 +1398,14 @@ function roundPatchMatches(
     arrayFieldMatches(current.logPaths, update.logPaths) &&
     fieldMatches(current.summary, update.summary) &&
     arrayFieldMatches(current.keyChanges, update.keyChanges) &&
+    arrayFieldMatches(current.keyLearnings, update.keyLearnings) &&
     arrayFieldMatches(current.remainingWork, update.remainingWork) &&
     arrayFieldMatches(current.changedFiles, update.changedFiles) &&
     fieldMatches(current.verificationStatus, update.verificationStatus) &&
+    verificationResultsMatch(
+      current.verificationResults,
+      update.verificationResults
+    ) &&
     fieldMatches(current.commitSha, update.commitSha) &&
     fieldMatches(current.recoveryCode, update.recoveryCode) &&
     fieldMatches(current.humanGate, update.humanGate)
@@ -1340,9 +1427,45 @@ function arrayFieldMatches(
   );
 }
 
+function verificationResultsMatch(
+  current: readonly ExecutorRoundVerificationResult[] | undefined,
+  update: readonly ExecutorRoundVerificationResult[] | undefined
+): boolean {
+  return (
+    update === undefined ||
+    JSON.stringify(current ?? []) === JSON.stringify(update)
+  );
+}
+
 function parseStringArray(text: string): string[] {
   const parsed = JSON.parse(text) as unknown;
   return Array.isArray(parsed) ? parsed.map((value) => String(value)) : [];
+}
+
+function parseVerificationResults(text: string): ExecutorRoundVerificationResult[] {
+  const parsed = JSON.parse(text) as unknown;
+  if (!Array.isArray(parsed)) return [];
+  return parsed.flatMap((value) => {
+    if (typeof value !== "object" || value === null) return [];
+    const record = value as Record<string, unknown>;
+    if (typeof record.command !== "string") return [];
+    const exitCode =
+      typeof record.exitCode === "number" && Number.isInteger(record.exitCode)
+        ? record.exitCode
+        : null;
+    const durationMs =
+      typeof record.durationMs === "number" && Number.isFinite(record.durationMs)
+        ? record.durationMs
+        : 0;
+    return [
+      {
+        command: record.command,
+        exitCode,
+        durationMs,
+        timedOut: record.timedOut === true
+      }
+    ];
+  });
 }
 
 function coalesce<T>(next: T | undefined, previous: T): T {

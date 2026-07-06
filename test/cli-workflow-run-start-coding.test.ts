@@ -138,6 +138,70 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
     }
   });
 
+  it("persists the current GNHF/CWFP implementation engine when explicitly selected", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const result = await run(
+      startCodingArgs({
+        dataDir,
+        repoDir,
+        runId: "ngx-568-current-engine",
+        objective: "Start the current fallback route",
+        extra: ["--implementation-engine", "current-gnhf-cwfp"]
+      })
+    );
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      ok: true,
+      command: "workflow run start-coding",
+      runId: "ngx-568-current-engine",
+      implementationEngine: "current-gnhf-cwfp",
+      route: {
+        implementationEngine: "current-gnhf-cwfp"
+      }
+    });
+
+    const db = openDb(dataDir);
+    try {
+      const runRow = db
+        .prepare(`SELECT route_json FROM workflow_runs WHERE id = ?`)
+        .get("ngx-568-current-engine") as { route_json: string };
+      expect(JSON.parse(runRow.route_json)).toEqual({
+        implementationEngine: "current-gnhf-cwfp"
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("renders the selected implementation engine in text success output", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    const result = await run([
+      "workflow",
+      "run",
+      "start-coding",
+      "--run-id",
+      "ngx-568-text-engine",
+      "--repo",
+      repoDir,
+      "--objective",
+      "Show the operator which implementation path started",
+      "--data-dir",
+      dataDir,
+      "--implementation-engine",
+      "current-gnhf-cwfp"
+    ]);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(
+      "Implementation engine: current-gnhf-cwfp"
+    );
+    expect(result.stderr).toBe("");
+  });
+
   it("ignores persisted coding-workflow overrides and starts the built-in six-step definition", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
@@ -408,7 +472,7 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
     );
   });
 
-  it("leaves the run route empty when no runtime/profile is selected", async () => {
+  it("records the native implementation engine even when no runtime profile is selected", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
     const result = await run(
@@ -426,7 +490,9 @@ describe("momentum workflow run start-coding (NGX-508)", () => {
       const runRow = db
         .prepare(`SELECT route_json FROM workflow_runs WHERE id = ?`)
         .get("ngx-508-no-profile") as { route_json: string };
-      expect(runRow.route_json).toBe("{}");
+      expect(JSON.parse(runRow.route_json)).toEqual({
+        implementationEngine: "native-goal-loop"
+      });
     } finally {
       db.close();
     }
@@ -895,6 +961,7 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
         .get("ngx-510-steps") as { route_json: string };
       // Trimmed, and normalized to canonical step + field order (byte-stable).
       expect(JSON.parse(runRow.route_json)).toEqual({
+        implementationEngine: "native-goal-loop",
         steps: {
           implementation: { harness: "gnhf", model: "claude-opus-4-8" },
           "no-mistakes": { effort: "high" }
@@ -947,6 +1014,7 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
         .prepare(`SELECT route_json FROM workflow_runs WHERE id = ?`)
         .get("ngx-510-profile-steps") as { route_json: string };
       expect(JSON.parse(runRow.route_json)).toEqual({
+        implementationEngine: "native-goal-loop",
         profile: "ngx-499-coding-workflow-live-wrapper",
         steps: { postflight: { harness: "claude" } }
       });
@@ -993,6 +1061,7 @@ describe("momentum workflow run start-coding route reconfiguration (NGX-510)", (
         .prepare(`SELECT route_json FROM workflow_runs WHERE id = ?`)
         .get("ngx-510-model-alias") as { route_json: string };
       expect(JSON.parse(runRow.route_json)).toEqual({
+        implementationEngine: "native-goal-loop",
         steps: {
           implementation: {
             harness: "claude",

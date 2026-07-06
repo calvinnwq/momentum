@@ -195,6 +195,7 @@ type ParsedFlags = {
   objective?: string;
   runId?: string;
   skillRevision?: string;
+  implementationEngine?: string;
   profile?: string;
   stepsJson?: string;
   error?: string;
@@ -1056,6 +1057,7 @@ function parseFlags(argv: string[]): ParsedFlags {
   let objectiveFlag: string | undefined;
   let runIdFlag: string | undefined;
   let skillRevisionFlag: string | undefined;
+  let implementationEngineFlag: string | undefined;
   let profileFlag: string | undefined;
   let stepsJsonFlag: string | undefined;
   let error: string | undefined;
@@ -1579,6 +1581,17 @@ function parseFlags(argv: string[]): ParsedFlags {
       continue;
     }
 
+    if (arg === "--implementation-engine") {
+      const value = readFlagValue(argv, index);
+      if (value === undefined) {
+        error ??= "Missing required value for --implementation-engine.";
+      } else {
+        implementationEngineFlag = value;
+        index += 1;
+      }
+      continue;
+    }
+
     if (arg === "--steps-json") {
       const value = readFlagValue(argv, index);
       if (value === undefined) {
@@ -1818,6 +1831,9 @@ function parseFlags(argv: string[]): ParsedFlags {
   if (objectiveFlag !== undefined) parsed.objective = objectiveFlag;
   if (runIdFlag !== undefined) parsed.runId = runIdFlag;
   if (skillRevisionFlag !== undefined) parsed.skillRevision = skillRevisionFlag;
+  if (implementationEngineFlag !== undefined) {
+    parsed.implementationEngine = implementationEngineFlag;
+  }
   if (profileFlag !== undefined) parsed.profile = profileFlag;
   if (stepsJsonFlag !== undefined) parsed.stepsJson = stepsJsonFlag;
   if (error !== undefined) parsed.error = error;

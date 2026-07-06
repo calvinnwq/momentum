@@ -238,6 +238,7 @@ export function runSingleShotRound(
     ...startRecord,
     logPaths: [...frozenLogPaths],
     keyChanges: [...startRecord.keyChanges],
+    keyLearnings: [...startRecord.keyLearnings],
     remainingWork: [...startRecord.remainingWork],
     changedFiles: [...startRecord.changedFiles]
   });

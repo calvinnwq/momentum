@@ -9,6 +9,7 @@
     "The next round should continue from the persisted checkpoint rather than terminal scrollback."
   ],
   "completionRecommendation": "continue",
+  "daemonClassification": "continue",
   "verificationResult": {
     "status": "passed",
     "commands": [

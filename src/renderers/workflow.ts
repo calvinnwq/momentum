@@ -82,6 +82,8 @@ export function emitWorkflowRunStartSuccess(
     approvalBoundary: summary.approvalBoundary,
     definitionKey: summary.definitionKey,
     definitionVersion: summary.definitionVersion,
+    route: summary.route,
+    implementationEngine: summary.implementationEngine,
     repoPath: result.repoPath,
     objective: result.objective,
     counts: { steps: summary.stepCount },
@@ -98,6 +100,9 @@ export function emitWorkflowRunStartSuccess(
     `Definition: ${summary.definitionKey} v${summary.definitionVersion}`,
     `State: ${summary.state}`,
     `Approval boundary: ${summary.approvalBoundary ?? "(none)"}`,
+    ...(summary.implementationEngine !== null
+      ? [`Implementation engine: ${summary.implementationEngine}`]
+      : []),
     `Steps: ${summary.stepCount}`,
     `Repo: ${result.repoPath}`,
     `Objective: ${result.objective}`,
@@ -126,11 +131,12 @@ export function emitWorkflowRunStartFailure(
  * Emit the frozen, pre-execution preview of a Momentum-native coding workflow
  * (`workflow run preview-coding`). The envelope mirrors the fields a
  * `workflow run start-coding` would durably persist - run id, repo, objective,
- * issue scope, route/profile and per-step route selections, approval boundary,
- * definition key/version, and the ordered steps each with its executor family
- * and on-start state - but carries an explicit `preview: true` marker and writes
- * nothing. It contains no wall-clock fields, so repeated previews of the same
- * inputs are byte-stable and safe to show before approval.
+ * issue scope, route/profile, implementation engine, and per-step route
+ * selections, approval boundary, definition key/version, and the ordered steps
+ * each with its executor family and on-start state - but carries an explicit
+ * `preview: true` marker and writes nothing. It contains no wall-clock fields,
+ * so repeated previews of the same inputs are byte-stable and safe to show
+ * before approval.
  */
 export function emitWorkflowRunPreviewCodingSuccess(
   parsed: { json: boolean },
@@ -167,6 +173,7 @@ export function emitWorkflowRunPreviewCodingSuccess(
     objective: preview.objective,
     issueScope: preview.issueScope,
     route: preview.route,
+    implementationEngine: preview.implementationEngine,
     skillRevision: preview.skillRevision,
     steps,
     counts: { steps: steps.length },
@@ -195,6 +202,7 @@ export function emitWorkflowRunPreviewCodingSuccess(
     `State on start: ${preview.state}`,
     `Approval boundary: ${preview.approvalBoundary ?? "(none)"}`,
     `Profile: ${profile}`,
+    `Implementation engine: ${preview.implementationEngine ?? "(none)"}`,
     ...result.stepRouteLines,
     `Repo: ${preview.repoPath}`,
     `Objective: ${preview.objective}`,
@@ -1481,6 +1489,7 @@ export function emitWorkflowRunLogs(
     ),
     evidence: envelope.detail.evidence.map(workflowEvidenceToJsonShape),
     gates: envelope.detail.gates.map(workflowGateToJsonShape),
+    invocations: envelope.invocations.map(workflowInvocationToJsonShape),
     rounds: envelope.rounds.map(workflowRoundToJsonShape),
     nextAction: nextActionToJsonShape(
       envelope.detail.monitor,
@@ -1526,6 +1535,8 @@ export function workflowRoundToJsonShape(
     roundIndex: round.roundIndex,
     state: round.state,
     classification: round.classification,
+    executorRecommendation: round.executorRecommendation ?? null,
+    outcome: workflowRoundOutcome(round),
     startedAt: round.startedAt,
     heartbeatAt: round.heartbeatAt,
     finishedAt: round.finishedAt,
@@ -1538,16 +1549,98 @@ export function workflowRoundToJsonShape(
     logPaths: round.logPaths,
     summary: round.summary,
     keyChanges: round.keyChanges,
+    keyLearnings: round.keyLearnings,
+    learnings: round.keyLearnings,
+    nativeRoundEvidence: workflowShouldEmitNativeRoundEvidence(round)
+      ? workflowNativeRoundEvidence(round)
+      : null,
     remainingWork: round.remainingWork,
     changedFiles: round.changedFiles,
     verificationStatus: round.verificationStatus,
     commitSha: round.commitSha,
     recoveryCode: round.recoveryCode,
+    recoveryReason: round.recoveryCode,
     humanGate: round.humanGate,
     artifacts: round.artifacts.map((artifact) => ({ ...artifact })),
     checkpoints: round.checkpoints.map((checkpoint) => ({ ...checkpoint })),
     findings: round.findings.map((finding) => ({ ...finding })),
     decisions: round.decisions.map((decision) => ({ ...decision }))
+  };
+}
+
+function workflowNativeRoundEvidence(
+  round: WorkflowRunLogRound
+): Record<string, unknown> {
+  return {
+    schema: "momentum.native-goal-loop.round-result.v1",
+    summary: round.summary,
+    keyChanges: round.keyChanges,
+    learnings: round.keyLearnings,
+    completionRecommendation: workflowRoundCompletionRecommendation(round),
+    daemonClassification: round.classification,
+    verificationResult: {
+      status: round.verificationStatus ?? "not_run",
+      commands: (round.verificationResults ?? []).map((result) => ({
+        command: result.command,
+        exitCode: result.exitCode,
+        durationMs: result.durationMs,
+        timedOut: result.timedOut
+      }))
+    },
+    artifacts: round.artifacts.map((artifact) => ({
+      class: artifact.artifactClass,
+      path: artifact.path,
+      digest: artifact.digest
+    })),
+    checkpoints: round.checkpoints.map((checkpoint) => ({
+      stage: checkpoint.stage,
+      detail: checkpoint.detail
+    })),
+    changedFiles: round.changedFiles,
+    commitSha: round.commitSha,
+    recoveryReason: round.recoveryCode,
+    remainingWork: round.remainingWork
+  };
+}
+
+function workflowShouldEmitNativeRoundEvidence(
+  round: WorkflowRunLogRound
+): boolean {
+  return (
+    round.executorFamily === "goal-loop" &&
+    (round.classification !== null || round.executorRecommendation != null)
+  );
+}
+
+function workflowRoundCompletionRecommendation(
+  round: WorkflowRunLogRound
+): string {
+  if (round.executorRecommendation != null) {
+    return round.executorRecommendation;
+  }
+  if (
+    round.classification === "operator_decision_required" &&
+    round.humanGate === "quota_exhausted"
+  ) {
+    return round.commitSha !== null ? "continue" : "failed";
+  }
+  return round.classification ?? "continue";
+}
+
+export function workflowInvocationToJsonShape(
+  invocation: WorkflowRunLogsEnvelope["invocations"][number]
+): Record<string, unknown> {
+  return {
+    invocationId: invocation.invocationId,
+    workflowRunId: invocation.workflowRunId,
+    stepRunId: invocation.stepRunId,
+    stepKey: invocation.stepKey,
+    executorFamily: invocation.executorFamily,
+    state: invocation.state,
+    attempt: invocation.attempt,
+    startedAt: invocation.startedAt,
+    heartbeatAt: invocation.heartbeatAt,
+    finishedAt: invocation.finishedAt
   };
 }
 
@@ -1560,6 +1653,12 @@ export function renderWorkflowRunLogsText(
   lines.push(`Schema version: ${envelope.schemaVersion}`);
   lines.push(`Generated at (epoch ms): ${envelope.generatedAt}`);
   lines.push(`Run state: ${envelope.detail.run.state}`);
+  const implementationEngine = workflowRunImplementationEngine(
+    envelope.detail.run.route
+  );
+  if (implementationEngine !== null) {
+    lines.push(`Implementation engine: ${implementationEngine}`);
+  }
   lines.push(`Steps: ${envelope.detail.steps.length}`);
   lines.push(`Approvals: ${envelope.detail.approvals.length}`);
   lines.push(`Leases: ${envelope.detail.leases.length}`);
@@ -1578,14 +1677,38 @@ export function renderWorkflowRunLogsText(
           : "")
     );
   }
+  lines.push(`Executor invocations: ${envelope.invocations.length}`);
+  for (const invocation of envelope.invocations) {
+    lines.push(
+      `- ${invocation.invocationId} [${invocation.stepKey}/${invocation.state}]` +
+        ` attempt=${invocation.attempt}` +
+        ` executor=${invocation.executorFamily}`
+    );
+  }
   lines.push(`Executor rounds: ${envelope.rounds.length}`);
   for (const round of envelope.rounds) {
     lines.push(
       `- ${round.roundId} [${round.stepKey}/${round.state}]` +
-        (round.classification !== null ? ` ${round.classification}` : "")
+        (round.classification !== null ? ` ${round.classification}` : "") +
+        ` outcome=${workflowRoundOutcome(round)}`
     );
     if (round.summary !== null) {
       lines.push(`    summary: ${round.summary}`);
+    }
+    if (round.keyChanges.length > 0) {
+      lines.push(`    key changes: ${round.keyChanges.join("; ")}`);
+    }
+    if (round.keyLearnings.length > 0) {
+      lines.push(`    learnings: ${round.keyLearnings.join("; ")}`);
+    }
+    if (round.remainingWork.length > 0) {
+      lines.push(`    remaining work: ${round.remainingWork.join("; ")}`);
+    }
+    if (round.inputDigest !== null) {
+      lines.push(`    input digest: ${round.inputDigest}`);
+    }
+    if (round.resultDigest !== null) {
+      lines.push(`    result digest: ${round.resultDigest}`);
     }
     lines.push(
       `    verification: ${round.verificationStatus ?? "(none)"}` +
@@ -1594,6 +1717,18 @@ export function renderWorkflowRunLogsText(
           ? ` recovery: ${round.recoveryCode}`
           : "")
     );
+    if (round.verificationResults && round.verificationResults.length > 0) {
+      lines.push(
+        `    verification commands: ${round.verificationResults
+          .map(
+            (result) =>
+              `${result.command} (exit=${result.exitCode}, duration=${
+                result.durationMs ?? "unknown"
+              }ms, timedOut=${result.timedOut})`
+          )
+          .join("; ")}`
+      );
+    }
     if (round.logPaths.length > 0) {
       lines.push(`    logs: ${round.logPaths.join(", ")}`);
     }
@@ -1637,6 +1772,53 @@ export function renderWorkflowRunLogsText(
   lines.push(`Data dir: ${dataDir}`);
   lines.push("");
   return lines.join("\n");
+}
+
+function workflowRunImplementationEngine(
+  route: Record<string, unknown>
+): string | null {
+  const value = route["implementationEngine"];
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function workflowRoundOutcome(round: WorkflowRunLogRound): string {
+  if (round.recoveryCode === "nothing_to_commit") {
+    return "no_op";
+  }
+  if (round.recoveryCode === "result_invalid") {
+    return "invalid_result";
+  }
+  if (
+    round.state === "manual_recovery_required" ||
+    round.classification === "manual_recovery_required" ||
+    round.humanGate === "manual_recovery_required"
+  ) {
+    return "manual_recovery";
+  }
+  if (
+    round.classification === "operator_decision_required" ||
+    round.classification === "approval_required" ||
+    round.humanGate === "quota_exhausted" ||
+    round.humanGate === "operator_decision_required" ||
+    round.humanGate === "approval_required"
+  ) {
+    return round.classification ?? "operator_decision_required";
+  }
+  if (round.verificationStatus === "failed") {
+    return "verification_failed";
+  }
+  if (round.commitSha !== null || round.classification === "complete") {
+    return "successful";
+  }
+  if (round.state === "failed" || round.classification === "failed") {
+    return "failed";
+  }
+  if (round.classification === "continue" && round.commitSha === null) {
+    return "failed";
+  }
+  return "incomplete";
 }
 
 function emitWorkflowFailure(

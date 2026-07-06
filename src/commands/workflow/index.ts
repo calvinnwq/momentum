@@ -104,9 +104,14 @@ import {
   type WorkflowRunStartInput
 } from "../../core/workflow/run/start.js";
 import {
+  CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY,
+  CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE,
+  NATIVE_GOAL_LOOP_IMPLEMENTATION_ENGINE,
   formatCodingRouteStepSelectionLines,
+  isCodingImplementationEngine,
   resolveCodingRouteStepSelections,
   writeCodingStepRouteOverrides,
+  type CodingImplementationEngine,
   type CodingStepRouteOverrides
 } from "../../core/workflow/route/coding.js";
 import {
@@ -210,6 +215,7 @@ type ParsedFlags = {
   objective?: string;
   runId?: string;
   skillRevision?: string;
+  implementationEngine?: string;
   profile?: string;
   stepsJson?: string;
   error?: string;
@@ -409,6 +415,9 @@ function workflowRunStart(parsed: ParsedFlags, io: CliIo): number {
  *   - it records the run with the {@link MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE}
  *     provenance so status / handoff / monitor / logs surface it as
  *     Momentum-owned;
+ *   - it records the coding implementation engine under
+ *     `route.implementationEngine`, defaulting to `native-goal-loop` while
+ *     preserving `current-gnhf-cwfp` as an explicit compatibility selection;
  *   - it accepts the coding-only `--steps-json` route override and records
  *     validated per-step harness/model/effort selections under `route.steps`,
  *     with provider-aware model aliases normalized before persistence; and
@@ -432,9 +441,9 @@ function workflowRunStartCoding(parsed: ParsedFlags, io: CliIo): number {
  * instead of persisting a run it materializes a frozen
  * {@link materializeWorkflowCodingPlanPreview} projection and emits it so an
  * operator can inspect the proposed run - run id, repo, objective, issue scope,
- * approval boundary, route/profile and per-step route selections, definition
- * key/version, and every step with its executor family - before approving or
- * executing it. The preview is a pure
+ * approval boundary, route/profile, implementation engine, and per-step route
+ * selections, definition key/version, and every step with its executor family -
+ * before approving or executing it. The preview is a pure
  * projection of the version-pinned built-in definition plus inputs, so the
  * durable run a later `start-coding` persists matches it exactly.
  */
@@ -459,8 +468,8 @@ type WorkflowStartCommandOptions = {
  * the coding preconditions but returns a read-only plan before the durable
  * persistence point. The `coding` option toggles the coding-specific guards
  * (forced definition, reserved-run-id refusal, native source provenance,
- * `--steps-json` support) while `preview` keeps the materialized plan on the
- * read-only path.
+ * implementation-engine route selection, `--steps-json` support) while `preview`
+ * keeps the materialized plan on the read-only path.
  */
 function buildCodingRequiredInputPreflightEvidence(
   parsed: ParsedFlags,
@@ -551,6 +560,32 @@ function runWorkflowStartCommand(
       message: `Run id "${runId}" is reserved for CWFP/overnight compatibility imports; choose a Momentum-native run id for ${command}.`,
       runId
     });
+  }
+
+  let implementationEngine: CodingImplementationEngine =
+    NATIVE_GOAL_LOOP_IMPLEMENTATION_ENGINE;
+  if (parsed.implementationEngine !== undefined) {
+    if (!options.coding) {
+      return emitWorkflowRunStartFailure(parsed, io, {
+        command,
+        code: "route_config_not_allowed",
+        message: `--implementation-engine is only supported on the coding doors (\`workflow run start-coding\` / \`workflow run preview-coding\`); the generic \`workflow run start\` does not accept coding implementation engine routes.`,
+        runId
+      });
+    }
+    const normalizedEngine = parsed.implementationEngine.trim();
+    if (!isCodingImplementationEngine(normalizedEngine)) {
+      return emitWorkflowRunStartFailure(parsed, io, {
+        command,
+        code: "route_config_invalid",
+        message: `--implementation-engine must be one of: ${[
+          NATIVE_GOAL_LOOP_IMPLEMENTATION_ENGINE,
+          CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE
+        ].join(", ")}.`,
+        runId
+      });
+    }
+    implementationEngine = normalizedEngine;
   }
 
   // Native per-step coding route reconfiguration (NGX-510): an operator can adjust
@@ -674,7 +709,8 @@ function runWorkflowStartCommand(
       coding: options.coding,
       parsed,
       stepRouteOverrides,
-      routeProfile
+      routeProfile,
+      implementationEngine
     });
     const structuralPreflight = preflightCodingWorkflowRunStartInput(input);
     if (!structuralPreflight.ok) {
@@ -768,7 +804,8 @@ function runWorkflowStartCommand(
         coding: options.coding,
         parsed,
         stepRouteOverrides,
-        routeProfile
+        routeProfile,
+        implementationEngine
       });
 
     if (!options.coding) {
@@ -894,6 +931,7 @@ function buildWorkflowRunStartInput(args: {
   parsed: ParsedFlags;
   stepRouteOverrides: CodingStepRouteOverrides;
   routeProfile: string | undefined;
+  implementationEngine: CodingImplementationEngine;
 }): WorkflowRunStartInput {
   const {
     definition,
@@ -904,7 +942,8 @@ function buildWorkflowRunStartInput(args: {
     coding,
     parsed,
     stepRouteOverrides,
-    routeProfile
+    routeProfile,
+    implementationEngine
   } = args;
   const input: WorkflowRunStartInput = {
     definition,
@@ -925,11 +964,15 @@ function buildWorkflowRunStartInput(args: {
   if (parsed.issueScope !== undefined) {
     input.issueScope = { identifier: parsed.issueScope };
   }
-  // Compose the durable run route from the recorded operator profile (route.profile)
-  // and the validated per-step overrides (route.steps). The steps namespace is only
-  // embedded when at least one override is present, so a run with neither input keeps
-  // an empty route, exactly as before NGX-510.
+  // Compose the durable run route from the recorded implementation engine
+  // (route.implementationEngine), operator profile (route.profile), and validated
+  // per-step overrides (route.steps). The engine marker is written for native
+  // coding starts even when profile and per-step overrides are omitted, so readback
+  // can distinguish the selected implementation path from the compatibility route.
   let route: Record<string, unknown> = {};
+  if (coding) {
+    route[CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY] = implementationEngine;
+  }
   if (routeProfile !== undefined) {
     route.profile = routeProfile;
   }

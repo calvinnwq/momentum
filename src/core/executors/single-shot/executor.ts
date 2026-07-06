@@ -564,6 +564,7 @@ export function planSingleShotRoundStart(
     logPaths: input.logPaths ?? [],
     summary: null,
     keyChanges: [],
+    keyLearnings: [],
     remainingWork: [],
     changedFiles: [],
     verificationStatus: null,
@@ -1022,6 +1023,7 @@ export function planSingleShotRoundPersistence(
           ? {
               summary: input.result.summary,
               keyChanges: input.result.key_changes_made,
+              keyLearnings: input.result.key_learnings,
               remainingWork: input.result.remaining_work
             }
           : {}),

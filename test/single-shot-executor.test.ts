@@ -965,6 +965,7 @@ describe("planSingleShotRoundPersistence", () => {
       toState: "capturing_result",
       summary: "ran the one-shot review pass",
       keyChanges: ["approved the bounded change"],
+      keyLearnings: [],
       remainingWork: [],
       resultDigest: "sha256:result"
     });

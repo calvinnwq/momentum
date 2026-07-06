@@ -403,6 +403,7 @@ export type ExecutorRoundRecord = {
   // Execution.
   state: ExecutorRoundState;
   classification: ExecutorCompletionClassification | null;
+  executorRecommendation?: ExecutorCompletionClassification | null;
   startedAt: number | null;
   heartbeatAt: number | null;
   finishedAt: number | null;
@@ -416,12 +417,26 @@ export type ExecutorRoundRecord = {
   // Result.
   summary: string | null;
   keyChanges: string[];
+  keyLearnings: string[];
   remainingWork: string[];
   changedFiles: string[];
   verificationStatus: string | null;
+  verificationResults?: ExecutorRoundVerificationResult[] | undefined;
   commitSha: string | null;
   recoveryCode: string | null;
   humanGate: ExecutorHumanGateType | null;
+};
+
+/**
+ * One verification command result captured by a round.
+ * The shape mirrors the native round evidence projection and intentionally omits
+ * stdout/stderr, which live in the verification output artifact.
+ */
+export type ExecutorRoundVerificationResult = {
+  command: string;
+  exitCode: number | null;
+  durationMs: number;
+  timedOut: boolean;
 };
 
 /**

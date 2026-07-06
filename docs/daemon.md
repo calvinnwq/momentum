@@ -195,6 +195,10 @@ managed-loop mode to fail before registering a daemon run with
 
 The `--profile <name>` option on `workflow run start` and `workflow run start-coding` only records the trimmed operator-selected profile name in the run's durable `route.profile`; a blank profile is refused before durable writes.
 `workflow run preview-coding --profile <name>` reports that same projected `route.profile` in its frozen read-only plan but does not persist a run.
+The `--implementation-engine <engine>` option on `workflow run start-coding` records the selected coding implementation path in `route.implementationEngine`; when omitted, coding starts persist `native-goal-loop`.
+`workflow run preview-coding --implementation-engine <engine>` reports that same selected path without persisting a run.
+The only supported values are `native-goal-loop` and `current-gnhf-cwfp`.
+Native dispatch currently executes only `native-goal-loop`; a persisted `current-gnhf-cwfp` selection fails closed before the implementation executor starts instead of being silently translated to the native route.
 The `--steps-json <json>` option on `workflow run start-coding` records per-step harness/model/effort selections in `route.steps`, and `workflow run preview-coding --steps-json <json>` reports the same selection in its frozen read-only plan without persisting it.
 Provider-aware model aliases are normalized in both paths when the step supplies a known mapped harness (`claude`, `codex`, or `opencode`), so the previewed value is the same command-ready value later stored and injected.
 The command-line profile selector does not load or select the executable wrapper profile for the daemon.

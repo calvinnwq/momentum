@@ -1,14 +1,15 @@
 /**
- * Native per-step coding route/config overrides for the Momentum-native coding
- * workflow (NGX-510).
+ * Native coding route/config selection for the Momentum-native coding workflow
+ * (NGX-510 / NGX-568).
  *
  * NGX-508 (`workflow run start-coding`) and NGX-509 (`workflow run
  * preview-coding`) gave operators an explicit native door and a read-only frozen
- * plan, but the planned harness/model/effort selections were not yet
- * reconfigurable: the run-level `route.profile` was the only operator route input,
- * and nothing per-step. CWFP already lets an operator inspect and adjust the
- * planned harness/model choices before approving execution; this module is the
- * keystone that lets the native door carry the same per-step control.
+ * plan, but the planned implementation route and harness/model/effort selections
+ * were not yet explicit: the run-level `route.profile` was the only operator
+ * route input, and nothing per-step. CWFP already lets an operator inspect and
+ * adjust the implementation path plus planned harness/model choices before
+ * approving execution; this module is the keystone that lets the native door
+ * carry the same durable route control.
  *
  * This module owns ONLY the pure representation + validation half (no SQLite, no
  * file system, no clock, no network), the same discipline
@@ -22,11 +23,14 @@
  * namespace is corrupt.
  *
  * Home and namespace. A {@link import("../definition/definition.js").StepDefinition} carries
- * only an executor *family*, never per-step config, so - exactly as
+ * only an executor *family*, never the selected implementation path or per-step config, so - exactly as
  * `route/subworkflow.ts` reasoned for child config - the only in-scope durable
- * home without a schema change is the run's free-form `route` JSON. Per-step
- * overrides live under the single {@link CODING_ROUTE_STEPS_KEY} (`route.steps`)
- * namespace, parallel to `route.subworkflow` and the run-level `route.profile`.
+ * home without a schema change is the run's free-form `route` JSON. The
+ * implementation path lives under
+ * {@link CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY} (`route.implementationEngine`).
+ * Per-step overrides live under the single {@link CODING_ROUTE_STEPS_KEY}
+ * (`route.steps`) namespace, parallel to `route.subworkflow` and the run-level
+ * `route.profile`.
  * `route.profile` (the recorded operator profile) stays distinct from these
  * per-step selections and from the daemon's `MOMENTUM_LIVE_WRAPPER_PROFILE`
  * execution profile; none of them are conflated here.
@@ -46,6 +50,33 @@
  * `string | null` treatment.
  */
 import { resolveCommandModelAlias } from "../../model-aliases.js";
+
+/** The run-`route` field that records the selected coding implementation engine. */
+export const CODING_ROUTE_IMPLEMENTATION_ENGINE_KEY = "implementationEngine";
+
+/** The explicit native goal-loop route selected by `workflow run start-coding`. */
+export const NATIVE_GOAL_LOOP_IMPLEMENTATION_ENGINE = "native-goal-loop";
+
+/** The explicit compatibility route that keeps the current GNHF/CWFP path selectable. */
+export const CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE = "current-gnhf-cwfp";
+
+export const CODING_IMPLEMENTATION_ENGINES = [
+  NATIVE_GOAL_LOOP_IMPLEMENTATION_ENGINE,
+  CURRENT_GNHF_CWFP_IMPLEMENTATION_ENGINE
+] as const;
+
+export type CodingImplementationEngine =
+  (typeof CODING_IMPLEMENTATION_ENGINES)[number];
+
+const CODING_IMPLEMENTATION_ENGINE_SET: ReadonlySet<string> = new Set(
+  CODING_IMPLEMENTATION_ENGINES
+);
+
+export function isCodingImplementationEngine(
+  value: string
+): value is CodingImplementationEngine {
+  return CODING_IMPLEMENTATION_ENGINE_SET.has(value);
+}
 
 /** The run-`route` namespace that carries per-step coding route/config overrides. */
 export const CODING_ROUTE_STEPS_KEY = "steps";
@@ -320,7 +351,8 @@ export function readCodingStepRouteOverrides(
  * Embed per-step coding route overrides into a run `route`, returning a new route
  * object (the input is never mutated). When there are no overrides the
  * `route.steps` namespace is omitted entirely so the durable route stays minimal;
- * all other namespaces (`route.profile`, `route.subworkflow`, ...) are preserved.
+ * all other namespaces (`route.implementationEngine`, `route.profile`,
+ * `route.subworkflow`, ...) are preserved.
  */
 export function writeCodingStepRouteOverrides(
   route: Record<string, unknown>,

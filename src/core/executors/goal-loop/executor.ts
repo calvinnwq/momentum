@@ -80,6 +80,7 @@ import type {
   ExecutorInvocationState,
   ExecutorRoundRecord,
   ExecutorRoundState,
+  ExecutorRoundVerificationResult,
   WorkflowExecutorFamily
 } from "../loop/reducer.js";
 import type { ExecutorRoundUpdate } from "../loop/persist.js";
@@ -133,6 +134,12 @@ export type DecideGoalLoopRoundInput = {
   recommendation: GoalLoopRecommendation;
   /** The repo-safety outcome of the round's finalization transaction. */
   finalizeOutcome: GoalLoopFinalizeOutcome;
+  /**
+   * Optional more precise durable recovery code when the finalize outcome
+   * contains a safe sub-code operators need to query, such as
+   * `nothing_to_commit` for a commit no-op.
+   */
+  finalizeRecoveryCode?: string | null;
   /** 0-based index of the round that just finished. */
   roundIndex: number;
   /** Maximum rounds the executor definition allows, or null for unbounded. */
@@ -554,6 +561,7 @@ export function planGoalLoopRoundStart(
     logPaths: input.logPaths ?? [],
     summary: null,
     keyChanges: [],
+    keyLearnings: [],
     remainingWork: [],
     changedFiles: [],
     verificationStatus: null,
@@ -804,10 +812,12 @@ export function planGoalLoopRoundPersistence(
   const decision = decideGoalLoopRound({
     recommendation,
     finalizeOutcome: input.finalize.outcome,
+    finalizeRecoveryCode: recoveryCodeFromFinalizeResult(input.finalize),
     roundIndex: input.roundIndex,
     maxRounds: input.maxRounds
   });
   const evidence = goalLoopFinalizeEvidenceFromResult(input.finalize);
+  const verificationResults = verificationResultsFromFinalize(input.finalize);
   const captureUpdate: ExecutorRoundUpdate | null =
     input.result === null
       ? null
@@ -815,6 +825,7 @@ export function planGoalLoopRoundPersistence(
           toState: "capturing_result",
           summary: input.result.summary,
           keyChanges: input.result.key_changes_made,
+          keyLearnings: input.result.key_learnings,
           remainingWork: input.result.remaining_work,
           // Stamp the result digest only when the mechanism reported one; an
           // absent digest is left off the patch so `coalesce` keeps the
@@ -826,7 +837,12 @@ export function planGoalLoopRoundPersistence(
   const terminalUpdate: ExecutorRoundUpdate = {
     toState: decision.roundState,
     classification: decision.classification,
+    executorRecommendation: completionRecommendationFromResult(
+      input.result,
+      decision.classification
+    ),
     verificationStatus: evidence.verificationStatus,
+    ...(verificationResults.length > 0 ? { verificationResults } : {}),
     commitSha: evidence.commitSha,
     recoveryCode: decision.recoveryCode,
     humanGate: decision.humanGate,
@@ -839,6 +855,29 @@ export function planGoalLoopRoundPersistence(
       : {})
   };
   return { decision, evidence, captureUpdate, terminalUpdate };
+}
+
+function completionRecommendationFromResult(
+  result: RunnerResult | null,
+  fallback: ExecutorCompletionClassification
+): ExecutorCompletionClassification {
+  if (result === null) return fallback;
+  if (!result.success) return "failed";
+  return result.goal_complete ? "complete" : "continue";
+}
+
+function verificationResultsFromFinalize(
+  result: FinalizeWorkflowStepFromResultFileResult
+): ExecutorRoundVerificationResult[] {
+  const verification =
+    "verification" in result ? result.verification : undefined;
+  if (verification === undefined || verification === null) return [];
+  return verification.results.map((commandResult) => ({
+    command: commandResult.command,
+    exitCode: commandResult.exit_code,
+    durationMs: commandResult.duration_ms,
+    timedOut: commandResult.timed_out
+  }));
 }
 
 /**
@@ -859,7 +898,8 @@ export function decideGoalLoopRound(
   //    exact M9 recovery code, regardless of the executor's recommendation or
   //    the remaining round budget.
   if (UNSAFE_FINALIZE_OUTCOMES.has(finalizeOutcome)) {
-    const recoveryCode = recoveryCodeForFinalize(finalizeOutcome);
+    const recoveryCode =
+      input.finalizeRecoveryCode ?? recoveryCodeForFinalize(finalizeOutcome);
     return {
       classification: "manual_recovery_required",
       roundState: "manual_recovery_required",
@@ -994,6 +1034,18 @@ function resolveSelectionField<T extends string | number>(
  */
 function recoveryCodeForFinalize(outcome: GoalLoopFinalizeOutcome): string {
   return outcome === "manual_recovery_required" ? "head_mismatch" : outcome;
+}
+
+function recoveryCodeFromFinalizeResult(
+  result: FinalizeWorkflowStepFromResultFileResult
+): string | null {
+  if (
+    result.outcome === "commit_failed" &&
+    result.commit.code === "nothing_to_commit"
+  ) {
+    return "nothing_to_commit";
+  }
+  return null;
 }
 
 /**

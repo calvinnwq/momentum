@@ -54,8 +54,9 @@ Inside `commit`, `type` and `subject` are required; `scope`, `body`, and `breaki
 After finalization, Momentum projects the captured runner result plus durable round evidence into the native round evidence view consumed by `workflow run logs`.
 Future status, handoff, monitor, and GUI surfaces must use the same projection once they are wired to executor round evidence instead of scraping terminal text or runner-owned directories.
 The `momentum.native-goal-loop.round-result.v1` fixture is a post-finalization evidence projection, not a runner-authored input document.
-Its required JSON fields are `schema`, `summary`, `keyChanges`, `learnings`, `completionRecommendation`, `verificationResult`, `artifacts`, `checkpoints`, `changedFiles`, `commitSha`, `recoveryReason`, and `remainingWork`.
+Its required JSON fields are `schema`, `summary`, `keyChanges`, `learnings`, `completionRecommendation`, `daemonClassification`, `verificationResult`, `artifacts`, `checkpoints`, `changedFiles`, `commitSha`, `recoveryReason`, and `remainingWork`.
 `completionRecommendation` is the executor's recommendation only: `complete`, `continue`, `approval_required`, `operator_decision_required`, `manual_recovery_required`, `blocked`, `failed`, or `cancelled`.
+`daemonClassification` is Momentum's persisted daemon classification after budget, recovery, and operator-gate policy are applied.
 `verificationResult` records command names, exit codes, timing when available, and an overall status such as `passed`, `failed`, `skipped`, or `not_run`.
 Artifacts and checkpoints are durable pointers under the round, not proof by terminal text.
 `commitSha` is non-null only after Momentum has verified and recorded the successful commit for that round.
@@ -161,16 +162,20 @@ the built-in `coding-workflow` definition, refuses reserved `cwfp-*` / `cwfb-*` 
 source so durable status/handoff/monitor/logs show it as Momentum-owned. It
 captures the run's isolation inputs in durable state: repo, objective, issue
 scope, approval boundary, skill revision, and the selected runtime/profile
-(`route.profile`); the daemon still resolves the executing live-wrapper profile
-from `MOMENTUM_LIVE_WRAPPER_PROFILE` at run time.
+(`route.profile`) plus the selected implementation path
+(`route.implementationEngine`, defaulting to `native-goal-loop`); the daemon
+still resolves the executing live-wrapper profile from
+`MOMENTUM_LIVE_WRAPPER_PROFILE` at run time.
 Native coding dispatch resolves executor families from the built-in `coding-workflow` definition for that source, even if a persisted definition with the same key/version exists.
 Built-in workflow definitions are resolved by key and version; native runs must keep resolving the built-in version recorded on the run, even after a later built-in recipe becomes current.
 If the recorded built-in version is unavailable, native dispatch must fail closed instead of substituting persisted rows or a later built-in version.
-`workflow run preview-coding` (NGX-509) is the read-only native plan-preview door: it shares the `start-coding` preconditions and built-in definition resolution but writes nothing, emitting a frozen plan (run id, repo, objective, issue scope, approval boundary, route fields such as `route.profile` and `route.steps`, definition key/version, and every step with its executor family and on-start state) so an operator can inspect the proposed run before approval or execution.
+`workflow run preview-coding` (NGX-509) is the read-only native plan-preview door: it shares the `start-coding` preconditions and built-in definition resolution but writes nothing, emitting a frozen plan (run id, repo, objective, issue scope, approval boundary, route fields such as `route.implementationEngine`, `route.profile`, and `route.steps`, definition key/version, and every step with its executor family and on-start state) so an operator can inspect the proposed run before approval or execution.
 The preview is a pure projection of the version-pinned built-in definition plus inputs, so a later `start-coding` from the same inputs persists a matching run, and the frozen plan can be reconstructed from the run's recorded `(definition key, version)` for approval/dispatch to reference.
-Structural preflight is shared by the native coding start and preview doors before durable run writes: missing built-in definition versions, blank required repository paths, invalid approval boundaries, invalid issue-scope identifiers, blank route profiles, and invalid route steps fail closed with `preflightEvidence`.
+Structural preflight is shared by the native coding start and preview doors before durable run writes: missing built-in definition versions, blank required repository paths, invalid approval boundaries, invalid issue-scope identifiers, blank route profiles, unsupported implementation engines, and invalid route steps fail closed with `preflightEvidence`.
+`--implementation-engine` accepts `native-goal-loop` or `current-gnhf-cwfp` on the coding doors, and the generic `workflow run start` refuses it with `route_config_not_allowed`.
+The native dispatch lane executes only `native-goal-loop` today; a persisted `current-gnhf-cwfp` selection fails closed before the implementation executor starts rather than silently running the native goal-loop route.
 NGX-510 adds native per-step coding route/config overrides to the coding doors: `workflow run start-coding` / `workflow run preview-coding` accept `--steps-json <json>`, a sparse object keyed by the configurable coding steps (`implementation`, `postflight`, `no-mistakes`, `merge-cleanup`) carrying `harness`/`model`/`effort` string fields.
-Selections are validated and normalized to a byte-stable `route.steps` namespace on the durable run route, parallel to `route.profile` and `route.subworkflow`; absent steps/fields defer to defaults, and an unsupported step, unknown field, blank value, or malformed JSON fails closed with `route_config_invalid` (and writes nothing), while the generic `workflow run start` refuses the flag with `route_config_not_allowed`.
+Selections are validated and normalized to a byte-stable `route.steps` namespace on the durable run route, parallel to `route.implementationEngine`, `route.profile`, and `route.subworkflow`; absent steps/fields defer to defaults, and an unsupported step, unknown field, blank value, or malformed JSON fails closed with `route_config_invalid` (and writes nothing), while the generic `workflow run start` refuses the flag with `route_config_not_allowed`.
 Provider-specific model aliases are part of that normalization when the same step supplies the matching harness: known Claude aliases persist as pinned Claude Code model strings, known Codex aliases persist as un-namespaced Codex CLI model ids, and known OpenCode aliases persist as provider-qualified OpenCode model ids, while unknown harness/model values remain free-form.
 `route.steps` records the operator's per-step selection for durable audit by status/handoff/monitor/logs and for dispatcher-created executor-round selection; it stays distinct from the daemon's `MOMENTUM_LIVE_WRAPPER_PROFILE` execution profile.
 NGX-511 adds a native progress-monitor projection to `workflow run monitor` for explicit `momentum-native-coding` runs.

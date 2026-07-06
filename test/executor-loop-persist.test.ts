@@ -32,6 +32,7 @@ import {
   listExecutorCheckpointsForRound,
   listExecutorDecisionsForRound,
   listExecutorFindingsForRound,
+  listIncompleteExecutorRoundsForRun,
   listExecutorRoundsForInvocation,
   listExecutorRoundsForRun,
   loadExecutorDefinition,
@@ -200,6 +201,7 @@ function makeRound(
     logPaths: [],
     summary: null,
     keyChanges: [],
+    keyLearnings: [],
     remainingWork: [],
     changedFiles: [],
     verificationStatus: null,
@@ -482,6 +484,7 @@ describe("executor rounds", () => {
       const record = makeRound({
         state: "succeeded",
         classification: "complete",
+        executorRecommendation: "complete",
         startedAt: 500,
         heartbeatAt: 600,
         finishedAt: 700,
@@ -491,6 +494,7 @@ describe("executor rounds", () => {
         logPaths: ["/runs/round-1/stdout.log", "/runs/round-1/stderr.log"],
         summary: "Implemented the executor-loop persistence twin.",
         keyChanges: ["added migrations", "added persist module"],
+        keyLearnings: [],
         remainingWork: ["child record tables"],
         changedFiles: ["src/migrations.ts", "src/executor-loop-persist.ts"],
         verificationStatus: "passed",
@@ -672,6 +676,61 @@ describe("executor rounds", () => {
     }
   });
 
+  it("lists only incomplete rounds for a run without changing completed rounds", () => {
+    const db = openRoundDb();
+    try {
+      insertExecutorRound(
+        db,
+        makeRound({
+          roundId: "completed-round",
+          roundIndex: 0,
+          state: "succeeded",
+          classification: "complete",
+          summary: "complete",
+          commitSha: "abc123"
+        }),
+        { now: 1000 }
+      );
+      insertExecutorRound(
+        db,
+        makeRound({
+          roundId: "interrupted-round",
+          roundIndex: 1,
+          state: "running",
+          inputDigest: "sha256:input-1",
+          artifactRoot: "/runs/interrupted-round",
+          logPaths: ["/runs/interrupted-round/stdout.log"]
+        }),
+        { now: 1100 }
+      );
+      insertExecutorRound(
+        db,
+        makeRound({
+          roundId: "paused-round",
+          roundIndex: 2,
+          state: "waiting_operator",
+          humanGate: "operator_decision_required"
+        }),
+        { now: 1200 }
+      );
+
+      const completedBefore = loadExecutorRound(db, "completed-round");
+      const incomplete = listIncompleteExecutorRoundsForRun(db, "run-1");
+
+      expect(incomplete.map((round) => round.roundId)).toEqual([
+        "interrupted-round",
+        "paused-round"
+      ]);
+      expect(incomplete.map((round) => round.state)).toEqual([
+        "running",
+        "waiting_operator"
+      ]);
+      expect(loadExecutorRound(db, "completed-round")).toEqual(completedBefore);
+    } finally {
+      db.close();
+    }
+  });
+
   it("captures a normalized result while advancing the round state", () => {
     const db = openRoundDb();
     try {
@@ -683,6 +742,7 @@ describe("executor rounds", () => {
           toState: "capturing_result",
           summary: "did the work",
           keyChanges: ["a", "b"],
+          keyLearnings: [],
           remainingWork: ["c"],
           changedFiles: ["src/x.ts"],
           verificationStatus: "passed",

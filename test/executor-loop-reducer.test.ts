@@ -368,6 +368,7 @@ describe("executor-loop record shapes", () => {
       logPaths: ["goals/g-1/rounds/round-1/stdout.log"],
       summary: "Implemented the schema.",
       keyChanges: ["Added executor-loop-reducer.ts"],
+      keyLearnings: [],
       remainingWork: [],
       changedFiles: ["src/executor-loop-reducer.ts"],
       verificationStatus: "passed",
