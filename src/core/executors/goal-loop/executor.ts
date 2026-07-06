@@ -133,6 +133,12 @@ export type DecideGoalLoopRoundInput = {
   recommendation: GoalLoopRecommendation;
   /** The repo-safety outcome of the round's finalization transaction. */
   finalizeOutcome: GoalLoopFinalizeOutcome;
+  /**
+   * Optional more precise durable recovery code when the finalize outcome
+   * contains a safe sub-code operators need to query, such as
+   * `nothing_to_commit` for a commit no-op.
+   */
+  finalizeRecoveryCode?: string | null;
   /** 0-based index of the round that just finished. */
   roundIndex: number;
   /** Maximum rounds the executor definition allows, or null for unbounded. */
@@ -805,6 +811,7 @@ export function planGoalLoopRoundPersistence(
   const decision = decideGoalLoopRound({
     recommendation,
     finalizeOutcome: input.finalize.outcome,
+    finalizeRecoveryCode: recoveryCodeFromFinalizeResult(input.finalize),
     roundIndex: input.roundIndex,
     maxRounds: input.maxRounds
   });
@@ -861,7 +868,8 @@ export function decideGoalLoopRound(
   //    exact M9 recovery code, regardless of the executor's recommendation or
   //    the remaining round budget.
   if (UNSAFE_FINALIZE_OUTCOMES.has(finalizeOutcome)) {
-    const recoveryCode = recoveryCodeForFinalize(finalizeOutcome);
+    const recoveryCode =
+      input.finalizeRecoveryCode ?? recoveryCodeForFinalize(finalizeOutcome);
     return {
       classification: "manual_recovery_required",
       roundState: "manual_recovery_required",
@@ -996,6 +1004,18 @@ function resolveSelectionField<T extends string | number>(
  */
 function recoveryCodeForFinalize(outcome: GoalLoopFinalizeOutcome): string {
   return outcome === "manual_recovery_required" ? "head_mismatch" : outcome;
+}
+
+function recoveryCodeFromFinalizeResult(
+  result: FinalizeWorkflowStepFromResultFileResult
+): string | null {
+  if (
+    result.outcome === "commit_failed" &&
+    result.commit.code === "nothing_to_commit"
+  ) {
+    return "nothing_to_commit";
+  }
+  return null;
 }
 
 /**

@@ -1528,6 +1528,7 @@ export function workflowRoundToJsonShape(
     roundIndex: round.roundIndex,
     state: round.state,
     classification: round.classification,
+    outcome: workflowRoundOutcome(round),
     startedAt: round.startedAt,
     heartbeatAt: round.heartbeatAt,
     finishedAt: round.finishedAt,
@@ -1585,7 +1586,8 @@ export function renderWorkflowRunLogsText(
   for (const round of envelope.rounds) {
     lines.push(
       `- ${round.roundId} [${round.stepKey}/${round.state}]` +
-        (round.classification !== null ? ` ${round.classification}` : "")
+        (round.classification !== null ? ` ${round.classification}` : "") +
+        ` outcome=${workflowRoundOutcome(round)}`
     );
     if (round.summary !== null) {
       lines.push(`    summary: ${round.summary}`);
@@ -1640,6 +1642,35 @@ export function renderWorkflowRunLogsText(
   lines.push(`Data dir: ${dataDir}`);
   lines.push("");
   return lines.join("\n");
+}
+
+function workflowRoundOutcome(round: WorkflowRunLogRound): string {
+  if (round.recoveryCode === "nothing_to_commit") {
+    return "no_op";
+  }
+  if (round.recoveryCode === "result_invalid") {
+    return "invalid_result";
+  }
+  if (round.verificationStatus === "failed") {
+    return "verification_failed";
+  }
+  if (
+    round.state === "manual_recovery_required" ||
+    round.classification === "manual_recovery_required" ||
+    round.humanGate === "manual_recovery_required"
+  ) {
+    return "manual_recovery";
+  }
+  if (round.commitSha !== null || round.classification === "complete") {
+    return "successful";
+  }
+  if (round.state === "failed" || round.classification === "failed") {
+    return "failed";
+  }
+  if (round.classification === "continue" && round.commitSha === null) {
+    return "failed";
+  }
+  return "incomplete";
 }
 
 function emitWorkflowFailure(

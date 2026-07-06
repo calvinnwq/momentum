@@ -362,6 +362,16 @@ const COMMIT_FAILED: FinalizeWorkflowStepFromResultFileResult = {
   commit: { ok: false, code: "git_failed", error: "git commit failed" }
 };
 
+const COMMIT_NOOP: FinalizeWorkflowStepFromResultFileResult = {
+  outcome: "commit_failed",
+  verification: { ok: true, results: [] },
+  commit: {
+    ok: false,
+    code: "nothing_to_commit",
+    error: "No staged changes after runner; nothing to commit."
+  }
+};
+
 const RESET_FAILED_WITH_VERIFY: FinalizeWorkflowStepFromResultFileResult = {
   outcome: "reset_failed",
   trigger: "verification_failure",
@@ -625,6 +635,19 @@ describe("planGoalLoopRoundPersistence — manual recovery boundaries", () => {
     );
     expect(running.ok).toBe(true);
     expect(terminal.ok).toBe(true);
+  });
+
+  it("preserves a nothing_to_commit commit failure as a queryable no-op recovery code", () => {
+    const plan = planGoalLoopRoundPersistence({
+      result: runnerResult(),
+      finalize: COMMIT_NOOP,
+      roundIndex: 0,
+      maxRounds: 5
+    });
+
+    expect(plan.terminalUpdate.toState).toBe("manual_recovery_required");
+    expect(plan.terminalUpdate.recoveryCode).toBe("nothing_to_commit");
+    expect(plan.terminalUpdate.humanGate).toBe("manual_recovery_required");
   });
 
   it("routes a missing result directly from running to manual recovery", () => {

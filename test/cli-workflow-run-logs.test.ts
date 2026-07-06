@@ -80,7 +80,10 @@ function makeInvocation(runId: string): ExecutorInvocationRecord {
   };
 }
 
-function makeRound(runId: string): ExecutorRoundRecord {
+function makeRound(
+  runId: string,
+  overrides: Partial<ExecutorRoundRecord> = {}
+): ExecutorRoundRecord {
   return {
     roundId: "round-1",
     invocationId: "inv-1",
@@ -110,7 +113,8 @@ function makeRound(runId: string): ExecutorRoundRecord {
     verificationStatus: "passed",
     commitSha: "abc123",
     recoveryCode: null,
-    humanGate: null
+    humanGate: null,
+    ...overrides
   };
 }
 
@@ -397,6 +401,142 @@ describe("momentum workflow run logs", () => {
     expect(round.checkpoints).toEqual([makeCheckpoint()]);
     expect(round.findings).toEqual([makeFinding()]);
     expect(round.decisions).toEqual([makeDecision()]);
+  });
+
+  it("projects queryable native round outcomes from durable round evidence", async () => {
+    const dataDir = makeTempDir();
+    const runId = "cwfp-logs-outcomes";
+    const db = openDb(dataDir);
+    try {
+      db.prepare(
+        `INSERT INTO workflow_runs
+           (id, state, source, plan_json, objective, issue_scope_json, route_json,
+            needs_manual_recovery, created_at, updated_at)
+           VALUES (?, 'running', 'agent-workflow', '{}', 'logs read-back', '{}', '{}', 0, 1, 1)`
+      ).run(runId);
+      db.prepare(
+        `INSERT INTO workflow_steps
+           (run_id, step_id, kind, state, step_order, required, created_at, updated_at)
+           VALUES (?, 'implementation', 'implementation', 'running', 1, 1, 1, 1)`
+      ).run(runId);
+      insertExecutorInvocation(db, makeInvocation(runId), { now: 1 });
+
+      const cases: Array<
+        [
+          string,
+          Partial<ExecutorRoundRecord>,
+          "successful" | "failed" | "no_op" | "invalid_result" | "verification_failed" | "manual_recovery"
+        ]
+      > = [
+        [
+          "successful",
+          {
+            state: "succeeded",
+            classification: "complete",
+            commitSha: "abc123",
+            verificationStatus: "passed"
+          },
+          "successful"
+        ],
+        [
+          "failed",
+          {
+            state: "failed",
+            classification: "continue",
+            commitSha: null,
+            verificationStatus: null
+          },
+          "failed"
+        ],
+        [
+          "no-op",
+          {
+            state: "manual_recovery_required",
+            classification: "manual_recovery_required",
+            commitSha: null,
+            verificationStatus: "skipped",
+            recoveryCode: "nothing_to_commit",
+            humanGate: "manual_recovery_required"
+          },
+          "no_op"
+        ],
+        [
+          "invalid-result",
+          {
+            state: "manual_recovery_required",
+            classification: "manual_recovery_required",
+            commitSha: null,
+            verificationStatus: null,
+            recoveryCode: "result_invalid",
+            humanGate: "manual_recovery_required"
+          },
+          "invalid_result"
+        ],
+        [
+          "verification-failed",
+          {
+            state: "failed",
+            classification: "continue",
+            commitSha: null,
+            verificationStatus: "failed"
+          },
+          "verification_failed"
+        ],
+        [
+          "manual-recovery",
+          {
+            state: "manual_recovery_required",
+            classification: "manual_recovery_required",
+            commitSha: null,
+            verificationStatus: null,
+            recoveryCode: "head_mismatch",
+            humanGate: "manual_recovery_required"
+          },
+          "manual_recovery"
+        ]
+      ];
+
+      cases.forEach(([id, overrides], index) => {
+        insertExecutorRound(
+          db,
+          makeRound(runId, {
+            roundId: `round-${id}`,
+            roundIndex: index,
+            summary: id,
+            changedFiles: [],
+            ...overrides
+          }),
+          { now: index + 1 }
+        );
+      });
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "logs",
+      runId,
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    const payload = JSON.parse(result.stdout) as {
+      rounds: Array<{ summary: string | null; outcome: string }>;
+    };
+    expect(payload.rounds.map((round) => [round.summary, round.outcome])).toEqual(
+      [
+        ["successful", "successful"],
+        ["failed", "failed"],
+        ["no-op", "no_op"],
+        ["invalid-result", "invalid_result"],
+        ["verification-failed", "verification_failed"],
+        ["manual-recovery", "manual_recovery"]
+      ]
+    );
   });
 
   it("renders text output with schema version and round log lines", async () => {
