@@ -633,7 +633,7 @@ describe("planGoalLoopRoundPersistence — manual recovery boundaries", () => {
     });
     expect(plan.captureUpdate).not.toBeNull();
     expect(plan.terminalUpdate.toState).toBe("manual_recovery_required");
-    expect(plan.terminalUpdate.recoveryCode).toBe("commit_failed");
+    expect(plan.terminalUpdate.recoveryCode).toBe("git_failed");
     // Verification passed before the commit failed; the evidence preserves that.
     expect(plan.terminalUpdate.verificationStatus).toBe("passed");
     const running = transitionExecutorRound(
@@ -646,6 +646,19 @@ describe("planGoalLoopRoundPersistence — manual recovery boundaries", () => {
     );
     expect(running.ok).toBe(true);
     expect(terminal.ok).toBe(true);
+  });
+
+  it("preserves a failed reset's precise git recovery code", () => {
+    const plan = planGoalLoopRoundPersistence({
+      result: runnerResult(),
+      finalize: RESET_FAILED_NO_VERIFY,
+      roundIndex: 0,
+      maxRounds: 5
+    });
+
+    expect(plan.terminalUpdate.toState).toBe("manual_recovery_required");
+    expect(plan.terminalUpdate.recoveryCode).toBe("git_failed");
+    expect(plan.terminalUpdate.humanGate).toBe("manual_recovery_required");
   });
 
   it("preserves a nothing_to_commit commit failure as a queryable no-op recovery code", () => {

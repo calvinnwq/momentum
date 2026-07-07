@@ -1039,13 +1039,24 @@ function recoveryCodeForFinalize(outcome: GoalLoopFinalizeOutcome): string {
 function recoveryCodeFromFinalizeResult(
   result: FinalizeWorkflowStepFromResultFileResult
 ): string | null {
-  if (
-    result.outcome === "commit_failed" &&
-    result.commit.code === "nothing_to_commit"
-  ) {
-    return "nothing_to_commit";
+  switch (result.outcome) {
+    case "manual_recovery_required":
+      return result.recoveryCode;
+    case "reset_failed":
+      return result.reset.code;
+    case "commit_failed":
+      return result.commit.code;
+    case "git_failed":
+    case "repo_lock_lost":
+    case "invalid_input":
+    case "result_missing":
+    case "result_invalid":
+      return result.outcome;
+    case "committed":
+    case "reset_step_failure":
+    case "reset_verification_failure":
+      return null;
   }
-  return null;
 }
 
 /**
