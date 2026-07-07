@@ -13,33 +13,70 @@ function readFile(relative: string): string {
 describe("Momentum vision contract", () => {
   const vision = readFile("VISION.md");
 
-  it("anchors the product and engineering opinions in a root repo doc", () => {
+  it("anchors the product identity and success test in a root repo doc", () => {
     expect(vision).toMatch(/^# Momentum Vision/m);
-    expect(vision).toContain("Durable rows, compact JSON envelopes, fixtures, and evidence records");
-    expect(vision).toContain("Steps Are Resumable Units");
-    expect(vision).toContain("Tail Steps Own Their Side-Effect Preconditions");
-    expect(vision).toContain("Workflow-Level Preflight Is Structural");
-    expect(vision).toContain("Native Goal Loop Is The Core Flywheel");
+    expect(vision).toContain(
+      "local-first runtime that makes agent-driven repo work durable"
+    );
+    expect(vision).toContain("Momentum is not an agent and never will be");
+    expect(vision).toContain(
+      "ten or more external users run Momentum weekly on their own repositories"
+    );
   });
 
-  it("keeps the preflight ownership split explicit", () => {
+  it("codifies the durable model vocabulary", () => {
+    expect(vision).toContain("**workflow definition**");
+    expect(vision).toContain("**run**");
+    expect(vision).toContain("**step**");
+    expect(vision).toContain("**invocation**");
+    expect(vision).toContain("**round**");
     expect(vision).toContain("preflight -> apply -> reconcile");
-    expect(vision).toContain("Workflow-level structural preflight covers");
-    expect(vision).toContain("Workflow-level structural preflight should not own");
-    expect(vision).toContain("GitHub merge auth and pull request mergeability");
-    expect(vision).toContain("Linear external-apply auth, pending intent claim, or tracker mutation");
+    expect(vision).toContain("Terminal rounds are immutable");
+    expect(vision).toContain(
+      "a definition is instantiated as a run; a run advances through steps; a step dispatches invocations; an invocation accumulates rounds; every round verifies, then commits or resets, and leaves evidence"
+    );
   });
 
-  it("keeps the native goal-loop ownership model explicit", () => {
-    expect(vision).toContain("By default, a goal loop has no maximum iteration count and no token cap");
-    expect(vision).toContain("read durable state -> run one verifiable round -> verify -> commit or reset -> record evidence -> decide complete or continue");
-    expect(vision).toContain("Each successful round should commit its own coherent unit of work");
-    expect(vision).toContain("If a process dies halfway through, Momentum should resume from durable");
-    expect(vision).toContain("invocation and round state");
-    expect(vision).toContain(".gnhf/runs");
-    expect(vision).toContain("it must not be");
-    expect(vision).toContain("the durable source of truth for Momentum-native workflows");
-    expect(vision).toContain("Do not add a first-class `gnhf` executor family merely to reuse that behavior");
+  it("codifies engines as the pluggable execution boundary", () => {
+    expect(vision).toContain("Every step names an **engine**");
+    for (const engine of [
+      "`agent-once`",
+      "`agent-loop`",
+      "`script`",
+      "`service-mirror`",
+      "`external-write`",
+      "`subworkflow`"
+    ]) {
+      expect(vision, `VISION.md should name the ${engine} engine`).toContain(engine);
+    }
+    expect(vision).toContain("The daemon owns decisions");
+    expect(vision).toContain("Purpose and engine are separate axes");
+    expect(vision).toContain(
+      "the proof of the SDK is that the built-in engines use it themselves"
+    );
+  });
+
+  it("codifies the pre-1.0 stability posture", () => {
+    expect(vision).toContain("The changelog is the contract");
+    expect(vision).toContain("Interfaces are fluid, evidence is forever");
+    expect(vision).toContain(
+      "the bias is deletion and consolidation over compatibility"
+    );
+  });
+
+  it("keeps the reference deployment at the plugin edge", () => {
+    expect(vision).toContain("That deployment is proof, not product");
+    expect(vision).toContain(
+      "Nothing in the core schema, CLI, or envelopes may name the maintainer's tools"
+    );
+  });
+
+  it("keeps non-goals explicit", () => {
+    expect(vision).toContain("**Not an agent.**");
+    expect(vision).toContain("**Not a hosted service.**");
+    expect(vision).toContain("**Not CI.**");
+    expect(vision).toContain("**Not a tracker bot.**");
+    expect(vision).toContain("**Not a general workflow platform.**");
   });
 
   it("is discoverable from agent and runtime contract anchors", () => {

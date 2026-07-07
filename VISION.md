@@ -1,203 +1,171 @@
 # Momentum Vision
 
-This file captures the engineering opinions that shape Momentum. `SPEC.md`
-defines the current runtime contract; this file explains the product direction
-that future work should preserve. Long-form planning history, readiness notes,
-and migration rationale live in Obsidian `/Workspaces/Momentum`.
+This file is the compact product opinion anchor.
+[`SPEC.md`](SPEC.md) holds runtime contracts; [`ARCHITECTURE.md`](ARCHITECTURE.md) holds source structure.
+Long-form planning, milestone history, and rationale live in Obsidian `/Workspaces/Momentum`.
 
-## Core Direction
+## What Momentum Is
 
-Momentum is a durable workflow runtime for repo work. It should make work
-observable, resumable, auditable, and recoverable without depending on terminal
-scrollback or repeated LLM summarization.
+Momentum is a local-first runtime that makes agent-driven repo work durable.
+You wrap the agent CLIs you already use in workflow steps; Momentum owns what they cannot: resumable state, verification gates, commit boundaries, recovery, human approvals, and an auditable record of what happened.
 
-Momentum is also the backbone for AI-native workflow construction: users should
-be able to define their own workflows, compose ordered steps, plug in executor
-families, connect source adapters, and let the runtime preserve state,
-evidence, gates, recovery, and side-effect reconciliation.
+The core promise: if a process dies, a laptop sleeps, or an agent goes sideways, no work and no truth is lost.
+A workflow resumes from durable rows and evidence, never from terminal scrollback or a summarizer's memory.
 
-- Durable rows, compact JSON envelopes, fixtures, and evidence records are the
-  source of truth.
-- CLI text is for humans; structured JSON is for agents, GUI clients, monitors,
-  and sidecars.
-- External systems are observed or ingested before they are mutated.
-- External writes are explicit, policy-gated, audited, and reconciled from
-  read-back evidence.
-- Approval, recovery, and operator-decision gates are first-class workflow
-  state, not comments in logs.
-- Compatibility paths remain readable while Momentum-native paths are proven by
-  dogfood and tests.
+Momentum is not an agent and never will be.
+It does not prompt, reason, or write code.
+It is the layer underneath: the thing that makes whichever agent you use this month safe to run unattended.
 
-## Runtime Opinions
+### Who It Is For
 
-### Durable State Beats Process State
+Developers who run coding agents on real repositories and have been burned: lost sessions, unverified commits, silent failures, no record of what an overnight run actually did.
 
-Running processes, sockets, hooks, and file watchers are hints. They are never
-the authority. A resumed workflow must be able to recover from durable workflow
-rows, executor rounds, evidence records, events, and external read-back.
+### The Test
 
-### Steps Are Resumable Units
+Within 12 months, ten or more external users run Momentum weekly on their own repositories, evidenced by issues and adapter requests we did not seed.
+Until then, every design choice optimizes for reaching that test, not for protecting existing surfaces.
 
-A workflow step should be safe to retry. Before acting, it should inspect its
-own durable state and any relevant external state, then choose exactly one of:
+## The Model
 
-- no-op because the work is already complete
-- reconcile from evidence
-- perform the missing action once
-- block with a precise operator action
+Momentum's system of record is a five-level hierarchy.
 
-Step results should record what was observed, what was attempted, what changed,
-and what evidence proves completion.
+- A **workflow definition** is a versioned, reusable recipe: ordered steps with engines, gates, and route config.
+- A **run** is one durable instance of a definition against a repository.
+- A **step** is a resumable unit inside a run.
+  Before acting it inspects its own durable state and chooses exactly one of: no-op, reconcile from evidence, act once, or block with a precise operator action.
+  Side-effecting steps own their full `preflight -> apply -> reconcile` lifecycle.
+- An **invocation** is one engine attempt at a step.
+- A **round** is one durable iteration inside an invocation: it does bounded work, verifies, then commits or resets, and records evidence.
+  Terminal rounds are immutable; a resumed run never replays or re-commits them.
 
-### Tail Steps Own Their Side-Effect Preconditions
+Around that hierarchy sit four supporting concepts.
 
-Side-effecting tail steps such as `merge-cleanup` and `linear-refresh` own their
-own capability, auth, target-state, idempotency, apply, and reconcile checks.
-Their internal shape is:
+- **Gates** are durable human decision points: approval, operator decision, manual recovery.
+  They are first-class rows, never comments in logs.
+- **Leases, checkpoints, and heartbeats** are how in-flight work proves liveness and how staleness is detected without trusting process handles.
+- **Evidence** covers artifacts, events, verification results, and recovery codes.
+  Evidence outranks every process signal; it is what a resumed run and a human reviewer both read.
+- **Engines** are pluggable ways to run a step; they get their own section below.
 
-```text
-preflight -> apply -> reconcile
-```
+One sentence holds it together: a definition is instantiated as a run; a run advances through steps; a step dispatches invocations; an invocation accumulates rounds; every round verifies, then commits or resets, and leaves evidence.
 
-For `merge-cleanup`, that means the step proves GitHub auth/config visibility,
-pull request identity, expected head, and safe merge state before it mutates
-GitHub. On retry it reads GitHub and git first, then reconciles or applies once.
+## Core Opinions
 
-For `linear-refresh`, that means the step proves repo policy, Linear auth, run issue scope, a matching source item, one pending Linear `status_update` intent or deterministic seed evidence for the expected `Done` intent, a valid one-of `state` / `stateId` payload, and a stable idempotency marker before it mutates Linear.
-On retry it reads intent audit state first; if current successful audit evidence already proves the write landed and reconcile succeeded, it records terminal evidence without another mutation, otherwise it applies once or blocks.
+**Durable state beats process state.**
+Processes, sockets, hooks, and watchers are hints.
+Authority lives in durable rows, evidence records, and external read-back.
+Anything that matters survives a crash.
 
-These checks belong inside the step that owns the side effect so recovery stays
-local, idempotent, and evidence-backed.
+**Local-first, forever.**
+The operator's machine is the source of truth: SQLite plus local artifacts.
+Anything remote is sync or export, never authority.
+This is a permanent identity, not a staging phase.
 
-### Workflow-Level Preflight Is Structural
+**Verification is the commit boundary.**
+A round commits only after verification evidence is captured.
+Failed, stale, or no-op rounds never manufacture commits to make progress look cleaner, but they still preserve learnings and recovery evidence so the next round does not repeat the mistake.
 
-Workflow-level preflight should validate the shape of the run before runtime
-work begins. It is not a substitute for per-step side-effect preflight.
+**Observe before mutating.**
+External systems are read and ingested before they are written.
+External writes are explicit, policy-gated, audited, and reconciled from read-back evidence, never fire-and-forget.
 
-Workflow-level structural preflight covers:
+**Fail closed, honestly.**
+A missing capability is a structured refusal, not a fake success.
+Ambiguous failures are refined into precise setup, recovery, or operator-decision states with machine-readable fields.
 
-- workflow definition and built-in version resolution
-- approval boundary and route configuration validity
-- wrapper/profile/config schema validity
-- canonical config key spelling and value shape
-- generated artifact/result paths that can be validated without executing a
-  side effect
-- fail-closed setup errors with clear file/key/action metadata
+**One clear next move.**
+At any moment, an operator or client can see exactly one recommended action: approve, fix config, retry, reconcile, or stop.
+Surfaces that cannot say this are incomplete.
 
-Workflow-level structural preflight should not own:
+**Text is for humans; JSON is for machines.**
+Every surface a GUI, supervisor, or agent consumes is a structured envelope.
+Nothing downstream ever parses prose.
 
-- GitHub merge auth and pull request mergeability
-- Linear external-apply auth, pending intent claim, or tracker mutation
-- no-mistakes service result reconciliation
-- any external mutation or effectful retry
+## Engines
 
-Those belong to the step that performs or reconciles the side effect.
+Momentum never does the work.
+Every step names an **engine**, the kind of thing that does:
 
-### Actions Should Be Explicit
+- `agent-once` runs an agent CLI, captures its result, and stops.
+- `agent-loop` runs an agent in rounds until the goal's acceptance requirements are met.
+- `script` runs a deterministic command with no agent.
+- `service-mirror` watches work that happens in an external service until it reaches a terminal state.
+- `external-write` performs a policy-gated mutation of another system: preflight, apply once, reconcile from read-back.
+- `subworkflow` runs the step as a nested workflow.
 
-Operators and clients should see one clear next move:
+Every engine runs inside the same durable envelope: bounded execution, a structured result document, verification, a commit-or-reset boundary, evidence.
+That envelope is Momentum's identity; engines are interchangeable ways of filling it.
+Which agent an `agent-*` engine runs - harness, model, effort - is route configuration, not a new engine.
+What role a step plays in a recipe - implement, validate, merge - is the step's kind, not its engine.
+Purpose and engine are separate axes, always.
 
-- approve the next gate
-- fix config/auth
-- retry safely
-- reconcile from evidence
-- stop or abort
+An engine obeys one contract: inspect durable state first, act at most once per round, record what was observed, attempted, and proven, and recommend - never decide - the outcome.
+The daemon owns decisions.
 
-Ambiguous runtime failures should be refined into structured setup, recovery,
-or operator-decision states with precise machine-readable fields.
+The `agent-loop` engine keeps looping through rounds until the goal's requirements are met: no default iteration cap, requirements as the stop condition, one verified commit per successful round.
+It is a powerful engine, and it is only an engine: Momentum's identity is the durable envelope, not any single way of filling it.
 
-### Native Goal Loop Is The Core Flywheel
+Engines are the primary SDK surface.
+A third party adds an engine against documented interfaces, and the proof of the SDK is that the built-in engines use it themselves.
+If Momentum's own tracker adapter or agent wrapper needs private hooks, the SDK is not done.
 
-Momentum's `goal-loop` executor should be the native autonomous implementation
-engine for repo work. It should keep looping through a task until the goal's
-requirements are met, not stop merely because one agent attempt ended.
+The current schema and CLI still call this concept an "executor family"; the pre-1.0 nomenclature sweep renames it and its values to match this section.
 
-By default, a goal loop has no maximum iteration count and no token cap. The
-goal's acceptance requirements are the stop condition. Operational safety still
-matters: each round should have a bounded execution envelope, heartbeat/stale
-lease detection, no-progress detection, manual stop/cancel semantics, and
-operator recovery gates.
+## Stability And 1.0
 
-The durable loop shape is:
+Momentum is pre-1.0, and it behaves like it.
+Until 1.0, any surface may change between releases: command names, flags, JSON envelope fields, engine names, environment variables.
+The changelog is the contract.
+Pre-1.0 is also when the vocabulary gets one full cleaning pass: legacy and personal-history names are swept from schema enums, CLI flags, and env vars so external users never onboard into them.
 
-```text
-read durable state -> run one verifiable round -> verify -> commit or reset -> record evidence -> decide complete or continue
-```
+One thing never breaks, even pre-1.0: durable state.
+A product whose promise is durability does not strand its own data.
+Database and artifact-layout changes always ship with in-place migration; a data directory written by any earlier version keeps working.
+Interfaces are fluid, evidence is forever.
 
-Each successful round should commit its own coherent unit of work and record the
-commit SHA, changed files, verification result, normalized result JSON,
-artifacts, checkpoints, and learnings. Failed, invalid, or no-op rounds should
-not create misleading commits, but they should still preserve useful learnings
-and recovery evidence so the next round does not repeat the same mistake.
+1.0 is an event with a definition, not a milestone with a date.
+It is declared when external users are running Momentum weekly on their own repositories and the surfaces they depend on have stopped needing to change.
+At 1.0, the stable set freezes explicitly: the machine-facing JSON envelopes, the data-directory layout, exit codes, and the engine SDK interfaces.
+Everything not in the stable set stays honestly labeled as fluid.
 
-If a process dies halfway through, Momentum should resume from durable
-invocation and round state: completed rounds, in-flight/stale round markers,
-notes/learnings, commits, artifacts, leases, gates, and recovery evidence. A
-resumed loop must not infer truth from terminal scrollback, duplicate completed
-rounds, or create duplicate commits.
+Until then, the bias is deletion and consolidation over compatibility.
+Keeping a legacy surface alive costs the project more than it costs any current user, because there are none yet.
 
-GNHF is valuable source material for this loop: its per-iteration prompt, notes,
-structured JSON result, commit-per-successful-iteration behavior, stop condition,
-and resume model are all directionally right. But Momentum owns the runtime
-boundary. `.gnhf/runs` may be mirrored or used by a runner, but it must not be
-the durable source of truth for Momentum-native workflows.
+## Reference Deployment
 
-Do not add a first-class `gnhf` executor family merely to reuse that behavior.
-The product shape is native `goal-loop`; GNHF can be a runner, compatibility
-source, or extraction reference beneath it.
+Momentum's first production user is its own author.
+The maintainer's agent stack - an OpenClaw-based supervisor for delivery and wake-ups, a personal validation pipeline behind a `service-mirror` step, Linear as the tracker - runs real coding workflows through Momentum end to end: implementation, verification, merge cleanup, tracker refresh.
 
-## Workflow-Level Preflight Contract
+That deployment is proof, not product.
+It exists in this document for exactly two reasons.
+First, dogfood: Momentum's own changes ship through Momentum-orchestrated workflows, so the maintainer feels every rough edge before any external user does.
+Second, honesty about shape: it demonstrates that the integrations are plugins on public boundaries - a delivery wrapper over the watch envelope, a mirror engine over an external service, a tracker adapter behind the source and external-write interfaces.
+If the reference deployment ever needs a private hook, the boundary it bypassed is a bug in the product.
 
-The first workflow-level hardening slice implements structural preflight for
-native coding start and preview setup without moving tail-step side-effect
-checks out of their owning steps.
+Linear is the reference tracker adapter: the worked example of read-only ingestion, policy-gated writes, and audited reconciliation that other tracker adapters copy.
+Nothing in the core schema, CLI, or envelopes may name the maintainer's tools; that vocabulary lives at the plugin edge, where every user's stack lives.
 
-### Goal
+## Non-Goals
 
-Validate Momentum-native coding workflow structure before execution reaches
-runtime side effects, and emit compact structured evidence that tells an
-operator exactly what setup must be fixed.
-
-### Scope
-
-- Reuse one structural preflight routine across preview/start validation where
-  the same data is available.
-- Validate `route.implementationEngine` and `route.steps` as fail-closed structured config.
-- Validate route profile and wrapper config shape before invalid setup reaches
-  runtime work.
-- Reject unknown keys and common casing drift with canonical snake_case
-  guidance.
-- Validate env allowlists, result-file fields, timeout fields, and per-step
-  config ownership.
-- Emit compact preflight evidence with check ids, status, offending path/key,
-  and recommended fix.
-- Keep side-effect capability checks inside `merge-cleanup`, `linear-refresh`,
-  and other effectful steps.
-
-### Non-Goals
-
-- Do not switch Momentum-native workflow to the universal default.
-- Do not broaden environment forwarding beyond explicit allowlists.
-- Do not perform GitHub, Linear, or other external writes during workflow-level
-  preflight.
-- Do not require GUI or monitor clients to parse prose.
-
-### Acceptance Criteria
-
-- Invalid structural config fails before any downstream runtime side effect can
-  start.
-- Valid checked-in profiles and generated wrapper configs continue to pass.
-- Error envelopes identify the failing file/key/check and a corrective action.
-- Tests cover valid config, unknown keys, casing drift, malformed env allowlists,
-  invalid route steps, and the separation between structural preflight and
-  side-effect step preflight.
-- `SPEC.md` remains the runtime contract; this file remains the product and
-  engineering opinion anchor.
+- **Not an agent.**
+  Momentum never prompts, reasons, or writes code, and the runtime never calls an LLM, not even for diagnosis.
+  Intelligence lives in the engines' agents; judgment lives with the operator.
+- **Not a hosted service.**
+  No server, no tenant, no account.
+  Remote is sync or export, never authority.
+  If a future adds sharing, it is built on exported evidence, not on moving the source of truth.
+- **Not CI.**
+  Momentum runs a repo's own verification commands at commit boundaries; it does not replace test infrastructure, and it treats CI results as external state to observe.
+- **Not a tracker bot.**
+  External systems are never mutated autonomously.
+  Every write is an explicit, policy-gated, audited intent with reconciliation, or it does not happen.
+- **Not a general workflow platform.**
+  The scope is repo work: code, commits, verification, review, delivery.
+  Durable-execution ideas are borrowed gratefully, but Momentum is not competing to run arbitrary distributed jobs.
 
 ## Documentation Boundary
 
-This is a compact repo anchor, not a long-form planning archive.
-There are no standing exceptions for repo-local `internal/` docs; any future
-exception must be explicit, reviewed, and protected by the docs-boundary tests.
-Keep detailed roadmaps, milestone provenance, dogfood evidence, and migration
-rationale in Obsidian `/Workspaces/Momentum`.
+This file is the compact product opinion anchor, not a planning archive.
+[`SPEC.md`](SPEC.md) holds runtime contracts; [`ARCHITECTURE.md`](ARCHITECTURE.md) holds source structure; public docs describe shipped behavior only.
+Long-form planning, milestone history, dogfood evidence, and migration rationale live in Obsidian `/Workspaces/Momentum`.
+There are no standing exceptions for repo-local `internal/` docs; any future exception must be explicit, reviewed, and protected by the docs-boundary tests.
