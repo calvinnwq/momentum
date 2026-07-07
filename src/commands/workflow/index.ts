@@ -68,6 +68,7 @@ import {
   resolveDaemonWorkflowStepDispatch,
   type DaemonWorkflowDispatchDeps
 } from "../../core/daemon/workflow-dispatch.js";
+import { DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR } from "../../core/workflow/live-wrapper/daemon-profile.js";
 import {
   runWorkflowSchedulerOnceAsync,
   type RecoverStaleWorkflowLeasesResult
@@ -2554,6 +2555,22 @@ function isWorkflowWatchTailStepDispatchBlocked(
   return stepId === "merge-cleanup" || stepId === "linear-refresh";
 }
 
+function isWorkflowWatchLiveWrapperProfileRequired(
+  envelope: WorkflowMonitorEnvelope
+): boolean {
+  const stepId = envelope.nextAction.stepId;
+  if (envelope.nextAction.code !== "advance_to_step" || stepId === null) {
+    return false;
+  }
+  return stepId === "preflight" || stepId === "postflight";
+}
+
+function hasDaemonLiveWrapperProfileConfigured(
+  env: Record<string, string | undefined>
+): boolean {
+  return (env[DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR] ?? "").trim().length > 0;
+}
+
 async function runWorkflowWatchDispatcherTick(
   db: MomentumDb,
   envelope: WorkflowMonitorEnvelope,
@@ -2581,6 +2598,18 @@ async function runWorkflowWatchDispatcherTick(
     typeof resolveDaemonWorkflowStepDispatch
   > | null = null;
   if (canDispatchNextStep) {
+    if (
+      isWorkflowWatchLiveWrapperProfileRequired(envelope) &&
+      !hasDaemonLiveWrapperProfileConfigured(env)
+    ) {
+      return {
+        code: "daemon_live_wrapper_profile_required",
+        message:
+          `${DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR} is required before ` +
+          `workflow run watch --once can dispatch ${stepId}; refusing to ` +
+          "start the step without terminal live-wrapper evidence."
+      };
+    }
     dispatchResolution = resolveDaemonWorkflowStepDispatch(
       env,
       executeWorkflowStepDispatch,
