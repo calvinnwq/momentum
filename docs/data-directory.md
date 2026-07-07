@@ -95,6 +95,7 @@ A single `momentum.db` per data directory backs durable state across all goals:
   `workflow run logs` reads invocations run-wide in deterministic step / attempt / invocation order and rounds in deterministic step / attempt / invocation / round order.
   For native goal-loop, `executor_invocations` own the autonomous attempt and `executor_rounds` own each durable iteration; `.gnhf/runs`, terminal scrollback, and runner-local directories may be mirrored as artifacts but are not authoritative state.
   Successful goal-loop rounds record exactly one commit SHA after verification, while failed, stale, unsafe, canceled, invalid, and no-op rounds preserve recovery evidence without creating misleading commits.
+  When a native goal-loop round receives a usable absolute verification log path, its `executor_artifacts` can include `commit_or_reset_evidence` pointing at `<verification-log>.finalization.json` with a digest of the finalization sidecar.
 - `executor_artifacts`, `executor_checkpoints`, `executor_findings`, `executor_decisions` — append-only evidence rows below executor rounds for artifacts, checkpoint events, review findings, and durable decisions. Findings and decisions may carry mirrored external references for external review / gate identity. Each table references `executor_rounds` and keeps enough structured payload to reattach after process, daemon, or chat loss.
 
 ## Per-goal artifact files

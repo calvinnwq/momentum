@@ -43,12 +43,13 @@
  *     exactly when there is a result to capture and always fingerprints the
  *     document that result was parsed from.
  *   - The reported artifact pointers are only the files this bridge owns: the
- *     result document (whenever the file exists) and the verification log
- *     (whenever verification actually ran, per the finalize evidence). Both carry
- *     a `sha256:` content digest of their bytes so the durable artifact rows are
- *     self-verifying on reattach and cannot drift from the files they point at.
- *     It never invents a path; the orchestrator still derives the `logs`
- *     artifacts from the round-start record's frozen `logPaths`.
+ *     result document (whenever the file exists), the verification log (whenever
+ *     verification actually ran, per the finalize evidence), and a
+ *     commit/reset finalization sidecar derived from the verification log path.
+ *     They carry `sha256:` content digests of their bytes so durable artifact
+ *     rows are self-verifying on reattach and cannot drift from the files they
+ *     point at. It never invents a path; the orchestrator still derives the
+ *     `logs` artifacts from the round-start record's frozen `logPaths`.
  */
 
 import crypto from "node:crypto";
@@ -321,8 +322,8 @@ function readResultForCapture(resultFilePath: string): CapturedResultDocument {
 /**
  * The self-describing content digest of an artifact's raw bytes. The `sha256:`
  * prefix records the algorithm in the durable record so a later reattach can
- * re-verify the artifact even if the hash family evolves. Used for both the
- * result document and the verification log, so the two bridge-owned file
+ * re-verify the artifact even if the hash family evolves. Used for the result
+ * document, verification log, and finalization sidecar so bridge-owned file
  * artifacts fingerprint identically.
  */
 function sha256ContentDigest(raw: string): string {
@@ -351,13 +352,16 @@ function verificationLogDigest(verificationLogPath: string): string | null {
 
 /**
  * Build the round's reported artifact pointers from the files this bridge owns:
- * the result document (whenever it exists — every outcome except a missing file)
- * and the verification log (whenever verification actually ran, per the finalize
- * evidence's verification verdict). The result-document pointer carries the same
- * content digest stamped onto the round's `result_digest` field (whenever the
- * document was usable), so the artifact row is self-verifying and cannot drift
- * from the round field. The orchestrator derives `logs` from the round-start
- * record's frozen `logPaths`, so they are not reported here.
+ * the result document (whenever it exists), the verification log (whenever
+ * verification actually ran, per the finalize evidence's verification verdict),
+ * and the commit/reset finalization sidecar written next to the verification log
+ * when the log path is a usable absolute path. The result-document pointer
+ * carries the same content digest stamped onto the round's `result_digest` field
+ * (whenever the document was usable), and the sidecar captures commit metadata,
+ * changed files, verification status, recovery code, and finalize errors. The
+ * artifact rows are self-verifying and cannot drift from their files. The
+ * orchestrator derives `logs` from the round-start record's frozen `logPaths`,
+ * so they are not reported here.
  */
 function goalLoopMechanismArtifacts(
   input: GoalLoopRoundMechanismFromResultFileInput,
@@ -410,6 +414,14 @@ function verificationOutputPointer(
   };
 }
 
+/**
+ * Write the round-finalization sidecar that backs the
+ * `commit_or_reset_evidence` artifact. The file sits next to the verification log
+ * (`<verification-log>.finalization.json`), uses the stable
+ * `momentum.goal-loop.finalization-evidence.v1` schema, and summarizes the
+ * finalize outcome without requiring operators to infer commit/reset ownership
+ * from terminal output.
+ */
 function writeFinalizationEvidence(
   input: GoalLoopRoundMechanismFromResultFileInput,
   finalize: FinalizeWorkflowStepFromResultFileResult,
