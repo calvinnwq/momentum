@@ -16,7 +16,10 @@ import {
   resolveGoalLoopRoundSelection,
   type PlanGoalLoopRoundStartInput
 } from "../src/core/executors/goal-loop/executor.js";
-import { goalLoopRoundMechanismFromResultFile } from "../src/core/executors/goal-loop/mechanism.js";
+import {
+  goalLoopRoundMechanismFromPromptedResultFile,
+  goalLoopRoundMechanismFromResultFile
+} from "../src/core/executors/goal-loop/mechanism.js";
 import { runGoalLoopRound } from "../src/core/executors/goal-loop/orchestrator.js";
 import type { CommitIntent, RunnerResult } from "../src/core/executors/runner/types.js";
 
@@ -437,6 +440,134 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
     // The result document is readable, so the result is preserved for evidence.
     expect(mechanism.result).not.toBeNull();
     expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(movedHead);
+  });
+});
+
+describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
+  it("writes the native round prompt before finalizing the runner-authored result file", () => {
+    const { repoPath, baseHead } = setupRepoWithRoundEdits();
+    const promptFilePath = path.join(
+      makeTempDir("momentum-goal-loop-mechanism-prompt-"),
+      "prompt.md"
+    );
+    const resultFilePath = writeResultFile("");
+    fs.rmSync(resultFilePath);
+    const verificationLogPath = makeVerificationLogPath();
+    const calls: Array<{
+      promptFilePath: string;
+      resultFilePath: string;
+      prompt: string;
+    }> = [];
+
+    const mechanism = goalLoopRoundMechanismFromPromptedResultFile({
+      repoPath,
+      baseHead,
+      resultFilePath,
+      verificationCommands: ["echo verify-ok"],
+      verificationTimeoutSec: 30,
+      verificationLogPath,
+      promptFilePath,
+      promptInput: {
+        objective: "Prove the prompted result mechanism.",
+        round: {
+          workflowRunId: "run-1",
+          stepRunId: "step-1",
+          invocationId: "inv-1",
+          roundId: "round-1",
+          roundIndex: 0,
+          attempt: 1
+        },
+        repo: {
+          path: repoPath,
+          baseHead,
+          branch: "feat/ngx-569-round-prompt-result"
+        },
+        acceptanceRequirements: [
+          "Prompt must be written before the runner result is consumed."
+        ],
+        verificationCommands: ["echo verify-ok"]
+      },
+      runPromptedRound: (runnerInput) => {
+        calls.push(runnerInput);
+        expect(fs.readFileSync(runnerInput.promptFilePath, "utf-8")).toBe(
+          runnerInput.prompt
+        );
+        expect(runnerInput.prompt).toContain(
+          "- objective: Prove the prompted result mechanism."
+        );
+        expect(runnerInput.prompt).toContain(
+          `- result_path: ${resultFilePath}`
+        );
+        fs.writeFileSync(
+          runnerInput.resultFilePath,
+          JSON.stringify({
+            success: true,
+            summary: "round finished",
+            key_changes_made: ["wrote round-edit.txt"],
+            goal_complete: true,
+            commit: baseIntent()
+          }),
+          "utf-8"
+        );
+      }
+    });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.promptFilePath).toBe(promptFilePath);
+    expect(calls[0]?.resultFilePath).toBe(resultFilePath);
+    expect(fs.readFileSync(promptFilePath, "utf-8")).toContain(
+      "## Output contract"
+    );
+    expect(mechanism.finalize.outcome).toBe("committed");
+    expect(mechanism.result?.key_learnings).toEqual([]);
+    expect(mechanism.result?.remaining_work).toEqual([]);
+    expect(mechanism.artifacts?.resultDocument?.path).toBe(resultFilePath);
+  });
+
+  it("routes a prompted runner that writes no result to explicit missing-result recovery", () => {
+    const { repoPath, baseHead } = setupRepoWithRoundEdits();
+    const promptFilePath = path.join(
+      makeTempDir("momentum-goal-loop-mechanism-prompt-"),
+      "prompt.md"
+    );
+    const resultFilePath = path.join(
+      makeTempDir("momentum-goal-loop-mechanism-result-"),
+      "missing-result.json"
+    );
+    const verificationLogPath = makeVerificationLogPath();
+
+    const mechanism = goalLoopRoundMechanismFromPromptedResultFile({
+      repoPath,
+      baseHead,
+      resultFilePath,
+      verificationCommands: ["echo should-not-run"],
+      verificationTimeoutSec: 30,
+      verificationLogPath,
+      promptFilePath,
+      promptInput: {
+        objective: "Preserve missing result evidence.",
+        round: {
+          workflowRunId: "run-1",
+          stepRunId: "step-1",
+          invocationId: "inv-1",
+          roundId: "round-1",
+          roundIndex: 0,
+          attempt: 1
+        },
+        repo: { path: repoPath, baseHead }
+      },
+      runPromptedRound: () => {
+        // Simulate a runner that exits without writing the configured result.
+      }
+    });
+
+    expect(fs.readFileSync(promptFilePath, "utf-8")).toContain(
+      "- objective: Preserve missing result evidence."
+    );
+    expect(mechanism.finalize.outcome).toBe("result_missing");
+    expect(mechanism.result).toBeNull();
+    expect(mechanism.artifacts?.resultDocument).toBeUndefined();
+    expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
   });
 });
 

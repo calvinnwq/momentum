@@ -47,6 +47,7 @@
 
 import crypto from "node:crypto";
 import fs from "node:fs";
+import path from "node:path";
 
 import { listCommittedChangedFiles } from "../../../adapters/git-transaction.js";
 import {
@@ -62,6 +63,10 @@ import {
 } from "../shared/step-finalize.js";
 import { parseRunnerResult } from "../runner/result.js";
 import type { RunnerResult } from "../runner/types.js";
+import {
+  renderGoalLoopRoundPrompt,
+  type GoalLoopRoundPromptInput
+} from "./prompt.js";
 
 /**
  * The inputs to {@link goalLoopRoundMechanismFromResultFile}: exactly the
@@ -72,6 +77,19 @@ import type { RunnerResult } from "../runner/types.js";
  */
 export type GoalLoopRoundMechanismFromResultFileInput =
   FinalizeWorkflowStepFromResultFileInput;
+
+export type GoalLoopPromptedRoundRunnerInput = {
+  promptFilePath: string;
+  resultFilePath: string;
+  prompt: string;
+};
+
+export type GoalLoopRoundMechanismFromPromptedResultFileInput =
+  GoalLoopRoundMechanismFromResultFileInput & {
+    promptFilePath: string;
+    promptInput: Omit<GoalLoopRoundPromptInput, "resultPath">;
+    runPromptedRound: (input: GoalLoopPromptedRoundRunnerInput) => void;
+  };
 
 /**
  * Run the existing shared goal / iteration finalize safety over a finished round's
@@ -96,6 +114,39 @@ export function goalLoopRoundMechanismFromResultFile(
     ),
     changedFiles: committedChangedFiles(input, finalize)
   };
+}
+
+/**
+ * Render the native goal-loop prompt, let a runner author the configured result
+ * document, then reuse {@link goalLoopRoundMechanismFromResultFile} for parsing,
+ * verification, commit/reset, and recovery classification.
+ *
+ * The prompt path is a runner input artifact, not a durable classification
+ * source. If the runner does not write a usable result file, the existing
+ * result-file mechanism still routes to explicit `result_missing` or
+ * `result_invalid` recovery evidence.
+ */
+export function goalLoopRoundMechanismFromPromptedResultFile(
+  input: GoalLoopRoundMechanismFromPromptedResultFileInput
+): GoalLoopRoundMechanismResult {
+  const prompt = renderGoalLoopRoundPrompt({
+    ...input.promptInput,
+    resultPath: input.resultFilePath
+  });
+  fs.mkdirSync(path.dirname(input.promptFilePath), { recursive: true });
+  fs.writeFileSync(input.promptFilePath, prompt, "utf-8");
+
+  try {
+    input.runPromptedRound({
+      promptFilePath: input.promptFilePath,
+      resultFilePath: input.resultFilePath,
+      prompt
+    });
+  } catch {
+    // Preserve the existing fail-closed result-file recovery path below.
+  }
+
+  return goalLoopRoundMechanismFromResultFile(input);
 }
 
 /**
