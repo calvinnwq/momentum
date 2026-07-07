@@ -46,6 +46,9 @@ Round states are `pending`, `running`, `capturing_result`, `finalizing`, `mirror
 Stale in-flight work is detected from Momentum-owned leases and heartbeat/checkpoint age, then converted to durable recovery evidence before any continuation starts.
 
 The runner-authored result document consumed by the shipped goal-loop mechanism remains the normalized `RunnerResult` schema.
+Before a native round hands control to a runner, Momentum renders a deterministic per-round prompt from the workflow objective, issue scope/source context, round identity, repo/base HEAD context, verification and acceptance requirements, prior round evidence, and the configured result path.
+Source context and prior-round evidence are rendered as quoted untrusted JSON context, not executable instructions.
+The prompted result-file mechanism clears any stale result file, writes that prompt as a runner input artifact, lets the runner author the configured result document, then reuses the existing result-file finalization bridge for parsing, verification, commit/reset, and recovery classification.
 Runner-authored results are parsed before finalization and classification, and their required fields are `success`, `summary`, `key_changes_made`, `goal_complete`, and `commit`.
 `key_learnings` and `remaining_work` are optional runner-authored arrays that default to empty arrays when omitted.
 The `commit` object supplies the commit intent that Momentum uses only after repository safety and verification have passed.

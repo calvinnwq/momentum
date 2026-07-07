@@ -28,7 +28,10 @@
  * {@link runGoalLoopStep} materializes the invocation/round identity and leaves
  * the real daemon wiring to thread each round's result into the next round's
  * input through its runtime input resolver, the same way the run-level caller
- * composes `runLiveWorkflowStep`.
+ * composes `runLiveWorkflowStep`. The prompted-result helper in
+ * `goal-loop/mechanism.ts` is the concrete runner-input variant: it renders the
+ * per-round prompt, invokes a runner with that prompt and result path, then
+ * returns the same mechanism result shape this driver persists.
  *
  * The bounded mechanism is injected as a {@link GoalLoopRoundRunner} so the real
  * M9 goal iteration, a no-op, or a deterministic fake can all drive a round
@@ -138,11 +141,10 @@ export type GoalLoopRoundMechanismResult = {
  * (its frozen agent/model/effort, input digest, artifact root, and identity) and
  * returns the round's normalized result + finalize outcome. It must be total —
  * encode failures as finalize outcomes rather than throwing — mirroring
- * `finalizeWorkflowStepFromResultFile`. `goal-loop/mechanism.ts`'s
- * `goalLoopRoundMechanismFromResultFile` is the concrete mechanism that reuses
- * that shared finalize safety over a round's result document; the daemon wiring that
- * runs the agent producing the document then calls it inside this closure. Tests
- * inject a deterministic fake.
+ * `finalizeWorkflowStepFromResultFile`. `goal-loop/mechanism.ts` provides the
+ * concrete result-file mechanism and the prompted-result wrapper that renders a
+ * native round prompt before asking a runner to produce that result document.
+ * Tests inject a deterministic fake.
  */
 export type GoalLoopRoundRunner = (
   round: ExecutorRoundRecord

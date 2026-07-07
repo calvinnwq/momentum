@@ -2341,6 +2341,8 @@ Native goal-loop log readers treat Momentum executor rows and child evidence as 
 `workflow run logs` is the shipped consumer of this projection today.
 Future status, handoff, monitor, and GUI readers must use the same projection once they are wired to executor round evidence.
 The implementation step's `goal-loop` executor records one `executor_invocation` for the autonomous attempt and one ordered `executor_round` per durable iteration.
+Before each round's runner starts, Momentum renders a deterministic prompt from objective, source context, round identity, repo/base-head context, acceptance and verification requirements, prior round evidence, and the configured result path.
+Source context and prior-round evidence are quoted as untrusted JSON context, and stale result files are cleared before the runner is asked to write the fresh normalized result JSON.
 Readers must derive attempt state plus summaries, key changes, learnings, remaining work, verification status, changed files, commit SHA, recovery reason, artifacts, checkpoints, findings, and decisions from those rows and artifact pointers.
 Post-finalization native round evidence exposes the executor's `completionRecommendation` as `complete`, `continue`, `approval_required`, `operator_decision_required`, `manual_recovery_required`, `blocked`, `failed`, or `cancelled`.
 It exposes Momentum's post-policy daemon decision separately as `daemonClassification`, so quota, recovery, and operator gates do not overwrite what the executor recommended.

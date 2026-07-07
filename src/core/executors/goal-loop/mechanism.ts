@@ -6,11 +6,17 @@
  * test so far has injected a deterministic fake mechanism. This module is the
  * concrete mechanism that reuses the existing Goal / iteration safety the ticket
  * asks for ("Reuse existing Goal / iteration safety where possible") rather than
- * re-implementing it: given the post-runner inputs (the repo, the base HEAD the
- * round started from, the normalized result document the round wrote, and the
- * verification config), it runs the shared `finalizeWorkflowStepFromResultFile`
- * verify -> commit / reset transaction and projects the outcome into the
+ * re-implementing it: given the repo, the base HEAD the round started from, the
+ * normalized result document the round wrote, and the verification config, it
+ * runs the shared `finalizeWorkflowStepFromResultFile` verify -> commit / reset
+ * transaction and projects the outcome into the
  * {@link GoalLoopRoundMechanismResult} the driver consumes.
+ *
+ * The prompted-result bridge adds the runner-facing half: it renders the native
+ * per-round prompt, clears any stale result file, hands the prompt + configured
+ * result path to an injected runner, and then reuses the same result-file
+ * finalization bridge. Prompt text is an input artifact only; classification is
+ * still driven by the normalized result document and repo-safety evidence.
  *
  * It owns no orchestration and no schema: it is the seam between "the round's
  * external agent finished and wrote a result document" and "the daemon classifies
@@ -47,6 +53,7 @@
 
 import crypto from "node:crypto";
 import fs from "node:fs";
+import path from "node:path";
 
 import { listCommittedChangedFiles } from "../../../adapters/git-transaction.js";
 import {
@@ -62,6 +69,10 @@ import {
 } from "../shared/step-finalize.js";
 import { parseRunnerResult } from "../runner/result.js";
 import type { RunnerResult } from "../runner/types.js";
+import {
+  renderGoalLoopRoundPrompt,
+  type GoalLoopRoundPromptInput
+} from "./prompt.js";
 
 /**
  * The inputs to {@link goalLoopRoundMechanismFromResultFile}: exactly the
@@ -72,6 +83,33 @@ import type { RunnerResult } from "../runner/types.js";
  */
 export type GoalLoopRoundMechanismFromResultFileInput =
   FinalizeWorkflowStepFromResultFileInput;
+
+/**
+ * Runner-facing input for a prompted native goal-loop round.
+ *
+ * The runner reads `promptFilePath` or the in-memory `prompt`, writes exactly one
+ * normalized result JSON document at `resultFilePath`, and leaves git commit /
+ * reset decisions to Momentum.
+ */
+export type GoalLoopPromptedRoundRunnerInput = {
+  promptFilePath: string;
+  resultFilePath: string;
+  prompt: string;
+};
+
+/**
+ * Inputs for the prompted result-file bridge.
+ *
+ * `promptInput` omits `resultPath` because the bridge derives it from the same
+ * `resultFilePath` that finalization will later consume, preventing prompt /
+ * result-path drift.
+ */
+export type GoalLoopRoundMechanismFromPromptedResultFileInput =
+  GoalLoopRoundMechanismFromResultFileInput & {
+    promptFilePath: string;
+    promptInput: Omit<GoalLoopRoundPromptInput, "resultPath">;
+    runPromptedRound: (input: GoalLoopPromptedRoundRunnerInput) => void;
+  };
 
 /**
  * Run the existing shared goal / iteration finalize safety over a finished round's
@@ -96,6 +134,114 @@ export function goalLoopRoundMechanismFromResultFile(
     ),
     changedFiles: committedChangedFiles(input, finalize)
   };
+}
+
+/**
+ * Render the native goal-loop prompt, let a runner author the configured result
+ * document, then reuse {@link goalLoopRoundMechanismFromResultFile} for parsing,
+ * verification, commit/reset, and recovery classification.
+ *
+ * The prompt path is a runner input artifact, not a durable classification
+ * source. If the runner does not write a usable result file, the existing
+ * result-file mechanism still routes to explicit `result_missing` or
+ * `result_invalid` recovery evidence.
+ */
+export function goalLoopRoundMechanismFromPromptedResultFile(
+  input: GoalLoopRoundMechanismFromPromptedResultFileInput
+): GoalLoopRoundMechanismResult {
+  const clearedResult = clearPromptedResultFile(input.resultFilePath);
+  if (!clearedResult.ok) {
+    return promptedRoundRecovery(
+      input,
+      "result_invalid",
+      `goal-loop result path could not be prepared: ${clearedResult.error}`
+    );
+  }
+
+  let prompt: string;
+  try {
+    prompt = renderGoalLoopRoundPrompt({
+      ...input.promptInput,
+      resultPath: input.resultFilePath
+    });
+    fs.mkdirSync(path.dirname(input.promptFilePath), { recursive: true });
+    fs.writeFileSync(input.promptFilePath, prompt, "utf-8");
+  } catch (error) {
+    return promptedRoundRecovery(
+      input,
+      promptedResultRecoveryOutcome(input.resultFilePath),
+      `goal-loop round prompt could not be written: ${errorMessage(error)}`
+    );
+  }
+
+  try {
+    input.runPromptedRound({
+      promptFilePath: input.promptFilePath,
+      resultFilePath: input.resultFilePath,
+      prompt
+    });
+  } catch (error) {
+    return promptedRoundRecovery(
+      input,
+      promptedResultRecoveryOutcome(input.resultFilePath),
+      `goal-loop prompted runner failed: ${errorMessage(error)}`
+    );
+  }
+
+  return goalLoopRoundMechanismFromResultFile(input);
+}
+
+function clearPromptedResultFile(
+  resultFilePath: string
+): { ok: true } | { ok: false; error: string } {
+  if (typeof resultFilePath !== "string" || resultFilePath.trim().length === 0) {
+    return { ok: true };
+  }
+  try {
+    fs.rmSync(resultFilePath, { force: true });
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: errorMessage(error) };
+  }
+}
+
+function promptedResultRecoveryOutcome(
+  resultFilePath: string
+): "result_missing" | "result_invalid" {
+  try {
+    fs.lstatSync(resultFilePath);
+    return "result_invalid";
+  } catch (error) {
+    return errnoCode(error) === "ENOENT" ? "result_missing" : "result_invalid";
+  }
+}
+
+function promptedRoundRecovery(
+  input: GoalLoopRoundMechanismFromResultFileInput,
+  outcome: "result_missing" | "result_invalid",
+  error: string
+): GoalLoopRoundMechanismResult {
+  const finalize: FinalizeWorkflowStepFromResultFileResult = {
+    outcome,
+    resultFilePath: input.resultFilePath,
+    error
+  };
+  return {
+    result: null,
+    resultDigest: null,
+    finalize,
+    artifacts: goalLoopMechanismArtifacts(input, finalize, null),
+    changedFiles: []
+  };
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function errnoCode(error: unknown): string | undefined {
+  if (error === undefined || error === null) return undefined;
+  return (error as NodeJS.ErrnoException).code;
 }
 
 /**
