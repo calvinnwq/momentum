@@ -71,6 +71,8 @@ The runner injects the following environment variables for the command: `MOMENTU
 
 Native workflow `goal-loop` runners consume the same runner-authored `RunnerResult` document before finalization and classification.
 For native goal-loop rounds, Momentum renders a deterministic per-round prompt that includes the workflow objective, source context, round identity, repo/base-head context, verification and acceptance requirements, prior round summaries/learnings/remaining work, and the exact result path.
+Source context and prior-round evidence are quoted as untrusted JSON context, not as runner instructions.
+Momentum clears any stale file at that result path before the runner starts, so the runner must write a fresh result for the current round.
 The runner writes only the normalized `RunnerResult` JSON at that configured result path, and Momentum routes missing, malformed, or schema-invalid result files through explicit recovery evidence instead of treating them as progress.
 After finalization, `workflow run logs` reads the native round evidence projected from `executor_invocations`, `executor_rounds`, and child evidence rows instead of treating the runner-authored JSON, terminal scrollback, `.gnhf/runs`, or a runner-local directory as authoritative state.
 Future workflow status, handoff, monitor, and GUI surfaces must use that same projection once they are wired to executor round evidence.

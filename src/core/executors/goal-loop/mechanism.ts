@@ -6,11 +6,17 @@
  * test so far has injected a deterministic fake mechanism. This module is the
  * concrete mechanism that reuses the existing Goal / iteration safety the ticket
  * asks for ("Reuse existing Goal / iteration safety where possible") rather than
- * re-implementing it: given the post-runner inputs (the repo, the base HEAD the
- * round started from, the normalized result document the round wrote, and the
- * verification config), it runs the shared `finalizeWorkflowStepFromResultFile`
- * verify -> commit / reset transaction and projects the outcome into the
+ * re-implementing it: given the repo, the base HEAD the round started from, the
+ * normalized result document the round wrote, and the verification config, it
+ * runs the shared `finalizeWorkflowStepFromResultFile` verify -> commit / reset
+ * transaction and projects the outcome into the
  * {@link GoalLoopRoundMechanismResult} the driver consumes.
+ *
+ * The prompted-result bridge adds the runner-facing half: it renders the native
+ * per-round prompt, clears any stale result file, hands the prompt + configured
+ * result path to an injected runner, and then reuses the same result-file
+ * finalization bridge. Prompt text is an input artifact only; classification is
+ * still driven by the normalized result document and repo-safety evidence.
  *
  * It owns no orchestration and no schema: it is the seam between "the round's
  * external agent finished and wrote a result document" and "the daemon classifies
@@ -78,12 +84,26 @@ import {
 export type GoalLoopRoundMechanismFromResultFileInput =
   FinalizeWorkflowStepFromResultFileInput;
 
+/**
+ * Runner-facing input for a prompted native goal-loop round.
+ *
+ * The runner reads `promptFilePath` or the in-memory `prompt`, writes exactly one
+ * normalized result JSON document at `resultFilePath`, and leaves git commit /
+ * reset decisions to Momentum.
+ */
 export type GoalLoopPromptedRoundRunnerInput = {
   promptFilePath: string;
   resultFilePath: string;
   prompt: string;
 };
 
+/**
+ * Inputs for the prompted result-file bridge.
+ *
+ * `promptInput` omits `resultPath` because the bridge derives it from the same
+ * `resultFilePath` that finalization will later consume, preventing prompt /
+ * result-path drift.
+ */
 export type GoalLoopRoundMechanismFromPromptedResultFileInput =
   GoalLoopRoundMechanismFromResultFileInput & {
     promptFilePath: string;

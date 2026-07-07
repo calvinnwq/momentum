@@ -17,7 +17,7 @@ were left in place; importers still reference the concrete modules below.
 | Concern | Modules |
 | --- | --- |
 | Executor loop (M10) | `loop/reducer.ts`, `loop/persist.ts` |
-| Goal-loop executor | `goal-loop/executor.ts`, `goal-loop/mechanism.ts`, `goal-loop/orchestrator.ts` |
+| Goal-loop executor | `goal-loop/executor.ts`, `goal-loop/mechanism.ts`, `goal-loop/orchestrator.ts`, `goal-loop/prompt.ts` |
 | Single-shot executor | `single-shot/executor.ts`, `single-shot/mechanism.ts`, `single-shot/orchestrator.ts` |
 | Live-step executor (M9) | `live-step/executor.ts`, `live-step/advance.ts`, `live-step/orchestrator.ts`, `live-step/run-recovery.ts`, `live-step/finalize.ts` |
 | Shared step finalization | `shared/step-finalize.ts` (neutral verify -> commit / reset seam) |
@@ -30,7 +30,8 @@ were left in place; importers still reference the concrete modules below.
 `loop/reducer.ts` is the central pure reducer and the most widely consumed entry
 point; `loop/persist.ts` wraps it with persistence. The goal-loop and single-shot
 families build on `loop/reducer` / `loop/persist`.
-The native `goal-loop` family treats runner-authored `RunnerResult` JSON as input to finalization only.
+The native `goal-loop` family renders deterministic per-round prompts through `goal-loop/prompt.ts`, then treats runner-authored `RunnerResult` JSON as input to finalization only.
+The prompted-result bridge clears stale result files before handing the prompt and configured result path to the runner, so an old result cannot be finalized as new progress.
 After finalization, its authoritative evidence is the `executor_invocations` / `executor_rounds` tree plus child artifacts, checkpoints, findings, and decisions that `workflow run logs` reads today.
 Compatibility mechanisms such as GNHF must sit below `goal-loop`; they must not become workflow executor families or make `.gnhf/runs` authoritative state.
 

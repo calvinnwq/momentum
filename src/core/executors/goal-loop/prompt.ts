@@ -1,5 +1,6 @@
 import { COMMIT_TYPES } from "../runner/types.js";
 
+/** Durable identity values rendered into one native goal-loop round prompt. */
 export type GoalLoopRoundPromptRound = {
   workflowRunId: string;
   stepRunId: string;
@@ -9,12 +10,19 @@ export type GoalLoopRoundPromptRound = {
   attempt: number;
 };
 
+/** Repository context rendered into one native goal-loop round prompt. */
 export type GoalLoopRoundPromptRepo = {
   path: string;
   baseHead: string;
   branch?: string | null;
 };
 
+/**
+ * External source item rendered as quoted context.
+ *
+ * Source text is never treated as instructions; the renderer emits it inside an
+ * explicitly untrusted JSON block.
+ */
 export type GoalLoopRoundPromptSource = {
   identifier?: string | null;
   title?: string | null;
@@ -22,6 +30,12 @@ export type GoalLoopRoundPromptSource = {
   body?: string | null;
 };
 
+/**
+ * Prior-round evidence rendered as quoted context for the next round.
+ *
+ * These values come from earlier runner-authored results or recovery evidence and
+ * are never allowed to create additional prompt sections.
+ */
 export type GoalLoopRoundPromptPriorRound = {
   roundIndex: number;
   summary?: string | null;
@@ -32,6 +46,12 @@ export type GoalLoopRoundPromptPriorRound = {
   commitSha?: string | null;
 };
 
+/**
+ * Complete input for the deterministic native goal-loop round prompt.
+ *
+ * `resultPath` is the exact file path the runner must populate with the
+ * normalized `RunnerResult` JSON consumed by finalization.
+ */
 export type GoalLoopRoundPromptInput = {
   objective: string;
   resultPath: string;
@@ -45,6 +65,13 @@ export type GoalLoopRoundPromptInput = {
   priorRounds?: readonly GoalLoopRoundPromptPriorRound[];
 };
 
+/**
+ * Render the deterministic Markdown prompt for one native goal-loop round.
+ *
+ * The prompt carries objective, round identity, repo/base-head context,
+ * acceptance and verification requirements, quoted untrusted source/prior-round
+ * evidence, runner instructions, and the normalized result-file contract.
+ */
 export function renderGoalLoopRoundPrompt(
   input: GoalLoopRoundPromptInput
 ): string {
