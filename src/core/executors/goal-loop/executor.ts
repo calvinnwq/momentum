@@ -1045,7 +1045,7 @@ function recoveryCodeFromFinalizeResult(
     case "reset_failed":
       return result.reset.code;
     case "commit_failed":
-      return result.commit.code;
+      return commitFailureResetFailure(result)?.code ?? result.commit.code;
     case "git_failed":
     case "repo_lock_lost":
     case "invalid_input":
@@ -1057,6 +1057,18 @@ function recoveryCodeFromFinalizeResult(
     case "reset_verification_failure":
       return null;
   }
+}
+
+function commitFailureResetFailure(
+  result: Extract<
+    FinalizeWorkflowStepFromResultFileResult,
+    { outcome: "commit_failed" }
+  >
+): Extract<NonNullable<typeof result.reset>, { ok: false }> | null {
+  if (result.reset !== undefined && !result.reset.ok) {
+    return result.reset;
+  }
+  return null;
 }
 
 /**

@@ -416,7 +416,8 @@ function writeFinalizationEvidence(
   verificationStatus: string | null,
   changedFiles: readonly string[]
 ): GoalLoopArtifactPointer | null {
-  const evidencePath = `${input.verificationLogPath}.finalization.json`;
+  const evidencePath = finalizationEvidencePath(input.verificationLogPath);
+  if (evidencePath === null) return null;
   const body = `${JSON.stringify(
     {
       schema: "momentum.goal-loop.finalization-evidence.v1",
@@ -432,7 +433,9 @@ function writeFinalizationEvidence(
       recoveryCode: finalizationRecoveryCode(finalize),
       resultFilePath: input.resultFilePath,
       verificationLogPath: input.verificationLogPath,
-      error: finalizationError(finalize)
+      error: finalizationError(finalize),
+      commitError: finalizationCommitError(finalize),
+      resetError: finalizationResetError(finalize)
     },
     null,
     2
@@ -444,6 +447,19 @@ function writeFinalizationEvidence(
     return null;
   }
   return { path: evidencePath, digest: sha256ContentDigest(body) };
+}
+
+function finalizationEvidencePath(verificationLogPath: string): string | null {
+  if (
+    typeof verificationLogPath !== "string" ||
+    verificationLogPath.trim().length === 0 ||
+    verificationLogPath.trim() !== verificationLogPath ||
+    !path.isAbsolute(verificationLogPath) ||
+    path.basename(verificationLogPath).length === 0
+  ) {
+    return null;
+  }
+  return `${verificationLogPath}.finalization.json`;
 }
 
 function finalizationRecoveryCode(
@@ -459,7 +475,7 @@ function finalizationRecoveryCode(
     case "reset_failed":
       return finalize.reset.code;
     case "commit_failed":
-      return finalize.commit.code;
+      return commitFailureResetFailure(finalize)?.code ?? finalize.commit.code;
     case "git_failed":
     case "repo_lock_lost":
     case "invalid_input":
@@ -482,7 +498,7 @@ function finalizationError(
     case "reset_failed":
       return finalize.reset.error;
     case "commit_failed":
-      return finalize.commit.error;
+      return commitFailureResetFailure(finalize)?.error ?? finalize.commit.error;
     case "git_failed":
     case "repo_lock_lost":
     case "invalid_input":
@@ -490,4 +506,35 @@ function finalizationError(
     case "result_invalid":
       return finalize.error;
   }
+}
+
+function finalizationCommitError(
+  finalize: FinalizeWorkflowStepFromResultFileResult
+): string | null {
+  return finalize.outcome === "commit_failed" ? finalize.commit.error : null;
+}
+
+function finalizationResetError(
+  finalize: FinalizeWorkflowStepFromResultFileResult
+): string | null {
+  switch (finalize.outcome) {
+    case "reset_failed":
+      return finalize.reset.error;
+    case "commit_failed":
+      return commitFailureResetFailure(finalize)?.error ?? null;
+    default:
+      return null;
+  }
+}
+
+function commitFailureResetFailure(
+  finalize: Extract<
+    FinalizeWorkflowStepFromResultFileResult,
+    { outcome: "commit_failed" }
+  >
+): Extract<NonNullable<typeof finalize.reset>, { ok: false }> | null {
+  if (finalize.reset !== undefined && !finalize.reset.ok) {
+    return finalize.reset;
+  }
+  return null;
 }

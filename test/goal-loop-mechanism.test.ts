@@ -127,6 +127,16 @@ function readJsonFile(filePath: string): Record<string, unknown> {
   >;
 }
 
+function installCommitFailingHook(repoPath: string): void {
+  const hookPath = path.join(repoPath, ".git", "hooks", "pre-commit");
+  fs.writeFileSync(
+    hookPath,
+    "#!/bin/sh\ntouch .git/index.lock\necho commit blocked >&2\nexit 1\n",
+    "utf-8"
+  );
+  fs.chmodSync(hookPath, 0o755);
+}
+
 describe("goalLoopRoundMechanismFromResultFile", () => {
   it("commits and returns the normalized result + result/verification artifacts on a verified success", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
@@ -213,6 +223,37 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
     });
   });
 
+  it("records reset failure details when commit cleanup reset fails", () => {
+    const { repoPath, baseHead } = setupRepoWithRoundEdits();
+    installCommitFailingHook(repoPath);
+    const resultFilePath = writeResultFile(JSON.stringify(baseRunnerResult()));
+    const verificationLogPath = makeVerificationLogPath();
+
+    const mechanism = goalLoopRoundMechanismFromResultFile({
+      repoPath,
+      baseHead,
+      resultFilePath,
+      verificationCommands: ["echo verify-ok"],
+      verificationTimeoutSec: 30,
+      verificationLogPath
+    });
+
+    expect(mechanism.finalize.outcome).toBe("commit_failed");
+    if (mechanism.finalize.outcome !== "commit_failed") {
+      throw new Error("expected commit failure");
+    }
+    expect(mechanism.finalize.reset?.ok).toBe(false);
+
+    const pointer = mechanism.artifacts?.commitOrResetEvidence;
+    const evidence = readJsonFile(pointer!.path);
+    expect(evidence.outcome).toBe("commit_failed");
+    expect(evidence.error).toEqual(expect.stringContaining("git reset"));
+    expect(evidence.commitError).toEqual(
+      expect.stringContaining("git commit")
+    );
+    expect(evidence.resetError).toEqual(expect.stringContaining("git reset"));
+  });
+
   it("reports an empty change set when the round resets without committing", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
     const resultFilePath = writeResultFile(
@@ -295,6 +336,33 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
     // No usable result means no digest, mirroring the null result itself.
     expect(mechanism.result).toBeNull();
     expect(mechanism.resultDigest).toBeNull();
+  });
+
+  it("skips commit/reset evidence when the verification log path is blank", () => {
+    const { repoPath, baseHead } = setupRepoWithRoundEdits();
+    const resultFilePath = writeResultFile(JSON.stringify(baseRunnerResult()));
+    const cwd = makeTempDir("momentum-goal-loop-mechanism-cwd-");
+    const cwdEvidencePath = path.join(cwd, ".finalization.json");
+    const previousCwd = process.cwd();
+
+    try {
+      process.chdir(cwd);
+      const mechanism = goalLoopRoundMechanismFromResultFile({
+        repoPath,
+        baseHead,
+        resultFilePath,
+        verificationCommands: ["echo verify-ok"],
+        verificationTimeoutSec: 30,
+        verificationLogPath: ""
+      });
+
+      expect(mechanism.finalize.outcome).toBe("invalid_input");
+      expect(mechanism.artifacts?.commitOrResetEvidence).toBeUndefined();
+      expect(fs.existsSync(cwdEvidencePath)).toBe(false);
+    } finally {
+      process.chdir(previousCwd);
+      fs.rmSync(cwdEvidencePath, { force: true });
+    }
   });
 
   it("resets without verification and keeps the result document pointer when the round reported failure", () => {
