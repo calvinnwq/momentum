@@ -1758,6 +1758,11 @@ OpenClaw hosts that need chat-delivery suppression, path-sanitized inspection co
 That wrapper also config-gates and audits its own local auto-actions before any local state write, records the intended saved status before that write, and appends a matching failed status row if the write fails; the raw watch command only reports `recommendedActionPolicy` and does not write OpenClaw auto-action audit files.
 When the wrapper's local auto-action audit fails closed, it suppresses its own monitor-removal cleanup hint and surfaces a human-required OpenClaw escalation instead of changing the raw watch contract.
 It does not resolve approvals, gates, manual recovery, or other operator decisions.
+When `--once` is eligible to dispatch a live-wrapper-owned setup step such as
+`preflight` or `postflight`, `MOMENTUM_LIVE_WRAPPER_PROFILE` must be configured.
+Without that profile, watch refuses before moving the step to `running` so a
+chat/supervisor poll cannot strand the workflow without terminal dispatch
+evidence.
 
 `--stream --jsonl` opens a long-lived JSONL stream over the same durable event cursor API as `workflow run events`.
 It emits one newline-delimited JSON record per durable semantic event, plus machine heartbeats, and exits cleanly once the run is terminal.

@@ -533,6 +533,73 @@ describe("momentum workflow run watch", () => {
     }
   });
 
+  it("refuses to start preflight from watch without live-wrapper terminal evidence", async () => {
+    const dataDir = makeTempDir();
+    const runId = "mwf-watch-preflight-profile-required";
+    const db = openDb(dataDir);
+    try {
+      persistWorkflowRunStart(db, {
+        definition: CODING_WORKFLOW_DEFINITION,
+        runId,
+        repoPath: "/repos/momentum",
+        objective: "Exercise watch preflight profile guard",
+        now: SEED_NOW,
+        source: MOMENTUM_NATIVE_CODING_WORKFLOW_SOURCE
+      });
+      db.prepare(
+        "UPDATE workflow_steps SET state = 'approved' WHERE run_id = ? AND step_id = 'preflight'"
+      ).run(runId);
+    } finally {
+      db.close();
+    }
+
+    const result = await run([
+      "workflow",
+      "run",
+      "watch",
+      runId,
+      "--once",
+      "--data-dir",
+      dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(1);
+    const failure = JSON.parse(result.stderr) as {
+      code: string;
+      message: string;
+    };
+    expect(failure).toMatchObject({
+      code: "daemon_live_wrapper_profile_required"
+    });
+    expect(failure.message).toContain("MOMENTUM_LIVE_WRAPPER_PROFILE");
+    expect(failure.message).toContain("preflight");
+
+    const after = openDb(dataDir);
+    try {
+      const step = after
+        .prepare(
+          "SELECT state FROM workflow_steps WHERE run_id = ? AND step_id = 'preflight'"
+        )
+        .get(runId) as { state: string };
+      expect(step.state).toBe("approved");
+      const invocationCount = after
+        .prepare(
+          "SELECT COUNT(*) AS count FROM executor_invocations WHERE workflow_run_id = ?"
+        )
+        .get(runId) as { count: number };
+      expect(invocationCount.count).toBe(0);
+      const leaseCount = after
+        .prepare(
+          "SELECT COUNT(*) AS count FROM workflow_leases WHERE run_id = ? AND lease_kind = 'dispatch'"
+        )
+        .get(runId) as { count: number };
+      expect(leaseCount.count).toBe(0);
+    } finally {
+      after.close();
+    }
+  });
+
   it("does not start an approved merge-cleanup tail step from a watch tick", async () => {
     const dataDir = makeTempDir();
     const runId = "mwf-watch-merge-cleanup-approved";
