@@ -129,12 +129,30 @@ export function goalLoopRoundMechanismFromResultFile(
 export function goalLoopRoundMechanismFromPromptedResultFile(
   input: GoalLoopRoundMechanismFromPromptedResultFileInput
 ): GoalLoopRoundMechanismResult {
-  const prompt = renderGoalLoopRoundPrompt({
-    ...input.promptInput,
-    resultPath: input.resultFilePath
-  });
-  fs.mkdirSync(path.dirname(input.promptFilePath), { recursive: true });
-  fs.writeFileSync(input.promptFilePath, prompt, "utf-8");
+  const clearedResult = clearPromptedResultFile(input.resultFilePath);
+  if (!clearedResult.ok) {
+    return promptedRoundRecovery(
+      input,
+      "result_invalid",
+      `goal-loop result path could not be prepared: ${clearedResult.error}`
+    );
+  }
+
+  let prompt: string;
+  try {
+    prompt = renderGoalLoopRoundPrompt({
+      ...input.promptInput,
+      resultPath: input.resultFilePath
+    });
+    fs.mkdirSync(path.dirname(input.promptFilePath), { recursive: true });
+    fs.writeFileSync(input.promptFilePath, prompt, "utf-8");
+  } catch (error) {
+    return promptedRoundRecovery(
+      input,
+      promptedResultRecoveryOutcome(input.resultFilePath),
+      `goal-loop round prompt could not be written: ${errorMessage(error)}`
+    );
+  }
 
   try {
     input.runPromptedRound({
@@ -142,11 +160,68 @@ export function goalLoopRoundMechanismFromPromptedResultFile(
       resultFilePath: input.resultFilePath,
       prompt
     });
-  } catch {
-    // Preserve the existing fail-closed result-file recovery path below.
+  } catch (error) {
+    return promptedRoundRecovery(
+      input,
+      promptedResultRecoveryOutcome(input.resultFilePath),
+      `goal-loop prompted runner failed: ${errorMessage(error)}`
+    );
   }
 
   return goalLoopRoundMechanismFromResultFile(input);
+}
+
+function clearPromptedResultFile(
+  resultFilePath: string
+): { ok: true } | { ok: false; error: string } {
+  if (typeof resultFilePath !== "string" || resultFilePath.trim().length === 0) {
+    return { ok: true };
+  }
+  try {
+    fs.rmSync(resultFilePath, { force: true });
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: errorMessage(error) };
+  }
+}
+
+function promptedResultRecoveryOutcome(
+  resultFilePath: string
+): "result_missing" | "result_invalid" {
+  try {
+    fs.lstatSync(resultFilePath);
+    return "result_invalid";
+  } catch (error) {
+    return errnoCode(error) === "ENOENT" ? "result_missing" : "result_invalid";
+  }
+}
+
+function promptedRoundRecovery(
+  input: GoalLoopRoundMechanismFromResultFileInput,
+  outcome: "result_missing" | "result_invalid",
+  error: string
+): GoalLoopRoundMechanismResult {
+  const finalize: FinalizeWorkflowStepFromResultFileResult = {
+    outcome,
+    resultFilePath: input.resultFilePath,
+    error
+  };
+  return {
+    result: null,
+    resultDigest: null,
+    finalize,
+    artifacts: goalLoopMechanismArtifacts(input, finalize, null),
+    changedFiles: []
+  };
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function errnoCode(error: unknown): string | undefined {
+  if (error === undefined || error === null) return undefined;
+  return (error as NodeJS.ErrnoException).code;
 }
 
 /**

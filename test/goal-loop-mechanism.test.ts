@@ -524,6 +524,138 @@ describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
     expect(mechanism.artifacts?.resultDocument?.path).toBe(resultFilePath);
   });
 
+  it("does not finalize a successful result when the prompted runner throws after writing it", () => {
+    const { repoPath, baseHead } = setupRepoWithRoundEdits();
+    const promptFilePath = path.join(
+      makeTempDir("momentum-goal-loop-mechanism-prompt-"),
+      "prompt.md"
+    );
+    const resultFilePath = path.join(
+      makeTempDir("momentum-goal-loop-mechanism-result-"),
+      "runner-result.json"
+    );
+    const verificationLogPath = makeVerificationLogPath();
+
+    const mechanism = goalLoopRoundMechanismFromPromptedResultFile({
+      repoPath,
+      baseHead,
+      resultFilePath,
+      verificationCommands: ["echo verify-ok"],
+      verificationTimeoutSec: 30,
+      verificationLogPath,
+      promptFilePath,
+      promptInput: {
+        objective: "Reject a crashed prompted runner result.",
+        round: {
+          workflowRunId: "run-1",
+          stepRunId: "step-1",
+          invocationId: "inv-1",
+          roundId: "round-1",
+          roundIndex: 0,
+          attempt: 1
+        },
+        repo: { path: repoPath, baseHead }
+      },
+      runPromptedRound: (runnerInput) => {
+        fs.writeFileSync(
+          runnerInput.resultFilePath,
+          JSON.stringify(baseRunnerResult({ goal_complete: true })),
+          "utf-8"
+        );
+        throw new Error("runner crashed after writing result");
+      }
+    });
+
+    expect(mechanism.finalize.outcome).toBe("result_invalid");
+    expect(mechanism.result).toBeNull();
+    expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
+  });
+
+  it("does not finalize a stale result when the prompted runner throws before writing", () => {
+    const { repoPath, baseHead } = setupRepoWithRoundEdits();
+    const promptFilePath = path.join(
+      makeTempDir("momentum-goal-loop-mechanism-prompt-"),
+      "prompt.md"
+    );
+    const resultFilePath = writeResultFile(
+      JSON.stringify(baseRunnerResult({ goal_complete: true }))
+    );
+    const verificationLogPath = makeVerificationLogPath();
+
+    const mechanism = goalLoopRoundMechanismFromPromptedResultFile({
+      repoPath,
+      baseHead,
+      resultFilePath,
+      verificationCommands: ["echo verify-ok"],
+      verificationTimeoutSec: 30,
+      verificationLogPath,
+      promptFilePath,
+      promptInput: {
+        objective: "Reject a stale prompted runner result.",
+        round: {
+          workflowRunId: "run-1",
+          stepRunId: "step-1",
+          invocationId: "inv-1",
+          roundId: "round-1",
+          roundIndex: 0,
+          attempt: 1
+        },
+        repo: { path: repoPath, baseHead }
+      },
+      runPromptedRound: () => {
+        throw new Error("runner crashed before writing result");
+      }
+    });
+
+    expect(mechanism.finalize.outcome).toBe("result_missing");
+    expect(mechanism.result).toBeNull();
+    expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
+  });
+
+  it("returns recovery evidence when the prompt cannot be written", () => {
+    const { repoPath, baseHead } = setupRepoWithRoundEdits();
+    const promptParentFile = path.join(
+      makeTempDir("momentum-goal-loop-mechanism-prompt-"),
+      "not-a-directory"
+    );
+    fs.writeFileSync(promptParentFile, "not a directory\n", "utf-8");
+    const promptFilePath = path.join(promptParentFile, "prompt.md");
+    const resultFilePath = path.join(
+      makeTempDir("momentum-goal-loop-mechanism-result-"),
+      "runner-result.json"
+    );
+    const verificationLogPath = makeVerificationLogPath();
+
+    const mechanism = goalLoopRoundMechanismFromPromptedResultFile({
+      repoPath,
+      baseHead,
+      resultFilePath,
+      verificationCommands: ["echo verify-ok"],
+      verificationTimeoutSec: 30,
+      verificationLogPath,
+      promptFilePath,
+      promptInput: {
+        objective: "Preserve prompt write recovery evidence.",
+        round: {
+          workflowRunId: "run-1",
+          stepRunId: "step-1",
+          invocationId: "inv-1",
+          roundId: "round-1",
+          roundIndex: 0,
+          attempt: 1
+        },
+        repo: { path: repoPath, baseHead }
+      },
+      runPromptedRound: () => {
+        throw new Error("runner should not start");
+      }
+    });
+
+    expect(mechanism.finalize.outcome).toBe("result_missing");
+    expect(mechanism.result).toBeNull();
+    expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
+  });
+
   it("routes a prompted runner that writes no result to explicit missing-result recovery", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
     const promptFilePath = path.join(
