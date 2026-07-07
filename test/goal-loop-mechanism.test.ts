@@ -1042,4 +1042,65 @@ describe("goalLoopRoundMechanismFromResultFile composed into runGoalLoopRound", 
     expect(durable?.recoveryCode).toBe("result_missing");
     db.close();
   });
+
+  it("drives a no-op committed result to durable manual recovery with finalization evidence", () => {
+    const repoPath = initRepo();
+    const baseHead = commitInitial(repoPath);
+    const resultFilePath = writeResultFile(
+      JSON.stringify(baseRunnerResult({ goal_complete: true }))
+    );
+    const verificationLogPath = makeVerificationLogPath();
+    const db = openRoundDb();
+    let mechanism: ReturnType<typeof goalLoopRoundMechanismFromResultFile>;
+
+    const outcome = runGoalLoopRound({
+      db,
+      start: buildStart(),
+      finishedAt: 5_000,
+      runRound: () => {
+        mechanism = goalLoopRoundMechanismFromResultFile({
+          repoPath,
+          baseHead,
+          resultFilePath,
+          verificationCommands: ["echo verify-ok"],
+          verificationTimeoutSec: 30,
+          verificationLogPath
+        });
+        return mechanism;
+      }
+    });
+
+    expect(mechanism!.finalize.outcome).toBe("commit_failed");
+    if (mechanism!.finalize.outcome !== "commit_failed") {
+      throw new Error("expected no-op commit to fail finalization");
+    }
+    expect(mechanism!.finalize.commit.code).toBe("nothing_to_commit");
+    expect(outcome.round.state).toBe("manual_recovery_required");
+    expect(outcome.round.recoveryCode).toBe("nothing_to_commit");
+    expect(outcome.round.commitSha).toBeNull();
+    expect(outcome.round.changedFiles).toEqual([]);
+    expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(baseHead);
+
+    const durable = loadExecutorRound(db, "round-1");
+    expect(durable?.state).toBe("manual_recovery_required");
+    expect(durable?.recoveryCode).toBe("nothing_to_commit");
+    expect(durable?.commitSha).toBeNull();
+
+    const finalizationArtifact = listExecutorArtifactsForRound(
+      db,
+      "round-1"
+    ).find((artifact) => artifact.artifactClass === "commit_or_reset_evidence");
+    expect(finalizationArtifact?.path).toBe(
+      `${verificationLogPath}.finalization.json`
+    );
+    const evidence = readJsonFile(finalizationArtifact!.path);
+    expect(evidence).toMatchObject({
+      outcome: "commit_failed",
+      commitSha: null,
+      changedFiles: [],
+      verificationStatus: "passed",
+      recoveryCode: "nothing_to_commit"
+    });
+    db.close();
+  });
 });
