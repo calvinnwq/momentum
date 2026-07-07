@@ -120,6 +120,13 @@ function sha256Digest(content: string): string {
   return `sha256:${crypto.createHash("sha256").update(content).digest("hex")}`;
 }
 
+function readJsonFile(filePath: string): Record<string, unknown> {
+  return JSON.parse(fs.readFileSync(filePath, "utf-8")) as Record<
+    string,
+    unknown
+  >;
+}
+
 describe("goalLoopRoundMechanismFromResultFile", () => {
   it("commits and returns the normalized result + result/verification artifacts on a verified success", () => {
     const { repoPath, baseHead } = setupRepoWithRoundEdits();
@@ -169,6 +176,41 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
     expect(mechanism.finalize.outcome).toBe("committed");
     // The round wrote exactly round-edit.txt, so the durable change set names it.
     expect(mechanism.changedFiles).toEqual(["round-edit.txt"]);
+  });
+
+  it("writes commit/reset evidence with stable commit metadata for a verified success", () => {
+    const { repoPath, baseHead } = setupRepoWithRoundEdits();
+    const resultFilePath = writeResultFile(
+      JSON.stringify(baseRunnerResult({ goal_complete: true }))
+    );
+    const verificationLogPath = makeVerificationLogPath();
+
+    const mechanism = goalLoopRoundMechanismFromResultFile({
+      repoPath,
+      baseHead,
+      resultFilePath,
+      verificationCommands: ["echo verify-ok"],
+      verificationTimeoutSec: 30,
+      verificationLogPath
+    });
+
+    expect(mechanism.finalize.outcome).toBe("committed");
+    const pointer = mechanism.artifacts?.commitOrResetEvidence;
+    expect(pointer?.path).toBe(`${verificationLogPath}.finalization.json`);
+    expect(pointer?.digest).toMatch(/^sha256:[0-9a-f]{64}$/);
+
+    const evidence = readJsonFile(pointer!.path);
+    expect(evidence).toMatchObject({
+      schema: "momentum.goal-loop.finalization-evidence.v1",
+      outcome: "committed",
+      commitSha:
+        mechanism.finalize.outcome === "committed"
+          ? mechanism.finalize.commit.commitSha
+          : null,
+      changedFiles: ["round-edit.txt"],
+      verificationStatus: "passed",
+      recoveryCode: null
+    });
   });
 
   it("reports an empty change set when the round resets without committing", () => {

@@ -123,6 +123,7 @@ export function goalLoopRoundMechanismFromResultFile(
   const captured = documentUnusable(finalize)
     ? { result: null, resultDigest: null }
     : readResultForCapture(input.resultFilePath);
+  const changedFiles = committedChangedFiles(input, finalize);
   return {
     result: captured.result,
     resultDigest: captured.resultDigest,
@@ -130,9 +131,10 @@ export function goalLoopRoundMechanismFromResultFile(
     artifacts: goalLoopMechanismArtifacts(
       input,
       finalize,
-      captured.resultDigest
+      captured.resultDigest,
+      changedFiles
     ),
-    changedFiles: committedChangedFiles(input, finalize)
+    changedFiles
   };
 }
 
@@ -230,7 +232,7 @@ function promptedRoundRecovery(
     result: null,
     resultDigest: null,
     finalize,
-    artifacts: goalLoopMechanismArtifacts(input, finalize, null),
+    artifacts: goalLoopMechanismArtifacts(input, finalize, null, []),
     changedFiles: []
   };
 }
@@ -360,9 +362,16 @@ function verificationLogDigest(verificationLogPath: string): string | null {
 function goalLoopMechanismArtifacts(
   input: GoalLoopRoundMechanismFromResultFileInput,
   finalize: FinalizeWorkflowStepFromResultFileResult,
-  resultDigest: string | null
+  resultDigest: string | null,
+  changedFiles: readonly string[]
 ): GoalLoopRoundArtifacts {
   const evidence = goalLoopFinalizeEvidenceFromResult(finalize);
+  const finalizationEvidence = writeFinalizationEvidence(
+    input,
+    finalize,
+    evidence.verificationStatus,
+    changedFiles
+  );
   return {
     ...(finalize.outcome !== "result_missing"
       ? {
@@ -378,6 +387,9 @@ function goalLoopMechanismArtifacts(
             input.verificationLogPath
           )
         }
+      : {}),
+    ...(finalizationEvidence !== null
+      ? { commitOrResetEvidence: finalizationEvidence }
       : {})
   };
 }
@@ -396,4 +408,86 @@ function verificationOutputPointer(
     path: verificationLogPath,
     ...(digest !== null ? { digest } : {})
   };
+}
+
+function writeFinalizationEvidence(
+  input: GoalLoopRoundMechanismFromResultFileInput,
+  finalize: FinalizeWorkflowStepFromResultFileResult,
+  verificationStatus: string | null,
+  changedFiles: readonly string[]
+): GoalLoopArtifactPointer | null {
+  const evidencePath = `${input.verificationLogPath}.finalization.json`;
+  const body = `${JSON.stringify(
+    {
+      schema: "momentum.goal-loop.finalization-evidence.v1",
+      outcome: finalize.outcome,
+      commitSha:
+        finalize.outcome === "committed" ? finalize.commit.commitSha : null,
+      commitMessage:
+        finalize.outcome === "committed" ? finalize.commit.message : null,
+      parentSha:
+        finalize.outcome === "committed" ? finalize.commit.parentSha : null,
+      changedFiles: [...changedFiles],
+      verificationStatus,
+      recoveryCode: finalizationRecoveryCode(finalize),
+      resultFilePath: input.resultFilePath,
+      verificationLogPath: input.verificationLogPath,
+      error: finalizationError(finalize)
+    },
+    null,
+    2
+  )}\n`;
+  try {
+    fs.mkdirSync(path.dirname(evidencePath), { recursive: true });
+    fs.writeFileSync(evidencePath, body, "utf-8");
+  } catch {
+    return null;
+  }
+  return { path: evidencePath, digest: sha256ContentDigest(body) };
+}
+
+function finalizationRecoveryCode(
+  finalize: FinalizeWorkflowStepFromResultFileResult
+): string | null {
+  switch (finalize.outcome) {
+    case "committed":
+    case "reset_step_failure":
+    case "reset_verification_failure":
+      return null;
+    case "manual_recovery_required":
+      return finalize.recoveryCode;
+    case "reset_failed":
+      return finalize.reset.code;
+    case "commit_failed":
+      return finalize.commit.code;
+    case "git_failed":
+    case "repo_lock_lost":
+    case "invalid_input":
+    case "result_missing":
+    case "result_invalid":
+      return finalize.outcome;
+  }
+}
+
+function finalizationError(
+  finalize: FinalizeWorkflowStepFromResultFileResult
+): string | null {
+  switch (finalize.outcome) {
+    case "committed":
+    case "reset_step_failure":
+    case "reset_verification_failure":
+      return null;
+    case "manual_recovery_required":
+      return finalize.reason;
+    case "reset_failed":
+      return finalize.reset.error;
+    case "commit_failed":
+      return finalize.commit.error;
+    case "git_failed":
+    case "repo_lock_lost":
+    case "invalid_input":
+    case "result_missing":
+    case "result_invalid":
+      return finalize.error;
+  }
 }
