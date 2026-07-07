@@ -483,6 +483,57 @@ describe("goalLoopRoundMechanismFromResultFile", () => {
     expect(mechanism.result).not.toBeNull();
     expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(movedHead);
   });
+
+  it("does not duplicate a committed round when finalization is re-entered from the original base", () => {
+    const { repoPath, baseHead } = setupRepoWithRoundEdits();
+    const resultFilePath = writeResultFile(
+      JSON.stringify(baseRunnerResult({ goal_complete: true }))
+    );
+    const firstVerificationLogPath = makeVerificationLogPath();
+
+    const first = goalLoopRoundMechanismFromResultFile({
+      repoPath,
+      baseHead,
+      resultFilePath,
+      verificationCommands: ["echo verify-ok"],
+      verificationTimeoutSec: 30,
+      verificationLogPath: firstVerificationLogPath
+    });
+
+    expect(first.finalize.outcome).toBe("committed");
+    if (first.finalize.outcome !== "committed") {
+      throw new Error("expected first finalization to commit");
+    }
+    const firstCommitSha = first.finalize.commit.commitSha;
+    const commitCountAfterFirst = runGit(repoPath, [
+      "rev-list",
+      "--count",
+      "HEAD"
+    ]).trim();
+
+    const second = goalLoopRoundMechanismFromResultFile({
+      repoPath,
+      baseHead,
+      resultFilePath,
+      verificationCommands: ["echo verify-ok"],
+      verificationTimeoutSec: 30,
+      verificationLogPath: makeVerificationLogPath()
+    });
+
+    expect(second.finalize.outcome).toBe("manual_recovery_required");
+    if (second.finalize.outcome !== "manual_recovery_required") {
+      throw new Error("expected re-entered finalization to require recovery");
+    }
+    expect(second.finalize.recoveryCode).toBe("head_mismatch");
+    expect(second.finalize.expectedHead).toBe(baseHead);
+    expect(second.finalize.currentHead).toBe(firstCommitSha);
+    expect(runGit(repoPath, ["rev-parse", "HEAD"]).trim()).toBe(
+      firstCommitSha
+    );
+    expect(runGit(repoPath, ["rev-list", "--count", "HEAD"]).trim()).toBe(
+      commitCountAfterFirst
+    );
+  });
 });
 
 describe("goalLoopRoundMechanismFromPromptedResultFile", () => {
