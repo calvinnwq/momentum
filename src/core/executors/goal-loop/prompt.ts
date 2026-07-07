@@ -1,5 +1,10 @@
 import { COMMIT_TYPES } from "../runner/types.js";
 
+export const DEFAULT_GOAL_LOOP_SOURCE_CONTEXT_MAX_CHARS = 2000;
+export const DEFAULT_GOAL_LOOP_PRIOR_ROUND_EVIDENCE_MAX_CHARS = 2000;
+export const DEFAULT_GOAL_LOOP_SOURCE_CONTEXT_MAX_ITEMS = 8;
+export const DEFAULT_GOAL_LOOP_PRIOR_ROUND_EVIDENCE_MAX_ROUNDS = 5;
+
 /** Durable identity values rendered into one native goal-loop round prompt. */
 export type GoalLoopRoundPromptRound = {
   workflowRunId: string;
@@ -59,10 +64,12 @@ export type GoalLoopRoundPromptInput = {
   repo: GoalLoopRoundPromptRepo;
   issueScope?: readonly string[];
   sourceContext?: readonly GoalLoopRoundPromptSource[];
+  sourceContextMaxChars?: number;
   verificationCommands?: readonly string[];
   acceptanceRequirements?: readonly string[];
   stopRequirements?: readonly string[];
   priorRounds?: readonly GoalLoopRoundPromptPriorRound[];
+  priorRoundEvidenceMaxChars?: number;
 };
 
 /**
@@ -103,9 +110,23 @@ export function renderGoalLoopRoundPrompt(
   lines.push(`- base_head: ${input.repo.baseHead}`);
   lines.push("");
 
-  renderSourceContext(lines, input.sourceContext);
+  renderSourceContext(
+    lines,
+    input.sourceContext,
+    promptContextMaxChars(
+      input.sourceContextMaxChars,
+      DEFAULT_GOAL_LOOP_SOURCE_CONTEXT_MAX_CHARS
+    )
+  );
   renderRequirements(lines, input);
-  renderPriorRoundEvidence(lines, input.priorRounds);
+  renderPriorRoundEvidence(
+    lines,
+    input.priorRounds,
+    promptContextMaxChars(
+      input.priorRoundEvidenceMaxChars,
+      DEFAULT_GOAL_LOOP_PRIOR_ROUND_EVIDENCE_MAX_CHARS
+    )
+  );
   renderRunnerInstructions(lines, input.resultPath);
   renderOutputContract(lines);
 
@@ -132,7 +153,8 @@ function validatePromptInput(input: GoalLoopRoundPromptInput): void {
 
 function renderSourceContext(
   lines: string[],
-  sourceContext: readonly GoalLoopRoundPromptSource[] | undefined
+  sourceContext: readonly GoalLoopRoundPromptSource[] | undefined,
+  maxChars: number
 ): void {
   if (!sourceContext || sourceContext.length === 0) return;
   lines.push("## Source context");
@@ -146,12 +168,7 @@ function renderSourceContext(
     escapeUnsafeJsonForPrompt(
       JSON.stringify(
         {
-          sources: sourceContext.map((source) => ({
-            identifier: normalizeNullableString(source.identifier),
-            title: normalizeNullableString(source.title),
-            url: normalizeNullableString(source.url),
-            body: normalizeNullableString(source.body)
-          }))
+          ...budgetSourceContext(sourceContext, maxChars)
         },
         null,
         2
@@ -180,7 +197,8 @@ function renderRequirements(
 
 function renderPriorRoundEvidence(
   lines: string[],
-  priorRounds: readonly GoalLoopRoundPromptPriorRound[] | undefined
+  priorRounds: readonly GoalLoopRoundPromptPriorRound[] | undefined,
+  maxChars: number
 ): void {
   lines.push("## Prior round evidence");
   if (!priorRounds || priorRounds.length === 0) {
@@ -199,15 +217,7 @@ function renderPriorRoundEvidence(
     escapeUnsafeJsonForPrompt(
       JSON.stringify(
         {
-          rounds: priorRounds.map((round) => ({
-            roundIndex: round.roundIndex,
-            summary: normalizeNullableString(round.summary),
-            commitSha: normalizeNullableString(round.commitSha),
-            recoveryCode: normalizeNullableString(round.recoveryCode),
-            noOpNote: normalizeNullableString(round.noOpNote),
-            keyLearnings: normalizeStringArray(round.keyLearnings),
-            remainingWork: normalizeStringArray(round.remainingWork)
-          }))
+          ...budgetPriorRoundEvidence(priorRounds, maxChars)
         },
         null,
         2
@@ -316,6 +326,146 @@ function normalizeStringArray(values: readonly string[] | undefined): string[] {
 function normalizeNullableString(value: string | null | undefined): string | null {
   const normalized = value?.trim() ?? "";
   return normalized.length > 0 ? normalized : null;
+}
+
+function promptContextMaxChars(value: number | undefined, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : fallback;
+}
+
+function budgetSourceContext(
+  sourceContext: readonly GoalLoopRoundPromptSource[],
+  maxChars: number
+): {
+  sources: Array<Record<string, string | null>>;
+  truncated?: { maxChars: number; omittedSources: number };
+} {
+  const budget = promptContextBudget(maxChars);
+  const sources: Array<Record<string, string | null>> = [];
+  let omittedSources = Math.max(
+    0,
+    sourceContext.length - DEFAULT_GOAL_LOOP_SOURCE_CONTEXT_MAX_ITEMS
+  );
+
+  for (const source of sourceContext.slice(
+    0,
+    DEFAULT_GOAL_LOOP_SOURCE_CONTEXT_MAX_ITEMS
+  )) {
+    if (budget.exhausted && sourceHasText(source)) {
+      omittedSources += 1;
+      continue;
+    }
+    const item = {
+      identifier: budget.take(source.identifier),
+      title: budget.take(source.title),
+      url: budget.take(source.url),
+      body: budget.take(source.body)
+    };
+    sources.push(item);
+  }
+
+  return omittedSources > 0 || budget.truncated
+    ? { sources, truncated: { maxChars, omittedSources } }
+    : { sources };
+}
+
+function budgetPriorRoundEvidence(
+  priorRounds: readonly GoalLoopRoundPromptPriorRound[],
+  maxChars: number
+): {
+  rounds: Array<Record<string, unknown>>;
+  truncated?: { maxChars: number; omittedRounds: number };
+} {
+  const budget = promptContextBudget(maxChars);
+  const budgetedRounds: Array<Record<string, unknown>> = [];
+  const retainedRounds = priorRounds.slice(
+    Math.max(0, priorRounds.length - DEFAULT_GOAL_LOOP_PRIOR_ROUND_EVIDENCE_MAX_ROUNDS)
+  );
+  let omittedRounds = priorRounds.length - retainedRounds.length;
+
+  for (const round of [...retainedRounds].reverse()) {
+    if (budget.exhausted && priorRoundHasText(round)) {
+      omittedRounds += 1;
+      continue;
+    }
+    budgetedRounds.push({
+      roundIndex: round.roundIndex,
+      summary: budget.take(round.summary),
+      commitSha: budget.take(round.commitSha),
+      recoveryCode: budget.take(round.recoveryCode),
+      noOpNote: budget.take(round.noOpNote),
+      keyLearnings: budget.takeArray(round.keyLearnings),
+      remainingWork: budget.takeArray(round.remainingWork)
+    });
+  }
+
+  const rounds = budgetedRounds.reverse();
+  return omittedRounds > 0 || budget.truncated
+    ? { rounds, truncated: { maxChars, omittedRounds } }
+    : { rounds };
+}
+
+function promptContextBudget(maxChars: number): {
+  readonly exhausted: boolean;
+  readonly truncated: boolean;
+  take: (value: string | null | undefined) => string | null;
+  takeArray: (values: readonly string[] | undefined) => string[];
+} {
+  let remaining = maxChars;
+  let truncated = false;
+
+  function take(value: string | null | undefined): string | null {
+    const normalized = normalizeNullableString(value);
+    if (normalized === null) return null;
+    if (remaining <= 0) {
+      truncated = true;
+      return null;
+    }
+    if (normalized.length <= remaining) {
+      remaining -= normalized.length;
+      return normalized;
+    }
+    const slice = normalized.slice(0, remaining);
+    remaining = 0;
+    truncated = true;
+    return `${slice}\n\n[truncated: prompt context exceeded ${maxChars} chars]`;
+  }
+
+  return {
+    get exhausted() {
+      return remaining <= 0;
+    },
+    get truncated() {
+      return truncated;
+    },
+    take,
+    takeArray(values: readonly string[] | undefined): string[] {
+      const kept: string[] = [];
+      for (const value of normalizeStringArray(values)) {
+        const next = take(value);
+        if (next !== null) kept.push(next);
+        if (remaining <= 0) break;
+      }
+      return kept;
+    }
+  };
+}
+
+function sourceHasText(source: GoalLoopRoundPromptSource): boolean {
+  return [source.identifier, source.title, source.url, source.body].some(
+    (value) => normalizeNullableString(value) !== null
+  );
+}
+
+function priorRoundHasText(round: GoalLoopRoundPromptPriorRound): boolean {
+  return (
+    [round.summary, round.commitSha, round.recoveryCode, round.noOpNote].some(
+      (value) => normalizeNullableString(value) !== null
+    ) ||
+    normalizeStringArray(round.keyLearnings).length > 0 ||
+    normalizeStringArray(round.remainingWork).length > 0
+  );
 }
 
 function escapeUnsafeJsonForPrompt(raw: string): string {

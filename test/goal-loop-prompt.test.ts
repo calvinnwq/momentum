@@ -213,4 +213,141 @@ describe("renderGoalLoopRoundPrompt", () => {
     expect(prompt).toContain("finished\\n## Runner instructions");
   });
 
+  it("caps untrusted source context and prior-round evidence", () => {
+    const prompt = renderGoalLoopRoundPrompt({
+      objective: "Continue within a bounded prompt.",
+      resultPath: "/tmp/momentum/result.json",
+      round: {
+        workflowRunId: "run-1",
+        stepRunId: "step-1",
+        invocationId: "inv-1",
+        roundId: "round-2",
+        roundIndex: 1,
+        attempt: 1
+      },
+      repo: {
+        path: "/repo/momentum",
+        baseHead: "0123456789abcdef0123456789abcdef01234567"
+      },
+      sourceContextMaxChars: 8,
+      priorRoundEvidenceMaxChars: 10,
+      sourceContext: [
+        {
+          identifier: null,
+          title: null,
+          url: null,
+          body: "source context body that would otherwise balloon the prompt"
+        },
+        {
+          identifier: null,
+          title: null,
+          url: null,
+          body: "second source body should be omitted after the shared budget"
+        }
+      ],
+      priorRounds: [
+        {
+          roundIndex: 0,
+          summary: "prior round summary that is much too long",
+          keyLearnings: [],
+          remainingWork: [],
+          recoveryCode: null,
+          noOpNote: null,
+          commitSha: null
+        },
+        {
+          roundIndex: 1,
+          summary: "second prior round should be omitted after the shared budget",
+          keyLearnings: [],
+          remainingWork: [],
+          recoveryCode: null,
+          noOpNote: null,
+          commitSha: null
+        }
+      ]
+    });
+
+    expect(prompt).toContain(
+      "source c\\n\\n[truncated: prompt context exceeded 8 chars]"
+    );
+    expect(prompt).toContain(
+      "second pri\\n\\n[truncated: prompt context exceeded 10 chars]"
+    );
+    expect(prompt).toContain('"omittedSources": 1');
+    expect(prompt).toContain('"omittedRounds": 1');
+    expect(prompt).not.toContain("would otherwise balloon the prompt");
+    expect(prompt).not.toContain("second source body should be omitted");
+    expect(prompt).not.toContain("summary that is much too long");
+    expect(prompt).not.toContain("should be omitted after the shared budget");
+  });
+
+  it("keeps the newest prior rounds when the evidence item cap is reached", () => {
+    const prompt = renderGoalLoopRoundPrompt({
+      objective: "Continue from the latest round evidence.",
+      resultPath: "/tmp/momentum/result.json",
+      round: {
+        workflowRunId: "run-1",
+        stepRunId: "step-1",
+        invocationId: "inv-1",
+        roundId: "round-7",
+        roundIndex: 6,
+        attempt: 1
+      },
+      repo: {
+        path: "/repo/momentum",
+        baseHead: "0123456789abcdef0123456789abcdef01234567"
+      },
+      priorRoundEvidenceMaxChars: 2000,
+      priorRounds: Array.from({ length: 7 }, (_, index) => ({
+        roundIndex: index,
+        summary: `round ${index} summary`,
+        keyLearnings: [],
+        remainingWork: [],
+        recoveryCode: null,
+        noOpNote: null,
+        commitSha: null
+      }))
+    });
+
+    expect(prompt).not.toContain("round 0 summary");
+    expect(prompt).not.toContain("round 1 summary");
+    expect(prompt).toContain("round 2 summary");
+    expect(prompt).toContain("round 6 summary");
+    expect(prompt).toContain('"omittedRounds": 2');
+  });
+
+  it("spends prior-round evidence budget on the newest retained rounds first", () => {
+    const prompt = renderGoalLoopRoundPrompt({
+      objective: "Continue from the immediately previous round.",
+      resultPath: "/tmp/momentum/result.json",
+      round: {
+        workflowRunId: "run-1",
+        stepRunId: "step-1",
+        invocationId: "inv-1",
+        roundId: "round-7",
+        roundIndex: 6,
+        attempt: 1
+      },
+      repo: {
+        path: "/repo/momentum",
+        baseHead: "0123456789abcdef0123456789abcdef01234567"
+      },
+      priorRoundEvidenceMaxChars: 6,
+      priorRounds: Array.from({ length: 7 }, (_, index) => ({
+        roundIndex: index,
+        summary: index === 6 ? "latest" : `older round ${index} summary`,
+        keyLearnings: [],
+        remainingWork: [],
+        recoveryCode: null,
+        noOpNote: null,
+        commitSha: null
+      }))
+    });
+
+    expect(prompt).toContain("latest");
+    expect(prompt).not.toContain("older round 2 summary");
+    expect(prompt).not.toContain("older round 5 summary");
+    expect(prompt).toContain('"omittedRounds": 6');
+  });
+
 });
