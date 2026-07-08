@@ -362,6 +362,18 @@ const COMMIT_FAILED: FinalizeWorkflowStepFromResultFileResult = {
   commit: { ok: false, code: "git_failed", error: "git commit failed" }
 };
 
+const COMMIT_FAILED_WITH_RESET_FAILED: FinalizeWorkflowStepFromResultFileResult =
+  {
+    outcome: "commit_failed",
+    verification: { ok: true, results: [verifyCmd(true)] },
+    commit: { ok: false, code: "git_failed", error: "git commit failed" },
+    reset: {
+      ok: false,
+      code: "missing_base",
+      error: "cleanup reset could not find base"
+    }
+  };
+
 const COMMIT_NOOP: FinalizeWorkflowStepFromResultFileResult = {
   outcome: "commit_failed",
   verification: { ok: true, results: [] },
@@ -633,7 +645,7 @@ describe("planGoalLoopRoundPersistence — manual recovery boundaries", () => {
     });
     expect(plan.captureUpdate).not.toBeNull();
     expect(plan.terminalUpdate.toState).toBe("manual_recovery_required");
-    expect(plan.terminalUpdate.recoveryCode).toBe("commit_failed");
+    expect(plan.terminalUpdate.recoveryCode).toBe("git_failed");
     // Verification passed before the commit failed; the evidence preserves that.
     expect(plan.terminalUpdate.verificationStatus).toBe("passed");
     const running = transitionExecutorRound(
@@ -646,6 +658,32 @@ describe("planGoalLoopRoundPersistence — manual recovery boundaries", () => {
     );
     expect(running.ok).toBe(true);
     expect(terminal.ok).toBe(true);
+  });
+
+  it("prefers the failed cleanup reset recovery code after a commit failure", () => {
+    const plan = planGoalLoopRoundPersistence({
+      result: runnerResult(),
+      finalize: COMMIT_FAILED_WITH_RESET_FAILED,
+      roundIndex: 0,
+      maxRounds: 5
+    });
+
+    expect(plan.terminalUpdate.toState).toBe("manual_recovery_required");
+    expect(plan.terminalUpdate.recoveryCode).toBe("missing_base");
+    expect(plan.terminalUpdate.humanGate).toBe("manual_recovery_required");
+  });
+
+  it("preserves a failed reset's precise git recovery code", () => {
+    const plan = planGoalLoopRoundPersistence({
+      result: runnerResult(),
+      finalize: RESET_FAILED_NO_VERIFY,
+      roundIndex: 0,
+      maxRounds: 5
+    });
+
+    expect(plan.terminalUpdate.toState).toBe("manual_recovery_required");
+    expect(plan.terminalUpdate.recoveryCode).toBe("git_failed");
+    expect(plan.terminalUpdate.humanGate).toBe("manual_recovery_required");
   });
 
   it("preserves a nothing_to_commit commit failure as a queryable no-op recovery code", () => {

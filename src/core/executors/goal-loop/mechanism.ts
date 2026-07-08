@@ -43,12 +43,13 @@
  *     exactly when there is a result to capture and always fingerprints the
  *     document that result was parsed from.
  *   - The reported artifact pointers are only the files this bridge owns: the
- *     result document (whenever the file exists) and the verification log
- *     (whenever verification actually ran, per the finalize evidence). Both carry
- *     a `sha256:` content digest of their bytes so the durable artifact rows are
- *     self-verifying on reattach and cannot drift from the files they point at.
- *     It never invents a path; the orchestrator still derives the `logs`
- *     artifacts from the round-start record's frozen `logPaths`.
+ *     result document (whenever the file exists), the verification log (whenever
+ *     verification actually ran, per the finalize evidence), and a
+ *     commit/reset finalization sidecar derived from the verification log path.
+ *     They carry `sha256:` content digests of their bytes so durable artifact
+ *     rows are self-verifying on reattach and cannot drift from the files they
+ *     point at. It never invents a path; the orchestrator still derives the
+ *     `logs` artifacts from the round-start record's frozen `logPaths`.
  */
 
 import crypto from "node:crypto";
@@ -123,6 +124,7 @@ export function goalLoopRoundMechanismFromResultFile(
   const captured = documentUnusable(finalize)
     ? { result: null, resultDigest: null }
     : readResultForCapture(input.resultFilePath);
+  const changedFiles = committedChangedFiles(input, finalize);
   return {
     result: captured.result,
     resultDigest: captured.resultDigest,
@@ -130,9 +132,10 @@ export function goalLoopRoundMechanismFromResultFile(
     artifacts: goalLoopMechanismArtifacts(
       input,
       finalize,
-      captured.resultDigest
+      captured.resultDigest,
+      changedFiles
     ),
-    changedFiles: committedChangedFiles(input, finalize)
+    changedFiles
   };
 }
 
@@ -230,7 +233,7 @@ function promptedRoundRecovery(
     result: null,
     resultDigest: null,
     finalize,
-    artifacts: goalLoopMechanismArtifacts(input, finalize, null),
+    artifacts: goalLoopMechanismArtifacts(input, finalize, null, []),
     changedFiles: []
   };
 }
@@ -319,8 +322,8 @@ function readResultForCapture(resultFilePath: string): CapturedResultDocument {
 /**
  * The self-describing content digest of an artifact's raw bytes. The `sha256:`
  * prefix records the algorithm in the durable record so a later reattach can
- * re-verify the artifact even if the hash family evolves. Used for both the
- * result document and the verification log, so the two bridge-owned file
+ * re-verify the artifact even if the hash family evolves. Used for the result
+ * document, verification log, and finalization sidecar so bridge-owned file
  * artifacts fingerprint identically.
  */
 function sha256ContentDigest(raw: string): string {
@@ -349,20 +352,30 @@ function verificationLogDigest(verificationLogPath: string): string | null {
 
 /**
  * Build the round's reported artifact pointers from the files this bridge owns:
- * the result document (whenever it exists — every outcome except a missing file)
- * and the verification log (whenever verification actually ran, per the finalize
- * evidence's verification verdict). The result-document pointer carries the same
- * content digest stamped onto the round's `result_digest` field (whenever the
- * document was usable), so the artifact row is self-verifying and cannot drift
- * from the round field. The orchestrator derives `logs` from the round-start
- * record's frozen `logPaths`, so they are not reported here.
+ * the result document (whenever it exists), the verification log (whenever
+ * verification actually ran, per the finalize evidence's verification verdict),
+ * and the commit/reset finalization sidecar written next to the verification log
+ * when the log path is a usable absolute path. The result-document pointer
+ * carries the same content digest stamped onto the round's `result_digest` field
+ * (whenever the document was usable), and the sidecar captures commit metadata,
+ * changed files, verification status, recovery code, and finalize errors. The
+ * artifact rows are self-verifying and cannot drift from their files. The
+ * orchestrator derives `logs` from the round-start record's frozen `logPaths`,
+ * so they are not reported here.
  */
 function goalLoopMechanismArtifacts(
   input: GoalLoopRoundMechanismFromResultFileInput,
   finalize: FinalizeWorkflowStepFromResultFileResult,
-  resultDigest: string | null
+  resultDigest: string | null,
+  changedFiles: readonly string[]
 ): GoalLoopRoundArtifacts {
   const evidence = goalLoopFinalizeEvidenceFromResult(finalize);
+  const finalizationEvidence = writeFinalizationEvidence(
+    input,
+    finalize,
+    evidence.verificationStatus,
+    changedFiles
+  );
   return {
     ...(finalize.outcome !== "result_missing"
       ? {
@@ -378,6 +391,9 @@ function goalLoopMechanismArtifacts(
             input.verificationLogPath
           )
         }
+      : {}),
+    ...(finalizationEvidence !== null
+      ? { commitOrResetEvidence: finalizationEvidence }
       : {})
   };
 }
@@ -396,4 +412,141 @@ function verificationOutputPointer(
     path: verificationLogPath,
     ...(digest !== null ? { digest } : {})
   };
+}
+
+/**
+ * Write the round-finalization sidecar that backs the
+ * `commit_or_reset_evidence` artifact. The file sits next to the verification log
+ * (`<verification-log>.finalization.json`), uses the stable
+ * `momentum.goal-loop.finalization-evidence.v1` schema, and summarizes the
+ * finalize outcome without requiring operators to infer commit/reset ownership
+ * from terminal output.
+ */
+function writeFinalizationEvidence(
+  input: GoalLoopRoundMechanismFromResultFileInput,
+  finalize: FinalizeWorkflowStepFromResultFileResult,
+  verificationStatus: string | null,
+  changedFiles: readonly string[]
+): GoalLoopArtifactPointer | null {
+  const evidencePath = finalizationEvidencePath(input.verificationLogPath);
+  if (evidencePath === null) return null;
+  const body = `${JSON.stringify(
+    {
+      schema: "momentum.goal-loop.finalization-evidence.v1",
+      outcome: finalize.outcome,
+      commitSha:
+        finalize.outcome === "committed" ? finalize.commit.commitSha : null,
+      commitMessage:
+        finalize.outcome === "committed" ? finalize.commit.message : null,
+      parentSha:
+        finalize.outcome === "committed" ? finalize.commit.parentSha : null,
+      changedFiles: [...changedFiles],
+      verificationStatus,
+      recoveryCode: finalizationRecoveryCode(finalize),
+      resultFilePath: input.resultFilePath,
+      verificationLogPath: input.verificationLogPath,
+      error: finalizationError(finalize),
+      commitError: finalizationCommitError(finalize),
+      resetError: finalizationResetError(finalize)
+    },
+    null,
+    2
+  )}\n`;
+  try {
+    fs.mkdirSync(path.dirname(evidencePath), { recursive: true });
+    fs.writeFileSync(evidencePath, body, "utf-8");
+  } catch {
+    return null;
+  }
+  return { path: evidencePath, digest: sha256ContentDigest(body) };
+}
+
+function finalizationEvidencePath(verificationLogPath: string): string | null {
+  if (
+    typeof verificationLogPath !== "string" ||
+    verificationLogPath.trim().length === 0 ||
+    verificationLogPath.trim() !== verificationLogPath ||
+    !path.isAbsolute(verificationLogPath) ||
+    path.basename(verificationLogPath).length === 0
+  ) {
+    return null;
+  }
+  return `${verificationLogPath}.finalization.json`;
+}
+
+function finalizationRecoveryCode(
+  finalize: FinalizeWorkflowStepFromResultFileResult
+): string | null {
+  switch (finalize.outcome) {
+    case "committed":
+    case "reset_step_failure":
+    case "reset_verification_failure":
+      return null;
+    case "manual_recovery_required":
+      return finalize.recoveryCode;
+    case "reset_failed":
+      return finalize.reset.code;
+    case "commit_failed":
+      return commitFailureResetFailure(finalize)?.code ?? finalize.commit.code;
+    case "git_failed":
+    case "repo_lock_lost":
+    case "invalid_input":
+    case "result_missing":
+    case "result_invalid":
+      return finalize.outcome;
+  }
+}
+
+function finalizationError(
+  finalize: FinalizeWorkflowStepFromResultFileResult
+): string | null {
+  switch (finalize.outcome) {
+    case "committed":
+    case "reset_step_failure":
+    case "reset_verification_failure":
+      return null;
+    case "manual_recovery_required":
+      return finalize.reason;
+    case "reset_failed":
+      return finalize.reset.error;
+    case "commit_failed":
+      return commitFailureResetFailure(finalize)?.error ?? finalize.commit.error;
+    case "git_failed":
+    case "repo_lock_lost":
+    case "invalid_input":
+    case "result_missing":
+    case "result_invalid":
+      return finalize.error;
+  }
+}
+
+function finalizationCommitError(
+  finalize: FinalizeWorkflowStepFromResultFileResult
+): string | null {
+  return finalize.outcome === "commit_failed" ? finalize.commit.error : null;
+}
+
+function finalizationResetError(
+  finalize: FinalizeWorkflowStepFromResultFileResult
+): string | null {
+  switch (finalize.outcome) {
+    case "reset_failed":
+      return finalize.reset.error;
+    case "commit_failed":
+      return commitFailureResetFailure(finalize)?.error ?? null;
+    default:
+      return null;
+  }
+}
+
+function commitFailureResetFailure(
+  finalize: Extract<
+    FinalizeWorkflowStepFromResultFileResult,
+    { outcome: "commit_failed" }
+  >
+): Extract<NonNullable<typeof finalize.reset>, { ok: false }> | null {
+  if (finalize.reset !== undefined && !finalize.reset.ok) {
+    return finalize.reset;
+  }
+  return null;
 }

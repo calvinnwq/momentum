@@ -2346,6 +2346,7 @@ Source context and prior-round evidence are quoted as untrusted JSON context, an
 Readers must derive attempt state plus summaries, key changes, learnings, remaining work, verification status, changed files, commit SHA, recovery reason, artifacts, checkpoints, findings, and decisions from those rows and artifact pointers.
 Post-finalization native round evidence exposes the executor's `completionRecommendation` as `complete`, `continue`, `approval_required`, `operator_decision_required`, `manual_recovery_required`, `blocked`, `failed`, or `cancelled`.
 It exposes Momentum's post-policy daemon decision separately as `daemonClassification`, so quota, recovery, and operator gates do not overwrite what the executor recommended.
+When the native goal-loop mechanism receives a usable absolute verification log path, it writes `commit_or_reset_evidence` at `<verification-log>.finalization.json` with a content digest and stable `momentum.goal-loop.finalization-evidence.v1` outcome metadata.
 For `goal-loop` rounds, `workflow run logs --json` includes the schema-aligned `nativeRoundEvidence` projection next to the raw durable round and child evidence fields.
 For non-`goal-loop` executor rows, `nativeRoundEvidence` is `null`.
 They must not scrape terminal scrollback or treat `.gnhf/runs` as authoritative.
@@ -2446,6 +2447,11 @@ Rounds are returned across every invocation in the run, ordered by step key, the
             "class": "verification_output",
             "path": "/path/to/data/runs/cwfp-abc123/round-1/verify.txt",
             "digest": "sha256:..."
+          },
+          {
+            "class": "commit_or_reset_evidence",
+            "path": "/path/to/data/runs/cwfp-abc123/round-1/verify.txt.finalization.json",
+            "digest": "sha256:..."
           }
         ],
         "checkpoints": [
@@ -2474,6 +2480,14 @@ Rounds are returned across every invocation in the run, ordered by step key, the
           "path": "/path/to/data/runs/cwfp-abc123/round-1/verify.txt",
           "digest": "sha256:...",
           "description": "verification output"
+        },
+        {
+          "artifactId": "artifact-2",
+          "roundId": "cwfp-abc123::implementation::dispatch::round-1",
+          "artifactClass": "commit_or_reset_evidence",
+          "path": "/path/to/data/runs/cwfp-abc123/round-1/verify.txt.finalization.json",
+          "digest": "sha256:...",
+          "description": "commit/reset finalization evidence"
         }
       ],
       "checkpoints": [

@@ -62,6 +62,7 @@ Its required JSON fields are `schema`, `summary`, `keyChanges`, `learnings`, `co
 `daemonClassification` is Momentum's persisted daemon classification after budget, recovery, and operator-gate policy are applied.
 `verificationResult` records command names, exit codes, timing when available, and an overall status such as `passed`, `failed`, `skipped`, or `not_run`.
 Artifacts and checkpoints are durable pointers under the round, not proof by terminal text.
+When a native goal-loop round has a usable absolute verification log path, Momentum writes a digested `commit_or_reset_evidence` sidecar at `<verification-log>.finalization.json` with the finalization outcome, commit metadata when present, changed files, verification status, recovery code, result path, verification log path, and commit/reset errors.
 `commitSha` is non-null only after Momentum has verified and recorded the successful commit for that round.
 `recoveryReason` is non-null only when the round requires recovery or explains why no safe commit was created.
 
