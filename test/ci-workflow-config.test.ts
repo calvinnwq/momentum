@@ -67,8 +67,24 @@ describe('CI workflow configuration', () => {
         expect.objectContaining({ name: 'Test', run: 'pnpm test' }),
         expect.objectContaining({ name: 'Typecheck', run: 'pnpm typecheck' }),
         expect.objectContaining({ name: 'Build', run: 'pnpm build' }),
-        expect.objectContaining({ name: 'Check whitespace', run: 'git diff --check' }),
       ])
+    );
+
+    expect(steps).toContainEqual(
+      expect.objectContaining({
+        name: 'Checkout',
+        uses: 'actions/checkout@v6',
+        with: { 'fetch-depth': 0 },
+      })
+    );
+    expect(steps).toContainEqual(
+      expect.objectContaining({
+        name: 'Check whitespace',
+        run: expect.stringContaining('git diff --check "$base_sha...HEAD"'),
+      })
+    );
+    expect(steps).not.toContainEqual(
+      expect.objectContaining({ name: 'Check whitespace', run: 'git diff --check' })
     );
   });
 });
