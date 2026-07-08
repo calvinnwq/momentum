@@ -51,5 +51,5 @@ jobs:
           if [ -n "$base_sha" ] && ! printf '%s' "$base_sha" | grep -Eq '^0+$'; then
             git diff --check "$base_sha...HEAD"
           else
-            git diff --check HEAD
+            git diff-tree --check --root HEAD
           fi

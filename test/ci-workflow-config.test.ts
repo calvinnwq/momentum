@@ -83,6 +83,12 @@ describe('CI workflow configuration', () => {
         run: expect.stringContaining('git diff --check "$base_sha...HEAD"'),
       })
     );
+    expect(steps).toContainEqual(
+      expect.objectContaining({
+        name: 'Check whitespace',
+        run: expect.stringContaining('git diff-tree --check --root HEAD'),
+      })
+    );
     expect(steps).not.toContainEqual(
       expect.objectContaining({ name: 'Check whitespace', run: 'git diff --check' })
     );
