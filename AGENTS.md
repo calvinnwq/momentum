@@ -51,13 +51,16 @@ external-apply, source-adapter, runtime-consolidation, and adapter-test
 coverage contracts are compactly anchored in [`SPEC.md`](SPEC.md). Long-form
 contract rationale lives in Obsidian `/Workspaces/Momentum`.
 
-Momentum's workflow direction is compactly anchored in [`VISION.md`](VISION.md):
-steps should be resumable/idempotent, structured JSON and durable evidence beat
-terminal scraping, workflow-level preflight is structural, and side-effecting
-tail steps own their own `preflight -> apply -> reconcile` lifecycle. The
-native `goal-loop` executor is the intended autonomous implementation flywheel:
-it loops until the goal requirements are met, commits successful rounds, records
-durable evidence, and resumes from Momentum-owned state.
+Momentum's product direction is compactly anchored in [`VISION.md`](VISION.md):
+Momentum is a local-first runtime that makes agent-driven repo work durable for
+external users. Steps are resumable/idempotent, structured JSON and durable
+evidence beat terminal scraping, and side-effecting steps own their own
+`preflight -> apply -> reconcile` lifecycle. Every step names an executor (the
+schema still says "executor family"; the pre-1.0 nomenclature sweep drops the
+suffix and renames the values) that runs inside the same durable envelope; no
+single executor is the product identity. Each step dispatches attempts, and
+attempts accumulate rounds. Surfaces may break freely before 1.0; durable state
+always migrates in place.
 
 ## Stack and workflow commands
 TypeScript on Node.js with Vitest tests, managed by pnpm. See [README.md](README.md)'s `## Development` block for `pnpm install`, `pnpm test`, `pnpm test:integration`, `pnpm test:full`, `pnpm typecheck`, `pnpm lint`, `pnpm build`, `pnpm format:check`, `node dist/index.js --help`, `node dist/index.js doctor`.
