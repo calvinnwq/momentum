@@ -26,33 +26,36 @@ describe("Momentum vision contract", () => {
 
   it("codifies the durable model vocabulary", () => {
     expect(vision).toContain("**workflow definition**");
-    expect(vision).toContain("**run**");
-    expect(vision).toContain("**step**");
-    expect(vision).toContain("**invocation**");
+    expect(vision).toContain("**workflow run**");
+    expect(vision).toContain("**step run**");
+    expect(vision).toContain("**attempt**");
     expect(vision).toContain("**round**");
     expect(vision).toContain("preflight -> apply -> reconcile");
     expect(vision).toContain("Terminal rounds are immutable");
     expect(vision).toContain(
-      "a definition is instantiated as a run; a run advances through steps; a step dispatches invocations; an invocation accumulates rounds; every round verifies, then commits or resets, and leaves evidence"
+      "a definition is instantiated as a run; a run advances through steps; a step dispatches attempts; an attempt accumulates rounds; every round verifies, then commits or resets, and leaves evidence"
     );
   });
 
-  it("codifies engines as the pluggable execution boundary", () => {
-    expect(vision).toContain("Every step names an **engine**");
-    for (const engine of [
+  it("codifies executors as the pluggable execution boundary", () => {
+    expect(vision).toContain("Every step names an **executor**");
+    for (const executor of [
       "`agent-once`",
       "`agent-loop`",
       "`script`",
-      "`service-mirror`",
-      "`external-write`",
+      "`delegate-supervisor`",
+      "`external-apply`",
       "`subworkflow`"
     ]) {
-      expect(vision, `VISION.md should name the ${engine} engine`).toContain(engine);
+      expect(vision, `VISION.md should name the ${executor} executor`).toContain(executor);
     }
     expect(vision).toContain("The daemon owns decisions");
-    expect(vision).toContain("Purpose and engine are separate axes");
+    expect(vision).toContain("Purpose and executor are separate axes");
     expect(vision).toContain(
-      "the proof of the SDK is that the built-in engines use it themselves"
+      "the proof of the SDK is that the built-in executors use it themselves"
+    );
+    expect(vision).toContain(
+      'the words "route" and "profile" are retired rather than redefined'
     );
   });
 

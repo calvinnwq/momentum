@@ -29,13 +29,13 @@ Until then, every design choice optimizes for reaching that test, not for protec
 
 Momentum's system of record is a five-level hierarchy.
 
-- A **workflow definition** is a versioned, reusable recipe: ordered steps with engines, gates, and route config.
-- A **run** is one durable instance of a definition against a repository.
-- A **step** is a resumable unit inside a run.
-  Before acting it inspects its own durable state and chooses exactly one of: no-op, reconcile from evidence, act once, or block with a precise operator action.
+- A **workflow definition** is a versioned, reusable recipe: ordered step definitions with executors, gates, and agent config.
+- A **workflow run** is one durable instance of a definition against a repository.
+- A **step** pairs the same way: a step definition in the recipe becomes a resumable **step run** inside the workflow run.
+  Before acting, a step run inspects its own durable state and chooses exactly one of: no-op, reconcile from evidence, act once, or block with a precise operator action.
   Side-effecting steps own their full `preflight -> apply -> reconcile` lifecycle.
-- An **invocation** is one engine attempt at a step.
-- A **round** is one durable iteration inside an invocation: it does bounded work, verifies, then commits or resets, and records evidence.
+- An **attempt** is one executor's go at a step; a retry after terminal recovery creates a new attempt, never a rewrite.
+- A **round** is one durable iteration inside an attempt: it does bounded work, verifies, then commits or resets, and records evidence.
   Terminal rounds are immutable; a resumed run never replays or re-commits them.
 
 Around that hierarchy sit four supporting concepts.
@@ -45,9 +45,9 @@ Around that hierarchy sit four supporting concepts.
 - **Leases, checkpoints, and heartbeats** are how in-flight work proves liveness and how staleness is detected without trusting process handles.
 - **Evidence** covers artifacts, events, verification results, and recovery codes.
   Evidence outranks every process signal; it is what a resumed run and a human reviewer both read.
-- **Engines** are pluggable ways to run a step; they get their own section below.
+- **Executors** are pluggable ways to run a step; they get their own section below.
 
-One sentence holds it together: a definition is instantiated as a run; a run advances through steps; a step dispatches invocations; an invocation accumulates rounds; every round verifies, then commits or resets, and leaves evidence.
+One sentence holds it together: a definition is instantiated as a run; a run advances through steps; a step dispatches attempts; an attempt accumulates rounds; every round verifies, then commits or resets, and leaves evidence.
 
 ## Core Opinions
 
@@ -81,40 +81,43 @@ Surfaces that cannot say this are incomplete.
 Every surface a GUI, supervisor, or agent consumes is a structured envelope.
 Nothing downstream ever parses prose.
 
-## Engines
+## Executors
 
 Momentum never does the work.
-Every step names an **engine**, the kind of thing that does:
+Every step names an **executor**, the kind of thing that does:
 
 - `agent-once` runs an agent CLI, captures its result, and stops.
-- `agent-loop` runs an agent in rounds until the goal's acceptance requirements are met.
+- `agent-loop` runs an agent in rounds until the objective's acceptance requirements are met.
 - `script` runs a deterministic command with no agent.
-- `service-mirror` watches work that happens in an external service until it reaches a terminal state.
-- `external-write` performs a policy-gated mutation of another system: preflight, apply once, reconcile from read-back.
+- `delegate-supervisor` hands the work to an autonomous external tool, then supervises it to completion: mirroring its progress into rounds, detecting stalls, and guiding it when it needs answers.
+  The tool owns its own loop; Momentum owns the evidence.
+  Which tool - a validation pipeline, an autonomous coding harness, a CI run - is step config, never a schema name.
+- `external-apply` performs a policy-gated mutation of another system - create, edit, or delete: preflight, apply once, reconcile from read-back.
 - `subworkflow` runs the step as a nested workflow.
 
-Every engine runs inside the same durable envelope: bounded execution, a structured result document, verification, a commit-or-reset boundary, evidence.
-That envelope is Momentum's identity; engines are interchangeable ways of filling it.
-Which agent an `agent-*` engine runs - harness, model, effort - is route configuration, not a new engine.
-What role a step plays in a recipe - implement, validate, merge - is the step's kind, not its engine.
-Purpose and engine are separate axes, always.
+Every executor runs inside the same durable envelope: bounded execution, a structured result document, verification, a commit-or-reset boundary, evidence.
+That envelope is Momentum's identity; executors are interchangeable ways of filling it.
+Which agent an `agent-*` executor runs is the step's **agent config** - harness, model, effort - not a new executor.
+What role a step plays in a recipe - implement, validate, merge - is the step's kind, not its executor.
+Purpose and executor are separate axes, always.
 
-An engine obeys one contract: inspect durable state first, act at most once per round, record what was observed, attempted, and proven, and recommend - never decide - the outcome.
+An executor obeys one contract: inspect durable state first, act at most once per round, record what was observed, attempted, and proven, and recommend - never decide - the outcome.
 The daemon owns decisions.
 
-The `agent-loop` engine keeps looping through rounds until the goal's requirements are met: no default iteration cap, requirements as the stop condition, one verified commit per successful round.
-It is a powerful engine, and it is only an engine: Momentum's identity is the durable envelope, not any single way of filling it.
+The `agent-loop` executor keeps looping through rounds until the objective's requirements are met: no default iteration cap, requirements as the stop condition, one verified commit per successful round.
+It is a powerful executor, and it is only an executor: Momentum's identity is the durable envelope, not any single way of filling it.
 
-Engines are the primary SDK surface.
-A third party adds an engine against documented interfaces, and the proof of the SDK is that the built-in engines use it themselves.
+Executors are the primary SDK surface.
+A third party adds an executor against documented interfaces, and the proof of the SDK is that the built-in executors use it themselves.
 If Momentum's own tracker adapter or agent wrapper needs private hooks, the SDK is not done.
 
-The current schema and CLI still call this concept an "executor family"; the pre-1.0 nomenclature sweep renames it and its values to match this section.
+The current schema calls this concept an "executor family"; the pre-1.0 nomenclature sweep drops the suffix and renames the values (`one-shot` to `agent-once`, `goal-loop` to `agent-loop`, `no-mistakes` to `delegate-supervisor` with the tool as step config).
+How steps bind to real commands on a given machine is that host's **bindings**, selected by environment; the words "route" and "profile" are retired rather than redefined.
 
 ## Stability And 1.0
 
 Momentum is pre-1.0, and it behaves like it.
-Until 1.0, any surface may change between releases: command names, flags, JSON envelope fields, engine names, environment variables.
+Until 1.0, any surface may change between releases: command names, flags, JSON envelope fields, executor names, environment variables.
 The changelog is the contract.
 Pre-1.0 is also when the vocabulary gets one full cleaning pass: legacy and personal-history names are swept from schema enums, CLI flags, and env vars so external users never onboard into them.
 
@@ -125,7 +128,7 @@ Interfaces are fluid, evidence is forever.
 
 1.0 is an event with a definition, not a milestone with a date.
 It is declared when external users are running Momentum weekly on their own repositories and the surfaces they depend on have stopped needing to change.
-At 1.0, the stable set freezes explicitly: the machine-facing JSON envelopes, the data-directory layout, exit codes, and the engine SDK interfaces.
+At 1.0, the stable set freezes explicitly: the machine-facing JSON envelopes, the data-directory layout, exit codes, and the executor SDK interfaces.
 Everything not in the stable set stays honestly labeled as fluid.
 
 Until then, the bias is deletion and consolidation over compatibility.
@@ -134,12 +137,12 @@ Keeping a legacy surface alive costs the project more than it costs any current 
 ## Reference Deployment
 
 Momentum's first production user is its own author.
-The maintainer's agent stack - an OpenClaw-based supervisor for delivery and wake-ups, a personal validation pipeline behind a `service-mirror` step, Linear as the tracker - runs real coding workflows through Momentum end to end: implementation, verification, merge cleanup, tracker refresh.
+The maintainer's agent stack - an OpenClaw-based supervisor for delivery and wake-ups, a personal validation pipeline behind a `delegate-supervisor` step, Linear as the tracker - runs real coding workflows through Momentum end to end: implementation, verification, merge cleanup, tracker refresh.
 
 That deployment is proof, not product.
 It exists in this document for exactly two reasons.
 First, dogfood: Momentum's own changes ship through Momentum-orchestrated workflows, so the maintainer feels every rough edge before any external user does.
-Second, honesty about shape: it demonstrates that the integrations are plugins on public boundaries - a delivery wrapper over the watch envelope, a mirror engine over an external service, a tracker adapter behind the source and external-write interfaces.
+Second, honesty about shape: it demonstrates that the integrations are plugins on public boundaries - a delivery wrapper over the watch envelope, a supervised delegation over an external tool, a tracker adapter behind the tracker-ingestion and external-apply interfaces.
 If the reference deployment ever needs a private hook, the boundary it bypassed is a bug in the product.
 
 Linear is the reference tracker adapter: the worked example of read-only ingestion, policy-gated writes, and audited reconciliation that other tracker adapters copy.
@@ -149,7 +152,7 @@ Nothing in the core schema, CLI, or envelopes may name the maintainer's tools; t
 
 - **Not an agent.**
   Momentum never prompts, reasons, or writes code, and the runtime never calls an LLM, not even for diagnosis.
-  Intelligence lives in the engines' agents; judgment lives with the operator.
+  Intelligence lives in the executors' agents and tools; judgment lives with the operator.
 - **Not a hosted service.**
   No server, no tenant, no account.
   Remote is sync or export, never authority.
