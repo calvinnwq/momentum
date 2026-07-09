@@ -49,9 +49,12 @@ The retired live-step direct-finalize lane (`live-step/advance.ts`,
 execution-lane decision: the dispatch reconciliation seam
 (`dispatch/reconcile.ts` / `dispatch/reconcile-execute.ts`) owns finalizing
 dispatched workflow steps from durable terminal executor evidence in
-production, which superseded the staged live-step composition lane. The
-remaining `live-step/executor.ts` is the production live-wrapper step executor
-consumed by the real-adapter registry.
+production, while `dispatch/executor-run.ts` calls this shared verify -> commit /
+reset seam before terminalizing successful live-wrapper results as durable
+executor evidence.
+That superseded the staged live-step composition lane.
+The remaining `live-step/executor.ts` is the production live-wrapper step
+executor consumed by the real-adapter registry.
 
 ## Ownership boundary with adapters
 

@@ -284,6 +284,8 @@ Behaviour:
   Missing/ambiguous context, missing credentials, policy denial, duplicate/stale or mismatched intent/audit evidence, invalid payload, a missing resolved target, or any other unsafe apply refusal routes to manual recovery before the adapter client is called.
   Configured `subworkflow` steps are also filled by the daemon itself: child config comes from the parent run's `route.subworkflow.child`, recursion lineage is bounded through `route.subworkflow.lineage`, the child run starts or attaches by workflow definition key, and terminal child evidence is mirrored back to the parent step; missing config, unsafe recursion, unresolved child definitions, unsupported attachment, invalid child state, or ambiguous child terminals route to manual recovery.
   When `MOMENTUM_LIVE_WRAPPER_PROFILE` points managed-loop `daemon start` at a valid workflow live-wrapper profile, the daemon runs configured live-wrapper-owned step wrappers after the scaffold is created, records terminal executor evidence, and reconciles the step from that evidence.
+  A successful wrapper result is finalized through the shared verify -> commit / reset transaction before reconciliation: Momentum reads the runner result's commit intent, writes `verification.log`, commits verified changes, resets safe failures, and attaches the verification log to round evidence.
+  Result-file, moved-HEAD, lost-lease, git, commit, and reset safety failures preserve the precise live recovery code in executor round / gate evidence and render best-effort run-scoped `recovery.md` guidance.
   With no profile, supported live-wrapper-owned steps keep the start scaffold and wait for a later executor path; a configured profile that omits the dispatched kind routes that step to manual recovery rather than reporting fake success.
 - **No clobber**: a duplicate `--run-id` refuses with `run_exists` and never overwrites the existing run.
 
@@ -1261,9 +1263,11 @@ Unknown or non-agent harness/model values remain pass-through values in these re
 - Run states: `pending`, `approved`, `running`, `succeeded`, `failed`, `blocked`, `canceled`.
 - Step states: `pending`, `approved`, `running`, `succeeded`, `failed`, `skipped`, `blocked`, `canceled`.
 
-`steps[].errorCode` is nullable. When present, it can be an executor result code
-or a Momentum-owned live finalization code with the `live_finalize_*` prefix for
-verification / git finalization failures reconciled after the executor result.
+`steps[].errorCode` is nullable.
+When present, it is the code recorded on the workflow step transition itself.
+Dispatched live-wrapper recovery specifics are recorded on executor rounds,
+manual-recovery gates, and `run.manualRecoveryReason` rather than copied onto
+`steps[].errorCode` during reconciliation.
 
 `monitor.nextAction.code` is one of:
 

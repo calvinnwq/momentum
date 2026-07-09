@@ -98,6 +98,13 @@ events, recovery, and logs surfaces. Autonomy is allowed only inside the approve
 Every dispatched step must produce normalized result evidence or mirrored
 external state before final classification. Process handles, hook events,
 sockets, and file watchers are fast-path hints, not authoritative state.
+For live-wrapper-owned dispatched steps, successful wrapper evidence is not
+terminal by itself: Momentum reads the runner result, verifies, commits or resets
+against the captured base HEAD, and only then records terminal executor evidence
+for reconciliation.
+Unsafe result, verification, git, commit/reset, or lease-ownership outcomes
+preserve precise recovery codes and run-scoped recovery guidance instead of
+collapsing into generic step failure.
 
 Workflow-level preflight validates structural setup before runtime work begins:
 definition resolution, approval boundary, route config, wrapper/profile schema,

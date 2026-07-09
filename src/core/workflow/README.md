@@ -93,10 +93,11 @@ The dispatched-step execution path producer has since landed:
 `dispatch/executor-terminalize.ts` records a finished
 `WorkflowStepExecutorDispatchResult` as terminal scaffold evidence, and
 `dispatch/executor-run.ts` composes "run the dispatched step's executor (through
-an injected real registry) → terminalize → reconcile" so a configured
-profile finalizes the step exactly once and a configured profile that lacks the
-claimed step kind parks the run for manual recovery instead of fabricating
-success. `live-wrapper/daemon-profile.ts`
+an injected real registry) -> finalize successful live-wrapper results through
+repo-safety / verification / commit-reset -> terminalize -> reconcile" so a
+configured profile finalizes the step exactly once and a configured profile that
+lacks the claimed step kind parks the run for manual recovery instead of
+fabricating success. `live-wrapper/daemon-profile.ts`
 has since added the daemon-default profile **source resolution**: a pure resolver
 that turns the `MOMENTUM_LIVE_WRAPPER_PROFILE` env var (a JSON profile file path)
 into an absent profile (unchanged default lane), a parsed `LiveWrapperProfile` the
@@ -107,7 +108,9 @@ dispatch with that producer into a `WorkflowStepDispatch`
 `createTerminalizingWorkflowDispatch`, it starts the scaffold via the base dispatch
 and — only for a genuinely-started dispatch — runs the executor + reconciliation in
 the same tick, taking the registry and the per-step exec-context deriver by
-injection and leaving the reconciliation seam the single finalization owner. `dispatch/retry.ts`
+injection, heartbeating the dispatch lease through verification / git
+finalization, and leaving the reconciliation seam the single workflow-row
+finalization owner. `dispatch/retry.ts`
 keeps the retry path explicit for stale live-wrapper bootstrap failures: after
 guarded recovery clear prepares a retryable `no-mistakes` or `merge-cleanup`
 step, the next dispatch reopens the same deterministic invocation id with the

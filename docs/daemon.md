@@ -117,7 +117,17 @@ or ambiguous child terminals park the parent run for manual recovery. When
 the managed loop also runs genuinely dispatched live-wrapper-owned step wrappers
 in the same tick, records terminal executor evidence on the dispatch scaffold,
 and lets the reconciliation seam finalize the step or park it for manual
-recovery. When the variable is unset or blank, supported live-wrapper-owned steps
+recovery.
+For successful wrapper results, the daemon first captures the current repo HEAD
+as the step base, parses the normalized runner result, runs the configured
+verification commands, commits verified changes, resets failed or unverifiable
+changes when safe, and records `verification.log` as round evidence before the
+dispatch scaffold is terminalized.
+If the base HEAD cannot be read, the result file is missing or invalid, HEAD
+moves unexpectedly, the dispatch lease is lost before git mutation, or git
+cannot safely commit or reset, the run is parked for manual recovery with the
+precise live recovery code and best-effort `<run-dir>/recovery.md` guidance.
+When the variable is unset or blank, supported live-wrapper-owned steps
 get the durable start scaffold only, while unconfigured wrapper kinds fail
 honestly with `runtime_unavailable` if a profile is configured but omits that
 step kind. If a claimed step cannot be resolved or uses an executor family the
