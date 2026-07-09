@@ -32,4 +32,3 @@ describe("LIVE_STEP_WRAPPER_RECOVERY_CODES", () => {
     expect(LIVE_STEP_WRAPPER_OUTPUT_MAX_BYTES).toBe(256 * 1024 * 1024);
   });
 });
-
