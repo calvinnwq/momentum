@@ -392,8 +392,9 @@ function acquireDispatchRepoOwnership(
     return { ok: true, lockId: null };
   }
   const acquiredNow = nowMs();
+  const repoRoot = exec.repoSafety.repoRoot ?? exec.repoPath;
   const acquired = acquireRepoLock(context.db, {
-    repoRoot: exec.repoPath,
+    repoRoot,
     holder: context.workerId,
     goalId: claim.runId,
     iteration: attempt,
@@ -405,7 +406,7 @@ function acquireDispatchRepoOwnership(
   if (acquired.ok) return { ok: true, lockId: acquired.lockId };
   return {
     ok: false,
-    error: `repository ${exec.repoPath} is locked by ${acquired.existing.holder} (run ${acquired.existing.goal_id}, ${acquired.existing.job_id}); refusing to execute and finalize ${claim.runId}/${claim.stepId} over a shared worktree`
+    error: `repository ${repoRoot} is locked by ${acquired.existing.holder} (run ${acquired.existing.goal_id}, ${acquired.existing.job_id}); refusing to execute and finalize ${claim.runId}/${claim.stepId} over a shared worktree`
   };
 }
 

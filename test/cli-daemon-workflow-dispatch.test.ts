@@ -10,6 +10,7 @@ import { buildIdempotencyMarker } from "../src/adapters/external-update-adapter.
 import { DOGFOOD_TERMINALIZE_DISPATCH_ENV_VAR } from "../src/core/workflow/dispatch/dogfood.js";
 import { DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR } from "../src/core/workflow/live-wrapper/daemon-profile.js";
 import { terminalizeDispatchedExecutorInvocation } from "../src/core/workflow/dispatch/executor-terminalize.js";
+import { acquireRepoLock } from "../src/core/repo/locks.js";
 
 type RunResult = {
   code: number;
@@ -41,13 +42,26 @@ function runGit(repoPath: string, args: string[]): string {
   }).trim();
 }
 
-function initRepo(repoPath: string): void {
+function initRepo(
+  repoPath: string,
+  options: { ignoreAgentWorkflows?: boolean } = {}
+): void {
   runGit(repoPath, ["init", "--initial-branch=main", "--quiet"]);
   runGit(repoPath, ["config", "user.email", "test@example.com"]);
   runGit(repoPath, ["config", "user.name", "Test User"]);
   runGit(repoPath, ["config", "commit.gpgsign", "false"]);
   fs.writeFileSync(path.join(repoPath, "README.md"), "init\n", "utf-8");
+  if (options.ignoreAgentWorkflows ?? true) {
+    fs.writeFileSync(
+      path.join(repoPath, ".gitignore"),
+      ".agent-workflows/\n",
+      "utf-8"
+    );
+  }
   runGit(repoPath, ["add", "README.md"]);
+  if (options.ignoreAgentWorkflows ?? true) {
+    runGit(repoPath, ["add", ".gitignore"]);
+  }
   runGit(repoPath, ["commit", "-m", "init", "--quiet"]);
 }
 
@@ -283,6 +297,133 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     expect(
       fs.existsSync(path.join(repoDir, ".agent-workflows", runId, "result.json"))
     ).toBe(true);
+    expect(runGit(repoDir, ["show", "--name-only", "--format=", "HEAD"])).toBe(
+      "daemon-preflight.txt"
+    );
+  });
+
+  it("parks before execution when repo-local daemon live-wrapper artifacts are not ignored", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    initRepo(repoDir, { ignoreAgentWorkflows: false });
+    const baseHead = runGit(repoDir, ["rev-parse", "HEAD"]);
+    const profileDir = makeTempDir();
+    const profilePath = writeSucceedingPreflightProfile(profileDir);
+    const runId = "ngx599-unignored-live-wrapper-artifacts";
+    await startApprovedCodingRun(dataDir, repoDir, runId);
+
+    const result = await run(
+      [
+        "daemon",
+        "start",
+        "--max-loop-iterations",
+        "1",
+        "--poll-interval-ms",
+        "0",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath }
+    );
+
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(runGit(repoDir, ["rev-parse", "HEAD"])).toBe(baseHead);
+    expect(fs.existsSync(path.join(repoDir, "daemon-preflight.txt"))).toBe(false);
+    expect(fs.existsSync(path.join(repoDir, ".agent-workflows"))).toBe(false);
+
+    const db = openDb(dataDir);
+    try {
+      const runRow = db
+        .prepare(
+          "SELECT needs_manual_recovery, manual_recovery_reason FROM workflow_runs WHERE id = ?"
+        )
+        .get(runId) as
+        | { needs_manual_recovery: number; manual_recovery_reason: string | null }
+        | undefined;
+      expect(runRow?.needs_manual_recovery).toBe(1);
+      expect(runRow?.manual_recovery_reason).toContain("invalid_input");
+      expect(runRow?.manual_recovery_reason).toContain("not ignored by git");
+
+      const round = db
+        .prepare(
+          "SELECT state, recovery_code, summary FROM executor_rounds WHERE workflow_run_id = ? AND step_key = ?"
+        )
+        .get(runId, "preflight") as
+        | { state: string; recovery_code: string | null; summary: string | null }
+        | undefined;
+      expect(round?.state).toBe("manual_recovery_required");
+      expect(round?.recovery_code).toBe("invalid_input");
+      expect(round?.summary).toContain("not ignored by git");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("uses the canonical repo root for daemon live-wrapper repo locks", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    initRepo(repoDir);
+    const rootDir = makeTempDir();
+    const aliasDir = path.join(rootDir, "repo-alias");
+    fs.symlinkSync(repoDir, aliasDir, "dir");
+    const profileDir = makeTempDir();
+    const profilePath = writeSucceedingPreflightProfile(profileDir);
+    const runId = "ngx599-canonical-live-wrapper-lock";
+    await startApprovedCodingRun(dataDir, aliasDir, runId);
+
+    const db = openDb(dataDir);
+    try {
+      const locked = acquireRepoLock(db, {
+        repoRoot: repoDir,
+        holder: "other-worker",
+        goalId: "run-other",
+        iteration: 1,
+        jobId: "run-other::preflight::dispatch",
+        leaseExpiresAt: 1_700_000_600_000,
+        now: 1_700_000_000_000
+      });
+      expect(locked.ok).toBe(true);
+    } finally {
+      db.close();
+    }
+
+    const result = await run(
+      [
+        "daemon",
+        "start",
+        "--max-loop-iterations",
+        "1",
+        "--poll-interval-ms",
+        "0",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath }
+    );
+
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(fs.existsSync(path.join(repoDir, "daemon-preflight.txt"))).toBe(false);
+
+    const verifyDb = openDb(dataDir);
+    try {
+      const runRow = verifyDb
+        .prepare(
+          "SELECT needs_manual_recovery, manual_recovery_reason FROM workflow_runs WHERE id = ?"
+        )
+        .get(runId) as
+        | { needs_manual_recovery: number; manual_recovery_reason: string | null }
+        | undefined;
+      expect(runRow?.needs_manual_recovery).toBe(1);
+      expect(runRow?.manual_recovery_reason).toContain(
+        `repository ${repoDir} is locked by other-worker`
+      );
+    } finally {
+      verifyDb.close();
+    }
   });
 
   it("parks a daemon live-wrapper step before execution when the repo is dirty", async () => {

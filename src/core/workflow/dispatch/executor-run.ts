@@ -120,6 +120,7 @@ export type DispatchedStepExecutorContext = {
 
 export type DispatchedStepRepoSafetyContext = {
   baseHead: string;
+  repoRoot?: string;
   verificationCommands: string[];
   verificationTimeoutSec: number;
   verificationLogPath: string;

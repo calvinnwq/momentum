@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -140,23 +141,28 @@ export function resolveDaemonWorkflowStepDispatch(
                 resolved.exec.runDir
               );
               if (!repoSafety.ok) {
+                const { recoveryArtifact, ...repoSafetyFailure } = repoSafety;
                 return {
-                  ...repoSafety,
-                  recoveryArtifact: {
-                    runDir: resolved.exec.runDir,
-                    repoPath: resolved.exec.repoPath
-                  }
+                  ...repoSafetyFailure,
+                  ...(recoveryArtifact === null
+                    ? {}
+                    : {
+                        recoveryArtifact: recoveryArtifact ?? {
+                          runDir: resolved.exec.runDir,
+                          repoPath: resolved.exec.repoPath
+                        }
+                      })
                 };
               }
               try {
-                fs.mkdirSync(resolved.exec.runDir, { recursive: true });
+                fs.mkdirSync(repoSafety.runDir, { recursive: true });
               } catch (error) {
                 return {
                   ok: false,
                   reason: `run_dir_unavailable: ${error instanceof Error ? error.message : String(error)}`,
                   recoveryArtifact: {
-                    runDir: resolved.exec.runDir,
-                    repoPath: resolved.exec.repoPath
+                    runDir: repoSafety.runDir,
+                    repoPath: repoSafety.repoPath
                   }
                 };
               }
@@ -164,6 +170,16 @@ export function resolveDaemonWorkflowStepDispatch(
                 ok: true,
                 exec: {
                   ...resolved.exec,
+                  repoPath: repoSafety.repoPath,
+                  runDir: repoSafety.runDir,
+                  resultJsonPath: path.join(
+                    repoSafety.runDir,
+                    path.basename(resolved.exec.resultJsonPath)
+                  ),
+                  executorLogPath: path.join(
+                    repoSafety.runDir,
+                    path.basename(resolved.exec.executorLogPath)
+                  ),
                   repoSafety: repoSafety.repoSafety,
                   env
                 }
@@ -186,8 +202,18 @@ function resolveDaemonDispatchedRepoSafety(
   repoPath: string,
   runDir: string
 ):
-  | { ok: true; repoSafety: DispatchedStepRepoSafetyContext }
-  | { ok: false; reason: string; recoveryCode: string } {
+  | {
+      ok: true;
+      repoPath: string;
+      runDir: string;
+      repoSafety: DispatchedStepRepoSafetyContext;
+    }
+  | {
+      ok: false;
+      reason: string;
+      recoveryCode: string;
+      recoveryArtifact?: { runDir: string; repoPath?: string | null } | null;
+    } {
   const repo = inspectRepo(repoPath);
   if (!repo.ok) {
     const recoveryCode =
@@ -200,7 +226,13 @@ function resolveDaemonDispatchedRepoSafety(
       recoveryCode
     };
   }
-  const verification = loadWorkflowRunVerificationConfig(db, runId, repoPath);
+  const canonicalRunDir = canonicalizeRunDir(repoPath, repo.repoPath, runDir);
+  const artifactSafety = verifyRepoLocalRunDirIgnored(
+    repo.repoPath,
+    canonicalRunDir
+  );
+  if (!artifactSafety.ok) return artifactSafety;
+  const verification = loadWorkflowRunVerificationConfig(db, runId, repo.repoPath);
   if (!verification.ok) {
     // Missing run row / malformed goal verification / malformed MOMENTUM.md
     // are invalid setup inputs needing operator or config repair, never the
@@ -213,13 +245,87 @@ function resolveDaemonDispatchedRepoSafety(
   }
   return {
     ok: true,
+    repoPath: repo.repoPath,
+    runDir: canonicalRunDir,
     repoSafety: {
+      repoRoot: repo.repoPath,
       baseHead: repo.head,
       verificationCommands: verification.commands,
       verificationTimeoutSec: verification.timeoutSec,
-      verificationLogPath: path.join(runDir, "verification.log")
+      verificationLogPath: path.join(canonicalRunDir, "verification.log")
     }
   };
+}
+
+function canonicalizeRunDir(
+  requestedRepoPath: string,
+  canonicalRepoPath: string,
+  runDir: string
+): string {
+  const requestedRepo = path.resolve(requestedRepoPath);
+  const resolvedRunDir = path.resolve(runDir);
+  const relativeToRequestedRepo = path.relative(requestedRepo, resolvedRunDir);
+  if (
+    relativeToRequestedRepo.length > 0 &&
+    !relativeToRequestedRepo.startsWith("..") &&
+    !path.isAbsolute(relativeToRequestedRepo)
+  ) {
+    return path.join(canonicalRepoPath, relativeToRequestedRepo);
+  }
+  return resolvedRunDir;
+}
+
+function verifyRepoLocalRunDirIgnored(
+  repoPath: string,
+  runDir: string
+):
+  | { ok: true }
+  | {
+      ok: false;
+      reason: string;
+      recoveryCode: string;
+      recoveryArtifact?: null;
+    } {
+  const relativeRunDir = path.relative(repoPath, runDir);
+  if (relativeRunDir.startsWith("..") || path.isAbsolute(relativeRunDir)) {
+    return { ok: true };
+  }
+  if (relativeRunDir.length === 0) {
+    return {
+      ok: false,
+      reason:
+        "repo_safety_unavailable: run artifact directory resolves to the repository root",
+      recoveryCode: "invalid_input",
+      recoveryArtifact: null
+    };
+  }
+  try {
+    execFileSync(
+      "git",
+      ["-C", repoPath, "check-ignore", "-q", "--", relativeRunDir],
+      { stdio: "ignore" }
+    );
+    return { ok: true };
+  } catch (error) {
+    const status =
+      typeof (error as { status?: unknown }).status === "number"
+        ? (error as { status: number }).status
+        : null;
+    if (status === 1) {
+      return {
+        ok: false,
+        reason: `repo_safety_unavailable: run artifact directory ${relativeRunDir} is inside the repository but is not ignored by git`,
+        recoveryCode: "invalid_input",
+        recoveryArtifact: null
+      };
+    }
+    const detail = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      reason: `repo_safety_unavailable: git check-ignore failed for run artifact directory ${relativeRunDir}: ${detail}`,
+      recoveryCode: "git_failed"
+    };
+  }
 }
 
 export const DEFAULT_DISPATCH_VERIFICATION_TIMEOUT_SEC = 900;

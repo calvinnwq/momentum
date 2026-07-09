@@ -110,7 +110,7 @@ export function inspectRepo(repoPath: string): RepoGuardResult {
     };
   }
 
-  return { ok: true, repoPath: topLevel, head };
+  return { ok: true, repoPath: realTop, head };
 }
 
 function runGit(cwd: string, args: string[]): string {

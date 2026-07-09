@@ -52,7 +52,12 @@ function initRepo(repoPath: string): void {
   runGit(repoPath, ["config", "user.name", "Test User"]);
   runGit(repoPath, ["config", "commit.gpgsign", "false"]);
   fs.writeFileSync(path.join(repoPath, "README.md"), "init\n", "utf-8");
-  runGit(repoPath, ["add", "README.md"]);
+  fs.writeFileSync(
+    path.join(repoPath, ".gitignore"),
+    ".agent-workflows/\n",
+    "utf-8"
+  );
+  runGit(repoPath, ["add", "README.md", ".gitignore"]);
   runGit(repoPath, ["commit", "-m", "init", "--quiet"]);
 }
 
