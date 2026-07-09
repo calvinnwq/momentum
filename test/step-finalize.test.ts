@@ -8,29 +8,18 @@ import {
   finalizeWorkflowStep,
   finalizeWorkflowStepFromResultFile
 } from "../src/core/executors/shared/step-finalize.js";
-import {
-  finalizeLiveWorkflowStep,
-  finalizeLiveWorkflowStepFromResultFile
-} from "../src/core/executors/live-step/finalize.js";
 import type { CommitIntent } from "../src/core/executors/runner/types.js";
 
 // Covers the NGX-494 shared finalization seam (`step-finalize.ts`), the
-// workflow/runtime-owned home the verify -> commit / reset transaction moved to
-// so the goal-loop executor family no longer depends on the M9-named
-// `live-step-finalize.ts` module as an ownership boundary. The single-shot
-// family still reaches the seam through the back-compat alias.
+// workflow/runtime-owned home of the verify -> commit / reset transaction that
+// the goal-loop and single-shot executor families consume directly. The
+// M9-named `live-step/finalize.ts` back-compat alias was deleted with the M9
+// live-step lane under NGX-599, so the neutral seam is the only surface.
 //
 // The git-heavy outcomes (committed / reset / moved-HEAD manual recovery) stay
-// exhaustively covered by `live-step-finalize.test.ts`, which now exercises the
-// *moved* implementation through the back-compat alias surface. This file proves
-// two things that pin the relocation without re-running real git:
-//
-//   1. The neutral seam's no-git decision paths (input validation and
-//      result-document recovery routing) behave as the contract requires when
-//      called directly under the new names.
-//   2. The M9 alias surface re-exports the *same* function objects, so every
-//      behavior the M9 integration tests prove about the `*LiveWorkflowStep*`
-//      names holds verbatim for the neutral seam — the move is byte-equivalent.
+// exhaustively covered by `live-step-finalize.test.ts` against the same neutral
+// seam. This file pins the seam's no-git decision paths (input validation and
+// result-document recovery routing) plus the ownership boundary below.
 
 const tempRoots: string[] = [];
 
@@ -148,35 +137,23 @@ describe("finalizeWorkflowStepFromResultFile (shared seam, no-git decision paths
   });
 });
 
-describe("M9 live-step finalization back-compat alias surface", () => {
-  it("re-exports the same finalize functions the neutral seam owns", () => {
-    // Identity equivalence: the M9 `*LiveWorkflowStep*` names are the neutral
-    // seam's functions, so the git-heavy behavior pinned by the M9 integration
-    // tests applies to the relocated seam unchanged.
-    expect(finalizeLiveWorkflowStep).toBe(finalizeWorkflowStep);
-    expect(finalizeLiveWorkflowStepFromResultFile).toBe(
-      finalizeWorkflowStepFromResultFile
-    );
-  });
-});
-
-describe("goal-loop family finalization ownership boundary (NGX-494 AC #1)", () => {
-  // AC #1: the goal-loop executor no longer directly depends on the M9
-  // live-wrapper finalization primitive as an ownership boundary. The goal-loop
-  // family must reach the shared verify -> commit / reset transaction through the
-  // neutral `shared/step-finalize.ts` seam, not through the M9-named
-  // `live-step/finalize.ts` back-compat alias. This guard locks the
-  // disentanglement so a later edit cannot silently re-couple the M10
-  // executor-loop family to the M9 lane's module.
+describe("executor-family finalization ownership boundary (NGX-494 AC #1, NGX-599)", () => {
+  // NGX-494 AC #1 disentangled the goal-loop family from the M9-named
+  // finalization alias; NGX-599 deleted the M9 live-step lane and migrated the
+  // single-shot family too. Every executor family must reach the shared
+  // verify -> commit / reset transaction through the neutral
+  // `shared/step-finalize.ts` seam; the deleted `live-step/finalize.ts` alias
+  // path must never come back.
   const here = path.dirname(fileURLToPath(import.meta.url));
   const repoRoot = path.resolve(here, "..");
-  const goalLoopFamily = [
+  const seamConsumers = [
     "src/core/executors/goal-loop/mechanism.ts",
     "src/core/executors/goal-loop/executor.ts",
-    "src/core/executors/goal-loop/orchestrator.ts"
+    "src/core/executors/goal-loop/orchestrator.ts",
+    "src/core/executors/single-shot/mechanism.ts"
   ];
 
-  for (const relative of goalLoopFamily) {
+  for (const relative of seamConsumers) {
     it(`${relative} imports the finalization seam from shared/step-finalize.ts, not the M9 alias`, () => {
       const source = fs.readFileSync(path.join(repoRoot, relative), "utf8");
       expect(

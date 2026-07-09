@@ -5,10 +5,17 @@ import os from "node:os";
 import path from "node:path";
 
 import {
-  finalizeLiveWorkflowStep,
-  finalizeLiveWorkflowStepFromResultFile
-} from "../src/core/executors/live-step/finalize.js";
+  finalizeWorkflowStep,
+  finalizeWorkflowStepFromResultFile
+} from "../src/core/executors/shared/step-finalize.js";
 import type { CommitIntent, RunnerResult } from "../src/core/executors/runner/types.js";
+
+// Git-heavy integration coverage for the shared verify -> commit / reset
+// finalization seam (`shared/step-finalize.ts`). These cases were originally
+// written against the M9 live-step lane's `*LiveWorkflowStep*` alias names; the
+// M9 lane and its `live-step/finalize.ts` alias were deleted under NGX-599, so
+// the same behavior is pinned directly against the neutral seam the goal-loop
+// and single-shot families consume.
 
 const ZERO_SHA = "0".repeat(40);
 const tempRoots: string[] = [];
@@ -106,11 +113,11 @@ function writeRunnerResultFile(overrides: Partial<RunnerResult> = {}): string {
   return writeResultFile(JSON.stringify(baseRunnerResult(overrides)));
 }
 
-describe("finalizeLiveWorkflowStep", () => {
+describe("finalizeWorkflowStep", () => {
   it("commits the live step diff when the step succeeded and verification passes", () => {
     const { repoPath, baseHead, logPath } = setupRepoWithStepEdits();
 
-    const result = finalizeLiveWorkflowStep({
+    const result = finalizeWorkflowStep({
       repoPath,
       baseHead,
       stepSuccess: true,
@@ -141,7 +148,7 @@ describe("finalizeLiveWorkflowStep", () => {
   it("commits when verification commands are empty (vacuous success)", () => {
     const { repoPath, baseHead, logPath } = setupRepoWithStepEdits();
 
-    const result = finalizeLiveWorkflowStep({
+    const result = finalizeWorkflowStep({
       repoPath,
       baseHead,
       stepSuccess: true,
@@ -157,7 +164,7 @@ describe("finalizeLiveWorkflowStep", () => {
   it("resets uncommitted changes and skips verification when the step reported failure", () => {
     const { repoPath, baseHead, logPath } = setupRepoWithStepEdits();
 
-    const result = finalizeLiveWorkflowStep({
+    const result = finalizeWorkflowStep({
       repoPath,
       baseHead,
       stepSuccess: false,
@@ -182,7 +189,7 @@ describe("finalizeLiveWorkflowStep", () => {
   it("resets uncommitted changes when verification fails", () => {
     const { repoPath, baseHead, logPath } = setupRepoWithStepEdits();
 
-    const result = finalizeLiveWorkflowStep({
+    const result = finalizeWorkflowStep({
       repoPath,
       baseHead,
       stepSuccess: true,
@@ -214,7 +221,7 @@ describe("finalizeLiveWorkflowStep", () => {
     expect(movedHead).not.toBe(baseHead);
 
     const logPath = makeLogPath();
-    const result = finalizeLiveWorkflowStep({
+    const result = finalizeWorkflowStep({
       repoPath,
       baseHead,
       stepSuccess: true,
@@ -245,7 +252,7 @@ describe("finalizeLiveWorkflowStep", () => {
     const baseHead = commitInitial(repoPath);
     const logPath = makeLogPath();
 
-    const result = finalizeLiveWorkflowStep({
+    const result = finalizeWorkflowStep({
       repoPath,
       baseHead,
       stepSuccess: true,
@@ -264,7 +271,7 @@ describe("finalizeLiveWorkflowStep", () => {
   });
 
   it("rejects a non-SHA baseHead as invalid_input", () => {
-    const result = finalizeLiveWorkflowStep({
+    const result = finalizeWorkflowStep({
       repoPath: "/tmp",
       baseHead: "not-a-sha",
       stepSuccess: true,
@@ -283,7 +290,7 @@ describe("finalizeLiveWorkflowStep", () => {
     const dir = makeTempDir();
     const logPath = makeLogPath();
 
-    const result = finalizeLiveWorkflowStep({
+    const result = finalizeWorkflowStep({
       repoPath: dir,
       baseHead: ZERO_SHA,
       stepSuccess: true,
@@ -297,14 +304,14 @@ describe("finalizeLiveWorkflowStep", () => {
   });
 });
 
-describe("finalizeLiveWorkflowStepFromResultFile", () => {
+describe("finalizeWorkflowStepFromResultFile", () => {
   it("commits using the result file's commit intent when it reports success", () => {
     const { repoPath, baseHead, logPath } = setupRepoWithStepEdits();
     const resultFilePath = writeRunnerResultFile({
       commit: baseIntent({ type: "fix", scope: "wf", subject: "live wire-up" })
     });
 
-    const result = finalizeLiveWorkflowStepFromResultFile({
+    const result = finalizeWorkflowStepFromResultFile({
       repoPath,
       baseHead,
       resultFilePath,
@@ -327,7 +334,7 @@ describe("finalizeLiveWorkflowStepFromResultFile", () => {
     const { repoPath, baseHead, logPath } = setupRepoWithStepEdits();
     const resultFilePath = writeRunnerResultFile({ success: false });
 
-    const result = finalizeLiveWorkflowStepFromResultFile({
+    const result = finalizeWorkflowStepFromResultFile({
       repoPath,
       baseHead,
       resultFilePath,
@@ -353,7 +360,7 @@ describe("finalizeLiveWorkflowStepFromResultFile", () => {
     const missingDir = makeTempDir("momentum-live-finalize-missing-");
     const resultFilePath = path.join(missingDir, "runner-result.json");
 
-    const result = finalizeLiveWorkflowStepFromResultFile({
+    const result = finalizeWorkflowStepFromResultFile({
       repoPath,
       baseHead,
       resultFilePath,
@@ -378,7 +385,7 @@ describe("finalizeLiveWorkflowStepFromResultFile", () => {
     const { repoPath, baseHead, logPath } = setupRepoWithStepEdits();
     const resultFilePath = writeResultFile("{ this is not json");
 
-    const result = finalizeLiveWorkflowStepFromResultFile({
+    const result = finalizeWorkflowStepFromResultFile({
       repoPath,
       baseHead,
       resultFilePath,
@@ -400,7 +407,7 @@ describe("finalizeLiveWorkflowStepFromResultFile", () => {
     const { repoPath, baseHead, logPath } = setupRepoWithStepEdits();
     const resultFilePath = writeResultFile(JSON.stringify({ hello: "world" }));
 
-    const result = finalizeLiveWorkflowStepFromResultFile({
+    const result = finalizeWorkflowStepFromResultFile({
       repoPath,
       baseHead,
       resultFilePath,
@@ -416,7 +423,7 @@ describe("finalizeLiveWorkflowStepFromResultFile", () => {
     const { repoPath, baseHead, logPath } = setupRepoWithStepEdits();
     const resultFilePath = writeResultFile("x".repeat(1024 * 1024 + 1));
 
-    const result = finalizeLiveWorkflowStepFromResultFile({
+    const result = finalizeWorkflowStepFromResultFile({
       repoPath,
       baseHead,
       resultFilePath,
@@ -437,7 +444,7 @@ describe("finalizeLiveWorkflowStepFromResultFile", () => {
     const linkPath = path.join(linkDir, "runner-result.json");
     fs.symlinkSync(target, linkPath);
 
-    const result = finalizeLiveWorkflowStepFromResultFile({
+    const result = finalizeWorkflowStepFromResultFile({
       repoPath,
       baseHead,
       resultFilePath: linkPath,
@@ -458,7 +465,7 @@ describe("finalizeLiveWorkflowStepFromResultFile", () => {
     const movedHead = runGit(repoPath, ["rev-parse", "HEAD"]).trim();
 
     const resultFilePath = writeRunnerResultFile();
-    const result = finalizeLiveWorkflowStepFromResultFile({
+    const result = finalizeWorkflowStepFromResultFile({
       repoPath,
       baseHead,
       resultFilePath,
@@ -478,7 +485,7 @@ describe("finalizeLiveWorkflowStepFromResultFile", () => {
   });
 
   it("rejects an empty resultFilePath as invalid_input", () => {
-    const result = finalizeLiveWorkflowStepFromResultFile({
+    const result = finalizeWorkflowStepFromResultFile({
       repoPath: "/tmp",
       baseHead: ZERO_SHA,
       resultFilePath: "",

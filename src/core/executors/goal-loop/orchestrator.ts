@@ -6,9 +6,7 @@
  * + two-phase persistence patches ({@link planGoalLoopRoundPersistence}), and the
  * deterministic agent/model selection. This module is the stateful seam that
  * composes those projections with the real executor-loop persistence
- * layer and round transition graph around the bounded mechanism, exactly the way
- * `live-step/orchestrator.ts` composes the pure `shared/step-finalize.ts`
- * transaction:
+ * layer and round transition graph around the bounded mechanism:
  *
  *   insert the round-start row  (running, agent/model/input frozen in)
  *   -> run the bounded mechanism (the goal iteration; injected here)
@@ -27,8 +25,7 @@
  * result-file mechanism lives in `goal-loop/mechanism.ts`, while
  * {@link runGoalLoopStep} materializes the invocation/round identity and leaves
  * the real daemon wiring to thread each round's result into the next round's
- * input through its runtime input resolver, the same way the run-level caller
- * composes `runLiveWorkflowStep`. The prompted-result helper in
+ * input through its runtime input resolver. The prompted-result helper in
  * `goal-loop/mechanism.ts` is the concrete runner-input variant: it renders the
  * per-round prompt, invokes a runner with that prompt and result path, then
  * returns the same mechanism result shape this driver persists.
@@ -474,8 +471,7 @@ export type RunGoalLoopStepInput = {
  * Clocks: the invocation start and each round's start/finish are stamped from the
  * injected `now`. As with {@link runGoalLoopInvocation}, a round's finish clock is
  * read when the round is planned; refining it to a wall-clock-accurate
- * post-mechanism stamp is part of the deferred real daemon clock wiring, the same
- * way `live-step/orchestrator.ts` owns its own lease/heartbeat clock.
+ * post-mechanism stamp is part of the deferred real daemon clock wiring.
  *
  * @throws {ExecutorInvocationConflictError} if the invocation id already exists
  * (a re-run must use a fresh `attempt`).

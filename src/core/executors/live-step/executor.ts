@@ -32,11 +32,12 @@
  * This module deliberately stops at the executor adapter boundary: it does not
  * acquire/heartbeat/release durable `workflow_leases`, persist `workflow_steps`
  * start/terminal state, re-derive run state, render run-scoped recovery, or own
- * verification/commit transactions. `live-step/orchestrator.ts` composes this
- * adapter with the lease / step lifecycle; `live-step/advance.ts` composes that
- * orchestration with verification, commit / reset finalization, and live
- * run-scoped recovery so the workflow state machine can drive a live wrapper exactly
- * as it already drives the fake executor.
+ * verification/commit transactions. The production dispatch lane composes this
+ * adapter with the lease / step lifecycle, and the dispatch reconciliation seam
+ * (`dispatch/reconcile.ts` / `dispatch/reconcile-execute.ts`) finalizes the
+ * dispatched step from durable terminal executor evidence. (The retired
+ * managed-step orchestration that used to compose this adapter was deleted
+ * with the live-step lane.)
  */
 
 import {

@@ -12,18 +12,15 @@
  * It began as the live-step lane's
  * `live-step/finalize.ts`, then was extracted here so the
  * finalization consumers depend on one shared seam instead of the
- * executor-loop families reaching into a live-step module for it. The consumers:
+ * executor-loop families reaching into a live-step module for it. The retired
+ * live-step orchestration lane and its back-compat alias have since been
+ * deleted. The consumers:
  *
- *   - the live wrappers - `live-step/advance.ts` and
- *     `live-step/run-recovery.ts`, via the `live-step/finalize.ts` back-compat
- *     alias surface that re-exports these functions under their original
- *     `*LiveWorkflowStep*` names;
  *   - the goal-loop executor family - `goal-loop/mechanism.ts`,
  *     `goal-loop/executor.ts`, and `goal-loop/orchestrator.ts`, imported
  *     directly; and
- *   - the single-shot executor family - `single-shot/mechanism.ts`, which
- *     still reaches the seam through the `live-step/finalize.ts` back-compat
- *     alias until its own migration.
+ *   - the single-shot executor family - `single-shot/mechanism.ts`, imported
+ *     directly.
  *
  * The ordered contract this transaction enforces:
  *
@@ -54,15 +51,11 @@
  * surfacing `result_missing` / `result_invalid` without touching git when that
  * document cannot be trusted.
  *
- * The run-level callers compose this seam: the live path's
- * {@link ../live-step/run-recovery.ts} `persistLiveWorkflowFinalizeRecovery` takes
- * any run-level recovery outcome (`manual_recovery_required`, `result_missing`,
+ * The goal-loop / single-shot mechanisms project the run-level recovery
+ * outcomes this seam surfaces (`manual_recovery_required`, `result_missing`,
  * `result_invalid`, unsafe finalization failures such as `reset_failed`,
- * `repo_lock_lost`, `git_failed`, `commit_failed`, or `invalid_input`) and sets
- * the durable `needs_manual_recovery` flag plus the per-run `recovery.md`
- * artifact, exactly as recovery reconcile already does for other blocking
- * codes; the goal-loop / single-shot mechanisms project the same outcomes
- * into their durable round classification.
+ * `repo_lock_lost`, `git_failed`, `commit_failed`, or `invalid_input`) into
+ * their durable round classification.
  */
 
 import { execFileSync } from "node:child_process";
@@ -312,7 +305,7 @@ export function finalizeWorkflowStep(
  * Read the normalized runner-result document a finished step wrote and run
  * {@link finalizeWorkflowStep} from it.
  *
- * A step orchestrator (e.g. `live-step/orchestrator.ts`) is git-agnostic and
+ * A step orchestrator is git-agnostic and
  * its dispatch result carries the runner-result file *path* rather than the
  * parsed `RunnerResult`; the executor boundary deliberately drops the
  * domain-shaped commit intent. This seam is therefore where the run-level
@@ -449,8 +442,8 @@ function errnoCode(error: unknown): string | undefined {
 }
 
 // The `live workflow step ...` reason wording is the preserved durable contract
-// (pinned by the finalize / run-recovery tests and surfaced in recovery
-// artifacts); it is kept verbatim across the relocation.
+// (pinned by the finalize tests and surfaced in recovery artifacts); it is
+// kept verbatim across the relocation.
 function manualRecovery(
   trigger: WorkflowStepFinalizeRecoveryTrigger,
   expectedHead: string,
