@@ -5,7 +5,6 @@ Operator-facing CLI envelopes for the `source list`, `source get`, `source link`
 See also:
 
 - [docs/intent-commands.md](intent-commands.md) — the `intent list` / `get` / `apply` / `skip` / `cancel` envelopes that the project rollup surfaces.
-- [docs/status.md](status.md) and [docs/handoff.md](handoff.md) — linked `sourceItems` / `source_items` summaries on the per-goal inspectors.
 - [docs/doctor.md](doctor.md) — the aggregate `sources` block (`totalSourceItems`, `linkedSourceItems`, `lastReconciliation`).
 
 ## `source list`

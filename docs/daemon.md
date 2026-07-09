@@ -7,10 +7,10 @@ See also:
 
 - [`docs/recovery.md`](recovery.md) for stale-lease auto-recovery and the
   manual-recovery artifact / `needs_manual_recovery` flag.
-- [`docs/walkthrough.md`](walkthrough.md) for the end-to-end managed daemon
-  drain narrative.
-- [`docs/failure-reset.md`](failure-reset.md) for per-iteration outcome
-  semantics that the managed loop composes via `runWorkerOnce`.
+- [`docs/walkthrough.md`](walkthrough.md) for the end-to-end workflow smoke
+  that composes a bounded daemon cycle.
+- [`docs/failure-reset.md`](failure-reset.md) for the retired goal lane's
+  per-iteration outcome semantics preserved in stored artifacts.
 
 ## `daemon start`
 
@@ -57,12 +57,13 @@ JSON envelope shape (register-only):
 ### Managed loop mode
 
 Passing `--max-loop-iterations` or `--max-idle-cycles` opts into the managed
-loop: the process keeps running, drains queued `goal_iteration` jobs in-process
-by composing `runWorkerOnce`, and runs one workflow scheduler tick per cycle to
-recover stale workflow leases, claim one runnable approved workflow step, and
-hand it to the production workflow-step dispatcher. The loop refreshes
+loop: the process keeps running and runs one workflow scheduler tick per cycle
+to recover stale workflow leases, claim one runnable approved workflow step,
+and hand it to the production workflow-step dispatcher. The workflow scheduler
+lane is the daemon's only work lane; the retired goal-first lane's
+`goal_iteration` queue is no longer drained. The loop refreshes
 `daemon_runs.heartbeat_at` / `active_job_id` / `reconcile_count` per cycle,
-applies deterministic idle backoff between empty polls or unexecutable jobs,
+applies deterministic idle backoff between idle cycles,
 and exits cleanly when one of the bounds is reached, `daemon stop` records a
 stop request, `daemon stop --now` records an immediate-stop request, or a
 terminal daemon-run state is observed. `--poll-interval-ms` only tunes the
@@ -70,16 +71,19 @@ bounded loop, defaults to 500ms, accepts non-negative integer millisecond values
 (`0` allowed), and is rejected unless `--max-loop-iterations` or
 `--max-idle-cycles` is also present.
 
-The top-level `ok` field reports loop/process health; `workSucceeded` reports
-whether claimed queued jobs succeeded, and managed-loop mode exits non-zero
-when either `ok` or `workSucceeded` is false. The opt-in surfaces a `loop`
-summary on the response with `exitReason` (`stop_requested` /
+The top-level `ok` field reports loop/process health, and managed-loop mode
+exits non-zero when either `ok` or `workSucceeded` is false. The opt-in
+surfaces a `loop` summary on the response with `exitReason` (`stop_requested` /
 `stop_now_requested` / `run_terminated` / `run_missing` /
 `max_loop_iterations` / `max_idle_cycles` / `internal_error`),
 `terminalState`, `cancelOutcome`, `workSucceeded`, `iterations`, `jobsRun`,
 `jobsFailed`, `jobsNotExecuted`, `idleCycles`, `workflowStepsDispatched`,
 `lastWorkflowCode`, `lastObservedState`, `lastWorkerCode`, `startupRecovery`,
-and `error`. All loop bounds must be
+and `error`. The `workSucceeded`, `jobsRun`, `jobsFailed`, `jobsNotExecuted`,
+and `lastWorkerCode` fields remain in the frozen envelope from the retired
+goal-iteration drain lane; with that lane retired no queued goal jobs are
+claimed, so they report an empty work lane (`jobsRun: 0`,
+`lastWorkerCode: "no_work"`). All loop bounds must be
 non-negative integers; a `--max-idle-cycles 0` or `--max-loop-iterations 0`
 invocation exits before claiming any work, which is useful as a one-shot
 readiness probe.
@@ -348,12 +352,12 @@ JSON envelope shape (managed loop):
     "iterations": 1,
     "jobsRun": 0,
     "jobsFailed": 0,
-    "jobsNotExecuted": 1,
+    "jobsNotExecuted": 0,
     "idleCycles": 1,
     "workflowStepsDispatched": 0,
-    "lastWorkflowCode": null,
+    "lastWorkflowCode": "idle",
     "lastObservedState": "running",
-    "lastWorkerCode": "not_executed",
+    "lastWorkerCode": "no_work",
     "startupRecovery": {
       "observedAt": 1731500000000,
       "graceMs": 5000,
@@ -444,7 +448,8 @@ terminal/error state. When no daemon has ever started, exits 0 with
 `reconciliation` (`{count, lastReconciledAt}`), `error` (`{message, at}` or
 `null`), and `updatedAt`. The envelope also lists `staleRepoLocks` (active repo
 locks whose `lease_expires_at` is in the past) and `staleClaimedJobs`
-(claimed/running `goal_iteration` jobs whose lease has lapsed), tolerating up
+(stored claimed/running `goal_iteration` jobs from the retired goal lane whose
+lease has lapsed), tolerating up
 to `staleLeaseGraceMs` (5s default) of clock skew, plus `goalsNeedingRecovery`
 listing goals whose durable `needs_manual_recovery` flag is set (each entry
 includes `goalId`, `title`, `goalState`, `recoveryMdPath`, and

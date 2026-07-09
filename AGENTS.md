@@ -6,13 +6,13 @@ Read [`ARCHITECTURE.md`](ARCHITECTURE.md) before changing CLI structure,
 adding command modules, or moving code out of `src/cli.ts`.
 
 ## Project purpose
-Momentum is a TypeScript CLI (Node.js) for queued goal execution across verified iterations with local artifacts.
+Momentum is a TypeScript CLI (Node.js) for durable workflow-run execution across verified steps with local artifacts.
 
 Typical loop:
-1. Run a goal iteration.
+1. Dispatch a workflow step to its executor.
 2. Execute verification.
 3. Commit or reset on failure.
-4. Emit handoff artifacts for continuity.
+4. Persist durable evidence and handoff state for continuity.
 
 ## Where docs live
 The repo has no `internal/` documentation tree.
@@ -44,7 +44,11 @@ current runtime/spec anchor. [`VISION.md`](VISION.md) is the source of truth for
 Momentum's product and engineering opinions.
 
 ## Architecture status
-The CLI architecture contract is stable. Its source of truth is [`ARCHITECTURE.md`](ARCHITECTURE.md): `src/cli.ts` remains the stable parser, top-level dispatch surface, and daemon/recovery/worker/doctor compatibility home; command-family orchestration lives under `src/commands/`; shared JSON/text/help/diagnostic output contracts live under `src/renderers/`; infrastructure-facing clients and runtime adapters live under `src/adapters/`. Public command semantics remain frozen while import-boundary guardrails preserve that shape. The `doctor --json` marker reports `CLI architecture: parser dispatch, command families, renderers, adapters`. Long-form milestone history lives in Obsidian `/Workspaces/Momentum`.
+The CLI architecture contract is stable.
+Its source of truth is [`ARCHITECTURE.md`](ARCHITECTURE.md): `src/cli.ts` remains the stable parser, top-level dispatch surface, and daemon/recovery/doctor compatibility home; the goal-first CLI lane and `worker run` are retired; command-family orchestration lives under `src/commands/`; shared JSON/text/help/diagnostic output contracts live under `src/renderers/`; infrastructure-facing clients and runtime adapters live under `src/adapters/`.
+Public command semantics remain frozen while import-boundary guardrails preserve that shape.
+The `doctor --json` marker reports `CLI architecture: parser dispatch, command families, renderers, adapters`.
+Long-form milestone history lives in Obsidian `/Workspaces/Momentum`.
 
 Workflow-first runtime, executor-loop, coding-workflow ownership,
 external-apply, source-adapter, runtime-consolidation, and adapter-test

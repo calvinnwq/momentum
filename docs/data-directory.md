@@ -1,14 +1,12 @@
 # Data directory layout
 
-Canonical reference for the on-disk artifact tree Momentum writes per goal, the SQLite database that backs durable state, and the per-iteration / per-goal lifecycle of each file.
+Canonical reference for the SQLite database that backs durable state, the workflow runtime tables, and the per-goal artifact tree. The `goals/<goal-id>/` artifact trees are durable compatibility data written by the retired goal-first lane; nothing writes new goal iterations anymore, but `recovery clear`, daemon startup recovery, `daemon status`, and `doctor` keep reading the stored rows and artifacts.
 
 See also:
 
-- [docs/goal-start.md](goal-start.md) — `goal start` queued / foreground envelopes; iteration 1 artifact bootstrap.
-- [docs/worker-run.md](worker-run.md) — `worker run` pipeline that materializes later iteration directories and persists `result_path` / `error_path`.
-- [docs/failure-reset.md](failure-reset.md) — per-iteration outcome matrix and `verification.log` capture rules.
+- [docs/failure-reset.md](failure-reset.md) — the retired lane's per-iteration outcome matrix and `verification.log` capture rules preserved in stored artifacts.
 - [docs/recovery.md](recovery.md) — `recovery.md` artifact and the `needs_manual_recovery` flag.
-- [docs/runners.md](runners.md) — `trusted-shell` / `acp` runner profiles and the per-profile `result_file` override.
+- [docs/runners.md](runners.md) — stored `trusted-shell` / `acp` runner-profile blocks and the per-profile `result_file` override.
 - [docs/openclaw-supervise.md](openclaw-supervise.md) — OpenClaw supervisor state and audit files written by `openclaw supervise`.
 
 ## Resolution chain
@@ -19,7 +17,7 @@ State is stored under (in order):
 2. `MOMENTUM_HOME` environment variable, when set.
 3. `~/.momentum` (the default).
 
-Momentum never modifies the data directory outside the resolved path. Each goal lives in its own directory keyed by goal ID, so multiple concurrent goals share the same SQLite database but isolated artifact trees.
+Momentum never modifies the data directory outside the resolved path. Each stored goal lives in its own directory keyed by goal ID, so multiple goals share the same SQLite database but isolated artifact trees.
 
 ## On-disk layout
 
@@ -31,11 +29,11 @@ Momentum never modifies the data directory outside the resolved path. Each goal 
     <encoded-run-id>.auto-actions.jsonl
                                 # Per-run OpenClaw local auto-action audit records
   goals/
-    <goal-id>/
-      goal.md                  # Canonical copy of the goal spec
+    <goal-id>/                 # Durable compatibility data from the retired goal lane
+      goal.md                  # Canonical copy of the stored goal spec
       ledger.md                # Append-only iteration ledger
-      handoff.md               # Populated by `handoff` (empty placeholder until then)
-      handoff.json             # Populated by `handoff` (schema v1)
+      handoff.md               # Populated by the retired lane's handoff surface
+      handoff.json             # Populated by the retired lane's handoff surface (schema v1)
       recovery.md              # Populated when a goal is flagged for manual recovery; includes reason, artifact paths, runner/profile metadata, and prompt path when available
       iterations/
         <n>/
@@ -49,8 +47,8 @@ Momentum never modifies the data directory outside the resolved path. Each goal 
 
 A single `momentum.db` per data directory backs durable state across all goals:
 
-- `goals` — durable goal rows, including `state`, `reducer_decision`, `needs_manual_recovery`, and `linked_source_item_id`.
-- `jobs` — queued / in-flight `goal_iteration` jobs claimed by `worker run` and the managed daemon loop.
+- `goals` — durable goal rows from the retired goal-first lane, including `state`, `reducer_decision`, `needs_manual_recovery`, and `linked_source_item_id`; `recovery clear`, daemon recovery surfaces, and `doctor` still read them.
+- `jobs` — stored `goal_iteration` job rows from the retired goal-first lane; nothing claims them anymore, but daemon startup recovery and `daemon status` still read and reconcile stale rows.
 - `events` — append-only audit stream (`job.succeeded`, `job.failed`, `goal.reduced`, `goal.completed`, `goal.failed`, `goal.recovery_cleared`, etc.).
 - `repo_locks` — per-repo exclusion lease held across an iteration; released on commit / reset / `recovery clear`.
 - `daemon_runs` — orchestrator-run state (register-only or managed-loop), the source of truth for `daemon status` and `doctor`'s daemon-readiness block.
@@ -100,13 +98,13 @@ A single `momentum.db` per data directory backs durable state across all goals:
 
 ## Per-goal artifact files
 
-Files at `<data-dir>/goals/<goal-id>/`:
+Files at `<data-dir>/goals/<goal-id>/`, written by the retired goal-first lane and kept as durable compatibility data:
 
-- `goal.md` — canonical copy of the original goal spec; written at init time.
+- `goal.md` — canonical copy of the original goal spec; written at init time by the retired lane (see [docs/goal-spec.md](goal-spec.md)).
 - `ledger.md` — append-only Markdown ledger; one block per iteration outcome.
-- `handoff.md` — populated by `momentum handoff`; an empty placeholder file is created at init time.
-- `handoff.json` — populated by `momentum handoff` (schema v1); starts as `{}` at init time.
-- `recovery.md` — written lazily when a goal transitions to `needs_manual_recovery`. Intentionally left on disk after `recovery clear` as durable evidence.
+- `handoff.md` — populated by the retired lane's handoff surface; starts as an empty placeholder.
+- `handoff.json` — populated by the retired lane's handoff surface (schema v1); starts as `{}`.
+- `recovery.md` — written lazily when a goal transitions to `needs_manual_recovery`; daemon startup recovery still writes it for stored goals it must park. Intentionally left on disk after `recovery clear` as durable evidence.
 
 ## OpenClaw supervisor state files
 
@@ -121,20 +119,19 @@ Files at `<data-dir>/openclaw-supervisor/`:
 
 ## Per-iteration artifact files
 
-Files at `<data-dir>/goals/<goal-id>/iterations/<n>/`:
+Files at `<data-dir>/goals/<goal-id>/iterations/<n>/`, written per executed iteration by the retired goal-first lane:
 
-- `prompt.md` — rendered iteration prompt; starts empty in queued goals, populated when the iteration is executed.
+- `prompt.md` — rendered iteration prompt; empty in iterations that were never executed.
 - `runner.log` — runner metadata and captured stdout / stderr.
 - `verification.log` — tagged verification command output with a capped capture buffer (see `docs/failure-reset.md`).
-- `result.json` — default runner result envelope. Built-in `trusted-shell` and `acp` runner profiles may report a different result file in the same iteration directory via `trusted_shell.result_file` / `acp.result_file`; the path is recorded on the iteration row.
+- `result.json` — default runner result envelope. Stored `trusted-shell` and `acp` runner profiles may report a different result file in the same iteration directory via `trusted_shell.result_file` / `acp.result_file`; the path is recorded on the iteration row.
 
-## Initialization lifecycle
+## How the retired lane initialized these files
 
-- `goal.md`, `ledger.md`, `handoff.md`, `handoff.json`, and the first iteration artifact files are created up-front during goal initialization.
-- `handoff.md`, `prompt.md`, `runner.log`, and `verification.log` start empty.
-- `handoff.json` and the default `result.json` start as `{}`.
-- `goal start --foreground` populates the iteration artifacts during inline execution.
-- In the queued path, iteration 1 starts with placeholders; later iteration directories and jobs are created by the reducer, and their artifact files are materialized when `momentum worker run` claims and executes that iteration.
+- `goal.md`, `ledger.md`, `handoff.md`, `handoff.json`, and the first iteration artifact files were created up-front during goal initialization.
+- `handoff.md`, `prompt.md`, `runner.log`, and `verification.log` started empty.
+- `handoff.json` and the default `result.json` started as `{}`.
+- Executed iterations populated their artifact files inline; stored goals whose later iterations were never claimed retain the empty placeholders.
 
 ## Operational invariants
 

@@ -38,9 +38,35 @@ describe("docs static site", () => {
       "Executors and apply",
       "OpenClaw supervise",
       "workflow run preview-coding",
-      "Compatibility smoke",
+      "End-to-end smoke",
+      "workflow run start --run-id demo-1",
+      "workflow status demo-1 --json",
+      "workflow handoff demo-1 --json",
     ]) {
       expect(index).toContain(phrase);
+    }
+  });
+
+  it("does not advertise the retired goal-first command lane", () => {
+    for (const retired of [
+      "goal start",
+      "goal-start.html",
+      "worker-run.html",
+      'href="status.html"',
+      'href="logs.html"',
+      'href="handoff.html"',
+    ]) {
+      expect(index).not.toContain(retired);
+      expect(script).not.toContain(retired);
+    }
+    for (const page of [
+      "docs/goal-start.md",
+      "docs/worker-run.md",
+      "docs/status.md",
+      "docs/logs.md",
+      "docs/handoff.md",
+    ]) {
+      expect(fs.existsSync(path.join(repoRoot, page)), `${page} should not exist`).toBe(false);
     }
   });
 

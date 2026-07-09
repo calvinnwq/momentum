@@ -34,7 +34,7 @@ describe("root ARCHITECTURE.md contract", () => {
     expect(architecture).toMatch(/Domain modules must not import command modules or renderers/i);
     expect(architecture).toMatch(/Renderers must not\s+mutate state/i);
     expect(architecture).toMatch(/External adapters stay behind domain or command boundaries/i);
-    expect(architecture).toMatch(/daemon, recovery, worker, and doctor remain deliberate\s+`src\/cli\.ts` compatibility surfaces/i);
+    expect(architecture).toMatch(/daemon,\s+recovery, and doctor remain deliberate\s+`src\/cli\.ts` compatibility surfaces/i);
   });
 
   it("is linked from AGENTS.md and SPEC.md", () => {

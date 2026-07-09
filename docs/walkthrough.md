@@ -1,15 +1,17 @@
 # End-to-end Walkthrough
 
-This page documents the disposable end-to-end run that exercises Momentum's queued default path, the managed daemon drain alternative, and the foreground debug path. It composes the queue / worker, the daemon / recovery, and the iteration → verification → commit / reset transaction into a single repeatable smoke that can be run from any clone of this repo.
+This page documents a disposable end-to-end run that exercises Momentum's workflow-first path: start a durable workflow run, let a bounded daemon cycle run the workflow scheduler lane, and inspect the run through the read-only workflow surfaces.
+It can be run from any clone of this repo with a scratch repository and a scratch `--data-dir`, and it writes nothing outside those scratch directories.
 
 See also:
 
-- [Recovery surfaces](recovery.md) — stale-lease auto-recovery and manual recovery artifacts that this walkthrough's daemon path exercises.
-- [Runner profiles and repo policy](runners.md) — runner family detail referenced by the `runner: fake` example below.
+- [Workflow commands](workflow-commands.md) — the full `workflow run start`, approval, monitor, watch, events, and logs envelopes this walkthrough composes.
+- [Daemon commands](daemon.md) — the managed daemon loop and its workflow scheduler lane.
+- [Recovery surfaces](recovery.md) — stale-lease auto-recovery, run-scoped workflow recovery, and the stored-goal `recovery clear` surface.
 
-## Queued default path
+## Start a durable workflow run
 
-Drive a fresh disposable run from anywhere in this repo. The default path is **queued**: `goal start` enqueues a `goal_iteration` job, and `worker run` drains the queue one iteration at a time.
+Drive a fresh disposable run from anywhere in this repo:
 
 ```bash
 pnpm build
@@ -22,62 +24,65 @@ printf "smoke\n" > "$REPO/README.md"
 git -C "$REPO" add README.md
 git -C "$REPO" commit -m init --quiet
 
-cat > "$DATA/goal.md" <<'EOF'
----
-title: Smoke Goal
-repo: REPO_PLACEHOLDER
-runner: fake
-verification:
-  - "true"
----
+# 1. Check local runtime readiness.
+node dist/index.js doctor --data-dir "$DATA" --json
 
-End-to-end smoke goal.
-EOF
-sed -i.bak "s|REPO_PLACEHOLDER|$REPO|" "$DATA/goal.md" && rm "$DATA/goal.md.bak"
-
-# 1. Enqueue the first iteration (queued default path).
-node dist/index.js goal start "$DATA/goal.md" --data-dir "$DATA" --json
-GOAL_ID=$(ls "$DATA/goals" | head -n 1)
-
-# 2. Drain one queued goal_iteration job.
-node dist/index.js worker run --data-dir "$DATA" --json
-
-# 3. Inspect queued lifecycle through status / logs / handoff.
-node dist/index.js status "$GOAL_ID" --data-dir "$DATA" --json
-node dist/index.js logs "$GOAL_ID" --data-dir "$DATA" --json
-node dist/index.js handoff "$GOAL_ID" --data-dir "$DATA" --json
+# 2. Start a durable workflow run from the built-in coding-workflow definition.
+node dist/index.js workflow run start \
+  --run-id demo-1 \
+  --repo "$REPO" \
+  --objective "Make the requested change" \
+  --data-dir "$DATA" --json
 ```
 
-Replacing the `verification: ["true"]` line with `verification: ["false"]` exercises the failure-reset path: the queued `goal_iteration` job fails, the worktree is reset to its pre-iteration HEAD, `verification.log` records the failed command, and `status --json` exposes `latestJob.errorPath` plus the `artifacts` block for inspection.
+`workflow run start` resolves the built-in `coding-workflow` definition, loads repo policy, and durably persists one `workflow_runs` row plus six ordered `workflow_steps` rows (`preflight`, `implementation`, `postflight`, `no-mistakes`, `merge-cleanup`, `linear-refresh`).
+The success envelope reports `"state": "pending"`, `"definitionKey": "coding-workflow"`, and `"counts": {"steps": 6}`.
 
-## Managed daemon drain
+## Run one bounded daemon cycle
 
-`worker run` is the single-shot consumer (step 2 above): one invocation drains
-one claimed job. The managed loop on `daemon start` is the bounded
-continuous-draining equivalent for queued goals and also runs the workflow
-scheduler lane once per cycle for approved workflow runs. It composes
-`runWorkerOnce` in-process, runs the startup-recovery pre-pass, and exits
-cleanly when a bound, `daemon stop`, `daemon stop --now`, or terminal
-daemon-run state is observed:
+The managed daemon loop is the scheduler for approved workflow steps.
+Each cycle runs a startup-recovery pre-pass and one workflow scheduler tick that recovers stale workflow leases and claims one runnable approved step:
 
 ```bash
-# Drain queued goal_iteration jobs until idle (alternative to repeated `worker run`).
-node dist/index.js daemon start --data-dir "$DATA" --max-idle-cycles 2 --poll-interval-ms 0 --json
+# 3. Run the workflow scheduler lane for one bounded idle cycle.
+node dist/index.js daemon start --data-dir "$DATA" --max-idle-cycles 1 --poll-interval-ms 0 --json
 node dist/index.js daemon status --data-dir "$DATA" --json
 ```
 
-Pick `worker run` when you want a one-shot iteration claim with no
-orchestrator-run record; pick `daemon start --max-*` when you want to drain
-multiple chained iterations under a single `daemon_runs` row that `daemon status`, `status --json`, and `handoff` can surface.
-Goal queue work still uses the same queue and artifacts as `worker run`; workflow run work uses the separate workflow tables and is surfaced through `workflow status`, `workflow handoff`, `workflow run monitor`, `workflow run watch --once`, `workflow run watch --stream --jsonl`, `workflow run events`, and `workflow run logs`.
+With no approved steps yet, the bounded loop exits cleanly with `loop.exitReason: "max_idle_cycles"`, `loop.lastWorkflowCode: "idle"`, and `loop.workflowStepsDispatched: 0`, and `daemon status` then reports the terminal `stopped` daemon run.
+Dispatching real work additionally requires an approval (below) and, for live-wrapper-owned step kinds, a configured `MOMENTUM_LIVE_WRAPPER_PROFILE`; see [Daemon commands](daemon.md).
 
-## Foreground debug path
-
-`--foreground` is an inline debugging path. It bypasses the queue and runs one iteration synchronously, useful when iterating on runner profiles or reproducing a single iteration locally without the worker:
+## Inspect the run
 
 ```bash
-node dist/index.js goal start "$DATA/goal.md" \
-  --foreground --repo "$REPO" --data-dir "$DATA" --runner fake --json
+# 4. Inspect durable run state, logs/evidence, and the next-action packet.
+node dist/index.js workflow status demo-1 --data-dir "$DATA" --json
+node dist/index.js workflow run logs demo-1 --data-dir "$DATA" --json
+node dist/index.js workflow handoff demo-1 --data-dir "$DATA" --json
 ```
 
-Day-to-day execution should use the default queued path so the reducer can chain iterations and the queue can be inspected with `status` / `logs` / `handoff`.
+All three surfaces are read-only:
+
+- `workflow status demo-1` returns the run row plus every step with its `kind`, `state`, and ordering.
+- `workflow run logs demo-1` returns the same detail shape plus `invocations` and `rounds` evidence arrays (both empty until an executor has run).
+- `workflow handoff demo-1` lifts `nextAction` to the top level; on a fresh run it reports `code: "await_approval"` with `actionClass: "approve_next_gate"` for the `preflight` step.
+
+## Approve and continue
+
+Recording a durable approval is what makes steps runnable for the scheduler lane:
+
+```bash
+# 5. Record an explicit approval boundary for the run.
+node dist/index.js workflow run approve demo-1 \
+  --approval-boundary through-implementation \
+  --phrase "approve demo-1 through implementation" \
+  --actor operator \
+  --data-dir "$DATA" --json
+node dist/index.js workflow handoff demo-1 --data-dir "$DATA" --json
+```
+
+After the approval, the run state is `approved`, the steps inside the boundary are `approved`, and `workflow handoff` reports `code: "advance_to_step"` with `actionClass: "continue_polling"` for `preflight`.
+From here, the next bounded `daemon start --max-idle-cycles ...` cycle can claim and dispatch the approved step when a live-wrapper profile is configured.
+
+For ongoing supervision — `workflow run monitor`, `workflow run watch --once`, `workflow run watch --stream --jsonl`, and `workflow run events` — see [Workflow commands](workflow-commands.md).
+For manual-recovery flags, `workflow run clear-recovery`, and the stored-goal `recovery clear <goal-id>` surface, see [Recovery surfaces](recovery.md).

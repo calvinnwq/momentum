@@ -3,7 +3,7 @@
 Operator-facing CLI envelopes for the `workflow run start`, `workflow run start-coding`, `workflow run preview-coding`, `workflow import`, `workflow status`, `workflow handoff`, `workflow run list`, `workflow run approve`, `workflow run decide`, `workflow run update-step`, `workflow run clear-recovery`, `workflow run monitor`, `workflow run watch`, `workflow run events`, and `workflow run logs` commands.
 
 - `workflow run start` starts a first-class workflow run from a validated workflow definition: it resolves the definition (a persisted definition, or the built-in `coding-workflow` recipe), loads repo policy, and durably materializes a `workflow_runs` row plus one ordered `workflow_steps` row per definition step, with an approval row when an approval boundary is supplied.
-  `goal start` remains the compatibility path for the older Goal loop.
+  The older goal-first start lane is retired; workflow starts are the only start doors.
 - `workflow run start-coding` is the explicit Momentum-native coding-workflow start door: a thin selector over `workflow run start` that always uses the built-in `coding-workflow` definition, refuses run ids reserved for compatibility imports, and records the run with a Momentum-native source so it is unmistakably Momentum-owned.
   Use it to intentionally choose Momentum orchestration for a new coding workflow; the ordinary definition-sourced start and the imported compatibility runs are unchanged.
 - `workflow run preview-coding` is the read-only plan preview for the Momentum-native coding workflow: it runs the same precondition checks and built-in definition resolution as `workflow run start-coding` but stops before any durable write, emitting a frozen plan an operator can inspect before approval or execution.
@@ -245,7 +245,7 @@ See also:
 momentum workflow run start --run-id <id> --repo <path> --objective <text> [--definition <key>] [--definition-version <n>] [--approval-boundary <boundary>] [--skill-revision <text>] [--issue-scope <identifier>] [--profile <name>] [--data-dir <path>] [--json]
 ```
 
-Starts a first-class workflow run from a validated workflow definition and emits a stable JSON/text envelope. This is the definition-sourced start surface; `goal start` is left intact as the compatibility path for the older Goal loop.
+Starts a first-class workflow run from a validated workflow definition and emits a stable JSON/text envelope. This is the definition-sourced start surface; the retired goal-first start lane no longer exists, so this and `workflow run start-coding` are the only start doors.
 
 Required arguments:
 
