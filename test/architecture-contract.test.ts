@@ -20,7 +20,7 @@ describe("root ARCHITECTURE.md contract", () => {
     expect(architecture.split("\n").length).toBeLessThan(205);
   });
 
-  it("links compact repo contracts and routes long-form internal docs to Obsidian", () => {
+  it("links compact repo contracts and routes long-form internal docs to the personal wiki", () => {
     expect(architecture).toContain("SPEC.md");
     expect(fs.existsSync(path.join(repoRoot, "SPEC.md")), "SPEC.md should exist").toBe(true);
     expect(architecture).toContain("/Workspaces/Momentum");

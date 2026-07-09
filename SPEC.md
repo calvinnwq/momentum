@@ -2,8 +2,8 @@
 
 This file is the compact repo anchor for current runtime, workflow, and
 documentation contracts. Long-form planning history, milestone provenance,
-readiness notes, dogfood evidence, and migration rationale live in Obsidian
-`/Workspaces/Momentum`.
+readiness notes, dogfood evidence, and migration rationale live in the
+personal wiki `/Workspaces/Momentum`.
 
 [`VISION.md`](VISION.md) is the companion product and engineering opinion anchor.
 When choosing workflow shape, preflight boundaries, recovery behavior, monitor
@@ -286,10 +286,10 @@ explicit policy checks.
 
 Current behavior belongs in source, tests, `README.md`, `ARCHITECTURE.md`,
 `AGENTS.md`, `SPEC.md`, and public/operator docs. Historical milestone detail
-and issue provenance belong in Obsidian.
+and issue provenance belong in the personal wiki.
 
 The repository must not contain an `internal/` documentation tree. Durable
-internal docs live in Obsidian `/Workspaces/Momentum`; repo anchors stay short
+internal docs live in the personal wiki `/Workspaces/Momentum`; repo anchors stay short
 and live only in `README.md`, `AGENTS.md`, `ARCHITECTURE.md`, `SPEC.md`, or
 narrowly scoped operator docs under `docs/`.
 
@@ -298,4 +298,4 @@ If a future exception is ever needed, it must be explicit, reviewed, and protect
 
 If a future note grows into planning, contract narrative, milestone provenance,
 readiness evidence, dogfood evidence, or migration rationale, move it to
-Obsidian and keep at most a compact repo anchor.
+the personal wiki and keep at most a compact repo anchor.

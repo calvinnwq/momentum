@@ -11,7 +11,7 @@
  * `definition/definition.ts`.
  *
  * Scope decisions pinned here, grounded in the compact Workflow Safety anchor in
- * SPEC.md plus the long-form planning contracts externalized to Obsidian:
+ * SPEC.md plus the long-form planning contracts externalized to the personal wiki:
  *
  *   - Gate types are the contract's nine durable human-gate classes. They are
  *     re-exported from `src/core/executors/loop/reducer.ts` so a workflow gate and an

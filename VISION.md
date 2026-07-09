@@ -2,7 +2,7 @@
 
 This file is the compact product opinion anchor.
 [`SPEC.md`](SPEC.md) holds runtime contracts; [`ARCHITECTURE.md`](ARCHITECTURE.md) holds source structure.
-Long-form planning, milestone history, and rationale live in Obsidian `/Workspaces/Momentum`.
+Long-form planning, milestone history, and rationale live in the personal wiki `/Workspaces/Momentum`.
 
 ## What Momentum Is
 
@@ -170,5 +170,5 @@ Nothing in the core schema, CLI, or envelopes may name the maintainer's tools; t
 
 This file is the compact product opinion anchor, not a planning archive.
 [`SPEC.md`](SPEC.md) holds runtime contracts; [`ARCHITECTURE.md`](ARCHITECTURE.md) holds source structure; public docs describe shipped behavior only.
-Long-form planning, milestone history, dogfood evidence, and migration rationale live in Obsidian `/Workspaces/Momentum`.
+Long-form planning, milestone history, dogfood evidence, and migration rationale live in the personal wiki `/Workspaces/Momentum`.
 There are no standing exceptions for repo-local `internal/` docs; any future exception must be explicit, reviewed, and protected by the docs-boundary tests.

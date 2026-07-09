@@ -87,7 +87,7 @@ describe("public docs hygiene", () => {
         const matches = surface.body.match(/\bNGX-\d+\b/g) ?? [];
         expect(
           matches,
-          `${surface.label} should not contain NGX-* identifiers; move to Obsidian /Workspaces/Momentum`
+          `${surface.label} should not contain NGX-* identifiers; move to the personal wiki /Workspaces/Momentum`
         ).toEqual([]);
       });
     }
@@ -113,7 +113,7 @@ describe("public docs hygiene", () => {
         }
         expect(
           hits,
-          `${surface.label} should not reference milestone planning vocabulary; move to Obsidian /Workspaces/Momentum`
+          `${surface.label} should not reference milestone planning vocabulary; move to the personal wiki /Workspaces/Momentum`
         ).toEqual([]);
       });
     }

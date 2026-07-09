@@ -18,7 +18,7 @@
  *
  * Scope decisions pinned here, grounded in the compact Runtime Model and
  * Workflow Safety anchors in SPEC.md plus the long-form planning contracts
- * externalized to Obsidian:
+ * externalized to the personal wiki:
  *
  *   - A run's durable step rows mirror the definition graph exactly: one
  *     {@link WorkflowStepRecord} per {@link StepDefinition}, materialized in

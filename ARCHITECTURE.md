@@ -45,12 +45,13 @@ Use these docs for detailed behavior:
 - [SPEC.md](SPEC.md): compact current runtime, workflow, external-apply,
   source-adapter, coding-workflow ownership, runtime-consolidation, and
   adapter-test contracts.
-- Obsidian `/Workspaces/Momentum`: long-form internal plans, contracts,
+- The personal wiki `/Workspaces/Momentum`: long-form internal plans, contracts,
   milestone provenance, roadmap sequencing, dogfood evidence, readiness notes,
   and migration rationale.
 
 The repo intentionally has no `internal/` documentation tree. Historical
-internal planning docs were externalized to Obsidian during DOCS-02/DOCS-03; do
+internal planning docs were externalized to the personal wiki during
+DOCS-02/DOCS-03; do
 not recreate `internal/`.
 
 There are no standing exceptions for repo-local `internal/` docs.
@@ -83,7 +84,7 @@ placeholder-free pending homes, and import guards; ARCH-03 populated
 now empty. High-density workflow and executor modules are grouped under local
 folders documented by each domain `README.md`. Detailed current rules live in
 this file and [SPEC.md](SPEC.md); long-form architecture migration rationale
-lives in Obsidian `/Workspaces/Momentum`.
+lives in the personal wiki `/Workspaces/Momentum`.
 
 The import direction is fixed:
 
@@ -183,7 +184,8 @@ new shared bucket.
   and doctor compatibility surfaces; broad extraction of those surfaces
   belongs to a future scoped issue.
 - Public docs stay in `docs/`; milestone sequencing, NGX detail, dogfood
-  evidence, and planning rationale live in Obsidian `/Workspaces/Momentum` by
+  evidence, and planning rationale live in the personal wiki
+  `/Workspaces/Momentum` by
   default. Keep only short repo anchors when the source tree needs a pointer.
 - Every extraction should leave the repo valid with focused tests, typecheck,
   and build passing.

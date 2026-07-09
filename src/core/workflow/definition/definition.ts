@@ -13,7 +13,7 @@
  * adapters stay outside this primitive module.
  *
  * Scope decisions pinned here, grounded in the compact runtime anchors in
- * SPEC.md and the long-form planning contracts externalized to Obsidian:
+ * SPEC.md and the long-form planning contracts externalized to the personal wiki:
  *
  *   - `StepDefinition.executor` names an executor *family* only. The rich
  *     per-step executor configuration (agent / model / effort / policy) is the
