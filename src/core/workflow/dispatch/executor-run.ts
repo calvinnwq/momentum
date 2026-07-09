@@ -226,6 +226,14 @@ export type ExecuteAndReconcileDispatchedStepResult = {
   status: WorkflowExecuteReconcileStatus;
   /** The executor result, when the executor was run this call. */
   executorResult?: WorkflowStepExecutorDispatchResult;
+  /**
+   * The post-finalization result that was terminalized, when the executor was
+   * run this call: the raw `executorResult` mapped through the repo-safety
+   * verify -> commit / reset outcome. Callers judging worktree state (e.g. the
+   * repo-lock settle) must use this, not the raw result - a wrapper can report
+   * `succeeded` while finalization refused to commit or reset.
+   */
+  finalizedResult?: WorkflowStepExecutorDispatchResult;
   /** The terminalize outcome, when the executor was run this call. */
   terminalize?: TerminalizeDispatchedExecutorResult;
   /** The reconciliation outcome, when reconciliation was attempted. */
@@ -350,6 +358,7 @@ export function executeAndReconcileDispatchedWorkflowStep(
     return {
       status: WORKFLOW_EXECUTE_RECONCILE_STATUS.reconcileDeferred,
       executorResult,
+      finalizedResult: finalized.result,
       terminalize,
       detail: reconciled.detail
     };
@@ -358,6 +367,7 @@ export function executeAndReconcileDispatchedWorkflowStep(
   return {
     status: WORKFLOW_EXECUTE_RECONCILE_STATUS.executedAndReconciled,
     executorResult,
+    finalizedResult: finalized.result,
     terminalize,
     reconcile: reconciled.reconcile
   };

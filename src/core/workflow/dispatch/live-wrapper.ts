@@ -59,7 +59,8 @@ import {
   recordDispatchedStepManualRecovery,
   recordUnresolvedDispatchedStepContext,
   type DispatchedStepExecutorContext,
-  type DispatchedStepRepoSafetyContext
+  type DispatchedStepRepoSafetyContext,
+  type ExecuteAndReconcileDispatchedStepResult
 } from "./executor-run.js";
 import {
   WORKFLOW_DISPATCH_RESULT_STATUS,
@@ -73,6 +74,7 @@ import {
 import { heartbeatWorkflowLease } from "../leases.js";
 import {
   acquireRepoLock,
+  markRepoLockNeedsManualRecovery,
   releaseRepoLock,
   updateRepoLockHeartbeat
 } from "../../repo/locks.js";
@@ -217,8 +219,9 @@ export function createLiveWrapperWorkflowDispatch(
             recoveryCode: "repo_lock_lost"
           });
         } else {
+          let outcome: ExecuteAndReconcileDispatchedStepResult | undefined;
           try {
-            executeAndReconcileDispatchedWorkflowStep({
+            outcome = executeAndReconcileDispatchedWorkflowStep({
               db: context.db,
               runId: claim.runId,
               stepId: claim.stepId,
@@ -237,10 +240,13 @@ export function createLiveWrapperWorkflowDispatch(
             });
           } finally {
             if (repoLock.lockId !== null) {
-              releaseRepoLock(context.db, {
-                lockId: repoLock.lockId,
-                now: nowMs()
-              });
+              settleDispatchRepoOwnership(
+                context,
+                claim,
+                repoLock.lockId,
+                outcome,
+                nowMs()
+              );
             }
           }
         }
@@ -390,6 +396,53 @@ function acquireDispatchRepoOwnership(
     ok: false,
     error: `repository ${exec.repoPath} is locked by ${acquired.existing.holder} (run ${acquired.existing.goal_id}, ${acquired.existing.job_id}); refusing to execute and finalize ${claim.runId}/${claim.stepId} over a shared worktree`
   };
+}
+
+/**
+ * Settle the repo lock after a dispatched execution. Releasing is only safe
+ * when the worktree state is PROVEN clean: the executor never ran this tick,
+ * or finalization ended in a clean terminal (`succeeded` = committed;
+ * `failed` = reset proven or nothing to commit). Every other outcome - a
+ * process-level wrapper failure, an untrusted result document, a moved HEAD,
+ * a failed reset, lost ownership, or an unexpected `skipped` terminal - may
+ * leave the wrapper's uncommitted edits in the worktree, so the lock is
+ * marked `needs_manual_recovery` instead: it keeps blocking other runs (whose
+ * whole-worktree `git add -A` commit would sweep the leftovers into their
+ * evidence) until the operator inspects the repository. The mark only touches
+ * a still-`active` lock, so ownership already lost or re-marked by stale-lock
+ * recovery is never clobbered back to `released`.
+ */
+function settleDispatchRepoOwnership(
+  context: WorkflowStepDispatchContext,
+  claim: ClaimedWorkflowStep,
+  lockId: string,
+  outcome: ExecuteAndReconcileDispatchedStepResult | undefined,
+  now: number
+): void {
+  const executorRanThisTick =
+    outcome !== undefined &&
+    outcome.status !== WORKFLOW_EXECUTE_RECONCILE_STATUS.notDispatched &&
+    outcome.status !== WORKFLOW_EXECUTE_RECONCILE_STATUS.stepNotFound &&
+    outcome.status !== WORKFLOW_EXECUTE_RECONCILE_STATUS.stepNotRunning;
+  // Judge the worktree by the POST-finalization result: a wrapper can report
+  // `succeeded` while finalization refused to commit or reset over it.
+  const finalized = outcome?.finalizedResult;
+  const provenClean =
+    outcome !== undefined &&
+    (!executorRanThisTick ||
+      (finalized !== undefined &&
+        finalized.ok &&
+        (finalized.result.state === "succeeded" ||
+          finalized.result.state === "failed")));
+  if (provenClean) {
+    releaseRepoLock(context.db, { lockId, now });
+    return;
+  }
+  markRepoLockNeedsManualRecovery(context.db, {
+    lockId,
+    now,
+    recoveryStatus: `dispatched step ${claim.runId}/${claim.stepId} parked with an unproven worktree; inspect the repository before clearing`
+  });
 }
 
 function withAttemptScopedEvidencePaths(

@@ -766,6 +766,61 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
     expect(fs.existsSync(path.join(repoPath, "live-edit.txt"))).toBe(true);
   });
 
+  it("keeps the repository lock guarding an unproven worktree after a manual-recovery park", () => {
+    const db = openSeededDb();
+    const claim = approveAndClaim(db, "preflight");
+    const { repoPath } = initRepo();
+    const runDir = makeTempDir("momentum-livewrap-run-");
+    const { registry } = countingRegistry((input) => {
+      fs.mkdirSync(input.runDir, { recursive: true });
+      fs.writeFileSync(path.join(repoPath, "live-edit.txt"), "edit\n", "utf-8");
+      // An untrusted result document: finalization refuses to commit or reset,
+      // so the wrapper's edit is still sitting in the worktree.
+      fs.writeFileSync(input.resultJsonPath, "{not json", "utf-8");
+      return succeededResult(input);
+    });
+    const exec: DispatchedStepExecutorContext = {
+      repoPath,
+      runDir,
+      resultJsonPath: path.join(runDir, "result.json"),
+      executorLogPath: path.join(runDir, "executor.log"),
+      repoSafety: {
+        baseHead: runGit(repoPath, ["rev-parse", "HEAD"]),
+        verificationCommands: ["true"],
+        verificationTimeoutSec: 30,
+        verificationLogPath: path.join(runDir, "verification.log")
+      }
+    };
+    const dispatch = createLiveWrapperWorkflowDispatch(
+      executeWorkflowStepDispatch,
+      { registry, deriveExec: () => ({ ok: true, exec }), nowMs: () => TICK_AT }
+    );
+
+    dispatch(claim, tickContext(db));
+
+    expect(
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+    ).toBe(true);
+    // The dirty worktree stays guarded: the lock is marked for manual recovery
+    // instead of released, so another run cannot acquire the repository and
+    // sweep the leftover edit into its own commit.
+    const lockRow = db
+      .prepare("SELECT state, recovery_status FROM repo_locks WHERE repo_root = ?")
+      .get(repoPath) as { state: string; recovery_status: string | null };
+    expect(lockRow.state).toBe("needs_manual_recovery");
+    expect(lockRow.recovery_status).toContain("unproven worktree");
+    const blocked = acquireRepoLock(db, {
+      repoRoot: repoPath,
+      holder: "other-worker",
+      goalId: "run-other",
+      iteration: 1,
+      jobId: "run-other::implementation::dispatch",
+      leaseExpiresAt: TICK_AT + 600_000,
+      now: TICK_AT + 2
+    });
+    expect(blocked.ok).toBe(false);
+  });
+
   it("preserves precise finalization recovery context and writes recovery.md", () => {
     const db = openSeededDb();
     const claim = approveAndClaim(db, "preflight");
