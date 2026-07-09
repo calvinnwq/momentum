@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
@@ -14,8 +13,8 @@ import {
 } from "../src/core/daemon/runs.js";
 import {
   runDaemonLoop,
-  type DaemonLoopInput,
-  type DaemonLoopResult
+  type DaemonLoopCycle,
+  type DaemonLoopInput
 } from "../src/core/daemon/loop.js";
 import {
   acquireRepoLock,
@@ -27,16 +26,6 @@ import {
   getQueueJob
 } from "../src/core/daemon/queue-jobs.js";
 import { JOB_RECOVERED_AUTO_REPENDED_STATUS, REPO_LOCK_AUTO_RELEASED_TERMINAL_JOB_STATUS } from "../src/core/daemon/stale-recovery.js";
-import {
-  FAKE_RUNNER_FAIL_ENV,
-  FAKE_RUNNER_GOAL_COMPLETE_ENV,
-  FAKE_RUNNER_TRAJECTORY_ENV
-} from "../src/adapters/fake-runner.js";
-import { initGoal } from "../src/core/goal/init.js";
-import type {
-  WorkerRunInput,
-  WorkerRunResult
-} from "../src/core/daemon/worker-run.js";
 import {
   WORKFLOW_DISPATCH_LEASE_KIND,
   type AsyncWorkflowStepDispatch,
@@ -57,69 +46,12 @@ afterEach(() => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   }
-  delete process.env[FAKE_RUNNER_FAIL_ENV];
-  delete process.env[FAKE_RUNNER_GOAL_COMPLETE_ENV];
-  delete process.env[FAKE_RUNNER_TRAJECTORY_ENV];
 });
 
 function makeTempDir(prefix = "momentum-daemon-loop-"): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   tempRoots.push(dir);
   return fs.realpathSync(dir);
-}
-
-function runGit(cwd: string, args: string[]): string {
-  return execFileSync("git", ["-C", cwd, ...args], {
-    encoding: "utf-8",
-    stdio: ["ignore", "pipe", "pipe"]
-  });
-}
-
-function initRepo(): string {
-  const dir = makeTempDir("momentum-daemon-loop-repo-");
-  runGit(dir, ["init", "--initial-branch=main", "--quiet"]);
-  runGit(dir, ["config", "user.email", "daemon-loop@example.com"]);
-  runGit(dir, ["config", "user.name", "Daemon Loop Tester"]);
-  runGit(dir, ["config", "commit.gpgsign", "false"]);
-  fs.writeFileSync(path.join(dir, "README.md"), "daemon loop\n", "utf-8");
-  runGit(dir, ["add", "README.md"]);
-  runGit(dir, ["commit", "-m", "init", "--quiet"]);
-  return dir;
-}
-
-function goalSpec(options: { maxIterations?: number } = {}): string {
-  const maxIterationsLine =
-    options.maxIterations !== undefined
-      ? `max_iterations: ${options.maxIterations}\n`
-      : "";
-  return `---
-title: Daemon Loop Test
-runner: fake
-${maxIterationsLine}verification:
-  - "true"
----
-
-Daemon loop coverage goal.
-`;
-}
-
-function seedQueuedGoal(
-  dataDir: string,
-  repo: string,
-  options: { maxIterations?: number } = {}
-): { goalId: string; jobId: string } {
-  const goalFile = path.join(dataDir, "goal.md");
-  fs.writeFileSync(goalFile, goalSpec(options), "utf-8");
-  const result = initGoal({
-    goalPath: goalFile,
-    repoOverride: repo,
-    dataDirOptions: { dataDir },
-    mode: "queued"
-  });
-  if (!result.ok) {
-    throw new Error(`seedQueuedGoal: ${result.error}`);
-  }
-  return { goalId: result.goalId, jobId: result.jobId };
 }
 
 function seedDaemonRun(db: MomentumDb): string {
@@ -166,14 +98,7 @@ describe("runDaemonLoop", () => {
         pollIntervalMs: 25,
         maxIdleCycles: 3,
         now: makeMonotonicNow(),
-        sleep,
-        runWorker: () => ({
-          code: "no_work",
-          workerId: "daemon-loop-idle",
-          dataDir,
-          outcome: "idle",
-          message: "no work"
-        })
+        sleep
       });
 
       expect(result.exitReason).toBe("max_idle_cycles");
@@ -183,12 +108,63 @@ describe("runDaemonLoop", () => {
       expect(result.iterations).toBe(3);
       expect(result.jobsRun).toBe(0);
       expect(result.jobsFailed).toBe(0);
+      expect(result.lastWorkerCode).toBe("no_work");
       expect(calls).toEqual([25, 25, 25]);
 
       const row = getDaemonRun(db, runId);
       expect(row?.state).toBe("stopped");
       expect(row?.reconcile_count).toBe(3);
       expect(row?.active_job_id).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("pins the retired goal-drain envelope fields to their idle values", async () => {
+    const dataDir = makeTempDir();
+    const db = openDb(dataDir);
+    try {
+      const idleRunId = seedDaemonRun(db);
+      const idleResult = await runDaemonLoop({
+        db,
+        dataDir,
+        runId: idleRunId,
+        workerId: "daemon-loop-envelope-idle",
+        pollIntervalMs: 0,
+        maxIdleCycles: 1,
+        now: makeMonotonicNow(),
+        sleep: async () => undefined
+      });
+
+      expect(idleResult.exitReason).toBe("max_idle_cycles");
+      expect(idleResult.jobsRun).toBe(0);
+      expect(idleResult.jobsFailed).toBe(0);
+      expect(idleResult.jobsNotExecuted).toBe(0);
+      expect(idleResult.workSucceeded).toBe(true);
+      expect(idleResult.lastWorkerCode).toBe("no_work");
+      expect(idleResult.iterations).toBe(1);
+      expect(idleResult.idleCycles).toBe(1);
+
+      // A zero-cycle run never stamps the retired lane's per-cycle code.
+      const zeroRunId = seedDaemonRun(db);
+      const zeroResult = await runDaemonLoop({
+        db,
+        dataDir,
+        runId: zeroRunId,
+        workerId: "daemon-loop-envelope-zero",
+        pollIntervalMs: 0,
+        maxIdleCycles: 0,
+        now: makeMonotonicNow(),
+        sleep: async () => undefined
+      });
+
+      expect(zeroResult.exitReason).toBe("max_idle_cycles");
+      expect(zeroResult.iterations).toBe(0);
+      expect(zeroResult.lastWorkerCode).toBeNull();
+      expect(zeroResult.jobsRun).toBe(0);
+      expect(zeroResult.jobsFailed).toBe(0);
+      expect(zeroResult.jobsNotExecuted).toBe(0);
+      expect(zeroResult.workSucceeded).toBe(true);
     } finally {
       db.close();
     }
@@ -212,10 +188,7 @@ describe("runDaemonLoop", () => {
         runId,
         workerId: "daemon-loop-stop",
         sleep,
-        now: makeMonotonicNow(),
-        runWorker: () => {
-          throw new Error("runWorker should not be called when stop_requested");
-        }
+        now: makeMonotonicNow()
       });
 
       expect(result.exitReason).toBe("stop_requested");
@@ -236,7 +209,6 @@ describe("runDaemonLoop", () => {
     const db = openDb(dataDir);
     try {
       const runId = seedDaemonRun(db);
-      let cycleCount = 0;
       const { calls, sleep } = makeRecordingSleep();
 
       const result = await runDaemonLoop({
@@ -248,22 +220,14 @@ describe("runDaemonLoop", () => {
         now: makeMonotonicNow(),
         sleep,
         maxIdleCycles: 10,
-        runWorker: () => {
-          cycleCount += 1;
-          if (cycleCount === 1) {
+        onCycleComplete: (cycle) => {
+          if (cycle.cycleIndex === 0) {
             requestDaemonRunStop(db, {
               runId,
               reason: "operator stop",
               now: 200_000
             });
           }
-          return {
-            code: "no_work",
-            workerId: "daemon-loop-stop-mid",
-            dataDir,
-            outcome: "idle",
-            message: "no work"
-          };
         }
       });
 
@@ -296,12 +260,7 @@ describe("runDaemonLoop", () => {
         runId,
         workerId: "daemon-loop-stop-now-idle",
         sleep: makeRecordingSleep().sleep,
-        now: makeMonotonicNow(),
-        runWorker: () => {
-          throw new Error(
-            "runWorker should not be called when stop_now_requested before any cycle"
-          );
-        }
+        now: makeMonotonicNow()
       });
 
       expect(result.exitReason).toBe("stop_now_requested");
@@ -343,10 +302,7 @@ describe("runDaemonLoop", () => {
         runId,
         workerId: "daemon-loop-terminal-canceled",
         sleep: makeRecordingSleep().sleep,
-        now: makeMonotonicNow(),
-        runWorker: () => {
-          throw new Error("runWorker should not be called for terminal runs");
-        }
+        now: makeMonotonicNow()
       });
 
       expect(result.exitReason).toBe("run_terminated");
@@ -356,93 +312,6 @@ describe("runDaemonLoop", () => {
       const row = getDaemonRun(db, runId);
       expect(row?.state).toBe("canceled");
       expect(row?.finished_at).toBe(100_750);
-    } finally {
-      db.close();
-    }
-  });
-
-  it("upgrades to canceled mid-loop with active_job_completed when a job ran first", async () => {
-    const dataDir = makeTempDir();
-    const db = openDb(dataDir);
-    try {
-      const runId = seedDaemonRun(db);
-      let cycleCount = 0;
-      const { sleep } = makeRecordingSleep();
-
-      const runWorker = (input: WorkerRunInput): WorkerRunResult => {
-        cycleCount += 1;
-        if (cycleCount > 1) {
-          throw new Error(
-            "runWorker should not run after stop_now is observed"
-          );
-        }
-        const claimedAt = input.now ? input.now() : Date.now();
-        input.hooks?.onJobClaimed?.({
-          goalId: "goal-a",
-          jobId: "job-a",
-          lockId: "lock-a",
-          iteration: 1,
-          workerId: input.workerId,
-          now: claimedAt
-        });
-        const releasedAt = input.now ? input.now() : Date.now();
-        input.hooks?.onJobReleased?.({
-          goalId: "goal-a",
-          jobId: "job-a",
-          lockId: "lock-a",
-          iteration: 1,
-          workerId: input.workerId,
-          now: releasedAt,
-          outcome: "success"
-        });
-        requestDaemonRunImmediateStop(db, {
-          runId,
-          reason: "operator-now",
-          now: 200_000
-        });
-        return {
-          code: "ran_job",
-          ok: true,
-          workerId: input.workerId,
-          dataDir,
-          outcome: "ran_job",
-          goalId: "goal-a",
-          jobId: "job-a",
-          lockId: "lock-a",
-          goalState: "completed",
-          jobState: "succeeded",
-          iteration: 1,
-          repoRoot: "/tmp/fake",
-          leaseExpiresAt: claimedAt + 1_000,
-          heartbeatAt: claimedAt,
-          jobIterationResult: { ok: true } as never,
-          reducer: null,
-          reducerError: null,
-          message: "mocked ran_job"
-        } as WorkerRunResult;
-      };
-
-      const result = await runDaemonLoop({
-        db,
-        dataDir,
-        runId,
-        workerId: "daemon-loop-stop-now-mid",
-        pollIntervalMs: 5,
-        now: makeMonotonicNow(),
-        sleep,
-        maxIdleCycles: 10,
-        runWorker
-      });
-
-      expect(result.exitReason).toBe("stop_now_requested");
-      expect(result.terminalState).toBe("canceled");
-      expect(result.cancelOutcome).toBe("active_job_completed");
-      expect(result.iterations).toBe(1);
-      expect(result.jobsRun).toBe(1);
-
-      const row = getDaemonRun(db, runId);
-      expect(row?.state).toBe("canceled");
-      expect(row?.cancel_outcome).toBe("active_job_completed");
     } finally {
       db.close();
     }
@@ -470,12 +339,7 @@ describe("runDaemonLoop", () => {
         runId,
         workerId: "daemon-loop-stop-now-upgrade",
         sleep: makeRecordingSleep().sleep,
-        now: makeMonotonicNow(),
-        runWorker: () => {
-          throw new Error(
-            "runWorker should not be called once stop_now is observed"
-          );
-        }
+        now: makeMonotonicNow()
       });
 
       expect(result.exitReason).toBe("stop_now_requested");
@@ -486,40 +350,6 @@ describe("runDaemonLoop", () => {
       expect(row?.state).toBe("canceled");
       expect(row?.stop_requested_at).toBe(100_100);
       expect(row?.stop_now_requested_at).toBe(100_500);
-    } finally {
-      db.close();
-    }
-  });
-
-  it("records error terminal state when runWorker throws", async () => {
-    const dataDir = makeTempDir();
-    const db = openDb(dataDir);
-    try {
-      const runId = seedDaemonRun(db);
-
-      const result = await runDaemonLoop({
-        db,
-        dataDir,
-        runId,
-        workerId: "daemon-loop-error",
-        pollIntervalMs: 5,
-        now: makeMonotonicNow(),
-        sleep: async () => undefined,
-        runWorker: () => {
-          throw new Error("worker boom");
-        }
-      });
-
-      expect(result.exitReason).toBe("internal_error");
-      expect(result.terminalState).toBe("error");
-      expect(result.ok).toBe(false);
-      expect(result.workSucceeded).toBe(true);
-      expect(result.error).toBe("worker boom");
-
-      const row = getDaemonRun(db, runId);
-      expect(row?.state).toBe("error");
-      expect(row?.error).toBe("worker boom");
-      expect(row?.error_at).not.toBeNull();
     } finally {
       db.close();
     }
@@ -540,14 +370,7 @@ describe("runDaemonLoop", () => {
         now: makeMonotonicNow(),
         sleep: async () => {
           throw new Error("sleep boom");
-        },
-        runWorker: () => ({
-          code: "no_work",
-          workerId: "daemon-loop-sleep-error",
-          dataDir,
-          outcome: "idle",
-          message: "no work"
-        })
+        }
       });
 
       expect(result.exitReason).toBe("internal_error");
@@ -580,10 +403,7 @@ describe("runDaemonLoop", () => {
       workerId: "daemon-loop-db-error",
       pollIntervalMs: 0,
       now: makeMonotonicNow(),
-      sleep: async () => undefined,
-      runWorker: () => {
-        throw new Error("runWorker should not be called");
-      }
+      sleep: async () => undefined
     });
 
     expect(result.exitReason).toBe("internal_error");
@@ -607,10 +427,7 @@ describe("runDaemonLoop", () => {
         workerId: "daemon-loop-missing",
         pollIntervalMs: 0,
         sleep: async () => undefined,
-        now: makeMonotonicNow(),
-        runWorker: () => {
-          throw new Error("runWorker should not be called when run is missing");
-        }
+        now: makeMonotonicNow()
       });
 
       expect(result.exitReason).toBe("run_missing");
@@ -641,10 +458,7 @@ describe("runDaemonLoop", () => {
         workerId: "daemon-loop-terminal",
         pollIntervalMs: 0,
         sleep: async () => undefined,
-        now: makeMonotonicNow(),
-        runWorker: () => {
-          throw new Error("runWorker should not be called when run is terminal");
-        }
+        now: makeMonotonicNow()
       });
 
       expect(result.exitReason).toBe("run_terminated");
@@ -677,10 +491,7 @@ describe("runDaemonLoop", () => {
         workerId: "daemon-loop-terminal-error",
         pollIntervalMs: 0,
         sleep: async () => undefined,
-        now: makeMonotonicNow(),
-        runWorker: () => {
-          throw new Error("runWorker should not be called when run is terminal");
-        }
+        now: makeMonotonicNow()
       });
 
       expect(result.exitReason).toBe("run_terminated");
@@ -696,433 +507,12 @@ describe("runDaemonLoop", () => {
     }
   });
 
-  it("updates active job/lock and heartbeat during work and clears them between jobs", async () => {
+  it("invokes onCycleComplete with the cycle payload for each cycle", async () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);
     try {
       const runId = seedDaemonRun(db);
-      const states: Array<{
-        phase: string;
-        activeJobId: string | null;
-        activeLockId: string | null;
-        heartbeatAt: number | null;
-      }> = [];
-
-      const sampleState = (phase: string): void => {
-        const row = getDaemonRun(db, runId);
-        states.push({
-          phase,
-          activeJobId: row?.active_job_id ?? null,
-          activeLockId: row?.active_lock_id ?? null,
-          heartbeatAt: row?.heartbeat_at ?? null
-        });
-      };
-
-      const runWorker = (input: WorkerRunInput): WorkerRunResult => {
-        // Simulate the worker invoking the hooks like runWorkerOnce does.
-        const claimedAt = input.now ? input.now() : Date.now();
-        input.hooks?.onJobClaimed?.({
-          goalId: "goal-a",
-          jobId: "job-a",
-          lockId: "lock-a",
-          iteration: 1,
-          workerId: input.workerId,
-          now: claimedAt
-        });
-        sampleState("during");
-        const releasedAt = input.now ? input.now() : Date.now();
-        input.hooks?.onJobReleased?.({
-          goalId: "goal-a",
-          jobId: "job-a",
-          lockId: "lock-a",
-          iteration: 1,
-          workerId: input.workerId,
-          now: releasedAt,
-          outcome: "success"
-        });
-        return {
-          code: "ran_job",
-          ok: true,
-          workerId: input.workerId,
-          dataDir,
-          outcome: "ran_job",
-          goalId: "goal-a",
-          jobId: "job-a",
-          lockId: "lock-a",
-          goalState: "completed",
-          jobState: "succeeded",
-          iteration: 1,
-          repoRoot: "/tmp/fake",
-          leaseExpiresAt: claimedAt + 1_000,
-          heartbeatAt: claimedAt,
-          jobIterationResult: {
-            ok: true,
-            goalState: "completed",
-            jobState: "succeeded",
-            iteration: {
-              ok: true
-              // The inner iteration shape is unused for this assertion path.
-            } as never
-          } as never,
-          reducer: null,
-          reducerError: null,
-          message: "mocked ran_job"
-        } as WorkerRunResult;
-      };
-
-      sampleState("before");
-
-      const result = await runDaemonLoop({
-        db,
-        dataDir,
-        runId,
-        workerId: "daemon-loop-active",
-        pollIntervalMs: 5,
-        maxLoopIterations: 1,
-        skipStartupRecovery: true,
-        now: makeMonotonicNow(),
-        sleep: async () => undefined,
-        runWorker
-      });
-
-      sampleState("after");
-
-      expect(result.exitReason).toBe("max_loop_iterations");
-      expect(result.iterations).toBe(1);
-      expect(result.jobsRun).toBe(1);
-      expect(states).toEqual([
-        {
-          phase: "before",
-          activeJobId: null,
-          activeLockId: null,
-          heartbeatAt: 100_000
-        },
-        {
-          phase: "during",
-          activeJobId: "job-a",
-          activeLockId: "lock-a",
-          heartbeatAt: 1_700_000_001_000
-        },
-        {
-          phase: "after",
-          activeJobId: null,
-          activeLockId: null,
-          heartbeatAt: 1_700_000_002_000
-        }
-      ]);
-    } finally {
-      db.close();
-    }
-  });
-
-  it("drains a single queued goal end-to-end with the real worker", async () => {
-    const dataDir = makeTempDir();
-    const repo = initRepo();
-    const seed = seedQueuedGoal(dataDir, repo);
-    process.env[FAKE_RUNNER_GOAL_COMPLETE_ENV] = "1";
-    const db = openDb(dataDir);
-    try {
-      const runId = seedDaemonRun(db);
-      const { calls: sleeps, sleep } = makeRecordingSleep();
-
-      const result = await runDaemonLoop({
-        db,
-        dataDir,
-        runId,
-        workerId: "daemon-loop-real",
-        pollIntervalMs: 10,
-        maxIdleCycles: 2,
-        sleep,
-        now: makeMonotonicNow()
-      });
-
-      expect(result.jobsRun).toBe(1);
-      expect(result.idleCycles).toBe(2);
-      expect(result.exitReason).toBe("max_idle_cycles");
-      expect(result.lastWorkerCode).toBe("no_work");
-      expect(sleeps).toEqual([10, 10]);
-
-      const goalRow = db
-        .prepare("SELECT state, completion_reason FROM goals WHERE id = ?")
-        .get(seed.goalId) as {
-        state: string;
-        completion_reason: string | null;
-      };
-      expect(goalRow.state).toBe("completed");
-      expect(goalRow.completion_reason).toBe("goal_complete");
-
-      const row = getDaemonRun(db, runId);
-      expect(row?.state).toBe("stopped");
-      expect(row?.active_job_id).toBeNull();
-      expect(row?.reconcile_count).toBeGreaterThanOrEqual(3);
-    } finally {
-      db.close();
-    }
-  });
-
-  it("drains a multi-iteration goal across reducer continuations until goal_complete", async () => {
-    const dataDir = makeTempDir();
-    const repo = initRepo();
-    seedQueuedGoal(dataDir, repo, { maxIterations: 3 });
-    process.env[FAKE_RUNNER_TRAJECTORY_ENV] = "ok|ok|complete";
-    const db = openDb(dataDir);
-    try {
-      const runId = seedDaemonRun(db);
-      const { sleep } = makeRecordingSleep();
-
-      const result = await runDaemonLoop({
-        db,
-        dataDir,
-        runId,
-        workerId: "daemon-loop-multi",
-        pollIntervalMs: 5,
-        maxIdleCycles: 1,
-        sleep,
-        now: makeMonotonicNow()
-      });
-
-      expect(result.jobsRun).toBe(3);
-      expect(result.jobsFailed).toBe(0);
-      expect(result.idleCycles).toBe(1);
-
-      const goalRow = db
-        .prepare(
-          "SELECT state, current_iteration, completion_reason FROM goals"
-        )
-        .get() as {
-        state: string;
-        current_iteration: number;
-        completion_reason: string | null;
-      };
-      expect(goalRow.state).toBe("completed");
-      expect(goalRow.current_iteration).toBe(3);
-      expect(goalRow.completion_reason).toBe("goal_complete");
-
-      const row = getDaemonRun(db, runId);
-      expect(row?.state).toBe("stopped");
-    } finally {
-      db.close();
-    }
-  });
-
-  it("stops between jobs without claiming the reducer-enqueued next iteration", async () => {
-    const dataDir = makeTempDir();
-    const repo = initRepo();
-    const seed = seedQueuedGoal(dataDir, repo, { maxIterations: 3 });
-    process.env[FAKE_RUNNER_TRAJECTORY_ENV] = "ok|ok|complete";
-    const db = openDb(dataDir);
-    try {
-      const runId = seedDaemonRun(db);
-      const { sleep } = makeRecordingSleep();
-
-      const result = await runDaemonLoop({
-        db,
-        dataDir,
-        runId,
-        workerId: "daemon-loop-stop-between",
-        pollIntervalMs: 5,
-        maxIdleCycles: 5,
-        sleep,
-        now: makeMonotonicNow(),
-        onCycleComplete: (cycle) => {
-          if (cycle.workerResult.code === "ran_job") {
-            requestDaemonRunStop(db, {
-              runId,
-              reason: "stop after first job",
-              now: 200_000
-            });
-          }
-        }
-      });
-
-      expect(result.exitReason).toBe("stop_requested");
-      expect(result.jobsRun).toBe(1);
-      expect(result.jobsFailed).toBe(0);
-      expect(result.terminalState).toBe("stopped");
-
-      const goalRow = db
-        .prepare(
-          "SELECT state, current_iteration, completion_reason FROM goals WHERE id = ?"
-        )
-        .get(seed.goalId) as {
-        state: string;
-        current_iteration: number;
-        completion_reason: string | null;
-      };
-      expect(goalRow.state).toBe("queued");
-      expect(goalRow.completion_reason).toBeNull();
-      expect(goalRow.current_iteration).toBe(1);
-
-      const pendingJobs = db
-        .prepare(
-          "SELECT iteration, state FROM jobs WHERE goal_id = ? AND state = 'pending' ORDER BY iteration ASC"
-        )
-        .all(seed.goalId) as { iteration: number; state: string }[];
-      expect(pendingJobs.length).toBe(1);
-      expect(pendingJobs[0]?.iteration).toBe(2);
-
-      const row = getDaemonRun(db, runId);
-      expect(row?.state).toBe("stopped");
-      expect(row?.stop_reason).toBe("stop after first job");
-      expect(row?.active_job_id).toBeNull();
-    } finally {
-      db.close();
-    }
-  });
-
-  it("backs off after a not_executed cycle and continues idling", async () => {
-    const dataDir = makeTempDir();
-    const db = openDb(dataDir);
-    try {
-      const runId = seedDaemonRun(db);
-      let cycle = 0;
-      const sleeps: number[] = [];
-
-      const result: DaemonLoopResult = await runDaemonLoop({
-        db,
-        dataDir,
-        runId,
-        workerId: "daemon-loop-not-executed",
-        pollIntervalMs: 7,
-        maxIdleCycles: 1,
-        now: makeMonotonicNow(),
-        sleep: async (ms) => {
-          sleeps.push(ms);
-        },
-        runWorker: () => {
-          cycle += 1;
-          if (cycle === 1) {
-            return {
-              code: "not_executed",
-              workerId: "daemon-loop-not-executed",
-              dataDir,
-              outcome: "not_executed",
-              reason: "repo_lock_already_locked",
-              goalId: "goal-x",
-              jobId: "job-x",
-              message: "contention"
-            };
-          }
-          return {
-            code: "no_work",
-            workerId: "daemon-loop-not-executed",
-            dataDir,
-            outcome: "idle",
-            message: "no work"
-          };
-        }
-      });
-
-      expect(result.jobsNotExecuted).toBe(1);
-      expect(result.idleCycles).toBe(1);
-      expect(result.iterations).toBe(1);
-      expect(sleeps).toEqual([7]);
-    } finally {
-      db.close();
-    }
-  });
-
-  it("bounds repeated not_executed cycles with maxIdleCycles", async () => {
-    const dataDir = makeTempDir();
-    const db = openDb(dataDir);
-    try {
-      const runId = seedDaemonRun(db);
-      const sleeps: number[] = [];
-
-      const result = await runDaemonLoop({
-        db,
-        dataDir,
-        runId,
-        workerId: "daemon-loop-not-executed-bound",
-        pollIntervalMs: 9,
-        maxIdleCycles: 2,
-        now: makeMonotonicNow(),
-        sleep: async (ms) => {
-          sleeps.push(ms);
-        },
-        runWorker: () => ({
-          code: "not_executed",
-          workerId: "daemon-loop-not-executed-bound",
-          dataDir,
-          outcome: "not_executed",
-          reason: "repo_lock_already_locked",
-          goalId: "goal-x",
-          jobId: "job-x",
-          message: "contention"
-        })
-      });
-
-      expect(result.exitReason).toBe("max_idle_cycles");
-      expect(result.jobsNotExecuted).toBe(2);
-      expect(result.idleCycles).toBe(2);
-      expect(result.iterations).toBe(2);
-      expect(sleeps).toEqual([9, 9]);
-    } finally {
-      db.close();
-    }
-  });
-
-  it("reports loop health separately from queued work success", async () => {
-    const dataDir = makeTempDir();
-    const db = openDb(dataDir);
-    try {
-      const runId = seedDaemonRun(db);
-
-      const result = await runDaemonLoop({
-        db,
-        dataDir,
-        runId,
-        workerId: "daemon-loop-failed-work",
-        pollIntervalMs: 0,
-        maxLoopIterations: 1,
-        now: makeMonotonicNow(),
-        sleep: async () => undefined,
-        runWorker: () => ({
-          code: "ran_job",
-          ok: false,
-          workerId: "daemon-loop-failed-work",
-          dataDir,
-          outcome: "ran_job",
-          goalId: "goal-a",
-          jobId: "job-a",
-          lockId: "lock-a",
-          goalState: "failed",
-          jobState: "failed",
-          iteration: 1,
-          repoRoot: "/tmp/fake",
-          leaseExpiresAt: 1,
-          heartbeatAt: 1,
-          jobIterationResult: {
-            ok: false,
-            goalState: "failed",
-            jobState: "failed",
-            iteration: {
-              ok: false
-            } as never
-          } as never,
-          reducer: null,
-          reducerError: null,
-          message: "mocked failed job"
-        } as WorkerRunResult)
-      });
-
-      expect(result.ok).toBe(true);
-      expect(result.workSucceeded).toBe(false);
-      expect(result.jobsRun).toBe(1);
-      expect(result.jobsFailed).toBe(1);
-      expect(result.exitReason).toBe("max_loop_iterations");
-    } finally {
-      db.close();
-    }
-  });
-
-  it("invokes onCycleComplete with the worker result for each cycle", async () => {
-    const dataDir = makeTempDir();
-    const db = openDb(dataDir);
-    try {
-      const runId = seedDaemonRun(db);
-      const observed: Array<{ index: number; code: WorkerRunResult["code"] }> =
-        [];
+      const cycles: DaemonLoopCycle[] = [];
 
       await runDaemonLoop({
         db,
@@ -1131,27 +521,53 @@ describe("runDaemonLoop", () => {
         workerId: "daemon-loop-observer",
         pollIntervalMs: 0,
         maxIdleCycles: 2,
+        skipStartupRecovery: true,
         sleep: async () => undefined,
         now: makeMonotonicNow(),
         onCycleComplete: (cycle) => {
-          observed.push({
-            index: cycle.cycleIndex,
-            code: cycle.workerResult.code
-          });
-        },
-        runWorker: () => ({
-          code: "no_work",
-          workerId: "daemon-loop-observer",
-          dataDir,
-          outcome: "idle",
-          message: "no work"
-        })
+          cycles.push(cycle);
+        }
       });
 
-      expect(observed).toEqual([
-        { index: 0, code: "no_work" },
-        { index: 1, code: "no_work" }
+      expect(cycles).toEqual([
+        {
+          cycleIndex: 0,
+          observedState: "running",
+          startedAt: 1_700_000_000_000
+        },
+        {
+          cycleIndex: 1,
+          observedState: "running",
+          startedAt: 1_700_000_001_000
+        }
       ]);
+      // Without a workflowLane config the tick never runs, so the payload
+      // carries no workflowResult key at all.
+      expect(cycles.every((cycle) => !("workflowResult" in cycle))).toBe(true);
+
+      // With the lane on, every cycle payload surfaces the tick result even
+      // when the tick found nothing runnable.
+      const laneRunId = seedDaemonRun(db);
+      const laneCycles: DaemonLoopCycle[] = [];
+      await runDaemonLoop({
+        db,
+        dataDir,
+        runId: laneRunId,
+        workerId: "daemon-loop-observer-lane",
+        pollIntervalMs: 0,
+        maxIdleCycles: 1,
+        skipStartupRecovery: true,
+        sleep: async () => undefined,
+        now: makeMonotonicNow(),
+        onCycleComplete: (cycle) => {
+          laneCycles.push(cycle);
+        },
+        workflowLane: { dispatch: async () => ({ status: "dispatched" }) }
+      });
+
+      expect(laneCycles).toHaveLength(1);
+      expect(laneCycles[0]?.workflowResult).toBeDefined();
+      expect(laneCycles[0]?.workflowResult?.code).toBe("idle");
     } finally {
       db.close();
     }
@@ -1174,14 +590,7 @@ describe("runDaemonLoop", () => {
         now: makeMonotonicNow(),
         onCycleComplete: () => {
           throw new Error("observer failed");
-        },
-        runWorker: () => ({
-          code: "no_work",
-          workerId: "daemon-loop-observer-error",
-          dataDir,
-          outcome: "idle",
-          message: "no work"
-        })
+        }
       });
 
       expect(result.ok).toBe(false);
@@ -1275,14 +684,7 @@ describe("runDaemonLoop", () => {
         maxLoopIterations: 1,
         startupRecoveryGraceMs: 0,
         now: makeMonotonicNow(1_000_000, 1),
-        sleep: async () => undefined,
-        runWorker: () => ({
-          code: "no_work",
-          workerId: "daemon-loop-recovery",
-          dataDir,
-          outcome: "idle",
-          message: "no work"
-        })
+        sleep: async () => undefined
       });
 
       expect(result.startupRecovery).not.toBeNull();
@@ -1342,14 +744,7 @@ describe("runDaemonLoop", () => {
         maxIdleCycles: 1,
         skipStartupRecovery: true,
         now: makeMonotonicNow(),
-        sleep: async () => undefined,
-        runWorker: () => ({
-          code: "no_work",
-          workerId: "daemon-loop-skip-recovery",
-          dataDir,
-          outcome: "idle",
-          message: "no work"
-        })
+        sleep: async () => undefined
       });
 
       expect(result.startupRecovery).toBeNull();
@@ -1371,14 +766,7 @@ describe("runDaemonLoop", () => {
         pollIntervalMs: 1,
         maxIdleCycles: 1,
         now: makeMonotonicNow(),
-        sleep: async () => undefined,
-        runWorker: () => ({
-          code: "no_work",
-          workerId: "daemon-loop-empty-recovery",
-          dataDir,
-          outcome: "idle",
-          message: "no work"
-        })
+        sleep: async () => undefined
       });
 
       expect(result.startupRecovery).not.toBeNull();
@@ -1410,14 +798,7 @@ describe("runDaemonLoop", () => {
         pollIntervalMs: 1,
         maxIdleCycles: 1,
         now: makeMonotonicNow(),
-        sleep: async () => undefined,
-        runWorker: () => ({
-          code: "no_work",
-          workerId: "daemon-loop-self-exclude",
-          dataDir,
-          outcome: "idle",
-          message: "no work"
-        })
+        sleep: async () => undefined
       });
 
       expect(result.startupRecovery).not.toBeNull();
@@ -1520,29 +901,6 @@ function asyncRecordingWorkflowDispatch(
   return { dispatch, calls };
 }
 
-function mockRanJob(workerId: string, dataDir: string): WorkerRunResult {
-  return {
-    code: "ran_job",
-    ok: true,
-    workerId,
-    dataDir,
-    outcome: "ran_job",
-    goalId: "goal-x",
-    jobId: "job-x",
-    lockId: "lock-x",
-    goalState: "completed",
-    jobState: "succeeded",
-    iteration: 1,
-    repoRoot: "/repo/x",
-    leaseExpiresAt: 0,
-    heartbeatAt: 0,
-    jobIterationResult: { ok: true } as never,
-    reducer: null,
-    reducerError: null,
-    message: "mocked ran_job"
-  } as WorkerRunResult;
-}
-
 describe("runDaemonLoop workflow scheduler lane (NGX-348)", () => {
   it("leaves the workflow lane inert when no workflowLane config is supplied", async () => {
     const dataDir = makeTempDir();
@@ -1559,14 +917,7 @@ describe("runDaemonLoop workflow scheduler lane (NGX-348)", () => {
         pollIntervalMs: 0,
         maxIdleCycles: 1,
         now: makeMonotonicNow(),
-        sleep: async () => undefined,
-        runWorker: () => ({
-          code: "no_work",
-          workerId: "daemon-loop-wf-inert",
-          dataDir,
-          outcome: "idle",
-          message: "no work"
-        })
+        sleep: async () => undefined
       });
 
       expect(result.workflowStepsDispatched).toBe(0);
@@ -1599,13 +950,6 @@ describe("runDaemonLoop workflow scheduler lane (NGX-348)", () => {
         now: makeMonotonicNow(),
         sleep: async () => undefined,
         onCycleComplete: (cycle) => observedCycles.push(cycle.workflowResult),
-        runWorker: () => ({
-          code: "no_work",
-          workerId: "daemon-loop-wf-dispatch",
-          dataDir,
-          outcome: "idle",
-          message: "no work"
-        }),
         workflowLane: { dispatch: recorder.dispatch }
       });
 
@@ -1651,13 +995,6 @@ describe("runDaemonLoop workflow scheduler lane (NGX-348)", () => {
         now: makeMonotonicNow(),
         sleep: async () => undefined,
         onCycleComplete: (cycle) => observedCycles.push(cycle.workflowResult),
-        runWorker: () => ({
-          code: "no_work",
-          workerId: "daemon-loop-wf-async-dispatch",
-          dataDir,
-          outcome: "idle",
-          message: "no work"
-        }),
         workflowLane: { dispatch: recorder.dispatch }
       });
 
@@ -1668,50 +1005,6 @@ describe("runDaemonLoop workflow scheduler lane (NGX-348)", () => {
       if (observedCycles[0]?.code === "dispatched") {
         expect(observedCycles[0].dispatch.status).toBe("async-dispatched");
       }
-    } finally {
-      db.close();
-    }
-  });
-
-  it("keeps draining goal iterations while the workflow lane dispatches", async () => {
-    const dataDir = makeTempDir();
-    const db = openDb(dataDir);
-    try {
-      const runId = seedDaemonRun(db);
-      seedRunnableWorkflow(db);
-      const recorder = recordingWorkflowDispatch();
-      let goalCycles = 0;
-
-      const result = await runDaemonLoop({
-        db,
-        dataDir,
-        runId,
-        workerId: "daemon-loop-wf-coexist",
-        pollIntervalMs: 0,
-        maxIdleCycles: 1,
-        now: makeMonotonicNow(),
-        sleep: async () => undefined,
-        runWorker: (input): WorkerRunResult => {
-          goalCycles += 1;
-          if (goalCycles === 1) {
-            return mockRanJob(input.workerId, dataDir);
-          }
-          return {
-            code: "no_work",
-            workerId: input.workerId,
-            dataDir,
-            outcome: "idle",
-            message: "no work"
-          };
-        },
-        workflowLane: { dispatch: recorder.dispatch }
-      });
-
-      // Both lanes advanced: the goal job drained AND a workflow step dispatched.
-      expect(result.jobsRun).toBe(1);
-      expect(result.workflowStepsDispatched).toBe(1);
-      expect(recorder.calls).toHaveLength(1);
-      expect(result.exitReason).toBe("max_idle_cycles");
     } finally {
       db.close();
     }
@@ -1735,13 +1028,6 @@ describe("runDaemonLoop workflow scheduler lane (NGX-348)", () => {
         maxIdleCycles: 2,
         now: makeMonotonicNow(),
         sleep,
-        runWorker: () => ({
-          code: "no_work",
-          workerId: "daemon-loop-wf-active",
-          dataDir,
-          outcome: "idle",
-          message: "no work"
-        }),
         workflowLane: { dispatch: recorder.dispatch }
       });
 
@@ -1781,13 +1067,6 @@ describe("runDaemonLoop workflow scheduler lane (NGX-348)", () => {
         maxLoopIterations: 1,
         now: makeMonotonicNow(),
         sleep: async () => undefined,
-        runWorker: () => ({
-          code: "no_work",
-          workerId: "daemon-loop-wf-heartbeat",
-          dataDir,
-          outcome: "idle",
-          message: "no work"
-        }),
         workflowLane: { dispatch }
       });
 
@@ -1824,13 +1103,6 @@ describe("runDaemonLoop workflow scheduler lane (NGX-348)", () => {
         maxLoopIterations: 1,
         now: makeMonotonicNow(),
         sleep: async () => undefined,
-        runWorker: () => ({
-          code: "no_work",
-          workerId: "daemon-loop-wf-active-job",
-          dataDir,
-          outcome: "idle",
-          message: "no work"
-        }),
         workflowLane: { dispatch }
       });
 
@@ -1843,53 +1115,54 @@ describe("runDaemonLoop workflow scheduler lane (NGX-348)", () => {
     }
   });
 
-  it("does not dispatch workflow work after a stop request during goal work", async () => {
+  it("does not run the workflow tick on a cycle that observes a stop request", async () => {
     const dataDir = makeTempDir();
     const db = openDb(dataDir);
     try {
       const runId = seedDaemonRun(db);
-      const wfRunId = seedRunnableWorkflow(db);
       const recorder = recordingWorkflowDispatch();
       const { calls, sleep } = makeRecordingSleep();
-      const observedCycles: Array<RunWorkflowSchedulerOnceResult | undefined> = [];
+      let wfRunId: string | null = null;
 
       const result = await runDaemonLoop({
         db,
         dataDir,
         runId,
-        workerId: "daemon-loop-wf-stop-after-goal",
+        workerId: "daemon-loop-wf-stop-pre-tick",
         pollIntervalMs: 7,
         maxIdleCycles: 10,
         now: makeMonotonicNow(),
         sleep,
-        onCycleComplete: (cycle) => observedCycles.push(cycle.workflowResult),
-        runWorker: () => {
-          requestDaemonRunStop(db, {
-            runId,
-            reason: "operator stop",
-            now: 200_000
-          });
-          return {
-            code: "no_work",
-            workerId: "daemon-loop-wf-stop-after-goal",
-            dataDir,
-            outcome: "idle",
-            message: "no work"
-          };
+        onCycleComplete: (cycle) => {
+          if (cycle.cycleIndex === 0) {
+            // Make workflow work runnable only after the stop lands: the next
+            // cycle's pre-cycle state check must exit before the tick runs.
+            wfRunId = seedRunnableWorkflow(db);
+            requestDaemonRunStop(db, {
+              runId,
+              reason: "operator stop",
+              now: 200_000
+            });
+          }
         },
         workflowLane: { dispatch: recorder.dispatch }
       });
 
       expect(result.exitReason).toBe("stop_requested");
+      expect(result.iterations).toBe(1);
+      expect(result.idleCycles).toBe(1);
+      // Cycle 0's tick ran (and idled); the stop-observing cycle never ticked.
+      expect(result.lastWorkflowCode).toBe("idle");
       expect(result.workflowStepsDispatched).toBe(0);
-      expect(result.lastWorkflowCode).toBeNull();
-      expect(result.idleCycles).toBe(0);
       expect(recorder.calls).toHaveLength(0);
-      expect(calls).toEqual([]);
-      expect(observedCycles).toEqual([undefined]);
+      expect(calls).toEqual([7]);
+      expect(wfRunId).not.toBeNull();
       expect(
-        getWorkflowLease(db, wfRunId, WORKFLOW_DISPATCH_LEASE_KIND)
+        getWorkflowLease(db, wfRunId!, WORKFLOW_DISPATCH_LEASE_KIND)
       ).toBeUndefined();
+
+      const row = getDaemonRun(db, runId);
+      expect(row?.state).toBe("stopped");
     } finally {
       db.close();
     }
@@ -1914,13 +1187,6 @@ describe("runDaemonLoop workflow scheduler lane (NGX-348)", () => {
         maxLoopIterations: 3,
         now: makeMonotonicNow(),
         sleep: async () => undefined,
-        runWorker: () => ({
-          code: "no_work",
-          workerId: "daemon-loop-wf-throw",
-          dataDir,
-          outcome: "idle",
-          message: "no work"
-        }),
         workflowLane: { dispatch }
       });
 
@@ -1955,13 +1221,6 @@ describe("runDaemonLoop workflow scheduler lane (NGX-348)", () => {
         maxLoopIterations: 1,
         now: () => fixedNow,
         sleep: async () => undefined,
-        runWorker: () => ({
-          code: "no_work",
-          workerId: "daemon-loop-wf-config",
-          dataDir,
-          outcome: "idle",
-          message: "no work"
-        }),
         workflowLane: {
           dispatch: recorder.dispatch,
           leaseDurationMs: 12_345,

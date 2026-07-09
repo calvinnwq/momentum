@@ -531,12 +531,12 @@ async function daemonStart(
         : {}),
       pollIntervalMs:
         parsed.pollIntervalMs ?? DEFAULT_DAEMON_POLL_INTERVAL_MS,
-      // Production workflow-first dispatch: bounded loops
-      // drive the workflow scheduler lane alongside goal-iteration draining.
-      // Register-only `daemon start` returns above and never reaches here, so it
-      // stays inert. The lane is harmlessly idle when no workflow run has a
-      // runnable step. Without a live-wrapper profile, the dogfood resolver keeps
-      // the default dispatch unchanged unless its explicit fixture opt-in is set.
+      // Production workflow-first dispatch (M10-09a, NGX-367): bounded loops
+      // drive the workflow scheduler lane. Register-only `daemon start` returns
+      // above and never reaches here, so it stays inert. The lane is harmlessly
+      // idle when no workflow run has a runnable step. Without a live-wrapper
+      // profile, the dogfood resolver keeps the default dispatch unchanged
+      // unless its explicit fixture opt-in is set.
       workflowLane: {
         dispatch: workflowDispatchResolution.dispatch,
         ...(workflowDispatchResolution.leaseDurationMs !== undefined

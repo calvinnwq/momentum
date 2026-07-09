@@ -1913,6 +1913,93 @@ describe("momentum CLI scaffold", () => {
     expect(run0["isActive"]).toBe(false);
   });
 
+  it("daemon start bounded loop keeps the frozen envelope keys and idle drain values", async () => {
+    const dataDir = makeTempDir("momentum-cli-daemon-loop-envelope-");
+    const result = await run([
+      "daemon", "start",
+      "--max-idle-cycles", "1",
+      "--poll-interval-ms", "0",
+      "--data-dir", dataDir,
+      "--json"
+    ]);
+
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    const payload = JSON.parse(result.stdout) as Record<string, unknown>;
+    expect(Object.keys(payload).sort()).toEqual([
+      "command",
+      "dataDir",
+      "host",
+      "loop",
+      "ok",
+      "pid",
+      "runId",
+      "startedAt",
+      "state",
+      "workSucceeded",
+      "workerId"
+    ]);
+
+    const loop = payload["loop"] as Record<string, unknown>;
+    expect(Object.keys(loop).sort()).toEqual([
+      "cancelOutcome",
+      "exitReason",
+      "idleCycles",
+      "iterations",
+      "jobsFailed",
+      "jobsNotExecuted",
+      "jobsRun",
+      "lastObservedState",
+      "lastWorkerCode",
+      "lastWorkflowCode",
+      "startupRecovery",
+      "terminalState",
+      "workSucceeded",
+      "workflowStepsDispatched"
+    ]);
+    // The retired goal-iteration drain lane must keep reporting its idle
+    // envelope values so operators and wrappers see an unchanged wire shape.
+    expect(loop).toMatchObject({
+      exitReason: "max_idle_cycles",
+      terminalState: "stopped",
+      cancelOutcome: null,
+      workSucceeded: true,
+      iterations: 1,
+      jobsRun: 0,
+      jobsFailed: 0,
+      jobsNotExecuted: 0,
+      idleCycles: 1,
+      workflowStepsDispatched: 0,
+      lastWorkflowCode: "idle",
+      lastObservedState: "running",
+      lastWorkerCode: "no_work"
+    });
+    const startupRecovery = loop["startupRecovery"] as Record<string, unknown>;
+    expect(Object.keys(startupRecovery).sort()).toEqual([
+      "graceMs",
+      "observedAt",
+      "recoveredClaimedJobCount",
+      "recoveredDaemonRunCount",
+      "recoveredRepoLockCount",
+      "skippedClaimedJobs",
+      "skippedDaemonRuns",
+      "skippedRepoLocks"
+    ]);
+
+    const textResult = await run([
+      "daemon", "start",
+      "--max-idle-cycles", "1",
+      "--poll-interval-ms", "0",
+      "--data-dir", makeTempDir("momentum-cli-daemon-loop-envelope-text-")
+    ]);
+    expect(textResult.code).toBe(0);
+    expect(textResult.stdout).toContain("Jobs run: 0");
+    expect(textResult.stdout).toContain("Jobs failed: 0");
+    expect(textResult.stdout).toContain("Jobs not executed: 0");
+    expect(textResult.stdout).toContain("Idle cycles: 1");
+    expect(textResult.stdout).toContain("Workflow steps dispatched: 0");
+  });
+
   it("daemon start rejects --poll-interval-ms without a loop bound", async () => {
     const dataDir = makeTempDir("momentum-cli-daemon-loop-");
     const result = await run([

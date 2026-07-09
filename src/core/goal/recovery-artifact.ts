@@ -1,6 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { parseAcpConfig } from "../../adapters/acp-config.js";
+import { parseTrustedShellConfig } from "../../adapters/trusted-shell-config.js";
+import type { GoalSpec } from "./types.js";
+
 /**
  * Filename for the manual-recovery artifact stored at the goal artifact root.
  * Co-located with goal.md / handoff.md so operators discover it through the
@@ -23,6 +27,56 @@ export type RecoveryArtifactRunnerProfile = {
   resultFile?: string;
   note?: string;
 };
+
+/**
+ * Renders the runner-profile summary recorded on recovery artifacts from a
+ * stored goal spec. Retained from the retired goal-iteration mechanism so
+ * stale-goal recovery keeps rendering the same profile detail for durable
+ * specs written before the lane was removed.
+ */
+export function buildRunnerProfileSummary(
+  spec: GoalSpec
+): RecoveryArtifactRunnerProfile {
+  if (spec.runner === "trusted-shell") {
+    const parsed = parseTrustedShellConfig(spec.trusted_shell);
+    if (!parsed.ok) {
+      return {
+        runner: spec.runner,
+        note: `runner profile parse error: ${parsed.error}`
+      };
+    }
+    return {
+      runner: spec.runner,
+      command: parsed.config.command,
+      args: [...parsed.config.args],
+      cwd: parsed.config.cwd,
+      timeoutSec: parsed.config.timeoutSec,
+      resultFile: parsed.config.resultFile
+    };
+  }
+
+  if (spec.runner === "acp") {
+    const parsed = parseAcpConfig(spec.acp);
+    if (!parsed.ok) {
+      return {
+        runner: spec.runner,
+        note: `runner profile parse error: ${parsed.error}`
+      };
+    }
+    return {
+      runner: spec.runner,
+      command: parsed.config.command,
+      args: [...parsed.config.args],
+      cwd: parsed.config.cwd,
+      timeoutSec: parsed.config.timeoutSec,
+      resultFile: parsed.config.resultFile
+    };
+  }
+
+  return {
+    runner: spec.runner
+  };
+}
 
 /**
  * Compact reason payload describing why a goal was routed to manual recovery.

@@ -26,13 +26,12 @@
  * ({@link runWorkflowSchedulerOnce}) composes the three into one per-cycle pass
  * — recover stale leases, recheck any active deferred `subworkflow` dispatch
  * that is due, otherwise scan and claim one runnable step, then hand it to an
- * injected executor-dispatch seam — as the workflow-first analogue of
- * `runWorkerOnce`.
+ * injected executor-dispatch seam.
  * Bounded `daemon start` now wires that seam with the production dispatcher,
  * which creates executor start scaffolds or fail-closed manual-recovery effects
  * (gates when the run row still exists, lease release when it vanished).
- * This lane leaves goal iteration draining (`worker-run.ts`) untouched, because
- * workflow scheduling is a separate lane over separate tables.
+ * The retired goal-iteration drain lane is gone; workflow scheduling is the
+ * daemon's only work lane and runs over its own tables.
  *
  * "Runnable" means, for a run that is neither terminal nor flagged for manual
  * recovery, the run's lease-aware derived state is `approved` (an approved step

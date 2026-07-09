@@ -14,11 +14,6 @@ import {
   type StartupRecoveryResult
 } from "./stale-recovery.js";
 import {
-  runWorkerOnce,
-  type WorkerRunInput,
-  type WorkerRunResult
-} from "./worker-run.js";
-import {
   runWorkflowSchedulerOnceAsync,
   type RunWorkflowSchedulerOnceAsyncInput,
   type RunWorkflowSchedulerOnceResult,
@@ -38,16 +33,14 @@ export const DEFAULT_DAEMON_STARTUP_RECOVERY_GRACE_MS = 5_000;
 
 export type DaemonLoopNow = () => number;
 export type DaemonLoopSleep = (ms: number) => Promise<void>;
-export type DaemonLoopRunWorker = (input: WorkerRunInput) => WorkerRunResult;
 
 /**
  * Configuration that enables the workflow-first scheduler lane. When supplied,
  * each daemon cycle runs one {@link runWorkflowSchedulerOnce} tick (recover →
- * scan → claim → dispatch) alongside — never instead of — goal iteration
- * draining. When omitted the lane is entirely inert and the loop behaves exactly
- * as before (no workflow tables are read or written). Bounded CLI starts now
- * supply the production workflow-step dispatcher; register-only starts still
- * exit before the loop and never enter this lane.
+ * scan → claim → dispatch). When omitted the lane is entirely inert and the
+ * cycle only heartbeats and idles (no workflow tables are read or written).
+ * Bounded CLI starts supply the production workflow-step dispatcher;
+ * register-only starts still exit before the loop and never enter this lane.
  */
 export type DaemonWorkflowLaneConfig = {
   /** Executor-dispatch seam handed each claimed workflow step. */
@@ -72,7 +65,6 @@ export type DaemonLoopInput = {
   maxIdleCycles?: number;
   now?: DaemonLoopNow;
   sleep?: DaemonLoopSleep;
-  runWorker?: DaemonLoopRunWorker;
   onCycleComplete?: (cycle: DaemonLoopCycle) => void;
   /**
    * Disable the one-shot stale-lease auto-recovery pass run before the loop
@@ -86,9 +78,8 @@ export type DaemonLoopInput = {
    */
   startupRecoveryGraceMs?: number;
   /**
-   * Enables the workflow-first scheduler lane. Omit to leave the lane inert and
-   * preserve goal-iteration-only behavior in callers that intentionally do not
-   * wire workflow dispatch. See {@link DaemonWorkflowLaneConfig}.
+   * Enables the workflow-first scheduler lane. Omit to leave the lane inert.
+   * See {@link DaemonWorkflowLaneConfig}.
    */
   workflowLane?: DaemonWorkflowLaneConfig;
 };
@@ -105,7 +96,6 @@ export type DaemonLoopExitReason =
 export type DaemonLoopCycle = {
   cycleIndex: number;
   observedState: DaemonRunState;
-  workerResult: WorkerRunResult;
   startedAt: number;
   /**
    * The workflow scheduler-lane tick result for this cycle, present only when
@@ -113,6 +103,14 @@ export type DaemonLoopCycle = {
    */
   workflowResult?: RunWorkflowSchedulerOnceResult;
 };
+
+/**
+ * The retired goal-iteration drain lane's per-cycle code. The daemon no longer
+ * claims `goal_iteration` jobs; every cycle reports the idle `"no_work"` value
+ * the drain produced when the queue was empty, keeping the wire-stable
+ * `daemon start` loop envelope byte-identical for the only reachable case.
+ */
+export type DaemonLoopWorkerCode = "no_work";
 
 export type DaemonLoopResult = {
   ok: boolean;
@@ -122,6 +120,7 @@ export type DaemonLoopResult = {
   exitReason: DaemonLoopExitReason;
   terminalState: Extract<DaemonRunState, "stopped" | "canceled" | "error">;
   iterations: number;
+  /** Retired goal-drain counters, pinned to their idle values (envelope-stable). */
   jobsRun: number;
   jobsFailed: number;
   jobsNotExecuted: number;
@@ -129,7 +128,7 @@ export type DaemonLoopResult = {
   /** Workflow steps dispatched by the scheduler lane across the run (0 if disabled). */
   workflowStepsDispatched: number;
   lastObservedState: DaemonRunState | null;
-  lastWorkerCode: WorkerRunResult["code"] | null;
+  lastWorkerCode: DaemonLoopWorkerCode | null;
   /** The last workflow scheduler-lane tick code, or null if the lane never ran. */
   lastWorkflowCode: RunWorkflowSchedulerOnceResult["code"] | null;
   cancelOutcome: DaemonCancelOutcome | null;
@@ -142,12 +141,11 @@ export async function runDaemonLoop(
 ): Promise<DaemonLoopResult> {
   const now = input.now ?? (() => Date.now());
   const sleep = input.sleep ?? defaultSleep;
-  const runWorker = input.runWorker ?? runWorkerOnce;
   const pollIntervalMs = normalizePositive(
     input.pollIntervalMs ?? DEFAULT_DAEMON_POLL_INTERVAL_MS,
     "pollIntervalMs"
   );
-  const leaseDurationMs = normalizePositive(
+  normalizePositive(
     input.leaseDurationMs ?? DEFAULT_DAEMON_WORKER_LEASE_MS,
     "leaseDurationMs"
   );
@@ -155,13 +153,10 @@ export async function runDaemonLoop(
   const maxIdleCycles = input.maxIdleCycles ?? Infinity;
 
   let iterations = 0;
-  let jobsRun = 0;
-  let jobsFailed = 0;
-  let jobsNotExecuted = 0;
   let idleCycles = 0;
   let workflowStepsDispatched = 0;
   let lastObservedState: DaemonRunState | null = null;
-  let lastWorkerCode: WorkerRunResult["code"] | null = null;
+  let lastWorkerCode: DaemonLoopWorkerCode | null = null;
   let lastWorkflowCode: RunWorkflowSchedulerOnceResult["code"] | null = null;
   let exitReason: DaemonLoopExitReason | null = null;
   let internalErrorMessage: string | null = null;
@@ -225,7 +220,6 @@ export async function runDaemonLoop(
   const completeCycle = (
     cycleIndex: number,
     observedState: DaemonRunState,
-    workerResult: WorkerRunResult,
     startedAt: number,
     workflowResult?: RunWorkflowSchedulerOnceResult
   ): boolean => {
@@ -233,7 +227,6 @@ export async function runDaemonLoop(
       input.onCycleComplete?.({
         cycleIndex,
         observedState,
-        workerResult,
         startedAt,
         ...(workflowResult !== undefined ? { workflowResult } : {})
       });
@@ -281,95 +274,14 @@ export async function runDaemonLoop(
         now: cycleStart
       });
 
-      const workerResult = runWorker({
-        db: input.db,
-        dataDir: input.dataDir,
-        workerId: input.workerId,
-        leaseDurationMs,
-        now,
-        hooks: {
-          onJobClaimed: (info) => {
-            setDaemonRunActiveJob(input.db, {
-              runId: input.runId,
-              jobId: info.jobId,
-              lockId: info.lockId,
-              now: info.now
-            });
-            heartbeatDaemonRun(input.db, {
-              runId: input.runId,
-              now: info.now
-            });
-          },
-          onJobReleased: (info) => {
-            setDaemonRunActiveJob(input.db, {
-              runId: input.runId,
-              jobId: null,
-              lockId: null,
-              now: info.now
-            });
-            heartbeatDaemonRun(input.db, {
-              runId: input.runId,
-              now: info.now
-            });
-          }
-        }
-      });
-
+      // The retired goal-iteration drain used to claim a queued job here.
+      // Nothing claims goal jobs anymore; the cycle reports the drain's idle
+      // code so the daemon start loop envelope keeps its stable value.
       iterations += 1;
-      lastWorkerCode = workerResult.code;
-
-      const goalRanJob = workerResult.code === "ran_job";
-      if (goalRanJob) {
-        jobsRun += 1;
-        if (!workerResult.ok) {
-          jobsFailed += 1;
-        }
-      } else if (workerResult.code === "not_executed") {
-        jobsNotExecuted += 1;
-      }
-
-      if (workflowLane !== undefined) {
-        const postWorkerRun = getDaemonRun(input.db, input.runId);
-        if (postWorkerRun === undefined) {
-          exitReason = "run_missing";
-          if (
-            !completeCycle(
-              iterations - 1,
-              run.state,
-              workerResult,
-              cycleStart
-            )
-          ) {
-            break;
-          }
-          break;
-        }
-        lastObservedState = postWorkerRun.state;
-        if (isTerminalDaemonRunState(postWorkerRun.state)) {
-          exitReason = "run_terminated";
-        } else if (postWorkerRun.stop_now_requested_at !== null) {
-          exitReason = "stop_now_requested";
-        } else if (postWorkerRun.state === "stop_requested") {
-          exitReason = "stop_requested";
-        }
-        if (exitReason !== null) {
-          if (
-            !completeCycle(
-              iterations - 1,
-              postWorkerRun.state,
-              workerResult,
-              cycleStart
-            )
-          ) {
-            break;
-          }
-          break;
-        }
-      }
+      lastWorkerCode = "no_work";
 
       // Workflow scheduler lane: a separate lane over separate tables, run each
-      // cycle after — and independently of — goal iteration draining. Inert
-      // unless enabled, so the goal-iteration accounting above is unchanged.
+      // cycle. Inert unless enabled.
       let workflowResult: RunWorkflowSchedulerOnceResult | undefined;
       if (workflowLane !== undefined && dispatchWithHeartbeat !== undefined) {
         const schedulerInput: RunWorkflowSchedulerOnceAsyncInput = {
@@ -391,34 +303,19 @@ export async function runDaemonLoop(
         }
       }
 
-      // A cycle is active (no idle increment, no poll sleep) when either lane
-      // did work; otherwise it idles and waits a poll interval.
-      const cycleDidWork = goalRanJob || workflowResult?.code === "dispatched";
+      // A cycle is active (no idle increment, no poll sleep) only when the
+      // workflow lane dispatched work; otherwise it idles and waits a poll
+      // interval.
+      const cycleDidWork = workflowResult?.code === "dispatched";
       if (cycleDidWork) {
-        if (
-          !completeCycle(
-            iterations - 1,
-            run.state,
-            workerResult,
-            cycleStart,
-            workflowResult
-          )
-        ) {
+        if (!completeCycle(iterations - 1, run.state, cycleStart, workflowResult)) {
           break;
         }
         continue;
       }
 
       idleCycles += 1;
-      if (
-        !completeCycle(
-          iterations - 1,
-          run.state,
-          workerResult,
-          cycleStart,
-          workflowResult
-        )
-      ) {
+      if (!completeCycle(iterations - 1, run.state, cycleStart, workflowResult)) {
         break;
       }
       await sleep(pollIntervalMs);
@@ -460,7 +357,9 @@ export async function runDaemonLoop(
     terminalState = "error";
   } else if (exitReason === "stop_now_requested") {
     terminalState = "canceled";
-    cancelOutcome = jobsRun > 0 ? "active_job_completed" : "idle";
+    // The retired goal drain was the only lane that could report a completed
+    // active job at stop-now time; without it every immediate stop is idle.
+    cancelOutcome = "idle";
     try {
       finishDaemonRun(input.db, {
         runId: input.runId,
@@ -491,15 +390,15 @@ export async function runDaemonLoop(
 
   const result: DaemonLoopResult = {
     ok: terminalState !== "error",
-    workSucceeded: jobsFailed === 0,
+    workSucceeded: true,
     runId: input.runId,
     workerId: input.workerId,
     exitReason: exitReason ?? "stop_requested",
     terminalState,
     iterations,
-    jobsRun,
-    jobsFailed,
-    jobsNotExecuted,
+    jobsRun: 0,
+    jobsFailed: 0,
+    jobsNotExecuted: 0,
     idleCycles,
     workflowStepsDispatched,
     lastObservedState,

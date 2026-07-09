@@ -10,13 +10,12 @@ import {
 } from "../executors/goal-iteration/foreground.js";
 import type { GoalSpec } from "./types.js";
 import { markGoalNeedsManualRecovery } from "./recovery.js";
-import { parseAcpConfig } from "../../adapters/acp-config.js";
 import {
+  buildRunnerProfileSummary,
   writeRecoveryArtifact,
   type RecoveryArtifactPathBundle
 } from "./recovery-artifact.js";
 import { buildIterationSourceContext } from "../source/context.js";
-import { parseTrustedShellConfig } from "../../adapters/trusted-shell-config.js";
 
 export type ExecuteIterationJobInput = {
   db: MomentumDb;
@@ -247,57 +246,6 @@ function recordManualRecoveryIfNeeded(input: {
   }
 }
 
-export function buildRunnerProfileSummary(
-  spec: GoalSpec
-): {
-  runner: string;
-  command?: string;
-  args?: string[];
-  cwd?: "repo" | "iteration";
-  timeoutSec?: number;
-  resultFile?: string;
-  note?: string;
-} {
-  if (spec.runner === "trusted-shell") {
-    const parsed = parseTrustedShellConfig(spec.trusted_shell);
-    if (!parsed.ok) {
-      return {
-        runner: spec.runner,
-        note: `runner profile parse error: ${parsed.error}`
-      };
-    }
-    return {
-      runner: spec.runner,
-      command: parsed.config.command,
-      args: [...parsed.config.args],
-      cwd: parsed.config.cwd,
-      timeoutSec: parsed.config.timeoutSec,
-      resultFile: parsed.config.resultFile
-    };
-  }
-
-  if (spec.runner === "acp") {
-    const parsed = parseAcpConfig(spec.acp);
-    if (!parsed.ok) {
-      return {
-        runner: spec.runner,
-        note: `runner profile parse error: ${parsed.error}`
-      };
-    }
-    return {
-      runner: spec.runner,
-      command: parsed.config.command,
-      args: [...parsed.config.args],
-      cwd: parsed.config.cwd,
-      timeoutSec: parsed.config.timeoutSec,
-      resultFile: parsed.config.resultFile
-    };
-  }
-
-  return {
-    runner: spec.runner
-  };
-}
 
 function pickErrorArtifactPath(
   result: ForegroundIterationError,
