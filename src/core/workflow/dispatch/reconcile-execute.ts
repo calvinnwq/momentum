@@ -47,6 +47,7 @@
 
 import type { MomentumDb } from "../../../adapters/db.js";
 import {
+  listExecutorRoundsForInvocation,
   loadExecutorInvocation
 } from "../../executors/loop/persist.js";
 import type { WorkflowExecutorFamily } from "../../executors/loop/reducer.js";
@@ -150,13 +151,16 @@ export function reconcileDispatchedWorkflowStep(
     };
   }
   if (plan.action === "manual_recovery") {
+    const recovery = readDispatchRecoveryEvidence(db, invocationId);
     return parkForManualRecovery(db, {
       runId,
       stepId,
       dispatchStartedAt: invocation.startedAt,
       executorFamily: invocation.executorFamily,
       invocationState: plan.invocationState,
-      reason: plan.reason,
+      reason:
+        recovery === null ? plan.reason : `${recovery.code}: ${recovery.summary}`,
+      evidence: recovery?.code ?? plan.invocationState,
       now
     });
   }
@@ -286,6 +290,7 @@ function parkForManualRecovery(
     executorFamily: WorkflowExecutorFamily;
     invocationState: string;
     reason: string;
+    evidence: string;
     now: number;
   }
 ): WorkflowStepReconciliationResult {
@@ -296,6 +301,7 @@ function parkForManualRecovery(
     executorFamily,
     invocationState,
     reason,
+    evidence,
     now
   } = args;
   db.exec("BEGIN IMMEDIATE");
@@ -345,7 +351,7 @@ function parkForManualRecovery(
             targetScope: "step",
             gateType: "manual_recovery_required",
             reason,
-            evidence: invocationState,
+            evidence,
             allowedActions: RECONCILE_RECOVERY_GATE_ACTIONS,
             recommendedAction: RECONCILE_RECOVERY_RECOMMENDED_ACTION
           },
@@ -370,6 +376,22 @@ function parkForManualRecovery(
     safeRollback(db);
     throw error;
   }
+}
+
+function readDispatchRecoveryEvidence(
+  db: MomentumDb,
+  invocationId: string
+): { code: string; summary: string } | null {
+  const latest = listExecutorRoundsForInvocation(db, invocationId).at(-1);
+  if (
+    latest?.recoveryCode === null ||
+    latest?.recoveryCode === undefined ||
+    latest.summary === null ||
+    latest.summary.length === 0
+  ) {
+    return null;
+  }
+  return { code: latest.recoveryCode, summary: latest.summary };
 }
 
 /**

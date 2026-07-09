@@ -17,9 +17,7 @@
  * `shared/step-finalize.ts` follow. The durable orchestrator that creates the
  * invocation, inserts the round, runs the bounded mechanism, runs finalization,
  * and persists this decision is layered on top in `goal-loop/orchestrator.ts`,
- * the same way `live-step/orchestrator.ts` composes the shared
- * `shared/step-finalize.ts` transaction (through its `live-step/finalize.ts`
- * back-compat alias).
+ * composed around the shared `shared/step-finalize.ts` transaction.
  *
  * Beyond the classification, this module also projects a finished round into the
  * durable {@link ExecutorRoundUpdate} patches the persistence twin
@@ -60,9 +58,7 @@
  *   - Repo safety wins over everything. Any unsafe or ambiguous finalize outcome
  *     (moved HEAD, failed reset/commit, lost repo lock, missing/invalid result)
  *     routes the round to `manual_recovery_required` and preserves the precise
- *     recovery code, never silently retrying. This mirrors how
- *     `live-step/run-recovery.ts` sets `needs_manual_recovery` for the same
- *     finalize outcomes.
+ *     recovery code, never silently retrying.
  *   - Bounded autonomy. "`continue` means the executor recommends another round,
  *     but the daemon must still enforce max rounds ...": once the configured
  *     round budget is exhausted without completion, the round raises a durable
@@ -443,8 +439,7 @@ export const GOAL_LOOP_GLOBAL_DEFAULT_SELECTION: Required<GoalLoopSelectionConfi
 
 /**
  * Finalize outcomes that leave the worktree in an unsafe or ambiguous state. The
- * round routes to manual recovery and preserves the precise code; this is the
- * same set `live-step/run-recovery.ts` flags as `needs_manual_recovery`.
+ * round routes to manual recovery and preserves the precise code.
  */
 const UNSAFE_FINALIZE_OUTCOMES: ReadonlySet<GoalLoopFinalizeOutcome> = new Set([
   "manual_recovery_required",

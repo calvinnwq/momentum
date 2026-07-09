@@ -19,7 +19,7 @@ const tempRoots: string[] = [];
 afterEach(() => {
   vi.restoreAllMocks();
   vi.doUnmock("../src/adapters/live-step-wrapper.js");
-  vi.doUnmock("../src/core/executors/live-step/finalize.js");
+  vi.doUnmock("../src/core/executors/shared/step-finalize.js");
   vi.resetModules();
   while (tempRoots.length > 0) {
     const dir = tempRoots.pop();
@@ -838,12 +838,12 @@ describe("single-shot concrete mechanisms", () => {
   it("preserves reset_failed when commit-failure cleanup fails", async () => {
     const artifactRoot = makeTempDir();
     vi.resetModules();
-    vi.doMock("../src/core/executors/live-step/finalize.js", async (importOriginal) => {
+    vi.doMock("../src/core/executors/shared/step-finalize.js", async (importOriginal) => {
       const actual =
-        await importOriginal<typeof import("../src/core/executors/live-step/finalize.js")>();
+        await importOriginal<typeof import("../src/core/executors/shared/step-finalize.js")>();
       return {
         ...actual,
-        finalizeLiveWorkflowStep: () => ({
+        finalizeWorkflowStep: () => ({
           outcome: "commit_failed",
           verification: { ok: true, results: [] },
           commit: {

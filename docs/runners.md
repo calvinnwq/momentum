@@ -5,7 +5,7 @@ This page remains for three reasons:
 
 - **Stored compatibility data.** Existing goal rows and `goals/<goal-id>/goal.md` copies still name runner profiles, and goal-scoped `recovery.md` artifacts render the stored runner / command / args / cwd / timeout / result-file metadata.
 - **The frozen `doctor` envelope.** `doctor --json` still reports the built-in runner-profile kinds in its `runners` block (see [`docs/doctor.md`](doctor.md)); that envelope is wire-stable even though nothing executes the profiles anymore.
-- **Still-live contracts.** The normalized `RunnerResult` schema below is consumed by the workflow runtime's live wrappers and native goal-loop rounds, and the `MOMENTUM.md` repo-policy loader is used by `doctor --repo` and the `workflow run start` / `start-coding` / `preview-coding` doors.
+- **Still-live contracts.** The normalized `RunnerResult` schema below is consumed by the workflow runtime's live wrappers and native goal-loop rounds, and the `MOMENTUM.md` repo-policy loader is used by `doctor --repo`, the `workflow run start` / `start-coding` / `preview-coding` doors, and live-wrapper dispatch finalization.
 
 Built-in runner profile names: `fake`, `trusted-shell`, and `acp`.
 The `runner` field on a stored goal spec is one of these.
@@ -47,6 +47,7 @@ Stored iteration artifacts and job error rows from either profile may carry the 
 ## Normalized `RunnerResult` schema
 
 This schema is still live: workflow live wrappers (see [`docs/daemon.md`](daemon.md)) and native workflow `goal-loop` executors write and consume the same normalized result document, and stored iteration `result.json` files from the retired lane use it too.
+For live-wrapper-owned dispatched steps, the document is not terminal evidence by itself: after a successful wrapper process, Momentum parses the result, runs repo-safety finalization, verifies, commits or resets, and only then terminalizes the executor round for reconciliation.
 The result JSON is written at `$MOMENTUM_RESULT_PATH`:
 
 ```json
@@ -105,7 +106,9 @@ Supported frontmatter keys (all optional, strict types when present):
 
 - `runner` — a built-in runner profile name (`fake`, `trusted-shell`, `acp`). This was the repo-level default for the retired goal lane; it is still parsed, validated, and reported by `doctor --repo`.
 - `verification` — array of non-empty verification command strings.
+  Native workflow live-wrapper finalization uses these commands as the repo-policy fallback when the run has no linked goal verification.
 - `verification_timeout_sec` — positive integer.
+  Native workflow live-wrapper finalization uses this timeout with the same fallback precedence.
 - `intent_apply_policy` - policy for how update intents are applied. Valid values: `create_intents_only` (default, Momentum records intents but does not perform external writes) or `external_apply_allowed` (`intent apply --external-apply`, and the bounded workflow daemon's `linear-refresh` / `external-apply` step after it proves the run issue scope, a matching source item, one pending Linear `status_update` intent or deterministic seed evidence for the expected `Done` intent, a valid one-of `state` / `stateId` payload, `LINEAR_API_KEY`, and a resolved target, may perform a policy-gated external tracker write through the adapter's external update client; the write is two-phase audit-before-write and idempotent under replay, and matching successful audit evidence can be reconciled without another mutation). Without `--external-apply`, `intent apply` always records a manual operator mark regardless of this setting.
 
 A `MOMENTUM.md` with no frontmatter at all is also valid: the entire body becomes policy notes and no config defaults are set.
@@ -114,6 +117,7 @@ Parse / schema errors map to stable codes (`policy_path_invalid`, `policy_file_u
 The preview door is read-only and never writes a run; the start doors refuse before writing when policy is malformed.
 
 Intent apply policy has a narrow precedence chain: `MOMENTUM.md` > `builtin_default`.
-In the retired goal lane, the `runner` / `verification` / `verification_timeout_sec` keys sat between goal frontmatter and built-in defaults; today they are inspection-only repo metadata surfaced by `doctor --repo`.
+In the retired goal lane, the `runner` / `verification` / `verification_timeout_sec` keys sat between goal frontmatter and built-in defaults.
+Today `runner` is inspection-only repo metadata surfaced by `doctor --repo`, while `verification` and `verification_timeout_sec` also provide the live-wrapper dispatch finalization fallback after any linked goal verification.
 
 `doctor` accepts an optional `--repo <path>` flag (`momentum doctor [--repo <path>] [--data-dir <path>] [--json]`) so operators can inspect a repo's policy file in isolation; without `--repo`, the doctor `policy` block reports `repoConfigured: false`.

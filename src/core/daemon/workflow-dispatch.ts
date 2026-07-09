@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -5,6 +6,7 @@ import type { MomentumDb } from "../../adapters/db.js";
 import type { LiveWrapperProfile } from "../../adapters/live-wrapper-registry.js";
 import type { LinearExternalUpdateClient } from "../../adapters/linear-external-update-client.js";
 import type { LinearIssueRefreshClient } from "../../adapters/linear-issue-refresh.js";
+import { inspectRepo } from "../repo/guard.js";
 import {
   defaultBuildLinearRefreshClient,
   executeExternalApply,
@@ -56,6 +58,7 @@ import type {
   AsyncWorkflowStepDispatch,
   WorkflowStepDispatch
 } from "../workflow/dispatch/scheduler.js";
+import type { DispatchedStepRepoSafetyContext } from "../workflow/dispatch/executor-run.js";
 
 export type LinearIssueRefreshClientFactoryInput = {
   apiKey: string | null;
@@ -131,18 +134,53 @@ export function resolveDaemonWorkflowStepDispatch(
               provenance
             );
             if (resolved.ok) {
+              const repoSafety = resolveDaemonDispatchedRepoSafety(
+                context.db,
+                claim.runId,
+                resolved.exec.repoPath,
+                resolved.exec.runDir
+              );
+              if (!repoSafety.ok) {
+                const { recoveryArtifact, ...repoSafetyFailure } = repoSafety;
+                return {
+                  ...repoSafetyFailure,
+                  ...(recoveryArtifact === null
+                    ? {}
+                    : {
+                        recoveryArtifact: recoveryArtifact ?? {
+                          runDir: resolved.exec.runDir,
+                          repoPath: resolved.exec.repoPath
+                        }
+                      })
+                };
+              }
               try {
-                fs.mkdirSync(resolved.exec.runDir, { recursive: true });
+                fs.mkdirSync(repoSafety.runDir, { recursive: true });
               } catch (error) {
                 return {
                   ok: false,
-                  reason: `run_dir_unavailable: ${error instanceof Error ? error.message : String(error)}`
+                  reason: `run_dir_unavailable: ${error instanceof Error ? error.message : String(error)}`,
+                  recoveryArtifact: {
+                    runDir: repoSafety.runDir,
+                    repoPath: repoSafety.repoPath
+                  }
                 };
               }
               return {
                 ok: true,
                 exec: {
                   ...resolved.exec,
+                  repoPath: repoSafety.repoPath,
+                  runDir: repoSafety.runDir,
+                  resultJsonPath: path.join(
+                    repoSafety.runDir,
+                    path.basename(resolved.exec.resultJsonPath)
+                  ),
+                  executorLogPath: path.join(
+                    repoSafety.runDir,
+                    path.basename(resolved.exec.executorLogPath)
+                  ),
+                  repoSafety: repoSafety.repoSafety,
                   env
                 }
               };
@@ -156,6 +194,238 @@ export function resolveDaemonWorkflowStepDispatch(
     ),
     leaseDurationMs: maxDaemonLiveWrapperProfileTimeoutMs(profile.profile)
   };
+}
+
+function resolveDaemonDispatchedRepoSafety(
+  db: MomentumDb,
+  runId: string,
+  repoPath: string,
+  runDir: string
+):
+  | {
+      ok: true;
+      repoPath: string;
+      runDir: string;
+      repoSafety: DispatchedStepRepoSafetyContext;
+    }
+  | {
+      ok: false;
+      reason: string;
+      recoveryCode: string;
+      recoveryArtifact?: { runDir: string; repoPath?: string | null } | null;
+    } {
+  const repo = inspectRepo(repoPath);
+  if (!repo.ok) {
+    const recoveryCode =
+      repo.code === "dirty_worktree" || repo.code === "git_failed"
+        ? "git_failed"
+        : "invalid_input";
+    return {
+      ok: false,
+      reason: `repo_safety_unavailable: ${repo.error}`,
+      recoveryCode
+    };
+  }
+  const canonicalRunDir = canonicalizeRunDir(repoPath, repo.repoPath, runDir);
+  const artifactSafety = verifyRepoLocalRunDirIgnored(
+    repo.repoPath,
+    canonicalRunDir
+  );
+  if (!artifactSafety.ok) return artifactSafety;
+  const verification = loadWorkflowRunVerificationConfig(db, runId, repo.repoPath);
+  if (!verification.ok) {
+    // Missing run row / malformed goal verification / malformed MOMENTUM.md
+    // are invalid setup inputs needing operator or config repair, never the
+    // retryable `runtime_unavailable` class.
+    return {
+      ok: false,
+      reason: verification.reason,
+      recoveryCode: "invalid_input"
+    };
+  }
+  return {
+    ok: true,
+    repoPath: repo.repoPath,
+    runDir: canonicalRunDir,
+    repoSafety: {
+      repoRoot: repo.repoPath,
+      baseHead: repo.head,
+      verificationCommands: verification.commands,
+      verificationTimeoutSec: verification.timeoutSec,
+      verificationLogPath: path.join(canonicalRunDir, "verification.log")
+    }
+  };
+}
+
+function canonicalizeRunDir(
+  requestedRepoPath: string,
+  canonicalRepoPath: string,
+  runDir: string
+): string {
+  const requestedRepo = path.resolve(requestedRepoPath);
+  const resolvedRunDir = path.resolve(runDir);
+  const relativeToRequestedRepo = path.relative(requestedRepo, resolvedRunDir);
+  if (
+    relativeToRequestedRepo.length > 0 &&
+    !relativeToRequestedRepo.startsWith("..") &&
+    !path.isAbsolute(relativeToRequestedRepo)
+  ) {
+    return path.join(canonicalRepoPath, relativeToRequestedRepo);
+  }
+  return resolvedRunDir;
+}
+
+function verifyRepoLocalRunDirIgnored(
+  repoPath: string,
+  runDir: string
+):
+  | { ok: true }
+  | {
+      ok: false;
+      reason: string;
+      recoveryCode: string;
+      recoveryArtifact?: null;
+    } {
+  const relativeRunDir = path.relative(repoPath, runDir);
+  if (relativeRunDir.startsWith("..") || path.isAbsolute(relativeRunDir)) {
+    return { ok: true };
+  }
+  if (relativeRunDir.length === 0) {
+    return {
+      ok: false,
+      reason:
+        "repo_safety_unavailable: run artifact directory resolves to the repository root",
+      recoveryCode: "invalid_input",
+      recoveryArtifact: null
+    };
+  }
+  try {
+    execFileSync(
+      "git",
+      ["-C", repoPath, "check-ignore", "-q", "--", relativeRunDir],
+      { stdio: "ignore" }
+    );
+    return { ok: true };
+  } catch (error) {
+    const status =
+      typeof (error as { status?: unknown }).status === "number"
+        ? (error as { status: number }).status
+        : null;
+    if (status === 1) {
+      return {
+        ok: false,
+        reason: `repo_safety_unavailable: run artifact directory ${relativeRunDir} is inside the repository but is not ignored by git`,
+        recoveryCode: "invalid_input",
+        recoveryArtifact: null
+      };
+    }
+    const detail = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      reason: `repo_safety_unavailable: git check-ignore failed for run artifact directory ${relativeRunDir}: ${detail}`,
+      recoveryCode: "git_failed"
+    };
+  }
+}
+
+export const DEFAULT_DISPATCH_VERIFICATION_TIMEOUT_SEC = 900;
+
+/**
+ * Resolve the effective verification config for a dispatched run's git
+ * finalization, per the repo policy precedence (goal frontmatter >
+ * `MOMENTUM.md` > built-in default). Native workflow runs carry no `goal_id`,
+ * so without the `MOMENTUM.md` fallback they would finalize wrapper edits with
+ * zero verification commands and commit on a vacuously "skipped" verification.
+ *
+ * Fail-closed cases return `{ ok: false }` so the daemon parks the step for
+ * manual recovery instead of committing unverified work: the run row vanished,
+ * the goal's stored verification column is malformed, or a present
+ * `MOMENTUM.md` cannot be trusted (mirroring how `workflow run start` refuses
+ * a present-but-malformed policy rather than silently ignoring it).
+ */
+export function loadWorkflowRunVerificationConfig(
+  db: MomentumDb,
+  runId: string,
+  repoPath: string
+):
+  | { ok: true; commands: string[]; timeoutSec: number }
+  | { ok: false; reason: string } {
+  const row = db
+    .prepare(
+      `SELECT goals.verification AS verification,
+              goals.verification_timeout_sec AS verificationTimeoutSec
+         FROM workflow_runs
+         LEFT JOIN goals ON goals.id = workflow_runs.goal_id
+        WHERE workflow_runs.id = ?`
+    )
+    .get(runId) as
+    | { verification: string | null; verificationTimeoutSec: number | null }
+    | undefined;
+  if (row === undefined) {
+    return {
+      ok: false,
+      reason: `verification_config_unavailable: workflow run ${runId} not found`
+    };
+  }
+
+  const goalCommands = parseVerificationCommands(row.verification);
+  if (!goalCommands.ok) {
+    return {
+      ok: false,
+      reason: `verification_config_invalid: goal verification for run ${runId} is not a JSON string array`
+    };
+  }
+  const goalTimeoutSec =
+    row.verificationTimeoutSec !== null &&
+    Number.isInteger(row.verificationTimeoutSec) &&
+    row.verificationTimeoutSec > 0
+      ? row.verificationTimeoutSec
+      : undefined;
+  if (goalCommands.commands !== undefined) {
+    return {
+      ok: true,
+      commands: goalCommands.commands,
+      timeoutSec: goalTimeoutSec ?? DEFAULT_DISPATCH_VERIFICATION_TIMEOUT_SEC
+    };
+  }
+
+  const policy = loadMomentumPolicy(repoPath);
+  if (!policy.ok) {
+    return {
+      ok: false,
+      reason: `verification_policy_invalid: (${policy.code}) ${policy.error}`
+    };
+  }
+  const config = policy.present ? policy.policy.config : undefined;
+  return {
+    ok: true,
+    commands:
+      config?.verification !== undefined ? [...config.verification] : [],
+    timeoutSec:
+      goalTimeoutSec ??
+      config?.verificationTimeoutSec ??
+      DEFAULT_DISPATCH_VERIFICATION_TIMEOUT_SEC
+  };
+}
+
+function parseVerificationCommands(
+  raw: string | null
+):
+  | { ok: true; commands: string[] | undefined }
+  | { ok: false } {
+  // A null column means "no goal-backed verification configured" (no goal, or
+  // a goal without commands) and defers to the MOMENTUM.md fallback; a
+  // present-but-malformed column is untrusted state and fails closed instead
+  // of silently skipping verification.
+  if (raw === null) return { ok: true, commands: undefined };
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed) && parsed.every((item) => typeof item === "string")) {
+      return { ok: true, commands: parsed as string[] };
+    }
+  } catch {
+  }
+  return { ok: false };
 }
 
 function withExternalApplyDispatch(

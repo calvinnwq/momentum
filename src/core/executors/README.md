@@ -1,8 +1,9 @@
 # core/executors
 
 Executor runtime domain. This folder owns the runtime execution *mechanisms*:
-the executor-loop reducer/persistence and the goal-loop, single-shot, live-step,
-and no-mistakes executor families plus their runner-profile and runner-smoke
+the executor-loop reducer/persistence, the goal-loop and single-shot executor
+families, the production live-step wrapper executor, and the no-mistakes
+mechanism, plus their runner-profile, foreground iteration, and runner-smoke
 support. It holds business/runtime behavior only —
 reducers, state machines, persistence policies, and execution decisions. It does
 not parse CLI arguments or format output.
@@ -19,7 +20,7 @@ were left in place; importers still reference the concrete modules below.
 | Executor loop | `loop/reducer.ts`, `loop/persist.ts` |
 | Goal-loop executor | `goal-loop/executor.ts`, `goal-loop/mechanism.ts`, `goal-loop/orchestrator.ts`, `goal-loop/prompt.ts` |
 | Single-shot executor | `single-shot/executor.ts`, `single-shot/mechanism.ts`, `single-shot/orchestrator.ts` |
-| Live-step executor | `live-step/executor.ts`, `live-step/advance.ts`, `live-step/orchestrator.ts`, `live-step/run-recovery.ts`, `live-step/finalize.ts` |
+| Live-step executor | `live-step/executor.ts` (production live-wrapper lane) |
 | Shared step finalization | `shared/step-finalize.ts` (neutral verify -> commit / reset seam) |
 | No-mistakes mechanism | `no-mistakes/mechanism.ts` |
 | Runner support | `runner/profile.ts` |
@@ -39,18 +40,21 @@ Compatibility mechanisms such as GNHF must sit below `goal-loop`; they must not 
 
 The verify -> commit / reset finalization transaction lives in the neutrally-named
 `shared/step-finalize.ts` seam (`finalizeWorkflowStep` /
-`finalizeWorkflowStepFromResultFile`). It is consumed by both the live-step
-path (`live-step/advance` / `live-step/run-recovery`) and the executor-loop
-families (goal-loop and single-shot). The goal-loop family imports the neutral
-seam directly; the live wrappers and the single-shot family
-reach it through `live-step/finalize.ts`, a back-compat alias that re-exports the
-seam under the original `*LiveWorkflowStep*` names.
+`finalizeWorkflowStepFromResultFile`), consumed directly by the goal-loop
+and single-shot families.
 
-The direct-finalize path and the executor-loop path intentionally stay
-separate composition lanes: the live-step path is **not** collapsed into the
-executor-loop path. Any unification is reconciliation work owned by the
-dispatch reconciliation seam (`dispatch/reconcile.ts` /
-`dispatch/reconcile-execute.ts`), not by this mechanical regrouping.
+The retired live-step direct-finalize lane (`live-step/advance.ts`,
+`live-step/orchestrator.ts`, `live-step/run-recovery.ts`) and its
+`live-step/finalize.ts` back-compat alias were deleted under the
+execution-lane decision: the dispatch reconciliation seam
+(`dispatch/reconcile.ts` / `dispatch/reconcile-execute.ts`) owns finalizing
+dispatched workflow steps from durable terminal executor evidence in
+production, while `dispatch/executor-run.ts` calls this shared verify -> commit /
+reset seam before terminalizing successful live-wrapper results as durable
+executor evidence.
+That superseded the staged live-step composition lane.
+The remaining `live-step/executor.ts` is the production live-wrapper step
+executor consumed by the real-adapter registry.
 
 ## Ownership boundary with adapters
 

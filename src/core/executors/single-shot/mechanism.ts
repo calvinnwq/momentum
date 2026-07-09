@@ -21,9 +21,9 @@ import path from "node:path";
 
 import { listCommittedChangedFiles } from "../../../adapters/git-transaction.js";
 import {
-  finalizeLiveWorkflowStep,
-  type FinalizeLiveWorkflowStepResult
-} from "../live-step/finalize.js";
+  finalizeWorkflowStep,
+  type FinalizeWorkflowStepResult
+} from "../shared/step-finalize.js";
 import {
   LIVE_STEP_WRAPPER_OUTPUT_MAX_BYTES,
   runLiveStepWrapper,
@@ -431,7 +431,7 @@ function finalizeOneShotProcessFailure(
   }
   return projectFinalizeResult({
     repoPath: options.repoPath,
-    finalize: finalizeLiveWorkflowStep({
+    finalize: finalizeWorkflowStep({
       repoPath: options.repoPath,
       baseHead: options.repoSafety.baseHead,
       stepSuccess: false,
@@ -478,7 +478,7 @@ function finalizeOneShotResult(
   }
   return projectFinalizeResult({
     repoPath: options.repoPath,
-    finalize: finalizeLiveWorkflowStep({
+    finalize: finalizeWorkflowStep({
       repoPath: options.repoPath,
       baseHead: options.repoSafety.baseHead,
       stepSuccess,
@@ -514,7 +514,7 @@ function finalizeScriptResult(
   }
   return projectFinalizeResult({
     repoPath: config.cwd,
-    finalize: finalizeLiveWorkflowStep({
+    finalize: finalizeWorkflowStep({
       repoPath: config.cwd,
       baseHead: config.repoSafety.baseHead,
       stepSuccess,
@@ -595,7 +595,7 @@ function readGit(
 
 function projectFinalizeResult(input: {
   repoPath: string;
-  finalize: FinalizeLiveWorkflowStepResult;
+  finalize: FinalizeWorkflowStepResult;
   failureCode: SingleShotRecoveryCode;
   artifacts: SingleShotRoundArtifacts;
   verificationLogPath: string;
@@ -695,7 +695,7 @@ function projectFinalizeResult(input: {
 
 function withFinalizeArtifacts(
   artifacts: SingleShotRoundArtifacts,
-  finalize: FinalizeLiveWorkflowStepResult,
+  finalize: FinalizeWorkflowStepResult,
   verificationLogPath: string
 ): SingleShotRoundArtifacts {
   const verificationStatus = verificationStatusFromMaybeFinalize(finalize);
@@ -707,7 +707,7 @@ function withFinalizeArtifacts(
 }
 
 function evidenceFromMaybeVerification(
-  finalize: Extract<FinalizeLiveWorkflowStepResult, { outcome: "reset_failed" }>
+  finalize: Extract<FinalizeWorkflowStepResult, { outcome: "reset_failed" }>
 ): SingleShotRoundEvidence | undefined {
   if (finalize.verification === null) return undefined;
   return {
@@ -716,7 +716,7 @@ function evidenceFromMaybeVerification(
 }
 
 function verificationStatusFromMaybeFinalize(
-  finalize: FinalizeLiveWorkflowStepResult
+  finalize: FinalizeWorkflowStepResult
 ): SingleShotVerificationStatus | null {
   if (!("verification" in finalize)) return null;
   if (finalize.verification === null) return null;
@@ -725,7 +725,7 @@ function verificationStatusFromMaybeFinalize(
 
 function verificationStatusFromFinalize(
   finalize: Extract<
-    FinalizeLiveWorkflowStepResult,
+    FinalizeWorkflowStepResult,
     { outcome: "committed" | "reset_verification_failure" | "commit_failed" }
   >
 ): SingleShotVerificationStatus {
@@ -742,7 +742,7 @@ function verificationStatusFromVerification(input: {
 
 function changedFilesForCommit(
   repoPath: string,
-  finalize: Extract<FinalizeLiveWorkflowStepResult, { outcome: "committed" }>
+  finalize: Extract<FinalizeWorkflowStepResult, { outcome: "committed" }>
 ): string[] {
   try {
     return listCommittedChangedFiles(

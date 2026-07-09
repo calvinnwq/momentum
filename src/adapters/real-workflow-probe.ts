@@ -17,8 +17,8 @@
  *     `profile_unavailable`) rather than throwing.
  *
  * It deliberately does not spawn the full agent, persist leases, capture result
- * files, or run the verification/commit transaction — those stay owned by the
- * live step wrapper / orchestrator layers and the coding-workflow-pipeline skill.
+ * files, or run the verification/commit transaction - those stay owned by the
+ * live-wrapper dispatch / executor-run lanes and the coding-workflow-pipeline skill.
  */
 
 import { spawnSync, type SpawnSyncReturns } from "node:child_process";

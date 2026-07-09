@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -14,7 +15,11 @@ import {
   type WorkflowStepDispatchContext,
   type WorkflowStepDispatchResult
 } from "../src/core/workflow/dispatch/scheduler.js";
-import { getWorkflowLease } from "../src/core/workflow/leases.js";
+import {
+  getWorkflowLease,
+  releaseWorkflowLease
+} from "../src/core/workflow/leases.js";
+import { acquireRepoLock, getActiveRepoLock } from "../src/core/repo/locks.js";
 import { listWorkflowGatesForRun } from "../src/core/workflow/gate/persist.js";
 import {
   clearWorkflowRunManualRecoveryGuarded,
@@ -83,6 +88,25 @@ function makeTempDir(prefix = "momentum-livewrap-"): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   tempRoots.push(dir);
   return fs.realpathSync(dir);
+}
+
+function runGit(repoPath: string, args: string[]): string {
+  return execFileSync("git", ["-C", repoPath, ...args], {
+    encoding: "utf-8",
+    stdio: ["ignore", "pipe", "pipe"]
+  }).trim();
+}
+
+function initRepo(): { repoPath: string; baseHead: string } {
+  const repoPath = makeTempDir("momentum-livewrap-repo-");
+  runGit(repoPath, ["init", "--initial-branch=main", "--quiet"]);
+  runGit(repoPath, ["config", "user.email", "test@example.com"]);
+  runGit(repoPath, ["config", "user.name", "Test User"]);
+  runGit(repoPath, ["config", "commit.gpgsign", "false"]);
+  fs.writeFileSync(path.join(repoPath, "README.md"), "init\n", "utf-8");
+  runGit(repoPath, ["add", "README.md"]);
+  runGit(repoPath, ["commit", "-m", "init", "--quiet"]);
+  return { repoPath, baseHead: runGit(repoPath, ["rev-parse", "HEAD"]) };
 }
 
 /** Open a migrated DB seeded exactly as the CLI `workflow run start` leaves it. */
@@ -344,26 +368,499 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
   it("passes the derived exec context into a real configured live-wrapper command end to end", () => {
     const db = openSeededDb();
     const claim = approveAndClaim(db, "preflight");
-    const repoPath = makeTempDir("momentum-livewrap-repo-");
+    const { repoPath, baseHead } = initRepo();
     const runDir = makeTempDir("momentum-livewrap-run-");
     const registry = buildRealWorkflowStepExecutorRegistry({
-      profile: profileWith("preflight", ["-c", WRITE_VALID_RESULT])
+      profile: profileWith("preflight", [
+        "-c",
+        `printf 'from-wrapper\\n' > "$MOMENTUM_REPO_PATH/live-edit.txt" && ${WRITE_VALID_RESULT}`
+      ])
     });
     const exec: DispatchedStepExecutorContext = {
       repoPath,
       runDir,
       resultJsonPath: path.join(runDir, "result.json"),
-      executorLogPath: path.join(runDir, "executor.log")
+      executorLogPath: path.join(runDir, "executor.log"),
+      repoSafety: {
+        baseHead,
+        verificationCommands: ["test -f live-edit.txt"],
+        verificationTimeoutSec: 30,
+        verificationLogPath: path.join(runDir, "verification.log")
+      }
     };
     const dispatch = createLiveWrapperWorkflowDispatch(
       executeWorkflowStepDispatch,
-      { registry, deriveExec: () => ({ ok: true, exec }) }
+      { registry, deriveExec: () => ({ ok: true, exec }), nowMs: () => TICK_AT }
     );
 
     const result = dispatch(claim, tickContext(db));
 
     expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
     expect(stepState(db, "preflight")).toBe("succeeded");
+    expect(runGit(repoPath, ["rev-parse", "HEAD"])).not.toBe(baseHead);
+    expect(runGit(repoPath, ["rev-parse", "HEAD^"])).toBe(baseHead);
+    expect(fs.existsSync(path.join(runDir, "verification.log"))).toBe(true);
+  });
+
+  it("runs verification and resets live-wrapper edits before reconciliation on verification failure", () => {
+    const db = openSeededDb();
+    const claim = approveAndClaim(db, "preflight");
+    const { repoPath, baseHead } = initRepo();
+    const runDir = makeTempDir("momentum-livewrap-run-");
+    const registry = buildRealWorkflowStepExecutorRegistry({
+      profile: profileWith("preflight", [
+        "-c",
+        `printf 'from-wrapper\\n' > "$MOMENTUM_REPO_PATH/live-edit.txt" && ${WRITE_VALID_RESULT}`
+      ])
+    });
+    const exec: DispatchedStepExecutorContext = {
+      repoPath,
+      runDir,
+      resultJsonPath: path.join(runDir, "result.json"),
+      executorLogPath: path.join(runDir, "executor.log"),
+      repoSafety: {
+        baseHead,
+        verificationCommands: ["false"],
+        verificationTimeoutSec: 30,
+        verificationLogPath: path.join(runDir, "verification.log")
+      }
+    };
+    const dispatch = createLiveWrapperWorkflowDispatch(
+      executeWorkflowStepDispatch,
+      { registry, deriveExec: () => ({ ok: true, exec }), nowMs: () => TICK_AT }
+    );
+
+    const result = dispatch(claim, tickContext(db));
+
+    expect(result.status).toBe(WORKFLOW_DISPATCH_RESULT_STATUS.dispatched);
+    expect(stepState(db, "preflight")).toBe("failed");
+    expect(runGit(repoPath, ["rev-parse", "HEAD"])).toBe(baseHead);
+    expect(fs.existsSync(path.join(repoPath, "live-edit.txt"))).toBe(false);
+    expect(fs.readFileSync(path.join(runDir, "verification.log"), "utf-8")).toContain(
+      "exit_code: 1"
+    );
+  });
+
+  it("fails the step without manual recovery when finalization has nothing to commit", () => {
+    const db = openSeededDb();
+    const claim = approveAndClaim(db, "preflight");
+    const { repoPath, baseHead } = initRepo();
+    const runDir = makeTempDir("momentum-livewrap-run-");
+    const { registry } = countingRegistry((input) => {
+      fs.mkdirSync(input.runDir, { recursive: true });
+      fs.writeFileSync(input.resultJsonPath, VALID_RESULT_JSON, "utf-8");
+      return succeededResult(input);
+    });
+    const exec: DispatchedStepExecutorContext = {
+      repoPath,
+      runDir,
+      resultJsonPath: path.join(runDir, "result.json"),
+      executorLogPath: path.join(runDir, "executor.log"),
+      repoSafety: {
+        baseHead,
+        verificationCommands: ["true"],
+        verificationTimeoutSec: 30,
+        verificationLogPath: path.join(runDir, "verification.log")
+      }
+    };
+    const dispatch = createLiveWrapperWorkflowDispatch(
+      executeWorkflowStepDispatch,
+      { registry, deriveExec: () => ({ ok: true, exec }), nowMs: () => TICK_AT }
+    );
+
+    dispatch(claim, tickContext(db));
+
+    expect(stepState(db, "preflight")).toBe("failed");
+    expect(
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+    ).toBe(false);
+    expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
+    expect(dispatchRounds(db, "preflight")[0]?.recoveryCode).toBeNull();
+  });
+
+  it("routes finalization to recovery when the dispatch lease is lost before git mutation", () => {
+    const db = openSeededDb();
+    const claim = approveAndClaim(db, "preflight");
+    const { repoPath, baseHead } = initRepo();
+    const runDir = makeTempDir("momentum-livewrap-run-");
+    const { registry } = countingRegistry((input) => {
+      fs.mkdirSync(input.runDir, { recursive: true });
+      fs.writeFileSync(path.join(repoPath, "live-edit.txt"), "edit\n", "utf-8");
+      fs.writeFileSync(input.resultJsonPath, VALID_RESULT_JSON, "utf-8");
+      releaseWorkflowLease(db, {
+        runId: claim.lease.runId,
+        leaseKind: claim.lease.leaseKind,
+        holder: claim.lease.holder,
+        acquiredAt: claim.lease.acquiredAt,
+        now: TICK_AT + 1
+      });
+      return succeededResult(input);
+    });
+    const exec: DispatchedStepExecutorContext = {
+      repoPath,
+      runDir,
+      resultJsonPath: path.join(runDir, "result.json"),
+      executorLogPath: path.join(runDir, "executor.log"),
+      repoSafety: {
+        baseHead,
+        verificationCommands: ["test -f live-edit.txt"],
+        verificationTimeoutSec: 30,
+        verificationLogPath: path.join(runDir, "verification.log")
+      }
+    };
+    const dispatch = createLiveWrapperWorkflowDispatch(
+      executeWorkflowStepDispatch,
+      { registry, deriveExec: () => ({ ok: true, exec }), nowMs: () => TICK_AT }
+    );
+
+    dispatch(claim, tickContext(db));
+
+    expect(stepState(db, "preflight")).toBe("running");
+    expect(
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+    ).toBe(true);
+    expect(dispatchRounds(db, "preflight")[0]?.recoveryCode).toBe(
+      "repo_lock_lost"
+    );
+    expect(runGit(repoPath, ["rev-parse", "HEAD"])).toBe(baseHead);
+    expect(fs.existsSync(path.join(repoPath, "live-edit.txt"))).toBe(true);
+  });
+
+  it("refuses git mutation when the dispatch lease expired while the wrapper ran", () => {
+    const db = openSeededDb();
+    const claim = approveAndClaim(db, "preflight");
+    const { repoPath, baseHead } = initRepo();
+    const runDir = makeTempDir("momentum-livewrap-run-");
+    const { registry } = countingRegistry((input) => {
+      fs.mkdirSync(input.runDir, { recursive: true });
+      fs.writeFileSync(path.join(repoPath, "live-edit.txt"), "edit\n", "utf-8");
+      fs.writeFileSync(input.resultJsonPath, VALID_RESULT_JSON, "utf-8");
+      return succeededResult(input);
+    });
+    const exec: DispatchedStepExecutorContext = {
+      repoPath,
+      runDir,
+      resultJsonPath: path.join(runDir, "result.json"),
+      executorLogPath: path.join(runDir, "executor.log"),
+      repoSafety: {
+        baseHead,
+        verificationCommands: ["test -f live-edit.txt"],
+        verificationTimeoutSec: 30,
+        verificationLogPath: path.join(runDir, "verification.log")
+      }
+    };
+    // The wrapper "ran" past the claim's 30s lease: the wall clock at mutation
+    // time is a minute after the claim. The stale tick timestamp
+    // (`context.now = TICK_AT`) would still satisfy `expires_at >=
+    // heartbeat_at` and retroactively extend the expired lease; the fresh
+    // clock must refuse instead.
+    const dispatch = createLiveWrapperWorkflowDispatch(
+      executeWorkflowStepDispatch,
+      {
+        registry,
+        deriveExec: () => ({ ok: true, exec }),
+        nowMs: () => NOW + 60_000
+      }
+    );
+
+    dispatch(claim, tickContext(db));
+
+    expect(stepState(db, "preflight")).toBe("running");
+    expect(
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+    ).toBe(true);
+    expect(dispatchRounds(db, "preflight")[0]?.recoveryCode).toBe(
+      "repo_lock_lost"
+    );
+    // Neither a commit nor a destructive reset happened after expiry.
+    expect(runGit(repoPath, ["rev-parse", "HEAD"])).toBe(baseHead);
+    expect(fs.existsSync(path.join(repoPath, "live-edit.txt"))).toBe(true);
+  });
+
+  it("never verifies or mutates git for an unexpected skipped executor terminal", () => {
+    const db = openSeededDb();
+    const claim = approveAndClaim(db, "preflight");
+    const { repoPath, baseHead } = initRepo();
+    const runDir = makeTempDir("momentum-livewrap-run-");
+    const { registry } = countingRegistry((input) => {
+      fs.mkdirSync(input.runDir, { recursive: true });
+      fs.writeFileSync(path.join(repoPath, "live-edit.txt"), "edit\n", "utf-8");
+      fs.writeFileSync(input.resultJsonPath, VALID_RESULT_JSON, "utf-8");
+      return {
+        ok: true,
+        result: {
+          state: "skipped",
+          summary: "wrapper reported an unexpected skip",
+          checkpoints: [],
+          artifacts: [],
+          resultDigest: null,
+          errorCode: null,
+          errorMessage: null,
+          retryHint: null,
+          recoveryHint: null
+        },
+        executorLogPath: input.executorLogPath,
+        resultJsonPath: input.resultJsonPath
+      };
+    });
+    const exec: DispatchedStepExecutorContext = {
+      repoPath,
+      runDir,
+      resultJsonPath: path.join(runDir, "result.json"),
+      executorLogPath: path.join(runDir, "executor.log"),
+      repoSafety: {
+        baseHead,
+        verificationCommands: ["true"],
+        verificationTimeoutSec: 30,
+        verificationLogPath: path.join(runDir, "verification.log")
+      }
+    };
+    const dispatch = createLiveWrapperWorkflowDispatch(
+      executeWorkflowStepDispatch,
+      { registry, deriveExec: () => ({ ok: true, exec }), nowMs: () => TICK_AT }
+    );
+
+    dispatch(claim, tickContext(db));
+
+    // Terminalization parks the unexpected skip for manual recovery, and
+    // finalization never verified, committed, or reset over it.
+    expect(
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+    ).toBe(true);
+    expect(dispatchRounds(db, "preflight")[0]?.recoveryCode).toBe(
+      "unexpected_skipped_terminal"
+    );
+    expect(runGit(repoPath, ["rev-parse", "HEAD"])).toBe(baseHead);
+    expect(fs.existsSync(path.join(repoPath, "live-edit.txt"))).toBe(true);
+    expect(fs.existsSync(path.join(runDir, "verification.log"))).toBe(false);
+  });
+
+  it("refuses to execute when another run holds the repository lock", () => {
+    const db = openSeededDb();
+    const claim = approveAndClaim(db, "preflight");
+    const { repoPath } = initRepo();
+    const runDir = makeTempDir("momentum-livewrap-run-");
+    const { registry, calls } = countingRegistry(succeededResult);
+    const foreign = acquireRepoLock(db, {
+      repoRoot: repoPath,
+      holder: "other-worker",
+      goalId: "run-other",
+      iteration: 1,
+      jobId: "run-other::implementation::dispatch",
+      leaseExpiresAt: TICK_AT + 600_000,
+      now: NOW
+    });
+    expect(foreign.ok).toBe(true);
+    const exec: DispatchedStepExecutorContext = {
+      repoPath,
+      runDir,
+      resultJsonPath: path.join(runDir, "result.json"),
+      executorLogPath: path.join(runDir, "executor.log"),
+      repoSafety: {
+        baseHead: "unused",
+        verificationCommands: ["true"],
+        verificationTimeoutSec: 30,
+        verificationLogPath: path.join(runDir, "verification.log")
+      }
+    };
+    const dispatch = createLiveWrapperWorkflowDispatch(
+      executeWorkflowStepDispatch,
+      { registry, deriveExec: () => ({ ok: true, exec }), nowMs: () => TICK_AT }
+    );
+
+    dispatch(claim, tickContext(db));
+
+    // The executor never ran: a shared worktree is never executed over, so the
+    // other run's changes can never be swept into this step's commit.
+    expect(calls()).toBe(0);
+    expect(
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+    ).toBe(true);
+    const rounds = dispatchRounds(db, "preflight");
+    expect(rounds[0]?.recoveryCode).toBe("repo_lock_lost");
+    expect(rounds[0]?.summary).toContain("is locked by other-worker");
+    const recoveryMd = fs.readFileSync(path.join(runDir, "recovery.md"), "utf-8");
+    expect(recoveryMd).toContain("repo_lock_lost");
+    expect(recoveryMd).toContain(`Repo path: ${repoPath}`);
+  });
+
+  it("holds the repository lock across execution and releases it after finalization", () => {
+    const db = openSeededDb();
+    const claim = approveAndClaim(db, "preflight");
+    const { repoPath, baseHead } = initRepo();
+    const runDir = makeTempDir("momentum-livewrap-run-");
+    const { registry } = countingRegistry((input) => {
+      // The lock is active while the wrapper runs.
+      expect(getActiveRepoLock(db, repoPath)?.goal_id).toBe(RUN_ID);
+      fs.mkdirSync(input.runDir, { recursive: true });
+      fs.writeFileSync(path.join(repoPath, "live-edit.txt"), "edit\n", "utf-8");
+      fs.writeFileSync(input.resultJsonPath, VALID_RESULT_JSON, "utf-8");
+      return succeededResult(input);
+    });
+    const exec: DispatchedStepExecutorContext = {
+      repoPath,
+      runDir,
+      resultJsonPath: path.join(runDir, "result.json"),
+      executorLogPath: path.join(runDir, "executor.log"),
+      repoSafety: {
+        baseHead,
+        verificationCommands: ["test -f live-edit.txt"],
+        verificationTimeoutSec: 30,
+        verificationLogPath: path.join(runDir, "verification.log")
+      }
+    };
+    const dispatch = createLiveWrapperWorkflowDispatch(
+      executeWorkflowStepDispatch,
+      { registry, deriveExec: () => ({ ok: true, exec }), nowMs: () => TICK_AT }
+    );
+
+    dispatch(claim, tickContext(db));
+
+    expect(stepState(db, "preflight")).toBe("succeeded");
+    // The lock does not outlive the execution.
+    expect(getActiveRepoLock(db, repoPath)).toBeUndefined();
+    const lockRow = db
+      .prepare("SELECT state FROM repo_locks WHERE repo_root = ?")
+      .get(repoPath) as { state: string } | undefined;
+    expect(lockRow?.state).toBe("released");
+  });
+
+  it("refuses git mutation when the repository lock is lost while the wrapper ran", () => {
+    const db = openSeededDb();
+    const claim = approveAndClaim(db, "preflight");
+    const { repoPath, baseHead } = initRepo();
+    const runDir = makeTempDir("momentum-livewrap-run-");
+    const { registry } = countingRegistry((input) => {
+      fs.mkdirSync(input.runDir, { recursive: true });
+      fs.writeFileSync(path.join(repoPath, "live-edit.txt"), "edit\n", "utf-8");
+      fs.writeFileSync(input.resultJsonPath, VALID_RESULT_JSON, "utf-8");
+      db.prepare(
+        "UPDATE repo_locks SET state = 'released', released_at = ?, updated_at = ? WHERE repo_root = ? AND state = 'active'"
+      ).run(TICK_AT + 1, TICK_AT + 1, repoPath);
+      return succeededResult(input);
+    });
+    const exec: DispatchedStepExecutorContext = {
+      repoPath,
+      runDir,
+      resultJsonPath: path.join(runDir, "result.json"),
+      executorLogPath: path.join(runDir, "executor.log"),
+      repoSafety: {
+        baseHead,
+        verificationCommands: ["test -f live-edit.txt"],
+        verificationTimeoutSec: 30,
+        verificationLogPath: path.join(runDir, "verification.log")
+      }
+    };
+    const dispatch = createLiveWrapperWorkflowDispatch(
+      executeWorkflowStepDispatch,
+      { registry, deriveExec: () => ({ ok: true, exec }), nowMs: () => TICK_AT }
+    );
+
+    dispatch(claim, tickContext(db));
+
+    expect(
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+    ).toBe(true);
+    expect(dispatchRounds(db, "preflight")[0]?.recoveryCode).toBe(
+      "repo_lock_lost"
+    );
+    // No commit and no destructive reset over a worktree Momentum may not own.
+    expect(runGit(repoPath, ["rev-parse", "HEAD"])).toBe(baseHead);
+    expect(fs.existsSync(path.join(repoPath, "live-edit.txt"))).toBe(true);
+  });
+
+  it("keeps the repository lock guarding an unproven worktree after a manual-recovery park", () => {
+    const db = openSeededDb();
+    const claim = approveAndClaim(db, "preflight");
+    const { repoPath } = initRepo();
+    const runDir = makeTempDir("momentum-livewrap-run-");
+    const { registry } = countingRegistry((input) => {
+      fs.mkdirSync(input.runDir, { recursive: true });
+      fs.writeFileSync(path.join(repoPath, "live-edit.txt"), "edit\n", "utf-8");
+      // An untrusted result document: finalization refuses to commit or reset,
+      // so the wrapper's edit is still sitting in the worktree.
+      fs.writeFileSync(input.resultJsonPath, "{not json", "utf-8");
+      return succeededResult(input);
+    });
+    const exec: DispatchedStepExecutorContext = {
+      repoPath,
+      runDir,
+      resultJsonPath: path.join(runDir, "result.json"),
+      executorLogPath: path.join(runDir, "executor.log"),
+      repoSafety: {
+        baseHead: runGit(repoPath, ["rev-parse", "HEAD"]),
+        verificationCommands: ["true"],
+        verificationTimeoutSec: 30,
+        verificationLogPath: path.join(runDir, "verification.log")
+      }
+    };
+    const dispatch = createLiveWrapperWorkflowDispatch(
+      executeWorkflowStepDispatch,
+      { registry, deriveExec: () => ({ ok: true, exec }), nowMs: () => TICK_AT }
+    );
+
+    dispatch(claim, tickContext(db));
+
+    expect(
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+    ).toBe(true);
+    // The dirty worktree stays guarded: the lock is marked for manual recovery
+    // instead of released, so another run cannot acquire the repository and
+    // sweep the leftover edit into its own commit.
+    const lockRow = db
+      .prepare("SELECT state, recovery_status FROM repo_locks WHERE repo_root = ?")
+      .get(repoPath) as { state: string; recovery_status: string | null };
+    expect(lockRow.state).toBe("needs_manual_recovery");
+    expect(lockRow.recovery_status).toContain("unproven worktree");
+    const blocked = acquireRepoLock(db, {
+      repoRoot: repoPath,
+      holder: "other-worker",
+      goalId: "run-other",
+      iteration: 1,
+      jobId: "run-other::implementation::dispatch",
+      leaseExpiresAt: TICK_AT + 600_000,
+      now: TICK_AT + 2
+    });
+    expect(blocked.ok).toBe(false);
+  });
+
+  it("preserves precise finalization recovery context and writes recovery.md", () => {
+    const db = openSeededDb();
+    const claim = approveAndClaim(db, "preflight");
+    const { repoPath, baseHead } = initRepo();
+    const runDir = makeTempDir("momentum-livewrap-run-");
+    const { registry } = countingRegistry((input) => {
+      fs.mkdirSync(input.runDir, { recursive: true });
+      fs.writeFileSync(input.resultJsonPath, "{not json", "utf-8");
+      return succeededResult(input);
+    });
+    const exec: DispatchedStepExecutorContext = {
+      repoPath,
+      runDir,
+      resultJsonPath: path.join(runDir, "result.json"),
+      executorLogPath: path.join(runDir, "executor.log"),
+      repoSafety: {
+        baseHead,
+        verificationCommands: ["true"],
+        verificationTimeoutSec: 30,
+        verificationLogPath: path.join(runDir, "verification.log")
+      }
+    };
+    const dispatch = createLiveWrapperWorkflowDispatch(
+      executeWorkflowStepDispatch,
+      { registry, deriveExec: () => ({ ok: true, exec }), nowMs: () => TICK_AT }
+    );
+
+    dispatch(claim, tickContext(db));
+
+    const recovery = getWorkflowRunManualRecoveryState(db, RUN_ID);
+    expect(recovery?.needsManualRecovery).toBe(true);
+    expect(recovery?.reason).toContain("result_invalid");
+    expect(dispatchRounds(db, "preflight")[0]?.recoveryCode).toBe(
+      "result_invalid"
+    );
+    const recoveryMd = fs.readFileSync(path.join(runDir, "recovery.md"), "utf-8");
+    expect(recoveryMd).toContain("result_invalid");
   });
 });
 
@@ -371,12 +868,19 @@ describe("createLiveWrapperWorkflowDispatch — unconfigured fails honestly", ()
   it("parks the run for manual recovery on runtime_unavailable instead of a fake success", () => {
     const db = openSeededDb();
     const claim = approveAndClaim(db, "preflight");
+    const runDir = makeTempDir("momentum-livewrap-run-");
+    const exec: DispatchedStepExecutorContext = {
+      ...EXEC_CONTEXT,
+      runDir,
+      resultJsonPath: path.join(runDir, "result.json"),
+      executorLogPath: path.join(runDir, "executor.log")
+    };
     // The real registry with NO profile resolves every kind to the honest
     // unconfigured adapter that refuses with runtime_unavailable.
     const registry = buildRealWorkflowStepExecutorRegistry();
     const dispatch = createLiveWrapperWorkflowDispatch(
       executeWorkflowStepDispatch,
-      { registry, deriveExec: () => ({ ok: true, exec: EXEC_CONTEXT }) }
+      { registry, deriveExec: () => ({ ok: true, exec }), nowMs: () => TICK_AT }
     );
 
     const result = dispatch(claim, tickContext(db));
@@ -399,6 +903,10 @@ describe("createLiveWrapperWorkflowDispatch — unconfigured fails honestly", ()
       gateType: "manual_recovery_required",
       stepRunId: "preflight"
     });
+    const recoveryMd = fs.readFileSync(path.join(runDir, "recovery.md"), "utf-8");
+    expect(recoveryMd).toContain("runtime_unavailable");
+    expect(recoveryMd).toContain(`executor-log: ${exec.executorLogPath}`);
+    expect(recoveryMd).toContain(`result-file: ${exec.resultJsonPath}`);
   });
 });
 
@@ -679,6 +1187,37 @@ describe("createLiveWrapperWorkflowDispatch — non-derivable exec context parks
     });
     // No stranded lease: RC-2 released the held dispatch lease while parking.
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
+  });
+
+  it("preserves a precise recovery code from a refused derivation instead of runtime_unavailable", () => {
+    const db = openSeededDb();
+    const claim = approveAndClaim(db, "preflight");
+    const { registry, calls } = countingRegistry(succeededResult);
+    const dispatch = createLiveWrapperWorkflowDispatch(
+      executeWorkflowStepDispatch,
+      {
+        registry,
+        deriveExec: () => ({
+          ok: false,
+          reason: "verification_policy_invalid: (policy_schema_invalid) bad MOMENTUM.md",
+          recoveryCode: "invalid_input"
+        })
+      }
+    );
+
+    dispatch(claim, tickContext(db));
+
+    expect(calls()).toBe(0);
+    expect(
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+    ).toBe(true);
+    const rounds = dispatchRounds(db, "preflight");
+    expect(rounds).toHaveLength(1);
+    // The precise setup classification survives to the round: `invalid_input`
+    // is not in the retryable dispatch recovery codes, so clear-recovery will
+    // not prepare a doomed retry for a config problem.
+    expect(rounds[0]?.recoveryCode).toBe("invalid_input");
+    expect(rounds[0]?.summary).toContain("verification_policy_invalid");
   });
 
   it("is idempotent on re-entry: never runs the executor and opens no duplicate gate", () => {

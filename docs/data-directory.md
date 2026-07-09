@@ -50,7 +50,8 @@ A single `momentum.db` per data directory backs durable state across all goals:
 - `goals` — durable goal rows from the retired goal-first lane, including `state`, `reducer_decision`, `needs_manual_recovery`, and `linked_source_item_id`; `recovery clear`, daemon recovery surfaces, and `doctor` still read them.
 - `jobs` — stored `goal_iteration` job rows from the retired goal-first lane; nothing claims them anymore, but daemon startup recovery and `daemon status` still read and reconcile stale rows.
 - `events` — append-only audit stream (`job.succeeded`, `job.failed`, `goal.reduced`, `goal.completed`, `goal.failed`, `goal.recovery_cleared`, etc.).
-- `repo_locks` — per-repo exclusion lease held across an iteration; released on commit / reset / `recovery clear`.
+- `repo_locks` — per-repo exclusion lease held across a goal iteration or a live-wrapper workflow dispatch that may mutate git; workflow dispatch locks are released only after a proven-clean commit / reset / reconciliation outcome, while stored goal-iteration manual-recovery locks are also released by `recovery clear`.
+  Workflow dispatch locks reuse the legacy identity columns (`goal_id` = run id, `job_id` = dispatch invocation id, `iteration` = attempt) so the active-per-repo-root index remains the exclusion primitive.
 - `daemon_runs` — orchestrator-run state (register-only or managed-loop), the source of truth for `daemon status` and `doctor`'s daemon-readiness block.
 - `source_items` — durable rows for external tracker items (linked or unlinked) seen by source adapters.
 - `source_snapshots` — point-in-time JSON snapshots captured during reconciliation.
@@ -80,7 +81,7 @@ A single `momentum.db` per data directory backs durable state across all goals:
 - `executor_definitions` — durable executor recipes keyed by `executor_key`, carrying the executor `family`, display name, optional agent / model / effort policy, and lifecycle timestamps.
 - `executor_invocations` - one configured executor session below a workflow step, keyed by `invocation_id` and referencing `(run_id, step_id)`; stores executor family, state, attempt number, and lifecycle timestamps.
   Bounded `daemon start --max-*` and `workflow run watch --once` create the first invocation scaffold when they dispatch an eligible approved workflow step for a supported executor family; the workflow dispatcher uses deterministic `<run-id>::<step-id>::dispatch` ids so re-entry finds the same scaffold instead of duplicating work.
-  When a bounded daemon cycle or watch tick uses a valid live-wrapper profile, that same scaffold is terminalized from the wrapper result and reconciled in place; for the built-in `linear-refresh` step's `external-apply` family, the daemon terminalizes it only after issue-scope, policy/auth, matching-source, one pending `status_update` intent or deterministic evidence to seed the expected `Done` intent, valid-payload, and idempotency-marker preflight passes, or from already-applied successful audit evidence.
+  When a bounded daemon cycle or watch tick uses a valid live-wrapper profile, that same scaffold is terminalized from the wrapper result after successful live-wrapper results pass through repo-safety, verification, and commit/reset finalization, then reconciled in place; for the built-in `linear-refresh` step's `external-apply` family, the daemon terminalizes it only after issue-scope, policy/auth, matching-source, one pending `status_update` intent or deterministic evidence to seed the expected `Done` intent, valid-payload, and idempotency-marker preflight passes, or from already-applied successful audit evidence.
   Configured `subworkflow` steps use the same scaffold shape to attach child-run evidence before the parent step is reconciled; missing child config, unsafe recursion, unsupported attachment, invalid child state, and ambiguous child terminals route to manual recovery.
   A retryable `no-mistakes` / `merge-cleanup` live-wrapper setup or lifecycle failure keeps the same deterministic invocation id; after `workflow run clear-recovery` prepares the step, the next dispatch reopens that invocation with an incremented attempt instead of duplicating the session.
   If an interrupted native `no-mistakes` wrapper left a failed step but the external no-mistakes run later proves success, guarded `clear-recovery` can instead stamp operator evidence on the failed `no-mistakes` step and re-derive the run without opening generic terminal-run mutation.
@@ -88,6 +89,7 @@ A single `momentum.db` per data directory backs durable state across all goals:
   The no-mistakes reconciliation path accepts legacy `no-mistakes:<run-id>#checks-passed` evidence or a readable structured deterministic evidence JSON file that matches the current workflow run, issue scope, branch head, pull request identity, no-mistakes run id, unresolved finding counts, check state, and required phase statuses.
 - `executor_rounds` - bounded executor-loop attempts or long-lived external mirror lanes keyed by `round_id` and referencing `executor_invocations`; stores attempt / round ordering, durable round state, execution metadata, executor recommendation, result summaries, key changes, key learnings, log paths, remaining work, verification status, verification command results, commit / recovery fields, and lifecycle timestamps.
   The dispatcher creates the first pending round scaffold (`<invocation-id>::round-1`) before any later executor work is driven; that scaffold freezes agent / model / effort metadata from the selected route when a native coding run has `route.steps`, but carries no result, artifact, verification, commit, or recovery evidence until an executor, configured daemon/watch live-wrapper profile, the daemon's external-apply adapter, an internal subworkflow mirror, or deliberate test/dogfood terminalizer fills it.
+  Live-wrapper-owned rounds filled by a configured daemon/watch profile can include `verification-log` artifact paths or precise recovery codes from result parsing, moved HEAD, lost dispatch lease, git, commit, or reset failures.
   A long-lived `no-mistakes` mirror round preserves its heartbeat while a running external-state digest is unchanged; after four minutes without fresh progress or terminal evidence, the round records manual recovery rather than waiting forever on stale mirror input.
   Retried live-wrapper setup recovery appends the next pending round (`round-2`, `round-3`, and so on) while preserving the failed round as durable evidence and the current selected agent / model / effort metadata; attempt-specific result and log paths are isolated under `attempt-<n>/` for attempts after the first.
   `workflow run logs` reads invocations run-wide in deterministic step / attempt / invocation order and rounds in deterministic step / attempt / invocation / round order.
@@ -105,6 +107,13 @@ Files at `<data-dir>/goals/<goal-id>/`, written by the retired goal-first lane a
 - `handoff.md` — populated by the retired lane's handoff surface; starts as an empty placeholder.
 - `handoff.json` — populated by the retired lane's handoff surface (schema v1); starts as `{}`.
 - `recovery.md` — written lazily when a goal transitions to `needs_manual_recovery`; daemon startup recovery still writes it for stored goals it must park. Intentionally left on disk after `recovery clear` as durable evidence.
+
+## Repo-local workflow artifact files
+
+Native workflow runs that execute through a configured live-wrapper profile use `<repo>/.agent-workflows/<run-id>/` as the run directory.
+Imported workflow runs use the directory derived from their source artifact path.
+The live-wrapper lane writes `result.json`, `executor.log`, `verification.log`, `recovery.md`, and attempt-specific `attempt-<n>/` subdirectories there as step evidence.
+When that run directory resolves inside the repository, daemon and watch dispatch require it to be ignored by git before the wrapper starts; otherwise the step is parked for manual recovery with `invalid_input` instead of risking evidence files being swept into a Momentum commit.
 
 ## OpenClaw supervisor state files
 

@@ -284,6 +284,9 @@ Behaviour:
   Missing/ambiguous context, missing credentials, policy denial, duplicate/stale or mismatched intent/audit evidence, invalid payload, a missing resolved target, or any other unsafe apply refusal routes to manual recovery before the adapter client is called.
   Configured `subworkflow` steps are also filled by the daemon itself: child config comes from the parent run's `route.subworkflow.child`, recursion lineage is bounded through `route.subworkflow.lineage`, the child run starts or attaches by workflow definition key, and terminal child evidence is mirrored back to the parent step; missing config, unsafe recursion, unresolved child definitions, unsupported attachment, invalid child state, or ambiguous child terminals route to manual recovery.
   When `MOMENTUM_LIVE_WRAPPER_PROFILE` points managed-loop `daemon start` at a valid workflow live-wrapper profile, the daemon runs configured live-wrapper-owned step wrappers after the scaffold is created, records terminal executor evidence, and reconciles the step from that evidence.
+  A successful wrapper result is finalized through the shared verify -> commit / reset transaction before reconciliation: Momentum reads the runner result's commit intent, writes `verification.log`, commits verified changes, resets safe failures, and attaches the verification log to round evidence.
+  Verification commands and timeout resolve from linked goal verification first, then `MOMENTUM.md`, then the built-in default timeout with no commands; a repo-local run directory must be ignored by git before execution starts.
+  Result-file, moved-HEAD, lost-lease, git, commit, and reset safety failures preserve the precise live recovery code in executor round / gate evidence and render best-effort run-scoped `recovery.md` guidance.
   With no profile, supported live-wrapper-owned steps keep the start scaffold and wait for a later executor path; a configured profile that omits the dispatched kind routes that step to manual recovery rather than reporting fake success.
 - **No clobber**: a duplicate `--run-id` refuses with `run_exists` and never overwrites the existing run.
 
@@ -1261,9 +1264,11 @@ Unknown or non-agent harness/model values remain pass-through values in these re
 - Run states: `pending`, `approved`, `running`, `succeeded`, `failed`, `blocked`, `canceled`.
 - Step states: `pending`, `approved`, `running`, `succeeded`, `failed`, `skipped`, `blocked`, `canceled`.
 
-`steps[].errorCode` is nullable. When present, it can be an executor result code
-or a Momentum-owned live finalization code with the `live_finalize_*` prefix for
-verification / git finalization failures reconciled after the executor result.
+`steps[].errorCode` is nullable.
+When present, it is the code recorded on the workflow step transition itself.
+Dispatched live-wrapper recovery specifics are recorded on executor rounds,
+manual-recovery gates, and `run.manualRecoveryReason` rather than copied onto
+`steps[].errorCode` during reconciliation.
 
 `monitor.nextAction.code` is one of:
 
@@ -1763,6 +1768,9 @@ When `--once` is eligible to dispatch a live-wrapper-owned setup step such as
 Without that profile, watch refuses before moving the step to `running` so a
 chat/supervisor poll cannot strand the workflow without terminal dispatch
 evidence.
+When the profile is configured, the watch dispatcher uses the same repo lock,
+ignored run-directory check, verification config fallback, and verify -> commit
+/ reset finalization path as managed-loop `daemon start`.
 
 `--stream --jsonl` opens a long-lived JSONL stream over the same durable event cursor API as `workflow run events`.
 It emits one newline-delimited JSON record per durable semantic event, plus machine heartbeats, and exits cleanly once the run is terminal.
@@ -1835,6 +1843,7 @@ Options:
 `emit` and `reason` can also reflect watch-only quiet-heartbeat or stuck-risk advisories when an unchanged tick reaches its quiet threshold.
 When a quiet-heartbeat or stuck-risk advisory emits, the command appends a matching workflow event row so disconnected clients can later catch up through `workflow run events`.
 Before deriving that tick, `workflow run watch --once` may run one target-run dispatcher tick, either to claim and dispatch one approved non-tail next step or to recheck one active running step that the scheduler can safely revisit.
+For a live-wrapper-owned step, that dispatcher tick can execute the wrapper and terminalize the round only after repo-safety, verification, and commit/reset finalization succeed or produce precise recovery evidence.
 Approved `merge-cleanup` and `linear-refresh` tail steps are not started by that dispatcher tick; the envelope reports `recommendedAction: "operator_decision"` with a human-required merge-cleanup or Linear-refresh policy instead.
 It does not resolve gates, approvals, or recovery decisions by itself, recover stale leases, or scan or claim work from other runs.
 `activeStep` is `null` when no step is active.

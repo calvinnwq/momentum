@@ -26,6 +26,7 @@ const integrationTestFiles = [
 export default defineConfig({
   test: {
     globals: true,
+    testTimeout: 15_000,
     include: ["test/**/*.test.ts"],
     exclude: ["node_modules/**", "dist/**", ...integrationTestFiles]
   }

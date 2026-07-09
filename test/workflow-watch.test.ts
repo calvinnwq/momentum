@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -36,6 +37,28 @@ function makeTempDir(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "momentum-workflow-watch-"));
   tempRoots.push(dir);
   return fs.realpathSync(dir);
+}
+
+function runGit(repoPath: string, args: string[]): string {
+  return execFileSync("git", ["-C", repoPath, ...args], {
+    encoding: "utf-8",
+    stdio: ["ignore", "pipe", "pipe"]
+  }).trim();
+}
+
+function initRepo(repoPath: string): void {
+  runGit(repoPath, ["init", "--initial-branch=main", "--quiet"]);
+  runGit(repoPath, ["config", "user.email", "test@example.com"]);
+  runGit(repoPath, ["config", "user.name", "Test User"]);
+  runGit(repoPath, ["config", "commit.gpgsign", "false"]);
+  fs.writeFileSync(path.join(repoPath, "README.md"), "init\n", "utf-8");
+  fs.writeFileSync(
+    path.join(repoPath, ".gitignore"),
+    ".agent-workflows/\n",
+    "utf-8"
+  );
+  runGit(repoPath, ["add", "README.md", ".gitignore"]);
+  runGit(repoPath, ["commit", "-m", "init", "--quiet"]);
 }
 
 async function run(
@@ -77,7 +100,7 @@ const VALID_WRAPPER_RESULT_JSON = JSON.stringify({
   }
 });
 
-const WRITE_VALID_WRAPPER_RESULT = `printf '%s' '${VALID_WRAPPER_RESULT_JSON}' > "$MOMENTUM_RESULT_PATH"`;
+const WRITE_VALID_WRAPPER_RESULT = `printf 'watch wrapper ran\\n' > "$MOMENTUM_REPO_PATH/watch-wrapper.txt" && printf '%s' '${VALID_WRAPPER_RESULT_JSON}' > "$MOMENTUM_RESULT_PATH"`;
 
 function writeLiveWrapperProfile(root: string, stepKind: string): string {
   const profilePath = path.join(root, "watch-live-wrapper-profile.json");
@@ -874,6 +897,7 @@ describe("momentum workflow run watch", () => {
     const dataDir = makeTempDir();
     const repoPath = path.join(dataDir, "repo");
     fs.mkdirSync(repoPath, { recursive: true });
+    initRepo(repoPath);
     const profilePath = writeLiveWrapperProfile(dataDir, "implementation");
     const runId = "mwf-watch-live-wrapper";
     const db = openDb(dataDir);

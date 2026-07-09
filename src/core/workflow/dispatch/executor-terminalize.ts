@@ -102,7 +102,7 @@ export function planDispatchedExecutorTerminalization(
   if (!result.ok) {
     // A process-level executor failure — including the honest `runtime_unavailable`
     // an unconfigured live wrapper returns — never produced a clean terminal.
-    return manualRecoveryPlan(result.code);
+    return manualRecoveryPlan(readExecutorRecoveryCode(result));
   }
   switch (result.result.state) {
     case "succeeded":
@@ -137,6 +137,15 @@ function manualRecoveryPlan(
     classification: "manual_recovery_required",
     recoveryCode
   };
+}
+
+function readExecutorRecoveryCode(
+  result: Extract<WorkflowStepExecutorDispatchResult, { ok: false }>
+): string {
+  const precise = (result as { liveRecoveryCode?: unknown }).liveRecoveryCode;
+  return typeof precise === "string" && precise.length > 0
+    ? precise
+    : result.code;
 }
 
 /**

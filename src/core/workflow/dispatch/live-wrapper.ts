@@ -54,15 +54,30 @@
 import path from "node:path";
 
 import {
+  WORKFLOW_EXECUTE_RECONCILE_STATUS,
   executeAndReconcileDispatchedWorkflowStep,
+  recordDispatchedStepManualRecovery,
   recordUnresolvedDispatchedStepContext,
-  type DispatchedStepExecutorContext
+  type DispatchedStepExecutorContext,
+  type DispatchedStepRepoSafetyContext,
+  type ExecuteAndReconcileDispatchedStepResult
 } from "./executor-run.js";
 import {
   WORKFLOW_DISPATCH_RESULT_STATUS,
   deriveDispatchInvocationId
 } from "./execute.js";
 import { loadExecutorInvocation } from "../../executors/loop/persist.js";
+import {
+  isTerminalExecutorInvocationState,
+  type ExecutorInvocationState
+} from "../../executors/loop/reducer.js";
+import { heartbeatWorkflowLease } from "../leases.js";
+import {
+  acquireRepoLock,
+  markRepoLockNeedsManualRecovery,
+  releaseRepoLock,
+  updateRepoLockHeartbeat
+} from "../../repo/locks.js";
 import type {
   ClaimedWorkflowStep,
   WorkflowStepDispatch,
@@ -82,7 +97,23 @@ import type { WorkflowStepExecutorRegistry } from "../step/executor.js";
  */
 export type DispatchedStepExecutorContextResolution =
   | { ok: true; exec: DispatchedStepExecutorContext }
-  | { ok: false; reason: string };
+  | {
+      ok: false;
+      reason: string;
+      recoveryArtifact?: {
+        runDir: string;
+        repoPath?: string | null;
+      };
+      /**
+       * Optional precise recovery classification (a
+       * `WorkflowLiveRunRecoveryCode` string such as `git_failed` or
+       * `invalid_input`) preserved on the parked round as `liveRecoveryCode`.
+       * Without it the refusal classifies as `runtime_unavailable`, which the
+       * retry lane treats as a retryable setup failure - wrong for
+       * config/git-safety refusals that need operator or config repair.
+       */
+      recoveryCode?: string;
+    };
 
 /**
  * Derive the per-run/per-step execution context a claimed dispatched step's executor
@@ -107,6 +138,15 @@ export type LiveWrapperWorkflowDispatchDeps = {
   registry: WorkflowStepExecutorRegistry;
   /** Derives the executor context for a claimed dispatched step. */
   deriveExec: DeriveDispatchedStepExecutorContext;
+  /**
+   * Wall-clock source for the lease-freshness check made before each git
+   * mutation. The wrapper may run long after the tick's `context.now` was
+   * captured, so the check must not reuse that stale timestamp: a lease that
+   * expired mid-wrapper has to fail `expires_at >= heartbeat_at` and refuse
+   * the mutation instead of being retroactively extended. Defaults to
+   * `Date.now`; tests inject their fake tick clock.
+   */
+  nowMs?: () => number;
 };
 
 /**
@@ -158,14 +198,66 @@ export function createLiveWrapperWorkflowDispatch(
       const resolved = deps.deriveExec(claim, context);
       if (resolved.ok) {
         const attempt = resolved.exec.attempt ?? invocation.attempt;
-        executeAndReconcileDispatchedWorkflowStep({
-          db: context.db,
-          runId: claim.runId,
-          stepId: claim.stepId,
-          registry: deps.registry,
-          exec: withAttemptScopedEvidencePaths(resolved.exec, attempt),
-          now: context.now
-        });
+        const nowMs = deps.nowMs ?? Date.now;
+        const repoLock = acquireDispatchRepoOwnership(
+          context,
+          claim,
+          invocation.state,
+          resolved.exec,
+          attempt,
+          nowMs
+        );
+        if (!repoLock.ok) {
+          // Another holder owns the repository worktree. Momentum's commit
+          // stages the whole worktree (`git add -A`), so finalizing here could
+          // sweep a concurrent run's changes into this step's commit and
+          // fabricate clean terminal evidence for the wrong step. Park
+          // honestly instead of mutating a shared worktree.
+          recordDispatchedStepManualRecovery({
+            db: context.db,
+            runId: claim.runId,
+            stepId: claim.stepId,
+            error: repoLock.error,
+            now: context.now,
+            status: WORKFLOW_EXECUTE_RECONCILE_STATUS.executionRejected,
+            recoveryCode: "repo_lock_lost",
+            recoveryArtifact: {
+              runDir: resolved.exec.runDir,
+              repoPath: resolved.exec.repoPath
+            }
+          });
+        } else {
+          let outcome: ExecuteAndReconcileDispatchedStepResult | undefined;
+          try {
+            outcome = executeAndReconcileDispatchedWorkflowStep({
+              db: context.db,
+              runId: claim.runId,
+              stepId: claim.stepId,
+              registry: deps.registry,
+              exec: withAttemptScopedEvidencePaths(
+                withDispatchLeaseOwnership(
+                  resolved.exec,
+                  claim,
+                  context,
+                  nowMs,
+                  repoLock.lockId !== null ? { lockId: repoLock.lockId } : null
+                ),
+                attempt
+              ),
+              now: context.now
+            });
+          } finally {
+            if (repoLock.lockId !== null) {
+              settleDispatchRepoOwnership(
+                context,
+                claim,
+                repoLock.lockId,
+                outcome,
+                nowMs()
+              );
+            }
+          }
+        }
       } else {
         // The context could not be derived (e.g. the run carries no repo path).
         // Park the run for manual recovery through the same terminalize -> the reconciliation seam
@@ -176,12 +268,193 @@ export function createLiveWrapperWorkflowDispatch(
           runId: claim.runId,
           stepId: claim.stepId,
           reason: resolved.reason,
-          now: context.now
+          now: context.now,
+          ...(resolved.recoveryCode !== undefined
+            ? { recoveryCode: resolved.recoveryCode }
+            : {}),
+          ...(resolved.recoveryArtifact !== undefined
+            ? { recoveryArtifact: resolved.recoveryArtifact }
+            : {})
         });
       }
     }
     return result;
   };
+}
+
+function withDispatchLeaseOwnership(
+  exec: DispatchedStepExecutorContext,
+  claim: ClaimedWorkflowStep,
+  context: WorkflowStepDispatchContext,
+  nowMs: () => number,
+  repoLock: { lockId: string } | null
+): DispatchedStepExecutorContext {
+  if (exec.repoSafety === undefined) return exec;
+  const extensionMs = dispatchOwnershipExtensionMs(claim, exec.repoSafety);
+  const existing = exec.repoSafety.beforeGitMutation;
+  return {
+    ...exec,
+    repoSafety: {
+      ...exec.repoSafety,
+      beforeGitMutation: () => {
+        const existingCheck = existing?.();
+        if (existingCheck?.ok === false) return existingCheck;
+        // Heartbeat from the current clock, not the tick's `context.now`: the
+        // wrapper ran between the two, and a lease that expired in that window
+        // must fail the `expires_at >= heartbeat_at` guard here rather than be
+        // extended after the fact while another daemon's stale-lease recovery
+        // may already own the run.
+        const mutationNow = nowMs();
+        const heartbeat = heartbeatWorkflowLease(context.db, {
+          runId: claim.lease.runId,
+          leaseKind: claim.lease.leaseKind,
+          holder: claim.lease.holder,
+          acquiredAt: claim.lease.acquiredAt,
+          heartbeatAt: mutationNow,
+          expiresAt: mutationNow + extensionMs
+        });
+        if (!heartbeat.ok) {
+          return {
+            ok: false,
+            error: `dispatch lease for ${claim.runId}/${claim.stepId} is no longer held by ${claim.lease.holder}`
+          };
+        }
+        if (repoLock !== null) {
+          const lockBeat = updateRepoLockHeartbeat(context.db, {
+            lockId: repoLock.lockId,
+            heartbeatAt: mutationNow,
+            leaseExpiresAt: mutationNow + extensionMs
+          });
+          if (!lockBeat.ok) {
+            return {
+              ok: false,
+              error: `repo lock for ${claim.runId}/${claim.stepId} is no longer active; refusing git mutation over a worktree Momentum may not own`
+            };
+          }
+        }
+        return { ok: true };
+      }
+    }
+  };
+}
+
+/**
+ * The ownership extension window for one dispatched execution: the claim's own
+ * lease duration plus the worst-case verification window, so ownership held
+ * across a long verification does not expire mid-finalization.
+ */
+function dispatchOwnershipExtensionMs(
+  claim: ClaimedWorkflowStep,
+  repoSafety: DispatchedStepRepoSafetyContext
+): number {
+  const leaseDurationMs = Math.max(
+    1,
+    claim.lease.expiresAt - claim.lease.acquiredAt
+  );
+  const verificationWindowMs =
+    Math.max(1, repoSafety.verificationCommands.length) *
+    repoSafety.verificationTimeoutSec *
+    1000;
+  return leaseDurationMs + verificationWindowMs;
+}
+
+type DispatchRepoOwnership =
+  | { ok: true; lockId: string | null }
+  | { ok: false; error: string };
+
+/**
+ * Take the exclusive repo lock for a dispatched execution that will finalize
+ * git state. The dispatch lease is scoped per run, but the worktree is shared
+ * per repository: without a repo-scoped guard, two runs against the same
+ * `repoPath` could execute concurrently and Momentum's whole-worktree commit
+ * (`git add -A`) could sweep the other run's changes into this step's
+ * evidence.
+ *
+ * No lock is taken (`lockId: null`) when Momentum will not mutate git for this
+ * execution: no repo-safety context, or an already-terminal invocation whose
+ * re-entry only re-drives reconciliation and never re-runs the executor.
+ *
+ * The goal-era `repo_locks` columns carry workflow identities here (`goal_id`
+ * = run id, `job_id` = dispatch invocation id, `iteration` = attempt): the
+ * table's active-per-repo-root unique index is the exclusion primitive, and
+ * daemon stale-lock recovery already owns expiring crashed holders.
+ */
+function acquireDispatchRepoOwnership(
+  context: WorkflowStepDispatchContext,
+  claim: ClaimedWorkflowStep,
+  invocationState: ExecutorInvocationState,
+  exec: DispatchedStepExecutorContext,
+  attempt: number,
+  nowMs: () => number
+): DispatchRepoOwnership {
+  if (exec.repoSafety === undefined) return { ok: true, lockId: null };
+  if (isTerminalExecutorInvocationState(invocationState)) {
+    return { ok: true, lockId: null };
+  }
+  const acquiredNow = nowMs();
+  const repoRoot = exec.repoSafety.repoRoot ?? exec.repoPath;
+  const acquired = acquireRepoLock(context.db, {
+    repoRoot,
+    holder: context.workerId,
+    goalId: claim.runId,
+    iteration: attempt,
+    jobId: deriveDispatchInvocationId(claim.runId, claim.stepId),
+    leaseExpiresAt:
+      acquiredNow + dispatchOwnershipExtensionMs(claim, exec.repoSafety),
+    now: acquiredNow
+  });
+  if (acquired.ok) return { ok: true, lockId: acquired.lockId };
+  return {
+    ok: false,
+    error: `repository ${repoRoot} is locked by ${acquired.existing.holder} (run ${acquired.existing.goal_id}, ${acquired.existing.job_id}); refusing to execute and finalize ${claim.runId}/${claim.stepId} over a shared worktree`
+  };
+}
+
+/**
+ * Settle the repo lock after a dispatched execution. Releasing is only safe
+ * when the worktree state is PROVEN clean: the executor never ran this tick,
+ * or finalization ended in a clean terminal (`succeeded` = committed;
+ * `failed` = reset proven or nothing to commit). Every other outcome - a
+ * process-level wrapper failure, an untrusted result document, a moved HEAD,
+ * a failed reset, lost ownership, or an unexpected `skipped` terminal - may
+ * leave the wrapper's uncommitted edits in the worktree, so the lock is
+ * marked `needs_manual_recovery` instead: it keeps blocking other runs (whose
+ * whole-worktree `git add -A` commit would sweep the leftovers into their
+ * evidence) until the operator inspects the repository. The mark only touches
+ * a still-`active` lock, so ownership already lost or re-marked by stale-lock
+ * recovery is never clobbered back to `released`.
+ */
+function settleDispatchRepoOwnership(
+  context: WorkflowStepDispatchContext,
+  claim: ClaimedWorkflowStep,
+  lockId: string,
+  outcome: ExecuteAndReconcileDispatchedStepResult | undefined,
+  now: number
+): void {
+  const executorRanThisTick =
+    outcome !== undefined &&
+    outcome.status !== WORKFLOW_EXECUTE_RECONCILE_STATUS.notDispatched &&
+    outcome.status !== WORKFLOW_EXECUTE_RECONCILE_STATUS.stepNotFound &&
+    outcome.status !== WORKFLOW_EXECUTE_RECONCILE_STATUS.stepNotRunning;
+  // Judge the worktree by the POST-finalization result: a wrapper can report
+  // `succeeded` while finalization refused to commit or reset over it.
+  const finalized = outcome?.finalizedResult;
+  const provenClean =
+    outcome !== undefined &&
+    (!executorRanThisTick ||
+      (finalized !== undefined &&
+        finalized.ok &&
+        (finalized.result.state === "succeeded" ||
+          finalized.result.state === "failed")));
+  if (provenClean) {
+    releaseRepoLock(context.db, { lockId, now });
+    return;
+  }
+  markRepoLockNeedsManualRecovery(context.db, {
+    lockId,
+    now,
+    recoveryStatus: `dispatched step ${claim.runId}/${claim.stepId} parked with an unproven worktree; inspect the repository before clearing`
+  });
 }
 
 function withAttemptScopedEvidencePaths(
@@ -197,6 +470,22 @@ function withAttemptScopedEvidencePaths(
     attempt,
     runDir,
     resultJsonPath: path.join(runDir, path.basename(exec.resultJsonPath)),
-    executorLogPath: path.join(runDir, path.basename(exec.executorLogPath))
+    executorLogPath: path.join(runDir, path.basename(exec.executorLogPath)),
+    ...(exec.repoSafety !== undefined
+      ? { repoSafety: withAttemptScopedRepoSafety(exec.repoSafety, runDir) }
+      : {})
+  };
+}
+
+function withAttemptScopedRepoSafety(
+  repoSafety: DispatchedStepRepoSafetyContext,
+  runDir: string
+): DispatchedStepRepoSafetyContext {
+  return {
+    ...repoSafety,
+    verificationLogPath: path.join(
+      runDir,
+      path.basename(repoSafety.verificationLogPath)
+    )
   };
 }

@@ -553,6 +553,30 @@ describe("recordUnresolvedDispatchedStepContext — non-derivable context parks 
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
   });
 
+  it("writes recovery.md when unresolved context has run-scoped artifact paths", () => {
+    const db = openSeededDb();
+    dispatchStep(db, "preflight");
+    const runDir = makeTempDir("momentum-execute-run-");
+
+    recordUnresolvedDispatchedStepContext({
+      db,
+      runId: RUN_ID,
+      stepId: "preflight",
+      reason: "verification_config_unavailable",
+      now: EXECUTE_AT,
+      recoveryCode: "invalid_input",
+      recoveryArtifact: {
+        runDir,
+        repoPath: "/repos/momentum"
+      }
+    });
+
+    const recoveryMd = fs.readFileSync(path.join(runDir, "recovery.md"), "utf-8");
+    expect(recoveryMd).toContain("invalid_input");
+    expect(recoveryMd).toContain("verification_config_unavailable");
+    expect(recoveryMd).toContain("Repo path: /repos/momentum");
+  });
+
   it("is idempotent on re-entry: opens no duplicate gate and re-runs no executor", () => {
     const db = openSeededDb();
     dispatchStep(db, "preflight");

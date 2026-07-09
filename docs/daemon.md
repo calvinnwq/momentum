@@ -117,7 +117,27 @@ or ambiguous child terminals park the parent run for manual recovery. When
 the managed loop also runs genuinely dispatched live-wrapper-owned step wrappers
 in the same tick, records terminal executor evidence on the dispatch scaffold,
 and lets the reconciliation seam finalize the step or park it for manual
-recovery. When the variable is unset or blank, supported live-wrapper-owned steps
+recovery.
+For successful wrapper results, the daemon first captures the current repo HEAD
+as the step base, parses the normalized runner result, runs the configured
+verification commands, commits verified changes, resets failed or unverifiable
+changes when safe, and records `verification.log` as round evidence before the
+dispatch scaffold is terminalized.
+The verification commands and timeout resolve per the repo policy precedence:
+the linked goal's stored verification when the run carries a legacy goal, then
+the repo's `MOMENTUM.md` `verification` frontmatter, then no commands, in which
+case `verification.log` records that verification was skipped; a missing run
+row, malformed stored goal verification, or present-but-malformed `MOMENTUM.md`
+parks the step for manual recovery instead of committing unverified work.
+If the base HEAD cannot be read, the result file is missing or invalid, HEAD
+moves unexpectedly, the dispatch lease is lost before git mutation, or git
+cannot safely commit or reset, the run is parked for manual recovery with the
+precise live recovery code and best-effort `<run-dir>/recovery.md` guidance.
+If the live-wrapper run directory resolves inside the repo, it must be ignored
+by git before the wrapper starts; otherwise the daemon parks the step with
+`invalid_input` so result, log, verification, or recovery artifacts cannot be
+committed as work.
+When the variable is unset or blank, supported live-wrapper-owned steps
 get the durable start scaffold only, while unconfigured wrapper kinds fail
 honestly with `runtime_unavailable` if a profile is configured but omits that
 step kind. If a claimed step cannot be resolved or uses an executor family the
@@ -182,6 +202,9 @@ Momentum injects `MOMENTUM_RUN_ID`, `MOMENTUM_STEP_ID`,
 `MOMENTUM_STEP_KIND`, `MOMENTUM_ATTEMPT`, `MOMENTUM_REPO_PATH`,
 `MOMENTUM_ITERATION_DIR`, `MOMENTUM_PROMPT_PATH` when available, and
 `MOMENTUM_RESULT_PATH` for every wrapper.
+For native workflow runs, `MOMENTUM_ITERATION_DIR` is the repo-local
+`.agent-workflows/<run-id>/` directory; attempts after the first scope their
+result, executor log, and verification log paths under `attempt-<n>/`.
 When a dispatched executor round has selected values, Momentum also injects
 `MOMENTUM_AGENT_PROVIDER`, `MOMENTUM_MODEL`, and `MOMENTUM_EFFORT`; for native
 coding runs those values come from persisted `route.steps` overrides when the
