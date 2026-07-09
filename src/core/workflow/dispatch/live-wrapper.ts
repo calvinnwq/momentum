@@ -54,7 +54,9 @@
 import path from "node:path";
 
 import {
+  WORKFLOW_EXECUTE_RECONCILE_STATUS,
   executeAndReconcileDispatchedWorkflowStep,
+  recordDispatchedStepManualRecovery,
   recordUnresolvedDispatchedStepContext,
   type DispatchedStepExecutorContext,
   type DispatchedStepRepoSafetyContext
@@ -64,7 +66,16 @@ import {
   deriveDispatchInvocationId
 } from "./execute.js";
 import { loadExecutorInvocation } from "../../executors/loop/persist.js";
+import {
+  isTerminalExecutorInvocationState,
+  type ExecutorInvocationState
+} from "../../executors/loop/reducer.js";
 import { heartbeatWorkflowLease } from "../leases.js";
+import {
+  acquireRepoLock,
+  releaseRepoLock,
+  updateRepoLockHeartbeat
+} from "../../repo/locks.js";
 import type {
   ClaimedWorkflowStep,
   WorkflowStepDispatch,
@@ -181,22 +192,58 @@ export function createLiveWrapperWorkflowDispatch(
       const resolved = deps.deriveExec(claim, context);
       if (resolved.ok) {
         const attempt = resolved.exec.attempt ?? invocation.attempt;
-        executeAndReconcileDispatchedWorkflowStep({
-          db: context.db,
-          runId: claim.runId,
-          stepId: claim.stepId,
-          registry: deps.registry,
-          exec: withAttemptScopedEvidencePaths(
-            withDispatchLeaseOwnership(
-              resolved.exec,
-              claim,
-              context,
-              deps.nowMs ?? Date.now
-            ),
-            attempt
-          ),
-          now: context.now
-        });
+        const nowMs = deps.nowMs ?? Date.now;
+        const repoLock = acquireDispatchRepoOwnership(
+          context,
+          claim,
+          invocation.state,
+          resolved.exec,
+          attempt,
+          nowMs
+        );
+        if (!repoLock.ok) {
+          // Another holder owns the repository worktree. Momentum's commit
+          // stages the whole worktree (`git add -A`), so finalizing here could
+          // sweep a concurrent run's changes into this step's commit and
+          // fabricate clean terminal evidence for the wrong step. Park
+          // honestly instead of mutating a shared worktree.
+          recordDispatchedStepManualRecovery({
+            db: context.db,
+            runId: claim.runId,
+            stepId: claim.stepId,
+            error: repoLock.error,
+            now: context.now,
+            status: WORKFLOW_EXECUTE_RECONCILE_STATUS.executionRejected,
+            recoveryCode: "repo_lock_lost"
+          });
+        } else {
+          try {
+            executeAndReconcileDispatchedWorkflowStep({
+              db: context.db,
+              runId: claim.runId,
+              stepId: claim.stepId,
+              registry: deps.registry,
+              exec: withAttemptScopedEvidencePaths(
+                withDispatchLeaseOwnership(
+                  resolved.exec,
+                  claim,
+                  context,
+                  nowMs,
+                  repoLock.lockId !== null ? { lockId: repoLock.lockId } : null
+                ),
+                attempt
+              ),
+              now: context.now
+            });
+          } finally {
+            if (repoLock.lockId !== null) {
+              releaseRepoLock(context.db, {
+                lockId: repoLock.lockId,
+                now: nowMs()
+              });
+            }
+          }
+        }
       } else {
         // The context could not be derived (e.g. the run carries no repo path).
         // Park the run for manual recovery through the same terminalize -> the reconciliation seam
@@ -222,18 +269,11 @@ function withDispatchLeaseOwnership(
   exec: DispatchedStepExecutorContext,
   claim: ClaimedWorkflowStep,
   context: WorkflowStepDispatchContext,
-  nowMs: () => number
+  nowMs: () => number,
+  repoLock: { lockId: string } | null
 ): DispatchedStepExecutorContext {
   if (exec.repoSafety === undefined) return exec;
-  const leaseDurationMs = Math.max(
-    1,
-    claim.lease.expiresAt - claim.lease.acquiredAt
-  );
-  const verificationWindowMs =
-    Math.max(1, exec.repoSafety.verificationCommands.length) *
-    exec.repoSafety.verificationTimeoutSec *
-    1000;
-  const extensionMs = leaseDurationMs + verificationWindowMs;
+  const extensionMs = dispatchOwnershipExtensionMs(claim, exec.repoSafety);
   const existing = exec.repoSafety.beforeGitMutation;
   return {
     ...exec,
@@ -256,13 +296,99 @@ function withDispatchLeaseOwnership(
           heartbeatAt: mutationNow,
           expiresAt: mutationNow + extensionMs
         });
-        if (heartbeat.ok) return { ok: true };
-        return {
-          ok: false,
-          error: `dispatch lease for ${claim.runId}/${claim.stepId} is no longer held by ${claim.lease.holder}`
-        };
+        if (!heartbeat.ok) {
+          return {
+            ok: false,
+            error: `dispatch lease for ${claim.runId}/${claim.stepId} is no longer held by ${claim.lease.holder}`
+          };
+        }
+        if (repoLock !== null) {
+          const lockBeat = updateRepoLockHeartbeat(context.db, {
+            lockId: repoLock.lockId,
+            heartbeatAt: mutationNow,
+            leaseExpiresAt: mutationNow + extensionMs
+          });
+          if (!lockBeat.ok) {
+            return {
+              ok: false,
+              error: `repo lock for ${claim.runId}/${claim.stepId} is no longer active; refusing git mutation over a worktree Momentum may not own`
+            };
+          }
+        }
+        return { ok: true };
       }
     }
+  };
+}
+
+/**
+ * The ownership extension window for one dispatched execution: the claim's own
+ * lease duration plus the worst-case verification window, so ownership held
+ * across a long verification does not expire mid-finalization.
+ */
+function dispatchOwnershipExtensionMs(
+  claim: ClaimedWorkflowStep,
+  repoSafety: DispatchedStepRepoSafetyContext
+): number {
+  const leaseDurationMs = Math.max(
+    1,
+    claim.lease.expiresAt - claim.lease.acquiredAt
+  );
+  const verificationWindowMs =
+    Math.max(1, repoSafety.verificationCommands.length) *
+    repoSafety.verificationTimeoutSec *
+    1000;
+  return leaseDurationMs + verificationWindowMs;
+}
+
+type DispatchRepoOwnership =
+  | { ok: true; lockId: string | null }
+  | { ok: false; error: string };
+
+/**
+ * Take the exclusive repo lock for a dispatched execution that will finalize
+ * git state. The dispatch lease is scoped per run, but the worktree is shared
+ * per repository: without a repo-scoped guard, two runs against the same
+ * `repoPath` could execute concurrently and Momentum's whole-worktree commit
+ * (`git add -A`) could sweep the other run's changes into this step's
+ * evidence.
+ *
+ * No lock is taken (`lockId: null`) when Momentum will not mutate git for this
+ * execution: no repo-safety context, or an already-terminal invocation whose
+ * re-entry only re-drives reconciliation and never re-runs the executor.
+ *
+ * The goal-era `repo_locks` columns carry workflow identities here (`goal_id`
+ * = run id, `job_id` = dispatch invocation id, `iteration` = attempt): the
+ * table's active-per-repo-root unique index is the exclusion primitive, and
+ * daemon stale-lock recovery already owns expiring crashed holders.
+ */
+function acquireDispatchRepoOwnership(
+  context: WorkflowStepDispatchContext,
+  claim: ClaimedWorkflowStep,
+  invocationState: ExecutorInvocationState,
+  exec: DispatchedStepExecutorContext,
+  attempt: number,
+  nowMs: () => number
+): DispatchRepoOwnership {
+  if (exec.repoSafety === undefined) return { ok: true, lockId: null };
+  if (isTerminalExecutorInvocationState(invocationState)) {
+    return { ok: true, lockId: null };
+  }
+  const acquiredNow = nowMs();
+  const acquired = acquireRepoLock(context.db, {
+    repoRoot: exec.repoPath,
+    holder: context.workerId,
+    goalId: claim.runId,
+    iteration: attempt,
+    jobId: deriveDispatchInvocationId(claim.runId, claim.stepId),
+    leaseExpiresAt:
+      acquiredNow + dispatchOwnershipExtensionMs(claim, exec.repoSafety),
+    now: acquiredNow
+  });
+  if (acquired.ok) return { ok: true, lockId: acquired.lockId };
+  return {
+    ok: false,
+    error: `repository ${exec.repoPath} is locked by ${acquired.existing.holder} (run ${acquired.existing.goal_id}, ${acquired.existing.job_id}); refusing to execute and finalize ${claim.runId}/${claim.stepId} over a shared worktree`
   };
 }
 
