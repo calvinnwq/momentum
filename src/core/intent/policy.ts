@@ -40,7 +40,7 @@ export const MOMENTUM_POLICY_FILENAME = "MOMENTUM.md";
  * - `create_intents_only` (default): the safe default. The apply CLI may
  *   record an operator's manual mark, but the system refuses to perform any
  *   external tracker writes unless the repo explicitly opts in.
- * - `external_apply_allowed`: opts the repo into the M6 adapter-mediated
+ * - `external_apply_allowed`: opts the repo into the external-apply adapter-mediated
  *   external apply path. The policy gates the adapter preview and Linear
  *   write-client path; public CLI execution may still be refused until the
  *   later two-phase apply slice is wired.
@@ -605,7 +605,7 @@ export type ResolvedIntentApplyPolicy = {
  * Resolve the effective `intent_apply_policy` for the current Goal/repo, with
  * precedence: MOMENTUM.md frontmatter > built-in default. The effective gate
  * stays at the repo policy or built-in default so the no-auto-apply trust
- * boundary and any M6 external-apply opt-in remain visible in one place.
+ * boundary and any external-apply opt-in remain visible in one place.
  */
 export function resolveIntentApplyPolicy(
   policyConfig: MomentumPolicyConfig | undefined
@@ -619,7 +619,7 @@ export function resolveIntentApplyPolicy(
 
 /**
  * Convenience check: does the effective policy allow external apply through
- * an adapter? In M6 this is the required policy gate for adapter-boundary
+ * an adapter? In external-apply this is the required policy gate for adapter-boundary
  * previews and the later two-phase external write path. Callers still decide
  * whether the current slice can execute a public CLI external write or must
  * refuse it until the execution path is wired.

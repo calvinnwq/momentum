@@ -29,7 +29,7 @@ export type WorkflowWatchStreamDbPoll = (
 ) => WorkflowWatchStreamPollResult;
 
 /**
- * Create a durable {@link WorkflowWatchStreamDbPoll} backed by the SUP-04 event
+ * Create a durable {@link WorkflowWatchStreamDbPoll} backed by the event-cursor event
  * cursor API and the run row's terminal state.
  *
  * Each poll performs two durable reads against the same {@link MomentumDb}: the

@@ -2,7 +2,7 @@
  * External update adapter boundary.
  *
  * This module defines the write-side adapter boundary that the policy-gated
- * external apply path in M6 layers on top of the M5 read adapter. It is
+ * external apply path layers on top of the read adapter. It is
  * intentionally narrow:
  *
  *  - Defines the durable input shape an external apply needs (a pending
@@ -168,7 +168,7 @@ export function getExternalUpdateAdapter(
 /**
  * Resolve the adapter that would handle the given intent, or undefined if the
  * intent's adapter kind is not registered or the intent type is not supported
- * by that adapter. The first eligible adapter wins; in M6 the only registered
+ * by that adapter. The first eligible adapter wins; the only registered
  * external update adapter is Linear with `source_satisfied` and `status_update`
  * support.
  */

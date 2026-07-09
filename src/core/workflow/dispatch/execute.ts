@@ -44,7 +44,7 @@
  * `pending -> running -> terminal`, run verification / commit finalization, or
  * advance the step to a terminal state. The landed `runGoalLoopStep` /
  * `runSingleShotStep` / `runNoMistakesMirrorStep` adapters own nested
- * `executor_invocations` / `executor_rounds` evidence only; the RC-2
+ * `executor_invocations` / `executor_rounds` evidence only; the reconciliation seam
  * reconciliation seam (`dispatch/reconcile-execute.ts`) is now the
  * single owner that converts terminal executor evidence into the workflow step's
  * terminal transition. The phase-1 invocation /
@@ -529,7 +529,7 @@ function parseRouteJson(
  * unmistakably the phase-1 dispatcher's row, not a landed adapter's reattachable
  * id (see the module doc's phase-1 boundary note).
  *
- * Exported as the single source of truth for this id: the RC-2 reconciliation
+ * Exported as the single source of truth for this id: the reconciliation
  * seam (`dispatch/reconcile-execute.ts`) recomputes the same id to find the
  * dispatched step's terminal executor evidence, so the two halves can never drift
  * apart on the namespacing convention.

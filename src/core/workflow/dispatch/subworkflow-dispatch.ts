@@ -10,7 +10,7 @@
  * against it, gated on {@link shouldRunDispatchedExecutor} and the dispatched
  * invocation's executor family.
  *
- * Boundary discipline (mirrors the external-apply lane so RC-2 stays the single
+ * Boundary discipline (mirrors the external-apply lane so the reconciliation seam stays the single
  * finalization owner):
  *
  *   - The producer runs only after a base dispatch that genuinely started (or

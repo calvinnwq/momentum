@@ -4,9 +4,9 @@
  * The production `WorkflowStepExecutor` default is real: with no
  * live-wrapper profile wired, every canonical kind resolves to the honest
  * `runtime_unavailable` adapter rather than a fabricated success
- * (`step/executor-real-adapters.ts`). RC-5b lets the daemon run dispatched
+ * (`step/executor-real-adapters.ts`). The daemon can run dispatched
  * steps through a configured live command and feed the terminal evidence into the
- * RC-2 reconciliation seam. The production lane is split across two focused pieces:
+ * reconciliation seam. The production lane is split across two focused pieces:
  *
  *   1. **profile source resolution** — how the daemon discovers a
  *      {@link LiveWrapperProfile} from operator configuration (this module); and

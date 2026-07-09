@@ -2,8 +2,8 @@
  * Production workflow-step reconciliation decision domain.
  *
  * This module owns the *pure* half of the single reconciliation seam the
- * runtime-consolidation plan names RC-2: the deterministic decision that turns a
- * dispatched M10 step's terminal executor evidence into a workflow-step
+ * runtime-consolidation plan names the reconciliation seam: the deterministic decision that turns a
+ * dispatched executor-loop step's terminal executor evidence into a workflow-step
  * finalization outcome. It is the brain; the effect twin reads the
  * `<run>::<step>::dispatch` invocation, applies the decision durably
  * (`finishWorkflowStep` + dispatch-lease release + run-state refresh), and is
@@ -17,7 +17,7 @@
  * and the reducers.
  *
  * Scope decisions pinned here, grounded in
- * SPEC.md ("The M9 / M10
+ * SPEC.md ("The live-wrapper / executor-loop
  * step-finalization boundary") and SPEC.md
  * ("Executor States" / "Core Boundary: the daemon, not the executor, decides
  * step progress"):

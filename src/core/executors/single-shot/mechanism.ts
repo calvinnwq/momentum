@@ -1,5 +1,5 @@
 /**
- * Runtime mechanisms for the M10-06 single-shot executor families.
+ * Runtime mechanisms for the single-shot executor families.
  *
  * `one-shot` delegates to the live-step wrapper and therefore requires a
  * normalized `RunnerResult` document on success. `script` runs an absolute

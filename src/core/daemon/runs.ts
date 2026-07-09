@@ -395,7 +395,7 @@ export function getDaemonRun(
 
 /**
  * Return the most recently started daemon run still in an active state
- * (`starting`, `running`, or `stop_requested`). M3 represents stale records
+ * (`starting`, `running`, or `stop_requested`). The daemon represents stale records
  * without guessing recovery, so this may return a row whose heartbeat is far
  * behind wall-clock; pair with `listStaleDaemonRuns` to surface that fact.
  */

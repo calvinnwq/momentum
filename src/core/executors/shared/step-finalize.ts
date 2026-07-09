@@ -14,14 +14,14 @@
  * finalization consumers depend on one shared seam instead of the
  * executor-loop families reaching into a live-step module for it. The consumers:
  *
- *   - the M9 live wrappers — `live-step/advance.ts` and
+ *   - the live wrappers - `live-step/advance.ts` and
  *     `live-step/run-recovery.ts`, via the `live-step/finalize.ts` back-compat
  *     alias surface that re-exports these functions under their original
  *     `*LiveWorkflowStep*` names;
- *   - the M10 goal-loop executor family — `goal-loop/mechanism.ts`,
+ *   - the goal-loop executor family - `goal-loop/mechanism.ts`,
  *     `goal-loop/executor.ts`, and `goal-loop/orchestrator.ts`, imported
  *     directly; and
- *   - the M10 single-shot executor family — `single-shot/mechanism.ts`, which
+ *   - the single-shot executor family - `single-shot/mechanism.ts`, which
  *     still reaches the seam through the `live-step/finalize.ts` back-compat
  *     alias until its own migration.
  *
@@ -46,7 +46,7 @@
  *      `repo_lock_lost`, or `invalid_input` outcomes.
  *
  * {@link finalizeWorkflowStep} takes the already-parsed `success` flag and
- * `commit` intent. Because a step orchestrator's dispatch result and the M7
+ * `commit` intent. Because a step orchestrator's dispatch result and the
  * executor boundary only carry the runner-result *path* (not the parsed
  * `RunnerResult`), {@link finalizeWorkflowStepFromResultFile} is the companion
  * seam the run-level composition actually calls: it re-reads the durable result
@@ -54,14 +54,14 @@
  * surfacing `result_missing` / `result_invalid` without touching git when that
  * document cannot be trusted.
  *
- * The run-level callers compose this seam: the M9 live path's
+ * The run-level callers compose this seam: the live path's
  * {@link ../live-step/run-recovery.ts} `persistLiveWorkflowFinalizeRecovery` takes
  * any run-level recovery outcome (`manual_recovery_required`, `result_missing`,
  * `result_invalid`, unsafe finalization failures such as `reset_failed`,
  * `repo_lock_lost`, `git_failed`, `commit_failed`, or `invalid_input`) and sets
  * the durable `needs_manual_recovery` flag plus the per-run `recovery.md`
- * artifact, exactly as the M8 recovery reconcile already does for other blocking
- * codes; the M10 goal-loop / single-shot mechanisms project the same outcomes
+ * artifact, exactly as recovery reconcile already does for other blocking
+ * codes; the goal-loop / single-shot mechanisms project the same outcomes
  * into their durable round classification.
  */
 
@@ -312,9 +312,9 @@ export function finalizeWorkflowStep(
  * Read the normalized runner-result document a finished step wrote and run
  * {@link finalizeWorkflowStep} from it.
  *
- * A step orchestrator (e.g. M9's `live-step/orchestrator.ts`) is git-agnostic and
+ * A step orchestrator (e.g. `live-step/orchestrator.ts`) is git-agnostic and
  * its dispatch result carries the runner-result file *path* rather than the
- * parsed `RunnerResult`; the M7 executor boundary deliberately drops the
+ * parsed `RunnerResult`; the executor boundary deliberately drops the
  * domain-shaped commit intent. This seam is therefore where the run-level
  * composition re-reads the durable result to obtain the `success` flag and the
  * explicit, normalized `commit` intent the "Git And Verification Transaction"
@@ -377,7 +377,7 @@ type ReadNormalizedResultFile =
  *
  * The `live step ...` wording in these `result_missing` / `result_invalid`
  * errors is the preserved durable contract — it surfaces in `goal-status`
- * output, `recovery.md` artifacts, and is pinned by the M9 finalize tests — so it
+ * output, `recovery.md` artifacts, and is pinned by the finalize tests, so it
  * is intentionally kept verbatim across the relocation, not updated to
  * match the neutral symbol names.
  */
@@ -449,7 +449,7 @@ function errnoCode(error: unknown): string | undefined {
 }
 
 // The `live workflow step ...` reason wording is the preserved durable contract
-// (pinned by the M9 finalize / run-recovery tests and surfaced in recovery
+// (pinned by the finalize / run-recovery tests and surfaced in recovery
 // artifacts); it is kept verbatim across the relocation.
 function manualRecovery(
   trigger: WorkflowStepFinalizeRecoveryTrigger,

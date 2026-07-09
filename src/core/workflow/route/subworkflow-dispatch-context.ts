@@ -2,7 +2,7 @@
  * Daemon-lane child-run context deriver for the `subworkflow` executor family
  *.
  *
- * The landed RC-4 entry-point factory (`dispatch/subworkflow-dispatch.ts`) takes its
+ * The landed the subworkflow seam entry-point factory (`dispatch/subworkflow-dispatch.ts`) takes its
  * child-run derivation by injection — a {@link DeriveDispatchedSubworkflowContext}
  * — precisely so the daemon lane owns building the start-or-attach runner and the
  * evidence paths from the existing workflow-owned seams, and the wrapper stays

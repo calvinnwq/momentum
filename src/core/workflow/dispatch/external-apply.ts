@@ -1,11 +1,11 @@
 /**
  * Pure half of the daemon-dispatchable `external-apply` adapter.
  *
- * RC-3 makes the `external-apply` executor family daemon-dispatchable by
- * connecting the existing M6 external-apply write path (`executeExternalApply`,
+ * the external-apply seam makes the `external-apply` executor family daemon-dispatchable by
+ * connecting the existing external-apply write path (`executeExternalApply`,
  * `src/core/intent/apply-execute.ts`) to the workflow dispatch/executor-evidence
  * lane — *without* inventing a second external write path and without weakening
- * the M6 safety contract (policy gating, audit-before-write, comment-only
+ * the external-apply safety contract (policy gating, audit-before-write, comment-only
  * default, idempotency markers, CAS/in-flight refusal, blocked/audit-incomplete
  * behavior).
  *
@@ -15,10 +15,10 @@
  *     {@link WorkflowStepExecutorDispatchResult} as terminal executor evidence on
  *     the `<run>::<step>::dispatch` scaffold (succeeded / failed for a clean
  *     terminal; `manual_recovery_required` for any `ok: false` result), and
- *   - `dispatch/reconcile-execute.ts` (RC-2) finalizes the owning
+ *   - `dispatch/reconcile-execute.ts` (the reconciliation seam) finalizes the owning
  *     `workflow_steps` row from that terminal evidence, exactly once.
  *
- * This module owns the one piece those seams do not: translating an M6
+ * This module owns the one piece those seams do not: translating an external-apply
  * {@link ExecuteExternalApplyResult} into the {@link WorkflowStepExecutorDispatchResult}
  * the terminalize bridge consumes. It is pure and total — no SQLite, no network,
  * no clock — so the mapping contract is exhaustively testable on its own, the
@@ -28,18 +28,18 @@
  * closed):
  *
  *   - A clean `applied` outcome — including an idempotent already-applied replay,
- *     which the M6 path reports as a success without re-issuing the external
+ *     which the external-apply path reports as a success without re-issuing the external
  *     write — becomes a clean `succeeded` executor result the terminalize decider
  *     routes to a clean workflow-step terminal.
- *   - EVERY M6 failure (`policy_denied`, `auth_unavailable`, `unsupported_adapter`,
+ *   - EVERY external-apply failure (`policy_denied`, `auth_unavailable`, `unsupported_adapter`,
  *     `intent_apply_in_progress`, `intent_blocked`, `audit_incomplete`,
  *     `write_rejected`, …) becomes an `ok: false` executor result the decider
  *     routes to manual recovery rather than a fabricated clean terminal, so an
  *     unconfigured / unsafe / refused apply parks the run for operator inspection
  *     with explicit evidence. The dispatched-step executor-evidence vocabulary
- *     ({@link WorkflowStepExecutorErrorCode}) has no per-M6-cause member, so the
+ *     ({@link WorkflowStepExecutorErrorCode}) has no per-external-apply-cause member, so the
  *     mapped result carries the `manual_recovery_required` executor code while the
- *     precise M6 cause is preserved verbatim in the operator-facing error text
+ *     precise external-apply cause is preserved verbatim in the operator-facing error text
  *     (which the terminalize bridge records as the round summary).
  */
 
@@ -53,7 +53,7 @@ import type { WorkflowStepExecutorDispatchResult } from "../step/executor.js";
 /**
  * The durable evidence paths the dispatched external-apply executor result
  * carries. The daemon lane derives these from the run's data-dir layout (a log
- * of the apply attempt and a JSON snapshot of the M6 result) and forwards them
+ * of the apply attempt and a JSON snapshot of the external-apply result) and forwards them
  * here so the terminalize bridge can attach them to the round as operator-visible
  * evidence — the same `executorLogPath` / `resultJsonPath` shape a live-wrapper
  * executor result carries.
@@ -64,7 +64,7 @@ export type ExternalApplyExecutorEvidence = {
 };
 
 /**
- * Translate an M6 {@link ExecuteExternalApplyResult} into the
+ * Translate an external-apply {@link ExecuteExternalApplyResult} into the
  * {@link WorkflowStepExecutorDispatchResult} the terminalize bridge consumes.
  *
  * Pure and total: never throws, always returns a dispatch result. A clean

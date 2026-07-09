@@ -28,7 +28,7 @@
  *   - Approval boundaries are preserved at start: a supplied boundary promotes
  *     every step whose `kind` it covers (per
  *     {@link workflowStepKindsForApprovalBoundary}) from `pending` to
- *     `approved`, exactly mirroring the M7 import-persist approval adjustment.
+ *     `approved`, exactly mirroring the workflow-run import-persist approval adjustment.
  *     The run state is then derived from those step rows with the existing
  *     reducer, so a fresh run with an approval boundary opens `approved` and an
  *     unapproved run opens `pending`.

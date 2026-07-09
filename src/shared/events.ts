@@ -45,7 +45,7 @@ export type AppendedEvent = {
 };
 
 /**
- * Append a typed queue event. Centralizing this prevents downstream M2 callers
+ * Append a typed queue event. Centralizing this prevents downstream queue-event callers
  * from inventing one-off event names and keeps the event log machine-readable.
  */
 export function appendQueueEvent(

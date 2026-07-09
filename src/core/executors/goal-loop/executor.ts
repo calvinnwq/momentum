@@ -22,7 +22,7 @@
  * back-compat alias).
  *
  * Beyond the classification, this module also projects a finished round into the
- * durable {@link ExecutorRoundUpdate} patches the M10-03 persistence twin
+ * durable {@link ExecutorRoundUpdate} patches the persistence twin
  * (`loop/persist.ts`) writes — implementing the contract's "Round
  * Schema" result/verification/commit/recovery evidence requirement. The
  * projection is two-phase to honour both the contract's Round Lifecycle and the
@@ -49,7 +49,7 @@
  * an already-started round." The resolved `maxRounds` is the same budget
  * {@link decideGoalLoopRound} enforces, so selection and classification stay tied.
  *
- * The boundaries this module preserves, grounded in the contract and the M9
+ * The boundaries this module preserves, grounded in the contract and the
  * finalization reuse:
  *
  *   - "Executors may recommend progress. The daemon decides progress." The
@@ -60,7 +60,7 @@
  *   - Repo safety wins over everything. Any unsafe or ambiguous finalize outcome
  *     (moved HEAD, failed reset/commit, lost repo lock, missing/invalid result)
  *     routes the round to `manual_recovery_required` and preserves the precise
- *     M9 recovery code, never silently retrying. This mirrors how
+ *     recovery code, never silently retrying. This mirrors how
  *     `live-step/run-recovery.ts` sets `needs_manual_recovery` for the same
  *     finalize outcomes.
  *   - Bounded autonomy. "`continue` means the executor recommends another round,
@@ -107,7 +107,7 @@ export type GoalLoopVerificationStatus = "passed" | "failed" | "skipped";
 /**
  * The repo-safety evidence a finished finalize transaction carries that the
  * durable round record must preserve: the commit SHA of a committed round and
- * the verification verdict, projected from the full M9 finalize result. The
+ * the verification verdict, projected from the full finalize result. The
  * decision module consumes only the {@link GoalLoopFinalizeOutcome} discriminant;
  * this evidence carries the extra round-schema fields the persistence layer
  * stores.
@@ -662,7 +662,7 @@ export function planGoalLoopRoundStartForInvocation(
 }
 
 /**
- * Project the full M9 finalize result into the {@link GoalLoopFinalizeEvidence}
+ * Project the full finalize result into the {@link GoalLoopFinalizeEvidence}
  * the durable round record preserves: the commit SHA of a committed round and
  * the verification verdict. Verification ran (and so resolves to passed/failed/
  * skipped) exactly when the finalize outcome carries a verification field;
@@ -680,7 +680,7 @@ export function goalLoopFinalizeEvidenceFromResult(
 
 /**
  * Project a finished round's evidence into the durable {@link ExecutorArtifactRecord}
- * rows the M10-03 persistence layer (`insertExecutorArtifact`) writes — the
+ * rows the persistence layer (`insertExecutorArtifact`) writes - the
  * contract "Required Artifacts" / ticket "artifact evidence" half of the round's
  * per-round evidence. `logs` rows are derived from the round-start record's frozen
  * `logPaths` (the orchestrator owns those); every other class comes from the
@@ -744,7 +744,7 @@ export function planGoalLoopRoundArtifacts(
 
 /**
  * Project a finished round's major executor stages into the durable
- * {@link ExecutorCheckpointRecord} stream the M10-03 persistence layer
+ * {@link ExecutorCheckpointRecord} stream the persistence layer
  * (`insertExecutorCheckpoint`) writes — the contract "Round Lifecycle" step 7
  * "Capture ... checkpoints ..." for the goal-loop family. These are the coarse
  * stages Momentum itself drives around the bounded mechanism, so they are derived
@@ -895,7 +895,7 @@ export function decideGoalLoopRound(
 
   // 1. Repo safety first: an unsafe or ambiguous finalize outcome can never be
   //    retried or completed away. Route to manual recovery and preserve the
-  //    exact M9 recovery code, regardless of the executor's recommendation or
+  //    exact recovery code, regardless of the executor's recommendation or
   //    the remaining round budget.
   if (UNSAFE_FINALIZE_OUTCOMES.has(finalizeOutcome)) {
     const recoveryCode =
@@ -1029,7 +1029,7 @@ function resolveSelectionField<T extends string | number>(
 
 /**
  * The recovery code a goal-loop round records for an unsafe finalize outcome.
- * `manual_recovery_required` is only ever raised by the M9 finalizer's moved-HEAD
+ * `manual_recovery_required` is only ever raised by the finalizer's moved-HEAD
  * guard (`head_mismatch`); every other unsafe outcome already names its own code.
  */
 function recoveryCodeForFinalize(outcome: GoalLoopFinalizeOutcome): string {

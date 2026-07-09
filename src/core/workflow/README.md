@@ -49,12 +49,12 @@ Other domains reach workflow behavior through these modules:
   do not mutate state).
 - **Daemon and supervisor dispatch** (`src/core/daemon/workflow-dispatch.ts`): `dispatch/execute`, `dispatch/dogfood`, `dispatch/external-apply-dispatch`, `dispatch/linear-refresh-lifecycle`, `dispatch/subworkflow-dispatch`, `dispatch/live-wrapper`, and `live-wrapper/daemon-profile`; configured `subworkflow` steps compose the child-run producer after the base scaffold while live-wrapper-owned families stay on the live-wrapper lane for bounded daemon cycles and eligible `workflow run watch --once` ticks.
 - **Dispatched-step reconciliation**: `dispatch/reconcile` /
-  `dispatch/reconcile-execute` own the RC-2 pure/effect seam that finalizes a
+  `dispatch/reconcile-execute` own the pure/effect seam that finalizes a
   dispatched step from terminal executor evidence.
 - **Executor / live-step / daemon runtime**: `run/reducer` (shared run-state
   reduction), `run/runtime-state` (cached run-state / monitor refresh after a
   caller-owned mutation), `step/executor` (registry/dispatch boundary),
-  `step/executor-real-adapters` (RC-5 production registry builder backed by
+  `step/executor-real-adapters` (production registry builder backed by
   live wrappers or honest `runtime_unavailable` adapters),
   `live-wrapper/coding-workflow` (the wrapper-command seam used by the
   checked-in dogfood live-wrapper profile), `live-wrapper/merge-cleanup-preflight`
@@ -82,9 +82,9 @@ importers keep direct typed module paths. ARCH-08 only introduces the
 refresh shared by dispatch, reconciliation, dogfood terminalization, and operator/recovery
 callers. It does **not** choose the reconciliation seam (that lives separately
 in `dispatch/reconcile.ts` / `dispatch/reconcile-execute.ts`), delete
-the dogfood stand-in, or narrow M9/M10 compatibility paths.
+the dogfood stand-in, or narrow live-wrapper / executor-loop compatibility paths.
 
-RC-5 fake demotion has since landed in this folder: the production
+Fake demotion has since landed in this folder: the production
 `WorkflowStepExecutor` default no longer fabricates fake successes, while the
 deterministic fake registry lives under `test/helpers/` and is injected only by
 tests that need substrate smoke coverage.
@@ -93,7 +93,7 @@ The dispatched-step execution path producer has since landed:
 `dispatch/executor-terminalize.ts` records a finished
 `WorkflowStepExecutorDispatchResult` as terminal scaffold evidence, and
 `dispatch/executor-run.ts` composes "run the dispatched step's executor (through
-an injected real registry) → terminalize → RC-2 reconcile" so a configured
+an injected real registry) → terminalize → reconcile" so a configured
 profile finalizes the step exactly once and a configured profile that lacks the
 claimed step kind parks the run for manual recovery instead of fabricating
 success. `live-wrapper/daemon-profile.ts`
@@ -105,9 +105,9 @@ silently fabricated profile. `dispatch/live-wrapper.ts` then composes the base
 dispatch with that producer into a `WorkflowStepDispatch`
 (`createLiveWrapperWorkflowDispatch`): the production analogue of the dogfood
 `createTerminalizingWorkflowDispatch`, it starts the scaffold via the base dispatch
-and — only for a genuinely-started dispatch — runs the executor + RC-2 reconcile in
+and — only for a genuinely-started dispatch — runs the executor + reconciliation in
 the same tick, taking the registry and the per-step exec-context deriver by
-injection and leaving RC-2 the single finalization owner. `dispatch/retry.ts`
+injection and leaving the reconciliation seam the single finalization owner. `dispatch/retry.ts`
 keeps the retry path explicit for stale live-wrapper bootstrap failures: after
 guarded recovery clear prepares a retryable `no-mistakes` or `merge-cleanup`
 step, the next dispatch reopens the same deterministic invocation id with the
@@ -124,7 +124,7 @@ safely: its deriver injection returns a total
 `DispatchedStepExecutorContextResolution`, and an `ok: false` resolution is routed
 to manual recovery (`recordUnresolvedDispatchedStepContext` in
 `dispatch/executor-run.ts`, which terminalizes the same honest
-`manual_recovery_required` evidence an unconfigured executor produces and lets RC-2
+`manual_recovery_required` evidence an unconfigured executor produces and lets the reconciliation seam
 park the run) instead of throwing — a throw inside the dispatch closure, after the
 scaffold exists, would release the lease over a still-`running` step and strand it.
 The bounded `daemon start` workflow lane now wires the resolved profile,
@@ -136,7 +136,7 @@ The daemon-dispatchable `external-apply` adapter:
 `dispatch/external-apply-run.ts` runs the injected external write path and reconciles
 through the reconciliation seam, and `dispatch/external-apply-dispatch.ts` gates the producer by scaffold
 family after the base dispatcher creates the durable start rows.
-`dispatch/linear-refresh-lifecycle.ts` adds the tail-owned preflight -> apply -> reconcile classifier for the built-in `linear-refresh` step: it proves issue scope, auth, policy, source item, one pending `status_update` intent or deterministic seed evidence for the expected `Done` intent, valid one-of `state` / `stateId` payload, and stable idempotency marker before the M6 write path can run, and it turns already-applied successful audit evidence into terminal executor evidence without another Linear mutation.
+`dispatch/linear-refresh-lifecycle.ts` adds the tail-owned preflight -> apply -> reconcile classifier for the built-in `linear-refresh` step: it proves issue scope, auth, policy, source item, one pending `status_update` intent or deterministic seed evidence for the expected `Done` intent, valid one-of `state` / `stateId` payload, and stable idempotency marker before the external write path can run, and it turns already-applied successful audit evidence into terminal executor evidence without another Linear mutation.
 The Linear apply preflight helpers live in `src/core/intent/` so workflow code continues to consume the intent-owned apply path instead of importing policy or auth checks back from workflow modules.
 
 The `subworkflow` adapter mechanism landed first, and a follow-up

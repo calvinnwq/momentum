@@ -39,7 +39,7 @@ adapter, and no-mistakes executor / orchestrator wrappers.
 
 Use these docs for detailed behavior:
 
-- [README.md](README.md) and [docs/index.md](docs/index.md): public command
+- [README.md](README.md) and [docs/index.html](docs/index.html): public command
   usage and operator documentation.
 - [SPEC.md](SPEC.md): compact current runtime, workflow, external-apply,
   source-adapter, coding-workflow ownership, runtime-consolidation, and

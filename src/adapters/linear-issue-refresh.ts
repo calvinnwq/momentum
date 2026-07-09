@@ -19,7 +19,7 @@
  *
  * The orchestrator (`post-apply-reconcile.ts`) translates these into the
  * post-apply reconciliation outcome taxonomy. Tests inject a mock fetch and the
- * M6 contract forbids real `api.linear.app` calls from this slice's tests.
+ * adapter tests forbid real `api.linear.app` calls from this boundary.
  */
 
 export const DEFAULT_LINEAR_ISSUE_REFRESH_ENDPOINT =

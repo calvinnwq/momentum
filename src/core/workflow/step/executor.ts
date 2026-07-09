@@ -10,23 +10,23 @@
  * mutate the durable substrate, do not perform external apply, and do not
  * decide approval boundary advancement.
  *
- * The boundary mirrors the M4 `RunnerAdapter` style: a small registry keyed by
+ * The boundary mirrors the runner-adapter `RunnerAdapter` style: a small registry keyed by
  * step kind, a single dispatch entrypoint that validates input and traps
- * thrown executors, and stable error codes that callers can map to the M7
+ * thrown executors, and stable error codes that callers can map to the workflow-run
  * state machine without leaking GNHF / postflight / no-mistakes /
  * merge-cleanup implementation details into Momentum core.
  *
- * This M7 module owns the dispatch boundary (input validation, executor
+ * This workflow-run module owns the dispatch boundary (input validation, executor
  * resolution, thrown-executor trapping, stable error codes). Runtime
  * consolidation flipped the production default away from the deterministic
  * fake it had classified as deprecate-later: the default
  * registry is now built from real adapters (the honest unconfigured adapter
  * below, which refuses with `runtime_unavailable` rather than fabricating a
  * success), and `step/executor-real-adapters.ts` wires configured kinds to real
- * M9 live wrappers. The deterministic fake moved behind an explicit test-only
- * seam (`test/helpers/fake-workflow-step-executor.ts`) that the M7/M8/M10
+ * live wrappers. The deterministic fake moved behind an explicit test-only
+ * seam (`test/helpers/fake-workflow-step-executor.ts`) that the workflow-run/operator-recovery/executor-loop
  * substrate smokes inject through the `registry` parameter of the three
- * entrypoints; no fake ships in `dist/`. M9 owns the live-wrapper registry /
+ * entrypoints; no fake ships in `dist/`. live-wrapper owns the live-wrapper registry /
  * command configuration in `live-wrapper-registry.ts`; live local command
  * execution is layered around this boundary rather than owned by a fake
  * dispatcher.
@@ -185,7 +185,7 @@ export function isWorkflowStepExecutorKind(
 /**
  * A resolvable `WorkflowStepExecutor` registry keyed by canonical step kind.
  * Production callers omit it and get the honest {@link DEFAULT_REGISTRY}; the
- * M7/M8/M10 substrate tests inject the deterministic fake registry from
+ * workflow-run/operator-recovery/executor-loop substrate tests inject the deterministic fake registry from
  * `test/helpers/fake-workflow-step-executor.ts` through the `registry` parameter
  * of the entrypoints below.
  */
@@ -219,7 +219,7 @@ export function createUnconfiguredWorkflowStepExecutor(
 }
 
 /**
- * The production default registry (RC-5). With no live-wrapper profile supplied,
+ * The production default registry (the real-adapter seam). With no live-wrapper profile supplied,
  * every canonical kind resolves to the honest unconfigured adapter: lookup/dispatch
  * never resolves to a fake success by default. Daemon callers that resolve a
  * configured live-wrapper profile pass an explicit registry instead.

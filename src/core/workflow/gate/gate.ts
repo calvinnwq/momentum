@@ -89,7 +89,7 @@ export type GateDecisionMode = (typeof GATE_DECISION_MODES)[number];
 /**
  * The decision-relevant projection of a durable gate. The brain reads only these
  * fields; the full persisted gate record (ids, timestamps, evidence links) is
- * owned by the M10-08 persistence slice.
+ * owned by the executor-loop persistence slice.
  */
 export type GateDecisionInput = {
   /** Whether the gate is already settled (double-resolve / idempotency guard). */

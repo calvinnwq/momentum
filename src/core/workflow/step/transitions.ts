@@ -1,8 +1,8 @@
 /**
  * Durable `workflow_steps` live-transition primitives.
  *
- * Iteration 1-3 of M9-02 added the live execution core (`live-step-wrapper.ts`),
- * the M7 executor bridge (`live-step/executor.ts`), and the durable
+ * Iteration 1-3 of live-wrapper added the live execution core (`live-step-wrapper.ts`),
+ * the workflow-run executor bridge (`live-step/executor.ts`), and the durable
  * `workflow_leases` lifecycle primitives (`leases.ts`). The remaining
  * caller-side foundation the live-execution contract requires is the step-state
  * half of the lifecycle: "write a start event before spawning" and "persist
@@ -13,7 +13,7 @@
  *
  *   - `persistWorkflowRunImport` (`run/import-persist.ts`) upserts step
  *     state from a *static* imported artifact tree, not from live execution.
- *   - The M8 `workflow run update-step` CLI handler transitions a step but does
+ *   - The operator-recovery `workflow run update-step` CLI handler transitions a step but does
  *     so as an *operator override*: it stamps `operator_transition_at` plus the
  *     `operator_reason` / `operator_actor` / `operator_*_pointer` audit columns,
  *     and `persistWorkflowRunImport` treats a non-null `operator_transition_at`

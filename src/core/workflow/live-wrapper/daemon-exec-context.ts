@@ -34,7 +34,7 @@
  * run that never recorded a repo) has no working directory a live command could be
  * run in. Rather than fabricate one, the resolver refuses with
  * `missing_repo_path` so the daemon lane can fail closed into manual recovery — the
- * same "never fabricate" posture RC-5 took for unconfigured executor adapters.
+ * same "never fabricate" posture the real-adapter seam took for unconfigured executor adapters.
  */
 
 import path from "node:path";

@@ -9,7 +9,7 @@
  * "open decision" was unresolved: *what configures a production `subworkflow`
  * step's child run, and what keeps recursion bounded?* This module owns exactly
  * that keystone decision. It does not itself touch
- * `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES` or wire any daemon lane; RC-4b
+ * `PHASE1_DISPATCHABLE_EXECUTOR_FAMILIES` or wire any daemon lane; the production lane
  * flipped `subworkflow` into that allowlist and wired the production
  * lane that composes this decision once the configured lane was proven.
  *
@@ -31,7 +31,7 @@
  *     the contract's "unsafe recursion" fail-closed case. This is the bound that
  *     lets the production flip stay safe: a recursive run can never spiral.
  *
- * The daemon-lane deriver (a later RC-4b slice) composes these two with the
+ * The daemon-lane deriver composes these two with the
  * existing workflow-owned run-start / status seams to build the
  * `DeriveDispatchedSubworkflowContext` the landed entry-point factory injects; a
  * refusal from either half is routed to manual recovery there, exactly as the

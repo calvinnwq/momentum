@@ -11,10 +11,10 @@
  *      {@link WorkflowStepExecutorDispatchResult} as terminal evidence on that
  *      scaffold's invocation / round (succeeded / failed, or manual_recovery for
  *      an unconfigured / process-level failure).
- *   3. `dispatch/reconcile-execute.ts` (RC-2) finalizes the owning
+ *   3. `dispatch/reconcile-execute.ts` (the reconciliation seam) finalizes the owning
  *      `workflow_steps` row from that terminal invocation, exactly once.
  *
- * The gap RC-5b closes is the *producer* in the middle: nothing in production ran
+ * The remaining gap was the *producer* in the middle: nothing in production ran
  * the dispatched step's executor to yield the result step 2 consumes, so a
  * dispatched step stayed `running` forever (or only advanced under the
  * test/dogfood-only `dispatch/dogfood.ts` stand-in). This module owns that
@@ -22,7 +22,7 @@
  *
  *   run the dispatched step's executor (through the injected real registry)
  *     -> terminalize its result as durable evidence
- *     -> let the RC-2 seam finalize the step from that evidence.
+ *     -> let the reconciliation seam finalize the step from that evidence.
  *
  * It deliberately takes the {@link WorkflowStepExecutorRegistry} by injection
  * rather than resolving a daemon-default live-wrapper profile itself: a configured
@@ -33,20 +33,20 @@
  * resolving the daemon-default profile source before calling this reusable,
  * registry-agnostic execution path.
  *
- * Boundary discipline (so RC-2 stays the single finalization owner and the M9
+ * Boundary discipline (so the reconciliation seam stays the single finalization owner and the live-wrapper
  * direct-finalize lane is never double-finalized):
  *
  *   - It acts only when a `<run>::<step>::dispatch` invocation exists. A step
- *     finalized by an M9 live wrapper (or never dispatched through the M10 lane)
+ *     finalized by a live wrapper (or never dispatched through the executor-loop lane)
  *     writes no such invocation, so this seam refuses it (`notDispatched`) and
  *     never runs an executor against it.
  *   - It never calls `finishWorkflowStep`, never writes `executor_invocations` /
  *     `executor_rounds` directly (the terminalize seam owns the scaffold rows),
- *     and never releases the dispatch lease (the RC-2 seam does, on terminal).
+ *     and never releases the dispatch lease (the reconciliation seam does, on terminal).
  *   - Idempotent on re-entry: once the dispatch invocation is terminal, a prior
  *     execution already ran the bounded session, so a re-entered tick NEVER
  *     re-runs the executor (no second process, no duplicate evidence). It only
- *     re-drives the idempotent RC-2 reconciliation to converge the finalization.
+ *     re-drives the idempotent reconciliation to converge the finalization.
  */
 
 import type { MomentumDb } from "../../../adapters/db.js";
@@ -143,7 +143,7 @@ export function buildDispatchedStepExecutorInput(
  * without explaining what it did to a dispatched step.
  */
 export const WORKFLOW_EXECUTE_RECONCILE_STATUS = {
-  /** No `<run>::<step>::dispatch` invocation: not this seam's step (M9 lane). */
+  /** No `<run>::<step>::dispatch` invocation: not this seam's step (live-wrapper lane). */
   notDispatched: "execute_not_dispatched",
   /** The dispatched step row vanished between dispatch and execution. */
   stepNotFound: "execute_step_not_found",
@@ -153,7 +153,7 @@ export const WORKFLOW_EXECUTE_RECONCILE_STATUS = {
   executedAndReconciled: "execute_reconciled",
   /** Re-entry over an already-terminal invocation: executor not re-run. */
   alreadyExecuted: "execute_already_executed",
-  /** Terminal evidence exists, but RC-2 reconciliation threw and must be retried. */
+  /** Terminal evidence exists, but reconciliation threw and must be retried. */
   reconcileDeferred: "execute_reconcile_deferred",
   /**
    * An async dispatched producer observed its underlying work still in flight
@@ -195,15 +195,15 @@ export type ExecuteAndReconcileDispatchedStepResult = {
   executorResult?: WorkflowStepExecutorDispatchResult;
   /** The terminalize outcome, when the executor was run this call. */
   terminalize?: TerminalizeDispatchedExecutorResult;
-  /** The RC-2 reconciliation outcome, when reconciliation was attempted. */
+  /** The reconciliation outcome, when reconciliation was attempted. */
   reconcile?: WorkflowStepReconciliationResult;
   detail?: string;
 };
 
 /**
- * Run a dispatched step's executor and finalize it through RC-2. The production
+ * Run a dispatched step's executor and finalize it through the reconciliation seam. The production
  * composition of "run executor -> terminalize evidence -> reconcile"; see the
- * module doc for the boundary discipline (single finalization owner, M9-lane
+ * module doc for the boundary discipline (single finalization owner, live-wrapper-lane
  * refusal, idempotent re-entry that never re-runs the executor).
  */
 export function executeAndReconcileDispatchedWorkflowStep(
@@ -213,7 +213,7 @@ export function executeAndReconcileDispatchedWorkflowStep(
   const invocationId = deriveDispatchInvocationId(runId, stepId);
   const invocation = loadExecutorInvocation(db, invocationId);
   if (invocation === undefined) {
-    // No phase-1 dispatch invocation: an M9 direct-finalize / never-dispatched
+    // No phase-1 dispatch invocation: a live-wrapper direct-finalize / never-dispatched
     // step. The seam owns only dispatched scaffolds, so it refuses and never runs
     // an executor — the structural guard against a double finalize.
     return {
@@ -225,7 +225,7 @@ export function executeAndReconcileDispatchedWorkflowStep(
   if (isTerminalExecutorInvocationState(invocation.state)) {
     // Idempotent re-entry: a prior execution already ran the bounded session and
     // recorded its terminal evidence. NEVER re-run the executor (a second process
-    // / duplicate evidence); just re-drive the idempotent RC-2 reconciliation so
+    // / duplicate evidence); just re-drive the idempotent reconciliation so
     // a crashed prior finalize still converges the step / lease / run-state.
     const reconciled = tryReconcileDispatchedWorkflowStep({
       db,
@@ -278,7 +278,7 @@ export function executeAndReconcileDispatchedWorkflowStep(
     registry
   );
 
-  // Record the result as terminal evidence, then let RC-2 finalize the step from
+  // Record the result as terminal evidence, then let the reconciliation seam finalize the step from
   // it. terminalize and reconcile are each idempotent and own their own
   // transactions.
   const terminalize = terminalizeDispatchedExecutorInvocation({
@@ -389,7 +389,7 @@ export function recordDispatchedStepManualRecovery(
  * Record that a dispatched step's executor could not be RUN because its execution
  * context could not be derived (e.g. the run carries no repo path the bounded
  * session could work in), routing the step to manual recovery through the SAME
- * `terminalize -> RC-2 reconcile` path an honest `runtime_unavailable` executor
+ * `terminalize -> the reconciliation seam reconcile` path an honest `runtime_unavailable` executor
  * result takes — without running any executor and without fabricating a clean
  * terminal.
  *
@@ -400,13 +400,13 @@ export function recordDispatchedStepManualRecovery(
  * release the dispatch lease and rethrow (its dispatch contract), stranding a
  * `running` step with no terminal evidence and no recovery gate. Recording manual
  * recovery instead parks the run safely — `needs_manual_recovery` + an
- * operator-visible gate, with RC-2 releasing the held lease — the no-stranded-step
+ * operator-visible gate, with the reconciliation seam releasing the held lease — the no-stranded-step
  * guarantee.
  *
  * Idempotent on re-entry: `terminalizeDispatchedExecutorInvocation` preserves an
  * already-terminal invocation and `reconcileDispatchedWorkflowStep` re-converges
  * the parked run, so a re-entered tick records no duplicate evidence and opens no
- * duplicate gate. A step with no dispatch invocation (the M9 direct-finalize lane)
+ * duplicate gate. A step with no dispatch invocation (the live-wrapper direct-finalize lane)
  * is left untouched: both seams refuse it and write nothing.
  */
 

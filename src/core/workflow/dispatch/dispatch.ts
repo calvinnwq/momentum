@@ -21,8 +21,8 @@
  * planning contracts externalized to Obsidian:
  *
  *   - The phase-1 dispatchable set is exactly the executor families that have a
- *     landed production adapter in the base allowlist (`goal-loop` M10-05,
- *     `one-shot` / `script` M10-06, `no-mistakes` M10-07, `external-apply` RC-3,
+ *     landed production adapter in the base allowlist (`goal-loop` executor-loop,
+ *     `one-shot` / `script` executor-loop, `no-mistakes` executor-loop, `external-apply` the external-apply seam,
  *     and `subworkflow` once its configured production lane was
  *     proven). A family with no landed adapter still fails closed rather than
  *     silently no-op or strand a lease.
@@ -91,7 +91,7 @@ export function isPhase1DispatchableExecutorFamily(
  *     dispatch.
  *   - `definition_unlinked`: the run carries no
  *     `(workflow_definition_key, workflow_definition_version)` link, so its steps
- *     cannot be resolved to an executor family (e.g. an M7-imported run).
+ *     cannot be resolved to an executor family (e.g. an workflow-run-imported run).
  *   - `step_definition_not_found`: no `step_definitions` row matches the claimed
  *     step's `(definitionKey, definitionVersion, stepId)` identity.
  *   - `unknown_executor_family`: the step definition's `executor` column is not a

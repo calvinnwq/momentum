@@ -95,7 +95,7 @@ export function resolveClaimedWorkflowStepFamily(
   const definitionKey = run.workflow_definition_key;
   const definitionVersion = run.workflow_definition_version;
   // Either half of the link missing means the run cannot be resolved to a
-  // definition (e.g. an M7-imported run), so its step has no executor family.
+  // definition (e.g. an workflow-run-imported run), so its step has no executor family.
   if (
     definitionKey === null ||
     definitionKey === "" ||

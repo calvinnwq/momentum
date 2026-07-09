@@ -8,7 +8,7 @@
  *     invocation + first round start scaffold, and holds the dispatch lease.
  *   - `dispatch/executor-run.ts` (`executeAndReconcileDispatchedWorkflowStep`) runs
  *     the dispatched step's executor through an injected registry, records the
- *     result as terminal evidence, and lets the RC-2 reconciliation seam finalize
+ *     result as terminal evidence, and lets the reconciliation seam finalize
  *     the step exactly once. It REQUIRES the scaffold to already exist.
  *
  * Nothing in production composed these two in a single daemon tick, so a dispatched
@@ -16,9 +16,9 @@
  * the scaffold and left the step `running`. This module is that missing composition.
  * It is the production analogue of the test/dogfood `createTerminalizingWorkflowDispatch`
  * (`dispatch/dogfood.ts`): same wrap-the-base-dispatch shape, but it drives the REAL
- * executor registry and finalizes through RC-2 instead of stamping a fake `succeeded`.
+ * executor registry and finalizes through the reconciliation seam instead of stamping a fake `succeeded`.
  *
- * Boundary discipline (so RC-2 stays the single finalization owner):
+ * Boundary discipline (so the reconciliation seam stays the single finalization owner):
  *
  *   - The executor runs only after a dispatch that genuinely started (or re-entered)
  *     a scaffold ({@link shouldRunDispatchedExecutor}) AND the scaffold belongs to
@@ -32,7 +32,7 @@
  *     its terminalization — daemon telemetry still reports the dispatch outcome.
  *   - It never releases the dispatch lease or writes step/executor rows itself:
  *     `executeAndReconcileDispatchedWorkflowStep` terminalizes the evidence and the
- *     RC-2 reconcile seam owns the `running -> terminal` finalization + lease release.
+ *     the reconciliation seam reconcile seam owns the `running -> terminal` finalization + lease release.
  *   - Idempotent on re-entry: a re-entered tick's base dispatch reports
  *     `alreadyDispatched` and the producer recognises the already-terminal invocation,
  *     so the executor is never run a second time.
@@ -168,7 +168,7 @@ export function createLiveWrapperWorkflowDispatch(
         });
       } else {
         // The context could not be derived (e.g. the run carries no repo path).
-        // Park the run for manual recovery through the same terminalize -> RC-2
+        // Park the run for manual recovery through the same terminalize -> the reconciliation seam
         // reconcile path an unconfigured executor takes, rather than throwing —
         // a throw here would release the lease over a still-running step.
         recordUnresolvedDispatchedStepContext({

@@ -1,7 +1,7 @@
 /**
  * Pure half of the daemon-dispatchable `subworkflow` adapter.
  *
- * RC-4 makes the `subworkflow` executor family daemon-dispatchable by connecting
+ * the subworkflow seam makes the `subworkflow` executor family daemon-dispatchable by connecting
  * a child workflow run's terminal classification to the workflow dispatch /
  * executor-evidence lane — *without* inventing a parallel ad hoc runtime and
  * without weakening the fail-closed posture recursive runs require. The parent
@@ -17,13 +17,13 @@
  *     {@link WorkflowStepExecutorDispatchResult} as terminal executor evidence on
  *     the `<run>::<step>::dispatch` scaffold (succeeded / failed for a clean
  *     terminal; `manual_recovery_required` for any `ok: false` result), and
- *   - `dispatch/reconcile-execute.ts` (RC-2) finalizes the owning
+ *   - `dispatch/reconcile-execute.ts` (the reconciliation seam) finalizes the owning
  *     `workflow_steps` row from that terminal evidence, exactly once.
  *
  * It is pure and total — no SQLite, no file system, no network, no clock — so the
  * mapping contract is exhaustively testable on its own, the same discipline
- * `mapExternalApplyResultToExecutorResult` (RC-3) and
- * `planDispatchedExecutorTerminalization` (RC-5b) follow.
+ * `mapExternalApplyResultToExecutorResult` (the external-apply seam) and
+ * `planDispatchedExecutorTerminalization` follow.
  *
  * Mapping discipline (a child run recurses into another run, so the default is
  * fail closed):

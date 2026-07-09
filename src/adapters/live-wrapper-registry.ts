@@ -10,7 +10,7 @@ import {
  *
  * Momentum invokes live workflow steps that wrap the existing
  * OpenClaw engines (GNHF, postflight, no-mistakes, merge-cleanup,
- * linear-refresh). The M9-00 decision gate pinned a *wrapper registry keyed by
+ * linear-refresh). The runtime uses a *wrapper registry keyed by
  * `WorkflowStepKind`* whose entries resolve from durable per-profile
  * configuration rather than hard-coded local paths.
  *
@@ -20,7 +20,7 @@ import {
  *     absolute `command`, argv `args`, `cwd`, raw `timeout_sec`,
  *     `env_allow`, `result_file`, and an optional pre-flight `probe`).
  *     Durable snake_case keys are canonical; camelCase aliases are accepted
- *     as transitional input while M9 wrappers settle.
+ *     as transitional input while wrappers settle.
  *   - `parseLiveWrapperProfile` validates a named profile whose `wrappers`
  *     mapping is keyed by `WorkflowStepKind`.
  *   - `resolveLiveWrapper` resolves the wrapper config for a requested step

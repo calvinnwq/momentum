@@ -4,7 +4,7 @@
  *
  * The symmetric sibling of {@link ../run/recovery.ts}'s
  * `clearWorkflowRunManualRecoveryGuarded`: where the guarded clear re-derives
- * the M7 monitor state and *clears* the durable `needs_manual_recovery` flag
+ * the workflow-run monitor state and *clears* the durable `needs_manual_recovery` flag
  * only when no blocking condition remains, this reconcile re-derives the same
  * monitor state and *sets* the durable flag (and renders the per-run
  * `recovery.md` artifact) when `deriveWorkflowMonitorState` classifies a
@@ -114,7 +114,7 @@ export type ReconcileWorkflowRunManualRecoveryResult =
     };
 
 /**
- * Re-derive the M7 monitor state for a run and, when it classifies a blocking
+ * Re-derive the workflow-run monitor state for a run and, when it classifies a blocking
  * recovery code, set the durable `needs_manual_recovery` flag (reason sourced
  * from the monitor recovery message) and render the run-scoped `recovery.md`.
  * Returns `no_recovery_required` when no blocking condition is present —

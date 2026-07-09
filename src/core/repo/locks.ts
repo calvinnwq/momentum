@@ -179,7 +179,7 @@ export type ListStaleRepoLocksInput = {
  * an optional `graceMs` tolerance for small clock skew). The lease deadline is
  * the contract between worker and lock; once it has passed, the holder no
  * longer owns the lock and the row is a candidate for stale-lease recovery.
- * This helper is read-only — M3-05 surfaces stale locks deterministically but
+ * This helper is read-only — stale-recovery surfaces stale locks deterministically but
  * leaves recovery decisions to higher-level orchestrator slices that can
  * verify repo state, holder liveness, and metadata invariants first.
  */

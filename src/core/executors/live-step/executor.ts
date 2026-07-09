@@ -1,15 +1,15 @@
 /**
  * Live workflow-step executor bridge.
  *
- * Iteration 1 of M9-02 added `runLiveStepWrapper` (`live-step-wrapper.ts`): the
- * pure execution core that runs a resolved M9-01 `LiveWrapperConfig` as an
+ * `runLiveStepWrapper` (`live-step-wrapper.ts`) is the pure execution core that
+ * runs a resolved `LiveWrapperConfig` as an
  * explicit local child process and classifies the outcome into the live-wrapper
- * execution recovery vocabulary (`LIVE_STEP_WRAPPER_RECOVERY_CODES`). M9-01
- * (`live-wrapper-registry.ts`) added the typed config plus a
+ * execution recovery vocabulary (`LIVE_STEP_WRAPPER_RECOVERY_CODES`).
+ * `live-wrapper-registry.ts` owns the typed config plus a
  * `WorkflowStepKind`-keyed profile/registry.
  *
  * This module is the seam that makes that execution core usable through the
- * existing M7 `WorkflowStepExecutor` boundary (`src/core/workflow/step/executor.ts`)
+ * existing `WorkflowStepExecutor` boundary (`src/core/workflow/step/executor.ts`)
  * without rewriting either side:
  *
  *   - `buildLiveStepWrapperInput` adapts a `WorkflowStepExecutorInput` into a
@@ -18,16 +18,16 @@
  *     resolves against); the wrapper owns the result path via `config`, so the
  *     advisory `input.resultJsonPath` is not forwarded.
  *   - `mapLiveStepWrapperResult` translates a `LiveStepWrapperResult` into the
- *     normalized M7 `WorkflowStepExecutorDispatchResult`. Runner-reported
+ *     normalized `WorkflowStepExecutorDispatchResult`. Runner-reported
  *     `success: false` is still a normalized `ok: true` step failure that later
  *     finalization handles with a reset; process-level wrapper failures become
  *     `ok: false` dispatch errors. Distinct live failure causes are never
  *     collapsed into generic failure text: the precise
  *     `LiveStepWrapperRecoveryCode` is preserved on `liveRecoveryCode` even when
- *     two live codes map onto one coarser M7 dispatch `errorCode`.
+ *     two live codes map onto one coarser dispatch `errorCode`.
  *   - `createLiveWorkflowStepExecutor` / `createLiveWorkflowStepExecutorsFromProfile`
  *     wrap the two functions plus `runLiveStepWrapper` into `WorkflowStepExecutor`
- *     values keyed by `WorkflowStepKind`, resolvable from an M9-01 profile.
+ *     values keyed by `WorkflowStepKind`, resolvable from a profile.
  *
  * This module deliberately stops at the executor adapter boundary: it does not
  * acquire/heartbeat/release durable `workflow_leases`, persist `workflow_steps`
@@ -35,7 +35,7 @@
  * verification/commit transactions. `live-step/orchestrator.ts` composes this
  * adapter with the lease / step lifecycle; `live-step/advance.ts` composes that
  * orchestration with verification, commit / reset finalization, and live
- * run-scoped recovery so the M7 state machine can drive a live wrapper exactly
+ * run-scoped recovery so the workflow state machine can drive a live wrapper exactly
  * as it already drives the fake executor.
  */
 
@@ -63,8 +63,8 @@ import type {
 
 /**
  * Stable mapping from the live-wrapper execution recovery vocabulary onto the
- * M7 `WorkflowStepExecutorErrorCode` dispatch taxonomy. Two live codes have no
- * direct M7 equivalent and intentionally collapse onto the nearest coarser
+ * `WorkflowStepExecutorErrorCode` dispatch taxonomy. Two live codes have no
+ * direct equivalent and intentionally collapse onto the nearest coarser
  * dispatch code while the precise cause is retained separately on
  * `LiveStepExecutorError.liveRecoveryCode`:
  *
@@ -86,7 +86,7 @@ export const LIVE_STEP_EXECUTOR_ERROR_CODE_BY_RECOVERY_CODE: Record<
 };
 
 /**
- * A dispatch error from a live wrapper. Assignable to the M7
+ * A dispatch error from a live wrapper. Assignable to the
  * `WorkflowStepExecutorError` so it satisfies the executor boundary, but carries
  * the precise `liveRecoveryCode` so the run-level lease/recovery layer can map
  * it without re-deriving live process semantics.
@@ -138,12 +138,12 @@ export function buildLiveStepWrapperInput(
 }
 
 /**
- * Translate a `LiveStepWrapperResult` into the normalized M7 dispatch result.
+ * Translate a `LiveStepWrapperResult` into the normalized dispatch result.
  * A successful wrapper process always becomes an `ok: true` executor result: a
  * runner document with `success: true` maps to `succeeded`, while `success:
  * false` maps to a normalized `failed` step with `command_failed` so finalization
  * can reset the worktree. Only process-level wrapper failures become `ok: false`
- * dispatch errors carrying the mapped M7 code plus the precise
+ * dispatch errors carrying the mapped code plus the precise
  * `liveRecoveryCode`.
  */
 export function mapLiveStepWrapperResult(
@@ -218,7 +218,7 @@ export function createLiveWorkflowStepExecutor(
 }
 
 /**
- * Build live executors for every step kind an M9-01 profile configures, keyed by
+ * Build live executors for every step kind a profile configures, keyed by
  * kind. Unconfigured kinds are simply absent from the map; resolution refusals
  * (which `listConfiguredLiveWrapperKinds` already filters out) are skipped.
  */

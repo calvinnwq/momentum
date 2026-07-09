@@ -698,7 +698,7 @@ export async function executeExternalApply(
   }
 
   // Intent transitions to applied with the operator reason that drove the
-  // write. This is intentionally separate from the M5 manual mark-applied
+  // write. This is intentionally separate from the manual mark-applied
   // path so the audit ledger is the durable record of the external write.
   const decisionReason = `external_apply: ${input.operatorReason}`;
   const markApplied = markAppliedFn(input.db, {

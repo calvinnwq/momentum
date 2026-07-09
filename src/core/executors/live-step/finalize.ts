@@ -1,15 +1,15 @@
 /**
- * M9 live-step finalization back-compat surface.
+ * Live-step finalization back-compat surface.
  *
  * The shared verify -> commit / reset finalization transaction this module used
  * to own moved to the neutrally-owned
  * {@link ../shared/step-finalize.ts} seam, so the goal-loop
- * executor-loop family no longer reaches into an M9-named module for it. This
+ * executor-loop family no longer reaches into a live-step-named module for it. This
  * module re-exports that seam under the live-step lane's original
  * `*LiveWorkflowStep*` / `LiveWorkflowFinalize*` names so the consumers that
- * still rely on that surface keep it with no behavior change: the M9 live
- * wrappers (`live-step/advance.ts`, `live-step/run-recovery.ts`), the M10
- * single-shot executor family (`single-shot/mechanism.ts`), and the M9 finalize
+ * still rely on that surface keep it with no behavior change: the live
+ * wrappers (`live-step/advance.ts`, `live-step/run-recovery.ts`), the
+ * single-shot executor family (`single-shot/mechanism.ts`), and the finalize
  * tests.
  *
  * New shared callers should import the neutral names directly from

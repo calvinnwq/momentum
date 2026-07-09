@@ -2,14 +2,14 @@
  * Run-scoped recovery artifact renderer.
  *
  * Renders the per-run `.agent-workflows/<runId>/recovery.md` artifact from
- * either the M7 monitor reducer's recovery classification, the M9 live
- * run-level recovery classifications, or the M10 scheduler lane's stale
+ * either the workflow-run monitor reducer's recovery classification, the live
+ * run-level recovery classifications, or the executor-loop scheduler lane's stale
  * workflow-lease recovery classification. The renderer is the run-scoped
- * sibling of the M3 goal-scoped `recovery-artifact.ts`: it owns artifact
+ * sibling of the goal-scoped `recovery-artifact.ts`: it owns artifact
  * *generation* only and never touches SQLite, executors, or the durable flag;
  * the durable `WorkflowRun.needs_manual_recovery` wiring and the explicit
- * clear path compose with this renderer through the M8 recovery slice, M9
- * live recovery seams, and M10 scheduler-lane recovery.
+ * clear path compose with this renderer through the recovery slice, live
+ * live recovery seams, and executor-loop scheduler-lane recovery.
  *
  * The renderer is intentionally pure and accepts only structured, bounded
  * fields (run id, step id, classification, evidence pointers, recommended next
@@ -43,9 +43,9 @@ export const WORKFLOW_RECOVERY_ARTIFACT_FILENAME = "recovery.md";
 export const WORKFLOW_RECOVERY_ARTIFACT_SCHEMA_VERSION = 1;
 
 /**
- * Live run-level recovery classifications that M9 layers on top of the M7
+ * Live run-level recovery classifications that live-wrapper layers on top of the workflow-run
  * monitor recovery codes. These are NOT emitted by `deriveWorkflowMonitorState`
- * — they are raised by the M9 live finalization transaction
+ * — they are raised by the live finalization transaction
  * (`head_mismatch`, `reset_failed`, `repo_lock_lost`, `git_failed`,
  * unsafe `commit_failed`, `invalid_input`), result-document checks during
  * finalization or process dispatch (`result_missing` / `result_invalid`), live
@@ -54,7 +54,7 @@ export const WORKFLOW_RECOVERY_ARTIFACT_SCHEMA_VERSION = 1;
  * throws (`executor_threw`), and wrapper-reported `manual_recovery_required` outcomes
  * rendered into the same per-run `recovery.md`. Extending the recovery taxonomy
  * here is explicitly sanctioned by SPEC.md
- * ("M9 can extend the M8 taxonomy, but it cannot collapse distinct failure
+ * ("live-wrapper can extend the operator-recovery taxonomy, but it cannot collapse distinct failure
  * causes into generic failure text"). The monitor reducer's emitted-code type
  * stays untouched so the substrate never claims to produce a code it cannot.
  */
@@ -79,9 +79,9 @@ export type WorkflowLiveRunRecoveryCode =
   (typeof WORKFLOW_LIVE_RUN_RECOVERY_CODES)[number];
 
 /**
- * Every classification `recovery.md` can render: the M7 monitor recovery codes
- * plus the M9 live run-level recovery codes. This is the single source of truth
- * the renderer validates against. The M10 scheduler lane reuses the
+ * Every classification `recovery.md` can render: the workflow-run monitor recovery codes
+ * plus the live run-level recovery codes. This is the single source of truth
+ * the renderer validates against. The executor-loop scheduler lane reuses the
  * monitor-owned `manual_recovery_lease` classification when a stale workflow
  * lease requires operator action, so it needs no separate live-only code here.
  */
@@ -243,8 +243,8 @@ export type WorkflowRecoveryEvidencePointer = {
 };
 
 /**
- * The recommended next action surfaced from the M7 monitor reducer's
- * `nextAction`, an M9 live run-level recovery seam, or the M10 scheduler lane's
+ * The recommended next action surfaced from the workflow-run monitor reducer's
+ * `nextAction`, an live run-level recovery seam, or the executor-loop scheduler lane's
  * stale workflow-lease recovery. Monitor-derived inputs carry the reducer's
  * stable code/detail, live recovery inputs carry live-specific `investigate_*`
  * codes and operator-facing detail, and scheduler-lane lease recovery carries

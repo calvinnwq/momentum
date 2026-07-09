@@ -58,7 +58,7 @@ const WORKFLOW_RUN_MONITOR_ADVISORY_COLUMNS: ColumnSpec[] = [
 
 // Link a workflow run back to the WorkflowDefinition recipe it
 // was started from, so a workflow-first run start records its (key, version)
-// provenance. Nullable because pre-M10 runs (e.g. imported coding-workflow
+// provenance. Nullable because older runs (e.g. imported coding-workflow
 // artifacts) have no persisted definition link.
 const WORKFLOW_RUN_DEFINITION_COLUMNS: ColumnSpec[] = [
   { name: "workflow_definition_key", type: "TEXT" },
@@ -463,7 +463,7 @@ CREATE INDEX IF NOT EXISTS idx_workflow_runs_repo_path
 // losing prior versions; its steps hang off that composite identity. Both
 // tables mirror the pure `WorkflowDefinition` / `StepDefinition` domain shape in
 // src/core/workflow/definition/definition.ts (no rich ExecutorDefinition config beyond the
-// executor-family field, no run state — those arrive in later M10 slices).
+// executor-family field, no run state; those arrive with executor-loop tables).
 const WORKFLOW_DEFINITIONS_DDL = `
 CREATE TABLE IF NOT EXISTS workflow_definitions (
   key TEXT NOT NULL,
