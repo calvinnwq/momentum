@@ -26,11 +26,12 @@ The repo has no `internal/` documentation tree.
   workflow contracts.
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) is the compact source architecture
   contract.
-- Obsidian `/Workspaces/Momentum` is the canonical internal home for long-form
+- The personal wiki `/Workspaces/Momentum` (the `personal-wiki-private` repo)
+  is the canonical internal home for long-form
   plans, contracts, milestone provenance, roadmap sequencing, dogfood evidence,
   readiness notes, and migration rationale.
 
-Historical internal planning docs were externalized to Obsidian
+Historical internal planning docs were externalized to the personal wiki
 `/Workspaces/Momentum`. Do not recreate `internal/`; keep repo docs focused on
 shipped behavior, operator truth, source architecture anchors, and executable
 checks.
@@ -48,12 +49,12 @@ The CLI architecture contract is stable.
 Its source of truth is [`ARCHITECTURE.md`](ARCHITECTURE.md): `src/cli.ts` remains the stable parser, top-level dispatch surface, and daemon/recovery/doctor compatibility home; the goal-first CLI lane and `worker run` are retired; command-family orchestration lives under `src/commands/`; shared JSON/text/help/diagnostic output contracts live under `src/renderers/`; infrastructure-facing clients and runtime adapters live under `src/adapters/`.
 Public command semantics remain frozen while import-boundary guardrails preserve that shape.
 The `doctor --json` marker reports `CLI architecture: parser dispatch, command families, renderers, adapters`.
-Long-form milestone history lives in Obsidian `/Workspaces/Momentum`.
+Long-form milestone history lives in the personal wiki `/Workspaces/Momentum`.
 
 Workflow-first runtime, executor-loop, coding-workflow ownership,
 external-apply, source-adapter, runtime-consolidation, and adapter-test
 coverage contracts are compactly anchored in [`SPEC.md`](SPEC.md). Long-form
-contract rationale lives in Obsidian `/Workspaces/Momentum`.
+contract rationale lives in the personal wiki `/Workspaces/Momentum`.
 
 Momentum's product direction is compactly anchored in [`VISION.md`](VISION.md):
 Momentum is a local-first runtime that makes agent-driven repo work durable for
@@ -117,6 +118,6 @@ State (`<data-dir>/momentum.db` SQLite plus per-goal `goals/<goal-id>/` artifact
 - Do not claim done without evidence from the above checks.
 
 ## Public docs hygiene
-- `docs/` and `README.md` are public-facing. Do not add NGX/Linear issue IDs, milestone planning, internal sequencing, or M-version language there. Put long-form internal detail in Obsidian `/Workspaces/Momentum`.
+- `docs/` and `README.md` are public-facing. Do not add NGX/Linear issue IDs, milestone planning, internal sequencing, or M-version language there. Put long-form internal detail in the personal wiki `/Workspaces/Momentum`.
 - The `test/public-docs-hygiene.test.ts` guard enforces this on every test run.
 - The `test/internal-docs-shape.test.ts` guard enforces that repo `internal/` does not return and that any future exception would require an explicit test change.

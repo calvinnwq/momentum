@@ -72,7 +72,7 @@ describe("repo internal docs boundary", () => {
     for (const rel of ["AGENTS.md", "ARCHITECTURE.md", "SPEC.md", "VISION.md"]) {
       const body = readDoc(rel);
       expect(body.trim().length, `${rel} should not be empty`).toBeGreaterThan(0);
-      expect(body, `${rel} should route long-form docs to Obsidian`).toContain(
+      expect(body, `${rel} should route long-form docs to the personal wiki`).toContain(
         "/Workspaces/Momentum"
       );
     }
@@ -94,7 +94,7 @@ describe("repo internal docs boundary", () => {
   it("documents where internal docs go and how exceptions are reviewed", () => {
     for (const rel of ["AGENTS.md", "SPEC.md", "VISION.md"]) {
       const body = readDoc(rel);
-      expect(body, `${rel} should keep Obsidian as the durable internal home`).toContain(
+      expect(body, `${rel} should keep the personal wiki as the durable internal home`).toContain(
         "/Workspaces/Momentum"
       );
       expect(body, `${rel} should make internal-doc exceptions explicit`).toContain(
@@ -127,7 +127,7 @@ describe("repo internal docs boundary", () => {
     expect(hits, `repo markdown must not reference internal paths: ${hits.join("; ")}`).toEqual([]);
   });
 
-  it("keeps public docs free of Obsidian-only internal routing details", () => {
+  it("keeps public docs free of wiki-only internal routing details", () => {
     const publicDocs = [
       path.join(repoRoot, "README.md"),
       ...listPublicDocs(path.join(repoRoot, "docs")),
@@ -140,6 +140,6 @@ describe("repo internal docs boundary", () => {
       if (body.includes("/Workspaces/Momentum")) hits.push(rel);
     }
 
-    expect(hits, "public docs should not mention the private Obsidian workspace").toEqual([]);
+    expect(hits, "public docs should not mention the private wiki workspace").toEqual([]);
   });
 });

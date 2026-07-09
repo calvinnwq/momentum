@@ -18,7 +18,7 @@
  *
  * Scope decisions pinned here, grounded in the compact Runtime Model, Workflow
  * Safety, and Runtime Consolidation anchors in SPEC.md plus the long-form
- * planning contracts externalized to Obsidian:
+ * planning contracts externalized to the personal wiki:
  *
  *   - The phase-1 dispatchable set is exactly the executor families that have a
  *     landed production adapter in the base allowlist (`goal-loop` executor-loop,
