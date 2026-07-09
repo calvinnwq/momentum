@@ -172,9 +172,8 @@ export type LoadStaleLeasePreCheckInput = {
 /**
  * Read-only stale-lease snapshot over an already-open db. Composes
  * `listStaleRepoLocks` and `listStaleClaimedGoalIterationJobs` against a single
- * observed `now` so callers (worker run pre-check, daemon status, doctor) see a
- * coherent view of orphaned repo locks and stale claimed/running
- * `goal_iteration` jobs.
+ * observed `now` so callers (daemon status, doctor) see a coherent view of
+ * orphaned repo locks and stale claimed/running `goal_iteration` jobs.
  *
  * The grace window tolerates small clock skew between the writer that stamped
  * `lease_expires_at` and the reader observing it; it is non-recovering and does

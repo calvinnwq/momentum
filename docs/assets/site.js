@@ -7,45 +7,34 @@
       title: "Start",
       items: [
         { n: "01", t: "Overview", h: "index.html" },
-        { n: "02", t: "Walkthrough", h: "walkthrough.html" },
-        { n: "03", t: "Goal spec", h: "goal-spec.html" },
-        { n: "04", t: "Agent skill", h: "agent-skill.html" }
-      ]
-    },
-    {
-      title: "Goal loop",
-      items: [
-        { n: "05", t: "Goal start", h: "goal-start.html" },
-        { n: "06", t: "Worker run", h: "worker-run.html" },
-        { n: "07", t: "Daemon", h: "daemon.html" },
-        { n: "08", t: "Failure and reset", h: "failure-reset.html" }
-      ]
-    },
-    {
-      title: "Operators",
-      items: [
-        { n: "09", t: "Status", h: "status.html" },
-        { n: "10", t: "Logs", h: "logs.html" },
-        { n: "11", t: "Handoff", h: "handoff.html" },
-        { n: "12", t: "Recovery", h: "recovery.html" },
-        { n: "13", t: "Doctor", h: "doctor.html" }
+        { n: "02", t: "Walkthrough", h: "walkthrough.html" }
       ]
     },
     {
       title: "Workflow runtime",
       items: [
-        { n: "14", t: "Workflow commands", h: "workflow-commands.html" },
-        { n: "15", t: "OpenClaw supervise", h: "openclaw-supervise.html" },
-        { n: "16", t: "Data directory", h: "data-directory.html" },
-        { n: "17", t: "Runners", h: "runners.html" }
+        { n: "03", t: "Workflow commands", h: "workflow-commands.html" },
+        { n: "04", t: "OpenClaw supervise", h: "openclaw-supervise.html" },
+        { n: "05", t: "Daemon", h: "daemon.html" },
+        { n: "06", t: "Recovery", h: "recovery.html" },
+        { n: "07", t: "Doctor", h: "doctor.html" },
+        { n: "08", t: "Data directory", h: "data-directory.html" }
       ]
     },
     {
       title: "External state",
       items: [
-        { n: "18", t: "Source commands", h: "source-commands.html" },
-        { n: "19", t: "Evidence commands", h: "evidence-commands.html" },
-        { n: "20", t: "Intent commands", h: "intent-commands.html" }
+        { n: "09", t: "Source commands", h: "source-commands.html" },
+        { n: "10", t: "Evidence commands", h: "evidence-commands.html" },
+        { n: "11", t: "Intent commands", h: "intent-commands.html" }
+      ]
+    },
+    {
+      title: "Goal-lane compatibility",
+      items: [
+        { n: "12", t: "Goal spec", h: "goal-spec.html" },
+        { n: "13", t: "Runners", h: "runners.html" },
+        { n: "14", t: "Failure and reset", h: "failure-reset.html" }
       ]
     }
   ];

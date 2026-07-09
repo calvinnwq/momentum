@@ -20,20 +20,21 @@ src/index.ts -> src/cli.ts -> src/commands/ registry + command families -> domai
 ```
 
 `src/cli.ts` owns top-level parsing, global compatibility flags, route
-dispatch, and the remaining daemon / recovery / worker / doctor compatibility
-surfaces. Extracted command-family modules own the read-only status family,
-workflow, OpenClaw, goal, source, evidence, project rollup, and update-intent /
-intent surfaces. Shared help, IO, reusable source / evidence / intent JSON
-shapes, and daemon / recovery / worker / doctor output contracts live under
-`src/renderers/`.
+dispatch, and the remaining daemon / recovery / doctor compatibility
+surfaces. Extracted command-family modules own the workflow, OpenClaw, source,
+evidence, project rollup, and update-intent / intent surfaces. Shared help, IO,
+reusable source / evidence / intent JSON shapes, and daemon / recovery / doctor
+output contracts live under `src/renderers/`. The goal-first CLI lane (goal
+start, top-level status / logs / handoff, worker run) is retired.
 
 Infrastructure-facing clients and runtime adapters that used to sit as flat
 `src/` modules now have explicit ownership under `src/adapters/`: database
 opening helpers, git transactions, Linear HTTP / source / external-update
-adapters and refresh clients, fake / trusted-shell / ACP runner adapters and
-configs, live wrapper / harness-probe adapters for OpenClaw-facing execution,
-the opt-in coding-workflow live-wrapper CLI adapter, OpenClaw watch-process
-adapter, and no-mistakes executor / orchestrator wrappers.
+adapters and refresh clients, trusted-shell / ACP runner-config parsers kept
+for stored-goal recovery rendering, live wrapper / harness-probe adapters for
+OpenClaw-facing execution, the opt-in coding-workflow live-wrapper CLI adapter,
+OpenClaw watch-process adapter, and no-mistakes executor / orchestrator
+wrappers.
 
 ## Deeper Contracts
 
@@ -99,11 +100,10 @@ paths and existing policy gates.
 
 ## Command Module Contract
 
-Each command-family module owns one coherent command
-family, for example `workflow`, read-only status, goal, source, evidence,
-intent, or project. Daemon, recovery, worker, and doctor remain deliberate
-`src/cli.ts` compatibility surfaces, with their output contracts delegated to
-`src/renderers/`.
+Each command-family module owns one coherent command family, for example
+`workflow`, source, evidence, intent, or project. Daemon,
+recovery, and doctor remain deliberate `src/cli.ts` compatibility surfaces,
+with their output contracts delegated to `src/renderers/`.
 
 A command module may:
 
@@ -180,7 +180,7 @@ new shared bucket.
 - JSON envelope keys, refusal codes, and text output must be preserved across
   extraction.
 - `src/cli.ts` intentionally retains top-level parsing plus daemon, recovery,
-  worker, and doctor compatibility surfaces; broad extraction of those surfaces
+  and doctor compatibility surfaces; broad extraction of those surfaces
   belongs to a future scoped issue.
 - Public docs stay in `docs/`; milestone sequencing, NGX detail, dogfood
   evidence, and planning rationale live in Obsidian `/Workspaces/Momentum` by

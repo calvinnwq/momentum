@@ -23,26 +23,26 @@ describe("runner-profile registry", () => {
     expect(isBuiltinRunnerKind("")).toBe(false);
   });
 
-  it("builds the fake profile as executing through the RunnerAdapter boundary with a safe summary", () => {
+  it("builds the fake compatibility profile with a safe summary", () => {
     const profile = buildRunnerProfile("fake");
     expect(profile).toEqual({
       kind: "fake",
       name: "fake",
       description:
-        "Built-in in-process fake runner; writes a fixture file and reports a normalized result. Dispatches through the RunnerAdapter boundary.",
+        "Built-in compatibility fake runner profile retained for stored goal-first data and diagnostics; the retired lane wrote a fixture file and reported a normalized result.",
       executes: true
     });
   });
 
-  it("builds the trusted-shell profile as executing after M4-03 with the explicit-trust caveat", () => {
+  it("builds the trusted-shell compatibility profile with the explicit-trust caveat", () => {
     const profile = buildRunnerProfile("trusted-shell");
     expect(profile.kind).toBe("trusted-shell");
     expect(profile.executes).toBe(true);
     expect(profile.description).toContain("no sandbox");
-    expect(profile.description).toContain("full privileges");
+    expect(profile.description).toContain("no privilege drop");
   });
 
-  it("builds the acp profile as executing after M4-04 with a runtime_unavailable caveat", () => {
+  it("builds the acp compatibility profile with a runtime_unavailable caveat", () => {
     const profile = buildRunnerProfile("acp");
     expect(profile.kind).toBe("acp");
     expect(profile.executes).toBe(true);
@@ -236,7 +236,7 @@ describe("safeRunnerProfileSummary", () => {
       kind: "fake",
       name: "fake",
       description:
-        "Built-in in-process fake runner; writes a fixture file and reports a normalized result. Dispatches through the RunnerAdapter boundary.",
+        "Built-in compatibility fake runner profile retained for stored goal-first data and diagnostics; the retired lane wrote a fixture file and reported a normalized result.",
       executes: true
     });
   });

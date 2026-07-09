@@ -7,8 +7,10 @@ contracts that are intentionally separate but composed by the same CLI surfaces:
   safe to release, re-pend, or finalize, and the stable skip taxonomy for
   everything it refuses.
 - **Manual recovery artifacts and the durable `needs_manual_recovery` flag** —
-  what Momentum writes to disk and blocks at the queue when an auto-recovery
-  refusal would lose audit context or risk a non-Momentum commit.
+  what Momentum writes to disk when an auto-recovery refusal would lose audit
+  context or risk a non-Momentum commit. Goal-scoped rows and artifacts are
+  durable compatibility data from the retired goal-first lane that this page's
+  `recovery clear` surface still operates over.
 - **Run-scoped workflow recovery** — what Momentum writes under
   `.agent-workflows/<run-id>/` when monitor-derived blockers, live workflow
   dispatch / finalization failures, or stale workflow leases require operator
@@ -49,35 +51,29 @@ recovery block. The CLI surfaces startup recovery at:
   and `staleRuns` rows, with `staleLeaseGraceMs` (5s default skew tolerance).
 - `doctor --json` / text — compact counts: `staleRunCount`,
   `staleRepoLockCount`, `staleClaimedJobCount`.
-- `status --json` / text and `handoff` — goal-scoped `staleRecovery` block with
-  `recoveredRepoLockCount`, `recoveredJobCount`, `latestRecoveredRepoLockAt`,
-  `latestRecoveredJobAt`, current `staleRepoLockCount`, current
-  `staleClaimedJobCount`, and `staleLeaseGraceMs`; markdown handoff includes a
-  `## Stale recovery` section.
-- `worker run --json` / text — pre-claim `stalePreCheck` snapshot listing stale
-  repo locks and claimed/running jobs observed before the worker attempts to
-  claim a job.
 
 Manual recovery is the operator-driven path for everything that lands in a skip
 taxonomy. Stale-claim skip reasons (`repo_dirty`, `repo_unknown_commit`,
-`repo_unavailable`, `job_running`) and iteration-time HEAD movement
-(`runner_changed_head`, `head_mismatch`) write a goal-scoped `recovery.md`
-artifact and set a durable `needs_manual_recovery` flag on the goal row; the
-flag blocks future queue claims until an operator explicitly clears it via
-`momentum recovery clear`. Skip reasons that indicate live ownership
-(`daemon_active`, `lock_active`, `job_state_changed`) do not produce an
-artifact since they resolve on their own.
+`repo_unavailable`, `job_running`) write a goal-scoped `recovery.md` artifact
+and set a durable `needs_manual_recovery` flag on the goal row, as did
+iteration-time HEAD movement (`runner_changed_head`, `head_mismatch`) while the
+retired goal-execution lane still ran; the flag stays set on the stored goal
+row until an operator explicitly clears it via `momentum recovery clear`. Skip
+reasons that indicate live ownership (`daemon_active`, `lock_active`,
+`job_state_changed`) do not produce an artifact since they resolve on their
+own.
 
 ## Manual recovery artifacts and flag
 
 When the daemon's startup-recovery pass or manual inspection identifies a stale
 claim that cannot be auto-recovered (because the repo is dirty, HEAD is
-unresolvable, the repo path is missing, or the job is still in a `running`
-state), or when iteration execution detects runner/finalization HEAD movement,
-Momentum writes a `recovery.md` artifact to the goal's artifact directory and
-sets a durable `needs_manual_recovery` flag on the goal row. The flag blocks
-`claimPendingGoalIterationJob` from claiming any pending iteration for that
-goal until the operator explicitly clears it.
+unresolvable, the repo path is missing, or the stored job is still in a
+`running` state), Momentum writes a `recovery.md` artifact to the goal's
+artifact directory and sets a durable `needs_manual_recovery` flag on the goal
+row. The retired goal-execution lane wrote the same artifact and flag when
+iteration execution detected runner/finalization HEAD movement, and those
+stored artifacts remain durable evidence. The flag stays set on the stored
+goal row until the operator explicitly clears it.
 
 The `recovery.md` artifact contains:
 
@@ -92,19 +88,11 @@ The `recovery.md` artifact contains:
   timeout, and result-file metadata when available
 - Safe next steps with actionable guidance
 
-The flag is surfaced in the queue claim filter so flagged goals are invisible
-to `worker run` and `daemon start` loop claims. Operators can detect flagged
-goals via:
+Operators can detect flagged goals via:
 
 - `daemon status --json` — `goalsNeedingRecovery` array with `goalId`, `title`,
   `goalState`, `recoveryMdPath`, and `recoveryMdExists`
 - `doctor --json` — `goalsNeedingRecoveryCount` compact count
-- `status --json` — `nextActionDetail.kind` = `manual_recovery_required`;
-  `artifacts.recoveryMd` and `artifactFiles.recoveryMd` show the evidence file
-  path/presence separately
-- `handoff.json` — `next_action_detail.kind` = `manual_recovery_required`;
-  `artifacts.recovery_md` and `artifact_files.recovery_md` show the evidence
-  file path/presence separately
 
 `recovery.md` presence is not equivalent to the durable flag: `recovery clear`
 leaves the artifact on disk as evidence after the goal is unblocked.
@@ -126,8 +114,9 @@ which:
 6. Leaves `recovery.md` on disk as durable evidence (operators remove it
    manually after capturing context).
 
-On successful clear, the goal immediately becomes eligible for queue claims
-again.
+On successful clear, the stored goal row is durably unflagged; the clear is an
+operator acknowledgement over compatibility data, since the retired
+goal-execution lane no longer claims queue work.
 
 ## Run-scoped workflow recovery
 
@@ -361,10 +350,6 @@ Operators can detect blocked intents via:
   `externalApply.applyState = "blocked"` plus the `latestAttempt` audit row
   with `lifecycleState = "audit_incomplete"`, `resultCode`, `resultMessage`,
   and `externalRefs` for the write that did reach the tracker.
-- `momentum status` / `momentum handoff` — the goal-scoped
-  `pendingUpdateIntents` / `pending_update_intents` summary carries each
-  pending intent's `externalApply` / `external_apply` block with the same
-  `applyState` and `latestAttempt` fields.
 - `momentum project status` — `pendingIntentApplyStateCounts.blocked` rolls up
   the count of pending intents currently in `blocked` apply state.
 - `momentum doctor` — the `externalApply` audit-ledger aggregate exposes

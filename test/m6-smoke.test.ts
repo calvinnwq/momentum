@@ -5,10 +5,9 @@ import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-import { FAKE_RUNNER_GOAL_COMPLETE_ENV } from "../src/adapters/fake-runner.js";
+import { openDb } from "../src/adapters/db.js";
 
 import {
-  SMOKE_GOAL_SPEC,
   buildCli,
   cleanupTempRoots,
   initDisposableRepo,
@@ -21,6 +20,35 @@ import {
 beforeAll(buildCli, 60_000);
 
 afterEach(cleanupTempRoots);
+
+/**
+ * Seed a completed goal row directly in the SQLite store shared with the CLI
+ * under test. The legacy goal-first lane (`goal start` + fake-runner daemon
+ * drain) is retired, so the smoke fixtures insert the durable `goals` row the
+ * kept surfaces actually read: source-satisfied intent generation requires
+ * `state = 'completed'`, and the evidence/source/intent commands only check
+ * that the goal row exists.
+ */
+function seedCompletedGoal(dataDir: string, goalId: string): void {
+  const db = openDb(dataDir);
+  try {
+    const now = Date.now();
+    db.prepare(
+      `INSERT INTO goals
+         (id, title, branch, state, artifact_dir, created_at, updated_at)
+       VALUES (?, ?, ?, 'completed', ?, ?, ?)`
+    ).run(
+      goalId,
+      "M6 smoke completed goal",
+      "momentum/smoke-m6",
+      path.join(dataDir, "goals", goalId),
+      now,
+      now
+    );
+  } finally {
+    db.close();
+  }
+}
 
 type LinearMockCommentCreateBehavior =
   | { kind: "success" }
@@ -389,9 +417,6 @@ describe("Milestone 6 external apply end-to-end smoke (NGX-301)", () => {
       runGit(repo, ["add", "MOMENTUM.md"]);
       runGit(repo, ["commit", "-m", "add MOMENTUM.md", "--quiet"]);
 
-      const goalFile = path.join(dataDir, "goal.md");
-      fs.writeFileSync(goalFile, SMOKE_GOAL_SPEC, "utf-8");
-
       const issue: LinearExternalApplyMockIssue = {
         id: "issue-smoke-ngx-301-apply",
         identifier: "NGX-301",
@@ -449,38 +474,8 @@ describe("Milestone 6 external apply end-to-end smoke (NGX-301)", () => {
         expect(sourceItems).toHaveLength(1);
         const sourceItemId = sourceItems[0]!.id;
 
-        const goalStart = runCliBinary([
-          "goal",
-          "start",
-          goalFile,
-          "--repo",
-          repo,
-          "--data-dir",
-          dataDir,
-          "--runner",
-          "fake",
-          "--json"
-        ]);
-        expect(goalStart.code, `goal start stderr: ${goalStart.stderr}`).toBe(0);
-        const goalId = (
-          JSON.parse(goalStart.stdout) as { goalId: string }
-        ).goalId;
-
-        const drain = runCliBinary(
-          [
-            "daemon",
-            "start",
-            "--max-idle-cycles",
-            "2",
-            "--poll-interval-ms",
-            "0",
-            "--data-dir",
-            dataDir,
-            "--json"
-          ],
-          { env: { [FAKE_RUNNER_GOAL_COMPLETE_ENV]: "1" } }
-        );
-        expect(drain.code, `daemon start stderr: ${drain.stderr}`).toBe(0);
+        const goalId = "goal-smoke-m6-apply";
+        seedCompletedGoal(dataDir, goalId);
 
         const fixtureRoot = makeTempDir("momentum-smoke-m6-apply-fixture-");
         const intentRunId = "smoke-m6-apply-run-1";
@@ -1530,18 +1525,18 @@ describe("Milestone 6 external apply end-to-end smoke (NGX-301)", () => {
   );
 
   it(
-    "surfaces the external apply audit through status, project status, doctor, and the handoff.json artifact after a write_rejected attempt leaves the intent pending",
+    "surfaces the external apply audit through intent get, project status, and doctor after a write_rejected attempt leaves the intent pending",
     async () => {
       const fixture = await establishM6ExternalApplyFixture({
         momentumPolicy: "external_apply_allowed"
       });
-      const { repo, dataDir, goalId, intentId, mock } = fixture;
+      const { repo, dataDir, intentId, mock } = fixture;
       try {
         // Drive a write_rejected attempt so the intent stays pending — that
         // keeps the audit row visible through the pending-intent rollups used
-        // by status, project status, and the handoff artifact, while doctor
-        // surfaces the same audit through its global listIntentApplyAudits
-        // view regardless of intent state.
+        // by intent get and project status, while doctor surfaces the same
+        // audit through its global listIntentApplyAudits view regardless of
+        // intent state.
         mock.setCommentCreateBehavior({
           kind: "graphql_error",
           message: "smoke mock injected commentCreate failure"
@@ -1584,43 +1579,25 @@ describe("Milestone 6 external apply end-to-end smoke (NGX-301)", () => {
         const auditId = refusal.externalApply.auditId;
         expect(typeof auditId).toBe("string");
 
-        // status --json shows the failed audit on the pending intent and at
-        // the rollup level so operators can see the latest attempt without
-        // drilling into intent get.
-        const statusResult = runCliBinary([
-          "status",
-          goalId,
+        // intent get --json shows the failed audit on the still-pending
+        // intent so operators can inspect the latest attempt for a single
+        // intent without a goal-scoped surface.
+        const intentGet = runCliBinary([
+          "intent",
+          "get",
+          intentId,
           "--data-dir",
           dataDir,
           "--json"
         ]);
-        expect(statusResult.code, `status stderr: ${statusResult.stderr}`).toBe(0);
-        const statusPayload = JSON.parse(statusResult.stdout) as {
-          goalId: string;
-          artifactDir: string;
-          pendingUpdateIntents: Array<{
-            intentId: string;
-            externalApply: {
-              applyState: string;
-              totalAttempts: number;
-              counts: { failed: number };
-              latestAttempt: {
-                id: string;
-                lifecycleState: string;
-                resultCode: string;
-              } | null;
-            };
-          }>;
+        expect(intentGet.code, `intent get stderr: ${intentGet.stderr}`).toBe(0);
+        const intentGetPayload = JSON.parse(intentGet.stdout) as {
+          intent: { id: string; status: string };
           externalApply: {
-            pendingIntentApplyStateCounts: {
-              idle: number;
-              in_flight: number;
-              blocked: number;
-            };
-            pendingAuditCounts: { failed: number; succeeded: number };
+            applyState: string;
             totalAttempts: number;
+            counts: { failed: number; succeeded: number };
             latestAttempt: {
-              intentId: string;
               id: string;
               lifecycleState: string;
               resultStatus: string;
@@ -1628,36 +1605,21 @@ describe("Milestone 6 external apply end-to-end smoke (NGX-301)", () => {
             } | null;
           };
         };
-        expect(statusPayload.goalId).toBe(goalId);
-        expect(statusPayload.pendingUpdateIntents).toHaveLength(1);
-        const statusIntent = statusPayload.pendingUpdateIntents[0]!;
-        expect(statusIntent.intentId).toBe(intentId);
-        expect(statusIntent.externalApply.applyState).toBe("idle");
-        expect(statusIntent.externalApply.totalAttempts).toBe(1);
-        expect(statusIntent.externalApply.counts.failed).toBe(1);
-        expect(statusIntent.externalApply.latestAttempt).not.toBeNull();
-        expect(statusIntent.externalApply.latestAttempt!.id).toBe(auditId);
-        expect(statusIntent.externalApply.latestAttempt!.lifecycleState).toBe(
+        expect(intentGetPayload.intent.id).toBe(intentId);
+        expect(intentGetPayload.intent.status).toBe("pending");
+        expect(intentGetPayload.externalApply.applyState).toBe("idle");
+        expect(intentGetPayload.externalApply.totalAttempts).toBe(1);
+        expect(intentGetPayload.externalApply.counts.failed).toBe(1);
+        expect(intentGetPayload.externalApply.counts.succeeded).toBe(0);
+        expect(intentGetPayload.externalApply.latestAttempt).not.toBeNull();
+        expect(intentGetPayload.externalApply.latestAttempt!.id).toBe(auditId);
+        expect(intentGetPayload.externalApply.latestAttempt!.lifecycleState).toBe(
           "failed"
         );
-        expect(statusIntent.externalApply.latestAttempt!.resultCode).toBe(
-          "write_rejected"
-        );
-        expect(statusPayload.externalApply.totalAttempts).toBe(1);
-        expect(statusPayload.externalApply.pendingAuditCounts.failed).toBe(1);
-        expect(statusPayload.externalApply.pendingAuditCounts.succeeded).toBe(0);
-        expect(statusPayload.externalApply.pendingIntentApplyStateCounts).toMatchObject({
-          idle: 1,
-          in_flight: 0,
-          blocked: 0
-        });
-        expect(statusPayload.externalApply.latestAttempt).not.toBeNull();
-        expect(statusPayload.externalApply.latestAttempt!.intentId).toBe(intentId);
-        expect(statusPayload.externalApply.latestAttempt!.id).toBe(auditId);
-        expect(statusPayload.externalApply.latestAttempt!.lifecycleState).toBe(
+        expect(intentGetPayload.externalApply.latestAttempt!.resultStatus).toBe(
           "failed"
         );
-        expect(statusPayload.externalApply.latestAttempt!.resultCode).toBe(
+        expect(intentGetPayload.externalApply.latestAttempt!.resultCode).toBe(
           "write_rejected"
         );
 
@@ -1674,7 +1636,11 @@ describe("Milestone 6 external apply end-to-end smoke (NGX-301)", () => {
         expect(projectStatus.code, `project status stderr: ${projectStatus.stderr}`).toBe(0);
         const projectPayload = JSON.parse(projectStatus.stdout) as {
           externalApply: {
-            pendingIntentApplyStateCounts: { idle: number };
+            pendingIntentApplyStateCounts: {
+              idle: number;
+              in_flight: number;
+              blocked: number;
+            };
             pendingAuditCounts: { failed: number; succeeded: number };
             totalAttempts: number;
             latestAttempt: {
@@ -1696,6 +1662,7 @@ describe("Milestone 6 external apply end-to-end smoke (NGX-301)", () => {
         expect(projectPayload.pendingUpdateIntents).toHaveLength(1);
         const projectIntent = projectPayload.pendingUpdateIntents[0]!;
         expect(projectIntent.intentId).toBe(intentId);
+        expect(projectIntent.externalApply.applyState).toBe("idle");
         expect(projectIntent.externalApply.totalAttempts).toBe(1);
         expect(projectIntent.externalApply.latestAttempt).not.toBeNull();
         expect(projectIntent.externalApply.latestAttempt!.id).toBe(auditId);
@@ -1705,9 +1672,11 @@ describe("Milestone 6 external apply end-to-end smoke (NGX-301)", () => {
         expect(projectPayload.externalApply.totalAttempts).toBe(1);
         expect(projectPayload.externalApply.pendingAuditCounts.failed).toBe(1);
         expect(projectPayload.externalApply.pendingAuditCounts.succeeded).toBe(0);
-        expect(projectPayload.externalApply.pendingIntentApplyStateCounts.idle).toBe(
-          1
-        );
+        expect(projectPayload.externalApply.pendingIntentApplyStateCounts).toMatchObject({
+          idle: 1,
+          in_flight: 0,
+          blocked: 0
+        });
         expect(projectPayload.externalApply.latestAttempt).not.toBeNull();
         expect(projectPayload.externalApply.latestAttempt!.intentId).toBe(intentId);
         expect(projectPayload.externalApply.latestAttempt!.id).toBe(auditId);
@@ -1762,78 +1731,6 @@ describe("Milestone 6 external apply end-to-end smoke (NGX-301)", () => {
           "failed"
         );
         expect(doctorPayload.externalApply.latestAttempt!.resultCode).toBe(
-          "write_rejected"
-        );
-
-        // handoff writes the same external_apply payload into handoff.json so
-        // downstream automations can pick up the audit from a single
-        // artifact file.
-        const handoff = runCliBinary([
-          "handoff",
-          goalId,
-          "--data-dir",
-          dataDir,
-          "--json"
-        ]);
-        expect(handoff.code, `handoff stderr: ${handoff.stderr}`).toBe(0);
-        const handoffJsonPath = path.join(statusPayload.artifactDir, "handoff.json");
-        const handoffArtifact = JSON.parse(
-          fs.readFileSync(handoffJsonPath, "utf-8")
-        ) as {
-          external_apply: {
-            pending_intent_apply_state_counts: { idle: number };
-            pending_audit_counts: { failed: number; succeeded: number };
-            total_attempts: number;
-            latest_attempt: {
-              intent_id: string;
-              id: string;
-              lifecycle_state: string;
-              result_status: string;
-              result_code: string;
-            } | null;
-          };
-          pending_update_intents: Array<{
-            intent_id: string;
-            external_apply: {
-              apply_state: string;
-              total_attempts: number;
-              latest_attempt: {
-                id: string;
-                lifecycle_state: string;
-                result_code: string;
-              } | null;
-            };
-          }>;
-        };
-        expect(handoffArtifact.pending_update_intents).toHaveLength(1);
-        const handoffIntent = handoffArtifact.pending_update_intents[0]!;
-        expect(handoffIntent.intent_id).toBe(intentId);
-        expect(handoffIntent.external_apply.total_attempts).toBe(1);
-        expect(handoffIntent.external_apply.apply_state).toBe("idle");
-        expect(handoffIntent.external_apply.latest_attempt).not.toBeNull();
-        expect(handoffIntent.external_apply.latest_attempt!.id).toBe(auditId);
-        expect(handoffIntent.external_apply.latest_attempt!.lifecycle_state).toBe(
-          "failed"
-        );
-        expect(handoffIntent.external_apply.latest_attempt!.result_code).toBe(
-          "write_rejected"
-        );
-        expect(handoffArtifact.external_apply.total_attempts).toBe(1);
-        expect(handoffArtifact.external_apply.pending_audit_counts.failed).toBe(1);
-        expect(handoffArtifact.external_apply.pending_audit_counts.succeeded).toBe(0);
-        expect(handoffArtifact.external_apply.pending_intent_apply_state_counts.idle).toBe(
-          1
-        );
-        expect(handoffArtifact.external_apply.latest_attempt).not.toBeNull();
-        expect(handoffArtifact.external_apply.latest_attempt!.intent_id).toBe(intentId);
-        expect(handoffArtifact.external_apply.latest_attempt!.id).toBe(auditId);
-        expect(handoffArtifact.external_apply.latest_attempt!.lifecycle_state).toBe(
-          "failed"
-        );
-        expect(handoffArtifact.external_apply.latest_attempt!.result_status).toBe(
-          "failed"
-        );
-        expect(handoffArtifact.external_apply.latest_attempt!.result_code).toBe(
           "write_rejected"
         );
       } finally {
@@ -2153,9 +2050,6 @@ async function establishM6ExternalApplyFixture(options: {
   runGit(repo, ["add", "MOMENTUM.md"]);
   runGit(repo, ["commit", "-m", "add MOMENTUM.md", "--quiet"]);
 
-  const goalFile = path.join(dataDir, "goal.md");
-  fs.writeFileSync(goalFile, SMOKE_GOAL_SPEC, "utf-8");
-
   const issue: LinearExternalApplyMockIssue = {
     id: "issue-smoke-ngx-301-failure",
     identifier: "NGX-301",
@@ -2211,38 +2105,8 @@ async function establishM6ExternalApplyFixture(options: {
   ).items;
   const sourceItemId = sourceItems[0]!.id;
 
-  const goalStart = runCliBinary([
-    "goal",
-    "start",
-    goalFile,
-    "--repo",
-    repo,
-    "--data-dir",
-    dataDir,
-    "--runner",
-    "fake",
-    "--json"
-  ]);
-  const goalId = (JSON.parse(goalStart.stdout) as { goalId: string }).goalId;
-
-  const drain = runCliBinary(
-    [
-      "daemon",
-      "start",
-      "--max-idle-cycles",
-      "2",
-      "--poll-interval-ms",
-      "0",
-      "--data-dir",
-      dataDir,
-      "--json"
-    ],
-    { env: { [FAKE_RUNNER_GOAL_COMPLETE_ENV]: "1" } }
-  );
-  if (drain.code !== 0) {
-    await mock.close();
-    throw new Error(`daemon start failed: ${drain.stderr}`);
-  }
+  const goalId = "goal-smoke-m6-failure";
+  seedCompletedGoal(dataDir, goalId);
 
   const fixtureRoot = makeTempDir("momentum-smoke-m6-failure-fixture-");
   const intentRunId = "smoke-m6-failure-run-1";

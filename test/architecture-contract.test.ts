@@ -34,7 +34,7 @@ describe("root ARCHITECTURE.md contract", () => {
     expect(architecture).toMatch(/Domain modules must not import command modules or renderers/i);
     expect(architecture).toMatch(/Renderers must not\s+mutate state/i);
     expect(architecture).toMatch(/External adapters stay behind domain or command boundaries/i);
-    expect(architecture).toMatch(/daemon, recovery, worker, and doctor remain deliberate\s+`src\/cli\.ts` compatibility surfaces/i);
+    expect(architecture).toMatch(/daemon,\s+recovery, and doctor remain deliberate\s+`src\/cli\.ts` compatibility surfaces/i);
   });
 
   it("is linked from AGENTS.md and SPEC.md", () => {
@@ -65,17 +65,18 @@ describe("structural guard around src/cli.ts", () => {
     expect(commandIndex).not.toMatch(/readdir|glob|fs\./);
   });
 
-  it("extracts read-only and workflow command families into command modules", () => {
-    const statusModule = readFile("src/commands/status.ts");
-
+  it("extracts read-only and workflow command families through their assigned M11 slices", () => {
     for (const handler of [
       "function status(",
       "function logs(",
       "function handoff(",
     ]) {
       expect(cli, `src/cli.ts should no longer contain ${handler}`).not.toContain(handler);
-      expect(statusModule, `src/commands/status.ts should contain ${handler}`).toContain(handler);
     }
+    expect(
+      fs.existsSync(path.join(repoRoot, "src", "commands", "status.ts")),
+      "the goal-first read-only status family is retired"
+    ).toBe(false);
 
     const workflowModule = readFile("src/commands/workflow/index.ts");
     for (const handler of [
@@ -88,9 +89,9 @@ describe("structural guard around src/cli.ts", () => {
       expect(workflowModule, `src/commands/workflow/index.ts should contain ${handler}`).toContain(handler);
     }
   });
-  it("extracts goal, source, evidence, project, and intent command families", () => {
+
+  it("extracts source, evidence, project, and intent command families for NGX-415", () => {
     const expectations: Array<[string, string]> = [
-      ["function goalStart(", "src/commands/goal/index.ts"],
       ["function source(", "src/commands/source/index.ts"],
       ["function project(", "src/commands/project/index.ts"],
       ["function evidence(", "src/commands/evidence/index.ts"],
@@ -102,6 +103,11 @@ describe("structural guard around src/cli.ts", () => {
       expect(cli, `src/cli.ts should no longer contain ${handler}`).not.toContain(handler);
       expect(module, `${modulePath} should contain ${handler}`).toContain(handler);
     }
+
+    expect(
+      fs.existsSync(path.join(repoRoot, "src", "commands", "goal")),
+      "the goal-first command family is retired"
+    ).toBe(false);
   });
 
 });

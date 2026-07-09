@@ -19,7 +19,10 @@ Momentum is a workflow-first runtime for durable repo-work orchestration.
 - `ExecutorInvocation` and `ExecutorRound` sit below a step and store executor
   attempts, artifacts, result summaries, verification status, commit metadata,
   recovery codes, findings, decisions, and checkpoints.
-- `Goal` remains a compatibility surface and `goal-loop` executor family.
+- The goal-first CLI lane and its goal-iteration execution mechanism are
+  retired. `Goal`, `Iteration`, and `Job` rows remain durable compatibility
+  data served by `recovery clear`, daemon status/startup recovery, and doctor.
+  `goal-loop` remains an executor family.
 
 Executor families currently include `goal-loop`, `one-shot`, `script`,
 `no-mistakes`, `external-apply`, and `subworkflow`.

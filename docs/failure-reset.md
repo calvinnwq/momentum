@@ -1,8 +1,10 @@
-# Failure and reset semantics
+# Failure and reset semantics (retired goal lane)
 
-> See also: [docs/recovery.md](recovery.md) for stale-lease auto-recovery and manual recovery artifacts; [docs/walkthrough.md](walkthrough.md) for the failure-reset path in the end-to-end smoke; [docs/runners.md](runners.md) for runner-side failure surfaces.
+> See also: [docs/recovery.md](recovery.md) for stale-lease auto-recovery and manual recovery artifacts; [docs/runners.md](runners.md) for stored runner-profile metadata and failure codes.
 
-Momentum treats each iteration as a transaction over the target repo. The pre-iteration HEAD on the Momentum branch is captured as `baseHead` before the runner runs. From there, exactly one of the outcomes in the table below applies.
+This page documents the per-iteration transaction semantics of the retired goal-first execution lane. Nothing executes goal iterations anymore, but stored ledgers, job error rows, events, and recovery artifacts preserve these outcomes and codes as durable compatibility evidence that operators may still need to interpret.
+
+The retired lane treated each iteration as a transaction over the target repo. The pre-iteration HEAD on the Momentum branch was captured as `baseHead` before the runner ran. From there, exactly one of the outcomes in the table below applied.
 
 ## Per-iteration outcome matrix
 
@@ -30,8 +32,8 @@ Other early-pipeline errors surface as their own codes and do not produce a comm
 
 ## Runner adapter failure preservation
 
-Real runner adapter failures preserve their command/runtime/result taxonomy through `iteration.code`, `status`, `logs`, `handoff`, and recovery artifacts instead of collapsing into a generic `runner_failed` bucket. The full per-outcome runner codes appear in the table above; the manual-recovery reasons (`runner_changed_head`, `head_mismatch`) are durable and surface in the recovery artifact described in [docs/recovery.md](recovery.md).
+Runner adapter failures preserved their command/runtime/result taxonomy through stored `iteration.code` values, job error rows, and recovery artifacts instead of collapsing into a generic `runner_failed` bucket. The full per-outcome runner codes appear in the table above; the manual-recovery reasons (`runner_changed_head`, `head_mismatch`) are durable and surface in the recovery artifact described in [docs/recovery.md](recovery.md).
 
 ## Verification log capture
 
-Verification output is captured to `verification.log` with `[verify]` prefixes. The on-disk buffer is capped so a runaway command cannot fill the data directory.
+Verification output was captured to `verification.log` with `[verify]` prefixes. The on-disk buffer is capped so a runaway command could not fill the data directory.

@@ -46,8 +46,9 @@
             reusable workflows, ordered steps, pluggable executors, source
             adapters, durable evidence, gates, recovery actions, and
             operator-readable surfaces. The Momentum-native coding workflow is
-            the first shipped recipe; the original goal loop remains available
-            as a compatibility smoke path.
+            the first shipped recipe; the original goal-first command lane is
+            retired, and its stored goal rows and artifacts remain readable
+            compatibility data.
           </p>
 
           <div class="runtime-strip" aria-label="Momentum runtime loop">
@@ -76,10 +77,10 @@
                 <strong>Preview first, then start a durable coding run.</strong>
                 <span>Use this path to see workflow definitions, steps, approvals, monitor/watch events, and tail-step recovery in one run.</span>
               </a>
-              <a class="card" href="goal-start.html">
-                <span class="card-k">Compatibility smoke</span>
-                <strong>Run one small goal loop from a Markdown spec.</strong>
-                <span>Use this path for a minimal foreground/worker smoke test of the older goal-loop surface.</span>
+              <a class="card" href="walkthrough.html">
+                <span class="card-k">End-to-end smoke</span>
+                <strong>Start, schedule, and inspect one durable workflow run.</strong>
+                <span>Use this path for a copy-paste smoke that composes workflow run start, a bounded daemon cycle, and the read-only inspectors.</span>
               </a>
               <a class="card" href="agent-skill.html">
                 <span class="card-k">Agent operation</span>
@@ -102,13 +103,13 @@ node dist/index.js workflow run preview-coding \
   --approval-boundary through-no-mistakes \
   --json
 
-<span class="c"># or run a tiny compatibility goal from a Markdown spec</span>
-node dist/index.js goal start ./goal.md --foreground --json
-node dist/index.js status --json
-node dist/index.js logs &lt;goal-id&gt; --json
-node dist/index.js handoff &lt;goal-id&gt; --json</code></pre>
+<span class="c"># or start a durable workflow run and inspect it</span>
+node dist/index.js workflow run start --run-id demo-1 --repo /path/to/repo --objective "Make the requested change" --json
+node dist/index.js workflow status demo-1 --json
+node dist/index.js workflow run logs demo-1 --json
+node dist/index.js workflow handoff demo-1 --json</code></pre>
             <p>
-              For a copy-paste goal-loop smoke test, use the <a href="walkthrough.html">end-to-end walkthrough</a>.
+              For a copy-paste workflow smoke test, use the <a href="walkthrough.html">end-to-end walkthrough</a>.
               For the native workflow contract, start with <a href="workflow-commands.html">workflow commands</a>.
             </p>
           </section>
@@ -181,9 +182,9 @@ node dist/index.js handoff &lt;goal-id&gt; --json</code></pre>
               agents, GUI clients, and scheduled supervisors.
             </p>
             <div class="surface-list">
-              <a href="status.html"><code>momentum status</code><span>Inspect active goal state and current recovery flags.</span></a>
+              <a href="workflow-commands.html"><code>momentum workflow status &lt;run-id&gt; --json</code><span>Inspect one durable run: steps, approvals, leases, gates, and recovery flags.</span></a>
               <a href="workflow-commands.html"><code>momentum workflow run watch --once --json</code><span>Poll one native workflow and receive the next recommended action.</span></a>
-              <a href="handoff.html"><code>momentum handoff &lt;goal-id&gt;</code><span>Emit a compact restart packet with the same durable facts.</span></a>
+              <a href="workflow-commands.html"><code>momentum workflow handoff &lt;run-id&gt; --json</code><span>Emit a compact restart packet with the same durable facts.</span></a>
               <a href="openclaw-supervise.html"><code>momentum openclaw supervise &lt;run-id&gt; --once --json</code><span>OpenClaw supervise wraps watch output for host delivery and local auto-actions.</span></a>
             </div>
           </section>
@@ -191,10 +192,10 @@ node dist/index.js handoff &lt;goal-id&gt; --json</code></pre>
           <section>
             <h2>Documentation routes</h2>
             <div class="route-grid">
-              <a href="goal-spec.html"><b>Goal files</b><span>Markdown frontmatter, runners, verification, and goal text.</span></a>
+              <a href="goal-spec.html"><b>Stored goal specs</b><span>The retired goal lane's Markdown format, kept as compatibility data.</span></a>
               <a href="data-directory.html"><b>State and artifacts</b><span>Where Momentum stores SQLite rows, run artifacts, and evidence.</span></a>
-              <a href="runners.html"><b>Runner profiles</b><span>Fake, trusted shell, ACP, repo policy, and result-file behavior.</span></a>
-              <a href="failure-reset.html"><b>Failure semantics</b><span>How Momentum resets unsafe work and records failure evidence.</span></a>
+              <a href="runners.html"><b>Runner profiles</b><span>Stored runner-profile metadata, repo policy, and the runner result schema.</span></a>
+              <a href="failure-reset.html"><b>Failure semantics</b><span>How the retired goal lane recorded reset and failure evidence.</span></a>
               <a href="doctor.html"><b>Doctor</b><span>Runtime readiness, data directory health, daemon state, and external apply checks.</span></a>
               <a href="agent-skill.html"><b>Agent skill</b><span>Package-shipped skill files, CLI resolution, and agent operating rules.</span></a>
               <a href="source-commands.html"><b>Source adapters</b><span>Read-only source item ingestion and reconciliation surfaces.</span></a>

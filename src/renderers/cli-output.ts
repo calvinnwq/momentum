@@ -44,8 +44,6 @@ export function renderHelp(): string {
     "",
     "Usage:",
     ...COMMANDS.map((command) => `  ${command}`),
-    "",
-    "Default goal start enqueues a goal_iteration job for a worker; pass --foreground to run the iteration in the current process.",
     ""
   ].join("\n");
 }

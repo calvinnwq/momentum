@@ -69,9 +69,7 @@ describe("shared renderer output contracts", () => {
     const commandModules = [
       "src/commands/workflow/index.ts",
       "src/commands/project/index.ts",
-      "src/commands/status.ts",
       "src/commands/intent/index.ts",
-      "src/commands/goal/index.ts",
       "src/commands/source/index.ts",
       "src/commands/evidence/index.ts"
     ];
@@ -99,9 +97,7 @@ describe("shared renderer output contracts", () => {
     for (const rendererPath of [
       "src/renderers/workflow.ts",
       "src/renderers/project.ts",
-      "src/renderers/status.ts",
       "src/renderers/intent.ts",
-      "src/renderers/goal.ts",
       "src/renderers/source.ts",
       "src/renderers/evidence.ts"
     ]) {
@@ -122,9 +118,7 @@ describe("shared renderer output contracts", () => {
       "emitDaemonStartSuccess",
       "emitDaemonStartLoopResult",
       "emitDaemonStartFailure",
-      "emitDaemonStatus",
-      "emitWorkerRunResult",
-      "emitStalePreCheckText"
+      "emitDaemonStatus"
     ]) {
       expect(
         source,
@@ -135,7 +129,6 @@ describe("shared renderer output contracts", () => {
     for (const rendererPath of [
       "src/renderers/recovery.ts",
       "src/renderers/daemon.ts",
-      "src/renderers/worker.ts",
       "src/renderers/doctor.ts"
     ]) {
       expect(

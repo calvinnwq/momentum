@@ -5,7 +5,6 @@ Operator-facing CLI envelopes for the `intent list`, `intent get`, `intent apply
 See also:
 
 - [docs/source-commands.md](source-commands.md) — source-adapter commands that produce update intents.
-- [docs/status.md](status.md) and [docs/handoff.md](handoff.md) — the `pendingUpdateIntents` / `pending_update_intents` summaries on the inspector commands, including the `externalApply` / `external_apply` rollup.
 - [docs/doctor.md](doctor.md) — the `effectiveIntentApply` block (built-in default `create_intents_only` vs `external_apply_allowed` from `MOMENTUM.md`) and the `externalApply` audit-ledger aggregate.
 
 ## `intent list`
@@ -58,7 +57,7 @@ When no audit rows exist, `applyState` is `idle`, `totalAttempts` is 0, all life
 
 ### Audit row shape
 
-The `latestAttempt` audit row (emitted by `intent list`, `intent get`, `momentum status`, `momentum handoff`, `momentum project status`, and `momentum doctor`) carries:
+The `latestAttempt` audit row (emitted by `intent list`, `intent get`, `momentum project status`, and `momentum doctor`) carries:
 
 - `id`
 - `adapterKind`
@@ -82,7 +81,7 @@ The `latestAttempt` audit row (emitted by `intent list`, `intent get`, `momentum
 - `createdAt`
 - `updatedAt`
 
-Rollup surfaces also prepend `intentId` to identify the source intent. `momentum handoff` emits the same fields in snake_case.
+Rollup surfaces also prepend `intentId` to identify the source intent.
 
 `totalAvailable` is the total matching intent count regardless of `--limit`; `truncated` is `true` when results were capped.
 

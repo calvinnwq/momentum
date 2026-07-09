@@ -49,7 +49,6 @@ describe("adapter test coverage contract", () => {
       "test/source-reconciliation.test.ts",
       "test/external-update-adapter.test.ts",
       "test/intent-apply-execute.test.ts",
-      "test/runner-adapter.test.ts",
       "test/workflow-step-executor.test.ts",
       "test/workflow-dispatch-execute.test.ts",
       "test/full-adapter-e2e.test.ts",

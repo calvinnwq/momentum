@@ -4,10 +4,10 @@
  * This is the workflow/runtime-owned seam that takes the *output* of a finished
  * workflow-step implementation (its normalized runner-result `success` flag and
  * `commit` intent) and runs Momentum's existing verify -> commit / reset
- * transaction around it, preserving the same safety posture the foreground
- * iteration path already enforces. It owns no durable state: it is a pure
- * transaction over git + verification, mirroring how `iteration-finalize.ts` stays
- * a pure transaction the foreground caller composes.
+ * transaction around it, preserving the safety posture the retired foreground
+ * iteration path enforced. It owns no durable state: it is a pure transaction
+ * over git + verification, composed on `iteration-finalize.ts`, which stays a
+ * pure transaction its caller composes.
  *
  * It began as the live-step lane's
  * `live-step/finalize.ts`, then was extracted here so the
@@ -376,10 +376,10 @@ type ReadNormalizedResultFile =
  * into ingesting an oversized or non-regular artifact.
  *
  * The `live step ...` wording in these `result_missing` / `result_invalid`
- * errors is the preserved durable contract — it surfaces in `goal-status`
- * output, `recovery.md` artifacts, and is pinned by the finalize tests, so it
- * is intentionally kept verbatim across the relocation, not updated to
- * match the neutral symbol names.
+ * errors is the preserved durable contract. It surfaces in workflow status /
+ * logs output, `recovery.md` artifacts, and is pinned by the finalize tests, so
+ * it is intentionally kept verbatim across the relocation, not updated to match
+ * the neutral symbol names.
  */
 function readNormalizedResultFile(
   resultFilePath: string

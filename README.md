@@ -4,11 +4,10 @@
 ![TypeScript](https://img.shields.io/badge/typescript-5.9-3178C6?logo=typescript&logoColor=white)
 ![Status](https://img.shields.io/badge/status-pre--release-orange)
 
-Momentum is a TypeScript CLI for durable autonomous repo-work orchestration. It turns a Markdown Goal into verified iterations, local artifacts, handoff state, policy-gated tracker reconciliation, and an operator-mediated Linear apply path.
+Momentum is a TypeScript CLI for durable autonomous repo-work orchestration. It turns an objective into a workflow run of verified steps with local artifacts, handoff state, policy-gated tracker reconciliation, and an operator-mediated Linear apply path.
 
-- **Durable by default** - state lives in SQLite plus per-goal artifact directories.
-- **Runner-flexible** - use the fake runner for tests, trusted shell for local automation, or ACP-backed agents for real work.
-- **Operator-first** - status, logs, handoff, doctor, daemon, and recovery commands are all inspectable.
+- **Durable by default** - state lives in SQLite plus per-run artifact evidence.
+- **Operator-first** - workflow status, logs, handoff, monitor, watch, doctor, daemon, and recovery commands are all inspectable.
 - **External writes stay gated** - tracker updates are durable intents first; the optional Linear apply path runs only through `intent apply --external-apply` or the approved built-in `linear-refresh` workflow step, and `linear-refresh` proves the run issue scope, a matching source item, one pending Linear `status_update` intent or deterministic evidence to seed the expected `Done` intent, a valid one-of `state` / `stateId` payload, a credentialed process environment, repo policy, and a stable idempotency marker before applying or reconciling from already-successful audit evidence without another Linear mutation.
 
 Full documentation: <https://calvinnwq.github.io/momentum/>
@@ -34,48 +33,28 @@ contract.
 
 ## Quick Start
 
-Create a goal:
-
-```md
----
-title: Example Goal
-repo: /path/to/repo
-runner: fake
-max_iterations: 1
-verification:
-  - pnpm test
----
-
-Make the requested change and keep the repo valid.
-```
-
-Run one foreground iteration:
+Start a workflow run and inspect it:
 
 ```sh
-node dist/index.js goal start ./goal.md --foreground --json
-node dist/index.js status --json
-node dist/index.js logs <goal-id> --json
-node dist/index.js handoff <goal-id> --json
+node dist/index.js workflow run start --run-id demo-1 --repo /path/to/repo --objective "Make the requested change" --json
+node dist/index.js workflow status demo-1 --json
+node dist/index.js workflow run logs demo-1 --json
+node dist/index.js workflow handoff demo-1 --json
 ```
 
-Queue work for the worker or daemon path:
+Let a bounded daemon cycle schedule runnable steps:
 
 ```sh
-node dist/index.js goal start ./goal.md --json
-node dist/index.js worker run --json
 node dist/index.js daemon start --max-idle-cycles 1 --json
 ```
+
+The full walkthrough, including approvals, monitoring, and recovery, lives in the docs site linked above.
 
 ## Commands
 
 Commands:
 
 ```text
-momentum goal start <goal.md> [options]
-momentum status [goal-id] [--data-dir <path>] [--json]
-momentum logs <goal-id> [--iteration <n>] [--data-dir <path>] [--json]
-momentum handoff <goal-id> [--data-dir <path>] [--json]
-momentum worker run [--worker-id <id>] [--data-dir <path>] [--json]
 momentum daemon start|stop|status [options]
 momentum recovery clear <goal-id> [--reason <text>] [--data-dir <path>] [--json]
 momentum source list|get|link|unlink|reconcile linear [options]
@@ -112,7 +91,7 @@ node dist/index.js --help
 `pnpm test:integration` runs the heavier repo/git/process and smoke coverage, and `pnpm test:full` runs both lanes.
 `pnpm lint` uses the TypeScript test-project check as the current no-extra-dependency lint lane, and `pnpm format:check` runs Git whitespace checks against `HEAD`.
 The checked-in `.no-mistakes.yaml` points no-mistakes at the same `pnpm test && pnpm typecheck && pnpm build` and `pnpm lint && pnpm format:check` lanes.
-The suite covers foreground goals, queued workers, daemon/recovery, runner profiles, source/evidence/intent commands, CLI import-boundary and renderer-output contracts, and a public-docs hygiene guard.
+The suite covers workflow runs and executors, daemon/recovery, source/evidence/intent commands, CLI import-boundary and renderer-output contracts, and a public-docs hygiene guard.
 
 Releases are managed by Release Please on pushes to `main` or manual workflow dispatch. It opens or updates the release PR, keeps `CHANGELOG.md` current, and creates the GitHub release when that PR is merged; Momentum is still not published to npm.
 

@@ -9,7 +9,7 @@ See also:
   (`daemon_runs`) and the managed-loop semantics.
 - [`docs/recovery.md`](recovery.md) for the stale-lease and
   `needs_manual_recovery` surfaces aggregated by `doctor`.
-- [`docs/runners.md`](runners.md) for the runner profile catalog and the
+- [`docs/runners.md`](runners.md) for the stored runner-profile catalog and the
   `MOMENTUM.md` policy loader surfaced by `doctor --repo`.
 
 ## CLI shape
@@ -30,8 +30,8 @@ between the human-readable text output and the machine-readable JSON envelope
 shape documented below.
 
 Useful as a first sanity check after install, as a quick orchestrator-health
-probe before a large queued drain, and as a way to validate a repo's policy
-file in isolation.
+probe before a bounded daemon scheduling session, and as a way to validate a
+repo's policy file in isolation.
 
 ## Daemon-readiness JSON envelope
 
@@ -66,17 +66,18 @@ for the manual recovery contract).
 
 The `runners` block in JSON output lists the built-in runner catalog:
 
-- `supported` — current set of built-in runner profile names,
+- `supported` — the set of built-in runner profile names,
   `["fake", "trusted-shell", "acp"]`.
 - `default` — the built-in default runner kind, `"fake"`.
 - `profiles` — an array of `{kind, name, description, executes}` objects for
   each built-in runner.
 
-All three profiles now have `executes: true`; `trusted-shell` runs the
-operator-configured executable plus argv with no sandbox and no privilege
-drop, and `acp` runs the configured ACP/acpx-style external agent runtime
-with the same trust posture plus a stable `runtime_unavailable` code so
-missing runtime or auth is distinct from command failures.
+This envelope is frozen. The runner profiles are the retired goal-first
+execution lane's kinds: stored goal specs still name them and recovery
+artifacts still render their metadata, but no current command executes them.
+The `executes` field remains part of the wire-stable shape (all three profiles
+report `executes: true`); see [`docs/runners.md`](runners.md) for the stored
+runner-profile compatibility reference.
 
 Text output includes a `runners:` line showing the supported kinds and the
 default.

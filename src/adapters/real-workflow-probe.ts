@@ -9,9 +9,8 @@
  * pure:
  *
  *   - `runHarnessProbe` spawns the resolved live-wrapper pre-flight probe (a
- *     cheap availability check) with the same bounded `spawnSync` discipline as
- *     `src/adapters/acp-runner.ts`, then delegates the outcome mapping to the pure
- *     `classifyProbeSpawnResult`.
+ *     cheap availability check) with a bounded `spawnSync` discipline, then
+ *     delegates the outcome mapping to the pure `classifyProbeSpawnResult`.
  *   - `loadRawWorkflowProfileFromEnv` reads the operator-pointed live-wrapper
  *     profile JSON so the gated smoke can resolve a real wrapper command. It
  *     fails closed to `undefined` (the planner then skips with

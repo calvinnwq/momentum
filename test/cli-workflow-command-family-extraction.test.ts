@@ -117,13 +117,7 @@ describe("workflow command family extraction", () => {
         "Unknown workflow subcommand: bogus\n\nMomentum\n\nUsage:\n"
       )
     ).toBe(true);
-    expect(result.stderr).toMatch(/\n {2}momentum goal start /);
-    expect(
-      result.stderr
-        .trimEnd()
-        .endsWith(
-          "Default goal start enqueues a goal_iteration job for a worker; pass --foreground to run the iteration in the current process."
-        )
-    ).toBe(true);
+    expect(result.stderr).toMatch(/\n {2}momentum workflow status /);
+    expect(result.stderr).not.toContain("momentum goal start");
   });
 });

@@ -15,9 +15,6 @@ export type MomentumCommandRegistry<TParsed, TIo, TDeps> = ReadonlyArray<
 
 export type MomentumCommandRegistryHandlers<TParsed, TIo, TDeps> = {
   doctor: MomentumCommandHandler<TParsed, TIo, TDeps>;
-  status: MomentumCommandHandler<TParsed, TIo, TDeps>;
-  logs?: MomentumCommandHandler<TParsed, TIo, TDeps>;
-  handoff?: MomentumCommandHandler<TParsed, TIo, TDeps>;
   extraRoutes?: MomentumCommandRoute<TParsed, TIo, TDeps>[];
 };
 
@@ -39,13 +36,8 @@ export function createMomentumCommandRegistry<
   handlers: MomentumCommandRegistryHandlers<TParsed, TIo, TDeps>
 ): MomentumCommandRegistry<TParsed, TIo, TDeps> {
   const routes: MomentumCommandRoute<TParsed, TIo, TDeps>[] = [
-    { command: "doctor", run: handlers.doctor },
-    { command: "status", run: handlers.status }
+    { command: "doctor", run: handlers.doctor }
   ];
-  if (handlers.logs) routes.push({ command: "logs", run: handlers.logs });
-  if (handlers.handoff) {
-    routes.push({ command: "handoff", run: handlers.handoff });
-  }
   routes.push(...(handlers.extraRoutes ?? []));
   return assertUniqueRoutes(routes);
 }

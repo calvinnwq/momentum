@@ -386,10 +386,10 @@ describe("M11 CLI import boundaries", () => {
     expect(isPersistenceOrMutationModule("src/core/executors/runner/result.ts")).toBe(true);
     // Owned core/domain homes (post NGX-449/NGX-450) classify as renderer runtime boundaries.
     expect(isPersistenceOrMutationModule("src/core/daemon/status.ts")).toBe(true);
-    expect(isPersistenceOrMutationModule("src/core/goal/status.ts")).toBe(true);
+    expect(isPersistenceOrMutationModule("src/core/goal/recovery.ts")).toBe(true);
     expect(isPersistenceOrMutationModule("src/core/goal/types.ts")).toBe(true);
-    expect(isPersistenceOrMutationModule("src/core/source/context.ts")).toBe(true);
-    expect(isPersistenceOrMutationModule("src/core/evidence/handoff.ts")).toBe(true);
+    expect(isPersistenceOrMutationModule("src/core/source/items.ts")).toBe(true);
+    expect(isPersistenceOrMutationModule("src/core/evidence/records.ts")).toBe(true);
     expect(isPersistenceOrMutationModule("src/core/intent/policy.ts")).toBe(true);
     expect(isPersistenceOrMutationModule("src/core/repo/project-rollup.ts")).toBe(true);
   });
@@ -434,9 +434,9 @@ describe("M11 CLI import boundaries", () => {
     ).toBe(false);
 
     const coreTypeEdge: ImportEdge = {
-      from: "src/renderers/status.ts",
-      to: "src/core/goal/status.ts",
-      specifier: "../core/goal/status.js",
+      from: "src/renderers/recovery.ts",
+      to: "src/core/goal/recovery.ts",
+      specifier: "../core/goal/recovery.js",
       isTypeOnly: true,
       runtimeBindings: []
     };
@@ -445,7 +445,7 @@ describe("M11 CLI import boundaries", () => {
       rendererTransitionalImportIsAllowed({
         ...coreTypeEdge,
         isTypeOnly: false,
-        runtimeBindings: ["loadGoalStatus"]
+        runtimeBindings: ["clearGoalManualRecoveryGuarded"]
       })
     ).toBe(false);
   });
@@ -658,15 +658,11 @@ describe("M11 CLI import boundaries", () => {
       "src/adapters/linear-http-client.ts",
       "src/adapters/linear-issue-refresh.ts",
       "src/adapters/acp-config.ts",
-      "src/adapters/acp-runner.ts",
-      "src/adapters/fake-runner.ts",
       "src/adapters/live-step-wrapper.ts",
       "src/adapters/live-wrapper-registry.ts",
       "src/adapters/source-adapter.ts",
       "src/adapters/linear-source-adapter.ts",
-      "src/adapters/runner-adapter.ts",
       "src/adapters/trusted-shell-config.ts",
-      "src/adapters/trusted-shell-runner.ts",
       "src/adapters/no-mistakes-executor.ts",
       "src/adapters/no-mistakes-orchestrator.ts",
       "src/adapters/real-workflow-probe.ts"
@@ -685,15 +681,11 @@ describe("M11 CLI import boundaries", () => {
       "src/linear-http-client.ts",
       "src/linear-issue-refresh.ts",
       "src/acp-config.ts",
-      "src/acp-runner.ts",
-      "src/fake-runner.ts",
       "src/live-step-wrapper.ts",
       "src/live-wrapper-registry.ts",
       "src/source-adapter.ts",
       "src/linear-source-adapter.ts",
-      "src/runner-adapter.ts",
       "src/trusted-shell-config.ts",
-      "src/trusted-shell-runner.ts",
       "src/no-mistakes-executor.ts",
       "src/no-mistakes-orchestrator.ts",
       "src/real-workflow-probe.ts"

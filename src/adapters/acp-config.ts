@@ -1,18 +1,17 @@
 import path from "node:path";
 
 /**
- * ACP runner configuration.
+ * ACP runner-profile configuration.
  *
- * The `acp` runner profile is a smoke harness around the existing
- * `RunnerAdapter` boundary for ACP/acpx-style external agent runtimes.
- * Momentum core continues to own Goal/Iteration/Job state, the git
- * transaction, verification, and the artifact layout. The adapter only
- * spawns the configured runtime, detects whether the runtime is available
- * (pre-flight probe), and reports a normalized `RunnerResult`.
+ * The retired goal-first lane used the `acp` runner profile as a smoke
+ * harness for ACP/acpx-style external agent runtimes. Momentum keeps this
+ * parser so stored goal specs, runner-profile diagnostics, and recovery
+ * artifacts can still interpret the archived profile block.
  *
- * Like `trusted-shell`, the runtime command runs with the privileges of
- * the Momentum invoker. There is no sandbox and no privilege drop. The
- * operator is responsible for what the configured runtime can do.
+ * When those stored profiles were executed, the runtime command ran with the
+ * privileges of the Momentum invoker. There was no sandbox and no privilege
+ * drop, so archived profile data should still be treated as operator-trusted
+ * configuration.
  */
 
 export type AcpCwd = "repo" | "iteration";

@@ -6,7 +6,7 @@ See also:
 
 - [docs/source-commands.md](source-commands.md) — `source` and `project status` envelopes; evidence records may optionally link to a `source_items` row.
 - [docs/intent-commands.md](intent-commands.md) — `intent list` / `get` / `apply` / `skip` / `cancel` envelopes; the `intent list --evidence-record <id>` filter pivots from an evidence record to its derived intents.
-- [docs/status.md](status.md) and [docs/handoff.md](handoff.md) — the per-goal `latestEvidence` / `latest_evidence` summaries.
+- [docs/workflow-commands.md](workflow-commands.md) — the `workflow status` / `workflow handoff` / `workflow run logs` surfaces that attach run- and step-linked evidence.
 - [docs/doctor.md](doctor.md) — the aggregate `evidence` block (`totalRecords`, `goalLinkedRecords`, `sourceItemLinkedRecords`, `lastRecord`).
 
 ## `evidence ingest`

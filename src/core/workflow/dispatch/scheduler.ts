@@ -26,13 +26,12 @@
  * ({@link runWorkflowSchedulerOnce}) composes the three into one per-cycle pass
  * — recover stale leases, recheck any active deferred `subworkflow` dispatch
  * that is due, otherwise scan and claim one runnable step, then hand it to an
- * injected executor-dispatch seam — as the workflow-first analogue of
- * `runWorkerOnce`.
+ * injected executor-dispatch seam.
  * Bounded `daemon start` now wires that seam with the production dispatcher,
  * which creates executor start scaffolds or fail-closed manual-recovery effects
  * (gates when the run row still exists, lease release when it vanished).
- * This lane leaves goal iteration draining (`worker-run.ts`) untouched, because
- * workflow scheduling is a separate lane over separate tables.
+ * The retired goal-iteration drain lane is gone; workflow scheduling is the
+ * daemon's only work lane and runs over its own tables.
  *
  * "Runnable" means, for a run that is neither terminal nor flagged for manual
  * recovery, the run's lease-aware derived state is `approved` (an approved step
@@ -1016,8 +1015,8 @@ function validateClaimInput(input: ClaimRunnableWorkflowStepInput): void {
 
 /**
  * Default `dispatch` lease TTL the scheduler lane stamps on a claimed step.
- * Mirrors `DEFAULT_DAEMON_WORKER_LEASE_MS` from `daemon-loop` so the workflow
- * lane and the goal-iteration lane age leases on the same cadence.
+ * Mirrors `DEFAULT_DAEMON_WORKER_LEASE_MS` from `daemon-loop` so daemon and
+ * workflow leases age on the same cadence.
  */
 export const DEFAULT_WORKFLOW_DISPATCH_LEASE_MS = 30_000;
 
@@ -1391,10 +1390,9 @@ function dispatchClaim(
 /**
  * Run one workflow scheduler-lane tick: recover stale leases, scan for the next
  * runnable step, atomically claim it, and hand it to the executor-dispatch seam.
- * This is the workflow-first analogue of `runWorkerOnce` (the goal-iteration
- * drain) and is what the daemon loop will call each cycle alongside — never
- * instead of — goal iteration draining. Goal-iteration tables are untouched here:
- * workflow scheduling is a separate lane over separate tables.
+ * The daemon loop calls this each cycle; it is the daemon's only work lane now
+ * that the goal-iteration drain is retired. Goal tables are untouched here:
+ * workflow scheduling runs over its own tables.
  *
  * Ordering matters and is deliberate:
  *
