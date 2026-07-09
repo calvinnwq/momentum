@@ -7,6 +7,7 @@ import {
   BUILTIN_DEFAULT_VERIFICATION_TIMEOUT_SEC,
   DEFAULT_INTENT_APPLY_POLICY,
   MOMENTUM_POLICY_FILENAME,
+  UPDATE_INTENT_APPLY_POLICIES,
   isExternalApplyAllowedByPolicy,
   loadMomentumPolicy,
   parseMomentumPolicy,
@@ -363,6 +364,16 @@ describe("resolveIntentApplyPolicy", () => {
     });
     expect(resolved.value).toBe("external_apply_allowed");
     expect(resolved.source).toBe("momentum_policy");
+  });
+});
+
+describe("intent apply policy vocabulary", () => {
+  it("keeps the policy values and local-only default stable", () => {
+    expect(DEFAULT_INTENT_APPLY_POLICY).toBe("create_intents_only");
+    expect([...UPDATE_INTENT_APPLY_POLICIES]).toEqual([
+      "create_intents_only",
+      "external_apply_allowed"
+    ]);
   });
 });
 

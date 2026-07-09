@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  BUILTIN_SOURCE_ADAPTER_KINDS,
   dispatchSourceAdapterGet,
   dispatchSourceAdapterList,
   dispatchSourceAdapterNormalize,
@@ -8,6 +9,7 @@ import {
   listSourceAdapterKinds,
   type SourceAdapter,
   type SourceAdapterClient,
+  type SourceAdapterErrorCode,
   type SourceAdapterItem
 } from "../src/adapters/source-adapter.js";
 
@@ -30,6 +32,19 @@ function fixtureClient(items = fixtureItems): SourceAdapterClient {
 describe("source adapter registry", () => {
   it("lists the built-in source adapter kinds", () => {
     expect(listSourceAdapterKinds()).toEqual(["local-fixture", "linear"]);
+    expect([...BUILTIN_SOURCE_ADAPTER_KINDS]).toEqual(["local-fixture", "linear"]);
+  });
+
+  it("keeps the source adapter error vocabulary stable", () => {
+    const errorCodes: SourceAdapterErrorCode[] = [
+      "unsupported_source_adapter",
+      "source_adapter_threw",
+      "source_item_not_found",
+      "source_item_invalid",
+      "source_auth_unavailable",
+      "source_config_invalid"
+    ];
+    expect(errorCodes).toContain("source_auth_unavailable");
   });
 
   it("returns the local-fixture adapter from getSourceAdapter", () => {

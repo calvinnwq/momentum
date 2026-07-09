@@ -5,6 +5,8 @@ import path from "node:path";
 
 import { openDb, type MomentumDb } from "../src/adapters/db.js";
 import {
+  INTENT_APPLY_LIFECYCLE_STATES,
+  INTENT_APPLY_STATES,
   claimIntentApply,
   countBlockedIntents,
   countIntentApplyAuditsByLifecycleState,
@@ -66,6 +68,19 @@ function baseClaim(
     ...overrides
   };
 }
+
+describe("intent apply state vocabulary", () => {
+  it("keeps the apply and audit lifecycle states stable", () => {
+    expect([...INTENT_APPLY_STATES]).toEqual(["idle", "in_flight", "blocked"]);
+    expect([...INTENT_APPLY_LIFECYCLE_STATES]).toEqual([
+      "claimed",
+      "succeeded",
+      "failed",
+      "blocked",
+      "audit_incomplete"
+    ]);
+  });
+});
 
 describe("intent apply audit ledger", () => {
   it("claims an intent, persists the audit row, and finalizes succeeded", () => {
