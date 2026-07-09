@@ -116,7 +116,7 @@ External tracker writes are policy-gated and two-phase:
 The default policy is local intent creation only. The Linear path supports
 comment-only `source_satisfied` intents and explicit `status_update` intents
 whose payload supplies the target state (`state` or `stateId`), carries a stable
-idempotency marker, and must fail closed without losing the M6 refusal reason.
+idempotency marker, and must fail closed without losing the refusal reason.
 Before a workflow `linear-refresh` external write is attempted, the tail
 lifecycle preflight must prove `LINEAR_API_KEY` in the applying process,
 `intent_apply_policy: external_apply_allowed`, a workflow issue scope, a matching
@@ -124,9 +124,9 @@ Linear source item, and either one pending Linear `status_update` intent or enou
 unique issue-scope/source evidence to seed the expected pending `status_update` intent
 with a `Done` payload deterministically.
 The resulting intent must carry a valid payload with exactly one `state` / `stateId` and the stable idempotency marker.
-If durable M6 audit evidence already proves the intended write landed and
-post-apply reconcile succeeded, `linear-refresh` reconciles without another
-Linear mutation.
+If durable external-apply audit evidence already proves the intended write
+landed and post-apply reconcile succeeded, `linear-refresh` reconciles without
+another Linear mutation.
 
 ## Source And Adapter Boundaries
 
@@ -146,7 +146,7 @@ Default CI must not call real `api.linear.app`.
 
 ## Coding Workflow Ownership
 
-Momentum owns the future durable coding workflow runtime: workflow definitions,
+Momentum owns the durable coding workflow runtime: workflow definitions,
 workflow runs, step runs, gates, leases, executor state, evidence, recovery,
 status, monitor, handoff, events, and logs.
 
@@ -155,11 +155,12 @@ compatibility surface, and fallback route while replacement behavior is proven.
 Historical `cwfp-*` runs remain readable/importable compatibility state. They
 must not become the primary source of truth for new Momentum-owned runs.
 
-The NGX-499 opt-in dogfood proved a Momentum-owned coding workflow through
+An opt-in Momentum-owned coding workflow is proven end to end through
 implementation, postflight, no-mistakes, merge cleanup, and Linear refresh.
-NGX-404/default switching remains separate and must preserve rollback.
+CWFP remains the default coding-workflow start and rollback route; switching
+the default is a separate, deliberate decision that must preserve rollback.
 
-`workflow run start-coding` (NGX-508) is the explicit Momentum-native start
+`workflow run start-coding` is the explicit Momentum-native start
 door: a named opt-in selector over `workflow run start` that always materializes
 the built-in `coding-workflow` definition, refuses reserved `cwfp-*` / `cwfb-*` /
 `overnight-*` run ids, and records the run with the `momentum-native-coding`
@@ -173,16 +174,16 @@ still resolves the executing live-wrapper profile from
 Native coding dispatch resolves executor families from the built-in `coding-workflow` definition for that source, even if a persisted definition with the same key/version exists.
 Built-in workflow definitions are resolved by key and version; native runs must keep resolving the built-in version recorded on the run, even after a later built-in recipe becomes current.
 If the recorded built-in version is unavailable, native dispatch must fail closed instead of substituting persisted rows or a later built-in version.
-`workflow run preview-coding` (NGX-509) is the read-only native plan-preview door: it shares the `start-coding` preconditions and built-in definition resolution but writes nothing, emitting a frozen plan (run id, repo, objective, issue scope, approval boundary, route fields such as `route.implementationEngine`, `route.profile`, and `route.steps`, definition key/version, and every step with its executor family and on-start state) so an operator can inspect the proposed run before approval or execution.
+`workflow run preview-coding` is the read-only native plan-preview door: it shares the `start-coding` preconditions and built-in definition resolution but writes nothing, emitting a frozen plan (run id, repo, objective, issue scope, approval boundary, route fields such as `route.implementationEngine`, `route.profile`, and `route.steps`, definition key/version, and every step with its executor family and on-start state) so an operator can inspect the proposed run before approval or execution.
 The preview is a pure projection of the version-pinned built-in definition plus inputs, so a later `start-coding` from the same inputs persists a matching run, and the frozen plan can be reconstructed from the run's recorded `(definition key, version)` for approval/dispatch to reference.
 Structural preflight is shared by the native coding start and preview doors before durable run writes: missing built-in definition versions, blank required repository paths, invalid approval boundaries, invalid issue-scope identifiers, blank route profiles, unsupported implementation engines, and invalid route steps fail closed with `preflightEvidence`.
 `--implementation-engine` accepts `native-goal-loop` or `current-gnhf-cwfp` on the coding doors, and the generic `workflow run start` refuses it with `route_config_not_allowed`.
 The native dispatch lane executes only `native-goal-loop` today; a persisted `current-gnhf-cwfp` selection fails closed before the implementation executor starts rather than silently running the native goal-loop route.
-NGX-510 adds native per-step coding route/config overrides to the coding doors: `workflow run start-coding` / `workflow run preview-coding` accept `--steps-json <json>`, a sparse object keyed by the configurable coding steps (`implementation`, `postflight`, `no-mistakes`, `merge-cleanup`) carrying `harness`/`model`/`effort` string fields.
+The coding doors carry native per-step coding route/config overrides: `workflow run start-coding` / `workflow run preview-coding` accept `--steps-json <json>`, a sparse object keyed by the configurable coding steps (`implementation`, `postflight`, `no-mistakes`, `merge-cleanup`) carrying `harness`/`model`/`effort` string fields.
 Selections are validated and normalized to a byte-stable `route.steps` namespace on the durable run route, parallel to `route.implementationEngine`, `route.profile`, and `route.subworkflow`; absent steps/fields defer to defaults, and an unsupported step, unknown field, blank value, or malformed JSON fails closed with `route_config_invalid` (and writes nothing), while the generic `workflow run start` refuses the flag with `route_config_not_allowed`.
 Provider-specific model aliases are part of that normalization when the same step supplies the matching harness: known Claude aliases persist as pinned Claude Code model strings, known Codex aliases persist as un-namespaced Codex CLI model ids, and known OpenCode aliases persist as provider-qualified OpenCode model ids, while unknown harness/model values remain free-form.
 `route.steps` records the operator's per-step selection for durable audit by status/handoff/monitor/logs and for dispatcher-created executor-round selection; it stays distinct from the daemon's `MOMENTUM_LIVE_WRAPPER_PROFILE` execution profile.
-NGX-511 adds a native progress-monitor projection to `workflow run monitor` for explicit `momentum-native-coding` runs.
+`workflow run monitor` exposes a native progress-monitor projection for explicit `momentum-native-coding` runs.
 The monitor envelope derives from durable rows, exposes `manualRecoveryReason`, and includes `progress` fields for phase, digest, changed/emit suppression, current step, last event, next action, blocker reason, terminal status, and cleanup.
 `nextAction` includes the low-level monitor code plus `actionClass` and `recoveryDetail`, so status, handoff, monitor, and watch consumers can distinguish polling, approval, setup repair, deterministic no-mistakes reconciliation, external-tail reconciliation, approved side-effecting tail dispatch that needs operator authority, gate resolution, ordinary retry, recovery clearing, and monitor release without parsing prose.
 Clean terminal progress requires terminal durable state, no recovery object, and `nextAction.code: "no_action"`; a stale durable manual-recovery flag by itself does not keep an operator-reconciled succeeded run in `blocked`, so the monitor releases after `workflow run clear-recovery`.
@@ -192,34 +193,34 @@ Plain monitor reads do not write.
 `workflow run watch --once` builds on the same monitor projection, but first runs at most one run-scoped dispatcher tick when the target native run exposes an approved non-tail `advance_to_step` action or an active running step is eligible for a scheduler recheck, and has no open gate, recovery, or manual-recovery flag.
 Approved `merge-cleanup` and `linear-refresh` tail steps are not started by the watch poller; they surface as `recommendedAction: "operator_decision"` and `nextAction.actionClass: "operator_decision"` with human-required tail policy metadata.
 The watch tick re-reads durable state after that bounded dispatch, persists the same digest / timestamp advisory baselines as monitor advance, and still never resolves gates, approvals, or recovery decisions by itself.
-NGX-549 freezes the `workflow run watch --once --json` supervisor envelope as the wire contract cron, OpenClaw, and a future GUI consume, so downstream adapters never scrape prose or terminal text.
+The `workflow run watch --once --json` supervisor envelope is frozen as the wire contract cron, OpenClaw, and a future GUI consume, so downstream adapters never scrape prose or terminal text.
 Its top-level field set is fixed, `emit` is the machine-polling signal that suppresses repeated identical ticks below the quiet threshold while still surfacing meaningful changes and throttled quiet advisories, and it adds the watch-derived `recommendedAction`, `recommendedActionPolicy`, `nextPollSeconds`, `quietForSeconds`, `quietThresholdSeconds`, `stuckRisk`, `inspectionCommand`, and `humanAction` fields over the shared monitor projection so a consumer can branch and render a concise human update without a follow-up `workflow status` read.
 The envelope shape, enum vocabularies (`reason`, `disposition`, `phase`, `cleanup`, `recommendedAction`, `stuckRisk`, `nextAction.code`, `nextAction.actionClass`, and `humanAction.code`), the `humanAction.gateType` key, and common GUI scenarios are frozen by `test/fixtures/workflow-gui-contract.json` and `test/workflow-watch-contract.test.ts`, which fail if a required field disappears, an enum value drifts, or a scenario loses its expected human action, null action, failed-step next action, compact recovery detail, or stuck-risk inspection command.
 Supervisor action policy metadata classifies known watch, monitor, recovery, gate, and external-tail actions with `authority` (`auto_allowed`, `recommend_only`, `human_required`, or `forbidden`), `risk`, `evidenceRequired`, `rollback`, and a short rationale. `auto_allowed` is an explicit allowlist for safe wait/release/read-only or local recheck cases only. Approval/operator decisions, clear-recovery, stale manual recovery, no-mistakes recovery, merge cleanup, Linear refresh, and external-apply require human authority. Destructive/default-switch/broad external actions are forbidden and must surface as blocked policy metadata, not silent execution. If policy metadata is absent or invalid, consumers must fail closed by treating every non-wait action as `human_required`.
-NGX-550 extends the supervisor envelope with quiet-duration and stuck-risk hints for fast pollers that should stay quiet during healthy unchanged ticks.
+The supervisor envelope carries quiet-duration and stuck-risk hints for fast pollers that should stay quiet during healthy unchanged ticks.
 The quiet thresholds are centralized in the watch advisory reducer: implementation 15m, postflight 10m, no-mistakes 15m, merge-cleanup 5m, linear-refresh 5m, approval reminders 30m, recovery reminders 60m, and idle 15m.
 An unchanged tick remains `emit: false` until its threshold window is reached; threshold emissions use `reason: "quiet_heartbeat"` for approval / recovery / idle reminders or `reason: "stuck_risk"` for active execution, include elapsed `quietForSeconds`, the applied `quietThresholdSeconds`, and an inspection command when active execution may be stuck.
 These hints are advisory only: they never mark a run or step failed, never mutate execution lifecycle state, and never trigger LLM diagnosis in the CLI.
-NGX-551 adds `workflow run events` as the durable semantic replay API for supervisors and app clients that reconnect after process loss.
+`workflow run events` is the durable semantic replay API for supervisors and app clients that reconnect after process loss.
 It combines reproducible facts from workflow runs, steps, approvals, gates, and terminal run state with append-only `workflow_events` rows for overwritten or advisory transitions, including manual-recovery mark / clear, blocked-step metadata, retry / reconciliation preservation, and throttled quiet or stuck-risk watch advisories.
 Returned cursors are opaque replay tokens, not event identities; clients persist the response `cursor` for the next `--since` call and use event `id` only for dedupe.
 The GUI event envelope, per-event key set, cursor namespace, and event-type vocabulary are frozen by `test/fixtures/workflow-gui-contract.json` and `test/workflow-events.test.ts`.
 The API is replay-only and read-only: it does not hold a connection open, dispatch work, or change monitor/watch delivery semantics.
-NGX-552 adds `workflow run watch <run-id> --stream --jsonl` as the long-lived JSONL stream over that durable event cursor API.
+`workflow run watch <run-id> --stream --jsonl` is the long-lived JSONL stream over that durable event cursor API.
 The stream is read-only, resumes from `--since`, emits `event` records with `emit: true` only for durable human-worthy semantic events, emits `heartbeat` records with `emit: false` for liveness, retains only the cursor and counters between polls, and exits cleanly once the run row is terminal.
 When `--jsonl` is present, stream validation and usage failures use the shared JSON failure envelope instead of prose while usage errors still exit 2.
 It never runs the bounded watch dispatcher tick, writes monitor advisory baselines, delivers to OpenClaw, or invokes an LLM; durable events remain the source of truth for disconnected clients.
-NGX-553 adds `openclaw supervise <run-id> --once` as the OpenClaw delivery wrapper over `workflow run watch --once --json`.
+`openclaw supervise <run-id> --once` is the OpenClaw delivery wrapper over `workflow run watch --once --json`.
 It keeps the raw watch envelope as the workflow supervisor contract while adding OpenClaw-specific delivery suppression, sanitized inspection commands, terminal monitor cleanup, and per-run local state files under `<data-dir>/openclaw-supervisor/<encoded-run-id>.json`.
 The wrapper requires `--once`, refuses stream/jsonl mode, writes success envelopes to stdout and structured failures to stderr in JSON mode, preserves already-emitted watch advisories when local state persistence fails, and disables further watch execution once terminal cleanup has marked the monitor removable through an explicit `auto_allowed` `release_monitor` action policy.
 `openclaw supervise --help` and `openclaw supervise -h` print focused supervise usage and operator notes before run-id or `--once` validation, while `openclaw --help` remains shared top-level CLI help.
-NGX-554 extends that wrapper with host delivery intents for Discord/OpenClaw: emitted ticks carry a short sanitized message, optional action/evidence, wake/message routing, dedupe and reminder keys, terminal cleanup hints, and retry metadata, while suppressed ticks carry `deliveryIntent: null`.
+That wrapper emits host delivery intents for Discord/OpenClaw: emitted ticks carry a short sanitized message, optional action/evidence, wake/message routing, dedupe and reminder keys, terminal cleanup hints, and retry metadata, while suppressed ticks carry `deliveryIntent: null`.
 OpenClaw local auto-actions remain config-gated through `MOMENTUM_OPENCLAW_AUTO_ACTIONS`, execute only explicitly supported `auto_allowed` policies, append per-attempt audit JSONL beside the supervisor state before applying any local state change, append the intended saved status before the state write plus a matching failed status row if that write fails, bound repeated `release_monitor` state-save attempts to three saved records per digest while letting a failed status row cancel only its own attempt, and fail closed to human-required when policy support, repeat bounds, or audit persistence are ambiguous.
 The `release_monitor` repeat bound never re-enables an already disabled monitor; once disabled, a monitor at the bound repeats cleanup without appending another auto-action audit record.
 When the config gate is disabled, benign `watch_recheck` and `monitor_recheck` recommendations pass through unaudited while other supported auto-actions fail closed for human review.
 Fail-closed auto-action escalations preserve sanitized human-review delivery text, suppress monitor-removal cleanup unless a disabled-monitor escalation audit was saved, and treat required pre-state-write audit status failure as a nonzero `openclaw_auto_action_audit_failed` refusal.
 Momentum still does not post webhooks, wake external lanes, remove external monitors, or rewind supervisor state when a host delivery attempt fails.
-NGX-521 hardens native dogfood tail recovery without changing the default route.
+Native tail recovery is hardened without changing the default route.
 Failed required `merge-cleanup` and `linear-refresh` steps classify as `failed_external_side_effect_step` so operators verify the canonical external state - pull request merge or close state and any surviving remote branch ref for `merge-cleanup`, or tracker state for `linear-refresh` - then reconcile through `workflow run clear-recovery --evidence-pointer <ref>` instead of blindly re-running side-effecting tail work.
 Status, handoff, monitor, and watch expose that lane as `nextAction.actionClass: "reconcile_external_tail"` with `recoveryDetail.kind: "external_tail_reconcile"`.
 The checked-in live-wrapper dogfood profile executes the wrapper from source through the TypeScript source loader so cleanup of generated `dist/` artifacts does not break `merge-cleanup` or `linear-refresh` tail work.
@@ -227,7 +228,7 @@ The wrapper validates `MOMENTUM_CODING_WORKFLOW_WRAPPER_CONFIG` before spawning 
 For the `no-mistakes` step, the wrapper config must include a `runner_profile` block that selects the `axi` interface, declares `stdin: "closed"`, records the selected no-mistakes agent (`claude`, `codex`, `opencode`, or `rovodev`), records that agent's required harness environment (`HOME` and `PATH`, plus `CODEX_HOME` for Codex), and names the configured absolute executable agent path.
 The wrapper checks the filtered child environment, executable agent path, no-mistakes `HOME/.no-mistakes/config.yaml` top-level `agent`, and no-mistakes top-level `agent_path_override.<agent>` config against that profile before spawning no-mistakes, so missing runner env, `agent=auto`, malformed YAML, duplicate config keys, nested-only overrides, a missing/non-executable agent path, a mismatched no-mistakes agent override, or an unsafe stdin policy fails closed as setup recovery instead of relying on ambient daemon state.
 The `merge-cleanup` wrapper owns its side-effecting tail lifecycle: preflight proves explicit GitHub auth (`GH_TOKEN`, `GITHUB_TOKEN`, or `GH_CONFIG_DIR`), durable target identity (`merge_cleanup.pull_request_id`, `expected_head_sha`, and `cleanup_branch`), and live PR state/head/mergeability in the same worker before apply can spawn the merge command; already-merged or already-deleted cleanup state routes to reconcile instead of another mutation. This remains tail-local and is not promoted into workflow-level structural preflight.
-The `linear-refresh` daemon tail owns the same preflight -> apply -> reconcile shape around the existing M6 external-apply path: missing auth, missing source item, ambiguous source evidence, duplicate/stale intent, invalid payload, policy denial, or mismatched audit evidence fails closed before the Linear client is called; a missing intent can be deterministically seeded to `Done` only from the workflow issue scope plus a unique matching Linear source item, and already-applied succeeded audit evidence maps to terminal executor evidence instead of generic update-step repair.
+The `linear-refresh` daemon tail owns the same preflight -> apply -> reconcile shape around the existing external-apply path: missing auth, missing source item, ambiguous source evidence, duplicate/stale intent, invalid payload, policy denial, or mismatched audit evidence fails closed before the Linear client is called; a missing intent can be deterministically seeded to `Done` only from the workflow issue scope plus a unique matching Linear source item, and already-applied succeeded audit evidence maps to terminal executor evidence instead of generic update-step repair.
 For the `no-mistakes` step, the same live-wrapper treats a reported `checks-passed` outcome, or an otherwise-still-monitoring run with current clean pull request evidence and green or explicitly absent checks, as terminal Momentum success only when no current blocking outcome, active finding, unresolved gate, dirty / draft pull request, or non-successful check state is present.
 Current no-mistakes run status or outcome evidence showing cancellation before reliable completion remains retryable manual recovery, not failed verification.
 The no-mistakes mirror preserves the last heartbeat while a running external-state digest is unchanged; after four minutes without fresh progress or terminal evidence it parks the round in manual recovery so operators inspect the external run before clearing recovery.
@@ -236,7 +237,6 @@ Ordinary failed no-mistakes steps remain `nextAction.actionClass: "retry_failed_
 If the wrapper dies before writing that terminal evidence but the external no-mistakes run later proves success, `workflow run clear-recovery` may reconcile only the failed required `no-mistakes` step from durable rows and then re-derive the run; generic terminal run mutation remains refused.
 That reconciliation accepts the legacy `--evidence-pointer no-mistakes:<run-id>#checks-passed` path and a structured deterministic evidence JSON path whose schema records the workflow run id, issue scope, branch and head SHA, pull request identity and checks when present, no-mistakes run id, zero unresolved findings or decisions, and explicit review, test, docs, lint, format, push, PR, and CI phase statuses.
 Structured evidence is refused when its schema, identity, findings, check state, outcome, or phase statuses are unknown, stale, ambiguous, partial, mismatched, unresolved, pending, failed, or otherwise non-successful.
-CWFP remains the default coding-workflow start and rollback route; the default switch stays NGX-404.
 
 ## Runtime Consolidation
 
@@ -246,11 +246,10 @@ Runtime consolidation uses explicit decisions:
 - **Deprecate-later**: paths that narrow only after their named proof lands.
 - **Defer**: paths outside the current issue scope.
 
-No consolidation plan authorizes production deletion by itself. RC-1, RC-1b,
-RC-1c, RC-2, RC-3, RC-4, RC-4b, RC-5, and RC-5b have landed. The RC-2
-reconciliation seam is the single production owner for finalizing M10-dispatched
-workflow steps from durable terminal executor evidence and must prevent
-double-finalize and double-write behavior.
+No consolidation plan authorizes production deletion by itself. The
+workflow-step reconciliation seam is the single production owner for finalizing
+dispatched workflow steps from durable terminal executor evidence and must
+prevent double-finalize and double-write behavior.
 
 ## Architecture Contract
 
@@ -280,31 +279,11 @@ Domain modules must not import command modules or renderers. Renderers must not
 mutate state. External adapters stay behind domain or command boundaries with
 explicit policy checks.
 
-## Milestone Provenance Anchor
-
-The current source architecture baseline is Milestone 11: CLI Architecture
-Refactor, closed through NGX-411, NGX-412, NGX-413, NGX-414, NGX-415, NGX-416,
-NGX-417, NGX-418, and NGX-419.
-
-Earlier milestone issue ranges preserved in Obsidian:
-
-- M3: NGX-272 through NGX-278
-- M4: NGX-279 through NGX-286
-- M5: NGX-287 through NGX-294
-- M6: NGX-295 through NGX-302
-- M7: NGX-312 through NGX-319
-- M8: NGX-323 through NGX-330
-- M9: NGX-331 through NGX-338
-- M10: NGX-344 through NGX-353, with NGX-367 inserted as M10-09a
-
-M10 issue sequence: NGX-344, NGX-345, NGX-346, NGX-347, NGX-348, NGX-349,
-NGX-350, NGX-351, NGX-352, NGX-367, NGX-353.
+## Documentation Boundary
 
 Current behavior belongs in source, tests, `README.md`, `ARCHITECTURE.md`,
 `AGENTS.md`, `SPEC.md`, and public/operator docs. Historical milestone detail
-belongs in Obsidian.
-
-## Documentation Boundary
+and issue provenance belong in Obsidian.
 
 The repository must not contain an `internal/` documentation tree. Durable
 internal docs live in Obsidian `/Workspaces/Momentum`; repo anchors stay short

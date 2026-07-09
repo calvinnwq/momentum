@@ -13,8 +13,8 @@ describe("runtime consolidation contract", () => {
 
   it("keeps a compact runtime consolidation anchor", () => {
     expectSpecSection(spec, "Runtime Consolidation");
-    expect(spec).toContain("RC-2");
-    expect(spec).toContain("RC-4b");
+    expect(spec).toContain("reconciliation seam");
+    expect(spec).toContain("double-finalize");
   });
 
   it("pins the phase-1 dispatchable families in code", () => {
@@ -53,7 +53,7 @@ describe("runtime consolidation contract", () => {
     });
   });
 
-  it("keeps RC-2 reconciliation as the finalization decision seam", () => {
+  it("keeps reconciliation as the finalization decision seam", () => {
     expect(planWorkflowStepReconciliation("running")).toEqual({
       action: "not_terminal",
     });

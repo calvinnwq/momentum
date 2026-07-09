@@ -28,36 +28,13 @@ describe("root ARCHITECTURE.md contract", () => {
     expect(fs.existsSync(path.join(repoRoot, "internal")), "internal/ should not exist").toBe(false);
   });
 
-  it("defines the M11 import direction and boundaries", () => {
+  it("defines the import direction and boundaries", () => {
     expect(architecture).toContain("src/index.ts -> src/cli.ts -> src/commands/ registry + command families -> domain modules");
     expect(architecture).toContain("index -> cli -> commands -> renderers");
     expect(architecture).toMatch(/Domain modules must not import command modules or renderers/i);
     expect(architecture).toMatch(/Renderers must not\s+mutate state/i);
     expect(architecture).toMatch(/External adapters stay behind domain or command boundaries/i);
     expect(architecture).toMatch(/daemon, recovery, worker, and doctor remain deliberate\s+`src\/cli\.ts` compatibility surfaces/i);
-  });
-
-  it("pins NGX-411 through NGX-419 closeout order", () => {
-    const expected = [
-      "NGX-411",
-      "NGX-412",
-      "NGX-413",
-      "NGX-414",
-      "NGX-415",
-      "NGX-416",
-      "NGX-417",
-      "NGX-418",
-      "NGX-419",
-    ];
-    let cursor = -1;
-    for (const issue of expected) {
-      const index = architecture.indexOf(issue);
-      expect(index, `${issue} should be listed`).toBeGreaterThan(cursor);
-      cursor = index;
-    }
-
-    expect(architecture).toMatch(/closes out M11 with final regression coverage/i);
-    expect(architecture).toMatch(/NGX-413.*NGX-414/s);
   });
 
   it("is linked from AGENTS.md and SPEC.md", () => {
@@ -67,7 +44,7 @@ describe("root ARCHITECTURE.md contract", () => {
 
 });
 
-describe("M11 structural guard around src/cli.ts", () => {
+describe("structural guard around src/cli.ts", () => {
   const cli = readFile("src/cli.ts");
 
   it("keeps src/index.ts thin and pointed at runCli", () => {
@@ -78,7 +55,7 @@ describe("M11 structural guard around src/cli.ts", () => {
     expect(index).not.toMatch(/\.\/commands\//);
   });
 
-  it("introduces only the explicit command registry skeleton for NGX-412", () => {
+  it("introduces only the explicit command registry skeleton", () => {
     const srcDir = path.join(repoRoot, "src");
     const commandIndex = readFile("src/commands/index.ts");
 
@@ -88,7 +65,7 @@ describe("M11 structural guard around src/cli.ts", () => {
     expect(commandIndex).not.toMatch(/readdir|glob|fs\./);
   });
 
-  it("extracts read-only and workflow command families through their assigned M11 slices", () => {
+  it("extracts read-only and workflow command families into command modules", () => {
     const statusModule = readFile("src/commands/status.ts");
 
     for (const handler of [
@@ -111,7 +88,7 @@ describe("M11 structural guard around src/cli.ts", () => {
       expect(workflowModule, `src/commands/workflow/index.ts should contain ${handler}`).toContain(handler);
     }
   });
-  it("extracts goal, source, evidence, project, and intent command families for NGX-415", () => {
+  it("extracts goal, source, evidence, project, and intent command families", () => {
     const expectations: Array<[string, string]> = [
       ["function goalStart(", "src/commands/goal/index.ts"],
       ["function source(", "src/commands/source/index.ts"],

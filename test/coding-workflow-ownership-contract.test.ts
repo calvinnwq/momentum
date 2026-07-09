@@ -13,7 +13,9 @@ describe("Momentum-owned coding workflow contract", () => {
   it("keeps a compact coding-workflow ownership anchor", () => {
     expectSpecSection(spec, "Coding Workflow Ownership");
     expect(spec).toContain("cwfp-*");
-    expect(spec).toContain("NGX-404");
+    expect(spec).toContain(
+      "CWFP remains the default coding-workflow start and rollback route"
+    );
   });
 
   it("anchors the explicit Momentum-native coding-workflow start door", () => {
