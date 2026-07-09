@@ -285,6 +285,71 @@ describe("daemon start production workflow lane (NGX-367)", () => {
     ).toBe(true);
   });
 
+  it("parks a daemon live-wrapper step before execution when the repo is dirty", async () => {
+    const dataDir = makeTempDir();
+    const repoDir = makeTempDir();
+    initRepo(repoDir);
+    const baseHead = runGit(repoDir, ["rev-parse", "HEAD"]);
+    const profileDir = makeTempDir();
+    const profilePath = writeSucceedingPreflightProfile(profileDir);
+    const runId = "ngx599-dirty-live-wrapper-repo";
+    await startApprovedCodingRun(dataDir, repoDir, runId);
+    fs.writeFileSync(path.join(repoDir, "preexisting.txt"), "dirty\n", "utf8");
+
+    const result = await run(
+      [
+        "daemon",
+        "start",
+        "--max-loop-iterations",
+        "1",
+        "--poll-interval-ms",
+        "0",
+        "--data-dir",
+        dataDir,
+        "--json"
+      ],
+      { [DAEMON_LIVE_WRAPPER_PROFILE_ENV_VAR]: profilePath }
+    );
+
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(runGit(repoDir, ["rev-parse", "HEAD"])).toBe(baseHead);
+    expect(fs.existsSync(path.join(repoDir, "daemon-preflight.txt"))).toBe(false);
+
+    const db = openDb(dataDir);
+    try {
+      const runRow = db
+        .prepare(
+          "SELECT needs_manual_recovery, manual_recovery_reason FROM workflow_runs WHERE id = ?"
+        )
+        .get(runId) as
+        | { needs_manual_recovery: number; manual_recovery_reason: string | null }
+        | undefined;
+      expect(runRow?.needs_manual_recovery).toBe(1);
+      expect(runRow?.manual_recovery_reason).toContain("git_failed");
+
+      const round = db
+        .prepare(
+          "SELECT state, recovery_code, summary FROM executor_rounds WHERE workflow_run_id = ? AND step_key = ?"
+        )
+        .get(runId, "preflight") as
+        | { state: string; recovery_code: string | null; summary: string | null }
+        | undefined;
+      expect(round?.state).toBe("manual_recovery_required");
+      expect(round?.recovery_code).toBe("git_failed");
+      expect(round?.summary).toContain("uncommitted changes");
+    } finally {
+      db.close();
+    }
+
+    const recoveryMd = fs.readFileSync(
+      path.join(repoDir, ".agent-workflows", runId, "recovery.md"),
+      "utf-8"
+    );
+    expect(recoveryMd).toContain("git_failed");
+    expect(recoveryMd).toContain("uncommitted changes");
+  });
+
   it("matches external-apply intents by Linear issue key scope", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
@@ -1480,10 +1545,13 @@ describe("daemon start production workflow lane (NGX-367)", () => {
   it("parks the run for manual recovery when daemon live-wrapper run-dir creation fails", async () => {
     const dataDir = makeTempDir();
     const repoDir = makeTempDir();
+    initRepo(repoDir);
     const profileDir = makeTempDir();
     const profilePath = writeSucceedingPreflightProfile(profileDir);
     const runId = "ngx492-run-dir-unavailable";
     fs.writeFileSync(path.join(repoDir, ".agent-workflows"), "not a directory");
+    runGit(repoDir, ["add", ".agent-workflows"]);
+    runGit(repoDir, ["commit", "-m", "block agent workflows dir", "--quiet"]);
     await startApprovedCodingRun(dataDir, repoDir, runId);
 
     const result = await run(
@@ -1552,7 +1620,8 @@ describe("daemon start production workflow lane (NGX-367)", () => {
 
   it("parks the run for manual recovery when the coding workflow wrapper config is missing", async () => {
     const dataDir = makeTempDir();
-    const repoDir = process.cwd();
+    const repoDir = makeTempDir();
+    initRepo(repoDir);
     const profileDir = makeTempDir();
     const profilePath = writeCodingWorkflowWrapperPreflightProfile(profileDir);
     const runId = "ngx544-missing-wrapper-config";

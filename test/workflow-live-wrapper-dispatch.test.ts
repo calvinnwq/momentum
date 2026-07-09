@@ -679,6 +679,9 @@ describe("createLiveWrapperWorkflowDispatch — configured success", () => {
     const rounds = dispatchRounds(db, "preflight");
     expect(rounds[0]?.recoveryCode).toBe("repo_lock_lost");
     expect(rounds[0]?.summary).toContain("is locked by other-worker");
+    const recoveryMd = fs.readFileSync(path.join(runDir, "recovery.md"), "utf-8");
+    expect(recoveryMd).toContain("repo_lock_lost");
+    expect(recoveryMd).toContain(`Repo path: ${repoPath}`);
   });
 
   it("holds the repository lock across execution and releases it after finalization", () => {

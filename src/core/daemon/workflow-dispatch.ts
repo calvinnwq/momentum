@@ -1,11 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
 
 import type { MomentumDb } from "../../adapters/db.js";
 import type { LiveWrapperProfile } from "../../adapters/live-wrapper-registry.js";
 import type { LinearExternalUpdateClient } from "../../adapters/linear-external-update-client.js";
 import type { LinearIssueRefreshClient } from "../../adapters/linear-issue-refresh.js";
+import { inspectRepo } from "../repo/guard.js";
 import {
   defaultBuildLinearRefreshClient,
   executeExternalApply,
@@ -133,21 +133,33 @@ export function resolveDaemonWorkflowStepDispatch(
               provenance
             );
             if (resolved.ok) {
-              try {
-                fs.mkdirSync(resolved.exec.runDir, { recursive: true });
-              } catch (error) {
-                return {
-                  ok: false,
-                  reason: `run_dir_unavailable: ${error instanceof Error ? error.message : String(error)}`
-                };
-              }
               const repoSafety = resolveDaemonDispatchedRepoSafety(
                 context.db,
                 claim.runId,
                 resolved.exec.repoPath,
                 resolved.exec.runDir
               );
-              if (!repoSafety.ok) return repoSafety;
+              if (!repoSafety.ok) {
+                return {
+                  ...repoSafety,
+                  recoveryArtifact: {
+                    runDir: resolved.exec.runDir,
+                    repoPath: resolved.exec.repoPath
+                  }
+                };
+              }
+              try {
+                fs.mkdirSync(resolved.exec.runDir, { recursive: true });
+              } catch (error) {
+                return {
+                  ok: false,
+                  reason: `run_dir_unavailable: ${error instanceof Error ? error.message : String(error)}`,
+                  recoveryArtifact: {
+                    runDir: resolved.exec.runDir,
+                    repoPath: resolved.exec.repoPath
+                  }
+                };
+              }
               return {
                 ok: true,
                 exec: {
@@ -176,11 +188,17 @@ function resolveDaemonDispatchedRepoSafety(
 ):
   | { ok: true; repoSafety: DispatchedStepRepoSafetyContext }
   | { ok: false; reason: string; recoveryCode: string } {
-  const head = readGitHead(repoPath);
-  if (!head.ok) {
-    // The base HEAD is unreadable, so git cannot be inspected reliably: the
-    // precise classification is `git_failed`, not a missing runtime.
-    return { ok: false, reason: head.reason, recoveryCode: "git_failed" };
+  const repo = inspectRepo(repoPath);
+  if (!repo.ok) {
+    const recoveryCode =
+      repo.code === "dirty_worktree" || repo.code === "git_failed"
+        ? "git_failed"
+        : "invalid_input";
+    return {
+      ok: false,
+      reason: `repo_safety_unavailable: ${repo.error}`,
+      recoveryCode
+    };
   }
   const verification = loadWorkflowRunVerificationConfig(db, runId, repoPath);
   if (!verification.ok) {
@@ -196,27 +214,12 @@ function resolveDaemonDispatchedRepoSafety(
   return {
     ok: true,
     repoSafety: {
-      baseHead: head.head,
+      baseHead: repo.head,
       verificationCommands: verification.commands,
       verificationTimeoutSec: verification.timeoutSec,
       verificationLogPath: path.join(runDir, "verification.log")
     }
   };
-}
-
-function readGitHead(
-  repoPath: string
-): { ok: true; head: string } | { ok: false; reason: string } {
-  try {
-    const head = execFileSync("git", ["-C", repoPath, "rev-parse", "HEAD"], {
-      encoding: "utf-8",
-      stdio: ["ignore", "pipe", "pipe"]
-    }).trim();
-    return { ok: true, head };
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    return { ok: false, reason: `base_head_unavailable: ${detail}` };
-  }
 }
 
 export const DEFAULT_DISPATCH_VERIFICATION_TIMEOUT_SEC = 900;

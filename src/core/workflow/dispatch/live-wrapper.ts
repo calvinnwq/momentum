@@ -100,6 +100,10 @@ export type DispatchedStepExecutorContextResolution =
   | {
       ok: false;
       reason: string;
+      recoveryArtifact?: {
+        runDir: string;
+        repoPath?: string | null;
+      };
       /**
        * Optional precise recovery classification (a
        * `WorkflowLiveRunRecoveryCode` string such as `git_failed` or
@@ -216,7 +220,11 @@ export function createLiveWrapperWorkflowDispatch(
             error: repoLock.error,
             now: context.now,
             status: WORKFLOW_EXECUTE_RECONCILE_STATUS.executionRejected,
-            recoveryCode: "repo_lock_lost"
+            recoveryCode: "repo_lock_lost",
+            recoveryArtifact: {
+              runDir: resolved.exec.runDir,
+              repoPath: resolved.exec.repoPath
+            }
           });
         } else {
           let outcome: ExecuteAndReconcileDispatchedStepResult | undefined;
@@ -263,6 +271,9 @@ export function createLiveWrapperWorkflowDispatch(
           now: context.now,
           ...(resolved.recoveryCode !== undefined
             ? { recoveryCode: resolved.recoveryCode }
+            : {}),
+          ...(resolved.recoveryArtifact !== undefined
+            ? { recoveryArtifact: resolved.recoveryArtifact }
             : {})
         });
       }

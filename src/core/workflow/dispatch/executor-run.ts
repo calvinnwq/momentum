@@ -762,6 +762,12 @@ function processLevelEvidencePointers(
 
 function processLevelRecoveryDetail(code: WorkflowLiveRunRecoveryCode): string {
   switch (code) {
+    case "repo_lock_lost":
+      return "Momentum lost or could not acquire the active repo lock before a trusted terminal result could be produced. Confirm repository ownership and worktree state before clearing recovery.";
+    case "git_failed":
+      return "The live step setup could not inspect git reliably. Inspect the repository and worktree manually before clearing recovery.";
+    case "invalid_input":
+      return "The live step setup refused to run because its inputs were invalid. Inspect the run directory, configuration, and worktree manually before clearing recovery.";
     case "runtime_unavailable":
       return "The live wrapper runtime was unavailable before a trusted terminal result could be produced. Inspect the executor log and runtime configuration before retrying.";
     case "auth_unavailable":
@@ -792,6 +798,24 @@ function tryWriteFinalizeRecoveryArtifact(input: {
   recovery: LiveFinalizeRecovery;
   now: number;
 }): void {
+  tryWriteLiveRecoveryArtifact({
+    runId: input.runId,
+    stepId: input.stepId,
+    runDir: input.exec.runDir,
+    repoPath: input.exec.repoPath,
+    recovery: input.recovery,
+    now: input.now
+  });
+}
+
+function tryWriteLiveRecoveryArtifact(input: {
+  runId: string;
+  stepId: string;
+  runDir: string;
+  repoPath?: string | null;
+  recovery: LiveFinalizeRecovery;
+  now: number;
+}): void {
   if (!LIVE_RUN_RECOVERY_CODE_SET.has(input.recovery.code)) return;
   const artifactInput: WorkflowRecoveryArtifactInput = {
     runId: input.runId,
@@ -803,12 +827,12 @@ function tryWriteFinalizeRecoveryArtifact(input: {
       stepId: input.stepId
     },
     evidencePointers: input.recovery.evidencePointers,
-    repoPath: input.exec.repoPath,
+    repoPath: input.repoPath ?? null,
     classifiedAt: input.now
   };
   try {
     writeWorkflowRecoveryArtifactInRunDir({
-      runDir: input.exec.runDir,
+      runDir: input.runDir,
       input: artifactInput
     });
   } catch {
@@ -823,6 +847,10 @@ export type RecordDispatchedStepManualRecoveryInput = {
   now: number;
   status?: WorkflowExecuteReconcileStatus;
   detail?: string;
+  recoveryArtifact?: {
+    runDir: string;
+    repoPath?: string | null;
+  };
   /**
    * Precise recovery classification for the failure, preserved on the round as
    * `liveRecoveryCode` (a `WorkflowLiveRunRecoveryCode`). Without it the
@@ -842,6 +870,7 @@ export type RecordUnresolvedDispatchedStepContextInput = {
   now: number;
   /** Precise recovery classification; see {@link RecordDispatchedStepManualRecoveryInput}. */
   recoveryCode?: string;
+  recoveryArtifact?: RecordDispatchedStepManualRecoveryInput["recoveryArtifact"];
 };
 
 export function recordDispatchedStepManualRecovery(
@@ -866,6 +895,17 @@ export function recordDispatchedStepManualRecovery(
     result: executorResult,
     now
   });
+  const recovery = classifyProcessLevelRecovery(executorResult);
+  if (recovery !== null && input.recoveryArtifact !== undefined) {
+    tryWriteLiveRecoveryArtifact({
+      runId,
+      stepId,
+      runDir: input.recoveryArtifact.runDir,
+      repoPath: input.recoveryArtifact.repoPath ?? null,
+      recovery,
+      now
+    });
+  }
   const reconciled = tryReconcileDispatchedWorkflowStep({
     db,
     runId,
@@ -919,10 +959,19 @@ export function recordUnresolvedDispatchedStepContext(
 ): ExecuteAndReconcileDispatchedStepResult {
   const { runId, stepId, reason } = input;
   return recordDispatchedStepManualRecovery({
-    ...input,
+    db: input.db,
+    runId: input.runId,
+    stepId: input.stepId,
     error: `cannot derive execution context for dispatched step ${runId}/${stepId}: ${reason}`,
+    now: input.now,
     status: WORKFLOW_EXECUTE_RECONCILE_STATUS.contextUnresolved,
-    detail: reason
+    detail: reason,
+    ...(input.recoveryCode !== undefined
+      ? { recoveryCode: input.recoveryCode }
+      : {}),
+    ...(input.recoveryArtifact !== undefined
+      ? { recoveryArtifact: input.recoveryArtifact }
+      : {})
   });
 }
 
