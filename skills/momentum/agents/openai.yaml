@@ -1,0 +1,5 @@
+interface:
+  display_name: "Momentum"
+  short_description: "Operate durable Momentum workflow runs"
+  default_prompt: "Use $momentum to inspect and operate this Momentum workflow run."
+

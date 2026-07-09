@@ -7,6 +7,17 @@
   "bin": {
     "momentum": "./dist/index.js"
   },
+  "files": [
+    "dist",
+    "docs",
+    "skills/momentum",
+    "ARCHITECTURE.md",
+    "CHANGELOG.md",
+    "MOMENTUM.md",
+    "README.md",
+    "SPEC.md",
+    "VISION.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "docs": "python3 -m http.server 8080 --bind 127.0.0.1 --directory docs",

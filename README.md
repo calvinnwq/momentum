@@ -25,6 +25,11 @@ pnpm build
 node dist/index.js doctor
 ```
 
+The public agent-operated skill ships in `skills/momentum/`. Install that
+folder with any skill installer that accepts a repository path, or place it in
+your agent's skills root. The skill resolves the CLI via `MOMENTUM_CLI`,
+`momentum` on `PATH`, or a built Momentum checkout.
+
 ## Quick Start
 
 Create a goal:
