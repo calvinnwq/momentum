@@ -29,15 +29,51 @@ function git(commandArgs) {
   return result.stdout;
 }
 
+function gitMaybe(commandArgs) {
+  const result = run("git", commandArgs);
+  return result.status === 0 ? result.stdout.trim() : undefined;
+}
+
 function isAllZeroSha(value) {
   return /^[0]+$/.test(value);
 }
 
+function defaultBranchRefs() {
+  return [
+    gitMaybe([
+      "symbolic-ref",
+      "--quiet",
+      "--short",
+      "refs/remotes/origin/HEAD",
+    ]),
+    "origin/main",
+    "origin/master",
+    "main",
+    "master",
+    "trunk",
+  ].filter((ref, index, refs) => ref && refs.indexOf(ref) === index);
+}
+
+function defaultBase() {
+  for (const ref of defaultBranchRefs()) {
+    const base = gitMaybe(["merge-base", "HEAD", ref]);
+    if (base && !isAllZeroSha(base)) {
+      return base;
+    }
+  }
+
+  return undefined;
+}
+
 function changedFiles() {
   const files = new Set();
-  const base = explicitBase || envBase;
+  const configuredBase = explicitBase || envBase;
+  const base =
+    configuredBase && !isAllZeroSha(configuredBase)
+      ? configuredBase
+      : defaultBase();
 
-  if (base && !isAllZeroSha(base)) {
+  if (base) {
     for (const file of git([
       "diff",
       "--name-only",
