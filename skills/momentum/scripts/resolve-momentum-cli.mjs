@@ -73,7 +73,9 @@ function isExecutableFile(candidate) {
 function findOnPath(command, envPath = process.env.PATH ?? "") {
   const pathExt =
     process.platform === "win32"
-      ? (process.env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM").split(";")
+      ? path.win32.extname(command)
+        ? [""]
+        : ["", ...(process.env.PATHEXT ?? ".EXE;.CMD;.BAT;.COM").split(";").filter(Boolean)]
       : [""];
 
   for (const dir of envPath.split(path.delimiter).filter(Boolean)) {

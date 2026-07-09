@@ -136,6 +136,37 @@ describe("public Momentum skill", () => {
     expect(parsed.argv).toEqual([fake, "--from-env"]);
   });
 
+  it("resolves Windows PATH commands that already include an extension", () => {
+    const binDir = makeTempDir("momentum-skill-win-path-");
+    const fake = path.join(binDir, "node.exe");
+    fs.writeFileSync(fake, "", "utf8");
+
+    const prelude = "Object.defineProperty(process, 'platform', { value: 'win32' });";
+    const result = spawnSync(
+      process.execPath,
+      ["--import", `data:text/javascript,${encodeURIComponent(prelude)}`, resolver, "--json"],
+      {
+        cwd: repoRoot,
+        env: {
+          ...process.env,
+          MOMENTUM_CLI: "node.exe --from-env",
+          PATHEXT: ".EXE;.CMD",
+          PATH: binDir
+        },
+        encoding: "utf8"
+      }
+    );
+
+    expect(result.status).toBe(0);
+    const parsed = JSON.parse(result.stdout) as {
+      ok: boolean;
+      source: string;
+      argv: string[];
+    };
+    expect(parsed).toMatchObject({ ok: true, source: "env" });
+    expect(parsed.argv).toEqual(["node.exe", "--from-env"]);
+  });
+
   it("preserves backslashes in MOMENTUM_CLI command paths", () => {
     const binDir = makeTempDir("momentum-skill-backslash-");
     const fake = path.join(binDir, "momentum\\fake");
