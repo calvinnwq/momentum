@@ -420,6 +420,7 @@ describe("runNoMistakesMirrorRound — one poll on an existing mirror round", ()
     });
 
     expect(result.round.inputDigest).toBe("sha256:tick-7");
+    expect(result.round.resultDigest).toMatch(/^sha256:/);
   });
 
   it("leaves the round's frozen inputDigest intact on a reader failure (nothing to fingerprint)", () => {
@@ -934,6 +935,41 @@ describe("runNoMistakesMirrorRound — multi-poll lifecycle", () => {
     expect(stalled.round.summary).toContain(
       `has not changed for ${NO_MISTAKES_MIRROR_STALL_AFTER_MS}ms`
     );
+  });
+
+  it("parks startup-only running state even when raw external bytes keep changing", () => {
+    const db = openMirrorRoundDb();
+    const runningStartupOnly = {
+      stepStatus: "running" as const,
+      activeStep: "test-agent",
+      findings: [],
+      selectedFindingIds: [],
+      decisions: []
+    };
+
+    const first = runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      expectedExternalIdentity: EXPECTED_EXTERNAL_IDENTITY,
+      read: okReader(runningStartupOnly, "sha256:startup-json-1"),
+      polledAt: 2_000
+    });
+    expect(first.round.inputDigest).toBe("sha256:startup-json-1");
+    const semanticProgressDigest = first.round.resultDigest;
+    expect(semanticProgressDigest).toMatch(/^sha256:/);
+
+    const stalled = runNoMistakesMirrorRound({
+      db,
+      roundId: ROUND_ID,
+      read: okReader(runningStartupOnly, "sha256:startup-json-2"),
+      polledAt: 2_000 + NO_MISTAKES_MIRROR_STALL_AFTER_MS
+    });
+
+    expect(stalled.round.inputDigest).toBe("sha256:startup-json-2");
+    expect(stalled.round.resultDigest).toBe(semanticProgressDigest);
+    expect(stalled.decision.classification).toBe("manual_recovery_required");
+    expect(stalled.round.state).toBe("manual_recovery_required");
+    expect(stalled.round.summary).toContain("test-agent");
   });
 
   it("keeps polling when running external state changes before the stall window", () => {
