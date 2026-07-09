@@ -175,11 +175,24 @@ function resolveDaemonDispatchedRepoSafety(
   runDir: string
 ):
   | { ok: true; repoSafety: DispatchedStepRepoSafetyContext }
-  | { ok: false; reason: string } {
+  | { ok: false; reason: string; recoveryCode: string } {
   const head = readGitHead(repoPath);
-  if (!head.ok) return { ok: false, reason: head.reason };
+  if (!head.ok) {
+    // The base HEAD is unreadable, so git cannot be inspected reliably: the
+    // precise classification is `git_failed`, not a missing runtime.
+    return { ok: false, reason: head.reason, recoveryCode: "git_failed" };
+  }
   const verification = loadWorkflowRunVerificationConfig(db, runId, repoPath);
-  if (!verification.ok) return { ok: false, reason: verification.reason };
+  if (!verification.ok) {
+    // Missing run row / malformed goal verification / malformed MOMENTUM.md
+    // are invalid setup inputs needing operator or config repair, never the
+    // retryable `runtime_unavailable` class.
+    return {
+      ok: false,
+      reason: verification.reason,
+      recoveryCode: "invalid_input"
+    };
+  }
   return {
     ok: true,
     repoSafety: {

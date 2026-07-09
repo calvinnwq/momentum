@@ -323,6 +323,23 @@ export function executeAndReconcileDispatchedWorkflowStep(
     result: finalized.result,
     now
   });
+  // Write the run-scoped recovery artifact from this tick's evidence BEFORE
+  // attempting reconciliation: the artifact depends only on the terminalized
+  // evidence, and a deferred reconcile returns early while the terminal
+  // re-entry branch never reconstructs artifacts — writing here keeps
+  // `recovery.md` from being lost to a transient reconcile failure.
+  const recovery =
+    finalized.recovery ?? classifyProcessLevelRecovery(finalized.result);
+  if (recovery !== null) {
+    tryWriteFinalizeRecoveryArtifact({
+      runId,
+      stepId,
+      exec,
+      recovery,
+      now
+    });
+  }
+
   const reconciled = tryReconcileDispatchedWorkflowStep({
     db,
     runId,
@@ -336,17 +353,6 @@ export function executeAndReconcileDispatchedWorkflowStep(
       terminalize,
       detail: reconciled.detail
     };
-  }
-  const recovery =
-    finalized.recovery ?? classifyProcessLevelRecovery(finalized.result);
-  if (recovery !== null) {
-    tryWriteFinalizeRecoveryArtifact({
-      runId,
-      stepId,
-      exec,
-      recovery,
-      now
-    });
   }
 
   return {
@@ -807,6 +813,14 @@ export type RecordDispatchedStepManualRecoveryInput = {
   now: number;
   status?: WorkflowExecuteReconcileStatus;
   detail?: string;
+  /**
+   * Precise recovery classification for the failure, preserved on the round as
+   * `liveRecoveryCode` (a `WorkflowLiveRunRecoveryCode`). Without it the
+   * fabricated failure classifies as `runtime_unavailable`, which the retry
+   * lane treats as a retryable setup failure — wrong for config/git-safety
+   * problems that need operator or config repair, not a retry.
+   */
+  recoveryCode?: string;
 };
 
 export type RecordUnresolvedDispatchedStepContextInput = {
@@ -816,19 +830,25 @@ export type RecordUnresolvedDispatchedStepContextInput = {
   /** Why the execution context could not be derived (preserved as evidence). */
   reason: string;
   now: number;
+  /** Precise recovery classification; see {@link RecordDispatchedStepManualRecoveryInput}. */
+  recoveryCode?: string;
 };
 
 export function recordDispatchedStepManualRecovery(
   input: RecordDispatchedStepManualRecoveryInput
 ): ExecuteAndReconcileDispatchedStepResult {
   const { db, runId, stepId, error, now } = input;
-  const executorResult: WorkflowStepExecutorDispatchResult = {
-    ok: false,
-    code: "runtime_unavailable",
+  const failure = {
+    ok: false as const,
+    code: "runtime_unavailable" as const,
     error,
     executorLogPath: undefined,
-    resultJsonPath: undefined
+    resultJsonPath: undefined,
+    ...(input.recoveryCode !== undefined
+      ? { liveRecoveryCode: input.recoveryCode }
+      : {})
   };
+  const executorResult: WorkflowStepExecutorDispatchResult = failure;
   const terminalize = terminalizeDispatchedExecutorInvocation({
     db,
     runId,

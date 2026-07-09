@@ -999,6 +999,37 @@ describe("createLiveWrapperWorkflowDispatch — non-derivable exec context parks
     expect(getWorkflowLease(db, RUN_ID, "dispatch")?.releasedAt).not.toBeNull();
   });
 
+  it("preserves a precise recovery code from a refused derivation instead of runtime_unavailable", () => {
+    const db = openSeededDb();
+    const claim = approveAndClaim(db, "preflight");
+    const { registry, calls } = countingRegistry(succeededResult);
+    const dispatch = createLiveWrapperWorkflowDispatch(
+      executeWorkflowStepDispatch,
+      {
+        registry,
+        deriveExec: () => ({
+          ok: false,
+          reason: "verification_policy_invalid: (policy_schema_invalid) bad MOMENTUM.md",
+          recoveryCode: "invalid_input"
+        })
+      }
+    );
+
+    dispatch(claim, tickContext(db));
+
+    expect(calls()).toBe(0);
+    expect(
+      getWorkflowRunManualRecoveryState(db, RUN_ID)?.needsManualRecovery
+    ).toBe(true);
+    const rounds = dispatchRounds(db, "preflight");
+    expect(rounds).toHaveLength(1);
+    // The precise setup classification survives to the round: `invalid_input`
+    // is not in the retryable dispatch recovery codes, so clear-recovery will
+    // not prepare a doomed retry for a config problem.
+    expect(rounds[0]?.recoveryCode).toBe("invalid_input");
+    expect(rounds[0]?.summary).toContain("verification_policy_invalid");
+  });
+
   it("is idempotent on re-entry: never runs the executor and opens no duplicate gate", () => {
     const db = openSeededDb();
     const claim = approveAndClaim(db, "preflight");

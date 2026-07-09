@@ -84,7 +84,19 @@ import type { WorkflowStepExecutorRegistry } from "../step/executor.js";
  */
 export type DispatchedStepExecutorContextResolution =
   | { ok: true; exec: DispatchedStepExecutorContext }
-  | { ok: false; reason: string };
+  | {
+      ok: false;
+      reason: string;
+      /**
+       * Optional precise recovery classification (a
+       * `WorkflowLiveRunRecoveryCode` string such as `git_failed` or
+       * `invalid_input`) preserved on the parked round as `liveRecoveryCode`.
+       * Without it the refusal classifies as `runtime_unavailable`, which the
+       * retry lane treats as a retryable setup failure - wrong for
+       * config/git-safety refusals that need operator or config repair.
+       */
+      recoveryCode?: string;
+    };
 
 /**
  * Derive the per-run/per-step execution context a claimed dispatched step's executor
@@ -195,7 +207,10 @@ export function createLiveWrapperWorkflowDispatch(
           runId: claim.runId,
           stepId: claim.stepId,
           reason: resolved.reason,
-          now: context.now
+          now: context.now,
+          ...(resolved.recoveryCode !== undefined
+            ? { recoveryCode: resolved.recoveryCode }
+            : {})
         });
       }
     }
