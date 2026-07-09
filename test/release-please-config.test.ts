@@ -22,6 +22,7 @@ describe('release-please configuration', () => {
           'package-name': string;
           'include-component-in-tag': boolean;
           'changelog-path': string;
+          'bump-minor-pre-major': boolean;
         }
       >;
     }>('release-please-config.json');
@@ -32,6 +33,7 @@ describe('release-please configuration', () => {
       'package-name': packageJson.name,
       'include-component-in-tag': false,
       'changelog-path': 'CHANGELOG.md',
+      'bump-minor-pre-major': true,
     });
   });
 
